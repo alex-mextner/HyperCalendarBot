@@ -1,7 +1,11 @@
 import { z } from 'zod';
+import { eventTimestampSchema } from '../../utils/event-timestamps.ts';
+import { normalizeNumericId } from './numeric-id.ts';
 import type { ToolName } from './tool-executor.ts';
 
 // ── Shared fragments ──
+
+const numericId = z.preprocess(normalizeNumericId, z.number().int());
 
 const scopeField = z.enum(['personal', 'group']).optional();
 
@@ -14,15 +18,15 @@ const getEventsSchema = z
     start_date: z.string(),
     end_date: z.string(),
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
 const createEventSchema = z
   .object({
     title: z.string(),
-    start_at: z.string(),
-    end_at: z.string().optional(),
+    start_at: eventTimestampSchema,
+    end_at: eventTimestampSchema.optional(),
     description: z.string().optional(),
     location: z.string().optional(),
     location_abstract: z.boolean().optional(),
@@ -31,40 +35,40 @@ const createEventSchema = z
     reminder_minutes: z.array(z.number()).optional(),
     force: z.boolean().optional(),
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
 const updateEventSchema = z
   .object({
-    event_id: z.number(),
+    event_id: numericId,
     title: z.string().optional(),
-    start_at: z.string().optional(),
-    end_at: z.string().nullable().optional(),
+    start_at: eventTimestampSchema.optional(),
+    end_at: eventTimestampSchema.nullable().optional(),
     description: z.string().nullable().optional(),
     location: z.string().nullable().optional(),
     location_abstract: z.boolean().optional(),
     recurrence_rule: z.string().nullable().optional(),
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
 const deleteEventSchema = z
   .object({
-    event_id: z.number(),
+    event_id: numericId,
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
-const attachPendingLocationSchema = z.object({ event_id: z.number() }).passthrough();
+const attachPendingLocationSchema = z.object({ event_id: numericId }).passthrough();
 
 const getFreeSlotsSchema = z
   .object({
     date: z.string(),
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
@@ -72,18 +76,18 @@ const searchEventsSchema = z
   .object({
     query: z.string().optional(),
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
     event_type: z.enum(['birthday', 'regular']).optional(),
   })
   .passthrough();
 
 const createBirthdayEventSchema = z
   .object({
-    celebrant_id: z.number(),
+    celebrant_id: numericId,
     date: z.object({ day: z.number(), month: z.number() }),
     year: z.number().optional(),
     custom_name: z.string().optional(),
-    group_id: z.number().optional(),
+    group_id: numericId.optional(),
   })
   .passthrough();
 
@@ -91,30 +95,30 @@ const getUpcomingSchema = z
   .object({
     limit: z.number().optional(),
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
 const snoozeEventSchema = z
   .object({
-    event_id: z.number(),
+    event_id: numericId,
     minutes: z.number().optional(),
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
 const getEventSchema = z
   .object({
-    event_id: z.number(),
+    event_id: numericId,
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
 const notifyParticipantsSchema = z
   .object({
-    event_id: z.number(),
+    event_id: numericId,
     message: z.string(),
   })
   .passthrough();
@@ -123,18 +127,18 @@ const notifyParticipantsSchema = z
 
 const getRemindersSchema = z
   .object({
-    event_id: z.number(),
+    event_id: numericId,
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
 const setReminderSchema = z
   .object({
-    event_id: z.number(),
+    event_id: numericId,
     minutes_before: z.array(z.number()),
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
@@ -151,7 +155,7 @@ const askUserSchema = z
 
 const pickUsersSchema = z
   .object({
-    event_id: z.number(),
+    event_id: numericId,
     prompt: z.string(),
   })
   .passthrough();
@@ -185,7 +189,7 @@ const renderDayImageSchema = z
   .object({
     date: z.string(),
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
@@ -193,7 +197,7 @@ const renderWeekImageSchema = z
   .object({
     week_start: z.string(),
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
@@ -201,7 +205,7 @@ const renderMonthImageSchema = z
   .object({
     month: z.string(),
     scope: scopeField,
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
@@ -222,9 +226,8 @@ const makeCallSchema = z.object({ text: z.string() }).passthrough();
 const manageSettingsSchema = z
   .object({
     action: z.enum(['get', 'update']),
-    category: z.enum(['general', 'notifications', 'calls', 'privacy', 'voice', 'assistant']).optional(),
+    category: z.enum(['general', 'notifications', 'calls', 'privacy', 'voice']).optional(),
     updates: z.record(z.string(), z.unknown()).optional(),
-    assistantEnabled: z.boolean().optional(),
   })
   .passthrough();
 
@@ -232,21 +235,23 @@ const manageSettingsSchema = z
 
 const shareEventSchema = z
   .object({
-    event_id: z.number(),
+    event_id: numericId,
     target_type: z.enum(['user', 'group']),
-    target_id: z.number(),
+    target_id: numericId,
   })
   .passthrough();
 
 const sendInvitationSchema = z
   .object({
-    event_id: z.number().int().positive().safe(),
+    event_id: numericId.pipe(z.number().positive().safe()),
     force: z.boolean().optional(),
-    invitee_id: z
-      .number()
-      .int()
-      .safe()
-      .refine((id) => id !== 0)
+    invitee_id: numericId
+      .pipe(
+        z
+          .number()
+          .safe()
+          .refine((id) => id !== 0),
+      )
       .optional(),
     invitee_username: z
       .string()
@@ -259,37 +264,37 @@ const sendInvitationSchema = z
     message: 'Either invitee_id or invitee_username must be provided',
   });
 
-const getInvitationStatusSchema = z.object({ event_id: z.number() }).passthrough();
+const getInvitationStatusSchema = z.object({ event_id: numericId }).passthrough();
 
 const shareAgendaSchema = z
   .object({
     period: z.enum(['today', 'tomorrow', 'week']),
     target_type: z.enum(['user', 'group']),
-    target_id: z.number(),
+    target_id: numericId,
   })
   .passthrough();
 
 const setEventVisibilitySchema = z
   .object({
-    event_id: z.number(),
+    event_id: numericId,
     visibility: z.enum(['private', 'free_busy', 'full']),
-    owner_id: z.number().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 
 const proposeEditSchema = z
   .object({
-    event_id: z.number(),
+    event_id: numericId,
     changes: z.record(z.string(), z.union([z.string(), z.null()])),
     reason: z.string().optional(),
   })
   .passthrough();
 
-const cancelInvitationSchema = z.object({ invitation_id: z.number() }).passthrough();
+const cancelInvitationSchema = z.object({ invitation_id: numericId }).passthrough();
 
 const resendInvitationSchema = z
   .object({
-    invitation_id: z.number(),
+    invitation_id: numericId,
     invitee_username: z.string().optional(),
   })
   .passthrough();
@@ -299,9 +304,9 @@ const resendInvitationSchema = z
 const manageSecretariesSchema = z
   .object({
     action: z.enum(['invite', 'revoke', 'self_remove']),
-    secretary_telegram_id: z.number().optional(),
+    secretary_telegram_id: numericId.optional(),
     permission: z.enum(['read', 'write']).optional(),
-    secretary_access_id: z.number().optional(),
+    secretary_access_id: numericId.optional(),
   })
   .passthrough();
 
@@ -309,11 +314,11 @@ const manageSecretariesSchema = z
 
 const proposeCalendarChangeSchema = z
   .object({
-    target_telegram_id: z.number(),
+    target_telegram_id: numericId,
     action: z.enum(['create', 'update', 'delete']),
     summary: z.string(),
     event: z.record(z.string(), z.unknown()).optional(),
-    event_id: z.number().optional(),
+    event_id: numericId.optional(),
     changes: z.record(z.string(), z.unknown()).optional(),
   })
   .passthrough();
@@ -358,7 +363,7 @@ const getHistorySchema = z
 
 const getActionLogSchema = z
   .object({
-    event_id: z.number().optional(),
+    event_id: numericId.optional(),
     action_type: z.string().optional(),
     action_name: z.string().optional(),
     after: z.string().optional(),
@@ -394,7 +399,7 @@ const addTriggerSchema = z
 
 const setReactionSchema = z
   .object({
-    message_id: z.number().optional(),
+    message_id: numericId.optional(),
     emoji: z.string(),
   })
   .passthrough();
@@ -405,10 +410,6 @@ const rememberUserFactSchema = z
     content: z.string(),
   })
   .passthrough();
-
-// ── Assistant tools (passthrough — validated by the agent protocol) ──
-
-const assistantPayloadSchema = z.record(z.string(), z.unknown());
 
 // ── Schema map ──
 
@@ -504,15 +505,4 @@ export const toolSchemas: Record<ToolName, z.ZodType> = {
   // Memory tools
   set_reaction: setReactionSchema,
   remember_user_fact: rememberUserFactSchema,
-
-  // Assistant tools
-  claude_chat: assistantPayloadSchema,
-  claude_new_chat: assistantPayloadSchema,
-  claude_list_chats: assistantPayloadSchema,
-  claude_open_chat: assistantPayloadSchema,
-  claude_list_projects: assistantPayloadSchema,
-  claude_artifact: assistantPayloadSchema,
-  bash_execute: assistantPayloadSchema,
-  playwright_action: assistantPayloadSchema,
-  applescript_run: assistantPayloadSchema,
 };

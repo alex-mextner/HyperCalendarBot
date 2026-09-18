@@ -1,9 +1,7 @@
 import type { z } from 'zod';
-import type { AgentCommand } from '../../agent/protocol.ts';
 import type { FeatureKey } from '../../database/repositories/feature-usage.repository.ts';
 import { logger } from '../../utils/logger.ts';
 import { handleGetActionLog } from './tool-handlers/action-log.ts';
-import { handleAssistantTool } from './tool-handlers/assistant.ts';
 import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
 import { handleCalculate } from './tool-handlers/calculate.ts';
 import {
@@ -196,15 +194,6 @@ export interface ToolInputMap {
   remove_trigger: TriggerIdInput;
   set_reaction: { message_id?: number; emoji: string };
   remember_user_fact: { type: 'append' | 'rewrite'; content: string };
-  claude_chat: AgentCommand['payload'];
-  claude_new_chat: AgentCommand['payload'];
-  claude_list_chats: AgentCommand['payload'];
-  claude_open_chat: AgentCommand['payload'];
-  claude_list_projects: AgentCommand['payload'];
-  claude_artifact: AgentCommand['payload'];
-  bash_execute: AgentCommand['payload'];
-  playwright_action: AgentCommand['payload'];
-  applescript_run: AgentCommand['payload'];
   connect_telegram_status: Record<never, never>;
   dismiss_connect_telegram_prompt: Record<never, never>;
   resume_scene: Record<never, never>;
@@ -334,6 +323,17 @@ const SKIP_ACTION_LOG = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.skipActionLog),
 );
 
+/** Known writes use the same metadata classification as the action log. */
+export const WRITE_TOOLS = new Set(Object.keys(toolSchemas).filter((name) => !SKIP_ACTION_LOG.has(name)));
+
+export function isMutationTool(toolName: string, input: unknown): boolean {
+  if (!WRITE_TOOLS.has(toolName)) return false;
+  return (
+    toolName !== 'manage_settings' ||
+    !(typeof input === 'object' && input !== null && Reflect.get(input, 'action') === 'get')
+  );
+}
+
 /** Derived: tools that always result in [SKIP] — no status message or tool label. */
 export const SILENT_TOOLS = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.silent),
@@ -393,8 +393,26 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   dismiss_connect_telegram_prompt: 'telegram_connect',
 };
 
-export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
+export type ExecutorDisposition = 'executed' | 'failed' | 'skipped' | 'waiting';
+export type ExecutedToolResult = ToolResult & { disposition: ExecutorDisposition };
+
+export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ExecutedToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
+
+  let validationError: ToolResult | undefined;
+  const schema = toolSchemas[toolName as ToolName];
+  if (schema) {
+    const result = schema.safeParse(input);
+    if (!result.success) {
+      validationError = {
+        success: false,
+        mutationState: 'not_applied',
+        error: `Invalid input: ${describeIssues(result.error.issues)}`,
+      };
+    } else {
+      input = result.data;
+    }
+  }
 
   // Time throttle: identical tool call within THROTTLE_TTL_MS returns a synthetic
   // THROTTLED result without invoking the handler. Prevents rapid cross-run
@@ -404,7 +422,7 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
   // Build the throttle key before dispatch — used both for the pre-check and
   // the post-success write.
   let throttleKey: string | null = null;
-  if (!THROTTLE_EXEMPT.has(toolName)) {
+  if (!validationError && !THROTTLE_EXEMPT.has(toolName)) {
     const now = Date.now();
     throttleKey = buildThrottleKey(ctx.chatId, toolName, input);
     const lastCalledAt = throttleMap.get(throttleKey);
@@ -413,12 +431,12 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
         { tool: toolName, chatId: ctx.chatId, sinceMs: now - lastCalledAt },
         'Tool call throttled (identical within 5s)',
       );
-      return { success: true, output: THROTTLE_MARKER };
+      return { success: true, output: THROTTLE_MARKER, disposition: 'skipped' };
     }
   }
 
   try {
-    const result = await dispatchTool(ctx, toolName as ToolName, input as ToolInputMap[ToolName]);
+    const result = validationError ?? (await dispatchTool(ctx, toolName as ToolName, input as ToolInputMap[ToolName]));
 
     // Record throttle entry only after a successful execution — failed calls
     // must not poison the throttle window so retries get a real attempt.
@@ -475,10 +493,27 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
       }
     }
 
-    return result;
+    return {
+      ...result,
+      mutationState:
+        result.mutationState ??
+        (result.awaitingInput
+          ? 'not_applied'
+          : isMutationTool(toolName, input)
+            ? result.success
+              ? 'confirmed'
+              : 'uncertain'
+            : 'not_applied'),
+      disposition: !result.success ? 'failed' : result.awaitingInput ? 'waiting' : 'executed',
+    };
   } catch (outerError) {
     aiLogger.error({ tool: toolName, err: outerError }, 'Tool execution error');
-    return { success: false, error: `Tool execution failed: ${String(outerError)}` };
+    return {
+      success: false,
+      error: `Tool execution failed: ${String(outerError)}`,
+      disposition: 'failed',
+      mutationState: isMutationTool(toolName, input) ? 'uncertain' : 'not_applied',
+    };
   }
 }
 
@@ -531,15 +566,6 @@ function describeIssues(issues: readonly z.core.$ZodIssue[]): string {
 }
 
 async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolInputMap[ToolName]): Promise<ToolResult> {
-  const schema = toolSchemas[toolName];
-  if (schema) {
-    const result = schema.safeParse(input);
-    if (!result.success) {
-      return { success: false, error: `Invalid input: ${describeIssues(result.error.issues)}` };
-    }
-    input = result.data as ToolInputMap[ToolName];
-  }
-
   try {
     switch (toolName) {
       case 'supplement_skip':
@@ -729,17 +755,6 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
         return handleSetReaction(ctx, input as ToolInputMap['set_reaction']);
       case 'remember_user_fact':
         return handleRememberUserFact(ctx, input as ToolInputMap['remember_user_fact']);
-
-      case 'claude_chat':
-      case 'claude_new_chat':
-      case 'claude_list_chats':
-      case 'claude_open_chat':
-      case 'claude_list_projects':
-      case 'claude_artifact':
-      case 'bash_execute':
-      case 'playwright_action':
-      case 'applescript_run':
-        return handleAssistantTool(ctx, toolName as AgentCommand['type'], input as AgentCommand['payload']);
 
       case 'resume_scene':
         if (!ctx.scene?.scenePauseService) return { success: false, error: 'Scene pause not available' };

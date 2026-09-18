@@ -2,10 +2,6 @@
 
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import type { AgentDispatcher } from '../agent/dispatcher.ts';
-import type { WsData } from '../agent/pairing.ts';
-import type { AgentRegistry } from '../agent/registry.ts';
-import { createAgentWsHandler, upgradeAgentWs } from '../agent/ws-server.ts';
 import type { EnvConfig } from '../config/env.ts';
 import type { AlertRepository } from '../database/repositories/alert.repository.ts';
 import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
@@ -23,8 +19,6 @@ interface OAuthStateLookup {
 export interface WebServerDeps {
   config: EnvConfig;
   userRepo: UserRepository;
-  agentRegistry?: AgentRegistry;
-  agentDispatcher?: AgentDispatcher;
   // Google Calendar — only populated when GOOGLE_CLIENT_ID is configured
   oauthService?: GoogleOAuthService;
   syncRepo?: GoogleSyncRepository;
@@ -147,17 +141,8 @@ async function handleRequest(
   url: URL,
   server: { requestIP(req: Request): { address: string } | null },
   deps: WebServerDeps,
-  agentWs: ReturnType<typeof createAgentWsHandler> | undefined,
   oauthRateLimiter: IpRateLimiter,
-  upgradeWs?: (req: Request) => boolean,
-): Promise<Response | undefined> {
-  if (url.pathname === '/ws/agent' && agentWs && upgradeWs) {
-    if (!upgradeWs(req)) {
-      return new Response('WebSocket upgrade failed', { status: 400 });
-    }
-    return undefined;
-  }
-
+): Promise<Response> {
   if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/ready')) {
     const notLive = await livenessFailure(deps);
     if (notLive) return notLive;
@@ -286,11 +271,6 @@ export function startWebServer(deps: WebServerDeps): { port: number; stop: () =>
   const port = deps.config.OAUTH_SERVER_PORT ?? 3311;
   const oauthRateLimiter = new IpRateLimiter();
 
-  const agentWs =
-    deps.agentRegistry && deps.agentDispatcher
-      ? createAgentWsHandler(deps.agentRegistry, deps.agentDispatcher)
-      : undefined;
-
   function errorResponse(err: unknown): Response {
     const isAbort = err instanceof Error && err.name === 'AbortError';
     if (!isAbort) {
@@ -301,36 +281,17 @@ export function startWebServer(deps: WebServerDeps): { port: number; stop: () =>
     });
   }
 
-  async function fetchWithWs(
-    this: Bun.Server<WsData>,
-    req: Request,
-    server: Bun.Server<WsData>,
-  ): Promise<Response | undefined> {
+  async function handleFetch(this: Bun.Server<undefined>, req: Request, server: Bun.Server<undefined>) {
     try {
       const url = new URL(req.url);
-      const res = await handleRequest(req, url, server, deps, agentWs, oauthRateLimiter, (r) =>
-        upgradeAgentWs(r, server),
-      );
-      if (!res) return undefined;
+      const res = await handleRequest(req, url, server, deps, oauthRateLimiter);
       return withSecurityHeaders(res);
     } catch (err) {
       return errorResponse(err);
     }
   }
 
-  async function fetchPlain(this: Bun.Server<undefined>, req: Request, server: Bun.Server<undefined>) {
-    try {
-      const url = new URL(req.url);
-      const res = await handleRequest(req, url, server, deps, agentWs, oauthRateLimiter);
-      return res ? withSecurityHeaders(res) : new Response(null, { status: 204 });
-    } catch (err) {
-      return errorResponse(err);
-    }
-  }
-
-  const server = agentWs
-    ? Bun.serve({ port, fetch: fetchWithWs, websocket: { ...agentWs, idleTimeout: 120 } })
-    : Bun.serve({ port, fetch: fetchPlain });
+  const server = Bun.serve({ port, fetch: handleFetch });
   const cleanupTimer = setInterval(() => oauthRateLimiter.cleanup(), OAUTH_RATE_LIMIT.windowMs);
 
   webLogger.info({ port }, 'Web server started');

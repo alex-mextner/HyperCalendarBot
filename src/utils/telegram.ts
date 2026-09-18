@@ -46,7 +46,8 @@ export function truncateMessage(text: string, maxLen = 4000): string {
   return `${text.slice(0, maxLen - 3)}...`;
 }
 
-export function splitMessage(text: string, maxLen = 4000): string[] {
+export function splitMessage(text: string, maxLen = 4000, parseMode?: ParseMode): string[] {
+  if (parseMode === 'HTML') return splitHtmlMessage(text, maxLen);
   if (text.length <= maxLen) return [text];
 
   const chunks: string[] = [];
@@ -81,6 +82,37 @@ export function splitMessage(text: string, maxLen = 4000): string[] {
     remaining = remaining.slice(maxLen);
   }
 
+  return chunks;
+}
+
+/** Keep escaped entities, Unicode code points and formatted spans intact across messages. */
+function splitHtmlMessage(text: string, maxLen: number): string[] {
+  if (text.length <= maxLen) return [text];
+  const chunks: string[] = [];
+  const open: { start: string; end: string }[] = [];
+  let chunk = '';
+  const closing = () =>
+    open
+      .toReversed()
+      .map((tag) => tag.end)
+      .join('');
+  for (const match of text.matchAll(/<[^>]+>|&(?:#\d+|#x[\da-f]+|\w+);|[^<&]|[<&]/giu)) {
+    const token = match[0];
+    const start = token.match(/^<([a-z][\w-]*)\b[^>]*>$/i);
+    const end = token.match(/^<\/([a-z][\w-]*)>$/i);
+    const closingLength = closing().length + (start ? `</${start[1]}>`.length : 0) - (end ? token.length : 0);
+    if (chunk.length + token.length + closingLength > maxLen) {
+      chunks.push(chunk + closing());
+      chunk = open.map((tag) => tag.start).join('');
+      if (chunk.length + token.length + closingLength > maxLen) {
+        throw new Error('HTML tag exceeds message chunk capacity');
+      }
+    }
+    chunk += token;
+    if (start) open.push({ start: token, end: `</${start[1]}>` });
+    if (end) open.pop();
+  }
+  if (chunk) chunks.push(chunk + closing());
   return chunks;
 }
 

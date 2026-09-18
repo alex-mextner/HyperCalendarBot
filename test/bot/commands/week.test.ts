@@ -64,7 +64,8 @@ describe('handleWeek', () => {
 
     await handleWeek(ctx as never, svc as never, undefined, renderService as never);
 
-    expect(ctx.send).toHaveBeenCalledTimes(1);
+    expect(ctx.send).toHaveBeenCalledTimes(2);
+    expect(ctx.send).toHaveBeenLastCalledWith('Agenda image could not be generated. Choose a shorter date range.');
   });
 
   test('queries holidayService for each of 7 days', async () => {

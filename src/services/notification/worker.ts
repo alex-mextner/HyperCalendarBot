@@ -13,6 +13,23 @@ export function parseTelegramError(err: unknown): { code: number; retryAfter?: n
   return { code: obj.code, retryAfter };
 }
 
+const notificationReceiptSchema = z.object({ message_id: z.number().int().positive() });
+
+/** Keep transport rejection intact until the queue classifies it. Never swallow
+ * failures in the bootstrap adapter: resolving here means actual delivery. */
+export function createNotificationSender(transport: {
+  sendMessage: (telegramId: number, text: string, parseMode: 'HTML') => Promise<unknown>;
+}): (telegramId: number, text: string) => Promise<void> {
+  return async (telegramId, text) => {
+    // botRef is patched after bot creation. Resolve its method on each send;
+    // never bind the initial no-op placeholder or call it a delivered message.
+    const result = await transport.sendMessage(telegramId, text, 'HTML');
+    if (!notificationReceiptSchema.safeParse(result).success) {
+      throw new Error('Notification transport did not confirm message delivery');
+    }
+  };
+}
+
 export interface NotificationJobData {
   logId: number;
   telegramId: number;

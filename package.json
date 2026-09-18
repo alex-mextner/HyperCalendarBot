@@ -3,18 +3,13 @@
   "module": "src/index.ts",
   "type": "module",
   "private": true,
-  "workspaces": [
-    "packages/*"
-  ],
   "scripts": {
     "lint": "biome check .",
     "lint:fix": "biome check --fix .",
     "format": "biome format --write .",
     "start": "bun run src/index.ts",
     "test:call": "bun run scripts/test-call.ts",
-    "postinstall": "lefthook install",
-    "agent:build": "cd packages/agent-macos && bun run build:app",
-    "agent:install": "pkill -f HyperBotAgent 2>/dev/null; sleep 1; cd packages/agent-macos && bun run install:app && open /Applications/HyperBotAgent.app"
+    "postinstall": "lefthook install"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
@@ -47,7 +42,6 @@
     "google-auth-library": "^10.6.2",
     "googleapis": "^171.4.0",
     "gramio": "^0.7.0",
-    "jose": "^6.2.2",
     "libphonenumber-js": "^1.12.8",
     "lvovich": "^2.1.0",
     "marked": "^15.0.12",

@@ -110,8 +110,6 @@ export interface EnvConfig {
   INTENT_LEARNER_DAILY_LIMIT: number;
   INLINE_BOT_TOKEN?: string;
   INLINE_BOT_USERNAME?: string;
-  AGENT_JWT_SECRET?: string;
-  AGENT_DOWNLOAD_URL?: string;
   SILERO_PYTHON_PATH?: string;
   DEEPGRAM_API_KEY?: string;
   DISABLE_VOICE?: boolean;
@@ -223,8 +221,6 @@ export function loadConfig(): EnvConfig {
     INTENT_LEARNER_DAILY_LIMIT,
     INLINE_BOT_TOKEN: process.env.INLINE_BOT_TOKEN || undefined,
     INLINE_BOT_USERNAME: process.env.INLINE_BOT_USERNAME || undefined,
-    AGENT_JWT_SECRET: process.env.AGENT_JWT_SECRET || undefined,
-    AGENT_DOWNLOAD_URL: process.env.AGENT_DOWNLOAD_URL || undefined,
     SILERO_PYTHON_PATH: process.env.SILERO_PYTHON_PATH || undefined,
     DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY || undefined,
     DISABLE_VOICE: process.env.DISABLE_VOICE === 'true' || undefined,

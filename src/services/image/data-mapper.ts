@@ -14,6 +14,7 @@ import type {
   WeeklyOverviewData,
 } from '../../worker/templates/types.ts';
 import { ruPlural } from '../event/formatters.ts';
+import { formatLocationPlain } from '../location/format-location.ts';
 import { formatTempRange } from '../weather/format.ts';
 import type { DayWeather } from '../weather/types.ts';
 import { weatherEmoji } from '../weather/weather-service.ts';
@@ -70,7 +71,8 @@ function mapToAgendaEvent(
     title: eventTitle(occ, locale),
     startMinutes: toMinutes(occ.occurrence_start, tz),
     endMinutes: occ.occurrence_end ? toMinutes(occ.occurrence_end, tz) : toMinutes(occ.occurrence_start, tz) + 60,
-    location: ev.location ?? undefined,
+    location: formatLocationPlain(ev) || undefined,
+    displayMetadata: ev.displayMetadata,
     calendarColor: isBirthday ? BIRTHDAY_COLOR : colors[colorIdx % colors.length]!,
     isAllDay: ev.all_day === 1,
   };
@@ -147,6 +149,8 @@ export function mapWeeklyOverviewData(params: {
       events: occs.map(
         (o): MiniEvent => ({
           title: eventTitle(o, locale),
+          location: formatLocationPlain(o.event) || undefined,
+          displayMetadata: o.event.displayMetadata,
           startMinutes: o.event.all_day === 1 ? 0 : toMinutes(o.occurrence_start, timezone),
           endMinutes:
             o.event.all_day === 1
@@ -198,8 +202,8 @@ export function mapEventCardData(params: {
     dateFormatted: `${dayOfWeek}, ${dateStr}`,
     timeFormatted: ev.all_day === 1 ? '' : `${formatTime(startMin)} – ${formatTime(endMin)}`,
     duration: ev.all_day === 1 ? '' : formatDuration(endMin - startMin),
-    location: ev.location ?? undefined,
-    description: ev.description?.slice(0, 200) ?? undefined,
+    location: formatLocationPlain(ev) || undefined,
+    displayMetadata: ev.displayMetadata,
     calendarName: 'HyperCalendar',
     calendarColor: ev.event_type === 'birthday' ? BIRTHDAY_COLOR : theme.eventColors[0]!,
     isAllDay: ev.all_day === 1,
@@ -296,6 +300,8 @@ function makeDay(
     events: occs.map(
       (o, i): MiniEvent => ({
         title: eventTitle(o, params.locale),
+        location: formatLocationPlain(o.event) || undefined,
+        displayMetadata: o.event.displayMetadata,
         startMinutes: o.event.all_day === 1 ? 0 : toMinutes(o.occurrence_start, params.timezone),
         endMinutes:
           o.event.all_day === 1

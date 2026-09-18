@@ -10,6 +10,7 @@
 // tts-translation) omit callbacks — the full result is still returned either way.
 
 import OpenAI from 'openai';
+import type { CompletionUsage } from 'openai/resources/completions';
 import { type ChainOrder, loadConfig } from '../../config/env.ts';
 import {
   type ProviderChainKind,
@@ -22,6 +23,7 @@ import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
 import { clearBlock, isBlocked, noteFailureForEligibility } from './provider-eligibility.ts';
 import type { ProviderId } from './provider-ids.ts';
+import { estimateTokens } from './token-estimate.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
 
@@ -37,6 +39,8 @@ export interface StreamRoundOptions {
   signal?: AbortSignal;
   /** User ID for log context only. */
   userId?: number;
+  /** Opaque per-agent-run correlation id; contains no user content. */
+  requestId?: string;
 }
 
 export interface StreamCallbacks {
@@ -53,6 +57,34 @@ export interface StreamToolCall {
   arguments: string;
 }
 
+export interface StreamTokenUsage {
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  cachedTokens: number | null;
+  reasoningTokens: number | null;
+}
+
+export interface StreamRoundMetrics {
+  provider: ProviderId;
+  model: string;
+  chain: ProviderChainKind;
+  /** First usable delta measured from the winning provider attempt start. */
+  firstUsableSinceAttemptMs: number | null;
+  /** Duration of the winning provider attempt only. */
+  providerDurationMs: number;
+  totalDurationMs: number;
+  attemptCount: number;
+  fallbackCount: number;
+  usage: StreamTokenUsage | null;
+}
+
+export interface FailedRoundMetrics {
+  totalDurationMs: number;
+  attemptCount: number;
+  fallbackCount: number;
+}
+
 export interface StreamRoundResult {
   text: string;
   toolCalls: StreamToolCall[];
@@ -60,6 +92,42 @@ export interface StreamRoundResult {
   assistantMessage: OpenAI.ChatCompletionMessageParam;
   /** Human-readable provider slot that actually produced the result. */
   providerUsed: string;
+  metrics?: StreamRoundMetrics;
+}
+
+const TOKEN_ESTIMATE_ERROR_FRACTION = 0.2;
+const GROQ_ON_DEMAND_TPM_LIMITS = new Map<string, number>([
+  ['openai/gpt-oss-120b', 8_000],
+  ['openai/gpt-oss-20b', 8_000],
+]);
+
+export interface RequestFitRejection {
+  estimatedInputTokens: number;
+  conservativeRequestedTokens: number;
+  limitTokens: number;
+}
+
+/**
+ * Skip only requests that cannot fit even at the optimistic edge of our ±20%
+ * token estimator. This avoids false skips near the boundary while preventing a
+ * guaranteed Groq 413 for the current 8K on-demand gpt-oss tiers.
+ */
+export function preflightRequestFit(
+  provider: ProviderId,
+  model: string,
+  options: Pick<StreamRoundOptions, 'messages' | 'tools' | 'maxTokens'>,
+): RequestFitRejection | null {
+  if (provider !== 'groq') return null;
+  const limitTokens = GROQ_ON_DEMAND_TPM_LIMITS.get(model);
+  if (!limitTokens) return null;
+
+  const serializedInput = JSON.stringify({ messages: options.messages, tools: options.tools ?? [] });
+  const estimatedInputTokens = estimateTokens(serializedInput);
+  const optimisticInputTokens = Math.floor(estimatedInputTokens * (1 - TOKEN_ESTIMATE_ERROR_FRACTION));
+  const conservativeRequestedTokens = optimisticInputTokens + options.maxTokens;
+  if (conservativeRequestedTokens <= limitTokens) return null;
+
+  return { estimatedInputTokens, conservativeRequestedTokens, limitTokens };
 }
 
 /**
@@ -77,8 +145,10 @@ export class EmptyProviderResponseError extends Error {
 
 /** One provider slot's failure, kept for the aggregate error and the admin alert. */
 export interface ProviderFailure {
-  /** Provider slot label including the model actually requested. */
+  /** Human-readable provider slot including the model actually requested. */
   provider: string;
+  providerId: ProviderId;
+  model: string;
   /** HTTP status, when the provider returned one. */
   status?: number;
   message: string;
@@ -93,12 +163,18 @@ export interface ProviderFailure {
  */
 export class AllProvidersFailedError extends Error {
   readonly failures: ProviderFailure[];
+  readonly roundMetrics: FailedRoundMetrics;
 
-  constructor(failures: ProviderFailure[]) {
+  constructor(failures: ProviderFailure[], roundMetrics?: FailedRoundMetrics) {
     const detail = failures.map((f) => `${f.provider}: ${f.status ?? 'no status'} ${f.message}`).join(' | ');
     super(`All ${failures.length} AI providers failed — ${detail}`);
     this.name = 'AllProvidersFailedError';
     this.failures = failures;
+    this.roundMetrics = roundMetrics ?? {
+      totalDurationMs: 0,
+      attemptCount: failures.length,
+      fallbackCount: Math.max(0, failures.length - 1),
+    };
   }
 }
 
@@ -173,7 +249,12 @@ interface ProviderSlot {
   /** Model id from the config. May be overridden at request time when it is gone. */
   configuredModel: string;
   getClient: () => OpenAI;
-  stream: (model: string, opts: StreamRoundOptions, cbs: StreamCallbacks) => Promise<StreamRoundResult>;
+  stream: (
+    model: string,
+    opts: StreamRoundOptions,
+    cbs: StreamCallbacks,
+    onHttpAttempt: () => void,
+  ) => Promise<StreamRoundResult>;
 }
 
 interface ToolCallDelta {
@@ -224,27 +305,40 @@ interface ConsumedStream {
   text: string;
   toolCalls: StreamToolCall[];
   finishReason: string;
+  firstUsableMs: number | null;
+  usage: CompletionUsage | null;
 }
 
 async function consumeStream(
   stream: AsyncIterable<OpenAI.ChatCompletionChunk>,
   cbs: StreamCallbacks,
+  startedAt: number,
 ): Promise<ConsumedStream> {
   let text = '';
   let finishReason = 'stop';
+  let firstUsableMs: number | null = null;
+  let usage: CompletionUsage | null = null;
   const toolCalls = new Map<number, PendingToolCall>();
+  const markUsable = () => {
+    if (firstUsableMs === null) firstUsableMs = Math.max(0, performance.now() - startedAt);
+  };
 
   for await (const chunk of stream) {
+    // OpenAI-compatible providers emit the final usage in a choices=[] chunk.
+    // Capture it BEFORE looking for delta or it silently disappears.
+    if (chunk.usage) usage = chunk.usage;
     const choice = chunk.choices[0];
     const delta = choice?.delta;
     if (!delta) continue;
 
     if (delta.content) {
+      markUsable();
       text += delta.content;
       cbs.onTextDelta?.(delta.content);
     }
 
     if (delta.tool_calls) {
+      if (delta.tool_calls.some((tc) => tc.id || tc.function?.name || tc.function?.arguments)) markUsable();
       for (const tc of delta.tool_calls) applyToolCallDelta(tc, toolCalls, cbs);
     }
 
@@ -254,7 +348,24 @@ async function consumeStream(
   return {
     text,
     finishReason,
+    firstUsableMs,
+    usage,
     toolCalls: [...toolCalls.values()].map((tc) => ({ id: tc.id, name: tc.name, arguments: tc.args })),
+  };
+}
+
+function finite(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizeUsage(usage: CompletionUsage | null): StreamTokenUsage | null {
+  if (!usage) return null;
+  return {
+    promptTokens: finite(usage.prompt_tokens),
+    completionTokens: finite(usage.completion_tokens),
+    totalTokens: finite(usage.total_tokens),
+    cachedTokens: finite(usage.prompt_tokens_details?.cached_tokens),
+    reasoningTokens: finite(usage.completion_tokens_details?.reasoning_tokens),
   };
 }
 
@@ -271,6 +382,19 @@ function buildAssistantMessage(text: string, toolCalls: StreamToolCall[]): OpenA
   };
 }
 
+const providersWithoutStreamingUsage = new Set<ProviderId>();
+export function _resetStreamingUsageCompatibilityForTest(): void {
+  providersWithoutStreamingUsage.clear();
+}
+
+function rejectsUsageStreamOption(error: unknown): boolean {
+  if (!(error instanceof OpenAI.APIError) || error.status !== 400) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('stream_options') || message.includes('include_usage') || message.includes('unknown parameter')
+  );
+}
+
 /** Standard OpenAI streaming adapter (works for all four providers). */
 function streamingSlot(
   label: string,
@@ -283,20 +407,47 @@ function streamingSlot(
     provider,
     configuredModel,
     getClient,
-    stream: async (model, opts, cbs) => {
+    stream: async (model, opts, cbs, onHttpAttempt) => {
+      let attemptStartedAt = performance.now();
       const params: OpenAI.ChatCompletionCreateParamsStreaming = {
         model,
         messages: opts.messages,
         max_tokens: opts.maxTokens,
         temperature: opts.temperature ?? 0.3,
         stream: true,
+        ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
       };
       if (opts.tools && opts.tools.length > 0) {
         params.tools = opts.tools;
       }
 
-      const stream = await getClient().chat.completions.create(params, { signal: opts.signal });
-      const { text, toolCalls, finishReason } = await consumeStream(stream, cbs);
+      const client = getClient();
+      let stream: Awaited<ReturnType<typeof client.chat.completions.create>>;
+      try {
+        attemptStartedAt = performance.now();
+        onHttpAttempt();
+        stream = await client.chat.completions.create(params, { signal: opts.signal });
+      } catch (error) {
+        if (!rejectsUsageStreamOption(error)) throw error;
+        const { stream_options: _unsupported, ...withoutUsage } = params;
+        providersWithoutStreamingUsage.add(provider);
+        logOnce(`usage-stream-unsupported:${provider}`, () =>
+          aiLogger.warn(
+            { provider, model },
+            'Provider rejected streaming usage — retrying this request without usage telemetry',
+          ),
+        );
+        attemptStartedAt = performance.now();
+        onHttpAttempt();
+        stream = await client.chat.completions.create(withoutUsage as OpenAI.ChatCompletionCreateParamsStreaming, {
+          signal: opts.signal,
+        });
+      }
+      const { text, toolCalls, finishReason, firstUsableMs, usage } = await consumeStream(
+        stream as AsyncIterable<OpenAI.ChatCompletionChunk>,
+        cbs,
+        attemptStartedAt,
+      );
 
       // z.ai coding endpoint returns content='' and only reasoning_content for
       // pure text responses (no tools). If we got 200 OK but nothing usable,
@@ -311,6 +462,17 @@ function streamingSlot(
         finishReason,
         assistantMessage: buildAssistantMessage(text, toolCalls),
         providerUsed: slotName(label, model),
+        metrics: {
+          provider,
+          model,
+          chain: opts.fast ? 'fast' : 'smart',
+          firstUsableSinceAttemptMs: firstUsableMs,
+          providerDurationMs: Math.max(0, performance.now() - attemptStartedAt),
+          totalDurationMs: 0,
+          attemptCount: 1,
+          fallbackCount: 0,
+          usage: normalizeUsage(usage),
+        },
       };
     },
   };
@@ -458,12 +620,17 @@ function buildFastChain(): ProviderSlot[] {
  * chunk is streamed, so the retry can never duplicate text already sent to the
  * user.
  */
-async function runSlot(slot: ProviderSlot, opts: StreamRoundOptions, cbs: StreamCallbacks): Promise<StreamRoundResult> {
+async function runSlot(
+  slot: ProviderSlot,
+  opts: StreamRoundOptions,
+  cbs: StreamCallbacks,
+  onAttempt: () => void,
+): Promise<StreamRoundResult> {
   const cachedOverride = getModelOverride(slot.provider, slot.configuredModel);
   const model = cachedOverride ?? slot.configuredModel;
 
   try {
-    return await slot.stream(model, opts, cbs);
+    return await slot.stream(model, opts, cbs, onAttempt);
   } catch (error) {
     if (!isModelNotFoundError(error)) throw error;
 
@@ -482,7 +649,7 @@ async function runSlot(slot: ProviderSlot, opts: StreamRoundOptions, cbs: Stream
       { provider: slot.label, configuredModel: slot.configuredModel, resolvedModel: replacement, userId: opts.userId },
       'Configured model is gone — retrying the same provider with an auto-detected live model',
     );
-    return await slot.stream(replacement, opts, cbs);
+    return await slot.stream(replacement, opts, cbs, onAttempt);
   }
 }
 
@@ -490,7 +657,14 @@ function describeFailure(slot: ProviderSlot, error: unknown): ProviderFailure {
   const status = error instanceof OpenAI.APIError && typeof error.status === 'number' ? error.status : undefined;
   const message = error instanceof Error ? error.message : String(error);
   const model = getModelOverride(slot.provider, slot.configuredModel) ?? slot.configuredModel;
-  return { provider: slotName(slot.label, model), status, message, transient: isTransientProviderError(error) };
+  return {
+    provider: slotName(slot.label, model),
+    providerId: slot.provider,
+    model,
+    status,
+    message,
+    transient: isTransientProviderError(error),
+  };
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -528,9 +702,11 @@ export async function aiStreamRound(
   options: StreamRoundOptions,
   callbacks: StreamCallbacks = {},
 ): Promise<StreamRoundResult> {
+  const roundStartedAt = performance.now();
   const chainKind: ProviderChainKind = options.fast ? 'fast' : 'smart';
   const chain = options.fast ? buildFastChain() : buildSmartChain();
   const failures: ProviderFailure[] = [];
+  let actualAttempts = 0;
   // Anything the caller has already shown the user for this round: streamed text
   // or a "running <tool>" label. Both must be cleared before another provider
   // starts, otherwise the user sees output from a round that never finished.
@@ -559,14 +735,41 @@ export async function aiStreamRound(
   }
 
   for (const slot of attempts) {
+    const requestModel = getModelOverride(slot.provider, slot.configuredModel) ?? slot.configuredModel;
+    const fitRejection = preflightRequestFit(slot.provider, requestModel, options);
+    if (fitRejection) {
+      const provider = slotName(slot.label, requestModel);
+      const message = `Preflight skipped: conservative request estimate ${fitRejection.conservativeRequestedTokens} tokens exceeds known ${fitRejection.limitTokens} TPM limit`;
+      failures.push({ provider, providerId: slot.provider, model: requestModel, message, transient: false });
+      aiLogger.info(
+        { provider, userId: options.userId, ...fitRejection },
+        'Skipping provider because the request cannot fit its known token budget',
+      );
+      continue;
+    }
+
     try {
-      aiLogger.info({ provider: slot.label, model: slot.configuredModel, userId: options.userId }, 'Trying provider');
-      const result = await runSlot(slot, options, wrappedCallbacks);
+      aiLogger.info(
+        { provider: slot.label, model: slot.configuredModel, userId: options.userId, requestId: options.requestId },
+        'Trying provider',
+      );
+      const result = await runSlot(slot, options, wrappedCallbacks, () => {
+        actualAttempts++;
+      });
       // A slot that answers settles any outstanding outage for it and for its own
       // chain. The alert layer decides whether that is worth telling the admin
       // about.
       reportProviderAnswered(slot.label, chainKind);
       clearBlock(slot.provider, chainKind, hasTools);
+      if (result.metrics) {
+        result.metrics = {
+          ...result.metrics,
+          chain: chainKind,
+          attemptCount: actualAttempts,
+          fallbackCount: failures.length,
+          totalDurationMs: Math.max(0, performance.now() - roundStartedAt),
+        };
+      }
       return result;
     } catch (error) {
       const failure = describeFailure(slot, error);
@@ -596,7 +799,11 @@ export async function aiStreamRound(
     }
   }
 
-  const aggregate = new AllProvidersFailedError(failures);
+  const aggregate = new AllProvidersFailedError(failures, {
+    totalDurationMs: Math.max(0, performance.now() - roundStartedAt),
+    attemptCount: actualAttempts,
+    fallbackCount: Math.max(0, failures.length - 1),
+  });
   aiLogger.error({ failures, userId: options.userId }, 'Every AI provider in the chain failed');
   // The loudest alert there is: nobody answered, so the user got nothing.
   reportAllProvidersFailed(failures, chainKind);

@@ -1,5 +1,5 @@
 // src/services/notification/queue.ts
-import { DelayedError, Queue, Worker } from 'bullmq';
+import { DelayedError, type Job, Queue, Worker } from 'bullmq';
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 import { parseRedisUrl } from '../../utils/redis.ts';
@@ -23,6 +23,41 @@ export function createNotificationQueue(redisUrl: string) {
   return queue;
 }
 
+type NotificationJob = Pick<Job<NotificationJobData>, 'name' | 'data' | 'attemptsMade' | 'moveToDelayed'>;
+
+/** Exact processor used by BullMQ, exposed for transport-to-storage regressions. */
+export async function processNotificationJob(
+  job: NotificationJob,
+  logRepo: NotificationLogRepository,
+  sendMessage: (telegramId: number, text: string) => Promise<void>,
+  token?: string,
+  scheduler?: Pick<NotificationScheduler, 'tick'>,
+): Promise<void> {
+  if (job.name === 'tick') {
+    if (scheduler) await scheduler.tick(new Date());
+    return;
+  }
+  try {
+    await processNotification(job.data, logRepo, sendMessage);
+  } catch (err) {
+    const tgErr = parseTelegramError(err);
+    if (tgErr?.code === 429) {
+      const delay = (tgErr.retryAfter ?? 30) * 1000;
+      await job.moveToDelayed(Date.now() + delay, token);
+      throw new DelayedError();
+    }
+    if (tgErr?.code === 403) {
+      notifyLogger.warn(
+        { logId: job.data.logId, telegramId: job.data.telegramId },
+        'Bot blocked by user, dropping notification',
+      );
+      logRepo.markFailed(job.data.logId, 'Bot blocked by user', job.attemptsMade);
+      return;
+    }
+    throw err;
+  }
+}
+
 export function createNotificationWorker(
   redisUrl: string,
   logRepo: NotificationLogRepository,
@@ -33,31 +68,7 @@ export function createNotificationWorker(
 
   const worker = new Worker<NotificationJobData>(
     'notifications',
-    async (job, token) => {
-      if (job.name === 'tick') {
-        if (scheduler) await scheduler.tick(new Date());
-        return;
-      }
-      try {
-        await processNotification(job.data, logRepo, sendMessage);
-      } catch (err) {
-        const tgErr = parseTelegramError(err);
-        if (tgErr?.code === 429) {
-          const delay = (tgErr.retryAfter ?? 30) * 1000;
-          await job.moveToDelayed(Date.now() + delay, token);
-          throw new DelayedError();
-        }
-        if (tgErr?.code === 403) {
-          notifyLogger.warn(
-            { logId: job.data.logId, telegramId: job.data.telegramId },
-            'Bot blocked by user, dropping notification',
-          );
-          logRepo.markFailed(job.data.logId, 'Bot blocked by user', job.attemptsMade);
-          return;
-        }
-        throw err;
-      }
-    },
+    (job, token) => processNotificationJob(job, logRepo, sendMessage, token, scheduler),
     { connection, concurrency: 5, limiter: { max: 20, duration: 1000 } },
   );
 

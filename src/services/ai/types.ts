@@ -1,6 +1,4 @@
 import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramMessage } from 'gramio';
-import type { AgentDispatcher } from '../../agent/dispatcher.ts';
-import type { AgentRegistry } from '../../agent/registry.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
@@ -134,12 +132,6 @@ export interface SceneCapability {
   scenePauseService: import('../scene-pause.ts').ScenePauseService;
 }
 
-export interface AgentsCapability {
-  agentRegistry: AgentRegistry;
-  agentDispatcher: AgentDispatcher;
-  onAgentChunk: ((text: string) => void) | undefined;
-}
-
 export interface BirthdayCapability {
   birthdayService: BirthdayService;
   userMemoryRepo: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
@@ -233,7 +225,6 @@ export interface AgentContext {
   feedback?: FeedbackCapability;
   scheduled?: ScheduledCapability;
   scene?: SceneCapability;
-  agents?: AgentsCapability;
   birthday?: BirthdayCapability;
   broadcast?: BroadcastCapability;
   locationVerification?: LocationVerificationService;
@@ -317,6 +308,15 @@ export interface ToolResult {
   output?: string;
   error?: string;
   stopLoop?: boolean;
+  /** A handoff is independent of the outer tool name (handlers may delegate). */
+  awaitingInput?: { kind: 'chat' } | { kind: 'speech'; question: string };
+  /** Direct execution evidence; never inferred from output or error prose. */
+  mutationState?: 'not_applied' | 'uncertain' | 'confirmed';
+  effect?:
+    | { kind: 'invitation'; delivery: 'delivered' | 'manual_forward' | 'failed' }
+    | { kind: 'attendance_declined' }
+    | { kind: 'event_deleted' };
+
   /**
    * Agent-only instruction appended to the tool result seen by the AI.
    * Never shown to the user — the intent engine ignores this field entirely.
@@ -385,6 +385,7 @@ export interface TelegramSender {
     userId?: number,
   ): Promise<{ message_id: number }>;
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;
+  sendDocument?(chatId: number, document: File, caption: string): Promise<{ message_id: number }>;
   sendPhoto?(chatId: number, photo: File): Promise<{ message_id: number }>;
   pinChatMessage?(chatId: number, messageId: number, options: { disable_notification: boolean }): Promise<true>;
   sendInvitation?(

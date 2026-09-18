@@ -1,10 +1,12 @@
 import { TZDate } from '@date-fns/tz';
 import { startOfWeek } from 'date-fns';
 import { t } from '../../../config/constants.ts';
+import { agendaImageErrorMessage, sendAgendaImage } from '../../../utils/agenda-image.ts';
 import { autoPin } from '../../../utils/auto-pin.ts';
-import { getDayRangeUtc, getWeekRangeUtc } from '../../../utils/date.ts';
+import { getDayRangeUtc, getWeekRangeUtc, localCalendarDate } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { getTheme } from '../../../worker/templates/themes.ts';
+import { enrichAgenda } from '../../event/agenda-enrichment.ts';
 import { renderDayImage } from '../../image/render-day.ts';
 import { renderMonthImage } from '../../image/render-month.ts';
 import { renderWeekImage } from '../../image/render-week.ts';
@@ -54,7 +56,12 @@ export async function handleRenderDayImage(
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
-  const dateObj = new Date(`${input.date}T12:00:00Z`);
+  let dateObj: TZDate;
+  try {
+    dateObj = localCalendarDate(input.date, ctx.user.timezone);
+  } catch {
+    return { success: false, error: 'Invalid calendar date.' };
+  }
   const occurrences =
     scope === 'group'
       ? (() => {
@@ -70,7 +77,11 @@ export async function handleRenderDayImage(
   try {
     const buffer = await renderDayImage(
       ctx.renderService,
-      occurrences,
+      enrichAgenda(
+        occurrences,
+        { userId, language: lang, groupId: scope === 'group' ? ctx.groupChatId : undefined },
+        ctx.isGroup && scope !== 'group' ? undefined : ctx.eventService.agendaRepository,
+      ),
       input.date,
       ctx.user.timezone,
       lang,
@@ -78,7 +89,13 @@ export async function handleRenderDayImage(
       holidays,
     );
     const file = new File([buffer], 'day.png', { type: 'image/png' });
-    const sent = await sender.sendPhoto!(ctx.chatId, file);
+    const sent = await sendAgendaImage(file, {
+      language: ctx.user.language,
+      sendPhoto: (photo) => sender.sendPhoto!(ctx.chatId, photo),
+      sendDocument: sender.sendDocument
+        ? (document, options) => sender.sendDocument!(ctx.chatId, document, options.caption)
+        : undefined,
+    });
     schedulePinFireAndForget(ctx, sent.message_id);
     return {
       success: true,
@@ -87,6 +104,8 @@ export async function handleRenderDayImage(
         'The day image has already been delivered to the chat. Do NOT call render_day_image again for this date in this turn.',
     };
   } catch (err) {
+    const imageError = agendaImageErrorMessage(err);
+    if (imageError) return { success: false, error: imageError };
     renderLogger.error({ err, date: input.date }, 'Day image render failed');
     return { success: false, error: tr.dayImageFailed(input.date) };
   }
@@ -117,7 +136,13 @@ export async function handleRenderTable(
       userId: ctx.user.telegram_id,
     });
     const file = new File([buffer], 'table.png', { type: 'image/png' });
-    const sent = await sender.sendPhoto!(ctx.chatId, file);
+    const sent = await sendAgendaImage(file, {
+      language: ctx.user.language,
+      sendPhoto: (photo) => sender.sendPhoto!(ctx.chatId, photo),
+      sendDocument: sender.sendDocument
+        ? (document, options) => sender.sendDocument!(ctx.chatId, document, options.caption)
+        : undefined,
+    });
     schedulePinFireAndForget(ctx, sent.message_id);
 
     const voiceNote = ctx.inputMode === 'live_call' ? ` ${tr.tableRenderingVoice}` : '';
@@ -128,6 +153,8 @@ export async function handleRenderTable(
         'The table has already been delivered to the chat. Do NOT call render_table again with identical arguments in this turn.',
     };
   } catch (err) {
+    const imageError = agendaImageErrorMessage(err);
+    if (imageError) return { success: false, error: imageError };
     renderLogger.error({ err, title: input.title }, 'Table image render failed');
     return { success: false, error: tr.tableFailed(input.title) };
   }
@@ -183,7 +210,10 @@ export async function handleRenderWeekImage(
   }
   const weekStartIso = startOfWeek(weekStartDate, { weekStartsOn: 1 }).toISOString().slice(0, 10);
 
-  const { start: startUtc, end: endUtc } = getWeekRangeUtc(new Date(`${weekStartIso}T12:00:00Z`), ctx.user.timezone);
+  const { start: startUtc, end: endUtc } = getWeekRangeUtc(
+    localCalendarDate(weekStartIso, ctx.user.timezone),
+    ctx.user.timezone,
+  );
 
   const occurrences =
     scope === 'group'
@@ -193,9 +223,26 @@ export async function handleRenderWeekImage(
   const sender = ctx.sender;
 
   try {
-    const buffer = await renderWeekImage(ctx.renderService, occurrences, weekStartIso, ctx.user.timezone, lang, userId);
+    const buffer = await renderWeekImage(
+      ctx.renderService,
+      enrichAgenda(
+        occurrences,
+        { userId, language: lang, groupId: scope === 'group' ? ctx.groupChatId : undefined },
+        ctx.isGroup && scope !== 'group' ? undefined : ctx.eventService.agendaRepository,
+      ),
+      weekStartIso,
+      ctx.user.timezone,
+      lang,
+      userId,
+    );
     const file = new File([buffer], 'week.png', { type: 'image/png' });
-    const sent = await sender.sendPhoto!(ctx.chatId, file);
+    const sent = await sendAgendaImage(file, {
+      language: ctx.user.language,
+      sendPhoto: (photo) => sender.sendPhoto!(ctx.chatId, photo),
+      sendDocument: sender.sendDocument
+        ? (document, options) => sender.sendDocument!(ctx.chatId, document, options.caption)
+        : undefined,
+    });
     schedulePinFireAndForget(ctx, sent.message_id);
     return {
       success: true,
@@ -204,6 +251,8 @@ export async function handleRenderWeekImage(
         'The weekly image has already been delivered to the chat. Do NOT call render_week_image again with identical arguments in this turn.',
     };
   } catch (err) {
+    const imageError = agendaImageErrorMessage(err);
+    if (imageError) return { success: false, error: imageError };
     renderLogger.error({ err, weekStart: input.week_start }, 'Week image render failed');
     return { success: false, error: tr.weekImageFailed(input.week_start) };
   }
@@ -248,9 +297,27 @@ export async function handleRenderMonthImage(
   const tr = t(lang).aiTools.meta;
 
   try {
-    const buffer = await renderMonthImage(ctx.renderService, occurrences, year, month, ctx.user.timezone, lang, userId);
+    const buffer = await renderMonthImage(
+      ctx.renderService,
+      enrichAgenda(
+        occurrences,
+        { userId, language: lang, groupId: scope === 'group' ? ctx.groupChatId : undefined },
+        ctx.isGroup && scope !== 'group' ? undefined : ctx.eventService.agendaRepository,
+      ),
+      year,
+      month,
+      ctx.user.timezone,
+      lang,
+      userId,
+    );
     const file = new File([buffer], 'month.png', { type: 'image/png' });
-    const sent = await sender.sendPhoto!(ctx.chatId, file);
+    const sent = await sendAgendaImage(file, {
+      language: ctx.user.language,
+      sendPhoto: (photo) => sender.sendPhoto!(ctx.chatId, photo),
+      sendDocument: sender.sendDocument
+        ? (document, options) => sender.sendDocument!(ctx.chatId, document, options.caption)
+        : undefined,
+    });
     schedulePinFireAndForget(ctx, sent.message_id);
     return {
       success: true,
@@ -259,6 +326,8 @@ export async function handleRenderMonthImage(
         'The monthly image has already been delivered to the chat. Do NOT call render_month_image again with identical arguments in this turn.',
     };
   } catch (err) {
+    const imageError = agendaImageErrorMessage(err);
+    if (imageError) return { success: false, error: imageError };
     renderLogger.error({ err, month: input.month }, 'Month image render failed');
     return { success: false, error: tr.monthImageFailed(input.month) };
   }

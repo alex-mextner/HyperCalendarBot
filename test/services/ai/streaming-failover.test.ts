@@ -212,6 +212,20 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
     expect(result.text).toBe('answer from Gemini');
   });
 
+  test('known-oversized Groq gpt-oss request is skipped before network dispatch', async () => {
+    process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
+    groq = makeProvider({ behaviors: [{ kind: 'throw', error: new Error('Groq must not be called') }] });
+
+    const result = await aiStreamRound({
+      messages: [{ role: 'user', content: 'x'.repeat(50_000) }],
+      maxTokens: 200,
+    });
+
+    expect(result.text).toBe('answer from Gemini');
+    expect(groq.requestedModels).toEqual([]);
+    expect(gemini.requestedModels).toEqual(['gemini-main']);
+  });
+
   test('every slot failing throws AllProvidersFailedError naming each provider and reason', async () => {
     gemini = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(500, 'gemini overloaded') }] });
     hf = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'hf unavailable') }] });
@@ -513,6 +527,8 @@ describe('aiStreamRound — auto-detecting a live model', () => {
     expect(result.providerUsed).toBe('Groq (openai/gpt-oss-120b)');
     expect(groq.requestedModels).toEqual(['llama-3.3-70b-versatile', 'openai/gpt-oss-120b']);
     expect(gemini.requestedModels).toEqual([]);
+    expect(result.metrics?.attemptCount).toBe(3); // z.ai quota + dead Groq model + replacement Groq request
+    expect(result.metrics?.fallbackCount).toBe(1);
   });
 
   test('the resolved model is cached: the next request skips the dead model and the second probe', async () => {

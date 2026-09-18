@@ -1,5 +1,5 @@
 import { InlineKeyboard } from 'gramio';
-import { type Lang, t } from '../../../config/constants.ts';
+import { type Lang, t, toLang } from '../../../config/constants.ts';
 import type {
   EventParticipant,
   Invitation,
@@ -78,15 +78,15 @@ export function handleShareEvent(ctx: AgentContext, input: ShareEventInput): Too
 
 export async function handleSendInvitation(ctx: AgentContext, input: SendInvitationInput): Promise<ToolResult> {
   if (!ctx.sharing?.invitationService) {
-    return { success: false, error: 'Invitations are not configured.' };
+    return { success: false, mutationState: 'not_applied', error: 'Invitations are not configured.' };
   }
 
   if (input.invitee_id === undefined && !input.invitee_username) {
-    return { success: false, error: t(ctx.user.language).aiTools.meta.recipientMissing };
+    return { success: false, mutationState: 'not_applied', error: t(ctx.user.language).aiTools.meta.recipientMissing };
   }
 
   if (!ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id))
-    return { success: false, error: 'Event not found' };
+    return { success: false, mutationState: 'not_applied', error: 'Event not found' };
 
   let recipient: Awaited<ReturnType<typeof resolveInvitationRecipient>>;
   try {
@@ -98,6 +98,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
     );
     return {
       success: false,
+      mutationState: 'not_applied',
       error: input.invitee_username
         ? t(ctx.user.language).aiTools.meta.recipientLookupFailed(input.invitee_username.replace(/^@/, ''))
         : t(ctx.user.language).aiTools.meta.recipientUnverified,
@@ -130,9 +131,10 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
         new InlineKeyboard().text(tr.recipientConfirmButton, `ric:${token}`),
       );
       return {
-        success: false,
+        success: true,
+        awaitingInput: { kind: 'chat' },
+        mutationState: 'not_applied',
         stopLoop: true,
-        error: tr.recipientUnverified,
         output: tr.recipientConfirmationSent,
         agentHint:
           'Wait for the actual confirmation callback or use pick_users. force=true alone cannot bypass identity confirmation; it never changes the numeric recipient.',
@@ -145,6 +147,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
     const tr = t(ctx.user.language).aiTools.meta;
     return {
       success: false,
+      mutationState: 'not_applied',
       error:
         recipient.reason === 'conflict'
           ? tr.recipientIdentityConflict
@@ -168,7 +171,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
   );
 
   if (!result.success) {
-    return { success: false, error: result.error };
+    return { success: false, mutationState: 'not_applied', error: result.error };
   }
 
   const invitation = result.invitation!;
@@ -220,7 +223,21 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
 
   return {
     success: true,
-    output: t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, inviteeId),
+    mutationState: 'confirmed',
+    effect: {
+      kind: 'invitation',
+      delivery: delivery.delivered ? 'delivered' : delivery.viaDeepLink ? 'manual_forward' : 'failed',
+    },
+    output: [
+      ...(ctx.isGroup
+        ? []
+        : [t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, inviteeId)]),
+      delivery.delivered
+        ? t(toLang(ctx.user.language)).writeOutcomes.invitationDelivered
+        : delivery.viaDeepLink
+          ? t(toLang(ctx.user.language)).writeOutcomes.invitationManual
+          : t(toLang(ctx.user.language)).writeOutcomes.invitationFailed,
+    ].join('\n'),
     agentHint: delivery.delivered
       ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
       : delivery.viaDeepLink
@@ -316,6 +333,10 @@ export async function handleResendInvitation(
     });
     return {
       success: true,
+      effect: {
+        kind: 'invitation',
+        delivery: delivery.delivered ? 'delivered' : delivery.viaDeepLink ? 'manual_forward' : 'failed',
+      },
       output: t(ctx.user.language).aiTools.sharing.invitationReminderQueued(invitation.invitee_id),
       agentHint: delivery.delivered
         ? 'The invitation reminder was delivered to the invitee. Tell the user it is sent.'

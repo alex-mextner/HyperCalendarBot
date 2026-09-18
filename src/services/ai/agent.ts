@@ -10,14 +10,21 @@ import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
-import { validateResponse } from './response-validator.ts';
+import {
+  type AgentRequestMetricSnapshot,
+  AgentRequestMetrics,
+  type AgentTermination,
+  elapsedMs,
+} from './request-metrics.ts';
+import { shouldValidateResponse, unverifiedResponseNotice, validateResponse } from './response-validator.ts';
 import { AllProvidersFailedError, aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
-import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS } from './tool-executor.ts';
+import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
 import { toolSchemas } from './tool-schemas.ts';
-import { getToolDefinitions, type UserCapabilities } from './tools.ts';
+import { getToolDefinitions } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
+import { WriteOutcomes } from './write-outcomes.ts';
 
 const aiLogger = logger.child({ module: 'ai-agent' });
 
@@ -463,6 +470,7 @@ export function toolCallKey(name: string, input: { [key: string]: unknown }): st
   const schema = toolSchemas[name as keyof typeof toolSchemas];
   const knownKeys =
     schema && 'shape' in schema ? Object.keys((schema as { shape: { [key: string]: unknown } }).shape) : null;
+  const parsed = schema?.safeParse(input);
   const filteredKeys = knownKeys
     ? Object.keys(input)
         .filter((k) => knownKeys.includes(k))
@@ -473,7 +481,10 @@ export function toolCallKey(name: string, input: { [key: string]: unknown }): st
   const canonical: { [key: string]: unknown } = {};
   for (const k of filteredKeys) {
     if (input[k] !== null && input[k] !== undefined) {
-      canonical[k] = input[k];
+      canonical[k] =
+        parsed?.success && parsed.data !== null && typeof parsed.data === 'object'
+          ? Reflect.get(parsed.data, k)
+          : input[k];
     }
   }
   return `${name}:${stableStringify(canonical)}`;
@@ -499,6 +510,8 @@ export interface AgentRunResult {
   toolCalls: AgentToolCallRecord[];
   toolResults: AgentToolResultRecord[];
   endCall?: boolean;
+  /** Structured latency/cost telemetry; contains no user text, tool args or actor ids. */
+  metrics?: AgentRequestMetricSnapshot;
 }
 
 export class CalendarBotAgent {
@@ -521,12 +534,12 @@ export class CalendarBotAgent {
   async buildMessages(
     ctx: AgentContext,
     history: ChatHistoryMessage[],
-    caps?: UserCapabilities,
+    measuredStream?: typeof aiStreamRound,
   ): Promise<{ systemPrompt: string; messages: MessageParam[] }> {
     // IMPORTANT: history must already contain the current user message.
     // The universal GramIO middleware in bot/index.ts saves it via ConversationLogger
     // before the pipeline runs, so by the time agent.run() is called, it is present.
-    const systemPrompt = buildSystemPrompt(ctx, caps);
+    const systemPrompt = buildSystemPrompt(ctx);
 
     const relevantHistory =
       ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 50) : history;
@@ -539,7 +552,12 @@ export class CalendarBotAgent {
 
       for (let msg of parsedMessages) {
         if (this.summarizer && isToolMessage(msg) && typeof msg.content === 'string') {
-          const condensed = await this.summarizer.condenseMessage(row.id, msg.tool_call_id, msg.content);
+          const condensed = await this.summarizer.condenseMessage(
+            row.id,
+            msg.tool_call_id,
+            msg.content,
+            measuredStream,
+          );
           if (condensed !== msg.content) {
             msg = { ...msg, content: condensed };
           }
@@ -644,8 +662,11 @@ export class CalendarBotAgent {
   }
 
   async run(ctx: AgentContext): Promise<AgentRunResult> {
+    const requestMetrics = new AgentRequestMetrics();
+    const requestId = requestMetrics.requestId;
     aiLogger.info(
       {
+        requestId,
         userId: ctx.user.telegram_id,
         chatId: ctx.chatId,
         supplementMode: !!ctx.supplementMode,
@@ -654,13 +675,70 @@ export class CalendarBotAgent {
       'Agent run started',
     );
 
-    const caps: UserCapabilities = {
-      assistantEnabled: Boolean(ctx.user.assistant_enabled),
-    };
+    const measuredStream =
+      (purpose: 'history' | 'agent' | 'validator' | 'retry') =>
+      async (...args: Parameters<typeof aiStreamRound>): ReturnType<typeof aiStreamRound> => {
+        const [options, callbacks] = args;
+        const startedAt = performance.now();
+        try {
+          const result = await this.streamImpl({ ...options, requestId }, callbacks);
+          requestMetrics.recordRound(result.metrics);
+          const metrics = result.metrics;
+          aiLogger.info(
+            {
+              requestId,
+              purpose,
+              provider: metrics?.provider ?? null,
+              model: metrics?.model ?? null,
+              chain: metrics?.chain ?? null,
+              firstUsableSinceAttemptMs: metrics?.firstUsableSinceAttemptMs ?? null,
+              providerDurationMs: metrics?.providerDurationMs ?? null,
+              totalDurationMs: metrics?.totalDurationMs ?? elapsedMs(startedAt),
+              attemptCount: metrics?.attemptCount ?? null,
+              fallbackCount: metrics?.fallbackCount ?? null,
+              promptTokens: metrics?.usage?.promptTokens ?? null,
+              completionTokens: metrics?.usage?.completionTokens ?? null,
+              reasoningTokens: metrics?.usage?.reasoningTokens ?? null,
+              cachedTokens: metrics?.usage?.cachedTokens ?? null,
+              success: true,
+            },
+            'AI model call metric',
+          );
+          return result;
+        } catch (error) {
+          const failed = error instanceof AllProvidersFailedError ? error.roundMetrics : null;
+          requestMetrics.recordFailedRound(
+            failed?.totalDurationMs ?? elapsedMs(startedAt),
+            failed?.attemptCount ?? 0,
+            failed?.fallbackCount ?? 0,
+          );
+          aiLogger.info(
+            {
+              requestId,
+              purpose,
+              totalDurationMs: failed?.totalDurationMs ?? elapsedMs(startedAt),
+              attemptCount: failed?.attemptCount ?? null,
+              fallbackCount: failed?.fallbackCount ?? null,
+              failedProviders:
+                error instanceof AllProvidersFailedError
+                  ? error.failures.map((failure) => ({ provider: failure.providerId, model: failure.model }))
+                  : [],
+              success: false,
+            },
+            'AI model call metric',
+          );
+          throw error;
+        }
+      };
+    const summaryStream = measuredStream('history');
+    const agentStream = measuredStream('agent');
+    const validatorStream = measuredStream('validator');
+    const retryStream = measuredStream('retry');
+
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
-    const { systemPrompt, messages: rawHistoryMessages } = await this.buildMessages(ctx, history, caps);
+    const { systemPrompt, messages: rawHistoryMessages } = await this.buildMessages(ctx, history, summaryStream);
     const historyMessages = this.summarizer
-      ? await this.summarizer.condenseHistory(rawHistoryMessages)
+      ? await this.summarizer.condenseHistory(rawHistoryMessages, summaryStream)
       : rawHistoryMessages;
 
     const dbg: AiDebugRunContext | null =
@@ -699,17 +777,6 @@ export class CalendarBotAgent {
     });
     await writer.init();
 
-    // Stream macOS agent chunks into the same writer so they appear live
-    // and land in the collapsed blockquote after commitIntermediate().
-    // tailText keeps only the last 3500 chars so Telegram never rejects the edit.
-    if (ctx.agents) {
-      ctx.agents.onAgentChunk = (text: string) => {
-        writer.appendText(text);
-        writer.tailText(3500);
-        writer.flush(false).catch((err) => aiLogger.warn({ err }, 'agent chunk flush failed'));
-      };
-    }
-
     const startTime = Date.now();
     const allToolCalls: AgentToolCallRecord[] = [];
     const allToolResults: AgentToolResultRecord[] = [];
@@ -718,6 +785,7 @@ export class CalendarBotAgent {
     // where the model keeps invoking the same tool (e.g. render_day_image,
     // which has user-visible side effects).
     const seenToolCallKeys = new Set<string>();
+    const writeOutcomes = new WriteOutcomes(WRITE_TOOLS);
     // Last text-only assistant turn — buffered so we don't persist a tool-less
     // hallucination to chat_history before the validator has a chance to reject it.
     let pendingAssistantTurn: MessageParam | null = null;
@@ -727,9 +795,24 @@ export class CalendarBotAgent {
     const systemMessage: MessageParam = { role: 'system', content: systemPrompt };
     let currentMessages: MessageParam[] = [systemMessage, ...historyMessages];
     let runFailed = false;
+    // Stays set until a validation retry produces an explicitly approved answer.
+    let responseUnverified = false;
+    let runError: unknown;
+    let termination: AgentTermination = 'limit';
+    const pendingHistory: MessageParam[] = [];
+    const saveAssistant = (message: MessageParam, skipIds?: Set<string>) => {
+      if ('tool_calls' in message && message.tool_calls?.length) {
+        this.saveAssistantTurn(ctx, { ...message, content: null }, skipIds);
+      } else {
+        pendingHistory.push(message);
+      }
+    };
+    const saveResults = (messages: MessageParam[], skipIds?: Set<string>) => {
+      this.saveToolResults(ctx, messages, skipIds);
+    };
 
     try {
-      for (let round = 0; round < MAX_ROUNDS; round++) {
+      rounds: for (let round = 0; round < MAX_ROUNDS; round++) {
         dbg?.logRound(round);
 
         if (Date.now() - startTime > TIMEOUT_MS) {
@@ -741,11 +824,13 @@ export class CalendarBotAgent {
 
         const callbacks: StreamCallbacks = {
           onTextDelta: (text) => {
+            requestMetrics.markVisible();
             writer.appendText(text);
             writer.flush(false).catch(() => {});
           },
           onToolCallStart: (name) => {
             if (SILENT_TOOLS.has(name)) return;
+            requestMetrics.markVisible();
             // Only set the label — don't flush. The tool loop flushes
             // sequentially with full input details. Fire-and-forget flush
             // here raced with the tool loop in noPlaceholder (group) mode,
@@ -758,10 +843,10 @@ export class CalendarBotAgent {
         };
 
         const remainingMs = Math.max(1000, TIMEOUT_MS - (Date.now() - startTime));
-        const result = await this.streamImpl(
+        const result = await agentStream(
           {
             messages: currentMessages,
-            tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
+            tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
             maxTokens: 4096,
             temperature: 0.3,
             signal: AbortSignal.timeout(remainingMs),
@@ -770,10 +855,13 @@ export class CalendarBotAgent {
           callbacks,
         );
 
+        const roundMetrics = result.metrics;
         aiLogger.info(
           {
-            userId: ctx.user.telegram_id,
-            provider: result.providerUsed,
+            requestId,
+            provider: roundMetrics?.provider ?? null,
+            model: roundMetrics?.model ?? null,
+            chain: roundMetrics?.chain ?? null,
             round,
             toolCount: result.toolCalls.length,
           },
@@ -786,6 +874,7 @@ export class CalendarBotAgent {
         // reject+retry, in which case we don't want the rejected answer in
         // chat_history. Final persistence happens after validation below.
         if (result.toolCalls.length === 0) {
+          termination = 'normal';
           pendingAssistantTurn = result.assistantMessage;
           pendingResponseText = result.text;
           break;
@@ -798,9 +887,9 @@ export class CalendarBotAgent {
           result.toolCalls.filter((tc) => SKIP_PERSIST_TOOLS.has(tc.name)).map((tc) => tc.id),
         );
 
-        // Persist the assistant turn (text + tool_calls) before executing tools
+        // Hold assistant prose until the final guard can reconcile it with execution evidence.
         if (!ctx.supplementMode) {
-          this.saveAssistantTurn(ctx, result.assistantMessage, skipPersistIds);
+          saveAssistant(result.assistantMessage, skipPersistIds);
         }
 
         const toolResultMessages: MessageParam[] = [];
@@ -839,11 +928,25 @@ export class CalendarBotAgent {
             await writer.flush(true);
           }
 
+          const toolStartedAt = performance.now();
           const toolResult = await executeTool(ctx, tc.name, input);
+          const toolElapsedMs = elapsedMs(toolStartedAt);
+          requestMetrics.recordTool(toolElapsedMs);
+          aiLogger.info(
+            {
+              requestId,
+              tool: tc.name,
+              durationMs: toolElapsedMs,
+              success: toolResult.success,
+              disposition: toolResult.disposition,
+            },
+            'Tool call complete',
+          );
+          writeOutcomes.record(tc.name, input, toolResult);
 
           // Record dedup key only after a successful execution — failed calls
           // must not block retries with a synthetic DUPLICATE result.
-          if (toolResult.success) {
+          if (toolResult.disposition === 'executed') {
             seenToolCallKeys.add(dedupKey);
           }
 
@@ -866,59 +969,54 @@ export class CalendarBotAgent {
           if (toolResult.stopLoop) {
             writer.clearToolLabel();
             if (!ctx.supplementMode && toolResultMessages.length > 0) {
-              this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
+              saveResults(toolResultMessages, skipPersistIds);
             }
-            writer.commitIntermediate();
-            await writer.finalize();
-            dbg?.logFinal(writer.getText().trim(), allToolCalls.length);
-            dbg?.flush();
-            if (allToolCalls.some((call) => call.name === 'end_conversation')) {
-              this.debugLogger?.endSession(ctx.chatId);
-            }
-            return {
-              responseText: ctx.inputMode !== 'text' ? writer.getPlainText() : writer.getText(),
-              toolCalls: allToolCalls,
-              toolResults: allToolResults,
-              endCall: ctx.callEndRequested === true,
-            };
+            termination = toolResult.disposition === 'waiting' ? 'waiting' : 'stop';
+            break rounds;
           }
         }
 
         if (isSkipText(writer.getText())) {
-          await writer.discard();
-          dbg?.logFinal('[SKIP] (mid-loop discard)', allToolCalls.length);
-          dbg?.flush();
-          return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
+          if (!ctx.supplementMode) saveResults(toolResultMessages, skipPersistIds);
+          termination = 'silent';
+          break;
         }
 
         writer.clearToolLabel();
         if (!ctx.supplementMode) {
-          this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
+          saveResults(toolResultMessages, skipPersistIds);
         }
         writer.commitIntermediate();
 
         currentMessages = [...currentMessages, result.assistantMessage, ...toolResultMessages];
       }
 
-      // Response validation: when no tools were called, verify the response isn't
-      // hallucinated. Always on — cheap via the fast chain, and critical for
-      // calendar correctness. Skip supplementMode (no user-visible output to validate).
-      const availableTools = getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode);
+      // Response validation: always validate tool-less prose, plus factual claims
+      // that the tools used in this run cannot support. The deterministic
+      // prefilter keeps ordinary tool-backed writes on the existing fast path.
+      const availableTools = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
       let rejected = false;
-      if (availableTools.length > 0 && allToolCalls.length === 0 && !ctx.supplementMode) {
+      if (availableTools.length > 0 && !ctx.supplementMode) {
         // Use the model's actual emitted text, not the writer buffer — tests
         // with scripted stream impls can produce an assistantMessage without
         // calling onTextDelta, so writer.getText() may be empty even when the
         // model did return content.
         const responseText = pendingResponseText.trim();
-        if (responseText && !isSkipText(responseText)) {
+        if (
+          responseText &&
+          !isSkipText(responseText) &&
+          shouldValidateResponse(
+            allToolCalls.map((tc) => tc.name),
+            responseText,
+          )
+        ) {
           const validation = await validateResponse(
             {
               userMessage: ctx.messageText,
               toolCalls: allToolCalls.map((tc) => tc.name),
               response: responseText,
             },
-            this.streamImpl,
+            validatorStream,
           );
 
           if (!validation.approved) {
@@ -927,6 +1025,7 @@ export class CalendarBotAgent {
               'Response validation REJECTED — retrying with tools',
             );
             rejected = true;
+            responseUnverified = true;
             pendingAssistantTurn = null;
             const retryOutcome = await this.runRetryAfterRejection(
               ctx,
@@ -934,17 +1033,22 @@ export class CalendarBotAgent {
               responseText,
               writer,
               dbg,
-              caps,
               allToolCalls,
               allToolResults,
               startTime,
               seenToolCallKeys,
+              writeOutcomes,
+              saveAssistant,
+              saveResults,
+              retryStream,
+              requestMetrics,
             );
 
-            // If the retry ALSO produced a tool-less answer, validate it once
-            // more. If the second pass also rejects, we log and ship anyway —
-            // the alternative is a blank or useless apology and we only get
-            // one retry budget per user request.
+            if (retryOutcome.hitStopLoop) termination = retryOutcome.waiting ? 'waiting' : 'stop';
+
+            // A retry is not approval. Keep unverified text out of both delivery
+            // and history on rejection, timeout, exhaustion, or an early stop.
+            // The final evidence guard preserves writes and clarification UI.
             if (!retryOutcome.hitStopLoop && retryOutcome.lastRoundText && !retryOutcome.lastRoundHadToolCalls) {
               const reValidation = await validateResponse(
                 {
@@ -952,12 +1056,13 @@ export class CalendarBotAgent {
                   toolCalls: allToolCalls.map((tc) => tc.name),
                   response: retryOutcome.lastRoundText,
                 },
-                this.streamImpl,
+                validatorStream,
               );
+              responseUnverified = !reValidation.approved;
               if (!reValidation.approved) {
                 aiLogger.warn(
                   { userId: ctx.user.telegram_id, reason: reValidation.reason },
-                  'Retry response ALSO rejected by validator — shipping anyway, user asked once',
+                  'Retry response rejected by validator — suppressing unverified explanation',
                 );
               }
             }
@@ -965,25 +1070,70 @@ export class CalendarBotAgent {
         }
       }
 
-      // Persist the final tool-less assistant turn only if validation didn't
-      // reject it. Tool-bearing rounds persist as they happen, inside the loop.
       if (pendingAssistantTurn && !rejected && !ctx.supplementMode) {
-        this.saveAssistantTurn(ctx, pendingAssistantTurn);
+        saveAssistant(pendingAssistantTurn);
       }
     } catch (error) {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
       runFailed = true;
-      this.announceFailure(ctx, error, writer);
+      termination = 'error';
+      runError = error;
 
-      // Enqueue next retry (or trigger graceful fail after max attempts)
-      if (ctx.retryEnqueue && !ctx.supplementMode && ctx.wasExplicitInvocation !== false) {
+      // Explanation repair must not replay the original request, even if the
+      // repair provider fails before a mutation. Ordinary execution retries stay unchanged.
+      if (
+        !responseUnverified &&
+        !writeOutcomes.mayHaveMutated &&
+        ctx.retryEnqueue &&
+        !ctx.supplementMode &&
+        ctx.wasExplicitInvocation !== false
+      ) {
         ctx.retryEnqueue(ctx.messageText).catch((err) => {
           aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to handle retry enqueue');
         });
       }
     }
 
-    if (!runFailed && !ctx.supplementMode) {
+    if (responseUnverified && !runFailed && termination !== 'waiting') termination = 'unverified';
+
+    // One evidence guard for every exit, including validation retries and partial streams.
+    // Clarification UI is already delivered by the handler; it is never a completed write.
+    const evidence = writeOutcomes.finalNotice(
+      ctx.user.language,
+      ctx.isGroup,
+      (runFailed || responseUnverified) && writeOutcomes.mayHaveMutated,
+    );
+    const silent =
+      ctx.supplementMode ||
+      ctx.wasExplicitInvocation === false ||
+      (termination === 'waiting' && !writeOutcomes.speechQuestion);
+    const validationNotice =
+      responseUnverified && !silent && !evidence && termination !== 'waiting'
+        ? unverifiedResponseNotice(ctx.user.language)
+        : null;
+    const guarded = responseUnverified || evidence !== null || termination === 'waiting' || termination === 'error';
+    if (guarded) {
+      writer.resetBuffers();
+      if (!silent) {
+        if (evidence && termination !== 'waiting') writer.appendText(evidence);
+        if (validationNotice) writer.appendText(validationNotice);
+        if (termination === 'waiting' && writeOutcomes.speechQuestion) writer.appendText(writeOutcomes.speechQuestion);
+      }
+    }
+    if (!ctx.supplementMode) {
+      if (!guarded) {
+        for (const message of pendingHistory) this.saveAssistantTurn(ctx, message);
+      }
+      if (termination === 'waiting' && writeOutcomes.speechQuestion) {
+        this.saveAssistantTurn(ctx, { role: 'assistant', content: writeOutcomes.speechQuestion });
+      }
+      if (evidence) this.saveAssistantTurn(ctx, { role: 'assistant', content: evidence });
+      // Execution evidence is durable even in quiet mode; a notice is persisted only when delivered.
+      if (validationNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: validationNotice });
+    }
+    if (runFailed && !evidence && !validationNotice) this.announceFailure(ctx, runError, writer);
+
+    if (!runFailed && !responseUnverified && !ctx.supplementMode) {
       // The bot answered — any comeback it promised earlier is now settled.
       aiFailureNotices.clear(ctx.user.telegram_id);
     }
@@ -998,27 +1148,37 @@ export class CalendarBotAgent {
 
     aiLogger.info(
       {
+        requestId,
         userId: ctx.user.telegram_id,
         chatId: ctx.chatId,
         toolCount: allToolCalls.length,
         supplementMode: !!ctx.supplementMode,
+        termination,
       },
       'Agent run complete',
     );
 
     // A failed run with nothing to show must not leave the ⏳ placeholder edited
     // into a bare "..." — that is the silence the user reads as being ignored.
-    if (isSkipText(finalText) || (runFailed && finalText.length === 0)) {
+    if ((silent && guarded) || isSkipText(finalText) || (runFailed && finalText.length === 0)) {
+      const deliveryStartedAt = performance.now();
       await writer.discard();
-      return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
+      const metrics = requestMetrics.snapshot(termination, 'discarded', elapsedMs(deliveryStartedAt));
+      aiLogger.info(metrics, 'AI request metric');
+      return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults, metrics };
     }
 
+    let deliveryOutcome: 'delivered' | 'fallback' = 'delivered';
+    const deliveryStartedAt = performance.now();
     try {
       await writer.finalize();
     } catch (finalizeErr) {
+      deliveryOutcome = 'fallback';
       aiLogger.error({ err: finalizeErr, userId: ctx.user.telegram_id }, 'Writer finalize failed');
       await writer.sendErrorFallback(t(ctx.user.language).ai_send_error);
     }
+    const metrics = requestMetrics.snapshot(termination, deliveryOutcome, elapsedMs(deliveryStartedAt));
+    aiLogger.info(metrics, 'AI request metric');
 
     const msgId = writer.getMessageId();
     if (ctx.onBotResponse && msgId !== null) {
@@ -1030,6 +1190,7 @@ export class CalendarBotAgent {
       toolCalls: allToolCalls,
       toolResults: allToolResults,
       endCall: ctx.callEndRequested === true,
+      metrics,
     };
   }
 
@@ -1049,13 +1210,18 @@ export class CalendarBotAgent {
     previousText: string,
     writer: TelegramStreamWriter,
     dbg: AiDebugRunContext | null,
-    caps: UserCapabilities,
     allToolCalls: AgentToolCallRecord[],
     allToolResults: AgentToolResultRecord[],
     startTime: number,
     seenToolCallKeys: Set<string>,
+    writeOutcomes: WriteOutcomes,
+    saveAssistant: (message: MessageParam, skipIds?: Set<string>) => void,
+    saveResults: (messages: MessageParam[], skipIds?: Set<string>) => void,
+    retryStream: typeof aiStreamRound,
+    requestMetrics: AgentRequestMetrics,
   ): Promise<{
     hitStopLoop: boolean;
+    waiting?: boolean;
     /** Text produced by the most recent round of the retry loop (for re-validation). */
     lastRoundText: string;
     /** Whether the last round called any tools. Used to decide if re-validation is needed. */
@@ -1090,20 +1256,23 @@ export class CalendarBotAgent {
 
       const callbacks: StreamCallbacks = {
         onTextDelta: (text) => {
+          requestMetrics.markVisible();
           writer.appendText(text);
           writer.flush(false).catch(() => {});
         },
         onToolCallStart: (name) => {
+          if (SILENT_TOOLS.has(name)) return;
+          requestMetrics.markVisible();
           writer.setToolLabel(name);
           writer.flush(true).catch(() => {});
         },
       };
 
       const remainingMs = Math.max(1000, TIMEOUT_MS - (Date.now() - startTime));
-      const result = await this.streamImpl(
+      const result = await retryStream(
         {
           messages: currentMessages,
-          tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
+          tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
           maxTokens: 4096,
           temperature: 0.3,
           signal: AbortSignal.timeout(remainingMs),
@@ -1114,9 +1283,7 @@ export class CalendarBotAgent {
       dbg?.logAiText(result.text);
 
       if (result.toolCalls.length === 0) {
-        if (!ctx.supplementMode) {
-          this.saveAssistantTurn(ctx, result.assistantMessage);
-        }
+        if (!ctx.supplementMode) saveAssistant(result.assistantMessage);
         return { hitStopLoop: false, lastRoundText: result.text, lastRoundHadToolCalls: false };
       }
 
@@ -1125,11 +1292,12 @@ export class CalendarBotAgent {
       );
 
       if (!ctx.supplementMode) {
-        this.saveAssistantTurn(ctx, result.assistantMessage, skipPersistIds);
+        saveAssistant(result.assistantMessage, skipPersistIds);
       }
 
       const toolResultMessages: MessageParam[] = [];
       let stopLoopTriggered = false;
+      let waiting = false;
       for (const tc of result.toolCalls) {
         let input: { [key: string]: unknown };
         try {
@@ -1156,10 +1324,13 @@ export class CalendarBotAgent {
         writer.setToolLabel(tc.name, input);
         await writer.flush(true);
 
+        const toolStartedAt = performance.now();
         const toolResult = await executeTool(ctx, tc.name, input);
+        requestMetrics.recordTool(elapsedMs(toolStartedAt));
+        writeOutcomes.record(tc.name, input, toolResult);
 
         // Record dedup key only on success — failed calls must not block retries.
-        if (toolResult.success) {
+        if (toolResult.disposition === 'executed') {
           seenToolCallKeys.add(dedupKey);
         }
 
@@ -1177,20 +1348,20 @@ export class CalendarBotAgent {
 
         if (toolResult.stopLoop) {
           stopLoopTriggered = true;
+          waiting = toolResult.disposition === 'waiting';
           break;
         }
       }
 
       if (!ctx.supplementMode && toolResultMessages.length > 0) {
-        this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
+        saveResults(toolResultMessages, skipPersistIds);
       }
       writer.clearToolLabel();
       writer.commitIntermediate();
 
       if (stopLoopTriggered) {
-        // A tool like ask_user / end_conversation already sent its own UI —
-        // do not produce additional assistant text after it.
-        return { hitStopLoop: true, lastRoundText: '', lastRoundHadToolCalls: true };
+        // The caller applies the shared evidence guard; only genuine clarification has its own UI.
+        return { hitStopLoop: true, waiting, lastRoundText: '', lastRoundHadToolCalls: true };
       }
 
       currentMessages = [...currentMessages, result.assistantMessage, ...toolResultMessages];

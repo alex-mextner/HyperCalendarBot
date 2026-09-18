@@ -97,9 +97,16 @@ describe('AiDebugLogger', () => {
     }
   });
 
-  test('flush does not throw when log directory does not exist', () => {
-    const logger = new AiDebugLogger(true, '/nonexistent/path/that/does/not/exist');
+  test('write failures stay non-fatal but are reported once per failing target', () => {
+    const failures: Array<{ operation: string; target: string }> = [];
+    const logger = new AiDebugLogger(true, '/nonexistent/path/that/does/not/exist', (operation, target) => {
+      failures.push({ operation, target });
+    });
     const ctx = logger.createRunContext(1, 300, 'u', 'U', null, false, 'test');
     expect(() => ctx?.flush()).not.toThrow();
+    expect(() => ctx?.flush()).not.toThrow();
+    expect(failures.map((failure) => failure.operation)).toEqual(['mkdir', 'append']);
+    expect(failures[0]?.target).toContain('/chats/300');
+    expect(failures[1]?.target).toMatch(/\/chats\/300\/.*\.log$/);
   });
 });

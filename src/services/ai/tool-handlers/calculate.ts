@@ -1,8 +1,11 @@
 import { addMonths, addYears, subMonths, subYears } from 'date-fns';
 import type { ToolHandlerMeta, ToolResult } from '../types.ts';
 
-const ISO_DT_RE = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?';
+const ISO_DT_RE = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})';
+const DATETIME_LIKE_RE = /^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}/;
 const DURATION_UNITS = 'min|minutes?|h|hr|hours?|d|days?|w|weeks?|mo|months?|y|years?';
+const DATETIME_SYNTAX_HINT =
+  'Datetime arithmetic requires ISO 8601 with T and an explicit Z/offset, e.g. "2026-09-17T10:49:00+02:00 + 2hours". The result is returned in UTC; do not append "to UTC" or use an offset-free local datetime.';
 
 function evalArithmetic(expr: string): number {
   let pos = 0;
@@ -106,7 +109,7 @@ export function handleCalculate(input: { expression: string }): ToolResult {
 
   // ISO datetime ± duration: "2026-03-18T22:34:00Z + 31min", "+ 1month", "+ 2weeks"
   const isoDatetimeMatch = expr.match(
-    new RegExp(`^(${ISO_DT_RE})\\s*([+-])\\s*(\\d+(?:\\.\\d+)?)\\s*(${DURATION_UNITS})\\b`, 'i'),
+    new RegExp(`^(${ISO_DT_RE})\\s*([+-])\\s*(\\d+(?:\\.\\d+)?)\\s*(${DURATION_UNITS})\\s*$`, 'i'),
   );
   if (isoDatetimeMatch) {
     const [, dateStr, op, amtStr, unit] = isoDatetimeMatch;
@@ -172,6 +175,13 @@ export function handleCalculate(input: { expression: string }): ToolResult {
       .padStart(2, '0');
     const rm = (totalMin % 60).toString().padStart(2, '0');
     return { success: true, output: `${rh}:${rm}` };
+  }
+
+  // Datetime-looking input should fail with a self-correcting contract instead
+  // of a generic parser error. In particular, never guess the user's timezone
+  // from an offset-free local datetime or from phrases such as "UTC+2 to UTC".
+  if (DATETIME_LIKE_RE.test(expr)) {
+    return { success: false, error: DATETIME_SYNTAX_HINT };
   }
 
   // Numeric arithmetic: digits, whitespace, operators, parentheses only

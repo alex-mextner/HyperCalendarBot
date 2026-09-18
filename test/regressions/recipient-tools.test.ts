@@ -526,7 +526,9 @@ describe('recipient and contact tool boundaries', () => {
       invitee_id: 5000000001,
       invitee_username: 'different',
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.awaitingInput).toEqual({ kind: 'chat' });
+    expect(result.mutationState).toBe('not_applied');
     expect(shown).toContain('5000000001');
     expect(shown).toContain('5000000002');
     expect(shown).toContain('Alex');
@@ -591,5 +593,28 @@ describe('recipient and contact tool boundaries', () => {
     const result = await handleResendInvitation(ctx, { invitation_id: invitation.id, invitee_username: 'different' });
     expect(result.success).toBe(false);
     expect(send).not.toHaveBeenCalled();
+  });
+  test('numeric identity confirmation is a waiting handoff, not a failed mutation', async () => {
+    const event = ctx.eventService.createEvent({
+      user_id: 10,
+      title: 'Synthetic confirmation',
+      start_at: '2035-01-01T12:00:00Z',
+      timezone: 'UTC',
+    });
+    ctx.messageText = 'Invite @different_person';
+    ctx.resolveUsername = async () => ({ id: 5000000002, username: 'different_person' });
+    ctx.sender = {
+      sendMessage: async () => ({ message_id: 1 }),
+      editMessageText: async () => {},
+      sendMessageWithKeyboard: async () => ({ message_id: 2 }),
+    };
+    const result = await executeTool(ctx, 'send_invitation', {
+      event_id: event.id,
+      invitee_id: 5000000001,
+      invitee_username: 'different_person',
+    });
+    expect(result.disposition).toBe('waiting');
+    expect(result.mutationState).toBe('not_applied');
+    expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
   });
 });

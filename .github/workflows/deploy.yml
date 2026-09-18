@@ -18,21 +18,6 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/hypercalendarbot
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      agent-macos: ${{ steps.filter.outputs.agent-macos }}
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
-        id: filter
-        with:
-          filters: |
-            agent-macos:
-              - 'packages/agent-macos/**'
-
   test:
     runs-on: ubuntu-latest
     steps:
@@ -90,49 +75,6 @@ jobs:
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-to: type=inline
 
-  build-agent:
-    needs: [test, changes]
-    if: needs.changes.outputs.agent-macos == 'true'
-    runs-on: macos-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Install root dependencies
-        run: npm install --ignore-scripts
-      - name: Install agent-macos dependencies
-        working-directory: packages/agent-macos
-        run: npm install
-      - name: Compile TypeScript
-        run: node_modules/.bin/tsc --project packages/agent-macos/tsconfig.json
-      - name: Build DMG
-        working-directory: packages/agent-macos
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: ../../node_modules/.bin/electron-builder --mac dmg
-      - name: Rename artifact
-        run: cp "$(ls packages/agent-macos/dist/*.dmg | head -1)" agent-macos.dmg
-      - name: Create downloads directory on server
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          script: mkdir -p ${{ secrets.DEPLOY_PATH }}/downloads
-      - name: Upload DMG
-        env:
-          SSH_KEY: ${{ secrets.SSH_KEY }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-        run: |
-          echo "$SSH_KEY" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no \
-            agent-macos.dmg \
-            "${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/downloads/"
-          rm -f /tmp/deploy_key
-
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -146,7 +88,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: docker-compose.yml,Caddyfile,scripts/backup-db.sh,scripts/healthcheck-alert.sh
+          source: docker-compose.yml,Caddyfile,scripts/backup-db.sh,scripts/healthcheck-alert.sh,scripts/prepare-runtime-dirs.sh
           target: ${{ secrets.DEPLOY_PATH }}
       - uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         env:
@@ -160,7 +102,7 @@ jobs:
           script: |
             set -e
             cd ${{ secrets.DEPLOY_PATH }}
-            chmod +x scripts/backup-db.sh scripts/healthcheck-alert.sh
+            chmod +x scripts/backup-db.sh scripts/healthcheck-alert.sh scripts/prepare-runtime-dirs.sh
             echo "$GH_TOKEN" | docker login ghcr.io -u github --password-stdin
             # Clean up old images to prevent "no space left on device"
             docker image prune -f
@@ -176,14 +118,12 @@ jobs:
                 ghcr.io/${{ env.IMAGE_NAME }}:latest bun scripts/generate-stress-dict.ts
               rm -rf /tmp/russian-dictionary
             fi
-            # Ensure data dir is owned by botuser (uid=999) — docker run --rm above
-            # creates files as root, causing SQLITE_READONLY on startup.
-            chown -R 999:999 data/
-            grep -q '^AGENT_DOWNLOAD_URL=' .env 2>/dev/null || echo 'AGENT_DOWNLOAD_URL=https://hypercal.invntrm.ru/downloads/agent-macos.dmg' >> .env
+            # Bind mounts override image ownership. Prepare both writable runtime
+            # directories for botuser (uid/gid 999) before restarting the container.
+            ./scripts/prepare-runtime-dirs.sh .
 
             echo "📜 Rotating logs before restart..."
             STAMP=$(date +%Y-%m-%d_%H-%M-%S)
-            mkdir -p logs
             for f in healthcheck.log backup.log; do
               if [ -s "logs/$f" ]; then
                 mv "logs/$f" "logs/${f%.log}_${STAMP}.log"
@@ -231,8 +171,8 @@ jobs:
 
   notify-failure:
     name: Notify on failure
-    needs: [test, build, build-agent, deploy]
-    if: always() && (needs.test.result == 'failure' || needs.build.result == 'failure' || needs.build-agent.result == 'failure' || needs.deploy.result == 'failure')
+    needs: [test, build, deploy]
+    if: always() && (needs.test.result == 'failure' || needs.build.result == 'failure' || needs.deploy.result == 'failure')
     runs-on: ubuntu-latest
     steps:
       - name: Send failure alert
@@ -244,14 +184,12 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           TEST_RESULT: ${{ needs.test.result }}
           BUILD_RESULT: ${{ needs.build.result }}
-          BUILD_AGENT_RESULT: ${{ needs.build-agent.result }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
           ADMIN_ALERT_TOKEN: ${{ secrets.ADMIN_ALERT_TOKEN }}
         run: |
           FAILED=""
           [[ "$TEST_RESULT" == "failure" ]] && FAILED="test "
           [[ "$BUILD_RESULT" == "failure" ]] && FAILED+="build "
-          [[ "$BUILD_AGENT_RESULT" == "failure" ]] && FAILED+="build-agent "
           [[ "$DEPLOY_RESULT" == "failure" ]] && FAILED+="deploy"
           FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
           TEXT=$(printf '🚨 <b>CI/CD failed</b> [%s]\n<code>%s</code> — %s\n%s' "$FAILED" "${COMMIT_SHA:0:7}" "$FIRST_LINE" "$RUN_URL")

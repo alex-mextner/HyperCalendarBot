@@ -144,6 +144,51 @@ function pickPhrase(phrases: readonly string[], exclude?: string): string {
 // i18n messages
 export const MSG = {
   en: {
+    writeOutcomes: {
+      completed: 'Completed',
+      notCompleted: 'Not completed',
+      uncertain: 'Outcome unknown',
+      failed: 'attempt failed; completion not confirmed',
+      notApplied: 'request rejected before applying changes',
+      skipped: 'skipped; no new write executed',
+      invitationDelivered: 'Invitation delivered',
+      invitationManual: 'Invitation created; not delivered. Please forward the link sent to your private chat.',
+      invitationFailed: 'Invitation created; not delivered.',
+      attendanceDeclined: 'Attendance declined; the event remains.',
+      interrupted: 'The request was interrupted. Some actions may already have happened; no automatic replay will run.',
+      attempts:
+        'These are distinct execution attempts, not a list of outstanding requests. Later successes are shown separately.',
+      write: 'Write',
+      field: 'field',
+      attempt: (n: number) => `Attempt ${n}`,
+      spokenQuestion: (question: string, options: string) => `${question} Options: ${options}`,
+      operations: {
+        delete_event: 'Delete event',
+        update_event: 'Update event',
+        create_event: 'Create event',
+        send_invitation: 'Send invitation',
+      },
+      fields: {
+        title: 'title',
+        start_at: 'start time',
+        end_at: 'end time',
+        description: 'description',
+        location: 'location',
+        all_day: 'all day',
+        timezone: 'timezone',
+        category: 'category',
+        location_abstract: 'location type',
+        recurrence_rule: 'recurrence',
+        recurrence_end_at: 'recurrence end',
+        reminder_overrides: 'reminders',
+        resolved_address: 'address',
+        latitude: 'latitude',
+        longitude: 'longitude',
+        google_maps_url: 'map link',
+        location_verified: 'location verification',
+        venue_name: 'venue',
+      },
+    },
     welcome: '🌍 Choose your language / Выберите язык:',
     tz_prompt: "Now let's set your timezone. The most accurate way is to share your location.",
     tz_detected: (tz: string, offset: string) => `Got it! Your timezone is ${tz} (${offset}).\nIs this correct?`,
@@ -609,22 +654,6 @@ export const MSG = {
         geoPurposeQuestion:
           '📍 Got your location! What is it for?\n1. Update your current city\n2. Set as location for your latest event\n3. Something else (please explain)',
       },
-      agent: {
-        connectMessage: (url: string) =>
-          `🔗 *Connect AI Assistant*\n\n1\\. [Download the agent](${url})\n2\\. Open the \\.dmg and drag the app to Applications\n3\\. Right\\-click the app → *Open* \\(don't double\\-click\\)\n   _If macOS says "damaged" — run in Terminal:_\n   \`xattr -cr '/Applications/HyperBotAgent.app'\`\n4\\. The app will show an activation command — send it here`,
-        activatePrompt: 'Provide the code from the app: /activate <code>',
-        activated:
-          '✅ Agent connected!\n\nYou can now ask me to run tasks on your Mac:\n• Run terminal commands\n• Chat with Claude Desktop and stream responses\n• Control the browser via Playwright\n• Run AppleScript\n\nJust tell me what to do, e.g. "run ls -la" or "ask Claude what TCP is".',
-        activationFailed: '❌ Code not found or expired. Open the app and copy the command again.',
-        disconnected: '✅ Agent disconnected. AI assistant disabled.',
-        notConnected: 'Agent is not connected.',
-        statusConnected: (connectedAt: string, lastPing: string) =>
-          `🟢 Agent connected\n\nConnected: ${connectedAt}\nLast ping: ${lastPing}`,
-        statusDisconnected:
-          '🔴 Agent not running.\n\nStart the HyperBotAgent app on your Mac. If not installed yet — /connect.',
-        statusDisabledByUser:
-          '⚠️ Agent app is connected but AI assistant tools are disabled.\n\nUse /activate <code> to re-enable.',
-      },
     },
     connectTelegram: {
       consent: [
@@ -976,6 +1005,51 @@ export const MSG = {
     },
   },
   ru: {
+    writeOutcomes: {
+      completed: 'Выполнено',
+      notCompleted: 'Не выполнено',
+      uncertain: 'Результат неизвестен',
+      failed: 'попытка не удалась; выполнение не подтверждено',
+      notApplied: 'запрос отклонён до внесения изменений',
+      skipped: 'пропущено; новое изменение не выполнялось',
+      invitationDelivered: 'Приглашение доставлено',
+      invitationManual: 'Приглашение создано, но не доставлено. Перешли ссылку из личного чата.',
+      invitationFailed: 'Приглашение создано, но не доставлено.',
+      attendanceDeclined: 'Участие отклонено; событие сохранено.',
+      interrupted: 'Запрос прерван. Часть действий могла уже выполниться; автоматического повтора не будет.',
+      attempts:
+        'Это отдельные попытки выполнения, а не список невыполненных запросов. Последующие успешные попытки показаны отдельно.',
+      write: 'Изменение',
+      field: 'поле',
+      attempt: (n: number) => `Попытка ${n}`,
+      spokenQuestion: (question: string, options: string) => `${question} Варианты: ${options}`,
+      operations: {
+        delete_event: 'Удаление события',
+        update_event: 'Изменение события',
+        create_event: 'Создание события',
+        send_invitation: 'Отправка приглашения',
+      },
+      fields: {
+        title: 'название',
+        start_at: 'начало',
+        end_at: 'окончание',
+        description: 'описание',
+        location: 'место',
+        all_day: 'весь день',
+        timezone: 'часовой пояс',
+        category: 'категория',
+        location_abstract: 'тип места',
+        recurrence_rule: 'повторение',
+        recurrence_end_at: 'конец повторения',
+        reminder_overrides: 'напоминания',
+        resolved_address: 'адрес',
+        latitude: 'широта',
+        longitude: 'долгота',
+        google_maps_url: 'ссылка на карту',
+        location_verified: 'проверка места',
+        venue_name: 'заведение',
+      },
+    },
     welcome: '🌍 Choose your language / Выберите язык:',
     tz_prompt: 'Установим часовой пояс. Самый точный способ — поделиться геолокацией.',
     tz_detected: (tz: string, offset: string) => `Ваш часовой пояс: ${tz} (${offset}).\nВсё верно?`,
@@ -1442,22 +1516,6 @@ export const MSG = {
           '📍 Понял. Пин сохранён на 30 минут — просто скажи, к какому событию его привязать, и я сделаю это.',
         geoPurposeQuestion:
           '📍 Получена геолокация! Для чего она?\n1. Обновить город\n2. Задать локацию для последнего события\n3. Другое (напиши пояснение)',
-      },
-      agent: {
-        connectMessage: (url: string) =>
-          `🔗 *Подключить AI Ассистент*\n\n1\\. [Скачать агент](${url})\n2\\. Открой \\.dmg и перетащи приложение в Программы\n3\\. Открой приложение правой кнопкой → *Открыть* \\(не двойным кликом\\)\n   _Если macOS пишет «повреждён» — выполни в Терминале:_\n   \`xattr -cr '/Applications/HyperBotAgent.app'\`\n4\\. Приложение покажет команду активации — отправь её сюда`,
-        activatePrompt: 'Укажи код из приложения: /activate <код>',
-        activated:
-          '✅ Агент подключён!\n\nТеперь можешь просить меня выполнять задачи прямо на твоём Mac:\n• Запускать команды в терминале\n• Общаться с Claude Desktop и получать ответы\n• Управлять браузером через Playwright\n• Выполнять AppleScript\n\nПросто напиши что нужно, например: «запусти ls -la» или «спроси Claude что такое TCP».',
-        activationFailed: '❌ Код не найден или истёк. Открой приложение и скопируй команду заново.',
-        disconnected: '✅ Агент отключён. AI ассистент выключен.',
-        notConnected: 'Агент не подключён.',
-        statusConnected: (connectedAt: string, lastPing: string) =>
-          `🟢 Агент подключён\n\nПодключён: ${connectedAt}\nПоследний пинг: ${lastPing}`,
-        statusDisconnected:
-          '🔴 Агент не запущен.\n\nЗапусти приложение HyperBotAgent на Mac. Если не установлен — /connect.',
-        statusDisabledByUser:
-          '⚠️ Приложение агента подключено, но инструменты AI ассистента отключены.\n\nИспользуй /activate <код> для повторного включения.',
       },
     },
     connectTelegram: {

@@ -77,23 +77,23 @@ const toolDefinitions: ToolDefinition[] = [
       properties: {
         title: { type: 'string', description: 'Event title' },
         start_at: { type: 'string', description: 'Start, ISO 8601 UTC.' },
-        end_at: { type: 'string', description: 'End, ISO 8601 UTC. Optional.' },
-        description: { type: 'string', description: 'Event description. Optional.' },
-        location: { type: 'string', description: 'Event location. Optional.' },
+        end_at: { type: 'string', description: 'End, ISO 8601 UTC.' },
+        description: { type: 'string', description: 'Event description.' },
+        location: { type: 'string', description: 'Event location.' },
         location_abstract: {
           type: 'boolean',
           description:
             'True for relative locations ("дома", "У Иры"), stored as plain text without geocoding. False for venues/street addresses. Default false.',
         },
-        all_day: { type: 'boolean', description: 'Whether this is an all-day event. Optional.' },
+        all_day: { type: 'boolean', description: 'Whether this is an all-day event.' },
         recurrence_rule: {
           type: 'string',
-          description: 'RRULE for recurring events, e.g. "FREQ=WEEKLY;INTERVAL=2". Optional.',
+          description: 'RRULE for recurring events, e.g. "FREQ=WEEKLY;INTERVAL=2".',
         },
         reminder_minutes: {
           type: 'array',
           items: { type: 'number' },
-          description: 'Minutes before the event to remind, e.g. [15, 60]. Optional.',
+          description: 'Minutes before the event to remind, e.g. [15, 60].',
         },
         force: {
           type: 'boolean',
@@ -112,19 +112,19 @@ const toolDefinitions: ToolDefinition[] = [
       type: 'object' as const,
       properties: {
         event_id: { type: 'number', description: 'ID of the event to update' },
-        title: { type: 'string', description: 'New title. Optional.' },
-        start_at: { type: 'string', description: 'New start, ISO 8601 UTC. Optional.' },
-        end_at: { type: 'string', description: 'New end, ISO 8601 UTC. null removes it. Optional.' },
-        description: { type: 'string', description: 'New description. null removes it. Optional.' },
+        title: { type: 'string', description: 'New title.' },
+        start_at: { type: 'string', description: 'New start, ISO 8601 UTC.' },
+        end_at: { type: 'string', description: 'New end, ISO 8601 UTC. null removes it.' },
+        description: { type: 'string', description: 'New description. null removes it.' },
         location: {
           type: 'string',
-          description: 'New place or address for the event. null removes it. Optional.',
+          description: 'New place or address for the event. null removes it.',
         },
         location_abstract: {
           type: 'boolean',
           description: 'True when the new location is relative (see create_event). Skips geocoding. Default false.',
         },
-        recurrence_rule: { type: 'string', description: 'New RRULE. null removes recurrence. Optional.' },
+        recurrence_rule: { type: 'string', description: 'New RRULE. null removes recurrence.' },
         scope: scopeProperty,
         owner_id: ownerIdProperty,
       },
@@ -267,7 +267,7 @@ const toolDefinitions: ToolDefinition[] = [
         action: { type: 'string', enum: ['get', 'update'], description: 'Action to perform' },
         category: {
           type: 'string',
-          enum: ['general', 'notifications', 'calls', 'privacy', 'voice', 'assistant'],
+          enum: ['general', 'notifications', 'calls', 'privacy', 'voice'],
           description: 'Required for update; for get, omit to return all.',
         },
         updates: {
@@ -372,10 +372,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'send_invitation',
     description:
-      'Create an invitation record and attempt delivery to another user. ' +
-      'Provide invitee_id (from find_contact, find_user, or pick_users) or invitee_username — at least one is required. ' +
-      'If only username is provided, the bot resolves the ID automatically. If resolve fails, a user picker opens. ' +
-      'Success means the record was created and delivery is in progress; it does NOT mean the message was received.',
+      'Create an invitation and attempt delivery to a verified numeric ID. Use find_contact/find_user/pick_users, or an explicitly supplied @username. Unknown usernames open a picker; conflicting identities require confirmation. Read the delivery result: record creation alone is not delivery.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -437,7 +434,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'get_user_info',
     description:
-      'Inspect a saved person by stable Telegram ID: current profile if reachable, stored aliases and actual contact creation time. Refreshes username metadata without changing ID. Private chat only. Unknown facts remain null.',
+      'Privately inspect a saved Telegram ID: reachable profile, saved aliases and contact creation time. Refreshes metadata, never identity; unknown fields stay null.',
     input_schema: {
       type: 'object',
       properties: {
@@ -469,7 +466,7 @@ const toolDefinitions: ToolDefinition[] = [
       type: 'object' as const,
       properties: {
         name: { type: 'string', description: 'Full display name, e.g. "Elena Larichkina"' },
-        username: { type: 'string', description: 'Telegram @username without @. Optional.' },
+        username: { type: 'string', description: 'Telegram @username without @.' },
         preferred_name: {
           type: 'string',
           description: 'Exactly how the user refers to this person, e.g. "Лена", "Вова", "Alex".',
@@ -498,9 +495,9 @@ const toolDefinitions: ToolDefinition[] = [
       type: 'object' as const,
       properties: {
         search: { type: 'string', description: 'Current name or @username identifying the contact' },
-        name: { type: 'string', description: 'New display name. Optional.' },
-        preferred_name: { type: 'string', description: 'New preferred name. Optional.' },
-        username: { type: 'string', description: 'New Telegram @username without @. Optional.' },
+        name: { type: 'string', description: 'New display name.' },
+        preferred_name: { type: 'string', description: 'New preferred name.' },
+        username: { type: 'string', description: 'New Telegram @username without @.' },
       },
       required: ['search'],
     },
@@ -639,7 +636,7 @@ const toolDefinitions: ToolDefinition[] = [
           type: 'object',
           description: 'Fields to change, e.g. {"start_at": "2026-03-20T11:00:00Z"}. null removes a field.',
         },
-        reason: { type: 'string', description: 'Short explanation of why. Optional.' },
+        reason: { type: 'string', description: 'Short explanation of why.' },
       },
       required: ['event_id', 'changes'],
     },
@@ -782,7 +779,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'calculate',
     description:
-      'Arithmetic calculator. ALWAYS use this tool for any math — never compute in your head. Supports: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days/weeks/months/years, YYYY-MM-DD ± N days/weeks/months/years, ISO datetime - ISO datetime (returns human-readable duration).',
+      'Arithmetic calculator. ALWAYS use this tool for any math — never compute in your head. Supports: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days/weeks/months/years, YYYY-MM-DD ± N days/weeks/months/years, ISO datetime - ISO datetime (returns human-readable duration). For local datetimes, ISO means a T separator plus an explicit Z/offset; include the user offset before doing arithmetic (example: 2026-09-17T10:49:00+02:00 + 2hours). Do not write offset-free YYYY-MM-DD HH:MM, UTC+2 to UTC, or append "to UTC"; results are already returned in UTC.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -1023,110 +1020,6 @@ const CALL_EXCLUDED_TOOLS = new Set([
 // Tools only available during a live call
 const CALL_ONLY_TOOLS = new Set(['end_call']);
 
-export interface UserCapabilities {
-  assistantEnabled: boolean;
-}
-
-const assistantToolDefinitions: ToolDefinition[] = [
-  {
-    name: 'claude_chat',
-    description: 'Send a message to an existing Claude Desktop chat and stream the response',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        chat_id: { type: 'string' },
-        message: { type: 'string' },
-        timeout_ms: { type: 'number' },
-      },
-      required: ['chat_id', 'message'],
-    },
-  },
-  {
-    name: 'claude_new_chat',
-    description: 'Create a new Claude Desktop chat (optionally in a project) and send a first message',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        message: { type: 'string' },
-        project_id: { type: 'string' },
-        timeout_ms: { type: 'number' },
-      },
-      required: ['message'],
-    },
-  },
-  {
-    name: 'claude_list_chats',
-    description: 'List recent Claude Desktop chats with titles and IDs',
-    input_schema: {
-      type: 'object' as const,
-      properties: { limit: { type: 'number' } },
-    },
-  },
-  {
-    name: 'claude_open_chat',
-    description: 'Get messages from an existing Claude Desktop chat by ID',
-    input_schema: {
-      type: 'object' as const,
-      properties: { chat_id: { type: 'string' } },
-      required: ['chat_id'],
-    },
-  },
-  {
-    name: 'claude_list_projects',
-    description: 'List Claude Desktop projects',
-    input_schema: {
-      type: 'object' as const,
-      properties: {},
-    },
-  },
-  {
-    name: 'claude_artifact',
-    description: 'Retrieve a Claude Desktop artifact by ID',
-    input_schema: {
-      type: 'object' as const,
-      properties: { artifact_id: { type: 'string' } },
-      required: ['artifact_id'],
-    },
-  },
-  {
-    name: 'bash_execute',
-    description: "Execute a bash command on the user's Mac. Returns stdout, stderr, exitCode.",
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        command: { type: 'string' },
-        timeout_ms: { type: 'number' },
-      },
-      required: ['command'],
-    },
-  },
-  {
-    name: 'playwright_action',
-    description: "Automate the browser on the user's Mac: screenshot, navigate, click, fill, extract content",
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        action: { type: 'string', enum: ['screenshot', 'navigate', 'click', 'fill', 'extract', 'evaluate'] },
-        params: { type: 'object' },
-        timeout_ms: { type: 'number' },
-      },
-      required: ['action', 'params'],
-    },
-  },
-  {
-    name: 'applescript_run',
-    description: "Run AppleScript on the user's Mac to control macOS apps or trigger Automator workflows",
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        script: { type: 'string' },
-        timeout_ms: { type: 'number' },
-      },
-      required: ['script'],
-    },
-  },
-];
-
 /**
  * The returned schemas are shared, not copied: fifteen tools reference the same
  * `scope` and `owner_id` objects. They are frozen, which stops one tool's copy
@@ -1136,20 +1029,12 @@ const assistantToolDefinitions: ToolDefinition[] = [
  * normalize it in place. Every consumer in this repo passes it straight to a
  * provider client, which serializes it.
  */
-export function getToolDefinitions(
-  inputMode?: string,
-  caps?: UserCapabilities,
-  supplementMode?: boolean,
-): OpenAI.ChatCompletionTool[] {
+export function getToolDefinitions(inputMode?: string, supplementMode?: boolean): OpenAI.ChatCompletionTool[] {
   let tools: ToolDefinition[];
   if (inputMode === 'live_call') {
     tools = toolDefinitions.filter((t) => !CALL_EXCLUDED_TOOLS.has(t.name));
   } else {
     tools = toolDefinitions.filter((t) => !CALL_ONLY_TOOLS.has(t.name));
-  }
-
-  if (caps?.assistantEnabled === true) {
-    tools = [...tools, ...assistantToolDefinitions];
   }
 
   if (supplementMode) {

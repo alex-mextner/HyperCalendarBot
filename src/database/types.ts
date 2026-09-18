@@ -23,14 +23,19 @@ export interface User {
   timezone_updated_at: string | null;
   voice_response_enabled: number | null;
   default_event_duration_minutes: number;
-  assistant_enabled: number; // 0 | 1
   city: string | null;
   connect_telegram_dismissed_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
+/** Authorized, preformatted view data only; never persisted or fetched by renderers. */
+export interface EventDisplayMetadata {
+  invitationStatus?: string;
+}
+
 export interface CalendarEvent {
+  displayMetadata?: EventDisplayMetadata;
   id: number;
   user_id: number;
   title: string;

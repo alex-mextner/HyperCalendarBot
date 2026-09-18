@@ -8,6 +8,7 @@
 //
 // Uses the FAST chain (cheap/fast models) via aiStreamRound({ fast: true }).
 
+import { toLang } from '../../config/constants.ts';
 import { logger } from '../../utils/logger.ts';
 import { aiStreamRound } from './streaming.ts';
 
@@ -19,6 +20,14 @@ const VALIDATION_MAX_TOKENS = 256;
 const MAX_USER_MESSAGE_CHARS = 500;
 /** Cap for the assistant response we show the validator. */
 const MAX_RESPONSE_CHARS = 2000;
+
+const SCHEDULE_READ_TOOLS = new Set(['get_events', 'search_events', 'get_upcoming', 'get_event', 'get_free_slots']);
+const CALENDAR_COMPLETENESS_PATTERNS = [
+  /\b(?:nothing|no(?:thing)? else)\b.{0,80}\b(?:scheduled|planned|calendar|events?)\b/i,
+  /\b(?:no|zero)\b.{0,40}\b(?:events?|appointments?|plans?)\b/i,
+  /(?:больше\s+ничего|ничего\s+больше|ничего).{0,60}(?:не\s+)?заплан/i,
+  /(?:нет|не\s+остал(?:ось|ось)).{0,40}(?:событ|встреч|дел|план)/i,
+];
 
 /**
  * Injection point for tests. Same signature as aiStreamRound — tests can
@@ -75,19 +84,52 @@ interface ValidationInput {
   response: string;
 }
 
-export type ValidationResult = { approved: true } | { approved: false; reason: string };
+function hasScheduleRead(toolCalls: string[]): boolean {
+  return toolCalls.some((tool) => SCHEDULE_READ_TOOLS.has(tool));
+}
+
+function claimsCompleteOrEmptySchedule(response: string): boolean {
+  return CALENDAR_COMPLETENESS_PATTERNS.some((pattern) => pattern.test(response));
+}
 
 /**
- * Validate an agent response. Fails open (approved=true) on transient errors
- * as long as the agent DID call at least one tool — calling-the-tools is the
- * main signal we want to reward. If no tools were called AND the validator
- * itself is unavailable, we fail closed (approved=false) because an untested
- * tool-less answer is the most likely hallucination.
+ * Keep the normal fast path after tool-backed writes, but re-enable validation
+ * when the final prose claims knowledge that those tools did not provide.
+ */
+export function shouldValidateResponse(toolCalls: string[], response: string): boolean {
+  if (toolCalls.length === 0) return true;
+  return !hasScheduleRead(toolCalls) && claimsCompleteOrEmptySchedule(response);
+}
+
+export type ValidationResult = { approved: true } | { approved: false; reason: string };
+
+/** A rejected explanation is not a failed mutation or a promise to retry. */
+export function unverifiedResponseNotice(language: string): string {
+  return toLang(language) === 'ru'
+    ? 'Не удалось проверить ответ по данным календаря. Проверьте /today или укажите нужную дату.'
+    : 'I could not verify this answer against the calendar data. Check /today or specify the date.';
+}
+
+/**
+ * Only an explicit approval verifies a response. A validator outage is not
+ * evidence, even when a tool was called. The agent preserves confirmed writes
+ * and replaces an unverified explanation without replaying the original request.
  */
 export async function validateResponse(
   input: ValidationInput,
   streamImpl: StreamImpl = aiStreamRound,
 ): Promise<ValidationResult> {
+  if (
+    input.toolCalls.length > 0 &&
+    !hasScheduleRead(input.toolCalls) &&
+    claimsCompleteOrEmptySchedule(input.response)
+  ) {
+    return {
+      approved: false,
+      reason: 'Claimed the complete/empty schedule without a schedule-read tool',
+    };
+  }
+
   const toolCallsSummary = input.toolCalls.length > 0 ? input.toolCalls.join(', ') : '(none — no tools were called)';
 
   // Both user-influenced strings are wrapped in clearly-delimited XML-style
@@ -119,15 +161,12 @@ export async function validateResponse(
     const text = result.text.trim();
     aiLogger.info({ result: text, providerUsed: result.providerUsed }, 'Response validation result');
 
-    if (text.toUpperCase().startsWith('APPROVE')) return { approved: true };
+    if (text.toUpperCase() === 'APPROVE') return { approved: true };
 
     const reason = text.replace(/^REJECT:\s*/i, '').trim() || 'Validation failed';
     return { approved: false, reason };
   } catch (err) {
     aiLogger.error({ err }, 'Response validation failed');
-    if (input.toolCalls.length === 0) {
-      return { approved: false, reason: 'Validator unavailable and no tools were called — likely hallucination' };
-    }
-    return { approved: true };
+    return { approved: false, reason: 'Validator unavailable — response could not be verified' };
   }
 }
