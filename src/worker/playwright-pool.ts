@@ -39,7 +39,14 @@ export class PlaywrightPool {
   initialize(): Promise<void> {
     if (this.stopped) return Promise.reject(new Error('PlaywrightPool is shut down'));
     if (this.initializationPromise) return this.initializationPromise;
-    if (this.browser) return Promise.resolve();
+    if (this.browser) {
+      if (this.browser.isConnected()) return Promise.resolve();
+      this.handleBrowserDisconnect(this.browser);
+      return (
+        this.reinitPromise ??
+        Promise.reject(new Error('PlaywrightPool is permanently disabled after repeated init failures'))
+      );
+    }
     this.initializationPromise = this.initializeBrowser().finally(() => {
       this.initializationPromise = null;
     });
@@ -60,46 +67,49 @@ export class PlaywrightPool {
     this.browser = browser;
     this.reinitAttempts = 0;
     this.dead = false;
-    this.browser.on('disconnected', () => {
-      if (this.stopped) return;
-      this.freePages = [];
-      this.busyPages.clear();
-      this.pageUseCount.clear();
-      this.pageCreatedAt.clear();
-      this.browser = null;
+    this.browser.on('disconnected', () => this.handleBrowserDisconnect(browser));
+  }
 
-      if (this.reinitAttempts >= this.maxReinitAttempts) {
-        this.dead = true;
+  private handleBrowserDisconnect(browser: Browser): void {
+    if (this.stopped || this.browser !== browser) return;
+    this.freePages = [];
+    this.busyPages.clear();
+    this.pageUseCount.clear();
+    this.pageCreatedAt.clear();
+    this.browser = null;
+
+    if (this.reinitAttempts >= this.maxReinitAttempts) {
+      this.dead = true;
+      imageLogger.error(
+        { attempts: this.reinitAttempts },
+        'PlaywrightPool permanently disabled — max reinit attempts exceeded',
+      );
+      return;
+    }
+
+    this.reinitAttempts++;
+    const recovery: Promise<void> = this.initialize()
+      .then(() => {
+        if (!this.stopped) imageLogger.info('PlaywrightPool reinit succeeded after browser disconnect');
+      })
+      .catch((err) => {
+        if (this.stopped) return;
         imageLogger.error(
-          { attempts: this.reinitAttempts },
-          'PlaywrightPool permanently disabled — max reinit attempts exceeded',
+          { err, attempt: this.reinitAttempts },
+          'PlaywrightPool reinit failed after browser disconnect',
         );
-        return;
-      }
-
-      this.reinitAttempts++;
-      this.reinitPromise = this.initialize()
-        .then(() => {
-          if (!this.stopped) imageLogger.info('PlaywrightPool reinit succeeded after browser disconnect');
-        })
-        .catch((err) => {
-          if (this.stopped) return;
+        if (this.reinitAttempts >= this.maxReinitAttempts) {
+          this.dead = true;
           imageLogger.error(
-            { err, attempt: this.reinitAttempts },
-            'PlaywrightPool reinit failed after browser disconnect',
+            { attempts: this.reinitAttempts },
+            'PlaywrightPool permanently disabled — max reinit attempts exceeded',
           );
-          if (this.reinitAttempts >= this.maxReinitAttempts) {
-            this.dead = true;
-            imageLogger.error(
-              { attempts: this.reinitAttempts },
-              'PlaywrightPool permanently disabled — max reinit attempts exceeded',
-            );
-          }
-        })
-        .finally(() => {
-          this.reinitPromise = null;
-        });
-    });
+        }
+      })
+      .finally(() => {
+        if (this.reinitPromise === recovery) this.reinitPromise = null;
+      });
+    this.reinitPromise = recovery;
   }
 
   private assertRunning(): void {
@@ -111,8 +121,10 @@ export class PlaywrightPool {
     this.assertRunning();
 
     const deadline = Date.now() + timeoutMs;
+    let generationRecoveries = 0;
 
     while (true) {
+      if (this.browser && !this.browser.isConnected()) this.handleBrowserDisconnect(this.browser);
       if (this.reinitPromise) {
         await this.reinitPromise;
       }
@@ -129,22 +141,37 @@ export class PlaywrightPool {
       // Create a new page if under limit
       const totalPages = this.freePages.length + this.busyPages.size;
       if (totalPages < this.maxPages) {
-        const { page, browser } = await this.createPage();
-        // Recheck after the helper Promise boundary; register in the same tick.
+        const requestedBrowser = this.browser;
         try {
-          this.assertRunning();
-          if (this.browser !== browser) throw new Error('PlaywrightPool browser changed during page creation');
+          const { page, browser } = await this.createPage();
+          try {
+            this.assertRunning();
+            if (this.browser !== browser) throw new Error('PlaywrightPool browser changed during page creation');
+          } catch (error) {
+            await page
+              .context()
+              .close()
+              .catch(() => {});
+            this.pageUseCount.delete(page);
+            this.pageCreatedAt.delete(page);
+            throw error;
+          }
+          this.busyPages.add(page);
+          return page;
         } catch (error) {
-          await page
-            .context()
-            .close()
-            .catch(() => {});
-          this.pageUseCount.delete(page);
-          this.pageCreatedAt.delete(page);
+          this.assertRunning();
+          // Retry observed browser-generation loss, never ordinary page errors.
+          if (requestedBrowser && (this.browser !== requestedBrowser || !requestedBrowser.isConnected())) {
+            if (++generationRecoveries > this.maxReinitAttempts) {
+              throw new Error('acquire failed: browser recovery limit reached', { cause: error });
+            }
+            if (this.browser === requestedBrowser) this.handleBrowserDisconnect(requestedBrowser);
+            if (Date.now() >= deadline)
+              throw new Error('acquire timeout: browser recovery did not complete', { cause: error });
+            continue;
+          }
           throw error;
         }
-        this.busyPages.add(page);
-        return page;
       }
 
       // Wait or timeout

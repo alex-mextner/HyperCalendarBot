@@ -10,8 +10,8 @@
 
     // Bundler mode
     "moduleResolution": "bundler",
-    // Keep transitive type imports inside the project dependency layout (isolated Bun store).
-    "preserveSymlinks": true,
+    // Follow package symlinks so transitive Bun/Fetch types resolve in a clean isolated install.
+    "preserveSymlinks": false,
     "customConditions": ["bun"],
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,

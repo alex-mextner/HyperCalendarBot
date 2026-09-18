@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright';
 
 import { PlaywrightPool } from '../../src/worker/playwright-pool.ts';
@@ -11,13 +11,16 @@ afterEach(() => {
 
 function makeFakeBrowser(options?: { crashAfterMs?: number; newContext?: () => Promise<BrowserContext> }): Browser {
   const handlers = new Map<string, (() => void)[]>();
+  let connected = true;
   const browser = {
+    isConnected: () => connected,
     on(event: string, fn: () => void) {
       const list = handlers.get(event) ?? [];
       list.push(fn);
       handlers.set(event, list);
     },
     close: mock(async () => {
+      connected = false;
       for (const fn of handlers.get('disconnected') ?? []) fn();
     }),
     newContext:
@@ -30,6 +33,7 @@ function makeFakeBrowser(options?: { crashAfterMs?: number; newContext?: () => P
 
   if (options?.crashAfterMs !== undefined) {
     setTimeout(() => {
+      connected = false;
       for (const fn of handlers.get('disconnected') ?? []) fn();
     }, options.crashAfterMs);
   }
@@ -262,5 +266,71 @@ describe('PlaywrightPool reinit', () => {
     await pool.shutdown();
     gate.reject(new Error('Target closed'));
     expect(await acquired).toContain('shut down');
+  });
+  test('acquire detects connection loss before a delayed disconnect event', async () => {
+    const first = makeFakeBrowser();
+    const replacement = makeFakeBrowser();
+    mockLaunch.mockResolvedValueOnce(first).mockResolvedValueOnce(replacement);
+    const pool = new PlaywrightPool({ launchBrowser: mockLaunch });
+    await pool.initialize();
+    const connected = spyOn(first, 'isConnected').mockReturnValue(false);
+    await pool.acquire(1000);
+    expect(mockLaunch).toHaveBeenCalledTimes(2);
+    expect(first.newContext).not.toHaveBeenCalled();
+    // A delayed old-generation event must not invalidate the replacement.
+    await first.close();
+    await pool.acquire(1000);
+    expect(mockLaunch).toHaveBeenCalledTimes(2);
+    connected.mockRestore();
+    await pool.shutdown();
+  });
+
+  test('acquire retries a page creation interrupted by browser replacement', async () => {
+    let first: Browser;
+    const context = controlledContext(async () => {
+      await first.close();
+      throw new Error('Synthetic target closed during creation');
+    });
+    first = makeFakeBrowser({ newContext: async () => context.context });
+    const replacement = makeFakeBrowser();
+    mockLaunch.mockResolvedValueOnce(first).mockResolvedValueOnce(replacement);
+    const pool = new PlaywrightPool({ launchBrowser: mockLaunch });
+    await pool.initialize();
+    const page = await pool.acquire(1000);
+    expect(page).toBeDefined();
+    expect(context.close).toHaveBeenCalledTimes(1);
+    expect(mockLaunch).toHaveBeenCalledTimes(2);
+    await pool.shutdown();
+  });
+  test('repeated generation loss has a small allocation budget per acquire', async () => {
+    mockLaunch.mockImplementation(async () => {
+      let browser: Browser;
+      const context = controlledContext(async () => {
+        await browser.close();
+        throw new Error('Synthetic repeated generation loss');
+      });
+      browser = makeFakeBrowser({ newContext: async () => context.context });
+      return browser;
+    });
+    const pool = new PlaywrightPool({ launchBrowser: mockLaunch, maxReinitAttempts: 2 });
+    await pool.initialize();
+    await expect(pool.acquire(100)).rejects.toThrow('browser recovery limit');
+    expect(mockLaunch.mock.calls.length).toBeLessThanOrEqual(4);
+    await pool.shutdown();
+  });
+  test('concurrent acquires share one recovery for a disconnected browser', async () => {
+    const first = makeFakeBrowser();
+    const replacement = makeFakeBrowser();
+    mockLaunch.mockResolvedValueOnce(first).mockResolvedValueOnce(replacement);
+    const pool = new PlaywrightPool({ launchBrowser: mockLaunch });
+    await pool.initialize();
+    const connected = spyOn(first, 'isConnected').mockReturnValue(false);
+    const pages = await Promise.all([pool.acquire(1000), pool.acquire(1000), pool.acquire(1000)]);
+    expect(pages).toHaveLength(3);
+    expect(mockLaunch).toHaveBeenCalledTimes(2);
+    expect(first.newContext).not.toHaveBeenCalled();
+    expect(replacement.newContext).toHaveBeenCalledTimes(3);
+    connected.mockRestore();
+    await pool.shutdown();
   });
 });
