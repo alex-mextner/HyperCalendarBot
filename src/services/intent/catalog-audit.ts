@@ -6,7 +6,7 @@ import type { seedIntents } from './seed-catalog.ts';
 import { WorkflowSchema } from './workflow-schema.ts';
 import { validateWorkflow } from './workflow-validator.ts';
 
-type Seed = (typeof seedIntents)[number];
+type Seed = Omit<(typeof seedIntents)[number], 'pattern'> & { pattern: string | null };
 type Raw = Pick<
   Intent,
   'id' | 'canonical_name' | 'phrases' | 'trigger_words' | 'pattern' | 'workflow' | 'format' | 'status' | 'created_at'
