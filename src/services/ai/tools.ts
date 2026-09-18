@@ -77,23 +77,23 @@ const toolDefinitions: ToolDefinition[] = [
       properties: {
         title: { type: 'string', description: 'Event title' },
         start_at: { type: 'string', description: 'Start, ISO 8601 UTC.' },
-        end_at: { type: 'string', description: 'End, ISO 8601 UTC. Optional.' },
-        description: { type: 'string', description: 'Event description. Optional.' },
-        location: { type: 'string', description: 'Event location. Optional.' },
+        end_at: { type: 'string', description: 'End, ISO 8601 UTC.' },
+        description: { type: 'string', description: 'Event description.' },
+        location: { type: 'string', description: 'Event location.' },
         location_abstract: {
           type: 'boolean',
           description:
-            'True when the location is relative rather than a venue or street address ("У Иры", "дома", "на работе", "у метро"). Leave false for concrete places ("Кофемания", "ул. Ленина 10", "Парк Горького"). True stores it as plain text, with no geocoding or Maps link. Default false.',
+            'True for relative locations ("дома", "У Иры"), stored as plain text without geocoding. False for venues/street addresses. Default false.',
         },
-        all_day: { type: 'boolean', description: 'Whether this is an all-day event. Optional.' },
+        all_day: { type: 'boolean', description: 'Whether this is an all-day event.' },
         recurrence_rule: {
           type: 'string',
-          description: 'RRULE for recurring events, e.g. "FREQ=WEEKLY;INTERVAL=2". Optional.',
+          description: 'RRULE for recurring events, e.g. "FREQ=WEEKLY;INTERVAL=2".',
         },
         reminder_minutes: {
           type: 'array',
           items: { type: 'number' },
-          description: 'Minutes before the event to remind, e.g. [15, 60]. Optional.',
+          description: 'Minutes before the event to remind, e.g. [15, 60].',
         },
         force: {
           type: 'boolean',
@@ -113,19 +113,19 @@ const toolDefinitions: ToolDefinition[] = [
       type: 'object' as const,
       properties: {
         event_id: { type: 'number', description: 'ID of the event to update' },
-        title: { type: 'string', description: 'New title. Optional.' },
-        start_at: { type: 'string', description: 'New start, ISO 8601 UTC. Optional.' },
-        end_at: { type: ['string', 'null'], description: 'New end, ISO 8601 UTC. null removes it. Optional.' },
-        description: { type: ['string', 'null'], description: 'New description. null removes it. Optional.' },
+        title: { type: 'string', description: 'New title.' },
+        start_at: { type: 'string', description: 'New start, ISO 8601 UTC.' },
+        end_at: { type: ['string', 'null'], description: 'New end, ISO 8601 UTC. null removes it.' },
+        description: { type: ['string', 'null'], description: 'New description. null removes it.' },
         location: {
           type: ['string', 'null'],
-          description: 'New place or address for the event. null removes it. Optional.',
+          description: 'New place or address for the event. null removes it.',
         },
         location_abstract: {
           type: 'boolean',
           description: 'True when the new location is relative (see create_event). Skips geocoding. Default false.',
         },
-        recurrence_rule: { type: ['string', 'null'], description: 'New RRULE. null removes recurrence. Optional.' },
+        recurrence_rule: { type: ['string', 'null'], description: 'New RRULE. null removes recurrence.' },
         scope: scopeProperty,
         owner_id: ownerIdProperty,
       },
@@ -373,14 +373,16 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'send_invitation',
     description:
-      'Create an invitation record and attempt delivery to another user. ' +
-      'Provide invitee_id (from find_contact, find_user, or pick_users) or invitee_username — at least one is required. ' +
-      'If only username is provided, the bot resolves the ID automatically. If resolve fails, a user picker opens. ' +
-      'Success means the record was created and delivery is in progress; it does NOT mean the message was received.',
+      'Create an invitation and attempt delivery to a verified numeric ID. Use find_contact/find_user/pick_users, or an explicitly supplied @username. Unknown usernames open a picker; conflicting identities require confirmation. Read the delivery result: record creation alone is not delivery.',
     input_schema: {
       type: 'object' as const,
       properties: {
         event_id: { type: 'number', description: 'ID of the event to invite to' },
+        force: {
+          type: 'boolean',
+          description:
+            'Only after the actual recipient confirmation button was clicked. Never bypasses ownership or changes ID.',
+        },
         invitee_id: {
           type: 'number',
           description:
@@ -421,7 +423,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'find_user',
     description:
-      'Find a bot user by Telegram @username and return their telegram_id for send_invitation. Only finds people who have used the bot.',
+      'Resolve an exact Telegram @username supplied by the user or saved in their contacts. Never guess a username from a personal name: use find_contact for names.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -431,9 +433,21 @@ const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'get_user_info',
+    description:
+      'Privately inspect a saved Telegram ID: reachable profile, saved aliases and contact creation time. Refreshes metadata, never identity; unknown fields stay null.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        telegram_id: { type: 'number', description: 'Stable Telegram user ID from contacts or the user.' },
+      },
+      required: ['telegram_id'],
+    },
+  },
+  {
     name: 'get_contacts',
     description:
-      "List all contacts from the user's address book. PRIVATE DATA: in group chats, always use ask_user to clarify what the user wants before calling this (they may mean group members, not personal contacts). Only call with force: true after the user explicitly confirmed they want their private contacts shown in the group.",
+      'List private address-book contacts. In groups first clarify via ask_user: they may mean group members. force:true requires explicit permission to show private contacts in that group.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -453,7 +467,7 @@ const toolDefinitions: ToolDefinition[] = [
       type: 'object' as const,
       properties: {
         name: { type: 'string', description: 'Full display name, e.g. "Elena Larichkina"' },
-        username: { type: 'string', description: 'Telegram @username without @. Optional.' },
+        username: { type: 'string', description: 'Telegram @username without @.' },
         preferred_name: {
           type: 'string',
           description: 'Exactly how the user refers to this person, e.g. "Лена", "Вова", "Alex".',
@@ -469,23 +483,36 @@ const toolDefinitions: ToolDefinition[] = [
     input_schema: {
       type: 'object' as const,
       properties: {
-        name: { type: 'string', description: 'Name to search for' },
+        name: { type: 'string', description: 'Name, @username, or exact Telegram ID to search for' },
       },
       required: ['name'],
     },
   },
   {
     name: 'update_contact',
-    description: "Rename or correct an existing contact's name, preferred_name, or username.",
+    description:
+      "Rename or correct an existing contact's name, preferred_name, or username. Does not delete contacts; use delete_contact for deletion.",
     input_schema: {
       type: 'object' as const,
       properties: {
         search: { type: 'string', description: 'Current name or @username identifying the contact' },
-        name: { type: 'string', description: 'New display name. Optional.' },
-        preferred_name: { type: 'string', description: 'New preferred name. Optional.' },
-        username: { type: 'string', description: 'New Telegram @username without @. Optional.' },
+        name: { type: 'string', description: 'New display name.' },
+        preferred_name: { type: 'string', description: 'New preferred name.' },
+        username: { type: 'string', description: 'New Telegram @username without @.' },
       },
       required: ['search'],
+    },
+  },
+  {
+    name: 'delete_contact',
+    description:
+      'Remove one contact from your private bot address book. Resolve it with find_contact/get_contacts first; ' +
+      'contact_id is the address-book row ID, NOT telegram_id. Does not delete Telegram users, events or invitations. ' +
+      'Use only for an explicit deletion request. Never simulate deletion by setting update_contact fields to null.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { contact_id: { type: 'integer', description: 'Owned contact_id returned by contact lookup.' } },
+      required: ['contact_id'],
     },
   },
   {
@@ -508,7 +535,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'pick_users',
     description:
-      'Open a Telegram user picker modal so the user can select people to invite to an event. Use after creating an event when some participants could not be found in the address book. In the prompt, explain WHO specifically needs to be found and why (e.g., "Вова не найден в контактах. Выберите его из списка контактов Telegram"). After calling, STOP and wait.',
+      'Open the Telegram recipient picker for an event. Name the missing or ambiguous person and explain why selection is needed. Stop and wait after calling. Never invent a username from a display name.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -610,7 +637,7 @@ const toolDefinitions: ToolDefinition[] = [
           type: 'object',
           description: 'Fields to change, e.g. {"start_at": "2026-03-20T11:00:00Z"}. null removes a field.',
         },
-        reason: { type: 'string', description: 'Short explanation of why. Optional.' },
+        reason: { type: 'string', description: 'Short explanation of why.' },
       },
       required: ['event_id', 'changes'],
     },

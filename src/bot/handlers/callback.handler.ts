@@ -1,3 +1,4 @@
+import { confirmRecipientApproval, finishRecipientApproval } from '../../services/ai/recipient-confirmation.ts';
 import { enrichAgenda, enrichAgendaEvents } from '../../services/event/agenda-enrichment.ts';
 import { agendaImageErrorMessage, sendAgendaImage } from '../../utils/agenda-image.ts';
 import { editAgendaText, sendAgendaText } from '../commands/agenda-text.ts';
@@ -228,6 +229,32 @@ export function createCallbackHandler(
     weatherService,
   } = opts;
   const dispatch = new Map<string, HandlerFn>();
+  dispatch.set('ric', async (ctx, payload, _parts, user) => {
+    const answer = async (text?: string) => {
+      await ctx.answer(text ? { text } : undefined).catch(() => {});
+    };
+    if (!onAiButtonClick || ctx.from.id !== user.telegram_id) {
+      await answer(t(user.language).aiTools.meta.recipientUnverified);
+      return;
+    }
+    const approved = confirmRecipientApproval(payload, ctx.from.id, Number(ctx.chatId));
+    if (!approved) {
+      await answer(t(user.language).aiTools.meta.recipientUnverified);
+      return;
+    }
+    await answer();
+    try {
+      await onAiButtonClick(
+        user.telegram_id,
+        user.telegram_id,
+        `Confirmed recipient Telegram ID ${approved.recipientId} for event ${approved.eventId}. Send that invitation with force=true; do not change the ID or use a conflicting username.`,
+      );
+      finishRecipientApproval(payload, false);
+    } catch (error) {
+      finishRecipientApproval(payload, true);
+      throw error;
+    }
+  });
 
   // Scene help — user asked AI for help during wizard
   dispatch.set(CB.SCENE_HELP, async (ctx, _payload, _parts, user) => {

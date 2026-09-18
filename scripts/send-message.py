@@ -9,47 +9,19 @@ import sys
 import os
 import asyncio
 import sqlite3
+from recipient_identity import send_to_recipient
 
 API_ID = int(os.environ.get("MTPROTO_API_ID", 0))
 API_HASH = os.environ.get("MTPROTO_API_HASH", "")
-
-if len(sys.argv) < 3:
-    print("Usage: send-message.py <user_id> <text> [username]", file=sys.stderr)
-    sys.exit(1)
-
-USER_ID = int(sys.argv[1])
-TEXT = sys.argv[2]
-USERNAME = sys.argv[3] if len(sys.argv) > 3 else None
 
 MAX_RETRIES = 3
 RETRY_DELAY = 0.5
 
 
-async def send_with_retry(app):
+async def send_with_retry(app, user_id: int, text: str, username: str | None = None):
     for attempt in range(MAX_RETRIES):
         try:
-            await app.send_message(USER_ID, TEXT)
-            print("OK", flush=True)
-            return True
-        except sqlite3.OperationalError as e:
-            if "database is locked" in str(e) and attempt < MAX_RETRIES - 1:
-                await asyncio.sleep(RETRY_DELAY * (attempt + 1))
-                continue
-            print(f"ERROR:{e}", file=sys.stderr, flush=True)
-            return False
-        except Exception as e:
-            msg = str(e)
-            if USERNAME and ("not found" in msg.lower() or "peer_id_invalid" in msg.lower()):
-                break
-            print(f"ERROR:{e}", file=sys.stderr, flush=True)
-            return False
-
-    if not USERNAME:
-        return False
-
-    for attempt in range(MAX_RETRIES):
-        try:
-            await app.send_message(f"@{USERNAME}", TEXT)
+            await send_to_recipient(app, user_id, text, username)
             print("OK", flush=True)
             return True
         except sqlite3.OperationalError as e:
@@ -61,11 +33,10 @@ async def send_with_retry(app):
         except Exception as e:
             print(f"ERROR:{e}", file=sys.stderr, flush=True)
             return False
-
     return False
 
 
-async def main():
+async def main(user_id: int, text: str, username: str | None = None):
     from pyrogram import Client
     from mtproto_lock import session_lock
 
@@ -75,10 +46,14 @@ async def main():
                      app_version="11.4", lang_code="en", system_lang_code="en-US")
         await start_service_session(app)
         try:
-            ok = await send_with_retry(app)
+            ok = await send_with_retry(app, user_id, text, username)
             sys.exit(0 if ok else 1)
         finally:
             await app.stop()
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    if len(sys.argv) < 3:
+        print("Usage: send-message.py <user_id> <text> [username]", file=sys.stderr)
+        sys.exit(1)
+    asyncio.run(main(int(sys.argv[1]), sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None))

@@ -469,22 +469,39 @@ describe('provider order', () => {
     expect(zai.requestedModels).toEqual([]);
   });
 
-  // The fast chain has its own default for a reason — Groq is last there because
-  // its empty 200s degrade summaries invisibly — so its fallback must be its own
-  // order, not the smart one and not the order the ids happen to be declared in.
+  // Missing configured fast providers fall back to the short-call default, not smart order.
   test('the fast chain falls back to its own default order', async () => {
     process.env.AI_FAST_CHAIN = 'groq';
     process.env.GROQ_API_KEY = '';
-    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'from zai fast' }] });
+    zai = unusedProvider();
     hf = unusedProvider();
-    gemini = unusedProvider();
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini fast' }] });
     groq = unusedProvider();
 
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, fast: true }, {});
 
-    expect(result.text).toBe('from zai fast');
-    expect(zai.requestedModels).toEqual(['glm-5.1-air']);
+    expect(result.text).toBe('from gemini fast');
+    expect(zai.requestedModels).toEqual([]);
+    expect(gemini.requestedModels).toEqual(['gemini-fast']);
     expect(groq.requestedModels).toEqual([]);
+  });
+
+  test.each([
+    '',
+    '   ',
+  ])('empty first Groq response %j falls through to the exact Gemini fast model', async (emptyText) => {
+    delete process.env.AI_FAST_CHAIN;
+    process.env.GROQ_FAST_MODEL = 'openai/gpt-oss-20b';
+    groq = makeProvider({ behaviors: [{ kind: 'text', text: emptyText }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'verified fallback' }] });
+    zai = unusedProvider();
+    hf = unusedProvider();
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 128, fast: true });
+    expect(result.text).toBe('verified fallback');
+    expect(groq.requestedModels).toEqual(['openai/gpt-oss-20b']);
+    expect(gemini.requestedModels).toEqual(['gemini-fast']);
+    expect(result.metrics?.attemptCount).toBe(2);
+    expect(zai.requestedModels).toEqual([]);
   });
 
   // A name in the order is a preference, not a requirement: Groq is optional

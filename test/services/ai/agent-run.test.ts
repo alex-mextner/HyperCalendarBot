@@ -337,6 +337,7 @@ describe('CalendarBotAgent.run()', () => {
 
   test('nested invitation picker remains a waiting handoff', async () => {
     const event = setupInvitations();
+    ctx.messageText = 'Invite @private_name';
     ctx.resolveUsername = async () => null;
     sender.sendUserPicker = mock(async () => ({ message_id: 43 }));
     const script = makeStreamImpl([
@@ -365,6 +366,7 @@ describe('CalendarBotAgent.run()', () => {
     ctx.chatId = -1009988;
     ctx.groupChatId = ctx.chatId;
     ctx.userRepo.create({ telegram_id: 789, timezone: 'UTC', language: 'en' });
+    ctx.verifiedRecipientIds = new Set([789]); // The user selected this numeric recipient.
     sender.sendInvitation = async () => (delivery === 'delivered' ? { message_id: 55 } : null);
     const privateMessages: string[] = [];
     sender.sendMessage = async (chatId, text) => {

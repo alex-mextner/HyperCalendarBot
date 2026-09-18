@@ -1,5 +1,6 @@
 import { t, toLang } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
+import { canResolveRecipientUsername, normalizeRecipientUsername } from '../recipient-identity.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 
 export { handleCalculate } from './calculate.ts';
@@ -36,11 +37,21 @@ export function handleGetHolidays(ctx: AgentContext, input: GetHolidaysInput): T
 handleGetHolidays.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export async function handleFindUser(ctx: AgentContext, input: FindUserInput): Promise<ToolResult> {
-  const username = input.username.replace(/^@/, '');
+  const username = normalizeRecipientUsername(input.username);
+  if (!canResolveRecipientUsername(ctx, username) && normalizeRecipientUsername(ctx.user.username ?? '') !== username) {
+    return {
+      success: false,
+      error: t(ctx.user.language).aiTools.meta.recipientUsernameUnconfirmed,
+      agentHint:
+        'Use find_contact for a personal name. Ask for the exact @username or use pick_users if the person is not in the address book; do not guess.',
+    };
+  }
   const user = ctx.userRepo.findByUsername(username);
   const lang = ctx.user.language;
   const unknownName = t(lang).aiTools.meta.unknownName;
-  if (user) {
+  if (user && !ctx.resolveUsername) {
+    ctx.verifiedRecipientIds ??= new Set();
+    ctx.verifiedRecipientIds.add(user.telegram_id);
     const name = user.first_name ?? user.username ?? unknownName;
     return {
       success: true,
@@ -52,6 +63,11 @@ export async function handleFindUser(ctx: AgentContext, input: FindUserInput): P
   if (ctx.resolveUsername) {
     const resolved = await ctx.resolveUsername(username);
     if (resolved) {
+      if (!Number.isSafeInteger(resolved.id) || resolved.id <= 0) {
+        return { success: false, error: t(lang).aiTools.meta.recipientUnverified };
+      }
+      ctx.verifiedRecipientIds ??= new Set();
+      ctx.verifiedRecipientIds.add(resolved.id);
       const name = resolved.firstName ?? resolved.username ?? unknownName;
       return {
         success: true,

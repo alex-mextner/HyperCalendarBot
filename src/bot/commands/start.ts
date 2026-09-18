@@ -44,6 +44,19 @@ export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Prom
 
         if (resolved.type === 'invitation' && deps.invitationRepo && deps.eventService) {
           const invitation = deps.invitationRepo.findById(resolved.payload.invitation_id);
+          if (
+            invitation &&
+            (invitation.invitee_id !== user.telegram_id ||
+              invitation.event_id !== resolved.payload.event_id ||
+              invitation.inviter_id !== resolved.createdBy)
+          ) {
+            cmdLogger.warn(
+              { invitationId: invitation.id, userId: user.telegram_id },
+              'Invitation link recipient or binding mismatch',
+            );
+            await ctx.send(t(lang).aiTools.meta.invitationLinkUnavailable);
+            return;
+          }
 
           if (invitation && invitation.status === 'pending') {
             const event = deps.eventService.getEvent(resolved.payload.event_id, resolved.createdBy);

@@ -189,11 +189,16 @@ export interface AgentContext {
     text: string,
     options?: { reply_markup?: InlineKeyboard | TelegramInlineKeyboardMarkup; message_thread_id?: number },
   ) => Promise<TelegramMessage>;
+  lookupTelegramUser?: (
+    id: number,
+  ) => Promise<{ id: number; firstName?: string; username?: string; deleted?: boolean } | null>;
   resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   /** Events in a ±2-week window around now, preloaded for pattern detection. */
   recentEventsWindow?: EventOccurrence[];
   /** Contact directory (also used by sharing, but independently configurable). */
   contactRepo?: ContactRepository;
+  /** Recipient identities resolved from a requested username during this run. */
+  verifiedRecipientIds?: Set<number>;
   /** Event participant registry (used independently by events and sharing). */
   participantRepo?: ParticipantRepository;
   /** Type of the current message being processed. */
@@ -258,14 +263,29 @@ export type ContactMatch = {
   username: string | null;
   telegram_id: number | null;
   confidence: number;
+  created_at?: string;
+};
+
+/** Public metadata from a numeric profile inspection; never authorization evidence. */
+export type UserInspection = {
+  telegram_id: number;
+  display_name: string | null;
+  preferred_name: string | null;
+  username: string | null;
+  contact_created_at: string | null;
+  profile_checked_at: string | null;
+  profile_source: 'telegram' | 'cached';
+  deleted: boolean | null;
 };
 
 /** Structured data from tool handlers for intent executor consumption. */
 export type ToolResultData =
+  | UserInspection
   | EventSummary
   | EventSummary[]
   | { telegram_id: number; name: string }
   | { matches: ContactMatch[] }
+  | { contact_id: number; deleted: boolean }
   | ScheduledAiCall[]
   | Trigger[]
   | TelegramSessionData
@@ -320,6 +340,8 @@ export interface ToolResult {
 export interface ToolHandlerMeta {
   /** No side effects — exempt from cross-run throttle. */
   readonly?: boolean;
+  /** Recheck access on every call while coalescing optional metadata work separately. */
+  throttleExempt?: boolean;
   /** Not worth logging as a user action (all readonly tools + UI/meta tools). */
   skipActionLog?: boolean;
   /** Tool always results in [SKIP] — no status message or tool label shown. */

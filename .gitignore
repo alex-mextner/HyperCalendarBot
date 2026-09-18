@@ -56,3 +56,6 @@ packages/agent-macos/node_modules
 packages/agent-macos/dist
 .playwright-mcp
 scripts/__pycache__/
+
+__pycache__/
+*.pyc

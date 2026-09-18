@@ -129,12 +129,14 @@ describe('meta tool handlers', () => {
     });
 
     test('returns error for unknown username when no resolver', async () => {
+      ctx.messageText = 'Find @nobody';
       const result = await handleFindUser(ctx, { username: 'nobody' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
     });
 
     test('error message includes cleaned username', async () => {
+      ctx.messageText = 'Find @ghost_user';
       const result = await handleFindUser(ctx, { username: '@ghost_user' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('ghost_user');
@@ -147,6 +149,7 @@ describe('meta tool handlers', () => {
         resolveUsername: async (u: string) =>
           u === 'ux_consul' ? { id: 999888, firstName: 'Alex', username: 'ux_consul' } : null,
       };
+      ctxWithResolver.messageText = 'Find @ux_consul';
       const result = await handleFindUser(ctxWithResolver, { username: '@ux_consul' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('telegram_id=999888');
@@ -158,6 +161,7 @@ describe('meta tool handlers', () => {
         ...ctx,
         resolveUsername: async (_u: string) => null,
       };
+      ctxWithResolver.messageText = 'Find @ghost_user';
       const result = await handleFindUser(ctxWithResolver, { username: 'ghost_user' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
@@ -335,6 +339,7 @@ describe('meta tool handlers', () => {
   describe('handleAddContact', () => {
     test('adds new contact', async () => {
       ctx.contactRepo = new ContactRepository(db);
+      ctx.messageText = 'Save Вова @vova123';
       const result = handleAddContact(ctx, { name: 'Вова', username: 'vova123' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Вова');
@@ -345,6 +350,7 @@ describe('meta tool handlers', () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Вова');
       ctx.contactRepo = contactRepo;
+      ctx.messageText = 'Save Вова @vova123';
       const result = handleAddContact(ctx, { name: 'Вова', username: 'vova123' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('vova123');
