@@ -273,7 +273,30 @@ describe('CalendarBotAgent.run()', () => {
       deliveryOutcome: 'delivered',
     });
     expect(result.metrics?.usagePartialRounds).toBe(2);
-    expect(JSON.stringify(result.metrics)).not.toContain(String(USER_ID));
+    // A duration or random request UUID can incidentally contain the actor's digits.
+    // Pin the semantic telemetry contract, not substrings of unrelated measurements.
+    expect(Object.keys(result.metrics ?? {}).sort()).toEqual(
+      [
+        'requestId',
+        'elapsedMs',
+        'firstVisibleMs',
+        'modelDurationMs',
+        'toolDurationMs',
+        'deliveryActionMs',
+        'modelCalls',
+        'modelAttempts',
+        'providerFallbacks',
+        'promptTokens',
+        'completionTokens',
+        'reportedTotalTokens',
+        'reasoningTokens',
+        'cachedTokens',
+        'usageMissingRounds',
+        'usagePartialRounds',
+        'termination',
+        'deliveryOutcome',
+      ].sort(),
+    );
   });
 
   test('post-update loss of read visibility is uncertain, never a pre-apply rejection', async () => {
