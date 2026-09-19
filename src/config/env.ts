@@ -1,6 +1,8 @@
 // src/config/env.ts
+
 import { PROVIDER_IDS, type ProviderId } from '../services/ai/provider-ids.ts';
 import { logger, logOnce } from '../utils/logger.ts';
+import { type GroqTokenLimits, parseGroqTokenLimits } from './groq-token-limits.ts';
 
 /** Main requests try responsive routes with their configured main model IDs.
  * Explicit operator order wins; token-fit guards, circuits and fallback stay intact.
@@ -90,6 +92,7 @@ export interface EnvConfig {
   MTPROTO_API_HASH?: string;
   MTPROTO_SERVICE_USER_ID?: number;
   GROQ_API_KEY?: string;
+  GROQ_TPM_LIMITS?: GroqTokenLimits;
   GROQ_MODEL?: string;
   GROQ_FAST_MODEL?: string;
 
@@ -226,6 +229,7 @@ export function loadConfig(): EnvConfig {
       ? Number(process.env.MTPROTO_SERVICE_USER_ID)
       : undefined,
     GROQ_API_KEY: process.env.GROQ_API_KEY || undefined,
+    GROQ_TPM_LIMITS: parseGroqTokenLimits(process.env.GROQ_TPM_LIMITS),
     GROQ_MODEL: process.env.GROQ_MODEL || undefined,
     GROQ_FAST_MODEL: process.env.GROQ_FAST_MODEL || undefined,
     AI_TOOL_SCHEMA_MODE: toolSchemaMode,
