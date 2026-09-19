@@ -23,3 +23,14 @@ Read `CLAUDE.md` and the deployment runbook before changing runtime behavior.
 ## Human-readable progress
 
 Explain what a change does before citing its issue number. Use concrete dates for past incidents. End reports with verified results, remaining work and open problems; do not equate a test count with completed deployment.
+
+## Interrupted-session recovery
+
+- Before any resumed action, read current main, task/PR state, dirty worktrees, recorded process ownership and the live deployment receipt. The last chat summary is a hint, not execution evidence.
+- Save a durable checkpoint before long stages: canonical task ID, exact source SHA/tree, worktree, command, owned PID/start time, log/report paths, last verified result and one next action. Keep credentials/private payloads out.
+- An interrupted chat/tool call does not prove the child stopped or the write failed. Reconcile the running process and actual result before retrying. Never queue a second release for a known live owner.
+- Use canonical task identifiers (for example GH-325) consistently for review and ship. Validate available CLI flags before invocation; review committed changes via an isolated exact diff, not an empty index.
+- On quota/auth failure, record the classification once and use another authorized route. On stalled review, inspect bounded progress and stop only the owned process tree after confirming it is idle. Completed work is preserved; partial review is not approval.
+- Noninteractive commands use closed stdin and explicit search roots. Put complex quoting in checked-in or temporary scripts; do not weaken permissions or work around security policy.
+- Poll bounded log tails and do useful independent work instead of flooding the conversation with empty one-second polls. No guarantee or invented cause for a platform-level Thinking failed message.
+- Ship through the normal shared gates and local CI fallback. If ship removes the PR worktree, continue from the stable canonical repository and exact merged blobs. Preserve useful changes before cleanup.
