@@ -22,6 +22,40 @@ def snapshot(sha=SHA, image=IMAGE, ready="ok"):
     }
 
 
+def unavailable_jobs():
+    # Reduced actual GitHub run35431103705 metadata; no annotations or secrets.
+    return [
+        {
+            "name": "test",
+            "status": "completed",
+            "conclusion": "failure",
+            "runner_id": 0,
+            "steps": [],
+        },
+        {
+            "name": "Notify on failure",
+            "status": "completed",
+            "conclusion": "failure",
+            "runner_id": 0,
+            "steps": [],
+        },
+        {
+            "name": "build",
+            "status": "completed",
+            "conclusion": "skipped",
+            "runner_id": None,
+            "steps": [],
+        },
+        {
+            "name": "deploy",
+            "status": "completed",
+            "conclusion": "skipped",
+            "runner_id": None,
+            "steps": [],
+        },
+    ]
+
+
 class FakeCommands:
     def __init__(self, root, mode="none", already=False):
         self.root = root
@@ -65,7 +99,15 @@ class FakeCommands:
             )
         if args[:2] == ["gh", "api"]:
             jobs = (
-                [{"name": "test", "runner_id": 0, "steps": []}]
+                [
+                    {
+                        "name": "test",
+                        "status": "completed",
+                        "conclusion": "failure",
+                        "runner_id": 0,
+                        "steps": [],
+                    }
+                ]
                 if self.mode == "unavailable"
                 else [
                     {
@@ -75,6 +117,8 @@ class FakeCommands:
                     }
                 ]
             )
+            if self.mode == "unavailable-with-skipped":
+                jobs = unavailable_jobs()
             return json.dumps({"jobs": jobs, "total_count": len(jobs)})
         if args[:2] == ["git", "show"]:
             return "# exact merged fallback source\n"
@@ -121,6 +165,13 @@ class PostShipTests(unittest.TestCase):
             fake = FakeCommands(self.root, mode)
             self.assertEqual(self.invoke(fake)["state"], "verified")
             self.assertTrue(any(a[0] == "bash" for a, k in fake.calls))
+
+    def test_real_unscheduled_run_with_skipped_dependencies_reaches_local_fallback(
+        self,
+    ):
+        fake = FakeCommands(self.root, "unavailable-with-skipped")
+        self.assertEqual(self.invoke(fake)["state"], "verified")
+        self.assertEqual(sum(args[0] == "bash" for args, _ in fake.calls), 1)
 
     def test_hosted_active_is_not_raced(self):
         fake = FakeCommands(self.root, "active")
@@ -259,6 +310,51 @@ class RecoverySafetyTests(unittest.TestCase):
                     os.kill(child_pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
+
+
+class SkippedJobMetadataTests(unittest.TestCase):
+    def check(self, jobs):
+        return module.hosted_action(
+            {"status": "completed", "conclusion": "failure"}, jobs
+        )
+
+    def test_explicit_skipped_dependencies_allow_only_no_runner_identifiers(self):
+        for runner in [None, 0]:
+            jobs = unavailable_jobs()
+            jobs[-1]["runner_id"] = runner
+            self.assertEqual(self.check(jobs), "local")
+
+    def test_skipped_only_run_is_not_evidence_of_runner_outage(self):
+        for runner in [None, 0]:
+            jobs = unavailable_jobs()[2:]
+            for job in jobs:
+                job["runner_id"] = runner
+            with self.assertRaises(module.DeploymentError):
+                self.check(jobs)
+
+    def test_conflicting_or_missing_metadata_and_real_execution_still_refuse(self):
+        invalid = [
+            {"runner_id": True},
+            {"runner_id": "0"},
+            {"runner_id": 8},
+            {"runner_name": "active-runner"},
+            {"steps": [{"name": "test", "conclusion": "failure"}]},
+            {"status": "in_progress"},
+            {"status": None},
+            {"conclusion": None},
+            {"conclusion": "success"},
+            {"conclusion": "cancelled"},
+        ]
+        for patch in invalid:
+            with self.subTest(patch=patch), self.assertRaises(module.DeploymentError):
+                jobs = unavailable_jobs()
+                jobs[-1].update(patch)
+                self.check(jobs)
+        for key in ["runner_id", "status", "conclusion", "steps"]:
+            with self.subTest(missing=key), self.assertRaises(module.DeploymentError):
+                jobs = unavailable_jobs()
+                del jobs[-1][key]
+                self.check(jobs)
 
 
 class WrapperTests(unittest.TestCase):
