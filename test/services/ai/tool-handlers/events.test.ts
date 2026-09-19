@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, setSystemTime, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
@@ -87,6 +87,36 @@ describe('event tool handlers', () => {
       });
       expect(result.success).toBe(true);
       expect(result.output).toContain('No events');
+    });
+
+    test('an empty result identifies the day instead of leaking database wording', async () => {
+      setSystemTime(new Date('2026-09-19T10:00:00Z'));
+      try {
+        ctx.user.language = 'ru';
+        ctx.user.timezone = 'Europe/Belgrade';
+        const result = await handleGetEvents(ctx, { start_date: '2026-09-20', end_date: '2026-09-20' });
+        expect(result.success).toBe(true);
+        expect(result.data).toEqual([]);
+        expect(result.output).toContain('20 сентября');
+        expect(result.output).toContain('в твоём календаре');
+        expect(result.output).not.toMatch(/диапазон|не найдено/i);
+        expect(result.output).toBe('На завтра, 20 сентября, в твоём календаре пока ничего не запланировано.');
+      } finally {
+        setSystemTime();
+      }
+    });
+    test('a failed read never becomes a friendly empty-calendar claim', async () => {
+      const original = ctx.eventService.getEventsInRange;
+      ctx.eventService.getEventsInRange = () => {
+        throw new Error('Synthetic storage failure');
+      };
+      try {
+        await expect(handleGetEvents(ctx, { start_date: '2026-09-20', end_date: '2026-09-20' })).rejects.toThrow(
+          'Synthetic storage failure',
+        );
+      } finally {
+        ctx.eventService.getEventsInRange = original;
+      }
     });
 
     test('accepts date-only format (YYYY-MM-DD) and finds events on that day', async () => {
