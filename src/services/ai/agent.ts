@@ -21,6 +21,7 @@ import { AllProvidersFailedError, aiStreamRound, providerFailureMetrics, type St
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
+import { createToolExposure, DISCOVERY_TOOL } from './tool-exposure.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import { getToolDefinitions } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
@@ -538,12 +539,16 @@ export interface AgentRunResult {
 }
 
 export class CalendarBotAgent {
+  private toolSchemaMode: 'full' | 'lazy';
+  private toolSchemaUserIds?: ReadonlySet<number>;
   private sender: TelegramSender;
   private debugLogger?: AiDebugLogger;
   private streamImpl: typeof aiStreamRound;
   private summarizer?: HistorySummarizer;
 
   constructor(config: AgentConfig, sender: TelegramSender, opts?: { streamImpl?: typeof aiStreamRound }) {
+    this.toolSchemaMode = config.toolSchemaMode ?? 'full';
+    this.toolSchemaUserIds = config.toolSchemaUserIds ? new Set(config.toolSchemaUserIds) : undefined;
     this.sender = sender;
     this.debugLogger = config.debugLogger;
     this.streamImpl = opts?.streamImpl ?? aiStreamRound;
@@ -776,7 +781,14 @@ export class CalendarBotAgent {
         ctx.messageText,
         ctx.supplementAutoResponse,
       ) ?? null;
-    dbg?.logSystemPrompt(systemPrompt);
+    const exposure =
+      this.toolSchemaMode === 'lazy' &&
+      ctx.inputMode !== 'live_call' &&
+      (!this.toolSchemaUserIds || this.toolSchemaUserIds.has(ctx.user.telegram_id))
+        ? createToolExposure(getToolDefinitions(ctx.inputMode, ctx.supplementMode))
+        : undefined;
+    const activePrompt = exposure ? `${systemPrompt}\n\n${exposure.prompt}` : systemPrompt;
+    dbg?.logSystemPrompt(activePrompt);
     dbg?.logHistory(historyMessages);
 
     const effectiveSender: TelegramSender = ctx.supplementMode
@@ -816,7 +828,7 @@ export class CalendarBotAgent {
     let pendingResponseText = '';
 
     // Build the full message list once (system first, then the reconstructed history).
-    const systemMessage: MessageParam = { role: 'system', content: systemPrompt };
+    const systemMessage: MessageParam = { role: 'system', content: activePrompt };
     let currentMessages: MessageParam[] = [systemMessage, ...historyMessages];
     let runFailed = false;
     // Stays set until a validation retry produces an explicitly approved answer.
@@ -853,7 +865,7 @@ export class CalendarBotAgent {
             writer.flush(false).catch(() => {});
           },
           onToolCallStart: (name) => {
-            if (SILENT_TOOLS.has(name)) return;
+            if (name === DISCOVERY_TOOL || SILENT_TOOLS.has(name)) return;
             requestMetrics.markVisible();
             // Only set the label — don't flush. The tool loop flushes
             // sequentially with full input details. Fire-and-forget flush
@@ -867,10 +879,11 @@ export class CalendarBotAgent {
         };
 
         const remainingMs = Math.max(1000, TIMEOUT_MS - (Date.now() - startTime));
+        const exposedThisRound = exposure?.snapshot();
         const result = await agentStream(
           {
             messages: currentMessages,
-            tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
+            tools: exposure?.schemas() ?? getToolDefinitions(ctx.inputMode, ctx.supplementMode),
             maxTokens: 4096,
             temperature: 0.3,
             signal: AbortSignal.timeout(remainingMs),
@@ -908,7 +921,9 @@ export class CalendarBotAgent {
         // Computed upfront so saveAssistantTurn can strip them from the assistant message
         // before writing to DB, keeping the persisted tool_calls / tool_results in sync.
         const skipPersistIds = new Set(
-          result.toolCalls.filter((tc) => SKIP_PERSIST_TOOLS.has(tc.name)).map((tc) => tc.id),
+          result.toolCalls
+            .filter((tc) => tc.name === DISCOVERY_TOOL || SKIP_PERSIST_TOOLS.has(tc.name))
+            .map((tc) => tc.id),
         );
 
         // Hold assistant prose until the final guard can reconcile it with execution evidence.
@@ -942,18 +957,22 @@ export class CalendarBotAgent {
               'Duplicate tool call skipped (in-run dedup)',
             );
             dbg?.logToolResult(tc.name, true, DUPLICATE_MARKER, undefined);
-            allToolCalls.push({ name: tc.name, input });
-            allToolResults.push({ success: true, output: DUPLICATE_MARKER });
+            if (tc.name !== DISCOVERY_TOOL) {
+              allToolCalls.push({ name: tc.name, input });
+              allToolResults.push({ success: true, output: DUPLICATE_MARKER });
+            }
             toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: DUPLICATE_MARKER });
             continue;
           }
-          if (!SILENT_TOOLS.has(tc.name)) {
+          if (tc.name !== DISCOVERY_TOOL && !SILENT_TOOLS.has(tc.name)) {
             writer.setToolLabel(tc.name, input);
             await writer.flush(true);
           }
 
           const toolStartedAt = performance.now();
-          const toolResult = await executeTool(ctx, tc.name, input);
+          const toolResult =
+            (exposure && exposedThisRound ? exposure.intercept(tc.name, input, exposedThisRound) : undefined) ??
+            (await executeTool(ctx, tc.name, input));
           const toolElapsedMs = elapsedMs(toolStartedAt);
           requestMetrics.recordTool(toolElapsedMs);
           aiLogger.info(
@@ -974,11 +993,13 @@ export class CalendarBotAgent {
             seenToolCallKeys.add(dedupKey);
           }
 
-          writer.markToolResult(toolResult.success);
+          if (tc.name !== DISCOVERY_TOOL) writer.markToolResult(toolResult.success);
           dbg?.logToolResult(tc.name, toolResult.success, toolResult.output, toolResult.error);
 
-          allToolCalls.push({ name: tc.name, input });
-          allToolResults.push({ success: toolResult.success, output: toolResult.output });
+          if (tc.name !== DISCOVERY_TOOL) {
+            allToolCalls.push({ name: tc.name, input });
+            allToolResults.push({ success: toolResult.success, output: toolResult.output });
+          }
 
           const content = toolResult.success
             ? `${toolResult.output ?? 'OK'}${toolResult.agentHint ? `\n[AGENT: ${toolResult.agentHint}]` : ''}`
@@ -1066,6 +1087,7 @@ export class CalendarBotAgent {
               saveResults,
               retryStream,
               requestMetrics,
+              exposure,
             );
 
             if (retryOutcome.hitStopLoop) termination = retryOutcome.waiting ? 'waiting' : 'stop';
@@ -1243,6 +1265,7 @@ export class CalendarBotAgent {
     saveResults: (messages: MessageParam[], skipIds?: Set<string>) => void,
     retryStream: typeof aiStreamRound,
     requestMetrics: AgentRequestMetrics,
+    exposure?: ReturnType<typeof createToolExposure>,
   ): Promise<{
     hitStopLoop: boolean;
     waiting?: boolean;
@@ -1285,7 +1308,7 @@ export class CalendarBotAgent {
           writer.flush(false).catch(() => {});
         },
         onToolCallStart: (name) => {
-          if (SILENT_TOOLS.has(name)) return;
+          if (name === DISCOVERY_TOOL || SILENT_TOOLS.has(name)) return;
           requestMetrics.markVisible();
           writer.setToolLabel(name);
           writer.flush(true).catch(() => {});
@@ -1293,10 +1316,11 @@ export class CalendarBotAgent {
       };
 
       const remainingMs = Math.max(1000, TIMEOUT_MS - (Date.now() - startTime));
+      const exposedThisRound = exposure?.snapshot();
       const result = await retryStream(
         {
           messages: currentMessages,
-          tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
+          tools: exposure?.schemas() ?? getToolDefinitions(ctx.inputMode, ctx.supplementMode),
           maxTokens: 4096,
           temperature: 0.3,
           signal: AbortSignal.timeout(remainingMs),
@@ -1312,7 +1336,9 @@ export class CalendarBotAgent {
       }
 
       const skipPersistIds = new Set(
-        result.toolCalls.filter((tc) => SKIP_PERSIST_TOOLS.has(tc.name)).map((tc) => tc.id),
+        result.toolCalls
+          .filter((tc) => tc.name === DISCOVERY_TOOL || SKIP_PERSIST_TOOLS.has(tc.name))
+          .map((tc) => tc.id),
       );
 
       if (!ctx.supplementMode) {
@@ -1340,16 +1366,22 @@ export class CalendarBotAgent {
             'Duplicate tool call skipped (in-run dedup, retry loop)',
           );
           dbg?.logToolResult(tc.name, true, DUPLICATE_MARKER, undefined);
-          allToolCalls.push({ name: tc.name, input });
-          allToolResults.push({ success: true, output: DUPLICATE_MARKER });
+          if (tc.name !== DISCOVERY_TOOL) {
+            allToolCalls.push({ name: tc.name, input });
+            allToolResults.push({ success: true, output: DUPLICATE_MARKER });
+          }
           toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: DUPLICATE_MARKER });
           continue;
         }
-        writer.setToolLabel(tc.name, input);
-        await writer.flush(true);
+        if (tc.name !== DISCOVERY_TOOL && !SILENT_TOOLS.has(tc.name)) {
+          writer.setToolLabel(tc.name, input);
+          await writer.flush(true);
+        }
 
         const toolStartedAt = performance.now();
-        const toolResult = await executeTool(ctx, tc.name, input);
+        const toolResult =
+          (exposure && exposedThisRound ? exposure.intercept(tc.name, input, exposedThisRound) : undefined) ??
+          (await executeTool(ctx, tc.name, input));
         requestMetrics.recordTool(elapsedMs(toolStartedAt));
         writeOutcomes.record(tc.name, input, toolResult);
 
@@ -1358,11 +1390,13 @@ export class CalendarBotAgent {
           seenToolCallKeys.add(dedupKey);
         }
 
-        writer.markToolResult(toolResult.success);
+        if (tc.name !== DISCOVERY_TOOL) writer.markToolResult(toolResult.success);
         dbg?.logToolResult(tc.name, toolResult.success, toolResult.output, toolResult.error);
 
-        allToolCalls.push({ name: tc.name, input });
-        allToolResults.push({ success: toolResult.success, output: toolResult.output });
+        if (tc.name !== DISCOVERY_TOOL) {
+          allToolCalls.push({ name: tc.name, input });
+          allToolResults.push({ success: toolResult.success, output: toolResult.output });
+        }
 
         const content = toolResult.success
           ? `${toolResult.output ?? 'OK'}${toolResult.agentHint ? `\n[AGENT: ${toolResult.agentHint}]` : ''}`

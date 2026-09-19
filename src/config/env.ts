@@ -101,6 +101,8 @@ export interface EnvConfig {
    * provider whose model or key is missing is skipped, so a name here is a
    * preference, not a requirement.
    */
+  AI_TOOL_SCHEMA_MODE?: 'full' | 'lazy';
+  AI_TOOL_SCHEMA_USER_IDS?: number[];
   AI_SMART_CHAIN: ChainOrder;
   AI_FAST_CHAIN: ChainOrder;
   BOT_ADMIN_ID?: number;
@@ -125,6 +127,22 @@ function requireEnv(name: string): string {
 
 export function loadConfig(): EnvConfig {
   const BOT_TOKEN = requireEnv('BOT_TOKEN');
+  const toolSchemaMode = process.env.AI_TOOL_SCHEMA_MODE ?? 'full';
+  if (toolSchemaMode !== 'full' && toolSchemaMode !== 'lazy')
+    throw new Error('AI_TOOL_SCHEMA_MODE must be full or lazy');
+
+  const rawToolUserIds = process.env.AI_TOOL_SCHEMA_USER_IDS;
+  let toolSchemaUserIds: number[] | undefined;
+  if (rawToolUserIds !== undefined) {
+    const parts = rawToolUserIds.split(',');
+    if (
+      rawToolUserIds.length > 1800 ||
+      parts.length > 100 ||
+      parts.some((p) => !/^[1-9][0-9]*$/.test(p.trim()) || !Number.isSafeInteger(Number(p)))
+    )
+      throw new Error('AI_TOOL_SCHEMA_USER_IDS must be at most 100 positive safe integer IDs');
+    toolSchemaUserIds = [...new Set(parts.map(Number))];
+  }
 
   const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || undefined;
   const REDIS_URL = requireEnv('REDIS_URL');
@@ -212,6 +230,8 @@ export function loadConfig(): EnvConfig {
     GROQ_API_KEY: process.env.GROQ_API_KEY || undefined,
     GROQ_MODEL: process.env.GROQ_MODEL || undefined,
     GROQ_FAST_MODEL: process.env.GROQ_FAST_MODEL || undefined,
+    AI_TOOL_SCHEMA_MODE: toolSchemaMode,
+    AI_TOOL_SCHEMA_USER_IDS: toolSchemaUserIds,
     AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),
     AI_FAST_CHAIN: parseChain('AI_FAST_CHAIN', DEFAULT_FAST_CHAIN),
     BOT_ADMIN_ID,

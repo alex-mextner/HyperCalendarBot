@@ -38,6 +38,26 @@ describe('loadConfig', () => {
     setAiVars();
   });
 
+  test('tool schemas remain full unless lazy rollout is explicitly selected', () => {
+    delete process.env.AI_TOOL_SCHEMA_MODE;
+    expect(loadConfig().AI_TOOL_SCHEMA_MODE).toBe('full');
+    process.env.AI_TOOL_SCHEMA_MODE = 'lazy';
+    expect(loadConfig().AI_TOOL_SCHEMA_MODE).toBe('lazy');
+    process.env.AI_TOOL_SCHEMA_MODE = 'lzy';
+    expect(() => loadConfig()).toThrow('AI_TOOL_SCHEMA_MODE');
+  });
+
+  test('lazy tool canary IDs are explicit bounded safe user IDs', () => {
+    process.env.AI_TOOL_SCHEMA_USER_IDS = '456,789,456';
+    expect(loadConfig().AI_TOOL_SCHEMA_USER_IDS).toEqual([456, 789]);
+    for (const invalid of ['', '1e3', '-1', '0', '1,,2', '9007199254740992', Array(101).fill('1').join(',')]) {
+      process.env.AI_TOOL_SCHEMA_USER_IDS = invalid;
+      expect(() => loadConfig()).toThrow('AI_TOOL_SCHEMA_USER_IDS');
+    }
+    delete process.env.AI_TOOL_SCHEMA_USER_IDS;
+    expect(loadConfig().AI_TOOL_SCHEMA_USER_IDS).toBeUndefined();
+  });
+
   describe('provider chain order', () => {
     const SMART_DEFAULT: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
     const FAST_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];

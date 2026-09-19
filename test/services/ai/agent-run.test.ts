@@ -19,6 +19,7 @@ import { runMigrations } from '../../../src/database/schema.ts';
 import { AssistantMessageCodec, aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
+import { TelegramStreamWriter } from '../../../src/services/ai/telegram-stream.ts';
 import { _resetToolThrottleForTest, executeTool } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
@@ -204,6 +205,159 @@ describe('CalendarBotAgent.run()', () => {
       sendMessage: mock(() => Promise.resolve({ message_id: 42 })),
       editMessageText: mock(() => Promise.resolve()),
     };
+  });
+
+  test.each([true, false])('lazy rollout can be scoped to the configured user only: %s', async (included) => {
+    const script = makeStreamImpl([{ kind: 'text', text: 'Synthetic reply.' }]);
+    let toolNames: string[] = [];
+    const impl: typeof script.impl = async (opts, cbs) => {
+      if (!isValidatorCall(opts))
+        toolNames = opts.tools?.flatMap((t) => (t.type === 'function' ? [t.function.name] : [])) ?? [];
+      return script.impl(opts, cbs);
+    };
+    await new CalendarBotAgent(
+      { ...config, toolSchemaMode: 'lazy', toolSchemaUserIds: [included ? USER_ID : USER_ID + 1] },
+      sender,
+      { streamImpl: impl },
+    ).run(ctx);
+    expect(toolNames.includes('discover_tools')).toBe(included);
+    expect(toolNames.includes('create_event')).toBe(!included);
+  });
+
+  test('live calls keep their full tool contract during the text-only lazy canary', async () => {
+    ctx.inputMode = 'live_call';
+    const script = makeStreamImpl([{ kind: 'text', text: 'Synthetic spoken reply.' }]);
+    let names: string[] = [];
+    const impl: typeof script.impl = async (opts, cbs) => {
+      if (!isValidatorCall(opts))
+        names = opts.tools?.flatMap((t) => (t.type === 'function' ? [t.function.name] : [])) ?? [];
+      return script.impl(opts, cbs);
+    };
+    await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, { streamImpl: impl }).run(ctx);
+    expect(names).not.toContain('discover_tools');
+    expect(names).toContain('end_call');
+  });
+
+  test('lazy schemas keep all names visible but expose only requested parameters', async () => {
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'discover', name: 'discover_tools', input: { groups: [], tools: ['get_events'] } },
+      {
+        kind: 'tool',
+        callId: 'events',
+        name: 'get_events',
+        input: { start_date: '2030-01-01T00:00:00Z', end_date: '2030-01-02T00:00:00Z' },
+      },
+      { kind: 'text', text: 'No matching events.' },
+    ]);
+    const captured: StreamRoundOptions[] = [];
+    const impl: typeof script.impl = async (opts, cbs) => {
+      if (!isValidatorCall(opts))
+        captured.push({ ...opts, tools: structuredClone(opts.tools), messages: structuredClone(opts.messages) });
+      return script.impl(opts, cbs);
+    };
+    const result = await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, { streamImpl: impl }).run(
+      ctx,
+    );
+    expect(captured[0]?.tools?.map((tool) => (tool.type === 'function' ? tool.function.name : ''))).toEqual([
+      'discover_tools',
+    ]);
+    expect(captured[0]?.messages[0]?.content).toContain('delete_event:');
+    expect(captured[1]?.tools?.map((tool) => (tool.type === 'function' ? tool.function.name : ''))).toEqual([
+      'discover_tools',
+      'get_events',
+    ]);
+    expect(result.toolCalls.some((call) => call.name === 'get_events')).toBe(true);
+    expect(result.toolCalls.some((call) => call.name === 'discover_tools')).toBe(false);
+    const stored = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
+    expect(stored).not.toContain('discover_tools');
+    expect(stored).toContain('get_events');
+  });
+
+  test('validation retry retains revealed schemas without replaying discovery', async () => {
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'discovery', name: 'discover_tools', input: { groups: [], tools: ['get_events'] } },
+      { kind: 'text', text: 'You have seven events today.' },
+      {
+        kind: 'tool',
+        callId: 'actual-read',
+        name: 'get_events',
+        input: { start_date: '2030-01-01T00:00:00Z', end_date: '2030-01-02T00:00:00Z' },
+      },
+      { kind: 'text', text: 'No matching events.' },
+    ]);
+    let validators = 0;
+    let calls = 0;
+    const impl: typeof script.impl = async (opts, cbs) => {
+      if (!isValidatorCall(opts)) {
+        if (calls++ === 2)
+          expect(opts.tools?.some((t) => t.type === 'function' && t.function.name === 'get_events')).toBe(true);
+        return script.impl(opts, cbs);
+      }
+      const result = await script.impl(opts, cbs);
+      const verdict = validators++ === 0 ? 'REJECT: no calendar evidence' : 'APPROVE';
+      return { ...result, text: verdict, assistantMessage: { role: 'assistant' as const, content: verdict } };
+    };
+    const result = await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, { streamImpl: impl }).run(
+      ctx,
+    );
+    expect(validators).toBe(2);
+    expect(calls).toBe(4);
+    expect(result.toolCalls.map((t) => t.name)).toEqual(['get_events']);
+    expect(result.responseText).toContain('No matching events.');
+  });
+
+  test('an unexposed rejection does not poison dedup after the schema is revealed', async () => {
+    const event = createOwnedEvent();
+    const change = spyOn(ctx.eventService, 'updateEvent');
+    const input = { event_id: event.id, title: 'Verified later change' };
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'denied', name: 'update_event', input },
+      { kind: 'tool', callId: 'reveal', name: 'discover_tools', input: { groups: [], tools: ['update_event'] } },
+      { kind: 'tool', callId: 'apply', name: 'update_event', input },
+      { kind: 'text', text: 'The title was changed.' },
+    ]);
+    try {
+      const result = await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, {
+        streamImpl: script.impl,
+      }).run(ctx);
+      expect(change).toHaveBeenCalledTimes(1);
+      expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe('Verified later change');
+      expect(result.responseText).not.toContain('Not completed');
+      expect(result.toolCalls.map((call) => call.name)).toEqual(['update_event', 'update_event']);
+    } finally {
+      change.mockRestore();
+    }
+  });
+
+  test('silent schema discovery never marks a visible operation completed', async () => {
+    const marker = spyOn(TelegramStreamWriter.prototype, 'markToolResult');
+    try {
+      const script = makeStreamImpl([
+        { kind: 'tool', callId: 'discover', name: 'discover_tools', input: { groups: [], tools: ['calculate'] } },
+        { kind: 'text', text: 'Ready for a calculation.' },
+      ]);
+      await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, { streamImpl: script.impl }).run(ctx);
+      expect(marker).not.toHaveBeenCalled();
+    } finally {
+      marker.mockRestore();
+    }
+  });
+
+  test('unexposed mutating tool is rejected without calling the real handler', async () => {
+    const event = createOwnedEvent();
+    const change = spyOn(ctx.eventService, 'updateEvent');
+    const script = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'wrong',
+        name: 'update_event',
+        input: { event_id: event.id, title: 'Incorrectly changed' },
+      },
+      { kind: 'text', text: 'Updated.' },
+    ]);
+    await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, { streamImpl: script.impl }).run(ctx);
+    expect(change).not.toHaveBeenCalled();
+    expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).not.toBe('Incorrectly changed');
   });
 
   function setupInvitations() {

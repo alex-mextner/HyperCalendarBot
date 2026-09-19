@@ -1025,7 +1025,12 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
   createBot(
     config.BOT_TOKEN,
     db,
-    { debugLogger: aiDebugLogger, summarizer: historySummarizer },
+    {
+      debugLogger: aiDebugLogger,
+      summarizer: historySummarizer,
+      toolSchemaMode: config.AI_TOOL_SCHEMA_MODE,
+      toolSchemaUserIds: config.AI_TOOL_SCHEMA_USER_IDS,
+    },
     {
       googleDeps,
       renderService,
