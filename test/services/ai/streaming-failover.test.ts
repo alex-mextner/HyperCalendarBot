@@ -696,6 +696,47 @@ describe('durable provider circuit', () => {
 });
 
 describe('provider order', () => {
+  test('default main route starts with configured OSS120 without waiting on z.ai', async () => {
+    delete process.env.AI_SMART_CHAIN;
+    process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
+    groq = makeProvider({ behaviors: [{ kind: 'text', text: 'main reply' }] });
+    gemini = unusedProvider();
+    hf = unusedProvider();
+    zai = unusedProvider();
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'synthetic request' }], maxTokens: 256 });
+    expect(result.text).toBe('main reply');
+    expect(result.metrics?.attemptCount).toBe(1);
+    expect(groq.requestedModels).toEqual(['openai/gpt-oss-120b']);
+    expect(zai.requestedModels).toEqual([]);
+    expect(hf.requestedModels).toEqual([]);
+  });
+  test('default main failure falls directly to configured Gemini main, not its fast model', async () => {
+    delete process.env.AI_SMART_CHAIN;
+    groq = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'unavailable') }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'main fallback' }] });
+    zai = unusedProvider();
+    hf = unusedProvider();
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'synthetic request' }], maxTokens: 256 });
+    expect(result.text).toBe('main fallback');
+    expect(result.metrics?.attemptCount).toBe(2);
+    expect(gemini.requestedModels).toEqual(['gemini-main']);
+    expect(zai.requestedModels).toEqual([]);
+  });
+
+  test('default main fallback still reaches HF before z.ai after both responsive providers fail', async () => {
+    delete process.env.AI_SMART_CHAIN;
+    groq = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic groq unavailable') }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic google unavailable') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'verified HF recovery' }] });
+    zai = unusedProvider();
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'synthetic request' }], maxTokens: 256 });
+    expect(result.text).toBe('verified HF recovery');
+    expect(result.metrics?.attemptCount).toBe(3);
+    expect(result.metrics?.chain).toBe('smart');
+    expect(hf.requestedModels).toEqual(['hf-main']);
+    expect(zai.requestedModels).toEqual([]);
+  });
+
   // The order is the whole point of the configuration: a provider that answers
   // 429 all week, or whose tier rejects every request of this size, must be
   // routed around without a deploy.
@@ -721,14 +762,16 @@ describe('provider order', () => {
   test('an order naming nothing configured falls back to the default order', async () => {
     process.env.AI_SMART_CHAIN = 'groq';
     process.env.GROQ_API_KEY = '';
-    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
+    hf = unusedProvider();
     zai = unusedProvider();
-    gemini = unusedProvider();
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
     groq = unusedProvider();
 
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
 
-    expect(result.text).toBe('from hf');
+    expect(result.text).toBe('from gemini');
+    expect(gemini.requestedModels).toEqual(['gemini-main']);
+    expect(hf.requestedModels).toEqual([]);
     expect(zai.requestedModels).toEqual([]);
   });
 
