@@ -4,12 +4,10 @@ import { PROVIDER_IDS, type ProviderId } from '../services/ai/provider-ids.ts';
 import { logger, logOnce } from '../utils/logger.ts';
 import { type GroqTokenLimits, parseGroqTokenLimits } from './groq-token-limits.ts';
 
-/**
- * Hugging Face first: it is the paid seat here, and the free tiers underneath it
- * fail in ways retrying cannot fix — a weekly quota that is simply spent, or a
- * per-minute token cap smaller than one request with the tool catalog in it.
+/** Main requests try responsive routes with their configured main model IDs.
+ * Explicit operator order wins; token-fit guards, circuits and fallback stay intact.
  */
-export const DEFAULT_SMART_CHAIN: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
+export const DEFAULT_SMART_CHAIN: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
 /** Short requests try responsive providers first. Explicit operator order still wins.
  * September 18 runtime probes: old order spent 15s on z.ai before a healthy provider;
  * Groq OSS20B and Gemini each completed independently in under 1s. Empty responses,

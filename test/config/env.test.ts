@@ -83,10 +83,10 @@ describe('loadConfig', () => {
   });
 
   describe('provider chain order', () => {
-    const SMART_DEFAULT: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
+    const SMART_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
     const FAST_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
 
-    test('puts the paid provider first by default, and keeps the small tiers behind it', () => {
+    test('main and fast defaults prefer responsive providers while using their own configured models', () => {
       const config = loadConfig();
       expect(config.AI_SMART_CHAIN).toEqual({ order: SMART_DEFAULT, fromEnv: false, fallback: SMART_DEFAULT });
       expect(config.AI_FAST_CHAIN).toEqual({ order: FAST_DEFAULT, fromEnv: false, fallback: FAST_DEFAULT });

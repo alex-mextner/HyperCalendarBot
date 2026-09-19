@@ -2,8 +2,8 @@
 // Unified AI streaming round with automatic provider fallback.
 //
 // Two chains, selected via options.fast:
-//   SMART_CHAIN (main): z.ai ${ZAI_MODEL}      → Groq ${GROQ_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
-//   FAST_CHAIN:          z.ai ${ZAI_FAST_MODEL} → Groq ${GROQ_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
+//   SMART_CHAIN (main): configured order, otherwise Groq ${GROQ_MODEL} → Gemini ${GEMINI_MODEL} → HF ${HF_MODEL} → z.ai ${ZAI_MODEL}
+//   FAST_CHAIN: configured order, otherwise Groq ${GROQ_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL} → z.ai ${ZAI_FAST_MODEL}
 //
 // Callers that need live updates (agent.ts) pass `onTextDelta`/`onToolCallStart` callbacks.
 // Callers that just want the final text (validator, intent-learner, city-resolver,
@@ -718,7 +718,7 @@ function describeFailure(slot: ProviderSlot, error: unknown): ProviderFailure {
  * (used by validator, intent-learner, city-resolver, tts-translation).
  *
  * Chains:
- *   fast=false → z.ai ZAI_MODEL      → Groq GROQ_MODEL      → Gemini GEMINI_MODEL      → HF HF_MODEL
+ *   fast=false → configured AI_SMART_CHAIN, otherwise the responsive DEFAULT_SMART_CHAIN
  *   fast=true  → configured AI_FAST_CHAIN, otherwise the short-call DEFAULT_FAST_CHAIN
  *
  * Fallback policy: ANY provider error moves on to the next slot. A 400/401/403/404
