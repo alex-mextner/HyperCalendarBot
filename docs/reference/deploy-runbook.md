@@ -61,6 +61,14 @@ The server runs multiple PM2 services alongside our Docker containers:
 **Never run `pm2 delete all`, `docker system prune`, or kill PIDs without checking ownership.**
 Port 3001 belongs to HyperCalendarBot Docker. Do not reassign it.
 
+## Normal ship deployment
+
+`gh ship <PR>` first delegates to the shared review, acceptance, merge and local-CI gates. The post-merge step loads its own code from the exact merged Git commit, so removing a PR worktree cannot remove the deployment runner. It reuses the local prebuilt-image fallback and repeats its exact-source tests; no `--skip-tests` is passed automatically.
+
+The post-merge runner uses a nonblocking local release lock, then compares the production receipt, actual running image/revision, health and readiness. An already verified target is a no-op. A newer main is reported as superseded. An active hosted deployment remains its owner; an actual executed failing hosted step is not bypassed. A failed platform run with zero executable steps/runner or a bounded absence of a run may use the local gate. API errors are not treated as proof CI is down.
+
+Set the existing `HYPERCAL_DOCKER_BIN`, `HYPERCAL_DOCKER_CONTEXT` and `HYPERCAL_BUN_BIN` operator variables before shipping when the default executables differ from the pinned local toolchain. Status is recorded under the common Git directory as `post-ship-release.json`. `hosted_pending`, `busy` and `superseded` return exit 75, not a false deployment success. `ok (unverified)` remains runtime-only verification.
+
 ## Local deploy fallback
 
 Use only when GitHub-hosted Actions cannot obtain a runner and the exact commit has been locally verified. The fallback builds Linux amd64 on the local Unix-socket Docker daemon from a clean `git archive`. The production host only loads a checksum-verified image; it never compiles source or runs the test suite.
@@ -75,7 +83,7 @@ scripts/deploy-local-fallback.sh
 scripts/deploy-local-fallback.sh --ref origin/main --skip-tests
 ```
 
-The script keeps the actual running image under a timestamped rollback tag, takes a WAL-safe DB backup before restart, preserves host files, reapplies runtime directory ownership and recreates only the bot service. It requires exact `/health=ok`, `/ready=ok` or `ok (unverified)`, and the expected image identity. An unverified readiness response is recorded as such, not a completed live AI test. A failure restores the previous image and host files without overwriting newer calendar writes. Generic rollback is intentionally limited to unchanged migration code: a schema-changing release requires a separately reviewed procedure. No broad prune or shared-proxy reload is performed. The receipt is stored in `/opt/hypercal/releases/current.json`. This does not yet connect every gh-ship invocation to deployment; that remaining orchestration is tracked by #276.
+The script keeps the actual running image under a timestamped rollback tag, takes a WAL-safe DB backup before restart, preserves host files, reapplies runtime directory ownership and recreates only the bot service. It requires exact `/health=ok`, `/ready=ok` or `ok (unverified)`, and the expected image identity. An unverified readiness response is recorded as such, not a completed live AI test. A failure restores the previous image and host files without overwriting newer calendar writes. Generic rollback is intentionally limited to unchanged migration code: a schema-changing release requires a separately reviewed procedure. No broad prune or shared-proxy reload is performed. The receipt is stored in `/opt/hypercal/releases/current.json`. Normal gh-ship invokes this same fallback after its merge and hosted-run checks; manual use remains an operator recovery path. Schema-changing releases and end-to-end AI verification remain separately tracked under #276.
 
 ## Docker
 

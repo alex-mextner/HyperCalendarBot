@@ -72,11 +72,16 @@ python3 "$LOCAL_SRC/scripts/release-artifact.py" "$LOCAL_SRC/image.tar.gz" "$SHA
 ARCHIVE_SUM="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive_sha256"])' "$LOCAL_SRC/artifact.json")"
 CONFIG_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$LOCAL_SRC/artifact.json")"
 
+# A later merge must not be overwritten after a long local build.
+git fetch origin main
+[[ "$(git rev-parse origin/main)" == "$SHA" ]] || { echo 'Release superseded during local build' >&2; exit 2; }
 ssh -o BatchMode=yes "$HOST" "mkdir -p '$REMOTE_SRC'"
 echo "== Uploading exact git archive $SHA =="
 git archive "$SHA" | ssh -o BatchMode=yes "$HOST" "tar -xf - -C '$REMOTE_SRC'"
 
 scp -q -o BatchMode=yes "$LOCAL_SRC/image.tar.gz" "$HOST:$REMOTE_SRC/image.tar.gz"
+git fetch origin main
+[[ "$(git rev-parse origin/main)" == "$SHA" ]] || { echo 'Release superseded during upload' >&2; exit 2; }
 echo "== Loading and deploying verified prebuilt $SHA on $HOST =="
 ssh -o BatchMode=yes "$HOST" bash "$REMOTE_SRC/scripts/deploy-prebuilt-image.sh" "$DEPLOY_PATH" "$REMOTE_SRC" "$IMAGE" "$SHA" "$ARCHIVE_SUM" "$CONFIG_ID"
 
