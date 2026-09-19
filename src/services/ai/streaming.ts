@@ -21,6 +21,15 @@ import {
 import { logger, logOnce } from '../../utils/logger.ts';
 import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
+import {
+  type Admission,
+  admitProvider,
+  type CircuitContext,
+  providerCircuitKey,
+  settleAnswered,
+  settleFailure,
+  settleInconclusive,
+} from './provider-circuit.ts';
 import { clearBlock, isBlocked, noteFailureForEligibility } from './provider-eligibility.ts';
 import type { ProviderId } from './provider-ids.ts';
 import { estimateTokens } from './token-estimate.ts';
@@ -251,6 +260,8 @@ interface ProviderSlot {
   provider: ProviderId;
   /** Model id from the config. May be overridden at request time when it is gone. */
   configuredModel: string;
+  /** Identifies the provider account (endpoint + credential) for the durable circuit. */
+  circuitKey: string;
   getClient: () => OpenAI;
   stream: (
     model: string,
@@ -404,11 +415,13 @@ function streamingSlot(
   provider: ProviderId,
   getClient: () => OpenAI,
   configuredModel: string,
+  circuitKey: string,
 ): ProviderSlot {
   return {
     label,
     provider,
     configuredModel,
+    circuitKey,
     getClient,
     stream: async (model, opts, cbs, onHttpAttempt) => {
       let attemptStartedAt = performance.now();
@@ -521,6 +534,8 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
 interface ProviderAvailability {
   model?: string;
   apiKey?: string;
+  /** Part of the account fingerprint; absent when the client hardcodes the endpoint. */
+  baseUrl?: string;
 }
 
 /**
@@ -549,7 +564,7 @@ function buildChain(
   const slotsFor = (ids: readonly ProviderId[]): ProviderSlot[] => {
     const chain: ProviderSlot[] = [];
     for (const provider of ids) {
-      const { model, apiKey } = available[provider];
+      const { model, apiKey, baseUrl } = available[provider];
       if (!model || !apiKey) {
         logOnce(`skip:${kind}:${provider}:${!!model}:${!!apiKey}`, () => {
           const detail = { chain: kind, provider, hasModel: !!model, hasKey: !!apiKey };
@@ -558,7 +573,15 @@ function buildChain(
         });
         continue;
       }
-      chain.push(streamingSlot(PROVIDER_LABELS[provider], provider, providerClients[provider], model));
+      chain.push(
+        streamingSlot(
+          PROVIDER_LABELS[provider],
+          provider,
+          providerClients[provider],
+          model,
+          providerCircuitKey(provider, baseUrl ?? '', apiKey),
+        ),
+      );
     }
     return chain;
   };
@@ -595,20 +618,20 @@ function buildChain(
 function buildSmartChain(): ProviderSlot[] {
   const cfg = loadConfig();
   return buildChain('smart', cfg.AI_SMART_CHAIN, {
-    zai: { model: cfg.ZAI_MODEL, apiKey: cfg.ZAI_API_KEY },
+    zai: { model: cfg.ZAI_MODEL, apiKey: cfg.ZAI_API_KEY, baseUrl: cfg.ZAI_BASE_URL },
     groq: { model: cfg.GROQ_MODEL, apiKey: cfg.GROQ_API_KEY },
-    gemini: { model: cfg.GEMINI_MODEL, apiKey: cfg.GEMINI_API_KEY },
-    hf: { model: cfg.HF_MODEL, apiKey: cfg.HF_TOKEN },
+    gemini: { model: cfg.GEMINI_MODEL, apiKey: cfg.GEMINI_API_KEY, baseUrl: cfg.GEMINI_BASE_URL },
+    hf: { model: cfg.HF_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
   });
 }
 
 function buildFastChain(): ProviderSlot[] {
   const cfg = loadConfig();
   return buildChain('fast', cfg.AI_FAST_CHAIN, {
-    zai: { model: cfg.ZAI_FAST_MODEL, apiKey: cfg.ZAI_API_KEY },
+    zai: { model: cfg.ZAI_FAST_MODEL, apiKey: cfg.ZAI_API_KEY, baseUrl: cfg.ZAI_BASE_URL },
     groq: { model: cfg.GROQ_FAST_MODEL, apiKey: cfg.GROQ_API_KEY },
-    gemini: { model: cfg.GEMINI_FAST_MODEL, apiKey: cfg.GEMINI_API_KEY },
-    hf: { model: cfg.HF_FAST_MODEL, apiKey: cfg.HF_TOKEN },
+    gemini: { model: cfg.GEMINI_FAST_MODEL, apiKey: cfg.GEMINI_API_KEY, baseUrl: cfg.GEMINI_BASE_URL },
+    hf: { model: cfg.HF_FAST_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
   });
 }
 
@@ -768,6 +791,20 @@ export async function aiStreamRound(
       continue;
     }
 
+    // Checked after the preflight so a request that never leaves does not spend
+    // the half-open probe.
+    const circuit: CircuitContext = {
+      key: slot.circuitKey,
+      provider: slot.provider,
+      label: slotName(slot.label, requestModel),
+      chain: chainKind,
+    };
+    const admission = admitProvider(circuit);
+    if (admission.kind === 'skip') {
+      failures.push(skippedByCircuit(slot, requestModel, admission));
+      continue;
+    }
+
     try {
       aiLogger.info(
         { provider: slot.label, model: slot.configuredModel, userId: options.userId, requestId: options.requestId },
@@ -780,6 +817,7 @@ export async function aiStreamRound(
       // chain. The alert layer decides whether that is worth telling the admin
       // about.
       reportProviderAnswered(slot.label, chainKind);
+      settleAnswered(circuit);
       clearBlock(slot.provider, chainKind, hasTools);
       if (result.metrics) {
         result.metrics = {
@@ -795,17 +833,25 @@ export async function aiStreamRound(
     } catch (error) {
       const failure = describeFailure(slot, error);
       failures.push(failure);
-      reportSlotFailure(failure, error, options.userId, chainKind);
-      // Recorded after the alerting, never instead of it: a bench suppresses
-      // calls, and the outage records must keep saying what actually happened.
-      noteFailureForEligibility(
-        slot.provider,
-        chainKind,
-        hasTools,
-        failure.status,
-        failure.message,
-        error instanceof OpenAI.APIError ? error.headers : undefined,
-      );
+      const callerAborted = isCallerAbort(options.signal);
+      // An account-level failure is owned by the durable circuit, which tells the
+      // admin once per incident from stored facts; it is not reported again here.
+      const ownedByCircuit = settleCircuitAfterFailure(circuit, admission, error, failure, callerAborted);
+      if (!callerAborted) {
+        reportSlotFailure(failure, error, options.userId, chainKind, false);
+        // Recorded after the alerting, never instead of it: a bench suppresses
+        // calls, and the outage records must keep saying what actually happened.
+        if (!ownedByCircuit && ![400, 403, 422].includes(failure.status ?? 0)) {
+          noteFailureForEligibility(
+            slot.provider,
+            chainKind,
+            hasTools,
+            failure.status === 429 ? 413 : failure.status,
+            failure.message,
+            error instanceof OpenAI.APIError ? error.headers : undefined,
+          );
+        }
+      }
 
       if (partialOutputShown) {
         aiLogger.error(
@@ -816,7 +862,7 @@ export async function aiStreamRound(
         partialOutputShown = false;
       }
 
-      if (isCallerAbort(options.signal)) throw error;
+      if (callerAborted) throw error;
     }
   }
 
@@ -831,11 +877,49 @@ export async function aiStreamRound(
   throw aggregate;
 }
 
+/** A slot the durable circuit kept the request away from — reported like a preflight skip. */
+function skippedByCircuit(
+  slot: ProviderSlot,
+  model: string,
+  admission: Extract<Admission, { kind: 'skip' }>,
+): ProviderFailure {
+  return {
+    provider: slotName(slot.label, model),
+    providerId: slot.provider,
+    model,
+    status: admission.status ?? undefined,
+    message: 'Provider circuit open — request skipped without contacting the provider',
+    transient: false,
+    skippedBeforeRequest: true,
+  };
+}
+
+/** Feeds the outcome of a failed attempt to the circuit; true when the circuit owns the failure. */
+function settleCircuitAfterFailure(
+  circuit: CircuitContext,
+  admission: Admission,
+  error: unknown,
+  failure: ProviderFailure,
+  callerAborted: boolean,
+): boolean {
+  if (callerAborted) {
+    settleInconclusive(circuit, admission, { pushBack: false });
+    return false;
+  }
+  return settleFailure(circuit, admission, {
+    status: failure.status,
+    message: failure.message,
+    headers: error instanceof OpenAI.APIError ? error.headers : undefined,
+    providerDown: isProviderDown(error),
+  });
+}
+
 function reportSlotFailure(
   failure: ProviderFailure,
   error: unknown,
   userId: number | undefined,
   chain: ProviderChainKind,
+  alertAdmin: boolean,
 ): void {
   const context = { err: error, provider: failure.provider, status: failure.status, userId };
   if (failure.transient) {
@@ -846,5 +930,5 @@ function reportSlotFailure(
 
   // The alert layer classifies and throttles; a transient blip never reaches the
   // admin on its own, so this is safe to call for every failure.
-  reportProviderFailure(failure, chain);
+  if (alertAdmin) reportProviderFailure(failure, chain);
 }
