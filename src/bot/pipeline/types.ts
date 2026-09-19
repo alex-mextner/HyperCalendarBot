@@ -11,6 +11,8 @@ export interface WorkflowSession {
   workflow: Workflow;
   captures: { [key: string]: string };
   createdAt: number;
+  /** Original actor-written request, never generated tool arguments. */
+  sourceMessage?: string;
   /** Unconfirmed prompt delivery must be retried, never treated as an answer. */
   pendingPrompt?: { text: string; options?: string[]; delivered: boolean };
 }

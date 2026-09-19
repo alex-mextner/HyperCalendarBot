@@ -1,5 +1,6 @@
 // src/bot/pipeline/intent-matcher-layer.ts
 
+import { t, toLang } from '../../config/constants.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
@@ -26,7 +27,11 @@ export function createIntentMatcherLayer(
   matcher: IntentMatcher,
   intentRepo: IntentRepository,
   executor: IntentExecutor,
-  toolExecutor: (toolName: string, input: unknown) => ToolResult | Promise<ToolResult>,
+  toolExecutor: (
+    toolName: string,
+    input: unknown,
+    origin?: { text: string; actorId: number; chatId: number },
+  ) => ToolResult | Promise<ToolResult>,
   workflowSessions: WorkflowSessionStore,
   notifyAdmin?: (text: string) => Promise<void>,
   getEventContext?: (
@@ -72,6 +77,14 @@ export function createIntentMatcherLayer(
           : {}),
       });
     workflowSessions.set(chatId, userId, { ...session, pendingPrompt: { ...prompt, delivered: true } });
+  }
+  /**
+   * A failed run must never replay the user's request through the AI once a write may
+   * have happened. Only a failure with no write evidence is safe to hand over.
+   */
+  async function deliverTerminalFailure(ctx: BotCommandContext, language: string, result: Result): Promise<void> {
+    const messages = t(toLang(language)).intentWorkflow;
+    await ctx.send(result.mutationEvidence === 'applied' ? messages.appliedIncomplete : messages.outcomeUnknown);
   }
   async function saveSuspension(
     ctx: BotCommandContext,
@@ -130,7 +143,9 @@ export function createIntentMatcherLayer(
           groupChatId: groupCtx?.groupChatId,
           ...eventCtx,
         },
-        toolExecutor,
+        session.sourceMessage === undefined
+          ? toolExecutor
+          : (name, input) => toolExecutor(name, input, { text: session.sourceMessage!, actorId: userId, chatId }),
         {
           stepIndex: session.stepIndex,
           stepResults: session.stepResults,
@@ -139,6 +154,16 @@ export function createIntentMatcherLayer(
       );
       if (result.suspended && result.suspendedAt !== undefined) {
         await saveSuspension(ctx, chatId, userId, session, result);
+        return { handled: true };
+      }
+      // The answer was consumed by the resumed workflow, so it cannot be replayed as a fresh request.
+      if (!result.success && result.mutationEvidence !== undefined) {
+        cmdLogger.warn(
+          { intentId: session.intentId, userId, errorCode: result.errorCode, evidence: result.mutationEvidence },
+          'Resumed intent workflow failed',
+        );
+        if (result.mutationEvidence === 'none') await ctx.send(t(toLang(user.language)).intentWorkflow.failedUnchanged);
+        else await deliverTerminalFailure(ctx, user.language, result);
         return { handled: true };
       }
       if (result.response) {
@@ -210,6 +235,7 @@ export function createIntentMatcherLayer(
           stepResults: result.stepResults ?? {},
           workflow,
           captures: match.captures,
+          sourceMessage: messageText,
           createdAt: Date.now(),
         },
         result,
@@ -217,7 +243,7 @@ export function createIntentMatcherLayer(
       return { handled: true };
     }
 
-    // 6. Fall through to AI agent on failure (e.g. unresolved variables, tool error)
+    // 6. Fall through to AI agent on failure with no write evidence (e.g. unresolved variables, read error)
     if (!result.success) {
       cmdLogger.warn(
         { intentId: match.intentId, userId, error: result.response },
@@ -229,6 +255,10 @@ export function createIntentMatcherLayer(
         ).catch((err: unknown) => {
           cmdLogger.error({ err: err }, 'Failed to send intent fail report to admin');
         });
+      }
+      if (result.mutationEvidence === 'applied' || result.mutationEvidence === 'unknown') {
+        await deliverTerminalFailure(ctx, user.language, result);
+        return { handled: true };
       }
       return { handled: false };
     }

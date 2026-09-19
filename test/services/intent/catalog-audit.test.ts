@@ -30,26 +30,23 @@ function fixture() {
     'pending',
     '2026-03-02 00:00:00',
   );
-  db.exec(`INSERT INTO user_action_log VALUES('intent_match','show_today',1,'2026-03-03 00:00:00');
+  db.exec(`INSERT INTO user_action_log VALUES('intent_match','basis.calendar.day',1,'2026-03-03 00:00:00');
   INSERT INTO user_action_log VALUES('ai_tool','create_event',0,'2026-03-03 00:00:00');
   INSERT INTO chat_history VALUES(1,'user','что у меня сегодня','2026-03-03 00:00:00');
   INSERT INTO chat_history VALUES(2,'user','SECRET user phrase','2026-03-03 00:00:01');`);
   return db;
 }
 
-test('six shipped definitions are import-safe and actual schema issues are visible', () => {
-  expect(seedIntents.map((x) => x.canonical_name)).toEqual([
-    'show_today',
-    'show_tomorrow',
-    'show_week',
-    'free_slots_today',
-    'search_events_by_query',
-    'create_event_named_tomorrow',
-  ]);
-  expect(auditDefinition(seedIntents[0]!).schemaValid).toBe(true);
-  expect(auditDefinition(seedIntents[5]!).schemaValid).toBe(false);
-  expect(auditDefinition(seedIntents[4]!).examplesMissingCaptures).toBe(0);
-  expect(auditDefinition(seedIntents[4]!).examplesMatched).toBe(3);
+test('shipped definitions are import-safe, namespaced and every one passes the actual schema audit', () => {
+  expect(seedIntents.length).toBeGreaterThan(0);
+  for (const seed of seedIntents) {
+    expect(seed.canonical_name.startsWith('basis.')).toBe(true);
+    const audit = auditDefinition(seed);
+    expect(audit.schemaValid).toBe(true);
+    expect(audit.contractErrors).toBe(0);
+    expect(audit.examplesMissingCaptures).toBe(0);
+    expect(audit.examplesMatched).toBe(seed.phrases.length);
+  }
 });
 
 test('snapshot is read-only, distinguishes missing from zero and never equates match with success', () => {
@@ -57,7 +54,7 @@ test('snapshot is read-only, distinguishes missing from zero and never equates m
   db.exec('PRAGMA query_only=ON');
   try {
     const s = collectIntentSnapshot(db, seedIntents, { sourceRevision: 'synthetic' });
-    expect(s.totals).toMatchObject({ database: 2, approved: 1, pending: 1, rejected: 0, seed: 6 });
+    expect(s.totals).toMatchObject({ database: 2, approved: 1, pending: 1, rejected: 0, seed: seedIntents.length });
     expect(s.seeds[0]).toMatchObject({ present: true, definition: 'same', recordedMatches: 1 });
     expect(s.seeds[1]).toMatchObject({ present: false, definition: 'absent', recordedMatches: 0 });
     expect(s.statistics.executionSuccessRate).toBeNull();
@@ -118,7 +115,7 @@ test('standalone page escapes untrusted text, no remote assets or private detail
   try {
     const s = collectIntentSnapshot(db, seedIntents, { sourceRevision: '</script><img src=x onerror=alert(1)>' });
     const html = renderIntentCatalogue(s);
-    expect(html).toContain('show_today');
+    expect(html).toContain('basis.calendar.day');
     expect(html).toContain('не означает успешное выполнение');
     expect(html).not.toContain('</script><img');
     expect(html).not.toContain('onerror=alert');
@@ -169,8 +166,8 @@ test('oversized recorded match input is excluded from the examined denominator',
     const insert = db.query(
       'INSERT INTO user_action_log(action_type,action_name,success,created_at,input_summary) VALUES(?,?,?,?,?)',
     );
-    insert.run('intent_match', 'show_today', 1, '2026-03-03 00:00:00', 'что у меня сегодня');
-    insert.run('intent_match', 'show_today', 1, '2026-03-03 00:00:01', 'x'.repeat(16001));
+    insert.run('intent_match', 'basis.calendar.day', 1, '2026-03-03 00:00:00', 'что у меня сегодня');
+    insert.run('intent_match', 'basis.calendar.day', 1, '2026-03-03 00:00:01', 'x'.repeat(16001));
     const s = collectIntentSnapshot(db, seedIntents, { sourceRevision: 'synthetic' });
     expect(s.statistics.recordedInputReplay).toMatchObject({
       fetched: 2,
@@ -197,7 +194,7 @@ test('each historical phrase is assigned to its actual seed, not the array offse
     const s = collectIntentSnapshot(db, seedIntents, { sourceRevision: 'synthetic' });
     for (const seed of seedIntents)
       expect(s.seeds.find((row) => row.name === seed.canonical_name)?.replayMatches).toBe(1);
-    expect(s.statistics.replay.matched).toBe(6);
+    expect(s.statistics.replay.matched).toBe(seedIntents.length);
   } finally {
     db.close();
   }

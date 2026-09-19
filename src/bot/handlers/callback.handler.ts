@@ -1713,6 +1713,15 @@ export function createCallbackHandler(
   // Intent verification: accept
   dispatch.set('intent_accept', async (ctx, payload, _parts, user) => {
     if (!intentDeps) return;
+    if (intentDeps.intentRepo.isManagedBasis()) {
+      await ctx.answer({
+        text:
+          user.language === 'ru'
+            ? 'Интенты управляются единым сидом: изменение через репозиторий.'
+            : 'Intents use the source-managed seed. Update the repository.',
+      });
+      return;
+    }
     const intentId = Number(payload);
     const lang = (user.language ?? 'en') as Lang;
     if (!intentDeps.adminId || user.telegram_id !== intentDeps.adminId) {
@@ -1729,6 +1738,15 @@ export function createCallbackHandler(
   // Intent verification: reject
   dispatch.set('intent_reject', async (ctx, payload, _parts, user) => {
     if (!intentDeps) return;
+    if (intentDeps.intentRepo.isManagedBasis()) {
+      await ctx.answer({
+        text:
+          user.language === 'ru'
+            ? 'Интенты управляются единым сидом: изменение через репозиторий.'
+            : 'Intents use the source-managed seed. Update the repository.',
+      });
+      return;
+    }
     const intentId = Number(payload);
     const lang = (user.language ?? 'en') as Lang;
     if (!intentDeps.adminId || user.telegram_id !== intentDeps.adminId) {
@@ -1744,6 +1762,15 @@ export function createCallbackHandler(
   // Intent verification: edit — store admin edit session
   dispatch.set('intent_edit', async (ctx, payload, _parts, user) => {
     if (!intentDeps) return;
+    if (intentDeps.intentRepo.isManagedBasis()) {
+      await ctx.answer({
+        text:
+          user.language === 'ru'
+            ? 'Интенты управляются единым сидом: изменение через репозиторий.'
+            : 'Intents use the source-managed seed. Update the repository.',
+      });
+      return;
+    }
     const intentId = Number(payload);
     const lang = (user.language ?? 'en') as Lang;
     if (!intentDeps.adminId || user.telegram_id !== intentDeps.adminId) {

@@ -1197,11 +1197,15 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             deps.intentMatcher,
             deps.intentRepo,
             deps.intentExecutor,
-            (toolName, input) => {
+            (toolName, input, origin) => {
               const agentCtx = agentContextBuilder(
                 user,
                 Number(ctx.chatId!),
-                messageText,
+                origin?.actorId === user.telegram_id &&
+                  origin.chatId === Number(ctx.chatId!) &&
+                  origin.text.length <= 16000
+                  ? origin.text
+                  : messageText,
                 {
                   isGroup,
                   groupChatId: isGroup ? Number(chatId) : undefined,

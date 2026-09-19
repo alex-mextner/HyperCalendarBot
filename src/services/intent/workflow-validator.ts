@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { toolSchemas } from '../ai/tool-schemas.ts';
 import { type FilterCall, KNOWN_FILTERS, parseFilterChain } from './filter-parser.ts';
+import { normalize } from './normalizer.ts';
 import type { Workflow } from './workflow-schema.ts';
 
 /** Tool schemas keyed by plain string, so an unknown step name is a lookup miss, not a type error. */
@@ -293,7 +294,49 @@ export function validateWorkflowSteps(workflow: Workflow): string[] {
  * Returns a list of human-readable error strings (empty = valid).
  */
 export function validateWorkflow(workflow: Workflow, pattern: string | null | undefined): string[] {
-  return [...validateWorkflowVariables(workflow, pattern), ...validateWorkflowSteps(workflow)];
+  return [
+    ...validateWorkflowVariables(workflow, pattern),
+    ...validateWorkflowSteps(workflow),
+    ...validateWorkflowBindings(workflow),
+  ];
+}
+
+/** The binding name a `bind.<name>...` reference starts with, ignoring path and index suffixes. */
+function bindingNameOf(varName: string): string {
+  return varName.slice('bind.'.length).split(/[.[]/)[0]!;
+}
+
+/** Binding-to-binding references must point backwards, at the type they consume. */
+export function validateWorkflowBindings(workflow: Workflow): string[] {
+  const bindings = 'bindings' in workflow ? workflow.bindings : undefined;
+  if (!bindings) return [];
+  const errors: string[] = [];
+  const seen = new Map<string, string>();
+  for (const [name, binding] of Object.entries(bindings)) {
+    if (binding.type === 'datetime') {
+      if (seen.get(binding.date) !== 'date')
+        errors.push(`binding "${name}": date must reference an earlier date binding`);
+      if (seen.get(binding.time) !== 'time')
+        errors.push(`binding "${name}": time must reference an earlier time binding`);
+    }
+    if ('optional' in binding && binding.optional) {
+      if (binding.default === undefined) errors.push(`binding "${name}": an optional binding needs a default`);
+      // A bare capture reference makes the matcher require the group; only a defaulted one may be absent.
+      if (!/\{\{\s*\$\d+\s*\|\s*default\(/.test(binding.from))
+        errors.push(`binding "${name}": an optional binding must read its capture with default(...)`);
+    }
+    for (const table of [
+      'values' in binding ? binding.values : undefined,
+      'words' in binding ? binding.words : undefined,
+      'units' in binding ? binding.units : undefined,
+    ]) {
+      for (const key of Object.keys(table ?? {})) {
+        if (normalize(key) !== key) errors.push(`binding "${name}": key "${key}" is not in normalized form`);
+      }
+    }
+    seen.set(name, binding.type);
+  }
+  return errors;
 }
 
 /**
@@ -305,6 +348,7 @@ export function validateWorkflowVariables(workflow: Workflow, pattern: string | 
   const capGroups = pattern ? countCapturingGroups(pattern) : 0;
   const askUserNames = extractAskUserNames(workflow);
   const stepOutputNames = extractStepOutputNames(workflow);
+  const bindingNames = new Set('bindings' in workflow ? Object.keys(workflow.bindings ?? {}) : []);
 
   // Validate filter chains in "as" fields (e.g. "choice|lower")
   for (const asValue of extractAsFields(workflow)) {
@@ -362,12 +406,16 @@ export function validateWorkflowVariables(workflow: Workflow, pattern: string | 
             `${loc}{{${expr}}} — capture group $${n} does not exist in pattern (pattern has ${capGroups} capturing group${capGroups === 1 ? '' : 's'})`,
           );
         }
+      } else if (varName.startsWith('bind.')) {
+        const name = bindingNameOf(varName);
+        if (!bindingNames.has(name)) errors.push(`${loc}{{${expr}}} — bind.${name} is not declared in bindings`);
       } else if (varName.startsWith('tool_outputs.')) {
         // {{tool_outputs.name}} or {{tool_outputs.name.field}} — step/ask_user output namespace
         const afterPrefix = varName.slice('tool_outputs.'.length);
-        const outputName = afterPrefix.split('.')[0]!;
+        const outputName = afterPrefix.split(/[.[]/)[0]!;
         const allOutputNames = new Set([...stepOutputNames, ...askUserNames]);
-        if (!allOutputNames.has(outputName)) {
+        const textOf = outputName.endsWith('_text') ? outputName.slice(0, -'_text'.length) : outputName;
+        if (!allOutputNames.has(outputName) && !allOutputNames.has(textOf)) {
           errors.push(
             `${loc}{{${expr}}} — tool_outputs.${outputName} is not defined; ` +
               `no step with as: "${outputName}" found`,

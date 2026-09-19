@@ -144,6 +144,13 @@ function pickPhrase(phrases: readonly string[], exclude?: string): string {
 // i18n messages
 export const MSG = {
   en: {
+    intentWorkflow: {
+      failedUnchanged: 'I could not complete that, and nothing was changed. Please try again or rephrase.',
+      appliedIncomplete:
+        'The change went through, but I could not finish the rest of the request. Check your calendar; I will not repeat it.',
+      outcomeUnknown:
+        'I could not confirm whether that went through. Check your calendar before repeating the request; I will not retry it automatically.',
+    },
     writeOutcomes: {
       completed: 'Completed',
       notCompleted: 'Not completed',
@@ -537,6 +544,7 @@ export const MSG = {
       },
       slots: {
         noFreeSlots: 'No free slots — the entire day is busy.',
+        invalidDate: 'Invalid date. Use a real calendar date like 2026-03-15.',
         freeSlots: (lines: string) => `Free slots:\n${lines}`,
       },
       settings: {
@@ -1005,6 +1013,13 @@ export const MSG = {
     },
   },
   ru: {
+    intentWorkflow: {
+      failedUnchanged: 'Не получилось выполнить, ничего не изменилось. Попробуй ещё раз или скажи иначе.',
+      appliedIncomplete:
+        'Изменение применено, но остальную часть запроса выполнить не удалось. Проверь календарь: повторять я не буду.',
+      outcomeUnknown:
+        'Не могу подтвердить, выполнилось ли это. Проверь календарь, прежде чем повторять запрос: сам я его повторять не буду.',
+    },
     writeOutcomes: {
       completed: 'Выполнено',
       notCompleted: 'Не выполнено',
@@ -1399,6 +1414,7 @@ export const MSG = {
       },
       slots: {
         noFreeSlots: 'Свободных окон нет — весь день занят.',
+        invalidDate: 'Некорректная дата. Нужна реальная дата вида 2026-03-15.',
         freeSlots: (lines: string) => `Свободные слоты:\n${lines}`,
       },
       settings: {

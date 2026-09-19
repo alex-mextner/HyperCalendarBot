@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BindingsSchema } from './workflow-bindings.ts';
 import { isBoundedJson, readWorkflowVersion, WORKFLOW_LIMITS, type WorkflowInputValue } from './workflow-input.ts';
 
 // Legacy definitions retain their historical string-only contract. A version is
@@ -56,6 +57,7 @@ const TypedWorkflow = z.custom<unknown>(isBoundedJson, 'Workflow exceeds JSON in
         tools: z.array(TypedTool).min(1).max(WORKFLOW_LIMITS.steps),
         format: z.string().optional(),
         i18n: I18nMapSchema.optional(),
+        bindings: BindingsSchema.optional(),
       })
       .strict(),
     z
@@ -63,6 +65,7 @@ const TypedWorkflow = z.custom<unknown>(isBoundedJson, 'Workflow exceeds JSON in
         version: z.literal(2),
         steps: z.array(TypedStep).min(1).max(WORKFLOW_LIMITS.steps),
         i18n: I18nMapSchema.optional(),
+        bindings: BindingsSchema.optional(),
       })
       .strict(),
   ]),

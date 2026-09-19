@@ -31,6 +31,18 @@ function groupMemberAnySql(alias: string): string {
   ))`;
 }
 
+// SQL fragment: candidate events whose occupied time may intersect [start, end].
+// Expects 2 bind params (rangeEnd, rangeStart). Timed events occupy at least 30
+// minutes; all-day values are floating dates that can sit a day away from the
+// requester's local day boundaries, so their range is padded by one day. This is
+// a superset: the service clips each candidate to its exact occupied time.
+function overlapCandidateSql(alias: string): string {
+  const col = alias ? `${alias}.` : '';
+  return `julianday(${col}start_at) < julianday(?) + (CASE WHEN ${col}all_day = 1 THEN 1.0 ELSE 0.0 END)
+    AND MAX(COALESCE(julianday(${col}end_at), 0), julianday(${col}start_at, '+30 minutes'))
+      > julianday(?) - (CASE WHEN ${col}all_day = 1 THEN 1.0 ELSE 0.0 END)`;
+}
+
 export const EVENT_UPDATE_FIELDS = [
   'title',
   'description',
@@ -94,8 +106,8 @@ export class EventRepository {
     assertValidEventTimestamps(data);
     const result = this.db
       .prepare(`
-      INSERT INTO events (user_id, title, description, category, start_at, end_at, all_day, timezone, location, recurrence_rule, recurrence_end_at, owner_type, group_id, created_by, event_type)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (user_id, title, description, category, start_at, end_at, all_day, timezone, location, recurrence_rule, recurrence_end_at, owner_type, group_id, created_by, event_type, reminder_overrides)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
       .run(
         data.user_id,
@@ -113,6 +125,7 @@ export class EventRepository {
         data.group_id ?? null,
         data.created_by ?? null,
         data.event_type ?? null,
+        data.reminder_minutes === undefined ? null : JSON.stringify(data.reminder_minutes),
       );
     const id = Number(result.lastInsertRowid);
     if (data.owner_type === 'group' && data.group_id != null) {
@@ -420,6 +433,30 @@ export class EventRepository {
       .all(startUtc, endUtc, userId, userId, userId) as CalendarEvent[];
   }
 
+  /** Same visibility as `getVisibleInRange`, but matches events that started before the range and still overlap it. */
+  getVisibleOverlapping(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
+    return this.db
+      .prepare(
+        `
+      SELECT DISTINCT e.* FROM events e
+      WHERE ${overlapCandidateSql('e')}
+        AND e.is_cancelled = 0 AND e.is_deleted = 0
+        AND e.recurrence_rule IS NULL
+        AND e.parent_event_id IS NULL
+        AND (
+          (e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
+          OR ${groupVisibleSql('e')}
+          OR e.id IN (
+            SELECT event_id FROM event_participants
+            WHERE user_id = ? AND status = 'accepted'
+          )
+        )
+      ORDER BY julianday(e.start_at), e.id
+    `,
+      )
+      .all(endUtc, startUtc, userId, userId, userId) as CalendarEvent[];
+  }
+
   isParticipant(eventId: number, userId: number): boolean {
     const row = this.db
       .prepare("SELECT 1 FROM event_participants WHERE event_id = ? AND user_id = ? AND status = 'accepted'")
@@ -698,6 +735,18 @@ export class EventRepository {
       ORDER BY julianday(start_at), id
     `)
       .all(groupId, startUtc, endUtc) as CalendarEvent[];
+  }
+
+  /** Same scope as `getInRangeForGroup`, but matches events that started before the range and still overlap it. */
+  getOverlappingForGroup(groupId: number, startUtc: string, endUtc: string): CalendarEvent[] {
+    return this.db
+      .prepare(`
+      SELECT * FROM events e
+      WHERE e.owner_type = 'group' AND e.group_id = ? AND ${overlapCandidateSql('e')}
+        AND e.is_cancelled = 0 AND e.is_deleted = 0 AND e.recurrence_rule IS NULL AND e.parent_event_id IS NULL
+      ORDER BY julianday(e.start_at), e.id
+    `)
+      .all(groupId, endUtc, startUtc) as CalendarEvent[];
   }
 
   getRecurringTemplatesForGroup(groupId: number): CalendarEvent[] {
