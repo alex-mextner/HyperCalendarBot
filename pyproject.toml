@@ -1,6 +1,6 @@
 [project]
 name = "hypercalendarbot"
-version = "0.2.6"
+version = "0.2.7"
 requires-python = ">=3.12"
 dependencies = [
     "pyrofork>=2.3",

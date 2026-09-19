@@ -74,17 +74,32 @@ def hosted_action(workflow, jobs):
         or not jobs
     ):
         raise DeploymentError("workflow did not establish runner unavailability")
+    failed_without_runner = False
     for job in jobs:
-        if not isinstance(job, dict) or not isinstance(job.get("steps"), list):
-            raise DeploymentError("invalid job metadata")
         if (
-            job["steps"]
-            or type(job.get("runner_id")) is not int
-            or job["runner_id"] != 0
+            not isinstance(job, dict)
+            or not isinstance(job.get("steps"), list)
+            or job.get("status") != "completed"
+            or "runner_id" not in job
         ):
+            raise DeploymentError("invalid job metadata")
+        runner_id = job["runner_id"]
+        # bool is an int subclass, but is never a valid GitHub runner identifier.
+        zero_runner = type(runner_id) is int and runner_id == 0
+        if job["steps"] or job.get("runner_name") not in (None, ""):
             raise DeploymentError(
                 "hosted executable steps ran; refusing local override"
             )
+        if job.get("conclusion") == "skipped" and (runner_id is None or zero_runner):
+            continue
+        if job.get("conclusion") == "failure" and zero_runner:
+            failed_without_runner = True
+            continue
+        raise DeploymentError("job did not establish runner unavailability")
+    if not failed_without_runner:
+        raise DeploymentError(
+            "skipped jobs alone do not establish runner unavailability"
+        )
     return "local"
 
 
