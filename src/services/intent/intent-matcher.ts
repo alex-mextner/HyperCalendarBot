@@ -18,6 +18,7 @@ interface IntentEntry {
   pattern?: RegExp;
   required: string[];
   parameterized: boolean;
+  strictStructure: boolean;
 }
 
 const MAX_INPUT_CHARS = 16000;
@@ -64,9 +65,11 @@ function captureRequirements(workflow: string): { required: string[]; parameteri
 function extract(entry: IntentEntry, input: MatchInput): MatchResult | null {
   if (!entry.pattern) return entry.parameterized ? null : { intentId: entry.intentId, captures: {} };
   const raw = input.raw;
-  let match = entry.pattern.exec(raw);
+  const structured = entry.strictStructure ? raw.replace(/[?!]+$/, '').trimEnd() : raw;
+  let match = entry.pattern.exec(structured);
   let offsets: ReturnType<typeof normalizeWithOffsets> | undefined;
-  if (!match || match.index !== 0 || match[0].length !== raw.length) {
+  if (!match || match.index !== 0 || match[0].length !== structured.length) {
+    if (entry.strictStructure) return null;
     offsets = input.normalized();
     match = entry.pattern.exec(offsets.text);
     if (!match || match.index !== 0 || match[0].length !== offsets.text.length) return null;
@@ -103,7 +106,11 @@ export class IntentMatcher {
         cmdLogger.warn({ intentId: intent.id }, 'Intent workflow exceeds inspection bound; not indexed');
         continue;
       }
-      const entry: IntentEntry = { intentId: intent.id, ...requirements };
+      const entry: IntentEntry = {
+        intentId: intent.id,
+        ...requirements,
+        strictStructure: intent.canonical_name.startsWith('basis.'),
+      };
       if (intent.pattern) {
         try {
           entry.pattern = new RegExp(intent.pattern, 'di');
@@ -152,7 +159,10 @@ export class IntentMatcher {
       if (exact.length !== 1)
         return { kind: 'abstain', reason: 'ambiguous', candidates: exact.map((e) => e.intentId).sort((a, b) => a - b) };
       const entry = exact[0]!;
-      const result = entry.parameterized ? extract(entry, input) : { intentId: entry.intentId, captures: {} };
+      const result =
+        entry.parameterized || entry.strictStructure
+          ? extract(entry, input)
+          : { intentId: entry.intentId, captures: {} };
       return result
         ? { kind: 'matched', strategy: 'exact', result }
         : { kind: 'abstain', reason: 'missing_capture', candidates: [entry.intentId] };

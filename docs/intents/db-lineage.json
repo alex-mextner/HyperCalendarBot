@@ -1,0 +1,708 @@
+{
+  "schemaVersion": 1,
+  "cohort": "production-intents-before-replacement",
+  "capturedAt": "2026-09-19T08:13:49.396193+00:00",
+  "counts": {
+    "merge": 20,
+    "rewrite": 25,
+    "retire": 10
+  },
+  "entries": [
+    {
+      "id": 2,
+      "oldName": "show_today",
+      "oldKey": "show_today",
+      "status": "approved",
+      "disposition": "merge",
+      "target": "basis.calendar.day",
+      "reason": "Сегодня и завтра — параметры одного запроса дня.",
+      "previousTools": [
+        "get_events",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 3,
+      "oldName": "show_day_plan",
+      "oldKey": "show_day_plan",
+      "status": "pending",
+      "disposition": "merge",
+      "target": "basis.calendar.day",
+      "reason": "Вариант формулировки плана дня объединён с просмотром событий дня.",
+      "previousTools": [
+        "get_events",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 4,
+      "oldName": "show_month",
+      "oldKey": "show_month",
+      "status": "pending",
+      "disposition": "merge",
+      "target": "basis.calendar.period",
+      "reason": "Месяц — параметр общего запроса периода.",
+      "previousTools": [
+        "get_events",
+        "render_image"
+      ]
+    },
+    {
+      "id": 5,
+      "oldName": "show_week_plan",
+      "oldKey": "show_week_plan",
+      "status": "pending",
+      "disposition": "merge",
+      "target": "basis.calendar.period",
+      "reason": "План недели объединён с просмотром периода.",
+      "previousTools": [
+        "get_events",
+        "render_week_image"
+      ]
+    },
+    {
+      "id": 6,
+      "oldName": "invite_user_to_event",
+      "oldKey": "invite_user_to_event",
+      "status": "approved",
+      "disposition": "rewrite",
+      "target": "basis.invite.send",
+      "reason": "Явное событие и проверенный адресат; отправка после подтверждения без force.",
+      "previousTools": [
+        "find_user",
+        "pick_users"
+      ]
+    },
+    {
+      "id": 7,
+      "oldName": "make_calendar_call",
+      "oldKey": "make_calendar_call",
+      "status": "approved",
+      "disposition": "rewrite",
+      "target": "basis.call.start",
+      "reason": "Звонок только запросившему пользователю, после подтверждения и проверки инструмента.",
+      "previousTools": [
+        "make_call"
+      ]
+    },
+    {
+      "id": 8,
+      "oldName": "show_tomorrow",
+      "oldKey": "show_tomorrow",
+      "status": "approved",
+      "disposition": "merge",
+      "target": "basis.calendar.day",
+      "reason": "Завтра задаётся относительной датой, не отдельным рецептом.",
+      "previousTools": [
+        "get_events",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 9,
+      "oldName": "show_week",
+      "oldKey": "show_week",
+      "status": "approved",
+      "disposition": "merge",
+      "target": "basis.calendar.period",
+      "reason": "Неделя задаётся параметром общего просмотра периода.",
+      "previousTools": [
+        "get_events",
+        "render_week_image"
+      ]
+    },
+    {
+      "id": 10,
+      "oldName": "free_slots_today",
+      "oldKey": "free_slots_today",
+      "status": "approved",
+      "disposition": "rewrite",
+      "target": "basis.slots.day",
+      "reason": "Реальные свободные интервалы учитывают пересечения, события без конца и локальную дату.",
+      "previousTools": [
+        "get_free_slots"
+      ]
+    },
+    {
+      "id": 11,
+      "oldName": "search_events_by_query",
+      "oldKey": "search_events_by_query",
+      "status": "approved",
+      "disposition": "merge",
+      "target": "basis.calendar.search",
+      "reason": "Общий поиск событий по явно указанному запросу.",
+      "previousTools": [
+        "search_events"
+      ]
+    },
+    {
+      "id": 12,
+      "oldName": "create_event_named_tomorrow",
+      "oldKey": "create_event_named_tomorrow",
+      "status": "approved",
+      "disposition": "rewrite",
+      "target": "basis.event.create",
+      "reason": "Сломанный строковый workflow заменён типизированной датой, временем и подтверждением.",
+      "previousTools": [
+        "ask_user",
+        "create_event"
+      ]
+    },
+    {
+      "id": 13,
+      "oldName": "set_timezone_belgrade",
+      "oldKey": "set_timezone_belgrade",
+      "status": "approved",
+      "disposition": "rewrite",
+      "target": "basis.settings.timezone",
+      "reason": "Фиксированный Белград заменён явным валидируемым часовым поясом IANA.",
+      "previousTools": [
+        "manage_settings"
+      ]
+    },
+    {
+      "id": 14,
+      "oldName": "change_language_to_russian",
+      "oldKey": "change_language_to_russian",
+      "status": "approved",
+      "disposition": "rewrite",
+      "target": "basis.settings.language",
+      "reason": "Фиксированный русский заменён общим выбором поддерживаемого языка.",
+      "previousTools": [
+        "manage_settings"
+      ]
+    },
+    {
+      "id": 15,
+      "oldName": "show_conversation_history",
+      "oldKey": "show_conversation_history",
+      "status": "approved",
+      "disposition": "rewrite",
+      "target": "basis.history.search",
+      "reason": "История использует актуальную схему инструмента и приватную область пользователя.",
+      "previousTools": [
+        "get_history"
+      ]
+    },
+    {
+      "id": 16,
+      "oldName": "update_event_time",
+      "oldKey": "update_event_time",
+      "status": "approved",
+      "disposition": "rewrite",
+      "target": "basis.event.reschedule",
+      "reason": "Явная цель по номеру или уникальному названию; изменение после подтверждения. Для события с концом требуется уточнение диапазона.",
+      "previousTools": [
+        "update_event"
+      ]
+    },
+    {
+      "id": 17,
+      "oldName": "show_next_week",
+      "oldKey": "show_next_week",
+      "status": "approved",
+      "disposition": "merge",
+      "target": "basis.calendar.period",
+      "reason": "Следующая неделя объединена с другими периодами.",
+      "previousTools": [
+        "get_events",
+        "render_week_image"
+      ]
+    },
+    {
+      "id": 18,
+      "oldName": "show_month_by_name",
+      "oldKey": "show_month_by_name",
+      "status": "rejected",
+      "disposition": "retire",
+      "target": null,
+      "reason": "Старый разбор названия месяца не активируется. Нестандартный период уточняется обычным диалогом; не подменяется текущим месяцем.",
+      "previousTools": [
+        "get_month_by_name"
+      ]
+    },
+    {
+      "id": 19,
+      "oldName": "get_current_time",
+      "oldKey": "get_current_time",
+      "status": "approved",
+      "disposition": "merge",
+      "target": "basis.time.now",
+      "reason": "Текущее время в пользовательском часовом поясе через общий запрос времени.",
+      "previousTools": [
+        "get_timezone_info",
+        "respond"
+      ]
+    },
+    {
+      "id": 20,
+      "oldName": "show_day_of_week",
+      "oldKey": "show_day_of_week",
+      "status": "pending",
+      "disposition": "retire",
+      "target": null,
+      "reason": "Узкое обученное правило дня недели не переносится как просмотр календаря; вопрос остаётся обычному диалогу.",
+      "previousTools": [
+        "get_day_of_week_date",
+        "get_events",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 21,
+      "oldName": "timezone_conversion",
+      "oldKey": "timezone_conversion",
+      "status": "rejected",
+      "disposition": "rewrite",
+      "target": "basis.time.convert",
+      "reason": "Явная конвертация времени с реальными правилами часовых поясов, без текущего фиксированного смещения.",
+      "previousTools": [
+        "calculate",
+        "get_timezone_info"
+      ]
+    },
+    {
+      "id": 22,
+      "oldName": "get_time_in_timezone",
+      "oldKey": "get_time_in_timezone",
+      "status": "approved",
+      "disposition": "merge",
+      "target": "basis.time.now",
+      "reason": "Время в городе или часовом поясе объединено с общим запросом времени.",
+      "previousTools": [
+        "get_timezone_info"
+      ]
+    },
+    {
+      "id": 23,
+      "oldName": "create_event_tomorrow_at_hour",
+      "oldKey": "create_event_tomorrow_at_hour",
+      "status": "rejected",
+      "disposition": "rewrite",
+      "target": "basis.event.create",
+      "reason": "Неоднозначный голый час не угадывается; используется общий сценарий создания.",
+      "previousTools": [
+        "ask_user",
+        "create_event",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 24,
+      "oldName": "create_event_with_invitation",
+      "oldKey": "create_event_with_invitation",
+      "status": "pending",
+      "disposition": "retire",
+      "target": null,
+      "reason": "Составной рецепт создания и приглашения не активируется автоматически: нужны отдельное подтверждение события и проверка адресата.",
+      "previousTools": [
+        "create_event",
+        "find_user",
+        "send_invitation"
+      ]
+    },
+    {
+      "id": 25,
+      "oldName": "show_upcoming",
+      "oldKey": "show_upcoming",
+      "status": "pending",
+      "disposition": "merge",
+      "target": "basis.calendar.upcoming",
+      "reason": "Ближайшие события с ограниченным параметром количества.",
+      "previousTools": [
+        "get_upcoming"
+      ]
+    },
+    {
+      "id": 26,
+      "oldName": "greet_show_upcoming",
+      "oldKey": "greet_show_upcoming",
+      "status": "rejected",
+      "disposition": "retire",
+      "target": null,
+      "reason": "Приветствие больше не запускает чтение календаря без явного намерения.",
+      "previousTools": [
+        "get_upcoming"
+      ]
+    },
+    {
+      "id": 27,
+      "oldName": "remember_fact",
+      "oldKey": "remember_fact",
+      "status": "approved",
+      "disposition": "rewrite",
+      "target": "basis.memory.remember",
+      "reason": "Сохранение факта только по явному запросу, с добавлением вместо переписывания всей памяти.",
+      "previousTools": [
+        "remember_user_fact"
+      ]
+    },
+    {
+      "id": 28,
+      "oldName": "get_event_time_by_query",
+      "oldKey": "get_event_time_by_query",
+      "status": "pending",
+      "disposition": "merge",
+      "target": "basis.calendar.search",
+      "reason": "Поиск времени события объединён с поиском события по запросу.",
+      "previousTools": [
+        "search_events"
+      ]
+    },
+    {
+      "id": 29,
+      "oldName": "delete_last_mentioned_duplicate",
+      "oldKey": "delete_last_mentioned_duplicate",
+      "status": "pending",
+      "disposition": "retire",
+      "target": null,
+      "reason": "Удаление последнего упомянутого дубля небезопасно без однозначного выбора; нужен явный номер события.",
+      "previousTools": [
+        "delete_event",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 30,
+      "oldName": "create_event_tomorrow_at_time_with_title",
+      "oldKey": "create_event_tomorrow_at_time_with_title",
+      "status": "pending",
+      "disposition": "rewrite",
+      "target": "basis.event.create",
+      "reason": "Вариант порядка названия, даты и времени заменён общим созданием.",
+      "previousTools": [
+        "create_event",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 31,
+      "oldName": "create_event_today_time_range",
+      "oldKey": "create_event_today_time_range",
+      "status": "pending",
+      "disposition": "rewrite",
+      "target": "basis.event.create_range",
+      "reason": "Начало и конец задаются явно в одном проверенном диапазоне, после подтверждения.",
+      "previousTools": [
+        "create_event",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 32,
+      "oldName": "mark_me_upcoming",
+      "oldKey": "mark_me_upcoming",
+      "status": "pending",
+      "disposition": "retire",
+      "target": null,
+      "reason": "Фраза отметь меня неоднозначна: участие, напоминание и создание не отождествляются.",
+      "previousTools": [
+        "get_upcoming"
+      ]
+    },
+    {
+      "id": 33,
+      "oldName": "invite_user",
+      "oldKey": "invite_user",
+      "status": "pending",
+      "disposition": "rewrite",
+      "target": "basis.invite.send",
+      "reason": "Общее приглашение с явной целью и проверенным получателем вместо узкого обученного рецепта.",
+      "previousTools": [
+        "find_user",
+        "send_invitation"
+      ]
+    },
+    {
+      "id": 34,
+      "oldName": "create_event_tomorrow",
+      "oldKey": "create_event_tomorrow",
+      "status": "pending",
+      "disposition": "rewrite",
+      "target": "basis.event.create",
+      "reason": "Завтра и название — параметры общего сценария создания.",
+      "previousTools": [
+        "create_event",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 35,
+      "oldName": "invite_to_event",
+      "oldKey": "invite_to_event",
+      "status": "pending",
+      "disposition": "rewrite",
+      "target": "basis.invite.send",
+      "reason": "Приглашение объединено с единым подтверждаемым сценарием отправки.",
+      "previousTools": [
+        "find_contact",
+        "send_invitation"
+      ]
+    },
+    {
+      "id": 36,
+      "oldName": "create_event_tomorrow_at_time",
+      "oldKey": "create_event_tomorrow_at_time",
+      "status": "pending",
+      "disposition": "rewrite",
+      "target": "basis.event.create",
+      "reason": "Дата и время типизированы; конкретный шаблон завтра не сохраняется отдельно.",
+      "previousTools": [
+        "create_event",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 37,
+      "oldName": "create_event_tomorrow_timerange",
+      "oldKey": "create_event_tomorrow_timerange",
+      "status": "pending",
+      "disposition": "rewrite",
+      "target": "basis.event.create_range",
+      "reason": "Вариант завтра с диапазоном объединён с общим началом и концом.",
+      "previousTools": [
+        "create_event",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 38,
+      "oldName": "create_veterinary_event",
+      "oldKey": "create_veterinary_event",
+      "status": "rejected",
+      "disposition": "merge",
+      "target": "basis.event.create",
+      "reason": "Ветеринар — название обычного события, а не отдельная функция.",
+      "previousTools": [
+        "create_event",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 39,
+      "oldName": "check_telegram_connection",
+      "oldKey": "check_telegram_connection",
+      "status": "approved",
+      "disposition": "rewrite",
+      "target": "basis.telegram.status",
+      "reason": "Приватная проверка состояния подключённого Telegram без авторизации другого человека.",
+      "previousTools": [
+        "connect_telegram_status"
+      ]
+    },
+    {
+      "id": 40,
+      "oldName": "remember_user_location",
+      "oldKey": "remember_user_location",
+      "status": "rejected",
+      "disposition": "rewrite",
+      "target": "basis.memory.remember",
+      "reason": "Место пользователя сохраняется как факт только по явной просьбе, без автоперезаписи памяти.",
+      "previousTools": [
+        "remember_user_fact"
+      ]
+    },
+    {
+      "id": 41,
+      "oldName": "convert_time_to_utc",
+      "oldKey": "convert_time_to_utc",
+      "status": "pending",
+      "disposition": "rewrite",
+      "target": "basis.time.convert",
+      "reason": "UTC — явный параметр общей конвертации времени.",
+      "previousTools": [
+        "calculate"
+      ]
+    },
+    {
+      "id": 42,
+      "oldName": "show_todays_events_in_city",
+      "oldKey": "show_todays_events_in_city",
+      "status": "rejected",
+      "disposition": "retire",
+      "target": null,
+      "reason": "Старое правило обещало фильтр города, которого вызов событий не выполнял. Уточнение остаётся обычному диалогу.",
+      "previousTools": [
+        "get_events",
+        "render_day_image"
+      ]
+    },
+    {
+      "id": 43,
+      "oldName": "save_contact_and_invite",
+      "oldKey": "save_contact_and_invite",
+      "status": "rejected",
+      "disposition": "retire",
+      "target": null,
+      "reason": "Сохранение контакта и приглашение не склеиваются без раздельной проверки личности и результата записи.",
+      "previousTools": [
+        "find_user",
+        "send_invitation",
+        "update_contact"
+      ]
+    },
+    {
+      "id": 44,
+      "oldName": "remind_in_hours",
+      "oldKey": "remind_in_hours",
+      "status": "pending",
+      "disposition": "rewrite",
+      "target": "basis.reminder.after",
+      "reason": "Часы и минуты сведены к относительной длительности; создаётся одна явно подтверждённая запись-напоминание.",
+      "previousTools": [
+        "calculate",
+        "schedule_ai_call"
+      ]
+    },
+    {
+      "id": 45,
+      "oldName": "add_contact_and_send_invitation",
+      "oldKey": "add_contact_and_send_invitation",
+      "status": "pending",
+      "disposition": "retire",
+      "target": null,
+      "reason": "Составной рецепт контакта и отправки удалён; обычный диалог использует реальные инструменты и их результаты.",
+      "previousTools": [
+        "add_contact",
+        "find_user",
+        "send_invitation"
+      ]
+    },
+    {
+      "id": 46,
+      "oldName": "invite_user_by_name",
+      "oldKey": "invite_user_by_name",
+      "status": "pending",
+      "disposition": "retire",
+      "target": null,
+      "reason": "Одно имя не является адресом доставки. Требуется разрешение контакта до устойчивого ID, а не слепое воспроизведение рецепта.",
+      "previousTools": [
+        "find_user",
+        "send_invitation"
+      ]
+    },
+    {
+      "id": 47,
+      "oldName": "get_timezone_setting",
+      "oldKey": "get_timezone_setting",
+      "status": "pending",
+      "disposition": "merge",
+      "target": "basis.settings.view",
+      "reason": "Часовой пояс читается из общих настроек пользователя.",
+      "previousTools": [
+        "manage_settings"
+      ]
+    },
+    {
+      "id": 48,
+      "oldName": "get_time_in_location",
+      "oldKey": "get_time_in_location",
+      "status": "pending",
+      "disposition": "merge",
+      "target": "basis.time.now",
+      "reason": "Время в месте объединено с общим запросом времени.",
+      "previousTools": [
+        "get_timezone_info"
+      ]
+    },
+    {
+      "id": 49,
+      "oldName": "search_flight_time",
+      "oldKey": "search_flight_time",
+      "status": "pending",
+      "disposition": "merge",
+      "target": "basis.calendar.search",
+      "reason": "Рейс — содержимое поискового запроса, не отдельный инструмент.",
+      "previousTools": [
+        "search_events"
+      ]
+    },
+    {
+      "id": 50,
+      "oldName": "create_barbershop_event",
+      "oldKey": "create_barbershop_event",
+      "status": "pending",
+      "disposition": "merge",
+      "target": "basis.event.create",
+      "reason": "Парикмахерская — название обычного события, не отдельный интент.",
+      "previousTools": [
+        "create_event",
+        "find_user",
+        "send_invitation"
+      ]
+    },
+    {
+      "id": 51,
+      "oldName": "create_laser_event",
+      "oldKey": "create_laser_event",
+      "status": "pending",
+      "disposition": "merge",
+      "target": "basis.event.create",
+      "reason": "Лазерная процедура — название обычного события, не отдельный интент.",
+      "previousTools": [
+        "create_event",
+        "find_user",
+        "send_invitation"
+      ]
+    },
+    {
+      "id": 52,
+      "oldName": "show_events_for_date",
+      "oldKey": "show_events_for_date",
+      "status": "rejected",
+      "disposition": "rewrite",
+      "target": "basis.calendar.day",
+      "reason": "Явная дата проверяется на существование и интерпретируется в часовом поясе пользователя.",
+      "previousTools": [
+        "get_events"
+      ]
+    },
+    {
+      "id": 53,
+      "oldName": "check_events_at_time",
+      "oldKey": "check_events_at_time",
+      "status": "pending",
+      "disposition": "rewrite",
+      "target": "basis.slots.check_time",
+      "reason": "Проверка занятости использует интервалы, включая начавшиеся раньше события, а не только начала внутри часа.",
+      "previousTools": [
+        "get_events"
+      ]
+    },
+    {
+      "id": 54,
+      "oldName": "report_errors",
+      "oldKey": "report_errors",
+      "status": "pending",
+      "disposition": "rewrite",
+      "target": "basis.actionlog.recent",
+      "reason": "Личная история действий читается реальным инструментом; вывод не выдаётся за доказанную причину ошибки.",
+      "previousTools": []
+    },
+    {
+      "id": 55,
+      "oldName": "show_week_image",
+      "oldKey": "show_week_image",
+      "status": "pending",
+      "disposition": "merge",
+      "target": "basis.calendar.image",
+      "reason": "Тип картинки и период задаются параметрами общего рендера.",
+      "previousTools": [
+        "render_week_image"
+      ]
+    },
+    {
+      "id": 56,
+      "oldName": "show_next_week_image",
+      "oldKey": "show_next_week_image",
+      "status": "approved",
+      "disposition": "merge",
+      "target": "basis.calendar.image",
+      "reason": "Картинка следующей недели объединена с общим рендером календаря.",
+      "previousTools": [
+        "render_week_image"
+      ]
+    }
+  ],
+  "note": "Это отдельная группа записей БД, не дополнительные готовые функции поверх 104 исходных рецептов. Старые workflow и личные примеры не публикуются."
+}

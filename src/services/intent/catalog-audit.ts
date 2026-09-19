@@ -91,9 +91,21 @@ function matcher(seeds: Seed[]): IntentMatcher {
 export function auditDefinition(seed: Seed) {
   const parsed = WorkflowSchema.safeParse(seed.workflow);
   const errors = parsed.success ? validateWorkflow(parsed.data, seed.pattern) : [];
-  const required = [
-    ...new Set([...JSON.stringify(seed.workflow).matchAll(/\{\{(\$\d+)(?:\||\}\})/g)].map((m) => m[1]!)),
-  ];
+  const requiredSet = new Set<string>();
+  const captureText = (text: string) => {
+    for (const match of text.matchAll(/\{\{(\$\d+)([^}]*)\}\}/g))
+      if (!match[2]?.includes('default(')) requiredSet.add(match[1]!);
+  };
+  const source = seed.workflow as { bindings?: { [key: string]: { [key: string]: unknown } }; [key: string]: unknown };
+  const { bindings, ...body } = source;
+  captureText(JSON.stringify(body));
+  for (const binding of Object.values(bindings ?? {}))
+    for (const [key, value] of Object.entries(binding)) {
+      if (key === 'from' && (binding.optional === true || binding.default_amount !== undefined)) continue;
+      captureText(JSON.stringify(value));
+    }
+  const required = [...requiredSet];
+
   const m = matcher([seed]);
   let matched = 0;
   let missing = 0;

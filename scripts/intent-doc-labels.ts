@@ -1,5 +1,116 @@
-// Intended jobs for recovered source candidates, not a claim of implemented behavior.
-export const candidateTaskLabels: Record<string, string> = {
+/** Russian labels for the generated intent documentation; the source seed keeps English titles. */
+
+/** Title of each canonical rule. Every rule in the seed has exactly one entry. */
+export const canonicalTitles: { [name: string]: string } = {
+  'basis.calendar.day': 'События на один день',
+  'basis.calendar.period': 'События недели, месяца или выходных',
+  'basis.calendar.upcoming': 'Ближайшие события',
+  'basis.calendar.search': 'Поиск событий по названию',
+  'basis.calendar.count': 'Сколько событий за период',
+  'basis.calendar.image': 'Календарь картинкой',
+  'basis.slots.day': 'Свободное время в один день',
+  'basis.slots.week': 'Свободное время по дням недели',
+  'basis.slots.check_time': 'Свободен ли я в указанное время',
+  'basis.holidays.upcoming': 'Ближайшие праздники',
+  'basis.event.create': 'Создать событие с названием, днём и временем',
+  'basis.event.show': 'Показать одно событие по номеру или точному названию',
+  'basis.event.reschedule': 'Перенести событие на явный день и время',
+  'basis.event.rename': 'Переименовать событие',
+  'basis.event.set_detail': 'Изменить место или описание события',
+  'basis.event.delete': 'Удалить одно событие после подтверждения',
+  'basis.event.snooze': 'Сдвинуть событие позже на минуты или часы',
+  'basis.event.hide': 'Сделать событие приватным',
+  'basis.reminder.set': 'Напомнить до события',
+  'basis.reminder.list': 'Показать напоминания события',
+  'basis.reminder.clear': 'Убрать напоминания одного события',
+  'basis.invite.send': 'Пригласить человека на своё событие',
+  'basis.invite.status': 'Кто приглашён на событие',
+  'basis.contacts.list': 'Список моих контактов',
+  'basis.contacts.find': 'Найти контакт по имени',
+  'basis.contacts.add': 'Сохранить контакт',
+  'basis.contacts.rename': 'Переименовать контакт',
+  'basis.contacts.set_username': 'Задать username контакта',
+  'basis.contacts.delete': 'Удалить один контакт после подтверждения',
+  'basis.settings.view': 'Показать мои настройки',
+  'basis.settings.toggle': 'Включить или выключить уведомление или голос',
+  'basis.settings.agenda_time': 'Время утренней или вечерней сводки',
+  'basis.settings.duration': 'Длительность события по умолчанию',
+  'basis.settings.language': 'Сменить язык бота',
+  'basis.settings.timezone': 'Задать часовой пояс по названию IANA',
+  'basis.history.search': 'Поиск по истории чата',
+  'basis.actionlog.recent': 'Что бот менял недавно',
+  'basis.memory.remember': 'Запомнить факт по явной просьбе',
+  'basis.time.now': 'Текущее время здесь или в городе',
+  'basis.time.convert': 'Перевести моё время сегодня в другой часовой пояс',
+  'basis.calc.evaluate': 'Вычислить арифметическое выражение',
+  'basis.google.status': 'Подключён ли Google Календарь',
+  'basis.google.calendars': 'Список моих календарей Google',
+  'basis.google.connect_help': 'Как подключить, переподключить или отключить Google Календарь',
+  'basis.secretary.list': 'Кто имеет доступ к моему календарю',
+  'basis.secretary.invite': 'Дать доступ по числовому Telegram ID',
+  'basis.secretary.clarify': 'Запросить числовой ID вместо доступа по @username',
+  'basis.bot.info': 'Что умеет бот и как связаться с разработчиком',
+  'basis.event.create_range': 'Создать событие с явным началом и концом',
+  'basis.telegram.status': 'Статус подключённого личного Telegram',
+  'basis.call.start': 'Позвонить на запросившую учётную запись',
+  'basis.reminder.after': 'Напоминание через заданное время',
+};
+
+/** Category headings in display order; a category present in the seed but missing here fails the build. */
+export const categoryTitles: { [category: string]: string } = {
+  calendar: 'Расписание',
+  slots: 'Свободное время',
+  events: 'События',
+  reminders: 'Напоминания',
+  invitations: 'Приглашения',
+  contacts: 'Контакты',
+  settings: 'Настройки',
+  history: 'История и журнал',
+  memory: 'Память',
+  utility: 'Время и вычисления',
+  google: 'Google Календарь',
+  secretary: 'Доступ помощников',
+  bot: 'О боте и подключениях',
+};
+
+/** What each risk level lets a rule do, in the reader's words. */
+export const riskTitles: { [risk: string]: string } = {
+  read: 'Чтение своего календаря',
+  private_read: 'Чтение личных данных',
+  write: 'Изменение данных',
+  sensitive_write: 'Изменение доступа или личности',
+};
+
+export const dispositionTitles: { [disposition: string]: string } = {
+  merge: 'Слито в общее правило',
+  rewrite: 'Переписано заново',
+  retire: 'Выведено без замены',
+};
+
+/** How each typed binding reads the message, for the engine section and the workflow descriptions. */
+export const bindingTypeTitles: { [type: string]: string } = {
+  integer: 'целое число в заданных границах',
+  enum: 'выбор из закрытого списка слов',
+  text: 'очищенный текст ограниченной длины',
+  date: 'календарный день: слово или полная дата',
+  time: 'время суток в формате ЧЧ:ММ',
+  period: 'период: день, неделя, месяц или выходные',
+  datetime: 'один момент времени из дня и времени в часовом поясе пользователя',
+  duration: 'длительность в минутах из числа и единицы',
+  relative_instant: 'момент через заданную длительность от текущего',
+  timezone: 'название часового пояса IANA',
+  eventref: 'ссылка на одно событие: номер или точное название',
+  recipient: 'один адресат: числовой ID или проверяемый username',
+};
+
+/** Public title each earlier rule carried. Every key in the lineage table has exactly one entry. */
+export const legacyTitles: { [oldKey: string]: string } = {
+  show_today: 'Расписание сегодня',
+  show_tomorrow: 'Расписание завтра',
+  show_week: 'Расписание недели',
+  free_slots_today: 'Свободное время сегодня',
+  search_events_by_query: 'Поиск по словам',
+  create_event_named_tomorrow: 'Создать завтра с подтверждением',
   list_contacts: 'Список личных контактов',
   find_contact_by_name: 'Найти контакт по имени',
   who_is_contact: 'Уточнить сведения о контакте',

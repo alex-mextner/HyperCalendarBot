@@ -318,7 +318,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const intentLearnerDailyLimit = envConfig?.INTENT_LEARNER_DAILY_LIMIT ?? 100;
 
   const intentLearner =
-    botAdminId && !Number.isNaN(botAdminId)
+    botAdminId && !Number.isNaN(botAdminId) && !intentRepo.isManagedBasis()
       ? new IntentLearner(intentRepo, {
           dailyLimit: intentLearnerDailyLimit,
           adminId: botAdminId,
