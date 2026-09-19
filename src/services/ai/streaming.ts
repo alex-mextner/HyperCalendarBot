@@ -11,7 +11,8 @@
 
 import OpenAI from 'openai';
 import type { CompletionUsage } from 'openai/resources/completions';
-import { type ChainOrder, loadConfig } from '../../config/env.ts';
+import { type ChainOrder, type EnvConfig, loadConfig } from '../../config/env.ts';
+import type { GroqTokenLimits } from '../../config/groq-token-limits.ts';
 import {
   type ProviderChainKind,
   reportAllProvidersFailed,
@@ -121,15 +122,19 @@ export interface RequestFitRejection {
 /**
  * Skip only requests that cannot fit even at the optimistic edge of our ±20%
  * token estimator. This avoids false skips near the boundary while preventing a
- * guaranteed Groq 413 for the current 8K on-demand gpt-oss tiers.
+ * guaranteed size rejection against the configured account limit or conservative free-tier default.
  */
 export function preflightRequestFit(
   provider: ProviderId,
   model: string,
   options: Pick<StreamRoundOptions, 'messages' | 'tools' | 'maxTokens'>,
+  configuredLimits?: GroqTokenLimits,
 ): RequestFitRejection | null {
   if (provider !== 'groq') return null;
-  const limitTokens = GROQ_ON_DEMAND_TPM_LIMITS.get(model);
+  const limitTokens =
+    configuredLimits && Object.hasOwn(configuredLimits, model)
+      ? configuredLimits[model]
+      : GROQ_ON_DEMAND_TPM_LIMITS.get(model);
   if (!limitTokens) return null;
 
   const serializedInput = JSON.stringify({ messages: options.messages, tools: options.tools ?? [] });
@@ -615,8 +620,7 @@ function buildChain(
   return fallback;
 }
 
-function buildSmartChain(): ProviderSlot[] {
-  const cfg = loadConfig();
+function buildSmartChain(cfg: EnvConfig): ProviderSlot[] {
   return buildChain('smart', cfg.AI_SMART_CHAIN, {
     zai: { model: cfg.ZAI_MODEL, apiKey: cfg.ZAI_API_KEY, baseUrl: cfg.ZAI_BASE_URL },
     groq: { model: cfg.GROQ_MODEL, apiKey: cfg.GROQ_API_KEY },
@@ -625,8 +629,7 @@ function buildSmartChain(): ProviderSlot[] {
   });
 }
 
-function buildFastChain(): ProviderSlot[] {
-  const cfg = loadConfig();
+function buildFastChain(cfg: EnvConfig): ProviderSlot[] {
   return buildChain('fast', cfg.AI_FAST_CHAIN, {
     zai: { model: cfg.ZAI_FAST_MODEL, apiKey: cfg.ZAI_API_KEY, baseUrl: cfg.ZAI_BASE_URL },
     groq: { model: cfg.GROQ_FAST_MODEL, apiKey: cfg.GROQ_API_KEY },
@@ -740,7 +743,8 @@ export async function aiStreamRound(
 ): Promise<StreamRoundResult> {
   const roundStartedAt = performance.now();
   const chainKind: ProviderChainKind = options.fast ? 'fast' : 'smart';
-  const chain = options.fast ? buildFastChain() : buildSmartChain();
+  const cfg = loadConfig();
+  const chain = options.fast ? buildFastChain(cfg) : buildSmartChain(cfg);
   const failures: ProviderFailure[] = [];
   let actualAttempts = 0;
   // Anything the caller has already shown the user for this round: streamed text
@@ -772,7 +776,7 @@ export async function aiStreamRound(
 
   for (const slot of attempts) {
     const requestModel = getModelOverride(slot.provider, slot.configuredModel) ?? slot.configuredModel;
-    const fitRejection = preflightRequestFit(slot.provider, requestModel, options);
+    const fitRejection = preflightRequestFit(slot.provider, requestModel, options, cfg.GROQ_TPM_LIMITS);
     if (fitRejection) {
       const provider = slotName(slot.label, requestModel);
       const message = `Preflight skipped: conservative request estimate ${fitRejection.conservativeRequestedTokens} tokens exceeds known ${fitRejection.limitTokens} TPM limit`;

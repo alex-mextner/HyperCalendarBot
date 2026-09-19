@@ -64,6 +64,16 @@ describe('isTransientProviderError — classifies a failure for logging and the 
 });
 
 describe('preflightRequestFit', () => {
+  test('paid account override admits a large request without lifting other model limits', () => {
+    const large = { messages: [{ role: 'user' as const, content: 'x'.repeat(50000) }], maxTokens: 200 };
+    const limits = { 'openai/gpt-oss-120b': 250000 };
+    expect(preflightRequestFit('groq', 'openai/gpt-oss-120b', large, limits)).toBeNull();
+    expect(preflightRequestFit('groq', 'openai/gpt-oss-20b', large, limits)?.limitTokens).toBe(8000);
+    expect(
+      preflightRequestFit('groq', 'openai/gpt-oss-120b', large, { 'openai/gpt-oss-120b': 1000 })?.limitTokens,
+    ).toBe(1000);
+  });
+
   test('rejects a Groq gpt-oss request that cannot fit even at the optimistic estimator bound', () => {
     const result = preflightRequestFit('groq', 'openai/gpt-oss-120b', {
       messages: [{ role: 'user', content: 'x'.repeat(50_000) }],

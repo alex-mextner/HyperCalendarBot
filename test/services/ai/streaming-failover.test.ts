@@ -696,6 +696,21 @@ describe('durable provider circuit', () => {
 });
 
 describe('provider order', () => {
+  test('verified account limit reaches actual Groq request preflight', async () => {
+    process.env.AI_SMART_CHAIN = 'groq,gemini';
+    process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
+    process.env.GROQ_TPM_LIMITS = '{"openai/gpt-oss-120b":250000}';
+    groq = makeProvider({ behaviors: [{ kind: 'text', text: 'large request admitted' }] });
+    gemini = unusedProvider();
+    hf = unusedProvider();
+    zai = unusedProvider();
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'x'.repeat(50000) }], maxTokens: 200 });
+    expect(result.text).toBe('large request admitted');
+    expect(result.metrics?.attemptCount).toBe(1);
+    expect(groq.requestedModels).toEqual(['openai/gpt-oss-120b']);
+    expect(gemini.requestedModels).toEqual([]);
+  });
+
   // The order is the whole point of the configuration: a provider that answers
   // 429 all week, or whose tier rejects every request of this size, must be
   // routed around without a deploy.

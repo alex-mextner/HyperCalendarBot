@@ -58,6 +58,30 @@ describe('loadConfig', () => {
     expect(loadConfig().AI_TOOL_SCHEMA_USER_IDS).toBeUndefined();
   });
 
+  test('Groq account token limits are optional, strict and model-specific', () => {
+    delete process.env.GROQ_TPM_LIMITS;
+    expect(loadConfig().GROQ_TPM_LIMITS).toBeUndefined();
+    process.env.GROQ_TPM_LIMITS = '{"openai/gpt-oss-120b":250000}';
+    expect(loadConfig().GROQ_TPM_LIMITS).toEqual({ 'openai/gpt-oss-120b': 250000 });
+    for (const invalid of [
+      '',
+      'null',
+      '[]',
+      '{broken',
+      '{"x":0}',
+      '{"x":-1}',
+      '{"x":1.5}',
+      '{"x":"8000"}',
+      '{"__proto__":8000}',
+      '{"x":1e20}',
+      ' '.repeat(4097),
+      JSON.stringify(Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`model${i}`, 8000]))),
+    ]) {
+      process.env.GROQ_TPM_LIMITS = invalid;
+      expect(() => loadConfig()).toThrow('GROQ_TPM_LIMITS');
+    }
+  });
+
   describe('provider chain order', () => {
     const SMART_DEFAULT: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
     const FAST_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
