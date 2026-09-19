@@ -34,3 +34,9 @@ Explain what a change does before citing its issue number. Use concrete dates fo
 - Noninteractive commands use closed stdin and explicit search roots. Put complex quoting in checked-in or temporary scripts; do not weaken permissions or work around security policy.
 - Poll bounded log tails and do useful independent work instead of flooding the conversation with empty one-second polls. No guarantee or invented cause for a platform-level Thinking failed message.
 - Ship through the normal shared gates and local CI fallback. If ship removes the PR worktree, continue from the stable canonical repository and exact merged blobs. Preserve useful changes before cleanup.
+
+## Benchmark retention
+
+- Preserve every prior raw measurement and derived score as timestamped, append-only evidence with a source SHA/tree, fixture/prompt/schema version, model settings, scope and checksum. Never overwrite a baseline to make progress look better.
+- Separate synthetic payload estimates, small provider probes, controlled live requests and natural traffic distributions. Report sample size, failures, retries, missing usage and delivery boundaries; one sample is not a production percentile target.
+- Keep personal conversation/calendar data and credentials out of committed reports. Store private raw records under restricted local logs; checked-in summaries must carry enough methodology to reproduce comparisons safely.

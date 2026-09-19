@@ -16,6 +16,7 @@ import { UserRepository } from '../src/database/repositories/user.repository.ts'
 import { runMigrations } from '../src/database/schema.ts';
 import { buildSystemPrompt } from '../src/services/ai/system-prompt.ts';
 import { estimateTokens } from '../src/services/ai/token-estimate.ts';
+import { createToolExposure } from '../src/services/ai/tool-exposure.ts';
 import { getToolDefinitions } from '../src/services/ai/tools.ts';
 import type { AgentContext } from '../src/services/ai/types.ts';
 import { ConversationLogger } from '../src/services/conversation-logger.ts';
@@ -75,14 +76,24 @@ interface Row {
   totalTokens: number;
 }
 
-function measure({ label, ctx }: Variant): Row {
-  const tools = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
+function measure({ label, ctx }: Variant, schemas: 'full' | 'lazy_initial' | 'lazy_read' = 'full'): Row {
+  const allTools = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
+  const exposure = schemas === 'full' ? undefined : createToolExposure(allTools);
+  if (exposure && schemas === 'lazy_read') {
+    const result = exposure.intercept(
+      'discover_tools',
+      { groups: ['calendar.read'], tools: ['calculate'] },
+      exposure.snapshot(),
+    );
+    if (!result?.success || !result.output) throw new Error('Invalid payload fixture');
+  }
+  const tools = exposure?.schemas() ?? allTools;
   const toolJson = JSON.stringify(tools);
-  const prompt = buildSystemPrompt(ctx);
+  const prompt = buildSystemPrompt(ctx) + (exposure ? `\n\n${exposure.prompt}` : '');
   const toolTokens = estimateTokens(toolJson);
   const promptTokens = estimateTokens(prompt);
   return {
-    label,
+    label: `${label} ${schemas}`,
     toolCount: tools.length,
     toolChars: toolJson.length,
     toolTokens,
@@ -111,5 +122,17 @@ function printTable(rows: Row[]): void {
 }
 
 const base = buildBaseContext();
-printTable(buildVariants(base).map(measure));
-console.log('\nToken counts are estimates (±20%), not a tokenizer. Groq TPM limit for this account: 8000.');
+const rows = buildVariants(base).flatMap((variant) =>
+  (['full', 'lazy_initial', 'lazy_read'] as const).map((mode) => measure(variant, mode)),
+);
+if (Bun.argv.includes('--json')) {
+  console.log(
+    `PAYLOAD_JSON ${JSON.stringify({ measuredAt: new Date().toISOString(), kind: 'synthetic_payload_estimate', estimator: 'estimateTokens ±20%; no history/data/HTTP latency', rows })}`,
+  );
+} else {
+  printTable(rows);
+  console.log('\nIncludes the discovery schema and short index. Token counts are estimates (±20%), not billed usage.');
+  console.log(
+    'No history, retrieved user data or extra discovery-round latency is included. Account rate limits must be read from the provider, not this script.',
+  );
+}

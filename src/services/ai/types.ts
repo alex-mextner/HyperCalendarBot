@@ -355,6 +355,9 @@ export interface ToolHandlerMeta {
 }
 
 export interface AgentConfig {
+  /** Opt-in rollout; default preserves the full canonical tool payload. */
+  toolSchemaMode?: 'full' | 'lazy';
+  toolSchemaUserIds?: readonly number[];
   debugLogger?: import('./debug-logger.ts').AiDebugLogger;
   summarizer?: import('./history-summarizer.ts').HistorySummarizer;
 }
