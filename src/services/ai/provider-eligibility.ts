@@ -15,10 +15,15 @@
 //     readiness endpoint and the admin alerting read — those must keep saying
 //     what actually happened, and silence is not health.
 //   • A block is bounded. An explicit provider reset is trusted (up to 32 days)
-//     so a weekly/monthly cap is not retried every hour; a vague rate limit still
+//     so a weekly/monthly cap is not retried every hour; a request-specific rate limit still
 //     gets only two minutes because guessing long is the expensive mistake.
 //   • A block never empties the chain. If every provider is blocked the request
 //     is attempted anyway — a wasted round trip beats no answer at all.
+//
+// Account-level failures (spent credits or quota, a rejected key) are NOT owned
+// here: provider-circuit.ts keeps them durably, across chains and restarts, and
+// never forces a depleted account. What stays here is what only says something
+// about a chain or a request shape — a request-specific rate/size rejection.
 
 import type { ProviderChainKind } from '../../utils/ai-provider-alert.ts';
 import { logger } from '../../utils/logger.ts';
@@ -96,7 +101,7 @@ function plainHeader(headers: object, name: string): unknown {
  * that quietly returns nothing would leave every rate limit on the two-minute
  * guess while the provider was telling us exactly when to come back.
  */
-function retryAfterMs(headers: unknown, now: number): number | null {
+export function retryAfterMs(headers: unknown, now: number): number | null {
   if (typeof headers !== 'object' || headers === null) return null;
   const raw =
     'get' in headers && typeof headers.get === 'function'

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
+import { loadConfig } from '../src/config/env.ts';
+import { configureProviderCircuit, resetProviderCircuit } from '../src/services/ai/provider-circuit.ts';
 import { aiStreamRound, type StreamRoundOptions, type StreamRoundResult } from '../src/services/ai/streaming.ts';
 
 const EXPECTED = 'HCB_RUNTIME_OK';
@@ -41,6 +43,8 @@ export async function probeAiChain(
   }
 }
 if (import.meta.main) {
+  const config = loadConfig();
+  configureProviderCircuit(`${config.DATABASE_PATH}.provider-state.sqlite`);
   const { values } = parseArgs({
     args: process.argv.slice(2),
     options: { smart: { type: 'boolean', default: false } },
@@ -48,5 +52,6 @@ if (import.meta.main) {
   });
   const result = await probeAiChain(!values.smart);
   console.log(`PROBE_JSON ${JSON.stringify(result)}`);
+  resetProviderCircuit();
   if (!result.ok) process.exitCode = 1;
 }

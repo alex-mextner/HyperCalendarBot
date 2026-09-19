@@ -220,16 +220,27 @@ unconfigured falls back to the default order over whatever IS configured (logged
 error). Reordering during an incident is an `.env` edit and a restart — do not hardcode
 a new order in `streaming.ts`.
 
-**A provider that says it is out is benched, not retried**: `src/services/ai/provider-eligibility.ts`
-remembers "this provider is out until T" from the two failures that state it — a spent quota
-(429, with the stated reset or `Retry-After`, trusted up to an hour) and a request rejected
-for its size (413, and only when the request carried the tool catalog, which is the fixed
-floor no retry shrinks; without it the size came from the conversation and says nothing about
-the next request). Blocks are keyed by provider AND chain, because the two chains run
-different models and fail independently.
-A bench suppresses calls, never observations: the outage records the readiness endpoint and
-the admin alerting read are written exactly as before, and a chain where every provider is
-benched is attempted anyway rather than answering nobody.
+**A depleted or rejected provider account is skipped, not retried**: `src/services/ai/provider-circuit.ts`
+keeps one durable circuit per provider account for every provider in the chain (key = fingerprint
+of provider id, endpoint and credential, so it covers the smart and the fast chain and resets when
+a key is rotated). 402, non-request-specific 429 and 401/403 open it at once; 5xx/connection faults open it
+after 3 in a row. While open the account is skipped silently (recorded as `skippedProviders`, never
+counted as an attempt) and it is NEVER forced: a chain whose accounts are all open fails with
+`AllProvidersFailedError` of skipped diagnostics. After the provider's `Retry-After` or a reset
+timestamp that names its zone (otherwise bounded exponential backoff, 5 min to 6 h) exactly one
+caller holds a 2-minute half-open lease across all processes; only a real provider answer closes the
+circuit, a passing deadline never does. The admin gets ONE notice per incident, through the generic
+alert layer, built from class, status and the quoted reset — never the provider's error body; the
+notice stays `pending` until that layer confirms it was sent. State is the sidecar file
+`<DATABASE_PATH>.provider-state.sqlite` (mode 0600, no calendar migration; in memory when not
+configured, so scripts never touch it). Storage errors fail open.
+A caller abort, a 400, a size rejection and a vague 429 say nothing about the account and never open it.
+`src/services/ai/provider-eligibility.ts` keeps the per-chain, in-memory memory of those last two:
+a rate limit with no stated reset (two minutes) and a request rejected for its size (413, only when
+the request carried the tool catalog; blocks are keyed by provider AND chain). That memory
+suppresses calls, never observations: the outage records the readiness endpoint and the admin
+alerting read are written exactly as before, and a chain where every provider is only
+eligibility-benched is still attempted rather than answering nobody.
 
 Optional features that depend on an env var must deactivate gracefully when the var is absent — never throw at startup. Validate at the point of use, not at startup.
 

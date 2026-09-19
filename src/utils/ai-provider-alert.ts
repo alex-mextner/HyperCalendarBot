@@ -143,9 +143,9 @@ function matchesAny(lowerMessage: string, patterns: string[]): boolean {
 /** Provider-reported quota reset timestamp, preserved verbatim because vendors
  * often omit the timezone. We show what the provider actually promised rather
  * than silently converting it to the server timezone. */
-function quotaResetHint(message: string): string | null {
+export function quotaResetHint(message: string): string | null {
   const match = message.match(
-    /(?:reset|restored)(?:\s+\w+){0,4}\s+(?:at|on)\s+(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?)/i,
+    /(?:resets?|restored)(?:\s+\w+){0,4}\s+(?:at|on)\s+(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?)/i,
   );
   return match?.[1] ?? null;
 }
@@ -218,6 +218,7 @@ interface ResolvedDeps {
 
 let deps: ResolvedDeps | null = null;
 let initializedAt = 0;
+let circuitSender: ((html: string) => boolean | Promise<boolean>) | null = null;
 
 /**
  * The transport, or a log-only sink when no admin is configured. Alerts have
@@ -253,6 +254,36 @@ function telegramSender(botToken: string, adminId: number): (html: string) => vo
 
 /** Call once at startup. Without it every report is a no-op (dev/test without an admin). */
 export function initProviderAlerts(config: AlertDeps): void {
+  circuitSender = config.send
+    ? (html) => {
+        try {
+          const result: unknown = config.send!(html);
+          return result instanceof Promise
+            ? result.then(
+                () => true,
+                () => false,
+              )
+            : true;
+        } catch {
+          return false;
+        }
+      }
+    : config.adminId === undefined
+      ? null
+      : async (html) => {
+          try {
+            const response = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              signal: AbortSignal.timeout(10000),
+              body: JSON.stringify({ chat_id: config.adminId, text: html, parse_mode: 'HTML' }),
+            });
+            const body: unknown = await response.json();
+            return response.ok && body !== null && typeof body === 'object' && Reflect.get(body, 'ok') === true;
+          } catch {
+            return false;
+          }
+        };
   deps = {
     send: config.send ?? adminSender(config.botToken, config.adminId),
     now: config.now ?? Date.now,
@@ -272,6 +303,7 @@ export function initProviderAlerts(config: AlertDeps): void {
 
 /** Test helper: drop all throttling state and the configured transport. */
 export function resetProviderAlertState(): void {
+  circuitSender = null;
   deps = null;
   initializedAt = 0;
   outages.clear();
@@ -370,12 +402,47 @@ function restartOutage(state: OutageState, now: number): void {
  * Report one provider slot failing. Transient failures are absorbed silently —
  * the chain handles them. Quota, auth and stale-model failures need a human, so
  * they alert under the throttling policy documented at the top of this file.
+ *
+ * Returns true when the admin has been told about this outage — by this call or
+ * by an earlier one — and false when nothing reached them: a transient failure,
+ * no transport, the startup grace window or the hourly ceiling. A caller that
+ * keeps its own once-per-incident record uses it to tell "announced" from
+ * "held back, try again later".
  */
-export function reportProviderFailure(failure: ProviderFailure, chain: ProviderChainKind): void {
+export interface ProviderIncidentNotice {
+  provider: string;
+  failureClass: 'quota_exhausted' | 'auth_failed' | 'unavailable';
+  status: number | null;
+  resetHint: string | null;
+}
+export function canSendProviderIncident(): boolean {
+  return circuitSender !== null;
+}
+/** The durable circuit owns deduplication; do not create a second digest/outage record. */
+export function sendProviderIncident(notice: ProviderIncidentNotice): boolean | Promise<boolean> {
+  if (!circuitSender) return false;
+  const reasons = {
+    quota_exhausted: 'исчерпан лимит или бюджет',
+    auth_failed: 'недоступна авторизация',
+    unavailable: 'повторяются ошибки соединения или сервера',
+  };
+  const lines = [
+    `⚠️ <b>${escapeHtml(providerLabel(notice.provider))}: ${reasons[notice.failureClass]}</b>`,
+    `Провайдер временно исключён, используются доступные резервные варианты.`,
+    `Статус: ${notice.status ?? 'соединение'}. Повторных сообщений по этому инциденту не будет.`,
+    notice.resetHint
+      ? `Указанный провайдером сброс: <code>${escapeHtml(notice.resetHint)}</code> (часовой пояс как сообщён).`
+      : '',
+    'Флаг снимается только после успешной проверки ответа.',
+  ].filter(Boolean);
+  return circuitSender(lines.join('\n'));
+}
+
+export function reportProviderFailure(failure: ProviderFailure, chain: ProviderChainKind): boolean {
   const failureClass = classifyProviderFailure(failure);
-  if (failureClass === 'transient') return;
+  if (failureClass === 'transient') return false;
   const key = providerKey(chain, failure.provider, failureClass);
-  noteFailure(key, 'provider', failure.provider, failureClass, [failure]);
+  return noteFailure(key, 'provider', failure.provider, failureClass, [failure]);
 }
 
 /**
@@ -472,8 +539,8 @@ function noteFailure(
   provider: string,
   failureClass: ProviderFailureClass,
   failures: ProviderFailure[],
-): void {
-  if (!deps) return;
+): boolean {
+  if (!deps) return false;
   const now = deps.now();
   const withinStartupGrace = now - initializedAt < ALERT_POLICY.startupGraceMs;
 
@@ -494,7 +561,7 @@ function noteFailure(
       { provider, failureClass },
       'Provider failure inside startup grace window — recorded, not alerting',
     );
-    return;
+    return false;
   }
 
   // An alert the ceiling held back must not count as announced, otherwise the
@@ -502,9 +569,9 @@ function noteFailure(
   // A hard quota has exactly one operator action: wait for the stated reset
   // (or top up). Repeating the same warning every few hours adds noise without
   // new information. Recovery is still announced by resolveOutage().
-  if (state.failureClass === 'quota_exhausted' && state.alertsSent > 0) return;
+  if (state.failureClass === 'quota_exhausted' && state.alertsSent > 0) return true;
 
-  if (shouldAlertNow(state, now) && sendOutageAlert(state, now)) return;
+  if (shouldAlertNow(state, now) && sendOutageAlert(state, now)) return true;
   state.suppressedSinceAlert += 1;
   // If the first quota alert was held back by the hourly ceiling, keep a digest
   // timer so the incident is eventually announced. Once announced, quota
@@ -512,6 +579,7 @@ function noteFailure(
   if (state.failureClass !== 'quota_exhausted' || state.alertsSent === 0) {
     scheduleDigest(key, state);
   }
+  return state.alertsSent > 0;
 }
 
 /**

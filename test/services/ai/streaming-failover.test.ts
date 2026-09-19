@@ -5,8 +5,16 @@
 // alive when a provider deletes the model named in .env.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import OpenAI from 'openai';
 import { resetModelRegistry } from '../../../src/services/ai/model-registry.ts';
+import {
+  configureProviderCircuit,
+  providerCircuitClock,
+  resetProviderCircuit,
+} from '../../../src/services/ai/provider-circuit.ts';
 import { resetEligibility } from '../../../src/services/ai/provider-eligibility.ts';
 import {
   hasChainAnswered,
@@ -18,7 +26,13 @@ import { resetLogOnce } from '../../../src/utils/logger.ts';
 
 // ── Fake provider clients ──────────────────────────────────────────────────
 
-type Behavior = { kind: 'text'; text: string } | { kind: 'throw'; error: Error };
+type Behavior =
+  | { kind: 'text'; text: string }
+  | { kind: 'throw'; error: Error }
+  /** Streams `text`, then dies — the provider failed after output reached the caller. */
+  | { kind: 'partial-then-throw'; text: string; error: Error }
+  /** Waits for `gate` before answering, so two requests can be in flight together. */
+  | { kind: 'hold'; gate: Promise<void>; text: string };
 
 interface FakeProvider {
   client: {
@@ -72,9 +86,12 @@ function makeProvider(options: FakeProviderOptions): FakeProvider {
             const behavior = options.behaviors[index];
             if (!behavior) throw new Error('fake provider has no behavior scripted');
             if (behavior.kind === 'throw') throw behavior.error;
+            if (behavior.kind === 'hold') await behavior.gate;
             const text = behavior.text;
+            const failAfterText = behavior.kind === 'partial-then-throw' ? behavior.error : null;
             async function* gen(): AsyncGenerator<StreamChunk> {
               yield { choices: [{ delta: { content: text }, finish_reason: null }] };
+              if (failAfterText) throw failAfterText;
               yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
             }
             return gen();
@@ -148,6 +165,7 @@ beforeEach(() => {
   });
   resetLogOnce();
   resetEligibility();
+  resetProviderCircuit();
   providerClients.zai = () => asOpenAIClient(zai.client);
   providerClients.groq = () => asOpenAIClient(groq.client);
   providerClients.gemini = () => asOpenAIClient(gemini.client);
@@ -155,6 +173,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetProviderCircuit();
+  providerCircuitClock.now = () => Date.now();
   process.env = { ...savedEnv };
   Object.assign(providerClients, realProviderClients);
 });
@@ -376,10 +396,10 @@ describe('benching a provider that said it is out', () => {
   // Groq's tier cannot take a request carrying the tool catalog, but the short
   // summaries on the fast chain fit — benching it for everything would throw
   // away the one thing it is still good for.
-  test('a size rejection benches only the requests that carry tools', async () => {
+  test.each([413, 429])('a size rejection %i benches only the requests that carry tools', async (sizeStatus) => {
     groq = makeProvider({
       behaviors: [
-        { kind: 'throw', error: apiError(413, 'Request too large ... tokens per minute (TPM): Limit 8000') },
+        { kind: 'throw', error: apiError(sizeStatus, 'Request too large ... tokens per minute (TPM): Limit 8000') },
         { kind: 'text', text: 'from groq' },
       ],
     });
@@ -398,9 +418,10 @@ describe('benching a provider that said it is out', () => {
     expect(withoutTools.text).toBe('from groq');
   });
 
-  // A memory of past failure must never turn into silence: if everything is
-  // benched, everything is tried anyway.
-  test('a chain where everything is benched is still attempted', async () => {
+  // A provider that reported a spent account is never forced: while every
+  // circuit is open the round fails with skipped diagnostics instead of paying
+  // four guaranteed rejections (this used to be "try them anyway").
+  test('a chain where every account is depleted is not forced', async () => {
     const spent = apiError(429, 'Weekly/Monthly Limit Exhausted, resets tomorrow');
     zai = makeProvider({
       behaviors: [
@@ -413,9 +434,17 @@ describe('benching a provider that said it is out', () => {
     hf = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {}).catch(() => null);
-    const second = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
+    const second = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {}).catch(
+      (error: unknown) => error,
+    );
 
-    expect(second.text).toBe('from zai');
+    expect(second).toBeInstanceOf(AllProvidersFailedError);
+    if (!(second instanceof AllProvidersFailedError)) throw new Error('unreachable');
+    expect(second.failures).toHaveLength(4);
+    expect(second.failures.every((f) => f.skippedBeforeRequest === true)).toBe(true);
+    expect(second.roundMetrics.attemptCount).toBe(0);
+    expect(zai.requestedModels).toHaveLength(1);
+    expect(hf.requestedModels).toHaveLength(1);
   });
 
   // The bench suppresses calls, not observations: a chain that answers nobody
@@ -429,6 +458,240 @@ describe('benching a provider that said it is out', () => {
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {}).catch(() => null);
     expect(isAiChainDown()).toBe(true);
+  });
+});
+
+describe('durable provider circuit', () => {
+  const T0 = 1_700_000_000_000;
+  const MINUTE = 60_000;
+  let clock: number;
+  let notices: string[];
+  let stateDir: string;
+  let statePath: string;
+
+  function startAlertLayer(): void {
+    resetProviderAlertState();
+    initProviderAlerts({
+      botToken: 't',
+      adminId: 1,
+      send: (html) => {
+        notices.push(html);
+      },
+      now: () => clock,
+    });
+    clock += 2 * MINUTE; // past the alert layer's startup grace
+  }
+
+  const incidentNotices = (): string[] => notices.filter((m) => m.includes('Флаг снимается только'));
+
+  beforeEach(() => {
+    clock = T0;
+    notices = [];
+    stateDir = mkdtempSync(join(tmpdir(), 'circuit-streaming-'));
+    statePath = join(stateDir, 'calendar.db.provider-state.sqlite');
+    providerCircuitClock.now = () => clock;
+    configureProviderCircuit(statePath);
+    startAlertLayer();
+    hf = unusedProvider();
+  });
+
+  afterEach(() => {
+    resetProviderAlertState();
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  test('two non-HF providers with different failures are skipped afterwards, one notice each', async () => {
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
+    groq = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(401, 'Invalid API key') }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+
+    await ask();
+    await ask();
+    const third = await ask();
+
+    expect(third.text).toBe('from gemini');
+    expect(zai.requestedModels).toHaveLength(1);
+    expect(groq.requestedModels).toHaveLength(1);
+    expect(gemini.requestedModels).toHaveLength(3);
+    expect(incidentNotices()).toHaveLength(2);
+  });
+
+  test('a depleted account is skipped on the OTHER chain too', async () => {
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+    groq = unusedProvider();
+
+    await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, fast: true });
+    const smart = await ask();
+
+    expect(smart.text).toBe('from gemini');
+    expect(zai.requestedModels).toEqual(['glm-5.1-air']);
+  });
+
+  test('a restart does not repeat the notice or re-ask the provider', async () => {
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+    groq = unusedProvider();
+    await ask();
+    expect(incidentNotices()).toHaveLength(1);
+
+    resetProviderCircuit();
+    configureProviderCircuit(statePath);
+    startAlertLayer();
+    await ask();
+
+    expect(zai.requestedModels).toHaveLength(1);
+    expect(incidentNotices()).toHaveLength(1);
+  });
+
+  test('only a successful probe closes the circuit, and the next incident notifies again', async () => {
+    zai = makeProvider({
+      behaviors: [
+        { kind: 'throw', error: apiError(402, 'Payment Required') },
+        { kind: 'text', text: 'from zai' },
+        { kind: 'throw', error: apiError(402, 'Payment Required') },
+      ],
+    });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+    groq = unusedProvider();
+
+    await ask();
+    clock += 24 * 60 * MINUTE;
+    const probe = await ask();
+    expect(probe.text).toBe('from zai');
+    expect(zai.requestedModels).toHaveLength(2);
+
+    clock += 30 * MINUTE;
+    const again = await ask(); // closed now: zai is asked again and fails again
+    expect(again.text).toBe('from gemini');
+    expect(zai.requestedModels).toHaveLength(3);
+    expect(incidentNotices()).toHaveLength(2);
+  });
+
+  test('only one of two simultaneous requests probes a half-open provider', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    zai = makeProvider({
+      behaviors: [
+        { kind: 'throw', error: apiError(402, 'Payment Required') },
+        { kind: 'hold', gate, text: 'from zai' },
+      ],
+    });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+    groq = unusedProvider();
+    await ask();
+    clock += 24 * 60 * MINUTE;
+
+    const first = ask();
+    const second = ask();
+    release();
+    const texts = (await Promise.all([first, second])).map((r) => r.text).sort();
+
+    expect(texts).toEqual(['from gemini', 'from zai']);
+    expect(zai.requestedModels).toHaveLength(2);
+  });
+
+  test('a provider dying mid-stream discards the partial output, opens its circuit and is not replayed', async () => {
+    zai = makeProvider({
+      behaviors: [{ kind: 'partial-then-throw', text: 'half an ans', error: apiError(402, 'Payment Required') }],
+    });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+    groq = unusedProvider();
+    const events: string[] = [];
+    const callbacks = {
+      onTextDelta: (text: string) => events.push(`text:${text}`),
+      onProviderSwitch: () => events.push('switch'),
+    };
+
+    const first = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, callbacks);
+    const second = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, callbacks);
+
+    expect(first.text).toBe('from gemini');
+    expect(second.text).toBe('from gemini');
+    expect(events).toEqual(['text:half an ans', 'switch', 'text:from gemini', 'text:from gemini']);
+    expect(zai.requestedModels).toHaveLength(1);
+    expect(gemini.requestedModels).toHaveLength(2);
+    expect(incidentNotices()).toHaveLength(1);
+  });
+
+  test('skipped providers stay visible in telemetry and are not counted as attempts', async () => {
+    process.env.AI_SMART_CHAIN = 'zai,gemini';
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+    groq = unusedProvider();
+    await ask();
+
+    const result = await ask();
+
+    expect(result.metrics?.skippedProviders).toEqual([{ provider: 'zai', model: 'glm-5.1' }]);
+    expect(result.metrics?.failedProviders).toEqual([]);
+    expect(result.metrics?.attemptCount).toBe(1);
+  });
+
+  test('a caller abort carrying a quota error does not open the circuit', async () => {
+    zai = makeProvider({
+      behaviors: [
+        { kind: 'throw', error: apiError(402, 'Payment Required') },
+        { kind: 'text', text: 'from zai' },
+      ],
+    });
+    gemini = unusedProvider();
+    groq = unusedProvider();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, signal: controller.signal }),
+    ).rejects.toBeDefined();
+    const next = await ask();
+
+    expect(next.text).toBe('from zai');
+    expect(incidentNotices()).toHaveLength(0);
+  });
+
+  test('a per-request rejection does not poison the provider for unrelated requests', async () => {
+    zai = makeProvider({
+      behaviors: [
+        { kind: 'throw', error: apiError(400, 'invalid tool schema') },
+        { kind: 'throw', error: apiError(413, 'Request too large for this tier') },
+        { kind: 'text', text: 'from zai' },
+      ],
+    });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+    groq = unusedProvider();
+    const tools = [{ type: 'function' as const, function: { name: 'get_events', description: 'x', parameters: {} } }];
+
+    await ask();
+    await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, tools });
+    const small = await ask();
+
+    expect(small.text).toBe('from zai');
+    expect(incidentNotices()).toHaveLength(0);
+  });
+
+  test('a rate-limit incident notifies once and is silently skipped afterward', async () => {
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(429, 'Rate limit reached') }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+    groq = unusedProvider();
+
+    await ask();
+    await ask();
+
+    expect(incidentNotices()).toHaveLength(1);
+    expect(zai.requestedModels).toHaveLength(1);
+  });
+
+  test('the incident notice never contains the provider error body', async () => {
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required SECRET-BODY-TEXT') }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+    groq = unusedProvider();
+
+    await ask();
+
+    expect(incidentNotices()).toHaveLength(1);
+    expect(notices.join('\n')).not.toContain('SECRET-BODY-TEXT');
   });
 });
 
@@ -687,4 +950,22 @@ describe('the chain a round runs on reaches the alert layer', () => {
     await askOn('smart');
     expect(isAiChainDown()).toBe(false);
   });
+});
+
+test('request-specific failure does not trigger an account incident from echoed text', async () => {
+  const messages: string[] = [];
+  initProviderAlerts({ botToken: 'synthetic', adminId: 1, send: (text) => messages.push(text), schedule: () => {} });
+  process.env.AI_SMART_CHAIN = 'zai,gemini';
+  zai = makeProvider({
+    behaviors: [
+      { kind: 'throw', error: apiError(400, 'Bad input text contains: payment required') },
+      { kind: 'text', text: 'healthy next request' },
+    ],
+  });
+  gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'fallback' }] });
+  const options = { messages: [{ role: 'user' as const, content: 'synthetic' }], maxTokens: 80 };
+  expect((await aiStreamRound(options)).text).toBe('fallback');
+  expect((await aiStreamRound(options)).text).toBe('healthy next request');
+  expect(zai.requestedModels).toHaveLength(2);
+  expect(messages).toHaveLength(0);
 });

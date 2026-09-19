@@ -14,6 +14,7 @@ import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { HistorySummarizer } from './services/ai/history-summarizer.ts';
+import { configureProviderCircuit } from './services/ai/provider-circuit.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
 import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
@@ -71,6 +72,10 @@ if (config.TELEGRAM_SESSION_MASTER_KEY) {
 // chat is configured has nothing to do with whether the bot can answer people.
 // Without an admin the alerts are logged instead of sent.
 initProviderAlerts({ botToken: config.BOT_TOKEN, adminId: config.BOT_ADMIN_ID });
+
+// Durable per-account provider circuits live in a sidecar next to the calendar
+// database, so a deploy does not forget which accounts are out.
+configureProviderCircuit(`${config.DATABASE_PATH}.provider-state.sqlite`);
 
 // Returns a BullMQ 'failed' handler: logs via pino, Telegrams the admin, pushes to alert queue.
 // When BOT_ADMIN_ID is absent (dev/test), still logs — just skips Telegram + alert queue.
