@@ -11,12 +11,22 @@ import { computeEventDiff, snapshotFromCalendarEvent } from '../google/change-de
 import type { ReminderMaterializer } from '../notification/materializer.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import type { ChangeNotifierOptions, EventChangeNotifier } from './event-change-notifier.ts';
+import {
+  computeFreeSpans,
+  isWithinMembership,
+  movedExceptionOccurrences,
+  recurrenceExpansionRange,
+} from './free-slots.ts';
 import { expandRecurrence } from './recurrence.ts';
 
 export interface FreeSlot {
   start: string;
   end: string;
   durationMinutes: number;
+}
+
+function asOneOffOccurrence(event: CalendarEvent): EventOccurrence {
+  return { event, occurrence_start: event.start_at, occurrence_end: event.end_at, is_exception: false };
 }
 
 export interface EventServiceDeps {
@@ -51,8 +61,7 @@ export class EventService {
   createEvent(data: CreateEventData): CalendarEvent {
     const event = this.eventRepo.create(data);
     if (this.materializer) {
-      // Prefer explicit reminder_minutes from CreateEventData over event.reminder_overrides
-      // (reminder_minutes is not persisted to events.reminder_overrides in the DB)
+      // Explicit reminder intervals are persisted on creation and reused after edits/restarts.
       const overrides = data.reminder_minutes
         ? JSON.stringify(data.reminder_minutes)
         : (event.reminder_overrides ?? null);
@@ -228,55 +237,69 @@ export class EventService {
     return [...oneOff, ...recurring].sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
   }
 
-  private computeFreeSlots(occurrences: EventOccurrence[], dayStart: string, dayEnd: string): FreeSlot[] {
-    const busy = occurrences
-      .filter((o) => o.occurrence_end)
-      .map((o) => ({
-        start: new Date(o.occurrence_start).getTime(),
-        end: new Date(o.occurrence_end!).getTime(),
+  private computeFreeSlots(
+    occurrences: EventOccurrence[],
+    dayStart: string,
+    dayEnd: string,
+    timezone: string,
+  ): FreeSlot[] {
+    const window = { startMs: Date.parse(dayStart), endMs: Date.parse(dayEnd) };
+    return computeFreeSpans(occurrences, window, timezone)
+      .map((span) => ({
+        start: new Date(span.startMs).toISOString(),
+        end: new Date(span.endMs).toISOString(),
+        durationMinutes: Math.round((span.endMs - span.startMs) / 60000),
       }))
-      .sort((a, b) => a.start - b.start);
+      .filter((slot) => slot.durationMinutes > 0);
+  }
 
-    const slots: FreeSlot[] = [];
-    let cursor = new Date(dayStart).getTime();
-    const dayEndMs = new Date(dayEnd).getTime();
-
-    for (const interval of busy) {
-      if (interval.start > cursor) {
-        const durationMinutes = Math.round((interval.start - cursor) / 60000);
-        if (durationMinutes > 0) {
-          slots.push({
-            start: new Date(cursor).toISOString(),
-            end: new Date(interval.start).toISOString(),
-            durationMinutes,
-          });
-        }
+  /**
+   * Occurrences that may occupy time inside [startUtc, endUtc], including ones that
+   * started earlier and run into it. Candidates can extend beyond the range; free-slot
+   * computation clips them to their exact occupied time.
+   */
+  private getOverlapCandidates(userId: number, startUtc: string, endUtc: string): EventOccurrence[] {
+    const oneOff = this.eventRepo.getVisibleOverlapping(userId, startUtc, endUtc).map(asOneOffOccurrence);
+    const recurring: EventOccurrence[] = [];
+    for (const template of this.eventRepo.getVisibleRecurringTemplates(userId)) {
+      let expanded = this.expandTemplateForOverlap(template, startUtc, endUtc);
+      const membership =
+        template.owner_type === 'group' && template.group_id && this.groupMemberRepo
+          ? this.groupMemberRepo.getMembership(template.group_id, userId)
+          : null;
+      if (membership) {
+        expanded = expanded.filter((occ) => isWithinMembership(occ.occurrence_start, membership));
       }
-      cursor = Math.max(cursor, interval.end);
+      recurring.push(...expanded);
     }
+    return [...oneOff, ...recurring];
+  }
 
-    if (cursor < dayEndMs) {
-      const durationMinutes = Math.round((dayEndMs - cursor) / 60000);
-      slots.push({
-        start: new Date(cursor).toISOString(),
-        end: new Date(dayEndMs).toISOString(),
-        durationMinutes,
-      });
-    }
+  private getOverlapCandidatesForGroup(groupId: number, startUtc: string, endUtc: string): EventOccurrence[] {
+    const oneOff = this.eventRepo.getOverlappingForGroup(groupId, startUtc, endUtc).map(asOneOffOccurrence);
+    const recurring = this.eventRepo
+      .getRecurringTemplatesForGroup(groupId)
+      .flatMap((template) => this.expandTemplateForOverlap(template, startUtc, endUtc));
+    return [...oneOff, ...recurring];
+  }
 
-    return slots;
+  private expandTemplateForOverlap(template: CalendarEvent, startUtc: string, endUtc: string): EventOccurrence[] {
+    const exceptions = this.eventRepo.getExceptions(template.id);
+    const { fromUtc, toUtc } = recurrenceExpansionRange(template, startUtc, endUtc);
+    const expanded = expandRecurrence(template, exceptions, fromUtc, toUtc);
+    return [...expanded, ...movedExceptionOccurrences(template, exceptions, expanded)];
   }
 
   getFreeSlots(userId: number, date: Date, timezone: string): FreeSlot[] {
     const { start: dayStart, end: dayEnd } = getDayRangeUtc(date, timezone);
-    const events = this.getEventsInRange(userId, dayStart, dayEnd);
-    return this.computeFreeSlots(events, dayStart, dayEnd);
+    const candidates = this.getOverlapCandidates(userId, dayStart, dayEnd);
+    return this.computeFreeSlots(candidates, dayStart, dayEnd, timezone);
   }
 
   getFreeSlotsForGroup(groupId: number, date: Date, timezone: string): FreeSlot[] {
     const { start: dayStart, end: dayEnd } = getDayRangeUtc(date, timezone);
-    const events = this.getEventsInRangeForGroup(groupId, dayStart, dayEnd);
-    return this.computeFreeSlots(events, dayStart, dayEnd);
+    const candidates = this.getOverlapCandidatesForGroup(groupId, dayStart, dayEnd);
+    return this.computeFreeSlots(candidates, dayStart, dayEnd, timezone);
   }
 
   searchEvents(userId: number, query: string): CalendarEvent[] {

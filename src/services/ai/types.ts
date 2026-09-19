@@ -279,12 +279,16 @@ export type UserInspection = {
 };
 
 /** Structured data from tool handlers for intent executor consumption. */
+/** Free time windows of one day, in UTC instants; empty when the day is fully busy. */
+export type FreeSlotsData = { slots: { start: string; end: string; durationMinutes: number }[] };
+
 export type ToolResultData =
   | UserInspection
   | EventSummary
   | EventSummary[]
   | { telegram_id: number; name: string }
   | { matches: ContactMatch[] }
+  | FreeSlotsData
   | { contact_id: number; deleted: boolean }
   | ScheduledAiCall[]
   | Trigger[]

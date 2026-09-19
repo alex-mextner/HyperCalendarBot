@@ -94,6 +94,7 @@ const WorkflowSessionSchema = z.object({
   workflow: WorkflowSchema,
   captures: z.record(z.string(), z.string()),
   createdAt: z.number(),
+  sourceMessage: z.string().max(16000).optional(),
   pendingPrompt: z
     .object({ text: z.string(), options: z.array(z.string()).optional(), delivered: z.boolean() })
     .optional(),

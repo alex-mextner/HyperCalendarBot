@@ -66,6 +66,71 @@ describe('handleGetFreeSlots', () => {
     expect(result.output).toBeDefined();
   });
 
+  describe('date parsing and structured slots', () => {
+    function inTimezone(timezone: string): AgentContext {
+      return { ...ctx, user: { ...ctx.user, timezone } };
+    }
+
+    test('a date-only value is the local calendar day west of UTC', () => {
+      const result = handleGetFreeSlots(inTimezone('America/New_York'), { date: '2026-03-15' });
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({
+        slots: [{ start: '2026-03-15T04:00:00.000Z', end: '2026-03-16T03:59:59.999Z', durationMinutes: 1440 }],
+      });
+    });
+
+    test.each(['garbage', '2026-02-30', '2026-13-01', ''])('rejects malformed date %p without throwing', (date) => {
+      const result = handleGetFreeSlots(ctx, { date });
+      expect(result.success).toBe(false);
+      expect(result.mutationState).toBe('not_applied');
+      expect(result.error).toBeDefined();
+    });
+
+    test('an empty result still carries structured slots', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Holiday',
+        start_at: '2026-03-15',
+        timezone: 'UTC',
+        all_day: true,
+      });
+      const result = handleGetFreeSlots(ctx, { date: '2026-03-15' });
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ slots: [] });
+      expect(result.output).toContain('No free slots');
+    });
+
+    test('an event without an end is not reported as free', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Call',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const result = handleGetFreeSlots(ctx, { date: '2026-03-15' });
+      expect(result.data).toEqual({
+        slots: [
+          { start: '2026-03-15T00:00:00.000Z', end: '2026-03-15T10:00:00.000Z', durationMinutes: 600 },
+          { start: '2026-03-15T10:30:00.000Z', end: '2026-03-15T23:59:59.999Z', durationMinutes: 810 },
+        ],
+      });
+    });
+
+    test('output shows local hours, not raw UTC instants', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Lunch',
+        start_at: '2026-06-10T10:00:00Z',
+        end_at: '2026-06-10T11:00:00Z',
+        timezone: 'UTC',
+      });
+      const result = handleGetFreeSlots(inTimezone('Europe/Belgrade'), { date: '2026-06-10' });
+      expect(result.output).toContain('00:00–12:00');
+      expect(result.output).toContain('13:00–23:59');
+      expect(result.output).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
+    });
+  });
+
   describe('group scope', () => {
     const GROUP_CHAT_ID = -100999;
 
