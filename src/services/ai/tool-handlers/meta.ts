@@ -77,6 +77,10 @@ export async function handleFindUser(ctx: AgentContext, input: FindUserInput): P
     }
   }
 
+  if (!ctx.resolveUsername) {
+    return { success: false, error: t(lang).aiTools.meta.recipientResolveUnavailable };
+  }
+
   return {
     success: false,
     error: `User @${username} not found. They may not have used this bot yet.`,

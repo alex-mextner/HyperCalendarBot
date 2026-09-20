@@ -66,8 +66,34 @@ test('invalid discovery input does not activate anything', () => {
   expect(s.schemas()).toHaveLength(1);
 });
 
-test('discovery wire contract requires both arrays even though catalog API supports shorthand', () => {
+test('discovery accepts groups alone, defaulting tools to empty (reproduces GH-285 incident payload)', () => {
   const s = createToolExposure(allowed);
-  expect(s.intercept('discover_tools', { tools: ['get_event'] }, s.snapshot())?.success).toBe(false);
+  const result = s.intercept('discover_tools', { groups: ['contacts'] }, s.snapshot());
+  expect(result?.success).toBe(true);
+  expect(result?.output).toContain('find_user');
+  expect(s.intercept('find_user', { username: 'ghost_handle' }, s.snapshot())?.success).toBeUndefined();
+});
+
+test('discovery accepts tools alone, defaulting groups to empty (reproduces GH-285 incident payload)', () => {
+  const s = createToolExposure(allowed);
+  const result = s.intercept('discover_tools', { tools: ['find_user'] }, s.snapshot());
+  expect(result?.success).toBe(true);
+  expect(result?.output).toContain('find_user');
+});
+
+test('discovery with neither array present is still rejected (at least one selector required)', () => {
+  const s = createToolExposure(allowed);
+  const result = s.intercept('discover_tools', {}, s.snapshot());
+  expect(result?.success).toBe(false);
   expect(s.schemas()).toHaveLength(1);
+});
+
+test('published discover_tools schema agrees with runtime validation on the empty-request case', () => {
+  const s = createToolExposure(allowed);
+  const discoverySchema = s.schemas().find((t) => t.type === 'function' && t.function.name === 'discover_tools');
+  if (discoverySchema?.type !== 'function') throw new Error('discover_tools schema missing');
+  // required: [] alone would make {} schema-valid while the runtime rejects it
+  // (GH-341); minProperties: 1 closes that gap at the schema level too.
+  expect(discoverySchema.function.parameters?.required).toEqual([]);
+  expect(discoverySchema.function.parameters?.minProperties).toBe(1);
 });

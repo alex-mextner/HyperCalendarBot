@@ -17,7 +17,7 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
     function: {
       name: DISCOVERY_TOOL,
       description:
-        'Reveal full parameter schemas for several tool names and/or groups. No business actions are executed. Newly revealed tools can be called in the NEXT model round.',
+        'Reveal full parameter schemas for several tool names and/or groups. Provide "groups" and/or "tools"; an omitted field defaults to an empty array. No business actions are executed. Newly revealed tools can be called in the NEXT model round.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -25,7 +25,8 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
           groups: { type: 'array', items: { type: 'string', enum: ids.groups }, maxItems: 8 },
           tools: { type: 'array', items: { type: 'string', enum: ids.tools }, maxItems: 24 },
         },
-        required: ['groups', 'tools'],
+        required: [],
+        minProperties: 1,
       },
     },
   };
@@ -50,8 +51,6 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
       // Invalid attempts also consume the run budget to bound recovery loops.
       if (++discoveryCalls > MAX_DISCOVERY_ATTEMPTS)
         return rejected('TOOL_DISCOVERY_LIMIT: use already revealed tools or explain what remains unavailable.');
-      if (!input || typeof input !== 'object' || !Object.hasOwn(input, 'groups') || !Object.hasOwn(input, 'tools'))
-        return rejected('INVALID_CATALOG_REQUEST');
       const result = catalog.describe(input);
       if (!result.ok) return rejected(result.error);
       const activated: string[] = [];

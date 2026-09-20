@@ -128,19 +128,12 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('telegram_id=123');
     });
 
-    test('returns error for unknown username when no resolver', async () => {
+    test('returns resolve-unavailable error for unknown username when no MTProto resolver configured', async () => {
       ctx.messageText = 'Find @nobody';
       const result = await handleFindUser(ctx, { username: 'nobody' });
       expect(result.success).toBe(false);
-      expect(result.error).toContain('not found');
-    });
-
-    test('error message includes cleaned username', async () => {
-      ctx.messageText = 'Find @ghost_user';
-      const result = await handleFindUser(ctx, { username: '@ghost_user' });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('ghost_user');
-      expect(result.error).not.toContain('@@');
+      expect(result.error).toContain('unavailable');
+      expect(result.error).not.toContain('not found');
     });
 
     test('falls back to MTProto resolver when not in DB', async () => {
@@ -156,15 +149,17 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('MTProto');
     });
 
-    test('returns error when MTProto resolver also fails', async () => {
+    test('returns error when MTProto resolver also fails, with cleaned username', async () => {
       const ctxWithResolver = {
         ...ctx,
         resolveUsername: async (_u: string) => null,
       };
       ctxWithResolver.messageText = 'Find @ghost_user';
-      const result = await handleFindUser(ctxWithResolver, { username: 'ghost_user' });
+      const result = await handleFindUser(ctxWithResolver, { username: '@ghost_user' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
+      expect(result.error).toContain('ghost_user');
+      expect(result.error).not.toContain('@@');
     });
   });
 
