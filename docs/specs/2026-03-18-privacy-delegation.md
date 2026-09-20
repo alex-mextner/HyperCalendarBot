@@ -218,7 +218,7 @@ If no secretary calendars are listed, ignore all of this.
 
 When the user wants to add a secretary to their calendar:
 1. Use find_user to resolve name/username to telegram_id.
-2. If not found: tell the user this person hasn't used the bot yet — they need to message it first.
+2. If find_user fails, tell the user what actually happened, in their own language — do not reword an "unavailable/couldn't verify" error as "hasn't used the bot yet" (that error means resolution could not be checked, not that the person doesn't use Telegram), and never paste the raw English error text verbatim.
 3. Use ask_user to confirm permission level: "Добавить @john секретарём?" with ["Чтение и запись", "Только чтение", "Отмена"].
 4. Call manage_secretaries with action "invite". STOP immediately after — do not add more text.
 

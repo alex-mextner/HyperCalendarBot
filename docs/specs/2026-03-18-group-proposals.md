@@ -249,7 +249,7 @@ UPDATE calendar_proposals SET status = 'declined', updated_at = datetime('now') 
 You are in a group chat. You CANNOT modify other users' calendars directly.
 If the message asks to change, add, or delete something in another user's calendar:
 1. Use find_user to resolve the target to telegram_id.
-2. If target not found in users: tell the proposer this person hasn't started the bot yet.
+2. If find_user fails, tell the proposer what actually happened, in their own language — do not reword an "unavailable/couldn't verify" error as "hasn't started the bot" (that error means resolution could not be checked, not that the person doesn't use Telegram), and never paste the raw English error text verbatim.
 3. Confirm the proposed change with ask_user if any details are ambiguous.
 4. Call propose_calendar_change. STOP immediately after — do not add more text.
 
