@@ -65,13 +65,18 @@ describe('capability-scoped batched tool discovery', () => {
   });
   test.each([
     null,
-    {},
     { tools: 'get_events' },
     { tools: [''] },
     { groups: ['calendar.read'], execute: true },
     { tools: Array(25).fill('get_events') },
   ])('rejects malformed or unbounded requests: %j', (request) => {
     expect(createToolCatalog(getToolDefinitions()).describe(request).ok).toBe(false);
+  });
+  test('accepts an empty selector as a legal no-op reveal', () => {
+    const result = createToolCatalog(getToolDefinitions()).describe({});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.tools).toEqual([]);
   });
   test('bounds expansion, gives explicit names priority and reports deferred schemas', () => {
     const catalog = createToolCatalog(getToolDefinitions(), { maxTools: 2, maxSchemaChars: 16000 });

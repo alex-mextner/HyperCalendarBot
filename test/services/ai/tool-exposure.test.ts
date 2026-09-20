@@ -66,8 +66,25 @@ test('invalid discovery input does not activate anything', () => {
   expect(s.schemas()).toHaveLength(1);
 });
 
-test('discovery wire contract requires both arrays even though catalog API supports shorthand', () => {
+test('discovery accepts groups alone, defaulting tools to empty (reproduces GH-285 incident payload)', () => {
   const s = createToolExposure(allowed);
-  expect(s.intercept('discover_tools', { tools: ['get_event'] }, s.snapshot())?.success).toBe(false);
+  const result = s.intercept('discover_tools', { groups: ['contacts'] }, s.snapshot());
+  expect(result?.success).toBe(true);
+  expect(result?.output).toContain('find_user');
+  expect(s.intercept('find_user', { username: 'ghost_handle' }, s.snapshot())?.success).toBeUndefined();
+});
+
+test('discovery accepts tools alone, defaulting groups to empty (reproduces GH-285 incident payload)', () => {
+  const s = createToolExposure(allowed);
+  const result = s.intercept('discover_tools', { tools: ['find_user'] }, s.snapshot());
+  expect(result?.success).toBe(true);
+  expect(result?.output).toContain('find_user');
+});
+
+test('discovery with neither array present is a harmless no-op, not a schema-compliant trap', () => {
+  const s = createToolExposure(allowed);
+  const result = s.intercept('discover_tools', {}, s.snapshot());
+  expect(result?.success).toBe(true);
+  expect(result?.output).toContain('"activated":[]');
   expect(s.schemas()).toHaveLength(1);
 });

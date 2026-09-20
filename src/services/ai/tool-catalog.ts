@@ -97,7 +97,6 @@ function budget(value: number | undefined, fallback: number, minimum: number, ma
 /** Bound raw arrays/strings before Zod traverses or trims their contents. */
 function rawRequestIsBounded(input: unknown): boolean {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
-  if (!Object.hasOwn(input, 'groups') && !Object.hasOwn(input, 'tools')) return false;
   for (const [key, max] of [
     ['groups', 8],
     ['tools', 24],

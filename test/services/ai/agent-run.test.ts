@@ -273,6 +273,28 @@ describe('CalendarBotAgent.run()', () => {
     expect(stored).toContain('get_events');
   });
 
+  test('discover_tools recovers from single-array payloads instead of exhausting into a hallucinated answer (GH-285 incident)', async () => {
+    ctx.messageText = '@ghost_handle 15:00 tomorrow call';
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'blind', name: 'find_user', input: { username: 'ghost_handle' } },
+      { kind: 'tool', callId: 'discover-groups-only', name: 'discover_tools', input: { groups: ['contacts'] } },
+      { kind: 'tool', callId: 'discover-tools-only', name: 'discover_tools', input: { tools: ['find_user'] } },
+      { kind: 'tool', callId: 'lookup', name: 'find_user', input: { username: 'ghost_handle' } },
+      { kind: 'text', text: 'Cannot verify that username right now.' },
+    ]);
+    const result = await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, {
+      streamImpl: script.impl,
+    }).run(ctx);
+    const findUserCalls = result.toolCalls.filter((call) => call.name === 'find_user');
+    expect(findUserCalls).toHaveLength(2);
+    // The first attempt is correctly rejected as unexposed; the second, after
+    // single-array discovery succeeds, must reach the real handler and report
+    // truthfully that resolution is unavailable rather than lying about "not found".
+    const stored = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
+    expect(stored).toContain('unavailable');
+    expect(stored).not.toContain('User @ghost_handle not found');
+  });
+
   test('validation retry retains revealed schemas without replaying discovery', async () => {
     const script = makeStreamImpl([
       { kind: 'tool', callId: 'discovery', name: 'discover_tools', input: { groups: [], tools: ['get_events'] } },
