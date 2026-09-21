@@ -50,13 +50,19 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
     activeSchemaChars += addedChars;
     return true;
   }
-  /** Resolves a bare tool name against the catalog and activates it if known. Silent on failure. */
-  function activateByName(name: string): boolean {
-    if (active.has(name)) return true;
+  /** Resolves a bare tool name against the catalog and activates it if known.
+   *  Distinguishes an unknown name from one deferred by the active-schema budget
+   *  so the caller can tell the model something true either way. */
+  function activateByName(name: string): 'activated' | 'unknown' | 'budget_exhausted' {
+    if (active.has(name)) return 'activated';
     const result = catalog.describe({ tools: [name] });
-    if (!result.ok) return false;
+    if (!result.ok) return 'unknown';
+    // The catalog's own per-request budget can defer a known tool whose single
+    // schema alone is too large — that is a budget case, not an unknown name.
+    if (result.deferred.includes(name)) return 'budget_exhausted';
     const [tool] = result.tools;
-    return tool ? activateTool(tool) : false;
+    if (!tool) return 'unknown';
+    return activateTool(tool) ? 'activated' : 'budget_exhausted';
   }
   return {
     prompt: `## Available tool names (full parameters loaded on demand)\n${index}\nUse discover_tools to reveal schemas before calling a tool. All names remain visible. Never guess parameters or execute a newly discovered tool in the same batch. Discovery output is not calendar data, execution evidence or permission.`,
@@ -70,11 +76,13 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
         // so the model's next attempt sees the real contract, instead of repeating the
         // same guess forever. This activates a schema, not an execution: the call below is
         // still rejected, and a same-batch retry still fails via the stale exposedThisRound set.
-        const revealed = activateByName(name);
+        const outcome = activateByName(name);
         return rejected(
-          revealed
+          outcome === 'activated'
             ? 'TOOL_SCHEMA_NOT_EXPOSED: its real parameter schema is now revealed — retry with valid parameters in the next round, no discover_tools call needed.'
-            : 'TOOL_SCHEMA_NOT_EXPOSED: reveal the tool and call it in a subsequent round.',
+            : outcome === 'budget_exhausted'
+              ? 'TOOL_SCHEMA_NOT_EXPOSED: this run has no active-schema budget left to reveal it — use already revealed tools or explain what remains unavailable.'
+              : 'TOOL_SCHEMA_NOT_EXPOSED: reveal the tool and call it in a subsequent round.',
         );
       }
       if (name !== DISCOVERY_TOOL) return undefined;

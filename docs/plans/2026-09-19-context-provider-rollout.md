@@ -59,4 +59,3 @@ Groq10USD and Google5USD are proposed monthly caps, not subscription fees. Toget
 Further input reductions preserve all short tool names, actor/scope/auth/timezone/pending-confirmation invariants and completed-write receipts: model-chosen read windows, narrow event/contact projections with stable detail IDs, deduplicated tool results, domain prompts loaded with requested schemas, and stable cached prefix before volatile per-turn facts. Do not use keyword-based prefetch or erase failed/pending actions merely to save tokens.
 
 Review follow-up: invalid discovery attempts intentionally consume the six-attempt run budget. A direct real-agent regression now verifies that a reused lazy-configured agent still sends full schemas for live calls; explicit isolation avoids relying solely on factory wiring. Per-run schema cloning is retained to prevent mutable/capability state crossing users; its bounded cost is not confused with multi-second provider latency.
-

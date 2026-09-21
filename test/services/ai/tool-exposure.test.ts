@@ -109,6 +109,7 @@ test('a blindly called tool (no discover_tools) is exposed for the next round in
   const roundOne = s.intercept('add_contact', { username: 'someuser', preferred_name: 'Name' }, original);
   expect(roundOne?.success).toBe(false);
   expect(roundOne?.mutationState).toBe('not_applied');
+  expect(roundOne?.error).toContain('now revealed');
   // A same-batch retry (same round, same stale snapshot) must still be blocked —
   // "never execute a newly discovered tool in the same batch" is unaffected.
   expect(s.intercept('add_contact', { username: 'someuser', preferred_name: 'Name' }, original)?.success).toBe(false);
@@ -145,5 +146,23 @@ test('a blind call still fails forever once the active-schema budget is exhauste
   const overBudget = s.intercept('tool_d', {}, s.snapshot());
   expect(overBudget?.success).toBe(false);
   expect(overBudget?.mutationState).toBe('not_applied');
+  expect(overBudget?.error).toContain('no active-schema budget left');
   expect(s.snapshot().has('tool_d')).toBe(false);
+});
+
+test('a single tool too large for the catalog per-request budget reports budget_exhausted, not unknown', () => {
+  // catalog.describe({ tools: [name] }) defers a tool whose own schema alone
+  // exceeds its 16,000-char per-request budget — that tool is known, just
+  // permanently unrevealable via this path. The blind-call rejection must say
+  // so honestly instead of the generic "reveal it" message, which would be a
+  // guaranteed-to-fail instruction for a name that can never be discovered.
+  const oversized: OpenAI.ChatCompletionTool = {
+    type: 'function',
+    function: { name: 'huge_tool', description: 'x'.repeat(20_000), parameters: { type: 'object', properties: {} } },
+  };
+  const s = createToolExposure([oversized]);
+  const result = s.intercept('huge_tool', {}, s.snapshot());
+  expect(result?.success).toBe(false);
+  expect(result?.error).toContain('no active-schema budget left');
+  expect(s.snapshot().has('huge_tool')).toBe(false);
 });
