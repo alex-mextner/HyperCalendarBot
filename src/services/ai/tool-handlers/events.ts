@@ -10,6 +10,7 @@ import { escapeHtml } from '../../../utils/telegram.ts';
 import { formatEventDetail } from '../../event/formatters.ts';
 import type { EventSummary } from '../../intent/variable-resolver.ts';
 import { formatEventWeatherLine } from '../../weather/format.ts';
+import { formatEmptyAgenda } from '../empty-agenda.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { formatReminderDuration } from './reminders.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
@@ -288,7 +289,18 @@ export async function handleGetEvents(ctx: AgentContext, input: GetEventsInput):
   const data = occurrences.map((occ) => occurrenceToSummary(occ, tz));
 
   if (occurrences.length === 0) {
-    return { success: true, output: t(ctx.user.language).aiTools.events.noEventsInRange, data };
+    return {
+      success: true,
+      output: formatEmptyAgenda({
+        start: startDate,
+        end: endDate,
+        timezone: tz,
+        language: ctx.user.language === 'ru' ? 'ru' : 'en',
+        scope,
+        delegated: userId !== ctx.user.telegram_id,
+      }),
+      data,
+    };
   }
 
   const weatherSuffixes = await Promise.all(
