@@ -30,7 +30,10 @@ test('unknown tool cannot become executable', () => {
   const s = createToolExposure(allowed);
   const result = s.intercept('discover_tools', { groups: [], tools: ['not_a_tool'] }, s.snapshot());
   expect(result?.output).toContain('not_a_tool');
-  expect(s.intercept('not_a_tool', {}, s.snapshot())?.success).toBe(false);
+  const blind = s.intercept('not_a_tool', {}, s.snapshot());
+  expect(blind?.success).toBe(false);
+  expect(blind?.error).toContain('reveal the tool');
+  expect(blind?.error).not.toContain('budget');
 });
 test('discovery returns names, not a second copy of full parameter schemas', () => {
   const s = createToolExposure(allowed);
@@ -146,7 +149,7 @@ test('a blind call still fails forever once the active-schema budget is exhauste
   const overBudget = s.intercept('tool_d', {}, s.snapshot());
   expect(overBudget?.success).toBe(false);
   expect(overBudget?.mutationState).toBe('not_applied');
-  expect(overBudget?.error).toContain('no active-schema budget left');
+  expect(overBudget?.error).toContain("cannot be revealed within this run's reveal budget");
   expect(s.snapshot().has('tool_d')).toBe(false);
 });
 
@@ -163,6 +166,6 @@ test('a single tool too large for the catalog per-request budget reports budget_
   const s = createToolExposure([oversized]);
   const result = s.intercept('huge_tool', {}, s.snapshot());
   expect(result?.success).toBe(false);
-  expect(result?.error).toContain('no active-schema budget left');
+  expect(result?.error).toContain("cannot be revealed within this run's reveal budget");
   expect(s.snapshot().has('huge_tool')).toBe(false);
 });
