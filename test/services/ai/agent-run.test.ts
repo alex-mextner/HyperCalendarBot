@@ -4,6 +4,7 @@ import type OpenAI from 'openai';
 import { EN_AGENT_ERROR_PHRASES, RU_AGENT_ERROR_PHRASES } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
+import { ContactRepository } from '../../../src/database/repositories/contact.repository.ts';
 import { DeepLinkRepository } from '../../../src/database/repositories/deep-link.repository.ts';
 import { EditProposalRepository } from '../../../src/database/repositories/edit-proposal.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -380,6 +381,40 @@ describe('CalendarBotAgent.run()', () => {
     await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, { streamImpl: script.impl }).run(ctx);
     expect(change).not.toHaveBeenCalled();
     expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).not.toBe('Incorrectly changed');
+  });
+
+  test('a blindly called mutating tool is exposed next round instead of failing forever (GH-344)', async () => {
+    // Anonymized shape of a real production incident: the model called a mutating
+    // contacts tool directly, without ever calling discover_tools, with a payload
+    // missing the required `name` field — because it had only ever seen the
+    // one-line index description, not the real schema. Both attempts failed
+    ctx.messageText = '@someuser Name\nAdd to contacts';
+    const contactRepo = new ContactRepository(db);
+    ctx.contactRepo = contactRepo;
+    const blindInput = { username: 'someuser', preferred_name: 'Name' };
+    const correctedInput = { name: 'Name', username: 'someuser', preferred_name: 'Name' };
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'blind', name: 'add_contact', input: blindInput },
+      { kind: 'tool', callId: 'corrected', name: 'add_contact', input: correctedInput },
+      { kind: 'text', text: 'Saved.' },
+    ]);
+    const captured: StreamRoundOptions[] = [];
+    const impl: typeof script.impl = async (opts, cbs) => {
+      if (!isValidatorCall(opts)) captured.push({ ...opts, tools: structuredClone(opts.tools) });
+      return script.impl(opts, cbs);
+    };
+    const result = await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, {
+      streamImpl: impl,
+    }).run(ctx);
+    // Round 2's tool contract must expose add_contact's real schema — the model
+    // finally sees `name` is required instead of guessing from the index blurb.
+    const round2Names = captured[1]?.tools?.flatMap((t) => (t.type === 'function' ? [t.function.name] : []));
+    expect(round2Names).toContain('add_contact');
+    // The corrected retry reaches the real handler and saves exactly one contact —
+    // the blind first attempt wrote nothing.
+    expect(contactRepo.list(USER_ID)).toHaveLength(1);
+    expect(result.toolCalls.filter((call) => call.name === 'add_contact')).toHaveLength(2);
+    expect(result.responseText).toContain('Completed');
   });
 
   function setupInvitations() {

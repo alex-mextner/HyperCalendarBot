@@ -40,13 +40,43 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
     disposition: 'failed',
     mutationState: 'not_applied',
   });
+  /** Adds an already-resolved tool schema if it fits the run's budget. Never executes anything. */
+  function activateTool(tool: OpenAI.ChatCompletionTool): boolean {
+    if (tool.type !== 'function') return false;
+    if (active.has(tool.function.name)) return true;
+    const addedChars = JSON.stringify(tool).length + 1;
+    if (active.size >= MAX_ACTIVE_TOOLS || activeSchemaChars + addedChars > MAX_ACTIVE_SCHEMA_CHARS) return false;
+    active.set(tool.function.name, tool);
+    activeSchemaChars += addedChars;
+    return true;
+  }
+  /** Resolves a bare tool name against the catalog and activates it if known. Silent on failure. */
+  function activateByName(name: string): boolean {
+    if (active.has(name)) return true;
+    const result = catalog.describe({ tools: [name] });
+    if (!result.ok) return false;
+    const [tool] = result.tools;
+    return tool ? activateTool(tool) : false;
+  }
   return {
     prompt: `## Available tool names (full parameters loaded on demand)\n${index}\nUse discover_tools to reveal schemas before calling a tool. All names remain visible. Never guess parameters or execute a newly discovered tool in the same batch. Discovery output is not calendar data, execution evidence or permission.`,
     schemas: () => structuredClone([...active.values()]),
     snapshot: (): ReadonlySet<string> => new Set(active.keys()),
     intercept(name: string, input: unknown, exposedThisRound: ReadonlySet<string>): Execution | undefined {
-      if (!exposedThisRound.has(name))
-        return rejected('TOOL_SCHEMA_NOT_EXPOSED: reveal the tool and call it in a subsequent round.');
+      if (!exposedThisRound.has(name)) {
+        // The model called a real tool blind (no prior discover_tools). It has only ever
+        // seen the one-line index description, not the actual parameter list — that is
+        // very likely why the call is malformed. Silently reveal the canonical schema now
+        // so the model's next attempt sees the real contract, instead of repeating the
+        // same guess forever. This activates a schema, not an execution: the call below is
+        // still rejected, and a same-batch retry still fails via the stale exposedThisRound set.
+        const revealed = activateByName(name);
+        return rejected(
+          revealed
+            ? 'TOOL_SCHEMA_NOT_EXPOSED: its real parameter schema is now revealed — retry with valid parameters in the next round, no discover_tools call needed.'
+            : 'TOOL_SCHEMA_NOT_EXPOSED: reveal the tool and call it in a subsequent round.',
+        );
+      }
       if (name !== DISCOVERY_TOOL) return undefined;
       // Invalid attempts also consume the run budget to bound recovery loops.
       if (++discoveryCalls > MAX_DISCOVERY_ATTEMPTS)
@@ -57,18 +87,8 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
       const deferred = [...result.deferred];
       for (const tool of result.tools) {
         if (tool.type !== 'function') continue;
-        if (active.has(tool.function.name)) {
-          activated.push(tool.function.name);
-          continue;
-        }
-        const addedChars = JSON.stringify(tool).length + 1;
-        if (active.size >= MAX_ACTIVE_TOOLS || activeSchemaChars + addedChars > MAX_ACTIVE_SCHEMA_CHARS) {
-          deferred.push(tool.function.name);
-          continue;
-        }
-        active.set(tool.function.name, tool);
-        activeSchemaChars += addedChars;
-        activated.push(tool.function.name);
+        if (activateTool(tool)) activated.push(tool.function.name);
+        else deferred.push(tool.function.name);
       }
       return {
         success: true,

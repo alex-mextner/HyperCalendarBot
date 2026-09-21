@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import type OpenAI from 'openai';
 import { createToolExposure } from '../../../src/services/ai/tool-exposure.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 
@@ -96,4 +97,53 @@ test('published discover_tools schema agrees with runtime validation on the empt
   // (GH-341); minProperties: 1 closes that gap at the schema level too.
   expect(discoverySchema.function.parameters?.required).toEqual([]);
   expect(discoverySchema.function.parameters?.minProperties).toBe(1);
+});
+
+test('a blindly called tool (no discover_tools) is exposed for the next round instead of failing forever (GH-344)', () => {
+  // Anonymized production shape: the model called a mutating contacts tool directly,
+  // twice in a row, without ever calling discover_tools first. Both attempts failed
+  // identically with TOOL_SCHEMA_NOT_EXPOSED and the run gave up without saving
+  // anything, because a blind miss never exposed the tool for a later round.
+  const s = createToolExposure(allowed);
+  const original = s.snapshot();
+  const roundOne = s.intercept('add_contact', { username: 'someuser', preferred_name: 'Name' }, original);
+  expect(roundOne?.success).toBe(false);
+  expect(roundOne?.mutationState).toBe('not_applied');
+  // A same-batch retry (same round, same stale snapshot) must still be blocked —
+  // "never execute a newly discovered tool in the same batch" is unaffected.
+  expect(s.intercept('add_contact', { username: 'someuser', preferred_name: 'Name' }, original)?.success).toBe(false);
+  // The NEXT round's snapshot must now include add_contact so the model's retry —
+  // informed by the real schema this time, not just the one-line index blurb — can
+  // actually reach the handler instead of repeating the same rejection forever.
+  const nextRound = s.snapshot();
+  expect(nextRound.has('add_contact')).toBe(true);
+  expect(s.intercept('add_contact', { name: 'Name', username: 'someuser', preferred_name: 'Name' }, nextRound)).toBe(
+    undefined,
+  );
+});
+
+test('a blind call still fails forever once the active-schema budget is exhausted (known, bounded degradation)', () => {
+  // Auto-exposing a blind call is best-effort: if the run has already spent its
+  // active-schema budget (e.g. on other blind misses or large discover_tools
+  // batches), the tool cannot be silently activated and the original failure
+  // mode this diff fixes reappears — but only at that documented boundary, and
+  // it never crashes or corrupts state. Each description stays under the
+  // catalog's own single-request budget (16,000 chars) so every blind call
+  // resolves individually; four of them exceed the exposure session's
+  // cumulative 48,000-char active-schema budget.
+  const bigDescription = 'x'.repeat(14_000);
+  const names = ['tool_a', 'tool_b', 'tool_c', 'tool_d'];
+  const synthetic: OpenAI.ChatCompletionTool[] = names.map((name) => ({
+    type: 'function',
+    function: { name, description: bigDescription, parameters: { type: 'object', properties: {} } },
+  }));
+  const s = createToolExposure(synthetic);
+  for (const name of names.slice(0, 3)) {
+    expect(s.intercept(name, {}, s.snapshot())?.success).toBe(false);
+    expect(s.snapshot().has(name)).toBe(true);
+  }
+  const overBudget = s.intercept('tool_d', {}, s.snapshot());
+  expect(overBudget?.success).toBe(false);
+  expect(overBudget?.mutationState).toBe('not_applied');
+  expect(s.snapshot().has('tool_d')).toBe(false);
 });
