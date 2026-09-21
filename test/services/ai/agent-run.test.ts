@@ -411,11 +411,12 @@ describe('CalendarBotAgent.run()', () => {
     // finally sees `name` is required instead of guessing from the index blurb.
     const round2Names = captured[1]?.tools?.flatMap((t) => (t.type === 'function' ? [t.function.name] : []));
     expect(round2Names).toContain('add_contact');
-    // The blind call's payload is missing the required `name` field, so it fails zod
-    // validation before the handler runs at all — contactRepo.upsert must be called
-    // exactly once (for the corrected retry), not zero-then-overwritten-by-idempotent-
-    // upsert twice. A row-count assertion alone can't distinguish those two cases
-    // because upsert is keyed by username and would collapse two calls into one row.
+    // Round 1 is rejected by the exposure gate (TOOL_SCHEMA_NOT_EXPOSED) before it ever
+    // reaches dispatcher validation or the handler — the payload's missing `name` field
+    // is never even checked for that call. contactRepo.upsert must therefore be called
+    // exactly once, for round 2's now-valid corrected retry. A row-count assertion alone
+    // can't prove this: upsert is keyed by username, so two calls would collapse into
+    // the same one row just as cleanly as one call would.
     expect(upsert).toHaveBeenCalledTimes(1);
     expect(contactRepo.list(USER_ID)).toHaveLength(1);
     expect(result.toolCalls.filter((call) => call.name === 'add_contact')).toHaveLength(2);
