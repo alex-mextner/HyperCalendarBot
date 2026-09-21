@@ -47,7 +47,9 @@ test('bounded discovery never evicts already disclosed schemas', () => {
   const s = createToolExposure(allowed);
   for (let i = 0; i < 6; i++)
     expect(s.intercept('discover_tools', { groups: [], tools: ['calculate'] }, s.snapshot())?.success).toBe(true);
-  expect(s.intercept('discover_tools', { groups: [], tools: ['get_event'] }, s.snapshot())?.success).toBe(false);
+  const limitHit = s.intercept('discover_tools', { groups: [], tools: ['get_event'] }, s.snapshot());
+  expect(limitHit?.success).toBe(false);
+  expect(limitHit?.error).toContain('use already revealed tools or explain what remains unavailable');
   expect(s.intercept('calculate', {}, s.snapshot())).toBeUndefined();
 });
 test('mode-specific tools are not advertised or activated', () => {
