@@ -391,6 +391,7 @@ describe('CalendarBotAgent.run()', () => {
     ctx.messageText = '@someuser Name\nAdd to contacts';
     const contactRepo = new ContactRepository(db);
     ctx.contactRepo = contactRepo;
+    const upsert = spyOn(contactRepo, 'upsert');
     const blindInput = { username: 'someuser', preferred_name: 'Name' };
     const correctedInput = { name: 'Name', username: 'someuser', preferred_name: 'Name' };
     const script = makeStreamImpl([
@@ -410,11 +411,21 @@ describe('CalendarBotAgent.run()', () => {
     // finally sees `name` is required instead of guessing from the index blurb.
     const round2Names = captured[1]?.tools?.flatMap((t) => (t.type === 'function' ? [t.function.name] : []));
     expect(round2Names).toContain('add_contact');
-    // The corrected retry reaches the real handler and saves exactly one contact —
-    // the blind first attempt wrote nothing.
+    // The blind call's payload is missing the required `name` field, so it fails zod
+    // validation before the handler runs at all — contactRepo.upsert must be called
+    // exactly once (for the corrected retry), not zero-then-overwritten-by-idempotent-
+    // upsert twice. A row-count assertion alone can't distinguish those two cases
+    // because upsert is keyed by username and would collapse two calls into one row.
+    expect(upsert).toHaveBeenCalledTimes(1);
     expect(contactRepo.list(USER_ID)).toHaveLength(1);
     expect(result.toolCalls.filter((call) => call.name === 'add_contact')).toHaveLength(2);
-    expect(result.responseText).toContain('Completed');
+    // add_contact is not in WriteOutcomes' targeted-dedup map (unlike update_event/
+    // send_invitation), so the failed attempt 1 is never superseded by attempt 2's
+    // success — the user sees both as a receipt, not a clean "Saved." reply. That is
+    // pre-existing write-outcomes framing, not something this fix changes; pin what
+    // is actually shown rather than a substring that happens to also match "Saved.".
+    expect(result.responseText).toContain('Attempt 2: Completed');
+    expect(result.responseText).not.toContain('Saved.');
   });
 
   function setupInvitations() {
