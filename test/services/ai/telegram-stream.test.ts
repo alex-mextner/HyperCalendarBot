@@ -223,6 +223,34 @@ describe('TelegramStreamWriter', () => {
     expect(text).toMatch(/blockquote>\n\n.*Готово/s);
   });
 
+  test('resetDraft preserves already-committed tool execution log (#346)', async () => {
+    // A real production complaint: when a write-outcomes notice or a
+    // validator rejection replaces the model's own final text, the "⚙️ Ход
+    // выполнения" block that already happened (e.g. two failed add_contact
+    // attempts) must still reach the user — showing it is never up to the
+    // model, and it must never look like nothing was attempted at all.
+    const writer = new TelegramStreamWriter(sender, 123, 'ru');
+    await writer.init();
+    writer.appendText('Пытаюсь сохранить контакт...');
+    writer.setToolLabel('add_contact', { username: 'someuser' });
+    writer.markToolResult(false);
+    writer.setToolLabel('add_contact', { username: 'someuser' });
+    writer.markToolResult(false);
+    writer.commitIntermediate();
+    // The framework now replaces the draft with a system-generated notice —
+    // the model never gets a say in whether the execution log survives.
+    writer.resetDraft();
+    writer.appendText('Попытка 1: Не выполнено\nПопытка 2: Не выполнено');
+    await writer.finalize();
+
+    const text = editMock.mock.calls[0]![2] as string;
+    expect(text).toContain('<blockquote expandable>');
+    expect(text).toContain('Ход выполнения');
+    expect(text).toContain('add_contact');
+    expect(text).toContain('❌');
+    expect(text).toContain('Попытка 1: Не выполнено');
+  });
+
   test('finalize without tools has no blockquote', async () => {
     const writer = new TelegramStreamWriter(sender, 123);
     await writer.init();

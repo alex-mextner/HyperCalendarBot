@@ -2,6 +2,26 @@ import type OpenAI from 'openai';
 import { MEMORY_FACT_MAX_CHARS } from './prompt-sections.ts';
 
 /**
+ * A single JSON-schema property definition, as authored on every tool below.
+ * `unknown` elsewhere in this file narrows to this shape when read back out
+ * for error/hint rendering — never trust it for anything beyond display.
+ */
+interface ToolSchemaProperty {
+  type?: string | readonly string[];
+  description?: string;
+  items?: { type?: string };
+  enum?: readonly unknown[];
+}
+
+/** A tool's parameter schema — the shape every `input_schema` below is authored in. */
+export interface ToolInputSchema {
+  type: 'object';
+  properties: { [key: string]: unknown };
+  required?: string[];
+  [key: string]: unknown;
+}
+
+/**
  * Internal tool definition format — the shape we author tools in.
  * Converted to OpenAI.ChatCompletionTool on the way out via toOpenAITool().
  * Keeping this intermediate form lets each tool stay a flat object (no
@@ -10,11 +30,7 @@ import { MEMORY_FACT_MAX_CHARS } from './prompt-sections.ts';
 interface ToolDefinition {
   name: string;
   description: string;
-  input_schema: {
-    type: 'object';
-    properties: { [key: string]: unknown };
-    required?: string[];
-  };
+  input_schema: ToolInputSchema;
 }
 
 /** Wrap an internal ToolDefinition into the OpenAI SDK format. */
@@ -1040,18 +1056,79 @@ export function getToolDefinitions(inputMode?: string, supplementMode?: boolean)
 
   if (supplementMode) {
     tools = tools.filter((t) => t.name !== 'end_conversation');
-    tools = [
-      ...tools,
-      {
-        name: 'supplement_skip',
-        description: 'Call when the automatic response was correct and complete. Suppresses your response.',
-        input_schema: {
-          type: 'object',
-          properties: {},
-          required: [],
-        },
-      },
-    ];
+    tools = [...tools, SUPPLEMENT_SKIP_TOOL];
   }
   return tools.map(toOpenAITool);
+}
+
+/** Synthesized only in supplement mode (not part of the static `toolDefinitions` list below),
+ * so its schema is registered explicitly in `toolInputSchemaByName` — otherwise a blind
+ * `supplement_skip` call would get no inline schema excerpt. */
+const SUPPLEMENT_SKIP_TOOL: ToolDefinition = {
+  name: 'supplement_skip',
+  description: 'Call when the automatic response was correct and complete. Suppresses your response.',
+  input_schema: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+};
+
+const toolInputSchemaByName = new Map<string, ToolInputSchema>([
+  ...toolDefinitions.map((t): [string, ToolInputSchema] => [t.name, t.input_schema]),
+  [SUPPLEMENT_SKIP_TOOL.name, SUPPLEMENT_SKIP_TOOL.input_schema],
+]);
+
+/**
+ * Looks up a tool's declared parameter schema by name, independent of mode
+ * filtering (a tool's own schema does not change between modes). Used to
+ * build error/hint excerpts — never to authorize or activate a tool call.
+ */
+function getToolInputSchema(name: string): ToolInputSchema | undefined {
+  return toolInputSchemaByName.get(name);
+}
+
+/**
+ * Renders a compact, model-readable excerpt of a schema's parameters — every
+ * field by default, or only the given field names (e.g. the ones a
+ * validation error just flagged).
+ */
+function formatSchemaExcerpt(schema: ToolInputSchema, fields?: readonly string[]): string {
+  const required = new Set(schema.required ?? []);
+  const names = fields ?? Object.keys(schema.properties);
+  return names
+    .map((name) => {
+      const rawProp = schema.properties[name];
+      if (typeof rawProp !== 'object' || rawProp === null) return null;
+      const prop = rawProp as ToolSchemaProperty;
+      const req = required.has(name) ? 'required' : 'optional';
+      const desc = prop.description ? ` — ${prop.description}` : '';
+      const baseType = Array.isArray(prop.type) ? prop.type.join('|') : (prop.type ?? 'any');
+      // Surface the exact contract the model got wrong, not just "array" or
+      // "string": an item type or an enum's actual values are precisely what
+      // it needs to self-correct on the next retry.
+      const typeLabel =
+        prop.enum && prop.enum.length > 0
+          ? `${baseType}(${prop.enum.join('|')})`
+          : baseType === 'array' && prop.items?.type
+            ? `array<${prop.items.type}>`
+            : baseType;
+      return `${name} (${typeLabel}, ${req})${desc}`;
+    })
+    .filter((line): line is string => line !== null)
+    .join('; ');
+}
+
+/**
+ * Appends a schema excerpt to a base message, in one consistent format,
+ * whenever the named tool's schema is known. Used so a tool-call error or a
+ * newly-revealed-schema hint carries the actual contract inline, instead of
+ * making the model infer it from a bare field name or wait for a separate
+ * discovery round. Returns `base` unchanged when the tool or excerpt is
+ * empty — never appends a bare "[schema: ]".
+ */
+export function withSchemaExcerpt(base: string, toolName: string, fields?: readonly string[]): string {
+  const schema = getToolInputSchema(toolName);
+  const excerpt = schema ? formatSchemaExcerpt(schema, fields) : '';
+  return excerpt ? `${base} [schema: ${excerpt}]` : base;
 }

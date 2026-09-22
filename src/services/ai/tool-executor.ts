@@ -81,6 +81,7 @@ import {
 import { handleGetFreeSlots } from './tool-handlers/slots.ts';
 import { handleConvertToTimezone, handleGetTimezoneInfoWithCityFallback } from './tool-handlers/timezone.ts';
 import { toolSchemas } from './tool-schemas.ts';
+import { withSchemaExcerpt } from './tools.ts';
 import type { AgentContext, ToolResult } from './types.ts';
 
 /**
@@ -407,7 +408,7 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
       validationError = {
         success: false,
         mutationState: 'not_applied',
-        error: `Invalid input: ${describeIssues(result.error.issues)}`,
+        error: `Invalid input: ${describeIssues(toolName, result.error.issues)}`,
       };
     } else {
       input = result.data;
@@ -548,19 +549,34 @@ function summarizeInput(toolName: string, input: ToolInputMap[ToolName]): string
 const ZOD_INVALID_INPUT_PREFIX = 'Invalid input: ';
 
 /**
- * Render zod issues as `field: reason` pairs.
+ * Render zod issues as `field: reason [schema: excerpt]` pairs.
  *
  * Naming the field matters: without it the model cannot tell which argument it got
- * wrong and retries the same call with the same broken arguments.
+ * wrong and retries the same call with the same broken arguments. The schema excerpt
+ * (type, required/optional, description) matters just as much — a bare "name: Required"
+ * tells the model WHAT is wrong but not what a valid value looks like, so it can guess
+ * wrong again on the very next retry. The excerpt is shown once per root field: an
+ * invalid array (e.g. three bad `reminder_minutes` entries) yields three issues but
+ * would otherwise repeat the identical excerpt three times, bloating the tool result
+ * the model has to re-read for no extra information.
  */
-function describeIssues(issues: readonly z.core.$ZodIssue[]): string {
+function describeIssues(toolName: string, issues: readonly z.core.$ZodIssue[]): string {
+  const excerptShownFor = new Set<string>();
   return issues
     .map((issue) => {
       const reason = issue.message.startsWith(ZOD_INVALID_INPUT_PREFIX)
         ? issue.message.slice(ZOD_INVALID_INPUT_PREFIX.length)
         : issue.message;
       const field = issue.path.join('.');
-      return field ? `${field}: ${reason}` : reason;
+      if (!field) return reason;
+      const base = `${field}: ${reason}`;
+      // field is non-empty here (the !field check above returned already), so
+      // split('.')[0] is never empty at runtime; the `|| field` fallback exists
+      // only to satisfy noUncheckedIndexedAccess's `string | undefined` type.
+      const root = field.split('.')[0] || field;
+      if (excerptShownFor.has(root)) return base;
+      excerptShownFor.add(root);
+      return withSchemaExcerpt(base, toolName, [root]);
     })
     .join(', ');
 }
