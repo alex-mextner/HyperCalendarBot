@@ -874,7 +874,7 @@ export class CalendarBotAgent {
             writer.setToolLabel(name);
           },
           onProviderSwitch: () => {
-            writer.resetBuffers();
+            writer.resetDraft();
           },
         };
 
@@ -965,7 +965,10 @@ export class CalendarBotAgent {
             continue;
           }
           if (tc.name !== DISCOVERY_TOOL && !SILENT_TOOLS.has(tc.name)) {
-            writer.setToolLabel(tc.name, input);
+            // Group chats: never surface raw tool arguments (invitee_id, owner_id, etc.) in the
+            // execution log — same "hide targets from other members" contract as finalNotice's
+            // hideTargets (ctx.isGroup) below.
+            writer.setToolLabel(tc.name, ctx.isGroup ? undefined : input);
             await writer.flush(true);
           }
 
@@ -1159,7 +1162,10 @@ export class CalendarBotAgent {
         : null;
     const guarded = responseUnverified || evidence !== null || termination === 'waiting' || termination === 'error';
     if (guarded) {
-      writer.resetBuffers();
+      // The whole request is untrusted at this point, including any prose
+      // the model narrated in an earlier round before the guard had a
+      // reason to fire — only tool-result lines (real actions) stay.
+      writer.resetForGuard();
       if (!silent) {
         if (evidence && termination !== 'waiting') writer.appendText(evidence);
         if (validationNotice) writer.appendText(validationNotice);
@@ -1274,9 +1280,10 @@ export class CalendarBotAgent {
     /** Whether the last round called any tools. Used to decide if re-validation is needed. */
     lastRoundHadToolCalls: boolean;
   }> {
-    // Actually throw away the rejected text — commitIntermediate() would push
-    // it into the final execution log, which is the opposite of what we want.
-    writer.resetBuffers();
+    // Discard the rejected draft text so commitIntermediate() never pushes it
+    // into the execution log — but keep any tool history already committed
+    // from earlier rounds of this same request; that work really happened.
+    writer.resetDraft();
 
     // Generic retry nudge. Does NOT echo the validator's REJECT string, which
     // is an LLM-generated value that cannot be trusted as a system directive.
@@ -1310,8 +1317,14 @@ export class CalendarBotAgent {
         onToolCallStart: (name) => {
           if (name === DISCOVERY_TOOL || SILENT_TOOLS.has(name)) return;
           requestMetrics.markVisible();
+          // Only set the label — don't flush. The tool loop flushes
+          // sequentially with full input details. Fire-and-forget flush
+          // here raced with the tool loop in noPlaceholder (group) mode,
+          // creating orphaned messages (same fix as the main loop's callback).
           writer.setToolLabel(name);
-          writer.flush(true).catch(() => {});
+        },
+        onProviderSwitch: () => {
+          writer.resetDraft();
         },
       };
 
@@ -1346,8 +1359,6 @@ export class CalendarBotAgent {
       }
 
       const toolResultMessages: MessageParam[] = [];
-      let stopLoopTriggered = false;
-      let waiting = false;
       for (const tc of result.toolCalls) {
         let input: { [key: string]: unknown };
         try {
@@ -1374,7 +1385,8 @@ export class CalendarBotAgent {
           continue;
         }
         if (tc.name !== DISCOVERY_TOOL && !SILENT_TOOLS.has(tc.name)) {
-          writer.setToolLabel(tc.name, input);
+          // Same group-redaction contract as the main loop above.
+          writer.setToolLabel(tc.name, ctx.isGroup ? undefined : input);
           await writer.flush(true);
         }
 
@@ -1405,9 +1417,21 @@ export class CalendarBotAgent {
         toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content });
 
         if (toolResult.stopLoop) {
-          stopLoopTriggered = true;
-          waiting = toolResult.disposition === 'waiting';
-          break;
+          // Mirror the main loop: skip commitIntermediate() entirely so this
+          // round's prose text (the model's final, not-yet-validated claim)
+          // is never folded into the trusted "⚙️ Execution log" as if it were
+          // a tool result. finalize()'s own trailing sweep still commits any
+          // already-marked toolLines from this round.
+          writer.clearToolLabel();
+          if (!ctx.supplementMode && toolResultMessages.length > 0) {
+            saveResults(toolResultMessages, skipPersistIds);
+          }
+          return {
+            hitStopLoop: true,
+            waiting: toolResult.disposition === 'waiting',
+            lastRoundText: '',
+            lastRoundHadToolCalls: true,
+          };
         }
       }
 
@@ -1416,11 +1440,6 @@ export class CalendarBotAgent {
       }
       writer.clearToolLabel();
       writer.commitIntermediate();
-
-      if (stopLoopTriggered) {
-        // The caller applies the shared evidence guard; only genuine clarification has its own UI.
-        return { hitStopLoop: true, waiting, lastRoundText: '', lastRoundHadToolCalls: true };
-      }
 
       currentMessages = [...currentMessages, result.assistantMessage, ...toolResultMessages];
     }

@@ -108,7 +108,7 @@ export class TelegramStreamWriter {
   private toolLabel: string | null = null;
   private toolLines: string[] = [];
   private pendingIndicators: string[] = [];
-  private intermediateChunks: string[] = [];
+  private intermediateChunks: { kind: 'reasoning' | 'tools'; text: string }[] = [];
   private plainResponseText = '';
   private userTranscript: string | undefined;
   private noPlaceholder: boolean;
@@ -122,7 +122,11 @@ export class TelegramStreamWriter {
   private rateLimitedUntil = 0;
   /** Once stream editing hits flood-wait, stop intermediate edits and only deliver final text. */
   private streamRateLimited = false;
-  /** Set by discard() so a pending flush knows to delete the message after creation. */
+  /** Set by discard() so a pending flush knows to delete the message after creation.
+   * discard() is only ever called as the terminal action of CalendarBotAgent.run(),
+   * immediately followed by `return` — no other method runs on this writer instance
+   * afterward. resetDraft()/resetForGuard() deliberately never clear this field: by
+   * the time either could run again, the request is already over. */
   private discarded = false;
 
   constructor(
@@ -171,20 +175,6 @@ export class TelegramStreamWriter {
     this.messageId = result.message_id;
   }
 
-  /** Clear all accumulated state for retry after validation rejection */
-  reset(): void {
-    this.discarded = false;
-    this.text = '';
-    this.plainResponseText = '';
-    this.intermediateChunks = [];
-    this.lastFlushedLength = 0;
-    this.toolLabel = null;
-    this.toolLines = [];
-    this.pendingIndicators = [];
-    this.rateLimitedUntil = 0;
-    this.streamRateLimited = false;
-  }
-
   appendText(chunk: string): void {
     this.text += chunk;
   }
@@ -221,11 +211,11 @@ export class TelegramStreamWriter {
 
   commitIntermediate(): void {
     if (this.text.trim()) {
-      this.intermediateChunks.push(escapeHtml(this.text.trim()));
+      this.intermediateChunks.push({ kind: 'reasoning', text: escapeHtml(this.text.trim()) });
     }
     // Collect completed tool lines into intermediate
     if (this.toolLines.length > 0) {
-      this.intermediateChunks.push(this.toolLines.join('\n'));
+      this.intermediateChunks.push({ kind: 'tools', text: this.toolLines.join('\n') });
       this.toolLines = [];
     }
     this.text = '';
@@ -339,16 +329,17 @@ export class TelegramStreamWriter {
 
     // Collect any remaining tool lines from the last round
     if (this.toolLines.length > 0) {
-      this.intermediateChunks.push(this.toolLines.join('\n'));
+      this.intermediateChunks.push({ kind: 'tools', text: this.toolLines.join('\n') });
       this.toolLines = [];
     }
 
     const finalResponse = this.plainResponseText ? markdownToHtml(this.text) : '...';
+    const joinedIntermediate = this.intermediateChunks.map((c) => c.text).join('\n');
 
     let finalText: string;
     if (this.userTranscript !== undefined) {
       // Live call: everything in one collapsed blockquote (transcript + tools + bot reply)
-      const toolsBlock = this.intermediateChunks.length > 0 ? `\n${this.intermediateChunks.join('\n')}` : '';
+      const toolsBlock = this.intermediateChunks.length > 0 ? `\n${joinedIntermediate}` : '';
       const botReply = finalResponse && finalResponse !== '...' ? `\n🤖 ${finalResponse}` : '';
       finalText = `<blockquote>📞\n👤 ${escapeHtml(this.userTranscript || '…')}${toolsBlock}${botReply}</blockquote>`;
     } else {
@@ -358,7 +349,7 @@ export class TelegramStreamWriter {
       finalText = finalResponse;
       if (this.intermediateChunks.length > 0) {
         const header = this.lang === 'ru' ? '⚙️ <b>Ход выполнения</b>' : '⚙️ <b>Execution log</b>';
-        let body = this.intermediateChunks.join('\n');
+        let body = joinedIntermediate;
         // blockquote wrapper + header + separators ≈ 60 chars overhead
         const overhead = `<blockquote expandable>${header}\n</blockquote>\n\n`.length;
         const maxBodyLen = MAX_MESSAGE_LENGTH - finalResponse.length - overhead;
@@ -457,20 +448,37 @@ export class TelegramStreamWriter {
   }
 
   /**
-   * Drop any buffered content (current text, intermediate chunks, tool lines)
-   * without touching Telegram. Used when the response validator rejects a
-   * tool-less answer and the agent wants to discard it and retry cleanly —
-   * the rejected text must NOT appear in the final execution log.
+   * Drop the current in-flight draft (unflushed text, tool label, pending
+   * indicators) without touching Telegram or the already-committed execution
+   * log (`intermediateChunks`/`toolLines`). Used on its own for a provider
+   * failover mid-stream — nothing has been distrusted yet, only the current
+   * attempt is being redone. Committed *tool* lines are real work that
+   * already happened and reach the "⚙️ Execution log" regardless of what
+   * replaces the draft — showing them is never the model's call to make.
+   * When the whole REQUEST turns out untrusted, use `resetForGuard()`
+   * instead, which also strips committed reasoning prose.
    */
-  resetBuffers(): void {
+  resetDraft(): void {
     this.text = '';
     this.lastFlushedLength = 0;
     this.toolLabel = null;
-    this.toolLines = [];
     this.pendingIndicators = [];
-    this.intermediateChunks = [];
     this.plainResponseText = '';
-    this.discarded = false;
+  }
+
+  /**
+   * Resets the draft AND strips already-committed reasoning-prose chunks
+   * from the execution log, keeping every tool-result line. The pairing is
+   * a single method, not caller discipline: use this — never `resetDraft()`
+   * alone — whenever a request-wide guard fires (validator rejection, a
+   * write-outcomes notice, a waiting/error termination). At that point NONE
+   * of the model's own narration for this request is trustworthy, including
+   * prose committed in an earlier round before the guard had a reason to
+   * fire, while every tool call that actually ran stays real regardless.
+   */
+  resetForGuard(): void {
+    this.resetDraft();
+    this.intermediateChunks = this.intermediateChunks.filter((chunk) => chunk.kind !== 'reasoning');
   }
 
   getMessageId(): number | null {

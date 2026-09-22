@@ -1,6 +1,7 @@
 import type OpenAI from 'openai';
 import { createToolCatalog } from './tool-catalog.ts';
 import type { executeTool } from './tool-executor.ts';
+import { withSchemaExcerpt } from './tools.ts';
 
 type Execution = Awaited<ReturnType<typeof executeTool>>;
 export const DISCOVERY_TOOL = 'discover_tools';
@@ -90,7 +91,13 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
         // so the model's next attempt sees the real contract, instead of repeating the
         // same guess forever. This activates a schema, not an execution: the call below is
         // still rejected, and a same-batch retry still fails via the stale exposedThisRound set.
-        return rejected(BLIND_CALL_MESSAGES[activateByName(name)]);
+        const outcome = activateByName(name);
+        const base = BLIND_CALL_MESSAGES[outcome];
+        // Inline excerpt, not just the structural next-round tools list: some
+        // providers don't reliably re-attend to a tools array that grew
+        // between rounds, so the contract must also be legible as plain text
+        // in the tool-result the model is already reading right now.
+        return rejected(outcome === 'activated' ? withSchemaExcerpt(base, name) : base);
       }
       if (name !== DISCOVERY_TOOL) return undefined;
       // Invalid attempts also consume the run budget to bound recovery loops.

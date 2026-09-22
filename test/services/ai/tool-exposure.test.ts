@@ -115,6 +115,10 @@ test('a blindly called tool (no discover_tools) is exposed for the next round in
   expect(roundOne?.success).toBe(false);
   expect(roundOne?.mutationState).toBe('not_applied');
   expect(roundOne?.error).toContain('now revealed');
+  // The schema excerpt must be inline in the rejection text itself, not only
+  // structurally in the next round's tools list — some providers don't
+  // reliably re-attend to a tools array that grew between rounds.
+  expect(roundOne?.error).toContain('name (string, required)');
   // A same-batch retry (same round, same stale snapshot) must still be blocked —
   // "never execute a newly discovered tool in the same batch" is unaffected.
   expect(s.intercept('add_contact', { username: 'someuser', preferred_name: 'Name' }, original)?.success).toBe(false);
@@ -126,6 +130,14 @@ test('a blindly called tool (no discover_tools) is exposed for the next round in
   expect(s.intercept('add_contact', { name: 'Name', username: 'someuser', preferred_name: 'Name' }, nextRound)).toBe(
     undefined,
   );
+});
+
+test('blind-call schema excerpt names every field with its type, required/optional and description (#346)', () => {
+  const s = createToolExposure(allowed);
+  const result = s.intercept('add_contact', {}, s.snapshot());
+  expect(result?.error).toContain('name (string, required) — Full display name');
+  expect(result?.error).toContain('username (string, optional) — Telegram @username without @.');
+  expect(result?.error).toContain('preferred_name (string, optional)');
 });
 
 test('a blind call still fails forever once the active-schema budget is exhausted (known, bounded degradation)', () => {

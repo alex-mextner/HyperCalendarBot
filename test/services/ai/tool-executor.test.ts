@@ -104,6 +104,62 @@ describe('executeTool', () => {
     expect(result.output).toContain('Test');
   });
 
+  test('validation error on a known tool includes a schema excerpt for the failing field (#346)', async () => {
+    // add_contact called with only username/preferred_name — the exact
+    // malformed shape from the GH-344 incident, missing the required `name`.
+    // A bare "name: expected string, received undefined" tells the model
+    // WHAT is wrong but not what a valid value looks like; the excerpt closes
+    // that gap.
+    const result = await executeTool(ctx, 'add_contact', { username: 'someuser', preferred_name: 'Name' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('name: expected string, received undefined');
+    expect(result.error).toContain('[schema: name (string, required) — Full display name');
+  });
+
+  test('validation error on a nested/array field falls back to the parent field schema excerpt (#346)', async () => {
+    // A zod issue path for an array element (e.g. "reminder_minutes.0") is
+    // not itself a top-level schema property — without the root-segment
+    // fallback this silently produced no excerpt at all, the exact gap this
+    // change exists to close.
+    const result = await executeTool(ctx, 'create_event', {
+      title: 'X',
+      start_at: '2030-01-01T10:00:00Z',
+      reminder_minutes: ['15'],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('reminder_minutes.0: expected number');
+    expect(result.error).toContain('[schema: reminder_minutes (array<number>, optional) — Minutes before the event');
+  });
+
+  test('multiple invalid array elements on the same field show the schema excerpt only once (#346)', async () => {
+    // Three bad reminder_minutes entries yield three zod issues on the same
+    // root field. Repeating the ~90-char excerpt per issue would bloat the
+    // tool-result content the model has to re-read for no extra information.
+    const result = await executeTool(ctx, 'create_event', {
+      title: 'X',
+      start_at: '2030-01-01T10:00:00Z',
+      reminder_minutes: ['15', 'x', 'y'],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('reminder_minutes.0: expected number');
+    expect(result.error).toContain('reminder_minutes.1: expected number');
+    expect(result.error).toContain('reminder_minutes.2: expected number');
+    expect(result.error?.split('[schema:')).toHaveLength(2);
+  });
+
+  test('validation error on an enum field surfaces the actual valid values (#346)', async () => {
+    // A bare "array"/"string" type label doesn't tell the model what to
+    // retry with — the enum's real values (or an array's item type) are
+    // exactly the contract it got wrong.
+    const result = await executeTool(ctx, 'create_event', {
+      title: 'X',
+      start_at: '2030-01-01T10:00:00Z',
+      scope: 'bogus',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('[schema: scope (string(personal|group), optional)');
+  });
+
   test('routes update_event to handler', async () => {
     const event = ctx.eventService.createEvent({
       user_id: USER_ID,
