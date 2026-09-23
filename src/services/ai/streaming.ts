@@ -641,6 +641,40 @@ function buildFastChain(cfg: EnvConfig): ProviderSlot[] {
 // ── Slot execution with live-model discovery ───────────────────────────────
 
 /**
+ * A 400 with no body is the provider dropping the request before it starts (it
+ * arrives within milliseconds and the identical request succeeds moments later),
+ * so the request is repeated once on the same slot. When the other providers are
+ * depleted or skipped, falling through would fail the whole turn on a blip.
+ */
+function isBodilessRejection(error: unknown): boolean {
+  return (
+    error instanceof OpenAI.APIError &&
+    error.status === 400 &&
+    error.error === undefined &&
+    error.message.includes('no body')
+  );
+}
+
+async function streamRetryingBodilessRejection(
+  slot: ProviderSlot,
+  model: string,
+  opts: StreamRoundOptions,
+  cbs: StreamCallbacks,
+  onAttempt: () => void,
+): Promise<StreamRoundResult> {
+  try {
+    return await slot.stream(model, opts, cbs, onAttempt);
+  } catch (error) {
+    if (!isBodilessRejection(error) || isCallerAbort(opts.signal)) throw error;
+    aiLogger.warn(
+      { provider: slot.label, model, userId: opts.userId },
+      'Provider rejected the request with an empty 400 — repeating it once',
+    );
+    return await slot.stream(model, opts, cbs, onAttempt);
+  }
+}
+
+/**
  * Run one slot. If the provider says the configured model is gone, probe its
  * `/v1/models` endpoint once, pick a live replacement and retry the request on
  * the same provider before giving up on it.
@@ -659,7 +693,7 @@ async function runSlot(
   const model = cachedOverride ?? slot.configuredModel;
 
   try {
-    return await slot.stream(model, opts, cbs, onAttempt);
+    return await streamRetryingBodilessRejection(slot, model, opts, cbs, onAttempt);
   } catch (error) {
     if (!isModelNotFoundError(error)) throw error;
 

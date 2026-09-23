@@ -392,6 +392,124 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
+  test('400 with no body is retried once on the same provider before falling through', async () => {
+    // With every other provider depleted, one bodiless 400 must not fail the whole turn.
+    const noBody = new OpenAI.APIError(400, undefined, '400 status code (no body)', new Headers());
+    const recovered = buildFakeClient([
+      { kind: 'text', text: 'zai recovered' },
+      { kind: 'finish', reason: 'stop' },
+    ]);
+    let calls = 0;
+    fakeZai = {
+      chat: {
+        completions: {
+          create: mock(async (...args: unknown[]) => {
+            calls++;
+            if (calls === 1) throw noBody;
+            return recovered.chat.completions.create(...(args as []));
+          }),
+        },
+      },
+    };
+    fakeGemini = buildFakeClient(() => {
+      throw new Error('gemini should not be called');
+    });
+    fakeHf = buildFakeClient(() => {
+      throw new Error('hf should not be called');
+    });
+
+    const result = await aiStreamRound({
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 100,
+    });
+
+    expect(result.text).toBe('zai recovered');
+    expect(calls).toBe(2);
+    expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
+  });
+
+  test('retries a second empty 400 only once, then falls through', async () => {
+    const noBody = new OpenAI.APIError(400, undefined, '400 status code (no body)', new Headers());
+    fakeZai = {
+      chat: {
+        completions: {
+          create: mock(async () => {
+            throw noBody;
+          }),
+        },
+      },
+    };
+    fakeGemini = buildFakeClient([
+      { kind: 'text', text: 'gemini fallback' },
+      { kind: 'finish', reason: 'stop' },
+    ]);
+    fakeHf = buildFakeClient(() => {
+      throw new Error('hf should not be called');
+    });
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
+    expect(result.text).toBe('gemini fallback');
+    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(2);
+    expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeHf.chat.completions.create).not.toHaveBeenCalled();
+    expect(result.metrics?.attemptCount).toBe(3); // z.ai twice + Gemini once
+  });
+
+  test('caller abort never triggers the empty-400 retry', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const noBody = new OpenAI.APIError(400, undefined, '400 status code (no body)', new Headers());
+    fakeZai = {
+      chat: {
+        completions: {
+          create: mock(async () => {
+            throw noBody;
+          }),
+        },
+      },
+    };
+    fakeGemini = buildFakeClient(() => {
+      throw new Error('gemini should not be called');
+    });
+    fakeHf = buildFakeClient(() => {
+      throw new Error('hf should not be called');
+    });
+    await expect(
+      aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, signal: controller.signal }),
+    ).rejects.toThrow();
+    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
+    expect(fakeHf.chat.completions.create).not.toHaveBeenCalled();
+  });
+
+  test('a normal 400 body mentioning no body is not retried', async () => {
+    const body = new OpenAI.APIError(
+      400,
+      { error: { message: 'not a no body retry' } },
+      '400 no body mentioned',
+      new Headers(),
+    );
+    fakeZai = {
+      chat: {
+        completions: {
+          create: mock(async () => {
+            throw body;
+          }),
+        },
+      },
+    };
+    fakeGemini = buildFakeClient([
+      { kind: 'text', text: 'normal fallback' },
+      { kind: 'finish', reason: 'stop' },
+    ]);
+    fakeHf = buildFakeClient(() => {
+      throw new Error('hf should not be called');
+    });
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
+    expect(result.text).toBe('normal fallback');
+    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
+  });
+
   test('mid-stream failure after text emitted discards the partial text and falls through', async () => {
     // z.ai starts streaming, then the iterator throws. The partial text already
     // shown to the user is discarded via onProviderSwitch and the next provider
