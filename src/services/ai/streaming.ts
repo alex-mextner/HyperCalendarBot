@@ -193,7 +193,19 @@ export class AllProvidersFailedError extends Error {
       fallbackCount: Math.max(0, failures.length - 1),
     };
   }
+
+  /** Tools the model called that the request did not offer — a provider validates this before answering. */
+  unexposedToolNames(): string[] {
+    const names = new Set<string>();
+    for (const failure of this.failures) {
+      const name = UNEXPOSED_TOOL_PATTERN.exec(failure.message)?.[1];
+      if (name) names.add(name);
+    }
+    return [...names];
+  }
 }
+
+const UNEXPOSED_TOOL_PATTERN = /attempted to call tool '([^']+)' which was not in request\.tools/;
 
 // ── Error helpers (exported for tests) ─────────────────────────────────────
 
@@ -910,8 +922,10 @@ export async function aiStreamRound(
     fallbackCount: Math.max(0, failures.length - 1),
   });
   aiLogger.error({ failures, userId: options.userId }, 'Every AI provider in the chain failed');
-  // The loudest alert there is: nobody answered, so the user got nothing.
-  reportAllProvidersFailed(failures, chainKind);
+  // The loudest alert there is: nobody answered, so the user got nothing. A rejected
+  // call to an unexposed tool is held back: the caller reveals the tool and retries,
+  // and reports the outage itself if that recovery cannot help.
+  if (aggregate.unexposedToolNames().length === 0) reportAllProvidersFailed(failures, chainKind);
   throw aggregate;
 }
 

@@ -21,7 +21,7 @@ import { AllProvidersFailedError, aiStreamRound, providerFailureMetrics, type St
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
-import { createToolExposure, DISCOVERY_TOOL } from './tool-exposure.ts';
+import { createToolExposure, DISCOVERY_TOOL, runRoundRevealingRejectedTools } from './tool-exposure.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import { getToolDefinitions } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
@@ -878,19 +878,24 @@ export class CalendarBotAgent {
           },
         };
 
-        const remainingMs = Math.max(1000, TIMEOUT_MS - (Date.now() - startTime));
-        const exposedThisRound = exposure?.snapshot();
-        const result = await agentStream(
-          {
-            messages: currentMessages,
-            tools: exposure?.schemas() ?? getToolDefinitions(ctx.inputMode, ctx.supplementMode),
-            maxTokens: 4096,
-            temperature: 0.3,
-            signal: AbortSignal.timeout(remainingMs),
-            userId: ctx.user.telegram_id,
-          },
-          callbacks,
-        );
+        const runAgentRound = (tools: OpenAI.ChatCompletionTool[]) =>
+          agentStream(
+            {
+              messages: currentMessages,
+              tools,
+              maxTokens: 4096,
+              temperature: 0.3,
+              signal: AbortSignal.timeout(Math.max(1000, TIMEOUT_MS - (Date.now() - startTime))),
+              userId: ctx.user.telegram_id,
+            },
+            callbacks,
+          );
+        const { result, exposedThisRound } = exposure
+          ? await runRoundRevealingRejectedTools(exposure, runAgentRound)
+          : {
+              result: await runAgentRound(getToolDefinitions(ctx.inputMode, ctx.supplementMode)),
+              exposedThisRound: undefined,
+            };
 
         const roundMetrics = result.metrics;
         aiLogger.info(
@@ -1328,18 +1333,23 @@ export class CalendarBotAgent {
         },
       };
 
-      const remainingMs = Math.max(1000, TIMEOUT_MS - (Date.now() - startTime));
-      const exposedThisRound = exposure?.snapshot();
-      const result = await retryStream(
-        {
-          messages: currentMessages,
-          tools: exposure?.schemas() ?? getToolDefinitions(ctx.inputMode, ctx.supplementMode),
-          maxTokens: 4096,
-          temperature: 0.3,
-          signal: AbortSignal.timeout(remainingMs),
-        },
-        callbacks,
-      );
+      const runRetryRound = (tools: OpenAI.ChatCompletionTool[]) =>
+        retryStream(
+          {
+            messages: currentMessages,
+            tools,
+            maxTokens: 4096,
+            temperature: 0.3,
+            signal: AbortSignal.timeout(Math.max(1000, TIMEOUT_MS - (Date.now() - startTime))),
+          },
+          callbacks,
+        );
+      const { result, exposedThisRound } = exposure
+        ? await runRoundRevealingRejectedTools(exposure, runRetryRound)
+        : {
+            result: await runRetryRound(getToolDefinitions(ctx.inputMode, ctx.supplementMode)),
+            exposedThisRound: undefined,
+          };
 
       dbg?.logAiText(result.text);
 
