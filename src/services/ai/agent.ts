@@ -878,7 +878,7 @@ export class CalendarBotAgent {
           },
         };
 
-        const runAgentRound = (tools: OpenAI.ChatCompletionTool[]) =>
+        const runAgentRound = (tools: OpenAI.ChatCompletionTool[], deferOutageAlert = false) =>
           agentStream(
             {
               messages: currentMessages,
@@ -887,6 +887,7 @@ export class CalendarBotAgent {
               temperature: 0.3,
               signal: AbortSignal.timeout(Math.max(1000, TIMEOUT_MS - (Date.now() - startTime))),
               userId: ctx.user.telegram_id,
+              deferOutageAlert,
             },
             callbacks,
           );
@@ -1333,7 +1334,7 @@ export class CalendarBotAgent {
         },
       };
 
-      const runRetryRound = (tools: OpenAI.ChatCompletionTool[]) =>
+      const runRetryRound = (tools: OpenAI.ChatCompletionTool[], deferOutageAlert = false) =>
         retryStream(
           {
             messages: currentMessages,
@@ -1341,6 +1342,7 @@ export class CalendarBotAgent {
             maxTokens: 4096,
             temperature: 0.3,
             signal: AbortSignal.timeout(Math.max(1000, TIMEOUT_MS - (Date.now() - startTime))),
+            deferOutageAlert,
           },
           callbacks,
         );

@@ -137,17 +137,17 @@ const MAX_REJECTED_TOOL_REVEALS = 3;
  */
 export async function runRoundRevealingRejectedTools<R>(
   exposure: ToolExposure,
-  run: (tools: OpenAI.ChatCompletionTool[]) => Promise<R>,
+  run: (tools: OpenAI.ChatCompletionTool[], deferOutageAlert: boolean) => Promise<R>,
 ): Promise<{ result: R; exposedThisRound: ReadonlySet<string> }> {
   for (let reveals = 0; ; reveals++) {
     const exposedThisRound = exposure.snapshot();
     try {
-      return { result: await run(exposure.schemas()), exposedThisRound };
+      return { result: await run(exposure.schemas(), true), exposedThisRound };
     } catch (error) {
       if (!(error instanceof AllProvidersFailedError)) throw error;
       const revealed = error.unexposedToolNames().filter((name) => exposure.reveal(name));
       if (revealed.length === 0 || reveals >= MAX_REJECTED_TOOL_REVEALS) {
-        reportAllProvidersFailed(error.failures, 'smart');
+        if (error.deferredAlertChain) reportAllProvidersFailed(error.failures, error.deferredAlertChain);
         throw error;
       }
     }

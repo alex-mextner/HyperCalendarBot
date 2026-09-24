@@ -51,6 +51,11 @@ export interface StreamRoundOptions {
   userId?: number;
   /** Opaque per-agent-run correlation id; contains no user content. */
   requestId?: string;
+  /**
+   * The caller reveals a tool the providers rejected as unexposed and retries the round,
+   * and reports the outage itself if that recovery gives up. Only such a caller sets this.
+   */
+  deferOutageAlert?: boolean;
 }
 
 export interface StreamCallbacks {
@@ -181,8 +186,10 @@ export interface ProviderFailure {
 export class AllProvidersFailedError extends Error {
   readonly failures: ProviderFailure[];
   readonly roundMetrics: FailedRoundMetrics;
+  /** Set when the round held the outage alert back for its caller: the chain it ran on. */
+  readonly deferredAlertChain?: ProviderChainKind;
 
-  constructor(failures: ProviderFailure[], roundMetrics?: FailedRoundMetrics) {
+  constructor(failures: ProviderFailure[], roundMetrics?: FailedRoundMetrics, deferredAlertChain?: ProviderChainKind) {
     const detail = failures.map((f) => `${f.provider}: ${f.status ?? 'no status'} ${f.message}`).join(' | ');
     super(`All ${failures.length} AI providers failed — ${detail}`);
     this.name = 'AllProvidersFailedError';
@@ -192,17 +199,22 @@ export class AllProvidersFailedError extends Error {
       attemptCount: failures.length,
       fallbackCount: Math.max(0, failures.length - 1),
     };
+    this.deferredAlertChain = deferredAlertChain;
   }
 
   /** Tools the model called that the request did not offer — a provider validates this before answering. */
   unexposedToolNames(): string[] {
-    const names = new Set<string>();
-    for (const failure of this.failures) {
-      const name = UNEXPOSED_TOOL_PATTERN.exec(failure.message)?.[1];
-      if (name) names.add(name);
-    }
-    return [...names];
+    return unexposedToolNamesOf(this.failures);
   }
+}
+
+function unexposedToolNamesOf(failures: ProviderFailure[]): string[] {
+  const names = new Set<string>();
+  for (const failure of failures) {
+    const name = UNEXPOSED_TOOL_PATTERN.exec(failure.message)?.[1];
+    if (name) names.add(name);
+  }
+  return [...names];
 }
 
 const UNEXPOSED_TOOL_PATTERN = /attempted to call tool '([^']+)' which was not in request\.tools/;
@@ -916,16 +928,19 @@ export async function aiStreamRound(
     }
   }
 
-  const aggregate = new AllProvidersFailedError(failures, {
-    totalDurationMs: Math.max(0, performance.now() - roundStartedAt),
-    attemptCount: actualAttempts,
-    fallbackCount: Math.max(0, failures.length - 1),
-  });
+  const deferAlert = options.deferOutageAlert === true && unexposedToolNamesOf(failures).length > 0;
+  const aggregate = new AllProvidersFailedError(
+    failures,
+    {
+      totalDurationMs: Math.max(0, performance.now() - roundStartedAt),
+      attemptCount: actualAttempts,
+      fallbackCount: Math.max(0, failures.length - 1),
+    },
+    deferAlert ? chainKind : undefined,
+  );
   aiLogger.error({ failures, userId: options.userId }, 'Every AI provider in the chain failed');
-  // The loudest alert there is: nobody answered, so the user got nothing. A rejected
-  // call to an unexposed tool is held back: the caller reveals the tool and retries,
-  // and reports the outage itself if that recovery cannot help.
-  if (aggregate.unexposedToolNames().length === 0) reportAllProvidersFailed(failures, chainKind);
+  // The loudest alert there is: nobody answered, so the user got nothing.
+  if (!deferAlert) reportAllProvidersFailed(failures, chainKind);
   throw aggregate;
 }
 
