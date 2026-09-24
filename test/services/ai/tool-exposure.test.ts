@@ -1,7 +1,9 @@
-import { expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type OpenAI from 'openai';
-import { createToolExposure } from '../../../src/services/ai/tool-exposure.ts';
+import { AllProvidersFailedError } from '../../../src/services/ai/streaming.ts';
+import { createToolExposure, runRoundRevealingRejectedTools } from '../../../src/services/ai/tool-exposure.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
+import { initProviderAlerts, isAiChainDown, resetProviderAlertState } from '../../../src/utils/ai-provider-alert.ts';
 
 const allowed = getToolDefinitions('text');
 test('new schemas do not authorize another call in the same model batch', () => {
@@ -182,4 +184,81 @@ test('a single tool too large for the catalog per-request budget reports budget_
   expect(result?.success).toBe(false);
   expect(result?.error).toContain("cannot be revealed within this run's reveal budget");
   expect(s.snapshot().has('huge_tool')).toBe(false);
+});
+
+describe('runRoundRevealingRejectedTools', () => {
+  beforeEach(() => {
+    resetProviderAlertState();
+    initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {} });
+  });
+
+  afterEach(() => {
+    resetProviderAlertState();
+  });
+
+  const REJECTION = "attempted to call tool 'update_event' which was not in request.tools";
+
+  function rejected(deferredAlertChain?: 'smart' | 'fast'): AllProvidersFailedError {
+    return new AllProvidersFailedError(
+      [
+        {
+          provider: 'groq (test)',
+          providerId: 'groq',
+          model: 'test',
+          status: 400,
+          message: REJECTION,
+          transient: false,
+        },
+      ],
+      undefined,
+      deferredAlertChain,
+    );
+  }
+
+  test('a rejected tool is revealed and the round retried with its schema', async () => {
+    const exposure = createToolExposure(allowed);
+    const sent: string[][] = [];
+    const { result } = await runRoundRevealingRejectedTools(exposure, async (tools, deferOutageAlert) => {
+      expect(deferOutageAlert).toBe(true);
+      sent.push(tools.map((t) => (t.type === 'function' ? t.function.name : '')));
+      if (sent.length === 1) throw rejected('smart');
+      return 'answered';
+    });
+    expect(result).toBe('answered');
+    expect(sent[0]).not.toContain('update_event');
+    expect(sent[1]).toContain('update_event');
+  });
+
+  test('giving up on a deferred rejection reports the outage on the chain the round ran on', async () => {
+    const exposure = createToolExposure(allowed);
+    await expect(
+      runRoundRevealingRejectedTools(exposure, async () => {
+        throw rejected('smart');
+      }),
+    ).rejects.toThrow(AllProvidersFailedError);
+    expect(isAiChainDown()).toBe(true);
+  });
+
+  test('a tool still rejected after it was revealed is retried once, then reported', async () => {
+    const exposure = createToolExposure(allowed);
+    let rounds = 0;
+    await expect(
+      runRoundRevealingRejectedTools(exposure, async () => {
+        rounds++;
+        throw rejected('smart');
+      }),
+    ).rejects.toThrow(AllProvidersFailedError);
+    expect(rounds).toBe(2);
+    expect(isAiChainDown()).toBe(true);
+  });
+
+  test('a failure the round reported itself is left alone', async () => {
+    const exposure = createToolExposure(allowed);
+    await expect(
+      runRoundRevealingRejectedTools(exposure, async () => {
+        throw rejected();
+      }),
+    ).rejects.toThrow(AllProvidersFailedError);
+    expect(isAiChainDown()).toBe(false);
+  });
 });

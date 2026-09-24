@@ -945,8 +945,24 @@ describe('aiStreamRound — auto-detecting a live model', () => {
 describe('the chain a round runs on reaches the alert layer', () => {
   const DEAD = [{ kind: 'throw' as const, error: apiError(503, 'provider is down') }];
 
-  function askOn(chain: 'smart' | 'fast') {
-    return aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, fast: chain === 'fast' });
+  function askOn(chain: 'smart' | 'fast', deferOutageAlert = false) {
+    return aiStreamRound({
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 100,
+      fast: chain === 'fast',
+      deferOutageAlert,
+    });
+  }
+
+  function everyProviderRejectsUnexposedTool(): void {
+    const rejection = apiError(
+      400,
+      "Tool call validation failed: tool call validation failed: attempted to call tool 'create_event' which was not in request.tools",
+    );
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
+    groq = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
+    hf = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
   }
 
   function allProvidersAnswer(): void {
@@ -989,6 +1005,39 @@ describe('the chain a round runs on reaches the alert layer', () => {
     allProvidersDead();
     await expect(askOn('fast')).rejects.toThrow(AllProvidersFailedError);
     expect(isAiChainDown()).toBe(false);
+  });
+
+  test('a smart round rejected only for an unexposed tool call leaves the bot ready when the caller recovers', async () => {
+    everyProviderRejectsUnexposedTool();
+    const error = await askOn('smart', true).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AllProvidersFailedError);
+    if (!(error instanceof AllProvidersFailedError)) throw new Error('unreachable');
+    expect(error.unexposedToolNames()).toEqual(['create_event']);
+    expect(error.deferredAlertChain).toBe('smart');
+    expect(isAiChainDown()).toBe(false);
+  });
+
+  test('a fast round rejected for an unexposed tool call hands the fast chain to the caller', async () => {
+    everyProviderRejectsUnexposedTool();
+    const error = await askOn('fast', true).catch((e: unknown) => e);
+    if (!(error instanceof AllProvidersFailedError)) throw new Error('expected AllProvidersFailedError');
+    expect(error.deferredAlertChain).toBe('fast');
+  });
+
+  test('a caller that does not recover unexposed tools still gets the outage alert', async () => {
+    everyProviderRejectsUnexposedTool();
+    const error = await askOn('smart').catch((e: unknown) => e);
+    if (!(error instanceof AllProvidersFailedError)) throw new Error('expected AllProvidersFailedError');
+    expect(error.deferredAlertChain).toBeUndefined();
+    expect(isAiChainDown()).toBe(true);
+  });
+
+  test('a recovering caller still gets the outage alert when the failure is not an unexposed tool call', async () => {
+    allProvidersDead();
+    const error = await askOn('smart', true).catch((e: unknown) => e);
+    if (!(error instanceof AllProvidersFailedError)) throw new Error('expected AllProvidersFailedError');
+    expect(error.deferredAlertChain).toBeUndefined();
+    expect(isAiChainDown()).toBe(true);
   });
 
   test('a smart round failing everywhere makes the bot unready', async () => {

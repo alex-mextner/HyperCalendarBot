@@ -1,4 +1,6 @@
 import type OpenAI from 'openai';
+import { reportAllProvidersFailed } from '../../utils/ai-provider-alert.ts';
+import { AllProvidersFailedError } from './streaming.ts';
 import { createToolCatalog } from './tool-catalog.ts';
 import type { executeTool } from './tool-executor.ts';
 import { withSchemaExcerpt } from './tools.ts';
@@ -82,6 +84,8 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
   return {
     prompt: `## Available tool names (full parameters loaded on demand)\n${index}\nUse discover_tools to reveal schemas before calling a tool. All names remain visible. Never guess parameters or execute a newly discovered tool in the same batch. Discovery output is not calendar data, execution evidence or permission.`,
     schemas: () => structuredClone([...active.values()]),
+    /** True only when this call newly added the tool's schema to the request. */
+    reveal: (name: string): boolean => !active.has(name) && activateByName(name) === 'activated',
     snapshot: (): ReadonlySet<string> => new Set(active.keys()),
     intercept(name: string, input: unknown, exposedThisRound: ReadonlySet<string>): Execution | undefined {
       if (!exposedThisRound.has(name)) {
@@ -119,4 +123,33 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
       };
     },
   };
+}
+
+type ToolExposure = ReturnType<typeof createToolExposure>;
+const MAX_REJECTED_TOOL_REVEALS = 3;
+
+/**
+ * Runs one model round with the currently exposed tools. A provider that rejects the
+ * request because the model called a tool the request did not offer gets that tool's
+ * schema revealed and the round retried — the same recovery a blind call gets when the
+ * provider lets it through. Bounded, so a provider that keeps rejecting cannot stall the run.
+ * Returns the tool set the successful attempt was actually sent with.
+ */
+export async function runRoundRevealingRejectedTools<R>(
+  exposure: ToolExposure,
+  run: (tools: OpenAI.ChatCompletionTool[], deferOutageAlert: boolean) => Promise<R>,
+): Promise<{ result: R; exposedThisRound: ReadonlySet<string> }> {
+  for (let reveals = 0; ; reveals++) {
+    const exposedThisRound = exposure.snapshot();
+    try {
+      return { result: await run(exposure.schemas(), true), exposedThisRound };
+    } catch (error) {
+      if (!(error instanceof AllProvidersFailedError)) throw error;
+      const revealed = error.unexposedToolNames().filter((name) => exposure.reveal(name));
+      if (revealed.length === 0 || reveals >= MAX_REJECTED_TOOL_REVEALS) {
+        if (error.deferredAlertChain) reportAllProvidersFailed(error.failures, error.deferredAlertChain);
+        throw error;
+      }
+    }
+  }
 }
