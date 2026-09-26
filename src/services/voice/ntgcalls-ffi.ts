@@ -97,9 +97,12 @@ export function getNtgCallsLoadError(): string | null {
  * requires a C shim to handle struct-by-value parameters.
  * That shim is follow-up work (Task 5 note in plan).
  */
+// Bun 1.4 types an FFIType.ptr result as Pointer | bigint | null; null is rejected below, and the
+// handle is only stored and passed back to ntg_destroy, which accepts either form.
+type NtgHandle = Pointer | bigint;
+
 export class NtgCalls {
-  // Bun 1.4 FFI may return a pointer as a bigint; it is only stored and passed back to ntg_destroy.
-  private handle: Pointer | bigint;
+  private handle: NtgHandle;
   private destroyed = false;
 
   constructor() {
@@ -128,7 +131,7 @@ export class NtgCalls {
   /**
    * Returns the raw FFI handle (for passing to future C shim functions).
    */
-  getHandle(): Pointer | bigint {
+  getHandle(): NtgHandle {
     if (this.destroyed) {
       throw new Error('NtgCalls instance already destroyed');
     }

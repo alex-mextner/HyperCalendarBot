@@ -66,6 +66,7 @@ test('an undeclared undici-types import from a global-store package resolves thr
     expect(config.error).toBeUndefined();
     // Relative typeRoots and paths resolve against the fixture project, as they would in a worktree.
     const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, project);
+    expect(parsed.errors).toEqual([]);
     const options = { ...parsed.options, types: ['proof'] };
     const host = ts.createCompilerHost(options);
     host.getCurrentDirectory = () => project;
