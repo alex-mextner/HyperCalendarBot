@@ -15,7 +15,7 @@ const child = spawnSync(process.execPath, ['--no-env-file', 'test', fixture], {
   maxBuffer: 4 * 1024 * 1024,
 });
 const output = stripVTControlCharacters(`${child.stdout ?? ''}\n${child.stderr ?? ''}`).trim();
-// Coupled to the pinned Bun 1.3.11 reporter; incomplete and skipped child suites fail below.
+// Coupled to the pinned Bun 1.4.2 reporter; incomplete and skipped child suites fail below.
 // Browser absence is not permission to certify a release without real rendering checks.
 const count = (kind: 'pass' | 'skip' | 'fail') =>
   Number(output.match(new RegExp(`^\\s*(\\d+) ${kind}\\s*$`, 'm'))?.[1] ?? 0);

@@ -6,7 +6,7 @@
 #
 # Or push changes to this file — the ci-image workflow triggers automatically.
 
-ARG BUN_VERSION=1.3.11
+ARG BUN_VERSION=1.4.2
 ARG PLAYWRIGHT_VERSION=1.58.2
 
 FROM debian:bookworm-slim
