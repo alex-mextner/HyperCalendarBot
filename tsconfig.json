@@ -12,6 +12,11 @@
     "moduleResolution": "bundler",
     // Follow package symlinks so transitive Bun/Fetch types resolve in a clean isolated install.
     "preserveSymlinks": false,
+    // Only this checkout's own @types: a worktree nested in another checkout must not load its stale ones.
+    "typeRoots": ["./node_modules/@types"],
+    // bun-types imports undici-types without declaring it. From Bun's global store only the
+    // isolated linker's hoisted directory can resolve it; a hoisted install falls back to node_modules.
+    "paths": { "undici-types": ["./node_modules/.bun/node_modules/undici-types"] },
     "customConditions": ["bun"],
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,

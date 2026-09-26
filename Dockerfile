@@ -1,4 +1,4 @@
-ARG BUN_VERSION=1.3.11
+ARG BUN_VERSION=1.4.2
 
 # Stage 1: install deps with locked versions
 FROM debian:bookworm-slim AS prod-deps

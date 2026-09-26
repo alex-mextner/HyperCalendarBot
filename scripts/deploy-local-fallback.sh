@@ -55,7 +55,7 @@ git archive "$SHA" | tar -xf - -C "$LOCAL_SRC"
 if [[ "$SKIP_TESTS" == false ]]; then
   echo "== Local verification for $SHA =="
   # Verify the exact source, never a dirty current working tree.
-  [[ "$("$BUN" --version)" == 1.3.11 ]] || { echo 'Use the pinned Bun 1.3.11' >&2; exit 2; }
+  [[ "$("$BUN" --version)" == 1.4.2 ]] || { echo 'Use the pinned Bun 1.4.2' >&2; exit 2; }
   (cd "$LOCAL_SRC" && "$BUN" install --frozen-lockfile --ignore-scripts && "$BUN" --no-env-file test ./test/ && "$BUN" run lint && "$BUN" node_modules/typescript/bin/tsc --noEmit)
 fi
 
