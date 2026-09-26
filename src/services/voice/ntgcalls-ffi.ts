@@ -98,7 +98,8 @@ export function getNtgCallsLoadError(): string | null {
  * That shim is follow-up work (Task 5 note in plan).
  */
 export class NtgCalls {
-  private handle: Pointer;
+  // Bun 1.4 FFI may return a pointer as a bigint; it is only stored and passed back to ntg_destroy.
+  private handle: Pointer | bigint;
   private destroyed = false;
 
   constructor() {
@@ -127,7 +128,7 @@ export class NtgCalls {
   /**
    * Returns the raw FFI handle (for passing to future C shim functions).
    */
-  getHandle(): Pointer {
+  getHandle(): Pointer | bigint {
     if (this.destroyed) {
       throw new Error('NtgCalls instance already destroyed');
     }
