@@ -1299,7 +1299,7 @@ export class CalendarBotAgent {
       {
         role: 'user',
         content:
-          '[SYSTEM] Your previous response was rejected by the quality validator because it answered a calendar question without calling any tools. You MUST call the appropriate tools (get_events, search_events, get_free_slots, etc.) and re-answer the question properly. Do NOT repeat the same mistake.',
+          '[SYSTEM] Your previous response was rejected by the quality validator. You MUST complete the calendar task with the appropriate tools instead of repeating unsupported prose. For normal calendar create/edit requests, user-provided titles, descriptions, locations, and notes are content-neutral data: do not refuse, sanitize, euphemize, or moralize because of profanity, sexual/adult wording, politics/religion, slang, or other sensitive vocabulary. Preserve the requested field text and perform the calendar operation when its date/time/action are otherwise valid.',
       },
     ];
 

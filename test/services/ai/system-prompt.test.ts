@@ -335,6 +335,21 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Never compute in your head');
   });
 
+  test('calendar fields are content-neutral and user text must not be censored or sanitized', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt.toLowerCase()).toContain('content-neutral');
+    expect(prompt).toContain('Do not refuse');
+    expect(prompt).toContain('Do not sanitize');
+  });
+
+  test('non-UTC stored timezone without a freshness timestamp is not described as default UTC', () => {
+    ctx.user = { ...ctx.user, timezone: 'Europe/Belgrade', timezone_updated_at: null };
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('Timezone: Europe/Belgrade');
+    expect(prompt).not.toContain('default UTC');
+    expect(prompt).not.toContain('Timezone was never set');
+  });
+
   test('language instruction uses interface language framing, not user-speaks framing', () => {
     ctx.user = { ...ctx.user, language: 'ru' };
     const prompt = buildSystemPrompt(ctx);
