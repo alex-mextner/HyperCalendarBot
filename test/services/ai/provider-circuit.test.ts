@@ -3,7 +3,7 @@
 // half-open lease and the one-notice-per-incident contract.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -154,19 +154,29 @@ describe('circuitBackoffMs', () => {
   });
 });
 
+// One open file per inspection: stat and read act on the same descriptor, not a re-resolved path.
+function throughDescriptor<T>(path: string, inspect: (fd: number) => T): T {
+  const fd = openSync(path, 'r');
+  try {
+    return inspect(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 describe('sidecar file', () => {
   test('is created 0600, survives a restart and never stores keys or error bodies', () => {
     const c = ctx('zai', 'smart', 'sk-very-secret-key');
     configureProviderCircuit(dbPath);
     settleFailure(c, admitProvider(c), CREDITS);
-    expect(statSync(dbPath).mode & 0o777).toBe(0o600);
+    expect(throughDescriptor(dbPath, (fd) => fstatSync(fd).mode & 0o777)).toBe(0o600);
 
     resetProviderCircuit();
     configureProviderCircuit(dbPath);
     expect(admitProvider(c).kind).toBe('skip');
 
     resetProviderCircuit();
-    const raw = readFileSync(dbPath).toString('latin1');
+    const raw = throughDescriptor(dbPath, (fd) => readFileSync(fd).toString('latin1'));
     expect(raw).not.toContain('sk-very-secret-key');
     expect(raw).not.toContain('SECRET-BODY-TEXT');
   });
