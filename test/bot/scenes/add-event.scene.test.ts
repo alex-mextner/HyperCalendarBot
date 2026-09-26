@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import { CALLBACK_ONLY_STEPS } from '../../../src/bot/handlers/message.handler.ts';
 import { createUserResolverComposer } from '../../../src/bot/middleware/user-resolver.ts';
 import {
   applyDefaultDuration,
-  CALLBACK_ONLY_STEP_INDICES,
   createAddEventScene,
+  parseWizardDateTime,
 } from '../../../src/bot/scenes/add-event.scene.ts';
 import { CB } from '../../../src/config/constants.ts';
 import type { DatabaseService } from '../../../src/database/index.ts';
@@ -162,44 +161,31 @@ describe('applyDefaultDuration', () => {
 });
 
 // ---------------------------------------------------------------------------
-// CALLBACK_ONLY_STEP_INDICES
+// Wizard date/time parsing
 // ---------------------------------------------------------------------------
 
-describe('CALLBACK_ONLY_STEP_INDICES', () => {
-  test('steps 3 and 4 are callback-only', () => {
-    expect(CALLBACK_ONLY_STEP_INDICES.has(3)).toBe(true);
-    expect(CALLBACK_ONLY_STEP_INDICES.has(4)).toBe(true);
+describe('parseWizardDateTime', () => {
+  const ref = new Date('2026-09-23T18:00:00Z');
+
+  test('Anton case: "25 сентября в 7 вечера" becomes 19:00 Belgrade / 17:00 UTC', () => {
+    expect(parseWizardDateTime('25 сентября в 7 вечера', 'Europe/Belgrade', undefined, ref)).toEqual({
+      kind: 'complete',
+      startAt: '2026-09-25T17:00:00.000Z',
+    });
   });
 
-  test('text-input steps are NOT callback-only', () => {
-    for (const s of [0, 1, 2, 5, 6]) {
-      expect(CALLBACK_ONLY_STEP_INDICES.has(s)).toBe(false);
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// CALLBACK_ONLY_STEPS (message handler registry)
-// ---------------------------------------------------------------------------
-
-describe('CALLBACK_ONLY_STEPS — add_event', () => {
-  test('step 3 (recurrence) is registered', () => {
-    expect(CALLBACK_ONLY_STEPS.get('add_event')?.has(3)).toBe(true);
+  test('date-only answer preserves the date and explicitly waits for a time', () => {
+    expect(parseWizardDateTime('25 сен', 'Europe/Belgrade', undefined, ref)).toEqual({
+      kind: 'needs_time',
+      localDate: '2026-09-25',
+    });
   });
 
-  test('step 4 (recurrence end) is registered', () => {
-    expect(CALLBACK_ONLY_STEPS.get('add_event')?.has(4)).toBe(true);
-  });
-
-  test('text-input steps are NOT registered', () => {
-    const steps = CALLBACK_ONLY_STEPS.get('add_event');
-    for (const s of [0, 1, 2, 5, 6]) {
-      expect(steps?.has(s)).toBe(false);
-    }
-  });
-
-  test('unknown scene is not registered', () => {
-    expect(CALLBACK_ONLY_STEPS.has('unknown_scene')).toBe(false);
+  test('pending date plus "7 вечера" becomes a complete local datetime', () => {
+    expect(parseWizardDateTime('7 вечера', 'Europe/Belgrade', '2026-09-25', ref)).toEqual({
+      kind: 'complete',
+      startAt: '2026-09-25T17:00:00.000Z',
+    });
   });
 });
 
@@ -312,6 +298,43 @@ describe('add_event step handlers', () => {
       const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/разобрать/);
     });
+
+    test('date without time stays on the date/time step and asks for a clock time', async () => {
+      const ctx = makeCtx({ stepId: 1, text: '25 сен', lang: 'ru' });
+      await fns[1]!(ctx, NOOP_NEXT);
+      const [patch, options] = ctx.scene.update.mock.calls[0] as unknown as [
+        { pendingDate?: string },
+        { step?: number },
+      ];
+      expect(patch.pendingDate).toMatch(/-09-25$/);
+      expect(options).toEqual({ step: undefined });
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
+      expect(msg).toMatch(/во сколько/i);
+    });
+
+    test('time entered after a date-only answer is combined with that pending date', async () => {
+      const ctx = makeCtx({
+        stepId: 1,
+        text: '19:00',
+        state: { pendingDate: '2026-09-25' },
+        lang: 'ru',
+      });
+      await fns[1]!(ctx, NOOP_NEXT);
+      const [patch] = ctx.scene.update.mock.calls[0] as unknown as [{ startAt?: string }];
+      expect(patch.startAt).toBe('2026-09-25T16:00:00.000Z');
+    });
+
+    test('bare 25 is treated as a day-of-month and asks for time instead of becoming 25:00', async () => {
+      const ctx = makeCtx({ stepId: 1, text: '25', lang: 'ru' });
+      await fns[1]!(ctx, NOOP_NEXT);
+      const [patch, options] = ctx.scene.update.mock.calls[0] as unknown as [
+        { pendingDate?: string },
+        { step?: number },
+      ];
+      expect(patch.pendingDate).toMatch(/-25$/);
+      expect(options).toEqual({ step: undefined });
+    });
   });
 
   // --- Step 2: Duration ---
@@ -401,7 +424,7 @@ describe('add_event step handlers', () => {
     test('"none" — sets null rule and skips to step 5', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 3, data: `${CB.ADD_RECURRENCE}:none` });
       await fns[3]!(ctx, NOOP_NEXT);
-      expect(ctx.scene.update).toHaveBeenCalledWith({ recurrenceRule: null });
+      expect(ctx.scene.update).toHaveBeenCalledWith({ recurrenceRule: null }, { step: undefined });
       expect(ctx.scene.step.go).toHaveBeenCalledWith(5, true);
     });
 
@@ -428,6 +451,12 @@ describe('add_event step handlers', () => {
       await fns[3]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
       expect(ctx.scene.step.go).not.toHaveBeenCalled();
+    });
+
+    test('custom recurrence accepts text on the same step', async () => {
+      const ctx = makeCtx({ stepId: 3, text: 'каждые 2 недели', lang: 'ru' });
+      await fns[3]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update).toHaveBeenCalledWith({ recurrenceRule: 'FREQ=WEEKLY;INTERVAL=2' });
     });
   });
 
@@ -461,6 +490,65 @@ describe('add_event step handlers', () => {
       expect(ctx.send).toHaveBeenCalledTimes(1);
       const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/times|раз/i);
+    });
+
+    test('"until" then date text appends an inclusive UNTIL and advances', async () => {
+      const ctx = makeCtx({
+        stepId: 4,
+        text: '26 сентября',
+        lang: 'ru',
+        state: { recurrenceRule: 'FREQ=DAILY', recEndMode: 'until', startAt: '2026-09-25T16:00:00.000Z' },
+      });
+      await fns[4]!(ctx, NOOP_NEXT);
+      const [patch] = ctx.scene.update.mock.calls[0] as unknown as [{ recurrenceRule?: string }];
+      expect(patch.recurrenceRule).toMatch(/^FREQ=DAILY;UNTIL=20260926T/);
+      expect(patch.recurrenceRule).toEndWith('Z');
+    });
+
+    test('"until" accepts a bare day-of-month in the event month', async () => {
+      const ctx = makeCtx({
+        stepId: 4,
+        text: '26',
+        lang: 'ru',
+        state: { recurrenceRule: 'FREQ=DAILY', recEndMode: 'until', startAt: '2026-09-25T16:00:00.000Z' },
+      });
+      await fns[4]!(ctx, NOOP_NEXT);
+      const [patch] = ctx.scene.update.mock.calls[0] as unknown as [{ recurrenceRule?: string }];
+      expect(patch.recurrenceRule).toMatch(/^FREQ=DAILY;UNTIL=20260926T/);
+    });
+
+    test('"count" then number appends COUNT and advances', async () => {
+      const ctx = makeCtx({ stepId: 4, text: '5', state: { recurrenceRule: 'FREQ=WEEKLY', recEndMode: 'count' } });
+      await fns[4]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update).toHaveBeenCalledWith({
+        recurrenceRule: 'FREQ=WEEKLY;COUNT=5',
+        recEndMode: undefined,
+      });
+    });
+
+    test('bare number without an end mode is clarified instead of guessed as date or count', async () => {
+      const ctx = makeCtx({
+        stepId: 4,
+        text: '26',
+        lang: 'ru',
+        state: { recurrenceRule: 'FREQ=DAILY', startAt: '2026-09-25T16:00:00.000Z' },
+      });
+      await fns[4]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update).not.toHaveBeenCalled();
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
+      expect(msg).toMatch(/26-е|повтор/i);
+    });
+
+    test('end date without a year is interpreted relative to the event year', async () => {
+      const ctx = makeCtx({
+        stepId: 4,
+        text: '2 февраля',
+        lang: 'ru',
+        state: { recurrenceRule: 'FREQ=DAILY', recEndMode: 'until', startAt: '2027-01-25T16:00:00.000Z' },
+      });
+      await fns[4]!(ctx, NOOP_NEXT);
+      const [patch] = ctx.scene.update.mock.calls[0] as unknown as [{ recurrenceRule?: string }];
+      expect(patch.recurrenceRule).toMatch(/^FREQ=DAILY;UNTIL=20270202T/);
     });
   });
 

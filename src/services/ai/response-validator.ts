@@ -28,6 +28,15 @@ const CALENDAR_COMPLETENESS_PATTERNS = [
   /(?:больше\s+ничего|ничего\s+больше|ничего).{0,60}(?:не\s+)?заплан/i,
   /(?:нет|не\s+остал(?:ось|ось)).{0,40}(?:событ|встреч|дел|план)/i,
 ];
+const CALENDAR_WRITE_REQUEST_PATTERNS = [
+  /\b(?:create|add|schedule|reschedule|edit|update)\b.{0,100}\b(?:event|meeting|appointment|reminder)\b/i,
+  /(?:создай|создать|добавь|добавить|запиши|записать|перенеси|перенести|измени|изменить).{0,100}(?:событ|встреч|напомин|календар)/i,
+  /(?:создай|добавь|запиши).{0,160}(?:завтра|сегодня|сентябр|октябр|ноябр|декабр|январ|феврал|март|апрел|ма[йя]|июн|июл|август)/i,
+];
+const CALENDAR_WRITE_REFUSAL_PATTERNS = [
+  /(?:can(?:not|'t)|won't|unable\s+to).{0,80}(?:create|add|schedule).{0,120}(?:such\s+content|content|wording|appropriate\s+(?:title|name)|title|description)/i,
+  /(?:не\s+могу|не\s+буду|отказываюсь).{0,80}(?:созда|добав).{0,120}(?:с\s+таким\s+содержанием|содержан|формулиров|подходящ\S*\s+(?:назван|формулиров)|нецензур|сексуаль|18\+|лексик)/i,
+];
 
 /**
  * Injection point for tests. Same signature as aiStreamRound — tests can
@@ -62,9 +71,11 @@ APPROVE the response when:
   - The assistant called tools and its final text is consistent with the tool results.
   - The assistant answered a chit-chat / meta question where tools were not needed
     (e.g. "hi", "thanks", "can you speak Russian?", "who are you?").
-  - The assistant politely refused or asked a clarifying question.
+  - The assistant asked a necessary clarifying question.
+  - The assistant politely refused a request that is not a normal calendar operation or cannot be performed by the calendar assistant.
 
 REJECT the response when:
+  - The user requested an ordinary calendar create/edit operation, but the assistant refused solely because of the wording/content of a title, description, location, or note. Calendar fields are content-neutral user data.
   - The assistant claims facts about the user's calendar, events, free slots,
     reminders, holidays, contacts, or settings without calling the matching tool.
   - The assistant confidently invents event titles, times, or IDs.
@@ -119,6 +130,17 @@ export async function validateResponse(
   input: ValidationInput,
   streamImpl: StreamImpl = aiStreamRound,
 ): Promise<ValidationResult> {
+  if (
+    input.toolCalls.length === 0 &&
+    CALENDAR_WRITE_REQUEST_PATTERNS.some((pattern) => pattern.test(input.userMessage)) &&
+    CALENDAR_WRITE_REFUSAL_PATTERNS.some((pattern) => pattern.test(input.response))
+  ) {
+    return {
+      approved: false,
+      reason: 'Refused an ordinary calendar write because of user-provided content',
+    };
+  }
+
   if (
     input.toolCalls.length > 0 &&
     !hasScheduleRead(input.toolCalls) &&
