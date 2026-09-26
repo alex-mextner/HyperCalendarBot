@@ -115,10 +115,10 @@ ws.onmessage = (event) => {
 };
 
 ws.onerror = (event) => {
-  console.error('[error]', (event as ErrorEvent).message ?? event);
+  console.error('[error]', oneLine((event as ErrorEvent).message ?? event));
 };
 
 ws.onclose = (event) => {
-  console.log(`[close] code=${event.code} reason=${event.reason || '(none)'}`);
+  console.log(`[close] code=${event.code} reason=${oneLine(event.reason || '(none)')}`);
   process.exit(event.code === 1000 ? 0 : 1);
 };

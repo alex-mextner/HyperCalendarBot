@@ -122,7 +122,7 @@ ws.onmessage = (event) => {
   }
 };
 
-ws.onerror = (e) => console.error(`[${ts()}] WS error:`, (e as ErrorEvent).message);
+ws.onerror = (e) => console.error(`[${ts()}] WS error:`, oneLine((e as ErrorEvent).message));
 ws.onclose = (e) => {
   console.log(`\n[${ts()}] Connection closed (code=${e.code})`);
   console.log(`\nSummary: ${turnCount} turn(s) detected`);
