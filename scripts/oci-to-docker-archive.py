@@ -141,7 +141,8 @@ def select_image(
         descriptor
         for descriptor in index.get("manifests") or []
         if isinstance(descriptor, dict)
-        and any((descriptor.get("annotations") or {}).get(key) == tag for key in NAME_ANNOTATIONS)
+        and isinstance(descriptor.get("annotations"), dict)
+        and any(descriptor["annotations"].get(key) == tag for key in NAME_ANNOTATIONS)
     ]
     if not roots:
         raise ConversionError(f"{tag} is not named in index.json")
@@ -166,7 +167,9 @@ def select_image(
         ) != (os_name, arch):
             return  # another platform, or an attestation (unknown/unknown)
         manifest = load_json(oci.read_blob(descriptor.get("digest")), "image manifest")
-        config_descriptor = manifest.get("config") or {}
+        config_descriptor = manifest.get("config")
+        if not isinstance(config_descriptor, dict):
+            raise ConversionError("Image manifest has no config descriptor")
         raw_config = oci.read_blob(config_descriptor.get("digest"))
         config = load_json(raw_config, "image config")
         if (config.get("os"), config.get("architecture")) == (os_name, arch):

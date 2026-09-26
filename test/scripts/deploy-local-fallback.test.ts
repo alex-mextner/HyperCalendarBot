@@ -22,6 +22,10 @@ describe('local deploy transport contracts (behavior exercised in Python harness
     // Apple's OCI layout is converted to the docker-save format the artifact checks expect.
     expect(script).toContain('"$CONTAINER" image save --platform linux/amd64');
     expect(script).toContain('"$LOCAL_SRC/scripts/oci-to-docker-archive.py"');
+    // A failed export must not strand the image: delete runs before the failure exit.
+    const deleteAt = script.indexOf('"$CONTAINER" image delete');
+    expect(deleteAt).toBeGreaterThan(-1);
+    expect(deleteAt).toBeLessThan(script.indexOf('Image export failed'));
   });
   test('clean release installation cannot rewrite the committed dependency lock', () => {
     expect(script).toContain('install --frozen-lockfile --ignore-scripts');

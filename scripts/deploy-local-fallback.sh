@@ -105,12 +105,16 @@ if [[ "$BUILD_BACKEND" == container ]]; then
   # `container image save` writes an OCI image layout; convert it (digest-checked,
   # config bytes unchanged) to the `docker save` format that release-artifact.py
   # and the server's `docker load` identity checks expect.
-  "$CONTAINER" image save --platform linux/amd64 "$IMAGE:$SHA" -o "$LOCAL_SRC/image.oci.tar"
-  python3 "$LOCAL_SRC/scripts/oci-to-docker-archive.py" "$LOCAL_SRC/image.oci.tar" "$LOCAL_SRC/image.tar" "$IMAGE:$SHA"
-  rm -f "$LOCAL_SRC/image.oci.tar"
-  gzip -1 "$LOCAL_SRC/image.tar"
-  # The archive is the release artifact; don't keep one local image per release.
+  export_status=0
+  "$CONTAINER" image save --platform linux/amd64 "$IMAGE:$SHA" -o "$LOCAL_SRC/image.oci.tar" \
+    && python3 "$LOCAL_SRC/scripts/oci-to-docker-archive.py" "$LOCAL_SRC/image.oci.tar" "$LOCAL_SRC/image.tar" "$IMAGE:$SHA" \
+    && rm -f "$LOCAL_SRC/image.oci.tar" \
+    && gzip -1 "$LOCAL_SRC/image.tar" \
+    || export_status=$?
+  # The archive is the release artifact; don't keep one local image per release,
+  # and don't strand a multi-GB image when the export fails either.
   "$CONTAINER" image delete "$IMAGE:$SHA" >/dev/null 2>&1 || echo "warning: could not delete local image $IMAGE:$SHA; remove it with \`container image delete\`" >&2
+  [[ "$export_status" == 0 ]] || { echo "Image export failed (exit $export_status)" >&2; exit "$export_status"; }
 else
   docker_local build --platform linux/amd64 --label "org.opencontainers.image.revision=$SHA" -t "$IMAGE:$SHA" "$LOCAL_SRC"
   docker_local save "$IMAGE:$SHA" | gzip -1 > "$LOCAL_SRC/image.tar.gz"
