@@ -77,7 +77,8 @@ Local builder: on the dev Mac it is Apple's native `container` CLI (Homebrew `co
 
 ```bash
 # Default: fetch and deploy the exact commit at origin/main, with local tests first.
-HYPERCAL_BUN_BIN=/path/to/bun-1.3.11 scripts/deploy-local-fallback.sh
+# The system Bun must be the pinned 1.4.2; otherwise point HYPERCAL_BUN_BIN at one.
+scripts/deploy-local-fallback.sh
 
 # If that exact commit already passed the full local gate in this incident/session:
 scripts/deploy-local-fallback.sh --ref origin/main --skip-tests
