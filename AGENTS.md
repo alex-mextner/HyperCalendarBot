@@ -42,3 +42,10 @@ Explain what a change does before citing its issue number. Use concrete dates fo
 - Preserve every prior raw measurement and derived score as timestamped, append-only evidence with a source SHA/tree, fixture/prompt/schema version, model settings, scope and checksum. Never overwrite a baseline to make progress look better.
 - Separate synthetic payload estimates, small provider probes, controlled live requests and natural traffic distributions. Report sample size, failures, retries, missing usage and delivery boundaries; one sample is not a production percentile target.
 - Keep personal conversation/calendar data and credentials out of committed reports. Store private raw records under restricted local logs; checked-in summaries must carry enough methodology to reproduce comparisons safely.
+
+## Local containers (no Colima)
+
+- Colima was removed from the dev Mac on 2026-09-26 (its VM data disk kept growing past 20 GB) and must not be reinstalled — nor Docker Desktop, OrbStack, Lima, a podman machine or any other always-on Linux VM. Use Apple's native `container` stack.
+- Local compose and ad-hoc containers: `docker`/`docker compose` on PATH (`/opt/homebrew/bin/docker`) are a wrapper over `mocker` + Apple `container`; `mocker compose` runs this repo's `docker-compose.yml` (redis + bot). Port publishing (`-p`) and bind mounts (`-v`) were verified on 2026-09-22; `healthcheck` and `shm_size` (Playwright/Chromium) were not verified end-to-end.
+- Release images: `scripts/deploy-local-fallback.sh` (also run by `gh ship`'s post-merge deploy when hosted CI is down) builds linux/amd64 with `container build` and converts the saved OCI layout into the `docker save` artifact with `scripts/oci-to-docker-archive.py`. It only needs `container system start`; see `docs/reference/deploy-runbook.md`.
+- Images live in `~/Library/Application Support/com.apple.container`. Delete what you pull or build for experiments (`container image delete …`); disk on this Mac is tight.

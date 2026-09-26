@@ -13,6 +13,16 @@ describe('local deploy transport contracts (behavior exercised in Python harness
     expect(script).toContain('"$endpoint" == unix://*');
     expect(remote).not.toMatch(/docker build|bun test|bun install/);
   });
+  test('without a chosen Docker context the Mac builds with Apple container, not Colima', () => {
+    expect(script).not.toContain('HYPERCAL_DOCKER_CONTEXT:-colima');
+    expect(script).toContain('"$CONTAINER" system status');
+    expect(script).toContain(
+      '"$CONTAINER" build --progress plain --platform linux/amd64 --label "org.opencontainers.image.revision=$SHA"',
+    );
+    // Apple's OCI layout is converted to the docker-save format the artifact checks expect.
+    expect(script).toContain('"$CONTAINER" image save --platform linux/amd64');
+    expect(script).toContain('"$LOCAL_SRC/scripts/oci-to-docker-archive.py"');
+  });
   test('clean release installation cannot rewrite the committed dependency lock', () => {
     expect(script).toContain('install --frozen-lockfile --ignore-scripts');
   });
