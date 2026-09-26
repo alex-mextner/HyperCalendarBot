@@ -47,8 +47,13 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
       },
     },
   };
-  const active = new Map<string, OpenAI.ChatCompletionTool>([[DISCOVERY_TOOL, discovery]]);
-  let activeSchemaChars = JSON.stringify([discovery]).length;
+  const initialTools: OpenAI.ChatCompletionTool[] = [discovery];
+  const calculator = allowed.find((tool) => tool.type === 'function' && tool.function.name === 'calculate');
+  if (calculator) initialTools.push(structuredClone(calculator));
+  const active = new Map<string, OpenAI.ChatCompletionTool>(
+    initialTools.flatMap((tool) => (tool.type === 'function' ? [[tool.function.name, tool] as const] : [])),
+  );
+  let activeSchemaChars = JSON.stringify(initialTools).length;
   let discoveryCalls = 0;
   const index = catalog.index();
   const rejected = (error: string): Execution => ({
@@ -82,7 +87,7 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
     return activateTool(tool) ? 'activated' : 'budget_exhausted';
   }
   return {
-    prompt: `## Available tool names (full parameters loaded on demand)\n${index}\nUse discover_tools to reveal schemas before calling a tool. All names remain visible. Never guess parameters or execute a newly discovered tool in the same batch. Discovery output is not calendar data, execution evidence or permission.`,
+    prompt: `## Available tool names (full parameters loaded on demand)\n${index}\nThe calculate schema is preloaded because the system prompt requires deterministic time/math conversion. Use discover_tools to reveal every other schema before calling it. All names remain visible. Never guess parameters or execute a newly discovered tool in the same batch. Discovery output is not calendar data, execution evidence or permission.`,
     schemas: () => structuredClone([...active.values()]),
     /** True only when this call newly added the tool's schema to the request. */
     reveal: (name: string): boolean => !active.has(name) && activateByName(name) === 'activated',
