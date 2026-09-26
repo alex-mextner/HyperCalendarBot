@@ -149,7 +149,10 @@ export function handleCalculate(input: { expression: string }): ToolResult {
       if (!sameWallClock(local, year, month, day, hour, minute, second))
         return { success: false, error: `Local time does not exist in ${timezone} because of a clock change.` };
       if (localTimeIsAmbiguous(local.getTime(), timezone!, year, month, day, hour, minute, second))
-        return { success: false, error: `Local time is ambiguous in ${timezone} because of a clock change; specify an explicit UTC offset.` };
+        return {
+          success: false,
+          error: `Local time is ambiguous in ${timezone} because of a clock change; specify an explicit UTC offset.`,
+        };
       return { success: true, output: new Date(local.getTime()).toISOString() };
     } catch {
       return { success: false, error: `Invalid timezone: ${timezone}` };
@@ -178,8 +181,10 @@ export function handleCalculate(input: { expression: string }): ToolResult {
       return { success: false, error: `Invalid fixed-offset datetime: ${expr}` };
     const offsetMinutes = (signRaw === '+' ? 1 : -1) * (offsetHours * 60 + offsetMinutesPart);
     if (!yearRaw) {
-      const utcMinutes = ((hour * 60 + minute - offsetMinutes) % 1440 + 1440) % 1440;
-      const hhmm = `${Math.floor(utcMinutes / 60).toString().padStart(2, '0')}:${(utcMinutes % 60).toString().padStart(2, '0')}`;
+      const utcMinutes = (((hour * 60 + minute - offsetMinutes) % 1440) + 1440) % 1440;
+      const hhmm = `${Math.floor(utcMinutes / 60)
+        .toString()
+        .padStart(2, '0')}:${(utcMinutes % 60).toString().padStart(2, '0')}`;
       return { success: true, output: secondRaw === undefined ? hhmm : `${hhmm}:${String(second).padStart(2, '0')}` };
     }
     const year = Number(yearRaw);

@@ -701,11 +701,7 @@ describe('handleCalculate', () => {
   });
 
   test('production-invalid datetime forms return a self-correcting ISO example', () => {
-    const invalid = [
-      '2026-09-16 17:40 - 2 hours',
-      '2026-09-17 18:30 - 2 hours',
-      '2026-09-17 10:49 + 2 hours to UTC',
-    ];
+    const invalid = ['2026-09-16 17:40 - 2 hours', '2026-09-17 18:30 - 2 hours', '2026-09-17 10:49 + 2 hours to UTC'];
     for (const expression of invalid) {
       const r = handleCalculate({ expression });
       expect(r.success).toBe(false);
