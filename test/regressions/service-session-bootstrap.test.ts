@@ -2,9 +2,9 @@
 import { Database } from 'bun:sqlite';
 import { expect, mock, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { migrations } from '../../src/database/migrations.ts';
 import { TelegramSessionRepository } from '../../src/database/repositories/telegram-session.repository.ts';
 import { UserRepository } from '../../src/database/repositories/user.repository.ts';
@@ -17,6 +17,17 @@ import {
 const expectedId = 5000000001;
 const configured = { MTPROTO_API_ID: 123, MTPROTO_API_HASH: 'synthetic', MTPROTO_SERVICE_USER_ID: expectedId };
 const success = { stdout: JSON.stringify({ ok: true, user_id: expectedId }), exitCode: 0 };
+
+// Bytes and timestamps come from one open descriptor, so they describe the same file.
+function snapshot(path: string): { bytes: Buffer; mtimeMs: number; ctimeMs: number } {
+  const fd = openSync(path, 'r');
+  try {
+    const { mtimeMs, ctimeMs } = fstatSync(fd);
+    return { bytes: readFileSync(fd), mtimeMs, ctimeMs };
+  } finally {
+    closeSync(fd);
+  }
+}
 
 for (const settings of [
   {},
@@ -54,8 +65,7 @@ test('directory bootstrap leaves an active ordinary-user database untouched when
     } finally {
       db.close();
     }
-    const before = readFileSync(userFile);
-    const beforeStat = statSync(userFile);
+    const before = snapshot(userFile);
     const files = readdirSync(directory);
     const reads = spyOn(fs, 'readFileSync');
     const queries = spyOn(Database.prototype, 'query');
@@ -74,11 +84,10 @@ test('directory bootstrap leaves an active ordinary-user database untouched when
       prepares.mockRestore();
       writes.mockRestore();
     }
-    expect(existsSync(serviceFile)).toBe(false);
-    expect(readdirSync(directory)).toEqual(files);
-    expect(readFileSync(userFile)).toEqual(before);
-    expect(statSync(userFile).mtimeMs).toBe(beforeStat.mtimeMs);
-    expect(statSync(userFile).ctimeMs).toBe(beforeStat.ctimeMs);
+    const after = readdirSync(directory);
+    expect(after).toEqual(files);
+    expect(after).not.toContain(basename(serviceFile));
+    expect(snapshot(userFile)).toEqual(before);
 
     // Only the service filename in the supplied directory permits a probe.
     writeFileSync(join(directory, 'other.session'), 'synthetic unrelated session');

@@ -27,7 +27,7 @@ describe('retired desktop-agent endpoints', () => {
         headers: {
           Upgrade: 'websocket',
           Connection: 'Upgrade',
-          'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+          'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==', // gitleaks:allow RFC 6455 section 1.3 sample nonce
           'Sec-WebSocket-Version': '13',
         },
       });
