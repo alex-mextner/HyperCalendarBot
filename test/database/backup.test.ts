@@ -1,21 +1,26 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { runSqliteBackup } from '../../src/database/backup.ts';
 import { migrations } from '../../src/database/migrations.ts';
 import { runMigrations } from '../../src/database/schema.ts';
 
-const TMP_BASE = path.join(os.tmpdir(), `bak-test-${Date.now()}`);
-const DATA_DIR = path.join(TMP_BASE, 'data');
-const DB_PATH = path.join(DATA_DIR, 'calendar.db');
-const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+let TMP_BASE: string;
+let DATA_DIR: string;
+let DB_PATH: string;
+let BACKUP_DIR: string;
 
 describe('runSqliteBackup', () => {
   let db: Database;
 
   beforeEach(async () => {
+    // A private, unpredictable directory per test; a fixed name in the shared temp dir could be pre-created.
+    TMP_BASE = await mkdtemp(path.join(os.tmpdir(), 'bak-test-'));
+    DATA_DIR = path.join(TMP_BASE, 'data');
+    DB_PATH = path.join(DATA_DIR, 'calendar.db');
+    BACKUP_DIR = path.join(DATA_DIR, 'backups');
     await mkdir(DATA_DIR, { recursive: true });
     db = new Database(DB_PATH);
     runMigrations(db, migrations);

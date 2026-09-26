@@ -294,7 +294,7 @@ export function startWebServer(deps: WebServerDeps): { port: number; stop: () =>
   const server = Bun.serve({ port, fetch: handleFetch });
   const cleanupTimer = setInterval(() => oauthRateLimiter.cleanup(), OAUTH_RATE_LIMIT.windowMs);
 
-  webLogger.info({ port }, 'Web server started');
+  webLogger.info({ port: server.port }, 'Web server started');
 
   return {
     port: server.port ?? port,

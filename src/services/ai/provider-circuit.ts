@@ -149,6 +149,9 @@ export function classifyCircuitFailure(input: CircuitFailureInput, now: number):
 
 /** Identifies one provider account. Contains neither the endpoint nor the credential. */
 export function providerCircuitKey(provider: ProviderId, baseUrl: string, apiKey: string): string {
+  // codeql[js/insufficient-password-hash] An API key is a random high-entropy token, not a
+  // user-chosen password, and this digest is only a stable account fingerprint used as a map
+  // key. The key itself is never stored, and brute-forcing it from the digest is infeasible.
   const digest = createHash('sha256').update([provider, baseUrl, apiKey].join('\0')).digest('hex');
   return `${provider}:${digest.slice(0, 32)}`;
 }

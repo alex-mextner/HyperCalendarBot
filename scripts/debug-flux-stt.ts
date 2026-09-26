@@ -8,6 +8,9 @@
  * Convert any audio: ffmpeg -i input.ogg -ar 16000 -ac 1 -f s16le output.raw
  */
 
+// Remote message fields are logged on one line: a newline in them must not forge a log entry.
+const oneLine = (value: unknown) => String(value).replace(/[\r\n]/g, '');
+
 const apiKey = process.env.DEEPGRAM_API_KEY;
 if (!apiKey) {
   console.error('DEEPGRAM_API_KEY not set');
@@ -91,7 +94,7 @@ ws.onmessage = (event) => {
     const msg = JSON.parse(raw) as Record<string, unknown>;
     const type = msg.type as string;
     if (type === 'ListenV2Connected') {
-      console.log('[msg] Connected, request_id:', msg.request_id);
+      console.log('[msg] Connected, request_id:', oneLine(msg.request_id));
     } else if (type === 'ListenV2TurnInfo') {
       const ev = msg.event as string;
       const transcript = (msg.transcript as string) ?? '';
@@ -99,15 +102,15 @@ ws.onmessage = (event) => {
       if (ev === 'StartOfTurn') {
         console.log('[turn] StartOfTurn');
       } else if (ev === 'EndOfTurn') {
-        console.log(`[turn] EndOfTurn  confidence=${conf?.toFixed(3)}  transcript="${transcript}"`);
+        console.log(`[turn] EndOfTurn  confidence=${conf?.toFixed(3)}  transcript="${oneLine(transcript)}"`);
       } else {
-        console.log(`[turn] ${ev}  transcript="${transcript}"`);
+        console.log(`[turn] ${oneLine(ev)}  transcript="${oneLine(transcript)}"`);
       }
     } else {
       console.log('[msg]', JSON.stringify(msg));
     }
   } catch {
-    console.log('[msg] non-JSON:', raw.slice(0, 80));
+    console.log('[msg] non-JSON:', oneLine(raw.slice(0, 80)));
   }
 };
 
