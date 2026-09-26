@@ -154,6 +154,18 @@ describe('parseSimpleDate', () => {
     expect(result!.toISOString()).toContain('2026-03-11T08:00');
   });
 
+  test('rejects impossible bare times instead of rolling them into the next day', () => {
+    const ref = new Date('2026-03-11T05:00:00Z');
+    expect(parseSimpleDate('25', 'UTC', ref)).toBeNull();
+    expect(parseSimpleDate('23:99', 'UTC', ref)).toBeNull();
+  });
+
+  test('rejects impossible month dates instead of rolling them into another month', () => {
+    const ref = new Date('2026-03-11T05:00:00Z');
+    expect(parseSimpleDate('32 мар', 'UTC', ref)).toBeNull();
+    expect(parseSimpleDate('31 апр', 'UTC', ref)).toBeNull();
+  });
+
   // Date without time (defaults to 00:00)
   test('parses "15 мар" (date without time)', () => {
     const ref = new Date('2026-03-11T08:00:00Z');

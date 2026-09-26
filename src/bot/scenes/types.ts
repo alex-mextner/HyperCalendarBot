@@ -3,6 +3,7 @@
 export interface AddEventState {
   title?: string;
   startAt?: string;
+  pendingDate?: string;
   endAt?: string;
   recurrenceRule?: string | null;
   recEndMode?: 'until' | 'count';
