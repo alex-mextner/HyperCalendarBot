@@ -195,7 +195,7 @@ function buildUserInfoSection(ctx: AgentContext, utcOffset: string, nowLocal: st
 - Current local time: ${nowLocal}
 - ${tzFreshness}
 ${cityLine}
-- To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.${secretaryLine}`;
+- Current offset ${utcOffset} is informational for the current instant; NEVER reuse it blindly for a future date because DST may differ. Use calculate with the full local date and IANA timezone for local → UTC conversion.${secretaryLine}`;
 }
 
 function buildContextSection(): string {
@@ -212,9 +212,9 @@ function buildLanguageRule(ctx: AgentContext): string {
 }
 
 function buildTimeRules(ctx: AgentContext, utcOffset: string): string {
-  return `- All dates/times in tool calls must use ISO 8601 UTC format (e.g., "2026-03-15T14:00:00Z"). CRITICAL: when the user says a time (e.g. "в 12:30"), it is ALWAYS in their local timezone (${ctx.user.timezone}, ${utcOffset}). You MUST convert to UTC before passing to any tool. Use the calculate tool: calculate("12:30 ${utcOffset} to UTC") → use the result as start_at. NEVER append "Z" to a local time — that is the #1 source of off-by-N-hours bugs.
-- TIMEZONE RULE: NEVER guess or hardcode UTC offsets for any timezone — not even well-known ones like Moscow, Tokyo, Paris, or New York. Your training data about offsets is stale and wrong when DST or legal changes occur. The ONLY exception is the user's own timezone offset shown in User Info above — it is computed fresh for every message and is correct; use it directly without calling any tool. For ANY other timezone, ALWAYS call get_timezone_info first.
-- When displaying times to the user, convert from UTC to their local timezone by adding the offset (${utcOffset}).`;
+  return `- All dates/times in business tool calls must use ISO 8601 UTC (e.g. "2026-03-15T14:00:00Z"). CRITICAL: a user-stated time is in their local timezone (${ctx.user.timezone}). First resolve the intended LOCAL calendar date, then call calculate with the full local date/time and IANA zone, e.g. calculate("2026-03-15 12:30 ${ctx.user.timezone} to UTC"); use the returned ISO UTC value as start_at. NEVER append "Z" to a local time.
+- TIMEZONE RULE: NEVER guess or hardcode an offset. For the user's own timezone, the calculate IANA conversion above is authoritative for the EVENT DATE and handles DST. The ${utcOffset} shown in User Info is only the offset NOW. For another timezone, call get_timezone_info first.
+- Fixed offsets explicitly supplied by the user are also safe: calculate("2026-03-15 12:30 UTC+2 to UTC").`;
 }
 
 function buildEventCreationRules(): string {
