@@ -74,6 +74,48 @@ function evalArithmetic(expr: string): number {
   return result;
 }
 
+function validCalendarDate(year: number, month: number, day: number): boolean {
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  return probe.getUTCFullYear() === year && probe.getUTCMonth() === month - 1 && probe.getUTCDate() === day;
+}
+
+function sameWallClock(
+  date: TZDate,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+): boolean {
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day &&
+    date.getHours() === hour &&
+    date.getMinutes() === minute &&
+    date.getSeconds() === second
+  );
+}
+
+function localTimeIsAmbiguous(
+  instant: number,
+  timezone: string,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+): boolean {
+  for (let deltaMinutes = -180; deltaMinutes <= 180; deltaMinutes += 15) {
+    if (deltaMinutes === 0) continue;
+    const candidate = new TZDate(instant + deltaMinutes * 60_000, timezone);
+    if (sameWallClock(candidate, year, month, day, hour, minute, second)) return true;
+  }
+  return false;
+}
+
 function formatDiffMs(absMs: number): string {
   const totalMin = Math.round(absMs / 60_000);
   if (totalMin < 60) return `${totalMin} min`;
@@ -100,19 +142,14 @@ export function handleCalculate(input: { expression: string }): ToolResult {
     const hour = Number(hourRaw);
     const minute = Number(minuteRaw);
     const second = Number(secondRaw ?? '0');
-    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59)
+    if (!validCalendarDate(year, month, day) || hour > 23 || minute > 59 || second > 59)
       return { success: false, error: `Invalid local datetime: ${expr}` };
     try {
       const local = TZDate.tz(timezone!, year, month - 1, day, hour, minute, second, 0);
-      if (
-        local.getFullYear() !== year ||
-        local.getMonth() !== month - 1 ||
-        local.getDate() !== day ||
-        local.getHours() !== hour ||
-        local.getMinutes() !== minute ||
-        local.getSeconds() !== second
-      )
+      if (!sameWallClock(local, year, month, day, hour, minute, second))
         return { success: false, error: `Local time does not exist in ${timezone} because of a clock change.` };
+      if (localTimeIsAmbiguous(local.getTime(), timezone!, year, month, day, hour, minute, second))
+        return { success: false, error: `Local time is ambiguous in ${timezone} because of a clock change; specify an explicit UTC offset.` };
       return { success: true, output: new Date(local.getTime()).toISOString() };
     } catch {
       return { success: false, error: `Invalid timezone: ${timezone}` };
@@ -135,20 +172,20 @@ export function handleCalculate(input: { expression: string }): ToolResult {
       minute > 59 ||
       second > 59 ||
       offsetHours > 14 ||
+      (offsetHours === 14 && offsetMinutesPart !== 0) ||
       (offsetMinuteRaw !== undefined && offsetMinutesPart > 59)
     )
       return { success: false, error: `Invalid fixed-offset datetime: ${expr}` };
     const offsetMinutes = (signRaw === '+' ? 1 : -1) * (offsetHours * 60 + offsetMinutesPart);
     if (!yearRaw) {
       const utcMinutes = ((hour * 60 + minute - offsetMinutes) % 1440 + 1440) % 1440;
-      return {
-        success: true,
-        output: `${Math.floor(utcMinutes / 60).toString().padStart(2, '0')}:${(utcMinutes % 60).toString().padStart(2, '0')}`,
-      };
+      const hhmm = `${Math.floor(utcMinutes / 60).toString().padStart(2, '0')}:${(utcMinutes % 60).toString().padStart(2, '0')}`;
+      return { success: true, output: secondRaw === undefined ? hhmm : `${hhmm}:${String(second).padStart(2, '0')}` };
     }
+    const year = Number(yearRaw);
     const month = Number(monthRaw);
     const day = Number(dayRaw);
-    if (month < 1 || month > 12 || day < 1 || day > 31) return { success: false, error: `Invalid date: ${expr}` };
+    if (!validCalendarDate(year, month, day)) return { success: false, error: `Invalid date: ${expr}` };
     const offset = `${signRaw}${String(offsetHours).padStart(2, '0')}:${String(offsetMinutesPart).padStart(2, '0')}`;
     const parsed = new Date(
       `${yearRaw}-${monthRaw}-${dayRaw}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}${offset}`,
