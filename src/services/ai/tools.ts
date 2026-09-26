@@ -796,14 +796,14 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'calculate',
     description:
-      'Arithmetic calculator. ALWAYS use this tool for any math — never compute in your head. Supports: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days/weeks/months/years, YYYY-MM-DD ± N days/weeks/months/years, ISO datetime - ISO datetime (returns human-readable duration). For local datetimes, ISO means a T separator plus an explicit Z/offset; include the user offset before doing arithmetic (example: 2026-09-17T10:49:00+02:00 + 2hours). Do not write offset-free YYYY-MM-DD HH:MM, UTC+2 to UTC, or append "to UTC"; results are already returned in UTC.',
+      'Deterministic calculator and local-time converter. ALWAYS use this tool for math/time conversion — never compute in your head. Supports numbers, durations, ISO datetime arithmetic/differences, and local → UTC conversion as "YYYY-MM-DD HH:MM Europe/Belgrade to UTC" or an explicit fixed offset such as "2026-09-23 12:30 UTC+2 to UTC". IANA conversion applies the offset for that event date, including DST.',
     input_schema: {
       type: 'object' as const,
       properties: {
         expression: {
           type: 'string',
           description:
-            'Expression to evaluate, e.g. "2 + 31", "22:34 + 31min", "2026-03-18T22:34:00Z + 2weeks", "2026-03-18 + 1month", "23:50 - 1hour", "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z"',
+            'Expression to evaluate, e.g. "2 + 31", "22:34 + 31min", "2026-03-18T22:34:00Z + 2weeks", "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z", "2026-09-23 12:30 Europe/Belgrade to UTC"',
         },
       },
       required: ['expression'],

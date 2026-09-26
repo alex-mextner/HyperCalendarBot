@@ -1,11 +1,16 @@
+import { TZDate } from '@date-fns/tz';
 import { addMonths, addYears, subMonths, subYears } from 'date-fns';
 import type { ToolHandlerMeta, ToolResult } from '../types.ts';
 
 const ISO_DT_RE = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})';
 const DATETIME_LIKE_RE = /^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}/;
 const DURATION_UNITS = 'min|minutes?|h|hr|hours?|d|days?|w|weeks?|mo|months?|y|years?';
+const IANA_LOCAL_TO_UTC_RE =
+  /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s+([A-Za-z_]+(?:\/[A-Za-z0-9_+.-]+)+)\s+to\s+UTC$/i;
+const FIXED_LOCAL_TO_UTC_RE =
+  /^(?:(\d{4})-(\d{2})-(\d{2})\s+)?(\d{1,2}):(\d{2})(?::(\d{2}))?\s+UTC([+-])(\d{1,2})(?::?(\d{2}))?\s+to\s+UTC$/i;
 const DATETIME_SYNTAX_HINT =
-  'Datetime arithmetic requires ISO 8601 with T and an explicit Z/offset, e.g. "2026-09-17T10:49:00+02:00 + 2hours". The result is returned in UTC; do not append "to UTC" or use an offset-free local datetime.';
+  'Datetime arithmetic requires ISO 8601 with T and an explicit Z/offset, e.g. "2026-09-17T10:49:00+02:00 + 2hours". Local-to-UTC conversion accepts a dated IANA zone, e.g. "2026-09-23 12:30 Europe/Belgrade to UTC", or an explicit fixed UTC offset. For arithmetic forms, do not append "to UTC".';
 
 function evalArithmetic(expr: string): number {
   let pos = 0;
@@ -69,6 +74,48 @@ function evalArithmetic(expr: string): number {
   return result;
 }
 
+function validCalendarDate(year: number, month: number, day: number): boolean {
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  return probe.getUTCFullYear() === year && probe.getUTCMonth() === month - 1 && probe.getUTCDate() === day;
+}
+
+function sameWallClock(
+  date: TZDate,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+): boolean {
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day &&
+    date.getHours() === hour &&
+    date.getMinutes() === minute &&
+    date.getSeconds() === second
+  );
+}
+
+function localTimeIsAmbiguous(
+  instant: number,
+  timezone: string,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+): boolean {
+  for (let deltaMinutes = -180; deltaMinutes <= 180; deltaMinutes += 15) {
+    if (deltaMinutes === 0) continue;
+    const candidate = new TZDate(instant + deltaMinutes * 60_000, timezone);
+    if (sameWallClock(candidate, year, month, day, hour, minute, second)) return true;
+  }
+  return false;
+}
+
 function formatDiffMs(absMs: number): string {
   const totalMin = Math.round(absMs / 60_000);
   if (totalMin < 60) return `${totalMin} min`;
@@ -83,6 +130,69 @@ function formatDiffMs(absMs: number): string {
 
 export function handleCalculate(input: { expression: string }): ToolResult {
   const expr = input.expression.trim();
+
+  // Local wall clock + IANA timezone → UTC. TZDate resolves the offset for
+  // the requested calendar date, so future DST changes never reuse today's offset.
+  const ianaMatch = expr.match(IANA_LOCAL_TO_UTC_RE);
+  if (ianaMatch) {
+    const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, timezone] = ianaMatch;
+    const year = Number(yearRaw);
+    const month = Number(monthRaw);
+    const day = Number(dayRaw);
+    const hour = Number(hourRaw);
+    const minute = Number(minuteRaw);
+    const second = Number(secondRaw ?? '0');
+    if (!validCalendarDate(year, month, day) || hour > 23 || minute > 59 || second > 59)
+      return { success: false, error: `Invalid local datetime: ${expr}` };
+    try {
+      const local = TZDate.tz(timezone!, year, month - 1, day, hour, minute, second, 0);
+      if (!sameWallClock(local, year, month, day, hour, minute, second))
+        return { success: false, error: `Local time does not exist in ${timezone} because of a clock change.` };
+      if (localTimeIsAmbiguous(local.getTime(), timezone!, year, month, day, hour, minute, second))
+        return { success: false, error: `Local time is ambiguous in ${timezone} because of a clock change; specify an explicit UTC offset.` };
+      return { success: true, output: new Date(local.getTime()).toISOString() };
+    } catch {
+      return { success: false, error: `Invalid timezone: ${timezone}` };
+    }
+  }
+
+  // Fixed offsets are deterministic and retained for explicit user input and
+  // backward compatibility with the old prompt.
+  const fixedMatch = expr.match(FIXED_LOCAL_TO_UTC_RE);
+  if (fixedMatch) {
+    const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, signRaw, offsetHourRaw, offsetMinuteRaw] =
+      fixedMatch;
+    const hour = Number(hourRaw);
+    const minute = Number(minuteRaw);
+    const second = Number(secondRaw ?? '0');
+    const offsetHours = Number(offsetHourRaw);
+    const offsetMinutesPart = Number(offsetMinuteRaw ?? '0');
+    if (
+      hour > 23 ||
+      minute > 59 ||
+      second > 59 ||
+      offsetHours > 14 ||
+      (offsetHours === 14 && offsetMinutesPart !== 0) ||
+      (offsetMinuteRaw !== undefined && offsetMinutesPart > 59)
+    )
+      return { success: false, error: `Invalid fixed-offset datetime: ${expr}` };
+    const offsetMinutes = (signRaw === '+' ? 1 : -1) * (offsetHours * 60 + offsetMinutesPart);
+    if (!yearRaw) {
+      const utcMinutes = ((hour * 60 + minute - offsetMinutes) % 1440 + 1440) % 1440;
+      const hhmm = `${Math.floor(utcMinutes / 60).toString().padStart(2, '0')}:${(utcMinutes % 60).toString().padStart(2, '0')}`;
+      return { success: true, output: secondRaw === undefined ? hhmm : `${hhmm}:${String(second).padStart(2, '0')}` };
+    }
+    const year = Number(yearRaw);
+    const month = Number(monthRaw);
+    const day = Number(dayRaw);
+    if (!validCalendarDate(year, month, day)) return { success: false, error: `Invalid date: ${expr}` };
+    const offset = `${signRaw}${String(offsetHours).padStart(2, '0')}:${String(offsetMinutesPart).padStart(2, '0')}`;
+    const parsed = new Date(
+      `${yearRaw}-${monthRaw}-${dayRaw}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}${offset}`,
+    );
+    if (Number.isNaN(parsed.getTime())) return { success: false, error: `Cannot parse datetime: ${expr}` };
+    return { success: true, output: parsed.toISOString() };
+  }
 
   // ISO datetime difference: "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z"
   const isoDatetimeDiffMatch = expr.match(new RegExp(`^(${ISO_DT_RE})\\s*-\\s*(${ISO_DT_RE})$`));

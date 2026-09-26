@@ -661,18 +661,56 @@ describe('handleCalculate', () => {
     expect(r.error).toContain('2026-09-17T10:49:00+02:00 + 2hours');
   });
 
+  test('converts dated local IANA time to UTC with the event-date DST offset', () => {
+    expect(handleCalculate({ expression: '2026-07-15 12:30 Europe/Belgrade to UTC' })).toMatchObject({
+      success: true,
+      output: '2026-07-15T10:30:00.000Z',
+    });
+    expect(handleCalculate({ expression: '2026-01-15 12:30 Europe/Belgrade to UTC' })).toMatchObject({
+      success: true,
+      output: '2026-01-15T11:30:00.000Z',
+    });
+  });
+
+  test('accepts explicit UTC offsets including the historical prompt form', () => {
+    expect(handleCalculate({ expression: '2026-09-23 12:30 UTC+2 to UTC' })).toMatchObject({
+      success: true,
+      output: '2026-09-23T10:30:00.000Z',
+    });
+    expect(handleCalculate({ expression: '12:30 UTC+2 to UTC' })).toMatchObject({ success: true, output: '10:30' });
+    expect(handleCalculate({ expression: '12:30 UTC-5 to UTC' })).toMatchObject({ success: true, output: '17:30' });
+  });
+
+  test('rejects DST gaps and folds instead of silently picking a different instant', () => {
+    const gap = handleCalculate({ expression: '2026-03-29 02:30 Europe/Belgrade to UTC' });
+    expect(gap.success).toBe(false);
+    expect(gap.error).toContain('does not exist');
+
+    const fold = handleCalculate({ expression: '2026-10-25 02:30 Europe/Belgrade to UTC' });
+    expect(fold.success).toBe(false);
+    expect(fold.error).toContain('ambiguous');
+  });
+
+  test('validates fixed-offset calendar dates and the UTC+14 boundary', () => {
+    expect(handleCalculate({ expression: '2026-02-31 12:30 UTC+2 to UTC' }).success).toBe(false);
+    expect(handleCalculate({ expression: '2026-09-23 12:30 UTC+14:30 to UTC' }).success).toBe(false);
+    expect(handleCalculate({ expression: '12:30:45 UTC+2 to UTC' })).toMatchObject({
+      success: true,
+      output: '10:30:45',
+    });
+  });
+
   test('production-invalid datetime forms return a self-correcting ISO example', () => {
     const invalid = [
       '2026-09-16 17:40 - 2 hours',
       '2026-09-17 18:30 - 2 hours',
-      '2026-09-16 14:00 UTC+2 to UTC',
       '2026-09-17 10:49 + 2 hours to UTC',
     ];
     for (const expression of invalid) {
       const r = handleCalculate({ expression });
       expect(r.success).toBe(false);
       expect(r.error).toContain('explicit Z/offset');
-      expect(r.error).toContain('do not append "to UTC"');
+      expect(r.error).toContain('Local-to-UTC conversion accepts');
     }
   });
 

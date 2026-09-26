@@ -267,10 +267,12 @@ describe('CalendarBotAgent.run()', () => {
     );
     expect(captured[0]?.tools?.map((tool) => (tool.type === 'function' ? tool.function.name : ''))).toEqual([
       'discover_tools',
+      'calculate',
     ]);
     expect(captured[0]?.messages[0]?.content).toContain('delete_event:');
     expect(captured[1]?.tools?.map((tool) => (tool.type === 'function' ? tool.function.name : ''))).toEqual([
       'discover_tools',
+      'calculate',
       'get_events',
     ]);
     expect(result.toolCalls.some((call) => call.name === 'get_events')).toBe(true);
@@ -278,6 +280,24 @@ describe('CalendarBotAgent.run()', () => {
     const stored = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
     expect(stored).not.toContain('discover_tools');
     expect(stored).toContain('get_events');
+  });
+
+  test('lazy mode can execute calculate in the first round without discovery', async () => {
+    const script = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'calc',
+        name: 'calculate',
+        input: { expression: '2026-07-15 12:30 Europe/Belgrade to UTC' },
+      },
+      { kind: 'text', text: 'Converted.' },
+    ]);
+    const result = await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, {
+      streamImpl: script.impl,
+    }).run(ctx);
+    expect(result.toolCalls.map((call) => call.name)).toEqual(['calculate']);
+    expect(result.toolResults[0]).toMatchObject({ success: true, output: '2026-07-15T10:30:00.000Z' });
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('TOOL_SCHEMA_NOT_EXPOSED');
   });
 
   test('discover_tools recovers from single-array payloads instead of exhausting into a hallucinated answer (GH-285 incident)', async () => {
