@@ -2,12 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,10 +20,10 @@ const SCRIPT = join(ROOT, 'scripts/install-git-hooks.sh');
 const USER_HOOK = '#!/bin/sh\n# the user-global hook dispatcher\n';
 
 /**
- * A throwaway HOME whose global git config points core.hooksPath at a shared directory that
+ * A throwaway HOME whose global git config can point core.hooksPath at a shared directory that
  * already holds a user hook. Nothing here can reach the real HOME or its global hooks.
  */
-function sandbox(globalHooksPath = true) {
+function sandbox({ globalHooksPath }: { globalHooksPath: boolean }) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'hcb-hooks-')));
   const home = join(dir, 'home');
   const globalHooks = join(home, '.config/git/hooks');
@@ -44,39 +46,41 @@ function sandbox(globalHooksPath = true) {
     if (result.status !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`);
     return result.stdout.trim();
   };
+  const initRepo = (name = 'repo') => {
+    const repo = join(dir, name);
+    mkdirSync(repo, { recursive: true });
+    git(repo, 'init', '-q');
+    return repo;
+  };
   const globalHooksUntouched = () => {
     expect(readdirSync(globalHooks)).toEqual(['pre-commit']);
     expect(readFileSync(join(globalHooks, 'pre-commit'), 'utf8')).toBe(USER_HOOK);
   };
-  return { dir, home, env, git, globalHooksUntouched };
+  return { dir, env, git, initRepo, globalHooksUntouched };
 }
 
-/** Runs the guard with a stand-in lefthook that only records how it was called. */
-function runGuard(box: ReturnType<typeof sandbox>, cwd: string) {
-  const bin = join(box.dir, 'bin');
+/** Runs the guard once; a stand-in lefthook (unless `withLefthook` is false) records this run's calls. */
+function runGuard(box: ReturnType<typeof sandbox>, cwd: string, { withLefthook = true } = {}) {
+  const bin = join(box.dir, withLefthook ? 'bin' : 'bin-git-only');
   const calls = join(box.dir, 'lefthook.calls');
+  rmSync(calls, { force: true });
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, 'lefthook'), `#!/bin/sh\necho "$*" >> '${calls}'\n`, { mode: 0o755 });
-  const result = spawnSync('sh', [SCRIPT], {
-    cwd,
-    env: { ...box.env, PATH: `${bin}:${box.env.PATH}` },
-    encoding: 'utf8',
-  });
-  let recorded: string[] = [];
-  try {
-    recorded = readFileSync(calls, 'utf8').trim().split('\n');
-  } catch {}
-  return { status: result.status, stderr: result.stderr, calls: recorded };
+  if (withLefthook) {
+    writeFileSync(join(bin, 'lefthook'), `#!/bin/sh\necho "$*" >> '${calls}'\n`, { mode: 0o755 });
+  } else if (!existsSync(join(bin, 'git'))) {
+    symlinkSync(Bun.which('git')!, join(bin, 'git'));
+  }
+  const path = withLefthook ? `${bin}:${box.env.PATH}` : `${bin}:/usr/bin:/bin`;
+  const result = spawnSync('sh', [SCRIPT], { cwd, env: { ...box.env, PATH: path }, encoding: 'utf8' });
+  const recorded = existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter(Boolean) : [];
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr, calls: recorded };
 }
 
 describe('postinstall git hook guard', () => {
   test('a global core.hooksPath outside the repository is left alone', () => {
-    const box = sandbox();
+    const box = sandbox({ globalHooksPath: true });
     try {
-      const repo = join(box.dir, 'repo');
-      mkdirSync(repo);
-      box.git(repo, 'init', '-q');
-      const run = runGuard(box, repo);
+      const run = runGuard(box, box.initRepo());
       expect(run.status).toBe(0);
       expect(run.calls).toEqual([]);
       expect(run.stderr).toContain('outside this repository');
@@ -87,11 +91,9 @@ describe('postinstall git hook guard', () => {
   });
 
   test('a local core.hooksPath pointing outside the repository is left alone', () => {
-    const box = sandbox(false);
+    const box = sandbox({ globalHooksPath: false });
     try {
-      const repo = join(box.dir, 'repo');
-      mkdirSync(repo);
-      box.git(repo, 'init', '-q');
+      const repo = box.initRepo();
       box.git(repo, 'config', 'core.hooksPath', '../shared-hooks');
       expect(runGuard(box, repo).calls).toEqual([]);
     } finally {
@@ -100,16 +102,27 @@ describe('postinstall git hook guard', () => {
   });
 
   test("the repository's own hooks directory is installed, also from a linked worktree", () => {
-    const box = sandbox();
+    const box = sandbox({ globalHooksPath: true });
     try {
-      const repo = join(box.dir, 'repo');
-      mkdirSync(repo);
-      box.git(repo, 'init', '-q');
+      const repo = box.initRepo();
       box.git(repo, 'config', 'core.hooksPath', join(repo, '.git/hooks'));
       box.git(repo, 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'base');
       box.git(repo, 'worktree', 'add', '-q', join(box.dir, 'linked'));
       expect(runGuard(box, repo).calls).toEqual(['install --force']);
-      expect(runGuard(box, join(box.dir, 'linked')).calls).toEqual(['install --force', 'install --force']);
+      expect(runGuard(box, join(box.dir, 'linked')).calls).toEqual(['install --force']);
+      box.globalHooksUntouched();
+    } finally {
+      rmSync(box.dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a core.hooksPath redirected to another directory inside the git dir is installed', () => {
+    const box = sandbox({ globalHooksPath: true });
+    try {
+      const repo = box.initRepo();
+      mkdirSync(join(repo, '.git/custom-hooks'));
+      box.git(repo, 'config', 'core.hooksPath', join(repo, '.git/custom-hooks'));
+      expect(runGuard(box, repo).calls).toEqual(['install --force']);
       box.globalHooksUntouched();
     } finally {
       rmSync(box.dir, { recursive: true, force: true });
@@ -117,25 +130,26 @@ describe('postinstall git hook guard', () => {
   });
 
   test('without any core.hooksPath the default .git/hooks is installed', () => {
-    const box = sandbox(false);
+    const box = sandbox({ globalHooksPath: false });
     try {
-      const repo = join(box.dir, 'repo');
-      mkdirSync(repo);
-      box.git(repo, 'init', '-q');
-      expect(runGuard(box, repo).calls).toEqual(['install --force']);
+      expect(runGuard(box, box.initRepo()).calls).toEqual(['install --force']);
     } finally {
       rmSync(box.dir, { recursive: true, force: true });
     }
   });
 
-  test('outside a git work tree nothing is installed', () => {
-    const box = sandbox();
+  test('outside a git work tree, or without lefthook, nothing is installed', () => {
+    const box = sandbox({ globalHooksPath: true });
     try {
       const plain = join(box.dir, 'plain');
       mkdirSync(plain);
-      const run = runGuard(box, plain);
-      expect(run.status).toBe(0);
-      expect(run.calls).toEqual([]);
+      const outside = runGuard(box, plain);
+      expect(outside.status).toBe(0);
+      expect(outside.calls).toEqual([]);
+      const noLefthook = runGuard(box, box.initRepo(), { withLefthook: false });
+      expect(noLefthook.status).toBe(0);
+      expect(noLefthook.stdout).toContain('lefthook is not installed');
+      box.globalHooksUntouched();
     } finally {
       rmSync(box.dir, { recursive: true, force: true });
     }
@@ -145,14 +159,13 @@ describe('postinstall git hook guard', () => {
     // The 2026-09-26 incident: lefthook's own dependency postinstall runs `lefthook install -f`,
     // which writes into a global core.hooksPath. The repository's root postinstall must not either.
     const cache = spawnSync(process.execPath, ['pm', 'cache'], { encoding: 'utf8' }).stdout.trim();
-    const box = sandbox();
+    const box = sandbox({ globalHooksPath: true });
     try {
-      const repo = join(box.dir, 'repo');
-      mkdirSync(join(repo, 'scripts'), { recursive: true });
+      const repo = box.initRepo();
+      mkdirSync(join(repo, 'scripts'));
       for (const file of ['package.json', 'bun.lock', 'lefthook.yml', 'scripts/install-git-hooks.sh']) {
         cpSync(join(ROOT, file), join(repo, file));
       }
-      box.git(repo, 'init', '-q');
       const install = spawnSync(process.execPath, ['install', '--frozen-lockfile'], {
         cwd: repo,
         env: { ...box.env, BUN_INSTALL_CACHE_DIR: cache },
