@@ -11,6 +11,9 @@
  * To convert any audio: ffmpeg -i input.ogg -ar 48000 -f s16le output.raw
  */
 
+// Remote message fields are logged on one line: a newline in them must not forge a log entry.
+const oneLine = (value: unknown) => String(value).replace(/[\r\n]/g, '');
+
 const apiKey = process.env.DEEPGRAM_API_KEY;
 if (!apiKey) {
   console.error('DEEPGRAM_API_KEY not set');
@@ -95,7 +98,7 @@ ws.onmessage = (event) => {
     const type = msg.type as string;
 
     if (type === 'Connected') {
-      console.log(`[${ts()}] Flux connected, request_id=${msg.request_id}`);
+      console.log(`[${ts()}] Flux connected, request_id=${oneLine(msg.request_id)}`);
     } else if (type === 'TurnInfo') {
       const ev = msg.event as string;
       const transcript = (msg.transcript as string) ?? '';
@@ -104,22 +107,22 @@ ws.onmessage = (event) => {
       if (ev === 'StartOfTurn') {
         console.log(`[${ts()}] ▶ StartOfTurn (turn ${turnCount})`);
       } else if (ev === 'EndOfTurn') {
-        console.log(`[${ts()}] ■ EndOfTurn   conf=${conf?.toFixed(3)}  transcript="${transcript}"`);
-        console.log(`            → would trigger agent with: "${transcript}"`);
+        console.log(`[${ts()}] ■ EndOfTurn   conf=${conf?.toFixed(3)}  transcript="${oneLine(transcript)}"`);
+        console.log(`            → would trigger agent with: "${oneLine(transcript)}"`);
         turnCount++;
       } else if (ev === 'Update' && transcript && transcript !== lastTranscript) {
-        console.log(`[${ts()}]   interim: "${transcript}"`);
+        console.log(`[${ts()}]   interim: "${oneLine(transcript)}"`);
         lastTranscript = transcript;
       }
     } else if (type === 'Error') {
-      console.error(`[${ts()}] Flux error: ${msg.description}`);
+      console.error(`[${ts()}] Flux error: ${oneLine(msg.description)}`);
     }
   } catch {
     // non-JSON
   }
 };
 
-ws.onerror = (e) => console.error(`[${ts()}] WS error:`, (e as ErrorEvent).message);
+ws.onerror = (e) => console.error(`[${ts()}] WS error:`, oneLine((e as ErrorEvent).message));
 ws.onclose = (e) => {
   console.log(`\n[${ts()}] Connection closed (code=${e.code})`);
   console.log(`\nSummary: ${turnCount} turn(s) detected`);

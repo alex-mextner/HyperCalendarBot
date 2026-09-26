@@ -5,7 +5,6 @@
  *
  * Generates Russian speech via Edge TTS, transcribes via Nova-3.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
 import { TtsService } from '../src/services/voice/tts-service';
 
 const API_KEY = process.env.DEEPGRAM_API_KEY;
@@ -23,15 +22,11 @@ const SAMPLES = [
 
 const ttsService = new TtsService();
 
-async function synthesize(text: string, outFile: string): Promise<void> {
-  const audio = await ttsService.synthesize(text, 'ru');
-  writeFileSync(outFile, audio);
+async function synthesize(text: string): Promise<Buffer> {
+  return ttsService.synthesize(text, 'ru');
 }
 
-async function transcribeNova3(
-  audioFile: string,
-): Promise<{ transcript: string; confidence: number; elapsed: number }> {
-  const audio = readFileSync(audioFile);
+async function transcribeNova3(audio: Buffer): Promise<{ transcript: string; confidence: number; elapsed: number }> {
   const t0 = Date.now();
 
   const res = await fetch(
@@ -59,8 +54,6 @@ async function transcribeNova3(
   return { transcript: alt.transcript, confidence: alt.confidence, elapsed: Date.now() - t0 };
 }
 
-const tmpFile = '/tmp/demo-nova3.mp3';
-
 console.log('=== Deepgram Nova-3 Russian STT Demo ===\n');
 
 for (const [i, text] of SAMPLES.entries()) {
@@ -68,11 +61,11 @@ for (const [i, text] of SAMPLES.entries()) {
 
   process.stdout.write('     Synthesizing TTS... ');
   const t0 = Date.now();
-  await synthesize(text, tmpFile);
+  const audio = await synthesize(text);
   console.log(`${Date.now() - t0}ms`);
 
   process.stdout.write('     Transcribing...     ');
-  const { transcript, confidence, elapsed } = await transcribeNova3(tmpFile);
+  const { transcript, confidence, elapsed } = await transcribeNova3(audio);
   console.log(`${elapsed}ms`);
 
   console.log(`     Nova-3 result: "${transcript}"`);

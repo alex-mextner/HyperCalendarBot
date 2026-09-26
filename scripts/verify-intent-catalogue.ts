@@ -1,9 +1,13 @@
-// Run after preview-intent-catalogue.ts. Uses only a synthetic local page.
+// Run after preview-intent-catalogue.ts, passing the directory it printed. Uses only a synthetic local page.
 import { strict as assert } from 'node:assert';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 
-const directory = resolve(process.argv[2] ?? '/tmp/hcb-intent-catalogue/synthetic');
+if (!process.argv[2]) {
+  console.error('Usage: bun scripts/verify-intent-catalogue.ts <directory printed by preview-intent-catalogue.ts>');
+  process.exit(2);
+}
+const directory = resolve(process.argv[2]);
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1050 }, deviceScaleFactor: 1 });

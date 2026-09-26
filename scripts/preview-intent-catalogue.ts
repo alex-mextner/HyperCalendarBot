@@ -1,6 +1,8 @@
 // Generates only synthetic fixtures; never reads a production DB or sends requests.
 import { Database } from 'bun:sqlite';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { collectIntentSnapshot } from '../src/services/intent/catalog-audit.ts';
 import { seedIntents } from '../src/services/intent/seed-catalog.ts';
 import { renderIntentCatalogue } from './intent-catalogue-page.ts';
@@ -26,7 +28,7 @@ try {
     sourceRevision: 'synthetic',
     capturedAt: '2026-01-01T00:00:00.000Z',
   });
-  const out = process.argv[2] ?? '/tmp/hcb-intent-catalogue/synthetic';
+  const out = process.argv[2] ?? mkdtempSync(join(tmpdir(), 'hcb-intent-catalogue-'));
   mkdirSync(out, { recursive: true });
   writeFileSync(`${out}/index.html`, renderIntentCatalogue(snapshot, true));
   console.log(out);
