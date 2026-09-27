@@ -156,13 +156,13 @@ export class AddressCache {
 
   /**
    * Forget the mapping `findMapping` returns for this input after the user rejected it, but only
-   * while it is still the `rejected` place: a place confirmed for the input since then replaced it
-   * and stays.
+   * while it is still the `rejected` place (same address, place id and coordinates): a place
+   * confirmed for the input since then replaced it and stays.
    */
   async forgetMapping(
     userId: number,
     input: string,
-    rejected: Pick<AddressMapping, 'resolvedAddress' | 'placeId'>,
+    rejected: Pick<AddressMapping, 'resolvedAddress' | 'placeId' | 'latitude' | 'longitude'>,
   ): Promise<void> {
     const key = MAPPINGS_KEY(userId);
     const raw = await this.redis.get(key);
@@ -174,7 +174,15 @@ export class AddressCache {
       return;
     }
     const current = this.match(parsed.data, input);
-    if (current?.resolvedAddress !== rejected.resolvedAddress || current.placeId !== rejected.placeId) return;
+    if (
+      !current ||
+      current.resolvedAddress !== rejected.resolvedAddress ||
+      current.placeId !== rejected.placeId ||
+      current.latitude !== rejected.latitude ||
+      current.longitude !== rejected.longitude
+    ) {
+      return;
+    }
 
     await this.redis.set(key, JSON.stringify(parsed.data.filter((m) => m !== current)));
   }

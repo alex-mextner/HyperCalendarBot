@@ -323,7 +323,12 @@ export class LocationVerificationService {
     await this.keepOnlyTypedText(event);
     const offered = picker.candidates[0];
     if (picker.remembered && offered) {
-      const rejected = { resolvedAddress: offered.formattedAddress, placeId: offered.placeId };
+      const rejected = {
+        resolvedAddress: offered.formattedAddress,
+        placeId: offered.placeId,
+        latitude: offered.latitude,
+        longitude: offered.longitude,
+      };
       await this.deps.addressCache.forgetMapping(userId, picker.location, rejected).catch((err) => {
         logger.warn({ err, eventId, userId }, 'Failed to forget rejected address mapping');
       });
