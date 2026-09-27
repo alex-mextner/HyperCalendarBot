@@ -4,7 +4,7 @@ import type { Lang } from '../../../config/constants.ts';
 import { t } from '../../../config/constants.ts';
 import { CLEARED_LOCATION } from '../../../database/repositories/event.repository.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
-import { getDayRangeUtc } from '../../../utils/date.ts';
+import { getDayRangeUtc, localCalendarDate } from '../../../utils/date.ts';
 import { eventTimestampError } from '../../../utils/event-timestamps.ts';
 import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
@@ -12,6 +12,7 @@ import { formatEventDetail } from '../../event/formatters.ts';
 import type { EventSummary } from '../../intent/variable-resolver.ts';
 import { formatLocationPlain } from '../../location/format-location.ts';
 import { formatEventWeatherLine } from '../../weather/format.ts';
+import { type AgendaInterval, type AgendaScope, formatEmptyAgenda } from '../empty-agenda.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { formatReminderDuration } from './reminders.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
@@ -282,6 +283,43 @@ interface SearchEventsInput {
   event_type?: 'birthday' | 'regular';
 }
 
+const DATETIME_RE = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?)(Z|[+-]\d{2}:?\d{2})?$/;
+
+/** True for a real calendar date; `new Date` would silently roll 2026-02-30 over into March. */
+function isRealCalendarDate(dateOnly: string): boolean {
+  try {
+    localCalendarDate(dateOnly, 'UTC');
+    return true;
+  } catch {
+    // An impossible date is invalid caller input, reported as INVALID_RANGE by the handler.
+    return false;
+  }
+}
+
+/**
+ * One get_events bound as an instant. A date-only value is the edge of that local day; a datetime
+ * without an offset is UTC, as the tool contract states. Anything else is null, so the formatter
+ * and the SQLite query can never read the same string as two different instants.
+ */
+function parseRangeBound(value: string, timezone: string, edge: 'start' | 'end'): Date | null {
+  if (!isRealCalendarDate(value.slice(0, 10))) return null;
+  if (DATE_ONLY_RE.test(value)) return new Date(expandDateOnly(value, timezone)[edge]);
+  const match = DATETIME_RE.exec(value);
+  if (!match) return null;
+  const [, date, time, offset] = match;
+  // Canonical ISO for `new Date`: "T" separator, millisecond precision, "+HH:MM" offset, UTC default.
+  const zone = offset === undefined ? 'Z' : offset.replace(/^([+-]\d{2})(\d{2})$/, '$1:$2');
+  const instant = new Date(`${date}T${time?.replace(/(\.\d{3})\d+$/, '$1')}${zone}`);
+  return Number.isFinite(instant.getTime()) ? instant : null;
+}
+
+function resolveRangeInterval(input: GetEventsInput, timezone: string): AgendaInterval | null {
+  const start = parseRangeBound(input.start_date, timezone, 'start');
+  const end = parseRangeBound(input.end_date, timezone, 'end');
+  if (!start || !end || start.getTime() >= end.getTime()) return null;
+  return { start, end };
+}
+
 export async function handleGetEvents(ctx: AgentContext, input: GetEventsInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
@@ -296,8 +334,16 @@ export async function handleGetEvents(ctx: AgentContext, input: GetEventsInput):
     return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
   }
   const tz = ctx.user.timezone;
-  const startDate = DATE_ONLY_RE.test(input.start_date) ? expandDateOnly(input.start_date, tz).start : input.start_date;
-  const endDate = DATE_ONLY_RE.test(input.end_date) ? expandDateOnly(input.end_date, tz).end : input.end_date;
+  const interval = resolveRangeInterval(input, tz);
+  if (!interval) {
+    return {
+      success: false,
+      mutationState: 'not_applied',
+      error: 'INVALID_RANGE: start_date and end_date must be real ISO 8601 dates or timestamps, with start before end.',
+    };
+  }
+  const startDate = interval.start.toISOString();
+  const endDate = interval.end.toISOString();
   const occurrences =
     scope === 'group'
       ? ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, startDate, endDate)
@@ -306,7 +352,10 @@ export async function handleGetEvents(ctx: AgentContext, input: GetEventsInput):
   const data = occurrences.map((occ) => occurrenceToSummary(occ, tz));
 
   if (occurrences.length === 0) {
-    return { success: true, output: t(ctx.user.language).aiTools.events.noEventsInRange, data };
+    const calendar: AgendaScope =
+      scope === 'group' ? 'group' : userId === ctx.user.telegram_id ? 'personal' : 'delegated';
+    const output = formatEmptyAgenda({ interval, timezone: tz, language: ctx.user.language, scope: calendar });
+    return { success: true, output, data };
   }
 
   const weatherSuffixes = await Promise.all(

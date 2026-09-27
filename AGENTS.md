@@ -59,3 +59,7 @@ Explain what a change does before citing its issue number. Use concrete dates fo
 - Bound connection plus full response stream and the overall round, abort late producers and ignore their callbacks. An expired shared deadline cannot launch another provider. Every HTTP retry consumes quota; failed or uncertain writes are never replayed to fix wording.
 - Gemini quotas are per project, not API key; all routes sharing a project must share their admission scope/store. Limits in application config are budgets, not proof of provider entitlement. Validate actual account limits separately; preserve reactive quota cooldown and never sleep a chat request until tomorrow.
 - Before restarting a container, retain redacted incident/benchmark evidence with timestamps and source revisions. Never replace older slow or failed results with newer successes.
+
+## Intent answer review
+
+Review user-facing answers for directness, informativeness, friendliness and truthful scope, not only schemas or tool success. Compare the historical AI answer, the actual intent execution and an ideal answer. Reject generic internal wording such as "no events found in this range"; identify the checked day and calendar, show the exact target before writes, and never present a failed read as an empty calendar. Emoji is optional and never a passing criterion. The required rubric is docs/intents/response-quality.md.
