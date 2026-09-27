@@ -109,6 +109,39 @@ describe('formatLocationHtml', () => {
     });
     expect(result).toBe('<a href="https://www.google.com/maps/search/?api=1&amp;query=sonder">sonder</a>');
   });
+
+  test('a place confirmed with a pin shows even when the event has no typed text', () => {
+    const result = formatLocationHtml({
+      location: null,
+      google_maps_url: 'https://www.google.com/maps/place/?q=place_id:pin',
+      resolved_address: 'Damrak 1, Amsterdam',
+      venue_name: null,
+      location_verified: 1,
+    });
+    expect(result).toBe('<a href="https://www.google.com/maps/place/?q=place_id:pin">Damrak 1, Amsterdam</a>');
+  });
+
+  test('shows nothing for a stale unconfirmed place on an event without typed text', () => {
+    const result = formatLocationHtml({
+      location: null,
+      google_maps_url: 'https://www.google.com/maps/place/?q=place_id:pin',
+      resolved_address: 'Damrak 1, Amsterdam',
+      venue_name: null,
+      location_verified: 0,
+    });
+    expect(result).toBe('');
+  });
+
+  test('shows nothing for blank typed text', () => {
+    const result = formatLocationHtml({
+      location: '   ',
+      google_maps_url: null,
+      resolved_address: null,
+      venue_name: null,
+      location_verified: 0,
+    });
+    expect(result).toBe('');
+  });
 });
 
 describe('formatLocationPlain', () => {

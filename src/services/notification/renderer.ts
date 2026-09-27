@@ -109,7 +109,8 @@ type NotificationLabels = ReturnType<typeof t>['notifications'];
 function formatAgendaEventLine(e: AgendaEvent, l: NotificationLabels): string {
   const safeTitle = escapeHtml(e.title);
   const line = e.isAllDay ? `📅 ${safeTitle} (${l.allDay})` : `${e.startTime} — ${safeTitle} (${e.duration})`;
-  return e.location ? `${line}\n        📍 ${locationLink(e)}` : line;
+  const place = locationLink(e);
+  return place ? `${line}\n        📍 ${place}` : line;
 }
 
 interface AgendaConfig {
@@ -199,8 +200,9 @@ export class NotificationRenderer {
     } else {
       lines.push(`🕐 ${data.startTime}`);
     }
-    if (data.location) {
-      lines.push(`📍 ${locationLink(data)}`);
+    const place = locationLink(data);
+    if (place) {
+      lines.push(`📍 ${place}`);
     }
     if (data.forecast) {
       lines.push(formatEventWeatherLine(langKey, data.forecast));
@@ -241,8 +243,9 @@ export class NotificationRenderer {
       const timeInfo = item.isAllDay ? l.allDay : item.startTime;
       const safeTitle = escapeHtml(item.title);
       let line = `• ${safeTitle} — ${timeInfo} (${intervalText})`;
-      if (item.location) {
-        line += `\n  📍 ${locationLink(item)}`;
+      const place = locationLink(item);
+      if (place) {
+        line += `\n  📍 ${place}`;
       }
       // Per-item weather only when forecasts differ across items
       if (!sharedWeather && formattedForecasts[i]) {

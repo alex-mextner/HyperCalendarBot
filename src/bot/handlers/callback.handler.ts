@@ -1579,8 +1579,7 @@ export function createCallbackHandler(
   /** The confirmation edited into the picker or pin message: the title and the resolved place, linked. */
   function locationResolvedHtml(lang: Lang, eventId: number, userId: number): string {
     const event = eventRepo?.findById(eventId, userId);
-    // A pin can resolve an event that has no typed location; show the resolved address then.
-    const place = event ? formatLocationHtml({ ...event, location: event.location ?? event.resolved_address }) : '';
+    const place = event ? formatLocationHtml(event) : '';
     return t(lang).aiTools.location.locationResolved(escapeHtml(event?.title ?? ''), place);
   }
 

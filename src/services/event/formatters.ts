@@ -21,7 +21,8 @@ import type { DayWeather, EventForecast } from '../weather/types.ts';
 
 function formatDisplayDetails(event: CalendarEvent): string {
   const lines: string[] = [];
-  if (event.location?.trim()) lines.push(`📍 ${formatLocationHtml(event)}`);
+  const place = formatLocationHtml(event);
+  if (place) lines.push(`📍 ${place}`);
   if (event.description?.trim()) lines.push(`📝 ${escapeHtml(event.description)}`);
   const status = event.displayMetadata?.invitationStatus;
   if (status?.trim()) lines.push(`✉️ ${escapeHtml(status)}`);
