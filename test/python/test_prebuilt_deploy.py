@@ -19,18 +19,70 @@ TAG = "repo/image:" + SHA
 
 
 class DeployTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # The fakes are stateless (all fixture state comes from env and the cwd), so write them
+        # once. macOS scans every newly created executable on its first exec (~150 ms, far more
+        # under load); writing a dozen fresh executables per test made this file take 20-34 s under
+        # full-suite load. Tests hard-link the deployed backup script, so it is not a new file.
+        shared = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(shared.cleanup)
+        cls.bin = Path(shared.name) / "bin"
+        cls.bin.mkdir()
+        cls.backup_script = Path(shared.name) / "backup-db.sh"
+        cls.exe(cls.backup_script, "#!/bin/sh\ncp data/calendar.db data/before.db\n")
+        cls.exe(cls.bin / "flock", "#!/bin/sh\nexit ${LOCK_FAILURE:-0}\n")
+        cls.exe(cls.bin / "caddy", "#!/bin/sh\nexit 0\n")
+        cls.exe(cls.bin / "uname", "#!/bin/sh\nprintf 'x86_64\\n'\n")
+        cls.exe(cls.bin / "seq", "#!/bin/sh\nprintf '1\\n'\n")
+        cls.exe(cls.bin / "sleep", "#!/bin/sh\nexit 0\n")
+        cls.exe(
+            cls.bin / "sha256sum",
+            "#!/usr/bin/env python3\nimport hashlib,sys\nprint(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest()+'  '+sys.argv[1])\n",
+        )
+        cls.exe(
+            cls.bin / "docker",
+            r"""#!/usr/bin/env python3
+import os,json,sys,sqlite3
+from pathlib import Path
+args=sys.argv[1:];root=Path(os.environ['FIXTURE_DEP']);current=root/'current'
+with open(os.environ['FIXTURE_LOG'],'a') as f:f.write(json.dumps(args)+'\n')
+if args and args[0]=='load' and os.environ.get('LOAD_FAILURE')=='1':sys.exit(42)
+if args and args[0]=='tag' and args[-1].endswith(':latest') and os.environ.get('TAG_FAILURE')=='1':sys.exit(43)
+if args[:2]==['image','inspect']:
+    fmt=args[-1]
+    print(os.environ['FIXTURE_ID'] if '.Id' in fmt else os.environ['FIXTURE_SHA'])
+elif args[:2]==['inspect','hypercal-bot']:print(current.read_text())
+elif args and args[0]=='exec':print('same-schema  /app/src/database/migrations.ts')
+elif args and args[0]=='run':print(os.environ.get('NEW_SCHEMA','same-schema')+'  /app/src/database/migrations.ts')
+elif args and args[0]=='compose' and 'up' in args:
+    override=Path(args[args.index('-f',args.index('-f')+1)+1]).read_text() if args.count('-f') >= 2 else 'candidate'
+    old='sha256:old' in override
+    current.write_text('sha256:old' if old else os.environ['FIXTURE_ID'])
+    if not old:
+        c=sqlite3.connect(root/'data/calendar.db');c.execute("INSERT INTO evidence VALUES ('after-start')");c.commit();c.close()
+""",
+        )
+        cls.exe(
+            cls.bin / "curl",
+            r"""#!/usr/bin/env python3
+import os,sys
+if 'ready' in sys.argv[-1]:
+    body=os.environ.get('READY_BODY','ok');print(body,end='');sys.exit(22 if body=='ai chain down' else 0)
+print(os.environ.get('HEALTH_BODY','ok'),end='')
+""",
+        )
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name)
         self.dep = self.path / "deploy"
         self.src = self.dep / (".incoming-" + SHA + "-123-1")
-        self.bin = self.path / "bin"
         for d in [
             self.dep / "scripts",
             self.dep / "data",
             self.src / "scripts",
-            self.bin,
         ]:
             d.mkdir(parents=True)
         for d in [self.dep, self.src]:
@@ -44,10 +96,8 @@ class DeployTests(unittest.TestCase):
         c.execute("INSERT INTO evidence VALUES ('before')")
         c.commit()
         c.close()
-        self.exe(
-            self.dep / "scripts/backup-db.sh",
-            "#!/bin/sh\ncp data/calendar.db data/before.db\n",
-        )
+        # The deploy replaces this file via `install` (unlink + create), never writes it in place.
+        os.link(self.backup_script, self.dep / "scripts/backup-db.sh")
         for name in ["backup-db.sh", "healthcheck-alert.sh", "prepare-runtime-dirs.sh"]:
             self.exe(self.src / "scripts" / name, "#!/bin/sh\nexit 0\n")
         shutil.copy(
@@ -77,47 +127,6 @@ class DeployTests(unittest.TestCase):
         ).hexdigest()
         (self.dep / "current").write_text("sha256:old")
         self.log = self.path / "calls.jsonl"
-        self.exe(self.bin / "flock", "#!/bin/sh\nexit ${LOCK_FAILURE:-0}\n")
-        self.exe(self.bin / "caddy", "#!/bin/sh\nexit 0\n")
-        self.exe(self.bin / "uname", "#!/bin/sh\nprintf 'x86_64\\n'\n")
-        self.exe(self.bin / "seq", "#!/bin/sh\nprintf '1\\n'\n")
-        self.exe(self.bin / "sleep", "#!/bin/sh\nexit 0\n")
-        self.exe(
-            self.bin / "sha256sum",
-            "#!/usr/bin/env python3\nimport hashlib,sys\nprint(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest()+'  '+sys.argv[1])\n",
-        )
-        self.exe(
-            self.bin / "docker",
-            r"""#!/usr/bin/env python3
-import os,json,sys,sqlite3
-from pathlib import Path
-args=sys.argv[1:];root=Path(os.environ['FIXTURE_DEP']);current=root/'current'
-with open(os.environ['FIXTURE_LOG'],'a') as f:f.write(json.dumps(args)+'\n')
-if args and args[0]=='load' and os.environ.get('LOAD_FAILURE')=='1':sys.exit(42)
-if args and args[0]=='tag' and args[-1].endswith(':latest') and os.environ.get('TAG_FAILURE')=='1':sys.exit(43)
-if args[:2]==['image','inspect']:
-    fmt=args[-1]
-    print(os.environ['FIXTURE_ID'] if '.Id' in fmt else os.environ['FIXTURE_SHA'])
-elif args[:2]==['inspect','hypercal-bot']:print(current.read_text())
-elif args and args[0]=='exec':print('same-schema  /app/src/database/migrations.ts')
-elif args and args[0]=='run':print(os.environ.get('NEW_SCHEMA','same-schema')+'  /app/src/database/migrations.ts')
-elif args and args[0]=='compose' and 'up' in args:
-    override=Path(args[args.index('-f',args.index('-f')+1)+1]).read_text() if args.count('-f') >= 2 else 'candidate'
-    old='sha256:old' in override
-    current.write_text('sha256:old' if old else os.environ['FIXTURE_ID'])
-    if not old:
-        c=sqlite3.connect(root/'data/calendar.db');c.execute("INSERT INTO evidence VALUES ('after-start')");c.commit();c.close()
-""",
-        )
-        self.exe(
-            self.bin / "curl",
-            r"""#!/usr/bin/env python3
-import os,sys
-if 'ready' in sys.argv[-1]:
-    body=os.environ.get('READY_BODY','ok');print(body,end='');sys.exit(22 if body=='ai chain down' else 0)
-print(os.environ.get('HEALTH_BODY','ok'),end='')
-""",
-        )
         self.remote = ROOT / "scripts/deploy-prebuilt-image.sh"
         baseline = os.environ.get("HCB_TEST_DEPLOY_SCRIPT")
         if baseline:
@@ -127,7 +136,8 @@ print(os.environ.get('HEALTH_BODY','ok'),end='')
                 text.split("<<'REMOTE'\n", 1)[1].split("\nREMOTE\n", 1)[0]
             )
 
-    def exe(self, path, body):
+    @staticmethod
+    def exe(path, body):
         path.write_text(body)
         path.chmod(0o755)
 
