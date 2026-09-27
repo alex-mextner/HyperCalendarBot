@@ -26,7 +26,7 @@ import {
 import { handleFindUser } from '../../src/services/ai/tool-handlers/meta.ts';
 import { handleResendInvitation, handleSendInvitation } from '../../src/services/ai/tool-handlers/sharing.ts';
 import { getToolDefinitions } from '../../src/services/ai/tools.ts';
-import type { AgentContext } from '../../src/services/ai/types.ts';
+import type { AgentContext, ToolResult } from '../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../src/services/conversation-logger.ts';
 import { EventService } from '../../src/services/event/event-service.ts';
 import { GroupMemberService } from '../../src/services/group/member-service.ts';
@@ -696,5 +696,75 @@ describe('recipient and contact tool boundaries', () => {
     const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: -100001 });
     expect(result.success).toBe(false);
     expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
+  });
+
+  describe('address-book contact_id is never a Telegram recipient', () => {
+    function lookupMatches(result: ToolResult) {
+      const data = result.data;
+      if (!data || Array.isArray(data) || !('matches' in data)) throw new Error('expected find_contact matches');
+      return data.matches;
+    }
+
+    function inviteContext() {
+      const event = ctx.eventService.createEvent({
+        user_id: 10,
+        title: 'Contact recipient',
+        start_at: new Date(Date.now() + 86400000).toISOString(),
+        timezone: 'UTC',
+      });
+      const approvals = mock(async () => ({ message_id: 2 }));
+      const deliveries = mock(async (_id: number) => ({ message_id: 3 }));
+      ctx.sender = {
+        sendMessage: async () => ({ message_id: 1 }),
+        editMessageText: async () => {},
+        sendMessageWithKeyboard: approvals,
+        sendInvitation: deliveries,
+      };
+      return { event, approvals, deliveries };
+    }
+
+    test('a name-only contact routes to pick_users instead of an approval for its row id', async () => {
+      const { event, approvals, deliveries } = inviteContext();
+      ctx.messageText = 'Invite Bora Example from my contacts';
+      expect((await executeTool(ctx, 'add_contact', { name: 'Bora Example' })).success).toBe(true);
+      const found = await executeTool(ctx, 'find_contact', { name: 'Bora Example' });
+      const [match] = lookupMatches(found);
+      expect(match?.telegram_id).toBeNull();
+      expect(found.output).toContain('telegram_id: none');
+      expect(found.agentHint).toContain('pick_users');
+      expect(handleGetContacts(ctx, {}).output).toMatch(/Bora Example — contact_id:\d+ — .*telegram_id:none/);
+
+      const result = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: match!.id });
+      expect(result.success).toBe(false);
+      expect(result.mutationState).toBe('not_applied');
+      expect(result.error).toContain('Bora Example');
+      expect(result.agentHint).toContain('pick_users');
+      expect(approvals).not.toHaveBeenCalled();
+      const forced = await executeTool(ctx, 'send_invitation', {
+        event_id: event.id,
+        invitee_id: match!.id,
+        force: true,
+      });
+      expect(forced.success).toBe(false);
+      expect(deliveries).not.toHaveBeenCalled();
+      expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
+    });
+
+    test('a contact with a Telegram ID invites by that ID, never by its row id', async () => {
+      const { event, approvals, deliveries } = inviteContext();
+      const found = await executeTool(ctx, 'find_contact', { name: 'Alex' });
+      const [match] = lookupMatches(found);
+      expect(found.output).toContain('telegram_id: 5000000001');
+
+      const byRow = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: match!.id });
+      expect(byRow.success).toBe(false);
+      expect(byRow.agentHint).toContain('invitee_id 5000000001');
+      expect(approvals).not.toHaveBeenCalled();
+
+      const invited = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: match!.telegram_id });
+      expect(invited.success).toBe(true);
+      expect(ctx.sharing!.invitationRepo.getByEvent(event.id).map((i) => i.invitee_id)).toEqual([5000000001]);
+      expect(deliveries.mock.calls.map(([id]) => id)).toEqual([5000000001]);
+    });
   });
 });
