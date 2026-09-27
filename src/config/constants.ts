@@ -236,6 +236,10 @@ export const MSG = {
       promised
         ? `🔧 Promised to come back — and the AI is still down. Devs are on it.\n\n${EN_AI_COMMANDS_HINT}`
         : `🔧 AI still down — devs are on it.\n\n${EN_AI_COMMANDS_HINT}`,
+    agent_restarting: (willRetry: boolean) =>
+      willRetry
+        ? '🔄 Restarting for an update — I will answer this in a minute.'
+        : '🔄 Restarting for an update — this request was not done, send it again in a minute.',
     agent_timeout: '⚠️ That took too long — timing out.',
     ai_response_blocked: 'The provider stopped this response. I will not automatically repeat the request.',
     rate_limited: 'Slow down, too many messages.',
@@ -1213,6 +1217,10 @@ export const MSG = {
       promised
         ? `🔧 Обещал вернуться — но ИИ так и не поднялся. Разрабы уже смотрят.\n\n${RU_AI_COMMANDS_HINT}`
         : `🔧 ИИ всё ещё недоступен — разрабы уже смотрят.\n\n${RU_AI_COMMANDS_HINT}`,
+    agent_restarting: (willRetry: boolean) =>
+      willRetry
+        ? '🔄 Перезапускаюсь на обновление — отвечу на это через минуту.'
+        : '🔄 Перезапускаюсь на обновление — этот запрос не выполнен, повтори его через минуту.',
     agent_timeout: '⚠️ Что-то долго думаю — прерываю.',
     ai_response_blocked: 'Провайдер остановил ответ. Я не буду автоматически повторять этот запрос.',
     rate_limited: 'Слишком много сообщений, подождите.',

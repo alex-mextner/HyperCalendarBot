@@ -1329,9 +1329,16 @@ bot.onStart(async ({ info }) => {
   botLogger.info({ username: info.username }, 'Bot started');
 });
 
-// Graceful shutdown
+// bot.stop() (in-flight handlers get up to 3 s) + this drain + the closes below must
+// fit the 8 s shutdown timeout and Docker's 10 s stop grace.
+const AGENT_DRAIN_SETTLE_MS = 2_500;
+
+// Graceful shutdown. Stop taking updates first, then abort the AI turns still
+// running so each one tells its user, queues its retry and writes its debug log
+// while the queues, Redis and the database are still open.
 async function shutdown(): Promise<void> {
   await bot.stop();
+  await agent.drain(AGENT_DRAIN_SETTLE_MS);
   if (aiMessagesQueueCleanup) await aiMessagesQueueCleanup.close();
   if (eventCheckerQueueCleanup) await eventCheckerQueueCleanup.close();
   if (notificationQueueCleanup) await notificationQueueCleanup.close();

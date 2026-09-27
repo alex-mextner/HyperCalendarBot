@@ -55,6 +55,7 @@ function serializeMessage(msg: DebugMessage): string {
 
 export class AiDebugRunContext {
   private parts: string[] = [];
+  private finalLogged = false;
 
   constructor(
     private readonly file: string,
@@ -140,6 +141,7 @@ export class AiDebugRunContext {
   }
 
   logFinal(responseText: string, toolCount: number): void {
+    this.finalLogged = true;
     this.parts.push('');
     this.parts.push('## FINAL');
     this.parts.push(`Tools called: ${toolCount}`);
@@ -155,6 +157,8 @@ export class AiDebugRunContext {
   }
 
   flush(): void {
+    if (!this.finalLogged)
+      this.parts.push('', '## END — the turn threw before FINAL; see the application log', '='.repeat(80));
     try {
       appendFileSync(this.file, `${this.parts.join('\n')}\n`);
     } catch (error) {

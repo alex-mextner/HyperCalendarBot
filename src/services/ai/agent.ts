@@ -569,6 +569,10 @@ export class CalendarBotAgent {
   private streamImpl: typeof aiStreamRound;
   private summarizer?: HistorySummarizer;
   private requestTimeoutMs: number;
+  /** Aborts every in-flight and later run once the process starts shutting down. */
+  private readonly shutdown = new AbortController();
+  /** Runs not yet settled, including their debug-log flush — what a shutdown drain waits for. */
+  private readonly inFlight = new Set<Promise<AgentRunResult>>();
 
   constructor(
     config: AgentConfig,
@@ -660,9 +664,10 @@ export class CalendarBotAgent {
    * Tell the user what happened when a run failed.
    *
    * Mid-chain retries stay quiet: the comeback was already promised on the first
-   * failure and repeating it every 30 seconds only adds noise. Everything else
-   * goes through the notice tracker, which decides between a playful stall, an
-   * honest "the AI is down, here is what still works", and silence.
+   * failure and repeating it every 30 seconds only adds noise. A run cut short by
+   * a shutdown says exactly that. Everything else goes through the notice
+   * tracker, which decides between a playful stall, an honest "the AI is down,
+   * here is what still works", and silence.
    */
   private announceFailure(ctx: AgentContext, error: unknown, writer: TelegramStreamWriter): void {
     if (ctx.supplementMode || ctx.wasExplicitInvocation === false) return;
@@ -675,6 +680,12 @@ export class CalendarBotAgent {
     }
     const hardOutage = isHardOutage(error);
     if ((ctx.retryAttempt ?? 0) > 0 && !hardOutage) return;
+    if (this.shutdown.signal.aborted) {
+      const text = t(ctx.user.language).agent_restarting(typeof ctx.retryEnqueue === 'function');
+      writer.appendText(`\n\n${text}`);
+      this.saveAssistantTurn(ctx, { role: 'assistant', content: text });
+      return;
+    }
 
     const notice = aiFailureNotices.decide(ctx.user.telegram_id, toLang(ctx.user.language), {
       hardOutage,
@@ -729,9 +740,53 @@ export class CalendarBotAgent {
     ctx.conversationLogger.logToolResults(ctx.user.telegram_id, toSave, chatId);
   }
 
-  async run(ctx: AgentContext): Promise<AgentRunResult> {
+  /**
+   * Shutdown hook: abort every in-flight run and wait until each has taken its
+   * failure path — user notice, durable retry or write evidence, debug log — so
+   * nothing is still writing when the caller closes the queues and the database.
+   * A run still stuck after `settleMs` is logged and left behind.
+   */
+  async drain(settleMs: number): Promise<void> {
+    this.shutdown.abort(new Error('Bot is shutting down'));
+    const runs = [...this.inFlight];
+    if (runs.length === 0) return;
+    const deadline = Promise.withResolvers<'timeout'>();
+    const timer = setTimeout(() => deadline.resolve('timeout'), settleMs);
+    try {
+      const outcome = await Promise.race([Promise.allSettled(runs), deadline.promise]);
+      aiLogger.info(
+        { runs: runs.length, stillRunning: outcome === 'timeout' ? this.inFlight.size : 0 },
+        'Agent runs drained for shutdown',
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  run(ctx: AgentContext): Promise<AgentRunResult> {
+    const dbg: AiDebugRunContext | null =
+      this.debugLogger?.createRunContext(
+        ctx.user.telegram_id,
+        ctx.chatId,
+        ctx.user.username,
+        ctx.user.first_name,
+        ctx.groupTitle ?? null,
+        !!ctx.supplementMode,
+        ctx.messageText,
+        ctx.supplementAutoResponse,
+      ) ?? null;
+    const turn = this.runTurn(ctx, dbg).finally(() => {
+      this.inFlight.delete(turn);
+      // Every exit leaves the turn's evidence, including one that threw after its failure path.
+      dbg?.flush();
+    });
+    this.inFlight.add(turn);
+    return turn;
+  }
+
+  private async runTurn(ctx: AgentContext, dbg: AiDebugRunContext | null): Promise<AgentRunResult> {
     const startTime = Date.now();
-    const requestSignal = AbortSignal.timeout(this.requestTimeoutMs);
+    const requestSignal = AbortSignal.any([AbortSignal.timeout(this.requestTimeoutMs), this.shutdown.signal]);
     const requestMetrics = new AgentRequestMetrics();
     const requestId = requestMetrics.requestId;
     aiLogger.info(
@@ -824,17 +879,6 @@ export class CalendarBotAgent {
     const validatorStream = measuredStream('validator');
     const retryStream = measuredStream('retry');
 
-    const dbg: AiDebugRunContext | null =
-      this.debugLogger?.createRunContext(
-        ctx.user.telegram_id,
-        ctx.chatId,
-        ctx.user.username,
-        ctx.user.first_name,
-        ctx.groupTitle ?? null,
-        !!ctx.supplementMode,
-        ctx.messageText,
-        ctx.supplementAutoResponse,
-      ) ?? null;
     const exposure =
       this.toolSchemaMode === 'lazy' &&
       ctx.inputMode !== 'live_call' &&
@@ -1201,7 +1245,8 @@ export class CalendarBotAgent {
         !ctx.supplementMode &&
         ctx.wasExplicitInvocation !== false
       ) {
-        ctx.retryEnqueue(ctx.messageText).catch((err) => {
+        // Awaited: a shutdown drain must not close the queue before the retry is stored.
+        await ctx.retryEnqueue(ctx.messageText).catch((err) => {
           aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to handle retry enqueue');
         });
       }
@@ -1256,7 +1301,6 @@ export class CalendarBotAgent {
 
     const finalText = writer.getText().trim();
     dbg?.logFinal(finalText, allToolCalls.length);
-    dbg?.flush();
 
     if (allToolCalls.some((tc) => tc.name === 'end_conversation')) {
       this.debugLogger?.endSession(ctx.chatId);
