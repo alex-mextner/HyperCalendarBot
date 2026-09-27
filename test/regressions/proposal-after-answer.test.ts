@@ -116,5 +116,7 @@ describe('time proposal on an invitation the invitee already answered', () => {
     expect(send).toHaveBeenCalledWith(t('en').invitation_already_answered);
     expect(editMessage).not.toHaveBeenCalled();
     expect(notifyInviterProposal).not.toHaveBeenCalled();
+    // The refusal ends the session, so the invitee's next message reaches the bot normally.
+    expect(proposeTimeSessions.has(INVITEE)).toBe(false);
   });
 });
