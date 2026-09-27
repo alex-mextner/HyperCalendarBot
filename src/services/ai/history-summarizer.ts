@@ -1,7 +1,13 @@
 import type OpenAI from 'openai';
 import { logger } from '../../utils/logger.ts';
 import { estimateMessageListTokens } from '../../utils/token-estimate.ts';
-import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from './streaming.ts';
+import { waitForAbort } from './provider-deadline.ts';
+import {
+  ProviderSafetyStopError,
+  type StreamCallbacks,
+  type StreamRoundOptions,
+  type StreamRoundResult,
+} from './streaming.ts';
 
 const histLogger = logger.child({ module: 'history-summarizer' });
 
@@ -26,12 +32,20 @@ export class HistorySummarizer {
     private streamFn: StreamFn,
   ) {}
 
-  async condenseMessage(rowId: number, subKey: string, content: string, streamOverride?: StreamFn): Promise<string> {
+  async condenseMessage(
+    rowId: number,
+    subKey: string,
+    content: string,
+    streamOverride?: StreamFn,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    signal?.throwIfAborted();
     if (content.length <= PER_MSG_CHARS_LIMIT) return content;
 
     const cacheKey = perMsgCacheKey(rowId, subKey);
     if (this.redis) {
-      const cached = await this.redis.get(cacheKey).catch(() => null);
+      const redis = this.redis;
+      const cached = await waitForAbort(() => redis.get(cacheKey).catch(() => null), signal);
       if (cached) return cached;
     }
 
@@ -50,6 +64,7 @@ export class HistorySummarizer {
           maxTokens: 256,
           temperature: 0,
           fast: true,
+          signal,
         },
         {},
       );
@@ -60,19 +75,31 @@ export class HistorySummarizer {
       }
 
       if (this.redis) {
-        await this.redis
-          .set(cacheKey, summary, 'EX', String(SUMMARY_CACHE_TTL_SECS))
-          .catch((err) => histLogger.warn({ err }, 'Redis set failed for per-message summary'));
+        const redis = this.redis;
+        await waitForAbort(
+          () =>
+            redis
+              .set(cacheKey, summary, 'EX', String(SUMMARY_CACHE_TTL_SECS))
+              .catch((err) => histLogger.warn({ err }, 'Redis set failed for per-message summary')),
+          signal,
+        );
       }
 
       return summary;
     } catch (err) {
+      if (err instanceof ProviderSafetyStopError) throw err;
+      signal?.throwIfAborted();
       histLogger.warn({ err, rowId }, 'Per-message summarization failed — truncating');
       return `${content.slice(0, PER_MSG_CHARS_LIMIT)}[…]`;
     }
   }
 
-  async condenseHistory(messages: MessageParam[], streamOverride?: StreamFn): Promise<MessageParam[]> {
+  async condenseHistory(
+    messages: MessageParam[],
+    streamOverride?: StreamFn,
+    signal?: AbortSignal,
+  ): Promise<MessageParam[]> {
+    signal?.throwIfAborted();
     const total = estimateMessageListTokens(messages);
     if (total <= HISTORY_TOKEN_BUDGET) return messages;
 
@@ -122,6 +149,7 @@ export class HistorySummarizer {
           maxTokens: 400,
           temperature: 0,
           fast: true,
+          signal,
         },
         {},
       );
@@ -134,6 +162,8 @@ export class HistorySummarizer {
 
       return [summaryMsg, ...recent];
     } catch (err) {
+      if (err instanceof ProviderSafetyStopError) throw err;
+      signal?.throwIfAborted();
       histLogger.warn({ err }, 'Full-history summarization failed — keeping recent messages only');
       return recent;
     }

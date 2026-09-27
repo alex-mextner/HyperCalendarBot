@@ -18,6 +18,7 @@ const ROOT = join(import.meta.dir, '../..');
 const caddyfile = readFileSync(join(ROOT, 'Caddyfile'), 'utf8');
 const watchdog = readFileSync(join(ROOT, 'scripts/healthcheck-alert.sh'), 'utf8');
 const deployWorkflow = readFileSync(join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
+const deployActivator = readFileSync(join(ROOT, 'scripts/deploy-prebuilt-image.sh'), 'utf8');
 
 /** The paths the @bot matcher forwards to the bot. */
 function proxiedPaths(): string[] {
@@ -59,15 +60,17 @@ function proxyRetryWindowSeconds(): number {
 
 /** How long the deploy's own readiness probe waits, in seconds. */
 function deployProbeTimeoutSeconds(): number {
-  const value = deployWorkflow.match(/curl -s --max-time (\d+) https:\/\/\S*\/ready/)?.[1];
-  if (!value) throw new Error('deploy.yml has no readiness probe');
+  const value = deployActivator.match(/curl -[a-zA-Z]+ --max-time (\d+) https:\/\/\S*\/ready/)?.[1];
+  if (!value) throw new Error('The shared deploy activator has no readiness probe');
   return Number(value);
 }
 
 function deployCopiedFiles(): Set<string> {
   const source = deployWorkflow.match(/^\s*source:\s*(.+)$/m)?.[1];
-  if (!source) throw new Error('deploy.yml has no scp source list');
-  return new Set(source.split(',').map((entry) => entry.trim()));
+  if (source !== 'release') throw new Error('deploy.yml must upload its prepared release directory');
+  const copied = [...deployWorkflow.matchAll(/^\s*cp (.+) release(?:\/scripts)?\/\s*$/gm)];
+  if (copied.length === 0) throw new Error('deploy.yml stages no release files');
+  return new Set(copied.flatMap((match) => match[1]!.trim().split(/\s+/)));
 }
 
 /** How long the watchdog waits for a readiness answer, in seconds. */
@@ -134,19 +137,24 @@ describe('Caddy routing', () => {
     for (const script of referencedScripts) expect(copied.has(script)).toBe(true);
   });
 
-  // Routing is applied by a reload the deploy cannot fail on (shared server), so
-  // the deploy checks the outcome against the very URL the watchdog will poll.
+  // Hosted deployment must invoke the shared activator that verifies the actual
+  // routed URL. A disconnected helper containing this URL is not sufficient.
   test('the deploy verifies the URL the watchdog polls', () => {
-    expect(deployWorkflow).toContain(watchdogUrl());
+    expect(deployWorkflow).toContain('"$REMOTE_SRC/scripts/deploy-prebuilt-image.sh"');
+    expect(deployActivator).toContain(watchdogUrl());
   });
 
-  // The deploy decides "routed" by recognising the bodies the bot answers with.
-  // That list is a copy of the server's, and a copy that drifts fails every
-  // deploy for a routing problem that does not exist.
-  test('the deploy accepts exactly the bodies the server answers with', () => {
-    const branch = deployWorkflow.match(/^\s*(.+)\)\s*ROUTED="\$BODY"/m)?.[1];
-    if (!branch) throw new Error('deploy.yml has no readiness case branch');
-    expect(acceptedBodies(branch)).toEqual([...Object.values(READINESS_BODY)].sort());
+  // The watchdog recognizes an outage body, but a deployment cannot declare an
+  // outage healthy. The activator's real rollback is covered by Python fixtures.
+  test('the deploy accepts only healthy or explicitly unverified server bodies', () => {
+    const branch = deployActivator.match(/^\s*(ok[^\n]+)\)\s*;;$/m)?.[1];
+    if (!branch) throw new Error('The shared activator has no readiness acceptance branch');
+    expect(acceptedBodies(branch)).toEqual(
+      Object.values(READINESS_BODY)
+        .filter((body) => body !== 'ai chain down')
+        .sort(),
+    );
+    expect(acceptedBodies(branch)).not.toContain('ai chain down');
   });
 
   // The watchdog holds the same list, for the same reason: a 200 from anything

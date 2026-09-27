@@ -11,6 +11,7 @@
 
 import OpenAI from 'openai';
 import type { CompletionUsage } from 'openai/resources/completions';
+import { z } from 'zod';
 import { type ChainOrder, type EnvConfig, loadConfig } from '../../config/env.ts';
 import type { GroqTokenLimits } from '../../config/groq-token-limits.ts';
 import {
@@ -19,8 +20,10 @@ import {
   reportProviderAnswered,
   reportProviderFailure,
 } from '../../utils/ai-provider-alert.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger, logOnce } from '../../utils/logger.ts';
 import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
+import { isGeminiLocalSkip, reserveGeminiBudget } from './gemini-quota.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
 import {
   type Admission,
@@ -31,11 +34,13 @@ import {
   settleFailure,
   settleInconclusive,
 } from './provider-circuit.ts';
+import { waitForAbort, withinProviderDeadline } from './provider-deadline.ts';
 import { clearBlock, isBlocked, noteFailureForEligibility } from './provider-eligibility.ts';
 import type { ProviderId } from './provider-ids.ts';
 import { estimateTokens } from './token-estimate.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
+const toolArgumentsCodec = jsonCodec(z.record(z.string(), z.json()));
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -43,6 +48,8 @@ export interface StreamRoundOptions {
   messages: OpenAI.ChatCompletionMessageParam[];
   tools?: OpenAI.ChatCompletionTool[];
   maxTokens: number;
+  /** Optional narrower wall-time cap for one provider, including all stream chunks. */
+  providerTimeoutMs?: number;
   temperature?: number;
   /** Use the fast chain (cheap/fast models) instead of the smart chain. Default: false. */
   fast?: boolean;
@@ -157,15 +164,43 @@ export function preflightRequestFit(
  * rather than substring-matching the message — a future copy-edit to the
  * message text would otherwise silently break the fallback decision.
  */
+export interface EmptyResponseDiagnostics {
+  classification: 'no_chunks' | 'no_choices' | 'length' | 'reasoning_only' | 'empty' | 'malformed_tools' | 'safety';
+  choiceCount: number;
+  toolFragmentCount: number;
+  finishReason: string | null;
+  chunkCount: number;
+  maxOutputTokens: number;
+  messageCount: number;
+  toolCount: number;
+  usage: StreamTokenUsage | null;
+}
+
 export class EmptyProviderResponseError extends Error {
-  constructor(provider: string) {
-    super(`Provider ${provider} returned 200 OK with no text and no tool calls`);
+  constructor(
+    provider: string,
+    readonly diagnostics?: EmptyResponseDiagnostics,
+  ) {
+    super(
+      diagnostics?.classification === 'malformed_tools'
+        ? `Provider ${provider} returned malformed tool calls — nothing executed`
+        : `Provider ${provider} returned 200 OK with no text and no tool calls`,
+    );
     this.name = 'EmptyProviderResponseError';
+  }
+}
+
+/** An explicit upstream safety stop is a result, not permission to try another provider. */
+export class ProviderSafetyStopError extends Error {
+  constructor(readonly diagnostics: EmptyResponseDiagnostics) {
+    super('Provider stopped the response for safety; no automatic retry');
+    this.name = 'ProviderSafetyStopError';
   }
 }
 
 /** One provider slot's failure, kept for the aggregate error and the admin alert. */
 export interface ProviderFailure {
+  emptyResponse?: EmptyResponseDiagnostics;
   skippedBeforeRequest?: boolean;
   /** Human-readable provider slot including the model actually requested. */
   provider: string;
@@ -269,16 +304,9 @@ export function isTransientProviderError(error: unknown): boolean {
   return false;
 }
 
-/**
- * True only when the caller genuinely cancelled the request. `AbortSignal.timeout()`
- * aborts with a `TimeoutError`, which is our own per-round deadline — that must
- * still fall through to a (possibly faster) next provider.
- */
+/** Shared caller deadlines end the round; each provider has its own shorter deadline. */
 function isCallerAbort(signal: AbortSignal | undefined): boolean {
-  if (!signal?.aborted) return false;
-  const reason: unknown = signal.reason;
-  if (reason instanceof Error && reason.name === 'TimeoutError') return false;
-  return true;
+  return signal?.aborted === true;
 }
 
 // ── Provider adapters ──────────────────────────────────────────────────────
@@ -345,6 +373,11 @@ function applyToolCallDelta(tc: ToolCallDelta, toolCalls: Map<number, PendingToo
 }
 
 interface ConsumedStream {
+  refusalSeen: boolean;
+  choiceCount: number;
+  toolFragmentCount: number;
+  chunkCount: number;
+  finishReasonSeen: boolean;
   text: string;
   toolCalls: StreamToolCall[];
   finishReason: string;
@@ -356,9 +389,15 @@ async function consumeStream(
   stream: AsyncIterable<OpenAI.ChatCompletionChunk>,
   cbs: StreamCallbacks,
   startedAt: number,
+  signal?: AbortSignal,
 ): Promise<ConsumedStream> {
   let text = '';
   let finishReason = 'stop';
+  let chunkCount = 0;
+  let choiceCount = 0;
+  let toolFragmentCount = 0;
+  let finishReasonSeen = false;
+  let refusalSeen = false;
   let firstUsableMs: number | null = null;
   let usage: CompletionUsage | null = null;
   const toolCalls = new Map<number, PendingToolCall>();
@@ -366,31 +405,61 @@ async function consumeStream(
     if (firstUsableMs === null) firstUsableMs = Math.max(0, performance.now() - startedAt);
   };
 
-  for await (const chunk of stream) {
-    // OpenAI-compatible providers emit the final usage in a choices=[] chunk.
-    // Capture it BEFORE looking for delta or it silently disappears.
-    if (chunk.usage) usage = chunk.usage;
-    const choice = chunk.choices[0];
-    const delta = choice?.delta;
-    if (!delta) continue;
+  const iterator = stream[Symbol.asyncIterator]();
+  let completed = false;
+  try {
+    while (true) {
+      const next = await waitForAbort(() => iterator.next(), signal);
+      if (next.done) {
+        completed = true;
+        break;
+      }
+      const chunk = next.value;
+      chunkCount++;
+      choiceCount += chunk.choices.length;
+      // OpenAI-compatible providers emit the final usage in a choices=[] chunk.
+      // Capture it BEFORE looking for delta or it silently disappears.
+      if (chunk.usage) usage = chunk.usage;
+      const choice = chunk.choices[0];
+      if (choice?.finish_reason) {
+        finishReason = choice.finish_reason;
+        finishReasonSeen = true;
+      }
+      const delta = choice?.delta;
+      if (!delta) continue;
+      if (delta.refusal) refusalSeen = true;
 
-    if (delta.content) {
-      markUsable();
-      text += delta.content;
-      cbs.onTextDelta?.(delta.content);
+      if (delta.content) {
+        markUsable();
+        text += delta.content;
+        cbs.onTextDelta?.(delta.content);
+      }
+
+      if (delta.tool_calls) {
+        toolFragmentCount += delta.tool_calls.length;
+        if (delta.tool_calls.some((tc) => tc.id || tc.function?.name || tc.function?.arguments)) markUsable();
+        for (const tc of delta.tool_calls) applyToolCallDelta(tc, toolCalls, cbs);
+      }
     }
-
-    if (delta.tool_calls) {
-      if (delta.tool_calls.some((tc) => tc.id || tc.function?.name || tc.function?.arguments)) markUsable();
-      for (const tc of delta.tool_calls) applyToolCallDelta(tc, toolCalls, cbs);
+  } finally {
+    // Cancellation must request producer cleanup but cannot wait forever on return().
+    if (!completed && iterator.return) {
+      Promise.resolve()
+        .then(() => iterator.return?.())
+        .catch(() => {
+          aiLogger.warn('Provider stream cleanup failed after cancellation');
+        });
     }
-
-    if (choice?.finish_reason) finishReason = choice.finish_reason;
   }
 
   return {
     text,
     finishReason,
+    refusalSeen,
+    choiceCount,
+    toolFragmentCount,
+    chunkCount,
+    finishReasonSeen,
     firstUsableMs,
     usage,
     toolCalls: [...toolCalls.values()].map((tc) => ({ id: tc.id, name: tc.name, arguments: tc.args })),
@@ -462,6 +531,9 @@ function streamingSlot(
         stream: true,
         ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
       };
+      // Only the supported 2.5 Flash text routes: never send none to Pro/3.x.
+      if (provider === 'gemini' && opts.fast && /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, '')))
+        params.reasoning_effort = 'none';
       if (opts.tools && opts.tools.length > 0) {
         params.tools = opts.tools;
       }
@@ -488,17 +560,60 @@ function streamingSlot(
           signal: opts.signal,
         });
       }
-      const { text, toolCalls, finishReason, firstUsableMs, usage } = await consumeStream(
-        stream as AsyncIterable<OpenAI.ChatCompletionChunk>,
-        cbs,
-        attemptStartedAt,
-      );
+      const {
+        text,
+        toolCalls,
+        finishReason,
+        firstUsableMs,
+        usage,
+        chunkCount,
+        finishReasonSeen,
+        choiceCount,
+        toolFragmentCount,
+        refusalSeen,
+      } = await consumeStream(stream as AsyncIterable<OpenAI.ChatCompletionChunk>, cbs, attemptStartedAt, opts.signal);
 
-      // z.ai coding endpoint returns content='' and only reasoning_content for
-      // pure text responses (no tools). If we got 200 OK but nothing usable,
-      // treat as provider failure so the chain falls through.
-      if (!text.trim() && toolCalls.length === 0) {
-        throw new EmptyProviderResponseError(slotName(label, model));
+      const invalidTools =
+        (toolFragmentCount > 0 && toolCalls.length === 0) ||
+        toolCalls.some(
+          (tc) =>
+            !tc.id.trim() ||
+            !/^[a-zA-Z0-9_-]{1,64}$/.test(tc.name) ||
+            !toolArgumentsCodec.safeParse(tc.arguments).success,
+        ) ||
+        new Set(toolCalls.map((tc) => tc.id)).size !== toolCalls.length;
+      const normalizedUsage = normalizeUsage(usage);
+      const diagnostics: EmptyResponseDiagnostics = {
+        classification:
+          refusalSeen || finishReason === 'content_filter'
+            ? 'safety'
+            : invalidTools
+              ? 'malformed_tools'
+              : finishReasonSeen && finishReason === 'length'
+                ? 'length'
+                : (normalizedUsage?.reasoningTokens ?? 0) > 0
+                  ? 'reasoning_only'
+                  : chunkCount === 0
+                    ? 'no_chunks'
+                    : choiceCount === 0
+                      ? 'no_choices'
+                      : 'empty',
+        finishReason: finishReasonSeen
+          ? ['stop', 'length', 'tool_calls', 'function_call', 'content_filter'].includes(finishReason)
+            ? finishReason
+            : 'unknown'
+          : null,
+        chunkCount,
+        choiceCount,
+        toolFragmentCount,
+        maxOutputTokens: opts.maxTokens,
+        messageCount: opts.messages.length,
+        toolCount: opts.tools?.length ?? 0,
+        usage: normalizedUsage,
+      };
+      if (refusalSeen || finishReason === 'content_filter') throw new ProviderSafetyStopError(diagnostics);
+      if (invalidTools || (!text.trim() && toolCalls.length === 0)) {
+        throw new EmptyProviderResponseError(slotName(label, model), diagnostics);
       }
 
       return {
@@ -761,6 +876,8 @@ function describeFailure(slot: ProviderSlot, error: unknown): ProviderFailure {
     status,
     message,
     transient: isTransientProviderError(error),
+    ...(isGeminiLocalSkip(error) ? { skippedBeforeRequest: true } : {}),
+    ...(error instanceof EmptyProviderResponseError && error.diagnostics ? { emptyResponse: error.diagnostics } : {}),
   };
 }
 
@@ -799,12 +916,17 @@ export async function aiStreamRound(
   options: StreamRoundOptions,
   callbacks: StreamCallbacks = {},
 ): Promise<StreamRoundResult> {
+  options.signal?.throwIfAborted();
+  const cap = options.providerTimeoutMs ?? (options.fast ? 8_000 : 15_000);
+  if (!Number.isFinite(cap) || cap <= 0 || cap > 15_000)
+    throw new Error('providerTimeoutMs must be positive and at most 15000');
   const roundStartedAt = performance.now();
   const chainKind: ProviderChainKind = options.fast ? 'fast' : 'smart';
   const cfg = loadConfig();
   const chain = options.fast ? buildFastChain(cfg) : buildSmartChain(cfg);
   const failures: ProviderFailure[] = [];
   let actualAttempts = 0;
+  let geminiInputTokens: number | undefined;
   // Anything the caller has already shown the user for this round: streamed text
   // or a "running <tool>" label. Both must be cleared before another provider
   // starts, otherwise the user sees output from a round that never finished.
@@ -833,6 +955,13 @@ export async function aiStreamRound(
   }
 
   for (const slot of attempts) {
+    options.signal?.throwIfAborted();
+    const remainingMs = 30_000 - (performance.now() - roundStartedAt);
+    if (remainingMs < Math.min(cap, 1000)) {
+      aiLogger.warn({ requestId: options.requestId }, 'AI round deadline reached before next provider');
+      break;
+    }
+
     const requestModel = getModelOverride(slot.provider, slot.configuredModel) ?? slot.configuredModel;
     const fitRejection = preflightRequestFit(slot.provider, requestModel, options, cfg.GROQ_TPM_LIMITS);
     if (fitRejection) {
@@ -872,9 +1001,37 @@ export async function aiStreamRound(
         { provider: slot.label, model: slot.configuredModel, userId: options.userId, requestId: options.requestId },
         'Trying provider',
       );
-      const result = await runSlot(slot, options, wrappedCallbacks, () => {
-        actualAttempts++;
-      });
+      const result = await withinProviderDeadline(
+        async (signal) =>
+          runSlot(
+            slot,
+            { ...options, signal },
+            {
+              onTextDelta: (text) => {
+                if (!signal.aborted) wrappedCallbacks.onTextDelta?.(text);
+              },
+              onToolCallStart: (name) => {
+                if (!signal.aborted) wrappedCallbacks.onToolCallStart?.(name);
+              },
+            },
+            () => {
+              signal.throwIfAborted();
+              if (slot.provider === 'gemini' && cfg.GEMINI_RATE_LIMITS) {
+                geminiInputTokens ??= Math.ceil(
+                  estimateTokens(JSON.stringify({ messages: options.messages, tools: options.tools ?? [] })) * 1.25,
+                );
+                reserveGeminiBudget(
+                  `${cfg.DATABASE_PATH}.gemini-quota.sqlite`,
+                  cfg.GEMINI_RATE_LIMITS,
+                  geminiInputTokens,
+                );
+              }
+              actualAttempts++;
+            },
+          ),
+        Math.min(cap, remainingMs),
+        options.signal,
+      );
       // A slot that answers settles any outstanding outage for it and for its own
       // chain. The alert layer decides whether that is worth telling the admin
       // about.
@@ -893,6 +1050,15 @@ export async function aiStreamRound(
       }
       return result;
     } catch (error) {
+      if (error instanceof ProviderSafetyStopError) {
+        settleInconclusive(circuit, admission, { pushBack: false });
+        if (partialOutputShown) callbacks.onProviderSwitch?.();
+        aiLogger.warn(
+          { provider: slot.provider, model: requestModel, diagnostics: error.diagnostics },
+          'Provider safety stop — no fallback',
+        );
+        throw error;
+      }
       const failure = describeFailure(slot, error);
       failures.push(failure);
       const callerAborted = isCallerAbort(options.signal);
@@ -903,7 +1069,7 @@ export async function aiStreamRound(
         reportSlotFailure(failure, error, options.userId, chainKind, false);
         // Recorded after the alerting, never instead of it: a bench suppresses
         // calls, and the outage records must keep saying what actually happened.
-        if (!ownedByCircuit && ![400, 403, 422].includes(failure.status ?? 0)) {
+        if (!ownedByCircuit && !isGeminiLocalSkip(error) && ![400, 403, 422].includes(failure.status ?? 0)) {
           noteFailureForEligibility(
             slot.provider,
             chainKind,
@@ -969,7 +1135,7 @@ function settleCircuitAfterFailure(
   failure: ProviderFailure,
   callerAborted: boolean,
 ): boolean {
-  if (callerAborted) {
+  if (callerAborted || isGeminiLocalSkip(error)) {
     settleInconclusive(circuit, admission, { pushBack: false });
     return false;
   }
@@ -988,7 +1154,13 @@ function reportSlotFailure(
   chain: ProviderChainKind,
   alertAdmin: boolean,
 ): void {
-  const context = { err: error, provider: failure.provider, status: failure.status, userId };
+  const context = {
+    err: error,
+    provider: failure.provider,
+    status: failure.status,
+    userId,
+    ...(failure.emptyResponse ? { emptyResponse: failure.emptyResponse } : {}),
+  };
   if (failure.transient) {
     aiLogger.warn(context, 'Provider temporarily unavailable — trying next provider');
   } else {

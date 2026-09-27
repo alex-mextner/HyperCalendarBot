@@ -2,15 +2,40 @@
 # Remote prebuilt-image activation only: no compiler, package install, or registry credentials.
 set -euo pipefail
 
-DEPLOY_PATH="$1"
-REMOTE_SRC="$2"
-IMAGE="$3"
-SHA="$4"
+DEPLOY_PATH="${1:?Deployment directory required}"
+REMOTE_SRC="${2:?Release staging directory required}"
+IMAGE="${3:?Image name required}"
+SHA="${4:?Source revision required}"
+ARCHIVE_SUM="${5:?Archive checksum required}"
+CONFIG_ID="${6:?Image config identity required}"
+# Validate ownership BEFORE arming any cleanup trap or touching the live service.
+# Hosted runs stage under DEPLOY_PATH; the local fallback uses its /tmp namespace.
+python3 - "$DEPLOY_PATH" "$REMOTE_SRC" "$SHA" <<'PYGUARD'
+from pathlib import Path
+import re
+import sys
+
+raw_root, raw_stage = Path(sys.argv[1]), Path(sys.argv[2])
+revision = sys.argv[3]
+try:
+    root, stage = raw_root.resolve(strict=True), raw_stage.resolve(strict=True)
+except OSError:
+    raise SystemExit("Release paths must already exist; no cleanup armed")
+if (not raw_root.is_absolute() or not raw_stage.is_absolute()
+        or not root.is_dir() or not stage.is_dir() or raw_stage.is_symlink()
+        or root == Path("/") or stage == root or stage in root.parents
+        or not re.fullmatch(r"[0-9a-f]{40}", revision)):
+    raise SystemExit("Unsafe release staging path; no cleanup armed")
+hosted = (stage.parent == root
+          and re.fullmatch(r"\.incoming-" + revision + r"-\d+-\d+", stage.name))
+local = (stage.parent == Path("/tmp").resolve()
+         and re.fullmatch(r"hypercal-source-" + revision[:12] + r"-\d+", stage.name))
+if not (hosted or local):
+    raise SystemExit("Staging is outside the owned release namespaces; no cleanup armed")
+PYGUARD
 SHORT_SHA="${SHA:0:12}"
 STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
 trap 'rm -rf "$REMOTE_SRC"' EXIT
-ARCHIVE_SUM="$5"
-CONFIG_ID="$6"
 exec 9>"$DEPLOY_PATH/.release.lock"
 flock -n 9 || { echo 'Another release owns this service' >&2; exit 1; }
 [[ "$(sha256sum "$REMOTE_SRC/image.tar.gz" | cut -d ' ' -f1)" == "$ARCHIVE_SUM" ]] || { echo 'Archive checksum mismatch' >&2; exit 1; }

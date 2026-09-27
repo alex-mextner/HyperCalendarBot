@@ -82,6 +82,22 @@ describe('loadConfig', () => {
     }
   });
 
+  test('Gemini quota budget is explicit and rejects invalid values', () => {
+    process.env.GEMINI_RATE_LIMITS = JSON.stringify({ scope: 'test-project', rpm: 2, tpm: 100000, rpd: 10 });
+    expect(loadConfig().GEMINI_RATE_LIMITS).toMatchObject({ rpm: 2, rpd: 10 });
+    for (const raw of [
+      '{}',
+      'null',
+      '{"scope":"x","rpm":0,"tpm":1,"rpd":1}',
+      '{"scope":"x","rpm":2,"tpm":1,"rpd":1,"unknown":1}',
+    ]) {
+      process.env.GEMINI_RATE_LIMITS = raw;
+      expect(() => loadConfig()).toThrow();
+    }
+    delete process.env.GEMINI_RATE_LIMITS;
+    expect(loadConfig().GEMINI_RATE_LIMITS).toBeUndefined();
+  });
+
   describe('provider chain order', () => {
     const SMART_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
     const FAST_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
