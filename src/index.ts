@@ -1016,6 +1016,8 @@ if (config.GOOGLE_API_KEY && config.REDIS_URL) {
       await botRef
         .editMessage(chatId, messageId, text, options.parse_mode, options.reply_markup)
         .catch((err: unknown) => {
+          // A keep tap re-renders every card; an unchanged card is already what the user sees
+          if (String(err).includes('message is not modified')) return;
           botLogger.error({ err, chatId, messageId }, 'Location verification: failed to edit message');
         });
     },
