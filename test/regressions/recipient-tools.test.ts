@@ -753,6 +753,23 @@ describe('recipient and contact tool boundaries', () => {
       expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
     });
 
+    test('a contact with only a saved @username is invited by that username after a row-id attempt', async () => {
+      const { event, approvals, sendInvitationCalls } = inviteContext();
+      ctx.messageText = 'Invite Bora Example from my contacts';
+      ctx.resolveUsername = async () => ({ id: 5000000003, username: 'boraex' });
+      const row = ctx.contactRepo!.add(10, 'Bora Example', 'boraex');
+
+      const byRow = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: row.id });
+      expect(byRow.success).toBe(false);
+      expect(toolResultContent(byRow)).toContain('invitee_username boraex');
+      expect(approvals).not.toHaveBeenCalled();
+
+      const invited = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_username: 'boraex' });
+      expect(invited.success).toBe(true);
+      expect(ctx.sharing!.invitationRepo.getByEvent(event.id).map((i) => i.invitee_id)).toEqual([5000000003]);
+      expect(sendInvitationCalls.mock.calls.map(([id]) => id)).toEqual([5000000003]);
+    });
+
     test('a "User N" placeholder left by approving the row id does not legitimize it', async () => {
       const { event, approvals } = inviteContext();
       const row = ctx.contactRepo!.add(10, 'Bora Example');
