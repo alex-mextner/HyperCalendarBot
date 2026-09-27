@@ -15,7 +15,15 @@ venv
 __pycache__
 *.pyc
 test
-docs
+# Only docs/reference/migrations ships in the image (deploy-prebuilt-image.sh reads it as the
+# reviewed-procedure door for schema-changing releases). A blanket "docs" ignore can't be
+# re-included per-subdirectory, so this stages the exclusion instead: drop everything under
+# docs, un-ignore reference/, drop its contents again, then un-ignore only migrations/. Any
+# new docs/* subdirectory added later stays excluded without needing an entry here.
+docs/*
+!docs/reference
+docs/reference/*
+!docs/reference/migrations
 .claude
 .cursor
 .serena

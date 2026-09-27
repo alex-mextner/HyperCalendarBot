@@ -52,3 +52,16 @@ rather than only a partial working-tree diff.
 - Final review findings disposition, normal PR ship and verified immutable deployment receipt.
 - Synthetic replay against the deployed source and unsigned-webhook rejection check.
 - Preserve superseded task worktree material before cleanup; do not touch unrelated worktrees.
+
+## Release handoff, 27 September 2026
+Application implementation and test/review gates are complete. The current candidate
+integrates upstream main through PR491, including its documented migration procedure.
+The temporary alternative migration policy was superseded, not shipped; a checksummed
+copy is retained locally under `.git/incident-recovery/GH-359-20260927`.
+Final local gate on tree `990b923448199c050449ac39a6e15016da9303ed`:
+5767 tests passed, zero failures; Biome and TypeScript both passed.
+The normal review gate reports four passed iterations across correctness, performance
+and quality. Incomplete reviews and a disproved digest-length finding are not approvals.
+Remaining: update and ship PR372, verify the immutable runtime receipt and readiness,
+then clean only this task's preserved obsolete workspaces. An upstream hosted release
+was active at handoff; do not start a competing activation.

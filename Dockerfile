@@ -43,6 +43,7 @@ RUN ./node_modules/.bin/playwright install --with-deps chromium-headless-shell
 
 COPY src ./src
 COPY scripts ./scripts
+COPY docs/reference/migrations ./docs/reference/migrations
 COPY tsconfig.json bunfig.toml package.json ./
 
 RUN groupadd -r botuser && useradd -r -g botuser botuser && \
