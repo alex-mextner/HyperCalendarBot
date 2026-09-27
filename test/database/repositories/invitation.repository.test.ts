@@ -5,6 +5,7 @@ import { EventRepository } from '../../../src/database/repositories/event.reposi
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import type { Invitation, InvitationStatus } from '../../../src/database/types.ts';
 
 function createTestDb(): Database {
   const db = new Database(':memory:');
@@ -68,6 +69,37 @@ describe('InvitationRepository', () => {
     const inv = repo.create({ event_id: eventId, inviter_id: INVITER, invitee_id: INVITEE });
     repo.updateStatus(inv.id, 'declined', 'pending');
     expect(repo.findActiveByEventAndInvitee(eventId, INVITEE)).toBeNull();
+  });
+
+  // created_at is wall-clock datetime('now'): UNIQUE(event_id, invitee_id, created_at) rejects a
+  // second row in the same second, and a clock step back gives the newer row an earlier timestamp.
+  // Only the AUTOINCREMENT id reliably says which invitation came last.
+  function inviteAt(createdAt: string, status: InvitationStatus): Invitation {
+    const inv = repo.create({ event_id: eventId, inviter_id: INVITER, invitee_id: INVITEE });
+    db.prepare('UPDATE invitations SET created_at = ?, status = ? WHERE id = ?').run(createdAt, status, inv.id);
+    return repo.findById(inv.id)!;
+  }
+
+  test('a cancelled re-invite revokes access even when its created_at is earlier than the declined original', () => {
+    const declined = inviteAt('2026-03-01 12:00:05', 'declined');
+    const cancelled = inviteAt('2026-03-01 12:00:04', 'cancelled');
+    expect(cancelled.id).toBeGreaterThan(declined.id);
+
+    expect(repo.findActiveOrRespondedByEventAndInvitee(eventId, INVITEE)).toBeNull();
+  });
+
+  test('an accepted re-invite restores access even when its created_at is earlier than the cancelled original', () => {
+    inviteAt('2026-03-01 12:00:05', 'cancelled');
+    const accepted = inviteAt('2026-03-01 12:00:04', 'accepted');
+
+    expect(repo.findActiveOrRespondedByEventAndInvitee(eventId, INVITEE)?.id).toBe(accepted.id);
+  });
+
+  test('findActiveByEventAndInvitee returns the most recently inserted active invitation, not the latest created_at', () => {
+    inviteAt('2026-03-01 12:00:05', 'accepted');
+    const newer = inviteAt('2026-03-01 12:00:04', 'pending');
+
+    expect(repo.findActiveByEventAndInvitee(eventId, INVITEE)?.id).toBe(newer.id);
   });
 
   test('countDeclined counts declined per event+invitee', () => {

@@ -37,13 +37,15 @@ export class InvitationRepository {
     return result.changes > 0;
   }
 
+  // Latest-row lookups order by the AUTOINCREMENT id, not created_at: datetime('now') has
+  // one-second resolution and follows the wall clock, which can step backwards.
   findActiveByEventAndInvitee(eventId: number, inviteeId: number): Invitation | null {
     return (
       (this.db
         .prepare(
           `SELECT * FROM invitations
            WHERE event_id = ? AND invitee_id = ? AND status IN ('pending', 'maybe', 'accepted')
-           ORDER BY created_at DESC LIMIT 1`,
+           ORDER BY id DESC LIMIT 1`,
         )
         .get(eventId, inviteeId) as Invitation | null) ?? null
     );
@@ -60,7 +62,7 @@ export class InvitationRepository {
       .prepare(
         `SELECT * FROM invitations
          WHERE event_id = ? AND invitee_id = ?
-         ORDER BY created_at DESC LIMIT 1`,
+         ORDER BY id DESC LIMIT 1`,
       )
       .get(eventId, inviteeId) as Invitation | null;
     if (!latest || latest.status === 'cancelled' || latest.status === 'expired') {
