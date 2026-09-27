@@ -381,6 +381,25 @@ describe('validateResponse — answers grounded in the same run (#492)', () => {
     });
   });
 
+  test('a run that attempted a write is never self-approved: a failed create next to an unrelated read', async () => {
+    const failedCreate: ToolEvidence = {
+      name: 'create_event',
+      input: { title: 'Встреча', start_at: '2026-09-29T10:30:00Z' },
+      success: false,
+    };
+    expect(await verdict('Встреча 29 сентября в 12:30.', [LESSON_READ, failedCreate])).toEqual({
+      approved: false,
+      modelCalls: 1,
+    });
+  });
+
+  test('a generic confirmation after reads only goes to the model', async () => {
+    expect(await verdict('Готово! Встреча 29 сентября в 12:30.', [LESSON_READ])).toEqual({
+      approved: false,
+      modelCalls: 1,
+    });
+  });
+
   test('a failed read, or facts only from a non-read tool, are no evidence', async () => {
     expect(await verdict('Урок 29 сентября в 12:30.', [{ ...LESSON_READ, success: false }])).toEqual({
       approved: false,

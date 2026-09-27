@@ -123,6 +123,9 @@ describe('claimsCompletedWrite', () => {
     'Отменила занятие.',
     'I deleted the lesson.',
     'The meeting was rescheduled.',
+    'Готово! Встреча в 15:00.',
+    'Done, see you at 3.',
+    '✅ Встреча в 15:00',
   ])('%s claims a completed change', (text) => {
     expect(claimsCompletedWrite(text)).toBe(true);
   });

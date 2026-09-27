@@ -24,6 +24,7 @@ import {
   verifiedScheduleEvents,
 } from './response-grounding.ts';
 import { aiStreamRound, ProviderSafetyStopError } from './streaming.ts';
+import { isMutationTool } from './tool-executor.ts';
 
 const aiLogger = logger.child({ module: 'response-validator' });
 
@@ -129,11 +130,13 @@ function claimsCompleteOrEmptySchedule(response: string): boolean {
 /**
  * A weak validator model must not overrule the run's own evidence. The answer
  * is accepted without a model verdict when a schedule read succeeded in this
- * run, the prose states at least one concrete fact, every such fact is in the
- * run's tool results, and the prose does not claim a calendar change was made.
+ * run, no write was attempted (the prose may narrate one, successful or not),
+ * the prose states at least one concrete fact, every such fact is in the run's
+ * tool results, and the prose does not claim a calendar change was made.
  */
 function isGroundedInRun(input: ValidationInput): boolean {
   if (!input.tools.some((tool) => tool.success && SCHEDULE_READ_TOOLS.has(tool.name))) return false;
+  if (input.tools.some((tool) => isMutationTool(tool.name, tool.input))) return false;
   if (claimsCompletedWrite(input.response)) return false;
   const report = checkGrounding(input.response, input.tools, input.timezone, input.userMessage);
   aiLogger.info(
@@ -175,8 +178,9 @@ export function unverifiedResponseNotice(language: string, timezone: string, too
   if (events.length === 0) return messages.unverified_answer;
   const today = format(new TZDate(Date.now(), timezone), 'yyyy-MM-dd');
   const upcoming = events.filter((event) => event.date >= today);
+  // Upcoming events from the earliest; when every one is past, the latest ones.
+  const shown = upcoming.length > 0 ? upcoming.slice(0, MAX_NOTICE_EVENTS) : events.slice(-MAX_NOTICE_EVENTS);
   const pool = upcoming.length > 0 ? upcoming : events;
-  const shown = upcoming.length > 0 ? pool.slice(0, MAX_NOTICE_EVENTS) : pool.slice(-MAX_NOTICE_EVENTS);
   const lines = [formatEventSummaries(shown, timezone)];
   if (pool.length > shown.length) lines.push(messages.unverified_more_events(pool.length - shown.length));
   return messages.unverified_answer_with_events(lines.join('\n'));

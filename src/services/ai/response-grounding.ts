@@ -100,14 +100,16 @@ const EN_DAY_MONTH = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+${EN_MONTH_PAT
 const EN_MONTH_DAY = new RegExp(`\\b${EN_MONTH_PATTERN}\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, 'gi');
 
 /**
- * Past-tense or passive statements that a calendar change already happened.
+ * Past-tense or passive statements that a calendar change already happened,
+ * and generic completion confirmations ("Готово", "Done", ✅).
  * Future forms ("перенесу", "создам") and nouns ("создатель") do not match.
  */
 const COMPLETED_WRITE_PATTERNS = [
-  /(?<![а-яё])(?:удалил|создал|добавил|отменил|изменил|обновил|отправил|пригласил|сохранил|записал|поставил|переименовал)(?:а|и)?(?![а-яё])/i,
-  /(?<![а-яё])(?:удал[её]н|создан|добавлен|отмен[её]н|измен[её]н|обновл[её]н|отправлен|приглаш[её]н|сохран[её]н|переименован)(?:а|о|ы)?(?![а-яё])/i,
-  /(?<![а-яё])(?:перен[её]с(?:ла|ли)?|перенес[её]н(?:а|о|ы)?)(?![а-яё])/i,
-  /\b(?:deleted|removed|created|added|moved|rescheduled|cancell?ed|updated|renamed|sent|invited|saved|booked)\b/i,
+  /(?<![а-яё])(?:удалил|создал|добавил|отменил|изменил|обновил|отправил|пригласил|сохранил|записал|поставил|переименовал|сделал)(?:а|и)?(?![а-яё])/i,
+  /(?<![а-яё])(?:удал[её]н|создан|добавлен|отмен[её]н|измен[её]н|обновл[её]н|отправлен|приглаш[её]н|сохран[её]н|переименован|сделан)(?:а|о|ы)?(?![а-яё])/i,
+  /(?<![а-яё])(?:перен[её]с(?:ла|ли)?|перенес[её]н(?:а|о|ы)?|готово)(?![а-яё])/i,
+  /\b(?:deleted|removed|created|added|moved|rescheduled|cancell?ed|updated|renamed|sent|invited|saved|booked|done|all set)\b/i,
+  /✅/u,
 ];
 
 function pad2(value: number): string {
