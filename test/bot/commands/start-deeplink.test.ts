@@ -1,5 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
+import type { InlineKeyboard } from 'gramio';
 import type { StartDeps } from '../../../src/bot/commands/start.ts';
+import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 
 function makeDeps(overrides: Partial<StartDeps> = {}): StartDeps {
   return {
@@ -111,9 +113,9 @@ describe('handleStart with deep links', () => {
     const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(msg).toContain('Party');
     expect(msg).toContain('@alex');
-    // Check keyboard was passed
-    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
-    expect(opts.reply_markup).toBeDefined();
+    // The invitee gets the canonical RSVP keyboard for this invitation
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: InlineKeyboard };
+    expect(opts.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(10, 'en').toJSON());
   });
 
   test('i_ deep link for already responded invitation shows invalid message', async () => {

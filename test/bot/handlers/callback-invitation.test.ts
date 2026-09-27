@@ -1,6 +1,8 @@
 import { describe, expect, mock, test } from 'bun:test';
+import type { InlineKeyboard } from 'gramio';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
 import { t } from '../../../src/config/constants.ts';
+import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 import { png } from '../../fixtures/png.ts';
 import { flushPromises } from '../../helpers/mock-context.ts';
 
@@ -569,6 +571,9 @@ describe('propose-time callbacks', () => {
     await flushPromises();
     expect(notifyDeps.sendMessage).toHaveBeenCalled();
     expect(notifyDeps.editMessage).toHaveBeenCalled();
+    // The restored invitation card gets the canonical RSVP keyboard back
+    const [, , , markup] = notifyDeps.editMessage.mock.calls[0] as unknown as [number, number, string, InlineKeyboard];
+    expect(markup.toJSON()).toEqual(invitationRsvpKeyboard(5, 'en').toJSON());
   });
 });
 

@@ -1,6 +1,8 @@
 // test/bot/handlers/invite-conflict-callback.test.ts
 import { describe, expect, mock, test } from 'bun:test';
+import type { InlineKeyboard } from 'gramio';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler.ts';
+import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 
 function makeCtx(data: string, language = 'ru', telegramId = 100) {
   return {
@@ -73,6 +75,13 @@ describe('inv_force callback', () => {
     expect(ctx.answer).toHaveBeenCalled();
     // sendInvitation called for 200 and 201
     expect(forceInviteDeps.invitationService.sendInvitation).toHaveBeenCalledTimes(2);
+    // Each invitee gets the canonical RSVP keyboard, including the propose-time button
+    const [, , options] = forceInviteDeps.sendMessage.mock.calls[0] as unknown as [
+      number,
+      string,
+      { reply_markup: InlineKeyboard },
+    ];
+    expect(options.reply_markup.toJSON()).toEqual(invitationRsvpKeyboard(99, 'en').toJSON());
   });
 
   test('does nothing without forceInviteDeps', async () => {

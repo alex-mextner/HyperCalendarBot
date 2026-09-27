@@ -42,6 +42,11 @@ import type { AdminEditSession } from '../../services/intent/admin-edit-session.
 import { ConflictService } from '../../services/invite/conflict-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { SceneName, ScenePauseService } from '../../services/scene-pause.ts';
+import {
+  formatAnsweredInvitationCard,
+  invitationAnswerLabel,
+} from '../../services/sharing/answered-invitation-card.ts';
+import { invitationRsvpKeyboard } from '../../services/sharing/invitation-rsvp-keyboard.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import { guessCountryFromTimezone, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
@@ -842,14 +847,13 @@ export function createCallbackHandler(
                 !!inviteeUser?.onboarding_completed,
               )
             : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
-          const keyboard = new InlineKeyboard()
-            .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-            .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
-            .row()
-            .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
-            .text(t(inviteeLang).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);
           invitationNotifyDeps
-            .editMessage(invitation.chat_id, invitation.message_id, originalText, keyboard)
+            .editMessage(
+              invitation.chat_id,
+              invitation.message_id,
+              originalText,
+              invitationRsvpKeyboard(invitation.id, inviteeLang),
+            )
             .catch(() => {});
         }
       }
@@ -873,43 +877,21 @@ export function createCallbackHandler(
     }
 
     if (result.success) {
-      const statusLabel =
-        subAction === 'accept'
-          ? t(lang).invitation_accepted
-          : subAction === 'decline'
-            ? t(lang).invitation_declined
-            : t(lang).invitation_maybe;
-      await ctx.answer(statusLabel);
+      const answer = subAction === 'accept' ? 'accepted' : subAction === 'decline' ? 'declined' : 'maybe';
+      await ctx.answer(invitationAnswerLabel(answer, lang));
 
       const event = eventRepo?.findById(result.invitation?.event_id ?? 0, result.invitation?.inviter_id ?? 0);
-      // Fetch forecast anchored to event start (hourly when within 48h, daily within 7 days).
-      // For all-day events the daily forecast is used regardless — no midnight temperature.
-      const forecast =
-        weatherService && event && subAction === 'accept'
-          ? await weatherService
-              .getForecastAt(user.timezone, new Date(event.start_at).getTime(), lang, {
-                allDay: event.all_day === 1,
-              })
-              .catch(() => null)
-          : null;
-      const eventCard = event
-        ? formatEventDetail(
-            enrichAgendaEvents(
-              [event],
-              {
-                userId: user.telegram_id,
-                language: lang,
-                groupId: isGroup(ctx) ? (getGroupId(ctx) ?? undefined) : undefined,
-              },
-              eventService.agendaRepository,
-            )[0]!,
-            event.timezone,
-            lang,
-            { forecast },
-          )
-        : '';
-
-      const editText = eventCard ? `${statusLabel}\n\n${eventCard}` : statusLabel;
+      const editText = await formatAnsweredInvitationCard(
+        answer,
+        event ?? null,
+        {
+          userId: user.telegram_id,
+          language: lang,
+          timezone: user.timezone,
+          groupId: isGroup(ctx) ? (getGroupId(ctx) ?? undefined) : undefined,
+        },
+        { agendaRepository: eventService.agendaRepository, weatherService },
+      );
       await editAgendaText(ctx, editText, { parse_mode: 'HTML' }).catch(() => {});
 
       // Notify inviter about the response
@@ -1271,15 +1253,13 @@ export function createCallbackHandler(
             !!inviteeUser?.onboarding_completed,
           )
         : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
-      const kb = new InlineKeyboard()
-        .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-        .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
-        .row()
-        .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`);
       await ctx.answer();
       await ctx.editText(t(invLang).invite_delivered(eventTitle), { parse_mode: 'HTML' });
       forceInviteDeps
-        .sendMessage(inviteeId, inviteeText, { parse_mode: 'HTML', reply_markup: kb })
+        .sendMessage(inviteeId, inviteeText, {
+          parse_mode: 'HTML',
+          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang),
+        })
         .then((sent) => {
           forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
         })
@@ -1340,14 +1320,11 @@ export function createCallbackHandler(
             !!inviteeUser?.onboarding_completed,
           )
         : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
-      const kb = new InlineKeyboard()
-        .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-        .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
-        .row()
-        .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`);
-
       forceInviteDeps
-        .sendMessage(inviteeId, inviteeText, { parse_mode: 'HTML', reply_markup: kb })
+        .sendMessage(inviteeId, inviteeText, {
+          parse_mode: 'HTML',
+          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang),
+        })
         .then((sent) => {
           forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
         })

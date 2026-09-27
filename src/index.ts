@@ -3,7 +3,7 @@ import { bootstrapServiceSession } from './services/telegram-session/service-ses
 import { formatSessionLoss } from './services/telegram-session/session-loss.ts';
 // src/index.ts
 
-import type { TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
+import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { z } from 'zod';
 import { buildCalendarPickerKeyboard } from './bot/commands/calendars.ts';
 import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
@@ -12,6 +12,7 @@ import type { Lang } from './config/constants.ts';
 import { t } from './config/constants.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
+import { AgendaRepository } from './database/repositories/agenda.repository.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { HistorySummarizer } from './services/ai/history-summarizer.ts';
 import { configureProviderCircuit } from './services/ai/provider-circuit.ts';
@@ -123,7 +124,13 @@ const botRef: {
     replyMarkup?: ReplyMarkup,
   ) => Promise<{ message_id: number }>;
   sendVoice: (telegramId: number, audio: Buffer) => Promise<void>;
-  editMessage: (chatId: number, messageId: number, text: string, parseMode?: ParseMode) => Promise<void>;
+  editMessage: (
+    chatId: number,
+    messageId: number,
+    text: string,
+    parseMode?: ParseMode,
+    replyMarkup?: InlineKeyboard,
+  ) => Promise<void>;
 } = {
   sendMessage: async () => ({ message_id: 0 }),
   sendVoice: async () => {},
@@ -996,16 +1003,20 @@ if (config.GOOGLE_API_KEY && config.REDIS_URL) {
     eventRepo: db.events,
     userRepo: db.users,
     invitationRepo: db.invitations,
+    agendaRepository: new AgendaRepository(db.db),
+    weatherService,
     candidateStore,
     sendMessage: async (userId, text, options) => {
       await botRef.sendMessage(userId, text, options?.parse_mode, options?.reply_markup).catch((err: unknown) => {
         botLogger.error({ err, userId }, 'Location verification: failed to send message');
       });
     },
-    editMessage: async (chatId, messageId, text, parseMode) => {
-      await botRef.editMessage(chatId, messageId, text, parseMode).catch((err: unknown) => {
-        botLogger.error({ err, chatId, messageId }, 'Location verification: failed to edit message');
-      });
+    editMessage: async (chatId, messageId, text, options) => {
+      await botRef
+        .editMessage(chatId, messageId, text, options.parse_mode, options.reply_markup)
+        .catch((err: unknown) => {
+          botLogger.error({ err, chatId, messageId }, 'Location verification: failed to edit message');
+        });
     },
   });
 
@@ -1075,12 +1086,13 @@ botRef.sendMessage = async (telegramId, text, parseMode, replyMarkup) => {
   }
   return { message_id: msg.message_id };
 };
-botRef.editMessage = async (chatId, messageId, text, parseMode) => {
+botRef.editMessage = async (chatId, messageId, text, parseMode, replyMarkup) => {
   await bot.api.editMessageText({
     chat_id: chatId,
     message_id: messageId,
     text,
     ...(parseMode ? { parse_mode: parseMode } : {}),
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
 };
 botRef.sendVoice = async (telegramId, audio) => {

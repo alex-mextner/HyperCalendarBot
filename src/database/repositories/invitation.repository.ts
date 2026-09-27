@@ -88,12 +88,6 @@ export class InvitationRepository {
       .all(inviterId) as Invitation[];
   }
 
-  getPendingForEvent(eventId: number): Invitation[] {
-    return this.db
-      .prepare("SELECT * FROM invitations WHERE event_id = ? AND status IN ('pending', 'maybe')")
-      .all(eventId) as Invitation[];
-  }
-
   expirePastInvitations(): number {
     const result = this.db
       .prepare(
@@ -113,12 +107,6 @@ export class InvitationRepository {
       )
       .run(eventId);
     return result.changes;
-  }
-
-  getAcceptedForEvent(eventId: number): Invitation[] {
-    return this.db
-      .prepare("SELECT * FROM invitations WHERE event_id = ? AND status = 'accepted'")
-      .all(eventId) as Invitation[];
   }
 
   getByEvent(eventId: number): Invitation[] {

@@ -10,6 +10,7 @@ import type { EventService } from '../../services/event/event-service.ts';
 import { formatInvitation } from '../../services/event/formatters.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
+import { invitationRsvpKeyboard } from '../../services/sharing/invitation-rsvp-keyboard.ts';
 import { resolveCity } from '../../services/timezone/city-resolver.ts';
 import {
   getTimezoneDisplay,
@@ -240,13 +241,10 @@ export function createOnboardingScene(
                   userTz,
                   true,
                 );
-                const kb = new InlineKeyboard()
-                  .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-                  .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
-                  .row()
-                  .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
-                  .text(t(l).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);
-                await context.send(text, { parse_mode: 'HTML', reply_markup: kb });
+                await context.send(text, {
+                  parse_mode: 'HTML',
+                  reply_markup: invitationRsvpKeyboard(invitation.id, l),
+                });
               }
             }
           } catch (err) {
