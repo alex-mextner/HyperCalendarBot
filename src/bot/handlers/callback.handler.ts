@@ -1592,7 +1592,9 @@ export function createCallbackHandler(
       return;
     }
     await ctx.answer();
-    await ctx.sendVenue(venue);
+    await ctx.sendVenue(venue).catch((err: unknown) => {
+      cmdLogger.warn({ err, eventId, userId: user.telegram_id }, 'Failed to send the event place as a venue');
+    });
   });
 
   // Group settings: timezone picker

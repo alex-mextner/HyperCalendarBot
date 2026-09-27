@@ -29,8 +29,9 @@ export function eventVenue(event: EventPlace): EventVenue | null {
   return {
     latitude: event.latitude,
     longitude: event.longitude,
-    title: event.venue_name ?? event.location ?? event.title,
-    address: event.resolved_address ?? `${event.latitude}, ${event.longitude}`,
+    // `||`: Telegram rejects an empty title or address, so a blank text falls through as well
+    title: event.venue_name || event.location || event.title,
+    address: event.resolved_address || `${event.latitude}, ${event.longitude}`,
   };
 }
 
