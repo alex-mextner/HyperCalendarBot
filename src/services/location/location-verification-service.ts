@@ -192,17 +192,17 @@ export class LocationVerificationService {
     await this.updateInvitationMessages(updatedEvent);
   }
 
-  /** Handle user selecting a location from candidates */
-  async handleLocationChoice(
-    eventId: number,
-    userId: number,
-    choiceIndex: number,
-    candidates: GeocodedLocation[],
-  ): Promise<boolean> {
+  /**
+   * The creator tapped candidate `choiceIndex` of picker `pickerId`. The tap answers the event's
+   * open picker (`LocationCandidateStore.take`); a tap on an older, answered or expired picker
+   * returns false and changes nothing, so a place is only applied from the list its button showed.
+   */
+  async handleLocationChoice(eventId: number, userId: number, pickerId: string, choiceIndex: number): Promise<boolean> {
     const event = this.deps.eventRepo.findById(eventId, userId);
     if (!event) return false;
 
-    const chosen = candidates[choiceIndex];
+    const picker = await this.deps.candidateStore.take(eventId, pickerId);
+    const chosen = picker?.candidates[choiceIndex];
     if (!chosen) return false;
 
     const user = this.deps.userRepo.findByTelegramId(userId);
@@ -211,17 +211,7 @@ export class LocationVerificationService {
     await this.applyResolvedLocation(event, chosen);
     await this.cacheAndUpdateCity(user, event.location ?? '', chosen);
 
-    // Clean up stored candidates after successful choice
-    await this.deps.candidateStore.del(eventId).catch((err) => {
-      logger.warn({ err, eventId }, 'Failed to delete location candidates from store');
-    });
-
     return true;
-  }
-
-  /** Retrieve stored candidates for a given event (from Redis) */
-  async getStoredCandidates(eventId: number): Promise<GeocodedLocation[] | null> {
-    return this.deps.candidateStore.get(eventId);
   }
 
   /** Reverse geocode coordinates to extract city. Used by callback handler to avoid ad-hoc service creation. */
@@ -243,6 +233,11 @@ export class LocationVerificationService {
     const user = this.deps.userRepo.findByTelegramId(userId);
     if (!user) return false;
 
+    // The pin answers any open picker for this event; closing it before applying means a keep tap
+    // on it either lands before the pin (and the pin wins) or finds it answered.
+    await this.deps.candidateStore.del(eventId).catch((err) => {
+      logger.warn({ err, eventId }, 'Failed to delete location candidates from store');
+    });
     await this.applyResolvedLocation(event, geo);
     if (event.location) {
       await this.cacheAndUpdateCity(user, event.location, geo);
@@ -254,15 +249,17 @@ export class LocationVerificationService {
    * The creator keeps the typed location ("none of these — keep as typed"): the event stays (or
    * becomes again) unverified with only the typed text, the offered candidates are dropped, and a
    * remembered place for this text is forgotten so it is not offered again. Nothing is cached.
+   *
+   * Like a candidate tap, it answers the event's open picker; a tap on an older, answered or
+   * expired picker returns null and changes nothing, so it never erases a place the creator
+   * confirmed after that picker was sent.
    */
-  async keepTypedLocation(eventId: number, userId: number): Promise<CalendarEvent | null> {
+  async keepTypedLocation(eventId: number, userId: number, pickerId: string): Promise<CalendarEvent | null> {
     const event = this.deps.eventRepo.findById(eventId, userId);
     if (!event) return null;
+    if (!(await this.deps.candidateStore.take(eventId, pickerId))) return null;
 
     await this.clearResolvedLocation(event);
-    await this.deps.candidateStore.del(eventId).catch((err) => {
-      logger.warn({ err, eventId }, 'Failed to delete location candidates from store');
-    });
     if (event.location) {
       await this.deps.addressCache.forgetMapping(userId, event.location).catch((err) => {
         logger.warn({ err, eventId, userId }, 'Failed to forget rejected address mapping');
@@ -356,23 +353,21 @@ export class LocationVerificationService {
     const options = limited.map((c, i) => `${i + 1}. ${placeLinkHtml(c)}`);
     const text = `${msgs.clarifyAddress(escapeHtml(event.title))}\n\n${options.join('\n')}`;
 
-    // Persist candidates in Redis so the callback handler can retrieve them
-    await this.deps.candidateStore.set(event.id, limited).catch((err) => {
+    // The open picker replaces any earlier one for this event; its id in the buttons tells a tap on
+    // this message from a tap on an older one. Eight hex digits are plenty: an id is only ever
+    // compared with the one picker of the same event, and callback_data is capped at 64 bytes.
+    const pickerId = crypto.randomUUID().slice(0, 8);
+    const callbackPrefix = `${CB.LOCATION_CANDIDATE}:${event.id}:${pickerId}`;
+    await this.deps.candidateStore.set(event.id, { id: pickerId, candidates: limited }).catch((err) => {
       logger.error({ err, eventId: event.id }, 'Failed to store location candidates');
     });
 
     // One row per place, labelled with its name; the numbers match the linked list above
     const rows = limited.map((c, i) => [
-      {
-        text: `${i + 1}. ${c.venueName ?? c.formattedAddress}`,
-        callback_data: `${CB.LOCATION_CANDIDATE}:${event.id}:${i}`,
-      },
+      { text: `${i + 1}. ${c.venueName ?? c.formattedAddress}`, callback_data: `${callbackPrefix}:${i}` },
     ]);
 
-    await this.notify(user, text, [
-      ...rows,
-      [{ text: msgs.noneOfThese, callback_data: `${CB.LOCATION_CANDIDATE}:${event.id}:keep` }],
-    ]);
+    await this.notify(user, text, [...rows, [{ text: msgs.noneOfThese, callback_data: `${callbackPrefix}:keep` }]]);
   }
 
   /**

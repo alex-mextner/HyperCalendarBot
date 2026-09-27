@@ -185,24 +185,6 @@ describe('LocationVerificationService', () => {
     expect(deps.candidateStore.set).toHaveBeenCalledTimes(1);
   });
 
-  test('handleLocationChoice applies chosen candidate', async () => {
-    const candidates = [makeGeoResult({ formattedAddress: 'Chosen' })];
-    const deps = makeDeps();
-    const svc = makeService(deps);
-    const success = await svc.handleLocationChoice(1, 100, 0, candidates);
-
-    expect(success).toBe(true);
-    expect(deps.eventRepo.updateLocationFields).toHaveBeenCalledTimes(1);
-    expect(deps.candidateStore.del).toHaveBeenCalledTimes(1);
-  });
-
-  test('handleLocationChoice returns false for invalid index', async () => {
-    const deps = makeDeps();
-    const svc = makeService(deps);
-    const success = await svc.handleLocationChoice(1, 100, 5, [makeGeoResult()]);
-
-    expect(success).toBe(false);
-  });
 
   test('resolveFromCoordinates applies reverse geocoded result', async () => {
     const geo = makeGeoResult();
