@@ -584,7 +584,7 @@ describe('propose-time callbacks', () => {
     expect(notifyDeps.editMessage).toHaveBeenCalled();
     // The restored invitation card gets the canonical RSVP keyboard back
     const [, , , markup] = notifyDeps.editMessage.mock.calls[0] as unknown as [number, number, string, InlineKeyboard];
-    expect(markup.toJSON()).toEqual(invitationRsvpKeyboard(5, 'en').toJSON());
+    expect(markup.toJSON()).toEqual(invitationRsvpKeyboard(5, 'en', null).toJSON());
   });
 });
 

@@ -185,7 +185,7 @@ describe('LocationVerificationService', () => {
     expect(deps.candidateStore.set).toHaveBeenCalledTimes(1);
   });
 
-  test('resolveFromCoordinates applies reverse geocoded result', async () => {
+  test('resolveFromSharedLocation applies the reverse geocoded result of a plain pin', async () => {
     const geo = makeGeoResult();
     const deps = makeDeps({
       geocodingService: {
@@ -195,16 +195,16 @@ describe('LocationVerificationService', () => {
       },
     });
     const svc = makeService(deps);
-    const success = await svc.resolveFromCoordinates(1, 55.7558, 37.6173, 100);
+    const success = await svc.resolveFromSharedLocation(1, { latitude: 55.7558, longitude: 37.6173, venue: null }, 100);
 
     expect(success).toBe(true);
     expect(deps.eventRepo.updateLocationFields).toHaveBeenCalledTimes(1);
   });
 
-  test('resolveFromCoordinates returns false when reverse geocode fails', async () => {
+  test('resolveFromSharedLocation returns false when the reverse geocode of a pin fails', async () => {
     const deps = makeDeps();
     const svc = makeService(deps);
-    const success = await svc.resolveFromCoordinates(1, 0, 0, 100);
+    const success = await svc.resolveFromSharedLocation(1, { latitude: 0, longitude: 0, venue: null }, 100);
 
     expect(success).toBe(false);
   });
@@ -263,14 +263,19 @@ describe('LocationVerificationService', () => {
         },
       });
 
-      await makeService(deps).applyResolvedLocation(makeEvent(), makeGeoResult());
+      const event = makeEvent();
+      const geo = makeGeoResult();
+      await makeService(deps).applyResolvedLocation(event, geo);
 
       expect(deps.editMessage).toHaveBeenCalledTimes(1);
       const [chatId, messageId, , options] = editCall(deps.editMessage, 0);
       expect(chatId).toBe(200);
       expect(messageId).toBe(111);
       expect(options.parse_mode).toBe('HTML');
-      expect(options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(128, 'ru').toJSON());
+      // The place is confirmed now, so the card also offers the Map button
+      expect(options.reply_markup?.toJSON()).toEqual(
+        invitationRsvpKeyboard(128, 'ru', { ...event, latitude: geo.latitude, longitude: geo.longitude }).toJSON(),
+      );
     });
 
     /** Real repositories on an in-memory DB: inviter 100, an event, and delivered invitations. */
@@ -316,14 +321,20 @@ describe('LocationVerificationService', () => {
       deliver(203, 333, 'accepted');
       deliver(204, 444, 'declined');
       deliver(205, 666, 'cancelled');
-
-      await makeService(deps).applyResolvedLocation(event, makeGeoResult());
+      const geo = makeGeoResult();
+      await makeService(deps).applyResolvedLocation(event, geo);
 
       const edits = editsByMessageId(deps.editMessage);
       expect([...edits.keys()].sort()).toEqual([111, 222, 333, 444]);
       const [, , pendingText, pendingOptions] = edits.get(111)!;
       expect(pendingText).toContain(RESOLVED_ADDRESS);
-      expect(pendingOptions.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(pendingId, 'en').toJSON());
+      expect(pendingOptions.reply_markup?.toJSON()).toEqual(
+        invitationRsvpKeyboard(pendingId, 'en', {
+          ...event,
+          latitude: geo.latitude,
+          longitude: geo.longitude,
+        }).toJSON(),
+      );
       for (const [messageId, chatId, label] of [
         [222, 202, t('en').invitation_maybe],
         [333, 203, t('en').invitation_accepted],
@@ -344,14 +355,16 @@ describe('LocationVerificationService', () => {
       deliver(groupChatId, 555, 'pending');
       deliver(-1001, 777, 'cancelled');
       deliver(-1002, 888, 'expired');
-
-      await makeService(deps).applyResolvedLocation(event, makeGeoResult());
+      const geo = makeGeoResult();
+      await makeService(deps).applyResolvedLocation(event, geo);
 
       expect(deps.editMessage).toHaveBeenCalledTimes(1);
       const [chatId, messageId, text, options] = editCall(deps.editMessage, 0);
       expect([chatId, messageId]).toEqual([groupChatId, 555]);
       expect(text).toContain(RESOLVED_ADDRESS);
-      expect(options.reply_markup?.toJSON()).toEqual(groupRsvpKeyboard(event.id, 'en').toJSON());
+      expect(options.reply_markup?.toJSON()).toEqual(
+        groupRsvpKeyboard(event.id, 'en', { ...event, latitude: geo.latitude, longitude: geo.longitude }).toJSON(),
+      );
     });
 
     test('an invitation answered while earlier cards are being edited keeps the answered card', async () => {

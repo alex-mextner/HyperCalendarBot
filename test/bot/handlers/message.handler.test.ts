@@ -15,6 +15,7 @@ import type { HolidayService } from '../../../src/services/holiday/holiday-servi
 import type { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
 import type { PendingGeoStore } from '../../../src/services/location/pending-geo-store.ts';
 import type { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
+import type { SharedLocation } from '../../../src/services/location/pending-geo-store.ts';
 
 function makeDeps(overrides: { [key: string]: unknown } = {}) {
   return {
@@ -748,9 +749,9 @@ describe('createMessageHandler', () => {
       await handler(ctx as never);
 
       expect(setMock).toHaveBeenCalledTimes(1);
-      const call = setMock.mock.calls[0] as unknown as [number, { latitude: number; longitude: number }];
+      const call = setMock.mock.calls[0] as unknown as [number, SharedLocation];
       expect(call[0]).toBe(100);
-      expect(call[1]).toEqual({ latitude: 40.7128, longitude: -74.006 });
+      expect(call[1]).toEqual({ latitude: 40.7128, longitude: -74.006, venue: null });
     });
 
     test('shows event-specific buttons when user has a recent unverified event', async () => {

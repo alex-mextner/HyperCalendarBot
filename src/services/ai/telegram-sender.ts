@@ -75,14 +75,14 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
       inviteeId: number,
       text: string,
       invitationId: number,
-      lang?: string,
-      variant: InvitationKeyboardVariant = { kind: 'personal' },
+      lang: string,
+      variant: InvitationKeyboardVariant,
     ) {
-      const inviteeLang = (lang ?? 'en') as 'en' | 'ru';
+      const inviteeLang = lang === 'ru' ? 'ru' : 'en';
       const kb =
         variant.kind === 'group'
-          ? groupRsvpKeyboard(variant.eventId, inviteeLang)
-          : invitationRsvpKeyboard(invitationId, inviteeLang);
+          ? groupRsvpKeyboard(variant.eventId, inviteeLang, variant.place)
+          : invitationRsvpKeyboard(invitationId, inviteeLang, variant.place);
       try {
         const result = await bot.api.sendMessage({
           chat_id: inviteeId,

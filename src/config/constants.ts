@@ -40,6 +40,7 @@ export const CB = {
   EVENT_VIEW: 'ev',
   EVENT_EDIT: 'ee',
   EVENT_DELETE: 'ed',
+  EVENT_MAP: 'ev_map',
   EVENT_DELETE_CONFIRM: 'edc',
   EVENT_RECURRENCE: 'er',
   EVENT_REMINDER: 'erm',
@@ -214,6 +215,7 @@ export const MSG = {
       `📍 Your current timezone is <b>${currentTz}</b>.\nBased on your location, it looks like you're in <b>${newTz}</b> (${offset}).\n\nUpdating the timezone ensures reminders, agenda, and event times are shown correctly.\n\nUpdate timezone?`,
     geo_tz_confirm_btn: 'Yes, update ✓',
     geo_tz_dismiss_btn: 'No, keep current',
+    event_map_btn: '🗺 Map',
     geo_tz_updated: (tz: string, offset: string) => `✅ Timezone updated to ${tz} (${offset}).`,
     geo_tz_dismissed: 'OK, timezone left unchanged.',
     tz_same_from_location: (tz: string, offset: string) =>
@@ -1212,6 +1214,7 @@ export const MSG = {
       `📍 Твой текущий часовой пояс — <b>${currentTz}</b>.\nПо геолокации похоже, что ты в <b>${newTz}</b> (${offset}).\n\nОбновление часового пояса нужно, чтобы напоминания, сводка дня и время событий отображались правильно.\n\nОбновить часовой пояс?`,
     geo_tz_confirm_btn: 'Да, обновить ✓',
     geo_tz_dismiss_btn: 'Нет, оставить',
+    event_map_btn: '🗺 На карте',
     geo_tz_updated: (tz: string, offset: string) => `✅ Часовой пояс обновлён: ${tz} (${offset}).`,
     geo_tz_dismissed: 'ОК, часовой пояс не изменён.',
     tz_same_from_location: (tz: string, offset: string) =>

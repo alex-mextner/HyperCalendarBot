@@ -84,7 +84,7 @@ When adding a new command, callback, scene, AI tool, or abstract user action —
 feature tracking map so tip filtering and re-engagement work correctly:
 
 - `COMMAND_FEATURE_MAP` — `/command` → `FeatureKey` (21 entries)
-- `CALLBACK_FEATURE_MAP` — callback prefix → `FeatureKey` (17 entries)
+- `CALLBACK_FEATURE_MAP` — callback prefix → `FeatureKey` (20 entries)
 - `SCENE_FEATURE_MAP` — scene name → `FeatureKey` (4 entries)
 - `ACTION_FEATURE_MAP` — abstract action → `FeatureKey` (3 entries: `voice_message`, `ics_file`, `geolocation`)
 - `TOOL_FEATURE_MAP` in `src/services/ai/tool-executor.ts` — AI tool name → `FeatureKey` (43 entries)

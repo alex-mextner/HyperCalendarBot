@@ -123,7 +123,7 @@ describe('INVITE_CONTACT callback', () => {
     expect(ctx.editText).toHaveBeenCalled();
     // The invitee gets the canonical RSVP keyboard, including the propose-time button
     const [, , options] = sendMessage.mock.calls[0] as unknown as [number, string, { reply_markup: InlineKeyboard }];
-    expect(options.reply_markup.toJSON()).toEqual(invitationRsvpKeyboard(42, 'en').toJSON());
+    expect(options.reply_markup.toJSON()).toEqual(invitationRsvpKeyboard(42, 'en', null).toJSON());
   });
 
   test('direct contact — answers Not configured when forceInviteDeps absent', async () => {

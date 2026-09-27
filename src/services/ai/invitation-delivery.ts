@@ -189,9 +189,11 @@ export async function deliverInvitation(
           if (!sender.sendInvitation) throw new Error('sendInvitation not available');
           // A group target carries the per-member RSVP keyboard (grsvp:<eventId>:going|notgoing)
           // so any member can respond for themselves; a personal target keeps the inv: keyboard.
+          // Both offer the Map button when the event's place is confirmed.
+          const place = event ?? null;
           const sent = isGroupTarget
-            ? await sender.sendInvitation(recipientId, msgText, invitationId, lang, { kind: 'group', eventId })
-            : await sender.sendInvitation(recipientId, msgText, invitationId);
+            ? await sender.sendInvitation(recipientId, msgText, invitationId, lang, { kind: 'group', eventId, place })
+            : await sender.sendInvitation(recipientId, msgText, invitationId, lang, { kind: 'personal', place });
           if (!sent) throw new Error('Bot API delivery failed');
           return sent;
         }
