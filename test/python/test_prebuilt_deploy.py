@@ -31,6 +31,9 @@ class DeployTests(unittest.TestCase):
         cls.bin.mkdir()
         cls.backup_script = Path(shared.name) / "backup-db.sh"
         cls.exe(cls.backup_script, "#!/bin/sh\ncp data/calendar.db data/before.db\n")
+        # Read-only, so a deploy that ever wrote this file in place (instead of replacing it)
+        # fails loudly with a permission error rather than corrupting later tests' fixture.
+        cls.backup_script.chmod(0o555)
         cls.exe(cls.bin / "flock", "#!/bin/sh\nexit ${LOCK_FAILURE:-0}\n")
         cls.exe(cls.bin / "caddy", "#!/bin/sh\nexit 0\n")
         cls.exe(cls.bin / "uname", "#!/bin/sh\nprintf 'x86_64\\n'\n")
@@ -96,7 +99,7 @@ print(os.environ.get('HEALTH_BODY','ok'),end='')
         c.execute("INSERT INTO evidence VALUES ('before')")
         c.commit()
         c.close()
-        # The deploy replaces this file via `install` (unlink + create), never writes it in place.
+        # The deploy replaces this file via `install` (unlink + create); the shared inode is read-only.
         os.link(self.backup_script, self.dep / "scripts/backup-db.sh")
         for name in ["backup-db.sh", "healthcheck-alert.sh", "prepare-runtime-dirs.sh"]:
             self.exe(self.src / "scripts" / name, "#!/bin/sh\nexit 0\n")
