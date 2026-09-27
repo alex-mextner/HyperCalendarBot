@@ -19,6 +19,18 @@ TAG = "repo/image:" + SHA
 
 
 class DeployTests(unittest.TestCase):
+    NEW_MIGRATION_ADDED = (
+        "export const migrations = [\n"
+        "  {\n    name: '001_x',\n    up(db){},\n  },\n"
+        "  {\n    name: '002_new_thing',\n    up(db){},\n  },\n"
+        "];\n"
+    )
+    EXISTING_MIGRATION_EDITED = (
+        "export const migrations = [\n"
+        "  {\n    name: '001_x',\n    up(db){ doSomethingElse(); },\n  },\n"
+        "];\n"
+    )
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -91,6 +103,7 @@ class DeployTests(unittest.TestCase):
             r"""#!/usr/bin/env python3
 import os,json,sys,sqlite3
 from pathlib import Path
+DEFAULT_MIGRATION_CONTENT="export const migrations = [\n  {\n    name: '001_x',\n    up(db){},\n  },\n];\n"
 args=sys.argv[1:];root=Path(os.environ['FIXTURE_DEP']);current=root/'current'
 with open(os.environ['FIXTURE_LOG'],'a') as f:f.write(json.dumps(args)+'\n')
 if args and args[0]=='load' and os.environ.get('LOAD_FAILURE')=='1':sys.exit(42)
@@ -99,8 +112,14 @@ if args[:2]==['image','inspect']:
     fmt=args[-1]
     print(os.environ['FIXTURE_ID'] if '.Id' in fmt else os.environ['FIXTURE_SHA'])
 elif args[:2]==['inspect','hypercal-bot']:print(current.read_text())
-elif args and args[0]=='exec':print('same-schema  /app/src/database/migrations.ts')
-elif args and args[0]=='run':print(os.environ.get('NEW_SCHEMA','same-schema')+'  /app/src/database/migrations.ts')
+elif args and args[0]=='exec':
+    if 'cat' in args:print(os.environ.get('OLD_MIGRATION_CONTENT',DEFAULT_MIGRATION_CONTENT),end='')
+    else:print('same-schema  /app/src/database/migrations.ts')
+elif args and args[0]=='run':
+    entrypoint=args[args.index('--entrypoint')+1] if '--entrypoint' in args else ''
+    if entrypoint=='cat':print(os.environ.get('NEW_MIGRATION_CONTENT',DEFAULT_MIGRATION_CONTENT),end='')
+    elif entrypoint=='ls':print(os.environ.get('NEW_MIGRATION_DOCS',''),end='')
+    else:print(os.environ.get('NEW_SCHEMA','same-schema')+'  /app/src/database/migrations.ts')
 elif args and args[0]=='compose' and 'up' in args:
     override=Path(args[args.index('-f',args.index('-f')+1)+1]).read_text() if args.count('-f') >= 2 else 'candidate'
     old='sha256:old' in override
@@ -233,6 +252,85 @@ print(os.environ.get('HEALTH_BODY','ok'),end='')
     def test_schema_change_is_rejected_before_any_restart(self):
         result = self.run_deploy(NEW_SCHEMA="different")
         self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.rows(), ["before"])
+        self.assertNotIn('"compose"', self.log.read_text())
+
+    def test_schema_change_with_no_identifiable_migration_edit_is_rejected(self):
+        # The raw file hash differs (a comment above the array changed) but every migration
+        # entry's own fingerprint is identical to what's already deployed, and no name is new,
+        # renamed or missing. There's nothing to point a reviewed doc at, so this must still
+        # fail closed rather than silently pass because "no migration actually changed."
+        unchanged_migration = "export const migrations = [\n  {\n    name: '001_x',\n    up(db){},\n  },\n];\n"
+        result = self.run_deploy(
+            NEW_SCHEMA="different",
+            NEW_MIGRATION_CONTENT="// updated comment\n" + unchanged_migration,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no new or edited migration entry could be identified", result.stderr)
+        self.assertEqual(self.rows(), ["before"])
+        self.assertNotIn('"compose"', self.log.read_text())
+
+    def test_schema_change_with_documented_new_migration_is_accepted(self):
+        result = self.run_deploy(
+            NEW_SCHEMA="different",
+            NEW_MIGRATION_CONTENT=self.NEW_MIGRATION_ADDED,
+            NEW_MIGRATION_DOCS="002_new_thing.md\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.rows(), ["before", "after-start"])
+
+    def test_schema_change_missing_doc_for_new_migration_names_it_and_rejects(self):
+        result = self.run_deploy(NEW_SCHEMA="different", NEW_MIGRATION_CONTENT=self.NEW_MIGRATION_ADDED)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("002_new_thing", result.stderr)
+        self.assertEqual(self.rows(), ["before"])
+        self.assertNotIn('"compose"', self.log.read_text())
+
+    def test_edit_to_an_already_shipped_migration_is_rejected(self):
+        result = self.run_deploy(NEW_SCHEMA="different", NEW_MIGRATION_CONTENT=self.EXISTING_MIGRATION_EDITED)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("001_x", result.stderr)
+        self.assertEqual(self.rows(), ["before"])
+        self.assertNotIn('"compose"', self.log.read_text())
+
+    def test_documented_new_migration_does_not_vouch_for_a_silent_edit_riding_along(self):
+        content = self.EXISTING_MIGRATION_EDITED.removesuffix("];\n") + (
+            "  {\n    name: '002_new_thing',\n    up(db){},\n  },\n];\n"
+        )
+        result = self.run_deploy(
+            NEW_SCHEMA="different",
+            NEW_MIGRATION_CONTENT=content,
+            NEW_MIGRATION_DOCS="002_new_thing.md\n",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("001_x", result.stderr)
+        self.assertEqual(self.rows(), ["before"])
+        self.assertNotIn('"compose"', self.log.read_text())
+
+    def test_renaming_an_already_shipped_migration_is_rejected_even_with_a_doc(self):
+        # A rename makes the old name vanish and a "new" name appear with the identical body.
+        # Matching by name alone would treat this as a brand-new, documented migration and let
+        # it through -- which would make the app's migration runner re-apply it under the new
+        # name on every already-migrated database. It must be rejected regardless of a doc.
+        renamed = "export const migrations = [\n  {\n    name: '001_x_renamed',\n    up(db){},\n  },\n];\n"
+        result = self.run_deploy(
+            NEW_SCHEMA="different",
+            NEW_MIGRATION_CONTENT=renamed,
+            NEW_MIGRATION_DOCS="001_x_renamed.md\n",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("001_x", result.stderr)
+        self.assertEqual(self.rows(), ["before"])
+        self.assertNotIn('"compose"', self.log.read_text())
+
+    def test_deleting_an_already_shipped_migration_outright_is_rejected(self):
+        result = self.run_deploy(
+            NEW_SCHEMA="different",
+            OLD_MIGRATION_CONTENT=self.NEW_MIGRATION_ADDED,
+            NEW_MIGRATION_CONTENT="export const migrations = [\n  {\n    name: '001_x',\n    up(db){},\n  },\n];\n",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("002_new_thing", result.stderr)
         self.assertEqual(self.rows(), ["before"])
         self.assertNotIn('"compose"', self.log.read_text())
 
