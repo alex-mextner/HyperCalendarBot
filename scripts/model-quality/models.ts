@@ -5,6 +5,9 @@ export interface Candidate {
   keyEnv: string;
   baseURL: string;
   effort?: 'none' | 'low' | 'medium';
+  temperature?: number;
+  streamingOnly?: boolean;
+  maxOutput?: number;
   inputPrice: number;
   outputPrice: number;
   priceKind: 'listed' | 'conservative-envelope';
@@ -111,3 +114,149 @@ export const candidates: Candidate[] = [
     priceKind: 'listed',
   },
 ];
+
+// Explicit expanded profiles verified against official model catalogs 2026-09-27.
+// Prices are uncached list estimates; no new subscriptions or implicit activation.
+candidates.push(
+  {
+    id: 'glm53-flash-low',
+    provider: 'together',
+    model: 'zai-org/GLM-5.3-Flash',
+    keyEnv: 'TOGETHER_KEY',
+    baseURL: 'https://api.together.ai/v1',
+    effort: 'low',
+    temperature: 1,
+    maxOutput: 8192,
+    inputPrice: 0.15,
+    outputPrice: 0.5,
+    priceKind: 'listed',
+  },
+  {
+    id: 'glm53-low',
+    provider: 'together',
+    model: 'zai-org/GLM-5.3',
+    keyEnv: 'TOGETHER_KEY',
+    baseURL: 'https://api.together.ai/v1',
+    effort: 'low',
+    temperature: 1,
+    maxOutput: 8192,
+    inputPrice: 1.4,
+    outputPrice: 4.4,
+    priceKind: 'listed',
+  },
+  {
+    id: 'deepseek41-flash',
+    provider: 'together',
+    model: 'deepseek-ai/DeepSeek-V4.1-Flash',
+    keyEnv: 'TOGETHER_KEY',
+    baseURL: 'https://api.together.ai/v1',
+    maxOutput: 8192,
+    inputPrice: 0.3,
+    outputPrice: 1.2,
+    priceKind: 'listed',
+  },
+  {
+    id: 'deepseek4-pro',
+    provider: 'together',
+    model: 'deepseek-ai/DeepSeek-V4-Pro-0813',
+    keyEnv: 'TOGETHER_KEY',
+    baseURL: 'https://api.together.ai/v1',
+    maxOutput: 8192,
+    inputPrice: 1.32,
+    outputPrice: 3.96,
+    priceKind: 'listed',
+  },
+  {
+    id: 'qwen38-large',
+    provider: 'together',
+    model: 'Qwen/Qwen3.8-2.4T-A95B',
+    keyEnv: 'TOGETHER_KEY',
+    baseURL: 'https://api.together.ai/v1',
+    maxOutput: 8192,
+    inputPrice: 2,
+    outputPrice: 6,
+    priceKind: 'listed',
+  },
+  {
+    id: 'qwen38-flash',
+    provider: 'together',
+    streamingOnly: true,
+    model: 'Qwen/Qwen3.8-Flash',
+    keyEnv: 'TOGETHER_KEY',
+    baseURL: 'https://api.together.ai/v1',
+    maxOutput: 8192,
+    inputPrice: 0.09,
+    outputPrice: 0.282,
+    priceKind: 'listed',
+  },
+  {
+    id: 'minimax3',
+    provider: 'together',
+    model: 'MiniMaxAI/MiniMax-M3',
+    keyEnv: 'TOGETHER_KEY',
+    baseURL: 'https://api.together.ai/v1',
+    maxOutput: 8192,
+    inputPrice: 0.3,
+    outputPrice: 1.2,
+    priceKind: 'listed',
+  },
+  {
+    id: 'kimi3',
+    provider: 'together',
+    model: 'moonshotai/Kimi-K3',
+    keyEnv: 'TOGETHER_KEY',
+    baseURL: 'https://api.together.ai/v1',
+    maxOutput: 8192,
+    inputPrice: 3,
+    outputPrice: 15,
+    priceKind: 'listed',
+  },
+  {
+    id: 'gemini38-low',
+    provider: 'gemini',
+    model: 'gemini-3.8-flash',
+    keyEnv: 'GEMINI_API_KEY',
+    baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    effort: 'low',
+    temperature: 1,
+    maxOutput: 8192,
+    inputPrice: 0.75,
+    outputPrice: 3.75,
+    priceKind: 'listed',
+    spacingMs: 500,
+  },
+  {
+    id: 'gemini31-pro-low',
+    provider: 'gemini',
+    model: 'gemini-3.1-pro-preview',
+    keyEnv: 'GEMINI_API_KEY',
+    baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    effort: 'low',
+    temperature: 1,
+    maxOutput: 8192,
+    inputPrice: 2,
+    outputPrice: 12,
+    priceKind: 'listed',
+    spacingMs: 500,
+  },
+  {
+    id: 'gemini35-lite-low',
+    provider: 'gemini',
+    model: 'gemini-3.5-flash-lite',
+    keyEnv: 'GEMINI_API_KEY',
+    baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    effort: 'low',
+    temperature: 1,
+    maxOutput: 4096,
+    inputPrice: 0.3,
+    outputPrice: 2.5,
+    priceKind: 'listed',
+    spacingMs: 500,
+  },
+);
+// Paired controls: only request pacing differs from the older profiles.
+for (const effort of ['none', 'low'] as const) {
+  const source = candidates.find((c) => c.id === 'gemini25-none');
+  if (!source) throw new Error('Missing Gemini control profile');
+  candidates.push({ ...source, id: `gemini25-paired-${effort}`, effort, spacingMs: 500 });
+}
