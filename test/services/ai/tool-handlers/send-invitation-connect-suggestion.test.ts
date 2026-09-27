@@ -202,4 +202,31 @@ describe('send_invitation /connect_telegram suggestion', () => {
     expect(result.effect).toEqual({ kind: 'invitation', delivery: 'failed' });
     expect(result.output?.split('\n').at(-1)).toBe(SUGGESTION);
   });
+
+  test('a Bot API error for an invitee who uses the bot still counts as not reached', async () => {
+    userRepo.create({ telegram_id: INVITEE_ID, timezone: 'UTC' });
+    const flaky: TelegramSender = {
+      ...unreachableByBot,
+      sendInvitation: async () => {
+        throw new Error('ETIMEDOUT');
+      },
+    };
+    const result = await handleSendInvitation(makeCtx({ sender: flaky }), {
+      event_id: eventId,
+      invitee_id: INVITEE_ID,
+    });
+    expect(result.output?.split('\n').at(-1)).toBe(SUGGESTION);
+  });
+
+  test.each([
+    ['no sender at all', undefined],
+    [
+      'a sender that cannot send invitations',
+      { sendMessage: reachableByBot.sendMessage, editMessageText: async () => {} },
+    ],
+  ])('no suggestion when nothing was attempted: %s', async (_name, sender) => {
+    const result = await handleSendInvitation(makeCtx({ sender }), { event_id: eventId, invitee_id: INVITEE_ID });
+    expect(result.success).toBe(true);
+    expect(mentionsSuggestion(result)).toBe(false);
+  });
 });

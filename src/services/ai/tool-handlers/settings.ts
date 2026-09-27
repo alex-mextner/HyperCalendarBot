@@ -293,12 +293,14 @@ function dismissedConnectPromptRecently(ctx: AgentContext): boolean {
  */
 export function takeConnectTelegramSuggestion(
   ctx: AgentContext,
-  invitation: { attempted: boolean; viaBotApi: boolean; isGroupTarget: boolean },
+  delivery: { viaBotApi: boolean },
+  isGroupTarget: boolean,
 ): string | null {
   const eligible =
-    invitation.attempted &&
-    !invitation.viaBotApi &&
-    !invitation.isGroupTarget &&
+    // Without a Bot API send capability nothing was attempted, so "not reached" means nothing.
+    ctx.sender?.sendInvitation !== undefined &&
+    !delivery.viaBotApi &&
+    !isGroupTarget &&
     !ctx.isGroup &&
     !ctx.connectTelegramSuggested &&
     ctx.telegramMasterKey !== undefined &&

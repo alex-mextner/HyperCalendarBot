@@ -245,11 +245,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
 
   // Decided here, not by the model: a prompt step asking it to check connect_telegram_status first
   // made weak models call that tool on plain event creation (#511).
-  const connectSuggestion = takeConnectTelegramSuggestion(ctx, {
-    attempted: ctx.sender !== undefined,
-    viaBotApi: delivery.viaBotApi,
-    isGroupTarget,
-  });
+  const connectSuggestion = takeConnectTelegramSuggestion(ctx, delivery, isGroupTarget);
   const deliveryHint = delivery.delivered
     ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
     : delivery.viaDeepLink
