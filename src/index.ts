@@ -1383,6 +1383,7 @@ async function shutdown(): Promise<void> {
 async function shutdownWithTimeout(): Promise<void> {
   // Refuse webhook updates from here on: Telegram keeps a refused update and
   // redelivers it to the next process instead of it dying in the stopped queue.
+  // Updates acknowledged just before this line still depend on the shutdown grace.
   webServerDeps.telegramUpdatesClosed = true;
   await Promise.race([
     shutdown(),

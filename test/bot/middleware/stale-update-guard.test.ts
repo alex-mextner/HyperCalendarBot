@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { createStaleUpdateGuard, type StaleUpdateContext } from '../../../src/bot/middleware/stale-update-guard.ts';
+import {
+  createStaleUpdateGuard,
+  STALE_UPDATE_MAX_AGE_MS,
+  type StaleUpdateContext,
+} from '../../../src/bot/middleware/stale-update-guard.ts';
 import { t } from '../../../src/config/constants.ts';
 
 const NOW_MS = Date.parse('2026-09-27T17:14:00Z');
-const MAX_AGE_MS = 10 * 60_000;
 
-function messageUpdate(chatId: number, sentAt: string, type = 'private') {
+function messageUpdate(chatId: number, sentAt: string, type = 'private'): StaleUpdateContext {
   return {
     update: { message: { date: Date.parse(sentAt) / 1000, chat: { id: chatId, type } } },
     dbUser: { language: 'ru' },
@@ -15,7 +18,7 @@ function messageUpdate(chatId: number, sentAt: string, type = 'private') {
 function makeGuard() {
   const notes: { chatId: number; text: string }[] = [];
   const guard = createStaleUpdateGuard({
-    maxAgeMs: MAX_AGE_MS,
+    maxAgeMs: STALE_UPDATE_MAX_AGE_MS,
     now: () => NOW_MS,
     sendNote: async (chatId, text) => {
       notes.push({ chatId, text });
@@ -48,6 +51,33 @@ describe('stale update guard', () => {
     expect(await passes(guard, messageUpdate(501, '2026-09-27T14:00:00Z'))).toBe(false);
     expect(await passes(guard, messageUpdate(501, '2026-09-27T14:05:00Z'))).toBe(false);
     expect(notes).toEqual([{ chatId: 501, text: t('ru').stale_update_skipped }]);
+  });
+
+  test('the window edge is inclusive: exactly at the limit is answered, a second later is not', async () => {
+    const { guard } = makeGuard();
+    const atLimit = new Date(NOW_MS - STALE_UPDATE_MAX_AGE_MS).toISOString();
+    const pastLimit = new Date(NOW_MS - STALE_UPDATE_MAX_AGE_MS - 1_000).toISOString();
+    expect(await passes(guard, messageUpdate(501, atLimit))).toBe(true);
+    expect(await passes(guard, messageUpdate(502, pastLimit))).toBe(false);
+  });
+
+  test('a stale edit is not replayed either', async () => {
+    const { guard, notes } = makeGuard();
+    const stale = messageUpdate(501, '2026-09-27T14:00:00Z');
+    const edit: StaleUpdateContext = { update: { edited_message: stale.update?.message }, dbUser: stale.dbUser };
+    expect(await passes(guard, edit)).toBe(false);
+    expect(notes).toHaveLength(1);
+  });
+
+  test('a note that cannot be delivered (bot blocked) still skips quietly', async () => {
+    const guard = createStaleUpdateGuard({
+      maxAgeMs: STALE_UPDATE_MAX_AGE_MS,
+      now: () => NOW_MS,
+      sendNote: async () => {
+        throw new Error('Forbidden: bot was blocked by the user');
+      },
+    });
+    expect(await passes(guard, messageUpdate(501, '2026-09-27T14:00:00Z'))).toBe(false);
   });
 
   test('a stale group message is skipped without a note', async () => {
