@@ -2,13 +2,16 @@
 
 import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { t } from '../../config/constants.ts';
+import type { AgendaRepository } from '../../database/repositories/agenda.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { CalendarEvent, User } from '../../database/types.ts';
 import { botLogger } from '../../utils/logger.ts';
 import { formatInvitation } from '../event/formatters.ts';
-import { invitationRsvpKeyboard } from '../sharing/invitation-rsvp-keyboard.ts';
+import { formatAnsweredInvitationCard } from '../sharing/answered-invitation-card.ts';
+import { groupRsvpKeyboard, invitationRsvpKeyboard } from '../sharing/invitation-rsvp-keyboard.ts';
+import type { WeatherService } from '../weather/weather-service.ts';
 import type { AddressCache } from './address-cache.ts';
 import type { GeocodedLocation, GeocodingService } from './geocoding-service.ts';
 import type { LocationCandidateStore } from './location-candidate-store.ts';
@@ -24,6 +27,10 @@ export interface LocationVerificationDeps {
   eventRepo: EventRepository;
   userRepo: UserRepository;
   invitationRepo: InvitationRepository;
+  /** Invitee's view of the event roster on an answered invitation card */
+  agendaRepository: AgendaRepository;
+  /** Forecast line on an accepted invitation card; absent when weather is not configured */
+  weatherService?: WeatherService;
   /** Temporary store for location candidates (Redis-backed with TTL) */
   candidateStore: LocationCandidateStore;
   /** Callback to send a message to a user (for confirmation/clarification) */
@@ -37,7 +44,7 @@ export interface LocationVerificationDeps {
     chatId: number,
     messageId: number,
     text: string,
-    options: { parse_mode: ParseMode; reply_markup: InlineKeyboard },
+    options: { parse_mode: ParseMode; reply_markup?: InlineKeyboard },
   ) => Promise<void>;
 }
 
@@ -272,39 +279,75 @@ export class LocationVerificationService {
   }
 
   /**
-   * Re-render delivered invitation cards the invitee has not answered yet, keeping their RSVP keyboard
-   * (a Telegram text edit without reply_markup deletes the buttons). Answered invitations are left alone:
-   * the RSVP callback already replaced that card with the invitee's status and event details, and
-   * EventChangeNotifier tells accepted/maybe participants about the location change.
+   * Re-render every delivered invitation card with the resolved location, in the form its recipient
+   * last saw. A Telegram text edit without reply_markup deletes the inline keyboard, so actionable cards
+   * send theirs again: a group card keeps Going/Not going for every member (a group invitation stays
+   * pending; members answer through event_participants), a pending personal card keeps its RSVP keyboard,
+   * and an answered card keeps the answer line and event detail the RSVP callback left, without buttons.
    */
   private async updateInvitationMessages(event: CalendarEvent): Promise<void> {
     if (!this.deps.editMessage) return;
 
-    const unanswered = this.deps.invitationRepo.getPendingForEvent(event.id).filter((inv) => inv.status === 'pending');
+    const delivered = [
+      ...this.deps.invitationRepo.getPendingForEvent(event.id),
+      ...this.deps.invitationRepo.getAcceptedForEvent(event.id),
+    ];
 
-    for (const inv of unanswered) {
+    for (const inv of delivered) {
       if (!inv.message_id || !inv.chat_id) continue;
 
       try {
         const inviter = this.deps.userRepo.findByTelegramId(inv.inviter_id);
+        const inviterName = inviter?.first_name ?? inviter?.username ?? 'User';
+
+        if (inv.invitee_id < 0) {
+          const groupLang = inviter?.language ?? 'en';
+          const text = formatInvitation(
+            event,
+            event.timezone,
+            groupLang,
+            inviterName,
+            inv.inviter_id,
+            inviter?.username,
+            null,
+            false,
+          );
+          await this.deps.editMessage(inv.chat_id, inv.message_id, text, {
+            parse_mode: 'HTML',
+            reply_markup: groupRsvpKeyboard(event.id, groupLang),
+          });
+          continue;
+        }
+
         const invitee = this.deps.userRepo.findByTelegramId(inv.invitee_id);
         const inviteeLang = invitee?.language ?? 'en';
 
-        const text = formatInvitation(
-          event,
-          event.timezone,
-          inviteeLang,
-          inviter?.first_name ?? inviter?.username ?? 'User',
-          inv.inviter_id,
-          inviter?.username,
-          invitee?.timezone,
-          invitee?.onboarding_completed === 1,
-        );
+        if (inv.status === 'pending') {
+          const text = formatInvitation(
+            event,
+            event.timezone,
+            inviteeLang,
+            inviterName,
+            inv.inviter_id,
+            inviter?.username,
+            invitee?.timezone,
+            invitee?.onboarding_completed === 1,
+          );
+          await this.deps.editMessage(inv.chat_id, inv.message_id, text, {
+            parse_mode: 'HTML',
+            reply_markup: invitationRsvpKeyboard(inv.id, inviteeLang),
+          });
+          continue;
+        }
 
-        await this.deps.editMessage(inv.chat_id, inv.message_id, text, {
-          parse_mode: 'HTML',
-          reply_markup: invitationRsvpKeyboard(inv.id, inviteeLang),
-        });
+        if (inv.status !== 'accepted' && inv.status !== 'maybe') continue;
+        const text = await formatAnsweredInvitationCard(
+          inv.status,
+          event,
+          { userId: inv.invitee_id, language: inviteeLang, timezone: invitee?.timezone ?? event.timezone },
+          { agendaRepository: this.deps.agendaRepository, weatherService: this.deps.weatherService },
+        );
+        await this.deps.editMessage(inv.chat_id, inv.message_id, text, { parse_mode: 'HTML' });
       } catch (err) {
         logger.warn(
           { err, invitationId: inv.id, eventId: event.id },

@@ -12,6 +12,7 @@ import type { Lang } from './config/constants.ts';
 import { t } from './config/constants.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
+import { AgendaRepository } from './database/repositories/agenda.repository.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { HistorySummarizer } from './services/ai/history-summarizer.ts';
 import { configureProviderCircuit } from './services/ai/provider-circuit.ts';
@@ -1002,6 +1003,8 @@ if (config.GOOGLE_API_KEY && config.REDIS_URL) {
     eventRepo: db.events,
     userRepo: db.users,
     invitationRepo: db.invitations,
+    agendaRepository: new AgendaRepository(db.db),
+    weatherService,
     candidateStore,
     sendMessage: async (userId, text, options) => {
       await botRef.sendMessage(userId, text, options?.parse_mode, options?.reply_markup).catch((err: unknown) => {
