@@ -283,17 +283,13 @@ export class LocationVerificationService {
    * last saw. A Telegram text edit without reply_markup deletes the inline keyboard, so actionable cards
    * send theirs again: a group card keeps Going/Not going for every member (a group invitation stays
    * pending; members answer through event_participants), a pending personal card keeps its RSVP keyboard,
-   * and an answered card keeps the answer line and event detail the RSVP callback left, without buttons.
+   * and an answered card (accepted, maybe, declined) keeps the answer line and event detail the RSVP
+   * callback left, without buttons. Cancelled and expired cards are left as they are.
    */
   private async updateInvitationMessages(event: CalendarEvent): Promise<void> {
     if (!this.deps.editMessage) return;
 
-    const delivered = [
-      ...this.deps.invitationRepo.getPendingForEvent(event.id),
-      ...this.deps.invitationRepo.getAcceptedForEvent(event.id),
-    ];
-
-    for (const inv of delivered) {
+    for (const inv of this.deps.invitationRepo.getByEvent(event.id)) {
       if (!inv.message_id || !inv.chat_id) continue;
 
       try {
@@ -340,7 +336,7 @@ export class LocationVerificationService {
           continue;
         }
 
-        if (inv.status !== 'accepted' && inv.status !== 'maybe') continue;
+        if (inv.status !== 'accepted' && inv.status !== 'maybe' && inv.status !== 'declined') continue;
         const text = await formatAnsweredInvitationCard(
           inv.status,
           event,

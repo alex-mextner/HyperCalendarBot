@@ -9,7 +9,7 @@ import { EventRepository } from '../../../src/database/repositories/event.reposi
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
-import type { CalendarEvent, User } from '../../../src/database/types.ts';
+import type { CalendarEvent, InvitationStatus, User } from '../../../src/database/types.ts';
 import type { GeocodedLocation } from '../../../src/services/location/geocoding-service.ts';
 import {
   type LocationVerificationDeps,
@@ -116,8 +116,7 @@ function makeDeps(overrides: { [key: string]: unknown } = {}) {
       update: mock(() => makeUser()),
     },
     invitationRepo: {
-      getPendingForEvent: mock(() => []),
-      getAcceptedForEvent: mock(() => []),
+      getByEvent: mock(() => []),
     },
     db: {},
     candidateStore: {
@@ -346,8 +345,7 @@ describe('LocationVerificationService', () => {
       const ruInvitee = makeUser({ telegram_id: 200, language: 'ru' });
       const deps = makeDeps({
         invitationRepo: {
-          getPendingForEvent: mock(() => [pendingInv]),
-          getAcceptedForEvent: mock(() => []),
+          getByEvent: mock(() => [pendingInv]),
         },
         userRepo: {
           findByTelegramId: mock((id: number) => (id === 200 ? ruInvitee : makeUser())),
@@ -372,7 +370,7 @@ describe('LocationVerificationService', () => {
       const userRepo = new UserRepository(db);
       const eventRepo = new EventRepository(db);
       const invitationRepo = new InvitationRepository(db);
-      for (const telegramId of [100, 201, 202, 203, 204]) userRepo.create({ telegram_id: telegramId });
+      for (const telegramId of [100, 201, 202, 203, 204, 205]) userRepo.create({ telegram_id: telegramId });
       const event = eventRepo.create({
         user_id: 100,
         title: 'Meeting',
@@ -380,7 +378,7 @@ describe('LocationVerificationService', () => {
         timezone: 'Europe/Belgrade',
         location: 'Cafe',
       });
-      const deliver = (inviteeId: number, messageId: number, status: 'pending' | 'maybe' | 'accepted' | 'declined') => {
+      const deliver = (inviteeId: number, messageId: number, status: InvitationStatus) => {
         const inv = invitationRepo.create({ event_id: event.id, inviter_id: 100, invitee_id: inviteeId });
         invitationRepo.setMessageInfo(inv.id, messageId, inviteeId);
         if (status !== 'pending') invitationRepo.updateStatus(inv.id, status, 'pending');
@@ -402,20 +400,22 @@ describe('LocationVerificationService', () => {
       deliver(202, 222, 'maybe');
       deliver(203, 333, 'accepted');
       deliver(204, 444, 'declined');
+      deliver(205, 666, 'cancelled');
 
       await makeService(deps).applyResolvedLocation(event, makeGeoResult());
 
       const edits = editsByMessageId(deps.editMessage);
-      expect([...edits.keys()].sort()).toEqual([111, 222, 333]);
+      expect([...edits.keys()].sort()).toEqual([111, 222, 333, 444]);
       const [, , pendingText, pendingOptions] = edits.get(111)!;
       expect(pendingText).toContain(RESOLVED_ADDRESS);
       expect(pendingOptions.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(pendingId, 'en').toJSON());
-      for (const [messageId, label] of [
-        [222, t('en').invitation_maybe],
-        [333, t('en').invitation_accepted],
+      for (const [messageId, chatId, label] of [
+        [222, 202, t('en').invitation_maybe],
+        [333, 203, t('en').invitation_accepted],
+        [444, 204, t('en').invitation_declined],
       ] as const) {
-        const [chatId, , text, options] = edits.get(messageId)!;
-        expect(chatId).toBe(messageId === 222 ? 202 : 203);
+        const [editedChatId, , text, options] = edits.get(messageId)!;
+        expect(editedChatId).toBe(chatId);
         expect(text.startsWith(`${label}\n\n📌 <b>Meeting</b>`)).toBe(true);
         expect(text).toContain(RESOLVED_ADDRESS);
         expect(options).toEqual({ parse_mode: 'HTML' });
@@ -442,8 +442,7 @@ describe('LocationVerificationService', () => {
       const delivered = makeInvitation({ id: 2, message_id: 999, chat_id: 200 });
       const deps = makeDeps({
         invitationRepo: {
-          getPendingForEvent: mock(() => [undelivered, delivered]),
-          getAcceptedForEvent: mock(() => []),
+          getByEvent: mock(() => [undelivered, delivered]),
         },
       });
       const svc = new LocationVerificationService(deps as never);
@@ -459,16 +458,15 @@ describe('LocationVerificationService', () => {
       const deps = makeDeps({
         editMessage: undefined,
         invitationRepo: {
-          getPendingForEvent: mock(() => [pendingInv]),
-          getAcceptedForEvent: mock(() => []),
+          getByEvent: mock(() => [pendingInv]),
         },
       });
       const svc = new LocationVerificationService(deps as never);
 
       await svc.applyResolvedLocation(makeEvent(), makeGeoResult());
 
-      // No editMessage to call — getPendingForEvent should not even be queried
-      expect(deps.invitationRepo.getPendingForEvent).not.toHaveBeenCalled();
+      // No editMessage to call — the invitations should not even be queried
+      expect(deps.invitationRepo.getByEvent).not.toHaveBeenCalled();
     });
 
     test('continues processing other invitations when one edit fails', async () => {
@@ -481,8 +479,7 @@ describe('LocationVerificationService', () => {
       const deps = makeDeps({
         editMessage,
         invitationRepo: {
-          getPendingForEvent: mock(() => [inv1, inv2]),
-          getAcceptedForEvent: mock(() => []),
+          getByEvent: mock(() => [inv1, inv2]),
         },
       });
       const svc = new LocationVerificationService(deps as never);
@@ -499,8 +496,7 @@ describe('LocationVerificationService', () => {
       const inviter = makeUser({ telegram_id: 100, first_name: 'Alice' });
       const deps = makeDeps({
         invitationRepo: {
-          getPendingForEvent: mock(() => [inv]),
-          getAcceptedForEvent: mock(() => []),
+          getByEvent: mock(() => [inv]),
         },
         userRepo: {
           findByTelegramId: mock((id: number) => (id === 200 ? ruInvitee : inviter)),
@@ -522,8 +518,7 @@ describe('LocationVerificationService', () => {
       const inv = makeInvitation({ id: 1, message_id: 111, chat_id: 200 });
       const deps = makeDeps({
         invitationRepo: {
-          getPendingForEvent: mock(() => [inv]),
-          getAcceptedForEvent: mock(() => []),
+          getByEvent: mock(() => [inv]),
         },
       });
       const svc = new LocationVerificationService(deps as never);

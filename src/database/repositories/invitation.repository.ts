@@ -115,12 +115,6 @@ export class InvitationRepository {
     return result.changes;
   }
 
-  getAcceptedForEvent(eventId: number): Invitation[] {
-    return this.db
-      .prepare("SELECT * FROM invitations WHERE event_id = ? AND status = 'accepted'")
-      .all(eventId) as Invitation[];
-  }
-
   getByEvent(eventId: number): Invitation[] {
     return this.db.prepare('SELECT * FROM invitations WHERE event_id = ? ORDER BY id').all(eventId) as Invitation[];
   }
