@@ -46,11 +46,73 @@ docker load -i "$REMOTE_SRC/image.tar.gz"
 CURRENT_IMAGE_ID="$(docker inspect hypercal-bot --format '{{.Image}}' 2>/dev/null)" || { echo 'Existing HyperCalendar container is required; use a reviewed first-install procedure' >&2; exit 1; }
 ROLLBACK_TAG="$IMAGE:rollback-$STAMP"
 docker tag "$CURRENT_IMAGE_ID" "$ROLLBACK_TAG"
-# Generic image rollback is allowed only when migration code is unchanged.
-# A schema-changing release requires its own reviewed migration/rollback procedure.
-old_schema="$(docker exec hypercal-bot sha256sum /app/src/database/migrations.ts | cut -d ' ' -f1)"
-new_schema="$(docker run --rm --network none --entrypoint sha256sum "$IMAGE:$SHA" /app/src/database/migrations.ts | cut -d ' ' -f1)"
-[[ -n "$old_schema" && "$old_schema" == "$new_schema" ]] || { echo 'Schema-changing release requires reviewed migration procedure' >&2; exit 1; }
+# Generic image rollback is allowed only when migration code is unchanged. A schema-changing
+# release requires a docs/reference/migrations/<name>.md for every newly added migration entry,
+# shipped inside the image: that doc is the reviewed procedure. Renaming or removing a migration
+# that already shipped, editing one in place, or a hash diff with no identifiable new migration
+# at all, has no such doc to point at, so all three fail closed like before -- one documented new
+# migration never vouches for a renamed, removed or silently edited one riding along with it.
+run_in_new_image() {
+  docker run --rm --network none --entrypoint "$1" "$IMAGE:$SHA" "${@:2}"
+}
+
+migration_fingerprints() {
+  python3 "$(dirname "${BASH_SOURCE[0]}")/migration-fingerprints.py"
+}
+
+# Exact-string lookup by name, never a regex: a migration name can contain characters that
+# would otherwise be interpreted as a pattern (e.g. "001.x" matching "0010x").
+fingerprint_lookup() {
+  awk -F'\t' -v n="$2" '$1==n{print $2}' <<< "$1"
+}
+
+check_no_migration_disappeared() {
+  local old_fingerprints="$1" new_fingerprints="$2" name _
+  while IFS=$'\t' read -r name _; do
+    [[ -n "$name" ]] || continue
+    [[ -n "$(fingerprint_lookup "$new_fingerprints" "$name")" ]] && continue
+    echo "Migration $name is missing from the new release; migrations must never be renamed or removed once shipped" >&2
+    return 1
+  done <<< "$old_fingerprints"
+}
+
+check_migrations_unchanged_or_documented() {
+  local old_fingerprints="$1" new_fingerprints="$2" new_docs="$3" name new_digest old_digest found_new=0
+  while IFS=$'\t' read -r name new_digest; do
+    [[ -n "$name" ]] || continue
+    old_digest="$(fingerprint_lookup "$old_fingerprints" "$name")"
+    if [[ -z "$old_digest" ]]; then
+      found_new=1
+      grep -qxF "$name.md" <<< "$new_docs" && continue
+      echo "Missing reviewed migration doc for $name: docs/reference/migrations/$name.md" >&2
+      return 1
+    elif [[ "$old_digest" != "$new_digest" ]]; then
+      echo "Migration $name changed after it already shipped; edits to an applied migration have no reviewed auto-deploy path" >&2
+      return 1
+    fi
+  done <<< "$new_fingerprints"
+  if [[ "$found_new" != 1 ]]; then
+    echo "migrations.ts changed but no new or edited migration entry could be identified" >&2
+    return 1
+  fi
+}
+
+check_new_migrations_documented() {
+  local old_fingerprints new_fingerprints new_docs
+  old_fingerprints="$(docker exec hypercal-bot cat /app/src/database/migrations.ts | migration_fingerprints)"
+  new_fingerprints="$(run_in_new_image cat /app/src/database/migrations.ts | migration_fingerprints)"
+  new_docs="$(run_in_new_image ls /app/docs/reference/migrations 2>/dev/null || true)"
+  [[ -n "$old_fingerprints" && -n "$new_fingerprints" ]] || return 1
+  check_no_migration_disappeared "$old_fingerprints" "$new_fingerprints" || return 1
+  check_migrations_unchanged_or_documented "$old_fingerprints" "$new_fingerprints" "$new_docs"
+}
+
+old_migrations_hash="$(docker exec hypercal-bot sha256sum /app/src/database/migrations.ts | cut -d ' ' -f1)"
+new_migrations_hash="$(run_in_new_image sha256sum /app/src/database/migrations.ts | cut -d ' ' -f1)"
+[[ -n "$old_migrations_hash" ]] || { echo 'Schema-changing release requires reviewed migration procedure' >&2; exit 1; }
+if [[ "$old_migrations_hash" != "$new_migrations_hash" ]]; then
+  check_new_migrations_documented || { echo 'Schema-changing release requires reviewed migration procedure' >&2; exit 1; }
+fi
 CONFIG_BACKUP="$DEPLOY_PATH/releases/config-$SHA-$STAMP"
 mkdir -p "$CONFIG_BACKUP/scripts"
 cp "$DEPLOY_PATH/docker-compose.yml" "$DEPLOY_PATH/Caddyfile" "$CONFIG_BACKUP/"
