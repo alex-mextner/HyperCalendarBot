@@ -20,7 +20,7 @@ export function formatLocationHtml(event: LocationFields): string {
 
   const displayText = escapeHtml(place);
   const verifiedUrl = event.location_verified === 1 ? event.google_maps_url : null;
-  const url = verifiedUrl ?? buildGoogleMapsSearchUrl(event.location ?? place);
+  const url = verifiedUrl ?? buildGoogleMapsSearchUrl(event.location?.trim() || place);
   // Encoded Unicode queries can exceed the HTML transport's indivisible tag budget.
   if (escapeHtml(url).length > 2000) return displayText;
 

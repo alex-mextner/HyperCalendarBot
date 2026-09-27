@@ -142,6 +142,19 @@ describe('formatLocationHtml', () => {
     });
     expect(result).toBe('');
   });
+
+  test('a verified place without a map link and without typed text links a search for the place', () => {
+    const result = formatLocationHtml({
+      location: '',
+      google_maps_url: null,
+      resolved_address: 'Damrak 1, Amsterdam',
+      venue_name: null,
+      location_verified: 1,
+    });
+    expect(result).toBe(
+      '<a href="https://www.google.com/maps/search/?api=1&amp;query=Damrak%201%2C%20Amsterdam">Damrak 1, Amsterdam</a>',
+    );
+  });
 });
 
 describe('formatLocationPlain', () => {
