@@ -10,6 +10,7 @@ import type {
 } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
+import { effectiveRsvpStatus } from '../../sharing/invitation-roster.ts';
 import { deliverInvitation, type InvitationDeliveryResult } from '../invitation-delivery.ts';
 import { issueRecipientApproval } from '../recipient-confirmation.ts';
 import { resolveInvitationRecipient } from '../recipient-identity.ts';
@@ -472,13 +473,7 @@ function buildPersonalRsvpLines(
     const participantStatus = participantByUser.get(userId);
     const inviteIsLive = inv.status === 'pending' || inv.status === 'accepted' || inv.status === 'maybe';
     if (participantStatus === undefined && !inviteIsLive) continue;
-    // A pending re-invite overrides stale negative/neutral participant rows (declined,
-    // pending) but must NOT mask a confirmed RSVP (accepted/maybe) from another
-    // channel such as a group invite — that positive signal is always authoritative.
-    const status =
-      inv.status === 'pending' && participantStatus !== 'accepted' && participantStatus !== 'maybe'
-        ? inv.status
-        : (participantStatus ?? inv.status);
+    const status = effectiveRsvpStatus(inv.status, participantStatus);
     const note =
       participantStatus !== undefined && participantStatus !== inv.status && inv.status !== 'pending'
         ? t(lang).aiTools.sharing.rsvpPersonalInviteNote(t(lang).aiTools.sharing.rsvpStatuses[inv.status])

@@ -21,6 +21,7 @@ import { configureProviderCircuit } from './services/ai/provider-circuit.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
 import { runSyntheticIntent } from './services/intent/synthetic-intent-run.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
+import { InvitationCardRefresher } from './services/sharing/invitation-cards.ts';
 import { createVoiceSender } from './services/voice/voice-sender.ts';
 import { hasChainAnswered, initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
 import { jsonCodec } from './utils/json-codec.ts';
@@ -980,6 +981,23 @@ if (participantPushSchedulerRef) {
     );
   });
 }
+
+// Delivered invitation cards list who is invited and each answer; re-render them when that changes.
+// The edit resolves botRef at call time (patched after createBot).
+const invitationCards = new InvitationCardRefresher({
+  eventRepo: db.events,
+  invitationRepo: db.invitations,
+  userRepo: db.users,
+  agendaRepository: new AgendaRepository(db.db),
+  weatherService,
+  editMessage: (chatId, messageId, text, options) =>
+    botRef.editMessage(chatId, messageId, text, options.parse_mode, options.reply_markup),
+});
+domainEventBus.on('invitationRoster.changed', (change) => {
+  invitationCards.refresh(change).catch((err: unknown) => {
+    botLogger.error({ err, eventId: change.eventId }, 'Failed to refresh delivered invitation cards');
+  });
+});
 
 // Location verification — requires GOOGLE_API_KEY + Redis for address cache
 let locationVerification:

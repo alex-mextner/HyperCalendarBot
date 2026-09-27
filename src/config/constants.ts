@@ -427,6 +427,20 @@ export const MSG = {
       `📨 ${name} declined your invitation to "<b>${title}</b>" ❌`,
     invitation_response_maybe: (name: string, title: string) =>
       `📨 ${name} responded "maybe" to your invitation to "<b>${title}</b>" 🤔`,
+    // SAFETY: every name argument must already be HTML-escaped.
+    invitationRoster: {
+      header: '👥 Participants:',
+      organizer: (nameHtml: string) => `👑 ${nameHtml} — organizer`,
+      answer: {
+        accepted: (nameHtml: string) => `✅ ${nameHtml} — going`,
+        maybe: (nameHtml: string) => `❔ ${nameHtml} — maybe`,
+        pending: (nameHtml: string) => `⏳ ${nameHtml} — no answer yet`,
+        declined: (nameHtml: string) => `❌ ${nameHtml} — not going`,
+      },
+      reader: (nameHtml: string) => `${nameHtml} (you)`,
+      unnamed: 'Guest',
+      more: (count: number) => `…and ${count} more`,
+    },
     group_rsvp_going_btn: '✅ Going',
     group_rsvp_notgoing_btn: "❌ Can't make it",
     group_rsvp_recorded: "You're going ✅",
@@ -1447,6 +1461,20 @@ export const MSG = {
       `📨 ${name} отклонил(а) приглашение на "<b>${title}</b>" ❌`,
     invitation_response_maybe: (name: string, title: string) =>
       `📨 ${name} ответил(а) "возможно" на приглашение "<b>${title}</b>" 🤔`,
+    // SAFETY: see en.invitationRoster — every name argument must already be HTML-escaped.
+    invitationRoster: {
+      header: '👥 Участники:',
+      organizer: (nameHtml: string) => `👑 ${nameHtml} — организатор`,
+      answer: {
+        accepted: (nameHtml: string) => `✅ ${nameHtml} — придёт`,
+        maybe: (nameHtml: string) => `❔ ${nameHtml} — возможно`,
+        pending: (nameHtml: string) => `⏳ ${nameHtml} — ждём ответа`,
+        declined: (nameHtml: string) => `❌ ${nameHtml} — не придёт`,
+      },
+      reader: (nameHtml: string) => `${nameHtml} (ты)`,
+      unnamed: 'Гость',
+      more: (count: number) => `…и ещё ${count} ${ruPlural(count, 'человек', 'человека', 'человек')}`,
+    },
     group_rsvp_going_btn: '✅ Иду',
     group_rsvp_notgoing_btn: '❌ Не иду',
     group_rsvp_recorded: 'Ты идёшь ✅',

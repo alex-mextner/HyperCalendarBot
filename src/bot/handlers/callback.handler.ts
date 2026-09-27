@@ -56,6 +56,7 @@ import {
   formatAnsweredInvitationCard,
   invitationAnswerLabel,
 } from '../../services/sharing/answered-invitation-card.ts';
+import { readInvitationRoster } from '../../services/sharing/invitation-roster.ts';
 import { invitationRsvpKeyboard } from '../../services/sharing/invitation-rsvp-keyboard.ts';
 import type { InvitationResult, InvitationService } from '../../services/sharing/invitation-service.ts';
 import { guessCountryFromTimezone, resolveTimezone } from '../../services/timezone/timezone-service.ts';
@@ -955,6 +956,7 @@ export function createCallbackHandler(
                 inviterUser?.username ?? undefined,
                 inviteeUser?.timezone ?? null,
                 !!inviteeUser?.onboarding_completed,
+                invitationRepo ? readInvitationRoster(invitationRepo, event.id, invitation.chat_id) : null,
               )
             : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
           invitationNotifyDeps
@@ -989,6 +991,8 @@ export function createCallbackHandler(
       await ctx.answer(invitationAnswerLabel(answer, lang));
 
       const event = eventRepo?.findById(result.invitation?.event_id ?? 0, result.invitation?.inviter_id ?? 0);
+      // A group chat must be identified to be checked against the roster's privacy rule; fail closed.
+      const rosterChatId = isGroup(ctx) ? getGroupId(ctx) : user.telegram_id;
       const editText = await formatAnsweredInvitationCard(
         answer,
         event ?? null,
@@ -999,6 +1003,9 @@ export function createCallbackHandler(
           groupId: isGroup(ctx) ? (getGroupId(ctx) ?? undefined) : undefined,
         },
         { agendaRepository: eventService.agendaRepository, weatherService },
+        event && invitationRepo && rosterChatId !== null
+          ? readInvitationRoster(invitationRepo, event.id, rosterChatId)
+          : null,
       );
       await editAgendaText(ctx, editText, { parse_mode: 'HTML' }).catch(() => {});
 
@@ -1387,6 +1394,7 @@ export function createCallbackHandler(
             user.username ?? undefined,
             inviteeUser?.timezone ?? null,
             !!inviteeUser?.onboarding_completed,
+            invitationRepo ? readInvitationRoster(invitationRepo, event.id, inviteeId) : null,
           )
         : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
       await ctx.answer();
@@ -1454,6 +1462,7 @@ export function createCallbackHandler(
             user.username ?? undefined,
             inviteeUser?.timezone ?? null,
             !!inviteeUser?.onboarding_completed,
+            invitationRepo ? readInvitationRoster(invitationRepo, eventForInv.id, inviteeId) : null,
           )
         : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
       forceInviteDeps
