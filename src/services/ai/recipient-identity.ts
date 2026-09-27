@@ -79,8 +79,12 @@ export async function resolveInvitationRecipient(
   }
   const owned = id === undefined ? null : ctx.contactRepo?.findByTelegramId(ctx.user.telegram_id, id);
   // An owned address-book row ID is never recipient evidence, even when a Telegram account has that number.
+  // A "User N" placeholder saved by an earlier approval of that same number is not identity evidence either.
   const addressBookRow =
-    id !== undefined && !owned && id !== establishedInvitationRecipientId && !ctx.verifiedRecipientIds?.has(id)
+    id !== undefined &&
+    !(owned && !/^User \d+$/.test(owned.name)) &&
+    id !== establishedInvitationRecipientId &&
+    !ctx.verifiedRecipientIds?.has(id)
       ? ctx.contactRepo?.findById(ctx.user.telegram_id, id)
       : null;
   if (addressBookRow) return { ok: false, reason: 'contact_row_id', contact: addressBookRow };

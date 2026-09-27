@@ -750,6 +750,17 @@ describe('recipient and contact tool boundaries', () => {
       expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
     });
 
+    test('a "User N" placeholder left by approving the row id does not legitimize it', async () => {
+      const { event, approvals } = inviteContext();
+      const row = ctx.contactRepo!.add(10, 'Bora Example');
+      ctx.contactRepo!.add(10, `User ${row.id}`, undefined, row.id);
+      const result = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: row.id });
+      expect(result.success).toBe(false);
+      expect(result.agentHint).toContain('pick_users');
+      expect(approvals).not.toHaveBeenCalled();
+      expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
+    });
+
     test('a contact with a Telegram ID invites by that ID, never by its row id', async () => {
       const { event, approvals, deliveries } = inviteContext();
       const found = await executeTool(ctx, 'find_contact', { name: 'Alex' });
