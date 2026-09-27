@@ -14,6 +14,7 @@ import { EventService } from '../../../src/services/event/event-service.ts';
 import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 import { png } from '../../fixtures/png.ts';
+import { makeCallbackHandler, makeCallbackTap } from '../../helpers/callback-handler.ts';
 import { flushPromises } from '../../helpers/mock-context.ts';
 
 function makeCtx(data: string, language: 'en' | 'ru' = 'en') {
@@ -760,12 +761,10 @@ describe('reschedule from a proposal the invitee has since answered', () => {
     });
     const invitation = invitationService.sendInvitation(event.id, INVITER, INVITEE).invitation!;
     const notifyDeps = { userRepo, sendMessage: mock(() => Promise.resolve()) };
-    const handler = createCallbackHandler(eventService, {} as never, {} as never, {} as never, {
-      invitationService,
-      eventRepo,
-      invitationRepo: invRepo,
-      invitationNotifyDeps: notifyDeps,
-    });
+    const handler = makeCallbackHandler(
+      { invitationService, eventRepo, invitationRepo: invRepo, invitationNotifyDeps: notifyDeps },
+      eventService,
+    );
     return { handler, invitationService, invRepo, eventRepo, participantRepo, event, invitation, notifyDeps };
   }
 
@@ -776,16 +775,15 @@ describe('reschedule from a proposal the invitee has since answered', () => {
     invitationService.proposeTime(invitation.id, INVITEE, proposedTime);
     invitationService.declineInvitation(invitation.id, INVITEE);
 
-    const ctx = makeCtx(`inv:reschedule:${invitation.id}`);
-    ctx.dbUser.telegram_id = INVITER;
-    await handler(ctx as never);
+    const tap = makeCallbackTap(`inv:reschedule:${invitation.id}`, { telegram_id: INVITER, language: 'en' });
+    await handler(tap.ctx);
     await flushPromises();
 
     expect(invRepo.findById(invitation.id)!.status).toBe('declined');
     expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
     expect(eventRepo.findById(event.id, INVITER)!.start_at).toBe(event.start_at);
-    expect(ctx.answer).toHaveBeenCalledWith({ text: t('en').invite_proposal_closed });
-    expect(ctx.editText).toHaveBeenCalledWith(t('en').invite_proposal_closed, { parse_mode: 'HTML' });
+    expect(tap.answer).toHaveBeenCalledWith({ text: t('en').invite_proposal_closed });
+    expect(tap.editText).toHaveBeenCalledWith(t('en').invite_proposal_closed, { parse_mode: 'HTML' });
     expect(notifyDeps.sendMessage).not.toHaveBeenCalled();
   });
 });

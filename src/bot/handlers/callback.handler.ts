@@ -2195,8 +2195,9 @@ async function notifyInviterProposal(
 
 /** Replaces the inviter's proposal notice, whose Reschedule/Keep buttons can no longer act on anything. */
 async function answerProposalClosed(ctx: BotCallbackContext, lang: Lang): Promise<void> {
-  await ctx.answer({ text: t(lang).invite_proposal_closed });
-  await ctx.editText(t(lang).invite_proposal_closed, { parse_mode: 'HTML' }).catch((err: unknown) => {
+  const text = t(lang).invite_proposal_closed;
+  await ctx.answer({ text });
+  await ctx.editText(text, { parse_mode: 'HTML' }).catch((err: unknown) => {
     cmdLogger.warn({ err }, 'Failed to close the inviter proposal notice');
   });
 }

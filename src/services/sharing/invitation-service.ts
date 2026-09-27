@@ -183,10 +183,9 @@ export class InvitationService {
     if (invitation.inviter_id !== userId) {
       return { success: false, error: 'Not authorized' };
     }
-    if (!hasOpenProposal(invitation)) {
+    if (!hasOpenProposal(invitation) || !this.invRepo.clearProposedTime(invitationId, invitation.proposed_time)) {
       return PROPOSAL_CLOSED;
     }
-    this.invRepo.clearProposedTime(invitationId);
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
 
