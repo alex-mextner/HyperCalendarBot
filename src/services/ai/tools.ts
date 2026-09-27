@@ -94,7 +94,7 @@ const toolDefinitions: ToolDefinition[] = [
         title: { type: 'string', description: 'Event title' },
         start_at: { type: 'string', description: 'Start, ISO 8601 UTC.' },
         end_at: { type: 'string', description: 'End, ISO 8601 UTC.' },
-        description: { type: 'string', description: 'Note the user dictated; never participant names.' },
+        description: { type: 'string', description: 'Note the user dictated; never an attendee list.' },
         location: { type: 'string', description: 'Event location.' },
         location_abstract: {
           type: 'boolean',
@@ -134,7 +134,7 @@ const toolDefinitions: ToolDefinition[] = [
         end_at: { type: ['string', 'null'], description: 'New end, ISO 8601 UTC. null removes it.' },
         description: {
           type: ['string', 'null'],
-          description: 'New note; never participant names. null removes it.',
+          description: 'New note; never an attendee list. null removes it.',
         },
         location: {
           type: ['string', 'null'],
