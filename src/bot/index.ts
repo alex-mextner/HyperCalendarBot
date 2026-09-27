@@ -799,6 +799,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           if (!user) return;
           await agent.run(buildAgentContextFactory(msgDeps)(user, chatId, text));
         },
+        agentContinuation: { agent, buildContext: buildAgentContextFactory(msgDeps) },
         oauthDeps: googleDeps
           ? { oauthService: googleDeps.oauthService, stateStore: googleDeps.stateStore }
           : undefined,
