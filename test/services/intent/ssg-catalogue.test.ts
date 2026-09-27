@@ -11,8 +11,8 @@ import {
   renderHtml,
   renderMarkdown,
 } from '../../../scripts/generate-intent-docs.ts';
+import { seedFingerprint } from '../../../src/services/intent/rule-fingerprint.ts';
 import { canonicalMetadata, legacyDisposition, seedIntents } from '../../../src/services/intent/seed-catalog.ts';
-import { seedFingerprint } from '../../../src/services/intent/seed-replacement.ts';
 
 const docsDirectory = fileURLToPath(new URL('../../../docs/intents/', import.meta.url));
 const generatorPath = fileURLToPath(new URL('../../../scripts/generate-intent-docs.ts', import.meta.url));
