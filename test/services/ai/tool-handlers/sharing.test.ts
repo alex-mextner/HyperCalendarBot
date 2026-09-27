@@ -6,6 +6,8 @@ import { DeepLinkRepository } from '../../../../src/database/repositories/deep-l
 import { EditProposalRepository } from '../../../../src/database/repositories/edit-proposal.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../../src/database/repositories/event-reminder.repository.ts';
+import { GroupChatRepository } from '../../../../src/database/repositories/group-chat.repository.ts';
+import { GroupMemberRepository } from '../../../../src/database/repositories/group-member.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { InvitationRepository } from '../../../../src/database/repositories/invitation.repository.ts';
 import { ParticipantRepository } from '../../../../src/database/repositories/participant.repository.ts';
@@ -26,6 +28,7 @@ import {
 } from '../../../../src/services/ai/tool-handlers/sharing.ts';
 import type { AgentContext, InvitationKeyboardVariant } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
+import { GroupMemberService } from '../../../../src/services/group/member-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 import { DeepLinkService } from '../../../../src/services/sharing/deep-link-service.ts';
 import { InvitationService } from '../../../../src/services/sharing/invitation-service.ts';
@@ -1254,6 +1257,120 @@ describe('sharing tool handlers', () => {
       expect(result.success).toBe(true);
       expect(result.output).toContain('accepted');
       expect(result.output).toContain('pending');
+    });
+
+    // The prompt answers "who takes part" only from this tool, so invitees must be able to call it
+    // on the owner's event; people outside the invitation must not.
+    describe('invitee access', () => {
+      const THIRD_USER_ID = 300;
+      const STRANGER_ID = 400;
+      let participantRepo: ParticipantRepository;
+      let groupMemberRepo: GroupMemberRepository;
+      let invitations: InvitationService;
+
+      function ctxFor(userId: number): AgentContext {
+        return makeCtx({
+          user: userRepo.findByTelegramId(userId)!,
+          chatId: userId,
+          participantRepo,
+          group: {
+            groupMemberRepo,
+            checkGroupMembership: () => Promise.resolve(false),
+            groupChatRepo: new GroupChatRepository(db),
+            groupMemberService: new GroupMemberService(groupMemberRepo, userRepo),
+          },
+        });
+      }
+
+      function rosterLines(output: string): string[] {
+        return output.split('\n').filter((line) => line.startsWith('invitee: ') || line.startsWith('attending'));
+      }
+
+      function createDinner() {
+        const event = eventService.createEvent({
+          user_id: USER_ID,
+          title: 'Team Dinner',
+          description: 'owner-only note',
+          start_at: futureStartAt(),
+          timezone: 'UTC',
+        });
+        const accepted = invitations.sendInvitation(event.id, USER_ID, OTHER_USER_ID).invitation!;
+        invitations.acceptInvitation(accepted.id, OTHER_USER_ID);
+        const pending = invitations.sendInvitation(event.id, USER_ID, THIRD_USER_ID).invitation!;
+        return { event, pending };
+      }
+
+      beforeEach(() => {
+        participantRepo = new ParticipantRepository(db);
+        groupMemberRepo = new GroupMemberRepository(db);
+        invitations = new InvitationService(invitationRepo, eventRepo, sharingSettingsRepo, participantRepo);
+        userRepo.create({ telegram_id: THIRD_USER_ID, timezone: 'UTC' });
+        userRepo.create({ telegram_id: STRANGER_ID, timezone: 'UTC' });
+      });
+
+      test('accepted invitee sees the roster the owner sees, plus who organizes it', () => {
+        const { event } = createDinner();
+        const owner = handleGetInvitationStatus(ctxFor(USER_ID), { event_id: event.id });
+        const invitee = handleGetInvitationStatus(ctxFor(OTHER_USER_ID), { event_id: event.id });
+
+        expect(owner.success).toBe(true);
+        expect(rosterLines(owner.output!)).toEqual([
+          'attending (going): 1',
+          `invitee: ${OTHER_USER_ID}, status: accepted`,
+          `invitee: ${THIRD_USER_ID}, status: pending`,
+        ]);
+        expect(owner.output).not.toContain('organizer');
+
+        expect(invitee.success).toBe(true);
+        expect(invitee.output).toContain('Team Dinner');
+        expect(rosterLines(invitee.output!)).toEqual(rosterLines(owner.output!));
+        expect(invitee.output).toContain(`organizer: ${USER_ID}`);
+        expect(invitee.output).not.toContain('owner-only note');
+      });
+
+      test('pending invitee and current members of an invited group can see the roster', () => {
+        const { event } = createDinner();
+        invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+        groupMemberRepo.upsert(GROUP_CHAT_ID, STRANGER_ID);
+
+        expect(handleGetInvitationStatus(ctxFor(THIRD_USER_ID), { event_id: event.id }).success).toBe(true);
+        // Invited through the group before answering, like a pending personal invitee.
+        expect(handleGetInvitationStatus(ctxFor(STRANGER_ID), { event_id: event.id }).success).toBe(true);
+        invitations.recordGroupAttendance(event.id, STRANGER_ID, 'accepted', GROUP_CHAT_ID);
+        const member = handleGetInvitationStatus(ctxFor(STRANGER_ID), { event_id: event.id });
+        expect(member.success).toBe(true);
+        expect(member.output).toContain(`member: ${STRANGER_ID}, status: accepted`);
+
+        // Leaving the group ends access even though the RSVP row stays behind.
+        groupMemberRepo.leave(GROUP_CHAT_ID, STRANGER_ID);
+        expect(handleGetInvitationStatus(ctxFor(STRANGER_ID), { event_id: event.id }).success).toBe(false);
+      });
+
+      test('stranger without an invitation is rejected', () => {
+        const { event } = createDinner();
+        const result = handleGetInvitationStatus(ctxFor(STRANGER_ID), { event_id: event.id });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+        expect(result.output).toBeUndefined();
+      });
+
+      test('cancelled invitee is rejected even with a leftover RSVP row; declined invitee is still admitted', () => {
+        const { event, pending } = createDinner();
+        // OTHER accepted (participant row "accepted"), then the owner withdrew the invitation. OTHER is
+        // not in the group invited to the same event, so that leftover row must not readmit them.
+        invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+        const accepted = invitationRepo.findActiveByEventAndInvitee(event.id, OTHER_USER_ID)!;
+        expect(invitations.cancelInvitation(accepted.id, USER_ID).success).toBe(true);
+        const cancelled = handleGetInvitationStatus(ctxFor(OTHER_USER_ID), { event_id: event.id });
+        expect(cancelled.success).toBe(false);
+        expect(cancelled.error).toContain('not found');
+
+        // Same rule as propose_edit: a declined invitee was invited and keeps read access.
+        invitations.declineInvitation(pending.id, THIRD_USER_ID);
+        const declined = handleGetInvitationStatus(ctxFor(THIRD_USER_ID), { event_id: event.id });
+        expect(declined.success).toBe(true);
+        expect(declined.output).toContain(`organizer: ${USER_ID}`);
+      });
     });
   });
 
