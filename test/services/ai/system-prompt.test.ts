@@ -171,6 +171,11 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('Group event creation — consensus required');
   });
 
+  test('asks which place a vague location means instead of sending it to geocoding', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toMatch(/^- VAGUE PLACE: .*"в кафе".*a chain without a branch.*ask_user.*$/m);
+  });
+
   test('group prompt requires clear intent AND consensus for event creation', () => {
     ctx.isGroup = true;
     ctx.groupTitle = 'Friends';
