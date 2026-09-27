@@ -4,6 +4,8 @@ import type { Queue } from 'bullmq';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
 import type { ParticipantGoogleSyncRepository } from '../../database/repositories/participant-google-sync.repository.ts';
+import type { CalendarEvent } from '../../database/types.ts';
+import { syncLogger } from '../../utils/logger.ts';
 import type { GoogleSyncJobData } from './sync-queue.ts';
 
 export function createPushScheduler(
@@ -88,5 +90,33 @@ export function createParticipantPushScheduler(
       }
     }
     await queue.add('push-participant-event', job);
+  };
+}
+
+/** Queues an update push of an event's Google Calendar copy in one user's calendar. */
+type ScheduleCopyUpdate = (userId: number, eventId: number, action: 'update') => Promise<void>;
+
+/**
+ * Re-push every Google Calendar copy of an event that changed outside an edit (a place confirmed
+ * after the event was pushed): the owner's copy of a personal event (a group event lives only in
+ * its members' calendars) and each participant copy already made for it. Each push goes through the
+ * normal scheduler, which skips users without active sync.
+ */
+export function createEventCopiesPushScheduler(
+  schedulePush: ScheduleCopyUpdate,
+  scheduleParticipantPush: ScheduleCopyUpdate,
+  participantSyncRepo: ParticipantGoogleSyncRepository,
+) {
+  return async function pushEventCopies(event: Pick<CalendarEvent, 'id' | 'user_id' | 'owner_type'>): Promise<void> {
+    const participantIds = participantSyncRepo.getSyncedByEvent(event.id).map((copy) => copy.user_id);
+    const results = await Promise.allSettled([
+      ...(event.owner_type === 'group' ? [] : [schedulePush(event.user_id, event.id, 'update')]),
+      ...participantIds.map((userId) => scheduleParticipantPush(userId, event.id, 'update')),
+    ]);
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        syncLogger.error({ err: result.reason, eventId: event.id }, 'Failed to schedule a Google copy push');
+      }
+    }
   };
 }

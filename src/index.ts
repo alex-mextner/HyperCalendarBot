@@ -13,6 +13,7 @@ import { t } from './config/constants.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
 import { AgendaRepository } from './database/repositories/agenda.repository.ts';
+import type { CalendarEvent } from './database/types.ts';
 import { AGENT_DRAIN_SETTLE_MS } from './services/ai/agent.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { HistorySummarizer } from './services/ai/history-summarizer.ts';
@@ -171,6 +172,8 @@ let googleRedisClient: Bun.RedisClient | undefined;
 let participantPushSchedulerRef:
   | ((participantUserId: number, eventId: number, action: 'create' | 'update' | 'delete') => Promise<void>)
   | undefined;
+/** Re-pushes all Google Calendar copies of an event after its place is confirmed or dropped */
+let pushEventCopiesRef: ((event: CalendarEvent) => Promise<void>) | undefined;
 let mtprotoSendAsUser: ((userId: number, text: string, username?: string) => Promise<boolean>) | undefined;
 let mtprotoLookupUser:
   | ((id: number) => Promise<{ id: number; firstName?: string; username?: string; deleted?: boolean } | null>)
@@ -192,7 +195,9 @@ if (!serviceSessionEnabled && config.MTPROTO_API_ID && config.MTPROTO_API_HASH) 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
   const { createGoogleSyncQueue } = await import('./services/google/sync-queue.ts');
-  const { createPushScheduler, createParticipantPushScheduler } = await import('./services/google/push-scheduler.ts');
+  const { createPushScheduler, createParticipantPushScheduler, createEventCopiesPushScheduler } = await import(
+    './services/google/push-scheduler.ts'
+  );
   const { executeSyncCronTick, setupSyncCron } = await import('./services/google/sync-cron.ts');
   const { renewExpiringChannels, setupWatchRenewalCron } = await import('./services/google/watch-renewal-cron.ts');
   const { executeCleanup, setupCleanupCron } = await import('./services/google/cleanup-cron.ts');
@@ -306,6 +311,11 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const pushScheduler = createPushScheduler(db.googleSync, db.events, queue);
   const participantPushScheduler = createParticipantPushScheduler(db.googleSync, db.participantGoogleSync, queue);
   participantPushSchedulerRef = participantPushScheduler;
+  pushEventCopiesRef = createEventCopiesPushScheduler(
+    pushScheduler,
+    participantPushScheduler,
+    db.participantGoogleSync,
+  );
 
   const disconnectDeps: DisconnectDeps = {
     config,
@@ -1022,6 +1032,7 @@ if (config.GOOGLE_API_KEY && config.REDIS_URL) {
           botLogger.error({ err, chatId, messageId }, 'Location verification: failed to edit message');
         });
     },
+    pushGoogleCopies: pushEventCopiesRef,
   });
 
   pendingGeoStore = new RedisPendingGeoStore({
