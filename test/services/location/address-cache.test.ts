@@ -59,11 +59,21 @@ describe('AddressCache', () => {
     await cache.recordMapping(1, 'Kafana Sunce Dorcol', { ...place, resolvedAddress: 'Wrong place' });
     await cache.recordMapping(1, 'Office', { ...place, resolvedAddress: 'Office address' });
 
-    // Forgets through the same fuzzy match that applied it.
-    await cache.forgetMapping(1, 'kafana sunce');
+    // Forgets through the same fuzzy match that offered it.
+    await cache.forgetMapping(1, 'kafana sunce', { resolvedAddress: 'Wrong place', placeId: null });
 
     expect(await cache.findMapping(1, 'Kafana Sunce Dorcol')).toBeNull();
     expect((await cache.findMapping(1, 'Office'))?.resolvedAddress).toBe('Office address');
+  });
+
+  test('forgetMapping keeps a place that replaced the rejected one for the input', async () => {
+    const cache = new AddressCache(makeInMemoryRedis());
+    const place = { googleMapsUrl: 'https://maps.google.com/?q=1,2', latitude: 1, longitude: 2, placeId: null };
+    await cache.recordMapping(1, 'Kafana Sunce', { ...place, resolvedAddress: 'Confirmed later' });
+
+    await cache.forgetMapping(1, 'Kafana Sunce', { resolvedAddress: 'Wrong place', placeId: null });
+
+    expect((await cache.findMapping(1, 'Kafana Sunce'))?.resolvedAddress).toBe('Confirmed later');
   });
 
   test('findMapping — fuzzy word match', async () => {

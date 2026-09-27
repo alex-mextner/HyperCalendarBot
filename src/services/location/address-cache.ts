@@ -154,8 +154,16 @@ export class AddressCache {
     }
   }
 
-  /** Forget the mapping `findMapping` returns for this input, after the user rejected that place. */
-  async forgetMapping(userId: number, input: string): Promise<void> {
+  /**
+   * Forget the mapping `findMapping` returns for this input after the user rejected it, but only
+   * while it is still the `rejected` place: a place confirmed for the input since then replaced it
+   * and stays.
+   */
+  async forgetMapping(
+    userId: number,
+    input: string,
+    rejected: Pick<AddressMapping, 'resolvedAddress' | 'placeId'>,
+  ): Promise<void> {
     const key = MAPPINGS_KEY(userId);
     const raw = await this.redis.get(key);
     if (!raw) return;
@@ -165,10 +173,10 @@ export class AddressCache {
       logger.warn({ err: parsed.error, userId }, 'Stored address mappings are unreadable; nothing forgotten');
       return;
     }
-    const rejected = this.match(parsed.data, input);
-    if (!rejected) return;
+    const current = this.match(parsed.data, input);
+    if (current?.resolvedAddress !== rejected.resolvedAddress || current.placeId !== rejected.placeId) return;
 
-    await this.redis.set(key, JSON.stringify(parsed.data.filter((m) => m !== rejected)));
+    await this.redis.set(key, JSON.stringify(parsed.data.filter((m) => m !== current)));
   }
 
   private match(mappings: AddressMapping[], input: string): AddressMapping | null {

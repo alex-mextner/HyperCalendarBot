@@ -904,6 +904,37 @@ describe('keep as typed', () => {
     expect(await s.addressCache.findMapping(USER_ID, RAW_LOCATION)).toBeNull();
   });
 
+  test('rejecting a remembered place keeps another place confirmed for the text after the picker was sent', async () => {
+    const geocoder = scriptedGeocoder({ places: [], reverse: BELGRADE_CAFE });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.addressCache.recordMapping(USER_ID, RAW_LOCATION, {
+      resolvedAddress: DUTCH_HOTEL.formattedAddress,
+      googleMapsUrl: DUTCH_HOTEL.googleMapsUrl,
+      latitude: DUTCH_HOTEL.latitude,
+      longitude: DUTCH_HOTEL.longitude,
+      placeId: DUTCH_HOTEL.placeId,
+      venueName: DUTCH_HOTEL.venueName,
+    });
+    await s.service.verifyEventLocation(s.event, s.user());
+    // Meanwhile a pin confirms another place for the same text on another event
+    const other = s.eventRepo.create({
+      user_id: USER_ID,
+      title: 'Обед',
+      start_at: s.event.start_at,
+      timezone: 'Europe/Belgrade',
+      location: RAW_LOCATION,
+    });
+    await s.pendingGeoStore.set(USER_ID, { latitude: BELGRADE_CAFE.latitude, longitude: BELGRADE_CAFE.longitude });
+    await s.tap(`loc_geo:geo:${other.id}`);
+
+    await s.tap(button(s.sent[0], 'keep'));
+
+    expect(s.storedEvent().location_verified).toBe(0);
+    expect((await s.addressCache.findMapping(USER_ID, RAW_LOCATION))?.resolvedAddress).toBe(
+      BELGRADE_CAFE.formattedAddress,
+    );
+  });
+
   test('keeping the text on one event keeps a place confirmed for the same text on another', async () => {
     const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE, NIS_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);

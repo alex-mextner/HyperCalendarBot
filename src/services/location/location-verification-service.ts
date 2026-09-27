@@ -309,7 +309,7 @@ export class LocationVerificationService {
    * The creator keeps the typed location ("none of these — keep as typed"): the event stays (or
    * becomes again) unverified with only the typed text, the offered candidates are dropped, and a
    * remembered place the picker offered is forgotten so it is not offered again. A place confirmed
-   * on another event after this picker was sent stays remembered. Nothing is cached.
+   * for the text after this picker was sent stays remembered. Nothing is cached.
    *
    * Like a candidate tap, it answers the event's open picker; a tap on an older, answered or
    * expired picker, or on one built for a text the event no longer has, returns null and changes
@@ -321,8 +321,10 @@ export class LocationVerificationService {
     const { picker, event } = answered;
 
     await this.keepOnlyTypedText(event);
-    if (picker.remembered) {
-      await this.deps.addressCache.forgetMapping(userId, picker.location).catch((err) => {
+    const offered = picker.candidates[0];
+    if (picker.remembered && offered) {
+      const rejected = { resolvedAddress: offered.formattedAddress, placeId: offered.placeId };
+      await this.deps.addressCache.forgetMapping(userId, picker.location, rejected).catch((err) => {
         logger.warn({ err, eventId, userId }, 'Failed to forget rejected address mapping');
       });
     }
