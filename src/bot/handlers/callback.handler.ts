@@ -1158,7 +1158,11 @@ export function createCallbackHandler(
     }
 
     await ctx.answer();
-    await ctx.editText(`✅ ${answerText}`);
+    // Keep the question: after a destructive confirmation it is the user's only record of
+    // what they agreed to. Appending at the end leaves the entity offsets valid.
+    const question = ctx.message?.text ?? '';
+    const entities = ctx.message?.entities?.map((entity) => entity.payload) ?? [];
+    await ctx.editText(question ? `${question}\n\n✅ ${answerText}` : `✅ ${answerText}`, { entities });
     const cbChatId = ctx.chatId;
     if (onAiButtonClick && cbChatId) {
       onAiButtonClick(user.telegram_id, cbChatId, answerText).catch((e) => {

@@ -86,12 +86,26 @@ describe('createCallbackHandler', () => {
     // Should return without error
   });
 
-  test('ai_btn triggers callback', async () => {
+  // Incident 2026-09-27: the tap replaced a four-event delete list with just '✅ Да', so the
+  // chat no longer showed what the user had confirmed.
+  test('ai_btn keeps the question and its formatting and appends the chosen answer', async () => {
+    const onAiButtonClick = mock(() => Promise.resolve());
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
+    const ctx = makeCtx('ai_btn:Да');
+    const question = 'Удалить:\n• Урок (вт, 29 сен, 12:30)\n• Урок (вт, 29 сен, 13:30)\nТочно?';
+    const bold = { type: 'bold', offset: 0, length: 8 };
+    Object.assign(ctx.message, { text: question, entities: [{ payload: bold }] });
+    await handler(ctx as never);
+    expect(ctx.editText).toHaveBeenCalledWith(`${question}\n\n✅ Да`, { entities: [bold] });
+    expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
+  });
+
+  test('ai_btn on a message whose text is unavailable still records the answer', async () => {
     const onAiButtonClick = mock(() => Promise.resolve());
     const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
     const ctx = makeCtx('ai_btn:Да');
     await handler(ctx as never);
-    expect(ctx.editText).toHaveBeenCalledWith('✅ Да');
+    expect(ctx.editText).toHaveBeenCalledWith('✅ Да', { entities: [] });
     expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
   });
 
@@ -99,8 +113,9 @@ describe('createCallbackHandler', () => {
     const onAiButtonClick = mock(() => Promise.resolve());
     const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
     const ctx = makeCtx('ai_btn:19:00');
+    Object.assign(ctx.message, { text: 'Во сколько?' });
     await handler(ctx as never);
-    expect(ctx.editText).toHaveBeenCalledWith('✅ 19:00');
+    expect(ctx.editText).toHaveBeenCalledWith('Во сколько?\n\n✅ 19:00', { entities: [] });
     expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, '19:00');
   });
 
@@ -110,8 +125,10 @@ describe('createCallbackHandler', () => {
     // User 100 clicks on button restricted to user 100
     const ctx = makeCtx('ai_btn:100:Да', { from: { id: 100 } });
     ctx.message.chat.type = 'group';
+    Object.assign(ctx.message, { text: 'Удалить?' });
     await handler(ctx as never);
-    expect(ctx.editText).toHaveBeenCalledWith('✅ Да');
+    expect(ctx.editText).toHaveBeenCalledWith('Удалить?\n\n✅ Да', { entities: [] });
+    expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
   });
 
   test('ai_btn with userId restriction blocks wrong user', async () => {
