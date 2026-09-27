@@ -316,24 +316,24 @@ describe('what the rules actually send', () => {
       input: { start_date: '2026-09-20', end_date: '2026-09-20', scope: 'personal' },
     });
     const week = await runMessage('show this week');
-    expect(week.tools.calls[0]?.input).toMatchObject({ start_date: '2026-09-14', end_date: '2026-09-20' });
+    expect(week.tools.calls[0]?.input).toMatchObject({ start_date: '2026-09-19', end_date: '2026-09-25' });
     const group = await runMessage('show this week', stubTools(), userCtx({ group: true }));
     expect(group.tools.calls[0]?.input).toMatchObject({ scope: 'group' });
   });
 
-  test('free time for a week asks for all seven days, Monday to Sunday', async () => {
+  test('free time for a week asks for the next seven days, starting today', async () => {
     const run = await runMessage('when am i free this week');
     const dates = run.tools.calls
       .filter((call) => call.name === 'get_free_slots')
       .map((call) => (call.input as { date: string }).date);
     expect(dates).toEqual([
-      '2026-09-14',
-      '2026-09-15',
-      '2026-09-16',
-      '2026-09-17',
-      '2026-09-18',
       '2026-09-19',
       '2026-09-20',
+      '2026-09-21',
+      '2026-09-22',
+      '2026-09-23',
+      '2026-09-24',
+      '2026-09-25',
     ]);
     for (const date of dates) expect(run.result.response).toContain(date);
   });
@@ -833,6 +833,31 @@ describe('creating an event against real SQLite', () => {
     await f.say('maybe later');
     expect(f.eventRows()).toEqual([]);
     expect(f.store.get(USER, USER)).not.toBeNull();
+  });
+});
+
+describe('a week plan against real SQLite', () => {
+  test('on a Sunday evening it lists the coming days, not the week already gone', async () => {
+    // 2026-09-27 23:15 Belgrade: 'План на неделю' listed Tuesday 22 – Friday 25 and
+    // nothing from Monday 28 on.
+    setSystemTime(new Date('2026-09-27T21:15:00Z'));
+    const f = fixture();
+    f.addEvent('Concert', '2026-09-22T18:30:00+02:00');
+    f.addEvent('Lesson', '2026-09-28T12:30:00+02:00');
+    f.addEvent('Vet', '2026-10-03T13:00:00+02:00');
+    f.addEvent('Next Sunday', '2026-10-04T10:00:00+02:00');
+
+    expect(await f.say('План на неделю')).toMatchObject({ handled: true });
+
+    expect(f.call.mock.calls[0]).toEqual([
+      'get_events',
+      { start_date: '2026-09-27', end_date: '2026-10-03', scope: 'personal' },
+    ]);
+    const text = f.lastText();
+    expect(text).toContain('2026-09-28 12:30  Lesson');
+    expect(text).toContain('Vet');
+    expect(text).not.toContain('Concert');
+    expect(text).not.toContain('Next Sunday');
   });
 });
 

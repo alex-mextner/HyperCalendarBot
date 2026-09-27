@@ -69,6 +69,8 @@ const calendarPeriod: FamilyDefinition = {
     'events next month',
   ],
   negatives: ['что у меня на прошлой неделе', 'что у меня на неделе после отпуска', 'что у меня в этом году'],
+  notes:
+    'This week is today and the six days after it, so a Sunday-evening plan is not a list of past days; next week is Monday to Sunday.',
 };
 
 const calendarUpcoming: FamilyDefinition = {
@@ -239,7 +241,8 @@ const slotsWeek: FamilyDefinition = {
     'free slots next week',
   ],
   negatives: ['свободные окна на неделе после отпуска'],
-  notes: 'Seven explicit day queries, Monday to Sunday, so every day of the week is answered.',
+  notes:
+    'Seven explicit day queries, so every day is answered: this week is today and the six days after it, next week is Monday to Sunday.',
 };
 
 const slotsCheckTime: FamilyDefinition = {
