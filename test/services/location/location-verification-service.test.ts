@@ -163,7 +163,6 @@ describe('LocationVerificationService', () => {
     expect(deps.geocodingService.findPlace).not.toHaveBeenCalled();
   });
 
-
   test('asks user to choose when multiple candidates found', async () => {
     const candidates = [
       makeGeoResult({ formattedAddress: 'Option A' }),
@@ -184,7 +183,6 @@ describe('LocationVerificationService', () => {
     expect(deps.sendMessage).toHaveBeenCalledTimes(1);
     expect(deps.candidateStore.set).toHaveBeenCalledTimes(1);
   });
-
 
   test('resolveFromCoordinates applies reverse geocoded result', async () => {
     const geo = makeGeoResult();
