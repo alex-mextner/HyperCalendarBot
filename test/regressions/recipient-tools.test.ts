@@ -804,6 +804,18 @@ describe('recipient and contact tool boundaries', () => {
       expect(ctx.sharing!.invitationRepo.getByEvent(event.id).map((i) => i.invitee_id)).toEqual([bora.id]);
     });
 
+    test('a saved @username resolves even when its Telegram ID equals another contact row id', async () => {
+      const { event, approvals, sendInvitationCalls } = inviteContext();
+      ctx.messageText = 'Invite Cato Sample from my contacts';
+      const bora = ctx.contactRepo!.add(10, 'Bora Example');
+      ctx.contactRepo!.add(10, 'Cato Sample', 'catosample', bora.id);
+      const invited = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_username: 'catosample' });
+      expect(invited.success).toBe(true);
+      expect(approvals).not.toHaveBeenCalled();
+      expect(ctx.sharing!.invitationRepo.getByEvent(event.id).map((i) => i.invitee_id)).toEqual([bora.id]);
+      expect(sendInvitationCalls.mock.calls.map(([id]) => id)).toEqual([bora.id]);
+    });
+
     test('resending an established invitation ignores a later contact row with the same number', async () => {
       const { event, sendInvitationCalls } = inviteContext();
       const bora = ctx.contactRepo!.add(10, 'Bora Example');

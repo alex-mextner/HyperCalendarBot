@@ -77,11 +77,14 @@ export async function resolveInvitationRecipient(
     }
     return known ? { ok: true, id, isGroup: true } : { ok: false, reason: 'unverified' };
   }
-  // An owned address-book row ID is ambiguous recipient evidence even when a saved contact has that Telegram ID:
-  // only an ID verified in this conversation (picker, username) or the invitation's own recipient overrides it.
+  // An explicit invitee_id that is an owned address-book row ID is ambiguous recipient evidence even when a saved
+  // contact has that Telegram ID: only an ID verified in this conversation (picker, username) or the invitation's
+  // own recipient overrides it. An ID derived from a saved @username is that contact's Telegram ID, not a row ID.
   const addressBookRow =
-    id !== undefined && id !== establishedInvitationRecipientId && !ctx.verifiedRecipientIds?.has(id)
-      ? ctx.contactRepo?.findById(ctx.user.telegram_id, id)
+    input.invitee_id !== undefined &&
+    input.invitee_id !== establishedInvitationRecipientId &&
+    !ctx.verifiedRecipientIds?.has(input.invitee_id)
+      ? ctx.contactRepo?.findById(ctx.user.telegram_id, input.invitee_id)
       : null;
   if (addressBookRow && addressBookRow.telegram_id !== id)
     return { ok: false, reason: 'contact_row_id', contact: addressBookRow };
