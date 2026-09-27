@@ -56,13 +56,14 @@ function baseEnv(): Record<string, string> {
   return { PATH: `${join(work, 'bin')}:${process.env.PATH ?? '/usr/bin:/bin'}`, HOME: work };
 }
 
-/** docker-compose.yml as Docker Compose resolves it for a host whose .env holds `password`. */
-function render(password = PASSWORD): Record<string, Service> {
+/** docker-compose.yml as Docker Compose resolves it for a host whose .env holds `password` (`null`: no line). */
+function render(password: string | null = PASSWORD): Record<string, Service> {
   if (!COMPOSE) throw new Error('Docker Compose v2 CLI is not installed');
   const project = join(work, 'project');
   mkdirSync(project);
   copyFileSync(COMPOSE_FILE, join(project, 'docker-compose.yml'));
-  writeFileSync(join(project, '.env'), `REDIS_PASSWORD='${password}'\nBOT_TOKEN=synthetic-bot-token\n`);
+  const passwordLine = password === null ? '' : `REDIS_PASSWORD='${password}'\n`;
+  writeFileSync(join(project, '.env'), `${passwordLine}BOT_TOKEN=synthetic-bot-token\n`);
   const proc = Bun.spawnSync([...COMPOSE, '--project-directory', project, 'config', '--format', 'json'], {
     cwd: project,
     env: baseEnv(),
@@ -188,6 +189,16 @@ describe.skipIf(!COMPOSE)('docker-compose.yml keeps the Redis password out of ar
     ['a double quote', 'Synth"pw-4f2c9'],
     ['a backslash', 'Synth\\pw-4f2c9'],
   ])('a password containing %s stops redis with an error instead of starting with a different password', (_, password) => {
+    const started = startRedis(render(password).redis!);
+    expect(started.exitCode).not.toBe(0);
+    expect(started.stderr).toContain('REDIS_PASSWORD');
+    expect(started.argv).toEqual([]);
+  });
+
+  test.each([
+    ['empty', ''],
+    ['unset', null],
+  ])('an %s password stops redis with an error instead of starting it without auth', (_, password) => {
     const started = startRedis(render(password).redis!);
     expect(started.exitCode).not.toBe(0);
     expect(started.stderr).toContain('REDIS_PASSWORD');
