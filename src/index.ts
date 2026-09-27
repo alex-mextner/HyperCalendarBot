@@ -990,7 +990,7 @@ let pendingGeoStore: import('./services/location/pending-geo-store.ts').PendingG
 
 if (config.GOOGLE_API_KEY && config.REDIS_URL) {
   const { createGeocodingService } = await import('./services/location/geocoding-service.ts');
-  const { AddressCache } = await import('./services/location/address-cache.ts');
+  const { AddressCache, redisCompareAndSet } = await import('./services/location/address-cache.ts');
   const { LocationVerificationService } = await import('./services/location/location-verification-service.ts');
   const { RedisLocationCandidateStore } = await import('./services/location/location-candidate-store.ts');
   const { RedisPendingGeoStore } = await import('./services/location/pending-geo-store.ts');
@@ -999,7 +999,10 @@ if (config.GOOGLE_API_KEY && config.REDIS_URL) {
   const geocodingService = createGeocodingService(config.GOOGLE_API_KEY);
   addressCache = new AddressCache({
     get: (key: string) => locationRedis.get(key),
-    set: (key: string, value: string) => locationRedis.set(key, value),
+    compareAndSet: redisCompareAndSet({
+      eval: (script: string, numkeys: number, ...keysAndArgs: string[]) =>
+        locationRedis.eval(script, numkeys, ...keysAndArgs),
+    }),
   });
   const candidateStore = new RedisLocationCandidateStore({
     set: (key: string, value: string, opts?: { ex?: number }) =>
