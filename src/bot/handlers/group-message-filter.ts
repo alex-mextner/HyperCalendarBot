@@ -141,6 +141,27 @@ export function mentionsBot(text: string): boolean {
   return BOT_MENTION_RE.test(text);
 }
 
+// --- Meeting place / time words ---
+//
+// Short, highly inflected words ("место", "адрес", "время") share the
+// problem above: fuzzy matching would collapse them with "месть", "тесто",
+// "бремя", and stem matching hits "местоимение", "местный", "заместитель",
+// "адресат", "временно" — the reason the stems were dropped once already.
+// Match an explicit list of word forms as whole words instead. The idiom
+// "на твоём месте я бы…" ("if I were you") is excluded by rejecting "месте"
+// right after a possessive pronoun.
+const PLACE_OR_TIME_RE = new RegExp(
+  '(?<![\\p{L}\\p{N}])(?:' +
+    'место|места|месту|местом|мест|местам|местами|местах|' +
+    '(?<!(?:мо[её]м|тво[её]м|сво[её]м|нашем|вашем|его|е[её]|их)\\s+)месте|' +
+    'локация|локации|локацию|локацией|локаций|локациям|локациями|локациях|' +
+    'адрес|адреса|адресу|адресом|адресе|адресов|адресам|адресами|адресах|' +
+    'время|времени|временем|времена|времён|времен|' +
+    'location|locations|venue|venues|address|addresses|where' +
+    ')(?![\\p{L}\\p{N}])',
+  'iu',
+);
+
 // --- Date / time hints ---
 //
 // A message that carries a concrete date or time is plausibly a calendar
@@ -214,6 +235,7 @@ export function isGroupRelevant(text: string, botUsername: string): boolean {
   if (startsWithCalendarAddress(text)) return true;
   if (mentionsBot(text)) return true;
   if (matchesKeywordFuzzy(text)) return true;
+  if (PLACE_OR_TIME_RE.test(text)) return true;
   if (containsDateHint(text)) return true;
   return false;
 }
