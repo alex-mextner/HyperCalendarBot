@@ -937,7 +937,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           .text(msgs.aiTools.location.geoNewLocation, `${CB.LOCATION_GEO}:city:${latitude}:${longitude}`)
           .row()
           .text(msgs.aiTools.location.geoExplain, `${CB.LOCATION_GEO}:other:${latitude}:${longitude}`);
-        await ctx.send(msgs.aiTools.location.geoForEvent(latestEvent.title), {
+        await ctx.send(msgs.aiTools.location.geoForEvent(escapeHtml(latestEvent.title)), {
           parse_mode: 'HTML',
           reply_markup: kb,
         });
