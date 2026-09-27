@@ -7,6 +7,7 @@ import { t } from '../../../../src/config/constants.ts';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { DeepLinkRepository } from '../../../../src/database/repositories/deep-link.repository.ts';
+import { EditProposalRepository } from '../../../../src/database/repositories/edit-proposal.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
@@ -19,6 +20,7 @@ import { runMigrations } from '../../../../src/database/schema.ts';
 import { handleDismissConnectTelegramPrompt } from '../../../../src/services/ai/tool-handlers/settings.ts';
 import { handleSendInvitation } from '../../../../src/services/ai/tool-handlers/sharing.ts';
 import type { AgentContext, TelegramSender } from '../../../../src/services/ai/types.ts';
+import { ConversationLogger } from '../../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 import { DeepLinkService } from '../../../../src/services/sharing/deep-link-service.ts';
@@ -58,6 +60,7 @@ describe('send_invitation /connect_telegram suggestion', () => {
   function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
     const sharingSettingsRepo = new SharingSettingsRepository(db);
     const privacyService = new PrivacyService(sharingSettingsRepo);
+    const chatHistory = new ChatHistoryRepository(db);
     return {
       user: userRepo.findByTelegramId(INVITER_ID)!,
       chatId: INVITER_ID,
@@ -65,7 +68,7 @@ describe('send_invitation /connect_telegram suggestion', () => {
       isGroup: false,
       eventService,
       holidayService: new HolidayService(new HolidayRepository(db)),
-      chatHistory: new ChatHistoryRepository(db),
+      chatHistory,
       userRepo,
       eventReminderRepo: new EventReminderRepository(db),
       sharing: {
@@ -78,14 +81,14 @@ describe('send_invitation /connect_telegram suggestion', () => {
           privacyService,
         ),
         privacyService,
-        editProposalRepo: undefined as never,
+        editProposalRepo: new EditProposalRepository(db),
       },
       sender: unreachableByBot,
       deepLinkService: new DeepLinkService(new DeepLinkRepository(db)),
       botUsername: 'TestBot',
       telegramSessionRepo: sessionRepo,
       telegramMasterKey: MASTER_KEY,
-      conversationLogger: null as never,
+      conversationLogger: new ConversationLogger(chatHistory),
       ...overrides,
     };
   }
