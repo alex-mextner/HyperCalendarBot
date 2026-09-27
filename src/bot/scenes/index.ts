@@ -3,6 +3,7 @@ import { scenes } from '@gramio/scenes';
 import type { DatabaseService } from '../../database/index.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
+import type { LocationVerificationService } from '../../services/location/location-verification-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
@@ -56,9 +57,16 @@ export function createScenesPlugin(
   holidayService?: HolidayService,
   onEventCreated?: (userId: number, eventId: number) => Promise<void>,
   connectTelegramSceneDeps?: ConnectTelegramSceneDeps,
+  locationVerification?: LocationVerificationService,
 ) {
-  const addEventScene = createAddEventScene(eventService, userComposer, db.actionLog, onEventCreated);
-  const editValueScene = createEditValueScene(eventService, userComposer, db.actionLog);
+  const addEventScene = createAddEventScene(
+    eventService,
+    userComposer,
+    db.actionLog,
+    onEventCreated,
+    locationVerification,
+  );
+  const editValueScene = createEditValueScene(eventService, userComposer, db.actionLog, locationVerification);
   const importScene = createImportScene(eventService, botToken, userComposer, db.actionLog);
   const timezoneScene = createTimezoneScene(db, userComposer);
   const onboardingScene = createOnboardingScene(

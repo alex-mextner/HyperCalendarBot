@@ -2,6 +2,7 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { Lang } from '../../../config/constants.ts';
 import { t } from '../../../config/constants.ts';
+import { CLEARED_LOCATION } from '../../../database/repositories/event.repository.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
 import { getDayRangeUtc } from '../../../utils/date.ts';
 import { eventTimestampError } from '../../../utils/event-timestamps.ts';
@@ -427,7 +428,9 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
   if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
-  const { event_id, scope: _, owner_id: _oid, ...updates } = input;
+  const { event_id, scope: _, owner_id: _oid, ...fields } = input;
+  // Removing the location also drops a place a pin set on an event without typed text
+  const updates = fields.location === null ? { ...fields, ...CLEARED_LOCATION } : fields;
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
   }

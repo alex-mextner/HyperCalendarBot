@@ -645,3 +645,53 @@ describe('add_event step handlers', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Location verification (#395): a location typed in /add goes through the same
+// verification and clarification flow as the AI create_event tool.
+// ---------------------------------------------------------------------------
+
+describe('add_event step 6: location verification', () => {
+  const STATE = { title: 'Dinner', startAt: '2026-10-05T17:00:00.000Z', endAt: '2026-10-05T18:00:00.000Z' };
+
+  function setup() {
+    const createEvent = mock((data: { location?: string }) => ({
+      id: 77,
+      title: STATE.title,
+      start_at: STATE.startAt,
+      end_at: STATE.endAt,
+      timezone: 'Europe/Moscow',
+      user_id: 1,
+      location: data.location ?? null,
+    }));
+    const verifyEventLocation = mock(() =>
+      Promise.resolve({ resolved: false, geocoded: null, cityExtracted: null, candidates: [] }),
+    );
+    const service = { createEvent } as unknown as EventService;
+    const fns = getStepFns(createAddEventScene(service, mockComposer, undefined, undefined, { verifyEventLocation }));
+    return { fns, verifyEventLocation };
+  }
+
+  test('typed location — verifies the created event for the user', async () => {
+    const { fns, verifyEventLocation } = setup();
+    const ctx = makeCtx({ stepId: 6, text: 'harbour cafe', state: { ...STATE } });
+    await fns[6]!(ctx, NOOP_NEXT);
+
+    expect(verifyEventLocation).toHaveBeenCalledTimes(1);
+    const [event, user] = verifyEventLocation.mock.calls[0] as unknown as [
+      { id: number; location: string },
+      { telegram_id: number },
+    ];
+    expect(event.id).toBe(77);
+    expect(event.location).toBe('harbour cafe');
+    expect(user.telegram_id).toBe(1);
+  });
+
+  test('skipped location — nothing to verify', async () => {
+    const { fns, verifyEventLocation } = setup();
+    const ctx = makeCtx({ activeType: 'callback_query', stepId: 6, data: `${CB.ADD_SKIP}:6`, state: { ...STATE } });
+    await fns[6]!(ctx, NOOP_NEXT);
+
+    expect(verifyEventLocation).not.toHaveBeenCalled();
+  });
+});

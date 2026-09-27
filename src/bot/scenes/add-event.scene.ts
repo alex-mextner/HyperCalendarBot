@@ -6,7 +6,9 @@ import { CB, t } from '../../config/constants.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
+import type { LocationVerificationService } from '../../services/location/location-verification-service.ts';
 import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
+import { botLogger } from '../../utils/logger.ts';
 import {
   cancelKeyboard,
   eventActionsKeyboard,
@@ -30,6 +32,7 @@ export function createAddEventScene(
   userComposer: UserResolverComposer,
   actionLogRepo?: ActionLogRepository,
   onEventCreated?: (userId: number, eventId: number) => Promise<void>,
+  locationVerification?: Pick<LocationVerificationService, 'verifyEventLocation'>,
 ) {
   return (
     new Scene('add_event')
@@ -307,6 +310,13 @@ export function createAddEventScene(
         });
 
         onEventCreated?.(user.telegram_id, event.id).catch(() => {});
+
+        // Same verification and clarification flow as the AI create_event tool.
+        if (event.location && locationVerification) {
+          locationVerification
+            .verifyEventLocation(event, user)
+            .catch((err) => botLogger.error({ err, eventId: event.id }, 'Background location verification failed'));
+        }
 
         await context.scene.exit();
         const detail = formatEventDetail(event, user.timezone, lang);
