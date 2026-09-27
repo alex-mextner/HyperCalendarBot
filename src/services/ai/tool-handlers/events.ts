@@ -606,11 +606,7 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
   if (ctx.locationVerification) {
     // Before the question below: a place the creator confirms from it re-renders the cards again,
     // and this edit's render must not land after that one
-    try {
-      await ctx.locationVerification.refreshInvitationCards(beforeUpdate, updated);
-    } catch (err) {
-      logger.error({ err, eventId: updated.id }, 'Failed to refresh invitation cards after the location edit');
-    }
+    await ctx.locationVerification.refreshInvitationCards(beforeUpdate, updated);
   }
 
   // Trigger background location verification if location was updated with a concrete location

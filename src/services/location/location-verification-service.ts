@@ -184,7 +184,10 @@ export class LocationVerificationService {
    */
   async refreshInvitationCards(before: CalendarEvent, after: CalendarEvent): Promise<void> {
     if (formatLocationHtml(before) === formatLocationHtml(after)) return;
-    await this.updateInvitationMessages(after);
+    // Never rejects: a card that cannot be re-rendered must not fail the edit or stop the question
+    await this.updateInvitationMessages(after).catch((err) => {
+      logger.error({ err, eventId: after.id }, 'Failed to re-render invitation cards after the location change');
+    });
   }
 
   /** The remembered place for this text, else the places a search biased to the home area finds. */

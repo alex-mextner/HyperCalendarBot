@@ -131,9 +131,7 @@ export function createEditValueScene(
 
         // Cards before the question, whose answer re-renders them again (see update_event)
         if (updated && before && locationVerification) {
-          await locationVerification
-            .refreshInvitationCards(before, updated)
-            .catch((err) => botLogger.error({ err, eventId }, 'Failed to refresh invitation cards after the edit'));
+          await locationVerification.refreshInvitationCards(before, updated);
         }
 
         // Same verification and clarification flow as the AI update_event tool.
