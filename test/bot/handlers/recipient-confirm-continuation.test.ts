@@ -1,14 +1,19 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { Scene } from '@gramio/scenes';
+import { Bot, CallbackQueryContext } from 'gramio';
 import type OpenAI from 'openai';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { ContactRepository } from '../../../src/database/repositories/contact.repository.ts';
+import { EditProposalRepository } from '../../../src/database/repositories/edit-proposal.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
+import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
+import { SharedEventRepository } from '../../../src/database/repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
@@ -21,7 +26,10 @@ import type { AgentContext, TelegramSender } from '../../../src/services/ai/type
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
+import { PrivacyService } from '../../../src/services/sharing/privacy-service.ts';
+import { SharingService } from '../../../src/services/sharing/sharing-service.ts';
 
 const ORGANIZER_ID = 1001;
 // Not a bot user and not a saved contact: sending needs the confirm-recipient button.
@@ -61,7 +69,20 @@ describe('confirm-recipient button continues the conversation', () => {
     userRepo.create({ telegram_id: ORGANIZER_ID, timezone: 'UTC', language: 'en' });
     organizer = userRepo.findByTelegramId(ORGANIZER_ID)!;
     const conversationLogger = new ConversationLogger(chatHistory);
-    const invitationService = new InvitationService(invitationRepo, eventRepo, new SharingSettingsRepository(db));
+    const sharingSettingsRepo = new SharingSettingsRepository(db);
+    const privacyService = new PrivacyService(sharingSettingsRepo);
+    const sharing: AgentContext['sharing'] = {
+      invitationRepo,
+      invitationService: new InvitationService(invitationRepo, eventRepo, sharingSettingsRepo),
+      sharingService: new SharingService(
+        (id, start, end) => eventService.getEventsInRange(id, start, end),
+        privacyService,
+      ),
+      sharingSettingsRepo,
+      sharedEventRepo: new SharedEventRepository(db),
+      privacyService,
+      editProposalRepo: new EditProposalRepository(db),
+    };
     buildContext = (user, chatId, messageText) => ({
       user,
       chatId,
@@ -74,7 +95,7 @@ describe('confirm-recipient button continues the conversation', () => {
       userRepo,
       eventReminderRepo: new EventReminderRepository(db),
       contactRepo: new ContactRepository(db),
-      sharing: { invitationRepo, invitationService } as AgentContext['sharing'],
+      sharing,
     });
     sender = {
       sendMessage: mock(() => Promise.resolve({ message_id: 42 })),
@@ -144,16 +165,32 @@ describe('confirm-recipient button continues the conversation', () => {
     };
     const agent = new CalendarBotAgent({}, sender, { streamImpl });
 
-    const handler = createCallbackHandler(eventService, {} as never, {} as never, {} as never, {
-      agentContinuation: { agent, buildContext },
-    });
-    await handler({
-      data: `ric:${approvalId}`,
-      dbUser: organizer,
-      from: { id: ORGANIZER_ID },
-      chatId: ORGANIZER_ID,
-      answer: async () => {},
-    } as never);
+    const handler = createCallbackHandler(
+      eventService,
+      new Scene('unused'),
+      new HolidayService(new HolidayRepository(db)),
+      new NotificationPreferencesService(new NotificationPreferencesRepository(db)),
+      { agentContinuation: { agent, buildContext } },
+    );
+    const bot = new Bot('123:test');
+    bot.api.answerCallbackQuery = async () => true;
+    const buttonMessage = { message_id: 10, date: 0, chat: { id: ORGANIZER_ID, type: 'private' as const } };
+    const press = Object.assign(
+      new CallbackQueryContext({
+        bot,
+        update: { update_id: 1 },
+        updateId: 1,
+        payload: {
+          id: 'callback',
+          chat_instance: 'test',
+          from: { id: ORGANIZER_ID, is_bot: false, first_name: 'Organizer' },
+          data: `ric:${approvalId}`,
+          message: buttonMessage,
+        },
+      }),
+      { dbUser: organizer, userTimezone: organizer.timezone, lang: 'en' as const, scene: { enter: async () => {} } },
+    );
+    await handler(press);
 
     // First provider request already carries the confirmation, saved before the model ran.
     expect(lastUserText(requests[0]!)).toContain(`${CONFIRMATION} for event ${event.id}.`);
