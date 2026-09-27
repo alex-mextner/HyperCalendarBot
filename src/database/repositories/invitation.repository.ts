@@ -127,8 +127,15 @@ export class InvitationRepository {
       .run(proposedTime, id);
   }
 
-  clearProposedTime(id: number): void {
-    this.db.prepare("UPDATE invitations SET proposed_time = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+  /** Drops the proposed time while that exact proposal is still open; false once the invitee answered or changed it. */
+  clearProposedTime(id: number, expectedProposedTime: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE invitations SET proposed_time = NULL, updated_at = datetime('now')
+         WHERE id = ? AND status = 'pending' AND proposed_time = ?`,
+      )
+      .run(id, expectedProposedTime);
+    return result.changes > 0;
   }
 
   /**
