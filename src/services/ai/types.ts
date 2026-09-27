@@ -199,6 +199,13 @@ export interface AgentContext {
   contactRepo?: ContactRepository;
   /** Recipient identities resolved from a requested username during this run. */
   verifiedRecipientIds?: Set<number>;
+  /** Events create_event made during this run; undoing them needs no delete confirmation. */
+  createdEventIds?: Set<number>;
+  /**
+   * `intent_workflow`: a code-defined intent runs the tools after its own confirmation step,
+   * so delete_event does not demand the bot-rendered delete list.
+   */
+  toolOrigin?: 'intent_workflow';
   /** Event participant registry (used independently by events and sharing). */
   participantRepo?: ParticipantRepository;
   /** Type of the current message being processed. */

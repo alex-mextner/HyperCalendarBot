@@ -1,4 +1,12 @@
+import {
+  approveDeletes,
+  chooseTargets,
+  type DeleteTarget,
+  deleteReportForAgent,
+  takeDeleteConfirmation,
+} from '../../services/ai/delete-confirmation.ts';
 import { confirmRecipientApproval, finishRecipientApproval } from '../../services/ai/recipient-confirmation.ts';
+import { executeTool } from '../../services/ai/tool-executor.ts';
 import { enrichAgenda, enrichAgendaEvents } from '../../services/event/agenda-enrichment.ts';
 import { agendaImageErrorMessage, sendAgendaImage } from '../../utils/agenda-image.ts';
 import { editAgendaText, sendAgendaText } from '../commands/agenda-text.ts';
@@ -265,6 +273,60 @@ export function createCallbackHandler(
       finishRecipientApproval(payload, true);
       throw error;
     }
+  });
+
+  // Bot-rendered delete list (ask_user with event_ids): delete exactly the tapped set here, so a
+  // model that deletes a different set, or no AI at all, cannot change what was confirmed.
+  dispatch.set('dlc', async (ctx, payload, _parts, user) => {
+    const tr = t(toLang(user.language)).aiTools.meta;
+    const [confirmationId = '', choice = ''] = payload.split(':');
+    const chatId = Number(ctx.chatId);
+    const targets =
+      agentContinuation && ['u', 'a', 'x'].includes(choice)
+        ? takeDeleteConfirmation(confirmationId, ctx.from.id, chatId)
+        : null;
+    if (!agentContinuation || !targets) {
+      await ctx.answer({ text: tr.deleteConfirmExpired, show_alert: true }).catch(() => {});
+      return;
+    }
+    await ctx.answer().catch(() => {});
+    const question = ctx.message?.text ?? '';
+    const entities = ctx.message?.entities?.map((entity) => entity.payload) ?? [];
+    const withResult = (result: string) => (question ? `${question}\n\n${result}` : result);
+    if (choice === 'x') {
+      await ctx.editText(withResult(tr.deleteCancelled), { entities });
+      return;
+    }
+
+    const chosen = chooseTargets(targets, choice === 'a' ? 'all' : 'upcoming');
+    approveDeletes(
+      user.telegram_id,
+      chatId,
+      chosen.map((target) => target.eventId),
+    );
+    const groupInfo = chatId === user.telegram_id ? undefined : { isGroup: true, groupChatId: chatId };
+    const agentCtx = agentContinuation.buildContext(user, chatId, '', groupInfo);
+    const deleted: DeleteTarget[] = [];
+    const failed: DeleteTarget[] = [];
+    for (const target of chosen) {
+      const result = await executeTool(agentCtx, 'delete_event', {
+        event_id: target.eventId,
+        scope: target.scope,
+        ...(target.ownerId !== undefined && { owner_id: target.ownerId }),
+      });
+      (result.success ? deleted : failed).push(target);
+    }
+    const kept = targets.filter((target) => !chosen.includes(target));
+    const summary = [tr.deleteDone(deleted.length)];
+    if (kept.length > 0) summary.push(tr.deleteKeptPast(kept.length));
+    if (failed.length > 0) summary.push(tr.deleteFailed(failed.map((target) => `«${target.title}»`).join(', ')));
+    await ctx.editText(withResult(summary.join('\n')), { entities });
+    await continueWithAgent(
+      user,
+      deleteReportForAgent({ deleted, kept, failed }, user.timezone),
+      agentContinuation,
+      chatId,
+    ).catch((err: unknown) => cmdLogger.error({ err }, 'AI continuation after delete confirmation failed'));
   });
 
   // Scene help — user asked AI for help during wizard

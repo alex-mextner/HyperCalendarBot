@@ -547,6 +547,12 @@ const toolDefinitions: ToolDefinition[] = [
           items: { type: 'string' },
           description: 'Short button labels (e.g., ["Да", "Нет"])',
         },
+        event_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description:
+            'Events to delete. The bot lists them with local dates, deletes what the user taps, reports back.',
+        },
       },
       required: ['question', 'options'],
     },

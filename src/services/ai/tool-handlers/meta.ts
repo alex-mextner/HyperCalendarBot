@@ -2,6 +2,7 @@ import { t, toLang } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
 import { canResolveRecipientUsername, normalizeRecipientUsername } from '../recipient-identity.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
+import { handleDeleteConfirmationRequest } from './events.ts';
 
 export { handleCalculate } from './calculate.ts';
 export { handleAddContact, handleFindContact, handleGetContacts, handleUpdateContact } from './contacts.ts';
@@ -90,8 +91,9 @@ handleFindUser.meta = { readonly: true, skipActionLog: true } satisfies ToolHand
 
 export async function handleAskUser(
   ctx: AgentContext,
-  input: { question: string; options: string[] },
+  input: { question: string; options: string[]; event_ids?: number[] },
 ): Promise<ToolResult> {
+  if (input.event_ids && input.event_ids.length > 0) return handleDeleteConfirmationRequest(ctx, input.event_ids);
   if (ctx.inputMode === 'live_call') {
     // During a call, no buttons — speak the question with options as numbered list
     const optionText = input.options.map((o, i) => `${i + 1}. ${o}`).join(', ');

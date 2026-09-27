@@ -138,7 +138,7 @@ export interface ToolInputMap {
   };
   set_reminder: { event_id: number; minutes_before: number[]; scope?: 'personal' | 'group'; owner_id?: number };
   find_user: { username: string };
-  ask_user: { question: string; options: string[] };
+  ask_user: { question: string; options: string[]; event_ids?: number[] };
   pick_users: { event_id: number; prompt: string };
   get_contacts: { force?: boolean };
   get_user_info: { telegram_id: number };

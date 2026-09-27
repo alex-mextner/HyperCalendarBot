@@ -1160,6 +1160,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
               );
               // Inject sender so pick_users / ask_user / send_invitation work in intent context
               agentCtx.sender = deps.agent.getSender();
+              // Seeded write workflows ask their own confirmation before any write step.
+              agentCtx.toolOrigin = 'intent_workflow';
               // chatHistoryId is set via buildAgentContextFactory from deps.chatHistoryIds
               // Track which events the intent touches
               agentCtx.onEventMentioned = (eventId) => {

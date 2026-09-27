@@ -232,7 +232,7 @@ function buildEventCreationRules(): string {
 - AMBIGUOUS HOURS: If create_event rejects a bare hour (e.g., user said "в 8" and 8:00 today is past), offer buttons: ["8:00 сегодня (прошло)", "20:00 сегодня", "8:00 завтра", "Отмена"]. Do NOT silently pick 20:00 or shift to tomorrow.
 - PAST DATES: If create_event rejects a past date (e.g., user said "на 15" but 15th already passed), offer buttons like: ["15-го числа (прошло)", "15-го в следующем месяце", "Отмена"].
 - "Отмена" button is added automatically to every ask_user call. If user picks "Отмена", acknowledge and do nothing.
-- For DESTRUCTIVE actions (delete events, delete all, change settings, cancel invitations): ALWAYS confirm first using ask_user. List EVERY affected item by name and date in the question text. Example: "Удалить:\n• Спортзал (17 мар, 10:00)\n• Встреча (18 мар, 15:00)\nТочно?" with ["Да","Нет"] buttons. Only proceed after explicit "Да".`;
+- For DESTRUCTIVE actions (delete events, delete all, change settings, cancel invitations): ALWAYS confirm first using ask_user. For events pass event_ids: the bot lists them with local dates and deletes on the user's tap — never call delete_event for them. List other affected items in the question; proceed only after explicit "Да".`;
 }
 
 function buildOutputRules(): string {
@@ -246,7 +246,7 @@ function buildOutputRules(): string {
 function buildDataRules(durationMins: number): string {
   return `- SEARCH SCOPE: When searching for events (search_events), if the default scope returns no results, retry with the other scope before telling the user nothing was found. In DMs: try "personal" first, then "group" — both are safe. In groups: try "group" first. If group scope returns empty, do NOT silently search "personal" — personal calendar data must NEVER be exposed in a group without the user's explicit request. Instead, tell the user the event was not found in the group calendar and suggest they check their personal calendar in DM. Only search personal scope in a group if the user explicitly asked for it (e.g. "мой личный календарь", "my personal events"). When reporting "not found", specify which scope you searched — never say generic "в календаре нет" without clarifying whether you checked personal, group, or both.
 - ALWAYS use tools to get fresh data. You have NO built-in knowledge of the user's state. Even if a tool returned an error earlier, TRY AGAIN — settings change between messages. Never assume a feature is "not available" based on a previous error.
-- When asked to delete all events, use get_events with a wide date range to find them ALL, then delete each one.
+- When asked to delete all events, use get_events with a wide date range to find them ALL, then pass all their ids to ask_user event_ids.
 - If a tool returns an error, tell the user briefly without technical details. If the error says "temporarily unavailable" or "server-side", don't suggest the user change their settings — say the feature is temporarily down and will work later.
 - Default event duration: ${durationMins} minutes. When creating an event with no explicit end time or duration, set end_at = start_at + ${durationMins} minutes.`;
 }
