@@ -732,7 +732,9 @@ describe('recipient and contact tool boundaries', () => {
       expect(match?.telegram_id).toBeNull();
       expect(found.output).toContain('telegram_id: none');
       expect(found.agentHint).toContain('pick_users');
-      expect(handleGetContacts(ctx, {}).output).toMatch(/Bora Example — contact_id:\d+ — .*telegram_id:none/);
+      const listed = await executeTool(ctx, 'get_contacts', {});
+      expect(listed.output).toMatch(/Bora Example — contact_id:\d+ — .*telegram_id:none/);
+      expect(listed.agentHint).toContain('pick_users');
 
       const result = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: match!.id });
       expect(result.success).toBe(false);
@@ -768,6 +770,7 @@ describe('recipient and contact tool boundaries', () => {
       const ambiguous = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: bora.id });
       expect(ambiguous.success).toBe(false);
       expect(ambiguous.agentHint).toContain('"Bora Example"');
+      expect(ambiguous.agentHint).toContain('pick_users');
       expect(approvals).not.toHaveBeenCalled();
       expect(sendInvitationCalls).not.toHaveBeenCalled();
       expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
@@ -777,6 +780,14 @@ describe('recipient and contact tool boundaries', () => {
         true,
       );
       expect(ctx.sharing!.invitationRepo.getByEvent(event.id).map((i) => i.invitee_id)).toEqual([bora.id]);
+    });
+
+    test('resending an established invitation ignores a later contact row with the same number', async () => {
+      const { event, sendInvitationCalls } = inviteContext();
+      const bora = ctx.contactRepo!.add(10, 'Bora Example');
+      const invitation = ctx.sharing!.invitationService.sendInvitation(event.id, 10, bora.id).invitation!;
+      expect((await handleResendInvitation(ctx, { invitation_id: invitation.id })).success).toBe(true);
+      expect(sendInvitationCalls.mock.calls.map(([id]) => id)).toEqual([bora.id]);
     });
 
     test('a contact with a Telegram ID invites by that ID, never by its row id', async () => {

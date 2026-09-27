@@ -7,7 +7,12 @@ import type { AgentContext, ContactMatch, ToolHandlerMeta, ToolResult, UserInspe
 
 const MAX_CONTACT_MATCHES = 5;
 /** contact_id and telegram_id are both bare integers in tool output; only telegram_id addresses a person. */
-const RECIPIENT_ID_HINT = 'contact_id is an address-book row, never a Telegram ID: invitee_id takes telegram_id.';
+function recipientIdHint(contacts: { telegram_id: number | null }[]): string {
+  const hint = 'contact_id is an address-book row, never a Telegram ID: invitee_id takes telegram_id.';
+  return contacts.some((contact) => contact.telegram_id === null)
+    ? `${hint} telegram_id: none means no linked Telegram account: invite via its saved @username, else pick_users.`
+    : hint;
+}
 
 type RankedContact = { contact: Contact; confidence: number };
 
@@ -86,7 +91,11 @@ export function handleGetContacts(ctx: AgentContext, input: { force?: boolean })
     parts.push(`telegram_id:${c.telegram_id ?? 'none'}`);
     return parts.join(' — ');
   });
-  return { success: true, output: t(lang).aiTools.meta.contactsList(lines.join('\n')) };
+  return {
+    success: true,
+    output: t(lang).aiTools.meta.contactsList(lines.join('\n')),
+    agentHint: recipientIdHint(contacts),
+  };
 }
 handleGetContacts.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
@@ -129,9 +138,7 @@ export function handleFindContact(ctx: AgentContext, input: { name: string }): T
 
   const lang = ctx.user.language;
   const matches = ranked.map(({ contact, confidence }) => toContactMatch(contact, confidence));
-  const agentHint = matches.some((match) => match.telegram_id === null)
-    ? `${RECIPIENT_ID_HINT} telegram_id: none means no linked Telegram account: invite via its saved @username, else pick_users.`
-    : RECIPIENT_ID_HINT;
+  const agentHint = recipientIdHint(matches);
 
   if (ranked.length === 1) {
     const only = ranked[0]!;
