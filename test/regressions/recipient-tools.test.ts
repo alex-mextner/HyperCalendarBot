@@ -26,7 +26,7 @@ import {
 import { handleFindUser } from '../../src/services/ai/tool-handlers/meta.ts';
 import { handleResendInvitation, handleSendInvitation } from '../../src/services/ai/tool-handlers/sharing.ts';
 import { getToolDefinitions } from '../../src/services/ai/tools.ts';
-import type { AgentContext, ToolResult } from '../../src/services/ai/types.ts';
+import type { AgentContext, ContactMatch, ToolResult } from '../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../src/services/conversation-logger.ts';
 import { EventService } from '../../src/services/event/event-service.ts';
 import { GroupMemberService } from '../../src/services/group/member-service.ts';
@@ -699,7 +699,7 @@ describe('recipient and contact tool boundaries', () => {
   });
 
   describe('address-book contact_id is never a Telegram recipient', () => {
-    function lookupMatches(result: ToolResult) {
+    function lookupMatches(result: ToolResult): ContactMatch[] {
       const data = result.data;
       if (!data || Array.isArray(data) || !('matches' in data)) throw new Error('expected find_contact matches');
       return data.matches;
@@ -713,18 +713,18 @@ describe('recipient and contact tool boundaries', () => {
         timezone: 'UTC',
       });
       const approvals = mock(async () => ({ message_id: 2 }));
-      const deliveries = mock(async (_id: number) => ({ message_id: 3 }));
+      const sendInvitationCalls = mock(async (_id: number) => ({ message_id: 3 }));
       ctx.sender = {
         sendMessage: async () => ({ message_id: 1 }),
         editMessageText: async () => {},
         sendMessageWithKeyboard: approvals,
-        sendInvitation: deliveries,
+        sendInvitation: sendInvitationCalls,
       };
-      return { event, approvals, deliveries };
+      return { event, approvals, sendInvitationCalls };
     }
 
     test('a name-only contact routes to pick_users instead of an approval for its row id', async () => {
-      const { event, approvals, deliveries } = inviteContext();
+      const { event, approvals, sendInvitationCalls } = inviteContext();
       ctx.messageText = 'Invite Bora Example from my contacts';
       expect((await executeTool(ctx, 'add_contact', { name: 'Bora Example' })).success).toBe(true);
       const found = await executeTool(ctx, 'find_contact', { name: 'Bora Example' });
@@ -746,7 +746,7 @@ describe('recipient and contact tool boundaries', () => {
         force: true,
       });
       expect(forced.success).toBe(false);
-      expect(deliveries).not.toHaveBeenCalled();
+      expect(sendInvitationCalls).not.toHaveBeenCalled();
       expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
     });
 
@@ -761,8 +761,26 @@ describe('recipient and contact tool boundaries', () => {
       expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
     });
 
+    test('a Telegram ID equal to another contact row id fails closed until verified in this conversation', async () => {
+      const { event, approvals, sendInvitationCalls } = inviteContext();
+      const bora = ctx.contactRepo!.add(10, 'Bora Example');
+      ctx.contactRepo!.add(10, 'Cato Sample', undefined, bora.id);
+      const ambiguous = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: bora.id });
+      expect(ambiguous.success).toBe(false);
+      expect(ambiguous.agentHint).toContain('"Bora Example"');
+      expect(approvals).not.toHaveBeenCalled();
+      expect(sendInvitationCalls).not.toHaveBeenCalled();
+      expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
+
+      ctx.verifiedRecipientIds = new Set([bora.id]);
+      expect((await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: bora.id })).success).toBe(
+        true,
+      );
+      expect(ctx.sharing!.invitationRepo.getByEvent(event.id).map((i) => i.invitee_id)).toEqual([bora.id]);
+    });
+
     test('a contact with a Telegram ID invites by that ID, never by its row id', async () => {
-      const { event, approvals, deliveries } = inviteContext();
+      const { event, approvals, sendInvitationCalls } = inviteContext();
       const found = await executeTool(ctx, 'find_contact', { name: 'Alex' });
       const [match] = lookupMatches(found);
       expect(found.output).toContain('telegram_id: 5000000001');
@@ -775,7 +793,7 @@ describe('recipient and contact tool boundaries', () => {
       const invited = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: match!.telegram_id });
       expect(invited.success).toBe(true);
       expect(ctx.sharing!.invitationRepo.getByEvent(event.id).map((i) => i.invitee_id)).toEqual([5000000001]);
-      expect(deliveries.mock.calls.map(([id]) => id)).toEqual([5000000001]);
+      expect(sendInvitationCalls.mock.calls.map(([id]) => id)).toEqual([5000000001]);
     });
   });
 });
