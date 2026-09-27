@@ -119,8 +119,10 @@ Inviter                     Bot                         Invitee
 **Invitation card roster.** Every invitation card (bot delivery, `/start` deep link, onboarding
 re-display, the answered card and every in-place re-render) ends with the event's roster: the
 organizer, then each invitee with their answer, ordered going, maybe, no answer yet, not going.
-Withdrawn and expired invitations are left out; members who answered through an invited group's
-card are listed while that group invitation is live. At most ten invitees are named and the rest
+Withdrawn and expired invitations are left out. A member's answer through a group's card is listed
+while that group invitation is live, and a group chat sees only its own members' answers
+(`event_participants.source_group_id`; answers of unknown origin are never listed as group answers).
+At most ten invitees are named and the rest
 counted ("…и ещё 3 человека"); invitees that would push the card past Telegram's 4096-character
 limit are counted instead of named. The roster is the organizer's to share: a group chat sees it
 only while it holds a live invitation to the event, a private reader only when on the roster.

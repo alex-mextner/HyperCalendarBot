@@ -912,6 +912,31 @@ describe('sharing tool handlers', () => {
       expect(result.output).not.toContain(`invitee: ${GROUP_CHAT_ID}`);
     });
 
+    test("a member's answer in a withdrawn group is not reported next to a group invited later", async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const groupA = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT_ID);
+      invitationRepo.updateStatus(groupA.id, 'cancelled', 'pending');
+      const groupB = -1007777;
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: groupB });
+      participantRepo.add(event.id, 302, 'accepted', 'attendee', groupB);
+
+      for (const ctx of [
+        makeCtx({ participantRepo }),
+        makeCtx({ participantRepo, isGroup: true, groupChatId: groupB, chatId: groupB }),
+      ]) {
+        const output = handleGetInvitationStatus(ctx, { event_id: event.id }).output ?? '';
+        expect(output).toContain('302');
+        expect(output).not.toContain('301');
+      }
+    });
+
     test('group invitation with no responses yet notes per-member RSVP, not a stale pending line', async () => {
       const participantRepo = new ParticipantRepository(db);
       const event = eventService.createEvent({

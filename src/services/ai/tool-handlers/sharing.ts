@@ -453,10 +453,11 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
   // a per-user view from the personal invitation rows plus the participant rows (the source of truth
   // synced to Google), deduping so every user appears exactly once across both sections.
   const personalInvByUser = new Map<number, Invitation>();
-  let hasGroupInvite = false;
+  const liveGroupChats = new Set<number>();
   for (const inv of ctx.sharing.invitationRepo.getByEvent(input.event_id)) {
     if (inv.invitee_id < 0) {
-      if (inv.status === 'pending' || inv.status === 'accepted' || inv.status === 'maybe') hasGroupInvite = true;
+      if (inv.status === 'pending' || inv.status === 'accepted' || inv.status === 'maybe')
+        liveGroupChats.add(inv.invitee_id);
       continue;
     }
     personalInvByUser.set(inv.invitee_id, inv);
@@ -476,12 +477,20 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
   // attending count would be misleadingly low (personal invitees only).
   let isGroupDegraded = false;
 
-  if (hasGroupInvite) {
+  if (liveGroupChats.size > 0) {
     if (participantRows === null) {
       isGroupDegraded = true;
       botLogger.warn({ eventId: input.event_id }, 'group rsvp: participant repo absent, attending count suppressed');
     }
-    const group = describeGroupRsvp(lang, participantRows, personal.listedUserIds);
+    // A member's answer counts while the group whose card carried it is still invited; in a group chat
+    // only that chat's own answers are shown. An answer of unknown origin stays out of group chats.
+    const groupRows =
+      participantRows?.filter((p) =>
+        p.source_group_id === null
+          ? !ctx.isGroup
+          : liveGroupChats.has(p.source_group_id) && (!ctx.isGroup || p.source_group_id === ctx.groupChatId),
+      ) ?? null;
+    const group = describeGroupRsvp(lang, groupRows, personal.listedUserIds);
     lines.push(...group.lines);
     for (const member of group.members) {
       if (isRsvpAttending(member.status)) attending++;

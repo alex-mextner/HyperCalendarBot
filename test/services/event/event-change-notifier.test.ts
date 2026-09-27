@@ -50,6 +50,7 @@ function makeParticipant(userId: number, status = 'accepted'): EventParticipant 
     user_id: userId,
     status: status as EventParticipant['status'],
     role: 'attendee',
+    source_group_id: null,
     created_at: '',
     updated_at: '',
   };

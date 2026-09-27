@@ -1055,4 +1055,13 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE users DROP COLUMN assistant_enabled');
     },
   },
+  {
+    // Which group chat an answer came through, so a group's invitation card lists only its own
+    // members' answers. Personal answers and rows from before this column stay NULL (unknown origin)
+    // and are never shown as group answers.
+    name: '064_event_participant_source_group',
+    up(db) {
+      db.exec('ALTER TABLE event_participants ADD COLUMN source_group_id INTEGER');
+    },
+  },
 ];
