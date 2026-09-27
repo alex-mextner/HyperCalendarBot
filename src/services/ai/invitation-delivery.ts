@@ -148,17 +148,7 @@ export async function deliverInvitation(
     // User-session MTProto: first-person text via user's own connected session
     const userFirstPersonText =
       event && url && sender.sendAsConnectedUser
-        ? buildUserSessionInvitationText({
-            event: {
-              title: event.title,
-              start_utc: event.start_at,
-              location: event.location,
-              description: event.description,
-            },
-            inviterTimezone,
-            deepLink: url,
-            lang,
-          })
+        ? buildUserSessionInvitationText({ event, inviterTimezone, deepLink: url, lang })
         : null;
 
     const userMtprotoSend =

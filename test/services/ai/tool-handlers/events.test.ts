@@ -245,6 +245,71 @@ describe('event tool handlers', () => {
     });
   });
 
+  describe('location in event tool output', () => {
+    const SOON = new Date(Date.now() + 2 * 86400000).toISOString();
+    const PLACE = 'verified place: Кафе Ромашка — ул. Примерная, 1, Москва';
+
+    /** An event typed as "кафе у парка" that a geocode matched to a synthetic venue. */
+    function createGeocodedEvent(locationVerified: 0 | 1): number {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Обед',
+        start_at: SOON,
+        timezone: 'UTC',
+        location: 'кафе у парка',
+      });
+      new EventRepository(db).updateLocationFields(event.id, {
+        resolved_address: 'ул. Примерная, 1, Москва',
+        latitude: 55.75,
+        longitude: 37.61,
+        google_maps_url: 'https://www.google.com/maps/search/?api=1&query=55.75,37.61',
+        location_verified: locationVerified,
+        venue_name: 'Кафе Ромашка',
+      });
+      return event.id;
+    }
+
+    test('get_event names the typed text and the verified venue with its address', async () => {
+      const eventId = createGeocodedEvent(1);
+      const result = await handleGetEvent(ctx, { event_id: eventId });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain(`location: кафе у парка, ${PLACE}`);
+    });
+
+    test('get_event marks an unverified location and never shows its geocode', async () => {
+      const eventId = createGeocodedEvent(0);
+      const result = await handleGetEvent(ctx, { event_id: eventId });
+      expect(result.output).toContain('location: кафе у парка (not verified)');
+      expect(result.output).not.toContain('Примерная');
+      expect(result.output).not.toContain('Ромашка');
+    });
+
+    test('update_event output keeps the verified place of the updated event', async () => {
+      const eventId = createGeocodedEvent(1);
+      const result = await handleUpdateEvent(ctx, { event_id: eventId, title: 'Обед с Леной' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain(`location: кафе у парка, ${PLACE}`);
+    });
+
+    test('update_event output marks an unverified location', async () => {
+      const eventId = createGeocodedEvent(0);
+      const result = await handleUpdateEvent(ctx, { event_id: eventId, title: 'Обед с Леной' });
+      expect(result.output).toContain('location: кафе у парка (not verified)');
+      expect(result.output).not.toContain('Примерная');
+    });
+
+    test('event lists (get_events, search_events, get_upcoming) show the verified place', async () => {
+      createGeocodedEvent(1);
+      const day = SOON.slice(0, 10);
+      const listed = await handleGetEvents(ctx, { start_date: day, end_date: day });
+      const searched = await handleSearchEvents(ctx, { query: 'Обед' });
+      const upcoming = await handleGetUpcoming(ctx, {});
+      for (const result of [listed, searched, upcoming]) {
+        expect(result.output).toContain(`location: кафе у парка, ${PLACE}`);
+      }
+    });
+  });
+
   describe('handleDeleteEvent', () => {
     test('deletes event', async () => {
       const event = ctx.eventService.createEvent({

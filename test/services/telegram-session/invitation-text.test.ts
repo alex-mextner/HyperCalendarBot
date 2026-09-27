@@ -3,9 +3,23 @@ import { buildUserSessionInvitationText } from '../../../src/services/telegram-s
 
 const baseEvent = {
   title: 'Обед с Леной',
-  start_utc: '2026-04-20T10:00:00Z',
+  start_at: '2026-04-20T10:00:00Z',
   location: 'Кофемания',
   description: 'Обсудим новый проект',
+  resolved_address: null,
+  venue_name: null,
+  location_verified: 0,
+  google_maps_url: null,
+};
+
+const MAP_URL = 'https://www.google.com/maps/search/?api=1&query=55.75,37.61&query_place_id=synthetic-place';
+const verifiedEvent = {
+  ...baseEvent,
+  location: 'кафе у парка',
+  resolved_address: 'ул. Примерная, 1, Москва',
+  venue_name: 'Кафе Ромашка',
+  location_verified: 1,
+  google_maps_url: MAP_URL,
 };
 
 describe('buildUserSessionInvitationText', () => {
@@ -66,5 +80,30 @@ describe('buildUserSessionInvitationText', () => {
       lang: 'ru',
     });
     expect(text).not.toContain('Обсудим');
+  });
+
+  test('verified location: shows the venue, the resolved address and a map link', () => {
+    const text = buildUserSessionInvitationText({
+      event: verifiedEvent,
+      inviterTimezone: 'Europe/Moscow',
+      deepLink: 'https://t.me/hypercal_bot?start=invite_123',
+      lang: 'ru',
+    });
+    expect(text).toContain(`📍 Кафе Ромашка — ул. Примерная, 1, Москва\n${MAP_URL}`);
+    expect(text).not.toContain('кафе у парка');
+    expect(text).toContain('https://t.me/hypercal_bot?start=invite_123');
+  });
+
+  test('unverified location: exactly the typed text, no address and no map link', () => {
+    const text = buildUserSessionInvitationText({
+      event: { ...verifiedEvent, location_verified: 0 },
+      inviterTimezone: 'Europe/Moscow',
+      deepLink: 'https://t.me/hypercal_bot?start=invite_123',
+      lang: 'ru',
+    });
+    expect(text).toContain('📍 кафе у парка\n');
+    expect(text).not.toContain('Примерная');
+    expect(text).not.toContain('Ромашка');
+    expect(text).not.toContain('google.com/maps');
   });
 });

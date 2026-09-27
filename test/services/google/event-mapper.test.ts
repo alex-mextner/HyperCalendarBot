@@ -13,6 +13,9 @@ describe('event-mapper', () => {
         all_day: 0,
         timezone: 'Europe/Kyiv',
         location: 'Office',
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
         recurrence_rule: null,
         reminder_overrides: null,
         sync_version: 1,
@@ -35,6 +38,9 @@ describe('event-mapper', () => {
         timezone: 'UTC',
         description: null,
         location: null,
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
         recurrence_rule: null,
         reminder_overrides: null,
         sync_version: 0,
@@ -54,6 +60,9 @@ describe('event-mapper', () => {
         timezone: 'UTC',
         description: null,
         location: null,
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
         recurrence_rule: null,
         reminder_overrides: null,
         sync_version: 0,
@@ -72,6 +81,9 @@ describe('event-mapper', () => {
         timezone: 'UTC',
         description: null,
         location: null,
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
         recurrence_rule: null,
         reminder_overrides: null,
         sync_version: 0,
@@ -90,6 +102,9 @@ describe('event-mapper', () => {
         timezone: 'UTC',
         description: null,
         location: null,
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
         recurrence_rule: 'RRULE:FREQ=WEEKLY;BYDAY=MO',
         reminder_overrides: null,
         sync_version: 0,
@@ -107,6 +122,9 @@ describe('event-mapper', () => {
         timezone: 'Europe/Moscow',
         description: null,
         location: null,
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
         recurrence_rule: 'RRULE:FREQ=WEEKLY\nEXDATE;TZID=Europe/Moscow:20260401T090000',
         reminder_overrides: null,
         sync_version: 1,
@@ -124,6 +142,9 @@ describe('event-mapper', () => {
         timezone: 'UTC',
         description: null,
         location: null,
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
         recurrence_rule: null,
         reminder_overrides: null,
         sync_version: 3,
@@ -142,6 +163,9 @@ describe('event-mapper', () => {
         timezone: 'UTC',
         description: null,
         location: null,
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
         recurrence_rule: null,
         reminder_overrides: '[5, 30]',
         sync_version: 0,
@@ -151,6 +175,39 @@ describe('event-mapper', () => {
         { method: 'popup', minutes: 5 },
         { method: 'popup', minutes: 30 },
       ]);
+    });
+
+    describe('location', () => {
+      const geocoded = {
+        id: 5,
+        title: 'Обед',
+        start_at: '2026-03-15T10:00:00Z',
+        end_at: '2026-03-15T11:00:00Z',
+        all_day: 0,
+        timezone: 'Europe/Moscow',
+        description: null,
+        location: 'кафе у парка',
+        resolved_address: 'ул. Примерная, 1, Москва',
+        venue_name: 'Кафе Ромашка',
+        recurrence_rule: null,
+        reminder_overrides: null,
+        sync_version: 1,
+      };
+
+      test('verified location sends the venue and resolved address for Google to geocode', () => {
+        const result = localToGoogle({ ...geocoded, location_verified: 1 });
+        expect(result.location).toBe('Кафе Ромашка — ул. Примерная, 1, Москва');
+      });
+
+      test('verified location without a venue sends the resolved address', () => {
+        const result = localToGoogle({ ...geocoded, venue_name: null, location_verified: 1 });
+        expect(result.location).toBe('ул. Примерная, 1, Москва');
+      });
+
+      test('unverified location sends exactly the typed text, never the geocode', () => {
+        const result = localToGoogle({ ...geocoded, location_verified: 0 });
+        expect(result.location).toBe('кафе у парка');
+      });
     });
   });
 
@@ -250,6 +307,9 @@ describe('localToGoogle — reminder_overrides resilience', () => {
     timezone: 'UTC',
     description: null,
     location: null,
+    resolved_address: null,
+    venue_name: null,
+    location_verified: 0,
     recurrence_rule: null,
     sync_version: 0,
   };
@@ -287,6 +347,9 @@ describe('localToGoogle — reminder_overrides resilience', () => {
     timezone: 'UTC',
     description: null,
     location: null,
+    resolved_address: null,
+    venue_name: null,
+    location_verified: 0,
     recurrence_rule: null,
     sync_version: 0,
   };

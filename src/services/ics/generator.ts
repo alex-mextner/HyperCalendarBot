@@ -2,6 +2,7 @@
 // Not currently wired up — /export command has not been implemented yet.
 // src/services/ics/generator.ts
 import type { CalendarEvent } from '../../database/types.ts';
+import { formatLocationPlain } from '../location/format-location.ts';
 
 /**
  * Generate ICS (iCalendar) string from events
@@ -20,7 +21,7 @@ function eventToVevent(event: CalendarEvent): string {
   if (event.end_at) lines.push(`DTEND:${isoToIcsDate(event.end_at)}`);
   lines.push(`SUMMARY:${escapeIcs(event.title)}`);
   if (event.description) lines.push(`DESCRIPTION:${escapeIcs(event.description)}`);
-  if (event.location) lines.push(`LOCATION:${escapeIcs(event.location)}`);
+  if (event.location) lines.push(`LOCATION:${escapeIcs(formatLocationPlain(event))}`);
   if (event.recurrence_rule) lines.push(`RRULE:${event.recurrence_rule}`);
   lines.push(`CREATED:${isoToIcsDate(event.created_at)}`);
   lines.push('END:VEVENT');

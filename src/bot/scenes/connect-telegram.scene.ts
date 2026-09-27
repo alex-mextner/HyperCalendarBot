@@ -681,17 +681,7 @@ function deliverPostConnectInvitation(
     return;
   }
 
-  const text = buildUserSessionInvitationText({
-    event: {
-      title: event.title,
-      start_utc: event.start_at,
-      location: event.location,
-      description: event.description,
-    },
-    inviterTimezone,
-    deepLink,
-    lang,
-  });
+  const text = buildUserSessionInvitationText({ event, inviterTimezone, deepLink, lang });
 
   deps
     .sendAsConnectedUser(inviterId, inviteeId, text, inviteeUsername, { invitationId })
