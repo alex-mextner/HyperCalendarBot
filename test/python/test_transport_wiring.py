@@ -1,4 +1,5 @@
 import contextlib
+import enum
 import importlib.util
 import io
 import json
@@ -13,6 +14,8 @@ SCRIPTS = Path(__file__).resolve().parents[2] / 'scripts'
 ERRORS = types.ModuleType('pyrogram.errors')
 for name in ['AuthKeyUnregistered', 'FloodWait', 'PeerIdInvalid', 'SessionRevoked', 'UserDeactivated']:
     setattr(ERRORS, name, type(name, (Exception,), {}))
+ENUMS = types.ModuleType('pyrogram.enums')
+ENUMS.ParseMode = enum.Enum('ParseMode', ['DEFAULT', 'MARKDOWN', 'HTML', 'DISABLED'])
 
 
 class SessionClient(FakeClient):
@@ -34,7 +37,7 @@ def load_script(filename, client=None):
     module = importlib.util.module_from_spec(spec)
     pyrogram = types.ModuleType('pyrogram')
     pyrogram.Client = lambda **kwargs: client
-    with patch.dict(sys.modules, {'pyrogram': pyrogram, 'pyrogram.errors': ERRORS}):
+    with patch.dict(sys.modules, {'pyrogram': pyrogram, 'pyrogram.errors': ERRORS, 'pyrogram.enums': ENUMS}):
         spec.loader.exec_module(module)
     return module
 
@@ -126,3 +129,23 @@ class TransportWiringTests(unittest.IsolatedAsyncioTestCase):
                         self.assertTrue(await script.send_with_retry(client, 5000000001, 'synthetic', 'reassigned'))
                 self.assertEqual(client.lookups, [5000000001])
                 self.assertEqual(client.sent, [(5000000001, 'synthetic')])
+
+    async def test_personal_sender_delivers_first_person_text_verbatim(self):
+        text = (
+            'Synthetic **title** <b>tag</b> __under__ ~~strike~~ ||spoiler|| '
+            'https://www.google.com/maps/search/?api=1&query=Synthetic&query_place_id=ChIJ--ab__cd--x'
+        )
+        client = SessionClient()
+        script = load_script('send-as-user.py', client)
+        with contextlib.redirect_stdout(io.StringIO()):
+            await script.send_message('/tmp/synthetic-only.session', 5000000001, text, None)
+        self.assertEqual(client.sent, [(5000000001, text)])
+        self.assertEqual(client.parse_modes, [ENUMS.ParseMode.DISABLED])
+
+    async def test_admin_sender_keeps_default_parsing_for_bot_html(self):
+        client = SessionClient()
+        script = load_script('send-message.py')
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(await script.send_with_retry(client, 5000000001, '<b>Synthetic</b> reminder', None))
+        self.assertEqual(client.sent, [(5000000001, '<b>Synthetic</b> reminder')])
+        self.assertEqual(client.parse_modes, [None])

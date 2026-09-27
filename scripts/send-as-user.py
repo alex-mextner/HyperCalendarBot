@@ -11,6 +11,7 @@ from pathlib import Path
 from recipient_identity import RecipientMismatch, send_to_recipient
 
 from pyrogram import Client
+from pyrogram.enums import ParseMode
 from pyrogram.errors import (
     AuthKeyUnregistered,
     FloodWait,
@@ -35,7 +36,9 @@ async def send_message(
     )
     try:
         await client.connect()
-        await send_to_recipient(client, user_id, text, username)
+        # First-person text is plain: default parsing would strip -- and __ from map
+        # place IDs and turn ** or <b> in titles into formatting.
+        await send_to_recipient(client, user_id, text, username, parse_mode=ParseMode.DISABLED)
         print(json.dumps({"status": "ok"}))
     except (AuthKeyUnregistered, SessionRevoked, UserDeactivated) as e:
         print(

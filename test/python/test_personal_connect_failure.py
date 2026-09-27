@@ -27,13 +27,18 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         )
         pyrogram = types.ModuleType("pyrogram")
         pyrogram.Client = lambda **kwargs: client
+        enums = types.ModuleType("pyrogram.enums")
+        enums.ParseMode = types.SimpleNamespace(DISABLED="disabled")
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
         spec = importlib.util.spec_from_file_location(
             "tested_personal_sender",
             Path(__file__).resolve().parents[2] / "scripts/send-as-user.py",
         )
         module = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {"pyrogram": pyrogram, "pyrogram.errors": errors}):
+        with patch.dict(
+            sys.modules,
+            {"pyrogram": pyrogram, "pyrogram.errors": errors, "pyrogram.enums": enums},
+        ):
             spec.loader.exec_module(module)
         output = io.StringIO()
         with (
