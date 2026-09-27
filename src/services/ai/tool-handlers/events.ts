@@ -50,9 +50,10 @@ function expandDateOnly(dateStr: string, timezone: string): { start: string; end
 function locationParts(
   e: Pick<CalendarEvent, 'location' | 'resolved_address' | 'venue_name' | 'location_verified'>,
 ): string[] {
-  if (e.location_verified === 1) {
-    const place = `verified place: ${formatLocationPlain(e)}`;
-    return [e.location ? `location: ${e.location}, ${place}` : place];
+  const place = formatLocationPlain(e);
+  if (e.location_verified === 1 && place) {
+    const verified = `verified place: ${place}`;
+    return [e.location ? `location: ${e.location}, ${verified}` : verified];
   }
   return e.location ? [`location: ${e.location} (not verified)`] : [];
 }

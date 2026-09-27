@@ -57,9 +57,22 @@ test('places marked verified before the bot asked for every place count as uncon
            (2, 101, 'Lunch', '2026-10-06T12:00:00Z', 'Europe/Belgrade', 'дома',
             NULL, NULL, NULL, NULL, 0, NULL, '2026-09-20 10:00:00', 1);
   `);
+  type PlaceRow = Pick<
+    CalendarEvent,
+    | 'id'
+    | 'location'
+    | 'resolved_address'
+    | 'latitude'
+    | 'longitude'
+    | 'google_maps_url'
+    | 'location_verified'
+    | 'venue_name'
+    | 'updated_at'
+    | 'sync_version'
+  >;
   const place = () =>
     db
-      .query<Pick<CalendarEvent, 'id' | 'location_verified'>, []>(
+      .query<PlaceRow, []>(
         `SELECT id, location, resolved_address, latitude, longitude, google_maps_url, location_verified, venue_name,
                 updated_at, sync_version FROM events ORDER BY id`,
       )
