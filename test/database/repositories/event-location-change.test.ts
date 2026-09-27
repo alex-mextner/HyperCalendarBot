@@ -256,6 +256,26 @@ describe('changing an event location drops the old resolved place (#395)', () =>
       expectCleared(readColumns(db, event.id), null);
     });
 
+    test('AI update_event removing the location drops a place a pin set on an event without typed text', async () => {
+      const event = events.create({
+        user_id: USER_ID,
+        title: 'Dinner',
+        start_at: '2026-10-05T17:00:00Z',
+        timezone: 'UTC',
+      });
+      events.updateLocationFields(event.id, OLD_PLACE);
+      const user = new UserRepository(db).findByTelegramId(USER_ID);
+      if (!user) throw new Error('user missing');
+
+      const result = await handleUpdateEvent(makeAgentCtx({ user, eventService: service }), {
+        event_id: event.id,
+        location: null,
+      });
+
+      expect(result.success).toBe(true);
+      expectCleared(readColumns(db, event.id), null);
+    });
+
     describe('Google Calendar incremental pull', () => {
       let sync: SyncService;
 

@@ -3,6 +3,7 @@ import { Scene } from '@gramio/scenes';
 import { addMinutes } from 'date-fns';
 import { t } from '../../config/constants.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
+import { CLEARED_LOCATION } from '../../database/repositories/event.repository.ts';
 import type { UpdateEventData } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
@@ -103,7 +104,11 @@ export function createEditValueScene(
         } else if (field === 'description') {
           updateData.description = text.toLowerCase() === 'clear' ? null : text;
         } else if (field === 'location') {
-          updateData.location = text.toLowerCase() === 'clear' ? null : text;
+          if (text.toLowerCase() === 'clear') {
+            Object.assign(updateData, CLEARED_LOCATION);
+          } else {
+            updateData.location = text;
+          }
         }
 
         const updated = eventService.updateEvent(eventId, user.telegram_id, updateData);

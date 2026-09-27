@@ -77,6 +77,22 @@ const RESOLVED_LOCATION_RESETS = [
   ['location_verified', '0'],
 ] as const satisfies readonly (readonly [keyof UpdateEventData, string])[];
 
+/**
+ * Update fields that remove an event's location together with its resolved place. An explicit
+ * removal must also drop a place a pin set on an event without typed text, which the text-change
+ * reset in `buildUpdateQuery` cannot see (NULL → NULL looks unchanged). Only explicit removals use
+ * it: a Google pull writes `location: null` on unrelated changes and must keep such a place.
+ */
+export const CLEARED_LOCATION = {
+  location: null,
+  resolved_address: null,
+  latitude: null,
+  longitude: null,
+  google_maps_url: null,
+  venue_name: null,
+  location_verified: 0,
+} as const satisfies UpdateEventData;
+
 export class EventRepository {
   /**
    * Tables that `cascadeCleanupChildren` should wipe when a parent event

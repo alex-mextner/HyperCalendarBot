@@ -165,6 +165,29 @@ describe('edit_value scene: Location button', () => {
     expect(verifyEventLocation).not.toHaveBeenCalled();
   });
 
+  test('"clear" drops a place a pin set on an event without typed text', async () => {
+    const event = events.create({
+      user_id: USER_ID,
+      title: 'Dinner',
+      start_at: '2026-10-05T17:00:00Z',
+      timezone: 'UTC',
+    });
+    events.updateLocationFields(event.id, OLD_PLACE);
+
+    await step(makeCtx(event.id, 'location', 'clear'), () => Promise.resolve());
+
+    expect(events.findById(event.id, USER_ID)).toMatchObject({
+      location: null,
+      resolved_address: null,
+      latitude: null,
+      longitude: null,
+      google_maps_url: null,
+      location_verified: 0,
+      venue_name: null,
+    });
+    expect(verifyEventLocation).not.toHaveBeenCalled();
+  });
+
   test('editing another field keeps the resolved place and verifies nothing', async () => {
     const event = resolvedEvent();
     await step(makeCtx(event.id, 'title', 'Late dinner'), () => Promise.resolve());
