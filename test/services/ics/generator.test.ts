@@ -102,4 +102,16 @@ describe('generateIcs', () => {
     expect(ics).toContain('LOCATION:кафе у парка\n');
     expect(ics).not.toContain('Примерная');
   });
+
+  test('LOCATION carries a place confirmed with a pin on an event without typed text', () => {
+    const ics = generateIcs([
+      makeEvent({
+        location: null,
+        resolved_address: 'ул. Примерная, 1, Москва',
+        venue_name: 'Кафе Ромашка',
+        location_verified: 1,
+      }),
+    ]);
+    expect(ics).toContain('LOCATION:Кафе Ромашка — ул. Примерная\\, 1\\, Москва\n');
+  });
 });

@@ -319,6 +319,33 @@ describe('event tool handlers', () => {
         expect(result.output).toContain(`location: кафе у парка, ${PLACE}`);
       }
     });
+
+    test('a place confirmed with a pin on an event without typed text is shown and pushed to Google', async () => {
+      const event = ctx.eventService.createEvent({ user_id: USER_ID, title: 'Обед', start_at: SOON, timezone: 'UTC' });
+      new EventRepository(db).updateLocationFields(event.id, {
+        resolved_address: 'ул. Примерная, 1, Москва',
+        latitude: 55.75,
+        longitude: 37.61,
+        google_maps_url: 'https://www.google.com/maps/search/?api=1&query=55.75,37.61',
+        location_verified: 1,
+        venue_name: 'Кафе Ромашка',
+      });
+
+      const single = await handleGetEvent(ctx, { event_id: event.id });
+      const day = SOON.slice(0, 10);
+      const lists = [
+        await handleGetEvents(ctx, { start_date: day, end_date: day }),
+        await handleSearchEvents(ctx, { query: 'Обед' }),
+        await handleGetUpcoming(ctx, {}),
+      ];
+
+      for (const result of [single, ...lists]) {
+        expect(result.output).toContain(PLACE);
+        expect(result.output).not.toContain('location: null');
+      }
+      const row = new EventRepository(db).findById(event.id, USER_ID)!;
+      expect(localToGoogle(row).location).toBe('Кафе Ромашка — ул. Примерная, 1, Москва');
+    });
   });
 
   describe('handleDeleteEvent', () => {

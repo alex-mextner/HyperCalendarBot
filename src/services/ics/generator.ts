@@ -21,7 +21,8 @@ function eventToVevent(event: CalendarEvent): string {
   if (event.end_at) lines.push(`DTEND:${isoToIcsDate(event.end_at)}`);
   lines.push(`SUMMARY:${escapeIcs(event.title)}`);
   if (event.description) lines.push(`DESCRIPTION:${escapeIcs(event.description)}`);
-  if (event.location) lines.push(`LOCATION:${escapeIcs(formatLocationPlain(event))}`);
+  const location = formatLocationPlain(event);
+  if (location) lines.push(`LOCATION:${escapeIcs(location)}`);
   if (event.recurrence_rule) lines.push(`RRULE:${event.recurrence_rule}`);
   lines.push(`CREATED:${isoToIcsDate(event.created_at)}`);
   lines.push('END:VEVENT');

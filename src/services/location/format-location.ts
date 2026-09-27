@@ -38,16 +38,16 @@ export function formatLocationHtml(event: LocationFields): string {
 
 /**
  * Format location as plain text (for contexts where HTML links aren't supported).
- * A verified location shows the resolved place ("Venue — Address"); an unverified one shows exactly
- * the typed text, so an unconfirmed geocode never leaves the bot.
+ * A verified location shows the resolved place ("Venue — Address"), also on an event with no typed
+ * text that a pin resolved; an unverified one shows exactly the typed text, so an unconfirmed
+ * geocode never leaves the bot.
  */
 export function formatLocationPlain(
   event: Pick<CalendarEvent, 'location' | 'resolved_address' | 'location_verified'> & { venue_name?: string | null },
 ): string {
-  if (!event.location) return '';
-  if (event.location_verified !== 1) return event.location;
+  if (event.location_verified !== 1) return event.location ?? '';
   if (event.venue_name) {
     return event.resolved_address ? `${event.venue_name} — ${event.resolved_address}` : event.venue_name;
   }
-  return event.resolved_address ?? event.location;
+  return event.resolved_address ?? event.location ?? '';
 }

@@ -106,4 +106,14 @@ describe('buildUserSessionInvitationText', () => {
     expect(text).not.toContain('Ромашка');
     expect(text).not.toContain('google.com/maps');
   });
+
+  test('a place confirmed with a pin on an event without typed text is shown with its map link', () => {
+    const text = buildUserSessionInvitationText({
+      event: { ...verifiedEvent, location: null },
+      inviterTimezone: 'Europe/Moscow',
+      deepLink: 'https://t.me/hypercal_bot?start=invite_123',
+      lang: 'ru',
+    });
+    expect(text).toContain(`📍 Кафе Ромашка — ул. Примерная, 1, Москва\n${MAP_URL}`);
+  });
 });

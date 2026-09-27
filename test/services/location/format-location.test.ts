@@ -148,4 +148,26 @@ describe('formatLocationPlain', () => {
       }),
     ).toBe('кафе у парка');
   });
+
+  test('returns a place confirmed with a pin even when the event has no typed text', () => {
+    expect(
+      formatLocationPlain({
+        location: null,
+        resolved_address: 'ул. Примерная, 1, Москва',
+        venue_name: 'Кафе Ромашка',
+        location_verified: 1,
+      }),
+    ).toBe('Кафе Ромашка — ул. Примерная, 1, Москва');
+  });
+
+  test('returns nothing for a stale unverified place on an event without typed text', () => {
+    expect(
+      formatLocationPlain({
+        location: null,
+        resolved_address: 'ул. Примерная, 1, Москва',
+        venue_name: 'Кафе Ромашка',
+        location_verified: 0,
+      }),
+    ).toBe('');
+  });
 });
