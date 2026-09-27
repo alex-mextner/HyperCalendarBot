@@ -24,6 +24,7 @@ import {
 } from '../../../../src/services/ai/tool-handlers/events.ts';
 import type { AgentContext, GroupCapability } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
+import { localToGoogle } from '../../../../src/services/google/event-mapper.ts';
 import type { GroupMemberService } from '../../../../src/services/group/member-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 
@@ -296,6 +297,16 @@ describe('event tool handlers', () => {
       const result = await handleUpdateEvent(ctx, { event_id: eventId, title: 'Обед с Леной' });
       expect(result.output).toContain('location: кафе у парка (not verified)');
       expect(result.output).not.toContain('Примерная');
+    });
+
+    test('a new location on a verified event is reported and pushed to Google as the new typed text', async () => {
+      const eventId = createGeocodedEvent(1);
+      const result = await handleUpdateEvent(ctx, { event_id: eventId, location: 'Starbucks Тверская' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('location: Starbucks Тверская (not verified)');
+      expect(result.output).not.toContain('Ромашка');
+      const row = new EventRepository(db).findById(eventId, USER_ID)!;
+      expect(localToGoogle(row).location).toBe('Starbucks Тверская');
     });
 
     test('event lists (get_events, search_events, get_upcoming) show the verified place', async () => {
