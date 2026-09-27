@@ -1670,20 +1670,6 @@ describe('CalendarBotAgent.run()', () => {
     expect(deleteMessage).toHaveBeenCalledTimes(0);
   });
 
-  test('[SKIP] response in DM is discarded (placeholder deleted)', async () => {
-    const { impl } = makeStreamImpl([{ kind: 'text', text: '[SKIP]' }]);
-    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
-    const deleteMessage = mock(() => Promise.resolve());
-    (sender as TelegramSender).deleteMessage = deleteMessage;
-
-    ctx.isGroup = false;
-    const result = await agent.run(ctx);
-
-    expect(result.responseText).toBe('');
-    expect(deleteMessage).toHaveBeenCalledTimes(1);
-    expect(sender.editMessageText).not.toHaveBeenCalled();
-  });
-
   test('[SKIP] with trailing whitespace is still discarded in group', async () => {
     const { impl } = makeStreamImpl([{ kind: 'text', text: '[SKIP]\n' }]);
     const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
@@ -1914,7 +1900,7 @@ describe('CalendarBotAgent.run()', () => {
     //   - Second validator call: APPROVE (a second REJECT must not be persisted)
     let round = 0;
     let validationCalls = 0;
-    const impl = async (opts: StreamRoundOptions) => {
+    const impl = async (opts: StreamRoundOptions, cbs: StreamCallbacks = {}) => {
       if (isValidatorCall(opts)) {
         const verdict = validationCalls++ === 0 ? 'REJECT: no tool used' : 'APPROVE';
         const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: verdict };
@@ -1928,6 +1914,8 @@ describe('CalendarBotAgent.run()', () => {
       }
       round++;
       const text = round === 1 ? 'hallucinated answer' : 'corrected answer';
+      // Stream like the real provider does, so the writer shows the approved retry text.
+      cbs.onTextDelta?.(text);
       const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: text };
       return {
         text,

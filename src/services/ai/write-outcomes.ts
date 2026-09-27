@@ -76,15 +76,23 @@ export class WriteOutcomes {
   }
 
   finalNotice(language: string, hideTargets = false, interrupted = false): string | null {
-    const outcomes = [...this.outcomes.values()];
-    const needsGuard = outcomes.some(
+    const needsGuard = [...this.outcomes.values()].some(
       (outcome) =>
         !outcome.success ||
         outcome.effect?.kind === 'attendance_declined' ||
         (outcome.effect?.kind === 'invitation' && outcome.effect.delivery !== 'delivered'),
     );
     if (!interrupted && !needsGuard) return null;
+    return this.describe(language, hideTargets, interrupted);
+  }
 
+  /** Every recorded write, clean successes included — for a private-chat turn the model left without an answer. */
+  summary(language: string): string | null {
+    return this.describe(language, false, false);
+  }
+
+  private describe(language: string, hideTargets: boolean, interrupted: boolean): string | null {
+    const outcomes = [...this.outcomes.values()];
     // Attempt framing is useful only when something actually failed/skipped and
     // a later receipt may correct it. On a clean success (including an
     // interrupted run where writes already landed) it reads like internal debug

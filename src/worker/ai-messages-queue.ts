@@ -32,6 +32,8 @@ export class SyntheticPipelineRunner {
       const agentCtx = this.deps.contextBuilder(user, user.telegram_id, jobData.message);
       const currentAttempt = jobData.retryAttempt ?? 0;
       agentCtx.retryAttempt = currentAttempt;
+      // Only a retry answers a user's message; the first attempt is the schedule/trigger itself.
+      agentCtx.unprompted = currentAttempt === 0;
 
       if (this.deps.retryQueue) {
         const queue = this.deps.retryQueue;

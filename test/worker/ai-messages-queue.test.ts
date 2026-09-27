@@ -274,6 +274,32 @@ describe('SyntheticPipelineRunner', () => {
     const [jobData] = addDelayed.mock.calls[0] as unknown as [{ retryAttempt: number }, number];
     expect(jobData.retryAttempt).toBe(1);
   });
+
+  // A scheduled/trigger run may end silently; a retry answers the user's own message (#508).
+  test.each([
+    [undefined, true],
+    [1, false],
+    [3, false],
+  ])('retryAttempt %p runs the agent with unprompted=%p', async (retryAttempt, unprompted) => {
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const seen: { unprompted?: boolean } = {};
+    const agentRun = mock(async (ctx: AgentContext) => {
+      seen.unprompted = ctx.unprompted;
+    });
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: () => agentCtx,
+      intentRun: async () => ({ handled: false }),
+      agentRun,
+    });
+    await runner.run(fakeUser, {
+      userId: fakeUser.telegram_id,
+      message: 'check calendar',
+      source: 'trigger',
+      retryAttempt,
+    });
+
+    expect(seen.unprompted).toBe(unprompted);
+  });
 });
 
 // ─── createAiMessagesQueue ─────────────────────────────────────────────────────

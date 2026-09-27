@@ -1343,14 +1343,43 @@ export class CalendarBotAgent {
         if (termination === 'waiting' && writeOutcomes.speechQuestion) writer.appendText(writeOutcomes.speechQuestion);
       }
     }
+    // A direct private-chat request never ends in silence or a bare "...": weak
+    // models answer '[SKIP]' (taught for reactions and group silence) or nothing
+    // after real work, and discarding that deleted every trace of the writes.
+    // A reaction, clarification UI or an unprompted scheduled run is real silence.
+    const draft = writer.getText().trim();
+    const reacted = allToolCalls.some((call, i) => SILENT_TOOLS.has(call.name) && allToolResults[i]?.success === true);
+    let unansweredNotice: string | null = null;
+    if (
+      !runFailed &&
+      !silent &&
+      !ctx.isGroup &&
+      !ctx.unprompted &&
+      ctx.inputMode !== 'live_call' &&
+      termination !== 'waiting' &&
+      !reacted &&
+      (draft === '' || isSkipText(draft))
+    ) {
+      const writes = writeOutcomes.summary(ctx.user.language);
+      unansweredNotice = writes
+        ? t(ctx.user.language).ai_unanswered_writes(writes)
+        : t(ctx.user.language).ai_unanswered;
+      aiLogger.warn(
+        { requestId, userId: ctx.user.telegram_id, termination, hadWrites: writes !== null },
+        'Model left a direct request unanswered — delivering fallback notice',
+      );
+      writer.resetForGuard();
+      writer.appendText(unansweredNotice);
+    }
     if (!ctx.supplementMode) {
-      if (!guarded) {
+      if (!guarded && !unansweredNotice) {
         for (const message of pendingHistory) this.saveAssistantTurn(ctx, message);
       }
       if (termination === 'waiting' && writeOutcomes.speechQuestion) {
         this.saveAssistantTurn(ctx, { role: 'assistant', content: writeOutcomes.speechQuestion });
       }
       if (evidence) this.saveAssistantTurn(ctx, { role: 'assistant', content: evidence });
+      if (unansweredNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: unansweredNotice });
       // Execution evidence is durable even in quiet mode; a notice is persisted only when delivered.
       if (validationNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: validationNotice });
     }
