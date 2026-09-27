@@ -7,6 +7,12 @@ import type { ToolName } from './tool-executor.ts';
 
 const numericId = z.preprocess(normalizeNumericId, z.number().int());
 
+/** Models sometimes serialize a boolean as its JSON string; only the exact literals are normalized. */
+const toolBoolean = z.preprocess(
+  (value) => (value === 'true' || value === 'false' ? value === 'true' : value),
+  z.boolean(),
+);
+
 const scopeField = z.enum(['personal', 'group']).optional();
 
 const emptyObject = z.object({}).passthrough();
@@ -29,11 +35,11 @@ const createEventSchema = z
     end_at: eventTimestampSchema.optional(),
     description: z.string().optional(),
     location: z.string().optional(),
-    location_abstract: z.boolean().optional(),
-    all_day: z.boolean().optional(),
+    location_abstract: toolBoolean.optional(),
+    all_day: toolBoolean.optional(),
     recurrence_rule: z.string().optional(),
     reminder_minutes: z.array(z.number()).optional(),
-    force: z.boolean().optional(),
+    force: toolBoolean.optional(),
     scope: scopeField,
     owner_id: numericId.optional(),
   })
@@ -47,7 +53,7 @@ const updateEventSchema = z
     end_at: eventTimestampSchema.nullable().optional(),
     description: z.string().nullable().optional(),
     location: z.string().nullable().optional(),
-    location_abstract: z.boolean().optional(),
+    location_abstract: toolBoolean.optional(),
     recurrence_rule: z.string().nullable().optional(),
     scope: scopeField,
     owner_id: numericId.optional(),
@@ -160,7 +166,7 @@ const pickUsersSchema = z
   })
   .passthrough();
 
-const getContactsSchema = z.object({ force: z.boolean().optional() }).passthrough();
+const getContactsSchema = z.object({ force: toolBoolean.optional() }).passthrough();
 
 const addContactSchema = z
   .object({
@@ -244,7 +250,7 @@ const shareEventSchema = z
 const sendInvitationSchema = z
   .object({
     event_id: numericId.pipe(z.number().positive().safe()),
-    force: z.boolean().optional(),
+    force: toolBoolean.optional(),
     invitee_id: numericId
       .pipe(
         z
@@ -391,7 +397,7 @@ const addTriggerSchema = z
     action: z.string(),
     condition: z.string().optional(),
     label: z.string().optional(),
-    once: z.boolean().optional(),
+    once: toolBoolean.optional(),
   })
   .passthrough();
 

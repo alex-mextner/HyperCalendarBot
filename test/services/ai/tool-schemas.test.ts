@@ -11,8 +11,10 @@ import { executeTool } from '../../../src/services/ai/tool-executor.ts';
 import { toolSchemas } from '../../../src/services/ai/tool-schemas.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
+import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import type { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -355,6 +357,105 @@ describe('numeric ID boundary', () => {
       nested: { event_id: '3' },
     });
     expect(toolSchemas.remove_trigger.parse({ id: '123' })).toEqual({ id: '123' });
+  });
+});
+
+/** Records every location-verification request made by update_event. */
+function makeLocationVerificationSpy(): { service: LocationVerificationService; verifiedEventIds: number[] } {
+  const verifiedEventIds: number[] = [];
+  const partial: Partial<LocationVerificationService> = {
+    verifyEventLocation: async (event) => {
+      verifiedEventIds.push(event.id);
+      return { resolved: true, geocoded: null, cityExtracted: null, candidates: [] };
+    },
+  };
+  return { service: partial as unknown as LocationVerificationService, verifiedEventIds };
+}
+
+describe('boolean tool field boundary', () => {
+  const USER_ID = 123;
+  let ctx: AgentContext;
+  let eventId: number;
+  let verifiedEventIds: number[];
+
+  beforeEach(() => {
+    const db = createTestDb();
+    const chatHistory = new ChatHistoryRepository(db);
+    const userRepo = new UserRepository(db);
+    userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
+    const eventService = new EventService({ eventRepo: new EventRepository(db) });
+    const spy = makeLocationVerificationSpy();
+    verifiedEventIds = spy.verifiedEventIds;
+    ctx = {
+      user: userRepo.findByTelegramId(USER_ID)!,
+      chatId: USER_ID,
+      messageText: '',
+      isGroup: false,
+      eventService,
+      holidayService: new HolidayService(new HolidayRepository(db)),
+      chatHistory,
+      conversationLogger: new ConversationLogger(chatHistory),
+      userRepo,
+      eventReminderRepo: new EventReminderRepository(db),
+      locationVerification: spy.service,
+    };
+    eventId = eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Meeting',
+      start_at: '2099-03-15T13:00:00Z',
+      end_at: '2099-03-15T14:00:00Z',
+      timezone: 'UTC',
+    }).id;
+  });
+
+  // Models sometimes serialize booleans as JSON strings; the exact literals must keep their meaning.
+  // Each case uses its own location: the executor throttles identical calls across tests.
+  test.each<[string | boolean, string, boolean]>([
+    ['false', 'Cafe Central', true],
+    ['true', 'At home', false],
+    [false, 'Cafe Sacher', true],
+    [true, 'At Ira', false],
+  ])('update_event location_abstract %j updates the event with boolean semantics', async (flag, location, verified) => {
+    const result = await executeTool(ctx, 'update_event', {
+      event_id: eventId,
+      location,
+      location_abstract: flag,
+    });
+    expect(result.success).toBe(true);
+    expect(ctx.eventService.getEvent(eventId, USER_ID)?.location).toBe(location);
+    expect(verifiedEventIds.includes(eventId)).toBe(verified);
+  });
+
+  test.each([
+    'yes',
+    '1',
+    'False',
+    'TRUE',
+    ' true',
+    '',
+    'no',
+    '0',
+  ])('update_event rejects location_abstract %j without touching the event', async (flag) => {
+    const result = await executeTool(ctx, 'update_event', {
+      event_id: eventId,
+      location: 'Cafe Central',
+      location_abstract: flag,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('location_abstract');
+    expect(ctx.eventService.getEvent(eventId, USER_ID)?.location).toBeNull();
+    expect(verifiedEventIds).toEqual([]);
+  });
+
+  test('every boolean tool field accepts only the exact string literals', () => {
+    expect(toolSchemas.create_event.parse({ title: 'M', start_at: '2099-03-15T13:00:00Z', all_day: 'true' })).toEqual({
+      title: 'M',
+      start_at: '2099-03-15T13:00:00Z',
+      all_day: true,
+    });
+    expect(toolSchemas.get_contacts.parse({ force: 'false' })).toEqual({ force: false });
+    expect(toolSchemas.get_contacts.safeParse({ force: 1 }).success).toBe(false);
+    expect(toolSchemas.get_contacts.safeParse({ force: null }).success).toBe(false);
   });
 });
 
