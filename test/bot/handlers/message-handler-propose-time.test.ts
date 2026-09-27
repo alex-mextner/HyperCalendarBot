@@ -1,7 +1,8 @@
 // test/bot/handlers/message-handler-propose-time.test.ts
 import { Database } from 'bun:sqlite';
 import { describe, expect, mock, test } from 'bun:test';
-import { createMessageHandler } from '../../../src/bot/handlers/message.handler';
+import { createMessageHandler, type MessageHandlerDeps } from '../../../src/bot/handlers/message.handler';
+import type { BotCommandContext } from '../../../src/bot/types.ts';
 import { t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -23,6 +24,27 @@ function makeCtx(text: string, userId = 200) {
     send: mock(() => Promise.resolve()),
     chat: { type: 'private' },
   };
+}
+
+/** A handler whose AI, history and reminder collaborators are inert stand-ins, cast in this one factory. */
+function makeProposeTimeHandler(deps: Partial<MessageHandlerDeps>) {
+  return createMessageHandler({
+    agent: { run: mock(() => Promise.resolve({ responseText: '' })) },
+    eventService: { getEventsInRange: mock(() => []) },
+    holidayService: {},
+    chatHistory: { save: mock(() => {}), getLast: mock(() => []) },
+    eventReminderRepo: {},
+    sceneStorage: { get: mock(() => Promise.resolve(null)), delete: mock(() => {}) },
+    conversationLogger: null,
+    ...deps,
+  } as unknown as MessageHandlerDeps);
+}
+
+/** A private-chat text message; `send` records the bot's replies. */
+function makePrivateMessage(text: string, userId: number) {
+  const send = mock((_text: string, _params?: unknown) => Promise.resolve());
+  const message = { text, dbUser: makeUser({ telegram_id: userId }), chatId: userId, send, chat: { type: 'private' } };
+  return { ctx: message as unknown as BotCommandContext, send };
 }
 
 describe('message handler: propose time session', () => {
@@ -187,26 +209,19 @@ describe('message handler: propose time session', () => {
     proposeTimeSessions.set(200, { invitationId: invitation.id });
     const notifyInviterProposal = mock(() => Promise.resolve());
 
-    const handler = createMessageHandler({
-      agent: { run: mock(() => Promise.resolve({ responseText: '' })) } as never,
-      eventService: { getEventsInRange: mock(() => []) } as never,
-      holidayService: {} as never,
-      chatHistory: { save: mock(() => {}), getLast: mock(() => []) } as never,
+    const handler = makeProposeTimeHandler({
       userRepo: users,
-      eventReminderRepo: {} as never,
-      sceneStorage: { get: mock(() => Promise.resolve(null)), delete: mock(() => {}) },
       proposeTimeSessions,
       invitationService,
       invitationRepo,
       notifyInviterProposal,
-      conversationLogger: null as never,
     });
 
-    const ctx = makeCtx('tomorrow 15:00');
-    await handler(ctx as never);
+    const { ctx, send } = makePrivateMessage('tomorrow 15:00', 200);
+    await handler(ctx);
 
     expect(invitationRepo.findById(invitation.id)!.proposed_time).toBeNull();
-    expect(ctx.send).toHaveBeenCalledWith(t('en').invitation_cancelled);
+    expect(send).toHaveBeenCalledWith(t('en').invitation_cancelled);
     expect(notifyInviterProposal).not.toHaveBeenCalled();
   });
 });
