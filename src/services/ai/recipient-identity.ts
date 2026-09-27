@@ -77,21 +77,19 @@ export async function resolveInvitationRecipient(
     }
     return known ? { ok: true, id, isGroup: true } : { ok: false, reason: 'unverified' };
   }
-  const owned = id === undefined ? null : ctx.contactRepo?.findByTelegramId(ctx.user.telegram_id, id);
-  // An owned address-book row ID is never recipient evidence, even when a Telegram account has that number.
-  // A "User N" placeholder saved by an earlier approval of that same number is not identity evidence either.
+  // An owned address-book row ID is ambiguous recipient evidence even when a saved contact has that Telegram ID:
+  // only an ID verified in this conversation (picker, username) or the invitation's own recipient overrides it.
   const addressBookRow =
-    id !== undefined &&
-    !(owned && !/^User \d+$/.test(owned.name)) &&
-    id !== establishedInvitationRecipientId &&
-    !ctx.verifiedRecipientIds?.has(id)
+    id !== undefined && id !== establishedInvitationRecipientId && !ctx.verifiedRecipientIds?.has(id)
       ? ctx.contactRepo?.findById(ctx.user.telegram_id, id)
       : null;
-  if (addressBookRow) return { ok: false, reason: 'contact_row_id', contact: addressBookRow };
+  if (addressBookRow && addressBookRow.telegram_id !== id)
+    return { ok: false, reason: 'contact_row_id', contact: addressBookRow };
   if (input.force && id !== undefined && id > 0 && input.event_id !== undefined) {
     if (!consumeRecipientApproval(ctx.user.telegram_id, input.event_id, id)) return { ok: false, reason: 'unverified' };
     return { ok: true, id, isGroup: false };
   }
+  const owned = id === undefined ? null : ctx.contactRepo?.findByTelegramId(ctx.user.telegram_id, id);
   const hint = input.invitee_username ? normalizeRecipientUsername(input.invitee_username) : '';
   const pinnedMetadata = !!(
     owned &&
