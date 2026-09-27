@@ -423,10 +423,12 @@ describe('LocationVerificationService', () => {
       expect(eventRepo.findById(event.id, 100)?.location_verified).toBe(1);
     });
 
-    test('a group invitation keeps its Going/Not going keyboard for every member', async () => {
+    test('a group invitation keeps its Going/Not going keyboard; revoked group cards stay untouched', async () => {
       const { event, deliver, deps } = seedDeliveredInvitations();
       const groupChatId = -1001234567890;
       deliver(groupChatId, 555, 'pending');
+      deliver(-1001, 777, 'cancelled');
+      deliver(-1002, 888, 'expired');
 
       await makeService(deps).applyResolvedLocation(event, makeGeoResult());
 

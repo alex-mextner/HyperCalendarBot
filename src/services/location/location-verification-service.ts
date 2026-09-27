@@ -290,7 +290,7 @@ export class LocationVerificationService {
     if (!this.deps.editMessage) return;
 
     for (const inv of this.deps.invitationRepo.getByEvent(event.id)) {
-      if (!inv.message_id || !inv.chat_id) continue;
+      if (!inv.message_id || !inv.chat_id || inv.status === 'cancelled' || inv.status === 'expired') continue;
 
       try {
         const inviter = this.deps.userRepo.findByTelegramId(inv.inviter_id);
@@ -336,7 +336,6 @@ export class LocationVerificationService {
           continue;
         }
 
-        if (inv.status !== 'accepted' && inv.status !== 'maybe' && inv.status !== 'declined') continue;
         const text = await formatAnsweredInvitationCard(
           inv.status,
           event,
