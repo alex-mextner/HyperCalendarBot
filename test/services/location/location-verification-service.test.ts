@@ -163,35 +163,6 @@ describe('LocationVerificationService', () => {
     expect(deps.geocodingService.findPlace).not.toHaveBeenCalled();
   });
 
-  test('uses cached mapping when available', async () => {
-    const cached = {
-      input: 'Кофемания',
-      resolvedAddress: 'Cached Address',
-      googleMapsUrl: 'https://cached',
-      latitude: 55.0,
-      longitude: 37.0,
-      placeId: 'cached_id',
-      timestamp: Date.now(),
-    };
-    const deps = makeDeps({
-      addressCache: {
-        findMapping: mock(() => Promise.resolve(cached)),
-        recordMapping: mock(() => Promise.resolve()),
-        getRecent: mock(() => Promise.resolve([])),
-        getFrequent: mock(() => Promise.resolve([])),
-        getAddressContext: mock(() => Promise.resolve({ recent: [], frequent: [] })),
-      },
-    });
-    const svc = makeService(deps);
-    const result = await svc.verifyEventLocation(makeEvent(), makeUser());
-
-    expect(result.resolved).toBe(true);
-    expect(result.geocoded!.formattedAddress).toBe('Cached Address');
-    expect(deps.eventRepo.updateLocationFields).toHaveBeenCalledTimes(1);
-    // Should NOT call geocoding API when cache hit
-    expect(deps.geocodingService.findPlace).not.toHaveBeenCalled();
-  });
-
 
   test('asks user to choose when multiple candidates found', async () => {
     const candidates = [

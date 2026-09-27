@@ -40,6 +40,7 @@ import { renderConflictImage } from '../../services/image/render-conflict.ts';
 import type { ImageRenderer } from '../../services/image/render-service.ts';
 import type { AdminEditSession } from '../../services/intent/admin-edit-session.ts';
 import { ConflictService } from '../../services/invite/conflict-service.ts';
+import { formatLocationHtml } from '../../services/location/format-location.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { SceneName, ScenePauseService } from '../../services/scene-pause.ts';
 import {
@@ -1447,6 +1448,14 @@ export function createCallbackHandler(
     await ctx.editText(t(lang).geo_tz_dismissed, { reply_markup: undefined });
   });
 
+  /** The confirmation edited into the picker or pin message: the title and the resolved place, linked. */
+  function locationResolvedHtml(lang: Lang, eventId: number, userId: number): string {
+    const event = eventRepo?.findById(eventId, userId);
+    // A pin can resolve an event that has no typed location; show the resolved address then.
+    const place = event ? formatLocationHtml({ ...event, location: event.location ?? event.resolved_address }) : '';
+    return t(lang).aiTools.location.locationResolved(escapeHtml(event?.title ?? ''), place);
+  }
+
   // Location geo: user chose what to do with a geolocation pin (geo/city/other)
   dispatch.set(CB.LOCATION_GEO, async (ctx, _payload, parts, user) => {
     await ctx.answer();
@@ -1476,9 +1485,7 @@ export function createCallbackHandler(
       await pendingGeoStore.delete(user.telegram_id);
 
       if (success) {
-        const event = eventRepo?.findById(eventId, user.telegram_id);
-        const address = event?.resolved_address ?? '';
-        await ctx.editText(msgs.aiTools.location.locationResolved(event?.title ?? '', address), {
+        await ctx.editText(locationResolvedHtml(lang, eventId, user.telegram_id), {
           parse_mode: 'HTML',
           reply_markup: undefined,
         });
@@ -1547,9 +1554,7 @@ export function createCallbackHandler(
     const success = await locationVerification.handleLocationChoice(eventId, user.telegram_id, choiceIndex, candidates);
 
     if (success) {
-      const event = eventRepo?.findById(eventId, user.telegram_id);
-      const address = event?.resolved_address ?? '';
-      await ctx.editText(msgs.aiTools.location.locationResolved(event?.title ?? '', address), {
+      await ctx.editText(locationResolvedHtml(lang, eventId, user.telegram_id), {
         parse_mode: 'HTML',
         reply_markup: undefined,
       });
