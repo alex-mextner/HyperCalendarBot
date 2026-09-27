@@ -11,6 +11,7 @@ import type { DeepLinkService } from '../../services/sharing/deep-link-service.t
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import { botLogger } from '../../utils/logger.ts';
 import { escapeHtml, type ParseMode } from '../../utils/telegram.ts';
+import { clearReplyKeyboard, type RemoveKeyboardParams } from '../keyboards.ts';
 
 const deliveryLogger = botLogger.child({ module: 'picker-invitation' });
 
@@ -249,19 +250,22 @@ export async function deliverPickerInvitations(
  * unit-testable without a live GramIO context. `sendAck` posts an immediate "sending…" message
  * (and, on an edit failure, the final status as a fresh message); `editAck` rewrites that message
  * in place with the final status. Both must target the same chat AND use the same parse mode so the
- * fallback re-send renders identically to the in-place edit.
+ * fallback re-send renders identically to the in-place edit. `clearKeyboard` removes the used
+ * picker reply keyboard without leaving a message behind.
  */
 export interface PickerAckIo {
   sendAck(text: string): Promise<{ message_id: number }>;
   editAck(messageId: number, text: string): Promise<void>;
+  clearKeyboard(): Promise<void>;
 }
 
-/**
- * Send options for the picker ack. Deliberately has no `reply_markup` — see {@link createPickerAckIo}.
- */
+/** Send options for the picker ack: no `reply_markup`, see {@link createPickerAckIo}. */
 export interface PickerAckSendParams {
   parse_mode?: ParseMode;
 }
+
+/** Everything the picker flow sends into the chat: the ack and the throwaway keyboard remover. */
+export type PickerChatSendParams = PickerAckSendParams | RemoveKeyboardParams;
 
 /**
  * Build the {@link PickerAckIo} for the chat the picker was answered in: `send` is GramIO's
@@ -270,11 +274,10 @@ export interface PickerAckSendParams {
  * The ack is sent without a reply markup. Telegram refuses editMessageText ("message can't be
  * edited") on a message carrying a reply keyboard or ReplyKeyboardRemove, so an ack that removed
  * the picker keyboard could never be finalized in place and every run fell through to the
- * fresh-message fallback (prod 2026-09-27). The picker keyboard is `one_time_keyboard`, so the
- * client already hides it once the user has picked.
+ * fresh-message fallback (prod 2026-09-27). The keyboard is removed separately instead.
  */
 export function createPickerAckIo(
-  send: (text: string, params: PickerAckSendParams) => Promise<{ id: number }>,
+  send: (text: string, params: PickerChatSendParams) => Promise<{ id: number; delete(): Promise<unknown> }>,
   edit: (messageId: number, text: string, parseMode?: ParseMode) => Promise<void>,
   parseMode?: ParseMode,
 ): PickerAckIo {
@@ -282,7 +285,20 @@ export function createPickerAckIo(
   return {
     sendAck: (text) => send(text, params).then((sent) => ({ message_id: sent.id })),
     editAck: (messageId, text) => edit(messageId, text, parseMode),
+    clearKeyboard: () => clearReplyKeyboard(send),
   };
+}
+
+/**
+ * Remove the used picker keyboard. Best effort: a still-visible keyboard must never cost the
+ * delivery or the final status, so a failure is logged (sanitized, like every GramIO error here).
+ */
+async function clearPickerKeyboard(io: PickerAckIo): Promise<void> {
+  try {
+    await io.clearKeyboard();
+  } catch (err) {
+    deliveryLogger.warn({ err: describeDeliveryError(err) }, 'Failed to remove the picker reply keyboard');
+  }
 }
 
 /**
@@ -329,6 +345,7 @@ export async function runPickerBatchWithAck(
 ): Promise<{ aiResultLines: string[] }> {
   const m = t(params.lang);
   const ack = await io.sendAck(m.invite_picker_sending);
+  await clearPickerKeyboard(io);
   const { statusLines, aiResultLines } = await deliverPickerInvitations(params, deps);
   await finalizeAck(io, ack.message_id, `${m.invite_picker_header}\n${statusLines.join('\n')}`);
   return { aiResultLines };
@@ -352,6 +369,7 @@ export async function runChatShareWithAck(
   io: PickerAckIo,
 ): Promise<{ outcome: PickerDeliveryOutcome }> {
   const ack = await io.sendAck(t(params.lang).invite_group_sending);
+  await clearPickerKeyboard(io);
   let outcome: PickerDeliveryOutcome;
   try {
     outcome = await deliverPickerInvitation(params.invitation, deps);

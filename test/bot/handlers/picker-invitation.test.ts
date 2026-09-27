@@ -6,7 +6,7 @@ import {
   deliverPickerInvitation,
   deliverPickerInvitations,
   type PickerAckIo,
-  type PickerAckSendParams,
+  type PickerChatSendParams,
   type PickerDeliveryOutcome,
   type PickerInvitationDeps,
   pickerAiLine,
@@ -46,26 +46,36 @@ const ALL_KINDS: PickerDeliveryOutcome[] = [
 interface FakeTelegramMessage {
   id: number;
   text: string;
-  params: PickerAckSendParams;
+  params: PickerChatSendParams;
 }
 
 /**
  * In-memory Telegram chat for the ack payloads. Mirrors the Bot API rule behind the 2026-09-27
  * `Bad Request: message can't be edited`: editMessageText is refused for a message sent with a
  * reply_markup that is not an inline keyboard (ReplyKeyboardMarkup / ReplyKeyboardRemove), and for
- * a message that no longer exists.
+ * a message that no longer exists. `sent` keeps every sendMessage payload, even deleted ones.
  */
 function makeTelegramChat() {
   const messages: FakeTelegramMessage[] = [];
+  const sent: FakeTelegramMessage[] = [];
   const edits: { messageId: number; text: string; parseMode?: string }[] = [];
   let nextId = 7849;
   return {
     messages,
+    sent,
     edits,
-    send: async (text: string, params: PickerAckSendParams) => {
+    send: async (text: string, params: PickerChatSendParams) => {
       const message = { id: nextId++, text, params };
       messages.push(message);
-      return { id: message.id };
+      sent.push({ ...message });
+      return {
+        id: message.id,
+        delete: async () => {
+          const index = messages.findIndex((m) => m.id === message.id);
+          if (index === -1) throw new Error('Bad Request: message to delete not found');
+          messages.splice(index, 1);
+        },
+      };
     },
     edit: async (messageId: number, text: string, parseMode?: string) => {
       const message = messages.find((m) => m.id === messageId);
@@ -74,14 +84,14 @@ function makeTelegramChat() {
       message.text = text;
       edits.push({ messageId, text, parseMode });
     },
-    deleteMessage: (messageId: number) => {
-      messages.splice(
-        messages.findIndex((m) => m.id === messageId),
-        1,
-      );
-    },
   };
 }
+
+const REMOVE_KEYBOARD_MESSAGE: FakeTelegramMessage = {
+  id: 7850,
+  text: '.',
+  params: { reply_markup: { remove_keyboard: true } },
+};
 
 describe('pickerStatusLine', () => {
   test.each(ALL_KINDS.map((o) => o.kind))('EN: %s line contains the name and the status emoji', (kind) => {
@@ -652,15 +662,19 @@ describe('runPickerBatchWithAck (reply-fast ack)', () => {
         events.push(`editAck:${messageId}`);
         editedText = text;
       },
+      clearKeyboard: async () => {
+        events.push('clearKeyboard');
+      },
     };
     const result = await runPickerBatchWithAck(
       { eventId, inviter, lang: 'en', fallbackChatId: INVITER_ID, invitees: [{ userId: 201, firstName: 'Alice' }] },
       makeDeps(sender),
       io,
     );
-    // Reply-fast: the "sending…" ack goes out BEFORE any delivery work, and the final status is
-    // an EDIT of that same message AFTER delivery completes — never a second fresh message.
-    expect(events).toEqual([`sendAck:${t('en').invite_picker_sending}`, 'deliver', 'editAck:555']);
+    // Reply-fast: the "sending…" ack goes out BEFORE any delivery work, the picker keyboard is
+    // cleared before the long delivery, and the final status is an EDIT of that same message AFTER
+    // delivery completes — never a second fresh message.
+    expect(events).toEqual([`sendAck:${t('en').invite_picker_sending}`, 'clearKeyboard', 'deliver', 'editAck:555']);
     expect(editedText).toBe(`${t('en').invite_picker_header}\n✅ Alice`);
     expect(result.aiResultLines).toEqual(['Alice (id:201): delivered to the invitee']);
   });
@@ -674,6 +688,7 @@ describe('runPickerBatchWithAck (reply-fast ack)', () => {
         return { message_id: 1 };
       },
       editAck: async () => {},
+      clearKeyboard: async () => {},
     };
     await runPickerBatchWithAck(
       { eventId, inviter, lang: 'ru', fallbackChatId: INVITER_ID, invitees: [{ userId: 201, firstName: 'Алиса' }] },
@@ -685,7 +700,11 @@ describe('runPickerBatchWithAck (reply-fast ack)', () => {
 
   test('returns the AI result lines verbatim from the serial delivery (pickerAiLine preserved)', async () => {
     const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 1 }) };
-    const io: PickerAckIo = { sendAck: async () => ({ message_id: 1 }), editAck: async () => {} };
+    const io: PickerAckIo = {
+      sendAck: async () => ({ message_id: 1 }),
+      editAck: async () => {},
+      clearKeyboard: async () => {},
+    };
     const result = await runPickerBatchWithAck(
       {
         eventId,
@@ -717,6 +736,7 @@ describe('runPickerBatchWithAck (reply-fast ack)', () => {
       editAck: async () => {
         throw new Error('message to edit not found');
       },
+      clearKeyboard: async () => {},
     };
     const result = await runPickerBatchWithAck(
       { eventId, inviter, lang: 'en', fallbackChatId: INVITER_ID, invitees: [{ userId: 201, firstName: 'Alice' }] },
@@ -743,6 +763,7 @@ describe('runPickerBatchWithAck (reply-fast ack)', () => {
       editAck: async () => {
         throw new Error('message to edit not found');
       },
+      clearKeyboard: async () => {},
     };
     const result = await runPickerBatchWithAck(
       { eventId, inviter, lang: 'en', fallbackChatId: INVITER_ID, invitees: [{ userId: 201, firstName: 'Alice' }] },
@@ -755,7 +776,7 @@ describe('runPickerBatchWithAck (reply-fast ack)', () => {
     expect(sendCount).toBe(2);
   });
 
-  test('users_shared ack is sent without a reply markup and finalized by editing it in place', async () => {
+  test('users_shared: picker keyboard removed, ack sent editable and finalized by editing it in place', async () => {
     const chat = makeTelegramChat();
     const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 1 }) };
     await runPickerBatchWithAck(
@@ -764,27 +785,27 @@ describe('runPickerBatchWithAck (reply-fast ack)', () => {
       createPickerAckIo(chat.send, chat.edit),
     );
     const finalText = `${t('en').invite_picker_header}\n✅ Alice`;
-    // Exactly one message in the chat: the ack, sent plain (editable) and rewritten with the status.
+    // The reply keyboard went away through a throwaway ReplyKeyboardRemove message, deleted at once…
+    expect(chat.sent).toContainEqual(REMOVE_KEYBOARD_MESSAGE);
+    // …so exactly one message stays: the ack, sent plain (editable) and rewritten with the status.
     expect(chat.messages).toEqual([{ id: 7849, text: finalText, params: {} }]);
     expect(chat.edits).toEqual([{ messageId: 7849, text: finalText, parseMode: undefined }]);
   });
 
-  test('users_shared ack deleted by the user mid-delivery → final status sent as a new message', async () => {
+  test('a failed keyboard removal never blocks delivery or the in-place finalize', async () => {
     const chat = makeTelegramChat();
-    const sender: TelegramSender = {
-      ...SENDER_BASE,
-      sendInvitation: async () => {
-        chat.deleteMessage(7849);
-        return { message_id: 1 };
-      },
+    const send: typeof chat.send = async (text, params) => {
+      if ('reply_markup' in params) throw new Error('Too Many Requests: retry after 5');
+      return chat.send(text, params);
     };
-    await runPickerBatchWithAck(
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 1 }) };
+    const result = await runPickerBatchWithAck(
       { eventId, inviter, lang: 'en', fallbackChatId: INVITER_ID, invitees: [{ userId: 201, firstName: 'Alice' }] },
       makeDeps(sender),
-      createPickerAckIo(chat.send, chat.edit),
+      createPickerAckIo(send, chat.edit),
     );
-    expect(chat.edits).toEqual([]);
-    expect(chat.messages).toEqual([{ id: 7850, text: `${t('en').invite_picker_header}\n✅ Alice`, params: {} }]);
+    expect(result.aiResultLines).toEqual(['Alice (id:201): delivered to the invitee']);
+    expect(chat.messages).toEqual([{ id: 7849, text: `${t('en').invite_picker_header}\n✅ Alice`, params: {} }]);
   });
 });
 
@@ -859,6 +880,9 @@ describe('runChatShareWithAck (reply-fast group invite)', () => {
         events.push(`editAck:${messageId}`);
         editedText = text;
       },
+      clearKeyboard: async () => {
+        events.push('clearKeyboard');
+      },
     };
     const { outcome } = await runChatShareWithAck(
       {
@@ -877,7 +901,7 @@ describe('runChatShareWithAck (reply-fast group invite)', () => {
       io,
     );
     expect(outcome).toEqual({ kind: 'delivered' });
-    expect(events).toEqual([`sendAck:${t('en').invite_group_sending}`, 'deliver', 'editAck:7']);
+    expect(events).toEqual([`sendAck:${t('en').invite_group_sending}`, 'clearKeyboard', 'deliver', 'editAck:7']);
     expect(editedText).toBe(t('en').invite_delivered('Launch Party'));
   });
 
@@ -892,6 +916,7 @@ describe('runChatShareWithAck (reply-fast group invite)', () => {
       editAck: async () => {
         throw new Error('message to edit not found');
       },
+      clearKeyboard: async () => {},
     };
     const { outcome } = await runChatShareWithAck(
       {
@@ -913,7 +938,7 @@ describe('runChatShareWithAck (reply-fast group invite)', () => {
     expect(sends).toEqual([t('en').invite_group_sending, t('en').invite_delivered('Launch Party')]);
   });
 
-  test('chat_shared HTML ack is sent without a reply markup and finalized by editing it in place', async () => {
+  test('chat_shared: picker keyboard removed, HTML ack sent editable and finalized by editing it in place', async () => {
     const chat = makeTelegramChat();
     const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 42 }) };
     await runChatShareWithAck(
@@ -933,6 +958,7 @@ describe('runChatShareWithAck (reply-fast group invite)', () => {
       createPickerAckIo(chat.send, chat.edit, 'HTML'),
     );
     const finalText = t('en').invite_delivered('Launch Party');
+    expect(chat.sent).toContainEqual(REMOVE_KEYBOARD_MESSAGE);
     expect(chat.messages).toEqual([{ id: 7849, text: finalText, params: { parse_mode: 'HTML' } }]);
     expect(chat.edits).toEqual([{ messageId: 7849, text: finalText, parseMode: 'HTML' }]);
   });
@@ -954,6 +980,7 @@ describe('runChatShareWithAck (reply-fast group invite)', () => {
       editAck: async (_id, text) => {
         editedText = text;
       },
+      clearKeyboard: async () => {},
     };
     const { outcome } = await runChatShareWithAck(
       {
