@@ -6,10 +6,14 @@ import { botLogger } from '../../utils/logger.ts';
 const logger = botLogger.child({ module: 'address-cache' });
 
 /**
- * Persistent Redis cache for user address mappings.
- * Key pattern: `addr:{userId}:mappings` → JSON hash { normalizedInput → resolvedAddress }
- * Key pattern: `addr:{userId}:freq` → JSON hash { resolvedAddress → useCount }
- * Key pattern: `addr:{userId}:recent` → JSON array of { input, resolved, timestamp }
+ * Persistent Redis cache of the places a user confirmed for typed locations (a tap on a picker
+ * candidate, or a pin shared for the event).
+ * Key pattern: `addr:{userId}:confirmed_mappings` → JSON array of { input, resolvedAddress, … }
+ * Key pattern: `addr:{userId}:confirmed_freq` → JSON object { resolvedAddress → { url, count, lastUsed } }
+ *
+ * The earlier keys `addr:{userId}:mappings` and `addr:{userId}:freq` are never read: until
+ * 2026-09-27 the bot also wrote places it had picked on its own (the incident mapped "Sonder
+ * Dorchol" in Belgrade to a Dutch hotel), so they are not confirmations.
  */
 
 export interface AddressMapping {
@@ -35,8 +39,8 @@ interface RedisLike {
   set(key: string, value: string): Promise<unknown>;
 }
 
-const MAPPINGS_KEY = (userId: number) => `addr:${userId}:mappings`;
-const FREQ_KEY = (userId: number) => `addr:${userId}:freq`;
+const MAPPINGS_KEY = (userId: number) => `addr:${userId}:confirmed_mappings`;
+const FREQ_KEY = (userId: number) => `addr:${userId}:confirmed_freq`;
 
 const AddressMappingSchema = z.object({
   input: z.string(),

@@ -21,6 +21,7 @@ import { runMigrations } from '../../../src/database/schema.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import { AddressCache } from '../../../src/services/location/address-cache.ts';
+import { buildAddressContext } from '../../../src/services/location/address-context.ts';
 import type {
   GeoBounds,
   GeocodedArea,
@@ -233,7 +234,8 @@ function setup(
     message_id: 77,
     chat_id: INVITEE_ID,
   });
-  const addressCache = new AddressCache(memoryRedis());
+  const addressRedis = memoryRedis();
+  const addressCache = new AddressCache(addressRedis);
   const candidateStore = new InMemoryLocationCandidateStore();
   const sent: SentMessage[] = [];
   const invitationEdits: string[] = [];
@@ -325,6 +327,7 @@ function setup(
     event,
     user,
     storedEvent,
+    addressRedis,
     addressCache,
     candidateStore,
     pendingGeoStore,
@@ -454,6 +457,35 @@ describe('no geocode is applied before the creator taps a candidate', () => {
 
     await s.expectNothingWritten();
     expect(edits.map((e) => e.text)).toEqual([t('ru').aiTools.location.locationChoiceOutdated]);
+  });
+
+  test('a place remembered before the bot required a confirmation is not offered; a fresh search is', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE, NIS_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    // What the bot stored in production when it applied the incident's geocode on its own
+    const autoResolved = {
+      input: RAW_LOCATION,
+      resolvedAddress: DUTCH_HOTEL.formattedAddress,
+      googleMapsUrl: DUTCH_HOTEL.googleMapsUrl,
+      latitude: DUTCH_HOTEL.latitude,
+      longitude: DUTCH_HOTEL.longitude,
+      placeId: DUTCH_HOTEL.placeId,
+      venueName: DUTCH_HOTEL.venueName,
+      timestamp: Date.now(),
+    };
+    await s.addressRedis.set(`addr:${USER_ID}:mappings`, JSON.stringify([autoResolved]));
+    await s.addressRedis.set(
+      `addr:${USER_ID}:freq`,
+      JSON.stringify({ [DUTCH_HOTEL.formattedAddress]: { url: DUTCH_HOTEL.googleMapsUrl, count: 3, lastUsed: 1 } }),
+    );
+
+    await s.service.verifyEventLocation(s.event, s.user());
+
+    expect(geocoder.searches.map((search) => search.query)).toEqual([RAW_LOCATION]);
+    expect(buttonLabels(s.sent[0])).toEqual(['1. Kafana Sunce', `2. ${NIS_CAFE.formattedAddress}`, KEEP_AS_TYPED]);
+    expect(s.sent[0]!.text).not.toContain(escapeHtml(DUTCH_HOTEL.formattedAddress));
+    // Nor is it suggested to the assistant as a known place
+    expect(await buildAddressContext(s.addressCache, USER_ID)).toBe('');
   });
 });
 
