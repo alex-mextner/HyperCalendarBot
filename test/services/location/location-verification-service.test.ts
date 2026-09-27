@@ -2,7 +2,10 @@
 import { describe, expect, mock, test } from 'bun:test';
 import type { CalendarEvent, User } from '../../../src/database/types.ts';
 import type { GeocodedLocation } from '../../../src/services/location/geocoding-service.ts';
-import { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
+import {
+  type LocationVerificationDeps,
+  LocationVerificationService,
+} from '../../../src/services/location/location-verification-service.ts';
 
 function makeUser(overrides: Partial<User> = {}): User {
   return {
@@ -441,6 +444,11 @@ describe('LocationVerificationService', () => {
       expect(text).toContain('https://maps.google.com');
     });
 
+    /** Partial mock deps → service; the one cast lives here, not at the call site. */
+    function makeService(deps: { [key: string]: unknown }): LocationVerificationService {
+      return new LocationVerificationService(deps as unknown as LocationVerificationDeps);
+    }
+
     test('re-rendered invitation keeps the full time range in both zones', async () => {
       const inv = makeInvitation({ id: 1, message_id: 111, chat_id: 200 });
       const invitee = makeUser({ telegram_id: 200, timezone: 'Europe/London' });
@@ -455,7 +463,7 @@ describe('LocationVerificationService', () => {
           update: mock(() => makeUser()),
         },
       });
-      const svc = new LocationVerificationService(deps as never);
+      const svc = makeService(deps);
 
       const event = makeEvent({
         start_at: '2026-09-27T13:00:00Z',
