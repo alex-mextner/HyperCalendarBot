@@ -27,17 +27,6 @@ type LiveInvitationStatus = Exclude<InvitationStatus, 'cancelled' | 'expired'>;
 
 const logger = botLogger.child({ module: 'location-verification' });
 
-/** A place farther than this from the user's home city is never resolved without asking. */
-const NEAR_HOME_CITY_KM = 50;
-const EARTH_RADIUS_KM = 6371;
-
-/** Where the user's locations are expected when the text does not say otherwise. */
-interface HomeArea {
-  bias: GeocodingBias;
-  /** Centre of the home city; null when only the home country is known. */
-  cityCenter: { latitude: number; longitude: number } | null;
-}
-
 /** The country the user set in the profile, else the one implied by the timezone. */
 function homeCountryCode(user: User): string | null {
   return user.country_code ?? guessCountryFromTimezone(user.timezone);
@@ -56,20 +45,6 @@ function isInUserRegion(
     resolveTimezone(place.latitude, place.longitude) === user.timezone ||
     (homeCountry !== null && place.countryCode === homeCountry)
   );
-}
-
-function isInsideHomeArea(geo: GeocodedLocation, home: HomeArea): boolean {
-  if (home.cityCenter) {
-    // Haversine great-circle distance.
-    const toRad = Math.PI / 180;
-    const dLat = (geo.latitude - home.cityCenter.latitude) * toRad;
-    const dLng = (geo.longitude - home.cityCenter.longitude) * toRad;
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(home.cityCenter.latitude * toRad) * Math.cos(geo.latitude * toRad) * Math.sin(dLng / 2) ** 2;
-    return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(a)) <= NEAR_HOME_CITY_KM;
-  }
-  return home.bias.countryCode !== null && geo.countryCode === home.bias.countryCode;
 }
 
 /** Place label ("Venue — address") linked to the place on Google Maps. */
@@ -104,10 +79,12 @@ export interface LocationVerificationDeps {
 }
 
 export interface LocationVerificationResult {
+  /** Always false: verification only asks; the creator's tap resolves the event. */
   resolved: boolean;
+  /** Always null, see `resolved`. */
   geocoded: GeocodedLocation | null;
   cityExtracted: string | null;
-  /** If multiple candidates found, returns them for user selection */
+  /** The places offered to the creator; empty when nothing was found. */
   candidates: GeocodedLocation[];
 }
 
@@ -115,23 +92,23 @@ export class LocationVerificationService {
   constructor(private deps: LocationVerificationDeps) {}
 
   /**
-   * Verify and resolve event location in the background.
-   * Called after event creation if the event has a location field.
+   * Ask the creator which place the event's typed location means. Runs in the background after an
+   * event gets a concrete location.
+   *
+   * The bot always asks: nothing is applied before the creator taps a candidate. The event keeps
+   * only the typed text, unverified; no venue, address or map link is written, delivered
+   * invitations are not edited, and neither the address cache nor `users.city` is touched.
    *
    * Flow:
-   * 1. Check address cache for a place the user confirmed earlier
-   * 2. If not cached, geocode via Google Maps, biased toward the user's home area
-   *    (home city when it lies in the user's timezone or home country, else the home country)
-   * 3. A single result inside the home area → resolve the event, update sent invitations and tell
-   *    the user which place was picked, with a "wrong place" button; a cache hit is announced the
-   *    same way, so a wrongly remembered place can be rejected and forgotten
-   * 4. Several results, or one outside the home area → ask the user to pick one or keep the text
-   * 5. No results → tell the user
-   * In cases 4 and 5 the event keeps only the typed text, unverified.
-   *
-   * Automatic resolution never writes the address cache or the user's city: a wrong guess would
-   * otherwise bias every later lookup. Only an explicit confirmation (candidate button or a pin
-   * shared for the event) does, see `cacheAndUpdateCity`.
+   * 1. A place the creator confirmed earlier for this text (address cache) is the candidate; no
+   *    new search is made.
+   * 2. Otherwise geocode via Google Maps, biased toward the creator's home area: the home city
+   *    when it lies in the creator's timezone or home country, else the home country
+   *    (`users.country_code`, else the one implied by the timezone).
+   * 3. Candidates found → one message: each place with its map link and a button named after it,
+   *    plus "none of these — keep as typed". `handleLocationChoice` / `keepTypedLocation` handle
+   *    the taps.
+   * 4. No candidates → tell the creator to send a pin or the full address.
    */
   async verifyEventLocation(event: CalendarEvent, user: User): Promise<LocationVerificationResult> {
     if (!event.location) {
@@ -145,69 +122,47 @@ export class LocationVerificationService {
 
     logger.info({ eventId: event.id, location, userId: user.telegram_id }, 'Starting location verification');
 
-    // 1. Check address cache
-    const cached = await this.deps.addressCache.findMapping(user.telegram_id, location);
-    if (cached) {
-      logger.info(
-        { eventId: event.id, cached: cached.resolvedAddress, venue: cached.venueName ?? null },
-        'Found cached address mapping',
-      );
-      const geoFromCache: GeocodedLocation = {
-        formattedAddress: cached.resolvedAddress,
-        latitude: cached.latitude,
-        longitude: cached.longitude,
-        city: null,
-        country: null,
-        placeId: cached.placeId,
-        googleMapsUrl: cached.googleMapsUrl,
-        venueName: cached.venueName ?? null,
-      };
-      await this.applyResolvedLocation(event, geoFromCache);
-      await this.announceResolved(event, user, geoFromCache);
-      return {
-        resolved: true,
-        geocoded: geoFromCache,
-        cityExtracted: null,
-        candidates: [],
-      };
-    }
-
-    // 2. Geocode via Google Maps, biased toward the user's home area
-    const home = await this.resolveHomeArea(user);
-
-    // Try place search first (handles venue names better), fallback to geocoding
-    let results = await this.deps.geocodingService.findPlace(location, home?.bias);
-    if (results.length === 0) {
-      results = await this.deps.geocodingService.geocodeAddress(location, home?.bias);
-    }
-
-    if (results.length === 0) {
+    const candidates = await this.findCandidates(event, user, location);
+    if (candidates.length === 0) {
       logger.info({ eventId: event.id, location }, 'No geocoding results found');
-      await this.clearResolvedLocation(event);
       await this.notify(user, t(user.language).aiTools.location.locationNotFound(escapeHtml(event.title)));
       return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
     }
 
-    // 3. Single result inside the home area → auto-resolve, and show the user what was picked
-    const geo = results.length === 1 ? results[0] : undefined;
-    if (geo && home && isInsideHomeArea(geo, home)) {
-      await this.applyResolvedLocation(event, geo);
-      await this.announceResolved(event, user, geo);
-      return { resolved: true, geocoded: geo, cityExtracted: geo.city, candidates: [] };
-    }
-
-    // 4. Several candidates, or one outside the home area → ask the user to choose
-    await this.clearResolvedLocation(event);
-    await this.askUserToChoose(event, user, results);
-    return {
-      resolved: false,
-      geocoded: null,
-      cityExtracted: results[0]?.city ?? null,
-      candidates: results,
-    };
+    await this.askUserToChoose(event, user, candidates);
+    return { resolved: false, geocoded: null, cityExtracted: candidates[0]?.city ?? null, candidates };
   }
 
-  /** Apply resolved location to event and update invitations */
+  /** The remembered place for this text, else the places a search biased to the home area finds. */
+  private async findCandidates(event: CalendarEvent, user: User, location: string): Promise<GeocodedLocation[]> {
+    const cached = await this.deps.addressCache.findMapping(user.telegram_id, location);
+    if (cached) {
+      logger.info(
+        { eventId: event.id, cached: cached.resolvedAddress, venue: cached.venueName ?? null },
+        'Offering the remembered place for this location',
+      );
+      return [
+        {
+          formattedAddress: cached.resolvedAddress,
+          latitude: cached.latitude,
+          longitude: cached.longitude,
+          city: null,
+          country: null,
+          placeId: cached.placeId,
+          googleMapsUrl: cached.googleMapsUrl,
+          venueName: cached.venueName ?? null,
+        },
+      ];
+    }
+
+    const bias = await this.homeAreaBias(user);
+    // Place search handles venue names better; plain geocoding is the fallback
+    const places = await this.deps.geocodingService.findPlace(location, bias);
+    if (places.length > 0) return places;
+    return this.deps.geocodingService.geocodeAddress(location, bias);
+  }
+
+  /** Apply the place the creator confirmed (candidate tap or pin) and update delivered invitations. */
   async applyResolvedLocation(event: CalendarEvent, geo: GeocodedLocation): Promise<void> {
     const venueName = geo.venueName ?? null;
     // Update event in DB
@@ -296,9 +251,9 @@ export class LocationVerificationService {
   }
 
   /**
-   * The user keeps the typed location (declined the candidates or the auto-picked place): the event
-   * loses any resolved place and stays unverified, the offered candidates are dropped, and a
-   * remembered place for this text is forgotten so it is not applied again.
+   * The creator keeps the typed location ("none of these — keep as typed"): the event stays (or
+   * becomes again) unverified with only the typed text, the offered candidates are dropped, and a
+   * remembered place for this text is forgotten so it is not offered again. Nothing is cached.
    */
   async keepTypedLocation(eventId: number, userId: number): Promise<CalendarEvent | null> {
     const event = this.deps.eventRepo.findById(eventId, userId);
@@ -317,10 +272,10 @@ export class LocationVerificationService {
   }
 
   /**
-   * Learn from a location the user explicitly confirmed (candidate button or a pin shared for the
+   * Learn from a place the creator explicitly confirmed (candidate tap or a pin shared for the
    * event): remember the typed text → place mapping, and fill an empty home city, but only with a
-   * place in the user's region, so a venue abroad never becomes the home city.
-   * Never called for automatic resolution.
+   * place in the creator's region (their timezone zone or home country), so a venue abroad never
+   * becomes the home city. An existing city is never overwritten.
    */
   private async cacheAndUpdateCity(user: User, inputLocation: string, geo: GeocodedLocation): Promise<void> {
     // Cache the mapping
@@ -340,31 +295,29 @@ export class LocationVerificationService {
   }
 
   /**
-   * The home city anchors searches only when it lies in the user's region: a city learned from a
-   * wrong guess must not pull every later search toward it.
+   * Search bias toward the creator's home area. The home city anchors searches only when it lies in
+   * the creator's region: a city learned from a wrong guess must not pull every later search toward
+   * it. Otherwise the home country; none when neither is known.
    */
-  private async resolveHomeArea(user: User): Promise<HomeArea | null> {
+  private async homeAreaBias(user: User): Promise<GeocodingBias | undefined> {
     const countryCode = homeCountryCode(user);
     if (user.city) {
       const city = await this.deps.geocodingService.locateArea({ city: user.city, countryCode });
       if (city && isInUserRegion(user, city)) {
-        return {
-          bias: { countryCode: city.countryCode, bounds: city.bounds },
-          cityCenter: { latitude: city.latitude, longitude: city.longitude },
-        };
+        return { countryCode: city.countryCode, bounds: city.bounds };
       }
       logger.warn(
         { userId: user.telegram_id, countryCode, cityCountryCode: city?.countryCode ?? null },
         'Home city is outside the user timezone and home country; biasing geocoding by country only',
       );
     }
-    if (!countryCode) return null;
+    if (!countryCode) return undefined;
 
     const country = await this.deps.geocodingService.locateArea({ city: null, countryCode });
-    return { bias: { countryCode, bounds: country?.bounds ?? null }, cityCenter: null };
+    return { countryCode, bounds: country?.bounds ?? null };
   }
 
-  /** Drop a resolved place that does not belong to the event's current text, and refresh invitations. */
+  /** Drop the resolved place after the creator kept the typed text, and refresh delivered invitations. */
   private async clearResolvedLocation(event: CalendarEvent): Promise<void> {
     if (event.location_verified === 0 && event.resolved_address === null) return;
 
@@ -379,14 +332,6 @@ export class LocationVerificationService {
       location_verified: 0,
       venue_name: null,
     });
-  }
-
-  /** Tell the user which place was applied, with a button to reject it. */
-  private async announceResolved(event: CalendarEvent, user: User, geo: GeocodedLocation): Promise<void> {
-    const msgs = t(user.language).aiTools.location;
-    await this.notify(user, msgs.locationResolved(escapeHtml(event.title), placeLinkHtml(geo)), [
-      [{ text: msgs.wrongPlace, callback_data: `${CB.LOCATION_CANDIDATE}:${event.id}:keep` }],
-    ]);
   }
 
   private async notify(

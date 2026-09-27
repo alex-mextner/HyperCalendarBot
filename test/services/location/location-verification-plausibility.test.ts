@@ -1,7 +1,9 @@
 // test/services/location/location-verification-plausibility.test.ts
 // Regression for the 2026-09-27 incident: an unconfirmed far-away geocode was shown to invitees as a
-// verified address and poisoned the user's home city and address cache. Real SQLite repositories,
-// real address cache over an in-memory Redis, and a scripted geocoder.
+// verified address and poisoned the user's home city and address cache. The bot now always asks: no
+// geocode is applied, cached or taught as the home city until the creator taps a candidate. Real
+// SQLite repositories, real address cache over an in-memory Redis, a scripted geocoder and the real
+// callback handler for the taps.
 import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Scene } from '@gramio/scenes';
@@ -28,11 +30,14 @@ import type {
 } from '../../../src/services/location/geocoding-service.ts';
 import { InMemoryLocationCandidateStore } from '../../../src/services/location/location-candidate-store.ts';
 import { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
+import { InMemoryPendingGeoStore } from '../../../src/services/location/pending-geo-store.ts';
 import { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
 import { escapeHtml } from '../../../src/utils/telegram.ts';
 
 const USER_ID = 1001;
+const INVITEE_ID = 2002;
 const RAW_LOCATION = 'Kafana Sunce';
+const KEEP_AS_TYPED = t('ru').aiTools.location.noneOfThese;
 
 const SERBIA_BOUNDS: GeoBounds = { south: 42.23, west: 18.82, north: 46.19, east: 23.01 };
 const SERBIA: GeocodedArea = { latitude: 44.02, longitude: 21.01, countryCode: 'RS', bounds: SERBIA_BOUNDS };
@@ -103,6 +108,17 @@ const NIS_CAFE = place({
   placeId: 'place-nis',
   googleMapsUrl: 'https://www.google.com/maps/search/?api=1&query=43.3209,21.8958&query_place_id=place-nis',
 });
+// HTML-significant characters in both the venue and the address.
+const TRICKY_CAFE = place({
+  formattedAddress: 'Cara Dušana 1 <dvorište & ulaz>, Белград, Сербия',
+  latitude: 44.8235,
+  longitude: 20.4641,
+  city: 'Белград',
+  countryCode: 'RS',
+  placeId: 'place-tricky',
+  venueName: 'Bar & Grill <Dorćol>',
+  googleMapsUrl: 'https://www.google.com/maps/search/?api=1&query=44.8235,20.4641&query_place_id=place-tricky',
+});
 
 interface GeocoderCall {
   query: string;
@@ -159,10 +175,19 @@ function memoryRedis() {
   };
 }
 
+interface EditedMessage {
+  text: string;
+  parseMode: string | undefined;
+  replyMarkup: unknown;
+}
+
 let db: Database;
 afterEach(() => db.close());
 
-function setup(profile: { timezone: string; city?: string; countryCode?: string }, geocodingService: GeocodingService) {
+function setup(
+  profile: { timezone: string; city?: string; countryCode?: string; title?: string },
+  geocodingService: GeocodingService,
+) {
   db = new Database(':memory:');
   runMigrations(db, migrations);
   const userRepo = new UserRepository(db);
@@ -172,31 +197,46 @@ function setup(profile: { timezone: string; city?: string; countryCode?: string 
     timezone: profile.timezone,
     ...(profile.countryCode ? { country_code: profile.countryCode } : {}),
   });
+  userRepo.create({ telegram_id: INVITEE_ID, language: 'ru', timezone: 'Europe/Belgrade' });
   if (profile.city) userRepo.update(USER_ID, { city: profile.city });
   const eventRepo = new EventRepository(db);
   const start = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const event = eventRepo.create({
     user_id: USER_ID,
-    title: 'Встреча',
+    title: profile.title ?? 'Встреча',
     start_at: start.toISOString(),
     end_at: new Date(start.getTime() + 60 * 60 * 1000).toISOString(),
     timezone: 'Europe/Belgrade',
     location: RAW_LOCATION,
   });
+  // A delivered invitation: its card is edited whenever the event's place changes.
+  const invitationRepo = new InvitationRepository(db);
+  invitationRepo.create({
+    event_id: event.id,
+    inviter_id: USER_ID,
+    invitee_id: INVITEE_ID,
+    message_id: 77,
+    chat_id: INVITEE_ID,
+  });
   const addressCache = new AddressCache(memoryRedis());
   const candidateStore = new InMemoryLocationCandidateStore();
   const sent: SentMessage[] = [];
+  const invitationEdits: string[] = [];
   const service = new LocationVerificationService({
     geocodingService,
     addressCache,
     eventRepo,
     userRepo,
-    invitationRepo: new InvitationRepository(db),
+    invitationRepo,
     candidateStore,
     sendMessage: async (userId, text, options) => {
       sent.push({ userId, text, replyMarkup: options?.reply_markup });
     },
+    editMessage: async (_chatId, _messageId, text) => {
+      invitationEdits.push(text);
+    },
   });
+  const pendingGeoStore = new InMemoryPendingGeoStore();
   const user = () => {
     const row = userRepo.findByTelegramId(USER_ID);
     if (!row) throw new Error('test user missing');
@@ -207,214 +247,264 @@ function setup(profile: { timezone: string; city?: string; countryCode?: string 
     if (!row) throw new Error('test event missing');
     return row;
   };
-  return { service, event, user, storedEvent, addressCache, candidateStore, sent };
+
+  /** Press an inline button as the creator, through the real callback handler. */
+  async function tap(data: string): Promise<EditedMessage[]> {
+    const bot = new Bot('123:test');
+    const edits: EditedMessage[] = [];
+    bot.api.answerCallbackQuery = async () => true;
+    bot.api.editMessageText = async (params) => {
+      edits.push({ text: params.text.toString(), parseMode: params.parse_mode, replyMarkup: params.reply_markup });
+      return true;
+    };
+    const dbUser = user();
+    const ctx = Object.assign(
+      new CallbackQueryContext({
+        bot,
+        update: { update_id: 1 },
+        updateId: 1,
+        payload: {
+          id: 'callback',
+          chat_instance: 'test',
+          from: { id: USER_ID, is_bot: false, first_name: 'Owner' },
+          data,
+          message: { message_id: 10, date: 0, chat: { id: USER_ID, type: 'private' } },
+        },
+      }),
+      { dbUser, userTimezone: dbUser.timezone, lang: 'ru' as const, scene: { enter: async () => {} } },
+    );
+    const handler = createCallbackHandler(
+      new EventService({ eventRepo, agendaRepository: new AgendaRepository(db) }),
+      new Scene('unused'),
+      new HolidayService(new HolidayRepository(db)),
+      new NotificationPreferencesService(new NotificationPreferencesRepository(db)),
+      { eventRepo, userRepo, locationVerification: service, pendingGeoStore },
+    );
+    await handler(ctx);
+    return edits;
+  }
+
+  /** Nothing about the typed place was applied, remembered or learned. */
+  async function expectNothingWritten() {
+    const stored = storedEvent();
+    expect(stored.location).toBe(RAW_LOCATION);
+    expect(stored.location_verified).toBe(0);
+    expect(stored.resolved_address).toBeNull();
+    expect(stored.venue_name).toBeNull();
+    expect(stored.google_maps_url).toBeNull();
+    expect(stored.latitude).toBeNull();
+    expect(stored.longitude).toBeNull();
+    expect(invitationEdits).toEqual([]);
+    expect(await addressCache.findMapping(USER_ID, RAW_LOCATION)).toBeNull();
+    expect(await addressCache.getRecent(USER_ID)).toEqual([]);
+  }
+
+  return {
+    service,
+    event,
+    user,
+    storedEvent,
+    addressCache,
+    candidateStore,
+    pendingGeoStore,
+    sent,
+    invitationEdits,
+    tap,
+    expectNothingWritten,
+  };
 }
 
-describe('automatic resolution is limited to the user home area', () => {
-  test('far-away single result for a Belgrade-timezone user without a city asks instead of resolving', async () => {
-    const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { '|RS': SERBIA } });
+describe('no geocode is applied before the creator taps a candidate', () => {
+  test('a single plausible result in the home city is offered as a candidate, and nothing is written', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
 
     const result = await s.service.verifyEventLocation(s.event, s.user());
 
     expect(result.resolved).toBe(false);
-    // The search itself is biased toward the timezone country, not left to the server's IP location.
-    expect(geocoder.searches[0]?.bias).toEqual({ countryCode: 'RS', bounds: SERBIA_BOUNDS });
-
-    const event = s.storedEvent();
-    expect(event.location).toBe(RAW_LOCATION);
-    expect(event.location_verified).toBe(0);
-    expect(event.resolved_address).toBeNull();
-    expect(event.google_maps_url).toBeNull();
-
+    await s.expectNothingWritten();
     expect(s.user().city).toBeNull();
-    expect(await s.addressCache.findMapping(USER_ID, RAW_LOCATION)).toBeNull();
-    expect(await s.addressCache.getRecent(USER_ID)).toEqual([]);
 
     expect(s.sent).toHaveLength(1);
     const ask = s.sent[0]!;
     expect(ask.userId).toBe(USER_ID);
-    expect(ask.text).toContain(escapeHtml(DUTCH_HOTEL.formattedAddress));
-    expect(ask.text).toContain(`<a href="${escapeHtml(DUTCH_HOTEL.googleMapsUrl)}">`);
-    expect(callbackData(ask)).toEqual([`loc_cand:${s.event.id}:0`, `loc_cand:${s.event.id}:keep`]);
-    expect(await s.candidateStore.get(s.event.id)).toEqual([DUTCH_HOTEL]);
-  });
-
-  test('a city learned from an earlier unconfirmed resolve outside the timezone country is not trusted', async () => {
-    const geocoder = scriptedGeocoder({
-      places: [DUTCH_HOTEL],
-      areas: { 'Zeedorp|RS': COASTAL_VILLAGE_NL, '|RS': SERBIA },
-    });
-    const s = setup({ timezone: 'Europe/Belgrade', city: 'Zeedorp' }, geocoder.service);
-
-    const result = await s.service.verifyEventLocation(s.event, s.user());
-
-    expect(result.resolved).toBe(false);
-    expect(geocoder.searches[0]?.bias).toEqual({ countryCode: 'RS', bounds: SERBIA_BOUNDS });
-    expect(s.storedEvent().location_verified).toBe(0);
-    expect(callbackData(s.sent[0])).toContain(`loc_cand:${s.event.id}:0`);
-  });
-
-  test('single result inside the timezone country is resolved and shown with a wrong-place button, without teaching the city or the cache', async () => {
-    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } });
-    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
-
-    const result = await s.service.verifyEventLocation(s.event, s.user());
-
-    expect(result.resolved).toBe(true);
-    const event = s.storedEvent();
-    expect(event.location_verified).toBe(1);
-    expect(event.resolved_address).toBe(BELGRADE_CAFE.formattedAddress);
-    expect(event.google_maps_url).toBe(BELGRADE_CAFE.googleMapsUrl);
-    expect(s.user().city).toBeNull();
-    expect(await s.addressCache.findMapping(USER_ID, RAW_LOCATION)).toBeNull();
-
-    expect(s.sent).toHaveLength(1);
-    expect(s.sent[0]!.text).toContain(
+    expect(ask.text).toContain(
       `<a href="${escapeHtml(BELGRADE_CAFE.googleMapsUrl)}">Kafana Sunce — ${escapeHtml(BELGRADE_CAFE.formattedAddress)}</a>`,
     );
-    expect(callbackData(s.sent[0])).toEqual([`loc_cand:${s.event.id}:keep`]);
-    expect(buttonLabels(s.sent[0])).toEqual(['❌ Не то место']);
+    expect(buttonLabels(ask)).toEqual(['1. Kafana Sunce', KEEP_AS_TYPED]);
+    expect(callbackData(ask)).toEqual([`loc_cand:${s.event.id}:0`, `loc_cand:${s.event.id}:keep`]);
+    expect(await s.candidateStore.get(s.event.id)).toEqual([BELGRADE_CAFE]);
   });
 
-  test('no result tells the user and leaves only the typed text', async () => {
-    const geocoder = scriptedGeocoder({ places: [], areas: { '|RS': SERBIA } });
+  test('the incident: a far-away single result is offered, not applied, and the search was biased home', async () => {
+    const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
 
     const result = await s.service.verifyEventLocation(s.event, s.user());
 
     expect(result.resolved).toBe(false);
-    expect(s.storedEvent().location_verified).toBe(0);
-    expect(s.sent.map((m) => m.text)).toEqual([
-      '📍 Не удалось определить адрес для «Встреча». Можешь отправить 📍 геолокацию или написать полный адрес.',
+    // Biased toward the timezone country, not left to the server's IP location.
+    expect(geocoder.searches[0]?.bias).toEqual({ countryCode: 'RS', bounds: SERBIA_BOUNDS });
+    await s.expectNothingWritten();
+    expect(s.user().city).toBeNull();
+    expect(s.sent[0]!.text).toContain(`<a href="${escapeHtml(DUTCH_HOTEL.googleMapsUrl)}">`);
+    expect(buttonLabels(s.sent[0])).toEqual([`1. ${DUTCH_HOTEL.venueName}`, KEEP_AS_TYPED]);
+  });
+
+  test('a remembered place is offered as the candidate, not applied, without a new search', async () => {
+    const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.addressCache.recordMapping(USER_ID, RAW_LOCATION, {
+      resolvedAddress: BELGRADE_CAFE.formattedAddress,
+      googleMapsUrl: BELGRADE_CAFE.googleMapsUrl,
+      latitude: BELGRADE_CAFE.latitude,
+      longitude: BELGRADE_CAFE.longitude,
+      placeId: BELGRADE_CAFE.placeId,
+      venueName: BELGRADE_CAFE.venueName,
+    });
+
+    const result = await s.service.verifyEventLocation(s.event, s.user());
+
+    expect(result.resolved).toBe(false);
+    expect(geocoder.searches).toEqual([]);
+    const stored = s.storedEvent();
+    expect(stored.location_verified).toBe(0);
+    expect(stored.resolved_address).toBeNull();
+    expect(s.invitationEdits).toEqual([]);
+    expect(s.sent[0]!.text).toContain(`<a href="${escapeHtml(BELGRADE_CAFE.googleMapsUrl)}">`);
+    expect(buttonLabels(s.sent[0])).toEqual(['1. Kafana Sunce', KEEP_AS_TYPED]);
+    expect((await s.candidateStore.get(s.event.id))?.map((c) => c.formattedAddress)).toEqual([
+      BELGRADE_CAFE.formattedAddress,
     ]);
   });
 
-  test('a place resolved for the previous text is dropped when the new text needs confirmation', async () => {
-    const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { '|RS': SERBIA } });
-    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
-    await s.service.applyResolvedLocation(s.event, BELGRADE_CAFE);
-
-    await s.service.verifyEventLocation(s.storedEvent(), s.user());
-
-    const event = s.storedEvent();
-    expect(event.location_verified).toBe(0);
-    expect(event.resolved_address).toBeNull();
-    expect(event.google_maps_url).toBeNull();
-    expect(event.latitude).toBeNull();
-  });
-
-  test('explicit profile country wins over the timezone country', async () => {
-    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } });
-    const s = setup({ timezone: 'Europe/Amsterdam', countryCode: 'RS' }, geocoder.service);
-
-    const result = await s.service.verifyEventLocation(s.event, s.user());
-
-    expect(result.resolved).toBe(true);
-    expect(geocoder.searches[0]?.bias?.countryCode).toBe('RS');
-  });
-
-  test('single result near the confirmed home city is resolved; biased to the city viewport', async () => {
-    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { 'Белград|RS': BELGRADE } });
-    const s = setup({ timezone: 'Europe/Belgrade', city: 'Белград' }, geocoder.service);
-
-    const result = await s.service.verifyEventLocation(s.event, s.user());
-
-    expect(result.resolved).toBe(true);
-    expect(geocoder.searches[0]?.bias).toEqual({ countryCode: 'RS', bounds: BELGRADE.bounds });
-    expect(s.storedEvent().location_verified).toBe(1);
-  });
-
-  test('single result in the home country but far from the home city asks', async () => {
-    const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { 'Белград|RS': BELGRADE } });
-    const s = setup({ timezone: 'Europe/Belgrade', city: 'Белград' }, geocoder.service);
-
-    const result = await s.service.verifyEventLocation(s.event, s.user());
-
-    expect(result.resolved).toBe(false);
-    expect(s.storedEvent().location_verified).toBe(0);
-    expect(callbackData(s.sent[0])).toEqual([`loc_cand:${s.event.id}:0`, `loc_cand:${s.event.id}:keep`]);
-  });
-
-  test('a home city across the border but inside the user timezone is trusted and anchors the search', async () => {
-    const budvaCafe = place({
-      formattedAddress: 'Mediteranska 1, Будва, Черногория',
-      latitude: 42.2853,
-      longitude: 18.8421,
-      city: 'Будва',
-      countryCode: 'ME',
-    });
-    const geocoder = scriptedGeocoder({ places: [budvaCafe], areas: { 'Будва|RS': BUDVA_ME } });
-    const s = setup({ timezone: 'Europe/Belgrade', city: 'Будва' }, geocoder.service);
-
-    const result = await s.service.verifyEventLocation(s.event, s.user());
-
-    expect(geocoder.searches[0]?.bias).toEqual({ countryCode: 'ME', bounds: BUDVA_ME.bounds });
-    expect(result.resolved).toBe(true);
-    expect(s.storedEvent().location_verified).toBe(1);
-  });
-
-  test('without a home country, a city outside the user timezone does not anchor the search', async () => {
-    const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { 'Zeedorp|': COASTAL_VILLAGE_NL } });
-    const s = setup({ timezone: 'Asia/Novosibirsk', city: 'Zeedorp' }, geocoder.service);
-
-    const result = await s.service.verifyEventLocation(s.event, s.user());
-
-    expect(geocoder.searches[0]?.bias).toBeUndefined();
-    expect(result.resolved).toBe(false);
-    expect(s.storedEvent().location_verified).toBe(0);
-    expect(callbackData(s.sent[0])).toEqual([`loc_cand:${s.event.id}:0`, `loc_cand:${s.event.id}:keep`]);
-  });
-
-  test('without any known home area a single result is never auto-resolved', async () => {
-    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE] });
-    const s = setup({ timezone: 'UTC' }, geocoder.service);
-
-    const result = await s.service.verifyEventLocation(s.event, s.user());
-
-    expect(result.resolved).toBe(false);
-    expect(geocoder.searches[0]?.bias).toBeUndefined();
-    expect(s.storedEvent().location_verified).toBe(0);
-    expect(s.sent).toHaveLength(1);
-  });
-
-  test('every candidate of an ambiguous result gets a map link and a button named after it, plus none-of-these', async () => {
+  test('several results: every candidate gets a map link and a button named after the place, plus keep as typed', async () => {
     const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE, NIS_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
 
     await s.service.verifyEventLocation(s.event, s.user());
 
+    await s.expectNothingWritten();
     const ask = s.sent[0]!;
     for (const candidate of [BELGRADE_CAFE, NIS_CAFE]) {
       expect(ask.text).toContain(`<a href="${escapeHtml(candidate.googleMapsUrl)}">`);
     }
-    expect(buttonLabels(ask)).toEqual(['1. Kafana Sunce', `2. ${NIS_CAFE.formattedAddress}`, '🚫 Ничего из этого']);
+    expect(buttonLabels(ask)).toEqual(['1. Kafana Sunce', `2. ${NIS_CAFE.formattedAddress}`, KEEP_AS_TYPED]);
     expect(callbackData(ask)).toEqual([
       `loc_cand:${s.event.id}:0`,
       `loc_cand:${s.event.id}:1`,
       `loc_cand:${s.event.id}:keep`,
     ]);
   });
-});
 
-describe('only an explicit confirmation teaches the address cache and the home city', () => {
-  test('choosing a candidate in the home country records the mapping and fills the empty city', async () => {
-    const geocoder = scriptedGeocoder({ places: [] });
+  test('no result tells the creator to send a pin or the full address, and nothing is written', async () => {
+    const geocoder = scriptedGeocoder({ places: [], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
 
-    const chosen = await s.service.handleLocationChoice(s.event.id, USER_ID, 0, [BELGRADE_CAFE]);
+    const result = await s.service.verifyEventLocation(s.event, s.user());
 
-    expect(chosen).toBe(true);
+    expect(result.resolved).toBe(false);
+    await s.expectNothingWritten();
+    expect(s.sent.map((m) => m.text)).toEqual([t('ru').aiTools.location.locationNotFound('Встреча')]);
+    expect(await s.candidateStore.get(s.event.id)).toBeNull();
+  });
+
+  test('a place confirmed earlier stays while the creator is asked again', async () => {
+    const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.service.handleLocationChoice(s.event.id, USER_ID, 0, [BELGRADE_CAFE]);
+    const editsAfterConfirmation = s.invitationEdits.length;
+
+    await s.service.verifyEventLocation(s.storedEvent(), s.user());
+
+    expect(s.storedEvent().resolved_address).toBe(BELGRADE_CAFE.formattedAddress);
     expect(s.storedEvent().location_verified).toBe(1);
+    expect(s.invitationEdits).toHaveLength(editsAfterConfirmation);
+  });
+});
+
+describe('searches are biased to the creator home area', () => {
+  test('a confirmed home city anchors the search to its viewport', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { 'Белград|RS': BELGRADE } });
+    const s = setup({ timezone: 'Europe/Belgrade', city: 'Белград' }, geocoder.service);
+
+    await s.service.verifyEventLocation(s.event, s.user());
+
+    expect(geocoder.searches[0]?.bias).toEqual({ countryCode: 'RS', bounds: BELGRADE.bounds });
+    await s.expectNothingWritten();
+  });
+
+  test('without a city, the profile country wins over the timezone country', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Amsterdam', countryCode: 'RS' }, geocoder.service);
+
+    await s.service.verifyEventLocation(s.event, s.user());
+
+    expect(geocoder.searches[0]?.bias).toEqual({ countryCode: 'RS', bounds: SERBIA_BOUNDS });
+  });
+
+  test('a city learned from a wrong guess outside the user region does not anchor the search', async () => {
+    const geocoder = scriptedGeocoder({
+      places: [DUTCH_HOTEL],
+      areas: { 'Zeedorp|RS': COASTAL_VILLAGE_NL, '|RS': SERBIA },
+    });
+    const s = setup({ timezone: 'Europe/Belgrade', city: 'Zeedorp' }, geocoder.service);
+
+    await s.service.verifyEventLocation(s.event, s.user());
+
+    expect(geocoder.searches[0]?.bias).toEqual({ countryCode: 'RS', bounds: SERBIA_BOUNDS });
+  });
+
+  test('a home city across the border but inside the user timezone anchors the search', async () => {
+    const geocoder = scriptedGeocoder({ places: [], areas: { 'Будва|RS': BUDVA_ME } });
+    const s = setup({ timezone: 'Europe/Belgrade', city: 'Будва' }, geocoder.service);
+
+    await s.service.verifyEventLocation(s.event, s.user());
+
+    expect(geocoder.searches[0]?.bias).toEqual({ countryCode: 'ME', bounds: BUDVA_ME.bounds });
+  });
+
+  test('with no home country, a city outside the user timezone gives no bias', async () => {
+    const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { 'Zeedorp|': COASTAL_VILLAGE_NL } });
+    const s = setup({ timezone: 'Asia/Novosibirsk', city: 'Zeedorp' }, geocoder.service);
+
+    await s.service.verifyEventLocation(s.event, s.user());
+
+    expect(geocoder.searches[0]?.bias).toBeUndefined();
+    await s.expectNothingWritten();
+  });
+});
+
+describe('tapping a candidate resolves the event', () => {
+  test('the tap applies the place, edits delivered invitations, remembers the place and fills an empty home city', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE, NIS_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.service.verifyEventLocation(s.event, s.user());
+    expect(s.invitationEdits).toEqual([]);
+
+    const edits = await s.tap(`loc_cand:${s.event.id}:0`);
+
+    const stored = s.storedEvent();
+    expect(stored.location).toBe(RAW_LOCATION);
+    expect(stored.location_verified).toBe(1);
+    expect(stored.resolved_address).toBe(BELGRADE_CAFE.formattedAddress);
+    expect(stored.venue_name).toBe('Kafana Sunce');
+    expect(stored.google_maps_url).toBe(BELGRADE_CAFE.googleMapsUrl);
+    expect(s.invitationEdits).toHaveLength(1);
+    expect(s.invitationEdits[0]).toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
     expect((await s.addressCache.findMapping(USER_ID, RAW_LOCATION))?.resolvedAddress).toBe(
       BELGRADE_CAFE.formattedAddress,
     );
     expect(s.user().city).toBe('Белград');
+    expect(await s.candidateStore.get(s.event.id)).toBeNull();
+    // The picker turns into the confirmation, without buttons.
+    expect(edits).toHaveLength(1);
+    expect(edits[0]!.replyMarkup).toBeUndefined();
+    expect(edits[0]!.text).toContain(`<a href="${escapeHtml(BELGRADE_CAFE.googleMapsUrl)}">`);
   });
 
-  test('choosing a candidate abroad records the mapping but never makes it the home city', async () => {
-    const geocoder = scriptedGeocoder({ places: [] });
-    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+  test('choosing a place abroad remembers it for this text but never makes it the home city', async () => {
+    const s = setup({ timezone: 'Europe/Belgrade' }, scriptedGeocoder({ places: [] }).service);
 
     const chosen = await s.service.handleLocationChoice(s.event.id, USER_ID, 0, [DUTCH_HOTEL]);
 
@@ -425,69 +515,74 @@ describe('only an explicit confirmation teaches the address cache and the home c
     expect(s.user().city).toBeNull();
   });
 
-  test('choosing a candidate never overwrites an existing city', async () => {
-    const geocoder = scriptedGeocoder({ places: [] });
-    const s = setup({ timezone: 'Europe/Belgrade', city: 'Нови-Сад' }, geocoder.service);
+  test('choosing a place never overwrites an existing home city', async () => {
+    const s = setup({ timezone: 'Europe/Belgrade', city: 'Нови-Сад' }, scriptedGeocoder({ places: [] }).service);
 
     await s.service.handleLocationChoice(s.event.id, USER_ID, 0, [BELGRADE_CAFE]);
 
     expect(s.user().city).toBe('Нови-Сад');
   });
 
-  test('a shared pin for the event is a confirmation too', async () => {
-    const geocoder = scriptedGeocoder({ places: [], reverse: BELGRADE_CAFE });
-    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+  test('the confirmation after a tap escapes the venue, the address and the title', async () => {
+    const geocoder = scriptedGeocoder({ places: [TRICKY_CAFE, NIS_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade', title: 'Q&A <встреча>' }, geocoder.service);
+    await s.service.verifyEventLocation(s.event, s.user());
 
-    const resolved = await s.service.resolveFromCoordinates(s.event.id, 44.8231, 20.4632, USER_ID);
+    const edits = await s.tap(`loc_cand:${s.event.id}:0`);
 
-    expect(resolved).toBe(true);
+    expect(edits).toHaveLength(1);
+    expect(edits[0]!.parseMode).toBe('HTML');
+    expect(edits[0]!.text).toContain('Q&amp;A &lt;встреча&gt;');
+    expect(edits[0]!.text).toContain('Bar &amp; Grill &lt;Dorćol&gt;');
+    expect(edits[0]!.text).toContain('Cara Dušana 1 &lt;dvorište &amp; ulaz&gt;');
+    expect(edits[0]!.text).not.toContain('<Dorćol>');
+    expect(edits[0]!.text).not.toContain('<dvorište');
+  });
+
+  test('a pin shared for the event is a confirmation too, and its confirmation is escaped', async () => {
+    const geocoder = scriptedGeocoder({ places: [], reverse: TRICKY_CAFE });
+    const s = setup({ timezone: 'Europe/Belgrade', title: 'Q&A <встреча>' }, geocoder.service);
+    await s.pendingGeoStore.set(USER_ID, { latitude: TRICKY_CAFE.latitude, longitude: TRICKY_CAFE.longitude });
+
+    const edits = await s.tap(`loc_geo:geo:${s.event.id}`);
+
     expect(s.storedEvent().location_verified).toBe(1);
+    expect(s.storedEvent().resolved_address).toBe(TRICKY_CAFE.formattedAddress);
+    expect(s.invitationEdits).toHaveLength(1);
     expect((await s.addressCache.findMapping(USER_ID, RAW_LOCATION))?.resolvedAddress).toBe(
-      BELGRADE_CAFE.formattedAddress,
+      TRICKY_CAFE.formattedAddress,
     );
     expect(s.user().city).toBe('Белград');
+    expect(edits).toHaveLength(1);
+    expect(edits[0]!.parseMode).toBe('HTML');
+    expect(edits[0]!.text).toContain('Q&amp;A &lt;встреча&gt;');
+    expect(edits[0]!.text).toContain('Bar &amp; Grill &lt;Dorćol&gt;');
+    expect(edits[0]!.text).toContain('Cara Dušana 1 &lt;dvorište &amp; ulaz&gt;');
   });
+});
 
-  test('keeping the typed text leaves the event unverified and drops the offered candidates', async () => {
-    const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { '|RS': SERBIA } });
+describe('keep as typed', () => {
+  test('tapping it leaves the event unverified, caches nothing and drops the offered candidates', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
     await s.service.verifyEventLocation(s.event, s.user());
 
-    const kept = await s.service.keepTypedLocation(s.event.id, USER_ID);
+    const edits = await s.tap(`loc_cand:${s.event.id}:keep`);
 
-    expect(kept?.location).toBe(RAW_LOCATION);
-    expect(s.storedEvent().location_verified).toBe(0);
-    expect(await s.candidateStore.get(s.event.id)).toBeNull();
-    expect(await s.addressCache.findMapping(USER_ID, RAW_LOCATION)).toBeNull();
+    await s.expectNothingWritten();
     expect(s.user().city).toBeNull();
+    expect(await s.candidateStore.get(s.event.id)).toBeNull();
+    expect(edits).toEqual([
+      {
+        text: t('ru').aiTools.location.keptAsTyped('Встреча', RAW_LOCATION),
+        parseMode: undefined,
+        replyMarkup: undefined,
+      },
+    ]);
   });
 
-  test('wrong place on an auto-picked place drops it back to the typed text', async () => {
-    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } });
-    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
-    await s.service.verifyEventLocation(s.event, s.user());
-
-    await s.service.keepTypedLocation(s.event.id, USER_ID);
-
-    const event = s.storedEvent();
-    expect(event.location).toBe(RAW_LOCATION);
-    expect(event.location_verified).toBe(0);
-    expect(event.resolved_address).toBeNull();
-    expect(event.google_maps_url).toBeNull();
-  });
-
-  test('keeping the text of an event the user cannot see changes nothing', async () => {
-    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } });
-    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
-    await s.service.verifyEventLocation(s.event, s.user());
-
-    expect(await s.service.keepTypedLocation(s.event.id, USER_ID + 1)).toBeNull();
-    expect(s.storedEvent().location_verified).toBe(1);
-  });
-
-  test('a remembered place is announced with a wrong-place button, and rejecting it forgets it', async () => {
-    const geocoder = scriptedGeocoder({ places: [] });
-    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+  test('rejecting a remembered place forgets it for this text', async () => {
+    const s = setup({ timezone: 'Europe/Belgrade' }, scriptedGeocoder({ places: [] }).service);
     await s.addressCache.recordMapping(USER_ID, RAW_LOCATION, {
       resolvedAddress: DUTCH_HOTEL.formattedAddress,
       googleMapsUrl: DUTCH_HOTEL.googleMapsUrl,
@@ -496,65 +591,35 @@ describe('only an explicit confirmation teaches the address cache and the home c
       placeId: DUTCH_HOTEL.placeId,
       venueName: DUTCH_HOTEL.venueName,
     });
+    await s.service.verifyEventLocation(s.event, s.user());
 
-    const result = await s.service.verifyEventLocation(s.event, s.user());
-
-    expect(result.resolved).toBe(true);
-    expect(s.sent[0]!.text).toContain(`<a href="${escapeHtml(DUTCH_HOTEL.googleMapsUrl)}">`);
-    expect(callbackData(s.sent[0])).toEqual([`loc_cand:${s.event.id}:keep`]);
-
-    await s.service.keepTypedLocation(s.event.id, USER_ID);
+    await s.tap(`loc_cand:${s.event.id}:keep`);
 
     expect(s.storedEvent().location_verified).toBe(0);
     expect(await s.addressCache.findMapping(USER_ID, RAW_LOCATION)).toBeNull();
   });
-});
 
-describe('keep-as-typed button', () => {
-  test('tapping it drops the auto-picked place and confirms the typed text', async () => {
-    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } });
+  test('keeping the typed text drops a place confirmed earlier and refreshes the invitation', async () => {
+    const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
-    await s.service.verifyEventLocation(s.event, s.user());
-    const [wrongPlace] = callbackData(s.sent[0]);
+    await s.service.handleLocationChoice(s.event.id, USER_ID, 0, [BELGRADE_CAFE]);
+    await s.service.verifyEventLocation(s.storedEvent(), s.user());
 
-    const bot = new Bot('123:test');
-    const edits: { text: string; replyMarkup: unknown }[] = [];
-    bot.api.answerCallbackQuery = async () => true;
-    bot.api.editMessageText = async (params) => {
-      edits.push({ text: params.text.toString(), replyMarkup: params.reply_markup });
-      return true;
-    };
-    const user = s.user();
-    const ctx = Object.assign(
-      new CallbackQueryContext({
-        bot,
-        update: { update_id: 1 },
-        updateId: 1,
-        payload: {
-          id: 'callback',
-          chat_instance: 'test',
-          from: { id: USER_ID, is_bot: false, first_name: 'Owner' },
-          data: wrongPlace,
-          message: { message_id: 10, date: 0, chat: { id: USER_ID, type: 'private' } },
-        },
-      }),
-      { dbUser: user, userTimezone: user.timezone, lang: 'ru' as const, scene: { enter: async () => {} } },
-    );
-    const eventRepo = new EventRepository(db);
-    const handler = createCallbackHandler(
-      new EventService({ eventRepo, agendaRepository: new AgendaRepository(db) }),
-      new Scene('unused'),
-      new HolidayService(new HolidayRepository(db)),
-      new NotificationPreferencesService(new NotificationPreferencesRepository(db)),
-      { eventRepo, locationVerification: s.service },
-    );
+    await s.tap(`loc_cand:${s.event.id}:keep`);
 
-    await handler(ctx);
+    const stored = s.storedEvent();
+    expect(stored.location).toBe(RAW_LOCATION);
+    expect(stored.location_verified).toBe(0);
+    expect(stored.resolved_address).toBeNull();
+    expect(stored.google_maps_url).toBeNull();
+    expect(s.invitationEdits.at(-1)).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
+  });
 
-    expect(edits).toEqual([
-      { text: t('ru').aiTools.location.keptAsTyped('Встреча', RAW_LOCATION), replyMarkup: undefined },
-    ]);
-    expect(s.storedEvent().location_verified).toBe(0);
-    expect(s.storedEvent().resolved_address).toBeNull();
+  test('keeping the text of an event the user cannot see changes nothing', async () => {
+    const s = setup({ timezone: 'Europe/Belgrade' }, scriptedGeocoder({ places: [] }).service);
+    await s.service.handleLocationChoice(s.event.id, USER_ID, 0, [BELGRADE_CAFE]);
+
+    expect(await s.service.keepTypedLocation(s.event.id, USER_ID + 1)).toBeNull();
+    expect(s.storedEvent().location_verified).toBe(1);
   });
 });
