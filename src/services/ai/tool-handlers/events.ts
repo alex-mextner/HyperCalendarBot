@@ -4,7 +4,7 @@ import type { Lang } from '../../../config/constants.ts';
 import { t, toLang } from '../../../config/constants.ts';
 import { CLEARED_LOCATION } from '../../../database/repositories/event.repository.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
-import { getDayRangeUtc, localCalendarDate } from '../../../utils/date.ts';
+import { formatLocalEventSpan, getDayRangeUtc, localCalendarDate } from '../../../utils/date.ts';
 import { eventTimestampError } from '../../../utils/event-timestamps.ts';
 import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
@@ -50,6 +50,18 @@ function expandDateOnly(dateStr: string, timezone: string): { start: string; end
   // the anchor landing on the wrong calendar day for UTC±10–12 offsets.
   const d = new TZDate(`${dateStr}T12:00:00`, timezone);
   return getDayRangeUtc(d, timezone);
+}
+
+/**
+ * Event time for the assistant: the user's wall clock first, so it is never tempted to present a
+ * UTC clock time as local, then the stored instants explicitly labelled as UTC. All-day values are
+ * floating dates and pass through unchanged.
+ */
+function timeParts(start: string, end: string | null | undefined, allDay: boolean, timezone: string): string[] {
+  const utc = (value: string) => (allDay ? value : new Date(value).toISOString());
+  const parts = [`local: ${formatLocalEventSpan(start, end ?? null, allDay, timezone)}`, `start_utc: ${utc(start)}`];
+  if (end) parts.push(`end_utc: ${utc(end)}`);
+  return parts;
 }
 
 /**
@@ -372,8 +384,8 @@ export async function handleGetEvents(ctx: AgentContext, input: GetEventsInput):
   );
   const lines = occurrences.map((occ, i) => {
     const e = occ.event;
-    const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${occ.occurrence_start}`];
-    if (occ.occurrence_end) parts.push(`end: ${occ.occurrence_end}`);
+    const parts = [`id: ${e.id}`, `title: ${e.title}`];
+    parts.push(...timeParts(occ.occurrence_start, occ.occurrence_end, e.all_day === 1, tz));
     if (e.description) parts.push(`description: ${e.description}`);
     parts.push(...locationParts(e));
     if (e.recurrence_rule) parts.push(`recurrence: ${e.recurrence_rule}`);
@@ -455,8 +467,8 @@ async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, us
     ctx.createdEventIds ??= new Set();
     ctx.createdEventIds.add(event.id);
 
-    const parts = [`id: ${event.id}`, `title: ${event.title}`, `start: ${event.start_at}`];
-    if (event.end_at) parts.push(`end: ${event.end_at}`);
+    const parts = [`id: ${event.id}`, `title: ${event.title}`];
+    parts.push(...timeParts(event.start_at, event.end_at, event.all_day === 1, ctx.user.timezone));
     if (event.description) parts.push(`description: ${event.description}`);
     parts.push(...locationParts(event));
 
@@ -533,8 +545,8 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
     };
   }
 
-  const parts = [`id: ${updated.id}`, `title: ${updated.title}`, `start: ${updated.start_at}`];
-  if (updated.end_at) parts.push(`end: ${updated.end_at}`);
+  const parts = [`id: ${updated.id}`, `title: ${updated.title}`];
+  parts.push(...timeParts(updated.start_at, updated.end_at, updated.all_day === 1, ctx.user.timezone));
   if (updated.description) parts.push(`description: ${updated.description}`);
   parts.push(...locationParts(updated));
 
@@ -936,8 +948,7 @@ export async function handleSearchEvents(ctx: AgentContext, input: SearchEventsI
 
   const weatherSuffixes = await Promise.all(events.map((e) => weatherSuffix(ctx, e.start_at, e.all_day === 1)));
   const lines = events.map((e, i) => {
-    const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${e.start_at}`];
-    if (e.end_at) parts.push(`end: ${e.end_at}`);
+    const parts = [`id: ${e.id}`, `title: ${e.title}`, ...timeParts(e.start_at, e.end_at, e.all_day === 1, tz)];
     parts.push(...locationParts(e));
     return parts.join(', ') + weatherSuffixes[i]!;
   });
@@ -985,8 +996,8 @@ export async function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInp
   );
   const lines = upcoming.map((occ, i) => {
     const e = occ.event;
-    const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${occ.occurrence_start}`];
-    if (occ.occurrence_end) parts.push(`end: ${occ.occurrence_end}`);
+    const parts = [`id: ${e.id}`, `title: ${e.title}`];
+    parts.push(...timeParts(occ.occurrence_start, occ.occurrence_end, e.all_day === 1, tz));
     parts.push(...locationParts(e));
     return parts.join(', ') + weatherSuffixes[i]!;
   });
@@ -1038,9 +1049,10 @@ export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): T
     return { success: false, error: 'Failed to snooze event.' };
   }
 
+  const newStartParts = timeParts(updated.start_at, null, updated.all_day === 1, ctx.user.timezone);
   return {
     success: true,
-    output: t(ctx.user.language).aiTools.events.snoozed(updated.title, minutes, updated.start_at),
+    output: t(ctx.user.language).aiTools.events.snoozed(updated.title, minutes, newStartParts.join(', ')),
   };
 }
 
@@ -1067,8 +1079,8 @@ export async function handleGetEvent(ctx: AgentContext, input: GetEventInput): P
   }
 
   const weather = await weatherSuffix(ctx, event.start_at, event.all_day === 1);
-  const parts = [`id: ${event.id}`, `title: ${event.title}`, `start: ${event.start_at}`];
-  if (event.end_at) parts.push(`end: ${event.end_at}`);
+  const parts = [`id: ${event.id}`, `title: ${event.title}`];
+  parts.push(...timeParts(event.start_at, event.end_at, event.all_day === 1, ctx.user.timezone));
   if (event.description) parts.push(`description: ${event.description}`);
   parts.push(...locationParts(event));
   if (event.recurrence_rule) parts.push(`recurrence: ${event.recurrence_rule}`);

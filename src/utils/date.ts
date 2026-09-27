@@ -42,6 +42,38 @@ export function formatTimeRange(startUtc: string, endUtc: string | null, timezon
   return `${start}–${toUserTime(endUtc, timezone)}`;
 }
 
+const LOCAL_DAY = 'EEE yyyy-MM-dd';
+
+/**
+ * An event's span on the user's wall clock with English weekday and zone, e.g.
+ * `Mon 2026-09-28 12:30–13:30 (Europe/Belgrade)` or `Mon 2026-09-28 23:00 – Tue 2026-09-29 01:00 (…)`.
+ * All-day values are floating calendar dates (their date part; a later end date is exclusive, the
+ * Google convention), so they render as `Mon 2026-09-28 all day` without a clock time or zone.
+ */
+export function formatLocalEventSpan(
+  startUtc: string,
+  endUtc: string | null,
+  allDay: boolean,
+  timezone: string,
+): string {
+  if (allDay) {
+    const firstDate = startUtc.slice(0, 10);
+    const endDate = endUtc?.slice(0, 10);
+    const first = format(localCalendarDate(firstDate, timezone), LOCAL_DAY);
+    if (!endDate || endDate <= firstDate) return `${first} all day`;
+    const last = format(addDays(localCalendarDate(endDate, timezone), -1), LOCAL_DAY);
+    return last === first ? `${first} all day` : `${first} – ${last} all day`;
+  }
+  const start = new TZDate(new Date(startUtc), timezone);
+  const zone = `(${timezone})`;
+  if (!endUtc) return `${format(start, `${LOCAL_DAY} HH:mm`)} ${zone}`;
+  const end = new TZDate(new Date(endUtc), timezone);
+  if (format(start, 'yyyy-MM-dd') === format(end, 'yyyy-MM-dd')) {
+    return `${format(start, `${LOCAL_DAY} HH:mm`)}–${format(end, 'HH:mm')} ${zone}`;
+  }
+  return `${format(start, `${LOCAL_DAY} HH:mm`)} – ${format(end, `${LOCAL_DAY} HH:mm`)} ${zone}`;
+}
+
 export function getDayRangeUtc(date: Date, timezone: string): { start: string; end: string } {
   const localDate = new TZDate(date.getTime(), timezone);
   const start = startOfDay(localDate);
