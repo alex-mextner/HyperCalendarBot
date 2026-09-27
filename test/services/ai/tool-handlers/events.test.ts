@@ -27,6 +27,8 @@ import { EventService } from '../../../../src/services/event/event-service.ts';
 import { localToGoogle } from '../../../../src/services/google/event-mapper.ts';
 import type { GroupMemberService } from '../../../../src/services/group/member-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
+import { generateIcs } from '../../../../src/services/ics/generator.ts';
+import { buildUserSessionInvitationText } from '../../../../src/services/telegram-session/invitation-text.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -345,6 +347,34 @@ describe('event tool handlers', () => {
       }
       const row = new EventRepository(db).findById(event.id, USER_ID)!;
       expect(localToGoogle(row).location).toBe('Кафе Ромашка — ул. Примерная, 1, Москва');
+    });
+
+    test('removing the location drops a pin-confirmed place from every surface', async () => {
+      const event = ctx.eventService.createEvent({ user_id: USER_ID, title: 'Обед', start_at: SOON, timezone: 'UTC' });
+      new EventRepository(db).updateLocationFields(event.id, {
+        resolved_address: 'ул. Примерная, 1, Москва',
+        latitude: 55.75,
+        longitude: 37.61,
+        google_maps_url: 'https://www.google.com/maps/search/?api=1&query=55.75,37.61',
+        location_verified: 1,
+        venue_name: 'Кафе Ромашка',
+      });
+
+      const cleared = await handleUpdateEvent(ctx, { event_id: event.id, location: null });
+      const shown = await handleGetEvent(ctx, { event_id: event.id });
+
+      expect(cleared.success).toBe(true);
+      for (const result of [cleared, shown]) expect(result.output).not.toContain('Ромашка');
+      const row = new EventRepository(db).findById(event.id, USER_ID)!;
+      expect(localToGoogle(row).location).toBeUndefined();
+      expect(generateIcs([row])).not.toContain('LOCATION');
+      const invitation = buildUserSessionInvitationText({
+        event: row,
+        inviterTimezone: 'UTC',
+        deepLink: 'https://t.me/hypercal_bot?start=invite_1',
+        lang: 'ru',
+      });
+      expect(invitation).not.toContain('📍');
     });
   });
 
