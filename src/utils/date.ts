@@ -236,15 +236,26 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
   return null;
 }
 
-/** Time range in one zone; names the end day when the event ends on a later local day there. */
-function formatZonedRange(startAt: string, endAt: string | null, timezone: string, lang: string): string {
-  if (!endAt) return toUserTime(startAt, timezone);
+/**
+ * Time range in one zone. Names the end day when the event ends on a later local day there, and the
+ * start day when it is not `cardDay`, the local date (yyyy-MM-dd) the card's date prefix shows.
+ */
+function formatZonedRange(
+  startAt: string,
+  endAt: string | null,
+  timezone: string,
+  lang: string,
+  cardDay: string,
+): string {
   const startDay = format(new TZDate(startAt, timezone), 'yyyy-MM-dd');
+  const dayPrefix = startDay === cardDay ? '' : `${formatDateShort(startAt, timezone, lang)}, `;
+  if (!endAt) return `${dayPrefix}${toUserTime(startAt, timezone)}`;
   const endDay = format(new TZDate(endAt, timezone), 'yyyy-MM-dd');
-  if (startDay === endDay) return formatTimeRange(startAt, endAt, timezone);
-  return `${toUserTime(startAt, timezone)} – ${formatDateShort(endAt, timezone, lang)}, ${toUserTime(endAt, timezone)}`;
+  if (startDay === endDay) return `${dayPrefix}${formatTimeRange(startAt, endAt, timezone)}`;
+  return `${dayPrefix}${toUserTime(startAt, timezone)} – ${formatDateShort(endAt, timezone, lang)}, ${toUserTime(endAt, timezone)}`;
 }
 
+/** The card's date prefix is the sender's start day; the recipient's range names its own day when it differs. */
 export function formatTimeWithTimezones(
   startAt: string,
   endAt: string | null,
@@ -253,13 +264,14 @@ export function formatTimeWithTimezones(
   recipientOnboarded: boolean,
   lang: string,
 ): string {
-  const senderTime = formatZonedRange(startAt, endAt, senderTimezone, lang);
+  const cardDay = format(new TZDate(startAt, senderTimezone), 'yyyy-MM-dd');
+  const senderTime = formatZonedRange(startAt, endAt, senderTimezone, lang, cardDay);
 
   if (!recipientOnboarded || !recipientTimezone || recipientTimezone === senderTimezone) {
     return `${senderTime} (${senderTimezone})`;
   }
 
-  const recipientTime = formatZonedRange(startAt, endAt, recipientTimezone, lang);
+  const recipientTime = formatZonedRange(startAt, endAt, recipientTimezone, lang, cardDay);
   return `${senderTime} (${senderTimezone}) / ${recipientTime} (${recipientTimezone})`;
 }
 
