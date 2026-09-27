@@ -247,13 +247,18 @@ function buildDataRules(durationMins: number): string {
 - Default event duration: ${durationMins} minutes. When creating an event with no explicit end time or duration, set end_at = start_at + ${durationMins} minutes.`;
 }
 
-function buildPeopleRules(ctx: AgentContext): string {
-  // 15:00 on the time-rule example date in the user's zone, in the exact form calculate returns.
-  const exampleStart = new Date(new TZDate(2026, 2, 15, 15, 0, 0, ctx.user.timezone).getTime()).toISOString();
-  const example = JSON.stringify({ title: 'Встреча с Леной', start_at: exampleStart });
+function buildPeopleRules(ctx: AgentContext, durationMins: number): string {
+  // Tomorrow 15:00 in the user's zone, in the exact form calculate returns, with the default duration.
+  const today = new TZDate(Date.now(), ctx.user.timezone);
+  const start = new TZDate(today.getFullYear(), today.getMonth(), today.getDate() + 1, 15, 0, 0, ctx.user.timezone);
+  const example = JSON.stringify({
+    title: 'Встреча с Леной',
+    start_at: new Date(start.getTime()).toISOString(),
+    end_at: new Date(start.getTime() + durationMins * 60_000).toISOString(),
+  });
   return `- NAMES: Always use the name form the user used. If a user says "Алекс", call them "Алекс" — never "Алексей", "Александр", or any other form. If they say "Вова", use "Вова" — never "Владимир". Save the preferred name via add_contact. When referring to contacts, use their preferred_name if set, otherwise their display name.
 - CONTACTS RESULT DISPLAY: After any add_contact or update_contact call — immediately call get_contacts and show the full updated list to the user. Never assume success without showing the result.
-- PARTICIPANTS: never write people into description — invite them as below; description is only a note the user dictated. "мной"/"я"/"me" is the user, the organizer: never invite, pick or list them. E.g. "встреча 15 марта в 15:00 с Леной и мной" → create_event(${example}), then invite only Лена.
+- PARTICIPANTS: never write people into description — invite them as below; description is only a note the user dictated. "мной"/"я"/"me" is the user, the organizer: never invite, pick or list them. E.g. "встреча завтра в 15:00 с Леной и мной" → create_event(${example}), then invite only Лена.
 - ATTENDANCE: answer who takes part only from get_invitation_status, never from description text; the user is the organizer of events they created.
 - IMPORTANT: When the user mentions OTHER PEOPLE in an event, follow this sequence:
   1. Create the event first.
@@ -274,7 +279,7 @@ function buildRulesSection(ctx: AgentContext, utcOffset: string, durationMins: n
     buildEventCreationRules(),
     buildOutputRules(),
     buildDataRules(durationMins),
-    buildPeopleRules(ctx),
+    buildPeopleRules(ctx, durationMins),
   ].join('\n');
 }
 

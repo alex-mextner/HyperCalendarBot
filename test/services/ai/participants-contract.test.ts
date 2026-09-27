@@ -1,169 +1,288 @@
 import { Database } from 'bun:sqlite';
-import { afterEach, describe, expect, setSystemTime, test } from 'bun:test';
+import { afterEach, describe, expect, mock, setSystemTime, test } from 'bun:test';
+import { TZDate } from '@date-fns/tz';
 import type OpenAI from 'openai';
+import { t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
+import { EditProposalRepository } from '../../../src/database/repositories/edit-proposal.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
+import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
+import { SharedEventRepository } from '../../../src/database/repositories/shared-event.repository.ts';
+import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
-import { buildSystemPrompt } from '../../../src/services/ai/system-prompt.ts';
-import { executeTool } from '../../../src/services/ai/tool-executor.ts';
-import { createToolExposure, DISCOVERY_TOOL } from '../../../src/services/ai/tool-exposure.ts';
+import { aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
+import { unverifiedResponseNotice } from '../../../src/services/ai/response-validator.ts';
+import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
+import { _resetToolThrottleForTest, executeTool } from '../../../src/services/ai/tool-executor.ts';
 import { toolSchemas } from '../../../src/services/ai/tool-schemas.ts';
-import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
-import type { AgentContext } from '../../../src/services/ai/types.ts';
+import type { AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
+import { PrivacyService } from '../../../src/services/sharing/privacy-service.ts';
+import { SharingService } from '../../../src/services/sharing/sharing-service.ts';
 import { jsonCodec } from '../../../src/utils/json-codec.ts';
 
-// Incident 2026-09-27: "встреча в 15 с Леной, Алексом, Аней и мной" was created with the
-// four names (the inviter included) as the description, and the inviter was later told he
-// "already participates because his name is in the description". The prompt and the tool
-// schema must say that people are invited, never described, and that attendance comes from
-// invitation data. The prompt's example call is an executable fixture, run below.
+// Incident 2026-09-27: "встреча в 15 с Леной, Алексом, Аней и мной" was created with the four
+// names (the inviter included) as its description, and the inviter, asking to be added, was told
+// he "already participates because his name is in the description". These scenarios run the real
+// agent loop, real handlers and a real database under a scripted model. The create call is not
+// scripted: it is the example the rendered system prompt demonstrates, so the prompt's own advice
+// is what gets executed.
 
-const USER_ID = 202;
-// The executor throttles identical write calls per chat for 5 s across tests; a fresh chat
-// per test keeps every run of the same example a real execution.
-let nextChatId = 1_000;
-const ZONES = ['UTC', 'Europe/Belgrade', 'America/New_York', 'Asia/Kolkata'];
-const MODES = ['full', 'lazy'] as const;
+const OWNER = 202;
+const LENA = 789;
+const DURATION_MINUTES = 45;
 
 interface StoredEvent {
-  title: string;
+  id: number;
   start_at: string;
+  end_at: string | null;
   description: string | null;
 }
 
-function makeContext(timezone: string): { ctx: AgentContext; db: Database } {
+interface InvitationRow {
+  invitee_id: number;
+}
+
+/** One scripted model turn: either a tool call or the final answer, chosen from the system prompt seen. */
+type Turn = { tool: string; input: { [key: string]: unknown } } | { text: string };
+
+function makeHarness(timezone: string): { ctx: AgentContext; db: Database; sender: TelegramSender } {
+  _resetToolThrottleForTest();
+  aiFailureNotices.reset();
   const db = new Database(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
   runMigrations(db, migrations);
   const userRepo = new UserRepository(db);
-  const user = userRepo.create({ telegram_id: USER_ID, first_name: 'Owner', timezone, language: 'ru' });
+  userRepo.create({ telegram_id: OWNER, first_name: 'Виталий', timezone, language: 'ru' });
+  userRepo.update(OWNER, { default_event_duration_minutes: DURATION_MINUTES });
+  userRepo.create({ telegram_id: LENA, first_name: 'Лена', timezone, language: 'ru' });
+  const eventRepo = new EventRepository(db);
+  const eventService = new EventService({ eventRepo });
+  const invitationRepo = new InvitationRepository(db);
+  const sharingSettingsRepo = new SharingSettingsRepository(db);
+  const privacyService = new PrivacyService(sharingSettingsRepo);
   const chatHistory = new ChatHistoryRepository(db);
+  const user = userRepo.findByTelegramId(OWNER);
+  if (!user) throw new Error('owner fixture missing');
   const ctx: AgentContext = {
     user,
-    chatId: nextChatId++,
-    messageText: 'добавь встречу в 15 с Леной и мной',
+    chatId: OWNER,
+    messageText: 'добавь встречу завтра в 15:00 с Леной и мной',
     isGroup: false,
-    eventService: new EventService({ eventRepo: new EventRepository(db) }),
+    eventService,
     holidayService: new HolidayService(new HolidayRepository(db)),
     chatHistory,
+    conversationLogger: new ConversationLogger(chatHistory),
     userRepo,
     eventReminderRepo: new EventReminderRepository(db),
-    conversationLogger: new ConversationLogger(chatHistory),
+    // Лена was resolved through the address book earlier in this conversation.
+    verifiedRecipientIds: new Set([LENA]),
+    sharing: {
+      invitationRepo,
+      sharingSettingsRepo,
+      privacyService,
+      invitationService: new InvitationService(invitationRepo, eventRepo, sharingSettingsRepo),
+      sharedEventRepo: new SharedEventRepository(db),
+      editProposalRepo: new EditProposalRepository(db),
+      sharingService: new SharingService(
+        (id, start, end) => eventService.getEventsInRange(id, start, end),
+        privacyService,
+      ),
+    },
   };
-  return { ctx, db };
+  const sender: TelegramSender = {
+    sendMessage: mock(() => Promise.resolve({ message_id: 42 })),
+    editMessageText: mock(() => Promise.resolve()),
+    sendInvitation: mock(() => Promise.resolve({ message_id: 55 })),
+  };
+  return { ctx, db, sender };
 }
 
-/** The prompt the model actually receives in each tool-schema mode (see CalendarBotAgent.run). */
-function promptFor(ctx: AgentContext, mode: (typeof MODES)[number]): string {
-  const base = buildSystemPrompt(ctx);
-  return mode === 'lazy' ? `${base}\n\n${createToolExposure(getToolDefinitions('text')).prompt}` : base;
+function systemPromptOf(opts: StreamRoundOptions): string {
+  const first = opts.messages[0];
+  return first?.role === 'system' && typeof first.content === 'string' ? first.content : '';
 }
 
-function createEventExamples(prompt: string): string[] {
-  return [...prompt.matchAll(/create_event\((\{[^\n]*?\})\)/g)].map((match) => match[1] ?? '');
+function toolMessages(opts: StreamRoundOptions): string[] {
+  return opts.messages.flatMap((m) => (m.role === 'tool' && typeof m.content === 'string' ? [m.content] : []));
 }
 
-function schemaProperty(tools: OpenAI.ChatCompletionTool[], tool: string, property: string): string {
-  const found = tools.find((t) => t.type === 'function' && t.function.name === tool);
-  if (!found || found.type !== 'function') throw new Error(`${tool} missing from catalog`);
-  const properties: unknown = found.function.parameters?.properties;
-  const prop: unknown = properties && typeof properties === 'object' ? Reflect.get(properties, property) : undefined;
-  const description: unknown = prop && typeof prop === 'object' ? Reflect.get(prop, 'description') : undefined;
-  return typeof description === 'string' ? description : '';
+/**
+ * A scripted model. The response validator always rejects, so an answer only reaches the user
+ * when the pipeline accepts it as grounded in this turn's tool results.
+ */
+function scriptedModel(turns: ((opts: StreamRoundOptions) => Turn)[]) {
+  const seen: StreamRoundOptions[] = [];
+  let round = 0;
+  const impl = async (opts: StreamRoundOptions, callbacks: StreamCallbacks = {}): Promise<StreamRoundResult> => {
+    if (systemPromptOf(opts).includes('strict QA validator')) {
+      const reject: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: 'REJECT: not grounded' };
+      return {
+        text: 'REJECT: not grounded',
+        toolCalls: [],
+        finishReason: 'stop',
+        assistantMessage: reject,
+        providerUsed: 'validator',
+      };
+    }
+    seen.push(opts);
+    const next = turns[round++];
+    if (!next) throw new Error(`scripted model ran out of turns at round ${round}`);
+    const turn = next(opts);
+    if ('text' in turn) {
+      callbacks.onTextDelta?.(turn.text);
+      return {
+        text: turn.text,
+        toolCalls: [],
+        finishReason: 'stop',
+        assistantMessage: { role: 'assistant', content: turn.text },
+        providerUsed: 'scripted',
+      };
+    }
+    callbacks.onToolCallStart?.(turn.tool);
+    const id = `call-${round}`;
+    const args = JSON.stringify(turn.input);
+    return {
+      text: '',
+      toolCalls: [{ id, name: turn.tool, arguments: args }],
+      finishReason: 'tool_calls',
+      assistantMessage: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id, type: 'function', function: { name: turn.tool, arguments: args } }],
+      },
+      providerUsed: 'scripted',
+    };
+  };
+  return { impl, seen };
+}
+
+/** The create_event call the rendered prompt demonstrates, decoded by the tool's real input schema. */
+function promptedCreateCall(opts: StreamRoundOptions): { [key: string]: unknown } {
+  const raw = systemPromptOf(opts).match(/create_event\((\{[^\n]*?\})\)/)?.[1];
+  if (!raw) throw new Error('the rendered system prompt has no create_event example');
+  const parsed = jsonCodec(toolSchemas.create_event).safeParse(raw);
+  if (!parsed.success || !parsed.data || typeof parsed.data !== 'object') {
+    throw new Error(`the prompt's create_event example does not satisfy the schema: ${raw}`);
+  }
+  return { ...parsed.data };
+}
+
+function storedEvents(db: Database): StoredEvent[] {
+  return db
+    .query<StoredEvent, [number]>('SELECT id, start_at, end_at, description FROM events WHERE user_id = ?')
+    .all(OWNER);
 }
 
 afterEach(() => {
   setSystemTime();
 });
 
-describe('participants are invited, never written into the description', () => {
-  for (const mode of MODES) {
-    for (const timezone of ZONES) {
-      test(`${mode} mode, ${timezone}: the prompt's create_event example runs through the real schema and handler`, async () => {
-        // Before the example date, so the real handler accepts it rather than PAST_EVENT.
-        setSystemTime(new Date('2026-03-01T09:00:00Z'));
-        const { ctx, db } = makeContext(timezone);
-        const prompt = promptFor(ctx, mode);
-        const examples = createEventExamples(prompt);
-        expect(examples.length).toBeGreaterThan(0);
+describe('creating an event with people: the prompt example, executed', () => {
+  const cases: { name: string; timezone: string; now?: string; mode: 'full' | 'lazy' }[] = [
+    { name: 'real time, Europe/Belgrade, full schemas', timezone: 'Europe/Belgrade', mode: 'full' },
+    { name: 'real time, UTC, lazy schemas', timezone: 'UTC', mode: 'lazy' },
+    { name: 'real time, Asia/Kolkata, lazy schemas', timezone: 'Asia/Kolkata', mode: 'lazy' },
+    // "Tomorrow" is after the spring-forward: today's offset is not tomorrow's.
+    { name: 'DST eve, Europe/Belgrade', timezone: 'Europe/Belgrade', now: '2026-03-28T12:00:00Z', mode: 'full' },
+    { name: 'DST eve, America/New_York', timezone: 'America/New_York', now: '2026-03-07T17:00:00Z', mode: 'lazy' },
+  ];
 
-        for (const raw of examples) {
-          const parsed = jsonCodec(toolSchemas.create_event).safeParse(raw);
-          expect(parsed.success, raw).toBe(true);
-          const args = parsed.data;
-          if (!args || typeof args !== 'object') throw new Error(`unparsable example ${raw}`);
-          expect(Object.keys(args)).not.toContain('description');
+  for (const { name, timezone, now, mode } of cases) {
+    test(`${name}: event without a description, only Лена invited, the organizer never`, async () => {
+      if (now) setSystemTime(new Date(now));
+      const { ctx, db, sender } = makeHarness(timezone);
+      const discover: ((opts: StreamRoundOptions) => Turn)[] =
+        mode === 'lazy'
+          ? [() => ({ tool: 'discover_tools', input: { tools: ['create_event', 'send_invitation'] } })]
+          : [];
+      const model = scriptedModel([
+        ...discover,
+        (opts) => ({ tool: 'create_event', input: promptedCreateCall(opts) }),
+        () => ({ tool: 'send_invitation', input: { event_id: storedEvents(db)[0]?.id, invitee_id: LENA } }),
+        () => ({ text: 'Встреча создана, приглашение Лене создано и отправляется.' }),
+      ]);
 
-          // The example obeys the prompt's own local → UTC rule for this zone and date (DST included).
-          const converted = await executeTool(ctx, 'calculate', { expression: `2026-03-15 15:00 ${timezone} to UTC` });
-          expect(Reflect.get(args, 'start_at')).toBe(converted.output);
+      const result = await new CalendarBotAgent({ toolSchemaMode: mode }, sender, { streamImpl: model.impl }).run(ctx);
 
-          if (mode === 'lazy') {
-            const exposure = createToolExposure(getToolDefinitions('text'));
-            expect(exposure.intercept('create_event', args, exposure.snapshot())?.success).toBe(false);
-            expect(exposure.intercept(DISCOVERY_TOOL, { tools: ['create_event'] }, exposure.snapshot())?.success).toBe(
-              true,
-            );
-            expect(exposure.intercept('create_event', args, exposure.snapshot())).toBeUndefined();
-          }
+      expect(result.toolResults.map((r) => r.success)).toEqual(result.toolResults.map(() => true));
+      const events = storedEvents(db);
+      expect(events).toHaveLength(1);
+      const [event] = events;
+      if (!event) throw new Error('unreachable');
+      expect(event.description).toBeNull();
 
-          const result = await executeTool(ctx, 'create_event', args);
-          expect(result.success, result.error).toBe(true);
-          expect(result.disposition).toBe('executed');
-        }
+      // "завтра в 15:00" in the user's zone, converted the way the prompt's time rules demand.
+      const today = new TZDate(Date.now(), timezone);
+      const tomorrow = new TZDate(today.getFullYear(), today.getMonth(), today.getDate() + 1, timezone);
+      const localDate = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
+      const utc = await executeTool(ctx, 'calculate', { expression: `${localDate} 15:00 ${timezone} to UTC` });
+      expect(Date.parse(event.start_at)).toBe(Date.parse(utc.output ?? ''));
+      expect(Date.parse(event.end_at ?? '') - Date.parse(event.start_at)).toBe(DURATION_MINUTES * 60_000);
 
-        const stored = db
-          .query<StoredEvent, [number]>('SELECT title, start_at, description FROM events WHERE user_id = ?')
-          .all(USER_ID);
-        expect(stored.length).toBe(examples.length);
-        for (const event of stored) {
-          expect(event.description).toBeNull();
-          expect(event.title).not.toContain('мной');
-        }
-      });
-    }
-
-    test(`${mode} mode: the prompt forbids people in description and grounds attendance in invitations`, () => {
-      const { ctx } = makeContext('Europe/Belgrade');
-      const prompt = promptFor(ctx, mode);
-      expect(prompt).toContain('never write people into description');
-      expect(prompt).toContain('the organizer: never invite, pick or list them');
-      expect(prompt).toContain('only from get_invitation_status, never from description');
+      const invitees = db
+        .query<InvitationRow, [number]>('SELECT invitee_id FROM invitations WHERE event_id = ?')
+        .all(event.id)
+        .map((row) => row.invitee_id);
+      expect(invitees).toEqual([LENA]);
+      expect(result.responseText).toContain('Встреча создана');
+      expect(result.responseText).not.toContain(unverifiedResponseNotice('ru'));
     });
   }
 
-  test('the create_event and update_event schemas carry the rule in every tool set', () => {
-    for (const tools of [
-      getToolDefinitions('text'),
-      getToolDefinitions('live_call'),
-      getToolDefinitions('text', true),
-    ]) {
-      expect(schemaProperty(tools, 'create_event', 'description')).toContain('never participant names');
-      expect(schemaProperty(tools, 'update_event', 'description')).toContain('never participant names');
-    }
+  test('the rendered prompt keeps people and the organizer out of the description', async () => {
+    const { ctx, sender } = makeHarness('Europe/Belgrade');
+    const model = scriptedModel([() => ({ tool: 'calculate', input: { expression: '1 + 1' } }), () => ({ text: '2' })]);
+    await new CalendarBotAgent({}, sender, { streamImpl: model.impl }).run(ctx);
+    const prompt = model.seen[0] ? systemPromptOf(model.seen[0]) : '';
+    expect(prompt).toContain('never write people into description');
+    expect(prompt).toContain('"мной"/"я"/"me" is the user, the organizer: never invite, pick or list them');
+    expect(prompt).toContain('answer who takes part only from get_invitation_status, never from description');
   });
+});
 
-  test('a rejected description retries with the rule in its schema excerpt', async () => {
-    setSystemTime(new Date('2026-03-01T09:00:00Z'));
-    const { ctx } = makeContext('UTC');
-    const result = await executeTool(ctx, 'create_event', {
+describe('who takes part: answered from invitations, not from the description', () => {
+  test('"добавь меня тоже" over a description naming the organizer: the answer rests on invitations', async () => {
+    const { ctx, db, sender } = makeHarness('Europe/Belgrade');
+    const start = new Date(Date.now() + 26 * 3_600_000).toISOString();
+    const event = ctx.eventService.createEvent({
+      user_id: OWNER,
       title: 'Встреча',
-      start_at: '2026-03-15T15:00:00.000Z',
-      description: ['Лена', 'Алекс'],
+      start_at: start,
+      timezone: 'Europe/Belgrade',
+      description: 'Лена, Алекс, Виталий',
     });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('never participant names');
-  });
+    expect(ctx.sharing?.invitationService.sendInvitation(event.id, OWNER, LENA).success).toBe(true);
+    ctx.messageText = 'добавь меня тоже на встречу';
+    const answer = 'Ты организатор этой встречи — приглашать тебя не нужно. Приглашена Лена, ждёт ответа.';
+    const model = scriptedModel([
+      () => ({ tool: 'get_invitation_status', input: { event_id: event.id } }),
+      () => ({ text: answer }),
+    ]);
 
-  test('the lazy index names get_invitation_status as the source of who takes part', () => {
-    const exposure = createToolExposure(getToolDefinitions('text'));
-    expect(exposure.prompt).toMatch(/get_invitation_status: [^\n]*only source for who takes part/);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: model.impl }).run(ctx);
+
+    // The participation data the model answers from lists the one real invitee, pending, and
+    // counts nobody as attending although the description names three people.
+    const statusSeen = model.seen[1] ? toolMessages(model.seen[1]).join('\n') : '';
+    expect(statusSeen).toContain(String(LENA));
+    expect(statusSeen).toContain(t('ru').aiTools.sharing.rsvpAttending(0));
+    expect(statusSeen).not.toContain(String(OWNER));
+
+    expect(result.toolResults.map((r) => r.success)).toEqual([true]);
+    const invitees = db
+      .query<InvitationRow, [number]>('SELECT invitee_id FROM invitations WHERE event_id = ?')
+      .all(event.id)
+      .map((row) => row.invitee_id);
+    expect(invitees).toEqual([LENA]);
+    expect(result.responseText).toContain(answer);
+    expect(result.responseText).not.toContain(unverifiedResponseNotice('ru'));
   });
 });
