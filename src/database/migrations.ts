@@ -1,4 +1,5 @@
 // src/database/migrations.ts
+import { backfillActiveRevision } from '../services/intent/revision-ledger.ts';
 import type { Migration } from './schema.ts';
 
 export const migrations: Migration[] = [
@@ -1065,6 +1066,44 @@ export const migrations: Migration[] = [
       // keep the typed text until the user confirms again. Only the flag changes; the resolved place
       // stays, and updated_at / sync_version are untouched so no row looks edited to sync.
       db.exec('UPDATE events SET location_verified = 0 WHERE location_verified = 1');
+    },
+  },
+  {
+    name: '065_intent_revisions',
+    up(db) {
+      // The managed intent registry gets an append-only revision ledger. The manifest table used to
+      // be created ad hoc by the operator replacement; it now belongs to the schema (same shape, so
+      // an existing production table is kept as is). The backfill ledgers the live manifest, never
+      // the build's source seed, and only when the approved rows still match it; otherwise nothing
+      // is inserted and the registry keeps failing closed until an operator repairs it.
+      db.exec(
+        'CREATE TABLE IF NOT EXISTS intent_basis_manifest (singleton INTEGER PRIMARY KEY CHECK(singleton=1), fingerprint TEXT NOT NULL, installed_at TEXT NOT NULL, rule_count INTEGER NOT NULL)',
+      );
+      db.exec(`
+        CREATE TABLE intent_revisions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind TEXT NOT NULL CHECK (kind IN ('source_baseline', 'manual', 'learned')),
+          status TEXT NOT NULL CHECK (status IN ('draft', 'validated', 'active', 'superseded', 'rejected')),
+          parent_id INTEGER REFERENCES intent_revisions(id),
+          base_revision_id INTEGER REFERENCES intent_revisions(id),
+          base_fingerprint TEXT,
+          target_fingerprint TEXT,
+          target_rules TEXT,
+          body_hash TEXT NOT NULL,
+          body TEXT NOT NULL,
+          validation TEXT NOT NULL,
+          author TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          decided_by TEXT,
+          decided_at INTEGER,
+          decision_reason TEXT
+        )
+      `);
+      db.exec(
+        "CREATE UNIQUE INDEX idx_intent_revisions_one_active ON intent_revisions(status) WHERE status = 'active'",
+      );
+      db.exec('CREATE INDEX idx_intent_revisions_status ON intent_revisions(status, id)');
+      backfillActiveRevision(db);
     },
   },
 ];
