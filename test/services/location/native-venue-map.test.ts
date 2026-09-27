@@ -360,6 +360,26 @@ describe('Map button on the event detail card', () => {
     expect(s.answers.at(-1)?.text).toBe(t('ru').callbackErrors.notFound);
   });
 
+  test('an unconfirmed place that still has coordinates gets no Map button and sends nothing', async () => {
+    const s = setup();
+    // A legacy row after migration 063: the place was reset to unverified but kept its fields
+    s.eventRepo.updateLocationFields(s.event.id, {
+      resolved_address: BELGRADE_CAFE.formattedAddress,
+      latitude: BELGRADE_CAFE.latitude,
+      longitude: BELGRADE_CAFE.longitude,
+      google_maps_url: BELGRADE_CAFE.googleMapsUrl,
+      location_verified: 0,
+      venue_name: 'Kafana Sunce',
+    });
+
+    await s.tap(`ev:${s.event.id}`);
+    await s.tap(`ev_map:${s.event.id}`);
+
+    expect(mapButtonData(s.edits.at(-1)?.replyMarkup)).toBeUndefined();
+    expect(s.venues).toEqual([]);
+    expect(s.answers.at(-1)?.text).toBe(t('ru').callbackErrors.notFound);
+  });
+
   test('pressing Map after the place was dropped sends nothing', async () => {
     const s = setup();
     await s.confirmCandidate(0);

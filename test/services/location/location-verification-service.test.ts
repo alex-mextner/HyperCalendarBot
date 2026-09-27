@@ -274,7 +274,12 @@ describe('LocationVerificationService', () => {
       expect(options.parse_mode).toBe('HTML');
       // The place is confirmed now, so the card also offers the Map button
       expect(options.reply_markup?.toJSON()).toEqual(
-        invitationRsvpKeyboard(128, 'ru', { ...event, latitude: geo.latitude, longitude: geo.longitude }).toJSON(),
+        invitationRsvpKeyboard(128, 'ru', {
+          ...event,
+          latitude: geo.latitude,
+          longitude: geo.longitude,
+          location_verified: 1,
+        }).toJSON(),
       );
     });
 
@@ -333,6 +338,7 @@ describe('LocationVerificationService', () => {
           ...event,
           latitude: geo.latitude,
           longitude: geo.longitude,
+          location_verified: 1,
         }).toJSON(),
       );
       for (const [messageId, chatId, label] of [
@@ -363,7 +369,12 @@ describe('LocationVerificationService', () => {
       expect([chatId, messageId]).toEqual([groupChatId, 555]);
       expect(text).toContain(RESOLVED_ADDRESS);
       expect(options.reply_markup?.toJSON()).toEqual(
-        groupRsvpKeyboard(event.id, 'en', { ...event, latitude: geo.latitude, longitude: geo.longitude }).toJSON(),
+        groupRsvpKeyboard(event.id, 'en', {
+          ...event,
+          latitude: geo.latitude,
+          longitude: geo.longitude,
+          location_verified: 1,
+        }).toJSON(),
       );
     });
 

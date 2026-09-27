@@ -8,7 +8,7 @@ import type { CalendarEvent } from '../../database/types.ts';
 /** The event fields a venue is built from. */
 export type EventPlace = Pick<
   CalendarEvent,
-  'id' | 'title' | 'location' | 'venue_name' | 'resolved_address' | 'latitude' | 'longitude'
+  'id' | 'title' | 'location' | 'venue_name' | 'resolved_address' | 'latitude' | 'longitude' | 'location_verified'
 >;
 
 /** The `sendVenue` fields of an event's place. */
@@ -20,11 +20,14 @@ export interface EventVenue {
 }
 
 /**
- * The event's confirmed place as a venue, or null when it has no coordinates (the place was never
- * confirmed or was dropped). Titled with the venue name, else the typed text, else the event title;
- * addressed with the resolved address, else the coordinates (Telegram requires both).
+ * The event's confirmed place as a venue, or null unless the creator confirmed it and it has
+ * coordinates: a row reset to unverified (e.g. by migration 063) can still hold an old place, and
+ * that must not be shown as the event's place. Titled with the venue name, else the typed text,
+ * else the event title; addressed with the resolved address, else the coordinates (Telegram
+ * requires both).
  */
 export function eventVenue(event: EventPlace): EventVenue | null {
+  if (event.location_verified !== 1) return null;
   if (typeof event.latitude !== 'number' || typeof event.longitude !== 'number') return null;
   return {
     latitude: event.latitude,

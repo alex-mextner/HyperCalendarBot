@@ -11,6 +11,7 @@ const CONFIRMED_PLACE: EventPlace = {
   resolved_address: 'Dunavska 1, Белград',
   latitude: 44.8231,
   longitude: 20.4632,
+  location_verified: 1,
 };
 const UNCONFIRMED_PLACE: EventPlace = {
   ...CONFIRMED_PLACE,
@@ -18,6 +19,7 @@ const UNCONFIRMED_PLACE: EventPlace = {
   resolved_address: null,
   latitude: null,
   longitude: null,
+  location_verified: 0,
 };
 
 describe('invitationRsvpKeyboard', () => {
