@@ -511,6 +511,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         await agent.run(buildAgentContextFactory(msgDeps)(user, chatId, text));
       },
     },
+    locationVerification,
   );
 
   // Fill in the one scene reference msgDeps needs now that scenes exist.

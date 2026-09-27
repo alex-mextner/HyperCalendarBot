@@ -6,7 +6,9 @@ import type { ActionLogRepository } from '../../database/repositories/action-log
 import type { UpdateEventData } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
+import type { LocationVerificationService } from '../../services/location/location-verification-service.ts';
 import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
+import { botLogger } from '../../utils/logger.ts';
 import { eventActionsKeyboard, sceneHelpKeyboard } from '../keyboards.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 
@@ -38,6 +40,7 @@ export function createEditValueScene(
   eventService: EventService,
   userComposer: UserResolverComposer,
   actionLogRepo?: ActionLogRepository,
+  locationVerification?: Pick<LocationVerificationService, 'verifyEventLocation'>,
 ) {
   return (
     new Scene('edit_value')
@@ -118,6 +121,13 @@ export function createEditValueScene(
           metadata: JSON.stringify(updateData),
           success: !!updated,
         });
+
+        // Same verification and clarification flow as the AI update_event tool.
+        if (updated && updateData.location && locationVerification) {
+          locationVerification
+            .verifyEventLocation(updated, user)
+            .catch((err) => botLogger.error({ err, eventId }, 'Background location verification failed'));
+        }
 
         await context.scene.exit();
 
