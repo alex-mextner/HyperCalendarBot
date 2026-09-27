@@ -11,17 +11,21 @@ services:
     # fed by a heredoc; variable expansion and heredocs are shell builtins, so no
     # process ever carries the password as an argument. docker-entrypoint.sh then
     # drops to the redis user exactly as it does for a plain `redis-server` command.
-    # The two substitutions escape `\` and `"` for the double-quoted redis.conf value.
+    # The value goes into a double-quoted redis.conf string, where `"` and `\`
+    # would be read as syntax, so such a password stops the container loudly
+    # instead of starting redis with a different password. The old string
+    # command could not carry those characters either.
     environment:
       REDISCLI_AUTH: ${REDIS_PASSWORD}
     command:
       - sh
       - -c
       - |
-        pw=$${REDISCLI_AUTH//\\/\\\\}
-        pw=$${pw//\"/\\\"}
+        case "$$REDISCLI_AUTH" in
+          *[\"\\]*) echo 'REDIS_PASSWORD must not contain a double quote or backslash' >&2; exit 1 ;;
+        esac
         exec docker-entrypoint.sh redis-server --appendonly yes --appendfsync everysec --maxmemory 200mb --maxmemory-policy noeviction - <<EOF
-        requirepass "$$pw"
+        requirepass "$$REDISCLI_AUTH"
         EOF
     volumes:
       - redis-data:/data

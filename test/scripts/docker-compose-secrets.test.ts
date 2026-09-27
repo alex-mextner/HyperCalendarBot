@@ -16,8 +16,8 @@ import { join } from 'node:path';
 
 const COMPOSE_FILE = join(import.meta.dir, '../../docker-compose.yml');
 const PASSWORD = 'Synth-redis-pw-4f2c9';
-// Quote, backslash, dollar and space: characters a config-file or shell hand-off could mangle.
-const TRICKY_PASSWORD = 'Synth"pw\\4f$HOME 9c';
+// Dollar, space and backtick: characters a shell or config hand-off could mangle.
+const TRICKY_PASSWORD = 'Synth$HOME pw`9c';
 
 type Service = {
   command?: string[];
@@ -87,18 +87,28 @@ function containerEnv(service: Service): Record<string, string> {
   return env;
 }
 
+type RedisStart = { exitCode: number; stderr: string; argv: string[]; stdin: string };
+
 /**
- * Starts the redis service the way the image does (`docker-entrypoint.sh <command>`),
- * with an entrypoint stub that records the redis-server argv and the config it reads on stdin.
+ * Starts the redis service the way the image does (`docker-entrypoint.sh <command>`), with an
+ * entrypoint stub that records the redis-server argv and, like redis-server itself, reads config
+ * from stdin only when `-` is its first or last argument.
  */
-function startRedis(redis: Service): { argv: string[]; stdin: string } {
+function startRedis(redis: Service): RedisStart {
   stub(
     'docker-entrypoint.sh',
-    `if [ "$1" = redis-server ]; then printf '%s\\n' "$@" > "$ARGV_LOG"; cat > "$STDIN_LOG"; exit 0; fi
+    `if [ "$1" = redis-server ]; then
+  printf '%s\\n' "$@" > "$ARGV_LOG"
+  shift
+  last=; for arg in "$@"; do last=$arg; done
+  if [ "$1" = - ] || [ "$last" = - ]; then cat > "$STDIN_LOG"; fi
+  exit 0
+fi
 exec "$@"`,
   );
   const argvLog = join(work, 'redis-argv');
   const stdinLog = join(work, 'redis-stdin');
+  writeFileSync(argvLog, '');
   writeFileSync(stdinLog, '');
   const proc = Bun.spawnSync([join(work, 'bin', 'docker-entrypoint.sh'), ...(redis.command ?? [])], {
     env: { ...baseEnv(), ...containerEnv(redis), ARGV_LOG: argvLog, STDIN_LOG: stdinLog },
@@ -106,17 +116,22 @@ exec "$@"`,
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  expect({ exitCode: proc.exitCode, stderr: proc.stderr.toString() }).toEqual({ exitCode: 0, stderr: '' });
-  return { argv: readFileSync(argvLog, 'utf8').trimEnd().split('\n'), stdin: readFileSync(stdinLog, 'utf8') };
+  const argv = readFileSync(argvLog, 'utf8').trimEnd();
+  return {
+    exitCode: proc.exitCode,
+    stderr: proc.stderr.toString(),
+    argv: argv === '' ? [] : argv.split('\n'),
+    stdin: readFileSync(stdinLog, 'utf8'),
+  };
 }
 
 /** The requirepass value redis-server ends up with, from argv options or stdin config lines. */
-function effectiveRequirepass(started: { argv: string[]; stdin: string }): string | undefined {
+function effectiveRequirepass(started: RedisStart): string | undefined {
   const flag = started.argv.indexOf('--requirepass');
   if (flag !== -1) return started.argv[flag + 1];
   const line = started.stdin.split('\n').find((l) => l.startsWith('requirepass '));
-  // redis.conf double-quoted strings use backslash escapes for `"` and `\`, as JSON does.
-  return line === undefined ? undefined : JSON.parse(line.slice('requirepass '.length));
+  // A redis.conf double-quoted value without backslashes is taken verbatim.
+  return line?.match(/^requirepass "([^"\\]*)"$/)?.[1];
 }
 
 /**
@@ -148,6 +163,7 @@ describe.skipIf(!COMPOSE)('docker-compose.yml keeps the Redis password out of ar
     const redis = render().redis;
     expect(redis).toBeDefined();
     const started = startRedis(redis!);
+    expect({ exitCode: started.exitCode, stderr: started.stderr }).toEqual({ exitCode: 0, stderr: '' });
     expect(effectiveRequirepass(started)).toBe(PASSWORD);
     expect(started.argv.filter((arg) => arg.includes(PASSWORD))).toEqual([]);
     expect((redis!.command ?? []).filter((arg) => arg.includes(PASSWORD))).toEqual([]);
@@ -160,10 +176,22 @@ describe.skipIf(!COMPOSE)('docker-compose.yml keeps the Redis password out of ar
     expect(argv).not.toContain(PASSWORD);
   });
 
-  test('a password with quotes, backslashes, dollars and spaces reaches redis-server and the healthcheck intact', () => {
+  test('a password with dollars, spaces and backticks reaches redis-server and the healthcheck intact', () => {
     const redis = render(TRICKY_PASSWORD).redis!;
-    expect(effectiveRequirepass(startRedis(redis))).toBe(TRICKY_PASSWORD);
+    const started = startRedis(redis);
+    expect({ exitCode: started.exitCode, stderr: started.stderr }).toEqual({ exitCode: 0, stderr: '' });
+    expect(effectiveRequirepass(started)).toBe(TRICKY_PASSWORD);
     expect(runHealthcheck(redis, TRICKY_PASSWORD).exitCode).toBe(0);
+  });
+
+  test.each([
+    ['a double quote', 'Synth"pw-4f2c9'],
+    ['a backslash', 'Synth\\pw-4f2c9'],
+  ])('a password containing %s stops redis with an error instead of starting with a different password', (_, password) => {
+    const started = startRedis(render(password).redis!);
+    expect(started.exitCode).not.toBe(0);
+    expect(started.stderr).toContain('REDIS_PASSWORD');
+    expect(started.argv).toEqual([]);
   });
 
   test('the bot receives the password only inside REDIS_URL', () => {
