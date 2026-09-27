@@ -1055,4 +1055,16 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE users DROP COLUMN assistant_enabled');
     },
   },
+  {
+    name: '063_unconfirm_legacy_verified_locations',
+    up(db) {
+      // location_verified = 1 now means the user confirmed the place (a candidate tap or a pin), and
+      // Google Calendar, first-person invitations, ICS and the assistant show it. Until 2026-09-27
+      // (#382) verification also set it on its own for a lone geocode or a remembered mapping, and
+      // such rows cannot be told from confirmed ones, so none counts as confirmed: those surfaces
+      // keep the typed text until the user confirms again. Only the flag changes; the resolved place
+      // stays, and updated_at / sync_version are untouched so no row looks edited to sync.
+      db.exec('UPDATE events SET location_verified = 0 WHERE location_verified = 1');
+    },
+  },
 ];
