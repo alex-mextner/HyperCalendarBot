@@ -23,11 +23,18 @@ export interface EventClock {
   startUtc: string;
   /** UTC ISO instant, null when the event has no end. */
   endUtc: string | null;
+  /**
+   * True when a tool result showed this event to the model in this run. Only such an
+   * event, printed at its UTC time, proves the reply used UTC; schedule-window events
+   * are corrected alongside it but never trigger a rewrite on their own.
+   */
+  fromTool: boolean;
 }
 
 interface ClockTimes {
   id: number;
   titleKey: string;
+  fromTool: boolean;
   utcStart: string;
   localStart: string;
   /** UTC clock time → local clock time, only for times that differ. */
@@ -37,9 +44,9 @@ interface ClockTimes {
 
 /** HH:MM not inside an ISO timestamp (T10:30) or a longer h:m:s value. */
 const CLOCK_TIME_RE = /(?<![\d:T])(\d{1,2}):(\d{2})(?![\d:])/g;
-/** A clock time the model explicitly labelled as UTC is not presented as local. */
-const UTC_LABEL_AFTER_RE = /^\s*\(?\s*(?:по\s+)?(?:UTC|GMT|Z)(?![A-Za-z])/i;
-const UTC_LABEL_BEFORE_RE = /(?:UTC|GMT)\s*$/i;
+/** A clock time the model explicitly labelled as UTC (alone or as a range) is not presented as local. */
+const UTC_LABEL_AFTER_RE = /^\s*(?:[-–—]\s*\d{1,2}:\d{2}\s*)?\(?\s*(?:по\s+)?(?:UTC|GMT|Z)(?![A-Za-z])/i;
+const UTC_LABEL_BEFORE_RE = /(?:UTC|GMT)\s*:?\s*(?:\d{1,2}:\d{2}\s*[-–—]\s*)?$/i;
 const ID_ANCHOR_RE = /(?:\bid\s*[:#№]?\s*|#)(\d{1,9})\b/gi;
 /** Shorter titles ("Я", "ДР") would anchor to unrelated words. */
 const MIN_TITLE_LENGTH = 3;
@@ -62,6 +69,7 @@ function toClockTimes(event: EventClock, timezone: string): ClockTimes {
   return {
     id: event.id,
     titleKey: titleKey(event.title),
+    fromTool: event.fromTool,
     utcStart: start.utc,
     localStart: start.local,
     mapping,
@@ -134,7 +142,7 @@ export function correctUtcClockTimes(text: string, events: readonly EventClock[]
   let derivedConsistent = true;
   // Local times of every named event: a free-window time equal to one of these may be right.
   const namedLocalTimes = new Set<string>();
-  let corrected = false;
+  let toolEventShownInUtc = false;
 
   lines.forEach((line, index) => {
     const named = namedEvents(line, clocks);
@@ -150,11 +158,11 @@ export function correctUtcClockTimes(text: string, events: readonly EventClock[]
     const mapping = new Map<string, string>();
     if (!shownInUtc.every((event) => mergeMapping(mapping, event.mapping))) return;
     lines[index] = rewriteLine(line, mapping);
-    corrected = true;
+    toolEventShownInUtc ||= shownInUtc.some((event) => event.fromTool);
     derivedConsistent = derivedConsistent && mergeMapping(derivedMapping, mapping);
   });
 
-  if (!corrected) return text;
+  if (!toolEventShownInUtc) return text;
   const derivedIsSafe = derivedConsistent && ![...derivedMapping.keys()].some((utc) => namedLocalTimes.has(utc));
   if (derivedIsSafe) for (const index of unnamedLines) lines[index] = rewriteLine(lines[index]!, derivedMapping);
   return lines.join('\n');
@@ -182,6 +190,7 @@ export function eventClocksForRun(
       title: summary.title,
       startUtc: new Date(start.getTime()).toISOString(),
       endUtc: summary.end_at ?? null,
+      fromTool: true,
     });
   }
   for (const occurrence of ctx.recentEventsWindow ?? []) {
@@ -191,6 +200,7 @@ export function eventClocksForRun(
       title: occurrence.event.title,
       startUtc: occurrence.occurrence_start,
       endUtc: occurrence.occurrence_end ?? null,
+      fromTool: false,
     });
   }
   return clocks;

@@ -29,12 +29,14 @@ const lesson: EventClock = {
   title: LESSON,
   startUtc: '2026-09-28T10:30:00.000Z',
   endUtc: '2026-09-28T11:30:00.000Z',
+  fromTool: true,
 };
 const errand: EventClock = {
   id: 43,
   title: ERRAND,
   startUtc: '2026-09-28T18:30:00.000Z',
   endUtc: '2026-09-28T19:30:00.000Z',
+  fromTool: true,
 };
 
 // The 23:12 'Планы на среду' answer: both events and the free windows built on them in UTC.
@@ -60,10 +62,10 @@ const localDayPlan = [
 
 // The 23:12 delete confirmation: four lessons named by id, all at their UTC clock times.
 const tuesdayLessons: EventClock[] = [
-  { id: 11, title: LESSON, startUtc: '2026-09-01T11:30:00.000Z', endUtc: '2026-09-01T12:30:00.000Z' },
-  { id: 12, title: LESSON, startUtc: '2026-09-08T11:30:00.000Z', endUtc: '2026-09-08T12:30:00.000Z' },
-  { id: 13, title: LESSON, startUtc: '2026-09-29T10:30:00.000Z', endUtc: '2026-09-29T11:30:00.000Z' },
-  { id: 14, title: LESSON, startUtc: '2026-09-29T11:30:00.000Z', endUtc: '2026-09-29T12:30:00.000Z' },
+  { id: 11, title: LESSON, startUtc: '2026-09-01T11:30:00.000Z', endUtc: '2026-09-01T12:30:00.000Z', fromTool: true },
+  { id: 12, title: LESSON, startUtc: '2026-09-08T11:30:00.000Z', endUtc: '2026-09-08T12:30:00.000Z', fromTool: true },
+  { id: 13, title: LESSON, startUtc: '2026-09-29T10:30:00.000Z', endUtc: '2026-09-29T11:30:00.000Z', fromTool: true },
+  { id: 14, title: LESSON, startUtc: '2026-09-29T11:30:00.000Z', endUtc: '2026-09-29T12:30:00.000Z', fromTool: true },
 ];
 const utcDeleteQuestion = [
   `Удалить все занятия «${LESSON}», запланированные во вторник?`,
@@ -99,6 +101,7 @@ describe('correctUtcClockTimes', () => {
       title: 'Урок',
       startUtc: '2026-09-28T08:30:00.000Z',
       endUtc: '2026-09-28T09:30:00.000Z',
+      fromTool: true,
     };
     // 10:30 is the short-titled event's local start, but the line names the lesson.
     expect(correctUtcClockTimes(`10:30 – 11:30 ${LESSON}`, [shortTitle, lesson], TZ)).toBe(`12:30 – 13:30 ${LESSON}`);
@@ -107,10 +110,23 @@ describe('correctUtcClockTimes', () => {
   test.each([
     ['a time labelled UTC', `${LESSON}: 12:30 (10:30 UTC)`],
     ['a time labelled «по UTC»', `${LESSON} в 10:30 по UTC`],
+    ['a range labelled UTC after its end', `${LESSON}: 10:30–11:30 UTC`],
+    ['a range labelled UTC before its start', `${LESSON}: UTC 10:30 – 11:30`],
+    ['a time after «UTC:»', `${LESSON} (UTC: 10:30)`],
     ['an ISO timestamp', `${LESSON}: 2026-09-28T10:30:00.000Z`],
     ['a time with no event named on its line', 'В Токио сейчас 10:30'],
   ])('does not touch %s', (_label, text) => {
     expect(correctUtcClockTimes(text, [lesson, errand], TZ)).toBe(text);
+  });
+
+  test('a schedule-window event alone never triggers a rewrite', () => {
+    // Without a tool result the model may be quoting another event entirely.
+    const text = `- 18:30 – 19:30 ${ERRAND}\n- свободно 19:30 – 23:59`;
+    expect(correctUtcClockTimes(text, [{ ...errand, fromTool: false }], TZ)).toBe(text);
+    const withToolEvent = `- 10:30 – 11:30 ${LESSON}\n${text}`;
+    expect(correctUtcClockTimes(withToolEvent, [lesson, { ...errand, fromTool: false }], TZ)).toBe(
+      `- 12:30 – 13:30 ${LESSON}\n- 20:30 – 21:30 ${ERRAND}\n- свободно 21:30 – 23:59`,
+    );
   });
 
   test('does nothing for a user whose zone has no offset', () => {
@@ -118,8 +134,20 @@ describe('correctUtcClockTimes', () => {
   });
 
   test('skips a line when same-titled events map one UTC time to different local times', () => {
-    const winter: EventClock = { id: 1, title: LESSON, startUtc: '2026-01-15T10:30:00.000Z', endUtc: null };
-    const summer: EventClock = { id: 2, title: LESSON, startUtc: '2026-07-15T10:30:00.000Z', endUtc: null };
+    const winter: EventClock = {
+      id: 1,
+      title: LESSON,
+      startUtc: '2026-01-15T10:30:00.000Z',
+      endUtc: null,
+      fromTool: true,
+    };
+    const summer: EventClock = {
+      id: 2,
+      title: LESSON,
+      startUtc: '2026-07-15T10:30:00.000Z',
+      endUtc: null,
+      fromTool: true,
+    };
     const text = `${LESSON} — 10:30`;
     expect(correctUtcClockTimes(text, [winter, summer], TZ)).toBe(text);
   });
@@ -130,6 +158,7 @@ describe('correctUtcClockTimes', () => {
       title: 'Кофе с соседкой',
       startUtc: '2026-09-28T08:30:00.000Z',
       endUtc: '2026-09-28T09:00:00.000Z',
+      fromTool: true,
     };
     const text = [`- 10:30 – 11:00 Кофе с соседкой`, `- 10:30 – 11:30 ${LESSON}`, '- свободно 00:00 – 10:30'].join(
       '\n',
