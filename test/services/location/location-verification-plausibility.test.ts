@@ -48,6 +48,13 @@ const COASTAL_VILLAGE_NL: GeocodedArea = {
   countryCode: 'NL',
   bounds: { south: 51.57, west: 3.6, north: 51.6, east: 3.64 },
 };
+// Montenegro shares the Europe/Belgrade timezone zone with Serbia.
+const BUDVA_ME: GeocodedArea = {
+  latitude: 42.2864,
+  longitude: 18.84,
+  countryCode: 'ME',
+  bounds: { south: 42.26, west: 18.8, north: 42.31, east: 18.9 },
+};
 
 function place(overrides: Partial<GeocodedLocation>): GeocodedLocation {
   return {
@@ -329,6 +336,36 @@ describe('automatic resolution is limited to the user home area', () => {
     expect(callbackData(s.sent[0])).toEqual([`loc_cand:${s.event.id}:0`, `loc_cand:${s.event.id}:keep`]);
   });
 
+  test('a home city across the border but inside the user timezone is trusted and anchors the search', async () => {
+    const budvaCafe = place({
+      formattedAddress: 'Mediteranska 1, Будва, Черногория',
+      latitude: 42.2853,
+      longitude: 18.8421,
+      city: 'Будва',
+      countryCode: 'ME',
+    });
+    const geocoder = scriptedGeocoder({ places: [budvaCafe], areas: { 'Будва|RS': BUDVA_ME } });
+    const s = setup({ timezone: 'Europe/Belgrade', city: 'Будва' }, geocoder.service);
+
+    const result = await s.service.verifyEventLocation(s.event, s.user());
+
+    expect(geocoder.searches[0]?.bias).toEqual({ countryCode: 'ME', bounds: BUDVA_ME.bounds });
+    expect(result.resolved).toBe(true);
+    expect(s.storedEvent().location_verified).toBe(1);
+  });
+
+  test('without a home country, a city outside the user timezone does not anchor the search', async () => {
+    const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { 'Zeedorp|': COASTAL_VILLAGE_NL } });
+    const s = setup({ timezone: 'Asia/Novosibirsk', city: 'Zeedorp' }, geocoder.service);
+
+    const result = await s.service.verifyEventLocation(s.event, s.user());
+
+    expect(geocoder.searches[0]?.bias).toBeUndefined();
+    expect(result.resolved).toBe(false);
+    expect(s.storedEvent().location_verified).toBe(0);
+    expect(callbackData(s.sent[0])).toEqual([`loc_cand:${s.event.id}:0`, `loc_cand:${s.event.id}:keep`]);
+  });
+
   test('without any known home area a single result is never auto-resolved', async () => {
     const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE] });
     const s = setup({ timezone: 'UTC' }, geocoder.service);
@@ -446,6 +483,30 @@ describe('only an explicit confirmation teaches the address cache and the home c
 
     expect(await s.service.keepTypedLocation(s.event.id, USER_ID + 1)).toBeNull();
     expect(s.storedEvent().location_verified).toBe(1);
+  });
+
+  test('a remembered place is announced with a wrong-place button, and rejecting it forgets it', async () => {
+    const geocoder = scriptedGeocoder({ places: [] });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.addressCache.recordMapping(USER_ID, RAW_LOCATION, {
+      resolvedAddress: DUTCH_HOTEL.formattedAddress,
+      googleMapsUrl: DUTCH_HOTEL.googleMapsUrl,
+      latitude: DUTCH_HOTEL.latitude,
+      longitude: DUTCH_HOTEL.longitude,
+      placeId: DUTCH_HOTEL.placeId,
+      venueName: DUTCH_HOTEL.venueName,
+    });
+
+    const result = await s.service.verifyEventLocation(s.event, s.user());
+
+    expect(result.resolved).toBe(true);
+    expect(s.sent[0]!.text).toContain(`<a href="${escapeHtml(DUTCH_HOTEL.googleMapsUrl)}">`);
+    expect(callbackData(s.sent[0])).toEqual([`loc_cand:${s.event.id}:keep`]);
+
+    await s.service.keepTypedLocation(s.event.id, USER_ID);
+
+    expect(s.storedEvent().location_verified).toBe(0);
+    expect(await s.addressCache.findMapping(USER_ID, RAW_LOCATION)).toBeNull();
   });
 });
 
