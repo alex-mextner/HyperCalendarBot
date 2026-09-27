@@ -175,8 +175,26 @@ export async function handleGetTimezoneInfoWithCityFallback(input: {
 }
 handleGetTimezoneInfoWithCityFallback.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
+/** An ISO instant: date, time and an explicit Z or UTC offset. */
+const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/i;
+const WALL_CLOCK_RE = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{1,2}:\d{2}))?/;
+
 export function handleConvertToTimezone(input: { datetime: string; timezone: string }): ToolResult {
-  const dt = new Date(input.datetime);
+  const datetime = input.datetime.trim();
+  if (!ISO_INSTANT_RE.test(datetime)) {
+    // new Date() would read an offset-free wall clock in the SERVER's zone (UTC in the
+    // container) and silently answer for a different moment (2026-07-10 incident, #516).
+    const wallClock = WALL_CLOCK_RE.exec(datetime);
+    if (!wallClock) return { success: false, error: `Invalid datetime: ${input.datetime}` };
+    return {
+      success: false,
+      error:
+        `Datetime "${input.datetime}" has no Z or UTC offset, so it names no single moment. ` +
+        'Send UTC ("2026-07-11T09:00:00Z") or an explicit offset ("2026-07-11T11:00:00+02:00"). ' +
+        `To turn a local wall clock into UTC, use calculate("${wallClock[1]} ${wallClock[2] ?? 'HH:MM'} ${input.timezone} to UTC").`,
+    };
+  }
+  const dt = new Date(datetime);
   if (Number.isNaN(dt.getTime())) {
     return { success: false, error: `Invalid datetime: ${input.datetime}` };
   }

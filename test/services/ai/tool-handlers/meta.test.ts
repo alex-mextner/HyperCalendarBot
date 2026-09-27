@@ -1005,4 +1005,48 @@ describe('handleConvertToTimezone', () => {
     const result = handleConvertToTimezone({ datetime: 'not-a-date', timezone: 'Europe/London' });
     expect(result.success).toBe(false);
   });
+
+  // 2026-07-10 incident (#516): an offset-free wall clock was read in the server's zone (UTC).
+  test.each([
+    ['2026-07-11T11:00:00', 'Africa/Cairo', '2026-07-11 11:00 Africa/Cairo to UTC'],
+    ['2026-07-11T11:00', 'Europe/Belgrade', '2026-07-11 11:00 Europe/Belgrade to UTC'],
+    ['2026-07-11 11:00', 'Europe/Belgrade', '2026-07-11 11:00 Europe/Belgrade to UTC'],
+  ])('refuses the offset-free datetime %s instead of guessing its zone', (datetime, timezone, calculateForm) => {
+    const result = handleConvertToTimezone({ datetime, timezone });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('no Z or UTC offset');
+    expect(result.error).toContain(`calculate("${calculateForm}")`);
+  });
+
+  test('refuses a bare date, which names no moment', () => {
+    const result = handleConvertToTimezone({ datetime: '2026-07-11', timezone: 'Europe/Belgrade' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('no Z or UTC offset');
+  });
+
+  test.each([
+    ['2026-10-25T00:30:00Z', '2026-10-25T02:30:00+02:00'],
+    ['2026-10-25T01:30:00Z', '2026-10-25T02:30:00+01:00'],
+    ['2026-03-29T01:30:00.000Z', '2026-03-29T03:30:00+02:00'],
+    ['2026-09-28T12:30:00+0200', '2026-09-28T12:30:00+02:00'],
+  ])('keeps converting the instant %s across DST in Europe/Belgrade', (datetime, local) => {
+    const result = handleConvertToTimezone({ datetime, timezone: 'Europe/Belgrade' });
+    expect(result.success).toBe(true);
+    expect(JSON.parse(result.output!).local_datetime).toBe(local);
+  });
+
+  test('the answer does not depend on the process timezone', () => {
+    const previous = process.env.TZ;
+    process.env.TZ = 'Asia/Tokyo';
+    try {
+      const instant = handleConvertToTimezone({ datetime: '2026-07-11T09:00:00Z', timezone: 'Europe/Belgrade' });
+      expect(JSON.parse(instant.output!).local_datetime).toBe('2026-07-11T11:00:00+02:00');
+      expect(handleConvertToTimezone({ datetime: '2026-07-11T11:00:00', timezone: 'Europe/Belgrade' }).success).toBe(
+        false,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.TZ;
+      else process.env.TZ = previous;
+    }
+  });
 });
