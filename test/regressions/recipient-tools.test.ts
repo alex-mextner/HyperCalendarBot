@@ -756,16 +756,20 @@ describe('recipient and contact tool boundaries', () => {
     test('a contact with only a saved @username is invited by that username after a row-id attempt', async () => {
       const { event, approvals, sendInvitationCalls } = inviteContext();
       ctx.messageText = 'Invite Bora Example from my contacts';
-      ctx.resolveUsername = async () => ({ id: 5000000003, username: 'boraex' });
+      const resolveUsername = mock(async (_username: string) => ({ id: 5000000003, username: 'boraex' }));
+      ctx.resolveUsername = resolveUsername;
       const row = ctx.contactRepo!.add(10, 'Bora Example', 'boraex');
 
       const byRow = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: row.id });
       expect(byRow.success).toBe(false);
+      expect(byRow.mutationState).toBe('not_applied');
+      expect(byRow.error).toContain('Bora Example');
       expect(toolResultContent(byRow)).toContain('invitee_username boraex');
       expect(approvals).not.toHaveBeenCalled();
 
       const invited = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_username: 'boraex' });
       expect(invited.success).toBe(true);
+      expect(resolveUsername.mock.calls).toEqual([['boraex']]);
       expect(ctx.sharing!.invitationRepo.getByEvent(event.id).map((i) => i.invitee_id)).toEqual([5000000003]);
       expect(sendInvitationCalls.mock.calls.map(([id]) => id)).toEqual([5000000003]);
     });
