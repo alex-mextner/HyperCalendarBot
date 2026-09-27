@@ -258,6 +258,10 @@ export const MSG = {
       notice: (facts: readonly string[]) =>
         `⚠️ ${facts.join('\n')}\nThe answer mixed up weekdays and dates, so it was not sent. Tell me which day you mean and I will check again.`,
     },
+    unverified_answer: 'Could not check this answer against your calendar. Open /today or name the date.',
+    unverified_answer_with_events: (events: string) =>
+      `Found in your calendar:\n${events}\n\nCould not check my own answer against this data, so here it is as is.`,
+    unverified_more_events: (count: number) => `… and ${count} more`,
     rate_limited: 'Slow down, too many messages.',
     addWizard: {
       noEnd: 'No end date',
@@ -1266,6 +1270,10 @@ export const MSG = {
       notice: (facts: readonly string[]) =>
         `⚠️ ${facts.join('\n')}\nВ ответе перепутались дни недели и даты, поэтому он не отправлен. Напиши, какой день нужен, — проверю заново.`,
     },
+    unverified_answer: 'Не удалось проверить ответ по данным календаря. Открой /today или назови нужную дату.',
+    unverified_answer_with_events: (events: string) =>
+      `Что нашлось в календаре:\n${events}\n\nСвой ответ по этим данным проверить не удалось, поэтому показываю их как есть.`,
+    unverified_more_events: (count: number) => `… и ещё ${count}`,
     rate_limited: 'Слишком много сообщений, подождите.',
     addWizard: {
       noEnd: 'Без конца',

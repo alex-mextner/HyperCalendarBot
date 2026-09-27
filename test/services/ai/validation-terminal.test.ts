@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -7,6 +7,7 @@ import { EventReminderRepository } from '../../../src/database/repositories/even
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import type { CreateUserData } from '../../../src/database/types.ts';
 import { aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import { unverifiedResponseNotice } from '../../../src/services/ai/response-validator.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
@@ -15,6 +16,30 @@ import type { AgentContext, TelegramSender } from '../../../src/services/ai/type
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+
+function buildContext(
+  db: Database,
+  user: CreateUserData,
+  messageText: string,
+  retryEnqueue: AgentContext['retryEnqueue'],
+): AgentContext {
+  const userRepo = new UserRepository(db);
+  const chatHistory = new ChatHistoryRepository(db);
+  return {
+    user: userRepo.create(user),
+    chatId: user.telegram_id,
+    messageText,
+    isGroup: false,
+    inputMode: 'text',
+    eventService: new EventService({ eventRepo: new EventRepository(db) }),
+    eventReminderRepo: new EventReminderRepository(db),
+    holidayService: new HolidayService(new HolidayRepository(db)),
+    chatHistory,
+    conversationLogger: new ConversationLogger(chatHistory),
+    userRepo,
+    retryEnqueue,
+  };
+}
 
 type Round = { text: string; tool?: { name: string; input: { [key: string]: unknown } }; error?: Error };
 const UNSUPPORTED = 'Nothing else scheduled today.';
@@ -85,24 +110,8 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
     db = new Database(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
     runMigrations(db, migrations);
-    const userRepo = new UserRepository(db);
-    const user = userRepo.create({ telegram_id: 456, timezone: 'UTC', language: 'en' });
-    const chatHistory = new ChatHistoryRepository(db);
-    ctx = {
-      user,
-      chatId: 456,
-      // No day word: scripted writes use arbitrary dates the weekday guard would reject after "today".
-      messageText: 'Show my events',
-      isGroup: false,
-      inputMode: 'text',
-      eventService: new EventService({ eventRepo: new EventRepository(db) }),
-      eventReminderRepo: new EventReminderRepository(db),
-      holidayService: new HolidayService(new HolidayRepository(db)),
-      chatHistory,
-      conversationLogger: new ConversationLogger(chatHistory),
-      userRepo,
-      retryEnqueue: enqueue,
-    };
+    // No day word: scripted writes use arbitrary dates the weekday guard would reject after "today".
+    ctx = buildContext(db, { telegram_id: 456, timezone: 'UTC', language: 'en' }, 'Show my events', enqueue);
     delivered = [];
     sender = {
       sendMessage: async (_chatId, text) => {
@@ -129,10 +138,10 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
     const script = scripted([{ text: INITIAL }, { text: UNSUPPORTED }], ['REJECT: no evidence', 'REJECT: no evidence']);
     const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
     expectNoRejectedProse(result.responseText);
-    expect(result.responseText).toBe(unverifiedResponseNotice(language));
+    expect(result.responseText).toBe(unverifiedResponseNotice(language, 'UTC', []));
     expect(result.metrics?.termination).toBe('unverified');
     expect(JSON.stringify(ctx.chatHistory.getRecent(ctx.user.telegram_id))).toContain(
-      unverifiedResponseNotice(language),
+      unverifiedResponseNotice(language, 'UTC', []),
     );
     expect(script.counts.model).toBe(2);
   });
@@ -177,7 +186,7 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
     );
     const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
     expectNoRejectedProse(result.responseText);
-    expect(result.responseText).toBe(unverifiedResponseNotice('en'));
+    expect(result.responseText).toBe(unverifiedResponseNotice('en', 'UTC', []));
   });
 
   test('early stop cannot bypass the outstanding rejection', async () => {
@@ -187,7 +196,7 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
     );
     const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
     expectNoRejectedProse(result.responseText);
-    expect(result.responseText).toBe(unverifiedResponseNotice('en'));
+    expect(result.responseText).toBe(unverifiedResponseNotice('en', 'UTC', []));
   });
   test('quiet implicit repair failure does not speak or erase an outstanding notice', async () => {
     ctx.wasExplicitInvocation = false;
@@ -200,7 +209,7 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
     expect(result.responseText).toBe('');
     expect(result.metrics?.termination).toBe('error');
     expect(JSON.stringify(ctx.chatHistory.getRecent(ctx.user.telegram_id))).not.toContain(
-      unverifiedResponseNotice('en'),
+      unverifiedResponseNotice('en', 'UTC', []),
     );
     expect(JSON.stringify(ctx.chatHistory.getRecent(ctx.user.telegram_id))).not.toContain(UNSUPPORTED);
     expect(aiFailureNotices.takeNotice(ctx.user.telegram_id)).toBe('stall');
@@ -233,8 +242,187 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
       ['REJECT: no evidence', new Error('Synthetic validator outage')],
     );
     const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
-    expect(result.responseText).toBe(unverifiedResponseNotice('en'));
+    expect(result.responseText).toBe(unverifiedResponseNotice('en', 'UTC', []));
     expect(script.counts).toEqual({ model: 3, validator: 2 });
     expect(enqueue).not.toHaveBeenCalled();
+  });
+});
+
+// Anonymized from production turns on 2026-09-27: the first draft was rejected,
+// the retry read the calendar and answered from those reads, and the LLM
+// re-validation (which saw only tool names) rejected the correct answer anyway.
+describe('re-validation accepts answers grounded in the same run (#492)', () => {
+  const LESSON = 'Английский с Томом';
+  let db: Database;
+  let ctx: AgentContext;
+  let delivered: string[];
+  let sender: TelegramSender;
+  const enqueue = mock(async () => true);
+  const eventIds: { [key: string]: number } = {};
+
+  function addEvent(key: string, title: string, start: string, end: string, description?: string) {
+    const repo = new EventRepository(db);
+    const event = repo.create({
+      user_id: ctx.user.telegram_id,
+      title,
+      start_at: start,
+      end_at: end,
+      timezone: 'Europe/Belgrade',
+      description,
+    });
+    eventIds[key] = event.id;
+  }
+
+  function setUp(now: string, messageText: string) {
+    setSystemTime(new Date(now));
+    ctx = buildContext(db, { telegram_id: 777, timezone: 'Europe/Belgrade', language: 'ru' }, messageText, enqueue);
+  }
+
+  function history(): string {
+    return JSON.stringify(ctx.chatHistory.getRecent(ctx.user.telegram_id));
+  }
+
+  beforeEach(() => {
+    _resetToolThrottleForTest();
+    aiFailureNotices.reset();
+    enqueue.mockClear();
+    db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    delivered = [];
+    sender = {
+      sendMessage: async (_chatId, text) => {
+        delivered.push(text);
+        return { message_id: 42 };
+      },
+      editMessageText: async (_chatId, _messageId, text) => {
+        delivered.push(text);
+      },
+    };
+  });
+
+  afterEach(() => {
+    setSystemTime();
+    db.close();
+  });
+
+  /** Sunday 2026-09-27, 23:00 in Belgrade (UTC+2): the lessons are stored in UTC. */
+  function seedLessons() {
+    setUp('2026-09-27T21:00:00Z', 'А английский когда?');
+    addEvent('pastLesson', 'Английский', '2026-08-27T10:30:00Z', '2026-08-27T11:30:00Z');
+    addEvent('today', LESSON, '2026-09-27T10:30:00Z', '2026-09-27T11:30:00Z');
+    addEvent('errand', 'Отвезти посылку', '2026-09-28T18:30:00Z', '2026-09-28T19:30:00Z');
+    addEvent('tuesday', LESSON, '2026-09-29T10:30:00Z', '2026-09-29T11:30:00Z');
+    addEvent('tuesdayLater', 'Английский', '2026-09-29T11:30:00Z', '2026-09-29T12:30:00Z');
+  }
+
+  /** The retry's real tool sequence, including the two failing conversions. */
+  function lessonReads(): Round[] {
+    return [
+      { text: '', tool: { name: 'search_events', input: { query: 'Английский', scope: 'personal' } } },
+      { text: '', tool: { name: 'calculate', input: { expression: '2026-09-29 10:30 Europe/Belgrade to UTC' } } },
+      {
+        text: '',
+        tool: {
+          name: 'get_events',
+          input: { start_date: '2026-09-28T00:00:00.000Z', end_date: '2026-09-28T23:59:59.999Z', scope: 'personal' },
+        },
+      },
+      { text: '', tool: { name: 'calculate', input: { expression: '2026-09-27 10:30 UTC to Europe/Belgrade' } } },
+      { text: '', tool: { name: 'calculate', input: { expression: '2026-09-27 10:30 UTC to Europe/Belgrade' } } },
+      {
+        text: '',
+        tool: {
+          name: 'get_events',
+          input: { start_date: '2026-09-27T00:00:00.000Z', end_date: '2026-10-05T23:59:59.999Z', scope: 'personal' },
+        },
+      },
+    ];
+  }
+
+  const TOOL_LESS_DRAFT = `Следующее занятие — во вторник, 29 сентября, 12:30 («${LESSON}»).`;
+
+  test('lesson answer backed by search_events + get_events is delivered, not replaced', async () => {
+    seedLessons();
+    const answer = [
+      `**${LESSON}**`,
+      '- **Сегодня, 27 сентября** — 10:30 – 11:30 (UTC) → 12:30 – 13:30 по вашему времени (Europe/Belgrade).',
+      '- **Завтра, 28 сентября** — урок отсутствует.',
+      '- **29 сентября** — 10:30 – 11:30 (UTC) → 12:30 – 13:30 (Europe/Belgrade) и ещё один «Английский» в 13:30 – 14:30 (Europe/Belgrade).',
+      'Итого, на завтра (28 сентября) уроков английского нет. Если хотите перенести одно из будущих занятий на завтра, дайте знать, и я создам/перенесу событие.',
+    ].join('\n');
+    const script = scripted(
+      [{ text: TOOL_LESS_DRAFT }, ...lessonReads(), { text: answer }],
+      [
+        'REJECT: Assistant gave calendar details without calling a tool.',
+        "REJECT: The assistant claims facts about the user's calendar, events, free slots, reminders, holidays, contacts, or settings without calling the matching tool.",
+      ],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(answer);
+    expect(result.metrics?.termination).not.toBe('unverified');
+    expect(history()).toContain('урок отсутствует');
+    expect(script.counts.validator).toBe(1);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  test('participation answer quoting the get_event result is delivered', async () => {
+    setUp('2026-09-27T11:34:37Z', 'Добавь меня тоже во встречу, а то меня в ней нет.');
+    addEvent('meeting', 'Встреча', '2026-09-27T13:00:00Z', '2026-09-27T14:00:00Z', 'Оля, Петя, Катя, Гоша');
+    const answer =
+      'Событие уже включает вас: в описании указано «Гоша», а как создатель встречи вы автоматически являетесь её участником. Если хотите добавить ещё кого‑то — дайте знать!';
+    const script = scripted(
+      [
+        { text: 'Вы уже участвуете в этой встрече — ваше имя уже указано в описании.' },
+        { text: '', tool: { name: 'get_event', input: { event_id: eventIds.meeting } } },
+        { text: answer },
+      ],
+      ['REJECT: event details without a tool call', 'REJECT: claims participation without evidence'],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(answer);
+    expect(history()).toContain('«Гоша»');
+    expect(script.counts.validator).toBe(1);
+  });
+
+  test('a time the reads never returned is still rejected, and the notice shows what the reads found', async () => {
+    seedLessons();
+    const invented = `${LESSON} — в среду, 30 сентября, в 15:00.`;
+    const script = scripted(
+      [{ text: TOOL_LESS_DRAFT }, ...lessonReads(), { text: invented }],
+      ['REJECT: calendar details without a tool call', 'REJECT: 15:00 is not in the tool results'],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(script.counts.validator).toBe(2);
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(result.responseText).not.toContain('15:00');
+    expect(history()).not.toContain('15:00');
+    // Verified local times from the reads, never the stored UTC clock or a past lesson.
+    expect(result.responseText).toMatch(/12:30\s+Английский с Томом/);
+    expect(result.responseText).toMatch(/2026-09-28 20:30\s+Отвезти посылку/);
+    expect(result.responseText).toMatch(/2026-09-29 12:30\s+Английский с Томом/);
+    expect(result.responseText).toMatch(/2026-09-29 13:30\s+Английский/);
+    expect(result.responseText).not.toContain('10:30');
+    expect(result.responseText).not.toContain('2026-08-27');
+    expect(history()).toMatch(/2026-09-29 12:30\s+Английский с Томом/);
+  });
+
+  test('a completed-write claim backed only by reads still goes to the validator and is blocked', async () => {
+    seedLessons();
+    const claim = `Удалил «${LESSON}» 29 сентября в 12:30.`;
+    const script = scripted(
+      [{ text: TOOL_LESS_DRAFT }, ...lessonReads(), { text: claim }],
+      ['REJECT: calendar details without a tool call', 'REJECT: claims a deletion without delete_event'],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(script.counts.validator).toBe(2);
+    expect(result.responseText).not.toContain('Удалил');
+    expect(history()).not.toContain('Удалил');
+    const remaining = db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM events').get();
+    expect(remaining?.n).toBe(5);
   });
 });
