@@ -8,7 +8,15 @@ const stepSchema = z
     name: z.string().optional(),
     uses: z.string().optional(),
     run: z.string().optional(),
-    with: z.record(z.string(), z.unknown()).optional(),
+    with: z
+      .object({
+        labels: z.string().optional(),
+        script: z.string().optional(),
+        target: z.string().optional(),
+        source: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 const workflow = z
@@ -41,4 +49,21 @@ test('hosted deployment never follows latest or changes unrelated shared service
   expect(text).not.toContain('docker image prune');
   expect(text).not.toContain('caddy reload');
   expect(text).toContain('Release still targets main');
+});
+
+test('the hosted staging producer follows the guarded release namespace', () => {
+  const scp = workflow.jobs.deploy.steps.find((step) => step.uses?.startsWith('appleboy/scp-action@'));
+  const target = scp?.with?.target;
+  expect(target).toBeDefined();
+  const sha = 'a'.repeat(40);
+  const name = target
+    ?.split('/')
+    .at(-1)
+    ?.replace(/\$\{\{\s*github\.sha\s*\}\}/g, sha)
+    .replace(/\$\{\{\s*github\.run_id\s*\}\}/g, '123')
+    .replace(/\$\{\{\s*github\.run_attempt\s*\}\}/g, '1');
+  expect(name).toBe(`.incoming-${sha}-123-1`);
+  const activator = readFileSync(resolve(import.meta.dir, '../../scripts/deploy-prebuilt-image.sh'), 'utf8');
+  expect(activator).toContain('stage.parent == root');
+  expect(activator).toContain('r"\\.incoming-" + revision + r"-\\d+-\\d+"');
 });

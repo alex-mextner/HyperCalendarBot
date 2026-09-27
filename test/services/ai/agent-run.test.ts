@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type OpenAI from 'openai';
-import { EN_AGENT_ERROR_PHRASES, RU_AGENT_ERROR_PHRASES } from '../../../src/config/constants.ts';
+import { EN_AGENT_ERROR_PHRASES, RU_AGENT_ERROR_PHRASES, t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { ContactRepository } from '../../../src/database/repositories/contact.repository.ts';
@@ -246,6 +246,30 @@ describe('CalendarBotAgent.run()', () => {
     expect(enqueue).not.toHaveBeenCalled();
     expect(result.responseText).toContain('provider stopped');
     expect(result.responseText).not.toContain('A response requiring validation.');
+  });
+
+  test('an expired explanation-retry budget uses the user language', async () => {
+    ctx.user.language = 'ru';
+    const started = Date.now();
+    const clock = spyOn(Date, 'now').mockReturnValue(started);
+    const append = spyOn(TelegramStreamWriter.prototype, 'appendText');
+    const script = makeStreamImpl([{ kind: 'text', text: 'Unverified draft.' }]);
+    const impl: typeof script.impl = async (options, callbacks) => {
+      const result = await script.impl(options, callbacks);
+      if (isValidatorCall(options)) {
+        clock.mockReturnValue(started + 100_000);
+        return { ...result, text: 'REJECT: missing tool evidence' };
+      }
+      return result;
+    };
+    try {
+      await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+      expect(append.mock.calls.some(([text]) => text.includes(t('ru').agent_timeout))).toBe(true);
+      expect(append.mock.calls.some(([text]) => text.includes('Timeout reached.'))).toBe(false);
+    } finally {
+      append.mockRestore();
+      clock.mockRestore();
+    }
   });
 
   test('one request budget includes validation and does not poison the next request', async () => {

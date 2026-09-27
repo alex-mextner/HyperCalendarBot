@@ -1354,7 +1354,7 @@ export class CalendarBotAgent {
 
       if (Date.now() - startTime >= this.requestTimeoutMs) {
         aiLogger.warn({ userId: ctx.user.telegram_id }, 'Agent timeout (retry)');
-        writer.appendText('\n\n⚠️ Timeout reached.');
+        writer.appendText(`\n\n${t(ctx.user.language).agent_timeout}`);
         return { hitStopLoop: false, lastRoundText: '', lastRoundHadToolCalls: false };
       }
 
