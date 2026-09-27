@@ -12,10 +12,11 @@ export interface InvitationResult {
   invitation?: Invitation;
   error?: string;
   /**
-   * Set when the invitee's time proposal was already settled: they answered, or the inviter acted on it.
-   * Each value is the `t(lang)` key of the message that tells the user why.
+   * Why an action was refused, as the `t(lang)` key of the message that tells the user: the invitee's
+   * time proposal was already settled (they answered, or the inviter acted on it), or the invitee acted
+   * on an invitation the inviter cancelled or that expired.
    */
-  reason?: 'invite_proposal_closed';
+  reason?: 'invite_proposal_closed' | 'invitation_cancelled' | 'invitation_expired';
   proposedTime?: string;
 }
 
@@ -28,6 +29,17 @@ const PROPOSAL_CLOSED: InvitationResult = {
 /** A proposal stays open until the invitee answers the invitation or the inviter settles it. */
 function hasOpenProposal(invitation: Invitation): invitation is Invitation & { proposed_time: string } {
   return invitation.status === 'pending' && !!invitation.proposed_time;
+}
+
+/** A cancelled or expired invitation takes no answer or time proposal from its invitee. */
+function revokedInvitationResult(invitation: Invitation): InvitationResult | null {
+  if (invitation.status === 'cancelled') {
+    return { success: false, reason: 'invitation_cancelled', error: 'Invitation was cancelled' };
+  }
+  if (invitation.status === 'expired') {
+    return { success: false, reason: 'invitation_expired', error: 'Invitation has expired' };
+  }
+  return null;
 }
 
 export class InvitationService {
@@ -145,6 +157,10 @@ export class InvitationService {
     if (invitation.invitee_id !== userId) {
       return { success: false, error: 'Not authorized to propose' };
     }
+    const revoked = revokedInvitationResult(invitation);
+    if (revoked) {
+      return revoked;
+    }
     this.invRepo.setProposedTime(invitationId, proposedTime);
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
@@ -196,6 +212,10 @@ export class InvitationService {
     }
     if (invitation.invitee_id !== userId) {
       return { success: false, error: 'Not authorized to respond' };
+    }
+    const revoked = revokedInvitationResult(invitation);
+    if (revoked) {
+      return revoked;
     }
     const ok = this.invRepo.updateStatus(invitationId, newStatus, invitation.status as InvitationStatus);
     if (!ok) {

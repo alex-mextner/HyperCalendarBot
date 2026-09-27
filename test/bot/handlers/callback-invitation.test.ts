@@ -819,3 +819,79 @@ describe('inviter acting on a time proposal that is already closed', () => {
     expect(notifyDeps.sendMessage).toHaveBeenCalledTimes(sentAfterKeep);
   });
 });
+
+describe('RSVP taps on a revoked invitation', () => {
+  const INVITER = 100;
+  const INVITEE = 200;
+
+  function setupRevokedInvitation(status: 'cancelled' | 'expired') {
+    const db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    const userRepo = new UserRepository(db);
+    userRepo.create({ telegram_id: INVITER, timezone: 'UTC', language: 'en' });
+    userRepo.create({ telegram_id: INVITEE, timezone: 'UTC', language: 'en' });
+    const eventRepo = new EventRepository(db);
+    const invRepo = new InvitationRepository(db);
+    const participantRepo = new ParticipantRepository(db);
+    const invitationService = new InvitationService(
+      invRepo,
+      eventRepo,
+      new SharingSettingsRepository(db),
+      participantRepo,
+    );
+    const event = eventRepo.create({
+      user_id: INVITER,
+      title: 'Fixture meetup',
+      start_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      timezone: 'UTC',
+    });
+    const invitation = invitationService.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+    if (status === 'cancelled') {
+      invitationService.cancelInvitation(invitation.id, INVITER);
+    } else {
+      db.prepare("UPDATE events SET start_at = datetime('now', '-1 hour') WHERE id = ?").run(event.id);
+      invRepo.expirePastInvitations();
+    }
+    expect(invRepo.findById(invitation.id)!.status).toBe(status);
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      invitationService,
+      eventRepo,
+      invitationRepo: invRepo,
+    });
+    return { handler, invRepo, participantRepo, event, invitation };
+  }
+
+  test.each([
+    ['cancelled', 'accept'],
+    ['cancelled', 'maybe'],
+    ['cancelled', 'decline'],
+    ['expired', 'accept'],
+    ['expired', 'maybe'],
+    ['expired', 'decline'],
+  ] as const)('%s invitation: %s keeps the status, adds no participant and says it is no longer active', async (status, action) => {
+    const { handler, invRepo, participantRepo, event, invitation } = setupRevokedInvitation(status);
+
+    const ctx = makeCtx(`inv:${action}:${invitation.id}`);
+    await handler(ctx as never);
+
+    expect(invRepo.findById(invitation.id)!.status).toBe(status);
+    expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
+    expect(ctx.answer).toHaveBeenCalledWith(
+      status === 'cancelled' ? t('en').invitation_cancelled : t('en').invitation_expired,
+    );
+    expect(ctx.editText).not.toHaveBeenCalled();
+  });
+
+  test.each(['cancelled', 'expired'] as const)('%s invitation: a +30 proposal is refused', async (status) => {
+    const { handler, invRepo, invitation } = setupRevokedInvitation(status);
+
+    const ctx = makeCtx(`inv:propose:${invitation.id}:+30`);
+    await handler(ctx as never);
+
+    expect(invRepo.findById(invitation.id)!.proposed_time).toBeNull();
+    expect(ctx.answer).toHaveBeenCalledWith({
+      text: status === 'cancelled' ? t('en').invitation_cancelled : t('en').invitation_expired,
+    });
+  });
+});
