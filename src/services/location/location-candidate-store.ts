@@ -24,13 +24,19 @@ export const GeocodedLocationSchema = z.object({
 
 const PickerSchema = z.object({
   id: z.string(),
+  location: z.string(),
   candidates: z.array(GeocodedLocationSchema),
+  placeDropped: z.boolean(),
 });
 
 /** The places offered in one picker message; `id` is in its buttons, so a tap on an older picker is recognised. */
 export interface LocationPicker {
   id: string;
+  /** The typed location the candidates were found for: a tap counts only while the event still has this text. */
+  location: string;
   candidates: GeocodedLocation[];
+  /** Opening the picker dropped a resolved place from the event, which delivered invitation cards may still show. */
+  placeDropped: boolean;
 }
 
 interface RedisClient {
