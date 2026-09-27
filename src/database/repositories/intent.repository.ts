@@ -1,29 +1,23 @@
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import { z } from 'zod';
-import { seedIntents } from '../../services/intent/seed-catalog.ts';
-import {
-  type CanonicalSeed,
-  installedSeedFingerprint,
-  seedFingerprint,
-} from '../../services/intent/seed-replacement.ts';
+import { registryIntegrity } from '../../services/intent/revision-ledger.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
+import { dbLogger } from '../../utils/logger.ts';
 import type { CreateIntentData, Intent, IntentStatus } from '../types.ts';
+import { IntentRevisionRepository } from './intent-revision.repository.ts';
 
 const StringArrayCodec = jsonCodec(z.array(z.string()));
 
 export class IntentRepository {
-  constructor(
-    private db: Database,
-    private readonly canonicalSeed: readonly CanonicalSeed[] = seedIntents,
-  ) {}
+  constructor(private db: Database) {}
 
   isManagedBasis(): boolean {
-    return installedSeedFingerprint(this.db) !== null;
+    return new IntentRevisionRepository(this.db).manifestFingerprint() !== null;
   }
 
   private requireUnmanaged(): void {
     if (this.isManagedBasis())
-      throw new Error('INTENT_BASIS_READ_ONLY: edit the versioned source and apply its reviewed migration');
+      throw new Error('INTENT_BASIS_READ_ONLY: propose a revision and have an administrator approve it');
   }
 
   create(data: CreateIntentData): number {
@@ -50,23 +44,22 @@ export class IntentRepository {
     return this.db.prepare('SELECT * FROM intents WHERE id = ?').get(id) as Intent | null;
   }
 
+  /**
+   * Approved rows. A managed registry loads only while its rows, manifest and active revision
+   * agree; the build's source seed is never consulted, so a source-only deploy keeps the active
+   * catalogue. Any disagreement disables the whole catalogue (fail closed) and is logged.
+   */
   getApproved(): Intent[] {
-    const rows = this.db.prepare('SELECT * FROM intents WHERE status = ?').all('approved') as Intent[];
-    const managed = installedSeedFingerprint(this.db);
-    if (managed === null) return rows;
-    try {
-      const actual = rows.map((row) => ({
-        canonical_name: row.canonical_name,
-        pattern: row.pattern ?? '',
-        workflow: JSON.parse(row.workflow),
-        phrases: JSON.parse(row.phrases),
-        trigger_words: JSON.parse(row.trigger_words ?? '[]'),
-        source_message: row.source_message ?? '',
-      }));
-      return managed === seedFingerprint(this.canonicalSeed) && managed === seedFingerprint(actual) ? rows : [];
-    } catch {
+    return this.db.transaction(() => {
+      const rows = this.db.query<Intent, [string]>('SELECT * FROM intents WHERE status = ?').all('approved');
+      const integrity = registryIntegrity(new IntentRevisionRepository(this.db));
+      if (integrity.state === 'unmanaged' || integrity.state === 'intact') return rows;
+      dbLogger.error(
+        { state: integrity.state },
+        `intent_registry_${integrity.state}: managed intent catalogue disabled`,
+      );
       return [];
-    }
+    })();
   }
 
   updateStatus(id: number, status: IntentStatus): void {

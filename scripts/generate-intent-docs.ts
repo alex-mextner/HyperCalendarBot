@@ -8,6 +8,7 @@ import { Marked } from 'marked';
 import { z } from 'zod';
 import { auditDefinition } from '../src/services/intent/catalog-audit.ts';
 import { IntentMatcher } from '../src/services/intent/intent-matcher.ts';
+import { seedFingerprint } from '../src/services/intent/rule-fingerprint.ts';
 import {
   type CanonicalMetadata,
   canonicalMetadata,
@@ -15,7 +16,6 @@ import {
   legacyDisposition,
   seedIntents,
 } from '../src/services/intent/seed-catalog.ts';
-import { seedFingerprint } from '../src/services/intent/seed-replacement.ts';
 import { BindingSchema } from '../src/services/intent/workflow-bindings.ts';
 import type { WorkflowInputValue } from '../src/services/intent/workflow-input.ts';
 import { type I18nMap, type Level2Step, WorkflowSchema } from '../src/services/intent/workflow-schema.ts';
