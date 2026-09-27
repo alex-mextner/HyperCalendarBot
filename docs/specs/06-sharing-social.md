@@ -116,6 +116,18 @@ Inviter                     Bot                         Invitee
   |                          |--- "added to calendar" ----->|
 ```
 
+**Invitation card roster.** Every invitation card (bot delivery, `/start` deep link, onboarding
+re-display, the answered card and every in-place re-render) ends with the event's roster: the
+organizer, then each invitee with their answer, ordered going, maybe, no answer yet, not going.
+Withdrawn and expired invitations are left out; members who answered through an invited group's
+card are listed while that group invitation is live. At most ten invitees are named and the rest
+counted ("…и ещё 3 человека"); invitees that would push the card past Telegram's 4096-character
+limit are counted instead of named. The roster is the organizer's to share: a group chat sees it
+only while it holds a live invitation to the event, a private reader only when on the roster.
+Whenever someone is invited, answers or is withdrawn, the other delivered cards of the event are
+re-rendered in place, each keeping its buttons (RSVP keyboard on a pending card, Going/Not going on a
+group card, none on an answered card).
+
 ---
 
 ## 2. Invitation State Machine

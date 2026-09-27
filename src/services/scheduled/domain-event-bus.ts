@@ -14,6 +14,11 @@ export type DomainEventMap = {
   // never reaches TriggerService (would fire user-defined automations) or the AI scheduled-call
   // topic list.
   'myGroup.rsvp': { userId: number; eventId: number; status: 'accepted' | 'declined' };
+  // Internal plumbing topic: someone was invited to, answered, or was withdrawn from an event, so its
+  // delivered invitation cards re-render their roster; kept OUT of ALL_TOPICS like myGroup.rsvp.
+  // userId is the organizer (the event owner); answeredInvitationId names the card its own answer
+  // callback rewrites itself.
+  'invitationRoster.changed': { userId: number; eventId: number; answeredInvitationId?: number };
 };
 
 export type DomainEventTopic = keyof DomainEventMap;

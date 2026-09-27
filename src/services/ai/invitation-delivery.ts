@@ -7,6 +7,7 @@ import { botLogger } from '../../utils/logger.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import { formatInvitation } from '../event/formatters.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
+import { readInvitationRoster } from '../sharing/invitation-roster.ts';
 import { buildUserSessionInvitationText } from '../telegram-session/invitation-text.ts';
 import { deliverMessage, describeDeliveryError } from './deliver-message.ts';
 import type { TelegramSender } from './types.ts';
@@ -104,6 +105,7 @@ export async function deliverInvitation(
           inviterUsername,
           invitee?.timezone ?? null,
           !!invitee?.onboarding_completed,
+          readInvitationRoster(invitationRepo, event.id, inviteeId),
         )
       : t(lang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
 

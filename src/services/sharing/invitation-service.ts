@@ -55,6 +55,7 @@ export class InvitationService {
       invitee_username: inviteeUsername,
     });
 
+    this.domainEvents?.emit('invitationRoster.changed', { userId: inviterId, eventId });
     return { success: true, invitation };
   }
 
@@ -91,6 +92,7 @@ export class InvitationService {
     // Mirror this member's own answer into their own Google Calendar (gated downstream on their
     // own active sync state): "going" adds the event, "not going" removes it.
     this.domainEvents?.emit('myGroup.rsvp', { userId, eventId, status });
+    this.domainEvents?.emit('invitationRoster.changed', { userId: groupInvitation.inviter_id, eventId });
     return { success: true };
   }
 
@@ -118,6 +120,10 @@ export class InvitationService {
     if (!ok) {
       return { success: false, error: 'Cannot cancel — status already changed' };
     }
+    this.domainEvents?.emit('invitationRoster.changed', {
+      userId: invitation.inviter_id,
+      eventId: invitation.event_id,
+    });
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
 
@@ -157,6 +163,11 @@ export class InvitationService {
         this.participantRepo.add(invitation.event_id, invitation.invitee_id, 'accepted');
       }
     }
+    this.domainEvents?.emit('invitationRoster.changed', {
+      userId: invitation.inviter_id,
+      eventId: invitation.event_id,
+      answeredInvitationId: invitationId,
+    });
     return { success: true, invitation: this.invRepo.findById(invitationId)!, proposedTime };
   }
 
@@ -199,6 +210,11 @@ export class InvitationService {
     }
 
     const result: InvitationResult = { success: true, invitation: this.invRepo.findById(invitationId)! };
+    this.domainEvents?.emit('invitationRoster.changed', {
+      userId: invitation.inviter_id,
+      eventId: invitation.event_id,
+      answeredInvitationId: invitationId,
+    });
 
     if (this.domainEvents && (newStatus === 'accepted' || newStatus === 'declined')) {
       const event = this.eventRepo.findById(invitation.event_id, invitation.inviter_id);

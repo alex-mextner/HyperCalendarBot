@@ -1,5 +1,18 @@
 import type { Database } from 'bun:sqlite';
-import type { CreateInvitationData, Invitation, InvitationStatus } from '../types.ts';
+import type { CreateInvitationData, Invitation, InvitationStatus, ParticipantStatus } from '../types.ts';
+
+/** One person on an event's invitation roster, as stored: the answer rules are applied by the reader. */
+export interface InvitationRosterRow {
+  source: 'organizer' | 'invitation' | 'participant';
+  /** Telegram id; a group invitation carries the (negative) group chat id */
+  user_id: number;
+  /** Latest invitation status or participant status; null for the organizer */
+  status: InvitationStatus | ParticipantStatus | null;
+  first_name: string | null;
+  username: string | null;
+  /** The organizer's own address-book name for this person */
+  contact_name: string | null;
+}
 
 export class InvitationRepository {
   constructor(private db: Database) {}
@@ -111,6 +124,40 @@ export class InvitationRepository {
 
   getByEvent(eventId: number): Invitation[] {
     return this.db.prepare('SELECT * FROM invitations WHERE event_id = ? ORDER BY id').all(eventId) as Invitation[];
+  }
+
+  /**
+   * Everyone an invitation card can list, in one read: the event owner, the latest invitation per
+   * invitee (group invitations included), and the per-member answers in event_participants.
+   */
+  getRoster(eventId: number): InvitationRosterRow[] {
+    return this.db
+      .query<InvitationRosterRow, [number]>(`
+        WITH latest AS (
+          SELECT i.*, ROW_NUMBER() OVER (PARTITION BY i.invitee_id ORDER BY i.created_at DESC, i.id DESC) AS recipient_rank
+          FROM invitations i WHERE i.event_id = ?1
+        )
+        SELECT source, user_id, status, first_name, username, contact_name FROM (
+          SELECT 'organizer' AS source, 0 AS position, e.user_id, NULL AS status, u.first_name, u.username,
+            NULL AS contact_name
+          FROM events e LEFT JOIN users u ON u.telegram_id = e.user_id WHERE e.id = ?1
+          UNION ALL
+          SELECT 'invitation', l.id, l.invitee_id, l.status, u.first_name,
+            COALESCE(u.username, l.invitee_username),
+            (SELECT c.name FROM contacts c WHERE c.user_id = l.inviter_id AND c.telegram_id = l.invitee_id
+              ORDER BY c.id LIMIT 1)
+          FROM latest l LEFT JOIN users u ON u.telegram_id = l.invitee_id WHERE l.recipient_rank = 1
+          UNION ALL
+          SELECT 'participant', p.id, p.user_id, p.status, u.first_name, u.username,
+            (SELECT c.name FROM contacts c WHERE c.user_id = e.user_id AND c.telegram_id = p.user_id
+              ORDER BY c.id LIMIT 1)
+          FROM event_participants p JOIN events e ON e.id = p.event_id
+          LEFT JOIN users u ON u.telegram_id = p.user_id
+          WHERE p.event_id = ?1 AND p.role != 'organizer'
+        )
+        ORDER BY CASE source WHEN 'organizer' THEN 0 WHEN 'invitation' THEN 1 ELSE 2 END, position
+      `)
+      .all(eventId);
   }
 
   setMessageInfo(id: number, messageId: number, chatId: number): void {

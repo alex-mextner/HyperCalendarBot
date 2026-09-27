@@ -7,6 +7,7 @@ import type { UserRepository } from '../../database/repositories/user.repository
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail, formatInvitation } from '../../services/event/formatters.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
+import { readInvitationRoster } from '../../services/sharing/invitation-roster.ts';
 import { invitationRsvpKeyboard } from '../../services/sharing/invitation-rsvp-keyboard.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
@@ -73,6 +74,7 @@ export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Prom
                   inviter?.username,
                   user.timezone,
                   !!user.onboarding_completed,
+                  readInvitationRoster(deps.invitationRepo, event.id, user.telegram_id),
                 )
               : `📨 ${inviterName} ${lang === 'ru' ? 'приглашает вас на событие' : 'invites you to an event'}`;
             await ctx.send(text, { parse_mode: 'HTML', reply_markup: invitationRsvpKeyboard(invitation.id, lang) });

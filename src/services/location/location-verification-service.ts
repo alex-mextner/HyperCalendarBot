@@ -1,16 +1,14 @@
 // src/services/location/location-verification-service.ts
 
-import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
+import type { TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { t } from '../../config/constants.ts';
 import type { AgendaRepository } from '../../database/repositories/agenda.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { CalendarEvent, Invitation, InvitationStatus, User } from '../../database/types.ts';
+import type { CalendarEvent, User } from '../../database/types.ts';
 import { botLogger } from '../../utils/logger.ts';
-import { formatInvitation } from '../event/formatters.ts';
-import { formatAnsweredInvitationCard } from '../sharing/answered-invitation-card.ts';
-import { groupRsvpKeyboard, invitationRsvpKeyboard } from '../sharing/invitation-rsvp-keyboard.ts';
+import { type InvitationEditOptions, refreshInvitationCards } from '../sharing/invitation-cards.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
 import type { AddressCache } from './address-cache.ts';
 import type { GeocodedLocation, GeocodingService } from './geocoding-service.ts';
@@ -18,10 +16,6 @@ import type { LocationCandidateStore } from './location-candidate-store.ts';
 
 type ParseMode = 'HTML' | 'MarkdownV2' | 'Markdown';
 type ReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKeyboardMarkup;
-type InvitationEditOptions = { parse_mode: ParseMode; reply_markup?: InlineKeyboard };
-type RenderedInvitationCard = { text: string; options: InvitationEditOptions };
-/** Statuses whose card is still on screen as the recipient last saw it */
-type LiveInvitationStatus = Exclude<InvitationStatus, 'cancelled' | 'expired'>;
 
 const logger = botLogger.child({ module: 'location-verification' });
 
@@ -290,73 +284,6 @@ export class LocationVerificationService {
   private async updateInvitationMessages(event: CalendarEvent): Promise<void> {
     const editMessage = this.deps.editMessage;
     if (!editMessage) return;
-
-    for (const inv of this.deps.invitationRepo.getByEvent(event.id)) {
-      if (!inv.message_id || !inv.chat_id || inv.status === 'cancelled' || inv.status === 'expired') continue;
-      if (inv.status === 'pending' && inv.proposed_time) continue;
-
-      try {
-        const card = await this.renderInvitationCard(event, inv, inv.status);
-        // Earlier edits in this loop yield, and an invitee can answer or propose a time meanwhile: that
-        // callback has then already rewritten the card, so a stale render must not overwrite it.
-        const current = this.deps.invitationRepo.findById(inv.id);
-        if (current?.status !== inv.status || current.proposed_time !== inv.proposed_time) continue;
-        await editMessage(inv.chat_id, inv.message_id, card.text, card.options);
-      } catch (err) {
-        logger.warn(
-          { err, invitationId: inv.id, eventId: event.id },
-          'Failed to update invitation message after location resolution',
-        );
-      }
-    }
-  }
-
-  private async renderInvitationCard(
-    event: CalendarEvent,
-    inv: Invitation,
-    status: LiveInvitationStatus,
-  ): Promise<RenderedInvitationCard> {
-    const inviter = this.deps.userRepo.findByTelegramId(inv.inviter_id);
-    const inviterName = inviter?.first_name ?? inviter?.username ?? 'User';
-
-    if (inv.invitee_id < 0) {
-      const groupLang = inviter?.language ?? 'en';
-      const text = formatInvitation(
-        event,
-        event.timezone,
-        groupLang,
-        inviterName,
-        inv.inviter_id,
-        inviter?.username,
-        null,
-        false,
-      );
-      return { text, options: { parse_mode: 'HTML', reply_markup: groupRsvpKeyboard(event.id, groupLang) } };
-    }
-
-    const invitee = this.deps.userRepo.findByTelegramId(inv.invitee_id);
-    const inviteeLang = invitee?.language ?? 'en';
-
-    if (status === 'pending') {
-      const text = formatInvitation(
-        event,
-        event.timezone,
-        inviteeLang,
-        inviterName,
-        inv.inviter_id,
-        inviter?.username,
-        invitee?.timezone,
-        invitee?.onboarding_completed === 1,
-      );
-      return { text, options: { parse_mode: 'HTML', reply_markup: invitationRsvpKeyboard(inv.id, inviteeLang) } };
-    }
-
-    const text = await formatAnsweredInvitationCard(
-      status,
-      event,
-      { userId: inv.invitee_id, language: inviteeLang, timezone: invitee?.timezone ?? event.timezone },
-      { agendaRepository: this.deps.agendaRepository, weatherService: this.deps.weatherService },
-    );
-    return { text, options: { parse_mode: 'HTML' } };
+    await refreshInvitationCards(event, { ...this.deps, editMessage });
   }
 }
