@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { z } from 'zod';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -11,8 +12,10 @@ import { executeTool } from '../../../src/services/ai/tool-executor.ts';
 import { toolSchemas } from '../../../src/services/ai/tool-schemas.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
+import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import type { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -355,6 +358,139 @@ describe('numeric ID boundary', () => {
       nested: { event_id: '3' },
     });
     expect(toolSchemas.remove_trigger.parse({ id: '123' })).toEqual({ id: '123' });
+  });
+});
+
+/** Records every location-verification request made by update_event. */
+function makeLocationVerificationSpy(): { service: LocationVerificationService; verifiedEventIds: number[] } {
+  const verifiedEventIds: number[] = [];
+  const partial: Partial<LocationVerificationService> = {
+    verifyEventLocation: async (event) => {
+      verifiedEventIds.push(event.id);
+      return { resolved: true, geocoded: null, cityExtracted: null, candidates: [] };
+    },
+  };
+  return { service: partial as unknown as LocationVerificationService, verifiedEventIds };
+}
+
+describe('boolean tool field boundary', () => {
+  const USER_ID = 123;
+  let ctx: AgentContext;
+  let eventId: number;
+  let verifiedEventIds: number[];
+
+  beforeEach(() => {
+    const db = createTestDb();
+    const chatHistory = new ChatHistoryRepository(db);
+    const userRepo = new UserRepository(db);
+    userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
+    const eventService = new EventService({ eventRepo: new EventRepository(db) });
+    const spy = makeLocationVerificationSpy();
+    verifiedEventIds = spy.verifiedEventIds;
+    ctx = {
+      user: userRepo.findByTelegramId(USER_ID)!,
+      chatId: USER_ID,
+      messageText: '',
+      isGroup: false,
+      eventService,
+      holidayService: new HolidayService(new HolidayRepository(db)),
+      chatHistory,
+      conversationLogger: new ConversationLogger(chatHistory),
+      userRepo,
+      eventReminderRepo: new EventReminderRepository(db),
+      locationVerification: spy.service,
+    };
+    eventId = eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Meeting',
+      start_at: '2099-03-15T13:00:00Z',
+      end_at: '2099-03-15T14:00:00Z',
+      timezone: 'UTC',
+    }).id;
+  });
+
+  // Models sometimes serialize booleans as JSON strings; the exact literals must keep their meaning.
+  // Each case uses its own location: the executor throttles identical calls across tests.
+  test.each<[string | boolean, string, boolean]>([
+    ['false', 'Cafe Central', true],
+    ['true', 'At home', false],
+    [false, 'Cafe Sacher', true],
+    [true, 'At Ira', false],
+  ])('update_event location_abstract %j updates the event with boolean semantics', async (flag, location, verified) => {
+    const result = await executeTool(ctx, 'update_event', {
+      event_id: eventId,
+      location,
+      location_abstract: flag,
+    });
+    expect(result.success).toBe(true);
+    expect(ctx.eventService.getEvent(eventId, USER_ID)?.location).toBe(location);
+    expect(verifiedEventIds.includes(eventId)).toBe(verified);
+  });
+
+  test.each([
+    'yes',
+    '1',
+    'False',
+    'TRUE',
+    ' true',
+    '',
+    'no',
+    '0',
+  ])('update_event rejects location_abstract %j without touching the event', async (flag) => {
+    const result = await executeTool(ctx, 'update_event', {
+      event_id: eventId,
+      location: 'Cafe Central',
+      location_abstract: flag,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('location_abstract');
+    expect(ctx.eventService.getEvent(eventId, USER_ID)?.location).toBeNull();
+    expect(verifiedEventIds).toEqual([]);
+  });
+
+  test.each<[string | boolean, string, number]>([
+    ['false', 'Cafe Mozart', 1],
+    ['true', 'At Lena', 0],
+    [false, 'Cafe Landtmann', 1],
+    [true, 'At Alex', 0],
+  ])('create_event location_abstract %j creates the event with boolean semantics', async (flag, location, verified) => {
+    const result = await executeTool(ctx, 'create_event', {
+      title: `Meeting ${location}`,
+      start_at: '2099-03-16T13:00:00Z',
+      location,
+      location_abstract: flag,
+    });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain(`location: ${location}`);
+    expect(verifiedEventIds).toHaveLength(verified);
+  });
+
+  test('every advertised boolean tool field accepts only the exact string literals', () => {
+    const schemasByName = new Map<string, z.ZodType>(Object.entries(toolSchemas));
+    const checked = new Set<string>();
+    for (const tool of [...getToolDefinitions(), ...getToolDefinitions('live_call')]) {
+      if (tool.type !== 'function') continue;
+      const properties = tool.function.parameters?.properties;
+      if (!properties || typeof properties !== 'object') continue;
+      for (const [field, advertised] of Object.entries(properties)) {
+        if (Reflect.get(advertised, 'type') !== 'boolean') continue;
+        const schema = schemasByName.get(tool.function.name);
+        if (!(schema instanceof z.ZodObject)) throw new Error(`${tool.function.name} has no object schema`);
+        const fieldSchema = schema.shape[field];
+        if (!fieldSchema) throw new Error(`${tool.function.name}.${field} is not validated`);
+        const label = `${tool.function.name}.${field}`;
+        expect([label, fieldSchema.safeParse('true').data]).toEqual([label, true]);
+        expect([label, fieldSchema.safeParse('false').data]).toEqual([label, false]);
+        expect([label, fieldSchema.safeParse(true).data]).toEqual([label, true]);
+        expect([label, fieldSchema.safeParse(false).data]).toEqual([label, false]);
+        for (const rejected of ['yes', '', '1', 'False', 1, null]) {
+          expect([label, rejected, fieldSchema.safeParse(rejected).success]).toEqual([label, rejected, false]);
+        }
+        checked.add(label);
+      }
+    }
+    expect([...checked]).toContain('create_event.location_abstract');
+    expect([...checked]).toContain('update_event.location_abstract');
   });
 });
 
