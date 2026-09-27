@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "fingerprint": "66274f699a93fd1438041ab624b7388960171b511868bcef7dc6e27eca0e2891",
+  "fingerprint": "6784bb007d70cee9930a1e9ab27b5e70962c8eb45fb8153f624e8a3b6a33f317",
   "runtimeVerification": null,
   "engine": {
     "document": "engine.md",
@@ -4069,12 +4069,10 @@
           },
           {
             "when": "bind.ref.kind == 'id'",
-            "call": "get_event",
+            "call": "get_invitation_status",
             "input": {
-              "event_id": "{{bind.ref.id}}",
-              "scope": "{{env.scope}}"
-            },
-            "as": "target"
+              "event_id": "{{bind.ref.id}}"
+            }
           },
           {
             "when": "bind.ref.kind == 'name'",
@@ -4104,6 +4102,7 @@
             "as": "target"
           },
           {
+            "when": "bind.ref.kind == 'name'",
             "call": "get_invitation_status",
             "input": {
               "event_id": "{{tool_outputs.target.id}}"
@@ -4124,9 +4123,9 @@
         }
       },
       "tools": [
-        "get_event",
+        "get_invitation_status",
         "search_events",
-        "get_invitation_status"
+        "get_event"
       ],
       "bindingTypes": [
         "eventref"
@@ -4138,9 +4137,9 @@
         "schemaValid": true,
         "contractErrors": 0,
         "tools": [
-          "get_event",
+          "get_invitation_status",
           "search_events",
-          "get_invitation_status"
+          "get_event"
         ],
         "requiredCaptures": [
           "$1"

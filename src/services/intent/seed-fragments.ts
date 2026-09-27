@@ -187,6 +187,16 @@ export function resolveEvent(): SeedStep[] {
       input: { event_id: '{{bind.ref.id}}', scope: SCOPE },
       as: 'target',
     },
+    ...resolveEventByName(),
+  ];
+}
+
+/**
+ * The title half of resolveEvent: search the actor's own calendar and stop unless exactly one
+ * event matches, leaving it in `tool_outputs.target`. Does nothing for an id reference.
+ */
+export function resolveEventByName(): SeedStep[] {
+  return [
     {
       when: "bind.ref.kind == 'name'",
       call: 'search_events',
