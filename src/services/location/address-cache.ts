@@ -43,11 +43,14 @@ interface RedisLike {
   compareAndSet(key: string, expected: string | null, value: string): Promise<boolean>;
 }
 
-/** SET only while the key still holds ARGV[1] ('' = absent; stored values are JSON, never ''); 1 when written. */
+/**
+ * SET KEYS[1] to ARGV[1] only while it still holds ARGV[2], or is absent when no ARGV[2] is given
+ * (GET answers false for an absent key, and a missing ARGV[2] is nil); 1 when written.
+ */
 const COMPARE_AND_SET_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
-if (current or '') ~= ARGV[1] then return 0 end
-redis.call('SET', KEYS[1], ARGV[2])
+if current ~= (ARGV[2] or false) then return 0 end
+redis.call('SET', KEYS[1], ARGV[1])
 return 1`;
 
 /** `compareAndSet` on a Redis client: one Lua script, which Redis runs atomically. */
@@ -55,15 +58,15 @@ export function redisCompareAndSet(redis: {
   eval(script: string, numkeys: number, ...keysAndArgs: string[]): Promise<unknown>;
 }): (key: string, expected: string | null, value: string) => Promise<boolean> {
   return async (key, expected, value) =>
-    (await redis.eval(COMPARE_AND_SET_SCRIPT, 1, key, expected ?? '', value)) === 1;
+    (await redis.eval(COMPARE_AND_SET_SCRIPT, 1, key, value, ...(expected === null ? [] : [expected]))) === 1;
 }
 
 /**
- * Attempts of one read-modify-write whose key other writers keep changing before it is written.
- * Of the writers that read the same value exactly one commits, so N concurrent writers all finish
- * within N attempts; one user's taps never come close to this many at once.
+ * Most attempts of one read-modify-write racing other writers of the same key. Of the writers that
+ * read the same value exactly one commits, so N concurrent writers all finish within N attempts,
+ * far more than one user's taps; the bound only stops a compare-and-set that can never succeed.
  */
-const MAX_UPDATE_ATTEMPTS = 10;
+const MAX_WRITE_ATTEMPTS = 10;
 
 const MAPPINGS_KEY = (userId: number) => `addr:${userId}:confirmed_mappings`;
 const FREQ_KEY = (userId: number) => `addr:${userId}:confirmed_freq`;
@@ -109,7 +112,7 @@ export class AddressCache {
     mapping: Omit<AddressMapping, 'input' | 'timestamp'>,
   ): Promise<void> {
     try {
-      await this.update(MAPPINGS_KEY(userId), (raw) => {
+      await this.readModifyWrite(MAPPINGS_KEY(userId), (raw) => {
         const mappings = raw ? MappingArraySchema.parse(JSON.parse(raw)) : [];
 
         const normalized = this.normalize(input);
@@ -148,7 +151,7 @@ export class AddressCache {
 
   /** Increment frequency counter for a resolved address */
   private async incrementFrequency(userId: number, resolvedAddress: string, googleMapsUrl: string): Promise<void> {
-    await this.update(FREQ_KEY(userId), (raw) => {
+    await this.readModifyWrite(FREQ_KEY(userId), (raw) => {
       const freq = raw ? FreqMapSchema.parse(JSON.parse(raw)) : {};
 
       const entry = freq[resolvedAddress] ?? { url: googleMapsUrl, count: 0, lastUsed: 0 };
@@ -166,14 +169,15 @@ export class AddressCache {
    * the key was not written since the read; otherwise start over from the newer value. Concurrent
    * callbacks of one user (a keep tap on one event, a candidate tap on another) share the same
    * per-user keys, and a plain GET then SET would let the later write drop the other's change.
+   * Throws when the key kept changing for `MAX_WRITE_ATTEMPTS` rounds.
    */
-  private async update(key: string, change: (raw: string | null) => string | null): Promise<void> {
-    for (let attempt = 1; attempt <= MAX_UPDATE_ATTEMPTS; attempt++) {
+  private async readModifyWrite(key: string, change: (raw: string | null) => string | null): Promise<void> {
+    for (let attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
       const raw = await this.redis.get(key);
       const next = change(raw);
       if (next === null || (await this.redis.compareAndSet(key, raw, next))) return;
     }
-    throw new Error(`${key} kept changing during ${MAX_UPDATE_ATTEMPTS} attempts to update it`);
+    throw new Error(`${key} kept changing during ${MAX_WRITE_ATTEMPTS} attempts to write it`);
   }
 
   /** Find a cached mapping by fuzzy-matching input text */
@@ -205,7 +209,7 @@ export class AddressCache {
     input: string,
     rejected: Pick<AddressMapping, 'resolvedAddress' | 'placeId' | 'latitude' | 'longitude'>,
   ): Promise<void> {
-    await this.update(MAPPINGS_KEY(userId), (raw) => {
+    await this.readModifyWrite(MAPPINGS_KEY(userId), (raw) => {
       if (!raw) return null;
 
       const parsed = jsonCodec(MappingArraySchema).safeParse(raw);
