@@ -238,17 +238,18 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
 
 export function formatTimeWithTimezones(
   startAt: string,
+  endAt: string | null,
   senderTimezone: string,
   recipientTimezone: string | null,
   recipientOnboarded: boolean,
 ): string {
-  const senderTime = formatTime(startAt, senderTimezone);
+  const senderTime = formatTimeRange(startAt, endAt, senderTimezone);
 
   if (!recipientOnboarded || !recipientTimezone || recipientTimezone === senderTimezone) {
     return `${senderTime} (${senderTimezone})`;
   }
 
-  const recipientTime = formatTime(startAt, recipientTimezone);
+  const recipientTime = formatTimeRange(startAt, endAt, recipientTimezone);
   return `${senderTime} (${senderTimezone}) / ${recipientTime} (${recipientTimezone})`;
 }
 

@@ -642,32 +642,32 @@ describe('formatInvitation', () => {
 
   test('no recipient info — shows sender timezone + inviter note', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1);
-    expect(result).toContain('15:00 (Europe/Moscow)');
+    expect(result).toContain('15:00–16:00 (Europe/Moscow)');
     expect(result).toContain("Alice's timezone");
   });
 
   test('recipient not onboarded — shows sender timezone + inviter note', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, null, 'Europe/Kyiv', false);
-    expect(result).toContain('15:00 (Europe/Moscow)');
+    expect(result).toContain('15:00–16:00 (Europe/Moscow)');
     expect(result).toContain("Alice's timezone");
     expect(result).not.toContain('14:00');
   });
 
   test('recipient null timezone — shows only sender timezone', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, null, null, true);
-    expect(result).toContain('15:00 (Europe/Moscow)');
+    expect(result).toContain('15:00–16:00 (Europe/Moscow)');
     expect(result).not.toContain('(Europe/Moscow) /');
   });
 
   test('recipient onboarded with different timezone — shows both timezones, no note', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, null, 'Europe/Kyiv', true);
-    expect(result).toContain('15:00 (Europe/Moscow) / 14:00 (Europe/Kyiv)');
+    expect(result).toContain('15:00–16:00 (Europe/Moscow) / 14:00–15:00 (Europe/Kyiv)');
     expect(result).not.toContain('timezone');
   });
 
   test('recipient onboarded with same timezone — shows timezone once, no note', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, null, 'Europe/Moscow', true);
-    expect(result).toContain('15:00 (Europe/Moscow)');
+    expect(result).toContain('15:00–16:00 (Europe/Moscow)');
     // Should not show duplicate or timezone note
     expect(result.match(/Europe\/Moscow/g)?.length).toBe(1);
     expect(result).not.toContain('timezone');
@@ -759,8 +759,67 @@ describe('formatInvitation', () => {
     // duplicated title (or shifts the overall layout) trips this test.
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, 'alice_tg');
     expect(result).toBe(
-      `📨 <b>Team Meeting</b> — invitation from @alice_tg\n\n🕐 Wed 11, 15:00 (Europe/Moscow) (1h)\n⏰ Time shown in Alice's timezone (Europe/Moscow)`,
+      `📨 <b>Team Meeting</b> — invitation from @alice_tg\n\n🕐 Wed 11, 15:00–16:00 (Europe/Moscow) (1h)\n⏰ Time shown in Alice's timezone (Europe/Moscow)`,
     );
+  });
+});
+
+// Incident 2026-09-27: the invitation card replaced "15:00–16:00" with "15:00 (tz)",
+// so invitees never saw when the meeting ends.
+describe('formatInvitation — time range keeps the end time', () => {
+  const meeting = makeEvent({
+    title: 'Meeting',
+    start_at: '2026-09-27T13:00:00Z', // 15:00–16:00 Belgrade (CEST), 14:00–15:00 London (BST)
+    end_at: '2026-09-27T14:00:00Z',
+    timezone: 'Europe/Belgrade',
+  });
+
+  test('same timezone recipient sees the full range once', () => {
+    const result = formatInvitation(meeting, 'Europe/Belgrade', 'ru', 'Алиса', 1, 'alice_tg', 'Europe/Belgrade', true);
+    expect(result).toBe('📨 <b>Meeting</b> — приглашение от @alice_tg\n\n🕐 вс 27, 15:00–16:00 (Europe/Belgrade) (1ч)');
+  });
+
+  test('different timezone recipient sees both full ranges', () => {
+    const result = formatInvitation(meeting, 'Europe/Belgrade', 'en', 'Alice', 1, 'alice_tg', 'Europe/London', true);
+    expect(result).toContain('🕐 Sun 27, 15:00–16:00 (Europe/Belgrade) / 14:00–15:00 (Europe/London) (1h)');
+  });
+
+  test('non-onboarded recipient sees the inviter range plus the timezone note', () => {
+    const result = formatInvitation(meeting, 'Europe/Belgrade', 'en', 'Alice', 1, 'alice_tg', 'Europe/London', false);
+    expect(result).toBe(
+      "📨 <b>Meeting</b> — invitation from @alice_tg\n\n🕐 Sun 27, 15:00–16:00 (Europe/Belgrade) (1h)\n⏰ Time shown in Alice's timezone (Europe/Belgrade)",
+    );
+  });
+
+  test('event without end time shows only the start with annotation', () => {
+    const open = makeEvent({ ...meeting, end_at: null });
+    const result = formatInvitation(open, 'Europe/Belgrade', 'en', 'Alice', 1, 'alice_tg', 'Europe/London', true);
+    expect(result).toBe(
+      '📨 <b>Meeting</b> — invitation from @alice_tg\n\n🕐 Sun 27, 15:00 (Europe/Belgrade) / 14:00 (Europe/London)',
+    );
+  });
+
+  test('cross-midnight event keeps the end time past midnight', () => {
+    const late = makeEvent({
+      ...meeting,
+      start_at: '2026-09-27T21:00:00Z', // 23:00 Belgrade → 01:00 next day; 22:00 → 00:00 London
+      end_at: '2026-09-27T23:00:00Z',
+    });
+    const result = formatInvitation(late, 'Europe/Belgrade', 'en', 'Alice', 1, 'alice_tg', 'Europe/London', true);
+    expect(result).toContain('🕐 Sun 27, 23:00–01:00 (Europe/Belgrade) / 22:00–00:00 (Europe/London) (2h)');
+  });
+
+  test('DST-end night renders wall-clock times on each side of the shift', () => {
+    // 2026-10-25 01:00Z Europe/Belgrade falls back CEST→CET; New York is still on EDT.
+    const dst = makeEvent({ ...meeting, start_at: '2026-10-25T00:30:00Z', end_at: '2026-10-25T02:30:00Z' });
+    const result = formatInvitation(dst, 'Europe/Belgrade', 'en', 'Alice', 1, 'alice_tg', 'America/New_York', true);
+    expect(result).toContain('02:30–03:30 (Europe/Belgrade) / 20:30–22:30 (America/New_York) (2h)');
+  });
+
+  test('all-day event has no time range or timezone annotation', () => {
+    const allDay = makeEvent({ ...meeting, all_day: 1 });
+    const result = formatInvitation(allDay, 'Europe/Belgrade', 'en', 'Alice', 1, 'alice_tg', 'Europe/London', true);
+    expect(result).toBe('📨 <b>Meeting</b> — invitation from @alice_tg\n\n📅 Sun 27, all day');
   });
 });
 
