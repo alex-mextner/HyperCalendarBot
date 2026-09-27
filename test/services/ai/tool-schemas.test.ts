@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { z } from 'zod';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -447,15 +448,49 @@ describe('boolean tool field boundary', () => {
     expect(verifiedEventIds).toEqual([]);
   });
 
-  test('every boolean tool field accepts only the exact string literals', () => {
-    expect(toolSchemas.create_event.parse({ title: 'M', start_at: '2099-03-15T13:00:00Z', all_day: 'true' })).toEqual({
-      title: 'M',
-      start_at: '2099-03-15T13:00:00Z',
-      all_day: true,
+  test.each<[string | boolean, string, number]>([
+    ['false', 'Cafe Mozart', 1],
+    ['true', 'At Lena', 0],
+    [false, 'Cafe Landtmann', 1],
+    [true, 'At Alex', 0],
+  ])('create_event location_abstract %j creates the event with boolean semantics', async (flag, location, verified) => {
+    const result = await executeTool(ctx, 'create_event', {
+      title: `Meeting ${location}`,
+      start_at: '2099-03-16T13:00:00Z',
+      location,
+      location_abstract: flag,
     });
-    expect(toolSchemas.get_contacts.parse({ force: 'false' })).toEqual({ force: false });
-    expect(toolSchemas.get_contacts.safeParse({ force: 1 }).success).toBe(false);
-    expect(toolSchemas.get_contacts.safeParse({ force: null }).success).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.output).toContain(`location: ${location}`);
+    expect(verifiedEventIds).toHaveLength(verified);
+  });
+
+  test('every advertised boolean tool field accepts only the exact string literals', () => {
+    const schemasByName = new Map<string, z.ZodType>(Object.entries(toolSchemas));
+    const checked = new Set<string>();
+    for (const tool of [...getToolDefinitions(), ...getToolDefinitions('live_call')]) {
+      if (tool.type !== 'function') continue;
+      const properties = tool.function.parameters?.properties;
+      if (!properties || typeof properties !== 'object') continue;
+      for (const [field, advertised] of Object.entries(properties)) {
+        if (Reflect.get(advertised, 'type') !== 'boolean') continue;
+        const schema = schemasByName.get(tool.function.name);
+        if (!(schema instanceof z.ZodObject)) throw new Error(`${tool.function.name} has no object schema`);
+        const fieldSchema = schema.shape[field];
+        if (!fieldSchema) throw new Error(`${tool.function.name}.${field} is not validated`);
+        const label = `${tool.function.name}.${field}`;
+        expect([label, fieldSchema.safeParse('true').data]).toEqual([label, true]);
+        expect([label, fieldSchema.safeParse('false').data]).toEqual([label, false]);
+        expect([label, fieldSchema.safeParse(true).data]).toEqual([label, true]);
+        expect([label, fieldSchema.safeParse(false).data]).toEqual([label, false]);
+        for (const rejected of ['yes', '', '1', 'False', 1, null]) {
+          expect([label, rejected, fieldSchema.safeParse(rejected).success]).toEqual([label, rejected, false]);
+        }
+        checked.add(label);
+      }
+    }
+    expect([...checked]).toContain('create_event.location_abstract');
+    expect([...checked]).toContain('update_event.location_abstract');
   });
 });
 
