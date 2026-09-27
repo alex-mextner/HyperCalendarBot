@@ -6,6 +6,8 @@ import {
   type DayReferenceSet,
   describeDay,
   describeReferences,
+  describeWeekdayDateMismatches,
+  findWeekdayDateMismatches,
   localDayOf,
   readDayContent,
   shiftDay,
@@ -325,5 +327,28 @@ export function checkDayReferences(ctx: AgentContext, toolName: string, input: u
       `${target.what}, which the user did not name. ` +
       `Redo it for the day the user named, e.g. ${target.redo(suggested)}. ` +
       'If the user really meant another day, ask them instead of guessing.',
+  };
+}
+
+const AskUserInput = z.object({ question: z.string(), options: z.array(z.string()).optional() });
+
+/**
+ * Rejects an ask_user question that pairs a weekday with a date on another weekday
+ * ("Понедельник 27 сентября" when the 27th is a Sunday) before it reaches the user, who
+ * would approve it on the strength of the weekday name.
+ */
+export function checkQuestionWeekdays(ctx: AgentContext, toolName: string, input: unknown): ToolResult | undefined {
+  if (toolName !== 'ask_user') return undefined;
+  const parsed = AskUserInput.safeParse(input);
+  if (!parsed.success) return undefined;
+  const text = [parsed.data.question, ...(parsed.data.options ?? [])].join('\n');
+  const mismatches = findWeekdayDateMismatches(text, new Date(), ctx.user.timezone);
+  if (mismatches.length === 0) return undefined;
+  return {
+    success: false,
+    mutationState: 'not_applied',
+    error:
+      `WEEKDAY_DATE_MISMATCH: the question was not sent. ${describeWeekdayDateMismatches(mismatches)}. ` +
+      'Use the date of the day the user named, make every weekday match its date, then call ask_user again.',
   };
 }

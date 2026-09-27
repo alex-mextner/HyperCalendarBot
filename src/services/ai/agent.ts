@@ -9,6 +9,7 @@ import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import { resolveTurnDayReferences } from './day-reference-guard.ts';
+import { describeWeekdayDateMismatches, findWeekdayDateMismatches } from './day-references.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
 import { waitForAbort } from './provider-deadline.ts';
@@ -959,6 +960,8 @@ export class CalendarBotAgent {
     // hallucination to chat_history before the validator has a chance to reject it.
     let pendingAssistantTurn: MessageParam | null = null;
     let pendingResponseText = '';
+    // A reply that paired a weekday with a date on another weekday gets one corrective round.
+    let weekdaysCorrected = false;
 
     let currentMessages: MessageParam[] = [];
     let runFailed = false;
@@ -1066,6 +1069,32 @@ export class CalendarBotAgent {
         // reject+retry, in which case we don't want the rejected answer in
         // chat_history. Final persistence happens after validation below.
         if (result.toolCalls.length === 0) {
+          // "в среду, 28 сентября" when the 28th is a Monday: the user trusts the weekday
+          // name, so such a reply is never delivered as is — the model gets one round to
+          // fix it with the real weekdays in hand.
+          const mismatches = weekdaysCorrected
+            ? []
+            : findWeekdayDateMismatches(result.text, new Date(), ctx.user.timezone);
+          if (mismatches.length > 0) {
+            weekdaysCorrected = true;
+            aiLogger.warn(
+              { userId: ctx.user.telegram_id, dates: mismatches.map((mismatch) => mismatch.date) },
+              'Reply pairs weekdays with dates on other weekdays — asking for a correction',
+            );
+            writer.resetDraft();
+            currentMessages = [
+              ...currentMessages,
+              result.assistantMessage,
+              {
+                role: 'user',
+                content:
+                  `[SYSTEM] Your reply was not sent: ${describeWeekdayDateMismatches(mismatches)}. ` +
+                  'Rewrite the reply so every weekday matches its date. Use the day the user named; if the ' +
+                  'events you reported belong to another day, read the named day with the calendar tools first.',
+              },
+            ];
+            continue;
+          }
           termination = 'normal';
           pendingAssistantTurn = result.assistantMessage;
           pendingResponseText = result.text;

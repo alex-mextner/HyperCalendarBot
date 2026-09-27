@@ -360,3 +360,129 @@ export function describeReferences(set: DayReferenceSet): string {
   }
   return parts.join('; ');
 }
+
+// ─── weekday names paired with dates in the bot's own text ──────────────────────────────
+
+/**
+ * A weekday written right next to a date that falls on another weekday. Users check the
+ * weekday name: on 2026-09-25 the bot confirmed "Понедельник 27 сентября" (a Sunday) and
+ * the user approved; on 2026-09-27 it answered "в среду, 28 сентября" (a Monday).
+ */
+export interface WeekdayDateMismatch {
+  /** The pair as written. */
+  phrase: string;
+  date: string;
+  said: string;
+  actual: string;
+}
+
+const PAIR_WEEKDAYS: ReadonlyMap<string, number> = new Map([
+  ...[...WEEKDAY_FORMS]
+    .filter(([, form]) => !form.plural)
+    .map(([word, form]): [string, number] => [word, form.weekday]),
+  ...(['mon', 'tue', 'tues', 'wed', 'thu', 'thur', 'thurs', 'fri', 'sat', 'sun'] as const).map(
+    (abbreviation): [string, number] => [
+      abbreviation,
+      WEEKDAY_NAMES.findIndex((name) => name.toLowerCase().startsWith(abbreviation.slice(0, 3))),
+    ],
+  ),
+]);
+const WD = `(${[...PAIR_WEEKDAYS.keys()].sort((a, b) => b.length - a.length).join('|')})`;
+/** What may stand between a weekday and its date on one line: spaces, commas, dashes, markdown. */
+const GAP = '[ \\t,*_()\\-–—.]{1,6}';
+
+interface PairParts {
+  weekday: string;
+  y: string | undefined;
+  month: number;
+  d: string;
+}
+
+const PAIR_PATTERNS: [RegExp, (m: RegExpMatchArray) => PairParts][] = [
+  // "Понедельник 27 сентября", "в среду, 28 сентября 2026", "Wed 30 Sep"
+  [
+    new RegExp(
+      `(?<![\\p{L}])${WD}${GAP}(\\d{1,2})(?:-?го|-?е|st|nd|rd|th)?[ \\t]+(?:of[ \\t]+)?(\\p{L}+)\\.?(?:,?[ \\t]+(\\d{4}))?`,
+      'gu',
+    ),
+    (m) => ({ weekday: m[1]!, d: m[2]!, month: monthIndex(m[3]!) + 1, y: m[4] }),
+  ],
+  // "Wednesday, September 28"
+  [
+    new RegExp(
+      `(?<![\\p{L}])${WD}${GAP}(\\p{L}+)\\.?[ \\t]+(\\d{1,2})(?:st|nd|rd|th)?(?:,?[ \\t]+(\\d{4}))?(?![\\p{L}\\d])`,
+      'gu',
+    ),
+    (m) => ({ weekday: m[1]!, month: monthIndex(m[2]!) + 1, d: m[3]!, y: m[4] }),
+  ],
+  // "ср 01.10"
+  [
+    new RegExp(`(?<![\\p{L}])${WD}${GAP}(\\d{1,2})\\.(\\d{1,2})(?:\\.(\\d{4}|\\d{2}))?(?![\\d:])`, 'gu'),
+    (m) => ({ weekday: m[1]!, d: m[2]!, month: Number(m[3]), y: m[4]?.padStart(4, '20') }),
+  ],
+  // "28 сентября, среда"
+  [
+    new RegExp(
+      `(?<![\\p{L}\\d])(\\d{1,2})(?:-?го|-?е|st|nd|rd|th)?[ \\t]+(\\p{L}+)\\.?(?:[ \\t]+(\\d{4}))?${GAP}${WD}(?![\\p{L}])`,
+      'gu',
+    ),
+    (m) => ({ d: m[1]!, month: monthIndex(m[2]!) + 1, y: m[3], weekday: m[4]! }),
+  ],
+  // "Sun 2026-09-28" and "2026-09-28, воскресенье"
+  [
+    new RegExp(`(?<![\\p{L}])${WD}${GAP}(\\d{4})-(\\d{2})-(\\d{2})`, 'gu'),
+    (m) => ({ weekday: m[1]!, y: m[2], month: Number(m[3]), d: m[4]! }),
+  ],
+  [
+    new RegExp(`(\\d{4})-(\\d{2})-(\\d{2})${GAP}${WD}(?![\\p{L}])`, 'gu'),
+    (m) => ({ y: m[1], month: Number(m[2]), d: m[3]!, weekday: m[4]! }),
+  ],
+];
+
+/** The calendar date of a day and month in the year that puts it nearest to today. */
+function nearestDate(month: number, day: number, today: string): string | null {
+  const year = Number(today.slice(0, 4));
+  const todayMs = Date.parse(today);
+  const candidates = [year - 1, year, year + 1]
+    .map((candidate) => validDayKey(candidate, month, day))
+    .filter((key): key is string => key !== null);
+  return candidates.sort((a, b) => Math.abs(Date.parse(a) - todayMs) - Math.abs(Date.parse(b) - todayMs))[0] ?? null;
+}
+
+/** Every weekday name in `text` written next to a date that falls on another weekday. */
+export function findWeekdayDateMismatches(text: string, now: Date, timezone: string): WeekdayDateMismatch[] {
+  const normalized = text.toLowerCase().replaceAll('ё', 'е');
+  const { today } = localToday(now, timezone);
+  const found = new Map<string, WeekdayDateMismatch>();
+  for (const [pattern, read] of PAIR_PATTERNS) {
+    for (const match of normalized.matchAll(pattern)) {
+      const parts = read(match);
+      const weekday = PAIR_WEEKDAYS.get(parts.weekday);
+      const date =
+        parts.y === undefined
+          ? nearestDate(parts.month, Number(parts.d), today)
+          : validDayKey(Number(parts.y), parts.month, Number(parts.d));
+      if (weekday === undefined || date === null || weekdayOf(date) === weekday) continue;
+      const start = match.index ?? 0;
+      const phrase = text.slice(start, start + match[0].length).replace(/[\s,*_().–—-]+$/u, '');
+      found.set(`${date}|${weekday}`, {
+        phrase,
+        date,
+        said: WEEKDAY_NAMES[weekday]!,
+        actual: WEEKDAY_NAMES[weekdayOf(date)]!,
+      });
+    }
+  }
+  return [...found.values()].sort((a, b) => text.indexOf(a.phrase) - text.indexOf(b.phrase));
+}
+
+/** Corrective English for the model: what each pair says, what is true, and the nearest named weekday. */
+export function describeWeekdayDateMismatches(mismatches: WeekdayDateMismatch[]): string {
+  return mismatches
+    .map(({ phrase, date, said, actual }) => {
+      const forward = (WEEKDAY_NAMES.findIndex((name) => name === said) - weekdayOf(date) + 7) % 7;
+      const nearest = shiftDay(date, forward <= 3 ? forward : forward - 7);
+      return `«${phrase}»: ${date} is a ${actual}, not a ${said}; the nearest ${said} is ${nearest}`;
+    })
+    .join('; ');
+}
