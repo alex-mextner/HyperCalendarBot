@@ -1,19 +1,21 @@
 // src/services/location/location-verification-service.ts
 
 import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
-import { t } from '../../config/constants.ts';
+import { CB, t } from '../../config/constants.ts';
 import type { AgendaRepository } from '../../database/repositories/agenda.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { CalendarEvent, Invitation, InvitationStatus, User } from '../../database/types.ts';
 import { botLogger } from '../../utils/logger.ts';
+import { escapeHtml } from '../../utils/telegram.ts';
 import { formatInvitation } from '../event/formatters.ts';
 import { formatAnsweredInvitationCard } from '../sharing/answered-invitation-card.ts';
 import { groupRsvpKeyboard, invitationRsvpKeyboard } from '../sharing/invitation-rsvp-keyboard.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
+import { guessCountryFromTimezone } from '../timezone/timezone-service.ts';
 import type { AddressCache } from './address-cache.ts';
-import type { GeocodedLocation, GeocodingService } from './geocoding-service.ts';
+import type { GeocodedLocation, GeocodingBias, GeocodingService } from './geocoding-service.ts';
 import type { LocationCandidateStore } from './location-candidate-store.ts';
 
 type ParseMode = 'HTML' | 'MarkdownV2' | 'Markdown';
@@ -24,6 +26,45 @@ type RenderedInvitationCard = { text: string; options: InvitationEditOptions };
 type LiveInvitationStatus = Exclude<InvitationStatus, 'cancelled' | 'expired'>;
 
 const logger = botLogger.child({ module: 'location-verification' });
+
+/** A place farther than this from the user's home city is never resolved without asking. */
+const NEAR_HOME_CITY_KM = 50;
+const EARTH_RADIUS_KM = 6371;
+
+/** Where the user's locations are expected when the text does not say otherwise. */
+interface HomeArea {
+  bias: GeocodingBias;
+  /** Centre of the home city; null when only the home country is known. */
+  cityCenter: { latitude: number; longitude: number } | null;
+}
+
+/** The country the user set in the profile, else the one implied by the timezone. */
+function homeCountryCode(user: User): string | null {
+  return user.country_code ?? guessCountryFromTimezone(user.timezone);
+}
+
+function isInsideHomeArea(geo: GeocodedLocation, home: HomeArea): boolean {
+  if (home.cityCenter) {
+    // Haversine great-circle distance.
+    const toRad = Math.PI / 180;
+    const dLat = (geo.latitude - home.cityCenter.latitude) * toRad;
+    const dLng = (geo.longitude - home.cityCenter.longitude) * toRad;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(home.cityCenter.latitude * toRad) * Math.cos(geo.latitude * toRad) * Math.sin(dLng / 2) ** 2;
+    return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(a)) <= NEAR_HOME_CITY_KM;
+  }
+  return home.bias.countryCode !== null && geo.countryCode === home.bias.countryCode;
+}
+
+/** Place label ("Venue — address") linked to the place on Google Maps. */
+function placeLinkHtml(geo: GeocodedLocation): string {
+  const label =
+    geo.venueName && geo.venueName !== geo.formattedAddress
+      ? `${geo.venueName} — ${geo.formattedAddress}`
+      : geo.formattedAddress;
+  return `<a href="${escapeHtml(geo.googleMapsUrl)}">${escapeHtml(label)}</a>`;
+}
 
 export interface LocationVerificationDeps {
   geocodingService: GeocodingService;
@@ -63,14 +104,18 @@ export class LocationVerificationService {
    * Called after event creation if the event has a location field.
    *
    * Flow:
-   * 1. Check address cache for known mapping
-   * 2. If not cached, geocode via Google Maps API (using user city as bias)
-   * 3. If single confident result → auto-resolve
-   * 4. If multiple candidates → ask user to choose
-   * 5. Update event with resolved location
-   * 6. Update user city if not set
-   * 7. Update sent invitations with new location
-   * 8. Cache the mapping
+   * 1. Check address cache for a mapping the user confirmed earlier
+   * 2. If not cached, geocode via Google Maps, biased toward the user's home area
+   *    (home city when it lies in the home country, else the profile/timezone country)
+   * 3. A single result inside the home area → resolve the event, update sent invitations and tell
+   *    the user which place was picked, with a "wrong place" button
+   * 4. Several results, or one outside the home area → ask the user to pick one or keep the text
+   * 5. No results → tell the user
+   * In cases 4 and 5 the event keeps only the typed text, unverified.
+   *
+   * Automatic resolution never writes the address cache or the user's city: a wrong guess would
+   * otherwise bias every later lookup. Only an explicit confirmation (candidate button or a pin
+   * shared for the event) does, see `cacheAndUpdateCity`.
    */
   async verifyEventLocation(event: CalendarEvent, user: User): Promise<LocationVerificationResult> {
     if (!event.location) {
@@ -110,29 +155,35 @@ export class LocationVerificationService {
       };
     }
 
-    // 2. Geocode via Google Maps
-    const biasCity = user.city ?? undefined;
+    // 2. Geocode via Google Maps, biased toward the user's home area
+    const home = await this.resolveHomeArea(user);
 
     // Try place search first (handles venue names better), fallback to geocoding
-    let results = await this.deps.geocodingService.findPlace(location, biasCity);
+    let results = await this.deps.geocodingService.findPlace(location, home?.bias);
     if (results.length === 0) {
-      results = await this.deps.geocodingService.geocodeAddress(location, biasCity);
+      results = await this.deps.geocodingService.geocodeAddress(location, home?.bias);
     }
 
     if (results.length === 0) {
       logger.info({ eventId: event.id, location }, 'No geocoding results found');
+      await this.clearResolvedLocation(event);
+      await this.notify(user, t(user.language).aiTools.location.locationNotFound(escapeHtml(event.title)));
       return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
     }
 
-    // 3. Single confident result → auto-resolve
-    if (results.length === 1) {
-      const geo = results[0]!;
+    // 3. Single result inside the home area → auto-resolve, and show the user what was picked
+    const geo = results.length === 1 ? results[0] : undefined;
+    if (geo && home && isInsideHomeArea(geo, home)) {
       await this.applyResolvedLocation(event, geo);
-      await this.cacheAndUpdateCity(user, location, geo);
+      const msgs = t(user.language).aiTools.location;
+      await this.notify(user, msgs.locationResolved(escapeHtml(event.title), placeLinkHtml(geo)), [
+        [{ text: msgs.wrongPlace, callback_data: `${CB.LOCATION_CANDIDATE}:${event.id}:keep` }],
+      ]);
       return { resolved: true, geocoded: geo, cityExtracted: geo.city, candidates: [] };
     }
 
-    // 4. Multiple candidates → ask user to choose
+    // 4. Several candidates, or one outside the home area → ask the user to choose
+    await this.clearResolvedLocation(event);
     await this.askUserToChoose(event, user, results);
     return {
       resolved: false,
@@ -230,6 +281,27 @@ export class LocationVerificationService {
     return true;
   }
 
+  /**
+   * The user keeps the typed location (declined the candidates or the auto-picked place): the event
+   * loses any resolved place and stays unverified, and the offered candidates are dropped.
+   */
+  async keepTypedLocation(eventId: number, userId: number): Promise<CalendarEvent | null> {
+    const event = this.deps.eventRepo.findById(eventId, userId);
+    if (!event) return null;
+
+    await this.clearResolvedLocation(event);
+    await this.deps.candidateStore.del(eventId).catch((err) => {
+      logger.warn({ err, eventId }, 'Failed to delete location candidates from store');
+    });
+    return event;
+  }
+
+  /**
+   * Learn from a location the user explicitly confirmed (candidate button or a pin shared for the
+   * event): remember the typed text → place mapping, and fill an empty home city, but only with a
+   * place inside the home country, so a venue abroad never becomes the home city.
+   * Never called for automatic resolution.
+   */
   private async cacheAndUpdateCity(user: User, inputLocation: string, geo: GeocodedLocation): Promise<void> {
     // Cache the mapping
     await this.deps.addressCache.recordMapping(user.telegram_id, inputLocation, {
@@ -241,40 +313,94 @@ export class LocationVerificationService {
       venueName: geo.venueName,
     });
 
-    // Update user city if not set and we extracted one
-    if (!user.city && geo.city) {
+    const homeCountry = homeCountryCode(user);
+    if (!user.city && geo.city && (homeCountry === null || geo.countryCode === homeCountry)) {
       this.deps.userRepo.update(user.telegram_id, { city: geo.city });
-      logger.info({ userId: user.telegram_id, city: geo.city }, 'User city set from location');
+      logger.info({ userId: user.telegram_id, city: geo.city }, 'User city set from confirmed location');
+    }
+  }
+
+  /**
+   * The home city anchors searches only when it lies in the home country: a city learned from a
+   * wrong guess must not pull every later search toward it.
+   */
+  private async resolveHomeArea(user: User): Promise<HomeArea | null> {
+    const countryCode = homeCountryCode(user);
+    if (user.city) {
+      const city = await this.deps.geocodingService.locateArea({ city: user.city, countryCode });
+      if (city && (countryCode === null || city.countryCode === countryCode)) {
+        return {
+          bias: { countryCode: city.countryCode, bounds: city.bounds },
+          cityCenter: { latitude: city.latitude, longitude: city.longitude },
+        };
+      }
+      logger.warn(
+        { userId: user.telegram_id, countryCode, cityCountryCode: city?.countryCode ?? null },
+        'Home city not located in the home country; biasing geocoding by country only',
+      );
+    }
+    if (!countryCode) return null;
+
+    const country = await this.deps.geocodingService.locateArea({ city: null, countryCode });
+    return { bias: { countryCode, bounds: country?.bounds ?? null }, cityCenter: null };
+  }
+
+  /** Drop a resolved place that does not belong to the event's current text, and refresh invitations. */
+  private async clearResolvedLocation(event: CalendarEvent): Promise<void> {
+    if (event.location_verified === 0 && event.resolved_address === null) return;
+
+    this.deps.eventRepo.clearLocationFields(event.id);
+    logger.info({ eventId: event.id }, 'Event location reset to typed text');
+    await this.updateInvitationMessages({
+      ...event,
+      resolved_address: null,
+      latitude: null,
+      longitude: null,
+      google_maps_url: null,
+      location_verified: 0,
+      venue_name: null,
+    });
+  }
+
+  private async notify(
+    user: User,
+    text: string,
+    inlineKeyboard?: TelegramInlineKeyboardMarkup['inline_keyboard'],
+  ): Promise<void> {
+    try {
+      await this.deps.sendMessage(user.telegram_id, text, {
+        parse_mode: 'HTML',
+        ...(inlineKeyboard ? { reply_markup: { inline_keyboard: inlineKeyboard } } : {}),
+      });
+    } catch (err) {
+      logger.error({ err, userId: user.telegram_id }, 'Failed to send location message');
     }
   }
 
   private async askUserToChoose(event: CalendarEvent, user: User, candidates: GeocodedLocation[]): Promise<void> {
-    const header = t(user.language).aiTools.location.clarifyAddress(event.title);
+    const msgs = t(user.language).aiTools.location;
 
     const limited = candidates.slice(0, 5);
-    const options = limited.map((c, i) => `${i + 1}. ${c.formattedAddress}`);
-    const text = `${header}\n\n${options.join('\n')}`;
+    const options = limited.map((c, i) => `${i + 1}. ${placeLinkHtml(c)}`);
+    const text = `${msgs.clarifyAddress(escapeHtml(event.title))}\n\n${options.join('\n')}`;
 
     // Persist candidates in Redis so the callback handler can retrieve them
     await this.deps.candidateStore.set(event.id, limited).catch((err) => {
       logger.error({ err, eventId: event.id }, 'Failed to store location candidates');
     });
 
-    const buttons = limited.map((_c, i) => ({
-      text: `${i + 1}`,
-      callback_data: `loc_cand:${event.id}:${i}`,
-    }));
+    // One row per place, labelled with its name; the numbers match the linked list above
+    const rows = limited.map((c, i) => [
+      {
+        text: `${i + 1}. ${c.venueName ?? c.formattedAddress}`,
+        callback_data: `${CB.LOCATION_CANDIDATE}:${event.id}:${i}`,
+      },
+    ]);
 
-    const inlineKeyboard = [buttons];
-
-    try {
-      await this.deps.sendMessage(user.telegram_id, text, {
-        parse_mode: 'HTML',
-        reply_markup: { inline_keyboard: inlineKeyboard },
-      });
-    } catch (err) {
-      logger.error({ err, userId: user.telegram_id }, 'Failed to send location choice');
-    }
+    await this.notify(user, text, [
+      ...rows,
+      [{ text: msgs.noneOfThese, callback_data: `${CB.LOCATION_CANDIDATE}:${event.id}:keep` }],
+    ]);
   }
 
   /**

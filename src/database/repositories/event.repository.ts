@@ -237,6 +237,17 @@ export class EventRepository {
       );
   }
 
+  /** Drop the resolved place so only the typed location remains, unverified. */
+  clearLocationFields(eventId: number): void {
+    this.db
+      .prepare(
+        `UPDATE events SET resolved_address = NULL, latitude = NULL, longitude = NULL,
+         google_maps_url = NULL, location_verified = 0, venue_name = NULL, updated_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(eventId);
+  }
+
   findLatestCreatedByUser(userId: number): CalendarEvent | null {
     return this.db
       .prepare(

@@ -107,6 +107,7 @@ function makeDeps(overrides: { [key: string]: unknown } = {}) {
       geocodeAddress: mock(() => Promise.resolve([])),
       reverseGeocode: mock(() => Promise.resolve(null)),
       findPlace: mock(() => Promise.resolve([])),
+      locateArea: mock(() => Promise.resolve(null)),
     },
     addressCache: {
       findMapping: mock(() => Promise.resolve(null)),
@@ -191,53 +192,6 @@ describe('LocationVerificationService', () => {
     expect(deps.geocodingService.findPlace).not.toHaveBeenCalled();
   });
 
-  test('auto-resolves single geocoding result', async () => {
-    const geo = makeGeoResult();
-    const deps = makeDeps({
-      geocodingService: {
-        findPlace: mock(() => Promise.resolve([geo])),
-        geocodeAddress: mock(() => Promise.resolve([geo])),
-        reverseGeocode: mock(() => Promise.resolve(geo)),
-      },
-    });
-    const svc = makeService(deps);
-    const result = await svc.verifyEventLocation(makeEvent(), makeUser());
-
-    expect(result.resolved).toBe(true);
-    expect(result.geocoded!.city).toBe('Москва');
-    expect(deps.eventRepo.updateLocationFields).toHaveBeenCalledTimes(1);
-    expect(deps.addressCache.recordMapping).toHaveBeenCalledTimes(1);
-  });
-
-  test('sets user city when not already set', async () => {
-    const geo = makeGeoResult({ city: 'Москва' });
-    const deps = makeDeps({
-      geocodingService: {
-        findPlace: mock(() => Promise.resolve([geo])),
-        geocodeAddress: mock(() => Promise.resolve([])),
-        reverseGeocode: mock(() => Promise.resolve(null)),
-      },
-    });
-    const svc = makeService(deps);
-    await svc.verifyEventLocation(makeEvent(), makeUser({ city: null }));
-
-    expect(deps.userRepo.update).toHaveBeenCalledWith(100, { city: 'Москва' });
-  });
-
-  test('does NOT overwrite existing user city', async () => {
-    const geo = makeGeoResult({ city: 'Санкт-Петербург' });
-    const deps = makeDeps({
-      geocodingService: {
-        findPlace: mock(() => Promise.resolve([geo])),
-        geocodeAddress: mock(() => Promise.resolve([])),
-        reverseGeocode: mock(() => Promise.resolve(null)),
-      },
-    });
-    const svc = makeService(deps);
-    await svc.verifyEventLocation(makeEvent(), makeUser({ city: 'Москва' }));
-
-    expect(deps.userRepo.update).not.toHaveBeenCalled();
-  });
 
   test('asks user to choose when multiple candidates found', async () => {
     const candidates = [

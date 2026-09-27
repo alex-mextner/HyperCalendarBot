@@ -6,11 +6,14 @@ const logger = botLogger.child({ module: 'geocoding' });
 
 // --- Zod schemas for Google Maps API responses ---
 
+const LatLngSchema = z.object({
+  lat: z.number(),
+  lng: z.number(),
+});
+
 const GeocodeGeometrySchema = z.object({
-  location: z.object({
-    lat: z.number(),
-    lng: z.number(),
-  }),
+  location: LatLngSchema,
+  viewport: z.object({ northeast: LatLngSchema, southwest: LatLngSchema }).optional(),
 });
 
 const AddressComponentSchema = z.object({
@@ -51,19 +54,50 @@ export interface GeocodedLocation {
   longitude: number;
   city: string | null;
   country: string | null;
+  /** ISO 3166-1 alpha-2 code of the country the place is in. */
+  countryCode?: string | null;
   placeId: string | null;
   googleMapsUrl: string;
   /** Venue/organization name (only when found via Places API by business name). */
   venueName?: string | null;
 }
 
+/** Rectangle in decimal degrees. */
+export interface GeoBounds {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+}
+
+/** Area that searches prefer. It only biases the ranking; results outside it are still returned. */
+export interface GeocodingBias {
+  /** ISO 3166-1 alpha-2 code, sent as the Geocoding API region bias. */
+  countryCode: string | null;
+  /** Sent as the Geocoding API `bounds` and the Find Place `locationbias` rectangle. */
+  bounds: GeoBounds | null;
+}
+
+/** A located city or country. */
+export interface GeocodedArea {
+  latitude: number;
+  longitude: number;
+  countryCode: string | null;
+  bounds: GeoBounds;
+}
+
 export interface GeocodingService {
-  /** Geocode a free-text address/place name. Optionally bias toward a city. */
-  geocodeAddress(query: string, biasCity?: string): Promise<GeocodedLocation[]>;
+  /** Geocode a free-text address/place name, preferring results inside the bias area. */
+  geocodeAddress(query: string, bias?: GeocodingBias): Promise<GeocodedLocation[]>;
   /** Reverse-geocode coordinates to an address. */
   reverseGeocode(lat: number, lng: number): Promise<GeocodedLocation | null>;
-  /** Search for a place by name using Places API (better for venue names). */
-  findPlace(query: string, biasCity?: string): Promise<GeocodedLocation[]>;
+  /** Search for a place by name using Places API (better for venue names), preferring the bias area. */
+  findPlace(query: string, bias?: GeocodingBias): Promise<GeocodedLocation[]>;
+  /**
+   * Locate a city (ranked toward the country, not restricted to it, so a city in another country is
+   * reported as such) or, without a city, the country itself. Null when neither is given or found.
+   */
+  locateArea(area: { city: string | null; countryCode: string | null }): Promise<GeocodedArea | null>;
 }
 
 /** Build a Google Maps URL from coordinates */
@@ -96,19 +130,35 @@ function extractCountry(components: z.infer<typeof AddressComponentSchema>[]): s
   return null;
 }
 
+function extractCountryCode(components: z.infer<typeof AddressComponentSchema>[]): string | null {
+  for (const comp of components) {
+    if (comp.types.includes('country')) return comp.short_name;
+  }
+  return null;
+}
+
+/** Geocoding `region` takes a ccTLD, which differs from the ISO code for the United Kingdom. */
+function regionCode(countryCode: string): string {
+  return countryCode === 'GB' ? 'uk' : countryCode.toLowerCase();
+}
+
 export function createGeocodingService(apiKey: string): GeocodingService {
-  async function geocodeAddress(query: string, biasCity?: string): Promise<GeocodedLocation[]> {
-    const fullQuery = biasCity ? `${query}, ${biasCity}` : query;
+  async function geocodeAddress(query: string, bias?: GeocodingBias): Promise<GeocodedLocation[]> {
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
-    url.searchParams.set('address', fullQuery);
+    url.searchParams.set('address', query);
     url.searchParams.set('key', apiKey);
     url.searchParams.set('language', 'ru');
+    if (bias?.countryCode) url.searchParams.set('region', regionCode(bias.countryCode));
+    if (bias?.bounds) {
+      const { south, west, north, east } = bias.bounds;
+      url.searchParams.set('bounds', `${south},${west}|${north},${east}`);
+    }
 
     try {
       const res = await fetch(url.toString());
       const data = GeocodeResponseSchema.parse(await res.json());
       if (data.status !== 'OK' || data.results.length === 0) {
-        logger.debug({ query: fullQuery, status: data.status }, 'Geocode returned no results');
+        logger.debug({ query, status: data.status }, 'Geocode returned no results');
         return [];
       }
       return data.results.slice(0, 5).map((r) => ({
@@ -117,12 +167,13 @@ export function createGeocodingService(apiKey: string): GeocodingService {
         longitude: r.geometry.location.lng,
         city: extractCity(r.address_components),
         country: extractCountry(r.address_components),
+        countryCode: extractCountryCode(r.address_components),
         placeId: r.place_id ?? null,
         googleMapsUrl: buildGoogleMapsUrl(r.geometry.location.lat, r.geometry.location.lng, r.place_id),
         venueName: null, // geocode API doesn't return venue names
       }));
     } catch (err) {
-      logger.error({ err, query: fullQuery }, 'Geocode API request failed');
+      logger.error({ err, query }, 'Geocode API request failed');
       return [];
     }
   }
@@ -144,6 +195,7 @@ export function createGeocodingService(apiKey: string): GeocodingService {
         longitude: r.geometry.location.lng,
         city: extractCity(r.address_components),
         country: extractCountry(r.address_components),
+        countryCode: extractCountryCode(r.address_components),
         placeId: r.place_id ?? null,
         googleMapsUrl: buildGoogleMapsUrl(r.geometry.location.lat, r.geometry.location.lng, r.place_id),
         venueName: null,
@@ -154,31 +206,36 @@ export function createGeocodingService(apiKey: string): GeocodingService {
     }
   }
 
-  async function findPlace(query: string, biasCity?: string): Promise<GeocodedLocation[]> {
-    const fullQuery = biasCity ? `${query}, ${biasCity}` : query;
+  async function findPlace(query: string, bias?: GeocodingBias): Promise<GeocodedLocation[]> {
     const url = new URL('https://maps.googleapis.com/maps/api/place/findplacefromtext/json');
-    url.searchParams.set('input', fullQuery);
+    url.searchParams.set('input', query);
     url.searchParams.set('inputtype', 'textquery');
     url.searchParams.set('fields', 'name,formatted_address,geometry,place_id');
     url.searchParams.set('key', apiKey);
     url.searchParams.set('language', 'ru');
+    // Without an explicit bias Find Place ranks by the caller's IP, i.e. the server's data centre.
+    if (bias?.bounds) {
+      const { south, west, north, east } = bias.bounds;
+      url.searchParams.set('locationbias', `rectangle:${south},${west}|${north},${east}`);
+    }
 
     try {
       const res = await fetch(url.toString());
       const data = PlacesResponseSchema.parse(await res.json());
       if (data.status !== 'OK' || data.candidates.length === 0) {
-        return geocodeAddress(query, biasCity);
+        return geocodeAddress(query, bias);
       }
       const results: GeocodedLocation[] = [];
       for (const c of data.candidates) {
         if (!c.geometry) continue;
         const reverseResult = await reverseGeocode(c.geometry.location.lat, c.geometry.location.lng);
         results.push({
-          formattedAddress: c.formatted_address ?? c.name ?? fullQuery,
+          formattedAddress: c.formatted_address ?? c.name ?? query,
           latitude: c.geometry.location.lat,
           longitude: c.geometry.location.lng,
           city: reverseResult?.city ?? null,
           country: reverseResult?.country ?? null,
+          countryCode: reverseResult?.countryCode ?? null,
           placeId: c.place_id ?? null,
           googleMapsUrl: buildGoogleMapsUrl(c.geometry.location.lat, c.geometry.location.lng, c.place_id),
           // Places API returns the business/venue name (e.g. "Кофемания")
@@ -187,10 +244,44 @@ export function createGeocodingService(apiKey: string): GeocodingService {
       }
       return results;
     } catch (err) {
-      logger.error({ err, query: fullQuery }, 'Find place API request failed');
-      return geocodeAddress(query, biasCity);
+      logger.error({ err, query }, 'Find place API request failed');
+      return geocodeAddress(query, bias);
     }
   }
 
-  return { geocodeAddress, reverseGeocode, findPlace };
+  async function locateArea(area: { city: string | null; countryCode: string | null }): Promise<GeocodedArea | null> {
+    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
+    if (area.city) {
+      url.searchParams.set('address', area.city);
+      if (area.countryCode) url.searchParams.set('region', regionCode(area.countryCode));
+    } else if (area.countryCode) {
+      url.searchParams.set('components', `country:${area.countryCode}`);
+    } else {
+      return null;
+    }
+    url.searchParams.set('key', apiKey);
+    url.searchParams.set('language', 'ru');
+
+    try {
+      const res = await fetch(url.toString());
+      const data = GeocodeResponseSchema.parse(await res.json());
+      const r = data.status === 'OK' ? data.results[0] : undefined;
+      if (!r?.geometry.viewport) {
+        logger.debug({ area, status: data.status }, 'Area geocode returned no viewport');
+        return null;
+      }
+      const { southwest, northeast } = r.geometry.viewport;
+      return {
+        latitude: r.geometry.location.lat,
+        longitude: r.geometry.location.lng,
+        countryCode: extractCountryCode(r.address_components),
+        bounds: { south: southwest.lat, west: southwest.lng, north: northeast.lat, east: northeast.lng },
+      };
+    } catch (err) {
+      logger.error({ err, area }, 'Area geocode failed');
+      return null;
+    }
+  }
+
+  return { geocodeAddress, reverseGeocode, findPlace, locateArea };
 }

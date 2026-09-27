@@ -1514,7 +1514,7 @@ export function createCallbackHandler(
     }
   });
 
-  // Location candidate: user picked a resolved address from multiple candidates
+  // Location candidate: user picked a resolved address from the candidates, or kept the typed text
   dispatch.set(CB.LOCATION_CANDIDATE, async (ctx, _payload, parts, user) => {
     await ctx.answer();
     const lang = (user.language ?? 'en') as Lang;
@@ -1523,8 +1523,19 @@ export function createCallbackHandler(
     if (!locationVerification) return;
 
     const eventId = Number.parseInt(parts[1] ?? '', 10);
+    if (Number.isNaN(eventId)) return;
+
+    if (parts[2] === 'keep') {
+      const kept = await locationVerification.keepTypedLocation(eventId, user.telegram_id);
+      await ctx.editText(
+        kept ? msgs.aiTools.location.keptAsTyped(kept.title, kept.location ?? '') : msgs.callbackErrors.error,
+        { reply_markup: undefined },
+      );
+      return;
+    }
+
     const choiceIndex = Number.parseInt(parts[2] ?? '', 10);
-    if (Number.isNaN(eventId) || Number.isNaN(choiceIndex)) return;
+    if (Number.isNaN(choiceIndex)) return;
 
     const candidates = await locationVerification.getStoredCandidates(eventId);
     if (!candidates) {

@@ -14,6 +14,7 @@ export const GeocodedLocationSchema = z.object({
   longitude: z.number(),
   city: z.string().nullable(),
   country: z.string().nullable(),
+  countryCode: z.string().nullable().optional(),
   placeId: z.string().nullable(),
   googleMapsUrl: z.string(),
   venueName: z.string().nullable().optional(),
