@@ -1268,10 +1268,12 @@ describe('sharing tool handlers', () => {
       let groupMemberRepo: GroupMemberRepository;
       let invitations: InvitationService;
 
-      function ctxFor(userId: number): AgentContext {
+      function ctxFor(userId: number, groupChatId?: number): AgentContext {
         return makeCtx({
           user: userRepo.findByTelegramId(userId)!,
-          chatId: userId,
+          chatId: groupChatId ?? userId,
+          isGroup: groupChatId !== undefined,
+          groupChatId,
           participantRepo,
           group: {
             groupMemberRepo,
@@ -1352,6 +1354,19 @@ describe('sharing tool handlers', () => {
         expect(result.success).toBe(false);
         expect(result.error).toContain('not found');
         expect(result.output).toBeUndefined();
+      });
+
+      test('an invitee asking in a group chat gets the roster only in a chat the owner invited', () => {
+        const { event } = createDinner();
+        const OTHER_GROUP_CHAT_ID = -1008888;
+        expect(
+          handleGetInvitationStatus(ctxFor(OTHER_USER_ID, OTHER_GROUP_CHAT_ID), { event_id: event.id }).success,
+        ).toBe(false);
+
+        invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+        expect(handleGetInvitationStatus(ctxFor(OTHER_USER_ID, GROUP_CHAT_ID), { event_id: event.id }).success).toBe(
+          true,
+        );
       });
 
       test('cancelled invitee is rejected even with a leftover RSVP row; declined invitee is still admitted', () => {

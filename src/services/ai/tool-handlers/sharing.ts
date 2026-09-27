@@ -491,7 +491,9 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
       (chatId) => ctx.group?.groupMemberRepo.getMembership(chatId, requesterId)?.left_at === null,
     );
     const isInvited = hasPersonalInvitation || isInvitedGroupMember;
-    if (ownerId !== null && isInvited) {
+    // The roster is the owner's to share: never post it into a group chat the owner did not invite.
+    const isAllowedChat = !ctx.isGroup || (ctx.groupChatId !== undefined && liveGroupChatIds.includes(ctx.groupChatId));
+    if (ownerId !== null && isInvited && isAllowedChat) {
       event = ctx.eventService.getEvent(input.event_id, ownerId);
       organizerId = ownerId;
     }
