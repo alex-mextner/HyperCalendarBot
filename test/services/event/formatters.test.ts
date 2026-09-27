@@ -799,14 +799,28 @@ describe('formatInvitation — time range keeps the end time', () => {
     );
   });
 
-  test('cross-midnight event keeps the end time past midnight', () => {
+  test('cross-midnight event names the end day only in the zone where it changes', () => {
     const late = makeEvent({
       ...meeting,
-      start_at: '2026-09-27T21:00:00Z', // 23:00 Belgrade → 01:00 next day; 22:00 → 00:00 London
-      end_at: '2026-09-27T23:00:00Z',
+      start_at: '2026-09-27T20:00:00Z', // 22:00 Belgrade → 00:30 Mon; 21:00 → 23:30 London (same day)
+      end_at: '2026-09-27T22:30:00Z',
     });
     const result = formatInvitation(late, 'Europe/Belgrade', 'en', 'Alice', 1, 'alice_tg', 'Europe/London', true);
-    expect(result).toContain('🕐 Sun 27, 23:00–01:00 (Europe/Belgrade) / 22:00–00:00 (Europe/London) (2h)');
+    expect(result).toContain(
+      '🕐 Sun 27, 22:00 – Mon 28, 00:30 (Europe/Belgrade) / 21:00–23:30 (Europe/London) (2h 30m)',
+    );
+  });
+
+  test('multi-day timed event shows the end day and time', () => {
+    const trip = makeEvent({ ...meeting, end_at: '2026-09-29T14:00:00Z' });
+    const same = formatInvitation(trip, 'Europe/Belgrade', 'ru', 'Алиса', 1, 'alice_tg', 'Europe/Belgrade', true);
+    expect(same).toBe(
+      '📨 <b>Meeting</b> — приглашение от @alice_tg\n\n🕐 вс 27, 15:00 – вт 29, 16:00 (Europe/Belgrade) (49ч)',
+    );
+    const other = formatInvitation(trip, 'Europe/Belgrade', 'en', 'Alice', 1, 'alice_tg', 'Europe/London', true);
+    expect(other).toContain(
+      '🕐 Sun 27, 15:00 – Tue 29, 16:00 (Europe/Belgrade) / 14:00 – Tue 29, 15:00 (Europe/London) (49h)',
+    );
   });
 
   test('DST-end night renders wall-clock times on each side of the shift', () => {
@@ -819,6 +833,13 @@ describe('formatInvitation — time range keeps the end time', () => {
   test('all-day event has no time range or timezone annotation', () => {
     const allDay = makeEvent({ ...meeting, all_day: 1 });
     const result = formatInvitation(allDay, 'Europe/Belgrade', 'en', 'Alice', 1, 'alice_tg', 'Europe/London', true);
+    expect(result).toBe('📨 <b>Meeting</b> — invitation from @alice_tg\n\n📅 Sun 27, all day');
+  });
+
+  test('multi-day all-day event renders like every other event view, without a time range', () => {
+    // Same all-day line as formatEventDetail: the card must not invent times or zones for it.
+    const holiday = makeEvent({ ...meeting, all_day: 1, start_at: '2026-09-27', end_at: '2026-09-30' });
+    const result = formatInvitation(holiday, 'Europe/Belgrade', 'en', 'Alice', 1, 'alice_tg', 'Europe/London', true);
     expect(result).toBe('📨 <b>Meeting</b> — invitation from @alice_tg\n\n📅 Sun 27, all day');
   });
 });

@@ -440,5 +440,32 @@ describe('LocationVerificationService', () => {
       expect(text).toContain('Кофемания, ул. Большая Никитская, 12');
       expect(text).toContain('https://maps.google.com');
     });
+
+    test('re-rendered invitation keeps the full time range in both zones', async () => {
+      const inv = makeInvitation({ id: 1, message_id: 111, chat_id: 200 });
+      const invitee = makeUser({ telegram_id: 200, timezone: 'Europe/London' });
+      const inviter = makeUser({ telegram_id: 100, first_name: 'Alice' });
+      const deps = makeDeps({
+        invitationRepo: {
+          getPendingForEvent: mock(() => [inv]),
+          getAcceptedForEvent: mock(() => []),
+        },
+        userRepo: {
+          findByTelegramId: mock((id: number) => (id === 200 ? invitee : inviter)),
+          update: mock(() => makeUser()),
+        },
+      });
+      const svc = new LocationVerificationService(deps as never);
+
+      const event = makeEvent({
+        start_at: '2026-09-27T13:00:00Z',
+        end_at: '2026-09-27T14:00:00Z',
+        timezone: 'Europe/Belgrade',
+      });
+      await svc.applyResolvedLocation(event, makeGeoResult());
+
+      const text = (deps.editMessage.mock.calls[0] as unknown[])[2] as string;
+      expect(text).toContain('🕐 Sun 27, 15:00–16:00 (Europe/Belgrade) / 14:00–15:00 (Europe/London) (1h)');
+    });
   });
 });

@@ -340,32 +340,45 @@ describe('formatTimeWithTimezones', () => {
   const endAt = '2026-03-11T13:00:00Z';
 
   test('same timezone — shows range once with sender timezone', () => {
-    const result = formatTimeWithTimezones(startAt, endAt, 'Europe/Moscow', 'Europe/Moscow', true);
+    const result = formatTimeWithTimezones(startAt, endAt, 'Europe/Moscow', 'Europe/Moscow', true, 'en');
     expect(result).toBe('15:00–16:00 (Europe/Moscow)');
   });
 
   test('different timezones, recipient onboarded — shows both ranges', () => {
-    const result = formatTimeWithTimezones(startAt, endAt, 'Europe/Moscow', 'Europe/Kyiv', true);
+    const result = formatTimeWithTimezones(startAt, endAt, 'Europe/Moscow', 'Europe/Kyiv', true, 'en');
     expect(result).toBe('15:00–16:00 (Europe/Moscow) / 14:00–15:00 (Europe/Kyiv)');
   });
 
   test('no end time — shows start times only', () => {
-    const result = formatTimeWithTimezones(startAt, null, 'Europe/Moscow', 'Europe/Kyiv', true);
+    const result = formatTimeWithTimezones(startAt, null, 'Europe/Moscow', 'Europe/Kyiv', true, 'en');
     expect(result).toBe('15:00 (Europe/Moscow) / 14:00 (Europe/Kyiv)');
   });
 
+  test('end on another local day — names the end day in that zone only', () => {
+    // 20:00Z–22:30Z: Moscow 23:00 → 01:30 next day, Lisbon 20:00–22:30 same day
+    const result = formatTimeWithTimezones(
+      '2026-03-11T20:00:00Z',
+      '2026-03-11T22:30:00Z',
+      'Europe/Moscow',
+      'Europe/Lisbon',
+      true,
+      'en',
+    );
+    expect(result).toBe('23:00 – Thu 12, 01:30 (Europe/Moscow) / 20:00–22:30 (Europe/Lisbon)');
+  });
+
   test('recipient not onboarded — shows only sender timezone', () => {
-    const result = formatTimeWithTimezones(startAt, endAt, 'Europe/Moscow', 'Europe/Kyiv', false);
+    const result = formatTimeWithTimezones(startAt, endAt, 'Europe/Moscow', 'Europe/Kyiv', false, 'en');
     expect(result).toBe('15:00–16:00 (Europe/Moscow)');
   });
 
   test('recipient timezone null — shows only sender timezone', () => {
-    const result = formatTimeWithTimezones(startAt, endAt, 'Europe/Moscow', null, true);
+    const result = formatTimeWithTimezones(startAt, endAt, 'Europe/Moscow', null, true, 'en');
     expect(result).toBe('15:00–16:00 (Europe/Moscow)');
   });
 
   test('recipient timezone null and not onboarded — shows only sender timezone', () => {
-    const result = formatTimeWithTimezones(startAt, endAt, 'UTC', null, false);
+    const result = formatTimeWithTimezones(startAt, endAt, 'UTC', null, false, 'en');
     expect(result).toBe('12:00–13:00 (UTC)');
   });
 });

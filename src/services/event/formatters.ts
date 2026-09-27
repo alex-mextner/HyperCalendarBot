@@ -209,6 +209,7 @@ export function formatInvitation(
       timezone,
       recipientTimezone ?? null,
       recipientOnboarded ?? false,
+      lang,
     );
     const eventDetail = formatEventDetail(event, timezone, lang, { includeTitle: false });
     // Replace the plain time range in the event detail with the timezone-annotated one
