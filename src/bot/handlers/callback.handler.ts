@@ -773,6 +773,10 @@ export function createCallbackHandler(
 
     if (subAction === 'reschedule') {
       const reschedResult = invitationService.rescheduleFromProposal(invId, user.telegram_id);
+      if (reschedResult.reason === 'invite_proposal_closed') {
+        await answerProposalClosed(ctx, lang);
+        return;
+      }
       if (!reschedResult.success) {
         await ctx.answer({ text: reschedResult.error ?? t(lang).callbackErrors.error });
         return;
@@ -813,6 +817,10 @@ export function createCallbackHandler(
 
     if (subAction === 'dismiss') {
       const keepResult = invitationService.keepOriginalTime(invId, user.telegram_id);
+      if (keepResult.reason === 'invite_proposal_closed') {
+        await answerProposalClosed(ctx, lang);
+        return;
+      }
       if (!keepResult.success) {
         await ctx.answer({ text: keepResult.error ?? t(lang).callbackErrors.error });
         return;
@@ -2183,6 +2191,14 @@ async function notifyInviterProposal(
     .text(t(inviterLang).invite_reschedule_btn, `${CB.INVITATION_ACTION}:reschedule:${invitation.id}`)
     .text(t(inviterLang).invite_keep_btn, `${CB.INVITATION_ACTION}:dismiss:${invitation.id}`);
   await deps.sendMessage(invitation.inviter_id, text, { parse_mode: 'HTML', reply_markup: keyboard });
+}
+
+/** Replaces the inviter's proposal notice, whose Reschedule/Keep buttons can no longer act on anything. */
+async function answerProposalClosed(ctx: BotCallbackContext, lang: Lang): Promise<void> {
+  await ctx.answer({ text: t(lang).invite_proposal_closed });
+  await ctx.editText(t(lang).invite_proposal_closed, { parse_mode: 'HTML' }).catch((err: unknown) => {
+    cmdLogger.warn({ err }, 'Failed to close the inviter proposal notice');
+  });
 }
 
 async function notifyInviter(

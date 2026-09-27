@@ -215,7 +215,61 @@ describe('InvitationService', () => {
       const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
       const result = service.rescheduleFromProposal(inv.id, INVITER);
       expect(result.success).toBe(false);
-      expect(result.error).toContain('No proposed time');
+      expect(result.reason).toBe('invite_proposal_closed');
+    });
+
+    test.each([
+      ['declineInvitation', 'declined'],
+      ['acceptInvitation', 'accepted'],
+      ['maybeInvitation', 'maybe'],
+    ] as const)('after the invitee answers via %s the proposal is closed and the answer stays %s', (method, answer) => {
+      const { db, invRepo, eventRepo, settingsRepo, event } = setup();
+      const participantRepo = new ParticipantRepository(db);
+      const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo);
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+      service[method](inv.id, INVITEE);
+      const participantBefore = participantRepo.findByEventAndUser(event.id, INVITEE)?.status ?? null;
+
+      const result = service.rescheduleFromProposal(inv.id, INVITER);
+
+      expect(result.success).toBe(false);
+      expect(result.reason).toBe('invite_proposal_closed');
+      expect(invRepo.findById(inv.id)!.status).toBe(answer);
+      expect(participantRepo.findByEventAndUser(event.id, INVITEE)?.status ?? null).toBe(participantBefore);
+    });
+
+    test('a proposal made after declining never turns the decline into acceptance', () => {
+      const { db, invRepo, eventRepo, settingsRepo, event } = setup();
+      const participantRepo = new ParticipantRepository(db);
+      const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo);
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      service.declineInvitation(inv.id, INVITEE);
+      // The +30/+60 prompt is a separate message that keeps its buttons after the card is answered.
+      service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+
+      const result = service.rescheduleFromProposal(inv.id, INVITER);
+
+      expect(result.success).toBe(false);
+      expect(result.reason).toBe('invite_proposal_closed');
+      expect(invRepo.findById(inv.id)!.status).toBe('declined');
+      expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
+    });
+  });
+
+  describe('answering closes a pending time proposal', () => {
+    test.each([
+      'acceptInvitation',
+      'declineInvitation',
+      'maybeInvitation',
+    ] as const)('%s clears proposed_time', (method) => {
+      const { service, invRepo, event } = setup();
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+
+      expect(service[method](inv.id, INVITEE).success).toBe(true);
+
+      expect(invRepo.findById(inv.id)!.proposed_time).toBeNull();
     });
   });
 
@@ -237,6 +291,19 @@ describe('InvitationService', () => {
       service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
       const result = service.keepOriginalTime(inv.id, INVITEE);
       expect(result.success).toBe(false);
+    });
+
+    test('keepOriginalTime rejects once the invitee has answered', () => {
+      const { service, invRepo, event } = setup();
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+      service.declineInvitation(inv.id, INVITEE);
+
+      const result = service.keepOriginalTime(inv.id, INVITER);
+
+      expect(result.success).toBe(false);
+      expect(result.reason).toBe('invite_proposal_closed');
+      expect(invRepo.findById(inv.id)!.status).toBe('declined');
     });
   });
 

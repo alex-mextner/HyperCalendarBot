@@ -1,8 +1,18 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, mock, test } from 'bun:test';
 import type { InlineKeyboard } from 'gramio';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
 import { t } from '../../../src/config/constants.ts';
+import { migrations } from '../../../src/database/migrations.ts';
+import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
+import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
+import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
+import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
+import { EventService } from '../../../src/services/event/event-service.ts';
 import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
+import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 import { png } from '../../fixtures/png.ts';
 import { flushPromises } from '../../helpers/mock-context.ts';
 
@@ -718,5 +728,64 @@ describe('conflict image on accept', () => {
     await handler(ctx as never);
     await flushPromises();
     expect(sendPhoto).not.toHaveBeenCalled();
+  });
+});
+
+describe('reschedule from a proposal the invitee has since answered', () => {
+  const INVITER = 100;
+  const INVITEE = 200;
+
+  function setupRealInvitation() {
+    const db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    const userRepo = new UserRepository(db);
+    userRepo.create({ telegram_id: INVITER, timezone: 'UTC', language: 'en' });
+    userRepo.create({ telegram_id: INVITEE, timezone: 'UTC', language: 'en' });
+    const eventRepo = new EventRepository(db);
+    const eventService = new EventService({ eventRepo });
+    const invRepo = new InvitationRepository(db);
+    const participantRepo = new ParticipantRepository(db);
+    const invitationService = new InvitationService(
+      invRepo,
+      eventRepo,
+      new SharingSettingsRepository(db),
+      participantRepo,
+    );
+    const event = eventService.createEvent({
+      user_id: INVITER,
+      title: 'Fixture meetup',
+      start_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      timezone: 'UTC',
+    });
+    const invitation = invitationService.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+    const notifyDeps = { userRepo, sendMessage: mock(() => Promise.resolve()) };
+    const handler = createCallbackHandler(eventService, {} as never, {} as never, {} as never, {
+      invitationService,
+      eventRepo,
+      invitationRepo: invRepo,
+      invitationNotifyDeps: notifyDeps,
+    });
+    return { handler, invitationService, invRepo, eventRepo, participantRepo, event, invitation, notifyDeps };
+  }
+
+  test('a decline after proposing survives the inviter tapping Reschedule', async () => {
+    const { handler, invitationService, invRepo, eventRepo, participantRepo, event, invitation, notifyDeps } =
+      setupRealInvitation();
+    const proposedTime = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    invitationService.proposeTime(invitation.id, INVITEE, proposedTime);
+    invitationService.declineInvitation(invitation.id, INVITEE);
+
+    const ctx = makeCtx(`inv:reschedule:${invitation.id}`);
+    ctx.dbUser.telegram_id = INVITER;
+    await handler(ctx as never);
+    await flushPromises();
+
+    expect(invRepo.findById(invitation.id)!.status).toBe('declined');
+    expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
+    expect(eventRepo.findById(event.id, INVITER)!.start_at).toBe(event.start_at);
+    expect(ctx.answer).toHaveBeenCalledWith({ text: t('en').invite_proposal_closed });
+    expect(ctx.editText).toHaveBeenCalledWith(t('en').invite_proposal_closed, { parse_mode: 'HTML' });
+    expect(notifyDeps.sendMessage).not.toHaveBeenCalled();
   });
 });

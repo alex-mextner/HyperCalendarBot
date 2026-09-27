@@ -363,6 +363,7 @@ export const MSG = {
     invite_kept_inviter: '❌ Suggestion declined',
     invite_kept_invitee: (event: string, time: string) =>
       `❌ Your suggestion for <b>${event}</b> was declined. It stays at ${time}.`,
+    invite_proposal_closed: '⏰ Suggestion no longer open — the invitation was already answered',
     invitations_from: (name: string) => `from ${name}`,
     invitations_to: (name: string) => `to ${name}`,
     privacy_current: (level: string) => `🔒 Current visibility: <b>${level}</b>`,
@@ -1231,6 +1232,7 @@ export const MSG = {
     invite_kept_inviter: '❌ Предложение отклонено',
     invite_kept_invitee: (event: string, time: string) =>
       `❌ Ваше предложение для <b>${event}</b> отклонено. Событие остаётся в ${time}.`,
+    invite_proposal_closed: '⏰ Предложение уже неактуально — на приглашение уже ответили',
     invitations_from: (name: string) => `от ${name}`,
     invitations_to: (name: string) => `для ${name}`,
     privacy_current: (level: string) => `🔒 Текущая видимость: <b>${level}</b>`,
