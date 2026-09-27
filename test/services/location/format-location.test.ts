@@ -94,11 +94,15 @@ describe('formatLocationHtml', () => {
 
 describe('formatLocationPlain', () => {
   test('returns empty string for no location', () => {
-    expect(formatLocationPlain({ location: null, resolved_address: null, venue_name: null })).toBe('');
+    expect(
+      formatLocationPlain({ location: null, resolved_address: null, venue_name: null, location_verified: 0 }),
+    ).toBe('');
   });
 
   test('returns raw location when no resolved address', () => {
-    expect(formatLocationPlain({ location: 'Кофемания', resolved_address: null, venue_name: null })).toBe('Кофемания');
+    expect(
+      formatLocationPlain({ location: 'Кофемания', resolved_address: null, venue_name: null, location_verified: 0 }),
+    ).toBe('Кофемания');
   });
 
   test('returns resolved address when available', () => {
@@ -107,6 +111,7 @@ describe('formatLocationPlain', () => {
         location: 'кофемания',
         resolved_address: 'Кофемания, ул. Большая Никитская, 12',
         venue_name: null,
+        location_verified: 1,
       }),
     ).toBe('Кофемания, ул. Большая Никитская, 12');
   });
@@ -117,6 +122,7 @@ describe('formatLocationPlain', () => {
         location: 'кофемания',
         resolved_address: 'ул. Большая Никитская, 12',
         venue_name: 'Кофемания',
+        location_verified: 1,
       }),
     ).toBe('Кофемания — ул. Большая Никитская, 12');
   });
@@ -127,7 +133,19 @@ describe('formatLocationPlain', () => {
         location: 'кофемания',
         resolved_address: null,
         venue_name: 'Кофемания',
+        location_verified: 1,
       }),
     ).toBe('Кофемания');
+  });
+
+  test('returns exactly the typed text while the location is unverified, ignoring any geocode', () => {
+    expect(
+      formatLocationPlain({
+        location: 'кафе у парка',
+        resolved_address: 'ул. Примерная, 1, Москва',
+        venue_name: 'Кафе Ромашка',
+        location_verified: 0,
+      }),
+    ).toBe('кафе у парка');
   });
 });
