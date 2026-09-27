@@ -6,7 +6,7 @@ const ISO_DT_RE = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:
 const DATETIME_LIKE_RE = /^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}/;
 const DURATION_UNITS = 'min|minutes?|h|hr|hours?|d|days?|w|weeks?|mo|months?|y|years?';
 const IANA_LOCAL_TO_UTC_RE =
-  /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s+([A-Za-z_]+(?:\/[A-Za-z0-9_+.-]+)+)\s+to\s+UTC$/i;
+  /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s+(UTC|[A-Za-z_]+(?:\/[A-Za-z0-9_+.-]+)+)\s+to\s+UTC$/i;
 const FIXED_LOCAL_TO_UTC_RE =
   /^(?:(\d{4})-(\d{2})-(\d{2})\s+)?(\d{1,2}):(\d{2})(?::(\d{2}))?\s+UTC([+-])(\d{1,2})(?::?(\d{2}))?\s+to\s+UTC$/i;
 const DATETIME_SYNTAX_HINT =
@@ -16,7 +16,7 @@ function evalArithmetic(expr: string): number {
   let pos = 0;
 
   function skipWs(): void {
-    while (pos < expr.length && expr[pos] === ' ') pos++;
+    while (pos < expr.length && /\s/.test(expr[pos]!)) pos++;
   }
 
   function parseNumber(): number {
@@ -24,7 +24,9 @@ function evalArithmetic(expr: string): number {
     const start = pos;
     if (expr[pos] === '-') pos++;
     while (pos < expr.length && /[\d.]/.test(expr[pos]!)) pos++;
-    const n = Number(expr.slice(start, pos));
+    const token = expr.slice(start, pos);
+    if (!/^[-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(token)) throw new Error(`Expected a number at position ${start}`);
+    const n = Number(token);
     if (Number.isNaN(n)) throw new Error(`Invalid number at position ${start}`);
     return n;
   }
@@ -129,6 +131,7 @@ function formatDiffMs(absMs: number): string {
 }
 
 export function handleCalculate(input: { expression: string }): ToolResult {
+  if (input.expression.length > 500) return { success: false, error: 'Expression exceeds the 500 character limit' };
   const expr = input.expression.trim();
 
   // Local wall clock + IANA timezone → UTC. TZDate resolves the offset for

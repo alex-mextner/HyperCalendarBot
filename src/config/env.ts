@@ -2,6 +2,7 @@
 
 import { PROVIDER_IDS, type ProviderId } from '../services/ai/provider-ids.ts';
 import { logger, logOnce } from '../utils/logger.ts';
+import { type GeminiRateLimits, parseGeminiRateLimits } from './gemini-rate-limits.ts';
 import { type GroqTokenLimits, parseGroqTokenLimits } from './groq-token-limits.ts';
 
 /** Main requests try responsive routes with their configured main model IDs.
@@ -79,6 +80,7 @@ export interface EnvConfig {
   GEMINI_BASE_URL: string;
   GEMINI_MODEL: string;
   GEMINI_FAST_MODEL: string;
+  GEMINI_RATE_LIMITS?: GeminiRateLimits;
 
   REDIS_URL: string;
   GOOGLE_CLIENT_ID?: string;
@@ -237,6 +239,7 @@ export function loadConfig(): EnvConfig {
     AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),
     AI_FAST_CHAIN: parseChain('AI_FAST_CHAIN', DEFAULT_FAST_CHAIN),
     BOT_ADMIN_ID,
+    GEMINI_RATE_LIMITS: parseGeminiRateLimits(process.env.GEMINI_RATE_LIMITS),
     INTENT_LEARNER_DAILY_LIMIT,
     INLINE_BOT_TOKEN: process.env.INLINE_BOT_TOKEN || undefined,
     INLINE_BOT_USERNAME: process.env.INLINE_BOT_USERNAME || undefined,

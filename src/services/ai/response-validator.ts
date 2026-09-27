@@ -10,7 +10,7 @@
 
 import { toLang } from '../../config/constants.ts';
 import { logger } from '../../utils/logger.ts';
-import { aiStreamRound } from './streaming.ts';
+import { aiStreamRound, ProviderSafetyStopError } from './streaming.ts';
 
 const aiLogger = logger.child({ module: 'response-validator' });
 
@@ -166,6 +166,7 @@ export async function validateResponse(
     const reason = text.replace(/^REJECT:\s*/i, '').trim() || 'Validation failed';
     return { approved: false, reason };
   } catch (err) {
+    if (err instanceof ProviderSafetyStopError) throw err;
     aiLogger.error({ err }, 'Response validation failed');
     return { approved: false, reason: 'Validator unavailable — response could not be verified' };
   }

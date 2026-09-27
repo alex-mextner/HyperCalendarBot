@@ -232,6 +232,7 @@ export const MSG = {
         ? `🔧 Promised to come back — and the AI is still down. Devs are on it.\n\n${EN_AI_COMMANDS_HINT}`
         : `🔧 AI still down — devs are on it.\n\n${EN_AI_COMMANDS_HINT}`,
     agent_timeout: '⚠️ That took too long — timing out.',
+    ai_response_blocked: 'The provider stopped this response. I will not automatically repeat the request.',
     rate_limited: 'Slow down, too many messages.',
     add_title_prompt: "Let's create an event. What's the title?",
     add_time_prompt: 'When? (e.g., "tomorrow 18:00", "Mar 15 19:30")',
@@ -1101,6 +1102,7 @@ export const MSG = {
         ? `🔧 Обещал вернуться — но ИИ так и не поднялся. Разрабы уже смотрят.\n\n${RU_AI_COMMANDS_HINT}`
         : `🔧 ИИ всё ещё недоступен — разрабы уже смотрят.\n\n${RU_AI_COMMANDS_HINT}`,
     agent_timeout: '⚠️ Что-то долго думаю — прерываю.',
+    ai_response_blocked: 'Провайдер остановил ответ. Я не буду автоматически повторять этот запрос.',
     rate_limited: 'Слишком много сообщений, подождите.',
     add_title_prompt: 'Создаём событие. Как назовём?',
     add_time_prompt: 'Когда? (например, "завтра 18:00", "15 мар 19:30")',

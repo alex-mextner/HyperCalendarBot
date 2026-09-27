@@ -19,9 +19,11 @@ import { UserRepository } from '../../../src/database/repositories/user.reposito
 import { runMigrations } from '../../../src/database/schema.ts';
 import { AssistantMessageCodec, aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
+import { HistorySummarizer } from '../../../src/services/ai/history-summarizer.ts';
 import {
   AllProvidersFailedError,
   type ProviderFailure,
+  ProviderSafetyStopError,
   type StreamCallbacks,
   type StreamRoundOptions,
   type StreamRoundResult,
@@ -212,6 +214,127 @@ describe('CalendarBotAgent.run()', () => {
       sendMessage: mock(() => Promise.resolve({ message_id: 42 })),
       editMessageText: mock(() => Promise.resolve()),
     };
+  });
+
+  test.each([0, 1.5, Number.NaN, 90_001])('rejects invalid request timeout configuration: %s', (requestTimeoutMs) => {
+    expect(() => new CalendarBotAgent(config, sender, { requestTimeoutMs })).toThrow();
+  });
+
+  test('a validator safety stop is not converted into an execution retry', async () => {
+    const enqueue = mock(async () => {});
+    ctx.retryEnqueue = enqueue;
+    const script = makeStreamImpl([{ kind: 'text', text: 'A response requiring validation.' }]);
+    let calls = 0;
+    const impl: typeof script.impl = async (opts, cbs) => {
+      calls++;
+      if (isValidatorCall(opts))
+        throw new ProviderSafetyStopError({
+          classification: 'safety',
+          finishReason: 'content_filter',
+          chunkCount: 1,
+          choiceCount: 1,
+          toolFragmentCount: 0,
+          maxOutputTokens: 256,
+          messageCount: 2,
+          toolCount: 0,
+          usage: null,
+        });
+      return script.impl(opts, cbs);
+    };
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(calls).toBe(2);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(result.responseText).toContain('provider stopped');
+    expect(result.responseText).not.toContain('A response requiring validation.');
+  });
+
+  test('one request budget includes validation and does not poison the next request', async () => {
+    let slow = true;
+    let validationSignal: AbortSignal | undefined;
+    const script = makeStreamImpl([
+      { kind: 'text', text: 'Unverified first answer.' },
+      { kind: 'text', text: 'Second ready.' },
+    ]);
+    const impl: typeof script.impl = async (opts, cbs) => {
+      if (isValidatorCall(opts)) {
+        validationSignal = opts.signal;
+        if (slow) await Bun.sleep(350);
+      } else if (slow) await Bun.sleep(35);
+      return script.impl(opts, cbs);
+    };
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl, requestTimeoutMs: 70 });
+    const started = performance.now();
+    const first = await agent.run(ctx);
+    expect(performance.now() - started).toBeLessThan(250);
+    expect(validationSignal?.aborted).toBe(true);
+    expect(first.responseText).not.toContain('Unverified first answer.');
+    slow = false;
+    const second = await agent.run(ctx);
+    expect(second.responseText).toContain('Second ready.');
+  });
+
+  test('a completed write survives a later deadline without scheduling a replay', async () => {
+    const event = createOwnedEvent();
+    const enqueue = mock(async () => {});
+    ctx.retryEnqueue = enqueue;
+    const script = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'update-once',
+        name: 'update_event',
+        input: { event_id: event.id, title: 'Confirmed title' },
+      },
+      { kind: 'text', text: 'late unsupported claim' },
+    ]);
+    let rounds = 0;
+    const impl: typeof script.impl = async (opts, cbs) => {
+      if (++rounds > 1) await Bun.sleep(350);
+      return script.impl(opts, cbs);
+    };
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl, requestTimeoutMs: 70 }).run(ctx);
+    expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe('Confirmed title');
+    expect(result.toolCalls.filter((call) => call.name === 'update_event')).toHaveLength(1);
+    expect(result.responseText).not.toContain('late unsupported claim');
+    expect(result.responseText).toContain('Completed');
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  test('stalled history cache is bounded before the first model call', async () => {
+    const script = makeStreamImpl([
+      { kind: 'text', text: 'history summary' },
+      { kind: 'text', text: 'late answer' },
+    ]);
+    const summarizer = new HistorySummarizer(
+      {
+        get: async () => {
+          await Bun.sleep(350);
+          return null;
+        },
+        set: async () => null,
+      },
+      script.impl,
+    );
+    ctx.conversationLogger.logAiTurn(USER_ID, {
+      role: 'assistant',
+      content: null,
+      tool_calls: [{ id: 'historical-read', type: 'function', function: { name: 'get_events', arguments: '{}' } }],
+    });
+    ctx.conversationLogger.logToolResults(USER_ID, [
+      {
+        role: 'tool',
+        tool_call_id: 'historical-read',
+        content: 'synthetic history '.repeat(80),
+      },
+    ]);
+    const agent = new CalendarBotAgent({ ...config, summarizer }, sender, {
+      streamImpl: script.impl,
+      requestTimeoutMs: 50,
+    });
+    const started = performance.now();
+    const result = await agent.run(ctx);
+    expect(performance.now() - started).toBeLessThan(250);
+    expect(script.calls).toHaveLength(0);
+    expect(result.responseText).not.toContain('late answer');
   });
 
   test.each([true, false])('lazy rollout can be scoped to the configured user only: %s', async (included) => {
