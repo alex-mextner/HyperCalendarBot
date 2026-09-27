@@ -236,19 +236,30 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
   return null;
 }
 
+/** Time range in one zone; names the end day when the event ends on a later local day there. */
+function formatZonedRange(startAt: string, endAt: string | null, timezone: string, lang: string): string {
+  if (!endAt) return toUserTime(startAt, timezone);
+  const startDay = format(new TZDate(startAt, timezone), 'yyyy-MM-dd');
+  const endDay = format(new TZDate(endAt, timezone), 'yyyy-MM-dd');
+  if (startDay === endDay) return formatTimeRange(startAt, endAt, timezone);
+  return `${toUserTime(startAt, timezone)} – ${formatDateShort(endAt, timezone, lang)}, ${toUserTime(endAt, timezone)}`;
+}
+
 export function formatTimeWithTimezones(
   startAt: string,
+  endAt: string | null,
   senderTimezone: string,
   recipientTimezone: string | null,
   recipientOnboarded: boolean,
+  lang: string,
 ): string {
-  const senderTime = formatTime(startAt, senderTimezone);
+  const senderTime = formatZonedRange(startAt, endAt, senderTimezone, lang);
 
   if (!recipientOnboarded || !recipientTimezone || recipientTimezone === senderTimezone) {
     return `${senderTime} (${senderTimezone})`;
   }
 
-  const recipientTime = formatTime(startAt, recipientTimezone);
+  const recipientTime = formatZonedRange(startAt, endAt, recipientTimezone, lang);
   return `${senderTime} (${senderTimezone}) / ${recipientTime} (${recipientTimezone})`;
 }
 

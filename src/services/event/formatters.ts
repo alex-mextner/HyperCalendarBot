@@ -205,16 +205,15 @@ export function formatInvitation(
   if (!event.all_day) {
     const timeLabel = formatTimeWithTimezones(
       event.start_at,
+      event.end_at,
       timezone,
       recipientTimezone ?? null,
       recipientOnboarded ?? false,
+      lang,
     );
     const eventDetail = formatEventDetail(event, timezone, lang, { includeTitle: false });
-    // Replace the plain time in the event detail with the timezone-annotated one
-    const plainTime = event.end_at
-      ? `${formatTime(event.start_at, timezone)}–${formatTime(event.end_at, timezone)}`
-      : formatTime(event.start_at, timezone);
-    const annotatedDetail = eventDetail.replace(plainTime, timeLabel);
+    // Replace the plain time range in the event detail with the timezone-annotated one
+    const annotatedDetail = eventDetail.replace(formatTimeRange(event.start_at, event.end_at, timezone), timeLabel);
     card = `${header}\n\n${annotatedDetail}`;
   } else {
     card = `${header}\n\n${formatEventDetail(event, timezone, lang, { includeTitle: false })}`;
