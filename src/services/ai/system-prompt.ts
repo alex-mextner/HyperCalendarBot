@@ -247,10 +247,9 @@ function buildDataRules(durationMins: number): string {
 - Default event duration: ${durationMins} minutes. When creating an event with no explicit end time or duration, set end_at = start_at + ${durationMins} minutes.`;
 }
 
-function buildPeopleRules(ctx: AgentContext, durationMins: number): string {
+function buildPeopleRules(ctx: AgentContext, durationMins: number, now: TZDate): string {
   // Tomorrow 15:00 in the user's zone, in the exact form calculate returns, with the default duration.
-  const today = new TZDate(Date.now(), ctx.user.timezone);
-  const start = new TZDate(today.getFullYear(), today.getMonth(), today.getDate() + 1, 15, 0, 0, ctx.user.timezone);
+  const start = new TZDate(now.getFullYear(), now.getMonth(), now.getDate() + 1, 15, 0, 0, ctx.user.timezone);
   const example = JSON.stringify({
     title: 'Встреча с Леной',
     start_at: new Date(start.getTime()).toISOString(),
@@ -269,7 +268,7 @@ function buildPeopleRules(ctx: AgentContext, durationMins: number): string {
 - DELIVERY LANGUAGE: When send_invitation or resend_invitation returns success, say the invitation was *created and is being sent*. NEVER say it was delivered, received, or that you are waiting for a response — delivery is async and may fail.`;
 }
 
-function buildRulesSection(ctx: AgentContext, utcOffset: string, durationMins: number): string {
+function buildRulesSection(ctx: AgentContext, utcOffset: string, durationMins: number, now: TZDate): string {
   return [
     '## Rules',
     `- ${buildLanguageRule(ctx)}`,
@@ -278,7 +277,7 @@ function buildRulesSection(ctx: AgentContext, utcOffset: string, durationMins: n
     buildEventCreationRules(),
     buildOutputRules(),
     buildDataRules(durationMins),
-    buildPeopleRules(ctx, durationMins),
+    buildPeopleRules(ctx, durationMins, now),
   ].join('\n');
 }
 
@@ -540,7 +539,9 @@ You MUST help complete the action. When done:
 export function buildSystemPrompt(ctx: AgentContext): string {
   const durationMins = ctx.user.default_event_duration_minutes ?? 60;
   const utcOffset = formatUtcOffset(ctx.user.timezone);
-  const nowLocal = format(new TZDate(new Date(), ctx.user.timezone), 'yyyy-MM-dd EEE HH:mm');
+  // One instant for the displayed local time and the dated example, so midnight cannot fall between them.
+  const now = new TZDate(Date.now(), ctx.user.timezone);
+  const nowLocal = format(now, 'yyyy-MM-dd EEE HH:mm');
 
   const sections = [
     'You are a calendar assistant for a Telegram bot. You help users manage their schedule.',
@@ -550,7 +551,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
     buildPendingGeoSection(ctx),
     buildContextSection(),
     buildEventsWindowSection(ctx),
-    buildRulesSection(ctx, utcOffset, durationMins),
+    buildRulesSection(ctx, utcOffset, durationMins, now),
     buildProactiveSection(),
     buildSharedEventsSection(),
     buildConnectTelegramSection(),
