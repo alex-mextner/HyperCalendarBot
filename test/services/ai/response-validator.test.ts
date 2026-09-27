@@ -108,6 +108,45 @@ describe('validateResponse — happy path parsing', () => {
   });
 });
 
+describe('calendar write refusal guard', () => {
+  test('does not mistake a missing-time clarification for content censorship', async () => {
+    let called = false;
+    const result = await validateResponse(
+      {
+        userMessage: 'Создай событие завтра',
+        toolCalls: [],
+        response: 'Не могу создать событие без времени. Во сколько?',
+      },
+      async () => {
+        called = true;
+        return stubText('APPROVE')({ messages: [], maxTokens: 1 });
+      },
+    );
+
+    expect(result.approved).toBe(true);
+    expect(called).toBe(true);
+  });
+
+  test('rejects a tool-less refusal of an ordinary create-event request before asking the validator model', async () => {
+    let called = false;
+    const result = await validateResponse(
+      {
+        userMessage: 'Создай событие завтра в 10 с описанием как я написал',
+        toolCalls: [],
+        response: 'Я не могу создавать события с таким содержанием. Используйте подходящее название.',
+      },
+      async () => {
+        called = true;
+        return stubText('APPROVE')({ messages: [], maxTokens: 1 });
+      },
+    );
+
+    expect(result.approved).toBe(false);
+    expect(called).toBe(false);
+    if (!result.approved) expect(result.reason).toContain('calendar write');
+  });
+});
+
 describe('validateResponse — fail-closed semantics', () => {
   test('stream throws AND no tool calls → fail-CLOSED (rejected as likely hallucination)', async () => {
     const result = await validateResponse(
@@ -232,4 +271,30 @@ describe('validateResponse — prompt-injection hardening', () => {
     await validateResponse({ userMessage: 'hi', toolCalls: ['get_events', 'get_free_slots'], response: 'ok' }, impl);
     expect(capturedUserContent).toContain('TOOL CALLS MADE: get_events, get_free_slots');
   });
+});
+
+test('content refusal after calculate is still validated instead of leaking through', async () => {
+  const response = 'Я не могу создавать события с таким содержанием.';
+  expect(shouldValidateResponse(['calculate'], response)).toBe(true);
+  const result = await validateResponse(
+    {
+      userMessage: 'Создай событие завтра в 10 с этим названием',
+      toolCalls: ['calculate'],
+      response,
+    },
+    stubText('APPROVE'),
+  );
+  expect(result.approved).toBe(false);
+});
+
+test('asking for a missing English title is not classified as a content refusal', async () => {
+  const result = await validateResponse(
+    {
+      userMessage: 'Create an event tomorrow at 10',
+      toolCalls: [],
+      response: 'I cannot create an event without a title. What should I call it?',
+    },
+    stubText('APPROVE'),
+  );
+  expect(result.approved).toBe(true);
 });

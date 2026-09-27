@@ -1,8 +1,21 @@
 // src/bot/scenes/types.ts — Scene state interfaces shared across scenes, handlers, and services.
 
+export interface AddEventParams {
+  title?: string;
+  pendingDate?: string;
+  startAt?: string;
+  timezone?: string;
+  groupId?: number;
+}
+
 export interface AddEventState {
+  promptMessageId?: number;
+  createdEventId?: number;
+  timezone?: string;
+  groupId?: number;
   title?: string;
   startAt?: string;
+  pendingDate?: string;
   endAt?: string;
   recurrenceRule?: string | null;
   recEndMode?: 'until' | 'count';

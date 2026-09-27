@@ -76,50 +76,36 @@ describe('createMessageHandler', () => {
     expect(deps.agent.run).toHaveBeenCalledTimes(0);
   });
 
-  describe('Trigger 2: callback-only step auto-pause', () => {
-    const callbackOnlyScene = JSON.stringify({ name: 'add_event', step: 3, state: { title: 'Test' } });
+  describe('scene pause routing', () => {
+    const recurrenceScene = JSON.stringify({ name: 'add_event', step: 3, state: { title: 'Test' } });
 
-    test('routes to AI and saves pause when user types on a callback-only step', async () => {
+    test('keeps typed recurrence input inside the active /add scene', async () => {
       const saveScene = mock(() => Promise.resolve());
       const deps = makeDeps({
-        sceneStorage: { get: mock(() => Promise.resolve(callbackOnlyScene)) },
-        scenePauseService: {
-          get: mock(() => Promise.resolve(null)),
-          save: saveScene,
-        },
+        sceneStorage: { get: mock(() => Promise.resolve(recurrenceScene)) },
+        scenePauseService: { get: mock(() => Promise.resolve(null)), save: saveScene },
       });
       const handler = createMessageHandler(deps as never);
       await handler(makeCtx({ text: 'каждую неделю' }) as never);
-
-      expect(saveScene).toHaveBeenCalledWith(100, {
-        sceneName: 'add_event',
-        step: 3,
-        sceneState: { title: 'Test' },
-      });
-      expect(deps.agent.run).toHaveBeenCalledTimes(1);
-    });
-
-    test('does not auto-pause for non-callback-only steps (step 1)', async () => {
-      const saveScene = mock(() => Promise.resolve());
-      const deps = makeDeps({
-        sceneStorage: {
-          get: mock(() => Promise.resolve(JSON.stringify({ name: 'add_event', step: 1, state: {} }))),
-        },
-        scenePauseService: {
-          get: mock(() => Promise.resolve(null)),
-          save: saveScene,
-        },
-      });
-      const handler = createMessageHandler(deps as never);
-      await handler(makeCtx() as never);
-
       expect(saveScene).not.toHaveBeenCalled();
       expect(deps.agent.run).toHaveBeenCalledTimes(0);
     });
 
-    test('falls through to AI when scene is already manually paused', async () => {
+    test('keeps ordinary add-event text inside the active scene', async () => {
+      const saveScene = mock(() => Promise.resolve());
       const deps = makeDeps({
-        sceneStorage: { get: mock(() => Promise.resolve(callbackOnlyScene)) },
+        sceneStorage: { get: mock(() => Promise.resolve(JSON.stringify({ name: 'add_event', step: 1, state: {} }))) },
+        scenePauseService: { get: mock(() => Promise.resolve(null)), save: saveScene },
+      });
+      const handler = createMessageHandler(deps as never);
+      await handler(makeCtx() as never);
+      expect(saveScene).not.toHaveBeenCalled();
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+    });
+
+    test('falls through to AI when scene is already explicitly paused', async () => {
+      const deps = makeDeps({
+        sceneStorage: { get: mock(() => Promise.resolve(recurrenceScene)) },
         scenePauseService: {
           get: mock(() => Promise.resolve({ sceneName: 'add_event', step: 3, sceneState: {} })),
           save: mock(() => Promise.resolve()),
@@ -127,7 +113,6 @@ describe('createMessageHandler', () => {
       });
       const handler = createMessageHandler(deps as never);
       await handler(makeCtx() as never);
-
       expect(deps.agent.run).toHaveBeenCalledTimes(1);
     });
   });

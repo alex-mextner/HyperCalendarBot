@@ -1,135 +1,77 @@
-import { expect, mock, test } from 'bun:test';
+import { afterEach, expect, mock, test } from 'bun:test';
+import { Scene } from '@gramio/scenes';
 import { handleAdd } from '../../../src/bot/commands/add.ts';
-import type { GroupChatRepository } from '../../../src/database/repositories/group-chat.repository.ts';
-import type { CreateEventData } from '../../../src/database/types.ts';
-import type { EventService } from '../../../src/services/event/event-service.ts';
+import type { AddEventParams } from '../../../src/bot/scenes/types.ts';
+import type { BotCommandContext } from '../../../src/bot/types.ts';
+import { DatabaseService } from '../../../src/database/index.ts';
 
-// Minimal stub for addEventScene
-const stubScene = {} as never;
-
-function makeGroupCtx(args: string, overrides: Partial<{ send: ReturnType<typeof mock> }> = {}) {
-  return {
-    chat: { type: 'group' as const, id: -100 },
-    dbUser: { telegram_id: 42, language: 'ru' as const, timezone: 'Europe/Moscow' },
-    args,
-    send: overrides.send ?? mock(() => Promise.resolve()),
-    scene: { enter: mock(() => Promise.resolve()) },
-  };
+const databases: DatabaseService[] = [];
+afterEach(() => {
+  for (const db of databases.splice(0)) db.db.close();
+});
+function makeInput(args: string, groupTimezone?: string) {
+  const db = new DatabaseService(':memory:');
+  databases.push(db);
+  const user = db.users.create({ telegram_id: 42, language: 'ru', timezone: 'Europe/Belgrade' });
+  const chat = groupTimezone === undefined ? { type: 'private', id: 42 } : { type: 'group', id: -100 };
+  if (groupTimezone !== undefined) {
+    db.groupChats.upsertGroup({ chat_id: -100, added_by: 42 });
+    if (groupTimezone) db.groupChats.setTimezone(-100, groupTimezone);
+  }
+  const send = mock(async (text: string) => text);
+  const enter = mock(async (scene: Scene, params?: AddEventParams) => ({ scene, params }));
+  const context = { chat, dbUser: user, args, send, scene: { enter } } as unknown as BotCommandContext;
+  return { context, send, enter, db, scene: new Scene('add_event') };
 }
 
-function makePrivateCtx(args: string) {
-  return {
-    chat: { type: 'private' as const, id: 1 },
-    dbUser: { telegram_id: 1, language: 'ru' as const, timezone: 'UTC' },
-    args,
-    send: mock(() => Promise.resolve()),
-    scene: { enter: mock(() => Promise.resolve()) },
-  };
-}
-
-test('handleAdd in group with no args enters scene without crash', async () => {
-  const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') } as unknown as GroupChatRepository;
-  const ctx = makeGroupCtx('');
-  await handleAdd(
-    ctx as unknown as Parameters<typeof handleAdd>[0],
-    {} as unknown as EventService,
-    stubScene,
-    groupRepo,
-  );
-  expect(ctx.scene.enter).toHaveBeenCalled();
+test('group with no args enters a group-scoped draft', async () => {
+  const r = makeInput('', 'Europe/Moscow');
+  await handleAdd(r.context, r.scene, r.db.groupChats);
+  expect(r.enter.mock.calls[0]?.[1]).toMatchObject({ groupId: -100, timezone: 'Europe/Moscow' });
+});
+test('group without a timezone explains settings and does not enter', async () => {
+  const r = makeInput('Встреча завтра', '');
+  await handleAdd(r.context, r.scene, r.db.groupChats);
+  expect(r.enter).not.toHaveBeenCalled();
+  expect(r.send.mock.calls[0]?.[0]).toContain('/settings');
+});
+test('group quick-add retains group owner and waits for the missing time', async () => {
+  const r = makeInput('Встреча завтра', 'Europe/Moscow');
+  await handleAdd(r.context, r.scene, r.db.groupChats);
+  const params = r.enter.mock.calls[0]?.[1];
+  expect(params).toMatchObject({ title: 'Встреча', groupId: -100, timezone: 'Europe/Moscow' });
+  expect(params?.pendingDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(params?.startAt).toBeUndefined();
+});
+test('group quick-add converts the group timezone, not the author timezone', async () => {
+  const r = makeInput('Митинг 2027-01-15 19:00', 'Asia/Tokyo');
+  await handleAdd(r.context, r.scene, r.db.groupChats);
+  expect(r.enter.mock.calls[0]?.[1]).toMatchObject({ timezone: 'Asia/Tokyo', startAt: '2027-01-15T10:00:00.000Z' });
 });
 
-test("handleAdd in group with no timezone sends prompt containing 'таймзону'", async () => {
-  const groupRepo = { getTimezone: mock(() => null) } as unknown as GroupChatRepository;
-  let sentText = '';
-  const send = mock((text: string) => {
-    sentText = text;
-    return Promise.resolve();
-  });
-  const ctx = makeGroupCtx('Встреча завтра', { send });
-  await handleAdd(
-    ctx as unknown as Parameters<typeof handleAdd>[0],
-    {} as unknown as EventService,
-    stubScene,
-    groupRepo,
-  );
-  expect(sentText).toContain('таймзону');
+test('private quick-add has no group fields and never invents midnight', async () => {
+  const r = makeInput('Task завтра');
+  await handleAdd(r.context, r.scene);
+  expect(r.enter.mock.calls[0]?.[1]?.groupId).toBeUndefined();
+  expect(r.enter.mock.calls[0]?.[1]?.startAt).toBeUndefined();
+  expect(r.enter.mock.calls[0]?.[1]?.title).toBe('Task');
 });
-
-test('handleAdd in group with timezone creates event with group fields', async () => {
-  const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') } as unknown as GroupChatRepository;
-  let createdData: CreateEventData | null = null;
-  const fakeEvent = {
-    id: 1,
-    title: 'Встреча',
-    start_at: new Date().toISOString(),
-    end_at: null,
-    timezone: 'Europe/Moscow',
-    user_id: 42,
-  };
-  const eventService = {
-    createEvent: mock((data: CreateEventData) => {
-      createdData = data;
-      return fakeEvent;
-    }),
-  } as unknown as EventService;
-  const ctx = makeGroupCtx('Встреча завтра', {});
-  await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], eventService, stubScene, groupRepo);
-  // Parsing "Встреча завтра" succeeds -> createEvent is called
-  expect(createdData).not.toBeNull();
-  expect(createdData!.owner_type).toBe('group');
-  expect(createdData!.group_id).toBe(-100);
-  expect(createdData!.created_by).toBe(42);
+test('private chat without args starts a timezone-aware draft', async () => {
+  const r = makeInput('');
+  await handleAdd(r.context, r.scene);
+  expect(r.enter.mock.calls[0]?.[1]).toEqual({ timezone: 'Europe/Belgrade' });
 });
-
-test('handleAdd in group quick-add uses group timezone not user timezone', async () => {
-  const groupRepo = { getTimezone: mock(() => 'Asia/Tokyo') } as unknown as GroupChatRepository;
-  let createdData: CreateEventData | null = null;
-  const fakeEvent = {
-    id: 1,
-    title: 'Митинг',
-    start_at: new Date().toISOString(),
-    end_at: null,
-    timezone: 'Asia/Tokyo',
-    user_id: 42,
-  };
-  const eventService = {
-    createEvent: mock((data: CreateEventData) => {
-      createdData = data;
-      return fakeEvent;
-    }),
-  } as unknown as EventService;
-  const ctx = makeGroupCtx('Митинг завтра', {});
-  await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], eventService, stubScene, groupRepo);
-  expect(createdData).not.toBeNull();
-  expect(createdData!.timezone).toBe('Asia/Tokyo');
+test.each([
+  'Team standup',
+  'Разбор ошибок',
+  '  Важное   дело  ',
+])('title without a recognized date is preserved: %s', async (title) => {
+  const r = makeInput(title);
+  await handleAdd(r.context, r.scene);
+  expect(r.enter.mock.calls[0]?.[1]?.title).toBe(title.trim());
 });
-
-test('handleAdd in private chat does not set group fields', async () => {
-  let createdData: CreateEventData | null = null;
-  const fakeEvent = {
-    id: 1,
-    title: 'Task',
-    start_at: new Date().toISOString(),
-    end_at: null,
-    timezone: 'UTC',
-    user_id: 1,
-  };
-  const eventService = {
-    createEvent: mock((data: CreateEventData) => {
-      createdData = data;
-      return fakeEvent;
-    }),
-  } as unknown as EventService;
-  const ctx = makePrivateCtx('Task завтра');
-  await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], eventService, stubScene);
-  expect(createdData).not.toBeNull();
-  expect(createdData!.owner_type).not.toBe('group');
-  expect(createdData!.group_id).toBeUndefined();
-});
-
-test('handleAdd in private chat with no args enters scene', async () => {
-  const ctx = makePrivateCtx('');
-  await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], {} as unknown as EventService, stubScene);
-  expect(ctx.scene.enter).toHaveBeenCalled();
+test('long natural date suffix does not become part of the title', async () => {
+  const r = makeInput('Встреча 25 сентября 2027 в 7 вечера');
+  await handleAdd(r.context, r.scene);
+  expect(r.enter.mock.calls[0]?.[1]).toMatchObject({ title: 'Встреча', startAt: '2027-09-25T17:00:00.000Z' });
 });

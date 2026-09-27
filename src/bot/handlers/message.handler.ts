@@ -81,8 +81,6 @@ import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts'
 import { createIntentMatcherLayer } from '../pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../pipeline/pipeline.ts';
 import type { WorkflowSession, WorkflowSessionStore } from '../pipeline/types.ts';
-import { CALLBACK_ONLY_STEP_INDICES } from '../scenes/add-event.scene.ts';
-import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
 import type { BotCommandContext } from '../types.ts';
 import { isGroupRelevant, mentionsBot, startsWithCalendarAddress } from './group-message-filter.ts';
 
@@ -202,18 +200,6 @@ export interface MessageHandlerDeps {
   weatherService?: import('../../services/weather/weather-service.ts').WeatherService;
   aiRetryQueue?: import('../../services/scheduled/types.ts').QueueAdapter;
   aiRetryJobStore?: import('../../services/scheduled/types.ts').RetryJobStore;
-}
-
-// Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
-// Step indices are owned by each scene and imported here to avoid duplication.
-export const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', CALLBACK_ONLY_STEP_INDICES]]);
-
-const SceneStepCodec = jsonCodec(z.object({ name: z.string().optional(), step: z.number().optional() }));
-
-function isCallbackOnlyStep(rawScene: unknown): boolean {
-  const result = SceneStepCodec.safeParse(rawScene as string);
-  if (!result.success) return false;
-  return CALLBACK_ONLY_STEPS.get(result.data.name ?? '')?.has(result.data.step ?? -1) ?? false;
 }
 
 const TG_API = 'https://api.telegram.org';
@@ -986,50 +972,9 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     const activeScene = await deps.sceneStorage.get(sceneKey);
     if (activeScene) {
       const isPaused = deps.scenePauseService ? (await deps.scenePauseService.get(user.telegram_id)) !== null : false;
-
-      if (!isPaused) {
-        // Trigger 2: callback-only step — user typed instead of pressing a button → auto-pause
-        if (deps.scenePauseService && isCallbackOnlyStep(activeScene)) {
-          try {
-            const parsed = jsonCodec(
-              z.object({
-                name: z.string(),
-                step: z.number(),
-                state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
-              }),
-            ).parse(activeScene as string);
-            const step = parsed.step;
-            const state = parsed.state ?? {};
-            const name = parsed.name;
-            if (name === 'add_event') {
-              await deps.scenePauseService.save(user.telegram_id, {
-                sceneName: 'add_event',
-                step,
-                sceneState: state as AddEventState,
-              });
-            } else if (name === 'timezone') {
-              await deps.scenePauseService.save(user.telegram_id, {
-                sceneName: 'timezone',
-                step,
-                sceneState: state as TimezoneState,
-              });
-            } else if (name === 'onboarding') {
-              await deps.scenePauseService.save(user.telegram_id, {
-                sceneName: 'onboarding',
-                step,
-                sceneState: state as OnboardingState,
-              });
-            } else if (name === 'edit_value' || name === 'import') {
-              await deps.scenePauseService.save(user.telegram_id, { sceneName: name, step, sceneState: {} });
-            }
-          } catch {
-            return; // can't parse scene state — skip
-          }
-          // fall through to AI pipeline
-        } else {
-          return;
-        }
-      }
+      // Active wizard input stays with @gramio/scenes. Only an explicitly
+      // paused wizard (for example via its Help action) falls through to AI.
+      if (!isPaused) return;
     }
 
     const chatId = ctx.chatId;

@@ -65,6 +65,10 @@ export function localCalendarWeekDays(utcStartIso: string, timezone: string): st
   });
 }
 
+function isValidClock(hour: number, minute: number): boolean {
+  return Number.isInteger(hour) && Number.isInteger(minute) && hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
+}
+
 export function parseSimpleDate(input: string, timezone: string, refDate?: Date): Date | null {
   const ref = refDate ? new TZDate(refDate.getTime(), timezone) : TZDate.tz(timezone);
   const trimmed = input.trim().toLowerCase();
@@ -73,24 +77,33 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
   const bareTimeMatch = trimmed.match(/^(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/);
   if (bareTimeMatch) {
     const [, h, m] = bareTimeMatch;
+    const hour = Number(h);
+    const minute = Number(m ?? 0);
+    if (!isValidClock(hour, minute)) return null;
     const d = startOfDay(ref);
-    const result = addMinutes(d, Number(h) * 60 + Number(m ?? 0));
+    const result = addMinutes(d, hour * 60 + minute);
     return new Date(result.toISOString());
   }
 
   const todayMatch = trimmed.match(/^(today|сегодня)\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/);
   if (todayMatch) {
     const [, , h, m] = todayMatch;
+    const hour = Number(h);
+    const minute = Number(m ?? 0);
+    if (!isValidClock(hour, minute)) return null;
     const d = startOfDay(ref);
-    const result = addMinutes(d, Number(h) * 60 + Number(m ?? 0));
+    const result = addMinutes(d, hour * 60 + minute);
     return new Date(result.toISOString());
   }
 
   const tomorrowMatch = trimmed.match(/^(tomorrow|завтра)(?:\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?)?$/);
   if (tomorrowMatch) {
     const [, , h, m] = tomorrowMatch;
+    const hour = Number(h ?? 0);
+    const minute = Number(m ?? 0);
+    if (!isValidClock(hour, minute)) return null;
     const d = startOfDay(addDays(ref, 1));
-    const result = addMinutes(d, Number(h ?? 0) * 60 + Number(m ?? 0));
+    const result = addMinutes(d, hour * 60 + minute);
     return new Date(result.toISOString());
   }
 
@@ -100,8 +113,11 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
   );
   if (dayAfterMatch) {
     const [, , h, m] = dayAfterMatch;
+    const hour = Number(h ?? 0);
+    const minute = Number(m ?? 0);
+    if (!isValidClock(hour, minute)) return null;
     const d = startOfDay(addDays(ref, 2));
-    const result = addMinutes(d, Number(h ?? 0) * 60 + Number(m ?? 0));
+    const result = addMinutes(d, hour * 60 + minute);
     return new Date(result.toISOString());
   }
 
@@ -144,8 +160,11 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
       const currentDay = ref.getDay();
       let daysToAdd = targetDay - currentDay;
       if (daysToAdd <= 0) daysToAdd += 7;
+      const hour = Number(h);
+      const minute = Number(m ?? 0);
+      if (!isValidClock(hour, minute)) return null;
       const d = startOfDay(addDays(ref, daysToAdd));
-      const result = addMinutes(d, Number(h) * 60 + Number(m ?? 0));
+      const result = addMinutes(d, hour * 60 + minute);
       return new Date(result.toISOString());
     }
   }
@@ -228,7 +247,9 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
       const day = Number(part2);
       const hour = h ? Number(h) : 0;
       const min = m ? Number(m) : 0;
+      if (!isValidClock(hour, min)) return null;
       const d = new TZDate(year, monthNum, day, hour, min, 0, 0, timezone);
+      if (d.getFullYear() !== year || d.getMonth() !== monthNum || d.getDate() !== day) return null;
       return new Date(d.toISOString());
     }
   }

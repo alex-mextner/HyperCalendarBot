@@ -1,30 +1,250 @@
 // src/bot/scenes/add-event.scene.ts
 
+import { TZDate } from '@date-fns/tz';
 import { Scene } from '@gramio/scenes';
-import { addMinutes } from 'date-fns';
-import { CB, t } from '../../config/constants.ts';
+import { addDays, addMinutes, endOfDay } from 'date-fns';
+import { InlineKeyboard } from 'gramio';
+import { CB, type Lang, t } from '../../config/constants.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
+import { handleCalculate } from '../../services/ai/tool-handlers/calculate.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import type { LocationVerificationService } from '../../services/location/location-verification-service.ts';
-import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
-import { botLogger } from '../../utils/logger.ts';
-import {
-  cancelKeyboard,
-  eventActionsKeyboard,
-  recurrenceEndKeyboard,
-  recurrenceKeyboard,
-  sceneHelpKeyboard,
-  skipKeyboard,
-} from '../keyboards.ts';
+import { parseDuration, parseRecurrence, parseSimpleDate } from '../../utils/date.ts';
+import { cmdLogger } from '../../utils/logger.ts';
+import { escapeHtml, splitMessage } from '../../utils/telegram.ts';
+import { eventActionsKeyboard } from '../keyboards.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
-import type { AddEventState } from './types.ts';
-
-/** Step indices that accept only button presses. Text input on these triggers AI (scene-pause Trigger 2). */
-export const CALLBACK_ONLY_STEP_INDICES = new Set([3, 4]); // recurrence (3), recurrence-end (4)
+import type { AddEventParams, AddEventState } from './types.ts';
 
 export function applyDefaultDuration(startAt: string, defaultMinutes: number): string {
   return addMinutes(new Date(startAt), defaultMinutes).toISOString();
+}
+
+type WizardDateTimeResult =
+  | { kind: 'complete'; startAt: string }
+  | { kind: 'needs_time'; localDate: string }
+  | { kind: 'ambiguous_number' }
+  | { kind: 'invalid' };
+
+function localDateKey(date: Date, timezone: string): string {
+  const local = new TZDate(date.getTime(), timezone);
+  return [
+    local.getFullYear(),
+    String(local.getMonth() + 1).padStart(2, '0'),
+    String(local.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function parseClockInput(input: string): { hour: number; minute: number } | null {
+  const match = input
+    .trim()
+    .toLowerCase()
+    .match(/^(?:(?:at|в)\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|утра|дня|вечера|ночи)?$/);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? 0);
+  const period = match[3];
+  if (minute > 59 || hour > 23 || (period && (hour < 1 || hour > 12))) return null;
+  if (period === 'pm' || period === 'дня' || period === 'вечера') {
+    if (hour < 12) hour += 12;
+  } else if (period && hour === 12) hour = 0;
+  return { hour, minute };
+}
+
+function calendarDate(year: number, month: number, day: number, timezone: string): Date | null {
+  const date = new TZDate(year, month - 1, day, 12, 0, 0, 0, timezone);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+    ? new Date(date.getTime())
+    : null;
+}
+
+function parseWizardDate(input: string, timezone: string, refDate = new Date(), bareDay = false): Date | null {
+  const ref = new TZDate(refDate.getTime(), timezone);
+  const text = input
+    .trim()
+    .toLowerCase()
+    .replace(/^(?:на|в)\s+/, '');
+  const relative: { [key: string]: number } = {
+    today: 0,
+    сегодня: 0,
+    tomorrow: 1,
+    завтра: 1,
+    послезавтра: 2,
+    'day after tomorrow': 2,
+  };
+  const offset = relative[text];
+  if (offset !== undefined) return addDays(ref, offset);
+  const weekdays: { [key: string]: number } = {
+    пн: 1,
+    понедельник: 1,
+    mon: 1,
+    monday: 1,
+    вт: 2,
+    вторник: 2,
+    tue: 2,
+    tuesday: 2,
+    ср: 3,
+    среда: 3,
+    среду: 3,
+    wed: 3,
+    wednesday: 3,
+    чт: 4,
+    четверг: 4,
+    thu: 4,
+    thursday: 4,
+    пт: 5,
+    пятница: 5,
+    пятницу: 5,
+    fri: 5,
+    friday: 5,
+    сб: 6,
+    суббота: 6,
+    субботу: 6,
+    sat: 6,
+    saturday: 6,
+    вс: 0,
+    воскресенье: 0,
+    sun: 0,
+    sunday: 0,
+  };
+  const weekday = weekdays[text];
+  if (weekday !== undefined) return addDays(ref, (weekday - ref.getDay() + 7) % 7 || 7);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (iso) return calendarDate(Number(iso[1]), Number(iso[2]), Number(iso[3]), timezone);
+  const numeric = /^(\d{1,2})[./](\d{1,2})(?:[./](\d{4}))?$/.exec(text);
+  if (numeric)
+    return calendarDate(Number(numeric[3] ?? ref.getFullYear()), Number(numeric[2]), Number(numeric[1]), timezone);
+  if (bareDay && /^\d{1,2}$/.test(text))
+    return calendarDate(ref.getFullYear(), ref.getMonth() + 1, Number(text), timezone);
+  const withYear = /^(.*[a-zа-яё])\s+(\d{4})$/i.exec(text);
+  const monthText = withYear ? withYear[1]! : text;
+  if (!/^(?:[a-zа-яё]+\s+\d{1,2}|\d{1,2}\s+[a-zа-яё]+)$/.test(monthText)) return null;
+  const monthRef = withYear ? new TZDate(Number(withYear[2]), 0, 1, 12, timezone) : ref;
+  return parseSimpleDate(monthText, timezone, monthRef);
+}
+
+function completeWizardTime(
+  localDate: string,
+  clock: { hour: number; minute: number },
+  timezone: string,
+): WizardDateTimeResult {
+  const time = `${String(clock.hour).padStart(2, '0')}:${String(clock.minute).padStart(2, '0')}`;
+  const result = handleCalculate({ expression: `${localDate} ${time} ${timezone} to UTC` });
+  return result.success && result.output ? { kind: 'complete', startAt: result.output } : { kind: 'invalid' };
+}
+
+export function parseWizardDateTime(
+  input: string,
+  timezone: string,
+  pendingDate?: string,
+  refDate = new Date(),
+): WizardDateTimeResult {
+  const text = input.trim();
+  const clock = parseClockInput(text);
+  if (pendingDate && clock) return completeWizardTime(pendingDate, clock, timezone);
+  if (/^\d{1,2}$/.test(text)) {
+    const value = Number(text);
+    if (value >= 1 && value <= 23) return { kind: 'ambiguous_number' };
+    const date = parseWizardDate(text, timezone, refDate, true);
+    return date ? { kind: 'needs_time', localDate: localDateKey(date, timezone) } : { kind: 'invalid' };
+  }
+  if (clock) return completeWizardTime(localDateKey(refDate, timezone), clock, timezone);
+  const combined = /^(.*?)\s+(?:(?:at|в)\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm|утра|дня|вечера|ночи)?)$/i.exec(text);
+  if (combined) {
+    const day = parseWizardDate(combined[1]!, timezone, refDate, true);
+    const time = parseClockInput(combined[2]!);
+    if (day && time) return completeWizardTime(localDateKey(day, timezone), time, timezone);
+  }
+  const date = parseWizardDate(text, timezone, refDate);
+  if (date) return { kind: 'needs_time', localDate: localDateKey(date, timezone) };
+  return { kind: 'invalid' };
+}
+
+function recurrenceUntilDate(input: string, timezone: string, startAt?: string): Date | null {
+  return parseWizardDate(input, timezone, startAt && /\d/.test(input) ? new Date(startAt) : new Date(), true);
+}
+
+function withRecurrenceEnd(rule: string, suffix: string): string {
+  const base = rule
+    .split(';')
+    .filter((part) => !part.startsWith('UNTIL=') && !part.startsWith('COUNT='))
+    .join(';');
+  return `${base};${suffix}`;
+}
+
+function recurrenceUntilValue(date: Date, timezone: string): string {
+  const localEnd = endOfDay(new TZDate(date.getTime(), timezone));
+  return new Date(localEnd.getTime())
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}/, '');
+}
+
+function wizardKeyboard(step: number, lang: Lang, number?: string): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  const wizardText = t(lang).addWizard;
+  if (step === 1) kb.text(wizardText.today, 'add:date:today').text(wizardText.tomorrow, 'add:date:tomorrow').row();
+  if (step === 2)
+    kb.text(wizardText.duration30, 'add:duration:30')
+      .text(wizardText.duration60, 'add:duration:60')
+      .text(wizardText.duration120, 'add:duration:120')
+      .row();
+  if (step === 3) {
+    kb.text(wizardText.none, `${CB.ADD_RECURRENCE}:none`).row();
+    for (const freq of ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'] as const)
+      kb.text(wizardText.frequencies[freq], `${CB.ADD_RECURRENCE}:${freq}`).row();
+  }
+  if (step === 4) {
+    if (number)
+      kb.text(wizardText.untilChoice(number), `${CB.ADD_REC_END}:until:${number}`)
+        .text(wizardText.countChoice(number), `${CB.ADD_REC_END}:count:${number}`)
+        .row();
+    kb.text(wizardText.noEnd, `${CB.ADD_REC_END}:forever`)
+      .text(wizardText.untilDate, `${CB.ADD_REC_END}:until`)
+      .text(wizardText.repeatCount, `${CB.ADD_REC_END}:count`)
+      .row();
+  }
+  if ([2, 5, 6].includes(step)) kb.text(t(lang).skip, `${CB.ADD_SKIP}:${step}`).row();
+  if (step === 7) kb.text(wizardText.confirm, 'add:confirm').row();
+  if (step > 0) kb.text(wizardText.back, `add:back:${step}`);
+  return kb.text(wizardText.cancel, CB.ADD_CANCEL);
+}
+
+function draftPreview(state: AddEventState, lang: Lang, timezone: string): string {
+  const wizardText = t(lang).addWizard;
+  const local = (value: string) =>
+    new Intl.DateTimeFormat(lang, { timeZone: timezone, dateStyle: 'medium', timeStyle: 'short' }).format(
+      new Date(value),
+    );
+  const field = (value: string | undefined, limit: number) =>
+    escapeHtml(value ? value.slice(0, limit) + (value.length > limit ? '…' : '') : wizardText.none);
+  const lines = [
+    `<b>${wizardText.preview}</b>`,
+    `${wizardText.title}: ${field(state.title, 300)}`,
+    `${wizardText.date}: ${state.startAt ? local(state.startAt) : '—'} (${escapeHtml(timezone)})`,
+  ];
+  if (state.endAt) lines.push(`${wizardText.end}: ${local(state.endAt)}`);
+  let repeat: string = wizardText.none;
+  const freq = /FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)/.exec(state.recurrenceRule ?? '')?.[1];
+  if (freq === 'DAILY' || freq === 'WEEKLY' || freq === 'MONTHLY' || freq === 'YEARLY') {
+    repeat = wizardText.frequencies[freq];
+    const interval = /INTERVAL=(\d+)/.exec(state.recurrenceRule ?? '')?.[1];
+    const count = /COUNT=(\d+)/.exec(state.recurrenceRule ?? '')?.[1];
+    const until = /UNTIL=(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/.exec(state.recurrenceRule ?? '');
+    if (interval) repeat += ` · ${wizardText.interval(Number(interval))}`;
+    if (count) repeat += ` · ${wizardText.count(Number(count))}`;
+    if (until)
+      repeat += ` · ${wizardText.until(local(`${until[1]}-${until[2]}-${until[3]}T${until[4]}:${until[5]}:${until[6]}Z`))}`;
+  }
+  lines.push(
+    `${wizardText.repeat}: ${repeat}`,
+    `${wizardText.description}: ${field(state.description, 1300)}`,
+    `${wizardText.location}: ${field(state.location, 500)}`,
+    '',
+    wizardText.previewHint,
+  );
+  return lines.join('\n');
 }
 
 export function createAddEventScene(
@@ -34,296 +254,282 @@ export function createAddEventScene(
   onEventCreated?: (userId: number, eventId: number) => Promise<void>,
   locationVerification?: Pick<LocationVerificationService, 'verifyEventLocation'>,
 ) {
-  return (
-    new Scene('add_event')
-      .state<AddEventState>()
-      .extend(userComposer)
-      // Step 0: Title (text + cancel button)
-      .step(['message', 'callback_query'], async (context) => {
-        const { lang } = context;
-        if (context.is('callback_query')) {
-          await context.answer();
-          await context.scene.exit();
-          await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
-          return;
+  // Bounded FIFO of actual confirmations, not abandoned drafts; prevents concurrent duplicate writes.
+  const submissions = new Map<string, Promise<number>>();
+  const scene = new Scene('add_event').params<AddEventParams>().state<AddEventState>().extend(userComposer);
+  for (let step = 0; step < 8; step++) {
+    scene.step(['message', 'callback_query'], async (context) => {
+      const { lang, dbUser: user } = context;
+      if (!user) return;
+      const wizardText = t(lang).addWizard;
+      const state = context.scene.state;
+      const timezone = state.timezone ?? context.scene.params?.timezone ?? user.timezone;
+      const show = async (text: string, number?: string, html = false) => {
+        const chunks = splitMessage(text, 4000, html ? 'HTML' : undefined);
+        for (const [index, chunk] of chunks.entries()) {
+          const last = index === chunks.length - 1;
+          const message = await context.send(chunk, {
+            ...(last ? { reply_markup: wizardKeyboard(step, lang, number) } : {}),
+            ...(html ? { parse_mode: 'HTML' as const } : {}),
+          });
+          if (last) await context.scene.update({ promptMessageId: message.id }, { step: undefined });
         }
-        if (context.scene.step.firstTime) {
-          await context.send(t(lang).add_title_prompt, { reply_markup: cancelKeyboard(lang) });
-          return;
-        }
-        const text = context.text;
-        if (!text?.trim()) {
-          await context.send(t(lang).add_title_prompt, { reply_markup: cancelKeyboard(lang) });
-          return;
-        }
-        await context.scene.update({ title: text.trim() });
-      })
-      // Step 1: Date/Time (text + cancel button)
-      .step(['message', 'callback_query'], async (context) => {
-        const { lang, dbUser: user } = context;
-        if (context.is('callback_query')) {
-          await context.answer();
-          await context.scene.exit();
-          await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
-          return;
-        }
-        if (context.scene.step.firstTime) {
-          await context.send(t(lang).add_time_prompt, { reply_markup: cancelKeyboard(lang) });
-          return;
-        }
-        const text = context.text;
-        if (!text) return;
-        const parsed = parseSimpleDate(text, user?.timezone ?? 'UTC');
-        if (!parsed) {
-          await context.send(
-            lang === 'ru'
-              ? 'Не могу разобрать дату. Попробуйте: "завтра 15:00"'
-              : 'Can\'t parse that date. Try: "tomorrow 15:00"',
-            { reply_markup: sceneHelpKeyboard(lang) },
+      };
+      if (context.scene.step.firstTime) {
+        if (step === 0 && context.scene.params?.title && !state.title) {
+          const params = context.scene.params;
+          await context.scene.update(
+            {
+              title: params.title,
+              timezone,
+              groupId: params.groupId,
+              pendingDate: params.pendingDate,
+              startAt: params.startAt,
+            },
+            { step: params.startAt ? 2 : 1 },
           );
           return;
         }
-        await context.scene.update({ startAt: parsed.toISOString() });
-      })
-      // Step 2: Duration (text + skip button)
-      .step(['message', 'callback_query'], async (context) => {
-        const { lang } = context;
-        if (context.scene.step.firstTime) {
-          await context.send(t(lang).add_duration_prompt, {
-            reply_markup: skipKeyboard(lang, 2),
-          });
+        if (step === 0)
+          await context.scene.update({ timezone, groupId: context.scene.params?.groupId }, { step: undefined });
+        const prompts = [
+          t(lang).add_title_prompt,
+          state.pendingDate ? wizardText.askTime(state.pendingDate) : t(lang).add_time_prompt,
+          wizardText.duration(user.default_event_duration_minutes ?? 60),
+          t(lang).recurrence_prompt,
+          t(lang).recurrence_end_prompt,
+          t(lang).add_description_prompt,
+          t(lang).add_location_prompt,
+        ];
+        await show(step === 7 ? draftPreview(state, lang, timezone) : prompts[step]!, undefined, step === 7);
+        return;
+      }
+      let text = context.is('message') ? context.text?.trim() : undefined;
+      let callback = '';
+      if (context.is('callback_query')) {
+        callback = context.data ?? '';
+        if (state.promptMessageId !== undefined && context.message?.id !== state.promptMessageId) {
+          await context.answer({ text: wizardText.stale });
           return;
         }
-
-        // Handle cancel/skip callbacks
-        if (context.is('callback_query')) {
-          const data = context.data;
-          if (data === CB.ADD_CANCEL) {
-            await context.answer();
-            await context.scene.exit();
-            await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
-            return;
-          }
-          if (data === `${CB.ADD_SKIP}:2`) {
-            await context.answer();
-            const defaultMins = context.dbUser?.default_event_duration_minutes ?? 60;
-            const { startAt } = context.scene.state;
-            if (startAt) {
-              await context.scene.update({ endAt: applyDefaultDuration(startAt, defaultMins) });
-            } else {
-              await context.scene.update({});
-            }
-            return;
-          }
-          await context.answer();
-          return;
-        }
-
-        // Handle text input
-        const text = context.text;
-        if (!text) return;
-
-        const { startAt } = context.scene.state;
-        if (!startAt) {
-          await context.scene.exit();
-          return;
-        }
-
-        const mins = parseDuration(text);
-        if (!mins) {
-          await context.send(
-            lang === 'ru'
-              ? 'Не понял. Примеры: 1ч, 30м, 1ч30м, 1 час 30 минут.'
-              : "Can't parse. Examples: 1h, 30m, 1h30m, 1 hour 30 min.",
-            { reply_markup: sceneHelpKeyboard(lang) },
-          );
-          return;
-        }
-        await context.scene.update({ endAt: addMinutes(new Date(startAt), mins).toISOString() });
-      })
-      // Step 3: Recurrence (button selection only — text input is handled by AI via Trigger 2)
-      .step('callback_query', async (context) => {
-        const { lang } = context;
-        if (context.scene.step.firstTime) {
-          await context.send(t(lang).recurrence_prompt, {
-            reply_markup: recurrenceKeyboard(lang),
-          });
-          return;
-        }
-
-        const data = context.data;
-        if (!data) return;
-        if (data === CB.ADD_CANCEL) {
-          await context.answer();
-          await context.scene.exit();
-          await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
-          return;
-        }
-        const value = data.replace(`${CB.ADD_RECURRENCE}:`, '');
         await context.answer();
-
-        if (value === 'none') {
-          await context.scene.update({ recurrenceRule: null });
-          // Skip recurrence-end step (step 4) → jump to description (step 5)
-          await context.scene.step.go(5, true);
+        if (callback === CB.ADD_CANCEL) {
+          await context.scene.exit();
+          await context.send(wizardText.cancelled);
           return;
         }
-
+        if (callback === `add:back:${step}` && step > 0) {
+          const previous = step === 5 && !state.recurrenceRule ? 3 : step - 1;
+          await context.scene.step.go(previous, true);
+          return;
+        }
+        if (callback === CB.SCENE_HELP) {
+          await context.scene.step.go(step, true);
+          return;
+        }
+      }
+      const skip = callback === `${CB.ADD_SKIP}:${step}` || (text !== undefined && /^(?:skip|пропустить)$/i.test(text));
+      if (step === 0) {
+        if (!text) {
+          await show(t(lang).add_title_prompt);
+          return;
+        }
+        await context.scene.update({ title: text });
+      } else if (step === 1) {
+        if (callback === 'add:date:today') text = 'today';
+        if (callback === 'add:date:tomorrow') text = 'tomorrow';
+        if (!text) {
+          await show(wizardText.unsupported);
+          return;
+        }
+        const parsed = parseWizardDateTime(text, timezone, state.pendingDate);
+        if (parsed.kind === 'needs_time') {
+          await context.scene.update({ pendingDate: parsed.localDate, startAt: undefined }, { step: undefined });
+          await show(wizardText.askTime(parsed.localDate));
+        } else if (parsed.kind === 'complete') {
+          await context.scene.update({ startAt: parsed.startAt, pendingDate: undefined, endAt: undefined });
+        } else await show(parsed.kind === 'ambiguous_number' ? wizardText.ambiguousDate : wizardText.invalidDate);
+      } else if (step === 2) {
+        const quick = /^add:duration:(30|60|120)$/.exec(callback)?.[1];
+        const minutes = skip ? (user.default_event_duration_minutes ?? 60) : parseDuration(quick ?? text ?? '');
+        if (!state.startAt) {
+          await context.scene.step.go(1, true);
+          return;
+        }
+        if (!minutes || !Number.isFinite(minutes) || minutes > 525600) {
+          await show(wizardText.invalidDuration);
+          return;
+        }
+        await context.scene.update({ endAt: applyDefaultDuration(state.startAt, minutes) });
+      } else if (step === 3) {
+        const value = /^ar:(none|DAILY|WEEKLY|MONTHLY|YEARLY|custom)$/.exec(callback)?.[1];
+        if (value === 'none' || /^(?:нет|не повторять|без повторения|none|no|never)$/i.test(text ?? '')) {
+          await context.scene.update({ recurrenceRule: null, recEndMode: undefined }, { step: 5 });
+          return;
+        }
         if (value === 'custom') {
-          await context.send(t(lang).recurrence_custom_prompt, { reply_markup: sceneHelpKeyboard(lang) });
+          await show(t(lang).recurrence_custom_prompt);
           return;
         }
-
-        // DAILY, WEEKLY, MONTHLY, YEARLY
-        await context.scene.update({ recurrenceRule: `FREQ=${value}` });
-      })
-      // Step 4: Recurrence End (button selection only — text input is handled by AI via Trigger 2)
-      .step('callback_query', async (context) => {
-        const { lang } = context;
-        if (context.scene.step.firstTime) {
-          await context.send(t(lang).recurrence_end_prompt, {
-            reply_markup: recurrenceEndKeyboard(lang),
+        const rule = value ? `FREQ=${value}` : undefined;
+        const parsed = text ? parseRecurrence(text) : null;
+        if (rule) await context.scene.update({ recurrenceRule: rule, recEndMode: undefined });
+        else if (parsed && parsed.interval >= 1 && parsed.interval <= 999)
+          await context.scene.update({
+            recurrenceRule: `FREQ=${parsed.freq}${parsed.interval === 1 ? '' : `;INTERVAL=${parsed.interval}`}`,
+            recEndMode: undefined,
+          });
+        else await show(wizardText.invalidRepeat);
+      } else if (step === 4) {
+        if (!state.recurrenceRule) {
+          await context.scene.step.go(3, true);
+          return;
+        }
+        const mode = /^are:(forever|until|count)(?::(\d{1,3}))?$/.exec(callback);
+        let recEndMode = state.recEndMode;
+        if (mode?.[1] === 'forever' || /^(?:forever|no end|бесконечно|без конца|никогда)$/i.test(text ?? '')) {
+          await context.scene.update({
+            recurrenceRule: state.recurrenceRule
+              .split(';')
+              .filter((part) => !/^(?:UNTIL|COUNT)=/.test(part))
+              .join(';'),
+            recEndMode: undefined,
           });
           return;
         }
-
-        const data = context.data;
-        if (!data) return;
-        if (data === CB.ADD_CANCEL) {
-          await context.answer();
-          await context.scene.exit();
-          await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
+        if (mode?.[1] === 'until' || mode?.[1] === 'count') {
+          recEndMode = mode[1];
+          await context.scene.update({ recEndMode }, { step: undefined });
+          if (!mode[2]) {
+            await show(recEndMode === 'until' ? t(lang).recurrence_until_prompt : t(lang).recurrence_count_prompt);
+            return;
+          }
+          text = mode[2];
+        }
+        if (!text) {
+          await show(wizardText.unsupported);
           return;
         }
-        const value = data.replace(`${CB.ADD_REC_END}:`, '');
-        await context.answer();
-
-        if (value === 'forever') {
-          await context.scene.update({});
+        if (!recEndMode && /^\d+$/.test(text)) {
+          await show(wizardText.ambiguousEnd(text), text);
           return;
         }
-
-        if (value === 'until') {
-          await context.scene.update({ recEndMode: 'until' }, { step: undefined });
-          await context.send(t(lang).recurrence_until_prompt, { reply_markup: sceneHelpKeyboard(lang) });
-          return;
-        }
-
-        if (value === 'count') {
-          await context.scene.update({ recEndMode: 'count' }, { step: undefined });
-          await context.send(t(lang).recurrence_count_prompt, { reply_markup: sceneHelpKeyboard(lang) });
-          return;
-        }
-      })
-      // Step 5: Description (text + skip button)
-      .step(['message', 'callback_query'], async (context) => {
-        const { lang } = context;
-        if (context.scene.step.firstTime) {
-          await context.send(t(lang).add_description_prompt, {
-            reply_markup: skipKeyboard(lang, 5),
+        const countMatch = /^(\d+)\s*(?:раз|повторений|повторения|повторение|times|repeats)?$/i.exec(text);
+        const countWasWrittenExplicitly = !recEndMode && countMatch !== null && !/^\d+$/.test(text);
+        if (recEndMode === 'count' || countWasWrittenExplicitly) {
+          const count = countMatch ? Number(countMatch[1]) : 0;
+          if (count < 1 || count > 999) {
+            await show(wizardText.invalidCount);
+            return;
+          }
+          await context.scene.update({
+            recurrenceRule: withRecurrenceEnd(state.recurrenceRule, `COUNT=${count}`),
+            recEndMode: undefined,
           });
           return;
         }
-
-        if (context.is('callback_query')) {
-          const data = context.data;
-          if (data === CB.ADD_CANCEL) {
-            await context.answer();
-            await context.scene.exit();
-            await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
-            return;
-          }
-          if (data === `${CB.ADD_SKIP}:5`) {
-            await context.answer();
-            await context.scene.update({});
-            return;
-          }
-          await context.answer();
+        const date = recurrenceUntilDate(text.replace(/^(?:до|until)\s+/i, ''), timezone, state.startAt);
+        if (
+          !date ||
+          (state.startAt && endOfDay(new TZDate(date, timezone)).getTime() < new Date(state.startAt).getTime())
+        ) {
+          await show(wizardText.invalidEnd);
           return;
         }
-
-        const text = context.text;
-        if (!text) return;
-        await context.scene.update({ description: text });
-      })
-      // Step 6: Location → create event (text + skip button)
-      .step(['message', 'callback_query'], async (context) => {
-        const { lang, dbUser: user } = context;
-        if (context.scene.step.firstTime) {
-          await context.send(t(lang).add_location_prompt, {
-            reply_markup: skipKeyboard(lang, 6),
-          });
+        await context.scene.update({
+          recurrenceRule: withRecurrenceEnd(state.recurrenceRule, `UNTIL=${recurrenceUntilValue(date, timezone)}`),
+          recEndMode: undefined,
+        });
+      } else if (step === 5 || step === 6) {
+        if (!skip && !text) {
+          await show(wizardText.unsupported);
           return;
         }
-        if (!user) return;
-
-        let location: string | undefined;
-
-        if (context.is('callback_query')) {
-          const data = context.data;
-          if (data === CB.ADD_CANCEL) {
-            await context.answer();
-            await context.scene.exit();
-            await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
-            return;
-          }
-          if (data === `${CB.ADD_SKIP}:6`) {
-            await context.answer();
-            location = undefined;
-          } else {
-            await context.answer();
-            return;
-          }
-        } else {
-          const text = context.text;
-          if (!text) return;
-          location = text;
+        if (step === 5)
+          await context.scene.update({ description: skip ? undefined : context.is('message') ? context.text : text });
+        else await context.scene.update({ location: skip ? undefined : text });
+      } else if (step === 7) {
+        if (callback !== 'add:confirm') {
+          await show(draftPreview(state, lang, timezone), undefined, true);
+          return;
         }
-
-        const { title, startAt, endAt, description, recurrenceRule } = context.scene.state;
+        const { title, startAt, endAt, description, location, recurrenceRule } = state;
         if (!title || !startAt) {
-          await context.scene.exit();
+          await show(wizardText.missing);
           return;
         }
-
-        const event = eventService.createEvent({
-          user_id: user.telegram_id,
-          title,
-          start_at: startAt,
-          end_at: endAt,
-          timezone: user.timezone,
-          description,
-          location,
-          recurrence_rule: recurrenceRule ?? undefined,
-        });
-
-        actionLogRepo?.insert({
-          user_id: user.telegram_id,
-          chat_id: Number(context.chatId ?? user.telegram_id),
-          action_type: 'scene',
-          action_name: 'create_event',
-          message_id: typeof context.id === 'number' ? context.id : undefined,
-          input_summary: title,
-          result_summary: `id: ${event.id}`,
-          target_event_id: event.id,
-          metadata: JSON.stringify({ startAt, endAt, recurrenceRule }),
-        });
-
-        onEventCreated?.(user.telegram_id, event.id).catch(() => {});
-
-        // Same verification and clarification flow as the AI create_event tool.
-        if (event.location && locationVerification) {
-          locationVerification
-            .verifyEventLocation(event, user)
-            .catch((err) => botLogger.error({ err, eventId: event.id }, 'Background location verification failed'));
+        const key = `${user.telegram_id}:${context.chatId}:${state.promptMessageId}`;
+        let saved = submissions.get(key);
+        if (!saved) {
+          saved = (async () => {
+            if (state.createdEventId) return state.createdEventId;
+            const event = eventService.createEvent({
+              user_id: user.telegram_id,
+              title,
+              start_at: startAt,
+              end_at: endAt,
+              timezone,
+              description,
+              location,
+              recurrence_rule: recurrenceRule ?? undefined,
+              ...(state.groupId
+                ? { owner_type: 'group' as const, group_id: state.groupId, created_by: user.telegram_id }
+                : {}),
+            });
+            await context.scene.update({ createdEventId: event.id }, { step: undefined });
+            actionLogRepo?.insert({
+              user_id: user.telegram_id,
+              chat_id: Number(context.chatId ?? user.telegram_id),
+              action_type: 'scene',
+              action_name: 'create_event',
+              input_summary: title,
+              result_summary: `id: ${event.id}`,
+              target_event_id: event.id,
+              metadata: JSON.stringify({ startAt, endAt, recurrenceRule }),
+            });
+            onEventCreated?.(user.telegram_id, event.id).catch((err) =>
+              cmdLogger.error({ err, eventId: event.id }, 'Event saved; post-create delivery failed'),
+            );
+            if (event.location && locationVerification) {
+              locationVerification
+                .verifyEventLocation(event, user)
+                .catch((err) =>
+                  cmdLogger.error({ err, eventId: event.id }, 'Event saved; location verification failed'),
+                );
+            }
+            return event.id;
+          })();
+          submissions.set(key, saved);
+          if (submissions.size > 1000) {
+            const oldest = submissions.keys().next().value;
+            if (oldest) submissions.delete(oldest);
+          }
         }
-
-        await context.scene.exit();
-        const detail = formatEventDetail(event, user.timezone, lang);
-        await context.send(`${t(lang).event_created(title)}\n\n${detail}`, {
-          parse_mode: 'HTML',
-          reply_markup: eventActionsKeyboard(event.id, lang),
-        });
-      })
-  );
+        try {
+          const id = await saved;
+          await context.scene.exit();
+          const event = eventService.getEvent(id, user.telegram_id);
+          if (!event) {
+            await context.send(wizardText.saveFailed);
+            return;
+          }
+          const receipt = splitMessage(
+            `${t(lang).event_created(escapeHtml(title))}\n\n${formatEventDetail(event, timezone, lang)}`,
+            4000,
+            'HTML',
+          );
+          for (const [index, chunk] of receipt.entries()) {
+            await context.send(chunk, {
+              parse_mode: 'HTML',
+              ...(index === receipt.length - 1 ? { reply_markup: eventActionsKeyboard(id, lang) } : {}),
+            });
+          }
+        } catch (err) {
+          cmdLogger.error({ err, userId: user.telegram_id }, 'Add-event save or receipt failed');
+          await context.send(wizardText.saveFailed);
+        }
+      }
+    });
+  }
+  return scene;
 }

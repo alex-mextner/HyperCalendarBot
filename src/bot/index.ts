@@ -46,6 +46,7 @@ import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import type { ParseMode } from '../utils/telegram.ts';
+import { resolveCallbackButtonLabel } from './callback-label.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
@@ -616,7 +617,11 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             conversationLogger.logUserMessage(user.telegram_id, answerText, logChatId),
           );
         } else {
-          conversationLogger.logButtonPress(user.telegram_id, action, payload || undefined, logChatId);
+          const callbackMessage = context.update?.callback_query?.message;
+          const replyMarkup =
+            callbackMessage && 'reply_markup' in callbackMessage ? callbackMessage.reply_markup : undefined;
+          const buttonLabel = resolveCallbackButtonLabel(replyMarkup, callbackData, action);
+          conversationLogger.logButtonPress(user.telegram_id, buttonLabel, payload || undefined, logChatId);
           // Log callback to action log
           const cbMsgId = context.update?.callback_query?.message?.message_id;
           db.actionLog.insert({
@@ -706,7 +711,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       handleWeek(ctx, eventService, holidayService, renderService, db.groupChats, weatherService),
     )
     .command('month', (ctx) => handleMonth(ctx, eventService, undefined, renderService, db.groupChats))
-    .command('add', (ctx) => handleAdd(ctx, eventService, scenesSetup.scenes.addEventScene, db.groupChats))
+    .command('add', (ctx) => handleAdd(ctx, scenesSetup.scenes.addEventScene, db.groupChats))
     .command('edit', (ctx) => handleEdit(ctx, eventService, db.groupChats))
     .command('delete', (ctx) => handleDelete(ctx, eventService, db.groupChats))
     .command('search', (ctx) => handleSearch(ctx, eventService, db.groupChats))
