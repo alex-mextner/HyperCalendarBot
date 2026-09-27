@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import type { FeatureKey } from '../../database/repositories/feature-usage.repository.ts';
 import { logger } from '../../utils/logger.ts';
 import { checkDayReferences, checkQuestionWeekdays } from './day-reference-guard.ts';
+import { extractEventSummaries } from './event-summaries.ts';
 import { handleGetActionLog } from './tool-handlers/action-log.ts';
 import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
 import { handleCalculate } from './tool-handlers/calculate.ts';
@@ -464,10 +465,13 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
       throttleMap.set(throttleKey, now);
     }
 
-    // Track which event was touched, for last_mentioned_event resolution in intents
+    // Track which event was touched, for last_mentioned_event resolution in intents,
+    // and every event the model was shown, as evidence for the reply-time guard.
     if (result.success) {
       const eventId = extractEventId(input as ToolInputMap[ToolName], result);
       if (eventId !== undefined) ctx.onEventMentioned?.(eventId);
+      const surfaced = extractEventSummaries(result.data);
+      if (surfaced) ctx.surfacedEvents = [...(ctx.surfacedEvents ?? []), ...surfaced];
     }
 
     // Track feature usage for tip personalization

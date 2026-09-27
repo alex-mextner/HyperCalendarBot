@@ -1,6 +1,7 @@
 import { t, toLang } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
 import { canResolveRecipientUsername, normalizeRecipientUsername } from '../recipient-identity.ts';
+import { correctUtcClockTimes, eventClocksForRun } from '../reply-time-guard.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { handleDeleteConfirmationRequest } from './events.ts';
 
@@ -94,17 +95,26 @@ export async function handleAskUser(
   input: { question: string; options: string[]; event_ids?: number[] },
 ): Promise<ToolResult> {
   if (input.event_ids && input.event_ids.length > 0) return handleDeleteConfirmationRequest(ctx, input.event_ids);
+  // The question goes to the user verbatim, so the reply-time guard runs here too (#498).
+  const question = correctUtcClockTimes(input.question, eventClocksForRun(ctx), ctx.user.timezone);
+  const agentHint =
+    question === input.question
+      ? undefined
+      : `Your question showed event times in UTC; the user saw them in local time instead: "${question}"`;
+  if (agentHint)
+    metaLogger.warn({ userId: ctx.user.telegram_id }, 'ask_user question showed UTC times as local — corrected');
   if (ctx.inputMode === 'live_call') {
     // During a call, no buttons — speak the question with options as numbered list
     const optionText = input.options.map((o, i) => `${i + 1}. ${o}`).join(', ');
     return {
       success: true,
-      output: t(toLang(ctx.user.language)).writeOutcomes.spokenQuestion(input.question, optionText),
+      output: t(toLang(ctx.user.language)).writeOutcomes.spokenQuestion(question, optionText),
       awaitingInput: {
         kind: 'speech',
-        question: t(toLang(ctx.user.language)).writeOutcomes.spokenQuestion(input.question, optionText),
+        question: t(toLang(ctx.user.language)).writeOutcomes.spokenQuestion(question, optionText),
       },
       stopLoop: true,
+      agentHint,
     };
   }
   if (!ctx.sender?.sendButtons) {
@@ -114,7 +124,7 @@ export async function handleAskUser(
   const options = input.options.some((o) => o === CANCEL) ? input.options : [...input.options, CANCEL];
   const userId = ctx.isGroup ? ctx.user.telegram_id : undefined;
   try {
-    await ctx.sender.sendButtons(ctx.chatId, input.question, options, 'HTML', userId);
+    await ctx.sender.sendButtons(ctx.chatId, question, options, 'HTML', userId);
   } catch (err) {
     metaLogger.error({ err }, 'Failed to send buttons');
     return { success: false, error: 'ASK_USER_DELIVERY_FAILED: failed to send the question to the user.' };
@@ -124,6 +134,7 @@ export async function handleAskUser(
     output: t(ctx.user.language).aiTools.meta.questionSent,
     awaitingInput: { kind: 'chat' },
     stopLoop: true,
+    agentHint,
   };
 }
 handleAskUser.meta = { skipActionLog: true } satisfies ToolHandlerMeta;
