@@ -1,6 +1,6 @@
 // src/services/location/location-verification-service.ts
 
-import type { TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
+import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { t } from '../../config/constants.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
@@ -8,6 +8,7 @@ import type { UserRepository } from '../../database/repositories/user.repository
 import type { CalendarEvent, User } from '../../database/types.ts';
 import { botLogger } from '../../utils/logger.ts';
 import { formatInvitation } from '../event/formatters.ts';
+import { invitationRsvpKeyboard } from '../sharing/invitation-rsvp-keyboard.ts';
 import type { AddressCache } from './address-cache.ts';
 import type { GeocodedLocation, GeocodingService } from './geocoding-service.ts';
 import type { LocationCandidateStore } from './location-candidate-store.ts';
@@ -31,8 +32,13 @@ export interface LocationVerificationDeps {
     text: string,
     options?: { parse_mode?: ParseMode; reply_markup?: ReplyMarkup },
   ) => Promise<void>;
-  /** Callback to edit an existing invitation message */
-  editMessage?: (chatId: number, messageId: number, text: string, parseMode?: ParseMode) => Promise<void>;
+  /** Callback to edit an existing invitation message; the edit replaces its inline keyboard with `reply_markup` */
+  editMessage?: (
+    chatId: number,
+    messageId: number,
+    text: string,
+    options: { parse_mode: ParseMode; reply_markup: InlineKeyboard },
+  ) => Promise<void>;
 }
 
 export interface LocationVerificationResult {
@@ -265,26 +271,29 @@ export class LocationVerificationService {
     }
   }
 
-  /** Update all invitation messages for an event after location is resolved */
+  /**
+   * Re-render delivered invitation cards the invitee has not answered yet, keeping their RSVP keyboard
+   * (a Telegram text edit without reply_markup deletes the buttons). Answered invitations are left alone:
+   * the RSVP callback already replaced that card with the invitee's status and event details, and
+   * EventChangeNotifier tells accepted/maybe participants about the location change.
+   */
   private async updateInvitationMessages(event: CalendarEvent): Promise<void> {
     if (!this.deps.editMessage) return;
 
-    // Find all invitations (pending + accepted) that have been delivered
-    const pending = this.deps.invitationRepo.getPendingForEvent(event.id);
-    const accepted = this.deps.invitationRepo.getAcceptedForEvent(event.id);
-    const allInvitations = [...pending, ...accepted];
+    const unanswered = this.deps.invitationRepo.getPendingForEvent(event.id).filter((inv) => inv.status === 'pending');
 
-    for (const inv of allInvitations) {
+    for (const inv of unanswered) {
       if (!inv.message_id || !inv.chat_id) continue;
 
       try {
         const inviter = this.deps.userRepo.findByTelegramId(inv.inviter_id);
         const invitee = this.deps.userRepo.findByTelegramId(inv.invitee_id);
+        const inviteeLang = invitee?.language ?? 'en';
 
         const text = formatInvitation(
           event,
           event.timezone,
-          invitee?.language ?? 'en',
+          inviteeLang,
           inviter?.first_name ?? inviter?.username ?? 'User',
           inv.inviter_id,
           inviter?.username,
@@ -292,7 +301,10 @@ export class LocationVerificationService {
           invitee?.onboarding_completed === 1,
         );
 
-        await this.deps.editMessage(inv.chat_id, inv.message_id, text, 'HTML');
+        await this.deps.editMessage(inv.chat_id, inv.message_id, text, {
+          parse_mode: 'HTML',
+          reply_markup: invitationRsvpKeyboard(inv.id, inviteeLang),
+        });
       } catch (err) {
         logger.warn(
           { err, invitationId: inv.id, eventId: event.id },
