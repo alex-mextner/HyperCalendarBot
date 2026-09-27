@@ -40,8 +40,14 @@ import { renderConflictImage } from '../../services/image/render-conflict.ts';
 import type { ImageRenderer } from '../../services/image/render-service.ts';
 import type { AdminEditSession } from '../../services/intent/admin-edit-session.ts';
 import { ConflictService } from '../../services/invite/conflict-service.ts';
+import { formatLocationHtml } from '../../services/location/format-location.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { SceneName, ScenePauseService } from '../../services/scene-pause.ts';
+import {
+  formatAnsweredInvitationCard,
+  invitationAnswerLabel,
+} from '../../services/sharing/answered-invitation-card.ts';
+import { invitationRsvpKeyboard } from '../../services/sharing/invitation-rsvp-keyboard.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import { guessCountryFromTimezone, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
@@ -73,6 +79,7 @@ import { getGroupId, isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
 import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
 import type { BotCallbackContext } from '../types.ts';
+import { type AgentContinuationDeps, continueWithAgent } from './agent-continuation.ts';
 import { handleNotifyCallback } from './notify-callback.ts';
 import { handleSnoozeCallback } from './snooze-callback.ts';
 
@@ -114,7 +121,10 @@ export interface CallbackHandlerOpts {
   invitationService?: InvitationService;
   eventRepo?: EventRepository;
   chatHistoryRepo?: ChatHistoryRepository;
+  /** Runs the AI on an `ai_btn` answer; the logging middleware already saved it to chat_history. */
   onAiButtonClick?: (userId: number, chatId: number, text: string) => Promise<void>;
+  /** Runs the AI on a bot-composed turn (recipient confirmation), saving it to chat_history first. */
+  agentContinuation?: AgentContinuationDeps;
   oauthDeps?: {
     oauthService: GoogleOAuthService;
     stateStore: { set(key: string, value: string, ttl: number): Promise<void> };
@@ -201,6 +211,7 @@ export function createCallbackHandler(
     eventRepo,
     chatHistoryRepo,
     onAiButtonClick,
+    agentContinuation,
     oauthDeps,
     invitationNotifyDeps,
     onboardingScene,
@@ -233,7 +244,7 @@ export function createCallbackHandler(
     const answer = async (text?: string) => {
       await ctx.answer(text ? { text } : undefined).catch(() => {});
     };
-    if (!onAiButtonClick || ctx.from.id !== user.telegram_id) {
+    if (!agentContinuation || ctx.from.id !== user.telegram_id) {
       await answer(t(user.language).aiTools.meta.recipientUnverified);
       return;
     }
@@ -244,10 +255,10 @@ export function createCallbackHandler(
     }
     await answer();
     try {
-      await onAiButtonClick(
-        user.telegram_id,
-        user.telegram_id,
+      await continueWithAgent(
+        user,
         `Confirmed recipient Telegram ID ${approved.recipientId} for event ${approved.eventId}. Send that invitation with force=true; do not change the ID or use a conflicting username.`,
+        agentContinuation,
       );
       finishRecipientApproval(payload, false);
     } catch (error) {
@@ -842,14 +853,13 @@ export function createCallbackHandler(
                 !!inviteeUser?.onboarding_completed,
               )
             : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
-          const keyboard = new InlineKeyboard()
-            .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-            .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
-            .row()
-            .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
-            .text(t(inviteeLang).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);
           invitationNotifyDeps
-            .editMessage(invitation.chat_id, invitation.message_id, originalText, keyboard)
+            .editMessage(
+              invitation.chat_id,
+              invitation.message_id,
+              originalText,
+              invitationRsvpKeyboard(invitation.id, inviteeLang),
+            )
             .catch(() => {});
         }
       }
@@ -873,43 +883,21 @@ export function createCallbackHandler(
     }
 
     if (result.success) {
-      const statusLabel =
-        subAction === 'accept'
-          ? t(lang).invitation_accepted
-          : subAction === 'decline'
-            ? t(lang).invitation_declined
-            : t(lang).invitation_maybe;
-      await ctx.answer(statusLabel);
+      const answer = subAction === 'accept' ? 'accepted' : subAction === 'decline' ? 'declined' : 'maybe';
+      await ctx.answer(invitationAnswerLabel(answer, lang));
 
       const event = eventRepo?.findById(result.invitation?.event_id ?? 0, result.invitation?.inviter_id ?? 0);
-      // Fetch forecast anchored to event start (hourly when within 48h, daily within 7 days).
-      // For all-day events the daily forecast is used regardless — no midnight temperature.
-      const forecast =
-        weatherService && event && subAction === 'accept'
-          ? await weatherService
-              .getForecastAt(user.timezone, new Date(event.start_at).getTime(), lang, {
-                allDay: event.all_day === 1,
-              })
-              .catch(() => null)
-          : null;
-      const eventCard = event
-        ? formatEventDetail(
-            enrichAgendaEvents(
-              [event],
-              {
-                userId: user.telegram_id,
-                language: lang,
-                groupId: isGroup(ctx) ? (getGroupId(ctx) ?? undefined) : undefined,
-              },
-              eventService.agendaRepository,
-            )[0]!,
-            event.timezone,
-            lang,
-            { forecast },
-          )
-        : '';
-
-      const editText = eventCard ? `${statusLabel}\n\n${eventCard}` : statusLabel;
+      const editText = await formatAnsweredInvitationCard(
+        answer,
+        event ?? null,
+        {
+          userId: user.telegram_id,
+          language: lang,
+          timezone: user.timezone,
+          groupId: isGroup(ctx) ? (getGroupId(ctx) ?? undefined) : undefined,
+        },
+        { agendaRepository: eventService.agendaRepository, weatherService },
+      );
       await editAgendaText(ctx, editText, { parse_mode: 'HTML' }).catch(() => {});
 
       // Notify inviter about the response
@@ -1271,15 +1259,13 @@ export function createCallbackHandler(
             !!inviteeUser?.onboarding_completed,
           )
         : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
-      const kb = new InlineKeyboard()
-        .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-        .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
-        .row()
-        .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`);
       await ctx.answer();
       await ctx.editText(t(invLang).invite_delivered(eventTitle), { parse_mode: 'HTML' });
       forceInviteDeps
-        .sendMessage(inviteeId, inviteeText, { parse_mode: 'HTML', reply_markup: kb })
+        .sendMessage(inviteeId, inviteeText, {
+          parse_mode: 'HTML',
+          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang),
+        })
         .then((sent) => {
           forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
         })
@@ -1340,14 +1326,11 @@ export function createCallbackHandler(
             !!inviteeUser?.onboarding_completed,
           )
         : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
-      const kb = new InlineKeyboard()
-        .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-        .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
-        .row()
-        .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`);
-
       forceInviteDeps
-        .sendMessage(inviteeId, inviteeText, { parse_mode: 'HTML', reply_markup: kb })
+        .sendMessage(inviteeId, inviteeText, {
+          parse_mode: 'HTML',
+          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang),
+        })
         .then((sent) => {
           forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
         })
@@ -1465,6 +1448,14 @@ export function createCallbackHandler(
     await ctx.editText(t(lang).geo_tz_dismissed, { reply_markup: undefined });
   });
 
+  /** The confirmation edited into the picker or pin message: the title and the resolved place, linked. */
+  function locationResolvedHtml(lang: Lang, eventId: number, userId: number): string {
+    const event = eventRepo?.findById(eventId, userId);
+    // A pin can resolve an event that has no typed location; show the resolved address then.
+    const place = event ? formatLocationHtml({ ...event, location: event.location ?? event.resolved_address }) : '';
+    return t(lang).aiTools.location.locationResolved(escapeHtml(event?.title ?? ''), place);
+  }
+
   // Location geo: user chose what to do with a geolocation pin (geo/city/other)
   dispatch.set(CB.LOCATION_GEO, async (ctx, _payload, parts, user) => {
     await ctx.answer();
@@ -1494,9 +1485,7 @@ export function createCallbackHandler(
       await pendingGeoStore.delete(user.telegram_id);
 
       if (success) {
-        const event = eventRepo?.findById(eventId, user.telegram_id);
-        const address = event?.resolved_address ?? '';
-        await ctx.editText(msgs.aiTools.location.locationResolved(event?.title ?? '', address), {
+        await ctx.editText(locationResolvedHtml(lang, eventId, user.telegram_id), {
           parse_mode: 'HTML',
           reply_markup: undefined,
         });
@@ -1532,7 +1521,7 @@ export function createCallbackHandler(
     }
   });
 
-  // Location candidate: user picked a resolved address from multiple candidates
+  // Location candidate: `loc_cand:<eventId>:<pickerId>:<index|keep>` — the creator picked a place or kept the typed text
   dispatch.set(CB.LOCATION_CANDIDATE, async (ctx, _payload, parts, user) => {
     await ctx.answer();
     const lang = (user.language ?? 'en') as Lang;
@@ -1541,27 +1530,34 @@ export function createCallbackHandler(
     if (!locationVerification) return;
 
     const eventId = Number.parseInt(parts[1] ?? '', 10);
-    const choiceIndex = Number.parseInt(parts[2] ?? '', 10);
-    if (Number.isNaN(eventId) || Number.isNaN(choiceIndex)) return;
+    if (Number.isNaN(eventId)) return;
+    const pickerId = parts[2] ?? '';
+    const choice = parts[3];
 
-    const candidates = await locationVerification.getStoredCandidates(eventId);
-    if (!candidates) {
-      cmdLogger.warn({ eventId, userId: user.telegram_id }, 'Location candidates expired or not found');
-      await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
+    if (choice === 'keep') {
+      const kept = await locationVerification.keepTypedLocation(eventId, user.telegram_id, pickerId);
+      await ctx.editText(
+        kept
+          ? msgs.aiTools.location.keptAsTyped(kept.title, kept.location ?? '')
+          : msgs.aiTools.location.locationChoiceOutdated,
+        { reply_markup: undefined },
+      );
       return;
     }
 
-    const success = await locationVerification.handleLocationChoice(eventId, user.telegram_id, choiceIndex, candidates);
+    const choiceIndex = Number.parseInt(choice ?? '', 10);
+    const resolved =
+      !Number.isNaN(choiceIndex) &&
+      (await locationVerification.handleLocationChoice(eventId, user.telegram_id, pickerId, choiceIndex));
 
-    if (success) {
-      const event = eventRepo?.findById(eventId, user.telegram_id);
-      const address = event?.resolved_address ?? '';
-      await ctx.editText(msgs.aiTools.location.locationResolved(event?.title ?? '', address), {
+    if (resolved) {
+      await ctx.editText(locationResolvedHtml(lang, eventId, user.telegram_id), {
         parse_mode: 'HTML',
         reply_markup: undefined,
       });
     } else {
-      await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
+      cmdLogger.warn({ eventId, userId: user.telegram_id }, 'Location picker is outdated or its event is gone');
+      await ctx.editText(msgs.aiTools.location.locationChoiceOutdated, { reply_markup: undefined });
     }
   });
 

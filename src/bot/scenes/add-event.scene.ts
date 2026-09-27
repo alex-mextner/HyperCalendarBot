@@ -9,6 +9,7 @@ import type { ActionLogRepository } from '../../database/repositories/action-log
 import { handleCalculate } from '../../services/ai/tool-handlers/calculate.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
+import type { LocationVerificationService } from '../../services/location/location-verification-service.ts';
 import { parseDuration, parseRecurrence, parseSimpleDate } from '../../utils/date.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { escapeHtml, splitMessage } from '../../utils/telegram.ts';
@@ -251,6 +252,7 @@ export function createAddEventScene(
   userComposer: UserResolverComposer,
   actionLogRepo?: ActionLogRepository,
   onEventCreated?: (userId: number, eventId: number) => Promise<void>,
+  locationVerification?: Pick<LocationVerificationService, 'verifyEventLocation'>,
 ) {
   // Bounded FIFO of actual confirmations, not abandoned drafts; prevents concurrent duplicate writes.
   const submissions = new Map<string, Promise<number>>();
@@ -488,6 +490,13 @@ export function createAddEventScene(
             onEventCreated?.(user.telegram_id, event.id).catch((err) =>
               cmdLogger.error({ err, eventId: event.id }, 'Event saved; post-create delivery failed'),
             );
+            if (event.location && locationVerification) {
+              locationVerification
+                .verifyEventLocation(event, user)
+                .catch((err) =>
+                  cmdLogger.error({ err, eventId: event.id }, 'Event saved; location verification failed'),
+                );
+            }
             return event.id;
           })();
           submissions.set(key, saved);

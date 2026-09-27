@@ -86,11 +86,6 @@ describe('InvitationRepository', () => {
     expect(repo.getByInviter(INVITER)).toHaveLength(1);
   });
 
-  test('getPendingForEvent returns pending/maybe', () => {
-    repo.create({ event_id: eventId, inviter_id: INVITER, invitee_id: INVITEE });
-    expect(repo.getPendingForEvent(eventId)).toHaveLength(1);
-  });
-
   test('getByEvent returns every invitation row regardless of status', () => {
     const declined = repo.create({ event_id: eventId, inviter_id: INVITER, invitee_id: INVITEE });
     repo.updateStatus(declined.id, 'declined', 'pending');

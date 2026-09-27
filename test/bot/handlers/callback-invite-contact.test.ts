@@ -1,6 +1,8 @@
 // test/bot/handlers/callback-invite-contact.test.ts
 import { describe, expect, mock, test } from 'bun:test';
+import type { InlineKeyboard } from 'gramio';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
+import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 
 function makeCtx(data: string, userId = 200, lang = 'en') {
   return {
@@ -119,6 +121,9 @@ describe('INVITE_CONTACT callback', () => {
     await makeHandler(eventService, forceInviteDeps)(ctx as never);
     expect(sendInvitation).toHaveBeenCalledWith(5, 200, 300);
     expect(ctx.editText).toHaveBeenCalled();
+    // The invitee gets the canonical RSVP keyboard, including the propose-time button
+    const [, , options] = sendMessage.mock.calls[0] as unknown as [number, string, { reply_markup: InlineKeyboard }];
+    expect(options.reply_markup.toJSON()).toEqual(invitationRsvpKeyboard(42, 'en').toJSON());
   });
 
   test('direct contact — answers Not configured when forceInviteDeps absent', async () => {

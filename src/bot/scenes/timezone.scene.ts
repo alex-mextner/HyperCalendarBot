@@ -7,7 +7,13 @@ import { resolveCity } from '../../services/timezone/city-resolver.ts';
 import { getTimezoneDisplay, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import { botLogger } from '../../utils/logger.ts';
 import { buildGeneralView } from '../commands/settings.ts';
-import { cityInputPrompt, removeKeyboard, timezoneConfirmKeyboard, timezoneMethodKeyboard } from '../keyboards.ts';
+import {
+  cityInputPrompt,
+  clearReplyKeyboard,
+  removeKeyboard,
+  timezoneConfirmKeyboard,
+  timezoneMethodKeyboard,
+} from '../keyboards.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 
 import type { TimezoneState } from './types.ts';
@@ -151,10 +157,7 @@ export function createTimezoneScene(
               bot.api
                 .deleteMessage({ chat_id: chatId, message_id: geoMsgId })
                 .catch((err: unknown) => botLogger.warn({ err }, 'tz scene: failed to delete geo message'));
-              const tempMsg = await context.send('.', removeKeyboard());
-              tempMsg.delete().catch((err: unknown) => {
-                botLogger.warn({ err }, 'tz scene: failed to delete temp remove-keyboard message');
-              });
+              await clearReplyKeyboard((text, params) => context.send(text, params));
             }
             return;
           }

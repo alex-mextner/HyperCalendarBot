@@ -2,6 +2,7 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { Lang } from '../../../config/constants.ts';
 import { t } from '../../../config/constants.ts';
+import { CLEARED_LOCATION } from '../../../database/repositories/event.repository.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
 import { getDayRangeUtc } from '../../../utils/date.ts';
 import { eventTimestampError } from '../../../utils/event-timestamps.ts';
@@ -9,6 +10,7 @@ import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
 import { formatEventDetail } from '../../event/formatters.ts';
 import type { EventSummary } from '../../intent/variable-resolver.ts';
+import { formatLocationPlain } from '../../location/format-location.ts';
 import { formatEventWeatherLine } from '../../weather/format.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { formatReminderDuration } from './reminders.ts';
@@ -38,6 +40,22 @@ function expandDateOnly(dateStr: string, timezone: string): { start: string; end
   // the anchor landing on the wrong calendar day for UTC±10–12 offsets.
   const d = new TZDate(`${dateStr}T12:00:00`, timezone);
   return getDayRangeUtc(d, timezone);
+}
+
+/**
+ * Location for the assistant: the typed text plus the verified place it resolved to (also a place a
+ * pin confirmed on an event with no typed text), so the assistant can say which venue was chosen,
+ * or a note that the location is not verified yet. Empty when the event has no location at all.
+ */
+function locationParts(
+  e: Pick<CalendarEvent, 'location' | 'resolved_address' | 'venue_name' | 'location_verified'>,
+): string[] {
+  const place = formatLocationPlain(e);
+  if (e.location_verified === 1 && place) {
+    const verified = `verified place: ${place}`;
+    return [e.location ? `location: ${e.location}, ${verified}` : verified];
+  }
+  return e.location ? [`location: ${e.location} (not verified)`] : [];
 }
 
 function occurrenceToSummary(occ: EventOccurrence, timezone: string): EventSummary {
@@ -299,7 +317,7 @@ export async function handleGetEvents(ctx: AgentContext, input: GetEventsInput):
     const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${occ.occurrence_start}`];
     if (occ.occurrence_end) parts.push(`end: ${occ.occurrence_end}`);
     if (e.description) parts.push(`description: ${e.description}`);
-    if (e.location) parts.push(`location: ${e.location}`);
+    parts.push(...locationParts(e));
     if (e.recurrence_rule) parts.push(`recurrence: ${e.recurrence_rule}`);
     if (e.owner_type === 'group' && e.group_id) {
       const groupTitle = ctx.group?.groupChatRepo.findByChatId(e.group_id)?.title;
@@ -380,7 +398,7 @@ async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, us
     const parts = [`id: ${event.id}`, `title: ${event.title}`, `start: ${event.start_at}`];
     if (event.end_at) parts.push(`end: ${event.end_at}`);
     if (event.description) parts.push(`description: ${event.description}`);
-    if (event.location) parts.push(`location: ${event.location}`);
+    parts.push(...locationParts(event));
 
     const groupNotificationsQueued = scope === 'group' ? await enqueueGroupNotifications(ctx, event, 'created') : 0;
 
@@ -427,7 +445,9 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
   if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
-  const { event_id, scope: _, owner_id: _oid, ...updates } = input;
+  const { event_id, scope: _, owner_id: _oid, ...fields } = input;
+  // Removing the location also drops a place a pin set on an event without typed text
+  const updates = fields.location === null ? { ...fields, ...CLEARED_LOCATION } : fields;
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
   }
@@ -456,7 +476,7 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
   const parts = [`id: ${updated.id}`, `title: ${updated.title}`, `start: ${updated.start_at}`];
   if (updated.end_at) parts.push(`end: ${updated.end_at}`);
   if (updated.description) parts.push(`description: ${updated.description}`);
-  if (updated.location) parts.push(`location: ${updated.location}`);
+  parts.push(...locationParts(updated));
 
   const groupNotificationsQueued = scope === 'group' ? await enqueueGroupNotifications(ctx, updated, 'updated') : 0;
 
@@ -740,7 +760,7 @@ export async function handleSearchEvents(ctx: AgentContext, input: SearchEventsI
   const lines = events.map((e, i) => {
     const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${e.start_at}`];
     if (e.end_at) parts.push(`end: ${e.end_at}`);
-    if (e.location) parts.push(`location: ${e.location}`);
+    parts.push(...locationParts(e));
     return parts.join(', ') + weatherSuffixes[i]!;
   });
 
@@ -789,7 +809,7 @@ export async function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInp
     const e = occ.event;
     const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${occ.occurrence_start}`];
     if (occ.occurrence_end) parts.push(`end: ${occ.occurrence_end}`);
-    if (e.location) parts.push(`location: ${e.location}`);
+    parts.push(...locationParts(e));
     return parts.join(', ') + weatherSuffixes[i]!;
   });
 
@@ -872,7 +892,7 @@ export async function handleGetEvent(ctx: AgentContext, input: GetEventInput): P
   const parts = [`id: ${event.id}`, `title: ${event.title}`, `start: ${event.start_at}`];
   if (event.end_at) parts.push(`end: ${event.end_at}`);
   if (event.description) parts.push(`description: ${event.description}`);
-  if (event.location) parts.push(`location: ${event.location}`);
+  parts.push(...locationParts(event));
   if (event.recurrence_rule) parts.push(`recurrence: ${event.recurrence_rule}`);
   if (event.all_day) parts.push('all_day: true');
   if (event.owner_type === 'group' && event.group_id) {

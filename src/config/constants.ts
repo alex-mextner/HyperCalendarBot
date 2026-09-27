@@ -700,6 +700,11 @@ export const MSG = {
       location: {
         clarifyAddress: (title: string) => `📍 Clarify the address for "${title}":`,
         locationResolved: (title: string, address: string) => `📍 Location for "${title}" resolved: ${address}`,
+        noneOfThese: '🚫 None of these — keep as typed',
+        keptAsTyped: (title: string, location: string) =>
+          `📍 Location for "${title}" kept as typed: ${location}. You can send a 📍 location pin or type the full address.`,
+        locationChoiceOutdated:
+          '📍 This choice is out of date. To set the place, send a 📍 location pin or type the full address.',
         locationNotFound: (title: string) =>
           `📍 Could not resolve location for "${title}". You can send a 📍 location pin or type the full address.`,
         geoForEvent: (title: string) => `📍 Got your location! Is this for the event "${title}"?`,
@@ -1621,6 +1626,11 @@ export const MSG = {
       location: {
         clarifyAddress: (title: string) => `📍 Уточни адрес для «${title}»:`,
         locationResolved: (title: string, address: string) => `📍 Адрес для «${title}» определён: ${address}`,
+        noneOfThese: '🚫 Ничего из этого — оставить как написано',
+        keptAsTyped: (title: string, location: string) =>
+          `📍 Адрес для «${title}» оставил как написано: ${location}. Можешь отправить 📍 геолокацию или написать полный адрес.`,
+        locationChoiceOutdated:
+          '📍 Этот выбор уже неактуален. Чтобы задать место, отправь 📍 геолокацию или напиши полный адрес.',
         locationNotFound: (title: string) =>
           `📍 Не удалось определить адрес для «${title}». Можешь отправить 📍 геолокацию или написать полный адрес.`,
         geoForEvent: (title: string) => `📍 Получена геолокация! Это для события «${title}»?`,

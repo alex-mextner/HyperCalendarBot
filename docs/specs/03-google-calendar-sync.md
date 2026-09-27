@@ -301,7 +301,7 @@ CREATE INDEX idx_sync_log_user_created ON sync_log(user_id, created_at);
 | `end_at`            | `end.dateTime`               | ISO 8601 with timezone offset                  |
 | `all_day`             | `start.date` / `end.date`    | All-day events use `date` instead of `dateTime` |
 | `timezone`            | `start.timeZone`             | IANA timezone (e.g. `Europe/Belgrade`)          |
-| `location`            | `location`                   | Free-text string                               |
+| `location`            | `location`                   | Free text Google geocodes: the verified place (`Venue — Address`) once `location_verified = 1`, else exactly the typed text. Pull skips copies carrying `hypercalendarbot_event_id`, so this never comes back as a user edit |
 | `recurrence_rule`     | `recurrence`                 | RRULE strings (RFC 5545), array in Google       |
 | `color`               | `colorId`                    | Google uses numeric IDs 1-11, map to hex        |
 | `reminders`           | `reminders.overrides`        | Array of `{method, minutes}`                   |
@@ -340,7 +340,7 @@ function localToGoogleEvent(local: LocalEvent): calendar_v3.Schema$Event {
   const event: calendar_v3.Schema$Event = {
     summary: local.title,
     description: local.description ?? undefined,
-    location: local.location ?? undefined,
+    location: formatLocationPlain(local) || undefined, // verified place, else the typed text
   };
 
   if (local.all_day) {

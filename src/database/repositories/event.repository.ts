@@ -63,6 +63,37 @@ export const EVENT_UPDATE_FIELDS = [
   'venue_name',
 ] satisfies readonly (keyof UpdateEventData)[];
 
+/**
+ * Resolved-place columns derived from the typed `location`. They describe one specific location
+ * text and are stale as soon as that text changes.
+ */
+const RESOLVED_PLACE_COLUMNS = [
+  'resolved_address',
+  'latitude',
+  'longitude',
+  'google_maps_url',
+  'venue_name',
+  'location_verified',
+] as const satisfies readonly (keyof UpdateEventData)[];
+
+/** The value of each resolved-place column that means "not resolved". */
+const UNRESOLVED_PLACE = {
+  resolved_address: null,
+  latitude: null,
+  longitude: null,
+  google_maps_url: null,
+  venue_name: null,
+  location_verified: 0,
+} as const satisfies Record<(typeof RESOLVED_PLACE_COLUMNS)[number], null | 0>;
+
+/**
+ * Update fields that remove an event's location together with its resolved place. An explicit
+ * removal must also drop a place a pin set on an event without typed text, which the text-change
+ * reset in `buildUpdateQuery` cannot see (NULL → NULL looks unchanged). Only explicit removals use
+ * it: a Google pull writes `location: null` on unrelated changes and must keep such a place.
+ */
+export const CLEARED_LOCATION = { location: null, ...UNRESOLVED_PLACE } as const satisfies UpdateEventData;
+
 export class EventRepository {
   /**
    * Tables that `cascadeCleanupChildren` should wipe when a parent event
@@ -148,6 +179,9 @@ export class EventRepository {
     | 'all_day'
     | 'timezone'
     | 'location'
+    | 'resolved_address'
+    | 'venue_name'
+    | 'location_verified'
     | 'recurrence_rule'
     | 'reminder_overrides'
     | 'sync_version'
@@ -156,6 +190,7 @@ export class EventRepository {
     return this.db
       .prepare(
         `SELECT id, user_id, title, description, start_at, end_at, all_day, timezone, location,
+                resolved_address, venue_name, location_verified,
                 recurrence_rule, reminder_overrides, sync_version, owner_type
          FROM events WHERE id = ? AND is_cancelled = 0 AND is_deleted = 0`,
       )
@@ -170,6 +205,9 @@ export class EventRepository {
       | 'all_day'
       | 'timezone'
       | 'location'
+      | 'resolved_address'
+      | 'venue_name'
+      | 'location_verified'
       | 'recurrence_rule'
       | 'reminder_overrides'
       | 'sync_version'
@@ -235,6 +273,17 @@ export class EventRepository {
         fields.venue_name,
         eventId,
       );
+  }
+
+  /** Drop the resolved place so only the typed location remains, unverified. */
+  clearLocationFields(eventId: number): void {
+    this.db
+      .prepare(
+        `UPDATE events SET resolved_address = NULL, latitude = NULL, longitude = NULL,
+         google_maps_url = NULL, location_verified = 0, venue_name = NULL, updated_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(eventId);
   }
 
   findLatestCreatedByUser(userId: number): CalendarEvent | null {
@@ -339,6 +388,18 @@ export class EventRepository {
       if (value !== undefined) {
         fields.push(`${key} = ?`);
         values.push(key === 'all_day' ? (value ? 1 : 0) : value);
+      }
+    }
+
+    // Every write path funnels through here, so a changed location can never keep the
+    // previous venue, address and map link. The reset happens in the same UPDATE:
+    // SQLite evaluates `location IS ?` against the pre-update row, so an unchanged
+    // text keeps its resolution. A caller that supplies a resolved column wins.
+    if (data.location !== undefined) {
+      for (const column of RESOLVED_PLACE_COLUMNS) {
+        if (data[column] !== undefined) continue;
+        fields.push(`${column} = CASE WHEN location IS ? THEN ${column} ELSE ? END`);
+        values.push(data.location, UNRESOLVED_PLACE[column]);
       }
     }
 

@@ -1,6 +1,9 @@
+import type { CalendarEvent } from '../../database/types.ts';
 import { syncLogger } from '../../utils/logger.ts';
+import { formatLocationPlain } from '../location/format-location.ts';
 
-interface LocalEventForGoogle {
+interface LocalEventForGoogle
+  extends Pick<CalendarEvent, 'location' | 'resolved_address' | 'venue_name' | 'location_verified'> {
   id: number;
   title: string;
   description: string | null;
@@ -8,7 +11,6 @@ interface LocalEventForGoogle {
   end_at: string | null;
   all_day: number; // 0 | 1
   timezone: string;
-  location: string | null;
   recurrence_rule: string | null;
   reminder_overrides: string | null; // JSON "[5, 30]"
   sync_version: number;
@@ -66,7 +68,9 @@ export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
   const event: GoogleEvent = {
     summary: local.title,
     description: local.description ?? undefined,
-    location: local.location ?? undefined,
+    // Free-form text Google geocodes: the verified place, else the typed text. Pull never reads it
+    // back into a bot event: copies carrying hypercalendarbot_event_id are skipped.
+    location: formatLocationPlain(local) || undefined,
     extendedProperties: {
       private: {
         hypercalendarbot_event_id: String(local.id),

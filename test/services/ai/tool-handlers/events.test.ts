@@ -24,8 +24,11 @@ import {
 } from '../../../../src/services/ai/tool-handlers/events.ts';
 import type { AgentContext, GroupCapability } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
+import { localToGoogle } from '../../../../src/services/google/event-mapper.ts';
 import type { GroupMemberService } from '../../../../src/services/group/member-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
+import { generateIcs } from '../../../../src/services/ics/generator.ts';
+import { buildUserSessionInvitationText } from '../../../../src/services/telegram-session/invitation-text.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -242,6 +245,136 @@ describe('event tool handlers', () => {
       });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
+    });
+  });
+
+  describe('location in event tool output', () => {
+    const SOON = new Date(Date.now() + 2 * 86400000).toISOString();
+    const PLACE = 'verified place: Кафе Ромашка — ул. Примерная, 1, Москва';
+
+    /** An event typed as "кафе у парка" that a geocode matched to a synthetic venue. */
+    function createGeocodedEvent(locationVerified: 0 | 1): number {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Обед',
+        start_at: SOON,
+        timezone: 'UTC',
+        location: 'кафе у парка',
+      });
+      new EventRepository(db).updateLocationFields(event.id, {
+        resolved_address: 'ул. Примерная, 1, Москва',
+        latitude: 55.75,
+        longitude: 37.61,
+        google_maps_url: 'https://www.google.com/maps/search/?api=1&query=55.75,37.61',
+        location_verified: locationVerified,
+        venue_name: 'Кафе Ромашка',
+      });
+      return event.id;
+    }
+
+    test('get_event names the typed text and the verified venue with its address', async () => {
+      const eventId = createGeocodedEvent(1);
+      const result = await handleGetEvent(ctx, { event_id: eventId });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain(`location: кафе у парка, ${PLACE}`);
+    });
+
+    test('get_event marks an unverified location and never shows its geocode', async () => {
+      const eventId = createGeocodedEvent(0);
+      const result = await handleGetEvent(ctx, { event_id: eventId });
+      expect(result.output).toContain('location: кафе у парка (not verified)');
+      expect(result.output).not.toContain('Примерная');
+      expect(result.output).not.toContain('Ромашка');
+    });
+
+    test('update_event output keeps the verified place of the updated event', async () => {
+      const eventId = createGeocodedEvent(1);
+      const result = await handleUpdateEvent(ctx, { event_id: eventId, title: 'Обед с Леной' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain(`location: кафе у парка, ${PLACE}`);
+    });
+
+    test('update_event output marks an unverified location', async () => {
+      const eventId = createGeocodedEvent(0);
+      const result = await handleUpdateEvent(ctx, { event_id: eventId, title: 'Обед с Леной' });
+      expect(result.output).toContain('location: кафе у парка (not verified)');
+      expect(result.output).not.toContain('Примерная');
+    });
+
+    test('a new location on a verified event is reported and pushed to Google as the new typed text', async () => {
+      const eventId = createGeocodedEvent(1);
+      const result = await handleUpdateEvent(ctx, { event_id: eventId, location: 'Starbucks Тверская' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('location: Starbucks Тверская (not verified)');
+      expect(result.output).not.toContain('Ромашка');
+      const row = new EventRepository(db).findById(eventId, USER_ID)!;
+      expect(localToGoogle(row).location).toBe('Starbucks Тверская');
+    });
+
+    test('event lists (get_events, search_events, get_upcoming) show the verified place', async () => {
+      createGeocodedEvent(1);
+      const day = SOON.slice(0, 10);
+      const listed = await handleGetEvents(ctx, { start_date: day, end_date: day });
+      const searched = await handleSearchEvents(ctx, { query: 'Обед' });
+      const upcoming = await handleGetUpcoming(ctx, {});
+      for (const result of [listed, searched, upcoming]) {
+        expect(result.output).toContain(`location: кафе у парка, ${PLACE}`);
+      }
+    });
+
+    test('a place confirmed with a pin on an event without typed text is shown and pushed to Google', async () => {
+      const event = ctx.eventService.createEvent({ user_id: USER_ID, title: 'Обед', start_at: SOON, timezone: 'UTC' });
+      new EventRepository(db).updateLocationFields(event.id, {
+        resolved_address: 'ул. Примерная, 1, Москва',
+        latitude: 55.75,
+        longitude: 37.61,
+        google_maps_url: 'https://www.google.com/maps/search/?api=1&query=55.75,37.61',
+        location_verified: 1,
+        venue_name: 'Кафе Ромашка',
+      });
+
+      const single = await handleGetEvent(ctx, { event_id: event.id });
+      const day = SOON.slice(0, 10);
+      const lists = [
+        await handleGetEvents(ctx, { start_date: day, end_date: day }),
+        await handleSearchEvents(ctx, { query: 'Обед' }),
+        await handleGetUpcoming(ctx, {}),
+      ];
+
+      for (const result of [single, ...lists]) {
+        expect(result.output).toContain(PLACE);
+        expect(result.output).not.toContain('location: null');
+      }
+      const row = new EventRepository(db).findById(event.id, USER_ID)!;
+      expect(localToGoogle(row).location).toBe('Кафе Ромашка — ул. Примерная, 1, Москва');
+    });
+
+    test('removing the location drops a pin-confirmed place from every surface', async () => {
+      const event = ctx.eventService.createEvent({ user_id: USER_ID, title: 'Обед', start_at: SOON, timezone: 'UTC' });
+      new EventRepository(db).updateLocationFields(event.id, {
+        resolved_address: 'ул. Примерная, 1, Москва',
+        latitude: 55.75,
+        longitude: 37.61,
+        google_maps_url: 'https://www.google.com/maps/search/?api=1&query=55.75,37.61',
+        location_verified: 1,
+        venue_name: 'Кафе Ромашка',
+      });
+
+      const cleared = await handleUpdateEvent(ctx, { event_id: event.id, location: null });
+      const shown = await handleGetEvent(ctx, { event_id: event.id });
+
+      expect(cleared.success).toBe(true);
+      for (const result of [cleared, shown]) expect(result.output).not.toContain('Ромашка');
+      const row = new EventRepository(db).findById(event.id, USER_ID)!;
+      expect(localToGoogle(row).location).toBeUndefined();
+      expect(generateIcs([row])).not.toContain('LOCATION');
+      const invitation = buildUserSessionInvitationText({
+        event: row,
+        inviterTimezone: 'UTC',
+        deepLink: 'https://t.me/hypercal_bot?start=invite_1',
+        lang: 'ru',
+      });
+      expect(invitation).not.toContain('📍');
     });
   });
 

@@ -3,10 +3,13 @@ import { Scene } from '@gramio/scenes';
 import { addMinutes } from 'date-fns';
 import { t } from '../../config/constants.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
+import { CLEARED_LOCATION } from '../../database/repositories/event.repository.ts';
 import type { UpdateEventData } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
+import type { LocationVerificationService } from '../../services/location/location-verification-service.ts';
 import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
+import { botLogger } from '../../utils/logger.ts';
 import { eventActionsKeyboard, sceneHelpKeyboard } from '../keyboards.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 
@@ -38,6 +41,7 @@ export function createEditValueScene(
   eventService: EventService,
   userComposer: UserResolverComposer,
   actionLogRepo?: ActionLogRepository,
+  locationVerification?: Pick<LocationVerificationService, 'verifyEventLocation'>,
 ) {
   return (
     new Scene('edit_value')
@@ -100,7 +104,11 @@ export function createEditValueScene(
         } else if (field === 'description') {
           updateData.description = text.toLowerCase() === 'clear' ? null : text;
         } else if (field === 'location') {
-          updateData.location = text.toLowerCase() === 'clear' ? null : text;
+          if (text.toLowerCase() === 'clear') {
+            Object.assign(updateData, CLEARED_LOCATION);
+          } else {
+            updateData.location = text;
+          }
         }
 
         const updated = eventService.updateEvent(eventId, user.telegram_id, updateData);
@@ -118,6 +126,13 @@ export function createEditValueScene(
           metadata: JSON.stringify(updateData),
           success: !!updated,
         });
+
+        // Same verification and clarification flow as the AI update_event tool.
+        if (updated && updateData.location && locationVerification) {
+          locationVerification
+            .verifyEventLocation(updated, user)
+            .catch((err) => botLogger.error({ err, eventId }, 'Background location verification failed'));
+        }
 
         await context.scene.exit();
 

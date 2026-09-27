@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:
 import { createCallbackHandler } from '../../src/bot/handlers/callback.handler.ts';
 import { migrations } from '../../src/database/migrations.ts';
 import { ActionLogRepository } from '../../src/database/repositories/action-log.repository.ts';
+import { ChatHistoryRepository } from '../../src/database/repositories/chat-history.repository.ts';
 import { ContactRepository } from '../../src/database/repositories/contact.repository.ts';
 import { DeepLinkRepository } from '../../src/database/repositories/deep-link.repository.ts';
 import { EventRepository } from '../../src/database/repositories/event.repository.ts';
@@ -12,6 +13,7 @@ import { InvitationRepository } from '../../src/database/repositories/invitation
 import { SharingSettingsRepository } from '../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../src/database/schema.ts';
+import type { User } from '../../src/database/types.ts';
 import { issueRecipientApproval } from '../../src/services/ai/recipient-confirmation.ts';
 import { _resetToolThrottleForTest, executeTool } from '../../src/services/ai/tool-executor.ts';
 import {
@@ -25,6 +27,7 @@ import { handleFindUser } from '../../src/services/ai/tool-handlers/meta.ts';
 import { handleResendInvitation, handleSendInvitation } from '../../src/services/ai/tool-handlers/sharing.ts';
 import { getToolDefinitions } from '../../src/services/ai/tools.ts';
 import type { AgentContext } from '../../src/services/ai/types.ts';
+import { ConversationLogger } from '../../src/services/conversation-logger.ts';
 import { EventService } from '../../src/services/event/event-service.ts';
 import { GroupMemberService } from '../../src/services/group/member-service.ts';
 import { DeepLinkService } from '../../src/services/sharing/deep-link-service.ts';
@@ -215,10 +218,10 @@ describe('recipient and contact tool boundaries', () => {
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      const continueAi = async (userId: number, chatId: number, text: string) => {
-        expect(userId).toBe(10);
-        expect(chatId).toBe(10);
-        expect(text).toContain(`Confirmed recipient Telegram ID 5000000002 for event ${event.id}.`);
+      const continueAi = async (continuation: AgentContext) => {
+        expect(continuation.user.telegram_id).toBe(10);
+        expect(continuation.chatId).toBe(10);
+        expect(continuation.messageText).toContain(`Confirmed recipient Telegram ID 5000000002 for event ${event.id}.`);
         calls++;
         if (mode === 'continuation rejection' && calls === 1) throw new Error('retry before tool');
         if (mode === 'concurrent') await gate;
@@ -231,9 +234,20 @@ describe('recipient and contact tool boundaries', () => {
           (await handleSendInvitation(ctx, { event_id: event.id, invitee_id: 5000000002, force: true })).success,
         ).toBe(true);
         if (mode === 'failure after consumption') throw new Error('failed after send');
+        return { responseText: '', toolCalls: [], toolResults: [] };
+      };
+      const agentContinuation = {
+        agent: { run: continueAi },
+        buildContext: (user: User, chatId: number, messageText: string): AgentContext => ({
+          ...ctx,
+          user,
+          chatId,
+          messageText,
+          conversationLogger: new ConversationLogger(new ChatHistoryRepository(db)),
+        }),
       };
       const handler = createCallbackHandler(ctx.eventService, {} as never, {} as never, {} as never, {
-        onAiButtonClick: continueAi,
+        agentContinuation,
       });
       await handler({ ...button, from: { id: 11 }, chatId: 11 } as never);
       await handler({ ...button, dbUser: { ...ctx.user, telegram_id: 11 }, from: { id: 11 }, chatId: 11 } as never);
