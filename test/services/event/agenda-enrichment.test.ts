@@ -233,11 +233,19 @@ test('301 distinct stored events cross the 300-ID boundary', () => {
 
 test('the most recently inserted invitation wins even when the wall clock stepped back', () => {
   const e = event();
-  const accepted = invite(e.id, 2, 'accepted');
-  db.query('UPDATE invitations SET created_at = ? WHERE id = ?').run('2099-01-02 00:00:05', accepted.id);
-  const cancelled = invite(e.id, 2, 'cancelled');
-  db.query('UPDATE invitations SET created_at = ? WHERE id = ?').run('2099-01-02 00:00:04', cancelled.id);
-  expect(visible(1)[0]?.event.displayMetadata?.invitationStatus).toBe('Alice: 🚫 cancelled');
+  const inviteAt = (user: number, status: InvitationStatus, createdAt: string) => {
+    const row = invite(e.id, user, status);
+    db.query('UPDATE invitations SET created_at = ? WHERE id = ?').run(createdAt, row.id);
+  };
+  inviteAt(2, 'accepted', '2099-01-02 00:00:05');
+  inviteAt(2, 'cancelled', '2099-01-02 00:00:04');
+  inviteAt(3, 'cancelled', '2099-01-02 00:00:05');
+  inviteAt(3, 'accepted', '2099-01-02 00:00:04');
+  const label = visible(1)[0]?.event.displayMetadata?.invitationStatus;
+  expect(label).toContain('Alice: 🚫 cancelled');
+  expect(label).toContain('Private Bob: ✅ accepted');
+  expect(label).not.toContain('Alice: ✅');
+  expect(label).not.toContain('Private Bob: 🚫');
 });
 
 test('child participation overrides master invitation and child invitation overrides participation', () => {

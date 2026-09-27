@@ -53,8 +53,8 @@ export class InvitationRepository {
 
   /**
    * Returns the most recently inserted personal invitation for this invitee and event, if it
-   * authorizes access. Fetches the single highest-id row regardless of status (created_at is not
-   * insertion order, see above), then rejects if it is cancelled or expired —
+   * authorizes access. Fetches the single highest-id row regardless of status (created_at can run
+   * backwards with the wall clock), then rejects if it is cancelled or expired —
    * a newer cancellation supersedes any older responded row (declined, accepted, etc.).
    * Returns null when no invitation exists or when the latest row is cancelled/expired.
    */
