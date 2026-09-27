@@ -78,6 +78,7 @@ import { getGroupId, isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
 import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
 import type { BotCallbackContext } from '../types.ts';
+import { type AgentContinuationDeps, continueWithAgent } from './agent-continuation.ts';
 import { handleNotifyCallback } from './notify-callback.ts';
 import { handleSnoozeCallback } from './snooze-callback.ts';
 
@@ -119,7 +120,10 @@ export interface CallbackHandlerOpts {
   invitationService?: InvitationService;
   eventRepo?: EventRepository;
   chatHistoryRepo?: ChatHistoryRepository;
+  /** Runs the AI on an `ai_btn` answer; the logging middleware already saved it to chat_history. */
   onAiButtonClick?: (userId: number, chatId: number, text: string) => Promise<void>;
+  /** Runs the AI on a bot-composed turn (recipient confirmation), saving it to chat_history first. */
+  agentContinuation?: AgentContinuationDeps;
   oauthDeps?: {
     oauthService: GoogleOAuthService;
     stateStore: { set(key: string, value: string, ttl: number): Promise<void> };
@@ -206,6 +210,7 @@ export function createCallbackHandler(
     eventRepo,
     chatHistoryRepo,
     onAiButtonClick,
+    agentContinuation,
     oauthDeps,
     invitationNotifyDeps,
     onboardingScene,
@@ -238,7 +243,7 @@ export function createCallbackHandler(
     const answer = async (text?: string) => {
       await ctx.answer(text ? { text } : undefined).catch(() => {});
     };
-    if (!onAiButtonClick || ctx.from.id !== user.telegram_id) {
+    if (!agentContinuation || ctx.from.id !== user.telegram_id) {
       await answer(t(user.language).aiTools.meta.recipientUnverified);
       return;
     }
@@ -249,10 +254,10 @@ export function createCallbackHandler(
     }
     await answer();
     try {
-      await onAiButtonClick(
-        user.telegram_id,
-        user.telegram_id,
+      await continueWithAgent(
+        user,
         `Confirmed recipient Telegram ID ${approved.recipientId} for event ${approved.eventId}. Send that invitation with force=true; do not change the ID or use a conflicting username.`,
+        agentContinuation,
       );
       finishRecipientApproval(payload, false);
     } catch (error) {
