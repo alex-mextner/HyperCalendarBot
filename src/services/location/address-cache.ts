@@ -1,14 +1,19 @@
 // src/services/location/address-cache.ts
 import { z } from 'zod';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { botLogger } from '../../utils/logger.ts';
 
 const logger = botLogger.child({ module: 'address-cache' });
 
 /**
- * Persistent Redis cache for user address mappings.
- * Key pattern: `addr:{userId}:mappings` → JSON hash { normalizedInput → resolvedAddress }
- * Key pattern: `addr:{userId}:freq` → JSON hash { resolvedAddress → useCount }
- * Key pattern: `addr:{userId}:recent` → JSON array of { input, resolved, timestamp }
+ * Persistent Redis cache of the places a user confirmed for typed locations (a tap on a picker
+ * candidate, or a pin shared for the event).
+ * Key pattern: `addr:{userId}:confirmed_mappings` → JSON array of { input, resolvedAddress, … }
+ * Key pattern: `addr:{userId}:confirmed_freq` → JSON object { resolvedAddress → { url, count, lastUsed } }
+ *
+ * The earlier keys `addr:{userId}:mappings` and `addr:{userId}:freq` are never read: until
+ * 2026-09-27 the bot also wrote places it had picked on its own (the incident mapped "Sonder
+ * Dorchol" in Belgrade to a Dutch hotel), so they are not confirmations.
  */
 
 export interface AddressMapping {
@@ -34,8 +39,8 @@ interface RedisLike {
   set(key: string, value: string): Promise<unknown>;
 }
 
-const MAPPINGS_KEY = (userId: number) => `addr:${userId}:mappings`;
-const FREQ_KEY = (userId: number) => `addr:${userId}:freq`;
+const MAPPINGS_KEY = (userId: number) => `addr:${userId}:confirmed_mappings`;
+const FREQ_KEY = (userId: number) => `addr:${userId}:confirmed_freq`;
 
 const AddressMappingSchema = z.object({
   input: z.string(),
@@ -137,38 +142,79 @@ export class AddressCache {
       const raw = await this.redis.get(key);
       if (!raw) return null;
 
-      const mappings = MappingArraySchema.parse(JSON.parse(raw));
-      const normalized = this.normalize(input);
-
-      // Exact normalized match
-      const exact = mappings.find((m) => this.normalize(m.input) === normalized);
-      if (exact) return exact;
-
-      // Substring containment (for typo tolerance at word level)
-      const words = normalized.split(' ').filter((w) => w.length > 2);
-      if (words.length === 0) return null;
-
-      let bestMatch: AddressMapping | null = null;
-      let bestScore = 0;
-
-      for (const m of mappings) {
-        const mNorm = this.normalize(m.input);
-        let score = 0;
-        for (const word of words) {
-          if (mNorm.includes(word)) score++;
-        }
-        const ratio = score / words.length;
-        if (ratio > 0.7 && score > bestScore) {
-          bestScore = score;
-          bestMatch = m;
-        }
+      const parsed = jsonCodec(MappingArraySchema).safeParse(raw);
+      if (!parsed.success) {
+        logger.warn({ err: parsed.error, userId }, 'Stored address mappings are unreadable');
+        return null;
       }
-
-      return bestMatch;
+      return this.match(parsed.data, input);
     } catch (err) {
       logger.warn({ err, userId }, 'Failed to find address mapping');
       return null;
     }
+  }
+
+  /**
+   * Forget the mapping `findMapping` returns for this input after the user rejected it, but only
+   * while it is still the `rejected` place (same address, place id and coordinates): a place
+   * confirmed for the input since then replaced it and stays.
+   */
+  async forgetMapping(
+    userId: number,
+    input: string,
+    rejected: Pick<AddressMapping, 'resolvedAddress' | 'placeId' | 'latitude' | 'longitude'>,
+  ): Promise<void> {
+    const key = MAPPINGS_KEY(userId);
+    const raw = await this.redis.get(key);
+    if (!raw) return;
+
+    const parsed = jsonCodec(MappingArraySchema).safeParse(raw);
+    if (!parsed.success) {
+      logger.warn({ err: parsed.error, userId }, 'Stored address mappings are unreadable; nothing forgotten');
+      return;
+    }
+    const current = this.match(parsed.data, input);
+    if (
+      !current ||
+      current.resolvedAddress !== rejected.resolvedAddress ||
+      current.placeId !== rejected.placeId ||
+      current.latitude !== rejected.latitude ||
+      current.longitude !== rejected.longitude
+    ) {
+      return;
+    }
+
+    await this.redis.set(key, JSON.stringify(parsed.data.filter((m) => m !== current)));
+  }
+
+  private match(mappings: AddressMapping[], input: string): AddressMapping | null {
+    const normalized = this.normalize(input);
+
+    // Exact normalized match
+    const exact = mappings.find((m) => this.normalize(m.input) === normalized);
+    if (exact) return exact;
+
+    // Substring containment (for typo tolerance at word level)
+    const words = normalized.split(' ').filter((w) => w.length > 2);
+    if (words.length === 0) return null;
+
+    let bestMatch: AddressMapping | null = null;
+    let bestScore = 0;
+
+    for (const m of mappings) {
+      const mNorm = this.normalize(m.input);
+      let score = 0;
+      for (const word of words) {
+        if (mNorm.includes(word)) score++;
+      }
+      const ratio = score / words.length;
+      if (ratio > 0.7 && score > bestScore) {
+        bestScore = score;
+        bestMatch = m;
+      }
+    }
+
+    return bestMatch;
   }
 
   /** Get the N most recent mappings for a user */

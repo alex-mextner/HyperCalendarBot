@@ -53,6 +53,43 @@ describe('AddressCache', () => {
     expect(result).toBeNull();
   });
 
+  test('forgetMapping drops only the mapping the input resolves to', async () => {
+    const cache = new AddressCache(makeInMemoryRedis());
+    const place = { googleMapsUrl: 'https://maps.google.com/?q=1,2', latitude: 1, longitude: 2, placeId: null };
+    await cache.recordMapping(1, 'Kafana Sunce Dorcol', { ...place, resolvedAddress: 'Wrong place' });
+    await cache.recordMapping(1, 'Office', { ...place, resolvedAddress: 'Office address' });
+
+    // Forgets through the same fuzzy match that offered it.
+    await cache.forgetMapping(1, 'kafana sunce', {
+      resolvedAddress: 'Wrong place',
+      placeId: null,
+      latitude: 1,
+      longitude: 2,
+    });
+
+    expect(await cache.findMapping(1, 'Kafana Sunce Dorcol')).toBeNull();
+    expect((await cache.findMapping(1, 'Office'))?.resolvedAddress).toBe('Office address');
+  });
+
+  test('forgetMapping keeps a place that replaced the rejected one for the input', async () => {
+    const cache = new AddressCache(makeInMemoryRedis());
+    const rejected = { resolvedAddress: 'Main Street 1', placeId: 'place-a', latitude: 1, longitude: 2 };
+    // Each replacement differs from the rejected place in one identifying field
+    const replacements = [
+      { ...rejected, resolvedAddress: 'Confirmed later' },
+      { ...rejected, placeId: 'place-b' },
+      { ...rejected, latitude: 1.5 },
+      { ...rejected, longitude: 2.5 },
+    ];
+    for (const replacement of replacements) {
+      await cache.recordMapping(1, 'Kafana Sunce', { ...replacement, googleMapsUrl: 'https://maps.google.com/?q=1,2' });
+
+      await cache.forgetMapping(1, 'Kafana Sunce', rejected);
+
+      expect(await cache.findMapping(1, 'Kafana Sunce')).toMatchObject(replacement);
+    }
+  });
+
   test('findMapping — fuzzy word match', async () => {
     const cache = new AddressCache(makeInMemoryRedis());
     await cache.recordMapping(1, 'Красная Площадь Москва', {

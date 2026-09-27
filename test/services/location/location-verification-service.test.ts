@@ -107,6 +107,7 @@ function makeDeps(overrides: { [key: string]: unknown } = {}) {
       geocodeAddress: mock(() => Promise.resolve([])),
       reverseGeocode: mock(() => Promise.resolve(null)),
       findPlace: mock(() => Promise.resolve([])),
+      locateArea: mock(() => Promise.resolve(null)),
     },
     addressCache: {
       findMapping: mock(() => Promise.resolve(null)),
@@ -162,83 +163,6 @@ describe('LocationVerificationService', () => {
     expect(deps.geocodingService.findPlace).not.toHaveBeenCalled();
   });
 
-  test('uses cached mapping when available', async () => {
-    const cached = {
-      input: 'Кофемания',
-      resolvedAddress: 'Cached Address',
-      googleMapsUrl: 'https://cached',
-      latitude: 55.0,
-      longitude: 37.0,
-      placeId: 'cached_id',
-      timestamp: Date.now(),
-    };
-    const deps = makeDeps({
-      addressCache: {
-        findMapping: mock(() => Promise.resolve(cached)),
-        recordMapping: mock(() => Promise.resolve()),
-        getRecent: mock(() => Promise.resolve([])),
-        getFrequent: mock(() => Promise.resolve([])),
-        getAddressContext: mock(() => Promise.resolve({ recent: [], frequent: [] })),
-      },
-    });
-    const svc = makeService(deps);
-    const result = await svc.verifyEventLocation(makeEvent(), makeUser());
-
-    expect(result.resolved).toBe(true);
-    expect(result.geocoded!.formattedAddress).toBe('Cached Address');
-    expect(deps.eventRepo.updateLocationFields).toHaveBeenCalledTimes(1);
-    // Should NOT call geocoding API when cache hit
-    expect(deps.geocodingService.findPlace).not.toHaveBeenCalled();
-  });
-
-  test('auto-resolves single geocoding result', async () => {
-    const geo = makeGeoResult();
-    const deps = makeDeps({
-      geocodingService: {
-        findPlace: mock(() => Promise.resolve([geo])),
-        geocodeAddress: mock(() => Promise.resolve([geo])),
-        reverseGeocode: mock(() => Promise.resolve(geo)),
-      },
-    });
-    const svc = makeService(deps);
-    const result = await svc.verifyEventLocation(makeEvent(), makeUser());
-
-    expect(result.resolved).toBe(true);
-    expect(result.geocoded!.city).toBe('Москва');
-    expect(deps.eventRepo.updateLocationFields).toHaveBeenCalledTimes(1);
-    expect(deps.addressCache.recordMapping).toHaveBeenCalledTimes(1);
-  });
-
-  test('sets user city when not already set', async () => {
-    const geo = makeGeoResult({ city: 'Москва' });
-    const deps = makeDeps({
-      geocodingService: {
-        findPlace: mock(() => Promise.resolve([geo])),
-        geocodeAddress: mock(() => Promise.resolve([])),
-        reverseGeocode: mock(() => Promise.resolve(null)),
-      },
-    });
-    const svc = makeService(deps);
-    await svc.verifyEventLocation(makeEvent(), makeUser({ city: null }));
-
-    expect(deps.userRepo.update).toHaveBeenCalledWith(100, { city: 'Москва' });
-  });
-
-  test('does NOT overwrite existing user city', async () => {
-    const geo = makeGeoResult({ city: 'Санкт-Петербург' });
-    const deps = makeDeps({
-      geocodingService: {
-        findPlace: mock(() => Promise.resolve([geo])),
-        geocodeAddress: mock(() => Promise.resolve([])),
-        reverseGeocode: mock(() => Promise.resolve(null)),
-      },
-    });
-    const svc = makeService(deps);
-    await svc.verifyEventLocation(makeEvent(), makeUser({ city: 'Москва' }));
-
-    expect(deps.userRepo.update).not.toHaveBeenCalled();
-  });
-
   test('asks user to choose when multiple candidates found', async () => {
     const candidates = [
       makeGeoResult({ formattedAddress: 'Option A' }),
@@ -258,25 +182,6 @@ describe('LocationVerificationService', () => {
     expect(result.candidates.length).toBe(2);
     expect(deps.sendMessage).toHaveBeenCalledTimes(1);
     expect(deps.candidateStore.set).toHaveBeenCalledTimes(1);
-  });
-
-  test('handleLocationChoice applies chosen candidate', async () => {
-    const candidates = [makeGeoResult({ formattedAddress: 'Chosen' })];
-    const deps = makeDeps();
-    const svc = makeService(deps);
-    const success = await svc.handleLocationChoice(1, 100, 0, candidates);
-
-    expect(success).toBe(true);
-    expect(deps.eventRepo.updateLocationFields).toHaveBeenCalledTimes(1);
-    expect(deps.candidateStore.del).toHaveBeenCalledTimes(1);
-  });
-
-  test('handleLocationChoice returns false for invalid index', async () => {
-    const deps = makeDeps();
-    const svc = makeService(deps);
-    const success = await svc.handleLocationChoice(1, 100, 5, [makeGeoResult()]);
-
-    expect(success).toBe(false);
   });
 
   test('resolveFromCoordinates applies reverse geocoded result', async () => {
