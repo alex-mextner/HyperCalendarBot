@@ -13,6 +13,7 @@ import { runMigrations } from '../../../src/database/schema.ts';
 import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 import { png } from '../../fixtures/png.ts';
+import { makeCallbackHandler, makeCallbackTap } from '../../helpers/callback-handler.ts';
 import { flushPromises } from '../../helpers/mock-context.ts';
 
 function makeCtx(data: string, language: 'en' | 'ru' = 'en') {
@@ -764,11 +765,7 @@ describe('RSVP taps on a revoked invitation', () => {
       invRepo.expirePastInvitations();
     }
     expect(invRepo.findById(invitation.id)!.status).toBe(status);
-    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
-      invitationService,
-      eventRepo,
-      invitationRepo: invRepo,
-    });
+    const handler = makeCallbackHandler({ invitationService, eventRepo, invitationRepo: invRepo });
     return { handler, invRepo, participantRepo, event, invitation };
   }
 
@@ -782,25 +779,25 @@ describe('RSVP taps on a revoked invitation', () => {
   ] as const)('%s invitation: %s keeps the status, adds no participant and says it is no longer active', async (status, action) => {
     const { handler, invRepo, participantRepo, event, invitation } = setupRevokedInvitation(status);
 
-    const ctx = makeCtx(`inv:${action}:${invitation.id}`);
-    await handler(ctx as never);
+    const tap = makeCallbackTap(`inv:${action}:${invitation.id}`, { telegram_id: INVITEE, language: 'en' });
+    await handler(tap.ctx);
 
     expect(invRepo.findById(invitation.id)!.status).toBe(status);
     expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
-    expect(ctx.answer).toHaveBeenCalledWith(
+    expect(tap.answer).toHaveBeenCalledWith(
       status === 'cancelled' ? t('en').invitation_cancelled : t('en').invitation_expired,
     );
-    expect(ctx.editText).not.toHaveBeenCalled();
+    expect(tap.editText).not.toHaveBeenCalled();
   });
 
   test.each(['cancelled', 'expired'] as const)('%s invitation: a +30 proposal is refused', async (status) => {
     const { handler, invRepo, invitation } = setupRevokedInvitation(status);
 
-    const ctx = makeCtx(`inv:propose:${invitation.id}:+30`);
-    await handler(ctx as never);
+    const tap = makeCallbackTap(`inv:propose:${invitation.id}:+30`, { telegram_id: INVITEE, language: 'en' });
+    await handler(tap.ctx);
 
     expect(invRepo.findById(invitation.id)!.proposed_time).toBeNull();
-    expect(ctx.answer).toHaveBeenCalledWith({
+    expect(tap.answer).toHaveBeenCalledWith({
       text: status === 'cancelled' ? t('en').invitation_cancelled : t('en').invitation_expired,
     });
   });
