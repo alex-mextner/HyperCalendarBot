@@ -744,20 +744,22 @@ export class CalendarBotAgent {
    * Shutdown hook: abort every in-flight run and wait until each has taken its
    * failure path — user notice, durable retry or write evidence, debug log — so
    * nothing is still writing when the caller closes the queues and the database.
-   * A run still stuck after `settleMs` is logged and left behind.
+   * Runs that start while it waits (a queue job, a handler finishing its download)
+   * fail fast and are waited for too. Anything still running after `settleMs` is
+   * logged and left behind.
    */
   async drain(settleMs: number): Promise<void> {
     this.shutdown.abort(new Error('Bot is shutting down'));
-    const runs = [...this.inFlight];
-    if (runs.length === 0) return;
+    if (this.inFlight.size === 0) return;
+    const drained = this.inFlight.size;
     const deadline = Promise.withResolvers<'timeout'>();
     const timer = setTimeout(() => deadline.resolve('timeout'), settleMs);
     try {
-      const outcome = await Promise.race([Promise.allSettled(runs), deadline.promise]);
-      aiLogger.info(
-        { runs: runs.length, stillRunning: outcome === 'timeout' ? this.inFlight.size : 0 },
-        'Agent runs drained for shutdown',
-      );
+      while (this.inFlight.size > 0) {
+        const outcome = await Promise.race([Promise.allSettled([...this.inFlight]), deadline.promise]);
+        if (outcome === 'timeout') break;
+      }
+      aiLogger.info({ drained, stillRunning: this.inFlight.size }, 'Agent runs drained for shutdown');
     } finally {
       clearTimeout(timer);
     }

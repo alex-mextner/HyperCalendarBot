@@ -229,6 +229,36 @@ describe('agent drain on shutdown', () => {
     expect(log).toContain('## END — the turn threw before FINAL');
   });
 
+  test('a turn that starts while the drain is waiting is waited for as well', async () => {
+    const probe = makeSender();
+    const { impl, secondRoundStarted } = stalledAfterTool({
+      name: 'calculate',
+      input: { expression: '2026-09-28 20:30 Europe/Belgrade to UTC' },
+    });
+    const agent = new CalendarBotAgent({}, probe.sender, { streamImpl: impl });
+    const first = agent.run(ctx);
+    await secondRoundStarted;
+
+    const draining = agent.drain(DRAIN_BOUND_MS);
+    // A queue job picked up mid-drain; its retry write is slower than the first one's.
+    const late = agent.run({
+      ...ctx,
+      messageText: 'Поздний запрос',
+      retryEnqueue: async (message: string) => {
+        for (let gap = 0; gap < 5; gap++) {
+          const tick = Promise.withResolvers<void>();
+          setImmediate(tick.resolve);
+          await tick.promise;
+        }
+        enqueued.push(message);
+      },
+    });
+    await draining;
+
+    expect(enqueued.toSorted()).toEqual(['Поздний запрос', REQUEST].toSorted());
+    await Promise.all([first, late]);
+  });
+
   test('a turn that starts after the drain fails fast into the same retry path', async () => {
     const probe = makeSender();
     const { impl } = stalledAfterTool({ name: 'calculate', input: { expression: '1 + 1' } });
