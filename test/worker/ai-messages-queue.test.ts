@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'bun:test';
 import type { User } from '../../src/database/types.ts';
 import { aiFailureNotices } from '../../src/services/ai/agent.ts';
 import type { AgentContext } from '../../src/services/ai/types.ts';
+import type { AiMessageJobData } from '../../src/services/scheduled/types.ts';
 import { SyntheticPipelineRunner } from '../../src/worker/ai-messages-queue.ts';
 
 // ─── BullMQ mock setup (must come before dynamic import) ──────────────────────
@@ -275,30 +276,30 @@ describe('SyntheticPipelineRunner', () => {
     expect(jobData.retryAttempt).toBe(1);
   });
 
-  // A scheduled/trigger run may end silently; a retry answers the user's own message (#508).
+  // A scheduled/trigger run (and its own retries) may end silently; a retry of the user's
+  // own message, enqueued by the chat pipeline without `unprompted`, must answer (#508).
   test.each([
-    [undefined, true],
-    [1, false],
-    [3, false],
-  ])('retryAttempt %p runs the agent with unprompted=%p', async (retryAttempt, unprompted) => {
-    const agentCtx = { user: fakeUser } as unknown as AgentContext;
-    const seen: { unprompted?: boolean } = {};
-    const agentRun = mock(async (ctx: AgentContext) => {
-      seen.unprompted = ctx.unprompted;
-    });
+    ['a scheduled run', true, { retryAttempt: undefined, unprompted: undefined }],
+    ["a retry of the user's message", false, { retryAttempt: 1, unprompted: undefined }],
+    ['a retry of a scheduled run', true, { retryAttempt: 2, unprompted: true }],
+  ])('%s runs the agent with unprompted=%p and its retry keeps that origin', async (_label, unprompted, job) => {
+    const seen: (boolean | undefined)[] = [];
+    const addDelayed = mock(async (_data: AiMessageJobData, _delay: number): Promise<string> => 'job-1');
     const runner = new SyntheticPipelineRunner({
-      contextBuilder: () => agentCtx,
+      contextBuilder: () => ({ user: fakeUser }) as unknown as AgentContext,
       intentRun: async () => ({ handled: false }),
-      agentRun,
+      agentRun: async (ctx: AgentContext) => {
+        seen.push(ctx.unprompted);
+        if (seen.length === 1) await ctx.retryEnqueue?.('check calendar');
+      },
+      retryQueue: { addDelayed },
     });
-    await runner.run(fakeUser, {
-      userId: fakeUser.telegram_id,
-      message: 'check calendar',
-      source: 'trigger',
-      retryAttempt,
-    });
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'check calendar', source: 'trigger', ...job });
+    const retryJob = addDelayed.mock.calls[0]?.[0];
+    if (!retryJob) throw new Error('the failed run did not enqueue a retry');
+    await runner.run(fakeUser, retryJob);
 
-    expect(seen.unprompted).toBe(unprompted);
+    expect(seen).toEqual([unprompted, unprompted]);
   });
 });
 

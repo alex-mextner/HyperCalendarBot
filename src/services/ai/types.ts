@@ -261,9 +261,9 @@ export interface AgentContext {
   /** Retry attempt index: 0 or absent = original message, 1-3 = subsequent backoff retries.
    *  Stall phrase is suppressed on attempts > 0. */
   retryAttempt?: number;
-  /** True for a scheduled/trigger run that answers no user message (the first synthetic attempt).
+  /** True for a scheduled/trigger run (or its retry) that answers no user message.
    *  Only such runs may end with an empty or [SKIP] final and say nothing in a private chat;
-   *  retries answer the user's original message and leave this unset. */
+   *  retries of a user's own message leave this unset. */
   unprompted?: boolean;
 }
 

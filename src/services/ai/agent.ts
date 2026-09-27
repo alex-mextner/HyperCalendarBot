@@ -1346,21 +1346,23 @@ export class CalendarBotAgent {
     // A direct private-chat request never ends in silence or a bare "...": weak
     // models answer '[SKIP]' (taught for reactions and group silence) or nothing
     // after real work, and discarding that deleted every trace of the writes.
-    // A reaction, clarification UI or an unprompted scheduled run is real silence.
+    // Clarification UI or an unprompted scheduled run is real silence, and so is
+    // a reaction — but only when it is the turn's whole outcome, never beside a write.
     const draft = writer.getText().trim();
-    const reacted = allToolCalls.some((call, i) => SILENT_TOOLS.has(call.name) && allToolResults[i]?.success === true);
-    let unansweredNotice: string | null = null;
-    if (
+    const modelStayedSilent = draft === '' || isSkipText(draft);
+    const answersDirectMessage =
       !runFailed &&
       !silent &&
       !ctx.isGroup &&
       !ctx.unprompted &&
       ctx.inputMode !== 'live_call' &&
-      termination !== 'waiting' &&
-      !reacted &&
-      (draft === '' || isSkipText(draft))
-    ) {
-      const writes = writeOutcomes.summary(ctx.user.language);
+      termination !== 'waiting';
+    const writes = writeOutcomes.summary(ctx.user.language);
+    const reactionOnly =
+      writes === null &&
+      allToolCalls.some((call, i) => SILENT_TOOLS.has(call.name) && allToolResults[i]?.success === true);
+    let unansweredNotice: string | null = null;
+    if (answersDirectMessage && modelStayedSilent && !reactionOnly) {
       unansweredNotice = writes
         ? t(ctx.user.language).ai_unanswered_writes(writes)
         : t(ctx.user.language).ai_unanswered;
@@ -1411,7 +1413,8 @@ export class CalendarBotAgent {
 
     // A failed run with nothing to show must not leave the ⏳ placeholder edited
     // into a bare "..." — that is the silence the user reads as being ignored.
-    if ((silent && guarded) || isSkipText(finalText) || (runFailed && finalText.length === 0)) {
+    // A reaction with no text is the whole answer, not a bare "..." either.
+    if ((silent && guarded) || isSkipText(finalText) || (finalText.length === 0 && (runFailed || reactionOnly))) {
       const deliveryStartedAt = performance.now();
       await writer.discard();
       const metrics = requestMetrics.snapshot(termination, 'discarded', elapsedMs(deliveryStartedAt));

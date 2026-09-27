@@ -220,10 +220,25 @@ describe('silent final guard (#508)', () => {
     expect(deleted).toEqual([]);
   });
 
+  test("a reaction beside real writes does not excuse '[SKIP]': the writes are still reported", async () => {
+    await run([
+      { tool: 'set_reaction', input: () => ({ emoji: '👍' }) },
+      { tool: 'create_event', input: () => ({ title: 'Синтетическая встреча', start_at: tomorrowAt10() }) },
+      { text: '[SKIP]' },
+    ]);
+
+    const tr = t('ru').writeOutcomes;
+    expect(deleted).toEqual([]);
+    expect(delivered.at(-1)).toContain(`${tr.completed}: ${tr.operations.create_event}`);
+  });
+
   describe('legitimate silence stays silent', () => {
     const expectSilent = () => {
-      expect(delivered.join('\n')).not.toContain(t('ru').ai_unanswered);
-      expect(assistantHistory()).not.toContain(t('ru').ai_unanswered);
+      const notices = [t('ru').ai_unanswered, t('ru').ai_unanswered_writes('').trim()];
+      for (const notice of notices) {
+        expect(delivered.join('\n')).not.toContain(notice);
+        expect(assistantHistory()).not.toContain(notice);
+      }
     };
 
     test("set_reaction then '[SKIP]' in a private chat deletes the placeholder and says nothing", async () => {
@@ -231,6 +246,15 @@ describe('silent final guard (#508)', () => {
 
       expect(result.responseText).toBe('');
       expect(deleted).toEqual([42]);
+      expectSilent();
+    });
+
+    test('set_reaction with no text in a private chat is discarded, not finalized as a bare "..."', async () => {
+      const result = await run([{ tool: 'set_reaction', input: () => ({ emoji: '👍' }) }, { text: '' }]);
+
+      expect(result.responseText).toBe('');
+      expect(deleted).toEqual([42]);
+      expect(delivered.some((text) => text.endsWith('...'))).toBe(false);
       expectSilent();
     });
 

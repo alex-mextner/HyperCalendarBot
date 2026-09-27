@@ -32,8 +32,10 @@ export class SyntheticPipelineRunner {
       const agentCtx = this.deps.contextBuilder(user, user.telegram_id, jobData.message);
       const currentAttempt = jobData.retryAttempt ?? 0;
       agentCtx.retryAttempt = currentAttempt;
-      // Only a retry answers a user's message; the first attempt is the schedule/trigger itself.
-      agentCtx.unprompted = currentAttempt === 0;
+      // The schedule/trigger itself and its own retries answer no user message; only
+      // retries of a user's message (enqueued by the chat pipeline) do.
+      const unprompted = currentAttempt === 0 || jobData.unprompted === true;
+      agentCtx.unprompted = unprompted;
 
       if (this.deps.retryQueue) {
         const queue = this.deps.retryQueue;
@@ -61,7 +63,13 @@ export class SyntheticPipelineRunner {
           }
           const delay = BACKOFF_DELAYS_MS[currentAttempt]!;
           const jobId = await queue.addDelayed(
-            { userId: user.telegram_id, message: msg, source: 'trigger', retryAttempt: currentAttempt + 1 },
+            {
+              userId: user.telegram_id,
+              message: msg,
+              source: 'trigger',
+              retryAttempt: currentAttempt + 1,
+              ...(unprompted && { unprompted }),
+            },
             delay,
           );
           // The job is stored and will run: the cancellation pointer is written in the background, so a
