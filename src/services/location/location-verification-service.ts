@@ -117,18 +117,14 @@ export class LocationVerificationService {
    * 5. No candidates → tell the creator to send a pin or the full address.
    */
   async verifyEventLocation(event: CalendarEvent, user: User): Promise<LocationVerificationResult> {
-    // Only a user who can see the event is asked. A secretary updating the owner's event could not
-    // answer the picker (#421), so the owner's place and open picker stay as they are, unsearched.
-    if (!this.deps.eventRepo.findById(event.id, user.telegram_id)) {
-      logger.info({ eventId: event.id, userId: user.telegram_id }, 'User cannot see the event; not verifying');
-      return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
+    const canSeeEvent = this.deps.eventRepo.findById(event.id, user.telegram_id) !== null;
+    if (canSeeEvent) {
+      // A new verification supersedes the previous picker: a tap on it must not apply a place
+      // chosen for an earlier text
+      await this.deps.candidateStore.del(event.id).catch((err) => {
+        logger.warn({ err, eventId: event.id }, 'Failed to delete location candidates from store');
+      });
     }
-
-    // A new verification supersedes the previous picker: a tap on it must not apply a place chosen
-    // for an earlier text
-    await this.deps.candidateStore.del(event.id).catch((err) => {
-      logger.warn({ err, eventId: event.id }, 'Failed to delete location candidates from store');
-    });
     const typed = event.location;
     if (!typed) {
       return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
@@ -139,13 +135,21 @@ export class LocationVerificationService {
       return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
     }
 
-    logger.info({ eventId: event.id, location, userId: user.telegram_id }, 'Starting location verification');
-
     // Until the creator answers, the event holds only the typed text: a place confirmed for an
-    // earlier text must not stay on it. Invitation cards are re-rendered only on the answer.
+    // earlier text must not stay on it, whoever changed the text. Invitation cards are re-rendered
+    // only on the answer.
     if (event.location_verified !== 0 || event.resolved_address !== null) {
       this.deps.eventRepo.clearLocationFields(event.id);
     }
+
+    // Only a user who can see the event is asked. A secretary updating the owner's event could not
+    // answer the picker (#421), so no search is made and the owner's open picker stays.
+    if (!canSeeEvent) {
+      logger.info({ eventId: event.id, userId: user.telegram_id }, 'User cannot see the event; not asking');
+      return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
+    }
+
+    logger.info({ eventId: event.id, location, userId: user.telegram_id }, 'Starting location verification');
 
     const { candidates, remembered } = await this.findCandidates(event, user, location);
 

@@ -468,20 +468,26 @@ describe('no geocode is applied before the creator taps a candidate', () => {
     expect(s.invitationEdits).toHaveLength(editsAfterConfirmation);
   });
 
-  test('a verification by a user who cannot see the event keeps its place and neither searches nor asks', async () => {
+  test('a location changed by a user who cannot see the event drops the old place, without searching or asking', async () => {
     const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
     await s.confirmEarlier(BELGRADE_CAFE);
-    // A secretary updating the owner's event: the event is the owner's, the acting user is not
+    const searchesBefore = geocoder.searches.length;
+    const sentBefore = s.sent.length;
+    // A secretary changes the owner's event text: the event is the owner's, the acting user is not
     const secretary = { ...s.user(), telegram_id: INVITEE_ID };
+    s.eventRepo.update(s.event.id, USER_ID, { location: EDITED_LOCATION });
 
     await s.service.verifyEventLocation(s.storedEvent(), secretary);
 
     const stored = s.storedEvent();
-    expect(stored.location_verified).toBe(1);
-    expect(stored.resolved_address).toBe(BELGRADE_CAFE.formattedAddress);
-    expect(geocoder.searches).toEqual([]);
-    expect(s.sent).toEqual([]);
+    expect(stored.location).toBe(EDITED_LOCATION);
+    expect(stored.location_verified).toBe(0);
+    expect(stored.resolved_address).toBeNull();
+    expect(stored.venue_name).toBeNull();
+    expect(stored.google_maps_url).toBeNull();
+    expect(geocoder.searches).toHaveLength(searchesBefore);
+    expect(s.sent).toHaveLength(sentBefore);
   });
 
   test('a new verification closes the previous picker, even when it finds nothing', async () => {
