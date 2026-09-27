@@ -7,7 +7,14 @@ import { z } from 'zod';
 import { evaluate, type Fixture, summarize, type Trace } from './core.ts';
 import { fixtures } from './fixtures.ts';
 import { type Candidate, candidates } from './models.ts';
+import {
+  createRequestCatalog,
+  isTransportConfigurationError,
+  modelAdvertised,
+  preserveAssistant,
+} from './request-profile.ts';
 import { createSandbox, promptFor, tools } from './sandbox.ts';
+import { collectCompletion } from './stream-result.ts';
 import { billedOutputUpperEstimate } from './usage.ts';
 
 const { values } = parseArgs({
@@ -19,9 +26,14 @@ const { values } = parseArgs({
     repeats: { type: 'string', default: '1' },
     budget: { type: 'string', default: '1.5' },
     catalog: { type: 'boolean', default: false },
+    mode: { type: 'string', default: 'full' },
+    rounds: { type: 'string', default: '6' },
   },
   strict: true,
 });
+if (!['full', 'lazy'].includes(values.mode!)) throw new Error('Invalid catalog mode');
+const maxRounds = Number(values.rounds);
+if (!Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > 12) throw new Error('Invalid max rounds');
 if (!values.out) throw new Error('--out unique directory required');
 const out = resolve(values.out);
 mkdirSync(out, { recursive: false, mode: 0o700 });
@@ -35,7 +47,16 @@ const repeats = Number(values.repeats),
 if (!Number.isInteger(repeats) || repeats < 1 || repeats > 3 || !Number.isFinite(budget) || budget <= 0 || budget > 1.5)
   throw new Error('Invalid experiment budget/repeats');
 const source = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { stdout: 'pipe' }).stdout.toString().trim();
-const sourceFiles = ['core.ts', 'fixtures.ts', 'sandbox.ts', 'models.ts', 'run.ts', 'usage.ts'];
+const sourceFiles = [
+  'core.ts',
+  'fixtures.ts',
+  'sandbox.ts',
+  'models.ts',
+  'run.ts',
+  'usage.ts',
+  'request-profile.ts',
+  'stream-result.ts',
+];
 const sourceHashes = Object.fromEntries(
   await Promise.all(
     sourceFiles.map(async (name) => [
@@ -56,10 +77,12 @@ const manifest = {
   caseIds: chosen.map((x) => x.id),
   repeats,
   budgetUSD: budget,
-  mode: 'nonstream full-production-prompt-and-schemas, simulated business tools, real calculator',
+  mode: values.mode,
+  transcriptPolicy:
+    'Preserve full provider assistant message and opaque continuation metadata in memory; no cross-provider transcript',
   privateHistorySent: false,
   fallback: false,
-  maxRounds: 6,
+  maxRounds,
   deadlineMs: 30000,
 };
 writeFileSync(`${out}/manifest.json`, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
@@ -125,8 +148,9 @@ async function execute(candidate: Candidate, fixture: Fixture, repetition: numbe
     return { ...trace, ...evaluate(fixture, trace) };
   }
   const client = new OpenAI({ apiKey: key, baseURL: candidate.baseURL, maxRetries: 0, timeout: 15000 });
+  const catalog = createRequestCatalog(values.mode === 'lazy' ? 'lazy' : 'full', tools);
   const messages: OpenAI.ChatCompletionMessageParam[] = [
-    { role: 'system', content: promptFor(fixture) },
+    { role: 'system', content: promptFor(fixture) + (catalog.prompt ? `\n\n${catalog.prompt}` : '') },
     { role: 'user', content: fixture.user },
   ];
   const sandbox = createSandbox(fixture);
@@ -134,22 +158,23 @@ async function execute(candidate: Candidate, fixture: Fixture, repetition: numbe
   const deadline = Date.now() + 30000;
   let pendingReservation = 0;
   try {
-    for (let round = 0; round < 6; round++) {
+    for (let round = 0; round < maxRounds; round++) {
       const delay = Math.max(0, (nextAllowed.get(candidate.provider) ?? 0) - Date.now());
       if (delay > 0) await Bun.sleep(delay);
       // Provider pacing is accounted in elapsed time; it never silently earns a fresh request deadline.
       if (Date.now() >= deadline) throw new Error('REQUEST_DEADLINE');
+      const exposed = catalog.exposure?.snapshot();
       const payload = {
         model: candidate.model,
         messages,
-        tools,
-        temperature: 0,
-        max_tokens: 4096,
+        tools: catalog.schemas(),
+        temperature: candidate.temperature ?? 0,
+        max_tokens: candidate.maxOutput ?? 4096,
         ...(candidate.effort ? { reasoning_effort: candidate.effort } : {}),
       };
       const reserve =
         (new TextEncoder().encode(JSON.stringify(payload)).length * candidate.inputPrice +
-          4096 * candidate.outputPrice) /
+          (candidate.maxOutput ?? 4096) * candidate.outputPrice) /
         1e6;
       if (spentEnvelope + reserve > budget) throw new Error('EXPERIMENT_BUDGET');
       spentEnvelope += reserve;
@@ -158,9 +183,15 @@ async function execute(candidate: Candidate, fixture: Fixture, repetition: numbe
       trace.rounds++;
       const callStart = performance.now();
       nextAllowed.set(candidate.provider, Date.now() + (candidate.spacingMs ?? 120));
-      const response = await client.chat.completions.create(payload, {
-        signal: AbortSignal.timeout(Math.max(1, Math.min(15000, deadline - Date.now()))),
-      });
+      const requestOptions = { signal: AbortSignal.timeout(Math.max(1, Math.min(15000, deadline - Date.now()))) };
+      const response = candidate.streamingOnly
+        ? await collectCompletion(
+            await client.chat.completions.create(
+              { ...payload, stream: true, stream_options: { include_usage: true } },
+              requestOptions,
+            ),
+          )
+        : await client.chat.completions.create(payload, requestOptions);
       trace.status = 200;
       const usage = response.usage;
       if (usage) {
@@ -223,18 +254,21 @@ async function execute(candidate: Candidate, fixture: Fixture, repetition: numbe
       const parsed = calls.map((call) => ({ ...call, args: objectSchema.parse(JSON.parse(call.function.arguments)) }));
       if (new Set(parsed.map((x) => x.id)).size !== parsed.length || parsed.some((x) => !x.id || !x.function.name))
         throw new Error('MALFORMED_TOOL_BATCH');
-      messages.push({
-        role: 'assistant',
-        content: candidate.provider === 'together' ? (message.content ?? '') : message.content,
-        tool_calls: calls,
-      });
+      messages.push(preserveAssistant(message, candidate.provider));
       let wait = false;
       for (const call of parsed) {
         if (wait) {
           trace.calls.push({ name: call.function.name, args: call.args, success: false, error: 'AFTER_WAIT' });
           continue;
         }
-        const executed = sandbox.execute(call.function.name, call.args);
+        const intercepted = exposed ? catalog.exposure?.intercept(call.function.name, call.args, exposed) : undefined;
+        const executed = intercepted
+          ? {
+              call: { name: call.function.name, args: call.args, success: intercepted.success },
+              result: JSON.parse(JSON.stringify(intercepted)),
+              wait: false,
+            }
+          : sandbox.execute(call.function.name, call.args);
         trace.calls.push(executed.call);
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(executed.result) });
         wait = executed.wait;
@@ -290,8 +324,8 @@ for (const candidate of selected) {
       `${JSON.stringify({
         candidate: candidate.id,
         status: r.status,
-        present: names.includes(candidate.model),
-        relevant: names.filter((x) => /oss|qwen3\.[68]|glm-5/i.test(x)),
+        present: modelAdvertised(candidate.provider, candidate.model, names),
+        relevant: names.filter((x) => /oss|qwen3\.8|glm-5|DeepSeek-V4|MiniMax-M3|Kimi-K3|gemini-(3\.|2\.5)/i.test(x)),
       })}\n`,
       { mode: 0o600 },
     );
@@ -317,6 +351,10 @@ for (const candidate of selected) {
           spent: Math.round(spentEnvelope * 10000) / 10000,
         }),
       );
+      if (isTransportConfigurationError(row.error, row.errorDetail)) {
+        stop = true;
+        break;
+      }
       if (
         ['NO_KEY', 'HTTP_401', 'HTTP_402', 'HTTP_403', 'HTTP_404', 'HTTP_429', 'EXPERIMENT_BUDGET'].includes(
           row.error ?? '',
