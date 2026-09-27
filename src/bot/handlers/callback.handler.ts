@@ -750,10 +750,18 @@ export function createCallbackHandler(
         await ctx.editText(t(lang).invite_propose_sent(formatted), { parse_mode: 'HTML' }).catch(() => {});
         // The +30/+60 buttons sit on a separate prompt, so the invitation card still has its RSVP buttons.
         // Replace it with the notice a typed proposal leaves: the location refresh skips pending cards
-        // with a proposed time, relying on no such card still showing live buttons.
-        if (inv.message_id && inv.chat_id && invitationNotifyDeps?.editMessage) {
+        // with a proposed time, relying on no such card still showing live buttons. Re-read first: an
+        // answer on the card (before this stale tap, or during the awaits above) must stay visible.
+        const current = invitationRepo?.findById(invId);
+        if (
+          current?.status === 'pending' &&
+          current.proposed_time === proposedTime &&
+          current.message_id &&
+          current.chat_id &&
+          invitationNotifyDeps?.editMessage
+        ) {
           await invitationNotifyDeps
-            .editMessage(inv.chat_id, inv.message_id, t(lang).invite_propose_sent(formatted))
+            .editMessage(current.chat_id, current.message_id, t(lang).invite_propose_sent(formatted))
             .catch((err: unknown) => {
               cmdLogger.warn(
                 { err, invitationId: invId },
