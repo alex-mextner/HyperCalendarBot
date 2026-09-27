@@ -239,9 +239,9 @@ describe('creating an event with people: the prompt example, executed', () => {
 
   test('the rendered prompt keeps attendees and the organizer out of the description', () => {
     const prompt = buildSystemPrompt(makeHarness('Europe/Belgrade').ctx);
-    expect(prompt).toContain('never list who takes part in description');
-    expect(prompt).toContain('"мной"/"я"/"me" is the user, the organizer: never invite, pick or list them');
-    expect(prompt).toContain('answer who takes part only from get_invitation_status, never from description');
+    expect(prompt).toContain('never list them in description');
+    expect(prompt).toContain('The user ("мной"/"me") is the organizer: never invite, pick or list them');
+    expect(prompt).toContain('attendance only from get_invitation_status');
   });
 });
 
@@ -274,7 +274,7 @@ describe('who takes part: answered from invitations, not from the description', 
     let statusSeen = '';
     const model = scriptedModel([
       () => ({ tool: 'get_invitation_status', input: { event_id: event.id } }),
-      // A model following ATTENDANCE: the answer is built only from the invitation data it got.
+      // A model following the attendance rule: the answer is built only from the invitation data it got.
       (opts) => {
         statusSeen = toolMessages(opts).join('\n');
         const ids = invitedIds(statusSeen);

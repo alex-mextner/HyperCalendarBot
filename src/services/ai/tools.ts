@@ -94,7 +94,7 @@ const toolDefinitions: ToolDefinition[] = [
         title: { type: 'string', description: 'Event title' },
         start_at: { type: 'string', description: 'Start, ISO 8601 UTC.' },
         end_at: { type: 'string', description: 'End, ISO 8601 UTC.' },
-        description: { type: 'string', description: 'Note the user dictated; never an attendee list.' },
+        description: { type: 'string', description: "The user's note; never an attendee list." },
         location: { type: 'string', description: 'Event location.' },
         location_abstract: {
           type: 'boolean',
@@ -417,7 +417,7 @@ const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'get_invitation_status',
-    description: 'Invitees of an event and their RSVP statuses: the only source for who takes part.',
+    description: "An event's invitees and RSVP statuses: the only source for who takes part.",
     input_schema: {
       type: 'object' as const,
       properties: {
