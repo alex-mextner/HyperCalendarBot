@@ -338,7 +338,6 @@ function setup(
       location: RAW_LOCATION,
       candidates: [geo],
       remembered: false,
-      placeDropped: false,
     });
     expect(await service.handleLocationChoice(event.id, USER_ID, 'e0e0e0e0', 0)).toBe(true);
   }
@@ -835,8 +834,13 @@ describe('keep as typed', () => {
     expect(stored.resolved_address).toBeNull();
     expect(await s.addressCache.findMapping(USER_ID, RAW_LOCATION)).toBeNull();
     expect(await s.addressCache.getRecent(USER_ID)).toEqual([]);
-    // The event never had a place, so delivered cards already show just the typed text
-    expect(s.invitationEdits).toEqual([]);
+    // The card is re-rendered with just the typed text, keeping its RSVP buttons
+    expect(s.invitationEdits).toHaveLength(1);
+    expect(s.invitationEdits[0]!.text).toContain(RAW_LOCATION);
+    expect(s.invitationEdits[0]!.text).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
+    expect(s.invitationEdits[0]!.options.reply_markup?.toJSON()).toEqual(
+      invitationRsvpKeyboard(s.invitation.id, 'ru').toJSON(),
+    );
     expect(s.user().city).toBeNull();
     expect(await s.candidateStore.get(s.event.id)).toBeNull();
     expect(edits).toEqual([
@@ -920,6 +924,23 @@ describe('keep as typed', () => {
     expect(stored.location_verified).toBe(0);
     expect(stored.resolved_address).toBeNull();
     expect(stored.google_maps_url).toBeNull();
+    expect(s.invitationEdits).toHaveLength(2);
+    const card = s.invitationEdits[1]!;
+    expect(card.text).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
+    expect(card.options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(s.invitation.id, 'ru').toJSON());
+  });
+
+  test('a keep tap refreshes the invitation even when an earlier question already dropped the place', async () => {
+    const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.confirmEarlier(BELGRADE_CAFE);
+    // The first question drops the confirmed place; the second finds the event without one
+    await s.service.verifyEventLocation(s.storedEvent(), s.user());
+    await s.service.verifyEventLocation(s.storedEvent(), s.user());
+
+    await s.tap(button(s.sent[1], 'keep'));
+
+    expect(s.storedEvent().location_verified).toBe(0);
     expect(s.invitationEdits).toHaveLength(2);
     const card = s.invitationEdits[1]!;
     expect(card.text).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));

@@ -136,8 +136,7 @@ export class LocationVerificationService {
 
     // Until the creator answers, the event holds only the typed text: a place confirmed for an
     // earlier text must not stay on it. Invitation cards are re-rendered only on the answer.
-    const placeDropped = event.location_verified !== 0 || event.resolved_address !== null;
-    if (placeDropped) {
+    if (event.location_verified !== 0 || event.resolved_address !== null) {
       this.deps.eventRepo.clearLocationFields(event.id);
     }
 
@@ -160,7 +159,7 @@ export class LocationVerificationService {
       return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
     }
 
-    await this.askUserToChoose(event, user, { location: typed, candidates, remembered, placeDropped });
+    await this.askUserToChoose(event, user, { location: typed, candidates, remembered });
     return { resolved: false, geocoded: null, cityExtracted: candidates[0]?.city ?? null, candidates };
   }
 
@@ -314,7 +313,7 @@ export class LocationVerificationService {
     if (!answered) return null;
     const { picker, event } = answered;
 
-    await this.keepOnlyTypedText(event, picker.placeDropped);
+    await this.keepOnlyTypedText(event);
     if (picker.remembered) {
       await this.deps.addressCache.forgetMapping(userId, picker.location).catch((err) => {
         logger.warn({ err, eventId, userId }, 'Failed to forget rejected address mapping');
@@ -370,15 +369,16 @@ export class LocationVerificationService {
   }
 
   /**
-   * The creator kept the typed text: drop any resolved place. Delivered invitation cards are
-   * re-rendered only when they may show a place: one the event still has, or one dropped when the
-   * picker was opened. Otherwise they already show just the typed text.
+   * The creator kept the typed text: drop any resolved place and re-render every delivered
+   * invitation card. A card may still show a place dropped before this answer (when the text
+   * changed or an earlier question was asked), and the answer is rare and idempotent, so the cards
+   * are always refreshed rather than tracking what they last showed.
    */
-  private async keepOnlyTypedText(event: CalendarEvent, placeDropped: boolean): Promise<void> {
-    const hasPlace = event.location_verified !== 0 || event.resolved_address !== null;
-    if (hasPlace) this.deps.eventRepo.clearLocationFields(event.id);
+  private async keepOnlyTypedText(event: CalendarEvent): Promise<void> {
+    if (event.location_verified !== 0 || event.resolved_address !== null) {
+      this.deps.eventRepo.clearLocationFields(event.id);
+    }
     logger.info({ eventId: event.id }, 'Event location kept as typed');
-    if (!hasPlace && !placeDropped) return;
 
     await this.updateInvitationMessages({
       ...event,

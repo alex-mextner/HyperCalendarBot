@@ -23,7 +23,7 @@ function makeGeoResult(overrides: Partial<GeocodedLocation> = {}): GeocodedLocat
 
 /** An open picker of `candidates` for the typed text "Test location". */
 function openPicker(id: string, candidates: GeocodedLocation[]): LocationPicker {
-  return { id, location: 'Test location', candidates, remembered: false, placeDropped: false };
+  return { id, location: 'Test location', candidates, remembered: false };
 }
 
 describe('InMemoryLocationCandidateStore', () => {
