@@ -542,7 +542,10 @@ Rules:
 - **No bot signature** — the message comes from the user's account, adding "sent via bot"
   undermines the trust benefit
 - **First person** — "Приглашаю тебя", not "Вы приглашены" or "User X invites you"
-- `{location_line}` — `📍 {location}` if present, omitted otherwise
+- `{location_line}` — `📍 {place}` if a location is present, omitted otherwise. `{place}` is
+  the verified place (`Venue — Address`) followed on the next line by its Google Maps link
+  once the location is verified (also when a shared pin set it on an event with no typed
+  text), and exactly the typed text (no link) until then
 - `{description_line}` — first 100 chars of description if present, omitted otherwise
 - `{bot_deep_link}` — `https://t.me/{bot_username}?start=invite_{invitationId}` for
   accepting/declining via the bot

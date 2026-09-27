@@ -179,6 +179,9 @@ export class EventRepository {
     | 'all_day'
     | 'timezone'
     | 'location'
+    | 'resolved_address'
+    | 'venue_name'
+    | 'location_verified'
     | 'recurrence_rule'
     | 'reminder_overrides'
     | 'sync_version'
@@ -187,6 +190,7 @@ export class EventRepository {
     return this.db
       .prepare(
         `SELECT id, user_id, title, description, start_at, end_at, all_day, timezone, location,
+                resolved_address, venue_name, location_verified,
                 recurrence_rule, reminder_overrides, sync_version, owner_type
          FROM events WHERE id = ? AND is_cancelled = 0 AND is_deleted = 0`,
       )
@@ -201,6 +205,9 @@ export class EventRepository {
       | 'all_day'
       | 'timezone'
       | 'location'
+      | 'resolved_address'
+      | 'venue_name'
+      | 'location_verified'
       | 'recurrence_rule'
       | 'reminder_overrides'
       | 'sync_version'

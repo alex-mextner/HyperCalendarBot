@@ -77,4 +77,41 @@ describe('generateIcs', () => {
     const count = (ics.match(/BEGIN:VEVENT/g) || []).length;
     expect(count).toBe(2);
   });
+
+  test('LOCATION carries the verified venue and resolved address', () => {
+    const ics = generateIcs([
+      makeEvent({
+        location: 'кафе у парка',
+        resolved_address: 'ул. Примерная, 1, Москва',
+        venue_name: 'Кафе Ромашка',
+        location_verified: 1,
+      }),
+    ]);
+    expect(ics).toContain('LOCATION:Кафе Ромашка — ул. Примерная\\, 1\\, Москва\n');
+  });
+
+  test('LOCATION stays exactly the typed text while the location is unverified', () => {
+    const ics = generateIcs([
+      makeEvent({
+        location: 'кафе у парка',
+        resolved_address: 'ул. Примерная, 1, Москва',
+        venue_name: 'Кафе Ромашка',
+        location_verified: 0,
+      }),
+    ]);
+    expect(ics).toContain('LOCATION:кафе у парка\n');
+    expect(ics).not.toContain('Примерная');
+  });
+
+  test('LOCATION carries a place confirmed with a pin on an event without typed text', () => {
+    const ics = generateIcs([
+      makeEvent({
+        location: null,
+        resolved_address: 'ул. Примерная, 1, Москва',
+        venue_name: 'Кафе Ромашка',
+        location_verified: 1,
+      }),
+    ]);
+    expect(ics).toContain('LOCATION:Кафе Ромашка — ул. Примерная\\, 1\\, Москва\n');
+  });
 });

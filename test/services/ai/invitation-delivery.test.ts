@@ -146,6 +146,45 @@ describe('deliverInvitation', () => {
     expect(adminCalled).toBe(false);
   });
 
+  test('first-person text from the inviter account names the verified place with a map link', async () => {
+    const mapUrl = 'https://www.google.com/maps/search/?api=1&query=55.75,37.61&query_place_id=synthetic-place';
+    const placed = eventService.createEvent({
+      user_id: INVITER_ID,
+      title: 'Launch Party',
+      start_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      timezone: 'UTC',
+      location: 'кафе у парка',
+    });
+    eventRepo.updateLocationFields(placed.id, {
+      resolved_address: 'ул. Примерная, 1, Москва',
+      latitude: 55.75,
+      longitude: 37.61,
+      google_maps_url: mapUrl,
+      location_verified: 1,
+      venue_name: 'Кафе Ромашка',
+    });
+    const event = eventRepo.findById(placed.id, INVITER_ID)!;
+    const invId = invitationRepo.create({ event_id: event.id, inviter_id: INVITER_ID, invitee_id: INVITEE_ID }).id;
+    const firstPersonTexts: string[] = [];
+    const sender = makeSender({
+      sendInvitation: async () => null,
+      sendAsConnectedUser: async (_inviterId, _targetId, text) => {
+        firstPersonTexts.push(text);
+        return true;
+      },
+    });
+
+    const result = await deliverInvitation({
+      ...baseParams({ invitationId: invId, deps: makeDeps(sender), event }),
+      eventId: event.id,
+    });
+
+    expect(result).toEqual({ delivered: true, viaDeepLink: false });
+    expect(firstPersonTexts).toHaveLength(1);
+    expect(firstPersonTexts[0]).toContain(`📍 Кафе Ромашка — ул. Примерная, 1, Москва\n${mapUrl}`);
+    expect(firstPersonTexts[0]).not.toContain('кафе у парка');
+  });
+
   test('bot API fails, MTProto returns false → deep-link fallback sent to inviter', async () => {
     const invId = createInvitation();
     let mtprotoCalled = false;
