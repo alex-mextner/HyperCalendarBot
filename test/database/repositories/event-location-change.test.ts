@@ -324,6 +324,25 @@ describe('changing an event location drops the old resolved place (#395)', () =>
 
         expectOldPlace(readColumns(db, event.id), 'seaside hotel');
       });
+
+      test('an unrelated change from Google keeps a place a pin set on an event without typed text', async () => {
+        const event = events.create({
+          user_id: USER_ID,
+          title: 'Dinner',
+          start_at: '2026-10-05T17:00:00Z',
+          timezone: 'UTC',
+        });
+        events.updateLocationFields(event.id, OLD_PLACE);
+        events.updateSyncFields(event.id, {
+          google_calendar_id: 'cal-1',
+          google_event_id: 'g-dinner',
+          sync_status: 'synced',
+        });
+
+        await sync.incrementalPull(makeGoogleApi([{ id: 'g-dinner', summary: 'Dinner moved' }]), USER_ID, 'cal-1');
+
+        expect(readColumns(db, event.id)).toEqual({ location: null, ...OLD_PLACE });
+      });
     });
   });
 });
