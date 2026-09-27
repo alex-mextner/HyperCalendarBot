@@ -1,5 +1,6 @@
 // src/services/location/address-cache.ts
 import { z } from 'zod';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { botLogger } from '../../utils/logger.ts';
 
 const logger = botLogger.child({ module: 'address-cache' });
@@ -137,38 +138,58 @@ export class AddressCache {
       const raw = await this.redis.get(key);
       if (!raw) return null;
 
-      const mappings = MappingArraySchema.parse(JSON.parse(raw));
-      const normalized = this.normalize(input);
-
-      // Exact normalized match
-      const exact = mappings.find((m) => this.normalize(m.input) === normalized);
-      if (exact) return exact;
-
-      // Substring containment (for typo tolerance at word level)
-      const words = normalized.split(' ').filter((w) => w.length > 2);
-      if (words.length === 0) return null;
-
-      let bestMatch: AddressMapping | null = null;
-      let bestScore = 0;
-
-      for (const m of mappings) {
-        const mNorm = this.normalize(m.input);
-        let score = 0;
-        for (const word of words) {
-          if (mNorm.includes(word)) score++;
-        }
-        const ratio = score / words.length;
-        if (ratio > 0.7 && score > bestScore) {
-          bestScore = score;
-          bestMatch = m;
-        }
-      }
-
-      return bestMatch;
+      return this.match(MappingArraySchema.parse(JSON.parse(raw)), input);
     } catch (err) {
       logger.warn({ err, userId }, 'Failed to find address mapping');
       return null;
     }
+  }
+
+  /** Forget the mapping `findMapping` returns for this input, after the user rejected that place. */
+  async forgetMapping(userId: number, input: string): Promise<void> {
+    const key = MAPPINGS_KEY(userId);
+    const raw = await this.redis.get(key);
+    if (!raw) return;
+
+    const parsed = jsonCodec(MappingArraySchema).safeParse(raw);
+    if (!parsed.success) {
+      logger.warn({ err: parsed.error, userId }, 'Stored address mappings are unreadable; nothing forgotten');
+      return;
+    }
+    const rejected = this.match(parsed.data, input);
+    if (!rejected) return;
+
+    await this.redis.set(key, JSON.stringify(parsed.data.filter((m) => m !== rejected)));
+  }
+
+  private match(mappings: AddressMapping[], input: string): AddressMapping | null {
+    const normalized = this.normalize(input);
+
+    // Exact normalized match
+    const exact = mappings.find((m) => this.normalize(m.input) === normalized);
+    if (exact) return exact;
+
+    // Substring containment (for typo tolerance at word level)
+    const words = normalized.split(' ').filter((w) => w.length > 2);
+    if (words.length === 0) return null;
+
+    let bestMatch: AddressMapping | null = null;
+    let bestScore = 0;
+
+    for (const m of mappings) {
+      const mNorm = this.normalize(m.input);
+      let score = 0;
+      for (const word of words) {
+        if (mNorm.includes(word)) score++;
+      }
+      const ratio = score / words.length;
+      if (ratio > 0.7 && score > bestScore) {
+        bestScore = score;
+        bestMatch = m;
+      }
+    }
+
+    return bestMatch;
   }
 
   /** Get the N most recent mappings for a user */
