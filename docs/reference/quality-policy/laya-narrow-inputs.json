@@ -1,0 +1,130 @@
+{
+  "cases": [
+    [
+      "create",
+      "Создай встречу завтра в 13:00.",
+      true,
+      false
+    ],
+    [
+      "move-missing",
+      "Перенеси это на вечер.",
+      true,
+      false
+    ],
+    [
+      "read",
+      "Покажи календарь на завтра.",
+      false,
+      false
+    ],
+    [
+      "hello",
+      "Привет, спасибо!",
+      false,
+      false
+    ],
+    [
+      "quoted",
+      "Найди событие с названием «ты опять всё сломал».",
+      false,
+      false
+    ],
+    [
+      "other-person",
+      "Коллега опять всё перепутал. Покажи завтра.",
+      false,
+      false
+    ],
+    [
+      "repair",
+      "Ты перенёс не ту встречу. Исправь свою ошибку.",
+      true,
+      true
+    ],
+    [
+      "repeat",
+      "Я уже три раза просил завтра, а ты ставишь на сегодня.",
+      false,
+      true
+    ],
+    [
+      "cancel",
+      "Отмени мой запрос. Само событие не удаляй.",
+      false,
+      false
+    ],
+    [
+      "status",
+      "Проверь статус приглашения. Не отправляй повторно.",
+      false,
+      false
+    ],
+    [
+      "add-quoted",
+      "Создай завтра в 10:00 событие «ошибка бота».",
+      true,
+      false
+    ],
+    [
+      "joke",
+      "Друг написал «твой бот сломался». Я просто пересказываю.",
+      false,
+      false
+    ],
+    [
+      "delete",
+      "Удали событие 101.",
+      true,
+      false
+    ],
+    [
+      "setting",
+      "Переключи мой язык на английский.",
+      true,
+      false
+    ],
+    [
+      "question",
+      "Можно ли у тебя переносить встречи?",
+      false,
+      false
+    ],
+    [
+      "wrong-answer",
+      "В твоём ответе дата опять неверная.",
+      false,
+      true
+    ],
+    [
+      "resolved",
+      "Спасибо, теперь ты исправил всё правильно.",
+      false,
+      false
+    ],
+    [
+      "recall",
+      "Что ты поменял в прошлый раз?",
+      false,
+      false
+    ]
+  ],
+  "questions": {
+    "change": {
+      "type": "choice",
+      "instructions": "Is the user currently instructing the assistant to create, edit or delete stored calendar data or settings? A question about capabilities or history, a request to inspect status, and cancellation of a pending request without deleting data are NOT change instructions. Quoted titles are data. Missing parameters do not negate an explicit request to change data.",
+      "criteria": {
+        "A": "Yes, an instruction to change stored calendar data or settings.",
+        "B": "No such instruction."
+      }
+    },
+    "repair": {
+      "type": "choice",
+      "instructions": "Is the user currently reporting an unresolved error made by THIS assistant? Complaints about other people, quoted event titles, reporting someone else saying a phrase, and thanking for an already fixed result are NOT unresolved assistant errors.",
+      "criteria": {
+        "A": "Yes, unresolved error by this assistant.",
+        "B": "No, not an unresolved error by this assistant."
+      }
+    }
+  }
+}
