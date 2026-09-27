@@ -1381,6 +1381,9 @@ async function shutdown(): Promise<void> {
 }
 
 async function shutdownWithTimeout(): Promise<void> {
+  // Refuse webhook updates from here on: Telegram keeps a refused update and
+  // redelivers it to the next process instead of it dying in the stopped queue.
+  webServerDeps.telegramUpdatesClosed = true;
   await Promise.race([
     shutdown(),
     new Promise<void>((_, reject) => setTimeout(() => reject(new Error('Shutdown timeout after 8s')), 8000)),
@@ -1411,14 +1414,15 @@ if (config.PUBLIC_DOMAIN) {
     secretToken: webhookSecret,
   }) as (req: Request) => Response;
 
+  // Pending updates are kept, not dropped: a message sent while the bot restarted
+  // is answered now, and createStaleUpdateGuard skips ones that waited too long.
   bot.start({
     webhook: {
       url: webhookUrl,
       secret_token: webhookSecret,
     },
-    dropPendingUpdates: true,
   });
   botLogger.info({ webhookUrl }, 'Bot started (webhook mode)');
 } else {
-  bot.start({ dropPendingUpdates: true });
+  bot.start();
 }

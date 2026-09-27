@@ -26,6 +26,11 @@ export interface WebServerDeps {
   stateLookup?: OAuthStateLookup;
   onConnected?: (userId: number) => Promise<void>;
   onWebhook?: (channelId: string, resourceId: string) => Promise<void>;
+  /**
+   * Set once shutdown begins. A refused webhook is kept and redelivered by Telegram
+   * to the next process; an accepted one would die in the stopped update queue.
+   */
+  telegramUpdatesClosed?: boolean;
   // Telegram bot webhook — set when PUBLIC_DOMAIN is configured
   telegramWebhookHandler?: (req: Request) => Response | Promise<Response>;
   // Optional deep health check — throws if a critical dependency is unreachable
@@ -181,6 +186,9 @@ async function handleRequest(
   }
 
   if (req.method === 'POST' && url.pathname === '/webhook/telegram') {
+    if (deps.telegramUpdatesClosed) {
+      return new Response('Service Unavailable', { status: 503, headers: { 'Retry-After': '5' } });
+    }
     if (!deps.telegramWebhookHandler) {
       return new Response('Not Found', { status: 404 });
     }

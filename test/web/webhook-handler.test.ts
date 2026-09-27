@@ -280,6 +280,23 @@ describe('webhook handler', () => {
   });
 });
 
+describe('telegram webhook during shutdown', () => {
+  test('refuses updates once closed, so Telegram keeps them for the next process', async () => {
+    const handler = mock(() => new Response('ok'));
+    const deps = baseDeps({ telegramWebhookHandler: handler });
+    const { stop, port } = startWebServer(deps);
+    try {
+      expect((await fetch(`http://localhost:${port}/webhook/telegram`, { method: 'POST' })).status).toBe(200);
+      deps.telegramUpdatesClosed = true;
+      const refused = await fetch(`http://localhost:${port}/webhook/telegram`, { method: 'POST' });
+      expect(refused.status).toBe(503);
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+    }
+  });
+});
+
 describe('fetch handler error guard', () => {
   test('returns 499 when handler throws AbortError (client disconnected)', async () => {
     const abort = new DOMException('The connection was closed.', 'AbortError');
