@@ -266,6 +266,7 @@ function regroupToolCallBlocks(messages: MessageParam[]): MessageParam[] {
     }
     if (pendingIds.size > 0 || interleaved.length === 0) continue;
     ordered.splice(i + 1, j - i - 1, ...results, ...interleaved);
+    // Continue at the first moved row: it may itself be another call block.
     i += results.length;
   }
   return ordered;
