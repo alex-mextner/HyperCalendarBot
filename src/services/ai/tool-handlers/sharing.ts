@@ -16,7 +16,7 @@ import { resolveInvitationRecipient } from '../recipient-identity.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { handlePickUsers } from './meta.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
-import { shouldSuggestConnectTelegram } from './settings.ts';
+import { takeConnectTelegramSuggestion } from './settings.ts';
 
 const deliveryLogger = botLogger.child({ module: 'invitation-delivery' });
 
@@ -245,10 +245,11 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
 
   // Decided here, not by the model: a prompt step asking it to check connect_telegram_status first
   // made weak models call that tool on plain event creation (#511).
-  const connectSuggestion =
-    ctx.sender && !isGroupTarget && !delivery.viaBotApi && shouldSuggestConnectTelegram(ctx)
-      ? t(toLang(ctx.user.language)).botTips.connect_telegram
-      : null;
+  const connectSuggestion = takeConnectTelegramSuggestion(ctx, {
+    attempted: ctx.sender !== undefined,
+    viaBotApi: delivery.viaBotApi,
+    isGroupTarget,
+  });
   const deliveryHint = delivery.delivered
     ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
     : delivery.viaDeepLink
@@ -274,7 +275,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
       ...(connectSuggestion ? [connectSuggestion] : []),
     ].join('\n'),
     agentHint: connectSuggestion
-      ? `${deliveryHint} The invitee does not use the bot: end your reply with the /connect_telegram line above, verbatim and once. If the user declines it, call dismiss_connect_telegram_prompt.`
+      ? `${deliveryHint} The bot could not reach the invitee directly: end your reply with the /connect_telegram line above, verbatim. If the user declines it, call dismiss_connect_telegram_prompt.`
       : deliveryHint,
   };
 }

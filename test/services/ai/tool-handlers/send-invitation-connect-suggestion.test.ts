@@ -16,6 +16,7 @@ import { SharingSettingsRepository } from '../../../../src/database/repositories
 import { TelegramSessionRepository } from '../../../../src/database/repositories/telegram-session.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
+import { handleDismissConnectTelegramPrompt } from '../../../../src/services/ai/tool-handlers/settings.ts';
 import { handleSendInvitation } from '../../../../src/services/ai/tool-handlers/sharing.ts';
 import type { AgentContext, TelegramSender } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
@@ -166,5 +167,39 @@ describe('send_invitation /connect_telegram suggestion', () => {
     });
     expect(result.success).toBe(true);
     expect(mentionsSuggestion(result)).toBe(false);
+  });
+
+  test('several invitations in one run carry the suggestion only once', async () => {
+    const ctx = makeCtx({ messageText: `Invite Telegram IDs ${INVITEE_ID} and ${INVITEE_ID + 1}` });
+    const first = await handleSendInvitation(ctx, { event_id: eventId, invitee_id: INVITEE_ID });
+    const second = await handleSendInvitation(ctx, { event_id: eventId, invitee_id: INVITEE_ID + 1 });
+    expect(first.output?.split('\n').at(-1)).toBe(SUGGESTION);
+    expect(second.success).toBe(true);
+    expect(mentionsSuggestion(second)).toBe(false);
+  });
+
+  test('a dismissal earlier in the same run suppresses the suggestion', async () => {
+    const ctx = makeCtx();
+    handleDismissConnectTelegramPrompt(ctx);
+    const result = await handleSendInvitation(ctx, { event_id: eventId, invitee_id: INVITEE_ID });
+    expect(result.success).toBe(true);
+    expect(mentionsSuggestion(result)).toBe(false);
+  });
+
+  test('the suggestion also follows a delivery that reached nobody', async () => {
+    // Bot API refused, the admin session failed and the inviter could not get the forward link.
+    const failing: TelegramSender = {
+      ...unreachableByBot,
+      sendAsUser: async () => false,
+      sendMessage: async () => {
+        throw new Error('Forbidden: bot was blocked by the user');
+      },
+    };
+    const result = await handleSendInvitation(makeCtx({ sender: failing }), {
+      event_id: eventId,
+      invitee_id: INVITEE_ID,
+    });
+    expect(result.effect).toEqual({ kind: 'invitation', delivery: 'failed' });
+    expect(result.output?.split('\n').at(-1)).toBe(SUGGESTION);
   });
 });

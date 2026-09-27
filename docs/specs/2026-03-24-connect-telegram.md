@@ -503,18 +503,22 @@ The `send_invitation` handler decides deterministically, after the delivery atte
 suggest connecting. The suggestion is added when ALL of these hold:
 
 - the bot itself could not reach the invitee (`deliverInvitation` returned `viaBotApi: false` —
-  the invitee has not started the bot, or blocked it), so the invitation went through the admin
-  MTProto session, a forwarded deep link, or failed;
+  usually the invitee has not started the bot or blocked it; a transient Bot API error looks the
+  same), so the invitation went through the admin MTProto session, a forwarded deep link, or failed;
 - the target is a person, not a group;
 - the conversation is a private chat (`/connect_telegram` refuses to run in groups);
 - the feature is enabled (`TELEGRAM_SESSION_MASTER_KEY` is configured);
 - the user has no `active` row in `user_telegram_sessions`;
-- `users.connect_telegram_dismissed_at` is empty or older than 30 days.
+- `users.connect_telegram_dismissed_at` is empty or older than 30 days (a dismissal earlier in the
+  same request counts);
+- no earlier invitation in the same request already carried the suggestion, so inviting several
+  people yields one suggestion.
 
-When it applies, the localized `botTips.connect_telegram` line becomes the last line of the tool
-`output`, and the `agentHint` tells the agent to end its reply with that line verbatim, once, and
-to call `dismiss_connect_telegram_prompt` if the user declines. An intent workflow that sends
-`output` directly shows the line as is. Example (ru):
+The whole decision lives in `takeConnectTelegramSuggestion` (`tool-handlers/settings.ts`). When it
+applies, the localized `botTips.connect_telegram` line becomes the last line of the tool `output`,
+and the `agentHint` tells the agent to end its reply with that line verbatim and to call
+`dismiss_connect_telegram_prompt` if the user declines. An intent workflow that sends `output`
+directly shows the line as is. Example (ru):
 
 ```
 📱 Подключи свой Telegram-аккаунт — тогда приглашения на встречи будут приходить от тебя лично, а не от бота. Люди отвечают гораздо охотнее. /connect_telegram

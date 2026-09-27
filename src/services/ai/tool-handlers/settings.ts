@@ -286,22 +286,35 @@ function dismissedConnectPromptRecently(ctx: AgentContext): boolean {
 }
 
 /**
- * Whether suggesting /connect_telegram can help and is welcome: the feature is enabled, the user
- * has no active session, has not dismissed the suggestion in the last 30 days, and is in a
- * private chat (the command refuses to run in groups).
+ * The /connect_telegram suggestion for an invitation that was just sent, or null (#511, spec
+ * §10.1). It is offered only when the bot itself could not reach a person invitee, the feature is
+ * enabled, the user has no active session, has not dismissed it in the last 30 days, is in a
+ * private chat (the command refuses to run in groups), and has not been shown it earlier in this run.
  */
-export function shouldSuggestConnectTelegram(ctx: AgentContext): boolean {
-  return (
+export function takeConnectTelegramSuggestion(
+  ctx: AgentContext,
+  invitation: { attempted: boolean; viaBotApi: boolean; isGroupTarget: boolean },
+): string | null {
+  const eligible =
+    invitation.attempted &&
+    !invitation.viaBotApi &&
+    !invitation.isGroupTarget &&
     !ctx.isGroup &&
+    !ctx.connectTelegramSuggested &&
     ctx.telegramMasterKey !== undefined &&
     ctx.telegramSessionRepo !== undefined &&
     !ctx.telegramSessionRepo.getActive(ctx.user.telegram_id) &&
-    !dismissedConnectPromptRecently(ctx)
-  );
+    !dismissedConnectPromptRecently(ctx);
+  if (!eligible) return null;
+  ctx.connectTelegramSuggested = true;
+  return t(ctx.user.language).botTips.connect_telegram;
 }
 
 export function handleDismissConnectTelegramPrompt(ctx: AgentContext): ToolResult {
-  ctx.userRepo.setConnectTelegramDismissedAt(ctx.user.telegram_id, new Date().toISOString());
+  const dismissedAt = new Date().toISOString();
+  ctx.userRepo.setConnectTelegramDismissedAt(ctx.user.telegram_id, dismissedAt);
+  // A later send_invitation in the same run reads ctx.user, not the row.
+  ctx.user = { ...ctx.user, connect_telegram_dismissed_at: dismissedAt };
   return { success: true, output: 'Noted. Will not suggest again for 30 days.' };
 }
 handleDismissConnectTelegramPrompt.meta = { skipActionLog: true } satisfies import('../types.ts').ToolHandlerMeta;
