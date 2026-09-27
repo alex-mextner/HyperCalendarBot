@@ -393,7 +393,12 @@ describe('LocationVerificationService', () => {
     }
 
     function editsByMessageId(editMessage: { mock: { calls: unknown[][] } }): Map<number, EditCall> {
-      return new Map(editMessage.mock.calls.map((_call, i) => [editCall(editMessage, i)[1], editCall(editMessage, i)]));
+      return new Map(
+        editMessage.mock.calls.map((_call, i): [number, EditCall] => {
+          const call = editCall(editMessage, i);
+          return [call[1], call];
+        }),
+      );
     }
 
     const RESOLVED_ADDRESS = 'Кофемания, ул. Большая Никитская, 12';
@@ -451,6 +456,22 @@ describe('LocationVerificationService', () => {
       // already rewritten their card, so the location edit must not restore the invite + buttons.
       deps.editMessage.mockImplementationOnce(async () => {
         invitationRepo.updateStatus(answeredMeanwhile, 'accepted', 'pending');
+      });
+
+      await makeService(deps).applyResolvedLocation(event, makeGeoResult());
+
+      expect([...editsByMessageId(deps.editMessage).keys()]).toEqual([111]);
+    });
+
+    test('a pending invitee who proposed another time keeps their card, also when proposing mid-edit', async () => {
+      const { event, invitationRepo, deliver, deps } = seedDeliveredInvitations();
+      deliver(201, 111, 'pending');
+      // A free-text proposal replaced this card with "proposal sent" and no buttons; the inviter's
+      // reschedule/keep answer is what settles it, so the location edit must not hand back RSVP buttons.
+      invitationRepo.setProposedTime(deliver(202, 222, 'pending'), '2026-10-01T18:00:00Z');
+      const proposesMeanwhile = deliver(203, 333, 'pending');
+      deps.editMessage.mockImplementationOnce(async () => {
+        invitationRepo.setProposedTime(proposesMeanwhile, '2026-10-01T19:00:00Z');
       });
 
       await makeService(deps).applyResolvedLocation(event, makeGeoResult());

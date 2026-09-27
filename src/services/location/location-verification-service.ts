@@ -283,7 +283,9 @@ export class LocationVerificationService {
    * send theirs again: a group card keeps Going/Not going for every member (a group invitation stays
    * pending; members answer through event_participants), a pending personal card keeps its RSVP keyboard,
    * and an answered card (accepted, maybe, declined) keeps the answer line and event detail the RSVP
-   * callback left, without buttons. Cancelled and expired cards are left as they are.
+   * callback left, without buttons. Cancelled and expired cards are left as they are, and so is a pending
+   * card whose invitee proposed another time: a free-text proposal already replaced it with the
+   * proposal-sent notice, and the inviter's keep/reschedule answer settles it.
    */
   private async updateInvitationMessages(event: CalendarEvent): Promise<void> {
     const editMessage = this.deps.editMessage;
@@ -291,13 +293,14 @@ export class LocationVerificationService {
 
     for (const inv of this.deps.invitationRepo.getByEvent(event.id)) {
       if (!inv.message_id || !inv.chat_id || inv.status === 'cancelled' || inv.status === 'expired') continue;
+      if (inv.status === 'pending' && inv.proposed_time) continue;
 
       try {
         const card = await this.renderInvitationCard(event, inv, inv.status);
-        // Earlier edits in this loop yield, and an invitee can answer meanwhile: the RSVP callback
-        // has then already rewritten the card with the resolved location, so a stale render must not
-        // overwrite it.
-        if (this.deps.invitationRepo.findById(inv.id)?.status !== inv.status) continue;
+        // Earlier edits in this loop yield, and an invitee can answer or propose a time meanwhile: that
+        // callback has then already rewritten the card, so a stale render must not overwrite it.
+        const current = this.deps.invitationRepo.findById(inv.id);
+        if (current?.status !== inv.status || current.proposed_time !== inv.proposed_time) continue;
         await editMessage(inv.chat_id, inv.message_id, card.text, card.options);
       } catch (err) {
         logger.warn(
