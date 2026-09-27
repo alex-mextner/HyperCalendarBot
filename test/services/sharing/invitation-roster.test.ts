@@ -87,7 +87,7 @@ describe('invitation card roster', () => {
           '👥 Participants:',
           '👑 Anna — organizer',
           '✅ Boris — going',
-          '❔ Vera — maybe',
+          '🤔 Vera — maybe',
           '⏳ Gleb (you) — no answer yet',
           '❌ Dina — not going',
         ].join('\n'),
@@ -105,7 +105,7 @@ describe('invitation card roster', () => {
           '👥 Участники:',
           '👑 Anna — организатор',
           '✅ Boris (ты) — придёт',
-          '❔ Vera — возможно',
+          '🤔 Vera — возможно',
           '⏳ Gleb — ждём ответа',
           '❌ Dina — не придёт',
         ].join('\n'),
@@ -241,7 +241,7 @@ describe('invitation card roster', () => {
       {},
       readInvitationRoster(invitations, event.id, 201),
     );
-    expect(text).toContain('✅ Boris (you) — going\n❔ Vera — maybe');
+    expect(text).toContain('✅ Boris (you) — going\n🤔 Vera — maybe');
     expect(text).not.toContain('Your invitation');
   });
 });

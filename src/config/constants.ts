@@ -433,7 +433,7 @@ export const MSG = {
       organizer: (nameHtml: string) => `👑 ${nameHtml} — organizer`,
       answer: {
         accepted: (nameHtml: string) => `✅ ${nameHtml} — going`,
-        maybe: (nameHtml: string) => `❔ ${nameHtml} — maybe`,
+        maybe: (nameHtml: string) => `🤔 ${nameHtml} — maybe`,
         pending: (nameHtml: string) => `⏳ ${nameHtml} — no answer yet`,
         declined: (nameHtml: string) => `❌ ${nameHtml} — not going`,
       },
@@ -1467,7 +1467,7 @@ export const MSG = {
       organizer: (nameHtml: string) => `👑 ${nameHtml} — организатор`,
       answer: {
         accepted: (nameHtml: string) => `✅ ${nameHtml} — придёт`,
-        maybe: (nameHtml: string) => `❔ ${nameHtml} — возможно`,
+        maybe: (nameHtml: string) => `🤔 ${nameHtml} — возможно`,
         pending: (nameHtml: string) => `⏳ ${nameHtml} — ждём ответа`,
         declined: (nameHtml: string) => `❌ ${nameHtml} — не придёт`,
       },
