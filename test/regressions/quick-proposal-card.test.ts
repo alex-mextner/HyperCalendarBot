@@ -34,49 +34,52 @@ function makeLocationService(deps: Partial<LocationVerificationDeps>): LocationV
   return new LocationVerificationService(deps as unknown as LocationVerificationDeps);
 }
 
+const INVITEE_USER = { telegram_id: INVITEE, language: 'en', timezone: 'UTC' } as const;
+
+/** A pending invitation whose card (message CARD_MESSAGE_ID) sits in the invitee's chat, and the bot around it. */
+function setup() {
+  const db = new Database(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  runMigrations(db, migrations);
+  const userRepo = new UserRepository(db);
+  userRepo.create({ telegram_id: INVITER, timezone: 'UTC', language: 'en' });
+  userRepo.create({ telegram_id: INVITEE, timezone: 'UTC', language: 'en' });
+  const eventRepo = new EventRepository(db);
+  const invitationRepo = new InvitationRepository(db);
+  const invitationService = new InvitationService(invitationRepo, eventRepo, new SharingSettingsRepository(db));
+  const event = eventRepo.create({
+    user_id: INVITER,
+    title: 'Fixture meetup',
+    start_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    timezone: 'UTC',
+    location: 'Fixture Cafe',
+  });
+  const invitation = invitationService.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+  invitationRepo.setMessageInfo(invitation.id, CARD_MESSAGE_ID, INVITEE);
+
+  const chat = new Map<number, ChatMessage>([
+    [
+      CARD_MESSAGE_ID,
+      { text: 'Fixture meetup at Fixture Cafe', keyboard: invitationRsvpKeyboard(invitation.id, 'en') },
+    ],
+  ]);
+  const editMessage = async (_chatId: number, messageId: number, text: string, keyboard?: InlineKeyboard) => {
+    chat.set(messageId, { text, keyboard: keyboard ?? null });
+  };
+  const handler = makeCallbackHandler({
+    invitationService,
+    eventRepo,
+    invitationRepo,
+    invitationNotifyDeps: { userRepo, sendMessage: mock(() => Promise.resolve()), editMessage },
+  });
+  return { db, userRepo, eventRepo, invitationRepo, event, invitation, chat, editMessage, handler };
+}
+
 describe('quick +30/+60 time proposal', () => {
   test('replaces the invitation card, so a later location resolution leaves no stale card with live buttons', async () => {
-    const db = new Database(':memory:');
-    db.exec('PRAGMA foreign_keys = ON');
-    runMigrations(db, migrations);
-    const userRepo = new UserRepository(db);
-    userRepo.create({ telegram_id: INVITER, timezone: 'UTC', language: 'en' });
-    userRepo.create({ telegram_id: INVITEE, timezone: 'UTC', language: 'en' });
-    const eventRepo = new EventRepository(db);
-    const invitationRepo = new InvitationRepository(db);
-    const invitationService = new InvitationService(invitationRepo, eventRepo, new SharingSettingsRepository(db));
-    const event = eventRepo.create({
-      user_id: INVITER,
-      title: 'Fixture meetup',
-      start_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      timezone: 'UTC',
-      location: 'Fixture Cafe',
-    });
-    const invitation = invitationService.sendInvitation(event.id, INVITER, INVITEE).invitation!;
-    invitationRepo.setMessageInfo(invitation.id, CARD_MESSAGE_ID, INVITEE);
-
-    const chat = new Map<number, ChatMessage>([
-      [
-        CARD_MESSAGE_ID,
-        { text: 'Fixture meetup at Fixture Cafe', keyboard: invitationRsvpKeyboard(invitation.id, 'en') },
-      ],
-    ]);
-    const editMessage = async (_chatId: number, messageId: number, text: string, keyboard?: InlineKeyboard) => {
-      chat.set(messageId, { text, keyboard: keyboard ?? null });
-    };
-
-    const handler = makeCallbackHandler({
-      invitationService,
-      eventRepo,
-      invitationRepo,
-      invitationNotifyDeps: { userRepo, sendMessage: mock(() => Promise.resolve()), editMessage },
-    });
+    const { db, userRepo, eventRepo, invitationRepo, event, invitation, chat, editMessage, handler } = setup();
     // The +30 button sits on the separate "What time do you suggest?" prompt, not on the card.
-    const tap = makeCallbackTap(`inv:propose:${invitation.id}:+30`, {
-      telegram_id: INVITEE,
-      language: 'en',
-      timezone: 'UTC',
-    });
+    const tap = makeCallbackTap(`inv:propose:${invitation.id}:+30`, INVITEE_USER);
     await handler(tap.ctx);
 
     const proposedTime = invitationRepo.findById(invitation.id)!.proposed_time;
@@ -101,5 +104,21 @@ describe('quick +30/+60 time proposal', () => {
     });
 
     expect(chat.get(CARD_MESSAGE_ID)).toEqual({ text: proposalSent, keyboard: null });
+  });
+
+  test('a stale +30 tapped after the invitee declined leaves the declined card as it is', async () => {
+    const { invitationRepo, invitation, chat, handler } = setup();
+
+    // The invitee taps Other time (the +30/+60 prompt appears), then Decline on the card itself.
+    const decline = makeCallbackTap(`inv:decline:${invitation.id}`, INVITEE_USER);
+    await handler(decline.ctx);
+    const [declinedText] = decline.editText.mock.calls.at(-1)!;
+    chat.set(CARD_MESSAGE_ID, { text: declinedText, keyboard: null });
+
+    // The prompt kept its buttons, so the stale +30 is still tappable.
+    await handler(makeCallbackTap(`inv:propose:${invitation.id}:+30`, INVITEE_USER).ctx);
+
+    expect(invitationRepo.findById(invitation.id)!.status).toBe('declined');
+    expect(chat.get(CARD_MESSAGE_ID)).toEqual({ text: declinedText, keyboard: null });
   });
 });
