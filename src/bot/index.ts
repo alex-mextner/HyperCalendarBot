@@ -75,7 +75,7 @@ import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.ha
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps } from './handlers/message.handler.ts';
-import { type PickerAckIo, runChatShareWithAck, runPickerBatchWithAck } from './handlers/picker-invitation.ts';
+import { createPickerAckIo, runChatShareWithAck, runPickerBatchWithAck } from './handlers/picker-invitation.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
@@ -1008,11 +1008,11 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       // non-WAL voice_caller.session, and concurrent spawns corrupt it — CLAUDE.md; serial also
       // avoids a 429 burst on the shared 1-CPU host), then edit the ack in place with the
       // per-invitee status. Per-invitee failures are isolated and the lines preserve input order.
-      const pickerIo: PickerAckIo = {
-        sendAck: (text) =>
-          ctx.send(text, { reply_markup: { remove_keyboard: true } }).then((sent) => ({ message_id: sent.id })),
-        editAck: (messageId, text) => pickerInvitationDeps.sender.editMessageText(ctx.chatId, messageId, text),
-      };
+      const pickerIo = createPickerAckIo(
+        (text, params) => ctx.send(text, params),
+        (messageId, text, parseMode) =>
+          pickerInvitationDeps.sender.editMessageText(ctx.chatId, messageId, text, parseMode),
+      );
       const { aiResultLines } = await runPickerBatchWithAck(
         {
           eventId,
@@ -1053,13 +1053,12 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       // Reply-fast: ack immediately, deliver, then edit the ack in place with the final result.
       // Both the ack and the edit use parse_mode HTML so the edit-failure fallback re-send renders
       // identically; buildChatSharedResultText escapes the title and any error before interpolation.
-      const chatShareIo: PickerAckIo = {
-        sendAck: (text) =>
-          ctx
-            .send(text, { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } })
-            .then((sent) => ({ message_id: sent.id })),
-        editAck: (messageId, text) => pickerInvitationDeps.sender.editMessageText(ctx.chatId, messageId, text, 'HTML'),
-      };
+      const chatShareIo = createPickerAckIo(
+        (text, params) => ctx.send(text, params),
+        (messageId, text, parseMode) =>
+          pickerInvitationDeps.sender.editMessageText(ctx.chatId, messageId, text, parseMode),
+        'HTML',
+      );
       // Groups receive the invitation via Bot API only — no MTProto userbot delivery, and no
       // deep-link fallback: a forward invite link resolves only in a user's private /start and
       // can't be accepted on behalf of a group, so a failed delivery reports honest failure.
