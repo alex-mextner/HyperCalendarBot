@@ -44,6 +44,16 @@ export function validateAndGetOffset(timezone: string, dt: Date): { offsetStr: s
   return { offsetStr, offsetMinutes };
 }
 
+/** Wall clock of `dt` at `offset`, as "YYYY-MM-DDTHH:MM:SS+HH:MM" (convert_to_timezone's local_datetime shape). */
+export function formatLocalIso(dt: Date, offset: { offsetStr: string; offsetMinutes: number }): string {
+  const local = new Date(dt.getTime() + offset.offsetMinutes * 60_000);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return (
+    `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}` +
+    `T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}${offset.offsetStr}`
+  );
+}
+
 function resolveSingle(
   timezone: string,
   dt: Date,
@@ -53,12 +63,7 @@ function resolveSingle(
   const janOffset = getOffsetMinutes(timezone, new Date(Date.UTC(year, 0, 15)));
   const julOffset = getOffsetMinutes(timezone, new Date(Date.UTC(year, 6, 15)));
   const dstActive = janOffset !== julOffset && offsetMinutes === Math.max(janOffset, julOffset);
-  const localMs = dt.getTime() + offsetMinutes * 60_000;
-  const local = new Date(localMs);
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  const localTime =
-    `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}` +
-    `T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}${offsetStr}`;
+  const localTime = formatLocalIso(dt, { offsetStr, offsetMinutes });
   return { offsetStr, offsetMinutes, dstActive, localTime };
 }
 
@@ -192,12 +197,7 @@ export function handleConvertToTimezone(input: { datetime: string; timezone: str
     return { success: false, error: `Invalid timezone "${input.timezone}".${hint}` };
   }
 
-  const localMs = dt.getTime() + offsetMinutes * 60_000;
-  const local = new Date(localMs);
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  const localDatetime =
-    `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}` +
-    `T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}${offsetStr}`;
+  const localDatetime = formatLocalIso(dt, { offsetStr, offsetMinutes });
 
   return {
     success: true,
