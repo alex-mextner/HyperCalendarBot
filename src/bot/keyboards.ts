@@ -2,6 +2,7 @@
 import { InlineKeyboard, Keyboard } from 'gramio';
 import { CB, t } from '../config/constants.ts';
 import type { CalendarEvent, Contact } from '../database/types.ts';
+import { describeDeliveryError } from '../services/ai/deliver-message.ts';
 import { formatTime } from '../utils/date.ts';
 import { botLogger } from '../utils/logger.ts';
 
@@ -427,14 +428,15 @@ export function removeKeyboard(): RemoveKeyboardParams {
 /**
  * Remove the chat's reply keyboard without leaving a message behind. Telegram drops a reply keyboard
  * only through a message carrying ReplyKeyboardRemove, and such a message can never be edited — so
- * send a throwaway one and delete it right away. A failed delete is logged, not thrown.
+ * send a throwaway one and delete it right away. A failed delete is logged (sanitized: a GramIO
+ * error carries the request payload), not thrown.
  */
 export async function clearReplyKeyboard(
   send: (text: string, params: RemoveKeyboardParams) => Promise<{ delete(): Promise<unknown> }>,
 ): Promise<void> {
   const tempMsg = await send('.', removeKeyboard());
   tempMsg.delete().catch((err: unknown) => {
-    botLogger.warn({ err }, 'Failed to delete temp remove-keyboard message');
+    botLogger.warn({ err: describeDeliveryError(err) }, 'Failed to delete temp remove-keyboard message');
   });
 }
 

@@ -1,6 +1,7 @@
-import { describe, expect, test } from 'bun:test';
-import { InlineKeyboard, Keyboard } from 'gramio';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { InlineKeyboard, Keyboard, TelegramError } from 'gramio';
 import {
+  clearReplyKeyboard,
   countryKeyboard,
   deleteConfirmKeyboard,
   editFieldKeyboard,
@@ -30,6 +31,7 @@ import {
   timezoneConfirmKeyboard,
   timezoneMethodKeyboard,
 } from '../../src/bot/keyboards';
+import { botLogger } from '../../src/utils/logger.ts';
 
 /** InlineKeyboard stores buttons in a private `keyboard` property.
  *  TypeScript private check bypass needed for test inspection. */
@@ -594,5 +596,29 @@ describe('inviteContactPickerKeyboard', () => {
     expect(allText.some((t) => t.includes('Другой'))).toBe(true);
     expect(allText.some((t) => t.includes('Групповой'))).toBe(true);
     expect(allText.some((t) => t.includes('Отмена'))).toBe(true);
+  });
+});
+
+describe('clearReplyKeyboard', () => {
+  test('a failed delete logs a sanitized error without the request payload', async () => {
+    const warn = spyOn(botLogger, 'warn').mockImplementation(() => {});
+    const failure = new TelegramError(
+      { ok: false, error_code: 400, description: 'Bad Request: message to delete not found' },
+      'deleteMessage',
+      { chat_id: 900001, message_id: 77 },
+    );
+    const rejected = Promise.reject(failure);
+    try {
+      await clearReplyKeyboard(async () => ({ delete: () => rejected }));
+      await rejected.catch(() => {});
+      await Promise.resolve();
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      const logged = JSON.stringify(warn.mock.calls[0]?.[0]);
+      expect(logged).toContain('deleteMessage');
+      expect(logged).not.toContain('900001');
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
