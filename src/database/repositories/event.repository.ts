@@ -63,6 +63,20 @@ export const EVENT_UPDATE_FIELDS = [
   'venue_name',
 ] satisfies readonly (keyof UpdateEventData)[];
 
+/**
+ * Resolved-place columns derived from the typed `location`, with the value that
+ * means "not resolved". They describe one specific location text and are stale
+ * as soon as that text changes.
+ */
+const RESOLVED_LOCATION_RESETS = [
+  ['resolved_address', 'NULL'],
+  ['latitude', 'NULL'],
+  ['longitude', 'NULL'],
+  ['google_maps_url', 'NULL'],
+  ['venue_name', 'NULL'],
+  ['location_verified', '0'],
+] as const satisfies readonly (readonly [keyof UpdateEventData, string])[];
+
 export class EventRepository {
   /**
    * Tables that `cascadeCleanupChildren` should wipe when a parent event
@@ -350,6 +364,18 @@ export class EventRepository {
       if (value !== undefined) {
         fields.push(`${key} = ?`);
         values.push(key === 'all_day' ? (value ? 1 : 0) : value);
+      }
+    }
+
+    // Every write path funnels through here, so a changed location can never keep the
+    // previous venue, address and map link. The reset happens in the same UPDATE:
+    // SQLite evaluates `location IS ?` against the pre-update row, so an unchanged
+    // text keeps its resolution. A caller that supplies a resolved column wins.
+    if (data.location !== undefined) {
+      for (const [column, unresolved] of RESOLVED_LOCATION_RESETS) {
+        if (data[column] !== undefined) continue;
+        fields.push(`${column} = CASE WHEN location IS ? THEN ${column} ELSE ${unresolved} END`);
+        values.push(data.location);
       }
     }
 
