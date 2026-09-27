@@ -38,6 +38,8 @@ import { escapeHtml } from '../../../src/utils/telegram.ts';
 const USER_ID = 1001;
 const INVITEE_ID = 2002;
 const RAW_LOCATION = 'Kafana Sunce';
+// The event's text after the creator edits the location.
+const EDITED_LOCATION = 'У Иры дома';
 const KEEP_AS_TYPED = t('ru').aiTools.location.noneOfThese;
 
 const SERBIA_BOUNDS: GeoBounds = { south: 42.23, west: 18.82, north: 46.19, east: 23.01 };
@@ -318,13 +320,19 @@ function setup(
 
   /** The creator confirmed `geo` earlier, by answering a picker that offered it. */
   async function confirmEarlier(geo: GeocodedLocation) {
-    await candidateStore.set(event.id, { id: 'e0e0e0e0', candidates: [geo] });
+    await candidateStore.set(event.id, {
+      id: 'e0e0e0e0',
+      location: RAW_LOCATION,
+      candidates: [geo],
+      placeDropped: false,
+    });
     expect(await service.handleLocationChoice(event.id, USER_ID, 'e0e0e0e0', 0)).toBe(true);
   }
 
   return {
     service,
     event,
+    eventRepo,
     user,
     storedEvent,
     addressRedis,
@@ -457,6 +465,39 @@ describe('no geocode is applied before the creator taps a candidate', () => {
 
     await s.expectNothingWritten();
     expect(edits.map((e) => e.text)).toEqual([t('ru').aiTools.location.locationChoiceOutdated]);
+  });
+
+  test('a slow search for an earlier text never replaces the picker of the newer text', async () => {
+    let releaseOldSearch = () => {};
+    const oldSearchReleased = new Promise<void>((resolve) => {
+      releaseOldSearch = resolve;
+    });
+    const geocoder: GeocodingService = {
+      findPlace: async (query) => {
+        if (query !== RAW_LOCATION) return [BELGRADE_CAFE];
+        await oldSearchReleased;
+        return [DUTCH_HOTEL];
+      },
+      geocodeAddress: async () => [],
+      reverseGeocode: async () => null,
+      locateArea: async () => SERBIA,
+    };
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder);
+    const oldVerification = s.service.verifyEventLocation(s.event, s.user());
+    s.eventRepo.update(s.event.id, USER_ID, { location: EDITED_LOCATION });
+    await s.service.verifyEventLocation(s.storedEvent(), s.user());
+
+    releaseOldSearch();
+    await oldVerification;
+    await s.tap(button(s.sent[0], '0'));
+
+    // Only the current text was asked about, and its answer applies to it
+    expect(s.sent).toHaveLength(1);
+    expect(s.storedEvent().location).toBe(EDITED_LOCATION);
+    expect(s.storedEvent().resolved_address).toBe(BELGRADE_CAFE.formattedAddress);
+    expect((await s.addressCache.findMapping(USER_ID, EDITED_LOCATION))?.resolvedAddress).toBe(
+      BELGRADE_CAFE.formattedAddress,
+    );
   });
 
   test('a place remembered before the bot required a confirmation is not offered; a fresh search is', async () => {
@@ -654,6 +695,26 @@ describe('tapping a candidate resolves the event', () => {
     expect(await s.candidateStore.get(s.event.id)).not.toBeNull();
   });
 
+  test('a tap after the text was edited without a new search applies and remembers nothing', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.service.verifyEventLocation(s.event, s.user());
+    // The /edit scene, an abstract location or a calendar sync change the text without verifying it
+    s.eventRepo.update(s.event.id, USER_ID, { location: EDITED_LOCATION });
+
+    const edits = await s.tap(button(s.sent[0], '0'));
+
+    const stored = s.storedEvent();
+    expect(stored.location).toBe(EDITED_LOCATION);
+    expect(stored.location_verified).toBe(0);
+    expect(stored.resolved_address).toBeNull();
+    expect(stored.venue_name).toBeNull();
+    expect(s.invitationEdits).toEqual([]);
+    expect(await s.addressCache.getRecent(USER_ID)).toEqual([]);
+    expect(s.user().city).toBeNull();
+    expect(edits.map((e) => e.text)).toEqual([t('ru').aiTools.location.locationChoiceOutdated]);
+  });
+
   test('the confirmation after a tap escapes the venue, the address and the title', async () => {
     const geocoder = scriptedGeocoder({ places: [TRICKY_CAFE, NIS_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade', title: 'Q&A <встреча>' }, geocoder.service);
@@ -705,8 +766,8 @@ describe('keep as typed', () => {
     expect(stored.resolved_address).toBeNull();
     expect(await s.addressCache.findMapping(USER_ID, RAW_LOCATION)).toBeNull();
     expect(await s.addressCache.getRecent(USER_ID)).toEqual([]);
-    // The confirmation re-renders delivered cards with the typed text only
-    for (const card of s.invitationEdits) expect(card).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
+    // The event never had a place, so delivered cards already show just the typed text
+    expect(s.invitationEdits).toEqual([]);
     expect(s.user().city).toBeNull();
     expect(await s.candidateStore.get(s.event.id)).toBeNull();
     expect(edits).toEqual([
@@ -716,6 +777,24 @@ describe('keep as typed', () => {
         replyMarkup: undefined,
       },
     ]);
+  });
+
+  test('a keep tap after the text was edited without a new search changes nothing', async () => {
+    const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.confirmEarlier(BELGRADE_CAFE);
+    await s.service.verifyEventLocation(s.storedEvent(), s.user());
+    s.eventRepo.update(s.event.id, USER_ID, { location: EDITED_LOCATION });
+    const cardEditsBefore = s.invitationEdits.length;
+
+    const edits = await s.tap(button(s.sent[0], 'keep'));
+
+    expect(edits.map((e) => e.text)).toEqual([t('ru').aiTools.location.locationChoiceOutdated]);
+    expect(s.invitationEdits).toHaveLength(cardEditsBefore);
+    // The place confirmed for the earlier text stays remembered for it
+    expect((await s.addressCache.findMapping(USER_ID, RAW_LOCATION))?.resolvedAddress).toBe(
+      BELGRADE_CAFE.formattedAddress,
+    );
   });
 
   test('rejecting a remembered place forgets it for this text', async () => {
