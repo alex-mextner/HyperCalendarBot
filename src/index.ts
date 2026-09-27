@@ -990,13 +990,17 @@ let pendingGeoStore: import('./services/location/pending-geo-store.ts').PendingG
 
 if (config.GOOGLE_API_KEY && config.REDIS_URL) {
   const { createGeocodingService } = await import('./services/location/geocoding-service.ts');
+  const { withCachedAreas } = await import('./services/location/area-cache.ts');
   const { AddressCache, redisCompareAndSet } = await import('./services/location/address-cache.ts');
   const { LocationVerificationService } = await import('./services/location/location-verification-service.ts');
   const { RedisLocationCandidateStore } = await import('./services/location/location-candidate-store.ts');
   const { RedisPendingGeoStore } = await import('./services/location/pending-geo-store.ts');
 
   const locationRedis = new Bun.RedisClient(config.REDIS_URL);
-  const geocodingService = createGeocodingService(config.GOOGLE_API_KEY);
+  const geocodingService = withCachedAreas(createGeocodingService(config.GOOGLE_API_KEY), {
+    get: (key: string) => locationRedis.get(key),
+    set: (key: string, value: string, opts: { ex: number }) => locationRedis.set(key, value, 'EX', opts.ex),
+  });
   addressCache = new AddressCache({
     get: (key: string) => locationRedis.get(key),
     compareAndSet: redisCompareAndSet({
