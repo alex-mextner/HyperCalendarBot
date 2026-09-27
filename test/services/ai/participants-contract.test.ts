@@ -293,4 +293,44 @@ describe('who takes part: answered from invitations, not from the description', 
     expect(statusSeen).not.toContain('Алекс');
     expect(result.responseText).toContain('Ты организатор этой встречи — приглашать тебя не нужно. Приглашены: Лена.');
   });
+
+  test('an invitee asking in a group the owner did not invite: the model learns the chat is refused, not the person', async () => {
+    const { ctx, sender } = makeHarness('Europe/Belgrade');
+    const event = ctx.eventService.createEvent({
+      user_id: OWNER,
+      title: 'Встреча',
+      start_at: new Date(Date.now() + 26 * 3_600_000).toISOString(),
+      timezone: 'Europe/Belgrade',
+    });
+    const invitations = ctx.sharing?.invitationService;
+    const invitation = invitations?.sendInvitation(event.id, OWNER, LENA).invitation;
+    if (!invitations || !invitation) throw new Error('invitation fixture missing');
+    expect(invitations.acceptInvitation(invitation.id, LENA).success).toBe(true);
+    const lena = ctx.userRepo.findByTelegramId(LENA);
+    if (!lena) throw new Error('invitee fixture missing');
+    const GROUP_CHAT_ID = -1_004_242;
+    const groupCtx: AgentContext = {
+      ...ctx,
+      user: lena,
+      chatId: GROUP_CHAT_ID,
+      isGroup: true,
+      groupChatId: GROUP_CHAT_ID,
+      messageText: `кто идёт на встречу ${event.id}?`,
+    };
+    let statusSeen = '';
+    const model = scriptedModel([
+      () => ({ tool: 'get_invitation_status', input: { event_id: event.id } }),
+      (opts) => {
+        statusSeen = toolMessages(opts).join('\n');
+        return { text: 'Список участников покажу в личном чате.' };
+      },
+    ]);
+
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: model.impl }).run(groupCtx);
+
+    expect(result.toolResults.map((r) => r.success)).toEqual([false]);
+    expect(statusSeen).toBe(
+      `Error: Event ${event.id}: its roster can only be read in a private chat or in a group invited to it.`,
+    );
+  });
 });

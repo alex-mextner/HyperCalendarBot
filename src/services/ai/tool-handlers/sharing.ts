@@ -491,9 +491,17 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
       (chatId) => ctx.group?.groupMemberRepo.getMembership(chatId, requesterId)?.left_at === null,
     );
     const isInvited = hasPersonalInvitation || isInvitedGroupMember;
-    // The roster is the owner's to share: never post it into a group chat the owner did not invite.
-    const isAllowedChat = !ctx.isGroup || (ctx.groupChatId !== undefined && liveGroupChatIds.includes(ctx.groupChatId));
-    if (ownerId !== null && isInvited && isAllowedChat) {
+    if (ownerId !== null && isInvited) {
+      // The roster is the owner's to share: never post it into a group chat the owner did not invite.
+      // Say why, so the model sends the invitee to a private chat instead of calling them uninvited.
+      const isAllowedChat =
+        !ctx.isGroup || (ctx.groupChatId !== undefined && liveGroupChatIds.includes(ctx.groupChatId));
+      if (!isAllowedChat) {
+        return {
+          success: false,
+          error: `Event ${input.event_id}: its roster can only be read in a private chat or in a group invited to it.`,
+        };
+      }
       event = ctx.eventService.getEvent(input.event_id, ownerId);
       organizerId = ownerId;
     }

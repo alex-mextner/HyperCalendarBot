@@ -1359,9 +1359,15 @@ describe('sharing tool handlers', () => {
       test('an invitee asking in a group chat gets the roster only in a chat the owner invited', () => {
         const { event } = createDinner();
         const OTHER_GROUP_CHAT_ID = -1008888;
-        expect(
-          handleGetInvitationStatus(ctxFor(OTHER_USER_ID, OTHER_GROUP_CHAT_ID), { event_id: event.id }).success,
-        ).toBe(false);
+        // Refused for the chat, not for the person: the model must not tell an invitee they are not invited.
+        const elsewhere = handleGetInvitationStatus(ctxFor(OTHER_USER_ID, OTHER_GROUP_CHAT_ID), { event_id: event.id });
+        expect(elsewhere.success).toBe(false);
+        expect(elsewhere.error).toBe(
+          `Event ${event.id}: its roster can only be read in a private chat or in a group invited to it.`,
+        );
+        expect(elsewhere.output).toBeUndefined();
+        const stranger = handleGetInvitationStatus(ctxFor(STRANGER_ID, OTHER_GROUP_CHAT_ID), { event_id: event.id });
+        expect(stranger.error).toContain('not found');
 
         invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
         expect(handleGetInvitationStatus(ctxFor(OTHER_USER_ID, GROUP_CHAT_ID), { event_id: event.id }).success).toBe(
