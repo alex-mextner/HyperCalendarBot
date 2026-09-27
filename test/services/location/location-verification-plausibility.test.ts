@@ -30,9 +30,13 @@ import type {
   GeocodingService,
 } from '../../../src/services/location/geocoding-service.ts';
 import { InMemoryLocationCandidateStore } from '../../../src/services/location/location-candidate-store.ts';
-import { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
+import {
+  type LocationVerificationDeps,
+  LocationVerificationService,
+} from '../../../src/services/location/location-verification-service.ts';
 import { InMemoryPendingGeoStore } from '../../../src/services/location/pending-geo-store.ts';
 import { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
+import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 import { escapeHtml } from '../../../src/utils/telegram.ts';
 
 const USER_ID = 1001;
@@ -199,6 +203,14 @@ interface EditedMessage {
   replyMarkup: unknown;
 }
 
+/** An edit of a delivered invitation card, with the keyboard it leaves on the card. */
+interface InvitationCardEdit {
+  chatId: number;
+  messageId: number;
+  text: string;
+  options: Parameters<NonNullable<LocationVerificationDeps['editMessage']>>[3];
+}
+
 let db: Database;
 afterEach(() => db.close());
 
@@ -229,7 +241,7 @@ function setup(
   });
   // A delivered invitation: its card is edited whenever the event's place changes.
   const invitationRepo = new InvitationRepository(db);
-  invitationRepo.create({
+  const invitation = invitationRepo.create({
     event_id: event.id,
     inviter_id: USER_ID,
     invitee_id: INVITEE_ID,
@@ -240,19 +252,20 @@ function setup(
   const addressCache = new AddressCache(addressRedis);
   const candidateStore = new InMemoryLocationCandidateStore();
   const sent: SentMessage[] = [];
-  const invitationEdits: string[] = [];
+  const invitationEdits: InvitationCardEdit[] = [];
   const service = new LocationVerificationService({
     geocodingService,
     addressCache,
     eventRepo,
     userRepo,
     invitationRepo,
+    agendaRepository: new AgendaRepository(db),
     candidateStore,
     sendMessage: async (userId, text, options) => {
       sent.push({ userId, text, replyMarkup: options?.reply_markup });
     },
-    editMessage: async (_chatId, _messageId, text) => {
-      invitationEdits.push(text);
+    editMessage: async (chatId, messageId, text, options) => {
+      invitationEdits.push({ chatId, messageId, text, options });
     },
   });
   const pendingGeoStore = new InMemoryPendingGeoStore();
@@ -340,6 +353,7 @@ function setup(
     candidateStore,
     pendingGeoStore,
     sent,
+    invitation,
     invitationEdits,
     tap,
     expectNothingWritten,
@@ -597,8 +611,12 @@ describe('tapping a candidate resolves the event', () => {
     expect(stored.resolved_address).toBe(BELGRADE_CAFE.formattedAddress);
     expect(stored.venue_name).toBe('Kafana Sunce');
     expect(stored.google_maps_url).toBe(BELGRADE_CAFE.googleMapsUrl);
+    // The invitee's card shows the place and keeps its RSVP buttons: an edit without them deletes them
     expect(s.invitationEdits).toHaveLength(1);
-    expect(s.invitationEdits[0]).toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
+    expect(s.invitationEdits[0]!.text).toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
+    expect(s.invitationEdits[0]!.options.reply_markup?.toJSON()).toEqual(
+      invitationRsvpKeyboard(s.invitation.id, 'ru').toJSON(),
+    );
     expect((await s.addressCache.findMapping(USER_ID, RAW_LOCATION))?.resolvedAddress).toBe(
       BELGRADE_CAFE.formattedAddress,
     );
@@ -815,7 +833,7 @@ describe('keep as typed', () => {
     expect(await s.addressCache.findMapping(USER_ID, RAW_LOCATION)).toBeNull();
   });
 
-  test('keeping the typed text drops a place confirmed earlier and refreshes the invitation', async () => {
+  test('keeping the typed text drops a place confirmed earlier and refreshes the invitation with its RSVP buttons', async () => {
     const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
     await s.confirmEarlier(BELGRADE_CAFE);
@@ -828,7 +846,10 @@ describe('keep as typed', () => {
     expect(stored.location_verified).toBe(0);
     expect(stored.resolved_address).toBeNull();
     expect(stored.google_maps_url).toBeNull();
-    expect(s.invitationEdits.at(-1)).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
+    expect(s.invitationEdits).toHaveLength(2);
+    const card = s.invitationEdits[1]!;
+    expect(card.text).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
+    expect(card.options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(s.invitation.id, 'ru').toJSON());
   });
 
   test('keeping the text of an event the user cannot see changes nothing', async () => {
