@@ -77,7 +77,7 @@ const RESOLVED_PLACE_COLUMNS = [
 ] as const satisfies readonly (keyof UpdateEventData)[];
 
 /** The value of each resolved-place column that means "not resolved". */
-const UNRESOLVED_PLACE = {
+export const UNRESOLVED_PLACE = {
   resolved_address: null,
   latitude: null,
   longitude: null,

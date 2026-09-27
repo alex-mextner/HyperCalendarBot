@@ -11,6 +11,7 @@ import { EventRepository } from '../../../src/database/repositories/event.reposi
 import { GoogleCalendarRepository } from '../../../src/database/repositories/google-calendar.repository.ts';
 import { GoogleSyncRepository } from '../../../src/database/repositories/google-sync.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
+import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
 import { ParticipantGoogleSyncRepository } from '../../../src/database/repositories/participant-google-sync.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
@@ -90,6 +91,8 @@ function setup(options: { ownerSynced?: boolean; groupEvent?: boolean } = {}) {
   if (options.ownerSynced !== false && !options.groupEvent) {
     eventRepo.updateSyncFields(event.id, { google_event_id: 'g-owner', sync_status: 'synced' });
   }
+  const participantRepo = new ParticipantRepository(db);
+  participantRepo.add(event.id, INVITEE_ID, 'accepted');
   const participantSyncRepo = new ParticipantGoogleSyncRepository(db);
   participantSyncRepo.upsert(INVITEE_ID, event.id, { google_event_id: 'g-invitee', sync_status: 'synced' });
 
@@ -105,6 +108,7 @@ function setup(options: { ownerSynced?: boolean; groupEvent?: boolean } = {}) {
     createPushScheduler(syncRepo, eventRepo, queue),
     createParticipantPushScheduler(syncRepo, participantSyncRepo, queue),
     participantSyncRepo,
+    participantRepo,
   );
 
   const geocodingService: GeocodingService = {
@@ -171,7 +175,7 @@ function setup(options: { ownerSynced?: boolean; groupEvent?: boolean } = {}) {
     return row;
   };
 
-  return { service, event, eventRepo, owner, jobs, runPushJobs, askedWith };
+  return { service, event, eventRepo, participantRepo, owner, jobs, runPushJobs, askedWith };
 }
 
 describe('the answer to the location question re-pushes the Google copies', () => {
@@ -255,6 +259,16 @@ describe('the answer to the location question re-pushes the Google copies', () =
     await s.service.applyResolvedLocation(s.event, CAFE);
 
     expect(await s.runPushJobs()).toEqual([{ copy: 'g-invitee', location: CAFE_SHOWN }]);
+  });
+
+  test('a participant who just declined keeps their copy removed: only the owner copy is pushed', async () => {
+    const s = setup();
+    // The decline queued the removal of their copy; its sync row lives until that job runs
+    s.participantRepo.updateStatus(s.event.id, INVITEE_ID, 'declined');
+
+    expect(await s.service.handleLocationChoice(s.event.id, OWNER_ID, await s.askedWith([CAFE]), 0)).toBe(true);
+
+    expect(await s.runPushJobs()).toEqual([{ copy: 'g-owner', location: CAFE_SHOWN }]);
   });
 
   test('without active Google sync nothing is queued', async () => {

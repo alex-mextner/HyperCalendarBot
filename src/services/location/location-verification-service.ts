@@ -3,7 +3,7 @@
 import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { CB, t } from '../../config/constants.ts';
 import type { AgendaRepository } from '../../database/repositories/agenda.repository.ts';
-import type { EventRepository } from '../../database/repositories/event.repository.ts';
+import { type EventRepository, UNRESOLVED_PLACE } from '../../database/repositories/event.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { CalendarEvent, Invitation, InvitationStatus, User } from '../../database/types.ts';
@@ -58,19 +58,6 @@ function placeLinkHtml(geo: GeocodedLocation): string {
       ? `${geo.venueName} — ${geo.formattedAddress}`
       : geo.formattedAddress;
   return `<a href="${escapeHtml(geo.googleMapsUrl)}">${escapeHtml(label)}</a>`;
-}
-
-/** The event with its resolved place dropped: only the typed text remains, unverified. */
-function withoutPlace(event: CalendarEvent): CalendarEvent {
-  return {
-    ...event,
-    resolved_address: null,
-    latitude: null,
-    longitude: null,
-    google_maps_url: null,
-    location_verified: 0,
-    venue_name: null,
-  };
 }
 
 export interface LocationVerificationDeps {
@@ -155,10 +142,7 @@ export class LocationVerificationService {
     // Until the creator answers, the event holds only the typed text: a place confirmed for an
     // earlier text must not stay on it, whoever changed the text. Invitation cards are re-rendered
     // only on the answer.
-    if (event.location_verified !== 0 || event.resolved_address !== null) {
-      this.deps.eventRepo.clearLocationFields(event.id);
-      await this.pushGoogleCopiesIfShownPlaceChanged(event, withoutPlace(event));
-    }
+    await this.dropResolvedPlace(event);
 
     // Only a user who can see the event is asked. A secretary updating the owner's event could not
     // answer the picker (#421), so no search is made and the owner's open picker stays.
@@ -409,20 +393,29 @@ export class LocationVerificationService {
   }
 
   /**
-   * The creator kept the typed text: drop any resolved place, re-push the Google copies if they
-   * showed it, and re-render every delivered invitation card. A card may still show a place dropped
+   * The creator kept the typed text: drop any resolved place (re-pushing the Google copies if they
+   * showed it) and re-render every delivered invitation card. A card may still show a place dropped
    * before this answer (when the text changed or an earlier question was asked), and the answer is
    * rare and idempotent, so the cards are always refreshed rather than tracking what they last showed.
    */
   private async keepOnlyTypedText(event: CalendarEvent): Promise<void> {
-    const typedOnly = withoutPlace(event);
+    const typedOnly = await this.dropResolvedPlace(event);
+    logger.info({ eventId: event.id }, 'Event location kept as typed');
+
+    await this.updateInvitationMessages(typedOnly);
+  }
+
+  /**
+   * Drop the event's resolved place, if it has one, so only the typed text remains, unverified, and
+   * re-push the Google copies that showed it. Returns the event as it now is.
+   */
+  private async dropResolvedPlace(event: CalendarEvent): Promise<CalendarEvent> {
+    const typedOnly: CalendarEvent = { ...event, ...UNRESOLVED_PLACE };
     if (event.location_verified !== 0 || event.resolved_address !== null) {
       this.deps.eventRepo.clearLocationFields(event.id);
       await this.pushGoogleCopiesIfShownPlaceChanged(event, typedOnly);
     }
-    logger.info({ eventId: event.id }, 'Event location kept as typed');
-
-    await this.updateInvitationMessages(typedOnly);
+    return typedOnly;
   }
 
   /**

@@ -315,6 +315,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     pushScheduler,
     participantPushScheduler,
     db.participantGoogleSync,
+    db.participants,
   );
 
   const disconnectDeps: DisconnectDeps = {
