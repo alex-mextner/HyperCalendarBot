@@ -7,6 +7,7 @@ import { CLEARED_LOCATION } from '../../database/repositories/event.repository.t
 import type { UpdateEventData } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
+import { withMapButton } from '../../services/location/event-venue.ts';
 import type { LocationVerificationService } from '../../services/location/location-verification-service.ts';
 import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
 import { botLogger } from '../../utils/logger.ts';
@@ -151,7 +152,7 @@ export function createEditValueScene(
             message_id: messageId,
             text: editText,
             parse_mode: 'HTML',
-            reply_markup: eventActionsKeyboard(eventId, lang),
+            reply_markup: withMapButton(eventActionsKeyboard(eventId, lang), updated, lang),
           });
         } else {
           await context.send(t(lang).something_wrong);

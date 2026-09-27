@@ -6,6 +6,7 @@
 
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, type Mock, mock, test } from 'bun:test';
+import type { InlineKeyboard } from 'gramio';
 import { createUserResolverComposer } from '../../../src/bot/middleware/user-resolver.ts';
 import { createEditValueScene } from '../../../src/bot/scenes/edit-value.scene.ts';
 import type { DatabaseService } from '../../../src/database/index.ts';
@@ -48,7 +49,7 @@ interface EditCtx {
     exit: Mock<() => Promise<void>>;
   };
   send: Mock<(text: string) => Promise<void>>;
-  bot: { api: { editMessageText: Mock<(params: { text: string }) => Promise<void>> } };
+  bot: { api: { editMessageText: Mock<(params: { text: string; reply_markup?: InlineKeyboard }) => Promise<void>> } };
   is: (type: string) => boolean;
 }
 
@@ -197,6 +198,21 @@ describe('edit_value scene: Location button', () => {
 
     expect(events.findById(event.id, USER_ID)).toMatchObject({ title: 'Late dinner', ...OLD_PLACE });
     expect(verifyEventLocation).not.toHaveBeenCalled();
+  });
+
+  test('the card re-rendered after editing another field keeps the Map button; a new location drops it', async () => {
+    const mapData = (ctx: EditCtx) =>
+      (ctx.bot.api.editMessageText.mock.calls[0]?.[0].reply_markup?.toJSON().inline_keyboard ?? [])
+        .flat()
+        .flatMap((b) => ('callback_data' in b && b.callback_data?.startsWith('ev_map:') ? [b.callback_data] : []));
+    const event = resolvedEvent();
+    const titleEdit = makeCtx(event.id, 'title', 'Late dinner');
+    await step(titleEdit, () => Promise.resolve());
+    expect(mapData(titleEdit)).toEqual([`ev_map:${event.id}`]);
+
+    const locationEdit = makeCtx(event.id, 'location', 'дома');
+    await step(locationEdit, () => Promise.resolve());
+    expect(mapData(locationEdit)).toEqual([]);
   });
 });
 
