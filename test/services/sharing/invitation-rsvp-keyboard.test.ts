@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
+import { t } from '../../../src/config/constants.ts';
+import { groupRsvpKeyboard, invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 
 describe('invitationRsvpKeyboard', () => {
   test('builds Accept/Decline and Maybe/Other time rows keyed by invitation id (en)', () => {
@@ -27,6 +28,19 @@ describe('invitationRsvpKeyboard', () => {
         [
           { text: 'Maybe 🤔', callback_data: 'inv:maybe:7' },
           { text: 'Другое время 🕐', callback_data: 'inv:propose:7' },
+        ],
+      ],
+    });
+  });
+});
+
+describe('groupRsvpKeyboard', () => {
+  test('builds one Going/Not going row keyed by event id, so any member can answer', () => {
+    expect(groupRsvpKeyboard(642, 'ru').toJSON()).toEqual({
+      inline_keyboard: [
+        [
+          { text: t('ru').group_rsvp_going_btn, callback_data: 'grsvp:642:going' },
+          { text: t('ru').group_rsvp_notgoing_btn, callback_data: 'grsvp:642:notgoing' },
         ],
       ],
     });

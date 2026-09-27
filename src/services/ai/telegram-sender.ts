@@ -1,8 +1,8 @@
 import type { Bot, TelegramReactionTypeEmojiEmoji } from 'gramio';
 import { InlineKeyboard, Keyboard } from 'gramio';
-import { CB, t } from '../../config/constants.ts';
+import { CB } from '../../config/constants.ts';
 import type { ParseMode } from '../../utils/telegram.ts';
-import { invitationRsvpKeyboard } from '../sharing/invitation-rsvp-keyboard.ts';
+import { groupRsvpKeyboard, invitationRsvpKeyboard } from '../sharing/invitation-rsvp-keyboard.ts';
 import type { InvitationKeyboardVariant, TelegramSender } from './types.ts';
 
 interface TelegramSenderOptions {
@@ -79,12 +79,9 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
       variant: InvitationKeyboardVariant = { kind: 'personal' },
     ) {
       const inviteeLang = (lang ?? 'en') as 'en' | 'ru';
-      const msgs = t(inviteeLang);
       const kb =
         variant.kind === 'group'
-          ? new InlineKeyboard()
-              .text(msgs.group_rsvp_going_btn, `${CB.GROUP_RSVP}:${variant.eventId}:going`)
-              .text(msgs.group_rsvp_notgoing_btn, `${CB.GROUP_RSVP}:${variant.eventId}:notgoing`)
+          ? groupRsvpKeyboard(variant.eventId, inviteeLang)
           : invitationRsvpKeyboard(invitationId, inviteeLang);
       try {
         const result = await bot.api.sendMessage({
