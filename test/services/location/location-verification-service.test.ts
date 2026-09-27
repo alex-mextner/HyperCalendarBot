@@ -13,7 +13,7 @@ import type { CalendarEvent, InvitationStatus, User } from '../../../src/databas
 import type { GeocodedLocation } from '../../../src/services/location/geocoding-service.ts';
 import {
   type LocationVerificationDeps,
-LocationVerificationService,
+  LocationVerificationService,
 } from '../../../src/services/location/location-verification-service.ts';
 import { groupRsvpKeyboard, invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 
@@ -547,20 +547,12 @@ describe('LocationVerificationService', () => {
       expect(text).toContain('https://maps.google.com');
     });
 
-    /** Partial mock deps → service; the one cast lives here, not at the call site. */
-    function makeService(deps: { [key: string]: unknown }): LocationVerificationService {
-      return new LocationVerificationService(deps as unknown as LocationVerificationDeps);
-    }
-
     test('re-rendered invitation keeps the full time range in both zones', async () => {
       const inv = makeInvitation({ id: 1, message_id: 111, chat_id: 200 });
       const invitee = makeUser({ telegram_id: 200, timezone: 'Europe/London' });
       const inviter = makeUser({ telegram_id: 100, first_name: 'Alice' });
       const deps = makeDeps({
-        invitationRepo: {
-          getPendingForEvent: mock(() => [inv]),
-          getAcceptedForEvent: mock(() => []),
-        },
+        invitationRepo: invitationRepoStub([inv]),
         userRepo: {
           findByTelegramId: mock((id: number) => (id === 200 ? invitee : inviter)),
           update: mock(() => makeUser()),
