@@ -556,6 +556,7 @@ describe('createMessageHandler', () => {
       });
       const originalFetch = globalThis.fetch;
       const fetchCalls: { url: string; body: FormData }[] = [];
+      const adminDocumentSent = Promise.withResolvers<void>();
       globalThis.fetch = mock(async (url: string | URL | Request, init?: RequestInit) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
         if (urlStr.includes('/getFile')) {
@@ -563,6 +564,7 @@ describe('createMessageHandler', () => {
         }
         if (urlStr.includes('/sendDocument')) {
           fetchCalls.push({ url: urlStr, body: init?.body as FormData });
+          adminDocumentSent.resolve();
           return new Response(JSON.stringify({ ok: true }));
         }
         return new Response(Buffer.from('fake-audio'));
@@ -572,8 +574,9 @@ describe('createMessageHandler', () => {
         const ctx = makeVoiceCtx();
         const handler = createMessageHandler(deps as never);
         await handler(ctx as never);
-        // Wait for fire-and-forget admin notification (mkdir + file write + fetch)
-        await Bun.sleep(50);
+        // The admin notification is fire-and-forget: wait for its sendDocument request itself
+        // (the log file is written before it), bounded by the test timeout rather than a guessed sleep.
+        await adminDocumentSent.promise;
 
         expect(fetchCalls).toHaveLength(1);
         const { url, body } = fetchCalls[0]!;
