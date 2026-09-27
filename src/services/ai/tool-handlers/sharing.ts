@@ -10,12 +10,13 @@ import type {
 } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
-import { deliverInvitation } from '../invitation-delivery.ts';
+import { deliverInvitation, type InvitationDeliveryResult } from '../invitation-delivery.ts';
 import { issueRecipientApproval } from '../recipient-confirmation.ts';
 import { resolveInvitationRecipient } from '../recipient-identity.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { handlePickUsers } from './meta.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
+import { shouldSuggestConnectTelegram } from './settings.ts';
 
 const deliveryLogger = botLogger.child({ module: 'invitation-delivery' });
 
@@ -211,7 +212,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
   }
 
   const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
-  let delivery: { delivered: boolean; viaDeepLink: boolean } = { delivered: false, viaDeepLink: false };
+  let delivery: InvitationDeliveryResult = { delivered: false, viaDeepLink: false, viaBotApi: false };
   if (ctx.sender) {
     delivery = await deliverInvitation({
       invitationId: invitation.id,
@@ -242,6 +243,18 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
     });
   }
 
+  // Decided here, not by the model: a prompt step asking it to check connect_telegram_status first
+  // made weak models call that tool on plain event creation (#511).
+  const connectSuggestion =
+    ctx.sender && !isGroupTarget && !delivery.viaBotApi && shouldSuggestConnectTelegram(ctx)
+      ? t(ctx.user.language).botTips.connect_telegram
+      : null;
+  const deliveryHint = delivery.delivered
+    ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
+    : delivery.viaDeepLink
+      ? 'Bot-API delivery failed. A deep-link fallback was sent to the inviter to forward manually. Tell the user to share the link.'
+      : 'Invitation delivery failed entirely. Tell the user there was a delivery problem.';
+
   return {
     success: true,
     mutationState: 'confirmed',
@@ -258,12 +271,11 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
         : delivery.viaDeepLink
           ? t(toLang(ctx.user.language)).writeOutcomes.invitationManual
           : t(toLang(ctx.user.language)).writeOutcomes.invitationFailed,
+      ...(connectSuggestion ? [connectSuggestion] : []),
     ].join('\n'),
-    agentHint: delivery.delivered
-      ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
-      : delivery.viaDeepLink
-        ? 'Bot-API delivery failed. A deep-link fallback was sent to the inviter to forward manually. Tell the user to share the link.'
-        : 'Invitation delivery failed entirely. Tell the user there was a delivery problem.',
+    agentHint: connectSuggestion
+      ? `${deliveryHint} The invitee does not use the bot: end your reply with the /connect_telegram line above, verbatim and once. If the user declines it, call dismiss_connect_telegram_prompt.`
+      : deliveryHint,
   };
 }
 

@@ -53,9 +53,14 @@ export interface DeliverInvitationParams {
   deps: InvitationDeliveryDeps;
 }
 
-export async function deliverInvitation(
-  params: DeliverInvitationParams,
-): Promise<{ delivered: boolean; viaDeepLink: boolean }> {
+export interface InvitationDeliveryResult {
+  delivered: boolean;
+  viaDeepLink: boolean;
+  /** The bot itself reached the invitee — they have started the bot and not blocked it. */
+  viaBotApi: boolean;
+}
+
+export async function deliverInvitation(params: DeliverInvitationParams): Promise<InvitationDeliveryResult> {
   const {
     invitationId,
     eventId,
@@ -76,7 +81,7 @@ export async function deliverInvitation(
   } = params;
   const { sender, invitationRepo, userRepo, deepLinkService: deepLinkSvc, botUsername } = deps;
   if (!sender.sendInvitation) {
-    return { delivered: false, viaDeepLink: false };
+    return { delivered: false, viaDeepLink: false, viaBotApi: false };
   }
 
   // The outer try guards every setup step after the invitation row was created, so nothing
@@ -216,11 +221,11 @@ export async function deliverInvitation(
           'delivered but failed to persist message info',
         );
       }
-      return { delivered: true, viaDeepLink: false };
+      return { delivered: true, viaDeepLink: false, viaBotApi: true };
     }
     if (result.delivered) {
       deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via MTProto');
-      return { delivered: true, viaDeepLink: false };
+      return { delivered: true, viaDeepLink: false, viaBotApi: false };
     }
     // Only claim "link sent to inviter" when a real link existed AND the fallback
     // message actually reached the inviter. Otherwise report honest non-delivery.
@@ -229,12 +234,12 @@ export async function deliverInvitation(
       { invitationId, fallbackChatId, linkSent, hadLink: url !== null, fallbackSent: result.fallbackSent === true },
       'Bot API + MTProto failed — deep-link fallback attempted',
     );
-    return { delivered: false, viaDeepLink: linkSent };
+    return { delivered: false, viaDeepLink: linkSent, viaBotApi: false };
   } catch (error) {
     // Sanitize: a thrown Telegram/API error can attach the full request body (incl. the deep
     // link) as enumerable props; describeDeliveryError reads only safe scalar fields.
     deliveryLogger.error({ invitationId, inviteeId, err: describeDeliveryError(error) }, 'Delivery chain failed');
-    return { delivered: false, viaDeepLink: false };
+    return { delivered: false, viaDeepLink: false, viaBotApi: false };
   }
 }
 
