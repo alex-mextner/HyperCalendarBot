@@ -315,8 +315,9 @@ export function takeConnectTelegramSuggestion(
 export function handleDismissConnectTelegramPrompt(ctx: AgentContext): ToolResult {
   const dismissedAt = new Date().toISOString();
   ctx.userRepo.setConnectTelegramDismissedAt(ctx.user.telegram_id, dismissedAt);
-  // A later send_invitation in the same run reads ctx.user, not the row.
-  ctx.user = { ...ctx.user, connect_telegram_dismissed_at: dismissedAt };
+  // Later steps of the same message read the user snapshot, not the row: intent workflows build a
+  // fresh context per step around the same user object, so update that object in place.
+  ctx.user.connect_telegram_dismissed_at = dismissedAt;
   return { success: true, output: 'Noted. Will not suggest again for 30 days.' };
 }
 handleDismissConnectTelegramPrompt.meta = { skipActionLog: true } satisfies import('../types.ts').ToolHandlerMeta;

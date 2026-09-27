@@ -527,6 +527,12 @@ directly shows the line as is. Example (ru):
 No suggestion is made when creating an event without inviting anyone, when the invitee received
 the invitation from the bot, when the user is connected, or within 30 days of a dismissal.
 
+Intent workflows build a fresh context per step, so the message handler carries the
+"already suggested" latch across the steps of one message, and a dismissal updates the shared
+user snapshot in place. Invitations sent through the native user picker (`pick_users` →
+`picker-invitation.ts`) do not add the suggestion yet — tracked in
+https://github.com/alex-mextner/HyperCalendarBot/issues/552.
+
 ### 10.2 Post-Connect Invitation Flow
 
 When `/connect_telegram` completes successfully AND was triggered in the context of a

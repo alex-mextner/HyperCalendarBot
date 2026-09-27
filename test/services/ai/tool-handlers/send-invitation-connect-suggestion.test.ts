@@ -178,6 +178,16 @@ describe('send_invitation /connect_telegram suggestion', () => {
     expect(mentionsSuggestion(second)).toBe(false);
   });
 
+  test('a dismissal in an earlier workflow step suppresses the suggestion in a later one', async () => {
+    // Intent workflows build a fresh context per step around the same message-level user object.
+    const messageUser = userRepo.findByTelegramId(INVITER_ID)!;
+    handleDismissConnectTelegramPrompt(makeCtx({ user: messageUser }));
+    const inviteStep = makeCtx({ user: messageUser });
+    const result = await handleSendInvitation(inviteStep, { event_id: eventId, invitee_id: INVITEE_ID });
+    expect(result.success).toBe(true);
+    expect(mentionsSuggestion(result)).toBe(false);
+  });
+
   test('a dismissal earlier in the same run suppresses the suggestion', async () => {
     const ctx = makeCtx();
     handleDismissConnectTelegramPrompt(ctx);
