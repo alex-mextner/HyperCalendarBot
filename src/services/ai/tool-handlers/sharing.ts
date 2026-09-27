@@ -247,7 +247,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
   // made weak models call that tool on plain event creation (#511).
   const connectSuggestion =
     ctx.sender && !isGroupTarget && !delivery.viaBotApi && shouldSuggestConnectTelegram(ctx)
-      ? t(ctx.user.language).botTips.connect_telegram
+      ? t(toLang(ctx.user.language)).botTips.connect_telegram
       : null;
   const deliveryHint = delivery.delivered
     ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'

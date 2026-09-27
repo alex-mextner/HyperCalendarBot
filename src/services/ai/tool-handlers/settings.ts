@@ -281,7 +281,8 @@ const CONNECT_PROMPT_SNOOZE_MS = 30 * 24 * 60 * 60 * 1000;
 
 function dismissedConnectPromptRecently(ctx: AgentContext): boolean {
   const dismissedAt = ctx.user.connect_telegram_dismissed_at;
-  return dismissedAt !== null && Date.now() - new Date(dismissedAt).getTime() < CONNECT_PROMPT_SNOOZE_MS;
+  if (!dismissedAt) return false;
+  return Date.now() - new Date(dismissedAt).getTime() < CONNECT_PROMPT_SNOOZE_MS;
 }
 
 /**
@@ -294,7 +295,7 @@ export function shouldSuggestConnectTelegram(ctx: AgentContext): boolean {
     !ctx.isGroup &&
     ctx.telegramMasterKey !== undefined &&
     ctx.telegramSessionRepo !== undefined &&
-    ctx.telegramSessionRepo.getActive(ctx.user.telegram_id) === null &&
+    !ctx.telegramSessionRepo.getActive(ctx.user.telegram_id) &&
     !dismissedConnectPromptRecently(ctx)
   );
 }
