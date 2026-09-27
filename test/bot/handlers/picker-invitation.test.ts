@@ -73,23 +73,23 @@ describe('pickerStatusLine', () => {
 
 describe('pickerAiLine', () => {
   test('delivered', () => {
-    expect(pickerAiLine('Bob', 42, { kind: 'delivered' })).toBe('Bob (id:42): delivered to the invitee');
+    expect(pickerAiLine('Bob', 42, { kind: 'delivered' })).toBe('"Bob" (id:42): delivered to the invitee');
   });
   test('deeplink', () => {
     expect(pickerAiLine('Bob', 42, { kind: 'deeplink' })).toBe(
-      'Bob (id:42): could not reach the invitee — a forward link was sent to the inviter',
+      '"Bob" (id:42): could not reach the invitee — a forward link was sent to the inviter',
     );
   });
   test('failed', () => {
-    expect(pickerAiLine('Bob', 42, { kind: 'failed' })).toBe('Bob (id:42): delivery failed');
+    expect(pickerAiLine('Bob', 42, { kind: 'failed' })).toBe('"Bob" (id:42): delivery failed');
   });
   test('error includes the reason', () => {
     expect(pickerAiLine('Bob', 42, { kind: 'error', error: 'Cannot invite yourself' })).toBe(
-      'Bob (id:42): invitation not created (Cannot invite yourself)',
+      '"Bob" (id:42): invitation not created (Cannot invite yourself)',
     );
   });
   test('notConfigured', () => {
-    expect(pickerAiLine('Bob', 42, { kind: 'notConfigured' })).toBe('Bob (id:42): invitations not configured');
+    expect(pickerAiLine('Bob', 42, { kind: 'notConfigured' })).toBe('"Bob" (id:42): invitations not configured');
   });
 });
 
@@ -620,7 +620,7 @@ describe('runPickerBatchWithAck (reply-fast ack)', () => {
     // an EDIT of that same message AFTER delivery completes — never a second fresh message.
     expect(events).toEqual([`sendAck:${t('en').invite_picker_sending}`, 'deliver', 'editAck:555']);
     expect(editedText).toBe(`${t('en').invite_picker_header}\n✅ Alice`);
-    expect(result.aiResultLines).toEqual(['Alice (id:201): delivered to the invitee']);
+    expect(result.aiResultLines).toEqual([pickerAiLine('Alice', 201, { kind: 'delivered' })]);
   });
 
   test('uses the Russian sending ack when lang is ru', async () => {
@@ -659,8 +659,8 @@ describe('runPickerBatchWithAck (reply-fast ack)', () => {
       io,
     );
     expect(result.aiResultLines).toEqual([
-      'Alice (id:201): delivered to the invitee',
-      'Bob (id:202): delivered to the invitee',
+      pickerAiLine('Alice', 201, { kind: 'delivered' }),
+      pickerAiLine('Bob', 202, { kind: 'delivered' }),
     ]);
   });
 
@@ -684,7 +684,7 @@ describe('runPickerBatchWithAck (reply-fast ack)', () => {
     // The user must never be left staring at "sending…": when the edit fails, the final status is
     // sent as a fresh message instead.
     expect(sends).toEqual([t('en').invite_picker_sending, `${t('en').invite_picker_header}\n✅ Alice`]);
-    expect(result.aiResultLines).toEqual(['Alice (id:201): delivered to the invitee']);
+    expect(result.aiResultLines).toEqual([pickerAiLine('Alice', 201, { kind: 'delivered' })]);
   });
 
   test('edit failure AND the fallback re-send failing is swallowed (double failure never throws)', async () => {
@@ -709,7 +709,7 @@ describe('runPickerBatchWithAck (reply-fast ack)', () => {
     );
     // The batch result is still returned even though the user is unreachable on BOTH the edit and
     // the re-send — the double failure is logged and swallowed, never thrown.
-    expect(result.aiResultLines).toEqual(['Alice (id:201): delivered to the invitee']);
+    expect(result.aiResultLines).toEqual([pickerAiLine('Alice', 201, { kind: 'delivered' })]);
     expect(sendCount).toBe(2);
   });
 });
