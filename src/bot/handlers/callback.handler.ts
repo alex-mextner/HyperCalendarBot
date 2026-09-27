@@ -1516,7 +1516,7 @@ export function createCallbackHandler(
     }
   });
 
-  // Location candidate: user picked a resolved address from the candidates, or kept the typed text
+  // Location candidate: `loc_cand:<eventId>:<pickerId>:<index|keep>` — the creator picked a place or kept the typed text
   dispatch.set(CB.LOCATION_CANDIDATE, async (ctx, _payload, parts, user) => {
     await ctx.answer();
     const lang = (user.language ?? 'en') as Lang;
@@ -1526,35 +1526,33 @@ export function createCallbackHandler(
 
     const eventId = Number.parseInt(parts[1] ?? '', 10);
     if (Number.isNaN(eventId)) return;
+    const pickerId = parts[2] ?? '';
+    const choice = parts[3];
 
-    if (parts[2] === 'keep') {
-      const kept = await locationVerification.keepTypedLocation(eventId, user.telegram_id);
+    if (choice === 'keep') {
+      const kept = await locationVerification.keepTypedLocation(eventId, user.telegram_id, pickerId);
       await ctx.editText(
-        kept ? msgs.aiTools.location.keptAsTyped(kept.title, kept.location ?? '') : msgs.callbackErrors.error,
+        kept
+          ? msgs.aiTools.location.keptAsTyped(kept.title, kept.location ?? '')
+          : msgs.aiTools.location.locationChoiceOutdated,
         { reply_markup: undefined },
       );
       return;
     }
 
-    const choiceIndex = Number.parseInt(parts[2] ?? '', 10);
-    if (Number.isNaN(choiceIndex)) return;
+    const choiceIndex = Number.parseInt(choice ?? '', 10);
+    const resolved =
+      !Number.isNaN(choiceIndex) &&
+      (await locationVerification.handleLocationChoice(eventId, user.telegram_id, pickerId, choiceIndex));
 
-    const candidates = await locationVerification.getStoredCandidates(eventId);
-    if (!candidates) {
-      cmdLogger.warn({ eventId, userId: user.telegram_id }, 'Location candidates expired or not found');
-      await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
-      return;
-    }
-
-    const success = await locationVerification.handleLocationChoice(eventId, user.telegram_id, choiceIndex, candidates);
-
-    if (success) {
+    if (resolved) {
       await ctx.editText(locationResolvedHtml(lang, eventId, user.telegram_id), {
         parse_mode: 'HTML',
         reply_markup: undefined,
       });
     } else {
-      await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
+      cmdLogger.warn({ eventId, userId: user.telegram_id }, 'Location picker is outdated or its event is gone');
+      await ctx.editText(msgs.aiTools.location.locationChoiceOutdated, { reply_markup: undefined });
     }
   });
 

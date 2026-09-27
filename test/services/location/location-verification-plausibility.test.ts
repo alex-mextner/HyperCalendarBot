@@ -5,7 +5,7 @@
 // SQLite repositories, real address cache over an in-memory Redis, a scripted geocoder and the real
 // callback handler for the taps.
 import { Database } from 'bun:sqlite';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { Scene } from '@gramio/scenes';
 import { Bot, CallbackQueryContext, type TelegramInlineKeyboardMarkup, type TelegramReplyKeyboardMarkup } from 'gramio';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler.ts';
@@ -158,6 +158,21 @@ function callbackData(message: SentMessage | undefined): string[] {
   return markup.inline_keyboard.flat().flatMap((button) => (button.callback_data ? [button.callback_data] : []));
 }
 
+/** The `index|keep` choices of a picker message, after checking every button answers the same picker of the event. */
+function pickerChoices(message: SentMessage | undefined, eventId: number): string[] {
+  const data = callbackData(message);
+  for (const d of data) expect(d).toMatch(new RegExp(`^loc_cand:${eventId}:[0-9a-f]{8}:[^:]+$`));
+  expect(new Set(data.map((d) => d.split(':')[2])).size).toBe(1);
+  return data.map((d) => d.split(':')[3] ?? '');
+}
+
+/** The callback data of a picker button (`0`, `1`, … or `keep`). */
+function button(message: SentMessage | undefined, choice: string): string {
+  const data = callbackData(message).find((d) => d.endsWith(`:${choice}`));
+  if (!data) throw new Error(`no ${choice} button`);
+  return data;
+}
+
 function buttonLabels(message: SentMessage | undefined): string[] {
   const markup = message?.replyMarkup;
   if (!markup || !('inline_keyboard' in markup)) return [];
@@ -299,6 +314,12 @@ function setup(
     expect(await addressCache.getRecent(USER_ID)).toEqual([]);
   }
 
+  /** The creator confirmed `geo` earlier, by answering a picker that offered it. */
+  async function confirmEarlier(geo: GeocodedLocation) {
+    await candidateStore.set(event.id, { id: 'e0e0e0e0', candidates: [geo] });
+    expect(await service.handleLocationChoice(event.id, USER_ID, 'e0e0e0e0', 0)).toBe(true);
+  }
+
   return {
     service,
     event,
@@ -311,6 +332,7 @@ function setup(
     invitationEdits,
     tap,
     expectNothingWritten,
+    confirmEarlier,
   };
 }
 
@@ -332,8 +354,8 @@ describe('no geocode is applied before the creator taps a candidate', () => {
       `<a href="${escapeHtml(BELGRADE_CAFE.googleMapsUrl)}">Kafana Sunce — ${escapeHtml(BELGRADE_CAFE.formattedAddress)}</a>`,
     );
     expect(buttonLabels(ask)).toEqual(['1. Kafana Sunce', KEEP_AS_TYPED]);
-    expect(callbackData(ask)).toEqual([`loc_cand:${s.event.id}:0`, `loc_cand:${s.event.id}:keep`]);
-    expect(await s.candidateStore.get(s.event.id)).toEqual([BELGRADE_CAFE]);
+    expect(pickerChoices(ask, s.event.id)).toEqual(['0', 'keep']);
+    expect((await s.candidateStore.get(s.event.id))?.candidates).toEqual([BELGRADE_CAFE]);
   });
 
   test('the incident: a far-away single result is offered, not applied, and the search was biased home', async () => {
@@ -373,7 +395,7 @@ describe('no geocode is applied before the creator taps a candidate', () => {
     expect(s.invitationEdits).toEqual([]);
     expect(s.sent[0]!.text).toContain(`<a href="${escapeHtml(BELGRADE_CAFE.googleMapsUrl)}">`);
     expect(buttonLabels(s.sent[0])).toEqual(['1. Kafana Sunce', KEEP_AS_TYPED]);
-    expect((await s.candidateStore.get(s.event.id))?.map((c) => c.formattedAddress)).toEqual([
+    expect((await s.candidateStore.get(s.event.id))?.candidates.map((c) => c.formattedAddress)).toEqual([
       BELGRADE_CAFE.formattedAddress,
     ]);
   });
@@ -390,11 +412,7 @@ describe('no geocode is applied before the creator taps a candidate', () => {
       expect(ask.text).toContain(`<a href="${escapeHtml(candidate.googleMapsUrl)}">`);
     }
     expect(buttonLabels(ask)).toEqual(['1. Kafana Sunce', `2. ${NIS_CAFE.formattedAddress}`, KEEP_AS_TYPED]);
-    expect(callbackData(ask)).toEqual([
-      `loc_cand:${s.event.id}:0`,
-      `loc_cand:${s.event.id}:1`,
-      `loc_cand:${s.event.id}:keep`,
-    ]);
+    expect(pickerChoices(ask, s.event.id)).toEqual(['0', '1', 'keep']);
   });
 
   test('no result tells the creator to send a pin or the full address, and nothing is written', async () => {
@@ -412,7 +430,7 @@ describe('no geocode is applied before the creator taps a candidate', () => {
   test('a place confirmed earlier stays while the creator is asked again', async () => {
     const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
-    await s.service.handleLocationChoice(s.event.id, USER_ID, 0, [BELGRADE_CAFE]);
+    await s.confirmEarlier(BELGRADE_CAFE);
     const editsAfterConfirmation = s.invitationEdits.length;
 
     await s.service.verifyEventLocation(s.storedEvent(), s.user());
@@ -482,7 +500,7 @@ describe('tapping a candidate resolves the event', () => {
     await s.service.verifyEventLocation(s.event, s.user());
     expect(s.invitationEdits).toEqual([]);
 
-    const edits = await s.tap(`loc_cand:${s.event.id}:0`);
+    const edits = await s.tap(button(s.sent[0], '0'));
 
     const stored = s.storedEvent();
     expect(stored.location).toBe(RAW_LOCATION);
@@ -504,11 +522,13 @@ describe('tapping a candidate resolves the event', () => {
   });
 
   test('choosing a place abroad remembers it for this text but never makes it the home city', async () => {
-    const s = setup({ timezone: 'Europe/Belgrade' }, scriptedGeocoder({ places: [] }).service);
+    const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.service.verifyEventLocation(s.event, s.user());
 
-    const chosen = await s.service.handleLocationChoice(s.event.id, USER_ID, 0, [DUTCH_HOTEL]);
+    await s.tap(button(s.sent[0], '0'));
 
-    expect(chosen).toBe(true);
+    expect(s.storedEvent().resolved_address).toBe(DUTCH_HOTEL.formattedAddress);
     expect((await s.addressCache.findMapping(USER_ID, RAW_LOCATION))?.resolvedAddress).toBe(
       DUTCH_HOTEL.formattedAddress,
     );
@@ -518,9 +538,72 @@ describe('tapping a candidate resolves the event', () => {
   test('choosing a place never overwrites an existing home city', async () => {
     const s = setup({ timezone: 'Europe/Belgrade', city: 'Нови-Сад' }, scriptedGeocoder({ places: [] }).service);
 
-    await s.service.handleLocationChoice(s.event.id, USER_ID, 0, [BELGRADE_CAFE]);
+    await s.confirmEarlier(BELGRADE_CAFE);
 
     expect(s.user().city).toBe('Нови-Сад');
+  });
+
+  test('a tap on an older picker never applies a place from the newer one', async () => {
+    const script = { places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } };
+    const s = setup({ timezone: 'Europe/Belgrade' }, scriptedGeocoder(script).service);
+    await s.service.verifyEventLocation(s.event, s.user());
+    script.places = [NIS_CAFE];
+    await s.service.verifyEventLocation(s.event, s.user());
+
+    const edits = await s.tap(button(s.sent[0], '0'));
+
+    await s.expectNothingWritten();
+    expect(edits.map((e) => e.text)).toEqual([t('ru').aiTools.location.locationChoiceOutdated]);
+
+    await s.tap(button(s.sent[1], '0'));
+
+    expect(s.storedEvent().resolved_address).toBe(NIS_CAFE.formattedAddress);
+  });
+
+  test('the picker can still be answered days after it was sent', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.service.verifyEventLocation(s.event, s.user());
+
+    setSystemTime(new Date(Date.now() + 3 * 24 * 60 * 60 * 1000));
+    try {
+      await s.tap(button(s.sent[0], '0'));
+    } finally {
+      setSystemTime();
+    }
+
+    expect(s.storedEvent().location_verified).toBe(1);
+    expect(s.storedEvent().resolved_address).toBe(BELGRADE_CAFE.formattedAddress);
+  });
+
+  test('a tap after the picker expired changes nothing and says the choice is out of date', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.service.verifyEventLocation(s.event, s.user());
+
+    setSystemTime(new Date(Date.now() + 31 * 24 * 60 * 60 * 1000));
+    let edits: EditedMessage[];
+    try {
+      edits = await s.tap(button(s.sent[0], '0'));
+    } finally {
+      setSystemTime();
+    }
+
+    await s.expectNothingWritten();
+    expect(edits.map((e) => e.text)).toEqual([t('ru').aiTools.location.locationChoiceOutdated]);
+  });
+
+  test('a button sent before pickers had an id changes nothing', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.service.verifyEventLocation(s.event, s.user());
+
+    for (const legacy of [`loc_cand:${s.event.id}:0`, `loc_cand:${s.event.id}:keep`]) {
+      const edits = await s.tap(legacy);
+      expect(edits.map((e) => e.text)).toEqual([t('ru').aiTools.location.locationChoiceOutdated]);
+    }
+    await s.expectNothingWritten();
+    expect(await s.candidateStore.get(s.event.id)).not.toBeNull();
   });
 
   test('the confirmation after a tap escapes the venue, the address and the title', async () => {
@@ -528,7 +611,7 @@ describe('tapping a candidate resolves the event', () => {
     const s = setup({ timezone: 'Europe/Belgrade', title: 'Q&A <встреча>' }, geocoder.service);
     await s.service.verifyEventLocation(s.event, s.user());
 
-    const edits = await s.tap(`loc_cand:${s.event.id}:0`);
+    const edits = await s.tap(button(s.sent[0], '0'));
 
     expect(edits).toHaveLength(1);
     expect(edits[0]!.parseMode).toBe('HTML');
@@ -567,7 +650,7 @@ describe('keep as typed', () => {
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
     await s.service.verifyEventLocation(s.event, s.user());
 
-    const edits = await s.tap(`loc_cand:${s.event.id}:keep`);
+    const edits = await s.tap(button(s.sent[0], 'keep'));
 
     await s.expectNothingWritten();
     expect(s.user().city).toBeNull();
@@ -593,7 +676,7 @@ describe('keep as typed', () => {
     });
     await s.service.verifyEventLocation(s.event, s.user());
 
-    await s.tap(`loc_cand:${s.event.id}:keep`);
+    await s.tap(button(s.sent[0], 'keep'));
 
     expect(s.storedEvent().location_verified).toBe(0);
     expect(await s.addressCache.findMapping(USER_ID, RAW_LOCATION)).toBeNull();
@@ -602,10 +685,10 @@ describe('keep as typed', () => {
   test('keeping the typed text drops a place confirmed earlier and refreshes the invitation', async () => {
     const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
-    await s.service.handleLocationChoice(s.event.id, USER_ID, 0, [BELGRADE_CAFE]);
+    await s.confirmEarlier(BELGRADE_CAFE);
     await s.service.verifyEventLocation(s.storedEvent(), s.user());
 
-    await s.tap(`loc_cand:${s.event.id}:keep`);
+    await s.tap(button(s.sent[0], 'keep'));
 
     const stored = s.storedEvent();
     expect(stored.location).toBe(RAW_LOCATION);
@@ -617,9 +700,58 @@ describe('keep as typed', () => {
 
   test('keeping the text of an event the user cannot see changes nothing', async () => {
     const s = setup({ timezone: 'Europe/Belgrade' }, scriptedGeocoder({ places: [] }).service);
-    await s.service.handleLocationChoice(s.event.id, USER_ID, 0, [BELGRADE_CAFE]);
+    await s.confirmEarlier(BELGRADE_CAFE);
+    await s.service.verifyEventLocation(s.storedEvent(), s.user());
 
-    expect(await s.service.keepTypedLocation(s.event.id, USER_ID + 1)).toBeNull();
+    const pickerId = button(s.sent[0], 'keep').split(':')[2] ?? '';
+    expect(await s.service.keepTypedLocation(s.event.id, USER_ID + 1, pickerId)).toBeNull();
     expect(s.storedEvent().location_verified).toBe(1);
+    expect(await s.candidateStore.get(s.event.id)).not.toBeNull();
+  });
+
+  test('a late keep tap on a picker already answered with a candidate does not erase the choice', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE, NIS_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.service.verifyEventLocation(s.event, s.user());
+    await s.tap(button(s.sent[0], '0'));
+
+    const edits = await s.tap(button(s.sent[0], 'keep'));
+
+    expect(s.storedEvent().location_verified).toBe(1);
+    expect(s.storedEvent().resolved_address).toBe(BELGRADE_CAFE.formattedAddress);
+    expect((await s.addressCache.findMapping(USER_ID, RAW_LOCATION))?.resolvedAddress).toBe(
+      BELGRADE_CAFE.formattedAddress,
+    );
+    expect(edits.map((e) => e.text)).toEqual([t('ru').aiTools.location.locationChoiceOutdated]);
+  });
+
+  test('a candidate tap and a keep tap racing on one picker: exactly one of them takes effect', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE, NIS_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.service.verifyEventLocation(s.event, s.user());
+
+    const [choose, keep] = await Promise.all([s.tap(button(s.sent[0], '0')), s.tap(button(s.sent[0], 'keep'))]);
+
+    const outdated = t('ru').aiTools.location.locationChoiceOutdated;
+    const outcomes = [choose[0]?.text === outdated, keep[0]?.text === outdated];
+    expect(outcomes.filter(Boolean)).toHaveLength(1);
+    if (keep[0]?.text === outdated) {
+      expect(s.storedEvent().resolved_address).toBe(BELGRADE_CAFE.formattedAddress);
+    } else {
+      await s.expectNothingWritten();
+    }
+  });
+
+  test('a keep tap after the place was confirmed with a pin does not erase it', async () => {
+    const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { '|RS': SERBIA }, reverse: BELGRADE_CAFE });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.service.verifyEventLocation(s.event, s.user());
+    await s.pendingGeoStore.set(USER_ID, { latitude: BELGRADE_CAFE.latitude, longitude: BELGRADE_CAFE.longitude });
+    await s.tap(`loc_geo:geo:${s.event.id}`);
+
+    await s.tap(button(s.sent[0], 'keep'));
+
+    expect(s.storedEvent().location_verified).toBe(1);
+    expect(s.storedEvent().resolved_address).toBe(BELGRADE_CAFE.formattedAddress);
   });
 });

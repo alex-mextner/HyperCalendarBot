@@ -138,7 +138,12 @@ export class AddressCache {
       const raw = await this.redis.get(key);
       if (!raw) return null;
 
-      return this.match(MappingArraySchema.parse(JSON.parse(raw)), input);
+      const parsed = jsonCodec(MappingArraySchema).safeParse(raw);
+      if (!parsed.success) {
+        logger.warn({ err: parsed.error, userId }, 'Stored address mappings are unreadable');
+        return null;
+      }
+      return this.match(parsed.data, input);
     } catch (err) {
       logger.warn({ err, userId }, 'Failed to find address mapping');
       return null;

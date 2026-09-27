@@ -1,7 +1,10 @@
 // test/services/location/location-candidate-store.test.ts
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, setSystemTime, test } from 'bun:test';
 import type { GeocodedLocation } from '../../../src/services/location/geocoding-service.ts';
-import { InMemoryLocationCandidateStore } from '../../../src/services/location/location-candidate-store.ts';
+import {
+  InMemoryLocationCandidateStore,
+  RedisLocationCandidateStore,
+} from '../../../src/services/location/location-candidate-store.ts';
 
 function makeGeoResult(overrides: Partial<GeocodedLocation> = {}): GeocodedLocation {
   return {
@@ -18,16 +21,20 @@ function makeGeoResult(overrides: Partial<GeocodedLocation> = {}): GeocodedLocat
 }
 
 describe('InMemoryLocationCandidateStore', () => {
-  test('set and get returns same candidates', async () => {
+  test('set and get return the same picker', async () => {
     const store = new InMemoryLocationCandidateStore();
     const candidates = [makeGeoResult({ formattedAddress: 'A' }), makeGeoResult({ formattedAddress: 'B' })];
-    await store.set(42, candidates);
+    await store.set(42, { id: 'abcd1234', candidates });
 
-    const result = await store.get(42);
-    expect(result).not.toBeNull();
-    expect(result!.length).toBe(2);
-    expect(result![0]!.formattedAddress).toBe('A');
-    expect(result![1]!.formattedAddress).toBe('B');
+    expect(await store.get(42)).toEqual({ id: 'abcd1234', candidates });
+  });
+
+  test('a new picker replaces the previous one of the event', async () => {
+    const store = new InMemoryLocationCandidateStore();
+    await store.set(42, { id: 'first000', candidates: [makeGeoResult({ formattedAddress: 'A' })] });
+    await store.set(42, { id: 'second00', candidates: [makeGeoResult({ formattedAddress: 'B' })] });
+
+    expect((await store.get(42))?.id).toBe('second00');
   });
 
   test('get returns null for unknown event', async () => {
@@ -37,23 +44,78 @@ describe('InMemoryLocationCandidateStore', () => {
 
   test('del removes entry', async () => {
     const store = new InMemoryLocationCandidateStore();
-    await store.set(42, [makeGeoResult()]);
+    await store.set(42, { id: 'abcd1234', candidates: [makeGeoResult()] });
     await store.del(42);
     expect(await store.get(42)).toBeNull();
   });
 
   test('expires after TTL', async () => {
-    const store = new InMemoryLocationCandidateStore(0.001);
-    await store.set(42, [makeGeoResult()]);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(await store.get(42)).toBeNull();
+    const store = new InMemoryLocationCandidateStore(60);
+    await store.set(42, { id: 'abcd1234', candidates: [makeGeoResult()] });
+    setSystemTime(new Date(Date.now() + 61_000));
+    try {
+      expect(await store.get(42)).toBeNull();
+    } finally {
+      setSystemTime();
+    }
   });
 
   test('different events independent', async () => {
     const store = new InMemoryLocationCandidateStore();
-    await store.set(1, [makeGeoResult({ formattedAddress: 'Event 1' })]);
-    await store.set(2, [makeGeoResult({ formattedAddress: 'Event 2' })]);
-    expect((await store.get(1))![0]!.formattedAddress).toBe('Event 1');
-    expect((await store.get(2))![0]!.formattedAddress).toBe('Event 2');
+    await store.set(1, { id: 'one00000', candidates: [makeGeoResult({ formattedAddress: 'Event 1' })] });
+    await store.set(2, { id: 'two00000', candidates: [makeGeoResult({ formattedAddress: 'Event 2' })] });
+    expect((await store.get(1))?.candidates[0]?.formattedAddress).toBe('Event 1');
+    expect((await store.get(2))?.candidates[0]?.formattedAddress).toBe('Event 2');
+  });
+});
+
+describe('InMemoryLocationCandidateStore.take', () => {
+  test('answers the open picker once, and only with its id', async () => {
+    const store = new InMemoryLocationCandidateStore();
+    const picker = { id: 'abcd1234', candidates: [makeGeoResult()] };
+    await store.set(42, picker);
+
+    expect(await store.take(42, 'ffff0000')).toBeNull();
+    expect(await store.take(42, 'abcd1234')).toEqual(picker);
+    expect(await store.take(42, 'abcd1234')).toBeNull();
+  });
+
+  test('of two concurrent takes only one gets the picker', async () => {
+    const store = new InMemoryLocationCandidateStore();
+    await store.set(42, { id: 'abcd1234', candidates: [makeGeoResult()] });
+
+    const results = await Promise.all([store.take(42, 'abcd1234'), store.take(42, 'abcd1234')]);
+
+    expect(results.filter((r) => r !== null)).toHaveLength(1);
+  });
+
+  test('a take for an older picker leaves the newer one open', async () => {
+    const store = new InMemoryLocationCandidateStore();
+    await store.set(42, { id: 'first000', candidates: [makeGeoResult({ formattedAddress: 'A' })] });
+    await store.set(42, { id: 'second00', candidates: [makeGeoResult({ formattedAddress: 'B' })] });
+
+    expect(await store.take(42, 'first000')).toBeNull();
+    expect((await store.get(42))?.id).toBe('second00');
+  });
+});
+
+describe('RedisLocationCandidateStore', () => {
+  test('keeps an open picker for weeks', async () => {
+    const writes: { key: string; value: string; ex: number | undefined }[] = [];
+    const store = new RedisLocationCandidateStore({
+      set: async (key, value, opts) => {
+        writes.push({ key, value, ex: opts?.ex });
+        return 'OK';
+      },
+      del: async () => 0,
+      eval: async () => null,
+    });
+    const picker = { id: 'abcd1234', candidates: [makeGeoResult()] };
+
+    await store.set(7, picker);
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.value).toBe(JSON.stringify(picker));
+    expect(writes[0]!.ex).toBeGreaterThanOrEqual(7 * 24 * 60 * 60);
   });
 });
