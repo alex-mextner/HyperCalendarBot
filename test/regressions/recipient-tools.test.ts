@@ -14,6 +14,7 @@ import { SharingSettingsRepository } from '../../src/database/repositories/shari
 import { UserRepository } from '../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../src/database/schema.ts';
 import type { User } from '../../src/database/types.ts';
+import { toolResultContent } from '../../src/services/ai/agent.ts';
 import { issueRecipientApproval } from '../../src/services/ai/recipient-confirmation.ts';
 import { _resetToolThrottleForTest, executeTool } from '../../src/services/ai/tool-executor.ts';
 import {
@@ -740,7 +741,7 @@ describe('recipient and contact tool boundaries', () => {
       expect(result.success).toBe(false);
       expect(result.mutationState).toBe('not_applied');
       expect(result.error).toContain('Bora Example');
-      expect(result.agentHint).toContain('pick_users');
+      expect(toolResultContent(result)).toContain('pick_users');
       expect(approvals).not.toHaveBeenCalled();
       const forced = await executeTool(ctx, 'send_invitation', {
         event_id: event.id,
@@ -758,7 +759,7 @@ describe('recipient and contact tool boundaries', () => {
       ctx.contactRepo!.add(10, `User ${row.id}`, undefined, row.id);
       const result = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: row.id });
       expect(result.success).toBe(false);
-      expect(result.agentHint).toContain('pick_users');
+      expect(toolResultContent(result)).toContain('pick_users');
       expect(approvals).not.toHaveBeenCalled();
       expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
     });
@@ -769,8 +770,8 @@ describe('recipient and contact tool boundaries', () => {
       ctx.contactRepo!.add(10, 'Cato Sample', undefined, bora.id);
       const ambiguous = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: bora.id });
       expect(ambiguous.success).toBe(false);
-      expect(ambiguous.agentHint).toContain('"Bora Example"');
-      expect(ambiguous.agentHint).toContain('pick_users');
+      expect(toolResultContent(ambiguous)).toContain('"Bora Example"');
+      expect(toolResultContent(ambiguous)).toContain('pick_users');
       expect(approvals).not.toHaveBeenCalled();
       expect(sendInvitationCalls).not.toHaveBeenCalled();
       expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
@@ -798,7 +799,7 @@ describe('recipient and contact tool boundaries', () => {
 
       const byRow = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: match!.id });
       expect(byRow.success).toBe(false);
-      expect(byRow.agentHint).toContain('invitee_id 5000000001');
+      expect(toolResultContent(byRow)).toContain('invitee_id 5000000001');
       expect(approvals).not.toHaveBeenCalled();
 
       const invited = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: match!.telegram_id });
