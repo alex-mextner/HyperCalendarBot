@@ -272,3 +272,29 @@ describe('validateResponse — prompt-injection hardening', () => {
     expect(capturedUserContent).toContain('TOOL CALLS MADE: get_events, get_free_slots');
   });
 });
+
+test('content refusal after calculate is still validated instead of leaking through', async () => {
+  const response = 'Я не могу создавать события с таким содержанием.';
+  expect(shouldValidateResponse(['calculate'], response)).toBe(true);
+  const result = await validateResponse(
+    {
+      userMessage: 'Создай событие завтра в 10 с этим названием',
+      toolCalls: ['calculate'],
+      response,
+    },
+    stubText('APPROVE'),
+  );
+  expect(result.approved).toBe(false);
+});
+
+test('asking for a missing English title is not classified as a content refusal', async () => {
+  const result = await validateResponse(
+    {
+      userMessage: 'Create an event tomorrow at 10',
+      toolCalls: [],
+      response: 'I cannot create an event without a title. What should I call it?',
+    },
+    stubText('APPROVE'),
+  );
+  expect(result.approved).toBe(true);
+});

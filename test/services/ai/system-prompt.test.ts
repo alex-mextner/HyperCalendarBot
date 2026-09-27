@@ -10,6 +10,7 @@ import { runMigrations } from '../../../src/database/schema.ts';
 import type { EventOccurrence } from '../../../src/database/types.ts';
 import { tagSender } from '../../../src/services/ai/agent.ts';
 import { buildSystemPrompt } from '../../../src/services/ai/system-prompt.ts';
+import { executeTool } from '../../../src/services/ai/tool-executor.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
@@ -562,6 +563,20 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('calculate("2026-03-15 12:30 Europe/Kyiv to UTC")');
     expect(prompt).toContain('offset NOW');
     expect(prompt).not.toContain('calculate("12:30 UTC+');
+  });
+
+  test.each([
+    'Europe/Belgrade',
+    'Europe/Kyiv',
+    'UTC',
+    'Etc/UTC',
+    'America/New_York',
+  ])('every concrete calculator call in the real prompt executes: %s', async (timezone) => {
+    ctx.user.timezone = timezone;
+    const examples = [...buildSystemPrompt(ctx).matchAll(/calculate\("([^"\n]+)"\)/g)];
+    expect(examples.length).toBeGreaterThan(0);
+    for (const [, expression] of examples)
+      expect((await executeTool(ctx, 'calculate', { expression })).success).toBe(true);
   });
 
   test('does not tell AI to pass LITERAL times to tools', () => {

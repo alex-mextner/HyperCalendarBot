@@ -219,6 +219,16 @@ describe('CalendarBotAgent', () => {
       { role: 'tool', tool_call_id: 'call_b', content: 'result b' },
     ];
     ctx.chatHistory.save(USER_ID, 'user', 'Show me');
+    const precedingCalls: OpenAI.ChatCompletionAssistantMessageParam = {
+      role: 'assistant',
+      content: null,
+      tool_calls: ['call_a', 'call_b'].map((id) => ({
+        id,
+        type: 'function',
+        function: { name: 'get_events', arguments: '{}' },
+      })),
+    };
+    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(precedingCalls));
     ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(toolResults));
     const agent = new CalendarBotAgent(config, sender);
     const history = ctx.chatHistory.getRecent(USER_ID);
@@ -227,6 +237,33 @@ describe('CalendarBotAgent', () => {
     expect(toolMessages).toHaveLength(2);
     expect((toolMessages[0] as OpenAI.ChatCompletionToolMessageParam).tool_call_id).toBe('call_a');
     expect((toolMessages[1] as OpenAI.ChatCompletionToolMessageParam).tool_call_id).toBe('call_b');
+  });
+
+  test('buildMessages sends only tool results that answer a call in the assistant turn directly above', async () => {
+    const calls = (ids: string[]): OpenAI.ChatCompletionAssistantMessageParam => ({
+      role: 'assistant',
+      content: null,
+      tool_calls: ids.map((id) => ({ id, type: 'function', function: { name: 'get_events', arguments: '{}' } })),
+    });
+    const results = (ids: string[]) => ids.map((id) => ({ role: 'tool', tool_call_id: id, content: `result ${id}` }));
+    // Complete block with a stray and a repeated result.
+    ctx.chatHistory.save(USER_ID, 'user', 'first');
+    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(calls(['call_a'])));
+    ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(results(['call_a', 'call_stray', 'call_a'])));
+    // Incomplete block (call_c never answered) followed by an unrelated result.
+    ctx.chatHistory.save(USER_ID, 'user', 'second');
+    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(calls(['call_b', 'call_c'])));
+    ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(results(['call_b', 'call_other'])));
+    ctx.chatHistory.save(USER_ID, 'user', 'third');
+    const agent = new CalendarBotAgent(config, sender);
+    const { messages } = await agent.buildMessages(ctx, ctx.chatHistory.getRecent(USER_ID));
+    expect(messages.map((m) => (m.role === 'tool' ? `tool:${m.tool_call_id}` : m.role))).toEqual([
+      'user',
+      'assistant',
+      'tool:call_a',
+      'user',
+      'user',
+    ]);
   });
 
   test('buildMessages drops legacy Anthropic tool_result rows that cannot be mapped', async () => {

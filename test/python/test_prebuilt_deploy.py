@@ -24,7 +24,7 @@ class DeployTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name)
         self.dep = self.path / "deploy"
-        self.src = self.path / "incoming"
+        self.src = self.dep / (".incoming-" + SHA + "-123-1")
         self.bin = self.path / "bin"
         for d in [
             self.dep / "scripts",
@@ -131,7 +131,7 @@ print(os.environ.get('HEALTH_BODY','ok'),end='')
         path.write_text(body)
         path.chmod(0o755)
 
-    def run_deploy(self, **changes):
+    def run_deploy(self, staging_path=None, **changes):
         env = dict(
             os.environ,
             PATH=str(self.bin) + ":" + os.environ["PATH"],
@@ -146,7 +146,7 @@ print(os.environ.get('HEALTH_BODY','ok'),end='')
                 "bash",
                 str(self.remote),
                 str(self.dep),
-                str(self.src),
+                str(self.src if staging_path is None else staging_path),
                 "repo/image",
                 SHA,
                 self.digest,
@@ -165,6 +165,46 @@ print(os.environ.get('HEALTH_BODY','ok'),end='')
             return [r[0] for r in c.execute("SELECT value FROM evidence")]
         finally:
             c.close()
+
+    def test_staging_root_cannot_be_deleted_on_validation_failure(self):
+        result = self.run_deploy(staging_path=self.dep)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.dep.exists(), "Cleanup deleted the deployment root")
+        self.assertTrue(self.db.exists())
+        self.assertEqual(self.rows(), ["before"])
+        self.assertFalse(self.log.exists())
+
+    def test_staging_ancestor_cannot_be_deleted(self):
+        result = self.run_deploy(staging_path=self.path)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.db.exists(), "Cleanup deleted an ancestor of the deployment root")
+        self.assertFalse(self.log.exists())
+
+    def test_staging_live_data_directory_is_not_owned_release_work(self):
+        result = self.run_deploy(staging_path=self.dep / "data")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.db.exists(), "Cleanup deleted the live data directory")
+        self.assertEqual(self.rows(), ["before"])
+        self.assertFalse(self.log.exists())
+
+    def test_staging_symlink_is_rejected_without_removing_it(self):
+        alias = self.dep / (".incoming-" + SHA + "-124-1")
+        alias.symlink_to(self.dep, target_is_directory=True)
+        result = self.run_deploy(staging_path=alias)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(alias.is_symlink())
+        self.assertTrue(self.db.exists())
+        self.assertFalse(self.log.exists())
+
+    def test_local_fallback_staging_namespace_remains_supported(self):
+        stage = Path("/tmp") / ("hypercal-source-" + SHA[:12] + "-" + str(os.getpid()))
+        stage.mkdir(exist_ok=False)
+        self.addCleanup(shutil.rmtree, stage, True)
+        shutil.copytree(self.src, stage, dirs_exist_ok=True)
+        result = self.run_deploy(staging_path=stage)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.rows(), ["before", "after-start"])
+        self.assertFalse(stage.exists())
 
     def test_success_pins_verified_config_and_writes_receipt(self):
         result = self.run_deploy()

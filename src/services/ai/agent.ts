@@ -10,6 +10,7 @@ import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
+import { waitForAbort } from './provider-deadline.ts';
 import {
   type AgentRequestMetricSnapshot,
   AgentRequestMetrics,
@@ -17,7 +18,13 @@ import {
   elapsedMs,
 } from './request-metrics.ts';
 import { shouldValidateResponse, unverifiedResponseNotice, validateResponse } from './response-validator.ts';
-import { AllProvidersFailedError, aiStreamRound, providerFailureMetrics, type StreamCallbacks } from './streaming.ts';
+import {
+  AllProvidersFailedError,
+  aiStreamRound,
+  ProviderSafetyStopError,
+  providerFailureMetrics,
+  type StreamCallbacks,
+} from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
@@ -30,7 +37,7 @@ import { WriteOutcomes } from './write-outcomes.ts';
 const aiLogger = logger.child({ module: 'ai-agent' });
 
 const MAX_ROUNDS = 15;
-const TIMEOUT_MS = 300_000;
+const TIMEOUT_MS = 90_000;
 
 /**
  * One apology covers a user for this long. A user who keeps writing during an
@@ -214,9 +221,9 @@ function withTimestamp(text: string, createdAt: string, timezone: string): strin
 /**
  * Sanitize message history before handing it to the model.
  *
- * Two invariants, both enforced to keep OpenAI-compatible providers happy:
+ * Three invariants, all enforced to keep OpenAI-compatible providers happy:
  *   1. The first non-system message must be a user message. If the history
- *      begins with an assistant or tool turn (e.g. a leading bot reply after
+ *      begins with an assistant turn (e.g. a leading bot reply after
  *      migration), insert a '...' user placeholder.
  *   2. Every assistant message with `tool_calls` must be followed by one
  *      tool-role message per tool_call_id. If any id is unmatched — usually
@@ -225,11 +232,19 @@ function withTimestamp(text: string, createdAt: string, timezone: string): strin
  *      fall back to the text content (or drop the message if it's empty).
  *      Without this, OpenAI returns `400 - An assistant message with
  *      'tool_calls' must be followed by tool messages`.
+ *   3. A tool-role message is sent only inside the complete call block directly
+ *      above it, once per tool_call_id. Any other result is dropped: most often
+ *      the history window starts on a result whose call row was cut off. Groq's
+ *      Harmony renderer names a tool message after the call it answers and
+ *      rejects a nameless one with `400 … Tools should have a name!`; Gemini
+ *      rejects it with a bodiless 400.
  */
 function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
   const paired: MessageParam[] = [];
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]!;
+    // Complete call blocks consume their results below; a result reaching here answers nothing.
+    if (isToolMessage(msg)) continue;
     if (
       msg.role !== 'assistant' ||
       !('tool_calls' in msg) ||
@@ -251,6 +266,15 @@ function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
     const allPaired = expectedIds.size > 0 && [...expectedIds].every((id) => foundIds.has(id));
     if (allPaired) {
       paired.push(msg);
+      const emittedIds = new Set<string>();
+      for (let k = i + 1; k < j; k++) {
+        const toolMsg = messages[k]!;
+        if (isToolMessage(toolMsg) && expectedIds.has(toolMsg.tool_call_id) && !emittedIds.has(toolMsg.tool_call_id)) {
+          paired.push(toolMsg);
+          emittedIds.add(toolMsg.tool_call_id);
+        }
+      }
+      i = j - 1;
       continue;
     }
     // Orphaned tool_calls — strip them. Preserve any text content as a fallback;
@@ -260,17 +284,7 @@ function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
     if (textContent) {
       paired.push({ role: 'assistant', content: textContent });
     }
-    // Note: we intentionally don't skip the orphaned trailing tool messages —
-    // OpenAI rejects tool messages without a matching tool_call above, so we
-    // also filter those out.
-    for (let k = i + 1; k < j; k++) {
-      const toolMsg = messages[k] as OpenAI.ChatCompletionToolMessageParam;
-      // Drop tool messages whose tool_call_id was part of the orphaned set.
-      if (!expectedIds.has(toolMsg.tool_call_id)) {
-        paired.push(messages[k]!);
-      }
-    }
-    i = j - 1; // advance past the orphaned tool block
+    i = j - 1; // advance past the orphaned tool block; its results answer no surviving call
   }
 
   // Second pass: ensure the first non-system message is a user.
@@ -545,14 +559,22 @@ export class CalendarBotAgent {
   private debugLogger?: AiDebugLogger;
   private streamImpl: typeof aiStreamRound;
   private summarizer?: HistorySummarizer;
+  private requestTimeoutMs: number;
 
-  constructor(config: AgentConfig, sender: TelegramSender, opts?: { streamImpl?: typeof aiStreamRound }) {
+  constructor(
+    config: AgentConfig,
+    sender: TelegramSender,
+    opts?: { streamImpl?: typeof aiStreamRound; requestTimeoutMs?: number },
+  ) {
     this.toolSchemaMode = config.toolSchemaMode ?? 'full';
     this.toolSchemaUserIds = config.toolSchemaUserIds ? new Set(config.toolSchemaUserIds) : undefined;
     this.sender = sender;
     this.debugLogger = config.debugLogger;
     this.streamImpl = opts?.streamImpl ?? aiStreamRound;
     this.summarizer = config.summarizer;
+    this.requestTimeoutMs = opts?.requestTimeoutMs ?? TIMEOUT_MS;
+    if (!Number.isSafeInteger(this.requestTimeoutMs) || this.requestTimeoutMs < 1 || this.requestTimeoutMs > TIMEOUT_MS)
+      throw new Error(`requestTimeoutMs must be between 1 and ${TIMEOUT_MS}`);
   }
 
   getSender(): TelegramSender {
@@ -563,6 +585,7 @@ export class CalendarBotAgent {
     ctx: AgentContext,
     history: ChatHistoryMessage[],
     measuredStream?: typeof aiStreamRound,
+    signal?: AbortSignal,
   ): Promise<{ systemPrompt: string; messages: MessageParam[] }> {
     // IMPORTANT: history must already contain the current user message.
     // The universal GramIO middleware in bot/index.ts saves it via ConversationLogger
@@ -576,6 +599,7 @@ export class CalendarBotAgent {
     const senderCache = new Map<number, string>();
 
     for (const row of relevantHistory) {
+      signal?.throwIfAborted();
       const parsedMessages = parseHistoryRow(row, ctx.user.timezone);
 
       for (let msg of parsedMessages) {
@@ -585,6 +609,7 @@ export class CalendarBotAgent {
             msg.tool_call_id,
             msg.content,
             measuredStream,
+            signal,
           );
           if (condensed !== msg.content) {
             msg = { ...msg, content: condensed };
@@ -633,6 +658,12 @@ export class CalendarBotAgent {
   private announceFailure(ctx: AgentContext, error: unknown, writer: TelegramStreamWriter): void {
     if (ctx.supplementMode || ctx.wasExplicitInvocation === false) return;
 
+    if (error instanceof ProviderSafetyStopError) {
+      const text = t(ctx.user.language).ai_response_blocked;
+      writer.appendText(text);
+      this.saveAssistantTurn(ctx, { role: 'assistant', content: text });
+      return;
+    }
     const hardOutage = isHardOutage(error);
     if ((ctx.retryAttempt ?? 0) > 0 && !hardOutage) return;
 
@@ -690,6 +721,8 @@ export class CalendarBotAgent {
   }
 
   async run(ctx: AgentContext): Promise<AgentRunResult> {
+    const startTime = Date.now();
+    const requestSignal = AbortSignal.timeout(this.requestTimeoutMs);
     const requestMetrics = new AgentRequestMetrics();
     const requestId = requestMetrics.requestId;
     aiLogger.info(
@@ -708,8 +741,24 @@ export class CalendarBotAgent {
       async (...args: Parameters<typeof aiStreamRound>): ReturnType<typeof aiStreamRound> => {
         const [options, callbacks] = args;
         const startedAt = performance.now();
+        const signal = options.signal ? AbortSignal.any([requestSignal, options.signal]) : requestSignal;
+        let active = true;
+        const guardedCallbacks: StreamCallbacks = {
+          onTextDelta: (text) => {
+            if (active && !signal.aborted) callbacks?.onTextDelta?.(text);
+          },
+          onToolCallStart: (name) => {
+            if (active && !signal.aborted) callbacks?.onToolCallStart?.(name);
+          },
+          onProviderSwitch: () => {
+            if (active && !signal.aborted) callbacks?.onProviderSwitch?.();
+          },
+        };
         try {
-          const result = await this.streamImpl({ ...options, requestId }, callbacks);
+          const result = await waitForAbort(
+            () => this.streamImpl({ ...options, requestId, signal }, guardedCallbacks),
+            signal,
+          );
           requestMetrics.recordRound(result.metrics);
           const metrics = result.metrics;
           aiLogger.info(
@@ -757,18 +806,14 @@ export class CalendarBotAgent {
             'AI model call metric',
           );
           throw error;
+        } finally {
+          active = false;
         }
       };
     const summaryStream = measuredStream('history');
     const agentStream = measuredStream('agent');
     const validatorStream = measuredStream('validator');
     const retryStream = measuredStream('retry');
-
-    const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
-    const { systemPrompt, messages: rawHistoryMessages } = await this.buildMessages(ctx, history, summaryStream);
-    const historyMessages = this.summarizer
-      ? await this.summarizer.condenseHistory(rawHistoryMessages, summaryStream)
-      : rawHistoryMessages;
 
     const dbg: AiDebugRunContext | null =
       this.debugLogger?.createRunContext(
@@ -787,9 +832,6 @@ export class CalendarBotAgent {
       (!this.toolSchemaUserIds || this.toolSchemaUserIds.has(ctx.user.telegram_id))
         ? createToolExposure(getToolDefinitions(ctx.inputMode, ctx.supplementMode))
         : undefined;
-    const activePrompt = exposure ? `${systemPrompt}\n\n${exposure.prompt}` : systemPrompt;
-    dbg?.logSystemPrompt(activePrompt);
-    dbg?.logHistory(historyMessages);
 
     const effectiveSender: TelegramSender = ctx.supplementMode
       ? ({
@@ -811,9 +853,6 @@ export class CalendarBotAgent {
       userTranscript: ctx.inputMode === 'live_call' ? ctx.messageText : undefined,
       noPlaceholder: ctx.isGroup,
     });
-    await writer.init();
-
-    const startTime = Date.now();
     const allToolCalls: AgentToolCallRecord[] = [];
     const allToolResults: AgentToolResultRecord[] = [];
     // Keys of tool calls already executed in this run — used to short-circuit
@@ -827,9 +866,7 @@ export class CalendarBotAgent {
     let pendingAssistantTurn: MessageParam | null = null;
     let pendingResponseText = '';
 
-    // Build the full message list once (system first, then the reconstructed history).
-    const systemMessage: MessageParam = { role: 'system', content: activePrompt };
-    let currentMessages: MessageParam[] = [systemMessage, ...historyMessages];
+    let currentMessages: MessageParam[] = [];
     let runFailed = false;
     // Stays set until a validation retry produces an explicitly approved answer.
     let responseUnverified = false;
@@ -848,15 +885,28 @@ export class CalendarBotAgent {
     };
 
     try {
+      await writer.init();
+      const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
+      const { systemPrompt, messages: rawHistoryMessages } = await waitForAbort(
+        () => this.buildMessages(ctx, history, summaryStream, requestSignal),
+        requestSignal,
+      );
+      const summarizer = this.summarizer;
+      const historyMessages = summarizer
+        ? await waitForAbort(
+            () => summarizer.condenseHistory(rawHistoryMessages, summaryStream, requestSignal),
+            requestSignal,
+          )
+        : rawHistoryMessages;
+      const activePrompt = exposure ? `${systemPrompt}\n\n${exposure.prompt}` : systemPrompt;
+      dbg?.logSystemPrompt(activePrompt);
+      dbg?.logHistory(historyMessages);
+      currentMessages = [{ role: 'system', content: activePrompt }, ...historyMessages];
+
       rounds: for (let round = 0; round < MAX_ROUNDS; round++) {
         dbg?.logRound(round);
 
-        if (Date.now() - startTime > TIMEOUT_MS) {
-          aiLogger.warn({ userId: ctx.user.telegram_id }, 'Agent timeout');
-          const lang = ctx.user.language as 'en' | 'ru';
-          writer.appendText(`\n\n${t(lang).agent_timeout}`);
-          break;
-        }
+        requestSignal.throwIfAborted();
 
         const callbacks: StreamCallbacks = {
           onTextDelta: (text) => {
@@ -885,7 +935,7 @@ export class CalendarBotAgent {
               tools,
               maxTokens: 4096,
               temperature: 0.3,
-              signal: AbortSignal.timeout(Math.max(1000, TIMEOUT_MS - (Date.now() - startTime))),
+              signal: requestSignal,
               userId: ctx.user.telegram_id,
               deferOutageAlert,
             },
@@ -1138,6 +1188,7 @@ export class CalendarBotAgent {
       // repair provider fails before a mutation. Ordinary execution retries stay unchanged.
       if (
         !responseUnverified &&
+        !(error instanceof ProviderSafetyStopError) &&
         !writeOutcomes.mayHaveMutated &&
         ctx.retryEnqueue &&
         !ctx.supplementMode &&
@@ -1308,9 +1359,9 @@ export class CalendarBotAgent {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       dbg?.logRound(100 + round);
 
-      if (Date.now() - startTime > TIMEOUT_MS) {
+      if (Date.now() - startTime >= this.requestTimeoutMs) {
         aiLogger.warn({ userId: ctx.user.telegram_id }, 'Agent timeout (retry)');
-        writer.appendText('\n\n⚠️ Timeout reached.');
+        writer.appendText(`\n\n${t(ctx.user.language).agent_timeout}`);
         return { hitStopLoop: false, lastRoundText: '', lastRoundHadToolCalls: false };
       }
 
@@ -1341,7 +1392,7 @@ export class CalendarBotAgent {
             tools,
             maxTokens: 4096,
             temperature: 0.3,
-            signal: AbortSignal.timeout(Math.max(1000, TIMEOUT_MS - (Date.now() - startTime))),
+            signal: AbortSignal.timeout(Math.max(1, this.requestTimeoutMs - (Date.now() - startTime))),
             deferOutageAlert,
           },
           callbacks,

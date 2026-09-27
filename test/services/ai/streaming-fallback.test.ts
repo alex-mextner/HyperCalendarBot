@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import OpenAI from 'openai';
+import { closeGeminiQuotaStores } from '../../../src/services/ai/gemini-quota.ts';
 
 // Build a fake OpenAI client whose chat.completions.create returns a scripted
 // async-iterable stream. Each script entry is one "round" the provider emits.
@@ -135,6 +136,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  closeGeminiQuotaStores();
   process.env = { ...savedEnv };
   Object.assign(providerClients, realProviderClients);
 });
@@ -154,6 +156,247 @@ describe('aiStreamRound — provider chain fallback', () => {
 
   afterEach(() => {
     // Each fake is recreated per test
+  });
+
+  test('a safety stop is explicit and is not retried through another provider', async () => {
+    process.env.AI_SMART_CHAIN = 'gemini,hf';
+    fakeGemini = buildFakeClient([{ kind: 'finish', reason: 'content_filter' }]);
+    fakeHf = buildFakeClient([{ kind: 'text', text: 'must not bypass stop' }]);
+    await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
+      name: 'ProviderSafetyStopError',
+    });
+    expect(fakeHf.chat.completions.create).not.toHaveBeenCalled();
+  });
+
+  test('a structured refusal delta stops fallback without exposing refusal contents', async () => {
+    process.env.AI_SMART_CHAIN = 'gemini,hf';
+    fakeGemini = {
+      chat: {
+        completions: {
+          create: mock(async () =>
+            (async function* () {
+              yield { choices: [{ delta: { refusal: 'PRIVATE_REFUSAL' }, finish_reason: 'stop' }] };
+            })(),
+          ),
+        },
+      },
+    };
+    fakeHf = buildFakeClient([{ kind: 'text', text: 'must not bypass refusal' }]);
+    await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
+      name: 'ProviderSafetyStopError',
+    });
+    expect(fakeHf.chat.completions.create).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    '{"expression":',
+    '[]',
+    'null',
+  ])('invalid or non-object tool arguments cannot become executable output: %s', async (args) => {
+    process.env.AI_SMART_CHAIN = 'gemini';
+    fakeGemini = buildFakeClient([{ kind: 'tool', id: 'bad-args', name: 'calculate', args }]);
+    await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
+      failures: [{ emptyResponse: { classification: 'malformed_tools' } }],
+    });
+  });
+
+  test('orphan argument fragments are diagnosed as malformed tool output', async () => {
+    process.env.AI_SMART_CHAIN = 'gemini';
+    fakeGemini = {
+      chat: {
+        completions: {
+          create: mock(async () =>
+            (async function* () {
+              yield { choices: [{ delta: { tool_calls: [{ function: { arguments: '{}' } }] } }] };
+            })(),
+          ),
+        },
+      },
+    };
+    await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
+      failures: [{ emptyResponse: { classification: 'malformed_tools', toolFragmentCount: 1 } }],
+    });
+  });
+
+  test('an incomplete tool declaration is not accepted as usable output', async () => {
+    process.env.AI_SMART_CHAIN = 'gemini';
+    fakeGemini = buildFakeClient([{ kind: 'tool', id: 'incomplete', name: '', args: '{}' }]);
+    await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
+      failures: [{ emptyResponse: { classification: 'malformed_tools', toolFragmentCount: 1, choiceCount: 1 } }],
+    });
+  });
+
+  test('no chunks and usage-only streams remain distinguishable diagnostics', async () => {
+    process.env.AI_SMART_CHAIN = 'gemini';
+    fakeGemini = buildFakeClient([]);
+    await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
+      failures: [{ emptyResponse: { classification: 'no_chunks', chunkCount: 0, choiceCount: 0, usage: null } }],
+    });
+    fakeGemini = buildFakeClient([{ kind: 'usage', prompt: 10, completion: 128, reasoning: 128 }]);
+    await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
+      failures: [{ emptyResponse: { classification: 'reasoning_only', chunkCount: 1, choiceCount: 0 } }],
+    });
+  });
+
+  test('aborting a stalled iterator requests closure without awaiting a stuck return', async () => {
+    const close = mock(() => new Promise<IteratorResult<OpenAI.ChatCompletionChunk>>(() => {}));
+    fakeZai = {
+      chat: {
+        completions: {
+          create: mock(async () => ({
+            [Symbol.asyncIterator]() {
+              return { next: () => new Promise<IteratorResult<OpenAI.ChatCompletionChunk>>(() => {}), return: close };
+            },
+          })),
+        },
+      },
+    };
+    fakeGemini = buildFakeClient([{ kind: 'text', text: 'fallback after cleanup' }]);
+    const started = performance.now();
+    const result = await aiStreamRound({ messages: [], maxTokens: 128, providerTimeoutMs: 20 });
+    expect(result.text).toBe('fallback after cleanup');
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(performance.now() - started).toBeLessThan(300);
+  });
+
+  test('retains a terminal finish reason without a delta', async () => {
+    fakeZai = {
+      chat: {
+        completions: {
+          create: mock(async () =>
+            (async function* () {
+              yield { choices: [{ delta: { content: 'partial' }, finish_reason: null }] };
+              yield { choices: [{ finish_reason: 'length' }] };
+            })(),
+          ),
+        },
+      },
+    };
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'synthetic' }], maxTokens: 128 });
+    expect(result.finishReason).toBe('length');
+  });
+  test('preserves finish/usage/request shape of empty output without prompt content', async () => {
+    process.env.AI_SMART_CHAIN = 'gemini';
+    fakeGemini = {
+      chat: {
+        completions: {
+          create: mock(async () =>
+            (async function* () {
+              yield { choices: [{ finish_reason: 'length' }] };
+              yield {
+                choices: [],
+                usage: {
+                  prompt_tokens: 40,
+                  completion_tokens: 0,
+                  total_tokens: 168,
+                  completion_tokens_details: { reasoning_tokens: 128 },
+                },
+              };
+            })(),
+          ),
+        },
+      },
+    };
+    let failure: InstanceType<typeof AllProvidersFailedError> | undefined;
+    try {
+      await aiStreamRound({ messages: [{ role: 'user', content: 'PRIVATE_CANARY_DO_NOT_LOG' }], maxTokens: 128 });
+    } catch (e) {
+      if (e instanceof AllProvidersFailedError) failure = e;
+      else throw e;
+    }
+    expect(failure?.failures[0]).toMatchObject({
+      emptyResponse: {
+        finishReason: 'length',
+        maxOutputTokens: 128,
+        chunkCount: 2,
+        usage: { promptTokens: 40, completionTokens: 0, reasoningTokens: 128 },
+      },
+    });
+    expect(JSON.stringify(failure?.failures)).not.toContain('PRIVATE_CANARY_DO_NOT_LOG');
+  });
+  test('a stalled response body times out and a healthy fallback finishes the same round', async () => {
+    let firstSignal: AbortSignal | undefined;
+    fakeZai = {
+      chat: {
+        completions: {
+          create: mock(async (_params: unknown, opts: { signal: AbortSignal }) => {
+            firstSignal = opts.signal;
+            return (async function* () {
+              await Bun.sleep(200);
+              yield { choices: [{ delta: { content: 'too late' } }] };
+            })();
+          }),
+        },
+      },
+    };
+    fakeGemini = buildFakeClient([{ kind: 'text', text: 'fallback ready' }]);
+    const visible: string[] = [];
+    const result = await aiStreamRound(
+      { messages: [{ role: 'user', content: 'synthetic' }], maxTokens: 128, providerTimeoutMs: 20 },
+      { onTextDelta: (t) => visible.push(t) },
+    );
+    expect(result.text).toBe('fallback ready');
+    expect(firstSignal?.aborted).toBe(true);
+    await Bun.sleep(220);
+    expect(visible.join('')).not.toContain('too late');
+  });
+  test('a completed shared deadline starts no provider request', async () => {
+    const signal = AbortSignal.timeout(1);
+    await Bun.sleep(5);
+    fakeZai = buildFakeClient([{ kind: 'text', text: 'should not run' }]);
+    await expect(aiStreamRound({ messages: [], maxTokens: 128, signal })).rejects.toThrow();
+    expect(fakeZai.chat.completions.create).not.toHaveBeenCalled();
+  });
+  test('tiny fast Gemini 2.5 Flash calls disable thinking, but main calls keep their reasoning policy', async () => {
+    process.env.AI_SMART_CHAIN = 'gemini';
+    process.env.AI_FAST_CHAIN = 'gemini';
+    process.env.GEMINI_FAST_MODEL = 'models/gemini-2.5-flash';
+    fakeGemini = buildFakeClient([{ kind: 'text', text: 'ready' }]);
+    await aiStreamRound({ messages: [], maxTokens: 256, fast: true });
+    expect(fakeGemini.chat.completions.create.mock.calls[0][0].reasoning_effort).toBe('none');
+    await aiStreamRound({ messages: [], maxTokens: 4096 });
+    expect(fakeGemini.chat.completions.create.mock.calls[1][0].reasoning_effort).toBeUndefined();
+  });
+
+  test('Gemini local budget skips network rather than waiting when exhausted', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'hcb-quota-'));
+    process.env.DATABASE_PATH = join(dir, 'calendar.db');
+    process.env.GEMINI_RATE_LIMITS = JSON.stringify({ scope: 'fake-project', rpm: 1, tpm: 50000, rpd: 10 });
+    process.env.AI_SMART_CHAIN = 'gemini,hf';
+    fakeGemini = buildFakeClient([{ kind: 'text', text: 'gemini' }]);
+    fakeHf = buildFakeClient([{ kind: 'text', text: 'reserve' }]);
+    try {
+      expect((await aiStreamRound({ messages: [], maxTokens: 128 })).text).toBe('gemini');
+      expect((await aiStreamRound({ messages: [], maxTokens: 128 })).text).toBe('reserve');
+      expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('unavailable local quota storage skips without blaming Gemini or sending HTTP', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'hcb-bad-quota-'));
+    process.env.DATABASE_PATH = join(dir, 'missing', 'calendar.db');
+    process.env.GEMINI_RATE_LIMITS = JSON.stringify({ scope: 'fake-project', rpm: 1, tpm: 50000, rpd: 10 });
+    process.env.AI_SMART_CHAIN = 'gemini,hf';
+    fakeGemini = buildFakeClient([{ kind: 'text', text: 'must not call' }]);
+    fakeHf = buildFakeClient([{ kind: 'text', text: 'reserve' }]);
+    try {
+      const result = await aiStreamRound({ messages: [], maxTokens: 128 });
+      expect(result.text).toBe('reserve');
+      expect(result.metrics?.attemptCount).toBe(1);
+      expect(result.metrics?.failedProviders).toEqual([]);
+      expect(result.metrics?.skippedProviders).toEqual([{ provider: 'gemini', model: 'gemini-main' }]);
+      expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('returns z.ai result on first success', async () => {
@@ -476,7 +719,7 @@ describe('aiStreamRound — provider chain fallback', () => {
     await expect(
       aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, signal: controller.signal }),
     ).rejects.toThrow();
-    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(0);
     expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
     expect(fakeHf.chat.completions.create).not.toHaveBeenCalled();
   });

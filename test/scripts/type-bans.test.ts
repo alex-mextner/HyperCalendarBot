@@ -45,14 +45,14 @@ async function gate(path: string, added: string, movedTo?: string): Promise<Verd
       writeFileSync(join(repo, path), added);
     }
     await git('add', '.');
-    await git('commit', '-qm', 'base');
+    await git('commit', '--no-verify', '-qm', 'base');
     const base = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: repo }).stdout.toString().trim();
     const destination = movedTo ?? path;
     mkdirSync(join(repo, destination, '..'), { recursive: true });
     if (movedTo !== undefined) await git('mv', path, movedTo);
     else writeFileSync(join(repo, destination), added);
     await git('add', '-A');
-    await git('commit', '-qm', 'change');
+    await git('commit', '--no-verify', '-qm', 'change');
 
     const proc = Bun.spawn(['bash', SCRIPT], {
       cwd: repo,
@@ -241,7 +241,7 @@ describe('type-ban gate', () => {
         await git('config', 'user.name', 'test');
         writeFileSync(join(repo, 'README.md'), 'base\n');
         await git('add', '.');
-        await git('commit', '-qm', 'base');
+        await git('commit', '--no-verify', '-qm', 'base');
 
         const proc = Bun.spawn(['bash', SCRIPT], {
           cwd: repo,

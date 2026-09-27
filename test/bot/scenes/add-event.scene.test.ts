@@ -87,7 +87,7 @@ function makeCtx(
     defaultDuration?: number;
   } = {},
 ): MockCtx {
-  const state = overrides.state ?? {};
+  const state = overrides.state ?? (overrides.stepId === 4 ? { recurrenceRule: 'FREQ=DAILY' } : {});
   const activeType = overrides.activeType ?? 'message';
   const ctx: MockCtx = {
     _activeType: activeType,
@@ -136,9 +136,9 @@ describe('createAddEventScene', () => {
     expect(scene.name).toBe('add_event');
   });
 
-  test('has 7 steps', () => {
+  test('has 8 steps including final confirmation', () => {
     const scene = createAddEventScene({} as EventService, mockComposer);
-    expect(scene.stepsCount).toBe(7);
+    expect(scene.stepsCount).toBe(8);
   });
 });
 
@@ -189,6 +189,34 @@ describe('parseWizardDateTime', () => {
   });
 });
 
+describe('wizard date/time corrections and boundaries (GH-359)', () => {
+  const ref = new Date('2026-09-23T18:00:00Z');
+  test.each([
+    ['в 19', '2026-09-23T17:00:00.000Z'],
+    ['сегодня 19', '2026-09-23T17:00:00.000Z'],
+    ['пн 10', '2026-09-28T08:00:00.000Z'],
+    ['25.09.2026 19:00', '2026-09-25T17:00:00.000Z'],
+    ['2026-09-25 19:00', '2026-09-25T17:00:00.000Z'],
+  ])('explicit local time %s does not ask for it a second time', (input, startAt) => {
+    expect(parseWizardDateTime(input, 'Europe/Belgrade', undefined, ref)).toEqual({ kind: 'complete', startAt });
+  });
+  test.each(['сегодня', '25.09', '2026-09-25', 'пятница'])('date-only %s asks for time', (input) => {
+    expect(parseWizardDateTime(input, 'Europe/Belgrade', undefined, ref).kind).toBe('needs_time');
+  });
+  test('a full correction replaces a pending date', () => {
+    expect(parseWizardDateTime('26 сен 20:00', 'Europe/Belgrade', '2026-09-25', ref)).toEqual({
+      kind: 'complete',
+      startAt: '2026-09-26T18:00:00.000Z',
+    });
+  });
+  test.each(['2026-03-29', '2026-10-25'])('clock change on %s requires clarification', (date) => {
+    expect(parseWizardDateTime('02:30', 'Europe/Belgrade', date, ref).kind).toBe('invalid');
+  });
+  test('a corrupt pending date cannot roll into a different month', () => {
+    expect(parseWizardDateTime('19:00', 'Europe/Belgrade', '2026-02-31', ref).kind).toBe('invalid');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // CB constants
 // ---------------------------------------------------------------------------
@@ -220,7 +248,7 @@ describe('add_event step handlers', () => {
 
   beforeEach(() => {
     createEventMock = mock(() => FAKE_EVENT);
-    const mockService = { createEvent: createEventMock } as unknown as EventService;
+    const mockService = { createEvent: createEventMock, getEvent: () => FAKE_EVENT } as unknown as EventService;
     fns = getStepFns(createAddEventScene(mockService, mockComposer));
   });
 
@@ -239,7 +267,9 @@ describe('add_event step handlers', () => {
       const ctx = makeCtx({ stepId: 0, text: '  ' });
       await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
-      expect(ctx.scene.update).not.toHaveBeenCalled();
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
     });
 
     test('valid text — stores trimmed title', async () => {
@@ -279,16 +309,20 @@ describe('add_event step handlers', () => {
       const ctx = makeCtx({ stepId: 1, text: 'not a date at all' });
       await fns[1]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
-      expect(ctx.scene.update).not.toHaveBeenCalled();
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
       const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/parse|разобрать/i);
     });
 
-    test('no text — does nothing', async () => {
+    test('no text — explains supported input without changing event data', async () => {
       const ctx = makeCtx({ stepId: 1 });
       await fns[1]!(ctx, NOOP_NEXT);
-      expect(ctx.send).not.toHaveBeenCalled();
-      expect(ctx.scene.update).not.toHaveBeenCalled();
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
     });
 
     test('ru locale — error message in Russian', async () => {
@@ -402,13 +436,15 @@ describe('add_event step handlers', () => {
       });
       await fns[2]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
-      expect(ctx.scene.update).not.toHaveBeenCalled();
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
     });
 
-    test('no startAt — exits scene', async () => {
+    test('no startAt — returns to the date step preserving draft', async () => {
       const ctx = makeCtx({ stepId: 2, text: '1h', state: {} });
       await fns[2]!(ctx, NOOP_NEXT);
-      expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+      expect(ctx.scene.step.go).toHaveBeenCalledWith(1, true);
     });
   });
 
@@ -424,8 +460,8 @@ describe('add_event step handlers', () => {
     test('"none" — sets null rule and skips to step 5', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 3, data: `${CB.ADD_RECURRENCE}:none` });
       await fns[3]!(ctx, NOOP_NEXT);
-      expect(ctx.scene.update).toHaveBeenCalledWith({ recurrenceRule: null }, { step: undefined });
-      expect(ctx.scene.step.go).toHaveBeenCalledWith(5, true);
+      expect(ctx.scene.update).toHaveBeenCalledWith({ recurrenceRule: null, recEndMode: undefined }, { step: 5 });
+      expect(ctx.scene.step.go).not.toHaveBeenCalled();
     });
 
     test('"WEEKLY" — stores FREQ=WEEKLY', async () => {
@@ -534,7 +570,9 @@ describe('add_event step handlers', () => {
         state: { recurrenceRule: 'FREQ=DAILY', startAt: '2026-09-25T16:00:00.000Z' },
       });
       await fns[4]!(ctx, NOOP_NEXT);
-      expect(ctx.scene.update).not.toHaveBeenCalled();
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
       const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/26-е|повтор/i);
     });
@@ -573,92 +611,89 @@ describe('add_event step handlers', () => {
       expect(ctx.scene.update).toHaveBeenCalledWith({ description: 'Weekly team sync notes' });
     });
 
-    test('no text — does nothing', async () => {
+    test('no text — explains supported input without changing event data', async () => {
       const ctx = makeCtx({ stepId: 5 });
       await fns[5]!(ctx, NOOP_NEXT);
-      expect(ctx.scene.update).not.toHaveBeenCalled();
-      expect(ctx.send).not.toHaveBeenCalled();
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
+      expect(ctx.send).toHaveBeenCalledTimes(1);
     });
   });
 
   // --- Step 6: Location + Create Event ---
 
-  describe('step 6: location + create event', () => {
-    test('firstTime — sends location prompt', async () => {
+  describe('location, preview and confirmation', () => {
+    test('location entry shows its prompt', async () => {
       const ctx = makeCtx({ stepId: 6, firstTime: true });
       await fns[6]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
     });
-
-    test('no title — exits without creating event', async () => {
-      const ctx = makeCtx({ stepId: 6, text: 'Office', state: { startAt: '2026-03-20T10:00:00.000Z' } });
-      await fns[6]!(ctx, NOOP_NEXT);
-      expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+    test.each([
+      { startAt: '2026-03-20T10:00:00Z' },
+      { title: 'Standup' },
+    ])('missing required data blocks confirmation', async (state) => {
+      const ctx = makeCtx({ activeType: 'callback_query', stepId: 7, data: 'add:confirm', state });
+      await fns[7]!(ctx, NOOP_NEXT);
       expect(createEventMock).not.toHaveBeenCalled();
+      expect(ctx.scene.exit).not.toHaveBeenCalled();
+      const [text] = ctx.send.mock.calls[0] as unknown as [string];
+      expect(text).toContain('missing');
     });
-
-    test('no startAt — exits without creating event', async () => {
-      const ctx = makeCtx({ stepId: 6, text: 'Office', state: { title: 'Stand up' } });
+    test.each(['Room 101', 'Office'])('location %s is only a draft until confirmation', async (location) => {
+      const state = { title: 'Standup', startAt: '2026-03-20T10:00:00Z' };
+      const ctx = makeCtx({ stepId: 6, text: location, state });
       await fns[6]!(ctx, NOOP_NEXT);
-      expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
       expect(createEventMock).not.toHaveBeenCalled();
-    });
-
-    test('valid state + location text — creates event with location', async () => {
-      const ctx = makeCtx({
-        stepId: 6,
-        text: 'Room 101',
-        state: { title: 'Standup', startAt: '2026-03-20T10:00:00.000Z', endAt: '2026-03-20T10:30:00.000Z' },
-      });
-      await fns[6]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.state.location).toBe(location);
+      const confirm = makeCtx({ activeType: 'callback_query', stepId: 7, data: 'add:confirm', state: ctx.scene.state });
+      await fns[7]!(confirm, NOOP_NEXT);
       expect(createEventMock).toHaveBeenCalledTimes(1);
-      const [data] = createEventMock.mock.calls[0] as unknown as [
-        { title: string; location?: string; start_at: string },
-      ];
-      expect(data.title).toBe('Standup');
-      expect(data.location).toBe('Room 101');
-      expect(data.start_at).toBe('2026-03-20T10:00:00.000Z');
-      expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+      const [data] = createEventMock.mock.calls[0] as unknown as [{ location: string }];
+      expect(data.location).toBe(location);
     });
-
-    test('skip location callback — creates event without location', async () => {
+    test('skip location clears an earlier location instead of retaining it', async () => {
       const ctx = makeCtx({
         activeType: 'callback_query',
         stepId: 6,
         data: `${CB.ADD_SKIP}:6`,
-        state: { title: 'Standup', startAt: '2026-03-20T10:00:00.000Z', endAt: '2026-03-20T10:30:00.000Z' },
+        state: { location: 'Old place' },
       });
       await fns[6]!(ctx, NOOP_NEXT);
-      expect(createEventMock).toHaveBeenCalledTimes(1);
-      const [data] = createEventMock.mock.calls[0] as unknown as [{ location?: string }];
-      expect(data.location).toBeUndefined();
+      expect(ctx.scene.state.location).toBeUndefined();
+      expect(createEventMock).not.toHaveBeenCalled();
     });
-
-    test('success — send message contains event title', async () => {
+    test('preview shows the exact title safely and writes nothing', async () => {
       const ctx = makeCtx({
-        stepId: 6,
-        text: 'Conf room',
-        state: { title: 'Demo Day', startAt: '2026-03-20T10:00:00.000Z', endAt: '2026-03-20T11:00:00.000Z' },
+        stepId: 7,
+        firstTime: true,
+        state: { title: 'Demo <Day>', startAt: '2026-03-20T10:00:00Z' },
       });
-      await fns[6]!(ctx, NOOP_NEXT);
-      expect(ctx.send).toHaveBeenCalledTimes(1);
-      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
-      expect(msg).toMatch(/Demo Day|Test Event/);
+      await fns[7]!(ctx, NOOP_NEXT);
+      const [text] = ctx.send.mock.calls[0] as unknown as [string];
+      expect(text).toContain('Demo &lt;Day&gt;');
+      expect(createEventMock).not.toHaveBeenCalled();
     });
-
-    test('event with recurrenceRule — passes rule to createEvent', async () => {
+    test('confirmation passes the recurrence unchanged to storage', async () => {
       const ctx = makeCtx({
-        stepId: 6,
-        text: 'Online',
+        activeType: 'callback_query',
+        stepId: 7,
+        data: 'add:confirm',
         state: {
           title: 'Weekly standup',
-          startAt: '2026-03-20T10:00:00.000Z',
-          recurrenceRule: 'FREQ=WEEKLY',
+          startAt: '2026-03-20T10:00:00Z',
+          recurrenceRule: 'FREQ=WEEKLY;COUNT=5',
         },
       });
-      await fns[6]!(ctx, NOOP_NEXT);
-      const [data] = createEventMock.mock.calls[0] as unknown as [{ recurrence_rule?: string }];
-      expect(data.recurrence_rule).toBe('FREQ=WEEKLY');
+      await fns[7]!(ctx, NOOP_NEXT);
+      const [data] = createEventMock.mock.calls[0] as unknown as [{ recurrence_rule: string }];
+      expect(data.recurrence_rule).toBe('FREQ=WEEKLY;COUNT=5');
+    });
+    test('typing on the preview cannot accidentally confirm', async () => {
+      const ctx = makeCtx({ stepId: 7, text: 'Wait', state: { title: 'Test', startAt: '2026-03-20T10:00:00Z' } });
+      await fns[7]!(ctx, NOOP_NEXT);
+      expect(createEventMock).not.toHaveBeenCalled();
+      expect(ctx.send).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -694,35 +729,45 @@ describe('add_event step handlers', () => {
       const ctx = makeCancelCtx({ stepId: 1 });
       await fns[1]!(ctx, NOOP_NEXT);
       expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
-      expect(ctx.scene.update).not.toHaveBeenCalled();
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
     });
 
     test('step 2: cancel callback exits scene without creating event', async () => {
       const ctx = makeCancelCtx({ stepId: 2, state: { startAt: '2026-03-20T10:00:00.000Z' } });
       await fns[2]!(ctx, NOOP_NEXT);
       expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
-      expect(ctx.scene.update).not.toHaveBeenCalled();
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
     });
 
     test('step 3: cancel callback exits scene', async () => {
       const ctx = makeCancelCtx({ stepId: 3 });
       await fns[3]!(ctx, NOOP_NEXT);
       expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
-      expect(ctx.scene.update).not.toHaveBeenCalled();
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
     });
 
     test('step 4: cancel callback exits scene', async () => {
       const ctx = makeCancelCtx({ stepId: 4 });
       await fns[4]!(ctx, NOOP_NEXT);
       expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
-      expect(ctx.scene.update).not.toHaveBeenCalled();
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
     });
 
     test('step 5: cancel callback exits scene without storing description', async () => {
       const ctx = makeCancelCtx({ stepId: 5 });
       await fns[5]!(ctx, NOOP_NEXT);
       expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
-      expect(ctx.scene.update).not.toHaveBeenCalled();
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
     });
 
     test('step 6: cancel callback exits scene without creating event', async () => {

@@ -10,7 +10,7 @@
 
 import { toLang } from '../../config/constants.ts';
 import { logger } from '../../utils/logger.ts';
-import { aiStreamRound } from './streaming.ts';
+import { aiStreamRound, ProviderSafetyStopError } from './streaming.ts';
 
 const aiLogger = logger.child({ module: 'response-validator' });
 
@@ -34,7 +34,7 @@ const CALENDAR_WRITE_REQUEST_PATTERNS = [
   /(?:создай|добавь|запиши).{0,160}(?:завтра|сегодня|сентябр|октябр|ноябр|декабр|январ|феврал|март|апрел|ма[йя]|июн|июл|август)/i,
 ];
 const CALENDAR_WRITE_REFUSAL_PATTERNS = [
-  /(?:can(?:not|'t)|won't|unable\s+to).{0,80}(?:create|add|schedule).{0,120}(?:such\s+content|content|wording|appropriate\s+(?:title|name)|title|description)/i,
+  /(?:can(?:not|'t)|won't|unable\s+to).{0,80}(?:create|add|schedule).{0,120}(?:such\s+content|inappropriate|explicit|offensive|profanity|sexual|wording|appropriate\s+(?:title|name))/i,
   /(?:не\s+могу|не\s+буду|отказываюсь).{0,80}(?:созда|добав).{0,120}(?:с\s+таким\s+содержанием|содержан|формулиров|подходящ\S*\s+(?:назван|формулиров)|нецензур|сексуаль|18\+|лексик)/i,
 ];
 
@@ -108,7 +108,7 @@ function claimsCompleteOrEmptySchedule(response: string): boolean {
  * when the final prose claims knowledge that those tools did not provide.
  */
 export function shouldValidateResponse(toolCalls: string[], response: string): boolean {
-  if (toolCalls.length === 0) return true;
+  if (toolCalls.length === 0 || CALENDAR_WRITE_REFUSAL_PATTERNS.some((pattern) => pattern.test(response))) return true;
   return !hasScheduleRead(toolCalls) && claimsCompleteOrEmptySchedule(response);
 }
 
@@ -131,7 +131,6 @@ export async function validateResponse(
   streamImpl: StreamImpl = aiStreamRound,
 ): Promise<ValidationResult> {
   if (
-    input.toolCalls.length === 0 &&
     CALENDAR_WRITE_REQUEST_PATTERNS.some((pattern) => pattern.test(input.userMessage)) &&
     CALENDAR_WRITE_REFUSAL_PATTERNS.some((pattern) => pattern.test(input.response))
   ) {
@@ -188,6 +187,7 @@ export async function validateResponse(
     const reason = text.replace(/^REJECT:\s*/i, '').trim() || 'Validation failed';
     return { approved: false, reason };
   } catch (err) {
+    if (err instanceof ProviderSafetyStopError) throw err;
     aiLogger.error({ err }, 'Response validation failed');
     return { approved: false, reason: 'Validator unavailable — response could not be verified' };
   }

@@ -346,23 +346,18 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
 
     await expect(
       aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, signal: controller.signal }),
-    ).rejects.toMatchObject({ status: 500 });
+    ).rejects.toMatchObject({ name: 'AbortError' });
 
     expect(groq.requestedModels).toEqual([]);
   });
 
-  test('a per-round timeout is not a caller abort — the chain keeps going', async () => {
-    const timeoutSignal = AbortSignal.timeout(1);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    expect(timeoutSignal.aborted).toBe(true);
-
-    const result = await aiStreamRound({
-      messages: [{ role: 'user', content: 'hi' }],
-      maxTokens: 100,
-      signal: timeoutSignal,
+  test('an exhausted caller deadline cannot start another provider', async () => {
+    const signal = AbortSignal.timeout(1);
+    await Bun.sleep(5);
+    await expect(aiStreamRound({ messages: [], maxTokens: 100, signal })).rejects.toMatchObject({
+      name: 'TimeoutError',
     });
-
-    expect(result.text).toBe('answer from Gemini');
+    expect(gemini.requestedModels).toEqual([]);
   });
 });
 
@@ -632,15 +627,13 @@ describe('durable provider circuit', () => {
 
   test('a caller abort carrying a quota error does not open the circuit', async () => {
     zai = makeProvider({
-      behaviors: [
-        { kind: 'throw', error: apiError(402, 'Payment Required') },
-        { kind: 'text', text: 'from zai' },
-      ],
+      behaviors: [{ kind: 'text', text: 'from zai' }],
     });
     gemini = unusedProvider();
     groq = unusedProvider();
     const controller = new AbortController();
-    controller.abort();
+    controller.abort(apiError(402, 'Payment Required'));
+    expect(zai.requestedModels).toEqual([]);
 
     await expect(
       aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, signal: controller.signal }),

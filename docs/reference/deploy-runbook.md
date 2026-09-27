@@ -67,16 +67,17 @@ Port 3001 belongs to HyperCalendarBot Docker. Do not reassign it.
 
 The post-merge runner uses a nonblocking local release lock, then compares the production receipt, actual running image/revision, health and readiness. An already verified target is a no-op. A newer main is reported as superseded. An active hosted deployment remains its owner; an actual executed failing hosted step is not bypassed. A failed platform run with zero executable steps/runner or a bounded absence of a run may use the local gate. API errors are not treated as proof CI is down.
 
-Set the existing `HYPERCAL_DOCKER_BIN`, `HYPERCAL_DOCKER_CONTEXT` and `HYPERCAL_BUN_BIN` operator variables before shipping when the default executables differ from the pinned local toolchain. Status is recorded under the common Git directory as `post-ship-release.json`. `hosted_pending`, `busy` and `superseded` return exit 75, not a false deployment success. `ok (unverified)` remains runtime-only verification.
+Set the existing `HYPERCAL_BUN_BIN` operator variable before shipping when the default `bun` differs from the pinned local toolchain. `HYPERCAL_DOCKER_BIN`/`HYPERCAL_DOCKER_CONTEXT` are only for building with a real Docker Engine instead of Apple `container`: setting `HYPERCAL_DOCKER_CONTEXT` alone switches the builder to Docker, so do not leave a stale value (e.g. `colima`) exported — the post-merge runner inherits the environment. Status is recorded under the common Git directory as `post-ship-release.json`. `hosted_pending`, `busy` and `superseded` return exit 75, not a false deployment success. `ok (unverified)` remains runtime-only verification.
 
 ## Local deploy fallback
 
-Use only when GitHub-hosted Actions cannot obtain a runner and the exact commit has been locally verified. The fallback builds Linux amd64 on the local Unix-socket Docker daemon from a clean `git archive`. The production host only loads a checksum-verified image; it never compiles source or runs the test suite.
+Use only when GitHub-hosted Actions cannot obtain a runner and the exact commit has been locally verified. The fallback builds Linux amd64 locally from a clean `git archive`. The production host only loads a checksum-verified image; it never compiles source or runs the test suite.
+
+Local builder: on the dev Mac it is Apple's native `container` CLI (Homebrew `container`; run `container system start` if `container system status` reports it stopped), with no always-on Linux VM. `container build --platform linux/amd64` builds the image, `container image save` exports an OCI image layout, and `scripts/oci-to-docker-archive.py` converts that — verifying the digest of every blob it reads and keeping the config bytes, so the image ID is unchanged — into the `docker save` format that `scripts/release-artifact.py` and the server's `docker load` identity checks expect. The local image is deleted after export. **Colima was removed from the Mac on 2026-09-26 (its VM disk kept growing) and is no longer a supported builder: do not reinstall it, Docker Desktop, OrbStack or another Docker VM for this.** A real Docker Engine elsewhere is still accepted via `HYPERCAL_BUILD_BACKEND=docker` (local Unix-socket context `HYPERCAL_DOCKER_CONTEXT`, default `default`, and CLI `HYPERCAL_DOCKER_BIN`).
 
 ```bash
 # Default: fetch and deploy the exact commit at origin/main, with local tests first.
-HYPERCAL_DOCKER_BIN=/opt/homebrew/opt/docker/bin/docker \
-HYPERCAL_DOCKER_CONTEXT=colima HYPERCAL_BUN_BIN=/path/to/bun-1.3.11 \
+# The system Bun must be the pinned 1.4.2; otherwise point HYPERCAL_BUN_BIN at one.
 scripts/deploy-local-fallback.sh
 
 # If that exact commit already passed the full local gate in this incident/session:

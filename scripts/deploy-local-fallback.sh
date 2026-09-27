@@ -8,8 +8,10 @@ DEPLOY_PATH="${HYPERCAL_DEPLOY_PATH:-/opt/hypercal}"
 IMAGE="${HYPERCAL_IMAGE:-ghcr.io/alex-mextner/hypercalendarbot}"
 REF="origin/main"
 SKIP_TESTS=false
-DOCKER_CONTEXT="${HYPERCAL_DOCKER_CONTEXT:-colima}"
+DOCKER_CONTEXT="${HYPERCAL_DOCKER_CONTEXT:-}"
 DOCKER="${HYPERCAL_DOCKER_BIN:-docker}"
+CONTAINER="${HYPERCAL_CONTAINER_BIN:-container}"
+BUILD_BACKEND="${HYPERCAL_BUILD_BACKEND:-auto}"
 BUN="${HYPERCAL_BUN_BIN:-bun}"
 
 usage() {
@@ -18,6 +20,15 @@ Usage: scripts/deploy-local-fallback.sh [--ref <git-ref>] [--skip-tests]
 
 Defaults to origin/main and runs the local test/lint/typecheck gate first.
 Use --skip-tests only when the exact commit already passed the same local gate.
+
+Local linux/amd64 image builder (HYPERCAL_BUILD_BACKEND, default auto):
+  container  Apple's native `container` CLI (macOS, no always-on Linux VM).
+             auto picks it when `container` is installed and
+             HYPERCAL_DOCKER_CONTEXT is unset.
+  docker     a real Docker Engine on a local Unix socket: HYPERCAL_DOCKER_CONTEXT
+             (default `default`) via HYPERCAL_DOCKER_BIN.
+Colima is not a supported builder on the dev Mac (removed 2026-09-26); do not
+reinstall it or any other Docker VM for this script.
 EOF
 }
 
@@ -46,9 +57,32 @@ git merge-base --is-ancestor "$SHA" origin/main
 REMOTE_SRC="/tmp/hypercal-source-${SHORT_SHA}-$$"
 LOCAL_SRC="$(mktemp -d)"
 trap 'rm -rf "$LOCAL_SRC"' EXIT
-# A remote Docker context is not a local build. Require the operator's Unix-socket daemon.
-endpoint="$("$DOCKER" context inspect "$DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}')"
-[[ "$endpoint" == unix://* ]] || { echo 'Local Unix-socket Docker context required' >&2; exit 2; }
+# Local image builder. Colima was removed from the dev Mac on 2026-09-26 (its VM
+# disk kept growing) and must not come back for this: on macOS the default is
+# Apple's native `container` CLI. A real Docker Engine is still accepted, but only
+# on a local Unix socket: a remote Docker context is not a local build.
+NO_VM='on the dev Mac build with Apple `container` (`container system start`); do not install Colima or another Docker VM'
+if [[ "$BUILD_BACKEND" == auto ]]; then
+  if [[ -z "$DOCKER_CONTEXT" ]] && command -v "$CONTAINER" >/dev/null 2>&1; then
+    BUILD_BACKEND=container
+  else
+    BUILD_BACKEND=docker
+    [[ -n "$DOCKER_CONTEXT" ]] || NO_VM="Apple container CLI not found ($CONTAINER); $NO_VM"
+  fi
+fi
+case "$BUILD_BACKEND" in
+  container)
+    command -v "$CONTAINER" >/dev/null 2>&1 || { echo "Apple container CLI not found: $CONTAINER" >&2; exit 2; }
+    "$CONTAINER" system status >/dev/null 2>&1 || { echo 'Apple container services are stopped: run `container system start` (do not install Colima or another Docker VM)' >&2; exit 2; }
+    ;;
+  docker)
+    DOCKER_CONTEXT="${DOCKER_CONTEXT:-default}"
+    endpoint="$("$DOCKER" context inspect "$DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
+    [[ "$endpoint" == unix://* ]] || { echo "Local Unix-socket Docker context required (context '$DOCKER_CONTEXT' via $DOCKER); $NO_VM" >&2; exit 2; }
+    "$DOCKER" --context "$DOCKER_CONTEXT" version >/dev/null 2>&1 || { echo "No Docker Engine answers on $endpoint; $NO_VM" >&2; exit 2; }
+    ;;
+  *) echo 'HYPERCAL_BUILD_BACKEND must be auto, container or docker' >&2; exit 2 ;;
+esac
 docker_local() { "$DOCKER" --context "$DOCKER_CONTEXT" "$@"; }
 git archive "$SHA" | tar -xf - -C "$LOCAL_SRC"
 
@@ -65,9 +99,26 @@ cleanup_remote() {
 }
 trap cleanup_remote EXIT
 
-echo "== Building Linux amd64 locally for $SHA =="
-docker_local build --platform linux/amd64 --label "org.opencontainers.image.revision=$SHA" -t "$IMAGE:$SHA" "$LOCAL_SRC"
-docker_local save "$IMAGE:$SHA" | gzip -1 > "$LOCAL_SRC/image.tar.gz"
+echo "== Building Linux amd64 locally for $SHA ($BUILD_BACKEND) =="
+if [[ "$BUILD_BACKEND" == container ]]; then
+  "$CONTAINER" build --progress plain --platform linux/amd64 --label "org.opencontainers.image.revision=$SHA" -t "$IMAGE:$SHA" "$LOCAL_SRC"
+  # `container image save` writes an OCI image layout; convert it (digest-checked,
+  # config bytes unchanged) to the `docker save` format that release-artifact.py
+  # and the server's `docker load` identity checks expect.
+  export_status=0
+  "$CONTAINER" image save --platform linux/amd64 "$IMAGE:$SHA" -o "$LOCAL_SRC/image.oci.tar" \
+    && python3 "$LOCAL_SRC/scripts/oci-to-docker-archive.py" "$LOCAL_SRC/image.oci.tar" "$LOCAL_SRC/image.tar" "$IMAGE:$SHA" \
+    && rm -f "$LOCAL_SRC/image.oci.tar" \
+    && gzip -1 "$LOCAL_SRC/image.tar" \
+    || export_status=$?
+  # The archive is the release artifact; don't keep one local image per release,
+  # and don't strand a multi-GB image when the export fails either.
+  "$CONTAINER" image delete "$IMAGE:$SHA" >/dev/null 2>&1 || echo "warning: could not delete local image $IMAGE:$SHA; remove it with \`container image delete\`" >&2
+  [[ "$export_status" == 0 ]] || { echo "Image export failed (exit $export_status)" >&2; exit "$export_status"; }
+else
+  docker_local build --platform linux/amd64 --label "org.opencontainers.image.revision=$SHA" -t "$IMAGE:$SHA" "$LOCAL_SRC"
+  docker_local save "$IMAGE:$SHA" | gzip -1 > "$LOCAL_SRC/image.tar.gz"
+fi
 python3 "$LOCAL_SRC/scripts/release-artifact.py" "$LOCAL_SRC/image.tar.gz" "$SHA" "$IMAGE:$SHA" > "$LOCAL_SRC/artifact.json"
 ARCHIVE_SUM="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive_sha256"])' "$LOCAL_SRC/artifact.json")"
 CONFIG_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$LOCAL_SRC/artifact.json")"

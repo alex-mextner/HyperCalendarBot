@@ -710,7 +710,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       handleWeek(ctx, eventService, holidayService, renderService, db.groupChats, weatherService),
     )
     .command('month', (ctx) => handleMonth(ctx, eventService, undefined, renderService, db.groupChats))
-    .command('add', (ctx) => handleAdd(ctx, eventService, scenesSetup.scenes.addEventScene, db.groupChats))
+    .command('add', (ctx) => handleAdd(ctx, scenesSetup.scenes.addEventScene, db.groupChats))
     .command('edit', (ctx) => handleEdit(ctx, eventService, db.groupChats))
     .command('delete', (ctx) => handleDelete(ctx, eventService, db.groupChats))
     .command('search', (ctx) => handleSearch(ctx, eventService, db.groupChats))
