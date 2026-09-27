@@ -185,6 +185,11 @@ describe('isGroupRelevant — meeting place and time words (#400)', () => {
     'Какое время всем удобно?',
     'Нет времени до пятницы',
     'Со временем определимся',
+    'Где встретимся?',
+    'Где будем?',
+    'где увидимся',
+    'давай на нашем месте',
+    'встретимся на вашем месте',
   ];
   for (const text of relevant) {
     test(`relevant: ${text}`, () => expect(isGroupRelevant(text, bot)).toBe(true));
@@ -198,6 +203,9 @@ describe('isGroupRelevant — meeting place and time words (#400)', () => {
     'на твоём месте я бы не стал',
     'На твоем месте я бы подождал',
     'на моём месте ты бы тоже расстроился',
+    'на его месте, я бы ушёл',
+    'везде пробки',
+    'нигде не найду ключи',
     'адресат выбыл',
     'кафе временно закрыто',
     'somewhere over the rainbow',

@@ -149,14 +149,15 @@ export function mentionsBot(text: string): boolean {
 // "адресат", "временно" — the reason the stems were dropped once already.
 // Match an explicit list of word forms as whole words instead. The idiom
 // "на твоём месте я бы…" ("if I were you") is excluded by rejecting "месте"
-// right after a possessive pronoun.
+// when the conditional "(я/ты/…) бы" follows; the pronoun before "месте" is
+// not the marker, since "давай на нашем месте" names a real meeting spot.
 const PLACE_OR_TIME_RE = new RegExp(
   '(?<![\\p{L}\\p{N}])(?:' +
     'место|места|месту|местом|мест|местам|местами|местах|' +
-    '(?<!(?:мо[её]м|тво[её]м|сво[её]м|нашем|вашем|его|е[её]|их)\\s+)месте|' +
+    'месте(?![\\s,]+(?:(?:я|ты|мы|вы|он|она|оно|они)\\s+)?бы(?![\\p{L}\\p{N}]))|' +
     'локация|локации|локацию|локацией|локаций|локациям|локациями|локациях|' +
     'адрес|адреса|адресу|адресом|адресе|адресов|адресам|адресами|адресах|' +
-    'время|времени|временем|времена|времён|времен|' +
+    'время|времени|временем|времена|времён|времен|где|' +
     'location|locations|venue|venues|address|addresses|where' +
     ')(?![\\p{L}\\p{N}])',
   'iu',
