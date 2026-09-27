@@ -141,6 +141,11 @@ function pickPhrase(phrases: readonly string[], exclude?: string): string {
   return source[Math.floor(Math.random() * source.length)]!;
 }
 
+/** Upper-cases the first character, for a relative-day word that opens a sentence. */
+function capitalize(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
 // i18n messages
 export const MSG = {
   en: {
@@ -606,7 +611,38 @@ export const MSG = {
         feedbackSent: 'Feedback sent to developer. They will respond in this chat.',
       },
       events: {
-        noEventsInRange: 'No events found in this range.',
+        emptyAgenda: {
+          calendar: {
+            personal: 'in your calendar',
+            group: "in this group's calendar",
+            delegated: 'in the selected calendar',
+          },
+          relativeDay: {
+            yesterday: 'yesterday',
+            today: 'today',
+            tomorrow: 'tomorrow',
+            dayAfterTomorrow: 'the day after tomorrow',
+          },
+          dateTime: (date: string, time: string) => `${date}, ${time}`,
+          dayUpcoming: (relative: string | null, date: string, calendar: string) =>
+            `No events ${calendar} start ${relative ? `${relative}, ${date}` : `on ${date}`}.`,
+          dayPast: (relative: string | null, date: string, calendar: string) =>
+            `No events ${calendar} started ${relative ? `${relative}, ${date}` : `on ${date}`}.`,
+          window: (relative: string | null, date: string, from: string, to: string, calendar: string) =>
+            `No events ${calendar} start ${relative ? `${relative}, ${date},` : `on ${date}`} between ${from} and ${to}.`,
+          windowSpan: (from: string, to: string, calendar: string) =>
+            `No events ${calendar} start between ${from} and ${to}.`,
+          windowPast: (relative: string | null, date: string, from: string, to: string, calendar: string) =>
+            `No events ${calendar} started ${relative ? `${relative}, ${date},` : `on ${date}`} between ${from} and ${to}.`,
+          windowSpanPast: (from: string, to: string, calendar: string) =>
+            `No events ${calendar} started between ${from} and ${to}.`,
+          rangeUpcoming: (from: string, to: string, calendar: string) =>
+            `No events ${calendar} start between ${from} and ${to}.`,
+          rangePast: (from: string, to: string, calendar: string) =>
+            `No events ${calendar} started between ${from} and ${to}.`,
+          rangeCurrent: (from: string, to: string, calendar: string) =>
+            `No events ${calendar} start between ${from} and ${to}.`,
+        },
         noEventsMatching: 'No events found matching the query.',
         noEventsMatchingScope: (scope: string) =>
           `No events found matching the query in ${scope} calendar. Try searching the other scope.`,
@@ -1531,7 +1567,38 @@ export const MSG = {
         feedbackSent: 'Отзыв отправлен разработчику. Ответ придёт в этот чат.',
       },
       events: {
-        noEventsInRange: 'Событий в этом диапазоне не найдено.',
+        emptyAgenda: {
+          calendar: {
+            personal: 'в твоём календаре',
+            group: 'в календаре этой группы',
+            delegated: 'в выбранном календаре',
+          },
+          relativeDay: {
+            yesterday: 'вчера',
+            today: 'сегодня',
+            tomorrow: 'завтра',
+            dayAfterTomorrow: 'послезавтра',
+          },
+          dateTime: (date: string, time: string) => `${date} ${time}`,
+          dayUpcoming: (relative: string | null, date: string, calendar: string) =>
+            `На ${relative ? `${relative}, ${date},` : date} ${calendar} пока нет событий, которые начинаются в этот день.`,
+          dayPast: (relative: string | null, date: string, calendar: string) =>
+            `${relative ? `${capitalize(relative)}, ${date},` : date} ${calendar} не было событий, которые начинались в этот день.`,
+          window: (relative: string | null, date: string, from: string, to: string, calendar: string) =>
+            `${relative ? `${capitalize(relative)}, ${date},` : date} с ${from} до ${to} ${calendar} нет событий, которые начинаются в это время.`,
+          windowSpan: (from: string, to: string, calendar: string) =>
+            `С ${from} до ${to} ${calendar} нет событий, которые начинаются в это время.`,
+          windowPast: (relative: string | null, date: string, from: string, to: string, calendar: string) =>
+            `${relative ? `${capitalize(relative)}, ${date},` : date} с ${from} до ${to} ${calendar} не было событий, которые начинались в это время.`,
+          windowSpanPast: (from: string, to: string, calendar: string) =>
+            `С ${from} до ${to} ${calendar} не было событий, которые начинались в это время.`,
+          rangeUpcoming: (from: string, to: string, calendar: string) =>
+            `С ${from} по ${to} ${calendar} пока нет событий, которые начинаются в эти дни.`,
+          rangePast: (from: string, to: string, calendar: string) =>
+            `С ${from} по ${to} ${calendar} не было событий, которые начинались в эти дни.`,
+          rangeCurrent: (from: string, to: string, calendar: string) =>
+            `С ${from} по ${to} ${calendar} нет событий, которые начинаются в эти дни.`,
+        },
         noEventsMatching: 'Событий по запросу не найдено.',
         noEventsMatchingScope: (scope: string) =>
           `Событий по запросу не найдено в ${scope === 'personal' ? 'личном' : 'групповом'} календаре. Попробуй поискать в ${scope === 'personal' ? 'групповом' : 'личном'}.`,

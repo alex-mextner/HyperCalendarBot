@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
+import { CalendarProposalRepository } from '../../../../src/database/repositories/calendar-proposal.repository.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../../src/database/repositories/event-reminder.repository.ts';
@@ -9,6 +10,7 @@ import { GroupChatRepository } from '../../../../src/database/repositories/group
 import { GroupMemberRepository } from '../../../../src/database/repositories/group-member.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { ParticipantRepository } from '../../../../src/database/repositories/participant.repository.ts';
+import { SecretaryRepository } from '../../../../src/database/repositories/secretary.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
 import {
@@ -90,6 +92,185 @@ describe('event tool handlers', () => {
       });
       expect(result.success).toBe(true);
       expect(result.output).toContain('No events');
+    });
+
+    describe('empty successful read names the checked day and calendar', () => {
+      const OWNER_ID = 456;
+
+      beforeEach(() => {
+        // Evening of 2026-09-19 in Belgrade; UTC is still the same calendar day.
+        setSystemTime(new Date('2026-09-19T19:30:00Z'));
+        ctx.user.timezone = 'Europe/Belgrade';
+        ctx.user.language = 'ru';
+      });
+      afterEach(() => {
+        setSystemTime();
+      });
+
+      test('"Что завтра?" answers with the local date instead of database-range wording', async () => {
+        const result = await handleGetEvents(ctx, { start_date: '2026-09-20', end_date: '2026-09-20' });
+        expect(result.success).toBe(true);
+        expect(result.data).toEqual([]);
+        expect(result.output).toBe(
+          'На завтра, 20 сентября, в твоём календаре пока нет событий, которые начинаются в этот день.',
+        );
+        expect(result.output).not.toMatch(/диапазон|не найдено|свобод/i);
+      });
+
+      test('English wording is equally specific', async () => {
+        ctx.user.language = 'en';
+        const result = await handleGetEvents(ctx, { start_date: '2026-09-20', end_date: '2026-09-20' });
+        expect(result.output).toBe('No events in your calendar start tomorrow, September 20.');
+      });
+
+      test('an event on another day does not leak into the empty answer for tomorrow', async () => {
+        ctx.eventService.createEvent({
+          user_id: USER_ID,
+          title: 'Synthetic dentist',
+          start_at: '2026-09-21T08:00:00Z',
+          end_at: '2026-09-21T09:00:00Z',
+          timezone: 'Europe/Belgrade',
+        });
+        const result = await handleGetEvents(ctx, { start_date: '2026-09-20', end_date: '2026-09-20' });
+        expect(result.output).toBe(
+          'На завтра, 20 сентября, в твоём календаре пока нет событий, которые начинаются в этот день.',
+        );
+      });
+
+      test('group scope names the group calendar', async () => {
+        const result = await handleGetEvents(
+          { ...ctx, isGroup: true, groupChatId: -100777, chatId: -100777 },
+          { start_date: '2026-09-20', end_date: '2026-09-20', scope: 'group' },
+        );
+        expect(result.output).toBe(
+          'На завтра, 20 сентября, в календаре этой группы пока нет событий, которые начинаются в этот день.',
+        );
+      });
+
+      test('a delegated read names the selected calendar, not the caller calendar', async () => {
+        new UserRepository(db).create({ telegram_id: OWNER_ID, timezone: 'Europe/Belgrade' });
+        const secretaryRepo = new SecretaryRepository(db);
+        const grant = secretaryRepo.upsert({ owner_id: OWNER_ID, secretary_id: USER_ID, permission: 'read' });
+        secretaryRepo.updateStatus(grant.id, 'active');
+        const delegatedCtx: AgentContext = {
+          ...ctx,
+          secretary: {
+            secretaryRepo,
+            secretaryForLine: undefined,
+            calendarProposalRepo: new CalendarProposalRepository(db),
+          },
+        };
+        const result = await handleGetEvents(delegatedCtx, {
+          start_date: '2026-09-20',
+          end_date: '2026-09-20',
+          owner_id: OWNER_ID,
+        });
+        expect(result.output).toBe(
+          'На завтра, 20 сентября, в выбранном календаре пока нет событий, которые начинаются в этот день.',
+        );
+      });
+
+      test('an hour-only query says nothing starts then, never that the day is free', async () => {
+        const result = await handleGetEvents(ctx, {
+          start_date: '2026-09-20T09:00:00+02:00',
+          end_date: '2026-09-20T10:00:00+02:00',
+        });
+        expect(result.output).toBe(
+          'Завтра, 20 сентября, с 09:00 до 10:00 в твоём календаре нет событий, которые начинаются в это время.',
+        );
+      });
+
+      test('UTC-midnight bounds are described truthfully in local time, not as a whole local day', async () => {
+        const result = await handleGetEvents(ctx, {
+          start_date: '2026-09-20T00:00:00Z',
+          end_date: '2026-09-20T23:59:59Z',
+        });
+        expect(result.output).toBe(
+          'С 20 сентября 02:00 до 21 сентября 01:59:59 в твоём календаре нет событий, которые начинаются в это время.',
+        );
+      });
+
+      test('a datetime without an offset is read as UTC by both the query and the answer', async () => {
+        ctx.eventService.createEvent({
+          user_id: USER_ID,
+          title: 'Synthetic standup',
+          start_at: '2026-09-20T07:30:00Z',
+          end_at: '2026-09-20T08:00:00Z',
+          timezone: 'Europe/Belgrade',
+        });
+        const hit = await handleGetEvents(ctx, { start_date: '2026-09-20T07:00:00', end_date: '2026-09-20T08:00:00' });
+        expect(hit.output).toContain('Synthetic standup');
+        const miss = await handleGetEvents(ctx, { start_date: '2026-09-20T08:00:00', end_date: '2026-09-20T09:00:00' });
+        expect(miss.output).toBe(
+          'Завтра, 20 сентября, с 10:00 до 11:00 в твоём календаре нет событий, которые начинаются в это время.',
+        );
+      });
+
+      test('space-separated datetimes and colon-less offsets name the same instant as the query', async () => {
+        const spaced = await handleGetEvents(ctx, {
+          start_date: '2026-09-20 07:00:00',
+          end_date: '2026-09-20 08:00:00',
+        });
+        expect(spaced.output).toBe(
+          'Завтра, 20 сентября, с 09:00 до 10:00 в твоём календаре нет событий, которые начинаются в это время.',
+        );
+        const compact = await handleGetEvents(ctx, {
+          start_date: '2026-09-20T09:00:00.123456+0200',
+          end_date: '2026-09-20T10:00:00+0200',
+        });
+        expect(compact.output).toBe(
+          'Завтра, 20 сентября, с 09:00 до 10:00 в твоём календаре нет событий, которые начинаются в это время.',
+        );
+      });
+
+      test('an overnight event that started the day before is not denied by the empty-day answer', async () => {
+        // Starts 22:00 on the 19th, ends 02:00 on the 20th (Belgrade). The start-matching read omits it
+        // (tracked by #570), so the answer may only claim that nothing STARTS on the 20th.
+        ctx.eventService.createEvent({
+          user_id: USER_ID,
+          title: 'Synthetic night train',
+          start_at: '2026-09-19T20:00:00Z',
+          end_at: '2026-09-20T00:00:00Z',
+          timezone: 'Europe/Belgrade',
+        });
+        const result = await handleGetEvents(ctx, { start_date: '2026-09-20', end_date: '2026-09-20' });
+        expect(result.data).toEqual([]);
+        expect(result.output).toBe(
+          'На завтра, 20 сентября, в твоём календаре пока нет событий, которые начинаются в этот день.',
+        );
+        expect(result.output).not.toMatch(/ничего не запланировано|свобод/i);
+      });
+
+      test('a failed read propagates instead of becoming an empty-calendar answer', async () => {
+        ctx.eventService.getEventsInRange = () => {
+          throw new Error('Synthetic storage failure');
+        };
+        await expect(handleGetEvents(ctx, { start_date: '2026-09-20', end_date: '2026-09-20' })).rejects.toThrow(
+          'Synthetic storage failure',
+        );
+      });
+
+      test.each([
+        ['2026-09-21T00:00:00Z', '2026-09-20T00:00:00Z'],
+        ['2026-09-20T09:00:00Z', '2026-09-20T09:00:00Z'],
+        ['tomorrow', '2026-09-20T09:00:00Z'],
+        ['2026-02-30', '2026-03-02'],
+        ['2026-09-20', '2026-13-01'],
+        ['0', '1'],
+        ['2026-09-20T09:00:00Z', 'next week'],
+        ['2026-02-30T09:00:00Z', '2026-03-05T09:00:00Z'],
+      ])('a reversed, zero-length or unparseable interval %s .. %s is rejected before any read', async (start, end) => {
+        let reads = 0;
+        ctx.eventService.getEventsInRange = () => {
+          reads++;
+          return [];
+        };
+        const result = await handleGetEvents(ctx, { start_date: start, end_date: end });
+        expect(result.success).toBe(false);
+        expect(result.mutationState).toBe('not_applied');
+        expect(result.error).toContain('INVALID_RANGE');
+        expect(reads).toBe(0);
+      });
     });
 
     test('accepts date-only format (YYYY-MM-DD) and finds events on that day', async () => {
