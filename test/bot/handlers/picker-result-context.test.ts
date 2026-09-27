@@ -1,7 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type OpenAI from 'openai';
-import { continuePickerWithAgent, pickerAiLine } from '../../../src/bot/handlers/picker-invitation.ts';
+import { continueWithAgent } from '../../../src/bot/handlers/agent-continuation.ts';
+import { buildPickerResultMessage, pickerAiLine } from '../../../src/bot/handlers/picker-invitation.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -41,7 +42,7 @@ function recordingStream(calls: OpenAI.ChatCompletionMessageParam[][]) {
   };
 }
 
-describe('continuePickerWithAgent', () => {
+describe('users_shared picker result continuation', () => {
   let chatHistory: ChatHistoryRepository;
   let inviter: User;
   let buildContext: (user: User, chatId: number, messageText: string) => AgentContext;
@@ -85,10 +86,10 @@ describe('continuePickerWithAgent', () => {
       return agent.run(ctx);
     };
 
-    await continuePickerWithAgent(
-      { inviter, chatId: INVITER_ID, invitees: [INVITEE], aiResultLines: [DELIVERED_LINE] },
-      { agent: { run }, buildContext },
-    );
+    await continueWithAgent(inviter, buildPickerResultMessage([INVITEE], [DELIVERED_LINE]), {
+      agent: { run },
+      buildContext,
+    });
 
     const firstRequest = calls[0]!;
     const last = firstRequest[firstRequest.length - 1]!;
@@ -117,13 +118,9 @@ describe('continuePickerWithAgent', () => {
     const runPicker = async (invitee: { userId: number; firstName: string }) => {
       const calls: OpenAI.ChatCompletionMessageParam[][] = [];
       const agent = new CalendarBotAgent({}, sender, { streamImpl: recordingStream(calls) });
-      await continuePickerWithAgent(
-        {
-          inviter,
-          chatId: INVITER_ID,
-          invitees: [invitee],
-          aiResultLines: [pickerAiLine(invitee.firstName, invitee.userId, { kind: 'delivered' })],
-        },
+      await continueWithAgent(
+        inviter,
+        buildPickerResultMessage([invitee], [pickerAiLine(invitee.firstName, invitee.userId, { kind: 'delivered' })]),
         { agent, buildContext },
       );
       const request = calls[0]!;

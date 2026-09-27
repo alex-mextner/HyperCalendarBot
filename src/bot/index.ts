@@ -73,12 +73,13 @@ import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
 import { isGroup } from './group-context.ts';
+import { continueWithAgent } from './handlers/agent-continuation.ts';
 import { createCallbackHandler } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps } from './handlers/message.handler.ts';
 import {
-  continuePickerWithAgent,
+  buildPickerResultMessage,
   createPickerAckIo,
   runChatShareWithAck,
   runPickerBatchWithAck,
@@ -934,12 +935,13 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         pickerInvitationDeps,
         pickerIo,
       );
-      // Trigger AI to acknowledge/continue with who was requested + what really happened
+      // Trigger AI to acknowledge/continue with who was requested + what really happened.
+      // Telegram allows request_users only in private chats, so this is the inviter's own history.
       if (chatId) {
-        continuePickerWithAgent(
-          { inviter: user, chatId, invitees: selected, aiResultLines },
-          { agent, buildContext: buildAgentContextFactory(msgDeps) },
-        ).catch((e) => botLogger.error({ err: e }, 'AI continuation after users_shared failed'));
+        continueWithAgent(user, buildPickerResultMessage(selected, aiResultLines), {
+          agent,
+          buildContext: buildAgentContextFactory(msgDeps),
+        }).catch((e) => botLogger.error({ err: e }, 'AI continuation after users_shared failed'));
       }
     })
     // Group chat shared from picker → send invitation to group chat
