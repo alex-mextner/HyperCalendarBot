@@ -13,10 +13,11 @@ export interface InvitationResult {
   error?: string;
   /**
    * Why an action was refused, as the `t(lang)` key of the message that tells the user: the invitee's
-   * time proposal was already settled (they answered, or the inviter acted on it), or the invitee acted
-   * on an invitation the inviter cancelled or that expired.
+   * time proposal was already settled (they answered, or the inviter acted on it), the invitee proposed a
+   * time on an invitation they already answered, or the invitee acted on an invitation the inviter
+   * cancelled or that expired.
    */
-  reason?: 'invite_proposal_closed' | 'invitation_cancelled' | 'invitation_expired';
+  reason?: 'invite_proposal_closed' | 'invitation_already_answered' | 'invitation_cancelled' | 'invitation_expired';
   proposedTime?: string;
 }
 
@@ -160,6 +161,11 @@ export class InvitationService {
     const revoked = revokedInvitationResult(invitation);
     if (revoked) {
       return revoked;
+    }
+    // The +30/+60 prompt and a typed-time session outlive the answer on the card; a proposal after it
+    // would only reach the inviter as a notice they can no longer act on.
+    if (invitation.status !== 'pending') {
+      return { success: false, reason: 'invitation_already_answered', error: 'Invitation was already answered' };
     }
     this.invRepo.setProposedTime(invitationId, proposedTime);
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
