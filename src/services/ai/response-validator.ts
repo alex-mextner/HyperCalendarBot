@@ -149,7 +149,7 @@ function toolResultsBlock(tools: readonly ToolEvidence[]): string {
   return tools
     .map((tool) => `[${tool.name}] ${tool.success ? (tool.output ?? 'OK').slice(0, MAX_TOOL_RESULT_CHARS) : 'failed'}`)
     .join('\n')
-    .replaceAll('</tool_results>', '')
+    .replace(/<\/?tool_results\s*>/gi, '')
     .slice(0, MAX_TOOL_RESULTS_CHARS);
 }
 
