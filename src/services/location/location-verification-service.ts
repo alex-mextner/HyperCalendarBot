@@ -117,6 +117,13 @@ export class LocationVerificationService {
    * 5. No candidates → tell the creator to send a pin or the full address.
    */
   async verifyEventLocation(event: CalendarEvent, user: User): Promise<LocationVerificationResult> {
+    // Only a user who can see the event is asked. A secretary updating the owner's event could not
+    // answer the picker (#421), so the owner's place and open picker stay as they are, unsearched.
+    if (!this.deps.eventRepo.findById(event.id, user.telegram_id)) {
+      logger.info({ eventId: event.id, userId: user.telegram_id }, 'User cannot see the event; not verifying');
+      return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
+    }
+
     // A new verification supersedes the previous picker: a tap on it must not apply a place chosen
     // for an earlier text
     await this.deps.candidateStore.del(event.id).catch((err) => {

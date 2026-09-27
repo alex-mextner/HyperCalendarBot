@@ -468,6 +468,22 @@ describe('no geocode is applied before the creator taps a candidate', () => {
     expect(s.invitationEdits).toHaveLength(editsAfterConfirmation);
   });
 
+  test('a verification by a user who cannot see the event keeps its place and neither searches nor asks', async () => {
+    const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.confirmEarlier(BELGRADE_CAFE);
+    // A secretary updating the owner's event: the event is the owner's, the acting user is not
+    const secretary = { ...s.user(), telegram_id: INVITEE_ID };
+
+    await s.service.verifyEventLocation(s.storedEvent(), secretary);
+
+    const stored = s.storedEvent();
+    expect(stored.location_verified).toBe(1);
+    expect(stored.resolved_address).toBe(BELGRADE_CAFE.formattedAddress);
+    expect(geocoder.searches).toEqual([]);
+    expect(s.sent).toEqual([]);
+  });
+
   test('a new verification closes the previous picker, even when it finds nothing', async () => {
     const script = { places: [BELGRADE_CAFE], areas: { '|RS': SERBIA } };
     const s = setup({ timezone: 'Europe/Belgrade' }, scriptedGeocoder(script).service);
