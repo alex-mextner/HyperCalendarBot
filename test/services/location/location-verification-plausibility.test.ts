@@ -337,6 +337,7 @@ function setup(
       id: 'e0e0e0e0',
       location: RAW_LOCATION,
       candidates: [geo],
+      remembered: false,
       placeDropped: false,
     });
     expect(await service.handleLocationChoice(event.id, USER_ID, 'e0e0e0e0', 0)).toBe(true);
@@ -512,6 +513,34 @@ describe('no geocode is applied before the creator taps a candidate', () => {
     expect((await s.addressCache.findMapping(USER_ID, EDITED_LOCATION))?.resolvedAddress).toBe(
       BELGRADE_CAFE.formattedAddress,
     );
+  });
+
+  test('a pin shared while the search runs answers the question: no picker follows it', async () => {
+    let releaseSearch = () => {};
+    const searchReleased = new Promise<void>((resolve) => {
+      releaseSearch = resolve;
+    });
+    const geocoder: GeocodingService = {
+      findPlace: async () => {
+        await searchReleased;
+        return [DUTCH_HOTEL];
+      },
+      geocodeAddress: async () => [],
+      reverseGeocode: async () => BELGRADE_CAFE,
+      locateArea: async () => SERBIA,
+    };
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder);
+    const verification = s.service.verifyEventLocation(s.event, s.user());
+    await s.pendingGeoStore.set(USER_ID, { latitude: BELGRADE_CAFE.latitude, longitude: BELGRADE_CAFE.longitude });
+    await s.tap(`loc_geo:geo:${s.event.id}`);
+
+    releaseSearch();
+    await verification;
+
+    // A picker sent now would let a keep tap erase the pinned place
+    expect(s.sent).toEqual([]);
+    expect(s.storedEvent().location_verified).toBe(1);
+    expect(s.storedEvent().resolved_address).toBe(BELGRADE_CAFE.formattedAddress);
   });
 
   test('a place remembered before the bot required a confirmation is not offered; a fresh search is', async () => {
@@ -733,6 +762,28 @@ describe('tapping a candidate resolves the event', () => {
     expect(edits.map((e) => e.text)).toEqual([t('ru').aiTools.location.locationChoiceOutdated]);
   });
 
+  test('a tap whose event text is edited while the picker is being taken applies nothing', async () => {
+    const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    await s.service.verifyEventLocation(s.event, s.user());
+    const take = s.candidateStore.take.bind(s.candidateStore);
+    s.candidateStore.take = async (eventId, pickerId) => {
+      const picker = await take(eventId, pickerId);
+      s.eventRepo.update(s.event.id, USER_ID, { location: EDITED_LOCATION });
+      return picker;
+    };
+
+    const edits = await s.tap(button(s.sent[0], '0'));
+
+    const stored = s.storedEvent();
+    expect(stored.location).toBe(EDITED_LOCATION);
+    expect(stored.location_verified).toBe(0);
+    expect(stored.resolved_address).toBeNull();
+    expect(s.invitationEdits).toEqual([]);
+    expect(await s.addressCache.getRecent(USER_ID)).toEqual([]);
+    expect(edits.map((e) => e.text)).toEqual([t('ru').aiTools.location.locationChoiceOutdated]);
+  });
+
   test('the confirmation after a tap escapes the venue, the address and the title', async () => {
     const geocoder = scriptedGeocoder({ places: [TRICKY_CAFE, NIS_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade', title: 'Q&A <встреча>' }, geocoder.service);
@@ -831,6 +882,29 @@ describe('keep as typed', () => {
 
     expect(s.storedEvent().location_verified).toBe(0);
     expect(await s.addressCache.findMapping(USER_ID, RAW_LOCATION)).toBeNull();
+  });
+
+  test('keeping the text on one event keeps a place confirmed for the same text on another', async () => {
+    const geocoder = scriptedGeocoder({ places: [BELGRADE_CAFE, NIS_CAFE], areas: { '|RS': SERBIA } });
+    const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
+    const other = s.eventRepo.create({
+      user_id: USER_ID,
+      title: 'Обед',
+      start_at: s.event.start_at,
+      timezone: 'Europe/Belgrade',
+      location: RAW_LOCATION,
+    });
+    await s.service.verifyEventLocation(s.event, s.user());
+    await s.service.verifyEventLocation(other, s.user());
+    await s.tap(button(s.sent[1], '0'));
+
+    // This picker offered fresh search results, not the place confirmed on the other event
+    await s.tap(button(s.sent[0], 'keep'));
+
+    expect(s.storedEvent().location_verified).toBe(0);
+    expect((await s.addressCache.findMapping(USER_ID, RAW_LOCATION))?.resolvedAddress).toBe(
+      BELGRADE_CAFE.formattedAddress,
+    );
   });
 
   test('keeping the typed text drops a place confirmed earlier and refreshes the invitation with its RSVP buttons', async () => {

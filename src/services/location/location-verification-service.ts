@@ -141,13 +141,16 @@ export class LocationVerificationService {
       this.deps.eventRepo.clearLocationFields(event.id);
     }
 
-    const candidates = await this.findCandidates(event, user, location);
+    const { candidates, remembered } = await this.findCandidates(event, user, location);
 
-    // The text changed (or the event went away) while the search ran. A newer text starts its own
-    // verification, which may already have stored its picker; this older answer must not replace
-    // it. No await may come between this check and the picker's `set` in `askUserToChoose`.
-    if (this.deps.eventRepo.findById(event.id, user.telegram_id)?.location !== typed) {
-      logger.info({ eventId: event.id }, 'Event location changed during verification; not asking about the old text');
+    // The event changed while the search ran: its text (a newer text starts its own verification,
+    // which may already have stored its picker), or it was deleted, or a pin confirmed a place
+    // (this verification cleared any earlier one). Asking now would replace the newer question or
+    // let a keep tap erase the pin. No await may come between this check and the picker's `set` in
+    // `askUserToChoose`.
+    const current = this.deps.eventRepo.findById(event.id, user.telegram_id);
+    if (current?.location !== typed || current.location_verified !== 0) {
+      logger.info({ eventId: event.id }, 'Event location changed or was confirmed during verification; not asking');
       return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
     }
 
@@ -157,37 +160,40 @@ export class LocationVerificationService {
       return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
     }
 
-    await this.askUserToChoose(event, user, { location: typed, candidates, placeDropped });
+    await this.askUserToChoose(event, user, { location: typed, candidates, remembered, placeDropped });
     return { resolved: false, geocoded: null, cityExtracted: candidates[0]?.city ?? null, candidates };
   }
 
   /** The remembered place for this text, else the places a search biased to the home area finds. */
-  private async findCandidates(event: CalendarEvent, user: User, location: string): Promise<GeocodedLocation[]> {
+  private async findCandidates(
+    event: CalendarEvent,
+    user: User,
+    location: string,
+  ): Promise<Pick<LocationPicker, 'candidates' | 'remembered'>> {
     const cached = await this.deps.addressCache.findMapping(user.telegram_id, location);
     if (cached) {
       logger.info(
         { eventId: event.id, cached: cached.resolvedAddress, venue: cached.venueName ?? null },
         'Offering the remembered place for this location',
       );
-      return [
-        {
-          formattedAddress: cached.resolvedAddress,
-          latitude: cached.latitude,
-          longitude: cached.longitude,
-          city: null,
-          country: null,
-          placeId: cached.placeId,
-          googleMapsUrl: cached.googleMapsUrl,
-          venueName: cached.venueName ?? null,
-        },
-      ];
+      const place: GeocodedLocation = {
+        formattedAddress: cached.resolvedAddress,
+        latitude: cached.latitude,
+        longitude: cached.longitude,
+        city: null,
+        country: null,
+        placeId: cached.placeId,
+        googleMapsUrl: cached.googleMapsUrl,
+        venueName: cached.venueName ?? null,
+      };
+      return { candidates: [place], remembered: true };
     }
 
     const bias = await this.homeAreaBias(user);
     // Place search handles venue names better; plain geocoding is the fallback
     const places = await this.deps.geocodingService.findPlace(location, bias);
-    if (places.length > 0) return places;
-    return this.deps.geocodingService.geocodeAddress(location, bias);
+    const candidates = places.length > 0 ? places : await this.deps.geocodingService.geocodeAddress(location, bias);
+    return { candidates, remembered: false };
   }
 
   /** Apply the place the creator confirmed (candidate tap or pin) and update delivered invitations. */
@@ -222,30 +228,44 @@ export class LocationVerificationService {
 
   /**
    * The creator tapped candidate `choiceIndex` of picker `pickerId`. The tap answers the event's
-   * open picker (`LocationCandidateStore.take`); a tap on an older, answered or expired picker, or
-   * on one built for a text the event no longer has, returns false and changes nothing, so a place
-   * is only applied from the list its button showed, for the text it was found for.
+   * open picker (`answerPicker`); a tap on an older, answered or expired picker, or on one built
+   * for a text the event no longer has, returns false and changes nothing, so a place is only
+   * applied from the list its button showed, for the text it was found for.
    */
   async handleLocationChoice(eventId: number, userId: number, pickerId: string, choiceIndex: number): Promise<boolean> {
-    const event = this.deps.eventRepo.findById(eventId, userId);
-    if (!event) return false;
-
     // Only indexes a picker can show; anything else must not consume the picker
     if (!Number.isInteger(choiceIndex) || choiceIndex < 0 || choiceIndex >= MAX_CANDIDATES) return false;
-    const picker = await this.deps.candidateStore.take(eventId, pickerId);
-    // An edit that does not re-verify (the /edit scene, an abstract location, a calendar sync) may
-    // have changed the text since the picker was sent; its places answer the old text.
-    if (!picker || picker.location !== event.location) return false;
-    const chosen = picker.candidates[choiceIndex];
-    if (!chosen) return false;
+    const answered = await this.answerPicker(eventId, userId, pickerId);
+    const chosen = answered?.picker.candidates[choiceIndex];
+    if (!answered || !chosen) return false;
 
     const user = this.deps.userRepo.findByTelegramId(userId);
     if (!user) return false;
 
-    await this.applyResolvedLocation(event, chosen);
-    await this.cacheAndUpdateCity(user, picker.location, chosen);
+    await this.applyResolvedLocation(answered.event, chosen);
+    await this.cacheAndUpdateCity(user, answered.picker.location, chosen);
 
     return true;
+  }
+
+  /**
+   * Answer the event's open picker `pickerId` (`LocationCandidateStore.take`). Only a user who can
+   * see the event consumes it, and it counts only while the event still has the text the picker was
+   * built for: an edit that does not re-verify (the /edit scene, an abstract location, a calendar
+   * sync) may have changed it, and then the picker's places answer the old text. The event is read
+   * again after the take, which yields, so an edit during it is seen too.
+   */
+  private async answerPicker(
+    eventId: number,
+    userId: number,
+    pickerId: string,
+  ): Promise<{ picker: LocationPicker; event: CalendarEvent } | null> {
+    if (!this.deps.eventRepo.findById(eventId, userId)) return null;
+    const picker = await this.deps.candidateStore.take(eventId, pickerId);
+    if (!picker) return null;
+    const event = this.deps.eventRepo.findById(eventId, userId);
+    if (!event || event.location !== picker.location) return null;
+    return { picker, event };
   }
 
   /** Reverse geocode coordinates to extract city. Used by callback handler to avoid ad-hoc service creation. */
@@ -282,22 +302,24 @@ export class LocationVerificationService {
   /**
    * The creator keeps the typed location ("none of these — keep as typed"): the event stays (or
    * becomes again) unverified with only the typed text, the offered candidates are dropped, and a
-   * remembered place for this text is forgotten so it is not offered again. Nothing is cached.
+   * remembered place the picker offered is forgotten so it is not offered again. A place confirmed
+   * on another event after this picker was sent stays remembered. Nothing is cached.
    *
    * Like a candidate tap, it answers the event's open picker; a tap on an older, answered or
    * expired picker, or on one built for a text the event no longer has, returns null and changes
    * nothing, so it never erases a place the creator confirmed after that picker was sent.
    */
   async keepTypedLocation(eventId: number, userId: number, pickerId: string): Promise<CalendarEvent | null> {
-    const event = this.deps.eventRepo.findById(eventId, userId);
-    if (!event) return null;
-    const picker = await this.deps.candidateStore.take(eventId, pickerId);
-    if (!picker || picker.location !== event.location) return null;
+    const answered = await this.answerPicker(eventId, userId, pickerId);
+    if (!answered) return null;
+    const { picker, event } = answered;
 
     await this.keepOnlyTypedText(event, picker.placeDropped);
-    await this.deps.addressCache.forgetMapping(userId, picker.location).catch((err) => {
-      logger.warn({ err, eventId, userId }, 'Failed to forget rejected address mapping');
-    });
+    if (picker.remembered) {
+      await this.deps.addressCache.forgetMapping(userId, picker.location).catch((err) => {
+        logger.warn({ err, eventId, userId }, 'Failed to forget rejected address mapping');
+      });
+    }
     return event;
   }
 

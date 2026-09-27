@@ -26,6 +26,7 @@ const PickerSchema = z.object({
   id: z.string(),
   location: z.string(),
   candidates: z.array(GeocodedLocationSchema),
+  remembered: z.boolean(),
   placeDropped: z.boolean(),
 });
 
@@ -35,6 +36,8 @@ export interface LocationPicker {
   /** The typed location the candidates were found for: a tap counts only while the event still has this text. */
   location: string;
   candidates: GeocodedLocation[];
+  /** The only candidate is the place the creator confirmed earlier for this text (address cache), not a search result. */
+  remembered: boolean;
   /** Opening the picker dropped a resolved place from the event, which delivered invitation cards may still show. */
   placeDropped: boolean;
 }
