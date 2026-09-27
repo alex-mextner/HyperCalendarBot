@@ -3,6 +3,12 @@ import { describe, expect, mock, test } from 'bun:test';
 import { handleAttachPendingLocationToEvent } from '../../../../src/services/ai/tool-handlers/events.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 
+const PENDING_VENUE = {
+  latitude: 55.75,
+  longitude: 37.6,
+  venue: { title: 'Кофемания', address: 'Никитская 13', googlePlaceId: null },
+};
+
 function makeCtx(overrides: { [key: string]: unknown } = {}): AgentContext {
   return {
     user: {
@@ -23,10 +29,10 @@ function makeCtx(overrides: { [key: string]: unknown } = {}): AgentContext {
       updated_at: '',
     },
     locationVerification: {
-      resolveFromCoordinates: mock(() => Promise.resolve(true)),
+      resolveFromSharedLocation: mock(() => Promise.resolve(true)),
     },
     pendingGeoStore: {
-      get: mock(() => Promise.resolve({ latitude: 55.75, longitude: 37.6 })),
+      get: mock(() => Promise.resolve(PENDING_VENUE)),
       delete: mock(() => Promise.resolve()),
       set: mock(() => Promise.resolve()),
     },
@@ -35,12 +41,12 @@ function makeCtx(overrides: { [key: string]: unknown } = {}): AgentContext {
 }
 
 describe('handleAttachPendingLocationToEvent', () => {
-  test('attaches pending pin to event and clears the store', async () => {
+  test('attaches the pending location, venue included, to the event and clears the store', async () => {
     const ctx = makeCtx();
     const result = await handleAttachPendingLocationToEvent(ctx, { event_id: 42 });
 
     expect(result.success).toBe(true);
-    expect(ctx.locationVerification!.resolveFromCoordinates).toHaveBeenCalledWith(42, 55.75, 37.6, 100);
+    expect(ctx.locationVerification!.resolveFromSharedLocation).toHaveBeenCalledWith(42, PENDING_VENUE, 100);
     expect(ctx.pendingGeoStore!.delete).toHaveBeenCalledWith(100);
   });
 
@@ -57,7 +63,7 @@ describe('handleAttachPendingLocationToEvent', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('No pending location pin');
-    expect(ctx.locationVerification!.resolveFromCoordinates).not.toHaveBeenCalled();
+    expect(ctx.locationVerification!.resolveFromSharedLocation).not.toHaveBeenCalled();
   });
 
   test('returns error when locationVerification is not available', async () => {
@@ -77,10 +83,10 @@ describe('handleAttachPendingLocationToEvent', () => {
     expect(result.success).toBe(false);
   });
 
-  test('returns error when resolveFromCoordinates fails (event not found)', async () => {
+  test('returns error when resolveFromSharedLocation fails (event not found)', async () => {
     const ctx = makeCtx({
       locationVerification: {
-        resolveFromCoordinates: mock(() => Promise.resolve(false)),
+        resolveFromSharedLocation: mock(() => Promise.resolve(false)),
       },
     });
 

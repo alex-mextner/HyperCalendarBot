@@ -7,14 +7,33 @@ const logger = botLogger.child({ module: 'pending-geo-store' });
 const KEY_PREFIX = 'pending_geo:';
 const TTL_SECONDS = 30 * 60; // 30 minutes
 
-const GeoDataSchema = z.object({
+const SharedLocationSchema = z.object({
   latitude: z.number(),
   longitude: z.number(),
+  // Pins stored before venues were kept have no venue
+  venue: z
+    .object({ title: z.string(), address: z.string(), googlePlaceId: z.string().nullable() })
+    .nullable()
+    .default(null),
 });
 
+/** A venue the user picked in Telegram's place search: the name and address they chose. */
+export interface SharedVenue {
+  title: string;
+  address: string;
+  googlePlaceId: string | null;
+}
+
+/** A location the user shared in the chat: a plain pin (`venue` null) or a Telegram venue. */
+export interface SharedLocation {
+  latitude: number;
+  longitude: number;
+  venue: SharedVenue | null;
+}
+
 export interface PendingGeoStore {
-  set(userId: number, data: { latitude: number; longitude: number }): Promise<void>;
-  get(userId: number): Promise<{ latitude: number; longitude: number } | null>;
+  set(userId: number, data: SharedLocation): Promise<void>;
+  get(userId: number): Promise<SharedLocation | null>;
   delete(userId: number): Promise<void>;
 }
 
@@ -27,17 +46,17 @@ interface RedisClient {
 export class RedisPendingGeoStore implements PendingGeoStore {
   constructor(private redis: RedisClient) {}
 
-  async set(userId: number, data: { latitude: number; longitude: number }): Promise<void> {
+  async set(userId: number, data: SharedLocation): Promise<void> {
     const key = `${KEY_PREFIX}${userId}`;
     await this.redis.set(key, JSON.stringify(data), { ex: TTL_SECONDS });
   }
 
-  async get(userId: number): Promise<{ latitude: number; longitude: number } | null> {
+  async get(userId: number): Promise<SharedLocation | null> {
     const key = `${KEY_PREFIX}${userId}`;
     const raw = await this.redis.get(key);
     if (!raw) return null;
     try {
-      return GeoDataSchema.parse(JSON.parse(raw));
+      return SharedLocationSchema.parse(JSON.parse(raw));
     } catch (err) {
       logger.warn({ err, userId }, 'Failed to parse pending geo data');
       return null;
@@ -51,22 +70,22 @@ export class RedisPendingGeoStore implements PendingGeoStore {
 }
 
 export class InMemoryPendingGeoStore implements PendingGeoStore {
-  private store = new Map<number, { latitude: number; longitude: number; expiresAt: number }>();
+  private store = new Map<number, { data: SharedLocation; expiresAt: number }>();
 
   constructor(private ttlSeconds: number = TTL_SECONDS) {}
 
-  async set(userId: number, data: { latitude: number; longitude: number }): Promise<void> {
-    this.store.set(userId, { ...data, expiresAt: Date.now() + this.ttlSeconds * 1000 });
+  async set(userId: number, data: SharedLocation): Promise<void> {
+    this.store.set(userId, { data, expiresAt: Date.now() + this.ttlSeconds * 1000 });
   }
 
-  async get(userId: number): Promise<{ latitude: number; longitude: number } | null> {
+  async get(userId: number): Promise<SharedLocation | null> {
     const entry = this.store.get(userId);
     if (!entry) return null;
     if (Date.now() > entry.expiresAt) {
       this.store.delete(userId);
       return null;
     }
-    return { latitude: entry.latitude, longitude: entry.longitude };
+    return entry.data;
   }
 
   async delete(userId: number): Promise<void> {

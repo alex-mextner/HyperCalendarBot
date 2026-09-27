@@ -75,7 +75,10 @@ export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Prom
                   !!user.onboarding_completed,
                 )
               : `📨 ${inviterName} ${lang === 'ru' ? 'приглашает вас на событие' : 'invites you to an event'}`;
-            await ctx.send(text, { parse_mode: 'HTML', reply_markup: invitationRsvpKeyboard(invitation.id, lang) });
+            await ctx.send(text, {
+              parse_mode: 'HTML',
+              reply_markup: invitationRsvpKeyboard(invitation.id, lang, event),
+            });
           } else {
             await ctx.send(
               lang === 'ru' ? '📨 Приглашение уже недействительно.' : '📨 This invitation is no longer valid.',

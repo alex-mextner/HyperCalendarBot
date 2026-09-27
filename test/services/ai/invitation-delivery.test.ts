@@ -233,35 +233,41 @@ describe('deliverInvitation', () => {
     });
 
     const result = await deliverInvitation({
-      ...baseParams({ invitationId: invId, deps: makeDeps(sender), allowMtproto: false }),
+      ...baseParams({ invitationId: invId, deps: makeDeps(sender), allowMtproto: false, event: seedEvent }),
       isGroupTarget: true,
     });
 
     expect(result).toEqual({ delivered: true, viaDeepLink: false });
     // A group target must carry the grsvp per-member keyboard keyed by eventId (not the invitation
     // id), so any member can respond for themselves — never the personal inv: keyboard.
-    expect(variant).toEqual({ kind: 'group', eventId: seedEvent.id });
+    expect(variant).toEqual({
+      kind: 'group',
+      eventId: seedEvent.id,
+      place: expect.objectContaining({ id: seedEvent.id }),
+    });
     expect(sawLang).toBe('en');
   });
 
-  test('personal target passes no keyboard variant to sendInvitation', async () => {
+  test('personal target passes the personal keyboard variant with the event and the invitee language', async () => {
     const invId = createInvitation();
-    let argCount: number | undefined;
     let variant: InvitationKeyboardVariant | undefined;
+    let sawLang: string | undefined;
     const sender = makeSender({
-      sendInvitation: async (...args) => {
-        argCount = args.length;
-        variant = args[4];
+      sendInvitation: async (_inviteeId, _text, _invitationId, lang, v) => {
+        sawLang = lang;
+        variant = v;
         return { message_id: 8 };
       },
     });
 
-    const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
+    const result = await deliverInvitation(
+      baseParams({ invitationId: invId, deps: makeDeps(sender), event: seedEvent }),
+    );
 
     expect(result).toEqual({ delivered: true, viaDeepLink: false });
-    // The personal path calls sendInvitation with only (inviteeId, text, invitationId) — no variant.
-    expect(argCount).toBe(3);
-    expect(variant).toBeUndefined();
+    // The personal inv: keyboard, with the event so a confirmed place adds the Map button
+    expect(variant).toEqual({ kind: 'personal', place: expect.objectContaining({ id: seedEvent.id }) });
+    expect(sawLang).toBe('en');
   });
 
   test('no deepLinkService → fallback without link, viaDeepLink false (no link existed)', async () => {

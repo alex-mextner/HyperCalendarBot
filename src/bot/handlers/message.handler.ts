@@ -921,18 +921,26 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       return handleVoiceMessage(ctx, user, { file_id: voice.fileId, duration: voice.duration }, deps);
     }
 
-    // Location message in private chat → context-aware handling
+    // Location message in private chat → context-aware handling. A venue picked in Telegram's place
+    // search also carries its location; its name and address are kept with it.
     const location = ctx.location;
     if (location && ctx.chat.type === 'private') {
       const { latitude, longitude } = location;
       const lang = user.language;
       const msgs = t(lang);
+      const venue = ctx.venue;
 
       // ALWAYS persist the pin so the AI can read it from system prompt and
       // attach it to any event the user mentions next. Auto-expires in 30 min.
       if (deps.pendingGeoStore) {
         await deps.pendingGeoStore
-          .set(user.telegram_id, { latitude, longitude })
+          .set(user.telegram_id, {
+            latitude,
+            longitude,
+            venue: venue
+              ? { title: venue.title, address: venue.address, googlePlaceId: venue.googlePlaceId ?? null }
+              : null,
+          })
           .catch((err) => cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to persist pending geo'));
       }
 

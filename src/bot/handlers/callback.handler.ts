@@ -25,7 +25,7 @@ import type { InvitationRepository } from '../../database/repositories/invitatio
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { CreateEventData, Invitation, UpdateEventData, User } from '../../database/types.ts';
+import type { CalendarEvent, CreateEventData, Invitation, UpdateEventData, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import {
   formatDayAgenda,
@@ -40,6 +40,7 @@ import { renderConflictImage } from '../../services/image/render-conflict.ts';
 import type { ImageRenderer } from '../../services/image/render-service.ts';
 import type { AdminEditSession } from '../../services/intent/admin-edit-session.ts';
 import { ConflictService } from '../../services/invite/conflict-service.ts';
+import { eventVenue, withMapButton } from '../../services/location/event-venue.ts';
 import { formatLocationHtml } from '../../services/location/format-location.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { SceneName, ScenePauseService } from '../../services/scene-pause.ts';
@@ -321,7 +322,7 @@ export function createCallbackHandler(
     await ctx.answer();
     return editAgendaText(ctx, detail, {
       parse_mode: 'HTML',
-      reply_markup: eventActionsKeyboard(eventId, user.language as 'en' | 'ru'),
+      reply_markup: withMapButton(eventActionsKeyboard(eventId, user.language as 'en' | 'ru'), event, lang),
     });
   });
 
@@ -858,7 +859,7 @@ export function createCallbackHandler(
               invitation.chat_id,
               invitation.message_id,
               originalText,
-              invitationRsvpKeyboard(invitation.id, inviteeLang),
+              invitationRsvpKeyboard(invitation.id, inviteeLang, event ?? null),
             )
             .catch(() => {});
         }
@@ -1264,7 +1265,7 @@ export function createCallbackHandler(
       forceInviteDeps
         .sendMessage(inviteeId, inviteeText, {
           parse_mode: 'HTML',
-          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang),
+          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang, event),
         })
         .then((sent) => {
           forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
@@ -1329,7 +1330,7 @@ export function createCallbackHandler(
       forceInviteDeps
         .sendMessage(inviteeId, inviteeText, {
           parse_mode: 'HTML',
-          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang),
+          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang, eventForInv),
         })
         .then((sent) => {
           forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
@@ -1476,12 +1477,7 @@ export function createCallbackHandler(
         return;
       }
 
-      const success = await locationVerification.resolveFromCoordinates(
-        eventId,
-        geo.latitude,
-        geo.longitude,
-        user.telegram_id,
-      );
+      const success = await locationVerification.resolveFromSharedLocation(eventId, geo, user.telegram_id);
       await pendingGeoStore.delete(user.telegram_id);
 
       if (success) {
@@ -1555,10 +1551,48 @@ export function createCallbackHandler(
         parse_mode: 'HTML',
         reply_markup: undefined,
       });
+      // The creator chose from text and links: show the chosen point on Telegram's map once. The
+      // picker itself keeps map links; a venue per candidate would flood the chat.
+      const event = eventService.getEvent(eventId, user.telegram_id);
+      const venue = event ? eventVenue(event) : null;
+      if (venue) {
+        await ctx.sendVenue(venue).catch((err: unknown) => {
+          cmdLogger.warn({ err, eventId, userId: user.telegram_id }, 'Failed to send the chosen place as a venue');
+        });
+      }
     } else {
       cmdLogger.warn({ eventId, userId: user.telegram_id }, 'Location picker is outdated or its event is gone');
       await ctx.editText(msgs.aiTools.location.locationChoiceOutdated, { reply_markup: undefined });
     }
+  });
+
+  /**
+   * The event behind a Map button, if the presser may see it: their own or group-visible event, or
+   * an event their personal invitation (or, in a group chat, the group's invitation) points to.
+   */
+  function eventForMap(eventId: number, userId: number, chatId: number | undefined): CalendarEvent | null {
+    const visible = eventService.getEvent(eventId, userId);
+    if (visible) return visible;
+    const invitation =
+      invitationRepo?.findActiveOrRespondedByEventAndInvitee(eventId, userId) ??
+      (chatId !== undefined && chatId < 0
+        ? invitationRepo?.findActiveOrRespondedByEventAndInvitee(eventId, chatId)
+        : null);
+    return invitation ? eventService.getEvent(eventId, invitation.inviter_id) : null;
+  }
+
+  // Map button: `ev_map:<eventId>` — send the event's confirmed place as a native Telegram venue
+  dispatch.set(CB.EVENT_MAP, async (ctx, payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
+    const eventId = Number.parseInt(payload, 10);
+    const event = Number.isNaN(eventId) ? null : eventForMap(eventId, user.telegram_id, ctx.chatId);
+    const venue = event ? eventVenue(event) : null;
+    if (!venue) {
+      await ctx.answer({ text: t(lang).callbackErrors.notFound });
+      return;
+    }
+    await ctx.answer();
+    await ctx.sendVenue(venue);
   });
 
   // Group settings: timezone picker

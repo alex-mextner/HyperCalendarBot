@@ -563,12 +563,7 @@ export async function handleAttachPendingLocationToEvent(
     };
   }
 
-  const success = await ctx.locationVerification.resolveFromCoordinates(
-    input.event_id,
-    geo.latitude,
-    geo.longitude,
-    ctx.user.telegram_id,
-  );
+  const success = await ctx.locationVerification.resolveFromSharedLocation(input.event_id, geo, ctx.user.telegram_id);
 
   if (!success) {
     return { success: false, error: `Could not resolve geo to address for event ${input.event_id}` };
