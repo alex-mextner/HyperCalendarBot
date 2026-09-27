@@ -78,11 +78,15 @@ export function createParticipantPushScheduler(
       }
     }
 
-    await queue.add('push-participant-event', {
-      type: 'push-participant-event',
-      userId: participantUserId,
-      eventId,
-      action,
-    });
+    const job: GoogleSyncJobData = { type: 'push-participant-event', userId: participantUserId, eventId, action };
+    if (action === 'delete') {
+      // The event delete removes this row before the worker runs; carry the copy's identity.
+      const copy = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
+      if (copy?.google_event_id) {
+        job.googleEventId = copy.google_event_id;
+        job.calendarId = copy.google_calendar_id;
+      }
+    }
+    await queue.add('push-participant-event', job);
   };
 }

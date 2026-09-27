@@ -75,6 +75,7 @@ function makeDeps(overrides: { participants?: EventParticipant[]; pendingProposa
     },
     participantSyncRepo: {
       deleteByEvent,
+      getByUserAndEvent: mock(() => null),
     },
     materializer: {
       deleteForEvent,

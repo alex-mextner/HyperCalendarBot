@@ -109,6 +109,11 @@ export class EventChangeNotifier {
 
     const participants = this.deps.participantRepo.getByEvent(event.id);
     const active = participants.filter((p) => p.status !== 'declined' && p.user_id !== event.user_id);
+    // Read before the first await: the event delete removes these rows in the same tick,
+    // and the queued delete job must still know which Google copy to remove.
+    const copies = new Map(
+      active.map((p) => [p.user_id, this.deps.participantSyncRepo.getByUserAndEvent(p.user_id, event.id)]),
+    );
 
     await this.expirePendingProposals(event);
 
@@ -118,12 +123,16 @@ export class EventChangeNotifier {
         logger.error({ err, userId: p.user_id, eventId: event.id }, 'Failed to notify participant about event delete');
       });
 
+      const copy = copies.get(p.user_id);
       await this.deps.syncQueue
         .add('push-participant-event', {
           type: 'push-participant-event',
           userId: p.user_id,
           eventId: event.id,
           action: 'delete',
+          ...(copy?.google_event_id
+            ? { googleEventId: copy.google_event_id, calendarId: copy.google_calendar_id }
+            : {}),
         })
         .catch((err) => {
           logger.error({ err, userId: p.user_id, eventId: event.id }, 'Failed to enqueue participant GCal delete');
