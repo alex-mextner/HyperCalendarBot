@@ -221,9 +221,9 @@ function withTimestamp(text: string, createdAt: string, timezone: string): strin
 /**
  * Sanitize message history before handing it to the model.
  *
- * Two invariants, both enforced to keep OpenAI-compatible providers happy:
+ * Three invariants, all enforced to keep OpenAI-compatible providers happy:
  *   1. The first non-system message must be a user message. If the history
- *      begins with an assistant or tool turn (e.g. a leading bot reply after
+ *      begins with an assistant turn (e.g. a leading bot reply after
  *      migration), insert a '...' user placeholder.
  *   2. Every assistant message with `tool_calls` must be followed by one
  *      tool-role message per tool_call_id. If any id is unmatched — usually
@@ -232,11 +232,19 @@ function withTimestamp(text: string, createdAt: string, timezone: string): strin
  *      fall back to the text content (or drop the message if it's empty).
  *      Without this, OpenAI returns `400 - An assistant message with
  *      'tool_calls' must be followed by tool messages`.
+ *   3. A tool-role message is sent only inside the complete call block directly
+ *      above it, once per tool_call_id. Any other result is dropped: most often
+ *      the history window starts on a result whose call row was cut off. Groq's
+ *      Harmony renderer names a tool message after the call it answers and
+ *      rejects a nameless one with `400 … Tools should have a name!`; Gemini
+ *      rejects it with a bodiless 400.
  */
 function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
   const paired: MessageParam[] = [];
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]!;
+    // Complete call blocks consume their results below; a result reaching here answers nothing.
+    if (isToolMessage(msg)) continue;
     if (
       msg.role !== 'assistant' ||
       !('tool_calls' in msg) ||
@@ -258,6 +266,15 @@ function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
     const allPaired = expectedIds.size > 0 && [...expectedIds].every((id) => foundIds.has(id));
     if (allPaired) {
       paired.push(msg);
+      const emittedIds = new Set<string>();
+      for (let k = i + 1; k < j; k++) {
+        const toolMsg = messages[k]!;
+        if (isToolMessage(toolMsg) && expectedIds.has(toolMsg.tool_call_id) && !emittedIds.has(toolMsg.tool_call_id)) {
+          paired.push(toolMsg);
+          emittedIds.add(toolMsg.tool_call_id);
+        }
+      }
+      i = j - 1;
       continue;
     }
     // Orphaned tool_calls — strip them. Preserve any text content as a fallback;
@@ -267,17 +284,7 @@ function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
     if (textContent) {
       paired.push({ role: 'assistant', content: textContent });
     }
-    // Note: we intentionally don't skip the orphaned trailing tool messages —
-    // OpenAI rejects tool messages without a matching tool_call above, so we
-    // also filter those out.
-    for (let k = i + 1; k < j; k++) {
-      const toolMsg = messages[k] as OpenAI.ChatCompletionToolMessageParam;
-      // Drop tool messages whose tool_call_id was part of the orphaned set.
-      if (!expectedIds.has(toolMsg.tool_call_id)) {
-        paired.push(messages[k]!);
-      }
-    }
-    i = j - 1; // advance past the orphaned tool block
+    i = j - 1; // advance past the orphaned tool block; its results answer no surviving call
   }
 
   // Second pass: ensure the first non-system message is a user.
