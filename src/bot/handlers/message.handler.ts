@@ -722,7 +722,7 @@ async function handleProposeTimeInput(
   const result = deps.invitationService?.proposeTime(session.invitationId, user.telegram_id, proposedTime);
 
   if (!result?.success) {
-    await ctx.send(result?.error ?? (lang === 'ru' ? 'Ошибка' : 'Error'));
+    await ctx.send(result?.reason ? t(lang)[result.reason] : (result?.error ?? (lang === 'ru' ? 'Ошибка' : 'Error')));
     return;
   }
 

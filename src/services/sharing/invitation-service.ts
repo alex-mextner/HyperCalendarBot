@@ -11,7 +11,23 @@ export interface InvitationResult {
   success: boolean;
   invitation?: Invitation;
   error?: string;
+  /**
+   * Set when the invitee acted on an invitation the inviter cancelled or that expired. Each value is
+   * the `t(lang)` key of the message that tells the user why.
+   */
+  reason?: 'invitation_cancelled' | 'invitation_expired';
   proposedTime?: string;
+}
+
+/** A cancelled or expired invitation takes no answer or time proposal from its invitee. */
+function revokedInvitationResult(invitation: Invitation): InvitationResult | null {
+  if (invitation.status === 'cancelled') {
+    return { success: false, reason: 'invitation_cancelled', error: 'Invitation was cancelled' };
+  }
+  if (invitation.status === 'expired') {
+    return { success: false, reason: 'invitation_expired', error: 'Invitation has expired' };
+  }
+  return null;
 }
 
 export class InvitationService {
@@ -129,6 +145,10 @@ export class InvitationService {
     if (invitation.invitee_id !== userId) {
       return { success: false, error: 'Not authorized to propose' };
     }
+    const revoked = revokedInvitationResult(invitation);
+    if (revoked) {
+      return revoked;
+    }
     this.invRepo.setProposedTime(invitationId, proposedTime);
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
@@ -179,6 +199,10 @@ export class InvitationService {
     }
     if (invitation.invitee_id !== userId) {
       return { success: false, error: 'Not authorized to respond' };
+    }
+    const revoked = revokedInvitationResult(invitation);
+    if (revoked) {
+      return revoked;
     }
     const ok = this.invRepo.updateStatus(invitationId, newStatus, invitation.status as InvitationStatus);
     if (!ok) {

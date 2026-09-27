@@ -47,7 +47,7 @@ import {
   invitationAnswerLabel,
 } from '../../services/sharing/answered-invitation-card.ts';
 import { invitationRsvpKeyboard } from '../../services/sharing/invitation-rsvp-keyboard.ts';
-import type { InvitationService } from '../../services/sharing/invitation-service.ts';
+import type { InvitationResult, InvitationService } from '../../services/sharing/invitation-service.ts';
 import { guessCountryFromTimezone, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
 import {
@@ -742,7 +742,9 @@ export function createCallbackHandler(
         const proposedTime = new Date(baseTime + offsetMs).toISOString().replace(/\.\d{3}Z$/, 'Z');
         const propResult = invitationService.proposeTime(invId, user.telegram_id, proposedTime);
         if (!propResult.success) {
-          await ctx.answer({ text: propResult.error ?? t(lang).callbackErrors.error });
+          await ctx.answer({
+            text: propResult.reason ? t(lang)[propResult.reason] : (propResult.error ?? t(lang).callbackErrors.error),
+          });
           return;
         }
         const formatted = formatProposedTime(proposedTime, user.timezone, lang);
@@ -860,9 +862,7 @@ export function createCallbackHandler(
       return;
     }
 
-    let result:
-      | { success: boolean; error?: string; invitation?: import('../../database/types.ts').Invitation }
-      | undefined;
+    let result: InvitationResult | undefined;
     if (subAction === 'accept') {
       result = invitationService.acceptInvitation(invId, user.telegram_id);
     } else if (subAction === 'decline') {
@@ -911,7 +911,7 @@ export function createCallbackHandler(
         await ctx.scene.enter(onboardingScene);
       }
     } else {
-      await ctx.answer(result.error ?? t(lang).callbackErrors.error);
+      await ctx.answer(result.reason ? t(lang)[result.reason] : (result.error ?? t(lang).callbackErrors.error));
     }
   });
 

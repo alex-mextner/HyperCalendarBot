@@ -150,6 +150,51 @@ describe('InvitationService', () => {
     expect(result.success).toBe(true);
   });
 
+  describe('revoked invitations cannot be answered', () => {
+    function setupRevoked(status: 'cancelled' | 'expired') {
+      const { db, invRepo, eventRepo, settingsRepo, event } = setup();
+      const participantRepo = new ParticipantRepository(db);
+      const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo);
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      if (status === 'cancelled') {
+        service.cancelInvitation(inv.id, INVITER);
+      } else {
+        // The fixture event starts in the past, so the expiry sweep expires its pending invitation.
+        invRepo.expirePastInvitations();
+      }
+      expect(invRepo.findById(inv.id)!.status).toBe(status);
+      return { service, invRepo, participantRepo, event, inv };
+    }
+
+    test.each([
+      ['cancelled', 'acceptInvitation'],
+      ['cancelled', 'maybeInvitation'],
+      ['cancelled', 'declineInvitation'],
+      ['expired', 'acceptInvitation'],
+      ['expired', 'maybeInvitation'],
+      ['expired', 'declineInvitation'],
+    ] as const)('an invitation that is %s rejects %s and stays unchanged', (status, method) => {
+      const { service, invRepo, participantRepo, event, inv } = setupRevoked(status);
+
+      const result = service[method](inv.id, INVITEE);
+
+      expect(result.success).toBe(false);
+      expect(result.reason).toBe(status === 'cancelled' ? 'invitation_cancelled' : 'invitation_expired');
+      expect(invRepo.findById(inv.id)!.status).toBe(status);
+      expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
+    });
+
+    test.each(['cancelled', 'expired'] as const)('an invitation that is %s rejects a time proposal', (status) => {
+      const { service, invRepo, inv } = setupRevoked(status);
+
+      const result = service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+
+      expect(result.success).toBe(false);
+      expect(result.reason).toBe(status === 'cancelled' ? 'invitation_cancelled' : 'invitation_expired');
+      expect(invRepo.findById(inv.id)!.proposed_time).toBeNull();
+    });
+  });
+
   describe('proposeTime', () => {
     test('sets proposed_time and returns success', () => {
       const { service, invRepo, event } = setup();
