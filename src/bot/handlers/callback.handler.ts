@@ -747,7 +747,9 @@ export function createCallbackHandler(
         const proposedTime = new Date(baseTime + offsetMs).toISOString().replace(/\.\d{3}Z$/, 'Z');
         const propResult = invitationService.proposeTime(invId, user.telegram_id, proposedTime);
         if (!propResult.success) {
-          await ctx.answer({ text: propResult.error ?? t(lang).callbackErrors.error });
+          await ctx.answer({
+            text: propResult.reason ? t(lang)[propResult.reason] : (propResult.error ?? t(lang).callbackErrors.error),
+          });
           return;
         }
         const formatted = formatProposedTime(proposedTime, user.timezone, lang);

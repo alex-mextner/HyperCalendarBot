@@ -11,6 +11,11 @@ export interface InvitationResult {
   success: boolean;
   invitation?: Invitation;
   error?: string;
+  /**
+   * Set when the invitee proposed a time on an invitation they already answered. Each value is the
+   * `t(lang)` key of the message that tells the user why.
+   */
+  reason?: 'invitation_already_answered';
   proposedTime?: string;
 }
 
@@ -128,6 +133,11 @@ export class InvitationService {
     }
     if (invitation.invitee_id !== userId) {
       return { success: false, error: 'Not authorized to propose' };
+    }
+    // The +30/+60 prompt and a typed-time session outlive the answer on the card; a proposal after it
+    // would only reach the inviter as a notice they can no longer act on.
+    if (invitation.status === 'accepted' || invitation.status === 'declined' || invitation.status === 'maybe') {
+      return { success: false, reason: 'invitation_already_answered', error: 'Invitation was already answered' };
     }
     this.invRepo.setProposedTime(invitationId, proposedTime);
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
