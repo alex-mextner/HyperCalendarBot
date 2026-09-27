@@ -452,7 +452,7 @@ describe('no geocode is applied before the creator taps a candidate', () => {
     expect(await s.candidateStore.get(s.event.id)).toBeNull();
   });
 
-  test('a new verification drops a place confirmed for the earlier text, without editing invitations', async () => {
+  test('a new verification drops a place confirmed for the earlier text, also from the invitation card', async () => {
     const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
     await s.confirmEarlier(BELGRADE_CAFE);
@@ -465,7 +465,12 @@ describe('no geocode is applied before the creator taps a candidate', () => {
     expect(stored.resolved_address).toBeNull();
     expect(stored.venue_name).toBeNull();
     expect(stored.google_maps_url).toBeNull();
-    expect(s.invitationEdits).toHaveLength(editsAfterConfirmation);
+    // One re-render with the typed text: neither the dropped place nor the newly offered one
+    expect(s.invitationEdits).toHaveLength(editsAfterConfirmation + 1);
+    const card = s.invitationEdits.at(-1);
+    expect(card?.text).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
+    expect(card?.text).not.toContain(escapeHtml(NIS_CAFE.formattedAddress));
+    expect(card?.options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(s.invitation.id, 'ru').toJSON());
   });
 
   test('a location changed by a user who cannot see the event drops the old place, without searching or asking', async () => {
@@ -977,8 +982,8 @@ describe('keep as typed', () => {
     expect(stored.location_verified).toBe(0);
     expect(stored.resolved_address).toBeNull();
     expect(stored.google_maps_url).toBeNull();
-    expect(s.invitationEdits).toHaveLength(2);
-    const card = s.invitationEdits[1]!;
+    expect(s.invitationEdits).toHaveLength(3);
+    const card = s.invitationEdits[2]!;
     expect(card.text).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
     expect(card.options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(s.invitation.id, 'ru').toJSON());
   });
@@ -994,8 +999,9 @@ describe('keep as typed', () => {
     await s.tap(button(s.sent[1], 'keep'));
 
     expect(s.storedEvent().location_verified).toBe(0);
-    expect(s.invitationEdits).toHaveLength(2);
-    const card = s.invitationEdits[1]!;
+    // Confirmation, the first question dropping the place, and the keep tap
+    expect(s.invitationEdits).toHaveLength(3);
+    const card = s.invitationEdits[2]!;
     expect(card.text).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
     expect(card.options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(s.invitation.id, 'ru').toJSON());
   });

@@ -15,7 +15,7 @@ import { groupRsvpKeyboard, invitationRsvpKeyboard } from '../sharing/invitation
 import { guessCountryFromTimezone, resolveTimezone } from '../timezone/timezone-service.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
 import type { AddressCache } from './address-cache.ts';
-import { formatLocationPlain } from './format-location.ts';
+import { formatLocationHtml, formatLocationPlain } from './format-location.ts';
 import type { GeocodedLocation, GeocodingBias, GeocodingService } from './geocoding-service.ts';
 import type { LocationCandidateStore, LocationPicker } from './location-candidate-store.ts';
 
@@ -103,9 +103,9 @@ export class LocationVerificationService {
    *
    * The bot always asks: nothing is applied before the creator taps a candidate. The event keeps
    * only the typed text, unverified: no venue, address or map link is written (a place confirmed
-   * for an earlier text is dropped, and Google copies showing it are re-pushed), delivered
-   * invitations are not edited, and neither the address cache nor `users.city` is touched. The
-   * previous picker of the event is closed.
+   * for an earlier text is dropped, Google copies showing it are re-pushed and delivered invitation
+   * cards showing it are re-rendered with the typed text), and neither the address cache nor
+   * `users.city` is touched. The previous picker of the event is closed.
    *
    * Flow:
    * 1. A place the creator confirmed earlier for this text (address cache) is the candidate; no
@@ -140,9 +140,9 @@ export class LocationVerificationService {
     }
 
     // Until the creator answers, the event holds only the typed text: a place confirmed for an
-    // earlier text must not stay on it, whoever changed the text. Invitation cards are re-rendered
-    // only on the answer.
-    await this.dropResolvedPlace(event);
+    // earlier text must not stay on it, whoever changed the text, nor on the invitation cards.
+    const typedOnly = await this.dropResolvedPlace(event);
+    await this.refreshInvitationCards(event, typedOnly);
 
     // Only a user who can see the event is asked. A secretary updating the owner's event could not
     // answer the picker (#421), so no search is made and the owner's open picker stays.
@@ -174,6 +174,17 @@ export class LocationVerificationService {
 
     await this.askUserToChoose(event, user, { location: typed, candidates, remembered });
     return { resolved: false, geocoded: null, cityExtracted: candidates[0]?.city ?? null, candidates };
+  }
+
+  /**
+   * The event's location changed from `before` to `after` without a place being confirmed: an edit
+   * (a new text, an abstract place, a removal) or a question that dropped the confirmed place.
+   * Re-render the delivered invitation cards when their location line changes, so no card keeps a
+   * place the event no longer has, whether or not a question follows or finds anything.
+   */
+  async refreshInvitationCards(before: CalendarEvent, after: CalendarEvent): Promise<void> {
+    if (formatLocationHtml(before) === formatLocationHtml(after)) return;
+    await this.updateInvitationMessages(after);
   }
 
   /** The remembered place for this text, else the places a search biased to the home area finds. */
@@ -394,9 +405,10 @@ export class LocationVerificationService {
 
   /**
    * The creator kept the typed text: drop any resolved place (re-pushing the Google copies if they
-   * showed it) and re-render every delivered invitation card. A card may still show a place dropped
-   * before this answer (when the text changed or an earlier question was asked), and the answer is
-   * rare and idempotent, so the cards are always refreshed rather than tracking what they last showed.
+   * showed it) and re-render every delivered invitation card. The edit or question that dropped a
+   * place already re-rendered them, but that render may have failed; the answer is rare and
+   * idempotent, so the cards are always refreshed once more rather than tracking what they last
+   * showed.
    */
   private async keepOnlyTypedText(event: CalendarEvent): Promise<void> {
     const typedOnly = await this.dropResolvedPlace(event);
