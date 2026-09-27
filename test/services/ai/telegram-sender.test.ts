@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import type { Bot, InlineKeyboard } from 'gramio';
 import { createTelegramSender } from '../../../src/services/ai/telegram-sender.ts';
+import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 
 interface CapturedButton {
   text: string;
@@ -30,15 +31,11 @@ function makeSender() {
 }
 
 describe('createTelegramSender.sendInvitation', () => {
-  test('personal variant (default) builds the inv: RSVP keyboard', async () => {
+  test('personal variant (default) sends the canonical RSVP keyboard', async () => {
     const { sender, calls } = makeSender();
-    await sender.sendInvitation!(123, 'You are invited', 7, 'en');
+    await sender.sendInvitation!(123, 'You are invited', 7, 'ru');
 
-    const buttons = keyboardButtons(calls[0]!.reply_markup!);
-    const data = buttons.map((b) => b.callback_data ?? '');
-    expect(data).toContain('inv:accept:7');
-    expect(data).toContain('inv:decline:7');
-    expect(data.some((d) => d.startsWith('grsvp:'))).toBe(false);
+    expect(calls[0]!.reply_markup!.toJSON()).toEqual(invitationRsvpKeyboard(7, 'ru').toJSON());
   });
 
   test('group variant builds the grsvp: per-member keyboard keyed by eventId', async () => {

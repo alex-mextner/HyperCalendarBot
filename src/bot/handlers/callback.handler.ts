@@ -42,6 +42,7 @@ import type { AdminEditSession } from '../../services/intent/admin-edit-session.
 import { ConflictService } from '../../services/invite/conflict-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { SceneName, ScenePauseService } from '../../services/scene-pause.ts';
+import { invitationRsvpKeyboard } from '../../services/sharing/invitation-rsvp-keyboard.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import { guessCountryFromTimezone, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
@@ -842,14 +843,13 @@ export function createCallbackHandler(
                 !!inviteeUser?.onboarding_completed,
               )
             : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
-          const keyboard = new InlineKeyboard()
-            .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-            .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
-            .row()
-            .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
-            .text(t(inviteeLang).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);
           invitationNotifyDeps
-            .editMessage(invitation.chat_id, invitation.message_id, originalText, keyboard)
+            .editMessage(
+              invitation.chat_id,
+              invitation.message_id,
+              originalText,
+              invitationRsvpKeyboard(invitation.id, inviteeLang),
+            )
             .catch(() => {});
         }
       }
@@ -1271,15 +1271,13 @@ export function createCallbackHandler(
             !!inviteeUser?.onboarding_completed,
           )
         : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
-      const kb = new InlineKeyboard()
-        .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-        .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
-        .row()
-        .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`);
       await ctx.answer();
       await ctx.editText(t(invLang).invite_delivered(eventTitle), { parse_mode: 'HTML' });
       forceInviteDeps
-        .sendMessage(inviteeId, inviteeText, { parse_mode: 'HTML', reply_markup: kb })
+        .sendMessage(inviteeId, inviteeText, {
+          parse_mode: 'HTML',
+          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang),
+        })
         .then((sent) => {
           forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
         })
@@ -1340,14 +1338,11 @@ export function createCallbackHandler(
             !!inviteeUser?.onboarding_completed,
           )
         : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
-      const kb = new InlineKeyboard()
-        .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-        .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
-        .row()
-        .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`);
-
       forceInviteDeps
-        .sendMessage(inviteeId, inviteeText, { parse_mode: 'HTML', reply_markup: kb })
+        .sendMessage(inviteeId, inviteeText, {
+          parse_mode: 'HTML',
+          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang),
+        })
         .then((sent) => {
           forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
         })

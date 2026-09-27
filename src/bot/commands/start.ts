@@ -1,13 +1,13 @@
 // src/bot/commands/start.ts
 
 import type { AnyScene } from '@gramio/scenes';
-import { InlineKeyboard } from 'gramio';
-import { CB, t } from '../../config/constants.ts';
+import { t } from '../../config/constants.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail, formatInvitation } from '../../services/event/formatters.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
+import { invitationRsvpKeyboard } from '../../services/sharing/invitation-rsvp-keyboard.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -75,14 +75,7 @@ export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Prom
                   !!user.onboarding_completed,
                 )
               : `📨 ${inviterName} ${lang === 'ru' ? 'приглашает вас на событие' : 'invites you to an event'}`;
-            const kb = new InlineKeyboard()
-              .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-              .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
-              .row()
-              .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
-              .text(t(lang).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);
-
-            await ctx.send(text, { parse_mode: 'HTML', reply_markup: kb });
+            await ctx.send(text, { parse_mode: 'HTML', reply_markup: invitationRsvpKeyboard(invitation.id, lang) });
           } else {
             await ctx.send(
               lang === 'ru' ? '📨 Приглашение уже недействительно.' : '📨 This invitation is no longer valid.',

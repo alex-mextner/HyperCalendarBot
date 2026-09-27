@@ -15,9 +15,12 @@ const resolveCityStub = mock(async (input: string) => {
   return resolveCityStubValue;
 });
 
+import type { InlineKeyboard } from 'gramio';
+import type { OnboardingInvitationDeps } from '../../../src/bot/scenes/onboarding.scene.ts';
 import type { DatabaseService } from '../../../src/database/index.ts';
 import type { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import type { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
+import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 
 // ---------------------------------------------------------------------------
 // GramIO internal extraction helpers
@@ -62,6 +65,7 @@ interface MockCtx {
     step: { id: number; firstTime: boolean };
     update: UpdateMock;
     exit: ExitMock;
+    params?: { pendingInvitationId: number; pendingEventId: number; pendingInviterTelegramId: number };
   };
   from: { id: number };
   is: (t: string | string[]) => boolean;
@@ -148,6 +152,25 @@ function makeHolidayService(): HolidayService {
   return {
     subscribeUser: mock(() => null),
   } as unknown as HolidayService;
+}
+
+/** Pending invitation 77 from inviter 500 for event 5 — partial repos stand in for the real deps. */
+function makeInvitationDeps(): OnboardingInvitationDeps {
+  const startAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  return {
+    invitationRepo: { findById: mock(() => ({ id: 77, status: 'pending' })) },
+    userRepo: { findByTelegramId: mock(() => ({ telegram_id: 500, first_name: 'Alex', username: 'alex' })) },
+    eventService: {
+      getEvent: mock(() => ({
+        id: 5,
+        title: 'Party',
+        start_at: startAt.toISOString(),
+        end_at: new Date(startAt.getTime() + 60 * 60 * 1000).toISOString(),
+        all_day: 0,
+        timezone: 'UTC',
+      })),
+    },
+  } as unknown as OnboardingInvitationDeps;
 }
 
 const NOOP_NEXT = () => Promise.resolve();
@@ -556,6 +579,27 @@ describe('onboarding step 3: morning agenda + completion', () => {
     });
     await localFns[3]!(ctx, NOOP_NEXT);
     expect(ctx.send).toHaveBeenCalledTimes(1);
+  });
+
+  test('pending invitation — re-sends the invitation with the canonical RSVP keyboard', async () => {
+    const localFns = getStepFns(
+      createOnboardingScene(db, mockComposer, false, prefsService, undefined, undefined, makeInvitationDeps()),
+    );
+    const ctx = makeCtx({
+      activeType: 'callback_query',
+      stepId: 3,
+      data: `${CB.ONBOARD_AGENDA}:no`,
+      state: { lang: 'en', timezone: 'Europe/Moscow' },
+    });
+    ctx.scene.params = { pendingInvitationId: 77, pendingEventId: 5, pendingInviterTelegramId: 500 };
+    await localFns[3]!(ctx, NOOP_NEXT);
+    expect(ctx.send).toHaveBeenCalledTimes(2);
+    const [, [invitationText, options]] = ctx.send.mock.calls as unknown as [
+      unknown,
+      [string, { reply_markup: InlineKeyboard }],
+    ];
+    expect(invitationText).toContain('Party');
+    expect(options.reply_markup.toJSON()).toEqual(invitationRsvpKeyboard(77, 'en').toJSON());
   });
 
   test('prefsService absent — morning time pick does not crash', async () => {
