@@ -2,9 +2,11 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import {
   buildChatSharedResultText,
+  createPickerAckIo,
   deliverPickerInvitation,
   deliverPickerInvitations,
   type PickerAckIo,
+  type PickerAckSendParams,
   type PickerDeliveryOutcome,
   type PickerInvitationDeps,
   pickerAiLine,
@@ -40,6 +42,46 @@ const ALL_KINDS: PickerDeliveryOutcome[] = [
   { kind: 'error', error: 'Cannot invite yourself' },
   { kind: 'notConfigured' },
 ];
+
+interface FakeTelegramMessage {
+  id: number;
+  text: string;
+  params: PickerAckSendParams;
+}
+
+/**
+ * In-memory Telegram chat for the ack payloads. Mirrors the Bot API rule behind the 2026-09-27
+ * `Bad Request: message can't be edited`: editMessageText is refused for a message sent with a
+ * reply_markup that is not an inline keyboard (ReplyKeyboardMarkup / ReplyKeyboardRemove), and for
+ * a message that no longer exists.
+ */
+function makeTelegramChat() {
+  const messages: FakeTelegramMessage[] = [];
+  const edits: { messageId: number; text: string; parseMode?: string }[] = [];
+  let nextId = 7849;
+  return {
+    messages,
+    edits,
+    send: async (text: string, params: PickerAckSendParams) => {
+      const message = { id: nextId++, text, params };
+      messages.push(message);
+      return { id: message.id };
+    },
+    edit: async (messageId: number, text: string, parseMode?: string) => {
+      const message = messages.find((m) => m.id === messageId);
+      if (!message) throw new Error('Bad Request: message to edit not found');
+      if ('reply_markup' in message.params) throw new Error("Bad Request: message can't be edited");
+      message.text = text;
+      edits.push({ messageId, text, parseMode });
+    },
+    deleteMessage: (messageId: number) => {
+      messages.splice(
+        messages.findIndex((m) => m.id === messageId),
+        1,
+      );
+    },
+  };
+}
 
 describe('pickerStatusLine', () => {
   test.each(ALL_KINDS.map((o) => o.kind))('EN: %s line contains the name and the status emoji', (kind) => {
@@ -712,6 +754,38 @@ describe('runPickerBatchWithAck (reply-fast ack)', () => {
     expect(result.aiResultLines).toEqual(['Alice (id:201): delivered to the invitee']);
     expect(sendCount).toBe(2);
   });
+
+  test('users_shared ack is sent without a reply markup and finalized by editing it in place', async () => {
+    const chat = makeTelegramChat();
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 1 }) };
+    await runPickerBatchWithAck(
+      { eventId, inviter, lang: 'en', fallbackChatId: INVITER_ID, invitees: [{ userId: 201, firstName: 'Alice' }] },
+      makeDeps(sender),
+      createPickerAckIo(chat.send, chat.edit),
+    );
+    const finalText = `${t('en').invite_picker_header}\n✅ Alice`;
+    // Exactly one message in the chat: the ack, sent plain (editable) and rewritten with the status.
+    expect(chat.messages).toEqual([{ id: 7849, text: finalText, params: {} }]);
+    expect(chat.edits).toEqual([{ messageId: 7849, text: finalText, parseMode: undefined }]);
+  });
+
+  test('users_shared ack deleted by the user mid-delivery → final status sent as a new message', async () => {
+    const chat = makeTelegramChat();
+    const sender: TelegramSender = {
+      ...SENDER_BASE,
+      sendInvitation: async () => {
+        chat.deleteMessage(7849);
+        return { message_id: 1 };
+      },
+    };
+    await runPickerBatchWithAck(
+      { eventId, inviter, lang: 'en', fallbackChatId: INVITER_ID, invitees: [{ userId: 201, firstName: 'Alice' }] },
+      makeDeps(sender),
+      createPickerAckIo(chat.send, chat.edit),
+    );
+    expect(chat.edits).toEqual([]);
+    expect(chat.messages).toEqual([{ id: 7850, text: `${t('en').invite_picker_header}\n✅ Alice`, params: {} }]);
+  });
 });
 
 describe('runChatShareWithAck (reply-fast group invite)', () => {
@@ -837,6 +911,30 @@ describe('runChatShareWithAck (reply-fast group invite)', () => {
     );
     expect(outcome).toEqual({ kind: 'delivered' });
     expect(sends).toEqual([t('en').invite_group_sending, t('en').invite_delivered('Launch Party')]);
+  });
+
+  test('chat_shared HTML ack is sent without a reply markup and finalized by editing it in place', async () => {
+    const chat = makeTelegramChat();
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 42 }) };
+    await runChatShareWithAck(
+      {
+        invitation: {
+          eventId,
+          inviter,
+          inviteeId: GROUP_ID,
+          fallbackChatId: INVITER_ID,
+          allowMtproto: false,
+          isGroupTarget: true,
+        },
+        lang: 'en',
+        title: 'Launch Party',
+      },
+      makeDeps(sender),
+      createPickerAckIo(chat.send, chat.edit, 'HTML'),
+    );
+    const finalText = t('en').invite_delivered('Launch Party');
+    expect(chat.messages).toEqual([{ id: 7849, text: finalText, params: { parse_mode: 'HTML' } }]);
+    expect(chat.edits).toEqual([{ messageId: 7849, text: finalText, parseMode: 'HTML' }]);
   });
 
   test('a throw during delivery finalizes the ack with a failure instead of leaving "sending…"', async () => {

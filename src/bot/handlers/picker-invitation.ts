@@ -10,7 +10,7 @@ import type { EventService } from '../../services/event/event-service.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import { botLogger } from '../../utils/logger.ts';
-import { escapeHtml } from '../../utils/telegram.ts';
+import { escapeHtml, type ParseMode } from '../../utils/telegram.ts';
 
 const deliveryLogger = botLogger.child({ module: 'picker-invitation' });
 
@@ -254,6 +254,35 @@ export async function deliverPickerInvitations(
 export interface PickerAckIo {
   sendAck(text: string): Promise<{ message_id: number }>;
   editAck(messageId: number, text: string): Promise<void>;
+}
+
+/**
+ * Send options for the picker ack. Deliberately has no `reply_markup` — see {@link createPickerAckIo}.
+ */
+export interface PickerAckSendParams {
+  parse_mode?: ParseMode;
+}
+
+/**
+ * Build the {@link PickerAckIo} for the chat the picker was answered in: `send` is GramIO's
+ * `ctx.send`, `edit` is `sender.editMessageText` bound to that same chat.
+ *
+ * The ack is sent without a reply markup. Telegram refuses editMessageText ("message can't be
+ * edited") on a message carrying a reply keyboard or ReplyKeyboardRemove, so an ack that removed
+ * the picker keyboard could never be finalized in place and every run fell through to the
+ * fresh-message fallback (prod 2026-09-27). The picker keyboard is `one_time_keyboard`, so the
+ * client already hides it once the user has picked.
+ */
+export function createPickerAckIo(
+  send: (text: string, params: PickerAckSendParams) => Promise<{ id: number }>,
+  edit: (messageId: number, text: string, parseMode?: ParseMode) => Promise<void>,
+  parseMode?: ParseMode,
+): PickerAckIo {
+  const params: PickerAckSendParams = parseMode ? { parse_mode: parseMode } : {};
+  return {
+    sendAck: (text) => send(text, params).then((sent) => ({ message_id: sent.id })),
+    editAck: (messageId, text) => edit(messageId, text, parseMode),
+  };
 }
 
 /**
