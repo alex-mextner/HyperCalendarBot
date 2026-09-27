@@ -100,14 +100,16 @@ function buildRoster(rows: InvitationRosterRow[], chatId: number): InvitationRos
     listed.add(row.user_id);
   }
 
-  // Group members answer through event_participants; list them while a group invitation is live.
-  if (liveGroupChats.size > 0) {
-    for (const row of rows) {
-      const answer = answerOf(row.status);
-      if (row.source !== 'participant' || listed.has(row.user_id) || !answer) continue;
-      invitees.push({ userId: row.user_id, name: displayName(row), answer });
-      listed.add(row.user_id);
-    }
+  // Group members answer through event_participants. An answer is listed only while the group whose
+  // card carried it holds a live invitation, and a group chat sees only its own members' answers; an
+  // answer of unknown origin (personal, or recorded before origins were kept) is never listed here.
+  for (const row of rows) {
+    const answer = answerOf(row.status);
+    const origin = row.source_group_id;
+    if (row.source !== 'participant' || listed.has(row.user_id) || !answer || origin === null) continue;
+    if (!liveGroupChats.has(origin) || (chatId < 0 && origin !== chatId)) continue;
+    invitees.push({ userId: row.user_id, name: displayName(row), answer });
+    listed.add(row.user_id);
   }
 
   // The roster is the organizer's to share: a group chat must hold a live invitation to the event, and

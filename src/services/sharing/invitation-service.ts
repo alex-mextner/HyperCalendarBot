@@ -103,9 +103,9 @@ export class InvitationService {
     }
     const existing = this.participantRepo.findByEventAndUser(eventId, userId);
     if (existing) {
-      this.participantRepo.updateStatus(eventId, userId, status);
+      this.participantRepo.updateStatus(eventId, userId, status, groupChatId);
     } else {
-      this.participantRepo.add(eventId, userId, status);
+      this.participantRepo.add(eventId, userId, status, 'attendee', groupChatId);
     }
     // Mirror this member's own answer into their own Google Calendar (gated downstream on their
     // own active sync state): "going" adds the event, "not going" removes it.
@@ -184,7 +184,7 @@ export class InvitationService {
     if (this.participantRepo) {
       const existing = this.participantRepo.findByEventAndUser(invitation.event_id, invitation.invitee_id);
       if (existing) {
-        this.participantRepo.updateStatus(invitation.event_id, invitation.invitee_id, 'accepted');
+        this.participantRepo.updateStatus(invitation.event_id, invitation.invitee_id, 'accepted', null);
       } else {
         this.participantRepo.add(invitation.event_id, invitation.invitee_id, 'accepted');
       }
@@ -248,12 +248,12 @@ export class InvitationService {
       const existing = this.participantRepo.findByEventAndUser(invitation.event_id, userId);
       if (newStatus === 'accepted' || newStatus === 'maybe') {
         if (existing) {
-          this.participantRepo.updateStatus(invitation.event_id, userId, newStatus);
+          this.participantRepo.updateStatus(invitation.event_id, userId, newStatus, null);
         } else {
           this.participantRepo.add(invitation.event_id, userId, newStatus);
         }
       } else if (newStatus === 'declined' && existing) {
-        this.participantRepo.updateStatus(invitation.event_id, userId, 'declined');
+        this.participantRepo.updateStatus(invitation.event_id, userId, 'declined', null);
       }
     }
 

@@ -621,7 +621,15 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
       isGroupDegraded = true;
       botLogger.warn({ eventId: input.event_id }, 'group rsvp: participant repo absent, attending count suppressed');
     }
-    const group = describeGroupRsvp(lang, participantRows, personal.listedUserIds, displayName);
+    // A member's answer counts while the group whose card carried it is still invited; in a group chat
+    // only that chat's own answers are shown. An answer of unknown origin stays out of group chats.
+    const groupRows =
+      participantRows?.filter((p) =>
+        p.source_group_id === null
+          ? !ctx.isGroup
+          : liveGroupChatIds.includes(p.source_group_id) && (!ctx.isGroup || p.source_group_id === ctx.groupChatId),
+      ) ?? null;
+    const group = describeGroupRsvp(lang, groupRows, personal.listedUserIds, displayName);
     lines.push(...group.lines);
     for (const member of group.members) {
       if (isRsvpAttending(member.status)) attending++;

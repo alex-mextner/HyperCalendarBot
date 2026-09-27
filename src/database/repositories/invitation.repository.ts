@@ -12,6 +12,8 @@ export interface InvitationRosterRow {
   username: string | null;
   /** The organizer's own address-book name for this person */
   contact_name: string | null;
+  /** Participant rows: the group chat whose card carried the answer; null when personal or unknown */
+  source_group_id: number | null;
 }
 
 export class InvitationRepository {
@@ -141,20 +143,22 @@ export class InvitationRepository {
           SELECT i.*, ROW_NUMBER() OVER (PARTITION BY i.invitee_id ORDER BY i.created_at DESC, i.id DESC) AS recipient_rank
           FROM invitations i WHERE i.event_id = ?1
         )
-        SELECT source, user_id, status, first_name, username, contact_name FROM (
+        SELECT source, user_id, status, first_name, username, contact_name, source_group_id FROM (
           SELECT 'organizer' AS source, 0 AS position, e.user_id, NULL AS status, u.first_name, u.username,
-            NULL AS contact_name
+            NULL AS contact_name, NULL AS source_group_id
           FROM events e LEFT JOIN users u ON u.telegram_id = e.user_id WHERE e.id = ?1
           UNION ALL
           SELECT 'invitation', l.id, l.invitee_id, l.status, u.first_name,
             COALESCE(u.username, l.invitee_username),
             (SELECT c.name FROM contacts c WHERE c.user_id = l.inviter_id AND c.telegram_id = l.invitee_id
-              ORDER BY c.id LIMIT 1)
+              ORDER BY c.id LIMIT 1),
+            NULL
           FROM latest l LEFT JOIN users u ON u.telegram_id = l.invitee_id WHERE l.recipient_rank = 1
           UNION ALL
           SELECT 'participant', p.id, p.user_id, p.status, u.first_name, u.username,
             (SELECT c.name FROM contacts c WHERE c.user_id = e.user_id AND c.telegram_id = p.user_id
-              ORDER BY c.id LIMIT 1)
+              ORDER BY c.id LIMIT 1),
+            p.source_group_id
           FROM event_participants p JOIN events e ON e.id = p.event_id
           LEFT JOIN users u ON u.telegram_id = p.user_id
           WHERE p.event_id = ?1 AND p.role != 'organizer'

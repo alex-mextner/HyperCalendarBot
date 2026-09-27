@@ -1106,4 +1106,13 @@ export const migrations: Migration[] = [
       backfillActiveRevision(db);
     },
   },
+  {
+    // Which group chat an answer came through, so a group's invitation card lists only its own
+    // members' answers. Personal answers and rows from before this column stay NULL (unknown origin)
+    // and are never shown as group answers.
+    name: '064_event_participant_source_group',
+    up(db) {
+      db.exec('ALTER TABLE event_participants ADD COLUMN source_group_id INTEGER');
+    },
+  },
 ];

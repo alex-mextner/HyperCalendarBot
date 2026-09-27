@@ -142,10 +142,10 @@ describe('invitation card roster', () => {
     person(302, 'Oleg');
     invite(201);
     invite(GROUP_CHAT);
-    participants.add(event.id, 301, 'accepted');
-    participants.add(event.id, 302, 'declined');
+    participants.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT);
+    participants.add(event.id, 302, 'declined', 'attendee', GROUP_CHAT);
     // A pending re-invite never masks a "going" the invitee already gave through the group card
-    participants.add(event.id, 201, 'accepted');
+    participants.add(event.id, 201, 'accepted', 'attendee', GROUP_CHAT);
 
     const text = card(event, invitations, GROUP_CHAT);
     expect(text).toContain('✅ Boris — going');
@@ -159,10 +159,43 @@ describe('invitation card roster', () => {
     person(301, 'Mila');
     invite(201);
     const group = invite(GROUP_CHAT);
-    participants.add(event.id, 301, 'accepted');
+    participants.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT);
     invitations.updateStatus(group.id, 'cancelled', 'pending');
 
     expect(card(event, invitations, 201)).not.toContain('Mila');
+  });
+
+  test("a member's answer in a withdrawn group never reaches a group invited later", () => {
+    const { event, invitations, participants, invite, person } = seed();
+    person(201, 'Boris');
+    person(301, 'Mila');
+    invite(201);
+    const groupA = invite(GROUP_CHAT);
+    participants.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT);
+    invitations.updateStatus(groupA.id, 'cancelled', 'pending');
+    invite(-1002);
+
+    expect(card(event, invitations, -1002)).toContain('⏳ Boris — no answer yet');
+    expect(card(event, invitations, -1002)).not.toContain('Mila');
+    expect(card(event, invitations, 201)).not.toContain('Mila');
+  });
+
+  test("each group card lists only its own members' answers; answers of unknown origin are never listed", () => {
+    const { event, invitations, participants, invite, person } = seed();
+    person(301, 'Mila');
+    person(302, 'Oleg');
+    person(303, 'Legacy');
+    invite(GROUP_CHAT);
+    invite(-1002);
+    participants.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT);
+    participants.add(event.id, 302, 'accepted', 'attendee', -1002);
+    participants.add(event.id, 303, 'accepted');
+
+    const groupA = card(event, invitations, GROUP_CHAT);
+    expect(groupA).toContain('✅ Mila — going');
+    expect(groupA).not.toContain('Oleg');
+    expect(groupA).not.toContain('Legacy');
+    expect(card(event, invitations, -1002)).not.toContain('Mila');
   });
 
   test('names come from the profile, then the username, then the organizer contact, else a neutral label', () => {
