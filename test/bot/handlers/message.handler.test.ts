@@ -574,9 +574,16 @@ describe('createMessageHandler', () => {
         const ctx = makeVoiceCtx();
         const handler = createMessageHandler(deps as never);
         await handler(ctx as never);
-        // The admin notification is fire-and-forget: wait for its sendDocument request itself
-        // (the log file is written before it), bounded by the test timeout rather than a guessed sleep.
-        await adminDocumentSent.promise;
+        // The admin notification is fire-and-forget: wait for its sendDocument request itself (the
+        // log file is written before it). The explicit bound sits below the 5 s test timeout so a
+        // missing notice fails here and `finally` still restores fetch for the following tests.
+        let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          adminDocumentSent.promise,
+          new Promise<never>((_, reject) => {
+            noticeTimer = setTimeout(() => reject(new Error('admin voice-error notice was not sent')), 3_000);
+          }),
+        ]).finally(() => clearTimeout(noticeTimer));
 
         expect(fetchCalls).toHaveLength(1);
         const { url, body } = fetchCalls[0]!;
