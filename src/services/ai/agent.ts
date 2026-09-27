@@ -31,7 +31,7 @@ import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './to
 import { createToolExposure, DISCOVERY_TOOL, runRoundRevealingRejectedTools } from './tool-exposure.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import { getToolDefinitions } from './tools.ts';
-import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
+import type { AgentConfig, AgentContext, TelegramSender, ToolResult } from './types.ts';
 import { WriteOutcomes } from './write-outcomes.ts';
 
 const aiLogger = logger.child({ module: 'ai-agent' });
@@ -488,6 +488,15 @@ function fieldSchemaAcceptsNull(schema: z.ZodType | undefined, key: string): boo
   if (!schema || !('shape' in schema)) return false;
   const field = (schema as ZodObjectShape).shape[key];
   return field?.safeParse(null).success ?? false;
+}
+
+/**
+ * The tool message the model sees. agentHint names the recovery route (which ID or tool to use
+ * next), so a failure carries it too; without it the model is left with the bare error.
+ */
+export function toolResultContent(result: ToolResult): string {
+  const body = result.success ? (result.output ?? 'OK') : `Error: ${result.error ?? result.output ?? 'Unknown error'}`;
+  return result.agentHint ? `${body}\n[AGENT: ${result.agentHint}]` : body;
 }
 
 /**
@@ -1060,9 +1069,7 @@ export class CalendarBotAgent {
             allToolResults.push({ success: toolResult.success, output: toolResult.output });
           }
 
-          const content = toolResult.success
-            ? `${toolResult.output ?? 'OK'}${toolResult.agentHint ? `\n[AGENT: ${toolResult.agentHint}]` : ''}`
-            : `Error: ${toolResult.error ?? toolResult.output ?? 'Unknown error'}`;
+          const content = toolResultContent(toolResult);
 
           toolResultMessages.push({
             role: 'tool',
@@ -1473,9 +1480,7 @@ export class CalendarBotAgent {
           allToolResults.push({ success: toolResult.success, output: toolResult.output });
         }
 
-        const content = toolResult.success
-          ? `${toolResult.output ?? 'OK'}${toolResult.agentHint ? `\n[AGENT: ${toolResult.agentHint}]` : ''}`
-          : `Error: ${toolResult.error ?? toolResult.output ?? 'Unknown error'}`;
+        const content = toolResultContent(toolResult);
 
         toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content });
 
