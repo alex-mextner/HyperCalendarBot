@@ -628,6 +628,7 @@ export interface DueReminderRow extends EventReminderRow {
   event_resolved_address: string | null;
   event_google_maps_url: string | null;
   event_venue_name: string | null;
+  event_location_verified: number; // 0 | 1
 }
 
 // --- Holiday ---
