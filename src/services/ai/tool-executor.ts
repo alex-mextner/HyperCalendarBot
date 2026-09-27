@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { FeatureKey } from '../../database/repositories/feature-usage.repository.ts';
 import { logger } from '../../utils/logger.ts';
+import { checkDayReferences } from './day-reference-guard.ts';
 import { handleGetActionLog } from './tool-handlers/action-log.ts';
 import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
 import { handleCalculate } from './tool-handlers/calculate.ts';
@@ -414,6 +415,8 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
       input = result.data;
     }
   }
+  // A date-bearing call for a day the user did not name is rejected before any write.
+  validationError ??= checkDayReferences(ctx, toolName, input);
 
   // Time throttle: identical tool call within THROTTLE_TTL_MS returns a synthetic
   // THROTTLED result without invoking the handler. Prevents rapid cross-run

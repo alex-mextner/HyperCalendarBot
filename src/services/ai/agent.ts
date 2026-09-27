@@ -8,6 +8,7 @@ import { isBalanceExhausted } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
+import { resolveTurnDayReferences } from './day-reference-guard.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
 import { waitForAbort } from './provider-deadline.ts';
@@ -981,6 +982,7 @@ export class CalendarBotAgent {
     try {
       await writer.init();
       const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
+      ctx.dayReferences = resolveTurnDayReferences(ctx.messageText, history, new Date(), ctx.user.timezone);
       const { systemPrompt, messages: rawHistoryMessages } = await waitForAbort(
         () => this.buildMessages(ctx, history, summaryStream, requestSignal),
         requestSignal,

@@ -42,6 +42,7 @@ import type { PrivacyService } from '../sharing/privacy-service.ts';
 import type { SharingService } from '../sharing/sharing-service.ts';
 import type { StressDictionary } from '../voice/stress-dictionary.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
+import type { DayReferenceSet } from './day-references.ts';
 
 // ---------------------------------------------------------------------------
 // Capability group interfaces — each group is optional as a whole;
@@ -215,6 +216,12 @@ export interface AgentContext {
   supplementMode?: boolean;
   /** The exact auto-response text that was sent by the intent matcher. Passed to supplement AI explicitly. */
   supplementAutoResponse?: string;
+  /**
+   * Days the user named in this turn ("в среду", "завтра"), resolved once per agent run.
+   * Date-bearing tool calls for any other day are rejected before dispatch. Unset outside
+   * the agent (intent workflows, callbacks) and null when the turn names no checkable day.
+   */
+  dayReferences?: DayReferenceSet | null;
   /** Scene key storage — used by cancel_scene to delete the GramIO scene entry. Always wired from sceneStorage dep. */
   sceneStorage?: { delete(key: string): Promise<void> };
   actionLogRepo?: ActionLogRepository;
