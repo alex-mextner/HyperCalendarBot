@@ -392,7 +392,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'send_invitation',
     description:
-      'Create an invitation and attempt delivery to a verified Telegram ID or explicitly supplied @username. Contact with telegram_id none: its saved @username, else pick_users. Unknown usernames open a picker; conflicting identities require confirmation. Read the delivery result: record creation alone is not delivery.',
+      'Create an invitation and attempt delivery to a verified Telegram ID or explicitly supplied @username. Unknown usernames open a picker; conflicting identities require confirmation. Read the delivery result: record creation alone is not delivery.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -405,7 +405,7 @@ const toolDefinitions: ToolDefinition[] = [
         invitee_id: {
           type: 'number',
           description:
-            'Telegram user ID: telegram_id from find_contact/get_contacts, find_user or pick_users; never contact_id. Optional with invitee_username.',
+            'telegram_id from find_contact/get_contacts, find_user or pick_users; never contact_id. Optional with invitee_username.',
         },
         invitee_username: {
           type: 'string',
