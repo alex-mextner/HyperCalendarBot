@@ -77,7 +77,12 @@ import { createCallbackHandler } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps } from './handlers/message.handler.ts';
-import { createPickerAckIo, runChatShareWithAck, runPickerBatchWithAck } from './handlers/picker-invitation.ts';
+import {
+  continuePickerWithAgent,
+  createPickerAckIo,
+  runChatShareWithAck,
+  runPickerBatchWithAck,
+} from './handlers/picker-invitation.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { createChatLogging } from './middleware/chat-logging.ts';
 import { createConnectWizardGuard } from './middleware/connect-wizard-guard.ts';
@@ -929,21 +934,12 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         pickerInvitationDeps,
         pickerIo,
       );
-      // Build context for AI: who was requested + what really happened
-      const selectedDetails = selected
-        .map((s) => {
-          const name = s.firstName ?? s.username ?? `id:${s.userId}`;
-          const parts = [name, `id:${s.userId}`];
-          if (s.username) parts.push(`@${s.username}`);
-          return parts.join(' ');
-        })
-        .join(', ');
-      const contextMsg = `[User picker result] Delivery was attempted for the selected people. Do NOT re-send for anyone already delivered or link-sent; for anyone whose result is an error (invitation not created) you MAY retry send_invitation. Selected: ${selectedDetails}. Delivery results:\n${aiResultLines.join('\n')}\nIf the selected person's display name differs from how the user originally referred to them, call add_contact with preferred_name = the name the user used.`;
-      // Trigger AI to acknowledge/continue
+      // Trigger AI to acknowledge/continue with who was requested + what really happened
       if (chatId) {
-        agent
-          .run(buildAgentContextFactory(msgDeps)(user, chatId, contextMsg))
-          .catch((e) => botLogger.error({ err: e }, 'AI continuation after users_shared failed'));
+        continuePickerWithAgent(
+          { inviter: user, chatId, invitees: selected, aiResultLines },
+          { agent, buildContext: buildAgentContextFactory(msgDeps) },
+        ).catch((e) => botLogger.error({ err: e }, 'AI continuation after users_shared failed'));
       }
     })
     // Group chat shared from picker → send invitation to group chat

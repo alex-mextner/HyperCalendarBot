@@ -3,9 +3,10 @@ import type { ContactRepository } from '../../database/repositories/contact.repo
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { User } from '../../database/types.ts';
+import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import { describeDeliveryError } from '../../services/ai/deliver-message.ts';
 import { deliverInvitation } from '../../services/ai/invitation-delivery.ts';
-import type { TelegramSender } from '../../services/ai/types.ts';
+import type { AgentContext, TelegramSender } from '../../services/ai/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
@@ -349,6 +350,36 @@ export async function runPickerBatchWithAck(
   const { statusLines, aiResultLines } = await deliverPickerInvitations(params, deps);
   await finalizeAck(io, ack.message_id, `${m.invite_picker_header}\n${statusLines.join('\n')}`);
   return { aiResultLines };
+}
+
+/** What the `users_shared` continuation needs to hand the picker result to the AI. */
+export interface PickerContinuationDeps {
+  agent: Pick<CalendarBotAgent, 'run'>;
+  buildContext: (user: User, chatId: number, messageText: string) => AgentContext;
+}
+
+/**
+ * Continue the conversation after a `users_shared` picker: tell the AI who was picked and what
+ * really happened to each delivery, so it acknowledges instead of re-sending. The message is saved
+ * to chat_history first, like any user turn: the agent reads the current turn from history, so an
+ * unsaved message never reaches the model and is missing from later turns too.
+ */
+export async function continuePickerWithAgent(
+  params: { inviter: User; chatId: number; invitees: PickerBatchInvitee[]; aiResultLines: string[] },
+  deps: PickerContinuationDeps,
+): Promise<void> {
+  const selectedDetails = params.invitees
+    .map((invitee) => {
+      const parts = [inviteeDisplayName(invitee), `id:${invitee.userId}`];
+      if (invitee.username) parts.push(`@${invitee.username}`);
+      return parts.join(' ');
+    })
+    .join(', ');
+  const contextMsg = `[User picker result] Delivery was attempted for the selected people. Do NOT re-send for anyone already delivered or link-sent; for anyone whose result is an error (invitation not created) you MAY retry send_invitation. Selected: ${selectedDetails}. Delivery results:\n${params.aiResultLines.join('\n')}\nIf the selected person's display name differs from how the user originally referred to them, call add_contact with preferred_name = the name the user used.`;
+  const ctx = deps.buildContext(params.inviter, params.chatId, contextMsg);
+  // Telegram allows request_users only in private chats, so this is the inviter's personal history.
+  const chatHistoryId = ctx.conversationLogger.logUserMessage(params.inviter.telegram_id, contextMsg);
+  await deps.agent.run({ ...ctx, chatHistoryId });
 }
 
 export interface ChatShareAckParams {
