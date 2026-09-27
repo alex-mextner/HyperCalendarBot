@@ -231,19 +231,13 @@ test('301 distinct stored events cross the 300-ID boundary', () => {
   ).toBe(true);
 });
 
-test('timestamp wins before ID; equal timestamps choose greater ID regardless of status', () => {
+test('the most recently inserted invitation wins even when the wall clock stepped back', () => {
   const e = event();
-  // Shadow only in this test: production's unique timestamp constraint prevents ties.
-  db.exec('CREATE TEMP TABLE invitations AS SELECT * FROM main.invitations');
-  db.exec(`INSERT INTO invitations (id, event_id, inviter_id, invitee_id, status, created_at)
-    VALUES (1, ${e.id}, 1, 2, 'cancelled', '2099-01-02'), (2, ${e.id}, 1, 2, 'accepted', '2099-01-01')`);
-  const first = { id: 1 };
-  const second = { id: 2 };
-  db.query('UPDATE invitations SET created_at = ? WHERE id = ?').run('2099-01-02', first.id);
-  db.query('UPDATE invitations SET created_at = ? WHERE id = ?').run('2099-01-01', second.id);
+  const accepted = invite(e.id, 2, 'accepted');
+  db.query('UPDATE invitations SET created_at = ? WHERE id = ?').run('2099-01-02 00:00:05', accepted.id);
+  const cancelled = invite(e.id, 2, 'cancelled');
+  db.query('UPDATE invitations SET created_at = ? WHERE id = ?').run('2099-01-02 00:00:04', cancelled.id);
   expect(visible(1)[0]?.event.displayMetadata?.invitationStatus).toBe('Alice: 🚫 cancelled');
-  db.query('UPDATE invitations SET created_at = ? WHERE id = ?').run('2099-01-02', second.id);
-  expect(visible(1)[0]?.event.displayMetadata?.invitationStatus).toBe('Alice: ✅ accepted');
 });
 
 test('child participation overrides master invitation and child invitation overrides participation', () => {

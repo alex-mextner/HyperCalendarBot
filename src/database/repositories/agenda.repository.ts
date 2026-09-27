@@ -74,7 +74,7 @@ export class AgendaRepository {
             .query<RosterRow, number[]>(`
         WITH ranked AS (
           SELECT *, ROW_NUMBER() OVER (
-            PARTITION BY event_id, invitee_id ORDER BY created_at DESC, id DESC
+            PARTITION BY event_id, invitee_id ORDER BY id DESC
           ) AS recipient_rank
           FROM invitations WHERE event_id IN (${privateIds.map(() => '?').join(',')})
         )
