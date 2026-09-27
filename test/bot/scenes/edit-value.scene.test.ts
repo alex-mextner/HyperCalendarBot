@@ -10,16 +10,23 @@ import { createUserResolverComposer } from '../../../src/bot/middleware/user-res
 import { createEditValueScene } from '../../../src/bot/scenes/edit-value.scene.ts';
 import type { DatabaseService } from '../../../src/database/index.ts';
 import { migrations } from '../../../src/database/migrations.ts';
+import { AgendaRepository } from '../../../src/database/repositories/agenda.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { CalendarEvent, User } from '../../../src/database/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
-import type { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
+import { AddressCache } from '../../../src/services/location/address-cache.ts';
+import type { GeocodedLocation } from '../../../src/services/location/geocoding-service.ts';
+import { InMemoryLocationCandidateStore } from '../../../src/services/location/location-candidate-store.ts';
+import { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
 
 const USER_ID = 502;
+const INVITEE_ID = 503;
 const CHAT_ID = 502;
 const CARD_MESSAGE_ID = 31;
+const INVITATION_MESSAGE_ID = 32;
 
 const OLD_PLACE = {
   resolved_address: 'Example Boulevard 7, Sampletown',
@@ -164,5 +171,194 @@ describe('edit_value scene: Location button', () => {
 
     expect(events.findById(event.id, USER_ID)).toMatchObject({ title: 'Late dinner', ...OLD_PLACE });
     expect(verifyEventLocation).not.toHaveBeenCalled();
+  });
+});
+
+// The Location button goes through the real verification: nothing is applied before the user
+// answers the picker, and answering "keep as typed" refreshes delivered invitation cards even
+// though the location write itself already dropped the old place.
+describe('edit_value scene: Location button with real verification', () => {
+  const LONE_MATCH: GeocodedLocation = {
+    formattedAddress: 'Doma Bistro, Example Street 3, Sampletown',
+    latitude: 44.81,
+    longitude: 20.46,
+    city: 'Sampletown',
+    country: 'Exampleland',
+    placeId: 'SYNTHETIC_DOMA_BISTRO',
+    googleMapsUrl: 'https://www.google.com/maps/place/?q=place_id:SYNTHETIC_DOMA_BISTRO',
+    venueName: 'Doma Bistro',
+  };
+
+  interface Offer {
+    userId: number;
+    text: string;
+    callbacks: string[];
+  }
+
+  let events: EventRepository;
+  let user: User;
+  let addressCache: AddressCache;
+  let candidates: InMemoryLocationCandidateStore;
+  let verification: LocationVerificationService;
+  let invitations: InvitationRepository;
+  let invitationCards: string[];
+  let offered: Promise<Offer>;
+  let step: StepFn;
+
+  beforeEach(() => {
+    const db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    const users = new UserRepository(db);
+    user = users.create({ telegram_id: USER_ID, timezone: 'UTC' });
+    users.create({ telegram_id: INVITEE_ID, timezone: 'UTC' });
+    events = new EventRepository(db);
+    const redis = new Map<string, string>();
+    addressCache = new AddressCache({
+      get: async (key) => redis.get(key) ?? null,
+      set: async (key, value) => redis.set(key, value),
+    });
+    candidates = new InMemoryLocationCandidateStore();
+    invitationCards = [];
+    const offer = Promise.withResolvers<Offer>();
+    offered = offer.promise;
+    invitations = new InvitationRepository(db);
+    verification = new LocationVerificationService({
+      geocodingService: {
+        findPlace: async () => [LONE_MATCH],
+        geocodeAddress: async () => [],
+        reverseGeocode: async () => null,
+        locateArea: async () => null,
+      },
+      addressCache,
+      eventRepo: events,
+      userRepo: users,
+      invitationRepo: invitations,
+      agendaRepository: new AgendaRepository(db),
+      candidateStore: candidates,
+      sendMessage: async (userId, text, options) => {
+        const markup = options?.reply_markup;
+        const rows = markup && 'inline_keyboard' in markup ? markup.inline_keyboard : [];
+        const callbacks = rows.flat().flatMap((button) => (button.callback_data ? [button.callback_data] : []));
+        offer.resolve({ userId, text, callbacks });
+      },
+      editMessage: async (_chatId, _messageId, text) => {
+        invitationCards.push(text);
+      },
+    });
+    step = getStepFn(
+      createEditValueScene(
+        new EventService({ eventRepo: events }),
+        createUserResolverComposer(userOnlyDb(users)),
+        undefined,
+        verification,
+      ),
+    );
+  });
+
+  /** An event whose place the user confirmed, with an invitation card delivered to the invitee. */
+  function resolvedInvitedEvent(): CalendarEvent {
+    const event = events.create({
+      user_id: USER_ID,
+      title: 'Dinner',
+      start_at: '2026-10-05T17:00:00Z',
+      end_at: '2026-10-05T18:00:00Z',
+      timezone: 'UTC',
+      location: 'seaside hotel',
+    });
+    events.updateLocationFields(event.id, OLD_PLACE);
+    invitations.create({
+      event_id: event.id,
+      inviter_id: USER_ID,
+      invitee_id: INVITEE_ID,
+      message_id: INVITATION_MESSAGE_ID,
+      chat_id: INVITEE_ID,
+    });
+    return event;
+  }
+
+  function locationCtx(eventId: number, text: string): EditCtx {
+    return {
+      lang: 'ru',
+      dbUser: user,
+      text,
+      id: 40,
+      scene: {
+        params: { eventId, field: 'location', chatId: CHAT_ID, messageId: CARD_MESSAGE_ID },
+        step: { id: 0 },
+        exit: mock(() => Promise.resolve()),
+      },
+      send: mock(() => Promise.resolve()),
+      bot: { api: { editMessageText: mock(() => Promise.resolve()) } },
+      is: (type) => type === 'message',
+    };
+  }
+
+  /** The `index|keep` choices of the picker, after checking they all answer one picker of the event. */
+  function pickerChoices(offer: Offer, eventId: number): { pickerId: string; choices: string[] } {
+    const parts = offer.callbacks.map((data) => data.split(':'));
+    for (const [prefix, id] of parts) {
+      expect(prefix).toBe('loc_cand');
+      expect(id).toBe(String(eventId));
+    }
+    const pickerIds = new Set(parts.map((p) => p[2]));
+    expect(pickerIds.size).toBe(1);
+    return { pickerId: parts[0]?.[2] ?? '', choices: parts.map((p) => p[3] ?? '') };
+  }
+
+  const UNRESOLVED = {
+    resolved_address: null,
+    latitude: null,
+    longitude: null,
+    google_maps_url: null,
+    location_verified: 0,
+    venue_name: null,
+  };
+
+  test('a lone geocoding match is offered for confirmation, not applied', async () => {
+    const event = resolvedInvitedEvent();
+    await step(locationCtx(event.id, 'дома'), () => Promise.resolve());
+
+    const offer = await offered;
+    expect(offer.userId).toBe(USER_ID);
+    expect(offer.text).toContain(LONE_MATCH.formattedAddress);
+    expect(pickerChoices(offer, event.id).choices).toEqual(['0', 'keep']);
+    expect((await candidates.get(event.id))?.candidates).toEqual([LONE_MATCH]);
+    expect(events.findById(event.id, USER_ID)).toMatchObject({ location: 'дома', ...UNRESOLVED });
+    expect(await addressCache.findMapping(USER_ID, 'дома')).toBeNull();
+    expect(invitationCards).toEqual([]);
+  });
+
+  test('a remembered place for the typed text is offered, not applied', async () => {
+    await addressCache.recordMapping(USER_ID, 'дома', {
+      resolvedAddress: LONE_MATCH.formattedAddress,
+      googleMapsUrl: LONE_MATCH.googleMapsUrl,
+      latitude: LONE_MATCH.latitude,
+      longitude: LONE_MATCH.longitude,
+      placeId: LONE_MATCH.placeId,
+      venueName: LONE_MATCH.venueName,
+    });
+    const event = resolvedInvitedEvent();
+    await step(locationCtx(event.id, 'дома'), () => Promise.resolve());
+
+    const offer = await offered;
+    expect(offer.text).toContain(LONE_MATCH.formattedAddress);
+    expect(pickerChoices(offer, event.id).choices).toEqual(['0', 'keep']);
+    expect(events.findById(event.id, USER_ID)).toMatchObject({ location: 'дома', ...UNRESOLVED });
+    expect(invitationCards).toEqual([]);
+  });
+
+  test('keeping the new text as typed refreshes the invitation card that still shows the old place', async () => {
+    const event = resolvedInvitedEvent();
+    await step(locationCtx(event.id, 'harbour cafe'), () => Promise.resolve());
+    const { pickerId } = pickerChoices(await offered, event.id);
+
+    expect(await verification.keepTypedLocation(event.id, USER_ID, pickerId)).not.toBeNull();
+
+    expect(events.findById(event.id, USER_ID)).toMatchObject({ location: 'harbour cafe', ...UNRESOLVED });
+    expect(invitationCards).toHaveLength(1);
+    expect(invitationCards[0]).toContain('harbour cafe');
+    expect(invitationCards[0]).not.toContain(OLD_PLACE.venue_name);
+    expect(invitationCards[0]).not.toContain('SYNTHETIC_OLD_PLACE');
   });
 });
