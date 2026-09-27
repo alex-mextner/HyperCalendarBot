@@ -732,7 +732,7 @@ describe('conflict image on accept', () => {
   });
 });
 
-describe('reschedule from a proposal the invitee has since answered', () => {
+describe('inviter acting on a time proposal that is already closed', () => {
   const INVITER = 100;
   const INVITEE = 200;
 
@@ -785,5 +785,37 @@ describe('reschedule from a proposal the invitee has since answered', () => {
     expect(tap.answer).toHaveBeenCalledWith({ text: t('en').invite_proposal_closed });
     expect(tap.editText).toHaveBeenCalledWith(t('en').invite_proposal_closed, { parse_mode: 'HTML' });
     expect(notifyDeps.sendMessage).not.toHaveBeenCalled();
+  });
+
+  test('a second tap on an already settled proposal keeps the invitation pending and the event in place', async () => {
+    const { handler, invitationService, invRepo, eventRepo, participantRepo, event, invitation, notifyDeps } =
+      setupRealInvitation();
+    // Two notices reach the inviter: the invitee first suggests one time, then another.
+    const firstProposal = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const secondProposal = new Date(Date.now() + 9 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    invitationService.proposeTime(invitation.id, INVITEE, firstProposal);
+    invitationService.proposeTime(invitation.id, INVITEE, secondProposal);
+
+    const keep = makeCallbackTap(`inv:dismiss:${invitation.id}`, { telegram_id: INVITER, language: 'en' });
+    await handler(keep.ctx);
+    await flushPromises();
+    expect(keep.editText).toHaveBeenCalledWith(t('en').invite_kept_inviter, { parse_mode: 'HTML' });
+    const sentAfterKeep = notifyDeps.sendMessage.mock.calls.length;
+
+    // A double tap on the settled notice, then Reschedule on the second notice.
+    for (const data of [`inv:dismiss:${invitation.id}`, `inv:reschedule:${invitation.id}`]) {
+      const tap = makeCallbackTap(data, { telegram_id: INVITER, language: 'en' });
+      await handler(tap.ctx);
+      await flushPromises();
+      expect(tap.answer).toHaveBeenCalledWith({ text: t('en').invite_proposal_closed });
+      expect(tap.editText).toHaveBeenCalledWith(t('en').invite_proposal_closed, { parse_mode: 'HTML' });
+    }
+
+    const stored = invRepo.findById(invitation.id)!;
+    expect(stored.status).toBe('pending');
+    expect(stored.proposed_time).toBeNull();
+    expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
+    expect(eventRepo.findById(event.id, INVITER)!.start_at).toBe(event.start_at);
+    expect(notifyDeps.sendMessage).toHaveBeenCalledTimes(sentAfterKeep);
   });
 });
