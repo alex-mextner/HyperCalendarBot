@@ -84,7 +84,40 @@ scripts/deploy-local-fallback.sh
 scripts/deploy-local-fallback.sh --ref origin/main --skip-tests
 ```
 
-The script keeps the actual running image under a timestamped rollback tag, takes a WAL-safe DB backup before restart, preserves host files, reapplies runtime directory ownership and recreates only the bot service. It requires exact `/health=ok`, `/ready=ok` or `ok (unverified)`, and the expected image identity. An unverified readiness response is recorded as such, not a completed live AI test. A failure restores the previous image and host files without overwriting newer calendar writes. Generic rollback is intentionally limited to unchanged migration code: a schema-changing release is allowed automatically only once every newly added `src/database/migrations.ts` entry has a matching `docs/reference/migrations/<name>.md` shipped in the image — that doc is the reviewed procedure. No broad prune or shared-proxy reload is performed. The receipt is stored in `/opt/hypercal/releases/current.json`. Normal gh-ship invokes this same fallback after its merge and hosted-run checks; manual use remains an operator recovery path. Schema-changing releases and end-to-end AI verification remain separately tracked under #276.
+The script keeps the actual running image under a timestamped rollback tag, takes a WAL-safe DB backup before restart, preserves host files, reapplies runtime directory ownership and recreates only the bot service. It requires exact `/health=ok`, `/ready=ok` or `ok (unverified)`, and the expected image identity. An unverified readiness response is recorded as such, not a completed live AI test. A failure restores the previous image and host files without overwriting newer calendar writes, and the rollback counts only when the restored container is the previous image answering `/health=ok` (readiness is logged, not required: an AI provider outage fails it for every image); otherwise the log says `ROLLBACK FAILED` and the bot may be down. Before any backup or restart, the schema gate below decides whether the release's migrations may activate unattended. No broad prune or shared-proxy reload is performed. The receipt is stored in `/opt/hypercal/releases/current.json`. Normal gh-ship invokes this same fallback after its merge and hosted-run checks; manual use remains an operator recovery path. End-to-end AI verification remains tracked under #276.
+
+### Schema gate
+
+`scripts/migration-gate.py check`, run by `deploy-prebuilt-image.sh` for hosted CI, the local fallback and gh-ship alike, compares `src/database/migrations.ts` of the running container with the release image (#589). When the file is byte-identical the release goes ahead. Otherwise it activates automatically only when every difference is a new migration entry appended after the shipped ones, which the database's `migrations` table (read through the running container) does not record yet, and whose `docs/reference/migrations/<name>.md` in the release image begins with exactly this front matter and has a non-empty body:
+
+```markdown
+---
+migration: <name>
+rollback-compatible: yes
+data-deletion: no
+---
+```
+
+- `rollback-compatible` says whether the previous image works on a database this migration has already changed. The automatic rollback relies on it. `no` needs a `## Rollback` section in the doc.
+- `data-deletion` says whether the migration removes or overwrites data that cannot be rebuilt from the migrated database: a dropped column or table, deleted rows, or a flag cleared on rows whose earlier value mattered (063).
+- Migration names are parsed strictly: each entry's `name:` is one single-quoted `[A-Za-z0-9_]` literal alone on its line. The names the release's module actually exports (read by importing it in a network-less container) must equal the parsed entries.
+- Code outside the entries (imports, top-level statements, anything after the array) is fingerprinted as a whole.
+
+A release that declares `rollback-compatible: no` or `data-deletion: yes`, changes code outside the entries, or ships a migration that the database records but the running image lacks (after an image-only rollback) needs a written, reviewed migration procedure, as for 062 and 063. The operator runs the activation by hand on the host and names the one transition that was reviewed. The refusal prints the pair, but it is the reviewed procedure that authorizes it:
+
+```bash
+HYPERCAL_REVIEWED_SCHEMA_TRANSITION="<running sha256>:<release sha256>" \
+  bash "$STAGE/scripts/deploy-prebuilt-image.sh" /opt/hypercal "$STAGE" "$IMAGE" "$SHA" "$ARCHIVE_SUM" "$CONFIG_ID"
+```
+
+The two values are `sha256sum /app/src/database/migrations.ts` in the running container and in the release image. Hosted CI, the local fallback and gh-ship never set the variable. It never accepts a missing, empty or malformed doc; an edited, renamed, removed or reordered shipped migration (the runner would never run the edit); a `migrations.ts` that cannot be read or parsed; exports that differ from the source entries; or applied migrations or docs that cannot be read.
+
+Every activation logs one audit line before the backup. Its keys are fixed:
+
+- `SCHEMA_GATE decision=unchanged migrations_sha256=<sha256>`
+- `SCHEMA_GATE decision=automatic|reviewed-override from=<running sha256> to=<release sha256>`, followed by one `migration=<name> doc=docs/reference/migrations/<name>.md doc_sha256=<sha256> rollback-compatible=yes|no data-deletion=yes|no` group per new migration. A reviewed override first logs the refusals it overrode as `Schema gate refusal: …` lines.
+
+If a release that the override accepted with `rollback-compatible: no` fails verification, the script stops it and reads the `migrations` table with the previous image. It restores the previous image only when none of those migrations is recorded. Otherwise, or when the read fails, it starts the release again, logs `ROLLBACK_SKIPPED`, and the operator follows the doc's `## Rollback` section. The database is never restored automatically.
 
 ## Docker
 
