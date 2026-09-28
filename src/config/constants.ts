@@ -567,6 +567,10 @@ export const MSG = {
           'The recipient ID and username identify different people. Choose the intended person again; no invitation was created.',
         recipientUnverified:
           'I cannot verify this recipient. Choose the person from your contacts or the Telegram picker; no invitation was created.',
+        recipientContactRowId:
+          'A contact number from the address book is not a Telegram ID; no invitation was created.',
+        recipientContactWithoutTelegram: (name: string) =>
+          `"${name}" in your contacts has no linked Telegram account. Choose them with the Telegram user picker; no invitation was created.`,
         contactsList: (lines: string) => `Contacts:\n${lines}`,
         contactSaved: (name: string) => `Contact saved: ${name}`,
         contactFound: (data: string) => `Contact found: ${data}`,
@@ -1522,6 +1526,9 @@ export const MSG = {
           'ID и username получателя указывают на разных людей. Выбери нужного человека ещё раз; приглашение не создавал.',
         recipientUnverified:
           'Не могу проверить этого получателя. Выбери человека из контактов или через выбор пользователей Telegram; приглашение не создавал.',
+        recipientContactRowId: 'Номер контакта в адресной книге — не Telegram ID; приглашение не создавал.',
+        recipientContactWithoutTelegram: (name: string) =>
+          `У контакта «${name}» нет привязанного Telegram-аккаунта. Выбери его через выбор пользователей Telegram; приглашение не создавал.`,
         contactsList: (lines: string) => `Контакты:\n${lines}`,
         contactSaved: (name: string) => `Контакт сохранён: ${name}`,
         contactFound: (data: string) => `Контакт найден: ${data}`,

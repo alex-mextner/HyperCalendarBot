@@ -2270,4 +2270,16 @@ describe('CalendarBotAgent.run()', () => {
       `RU responseText "${resultRu.responseText}" must contain a Russian stall phrase`,
     ).toBe(true);
   });
+
+  test('a failed tool result carries its recovery hint into the next model round', async () => {
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'lookup', name: 'find_user', input: { username: 'unconfirmed_person' } },
+      { kind: 'text', text: 'Please send the exact @username.' },
+    ]);
+    await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
+
+    const toolMessage = script.calls[1]?.messages.find((m) => m.role === 'tool' && m.tool_call_id === 'lookup');
+    expect(toolMessage?.content).toStartWith('Error: ');
+    expect(toolMessage?.content).toContain('\n[AGENT: Use find_contact for a personal name.');
+  });
 });

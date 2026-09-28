@@ -6,6 +6,13 @@ import { inspectRecipientProfile } from '../recipient-profile.ts';
 import type { AgentContext, ContactMatch, ToolHandlerMeta, ToolResult, UserInspection } from '../types.ts';
 
 const MAX_CONTACT_MATCHES = 5;
+/** contact_id and telegram_id are both bare integers in tool output; only telegram_id addresses a person. */
+function recipientIdHint(contacts: { telegram_id: number | null }[]): string {
+  const hint = 'contact_id is an address-book row, never a Telegram ID: invitee_id takes telegram_id.';
+  return contacts.some((contact) => contact.telegram_id === null)
+    ? `${hint} telegram_id: none means no linked Telegram account: invite via its saved @username, else pick_users.`
+    : hint;
+}
 
 type RankedContact = { contact: Contact; confidence: number };
 
@@ -25,7 +32,7 @@ function formatContactFields(contact: Contact): string {
   const parts = [`contact_id: ${contact.id}`, `name: ${contact.name}`, `created_at_utc: ${contact.created_at}`];
   if (contact.preferred_name) parts.push(`preferred_name: ${contact.preferred_name}`);
   if (contact.username) parts.push(`username: @${contact.username}`);
-  if (contact.telegram_id) parts.push(`telegram_id: ${contact.telegram_id}`);
+  parts.push(`telegram_id: ${contact.telegram_id ?? 'none'}`);
   return parts.join(', ');
 }
 
@@ -38,7 +45,7 @@ function formatContactMatchLine(match: ContactMatch): string {
   if (match.created_at) parts.push(`created_at_utc: ${match.created_at}`);
   if (match.preferred_name) parts.push(`preferred_name: ${match.preferred_name}`);
   if (match.username) parts.push(`username: @${match.username}`);
-  if (match.telegram_id) parts.push(`telegram_id: ${match.telegram_id}`);
+  parts.push(`telegram_id: ${match.telegram_id ?? 'none'}`);
   return `- ${parts.join(', ')} (${confidenceLabel(match.confidence)})`;
 }
 
@@ -81,10 +88,14 @@ export function handleGetContacts(ctx: AgentContext, input: { force?: boolean })
     const parts = [c.preferred_name ?? c.name, `contact_id:${c.id}`, `created_at_utc:${c.created_at}`];
     if (c.preferred_name) parts.push(`display:${c.name}`);
     if (c.username) parts.push(`@${c.username}`);
-    if (c.telegram_id) parts.push(`telegram_id:${c.telegram_id}`);
+    parts.push(`telegram_id:${c.telegram_id ?? 'none'}`);
     return parts.join(' — ');
   });
-  return { success: true, output: t(lang).aiTools.meta.contactsList(lines.join('\n')) };
+  return {
+    success: true,
+    output: t(lang).aiTools.meta.contactsList(lines.join('\n')),
+    agentHint: recipientIdHint(contacts),
+  };
 }
 handleGetContacts.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
@@ -127,6 +138,7 @@ export function handleFindContact(ctx: AgentContext, input: { name: string }): T
 
   const lang = ctx.user.language;
   const matches = ranked.map(({ contact, confidence }) => toContactMatch(contact, confidence));
+  const agentHint = recipientIdHint(matches);
 
   if (ranked.length === 1) {
     const only = ranked[0]!;
@@ -134,6 +146,7 @@ export function handleFindContact(ctx: AgentContext, input: { name: string }): T
     return {
       success: true,
       output: t(lang).aiTools.meta.contactFound(display),
+      agentHint,
       data: { matches },
     };
   }
@@ -141,6 +154,7 @@ export function handleFindContact(ctx: AgentContext, input: { name: string }): T
   return {
     success: true,
     output: t(lang).aiTools.meta.contactMatches(matches.map(formatContactMatchLine).join('\n')),
+    agentHint,
     data: { matches },
   };
 }

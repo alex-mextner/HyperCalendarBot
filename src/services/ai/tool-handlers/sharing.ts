@@ -105,6 +105,26 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
     };
   }
   if (!recipient.ok) {
+    if (recipient.reason === 'contact_row_id') {
+      const { contact } = recipient;
+      const tr = t(ctx.user.language).aiTools.meta;
+      const name = contact.preferred_name ?? contact.name;
+      if (contact.telegram_id) {
+        return {
+          success: false,
+          mutationState: 'not_applied',
+          error: tr.recipientContactRowId,
+          agentHint: `${contact.id} is the contact_id of "${name}", not a Telegram ID. For "${name}" retry with invitee_id ${contact.telegram_id}; for anyone else use pick_users.`,
+        };
+      }
+      const usernameRoute = contact.username ? `invitee_username ${contact.username} or ` : '';
+      return {
+        success: false,
+        mutationState: 'not_applied',
+        error: tr.recipientContactWithoutTelegram(name),
+        agentHint: `${contact.id} is the contact_id of "${name}", who has no Telegram ID. Use ${usernameRoute}pick_users with event_id ${input.event_id}.`,
+      };
+    }
     if (
       !input.force &&
       !ctx.isGroup &&
