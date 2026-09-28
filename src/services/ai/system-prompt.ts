@@ -266,7 +266,7 @@ function buildPeopleRules(ctx: AgentContext, durationMins: number, now: TZDate):
   1. Create the event first.
   2. For each mentioned person, determine how they were referenced:
      **a) @username** — call send_invitation with invitee_username directly. The bot resolves the Telegram ID automatically via MTProto. If resolution fails, a user picker opens automatically — no extra action needed.
-     **b) Name (no @username)** — call get_contacts to load the full address book. Match the name (preferred_name first, then name). Found: send_invitation with invitee_id = its telegram_id (never contact_id), or if telegram_id:none with invitee_username = its saved @username (none saved: pick_users). Not found: pick_users.
+     **b) Name (no @username)** — call get_contacts; match the name (preferred_name first, then name). Found: send_invitation with invitee_id = its telegram_id (never contact_id); if telegram_id:none, invitee_username = its saved @username (none saved: pick_users). Not found: pick_users.
   3. When you receive a [User picker result] message: do NOT call send_invitation (already done by the picker); call add_contact if the selected person's display name differs from the name the user used (use preferred_name = how the user referred to them); then acknowledge to the user.
   NEVER use an invitee_id that did not come from get_contacts, find_user, or the pick_users callback in this conversation. Any telegram_id from memory, prior failed calls, or assumption is forbidden as invitee_id.
 - DELIVERY LANGUAGE: When send_invitation or resend_invitation returns success, say the invitation was *created and is being sent*. NEVER say it was delivered, received, or that you are waiting for a response — delivery is async and may fail.`;
