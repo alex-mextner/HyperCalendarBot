@@ -1255,7 +1255,7 @@ if (config.REDIS_URL) {
 
 // Freeze msgDeps after all potential mutation sites (onboardingScene in createBot,
 // scheduledCallService/triggerService in the REDIS_URL block above). All downstream
-// consumers — AI agent context builder, pipeline layers, scene forwardToAi closure —
+// consumers — AI agent context builder, pipeline layers, callback agent continuations —
 // capture msgDeps by reference, so locking it here prevents accidental late writes
 // from silently reshaping what those closures see.
 Object.freeze(msgDeps);

@@ -2,8 +2,8 @@
  * Unit tests for `createScopedSceneStorage` — the public factory that bundles
  * `createSceneStorage` + `wrapWithChatId`. Exposing this as a standalone export
  * lets bot/index.ts wire the storage into msgDeps BEFORE scenes are built, which
- * in turn allows the scene plugin to receive a real (not late-bound) forwardToAi
- * closure. The factory is tiny, but its existence is load-bearing, so a smoke
+ * in turn allows the scene plugin to receive real (not late-bound) closures.
+ * The factory is tiny, but its existence is load-bearing, so a smoke
  * test guarantees the two pieces stay composed correctly.
  */
 import { Database } from 'bun:sqlite';

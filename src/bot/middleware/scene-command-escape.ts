@@ -1,10 +1,13 @@
 // src/bot/middleware/scene-command-escape.ts
 
 import type { Next } from 'gramio';
+import { t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
+import { abortConnectAuth, CONNECT_TELEGRAM_SCENE, deleteWizardInput } from '../scenes/connect-telegram.scene.ts';
 
 interface SceneData {
   name: string;
+  state?: unknown;
 }
 
 interface Storage {
@@ -17,6 +20,7 @@ interface EscapeCtx {
   from?: { id: number };
   dbUser?: User;
   send(text: string, opts?: { reply_markup?: { remove_keyboard?: boolean } }): Promise<void>;
+  delete(): Promise<unknown>;
   text?: string;
 }
 
@@ -31,7 +35,8 @@ const SCENE_CANCEL_MESSAGES: Record<string, Record<string, string>> = {
 /**
  * Middleware that intercepts commands while a scene is active.
  * Clears the scene from storage and sends a named cancellation message,
- * then lets the command propagate to the command handlers.
+ * then lets the command propagate to the command handlers — except inside the
+ * Telegram-connect wizard, whose input may be a credential and goes nowhere.
  *
  * Must be registered BEFORE the scenes plugin.
  */
@@ -53,6 +58,17 @@ export function createSceneCommandEscape(storage: Storage) {
     await storage.delete(key);
 
     const lang = (ctx.dbUser?.language ?? 'en') as 'en' | 'ru';
+
+    // At the connect wizard's prompts a "/…" text may be the 2FA password: end the wizard like its
+    // cancel button (stop the login, drop its temp session), take the message off the chat, and
+    // hand it to no command handler or AI.
+    if (sceneData.name === CONNECT_TELEGRAM_SCENE) {
+      await deleteWizardInput(ctx, userId);
+      await abortConnectAuth(userId, sceneData.state);
+      await ctx.send(t(lang).connectTelegram.authCancelled, { reply_markup: { remove_keyboard: true } });
+      return;
+    }
+
     const message = SCENE_CANCEL_MESSAGES[sceneData.name]?.[lang] ?? (lang === 'ru' ? 'Отменено.' : 'Cancelled.');
 
     await ctx.send(message, { reply_markup: { remove_keyboard: true } });

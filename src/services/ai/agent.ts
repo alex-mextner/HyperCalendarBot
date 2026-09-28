@@ -620,7 +620,7 @@ export class CalendarBotAgent {
     signal?: AbortSignal,
   ): Promise<{ systemPrompt: string; messages: MessageParam[] }> {
     // IMPORTANT: history must already contain the current user message.
-    // The universal GramIO middleware in bot/index.ts saves it via ConversationLogger
+    // The chat-logging middleware (bot/middleware/chat-logging.ts) saves it via ConversationLogger
     // before the pipeline runs, so by the time agent.run() is called, it is present.
     const systemPrompt = buildSystemPrompt(ctx);
 
