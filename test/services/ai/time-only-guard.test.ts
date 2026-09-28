@@ -126,6 +126,9 @@ describe('a message with only a clock time', () => {
     // An hour word may stand between the hour and the part of the day.
     expect(timeOnlyToday('поезд в 12 часов ночи', eight, TZ)).toBeNull();
     expect(timeOnlyToday('ужин в 7 часов вечера', eight, TZ)?.allowedDates).toEqual(new Set(['2026-09-16']));
+    // The part of the day applies to a time with minutes too.
+    expect(timeOnlyToday('в 7:30 вечера ужин', WEDNESDAY_MORNING, TZ)?.allowedDates).toEqual(new Set(['2026-09-16']));
+    expect(timeOnlyToday('в 12:30 ночи созвон', WEDNESDAY_MORNING, TZ)).toBeNull();
   });
 
   test('counts and other zones are no clock time for today', () => {
@@ -136,9 +139,19 @@ describe('a message with only a clock time', () => {
     const eight = new Date('2026-09-16T18:00:00Z');
     expect(timeOnlyToday('созвон в 23:30 по Токио', eight, TZ)).toBeNull();
     expect(timeOnlyToday('созвон в 23:30 мск', eight, TZ)).toBeNull();
-    // A place written in lower case, and zone abbreviations beyond МСК.
+    // A place written in lower case at the end of the time, and zone abbreviations beyond МСК.
     expect(timeOnlyToday('созвон в 23:30 по нью-йорку', eight, TZ)).toBeNull();
     expect(timeOnlyToday('созвон в 22:00 PST', eight, TZ)).toBeNull();
+    expect(timeOnlyToday('созвон в 23:30 HST', eight, TZ)).toBeNull();
+  });
+
+  test('"по" after a time is a zone only when a place ends the phrase', () => {
+    expect(timeOnlyToday('напомни в 18:30 по работе позвонить', WEDNESDAY_MORNING, TZ)?.allowedDates).toEqual(
+      new Set(['2026-09-16']),
+    );
+    // A named day is not widened to its neighbours by an ordinary "по".
+    const turn = resolveTurnDayReferences('созвон завтра в 9 утра по дороге домой', [], WEDNESDAY_MORNING, TZ);
+    expect(turn && [...turn.allowedDates]).toEqual(['2026-09-17']);
   });
 
   test('the phrase quoted back to the model is the time itself', () => {
