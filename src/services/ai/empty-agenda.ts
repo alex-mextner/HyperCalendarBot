@@ -82,7 +82,7 @@ function classify(interval: AgendaInterval, start: LocalMoment, end: LocalMoment
   return { kind: 'window', sameDay: start.dayIndex === end.dayIndex };
 }
 
-function relativeDayWord(
+export function relativeDayWord(
   words: Messages['aiTools']['events']['emptyAgenda']['relativeDay'],
   delta: number,
 ): string | null {

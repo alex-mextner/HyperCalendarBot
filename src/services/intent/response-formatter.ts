@@ -1,8 +1,10 @@
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import { z } from 'zod';
+import { t, toLang } from '../../config/constants.ts';
 import { formatTime } from '../../utils/date.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
+import { relativeDayWord } from '../ai/empty-agenda.ts';
 import type { EventSummary } from './variable-resolver.ts';
 
 const TextMapCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
@@ -73,6 +75,42 @@ export function formatResponse(
     // On any error (JSON parse, etc.), fall back to raw text
     return toolOutput;
   }
+}
+
+const DAY_MS = 86_400_000;
+
+/** One day of a several-day answer: the day that was read and what the read returned for it. */
+export interface DayAnswer {
+  /** YYYY-MM-DD in the user's timezone. */
+  day: string;
+  response?: string;
+  events?: EventSummary[];
+}
+
+/**
+ * Answer for several days, each under a heading with the day relative to today, its weekday and
+ * date ("Сегодня, пн 14.09:"), then that day's events or the tool's own text about it. Weekday and
+ * date come from the calendar day itself, never from generated text.
+ */
+export function formatDayAnswers(answers: DayAnswer[], timezone: string, language: string, now: Date): string {
+  const messages = t(toLang(language));
+  const today = Date.parse(format(new TZDate(now, timezone), 'yyyy-MM-dd'));
+  return answers
+    .map(({ day, response, events }) => {
+      const date = new Date(`${day}T00:00:00Z`);
+      const heading = messages.intentWorkflow.dayHeading(
+        relativeDayWord(messages.aiTools.events.emptyAgenda.relativeDay, (date.getTime() - today) / DAY_MS),
+        messages.intentWorkflow.weekdaysShort[(date.getUTCDay() + 6) % 7]!,
+        day.slice(8, 10),
+        day.slice(5, 7),
+      );
+      // The heading names the day, so event rows carry only their time.
+      const body = events?.length
+        ? events.map((event) => `${event.all_day ? '' : (event.time ?? '')}  ${event.title}`.trim()).join('\n')
+        : formatText(response ?? '');
+      return `${heading}:\n${body}`;
+    })
+    .join('\n\n');
 }
 
 function formatText(output: string): string {

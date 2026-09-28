@@ -155,6 +155,10 @@ export const MSG = {
         'The change went through, but I could not finish the rest of the request. Check your calendar; I will not repeat it.',
       outcomeUnknown:
         'I could not confirm whether that went through. Check your calendar before repeating the request; I will not retry it automatically.',
+      /** Monday first, for a day heading such as "Today, Mon 09/14". */
+      weekdaysShort: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      dayHeading: (relative: string | null, weekday: string, day: string, month: string) =>
+        `${relative ? `${capitalize(relative)}, ` : ''}${weekday} ${month}/${day}`,
     },
     writeOutcomes: {
       completed: 'Completed',
@@ -1142,6 +1146,9 @@ export const MSG = {
         'Изменение применено, но остальную часть запроса выполнить не удалось. Проверь календарь: повторять я не буду.',
       outcomeUnknown:
         'Не могу подтвердить, выполнилось ли это. Проверь календарь, прежде чем повторять запрос: сам я его повторять не буду.',
+      weekdaysShort: ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'],
+      dayHeading: (relative: string | null, weekday: string, day: string, month: string) =>
+        relative ? `${capitalize(relative)}, ${weekday} ${day}.${month}` : `${capitalize(weekday)} ${day}.${month}`,
     },
     writeOutcomes: {
       completed: 'Выполнено',

@@ -724,4 +724,33 @@ describe('IntentExecutor', () => {
       expect(result.response).toBe('Выбери пользователя из списка');
     });
   });
+
+  describe('after midnight', () => {
+    afterEach(() => jest.setSystemTime());
+
+    test('a rule that can write runs once, for the literal day, even when its date is marked for both days', async () => {
+      jest.setSystemTime(new Date('2026-09-13T23:22:00Z')); // Mon 2026-09-14 01:22 in Belgrade
+      const calls: { name: string; input: unknown }[] = [];
+      const workflow: Workflow = {
+        version: 2,
+        bindings: { day: { type: 'date', from: '{{$1}}', words: { завтра: 'tomorrow' }, after_midnight: 'both' } },
+        steps: [{ call: 'create_event', input: { title: 'Standup', start_at: '{{bind.day}}T10:00:00+02:00' } }],
+      };
+
+      const result = await executor.run(
+        workflow,
+        { $1: 'завтра' },
+        { timezone: 'Europe/Belgrade', language: 'ru' },
+        (name, input) => {
+          calls.push({ name, input });
+          return { success: true, output: 'created', mutationState: 'confirmed' };
+        },
+      );
+
+      expect(result.success).toBe(true);
+      expect(calls).toEqual([
+        { name: 'create_event', input: { title: 'Standup', start_at: '2026-09-15T10:00:00+02:00' } },
+      ]);
+    });
+  });
 });
