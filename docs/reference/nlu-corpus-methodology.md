@@ -108,11 +108,45 @@ so coverage accounting stays honest about what was excluded and why.
   path-based pre-check used only to produce an accurate `skipped_unsafe_path`
   inventory entry up front — it is not itself race-free (a plain
   check-then-open has a window where the path could be swapped to a symlink
-  afterward). `open_regular_bounded()` is the actual security boundary: the
-  kernel refuses the open outright if the final path component is a symlink
-  at open time, so nothing can be swapped in between a check and a read.
+  afterward). `open_regular_bounded()` is the actual security boundary for
+  that fd-based open: the kernel refuses the open outright if the final path
+  component is a symlink at open time, so nothing can be swapped in between
+  that check and the read it guards.
+- **Plain (non-gzip) SQLite sources are read through a second, path-based
+  open, honestly documented as narrower.** After the `open_regular_bounded()`
+  fd-based preflight above confirms the path was a bounded regular file, not
+  a symlink, `collect()` closes that fd and hands the real path to SQLite's
+  own read-only URI connection (`mode=ro`), because SQLite must open by path
+  to locate a sibling `-wal`/`-shm` file and correctly combine it with the
+  main `.db` file in one consistent read-only transaction. An earlier
+  version instead byte-copied only the main `.db` file into a temporary
+  file and read that copy — silently dropping any row committed to the WAL
+  but not yet checkpointed into the main file, which is exactly what live
+  bot databases look like between checkpoints. Forcing a checkpoint, or
+  reading/copying the WAL file independently, was rejected as an
+  unacceptable write against a source this tool must treat as read-only;
+  SQLite's own WAL-aware reader is the correct mechanism and needs no new
+  VFS. **This is a real, honest narrowing of the guarantee above**: the
+  second open is a standard path-based SQLite open, not `O_NOFOLLOW`+`fstat`
+  on an already-open descriptor, so it assumes `--root` is a trusted,
+  owner-controlled directory rather than defending against a kernel-race
+  swap of an arbitrary hostile ancestor directory between the two opens.
+  Gzip-compressed backups (`backups/*.db.gz`) keep the original
+  decompress-into-a-bounded-temp-file path unchanged — a compressed archive
+  is a static, already-checkpointed snapshot with no live WAL counterpart to
+  lose, so the byte-copy approach is correct and safe there.
+- `-wal`/`-shm`/`-journal` sidecar files next to a database are excluded from
+  the standalone source glob (`_is_wal_sidecar()`) — they are never
+  independently openable as their own SQLite database, and SQLite reads them
+  automatically (by path adjacency) when the parent database is opened
+  above. They are never deleted or moved by this tool. A fresh inventory run
+  found exactly one real file the unfiltered `*.db.pre-*` glob had
+  misclassified this way (`data/calendar.db.pre-intent-seed-backup-shm`,
+  reported `unreadable`); that entry is now excluded from the source list
+  rather than reported at all, and the parent database it belongs to is
+  still read correctly, WAL included, via the mechanism above.
 - Both SQLite files (plain and gzip) and debug logs are capped at a fixed
-  byte ceiling on the source file itself via that same `fstat` check, and gz
+  byte ceiling on the source file itself via the `fstat` preflight, and gz
   sources are additionally capped on their *decompressed* size while
   streaming, since a small compressed file can still decompress unboundedly.
 
@@ -136,6 +170,29 @@ response text. A gold record must carry:
   becomes true when all four are `approved`; a partial or rejected
   adjudication is recorded in `gold_adjudication` for the audit trail but
   never written into the `gold` field itself.
+- `intent` — must match `SINGLE_INTENT_RE` (one dotted or bare lowercase
+  label, e.g. `event.create`, matching everything `COMMANDS`/`RULES`/
+  `suggest_labels` ever produce). A compound request spanning multiple
+  operations, encoded as one string (e.g.
+  `"event.create,invitation.send"`), is rejected as unsupported rather than
+  silently squeezed into a single label — `GoldLabel` has no ordered,
+  multi-operation representation yet, and building one is future, separately
+  reviewable work, not a default the importer should invent.
+- `slots` — every key and value must be a `str`, matching the `GoldLabel`
+  TypedDict's `dict[str, str]` shape; a non-string slot value (or key) is
+  rejected rather than silently accepted and later misread by a consumer
+  expecting text.
+
+**A caller-supplied approval can never promote a source-quarantined
+candidate.** `apply_gold_import` hard-rejects `train_eligible` — regardless
+of what the four supplied review statuses say — for any candidate whose own
+`privacy_status` is `'quarantined'` or whose `text_candidate` is the
+`[QUARANTINED_AUTH]` marker (`gold_rejected_source_quarantined` in the
+report; `label_status` becomes `'gold_rejected_source_quarantined'`, and
+`gold`/`gold_adjudication` are cleared). An imported review is an *external
+assertion* about a record a reviewer looked at outside this script; it is
+never proof that this script itself re-adjudicated a quarantine it already
+raised, so it cannot override one.
 
 **Deferred, on purpose:** an end-to-end `--apply-gold` CLI mode that reads an
 existing `candidates.private.json`/`summary.json` package, applies gold in
@@ -161,24 +218,49 @@ much of a batch is actually validated, train-eligible gold.
 
 ## Current numbers (weak labels, not measured traffic truth)
 
-The most recent safe aggregate summaries available in this session (captured
-*before* the fixes in this change) reported, for the combined retained
-inventory: 3838 rows, 962 user candidates, 516 quarantined auth rows, 1014
-sources (57 SQLite, 956 debug logs, 1 legacy retained archive), 398 `unknown`
-and 279 `dialogue.answer` weak labels. **`gold_count` is 0 and `train_eligible`
-is 0** — nothing in this corpus is adjudicated, and nothing is train-eligible,
-by design.
+A parent-run fresh inventory pass against the real retained server, local,
+and archive roots completed on 2026-09-28T17:29:48Z, at commit `1bccd268`
+(the corrected session/lineage/permission/symlink logic, **before** the
+`eb3a7449` TOCTOU-hardening commit and **before** the three blocker fixes
+documented in this section that landed on top of it — see below). Only the
+aggregate `summary.json` counts were read; no raw historical text entered
+this document, model context, or any provider. Combined retained inventory:
+**3884 rows, 968 user candidates** (876 database, 92 debug-log), 553
+auth-quarantined rows, 108 detached-unknown-provenance rows, 1 detached
+stale-session row, 0 invalid timestamps. 1061 sources (71 SQLite, 989 debug
+logs, 1 legacy retained archive): 130 `read`, 930 `no_direct_dialogues`, 1
+`unreadable`. Weak labels: `unknown` 402, `dialogue.answer` 280,
+`calendar.read` 88, `invitation.send` 86, `event.create` 39 (plus smaller
+counts down the tail). **`gold_count` is 0 and `train_eligible` is 0** —
+nothing in this corpus is adjudicated, and nothing is train-eligible, by
+design. (A server-only sub-pass reported 2431 rows / 535 candidates / 140
+sources as a partial breakdown of the same combined total.) These are
+overlapping candidates, not unique Telegram updates or validated intents.
 
-Those counts predate this change's session/lineage/permission/symlink fixes
-and cannot be reused as-is: the corrected pairing logic will detach some
-assistant/tool rows that the earlier version incorrectly attached (chained
-short gaps, cross-snapshot collisions), and the symlink guard may report
-additional `skipped_unsafe_path` sources. **The exact next gated step is to
-rerun `scripts/nlu_corpus.py` against the same roots and republish a fresh
-aggregate summary before anyone treats the label/tool counts as current.**
-This was not done as part of this change because a full run reads the entire
-retained log volume (several gigabytes) and regenerating it is a distinct,
-independently-verifiable action from the code fix itself.
+That sole `unreadable` entry was `data/calendar.db.pre-intent-seed-backup-shm`
+— the real-world instance of the `*.db.pre-*` glob sidecar-misclassification
+bug fixed above, not an actually-unreadable history database. It is why that
+fix exists.
+
+**These numbers do not reflect the current `HEAD` of this branch** and must
+not be attributed to it: they predate both the `eb3a7449` WAL-byte-copy
+regression (fixed above, blocker 1) and its own fix, and they predate the
+`-shm`/`-wal` sidecar exclusion and the gold-import hardening (blockers 2
+and 3) landing in this same commit. A fresh rerun against this fixed `HEAD`
+is the concrete next step and is **not done as part of this change** — it
+remains an independently owned, independently verifiable action for the
+PR's reviewer/merge-queue owner, not something this code-fix commit should
+assert for itself.
+
+**Runtime correction:** an earlier version of this document assumed a full
+pass was too slow to run here because retained logs total several
+gigabytes. That was not measured and turned out to be wrong: the actual
+parent-run passes completed in 31.35s (server-only) and 31.55s (combined
+server+local+retained archive), both exit 0. The next full rerun is still
+deferred (see above) — not because of a runtime cost that does not exist,
+but because the fresh, fixed-`HEAD` run is a distinct action the reviewer
+performs and republishes, not something this fix should silently
+regenerate and then reuse as its own proof of correctness.
 
 ## Limitations
 

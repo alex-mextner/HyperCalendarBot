@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import os
 import pathlib
+import sqlite3
 import stat
 import tempfile
 import unittest
@@ -273,6 +274,78 @@ class NluCorpusTests(unittest.TestCase):
             self.assertEqual(len(evil), 1)
             self.assertEqual(evil[0]['status'], 'skipped_unsafe_path')
 
+    def test_collect_excludes_wal_and_shm_sidecars_of_a_pre_backup_database_from_standalone_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / 'root'
+            (root / 'data').mkdir(parents=True)
+            (root / 'logs').mkdir()
+            main = root / 'data' / 'calendar.db.pre-intent-seed-backup'
+            conn = sqlite3.connect(str(main))
+            try:
+                conn.execute('PRAGMA journal_mode=WAL')
+                conn.execute('PRAGMA wal_autocheckpoint=0')
+                conn.execute('CREATE TABLE chat_history (id INTEGER PRIMARY KEY, user_id INTEGER, chat_id INTEGER, role TEXT, content TEXT, created_at TEXT)')
+                conn.execute("INSERT INTO chat_history (user_id, chat_id, role, content, created_at) VALUES (1, 1, 'user', 'Привет', '2026-01-01T00:00:00Z')")
+                conn.commit()
+                shm = root / 'data' / 'calendar.db.pre-intent-seed-backup-shm'
+                wal = root / 'data' / 'calendar.db.pre-intent-seed-backup-wal'
+                self.assertTrue(shm.exists() and wal.exists(), 'WAL mode must actually create the real sidecars this test exercises')
+                rows, sources, lexicon = MODULE.collect(root)
+                # Checked with the writer connection still open: collect() itself must
+                # never delete or move these -- unlike closing the last writer
+                # connection (below), which triggers SQLite's own unrelated
+                # auto-checkpoint cleanup and is not something this tool controls.
+                self.assertTrue(shm.exists(), 'collect() must never delete or move a WAL sidecar')
+                self.assertTrue(wal.exists(), 'collect() must never delete or move a WAL sidecar')
+            finally:
+                conn.close()
+            names = {s['name'] for s in sources}
+            self.assertNotIn('data/calendar.db.pre-intent-seed-backup-shm', names, 'a WAL shared-memory sidecar must never be classified as its own standalone database source')
+            self.assertNotIn('data/calendar.db.pre-intent-seed-backup-wal', names, 'a WAL sidecar must never be classified as its own standalone database source')
+            main_source = [s for s in sources if s['name'] == 'data/calendar.db.pre-intent-seed-backup'][0]
+            self.assertEqual(main_source['status'], 'read')
+            self.assertEqual(main_source['rows'], 1, "the parent db's own committed row must still be read correctly, including via its real WAL sidecar")
+
+    def test_collect_rejects_an_oversized_wal_sidecar_instead_of_reading_it_unbounded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / 'root'
+            (root / 'data').mkdir(parents=True)
+            (root / 'logs').mkdir()
+            main = root / 'data' / 'calendar.db'
+            main.write_bytes(b'')  # zero bytes: well under any bound on its own
+            wal = root / 'data' / 'calendar.db-wal'
+            wal.write_bytes(b'0' * 2000)  # larger than the bound this test sets below
+            original_bound = MODULE.MAX_DATABASE_BYTES
+            MODULE.MAX_DATABASE_BYTES = 1000
+            try:
+                rows, sources, lexicon = MODULE.collect(root)
+            finally:
+                MODULE.MAX_DATABASE_BYTES = original_bound
+            main_source = [s for s in sources if s['name'] == 'data/calendar.db'][0]
+            self.assertEqual(main_source['status'], 'unreadable', 'an oversized -wal sidecar must be rejected by the same byte-ceiling invariant as the main db file, not read without any bound')
+
+    def test_collect_includes_committed_wal_only_rows_from_a_live_database(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / 'root'
+            (root / 'data').mkdir(parents=True)
+            (root / 'logs').mkdir()
+            db_path = root / 'data' / 'calendar.db'
+            conn = sqlite3.connect(str(db_path))
+            try:
+                conn.execute('PRAGMA journal_mode=WAL')
+                conn.execute('PRAGMA wal_autocheckpoint=0')
+                conn.execute('CREATE TABLE chat_history (id INTEGER PRIMARY KEY, user_id INTEGER, chat_id INTEGER, role TEXT, content TEXT, created_at TEXT)')
+                conn.execute("INSERT INTO chat_history (user_id, chat_id, role, content, created_at) VALUES (1, 1, 'user', 'Привет', '2026-01-01T00:00:00Z')")
+                conn.commit()
+                # Connection stays open (WAL row not checkpointed into the main .db file) while collect() runs.
+                rows, sources, lexicon = MODULE.collect(root)
+            finally:
+                conn.close()
+            db_source = [s for s in sources if s['name'] == 'data/calendar.db'][0]
+            self.assertEqual(db_source['status'], 'read')
+            self.assertEqual(db_source['rows'], 1, 'collect() must see the committed WAL-only row via a real read-only SQLite transaction, not silently drop it by byte-copying only the main .db file')
+            self.assertEqual(len(rows), 1)
+
     def test_inability_complaint_is_not_mistaken_for_the_action_it_names(self):
         self.assertEqual(MODULE.suggest_labels('Не могу создать событие, помоги'), ['feedback'])
 
@@ -360,6 +433,24 @@ class NluCorpusTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.validate_gold_record(record)
 
+    def test_validate_gold_record_rejects_a_non_string_slot_value(self):
+        record = self._gold_record('ref-1', 'sha-1')
+        record['slots'] = {'when': 7}
+        with self.assertRaises(ValueError):
+            MODULE.validate_gold_record(record)
+
+    def test_validate_gold_record_rejects_a_non_string_slot_key(self):
+        record = self._gold_record('ref-1', 'sha-1')
+        record['slots'] = {7: 'завтра'}
+        with self.assertRaises(ValueError):
+            MODULE.validate_gold_record(record)
+
+    def test_validate_gold_record_rejects_a_compound_multi_intent_string_as_unsupported(self):
+        record = self._gold_record('ref-1', 'sha-1')
+        record['intent'] = 'event.create,invitation.send'
+        with self.assertRaises(ValueError):
+            MODULE.validate_gold_record(record)
+
     def test_apply_gold_import_requires_every_dimension_approved_before_train_eligible(self):
         candidate = MODULE.candidate_record('Создай встречу', ['create_event'], b'key')
         candidate['source_ref'] = 'ref-1'
@@ -394,6 +485,27 @@ class NluCorpusTests(unittest.TestCase):
         updated, report = MODULE.apply_gold_import([candidate], gold, self._digest('current-sha'))
         self.assertIsNone(updated[0]['gold'])
         self.assertEqual(report['gold_rejected_corpus_mismatch'], 1)
+
+    def test_apply_gold_import_hard_rejects_train_eligible_for_a_privacy_quarantined_candidate_even_when_all_reviews_are_approved(self):
+        candidate = MODULE.candidate_record('пароль от телеграм 12345', ['create_event'], b'key')
+        candidate['source_ref'] = 'ref-quarantine'
+        self.assertEqual(candidate['text_candidate'], '[QUARANTINED_AUTH]')
+        self.assertEqual(candidate['privacy_status'], 'quarantined')
+        gold = [self._gold_record('ref-quarantine', 'sha-1')]
+        updated, report = MODULE.apply_gold_import([candidate], gold, self._digest('sha-1'))
+        self.assertFalse(updated[0]['train_eligible'], 'a caller-supplied approval must never override a source privacy quarantine')
+        self.assertIsNone(updated[0]['gold'])
+        self.assertEqual(report['gold_rejected_source_quarantined'], 1)
+
+    def test_apply_gold_import_hard_rejects_a_quarantined_text_candidate_even_if_privacy_status_was_overwritten(self):
+        candidate = MODULE.candidate_record('x', [], b'key')
+        candidate['source_ref'] = 'ref-quarantine-2'
+        candidate['text_candidate'] = '[QUARANTINED_AUTH]'  # simulates any other path that could set the marker text directly
+        candidate['privacy_status'] = 'pseudonymized_candidate_needs_review'  # a caller/reviewer field must not be trusted to clear a source quarantine
+        gold = [self._gold_record('ref-quarantine-2', 'sha-1')]
+        updated, report = MODULE.apply_gold_import([candidate], gold, self._digest('sha-1'))
+        self.assertFalse(updated[0]['train_eligible'])
+        self.assertEqual(report['gold_rejected_source_quarantined'], 1)
 
     def test_open_regular_bounded_rejects_a_symlink_via_no_follow(self):
         with tempfile.TemporaryDirectory() as tmp:

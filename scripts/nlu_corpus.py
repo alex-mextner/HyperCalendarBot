@@ -37,6 +37,7 @@ SCHEMA_VERSION = 2
 SESSION_GAP_SECONDS = 1800  # single source of truth for the auth-quarantine window, session boundary and stale-attachment cutoff
 MAX_DATABASE_BYTES = 512*1024*1024  # single bound enforced at both fstat-open time and while streaming a gz's decompressed bytes
 MAX_LOG_BYTES = 64*1024*1024        # same, for debug logs and --merge archives
+QUARANTINED_AUTH_MARKER = '[QUARANTINED_AUTH]'  # single source of truth: redact_candidate's replacement text and apply_gold_import's hard privacy gate must never drift apart
 
 AUTH = re.compile(r'connect_telegram|one.?time.?code|2fa|otp|two.factor|password|парол|код.{0,35}(?:вход|telegram|телеграм)|(?:telegram|телеграм).{0,35}код|session_string|api[_ -]?key|Bearer\s+[A-Za-z0-9]', re.I)
 COMMANDS = {'add':'event.create','edit':'event.update','delete':'event.delete','search':'event.search', 'today':'calendar.read','tomorrow':'calendar.read','week':'calendar.read','month':'calendar.read', 'free':'availability.read','invite':'invitation.send','invitations':'invitation.status', 'contacts':'contacts.manage','places':'places.manage','settings':'settings.manage', 'help':'help','start':'onboarding','log':'history.read','history':'history.read', 'cancel':'dialogue.cancel','import':'calendar.import','holidays':'calendar.holidays','birthdays':'calendar.birthdays','ping':'diagnostics','connect_google':'integration.manage','disconnect_google':'integration.manage','connect_telegram':'auth.sensitive'}
@@ -85,7 +86,7 @@ def _looks_like_calendar_date(value: str) -> bool:
 
 def redact_candidate(text: str, key: bytes, lexicon: dict[str, str] | None = None) -> str:
     if AUTH.search(text):
-        return '[QUARANTINED_AUTH]'
+        return QUARANTINED_AUTH_MARKER
     rules = [('URL', r'https?://[^\s<>"\x27]+'), ('EMAIL', r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}'), ('HANDLE', r'(?<!\w)@[A-Za-z0-9_]+'), ('COORD', r'(?<!\d)-?\d{1,3}\.\d{3,}(?!\d)'), ('NUMBER', r'(?<!\w)\+?\d[\d ()-]{5,}\d(?!\w)')]
     for kind, pattern in rules:
         def replace(match):
@@ -117,6 +118,10 @@ def quarantined_indices(rows: list[dict]) -> set[int]:
 GOLD_REVIEW_DIMENSIONS = ('privacy', 'intent', 'slots', 'expected_outcome')
 GOLD_REVIEW_STATUSES = {'approved', 'rejected', 'needs_more_info'}
 GOLD_REQUIRED_FIELDS = {'source_ref', 'corpus_candidate_sha256', 'intent', 'slots', 'expected_outcome', 'reviews'}
+# One dotted or bare lowercase intent label (e.g. 'event.create'); rejects a
+# compound multi-operation intent encoded as one string. See "Gold import"
+# in docs/reference/nlu-corpus-methodology.md for the full rationale.
+SINGLE_INTENT_RE = re.compile(r'^[a-z][a-z_]*(?:\.[a-z][a-z_]*)?$')
 
 class GoldReview(TypedDict):
     reviewer_id: str
@@ -166,8 +171,14 @@ def validate_gold_record(record: dict) -> None:
         raise ValueError('gold record corpus_candidate_sha256 must be a 64-character hex sha256 digest')
     if not isinstance(record.get('intent'), str) or not record['intent']:
         raise ValueError('gold record intent must be a non-empty string, never inferred or left unset')
-    if not isinstance(record.get('slots'), dict):
+    if not SINGLE_INTENT_RE.fullmatch(record['intent']):
+        raise ValueError(f'gold record intent {record["intent"]!r} is not a single supported intent label; a compound/multi-operation request must be rejected as unsupported in this bounded scope, never squeezed into one label')
+    slots = record.get('slots')
+    if not isinstance(slots, dict):
         raise ValueError('gold record slots must be a mapping')
+    for slot_key, slot_value in slots.items():
+        if not isinstance(slot_key, str) or not isinstance(slot_value, str):
+            raise ValueError(f'gold record slots must be a str-to-str mapping, got key {slot_key!r} -> value {slot_value!r}')
     if not isinstance(record.get('expected_outcome'), str) or not record['expected_outcome']:
         raise ValueError('gold record expected_outcome must be a non-empty string, never inferred from bot prose')
     reviews = record.get('reviews')
@@ -188,13 +199,18 @@ def apply_gold_import(candidates: list[dict], gold_records: list[dict], expected
 
     train_eligible only becomes true when every one of the four independent review
     dimensions is individually approved; a partial approval or a corpus-hash mismatch
-    leaves the candidate as-is except for a bookkeeping label_status.
+    leaves the candidate as-is except for a bookkeeping label_status. A candidate the
+    corpus itself already quarantined (privacy_status=='quarantined' or a redacted
+    text_candidate) is a hard privacy gate: a caller-supplied approval is an external
+    assertion about the record's content, not proof this script re-adjudicated the
+    quarantine, so it can never override it.
     """
     by_ref = {candidate.get('source_ref'): candidate for candidate in candidates}
     fully_approved = 0
     partial_or_rejected = 0
     rejected_unknown_source = 0
     rejected_corpus_mismatch = 0
+    rejected_source_quarantined = 0
     for record in gold_records:
         validate_gold_record(record)
         if record['corpus_candidate_sha256'] != expected_corpus_sha256:
@@ -203,6 +219,13 @@ def apply_gold_import(candidates: list[dict], gold_records: list[dict], expected
         candidate = by_ref.get(record['source_ref'])
         if candidate is None:
             rejected_unknown_source += 1
+            continue
+        if candidate.get('privacy_status') == 'quarantined' or candidate.get('text_candidate') == QUARANTINED_AUTH_MARKER:
+            rejected_source_quarantined += 1
+            candidate['label_status'] = 'gold_rejected_source_quarantined'
+            candidate['gold_adjudication'] = None
+            candidate['gold'] = None
+            candidate['train_eligible'] = False
             continue
         all_approved = all(record['reviews'][dimension]['status'] == 'approved' for dimension in GOLD_REVIEW_DIMENSIONS)
         adjudication = {'intent': record['intent'], 'slots': record['slots'], 'expected_outcome': record['expected_outcome'], 'reviews': record['reviews']}
@@ -214,7 +237,7 @@ def apply_gold_import(candidates: list[dict], gold_records: list[dict], expected
             fully_approved += 1
         else:
             partial_or_rejected += 1
-    return candidates, {'gold_fully_approved': fully_approved, 'gold_partial_or_rejected_recorded': partial_or_rejected, 'gold_rejected_unknown_source': rejected_unknown_source, 'gold_rejected_corpus_mismatch': rejected_corpus_mismatch}
+    return candidates, {'gold_fully_approved': fully_approved, 'gold_partial_or_rejected_recorded': partial_or_rejected, 'gold_rejected_unknown_source': rejected_unknown_source, 'gold_rejected_corpus_mismatch': rejected_corpus_mismatch, 'gold_rejected_source_quarantined': rejected_source_quarantined}
 
 def suggest_labels(text: str) -> list[str]:
     text = text.strip()
@@ -230,7 +253,13 @@ def suggest_labels(text: str) -> list[str]:
     return [label for label, pattern in RULES if re.search(pattern, text, re.I)] or ['unknown']
 
 def candidate_record(text: str, tools: list[str], key: bytes, lexicon=None) -> CandidateRecord:
-    return {'schema_version': SCHEMA_VERSION, 'text_candidate': redact_candidate(text, key, lexicon), 'intent_candidates': suggest_labels(text), 'observed_tools': list(dict.fromkeys(tools)), 'gold': None, 'gold_adjudication': None, 'train_eligible': False, 'label_status': 'needs_adjudication', 'privacy_status': 'pseudonymized_candidate_needs_review', 'outcome_status': 'not_inferred_from_prose'}
+    text_candidate = redact_candidate(text, key, lexicon)
+    # A candidate whose own text was replaced by the auth marker is a source
+    # privacy quarantine, not merely "needs review" -- apply_gold_import's
+    # hard gate relies on this field being honest regardless of what a
+    # caller-supplied gold import later claims about it.
+    privacy_status = 'quarantined' if text_candidate == QUARANTINED_AUTH_MARKER else 'pseudonymized_candidate_needs_review'
+    return {'schema_version': SCHEMA_VERSION, 'text_candidate': text_candidate, 'intent_candidates': suggest_labels(text), 'observed_tools': list(dict.fromkeys(tools)), 'gold': None, 'gold_adjudication': None, 'train_eligible': False, 'label_status': 'needs_adjudication', 'privacy_status': privacy_status, 'outcome_status': 'not_inferred_from_prose'}
 
 def parse_debug_runs(text: str) -> list[dict]:
     header = re.compile(r'^\[([^\n]+)\]\nCHAT: (-?\d+)[^\n]*\| USER: uid:(\d+)[^\n]*\nSUPPLEMENT: (true|false)\nMESSAGE: ', re.M)
@@ -312,10 +341,18 @@ def open_regular_bounded(path: Path, max_bytes: int) -> int:
 def _is_gzip_source(path: Path) -> bool:
     return path.suffix == '.gz'
 
+def _is_wal_sidecar(path: Path) -> bool:
+    """A `-wal`/`-shm`/`-journal` companion is never its own SQLite database
+    (see "Input bounds" in docs/reference/nlu-corpus-methodology.md)."""
+    return path.name.endswith(('-wal', '-shm', '-journal'))
+
 def collect(root: Path) -> tuple[list[dict], list[dict], dict[str,str]]:
     rows: dict[str,dict] = {}; sources = []; lexicon = {}
     data = root / 'data'
-    databases = sorted(set(data.glob('*.db')) | set(data.glob('*.db.pre-*')) | set((data/'backups').glob('*.db')) | set((data/'backups').glob('*.db.gz')))
+    databases = sorted(
+        path for path in (set(data.glob('*.db')) | set(data.glob('*.db.pre-*')) | set((data/'backups').glob('*.db')) | set((data/'backups').glob('*.db.gz')))
+        if not _is_wal_sidecar(path)
+    )
     for path in databases:
         source = {'kind':'sqlite','name':str(path.relative_to(root))}
         if not is_safe_source_file(path, root):
@@ -324,15 +361,34 @@ def collect(root: Path) -> tuple[list[dict], list[dict], dict[str,str]]:
             continue
         try:
             fd = open_regular_bounded(path, MAX_DATABASE_BYTES)
-            with os.fdopen(fd, 'rb') as raw_stream, tempfile.NamedTemporaryFile(suffix='.db') as temporary:
-                opener = gzip.GzipFile(fileobj=raw_stream) if _is_gzip_source(path) else raw_stream
-                total = 0
-                while chunk := opener.read(1024*1024):
-                    total += len(chunk)
-                    if total > MAX_DATABASE_BYTES: raise ValueError('oversized_database')
-                    temporary.write(chunk)
-                temporary.flush()
-                extracted, names = read_database(Path(temporary.name))
+            if _is_gzip_source(path):
+                with os.fdopen(fd, 'rb') as raw_stream, tempfile.NamedTemporaryFile(suffix='.db') as temporary:
+                    opener = gzip.GzipFile(fileobj=raw_stream)
+                    total = 0
+                    while chunk := opener.read(1024*1024):
+                        total += len(chunk)
+                        if total > MAX_DATABASE_BYTES: raise ValueError('oversized_database')
+                        temporary.write(chunk)
+                    temporary.flush()
+                    extracted, names = read_database(Path(temporary.name))
+            else:
+                # fd above already proved (O_NOFOLLOW+fstat) this path was a
+                # bounded regular file, not a symlink. SQLite must reopen by
+                # path to locate sibling -wal/-shm files, so it can combine
+                # committed-but-uncheckpointed WAL rows correctly without a
+                # checkpoint/write against a read-only source; this narrows
+                # the no-follow guarantee to a standard path-based open, and
+                # bounds the -wal/-shm siblings the same way before SQLite
+                # reads them. See docs/reference/nlu-corpus-methodology.md
+                # ("Input bounds") for the full rationale.
+                os.close(fd)
+                for sidecar_suffix in ('-wal', '-shm'):
+                    try:
+                        sidecar_fd = open_regular_bounded(path.with_name(path.name + sidecar_suffix), MAX_DATABASE_BYTES)
+                        os.close(sidecar_fd)
+                    except FileNotFoundError:
+                        pass
+                extracted, names = read_database(path)
             lexicon.update(names)
             digests = [row_key(row) for row in extracted]
             logical_sha256 = hashlib.sha256(''.join(digests).encode()).hexdigest()
