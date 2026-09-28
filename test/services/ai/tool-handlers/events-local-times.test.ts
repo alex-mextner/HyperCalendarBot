@@ -172,7 +172,17 @@ describe('local rendering edge cases', () => {
   test('a multi-day all-day event treats the later end date as exclusive', async () => {
     const ctx = buildCtx('Europe/Belgrade');
     const id = seed(ctx, { start_at: '2026-09-27', end_at: '2026-09-30', all_day: true });
-    expect(await getEventOutput(ctx, id)).toContain('local: Sun 2026-09-27 – Tue 2026-09-29 all day');
+    expect(await getEventOutput(ctx, id)).toContain(
+      'local: Sun 2026-09-27 – Tue 2026-09-29 all day, start_date: 2026-09-27, end_date_exclusive: 2026-09-30',
+    );
+  });
+
+  test('an all-day end on its own start date is a single day with no exclusive end', async () => {
+    const ctx = buildCtx('Europe/Belgrade');
+    const id = seed(ctx, { start_at: '2026-09-28', end_at: '2026-09-28', all_day: true });
+    const output = await getEventOutput(ctx, id);
+    expect(output).toContain('local: Mon 2026-09-28 all day, start_date: 2026-09-28');
+    expect(output).not.toContain('end_date');
   });
 
   test('a snoozed all-day event reports the exact new start, not an unchanged day', async () => {

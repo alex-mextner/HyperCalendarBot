@@ -4,7 +4,7 @@ import type { Lang } from '../../../config/constants.ts';
 import { t, toLang } from '../../../config/constants.ts';
 import { CLEARED_LOCATION } from '../../../database/repositories/event.repository.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
-import { formatLocalEventSpan, getDayRangeUtc, localCalendarDate } from '../../../utils/date.ts';
+import { allDayDates, formatLocalEventSpan, getDayRangeUtc, localCalendarDate } from '../../../utils/date.ts';
 import { eventTimestampError } from '../../../utils/event-timestamps.ts';
 import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
@@ -55,13 +55,19 @@ function expandDateOnly(dateStr: string, timezone: string): { start: string; end
 /**
  * Event time for the assistant: the user's wall clock first, so it is never tempted to present a
  * UTC clock time as local, then the stored instants explicitly labelled as UTC. All-day values are
- * floating calendar dates, labelled as dates, not as UTC instants.
+ * floating calendar dates, labelled as dates (with an explicitly exclusive end), not as UTC instants.
  */
 function timeParts(start: string, end: string | null | undefined, allDay: boolean, timezone: string): string[] {
-  const local = `local: ${formatLocalEventSpan(start, end ?? null, allDay, timezone)}`;
-  if (allDay) return [local, `start_date: ${start.slice(0, 10)}`, ...(end ? [`end_date: ${end.slice(0, 10)}`] : [])];
-  const parts = [local, `start_utc: ${new Date(start).toISOString()}`];
-  if (end) parts.push(`end_utc: ${new Date(end).toISOString()}`);
+  const endIso = end ?? null;
+  const parts = [`local: ${formatLocalEventSpan(start, endIso, allDay, timezone)}`];
+  if (allDay) {
+    const { first, endExclusive } = allDayDates(start, endIso);
+    parts.push(`start_date: ${first}`);
+    if (endExclusive) parts.push(`end_date_exclusive: ${endExclusive}`);
+    return parts;
+  }
+  parts.push(`start_utc: ${new Date(start).toISOString()}`);
+  if (endIso) parts.push(`end_utc: ${new Date(endIso).toISOString()}`);
   return parts;
 }
 
