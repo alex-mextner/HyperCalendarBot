@@ -135,7 +135,7 @@ if args and args[0]=='tag' and args[-1].endswith(':latest') and os.environ.get('
 if args[:2]==['image','inspect']:
     fmt=args[-1]
     print(os.environ['FIXTURE_ID'] if '.Id' in fmt else os.environ['FIXTURE_SHA'])
-elif args[:2]==['inspect','hypercal-bot'] and '.State.Running' in args[-1]:print('false')
+elif args[:2]==['inspect','hypercal-bot'] and '.State.Running' in args[-1]:print('true' if os.environ.get('STILL_RUNNING')=='1' else 'false')
 elif args[:2]==['inspect','hypercal-bot']:print(current.read_text())
 elif args[:3]==['exec','hypercal-bot','cat']:print(old_content,end='')
 elif args[:3]==['exec','hypercal-bot','bun']:recorded('APPLIED_FAILURE')
@@ -541,6 +541,15 @@ print(body,end='')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ROLLBACK image=sha256:old health=ok", result.stderr)
         self.assertEqual((self.dep / "current").read_text(), "sha256:old")
+
+    def test_failed_release_that_cannot_be_stopped_is_left_in_place_without_reading_the_database(self):
+        # A release that still runs could record its migration after any read of the database.
+        result = self.run_failing_release(RISKY_DOC, RELEASE_MIGRATION_FAILS="1", STOP_FAILURE="1", STILL_RUNNING="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ROLLBACK_SKIPPED", result.stderr)
+        self.assertEqual((self.dep / "current").read_text(), self.config_id)
+        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertEqual([c for c in calls if c[0] == "run" and "-v" in c], [])
 
     def test_failed_release_is_left_in_place_when_the_database_cannot_be_read(self):
         result = self.run_failing_release(RISKY_DOC, RELEASE_MIGRATION_FAILS="1", RECORDED_READ_FAILURE="1")
