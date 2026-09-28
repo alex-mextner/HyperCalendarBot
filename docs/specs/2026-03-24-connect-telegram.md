@@ -519,13 +519,19 @@ Showing the suggestion starts the 30-day snooze. The snooze is claimed with a co
 <value judged above>`), so concurrent requests of the same user cannot both show it; the in-memory
 user snapshot is updated too. Therefore:
 
-- the suggestion appears at most once per 30 days, whether or not the user answers it — no
-  "not now" has to be understood. The intent path shows `output` verbatim and cannot relay the
-  agent hint, and the prompt no longer describes the dismissal;
+- this post-invitation suggestion appears at most once per 30 days, whether or not the user answers
+  it — no "not now" has to be understood. The intent path shows `output` verbatim and cannot relay
+  the agent hint, and the prompt no longer describes the dismissal. (The same text is also one of
+  the scheduler's rotating `botTips`, which this snooze does not govern.);
 - inviting several people in one message yields one suggestion. This includes intent workflows,
   which build a fresh context per step around the same user object, and a workflow resumed in a
   later message;
 - an explicit `dismiss_connect_telegram_prompt` restarts the same snooze.
+
+Known limits: the snooze is claimed when the line enters the tool result, so it is spent even if the
+agent drops the line from its reply. A multi-invite intent workflow sends only the last step's
+output, so the line from an earlier step is lost. That is tracked in
+https://github.com/alex-mextner/HyperCalendarBot/issues/626.
 
 The whole decision lives in `takeConnectTelegramSuggestion` (`tool-handlers/settings.ts`). A
 failure inside it is logged and yields no suggestion; it never changes the reported outcome of an
