@@ -138,8 +138,12 @@ function toolResultRow(id: string, content: string): string {
  * exchange, then a meeting request that ends in pick_users and the picker's
  * acknowledgement. 36 rows, so the 30-row window starts on the result of
  * `call_old_2` while the assistant turn that made that call is cut off.
+ * `beforePickResult` rows are saved between the pick_users call and its result.
  */
-function seedIncidentHistory(history: ChatHistoryRepository): void {
+function seedIncidentHistory(
+  history: ChatHistoryRepository,
+  beforePickResult: ['user' | 'assistant', string][] = [],
+): void {
   const rows: ['user' | 'assistant' | 'tool', string][] = [
     ['user', 'Do not send the morning agenda'],
     ['assistant', toolCallTurn('call_old_1', 'manage_settings', '{"key":"morning_agenda","value":"off"}')],
@@ -174,6 +178,7 @@ function seedIncidentHistory(history: ChatHistoryRepository): void {
     ['assistant', toolCallTurn('call_6', 'find_contact', '{"query":"Clara"}')],
     ['tool', toolResultRow('call_6', 'Not found')],
     ['assistant', toolCallTurn('call_7', 'pick_users', '{"event_id":1}')],
+    ...beforePickResult,
     ['tool', toolResultRow('call_7', 'Picker shown, waiting for the user')],
     ['assistant', 'Sending invitations to 3 people'],
     ['assistant', 'Invitations: 3 sent'],
@@ -281,4 +286,34 @@ describe('serialized provider request after a pick_users exchange', () => {
       });
     }
   }
+
+  test('a button press and bot reply saved inside the pick_users round keep the call and result paired', async () => {
+    ctx.chatHistory.clear(USER_ID);
+    seedIncidentHistory(ctx.chatHistory, [
+      ['user', JSON.stringify({ kind: 'button', label: 'Anna' })],
+      ['assistant', JSON.stringify({ kind: 'bot', text: 'Anna selected' })],
+    ]);
+    process.env.AI_SMART_CHAIN = 'groq';
+    process.env.AI_FAST_CHAIN = 'groq';
+    const captured: CapturedRequest[] = [];
+    providerClients.zai = () => asOpenAIClient(refusingClient());
+    providerClients.hf = () => asOpenAIClient(refusingClient());
+    providerClients.gemini = () => asOpenAIClient(refusingClient());
+    providerClients.groq = () => asOpenAIClient(capturingClient(captured));
+
+    await new CalendarBotAgent({ toolSchemaMode: 'full' }, sender).run(ctx);
+
+    expect(captured.length).toBeGreaterThan(0);
+    for (const sent of captured) expect(namelessToolItems(sent)).toEqual([]);
+    const messages = captured[0]!.messages;
+    const pickResult = messages.findIndex((m) => m.role === 'tool' && m.tool_call_id === 'call_7');
+    expect(pickResult).toBeGreaterThan(0);
+    const pickCall = messages[pickResult - 1];
+    expect(pickCall?.role === 'assistant' && pickCall.tool_calls?.[0]?.id).toBe('call_7');
+    const afterResult = messages.slice(pickResult + 1, pickResult + 3).map((m) => m.content);
+    expect(afterResult).toEqual([
+      expect.stringContaining('[Button: "Anna"]'),
+      expect.stringContaining('Anna selected'),
+    ]);
+  });
 });

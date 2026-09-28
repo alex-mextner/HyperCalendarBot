@@ -243,6 +243,37 @@ function withTimestamp(text: string, createdAt: string, timezone: string): strin
 }
 
 /**
+ * Pull each tool-call block back together before sanitizeMessages checks it.
+ * Other chat_history rows can be saved between an assistant tool-call turn and
+ * its results — a button press, an edit, another group member's message — and
+ * sanitizeMessages would then drop the whole pair. Those rows move to just after
+ * the call's last result, keeping their relative order. A call whose results are
+ * not all present later is left in place for sanitizeMessages to strip.
+ */
+function regroupToolCallBlocks(messages: MessageParam[]): MessageParam[] {
+  const ordered = [...messages];
+  for (let i = 0; i < ordered.length; i++) {
+    const msg = ordered[i]!;
+    if (msg.role !== 'assistant' || !msg.tool_calls?.length) continue;
+    const pendingIds = new Set(msg.tool_calls.map((tc) => tc.id));
+    const results: MessageParam[] = [];
+    const interleaved: MessageParam[] = [];
+    let j = i + 1;
+    for (; j < ordered.length && pendingIds.size > 0; j++) {
+      const next = ordered[j]!;
+      if (isToolMessage(next) && pendingIds.delete(next.tool_call_id)) results.push(next);
+      else interleaved.push(next);
+    }
+    if (pendingIds.size > 0 || interleaved.length === 0) continue;
+    ordered.splice(i + 1, j - i - 1, ...results, ...interleaved);
+    // Resume at the first interleaved row, which may itself be another call
+    // block; the moved results before it are tool messages, never call blocks.
+    i += results.length;
+  }
+  return ordered;
+}
+
+/**
  * Sanitize message history before handing it to the model.
  *
  * Three invariants, all enforced to keep OpenAI-compatible providers happy:
@@ -682,20 +713,23 @@ export class CalendarBotAgent {
       }
     }
 
+    const ordered = regroupToolCallBlocks(messages);
+
     // A backoff retry re-runs the original message, but nothing re-saves it to
     // chat_history — the newest stored turn is the bot's own "one sec". Without
     // this the model is asked to continue from its own stall phrase and has no
     // idea which question it still owes an answer to.
+    // The check reads the newest saved row, before regrouping moved anything to the end.
     if ((ctx.retryAttempt ?? 0) > 0 && ctx.messageText.trim().length > 0) {
       const last = messages[messages.length - 1];
       const alreadyAsked =
         last?.role === 'user' && typeof last.content === 'string' && last.content.includes(ctx.messageText);
       if (!alreadyAsked) {
-        messages.push({ role: 'user', content: ctx.messageText });
+        ordered.push({ role: 'user', content: ctx.messageText });
       }
     }
 
-    return { systemPrompt, messages: sanitizeMessages(messages) };
+    return { systemPrompt, messages: sanitizeMessages(ordered) };
   }
 
   /**
