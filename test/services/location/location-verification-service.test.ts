@@ -184,6 +184,45 @@ describe('LocationVerificationService', () => {
     expect(deps.candidateStore.set).toHaveBeenCalledTimes(1);
   });
 
+  test('a secretary grant whose owner profile cannot be resolved fails closed: no search, no candidates', async () => {
+    const OWNER_ID = 900;
+    const SECRETARY_ID = 901;
+    const event = makeEvent({ id: 5, user_id: OWNER_ID });
+    const deps = makeDeps({
+      eventRepo: {
+        findById: mock((_id: number, userId: number) => (userId === OWNER_ID ? event : null)),
+        findByIdUnfiltered: mock(() => ({ id: event.id, user_id: OWNER_ID, owner_type: 'user' })),
+        clearLocationFields: mock(() => {}),
+      },
+      userRepo: {
+        // The owner's row is unresolvable (an inconsistent/partially-deleted account); the
+        // secretary's own row resolves fine — must never be substituted for the owner's (#421).
+        findByTelegramId: mock((id: number) => (id === OWNER_ID ? null : makeUser({ telegram_id: SECRETARY_ID }))),
+        update: mock(() => makeUser()),
+      },
+      secretaryRepo: {
+        findByOwnerAndSecretary: mock(() => ({
+          id: 1,
+          owner_id: OWNER_ID,
+          secretary_id: SECRETARY_ID,
+          permission: 'write' as const,
+          status: 'active' as const,
+          dm_message_id: null,
+          created_at: '',
+          updated_at: '',
+        })),
+      },
+    });
+    const svc = makeService(deps);
+    const secretaryUser = makeUser({ telegram_id: SECRETARY_ID });
+
+    const result = await svc.verifyEventLocation(event, secretaryUser);
+
+    expect(result.candidates).toEqual([]);
+    expect(deps.geocodingService.findPlace).not.toHaveBeenCalled();
+    expect(deps.sendMessage).not.toHaveBeenCalled();
+  });
+
   test('resolveFromCoordinates applies reverse geocoded result', async () => {
     const geo = makeGeoResult();
     const deps = makeDeps({

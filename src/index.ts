@@ -1005,6 +1005,7 @@ if (config.GOOGLE_API_KEY && config.REDIS_URL) {
     eventRepo: db.events,
     userRepo: db.users,
     invitationRepo: db.invitations,
+    secretaryRepo: db.secretaries,
     agendaRepository: new AgendaRepository(db.db),
     weatherService,
     candidateStore,

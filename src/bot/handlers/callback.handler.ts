@@ -1578,7 +1578,9 @@ export function createCallbackHandler(
 
   /** The confirmation edited into the picker or pin message: the title and the resolved place, linked. */
   function locationResolvedHtml(lang: Lang, eventId: number, userId: number): string {
-    const event = eventRepo?.findById(eventId, userId);
+    // A delegate answering the owner's picker cannot see the event through `eventRepo.findById`
+    // (owner/group visibility only); the service's live secretary-aware resolver covers that (#421).
+    const event = locationVerification?.getEventVisibleToActor(eventId, userId) ?? eventRepo?.findById(eventId, userId);
     // A pin can resolve an event that has no typed location; show the resolved address then.
     const place = event ? formatLocationHtml({ ...event, location: event.location ?? event.resolved_address }) : '';
     return t(lang).aiTools.location.locationResolved(escapeHtml(event?.title ?? ''), place);
