@@ -80,7 +80,7 @@ import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps
 import { createPickerAckIo, runChatShareWithAck, runPickerBatchWithAck } from './handlers/picker-invitation.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { createChatLogging } from './middleware/chat-logging.ts';
-import { RateLimiter } from './middleware/rate-limiter.ts';
+import { createRateLimitMiddleware, RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
 import { createUserResolver, createUserResolverComposer } from './middleware/user-resolver.ts';
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
@@ -535,20 +535,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         context.update?.my_chat_member?.chat?.id;
       return runWithChatId(chatId ?? 0, next);
     })
-    .use(async (context, next) => {
-      const userId = context.update?.message?.from?.id ?? context.update?.callback_query?.from?.id;
-      if (!userId) return next();
-      const { allowed, firstBlock } = rateLimiter.checkWithWarning(userId);
-      if (!allowed) {
-        if (firstBlock) {
-          const lang = (context.dbUser?.language ?? 'en') as 'en' | 'ru';
-          const ctxWithSend = context as { send?: (text: string) => Promise<unknown> };
-          await ctxWithSend.send?.(t(lang).rate_limited);
-        }
-        return;
-      }
-      return next();
-    })
+    .use(createRateLimitMiddleware(rateLimiter))
     // Chat logging runs before the command escape: a typed "/…" closes an open Telegram-connect
     // wizard, and the logger must still see that wizard so a password starting with "/" is redacted.
     .use(

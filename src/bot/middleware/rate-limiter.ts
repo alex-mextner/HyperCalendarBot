@@ -1,4 +1,7 @@
 // src/bot/middleware/rate-limiter.ts
+import type { Next, TelegramUpdate } from 'gramio';
+import { t, toLang } from '../../config/constants.ts';
+import type { User } from '../../database/types.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 
 interface RateLimiterConfig {
@@ -69,4 +72,25 @@ export class RateLimiter {
     const allowed = this.check(userId);
     return { allowed, firstBlock: !allowed && !wasSilenced };
   }
+}
+
+/** The part of a GramIO context the rate-limit middleware reads; `send` exists on message and callback contexts. */
+interface RateLimitContext {
+  update?: TelegramUpdate;
+  dbUser?: User;
+  send?: (text: string) => Promise<unknown>;
+}
+
+/** Drops messages and button presses from a user over the limit; the first dropped one gets one warning. */
+export function createRateLimitMiddleware(rateLimiter: RateLimiter) {
+  return async (context: RateLimitContext, next: Next) => {
+    const userId = context.update?.message?.from?.id ?? context.update?.callback_query?.from?.id;
+    if (!userId) return next();
+    const { allowed, firstBlock } = rateLimiter.checkWithWarning(userId);
+    if (!allowed) {
+      if (firstBlock) await context.send?.(t(toLang(context.dbUser?.language)).rate_limited);
+      return;
+    }
+    return next();
+  };
 }
