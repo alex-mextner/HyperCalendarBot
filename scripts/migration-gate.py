@@ -72,7 +72,9 @@ ENTRY_NAME = re.compile(r"\n  \{\n    name: '([A-Za-z0-9_]+)',\n")
 ANY_ENTRY_START = re.compile(r"(?<=[\[,])\s*\{\s*name\s*:")
 # The array closes at the file's last line starting with "];". A line like that inside the last
 # entry (a multi-line template literal) then stays in that entry, so an edit below it is an edit
-# of a shipped migration, never a change to the code outside the entries.
+# of a shipped migration, never a change to the code outside the entries. The price: code after
+# the array that has such a line of its own counts as part of the last entry, so an edit there
+# is refused, for good, as an edit of that migration.
 ARRAY_END = "\n];"
 
 
