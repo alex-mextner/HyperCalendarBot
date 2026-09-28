@@ -96,6 +96,22 @@ export function trackFeatureUsage(
   }
 }
 
+/**
+ * Middleware for messages: records a feature use for every slash command that got past the scenes
+ * and the connect-wizard guard, before the command handlers.
+ */
+export function createCommandUsageTracking(repo: FeatureUsageRepository) {
+  return (ctx: { text?: string; dbUser?: { telegram_id: number } }, next: () => Promise<unknown>) => {
+    const text = ctx.text;
+    const userId = ctx.dbUser?.telegram_id;
+    if (text && userId && text.startsWith('/')) {
+      const cmd = text.slice(1).split(/[\s@]/)[0]!;
+      trackFeatureUsage(repo, userId, 'command', cmd);
+    }
+    return next();
+  };
+}
+
 /** Extract callback data prefix (everything before the first ':') */
 export function callbackPrefix(data: string): string {
   const idx = data.indexOf(':');
