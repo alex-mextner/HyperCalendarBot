@@ -34,6 +34,7 @@ import {
   advance,
   applyParseResultToDraft,
   emptyDraft,
+  reconcileBeforeNewTurn,
   type SessionRuntimeDeps,
   type SessionShell,
   toPendingConfirmations,
@@ -229,7 +230,12 @@ export function createDialogueV3Layer(deps: DialogueV3LayerDeps) {
     const timezone = user.timezone;
     const now = deps.now ? deps.now() : new Date();
 
-    const existing = deps.dialogueSessions.get(key);
+    // Opportunistic crash recovery: an `executed` session with unresolved durable effects
+    // (session-runtime.ts's `EffectLedger`) is the only record of what happened after the event
+    // already exists — reconciled here (or found to already be fully reconciled) before this
+    // turn is allowed to touch the key at all, so a fresh draft below can never CAS-overwrite it.
+    const reconciliation = await reconcileBeforeNewTurn(ctx, user, key, deps);
+    const existing = reconciliation.existing;
     if (existing && existing.status === 'collecting') {
       if (CANCEL_WORDS[messageText.trim().toLowerCase()]) {
         deps.dialogueSessions.delete(key);
@@ -311,6 +317,18 @@ export function createDialogueV3Layer(deps: DialogueV3LayerDeps) {
     }
 
     if (firstWord(messageText) === '' || !STARTER_VERBS[firstWord(messageText)]) return { handled: false };
+
+    if (reconciliation.blocked) {
+      // Unresolved durable effects remain from a prior crash (invitations/Google push/receipt
+      // not yet all confirmed) — never silently discard that evidence by CAS-overwriting with a
+      // brand-new draft; the previous event was already created and stays exactly as it is.
+      await ctx.send(
+        ctx.lang === 'ru'
+          ? 'Предыдущее событие уже создано, но не все действия после этого подтверждены (приглашения, синхронизация, квитанция) — подожди подтверждения перед новым запросом.'
+          : 'The previous event was already created, but some follow-up actions (invitations, calendar sync, receipt) are not yet confirmed — please wait before starting a new request.',
+      );
+      return { handled: true };
+    }
 
     const parseResult = parseFullField(messageText, {
       timezone,

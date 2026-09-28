@@ -34,6 +34,26 @@ const DraftPersonSchema = z.object({
   confirmed: z.boolean(),
 });
 
+const InviteOutcomeSchema = z.object({
+  delivered: z.array(DraftPersonSchema),
+  pendingManualForward: z.array(DraftPersonSchema),
+  noAccount: z.array(DraftPersonSchema),
+  failed: z.array(z.object({ person: DraftPersonSchema, reason: z.string() })),
+});
+
+const EffectStatusSchema = z.union([
+  z.literal('pending'),
+  z.literal('applied'),
+  z.literal('unknown'),
+  z.literal('failed'),
+]);
+
+const EffectLedgerSchema = z.object({
+  invitations: EffectStatusSchema,
+  postCreateHooks: EffectStatusSchema,
+  receipt: EffectStatusSchema,
+});
+
 const DraftPlaceSchema = z.object({
   kind: z.union([z.literal('manual'), z.literal('native')]),
   label: z.string(),
@@ -85,7 +105,13 @@ const PendingFuzzyPersonSchema = z.object({
 
 const ExecutionReceiptSchema = z.union([
   z.object({ status: z.literal('unknown'), attemptedAtRevision: z.number() }),
-  z.object({ status: z.literal('applied'), eventId: z.number(), appliedAtRevision: z.number() }),
+  z.object({
+    status: z.literal('applied'),
+    eventId: z.number(),
+    appliedAtRevision: z.number(),
+    effects: EffectLedgerSchema,
+    inviteOutcome: InviteOutcomeSchema.nullable(),
+  }),
 ]);
 
 const DialogueV3SessionSchema = z.object({
@@ -147,17 +173,25 @@ export type DialogueSessionWriteResult =
 export class DialogueSessionRepository {
   constructor(private db: Database) {}
 
+  /**
+   * `status === 'executed'` is never expired by TTL: by construction (session-runtime.ts's
+   * `executeDraft`/`resumeExecutedSession`) a row is only ever persisted at that status while
+   * its durable post-create effect ledger is NOT yet fully reconciled — it is the only record
+   * of what happened after the calendar event already exists, deleted explicitly once every
+   * effect is `applied`, never silently timed out like an abandoned in-progress draft.
+   */
   get(key: DialogueSessionKey): DialogueV3Session | null {
     const row = this.db
       .prepare('SELECT data, updated_at FROM dialogue_v3_sessions WHERE chat_id = ? AND user_id = ? AND topic_id = ?')
       .get(key.chatId, key.userId, key.topicId) as { data: string; updated_at: number } | null;
     if (!row) return null;
-    if (isExpired(row.updated_at, Date.now())) {
+    const result = DialogueV3SessionCodec.safeParse(row.data);
+    if (!result.success) return null;
+    if (result.data.status !== 'executed' && isExpired(row.updated_at, Date.now())) {
       this.delete(key);
       return null;
     }
-    const result = DialogueV3SessionCodec.safeParse(row.data);
-    return result.success ? result.data : null;
+    return result.data;
   }
 
   /**
@@ -204,9 +238,18 @@ export class DialogueSessionRepository {
       .run(key.chatId, key.userId, key.topicId);
   }
 
+  /** See `get()`'s doc comment: an `executed` row with unresolved durable effects survives its normal TTL. */
   cleanup(): void {
-    this.db
-      .prepare('DELETE FROM dialogue_v3_sessions WHERE updated_at <= ?')
-      .run(Date.now() - DIALOGUE_V3_SESSION_TTL_MS);
+    const cutoff = Date.now() - DIALOGUE_V3_SESSION_TTL_MS;
+    const staleRows = this.db
+      .prepare('SELECT chat_id, user_id, topic_id, data FROM dialogue_v3_sessions WHERE updated_at <= ?')
+      .all(cutoff) as { chat_id: number; user_id: number; topic_id: number; data: string }[];
+    for (const row of staleRows) {
+      const parsed = DialogueV3SessionCodec.safeParse(row.data);
+      if (parsed.success && parsed.data.status === 'executed') continue;
+      this.db
+        .prepare('DELETE FROM dialogue_v3_sessions WHERE chat_id = ? AND user_id = ? AND topic_id = ?')
+        .run(row.chat_id, row.user_id, row.topic_id);
+    }
   }
 }

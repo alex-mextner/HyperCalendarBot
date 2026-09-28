@@ -18,6 +18,21 @@ export interface DraftPerson {
   readonly confirmed: boolean;
 }
 
+/**
+ * Real invitation-delivery classification for one `executeDraft` attempt (session-runtime.ts's
+ * `inviteResolvedPeople`) — durable enough to persist in `ExecutionReceipt.inviteOutcome` so a
+ * resumed session can render the exact same honest disclosure a crash prevented from reaching
+ * the user the first time, never a re-derived or re-attempted guess.
+ */
+export interface InviteOutcome {
+  /** Bot API or MTProto actually delivered the message to the invitee. */
+  readonly delivered: readonly DraftPerson[];
+  /** An Invitation record exists, but live delivery failed; a deep-link fallback was sent to the INVITER to forward manually — never claimed as delivered to the invitee. */
+  readonly pendingManualForward: readonly DraftPerson[];
+  readonly noAccount: readonly DraftPerson[];
+  readonly failed: readonly { readonly person: DraftPerson; readonly reason: string }[];
+}
+
 export interface DraftPlace {
   readonly kind: 'manual' | 'native';
   readonly label: string;
@@ -93,14 +108,60 @@ export function emptyDraft(scope: 'personal' | 'group', groupId?: number): Event
 export type DialogueV3Status = 'collecting' | 'ready' | 'executing' | 'executed' | 'cancelled' | 'handed_off';
 
 /**
+ * Durable status for one post-create side effect. `pending`: never attempted, safe for a
+ * resumed session to run for the first time. `applied`: the attempt ran to completion (its own
+ * result — even a locally-known partial failure, e.g. "no linked Telegram account" — was
+ * captured and honestly disclosed; there is nothing left to reconcile). `unknown`: the attempt
+ * itself threw/rejected, or the process crashed between the pre-attempt marker below and the
+ * completion write — for a real network side effect (an invitation send, a Google Calendar
+ * push, a Telegram receipt) a caught exception does NOT prove the remote call never landed, so
+ * this is never blindly retried, only surfaced for operator/user reconciliation. `failed`:
+ * reserved for a caller with a typed, unambiguous non-delivery signal (none of the three
+ * effects below produce one today; a future caller with such a signal can use it without a
+ * schema change) — resume treats it identically to `unknown` (never retried).
+ */
+export type EffectStatus = 'pending' | 'applied' | 'unknown' | 'failed';
+
+/**
+ * The three durable side effects `executeDraft` still owes after the event itself exists.
+ * `invitations`/`postCreateHooks` cover session-runtime.ts's `inviteResolvedPeople`/
+ * `runPostCreateHooks`; `receipt` covers `sendReceipt`. A session is deleted only once every
+ * field here is `applied` — see `isEffectLedgerReconciled`.
+ */
+export interface EffectLedger {
+  readonly invitations: EffectStatus;
+  readonly postCreateHooks: EffectStatus;
+  readonly receipt: EffectStatus;
+}
+
+/**
  * Durable idempotency identity for the one irreversible transition this session can make
  * (creating the calendar event). `unknown` is written BEFORE the create call; `applied` is
  * written only after `EventService.createEvent` actually returned an event — never inferred,
- * never guessed from an absent error.
+ * never guessed from an absent error. Once `applied`, `effects` tracks the three durable
+ * post-create side effects (see `EffectLedger`) and `inviteOutcome` durably carries the actual
+ * invitation-delivery result once known, so a resumed/reconciled session can render the exact
+ * same honest receipt a crash prevented from reaching the user, never a re-attempted guess.
  */
 export type ExecutionReceipt =
   | { readonly status: 'unknown'; readonly attemptedAtRevision: number }
-  | { readonly status: 'applied'; readonly eventId: number; readonly appliedAtRevision: number };
+  | {
+      readonly status: 'applied';
+      readonly eventId: number;
+      readonly appliedAtRevision: number;
+      readonly effects: EffectLedger;
+      readonly inviteOutcome: InviteOutcome | null;
+    };
+
+export function isEffectLedgerReconciled(effects: EffectLedger): boolean {
+  return effects.invitations === 'applied' && effects.postCreateHooks === 'applied' && effects.receipt === 'applied';
+}
+
+export const PENDING_EFFECT_LEDGER: EffectLedger = {
+  invitations: 'pending',
+  postCreateHooks: 'pending',
+  receipt: 'pending',
+};
 
 /**
  * A field the dialogue runtime still needs an answer for. `kind` selects the parser/keyboard;

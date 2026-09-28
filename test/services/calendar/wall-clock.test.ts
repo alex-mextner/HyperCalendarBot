@@ -6,7 +6,13 @@
 // regression in the instant-resolution math.
 
 import { describe, expect, setSystemTime, test } from 'bun:test';
-import { addOneDay, isoDay, resolveWallInstant, validCalendarDay } from '../../../src/services/calendar/wall-clock.ts';
+import {
+  addOneDay,
+  isoDay,
+  localMidnightInstant,
+  resolveWallInstant,
+  validCalendarDay,
+} from '../../../src/services/calendar/wall-clock.ts';
 
 describe('validCalendarDay', () => {
   test('accepts real calendar dates including leap day', () => {
@@ -84,5 +90,37 @@ describe('resolveWallInstant — ordinary days', () => {
     } finally {
       setSystemTime();
     }
+  });
+});
+
+describe('localMidnightInstant — GH-652 all-day storage boundary', () => {
+  test('rejects a calendar day entirely erased by a date-line crossing instead of normalizing it (Pacific/Apia, 2011-12-30)', () => {
+    // Samoa jumped from UTC-11 to UTC+13 at the stroke of local midnight on 2011-12-30,
+    // removing the day from its calendar outright — this is the exact skip the function's own
+    // docstring claims to reject, otherwise untested anywhere in the suite.
+    expect(localMidnightInstant({ y: 2011, m: 12, d: 30 }, 'Pacific/Apia')).toBeNull();
+  });
+
+  test('the days immediately adjacent to the erased Samoa day still resolve normally', () => {
+    expect(localMidnightInstant({ y: 2011, m: 12, d: 29 }, 'Pacific/Apia')).toBe('2011-12-29T00:00:00.000-10:00');
+    expect(localMidnightInstant({ y: 2011, m: 12, d: 31 }, 'Pacific/Apia')).toBe('2011-12-31T00:00:00.000+14:00');
+  });
+
+  test('a wall midnight repeated by a fall-back fold resolves to its earliest instant, not an arbitrary pick (Asia/Amman, 2006-10-27)', () => {
+    // Jordan's DST ended at local midnight in 2006 (unlike Belgrade's 02:00/03:00 transitions
+    // above): 2006-10-27T00:00 local happened twice, at +03:00 then +02:00. This is the
+    // "repeated (fall-back) midnight" branch the function's docstring documents but nothing
+    // else in the suite exercises.
+    const fold = resolveWallInstant({ y: 2006, m: 10, d: 27 }, 0, 0, 'Asia/Amman');
+    expect(fold.kind).toBe('fold');
+    expect(localMidnightInstant({ y: 2006, m: 10, d: 27 }, 'Asia/Amman')).toBe('2006-10-27T00:00:00.000+03:00');
+  });
+
+  test('a negative-offset zone (New York, UTC-5 in March) — local midnight is later the same UTC day, never shifted to the previous day', () => {
+    expect(localMidnightInstant({ y: 2027, m: 3, d: 10 }, 'America/New_York')).toBe('2027-03-10T00:00:00.000-05:00');
+  });
+
+  test('a positive-offset zone (Tokyo, UTC+9) still keeps the real offset rather than "Z"', () => {
+    expect(localMidnightInstant({ y: 2027, m: 4, d: 10 }, 'Asia/Tokyo')).toBe('2027-04-10T00:00:00.000+09:00');
   });
 });

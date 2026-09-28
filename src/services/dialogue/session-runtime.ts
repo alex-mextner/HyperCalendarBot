@@ -33,7 +33,7 @@ import type { CalendarEvent, User } from '../../database/types.ts';
 import { escapeHtml, splitMessage } from '../../utils/telegram.ts';
 import { deliverInvitation } from '../ai/invitation-delivery.ts';
 import type { TelegramSender } from '../ai/types.ts';
-import { type CalendarDay, resolveWallInstant } from '../calendar/wall-clock.ts';
+import { type CalendarDay, localMidnightInstant } from '../calendar/wall-clock.ts';
 import type { EventService } from '../event/event-service.ts';
 import { formatEventDetail } from '../event/formatters.ts';
 import type { LocationVerificationService } from '../location/location-verification-service.ts';
@@ -45,13 +45,18 @@ import {
   type DialogueV3Session,
   type DraftFieldName,
   type DraftPerson,
+  type EffectLedger,
   type EventCreateDraft,
+  type ExecutionReceipt,
   emptyDraft,
   type FieldProvenance,
+  type InviteOutcome,
+  isEffectLedgerReconciled,
+  PENDING_EFFECT_LEDGER,
   type PendingFuzzyPerson,
 } from './v3-types.ts';
 
-export { emptyDraft };
+export { emptyDraft, type InviteOutcome };
 
 /** Real delivery deps — same shape callback.handler.ts's own `pickerInvitationDeps` already builds in bot/index.ts, reused verbatim rather than re-invented. */
 export interface InvitationDeliveryRuntimeDeps {
@@ -74,25 +79,28 @@ export interface SessionRuntimeDeps {
   readonly locationVerification?: Pick<LocationVerificationService, 'verifyEventLocation'>;
 }
 
-/** Local calendar-midnight instant for an all-day boundary. Bounded forward search on the rare DST-gap edge (a clock change that skips local midnight) — never a naive UTC-literal fallback, which could land on the wrong proleptic day entirely for a positive-offset zone. */
-export function gapSafeLocalMidnight(isoDay: string, timezone: string): string {
-  const [y, m, d] = isoDay.split('-').map(Number) as [number, number, number];
-  const day: CalendarDay = { y, m, d };
-  const resolved = resolveWallInstant(day, 0, 0, timezone);
-  if (resolved.kind === 'unique') return new Date(resolved.ms).toISOString();
-  if (resolved.kind === 'fold') return new Date(resolved.instants[0].ms).toISOString();
-  // 'gap': local midnight itself was skipped by a clock change (rare; most DST transitions do
-  // not land exactly at midnight). Advance minute-by-minute — bounded to 4 hours, far beyond any
-  // real DST jump — to the first local instant that DOES exist on this calendar day, so the
-  // result always lands inside the intended day rather than drifting into UTC-literal territory.
-  for (let minute = 1; minute <= 240; minute++) {
-    const probe = resolveWallInstant(day, 0, minute, timezone);
-    if (probe.kind === 'unique') return new Date(probe.ms).toISOString();
-    if (probe.kind === 'fold') return new Date(probe.instants[0].ms).toISOString();
+/** ISO calendar-day string ("YYYY-MM-DD") parsed into wall-clock.ts's `CalendarDay` shape. */
+function parseIsoDay(isoDayStr: string): CalendarDay {
+  const [y, m, d] = isoDayStr.split('-').map(Number) as [number, number, number];
+  return { y, m, d };
+}
+
+/**
+ * The one all-day boundary instant this runtime ever stores — `wall-clock.ts`'s
+ * `localMidnightInstant`, reused verbatim rather than a second UTC-midnight conversion. A second
+ * conversion is exactly the bug this replaces: `new Date(ms).toISOString()` always renders "Z",
+ * discarding the zone's real offset and silently shifting the stored calendar-date prefix by a
+ * day west of UTC (America/New_York's local midnight would store as the PREVIOUS day). A
+ * calendar day whose local midnight a clock change skipped entirely (e.g. Pacific/Apia's
+ * 2011-12-30) has no valid instant — rejected outright, before any durable state (the CAS
+ * reservation, the event row) exists, never silently normalized onto a neighboring day.
+ */
+function localMidnightOrThrow(isoDayStr: string, timezone: string): string {
+  const instant = localMidnightInstant(parseIsoDay(isoDayStr), timezone);
+  if (instant === null) {
+    throw new Error(`local midnight for ${isoDayStr} in ${timezone} does not exist (skipped by a clock change)`);
   }
-  // Unreachable in practice (no real IANA zone has a >4h gap) — a same-day UTC literal is the
-  // least-wrong fallback available, and is itself still inside the intended proleptic day.
-  return `${isoDay}T00:00:00.000Z`;
+  return instant;
 }
 
 /** Applies one turn's parse patch onto a draft, updating field provenance honestly — never silently overwrites a `supplied` field back to `missing`. */
@@ -138,15 +146,6 @@ export function toPendingConfirmations(
     ...fuzzyPeople.map((f) => ({ rawName: f.rawName, candidates: f.candidates })),
     ...unresolvedPeopleNames.map((rawName) => ({ rawName, candidates: [] })),
   ];
-}
-
-export interface InviteOutcome {
-  /** Bot API or MTProto actually delivered the message to the invitee. */
-  readonly delivered: readonly DraftPerson[];
-  /** An Invitation record exists, but live delivery failed; a deep-link fallback was sent to the INVITER to forward manually — never claimed as delivered to the invitee. */
-  readonly pendingManualForward: readonly DraftPerson[];
-  readonly noAccount: readonly DraftPerson[];
-  readonly failed: readonly { readonly person: DraftPerson; readonly reason: string }[];
 }
 
 /**
@@ -229,16 +228,24 @@ export async function inviteResolvedPeople(
   return { delivered, pendingManualForward, noAccount, failed };
 }
 
-/** Fire-and-forget post-create hooks — same semantics add-event.scene.ts's own wizard already has (errors logged, never block the receipt), reused rather than duplicated. */
-export function runPostCreateHooks(
+/**
+ * Post-create Google push + place verification, run to completion and durably tracked — never
+ * fire-and-forget. A rejection from either hook is a genuine "did the external system actually
+ * receive it" unknown the effect ledger must capture for operator/user reconciliation, so this
+ * throws on the first rejection instead of the previous `.catch(() => {})` silent swallow that
+ * made a live Google-push failure indistinguishable from success.
+ */
+export async function runPostCreateHooks(
   event: CalendarEvent,
   user: User,
   deps: Pick<SessionRuntimeDeps, 'onEventCreated' | 'locationVerification'>,
-): void {
-  deps.onEventCreated?.(user.telegram_id, event.id).catch(() => {});
+): Promise<void> {
+  const hooks: Promise<unknown>[] = [];
+  if (deps.onEventCreated) hooks.push(deps.onEventCreated(user.telegram_id, event.id));
   if (event.location && deps.locationVerification) {
-    deps.locationVerification.verifyEventLocation(event, user).catch(() => {});
+    hooks.push(deps.locationVerification.verifyEventLocation(event, user));
   }
+  await Promise.all(hooks);
 }
 
 function inviteDisclosureLines(outcome: InviteOutcome, lang: 'en' | 'ru'): string[] {
@@ -296,13 +303,107 @@ export type ExecuteOutcome =
   | { readonly kind: 'executed'; readonly event: CalendarEvent }
   | { readonly kind: 'race_lost' };
 
+const EMPTY_INVITE_OUTCOME: InviteOutcome = { delivered: [], pendingManualForward: [], noAccount: [], failed: [] };
+
+/**
+ * Advances a durable session's effect ledger by exactly the effects still `pending` — never an
+ * already-`applied`/`unknown`/`failed` one. Each attempt is bracketed by two CAS writes: `unknown`
+ * right before the call runs, then the real completion status right after. A hard crash between
+ * those two writes (never observed by THIS process, which is why every caught exception below
+ * still resolves to a definite write) leaves the ledger honestly `unknown` for a later
+ * `resumeExecutedSession` call to find — never silently retried, since a caught exception from a
+ * real side effect (an invitation send, a Google push, a Telegram receipt) cannot prove the
+ * remote call never landed.
+ */
+async function runDurableEffects(
+  ctx: BotCommandContext,
+  event: CalendarEvent,
+  user: User,
+  draft: EventCreateDraft,
+  sessionShell: DialogueV3Session,
+  casRevision: number,
+  appliedAtRevision: number,
+  key: DialogueSessionKey,
+  ledger: EffectLedger,
+  inviteOutcomeSoFar: InviteOutcome | null,
+  deps: SessionRuntimeDeps,
+): Promise<{ readonly ledger: EffectLedger; readonly revision: number; readonly inviteOutcome: InviteOutcome | null }> {
+  let current = ledger;
+  let revision = casRevision;
+  let inviteOutcome = inviteOutcomeSoFar;
+
+  const persist = (next: EffectLedger, outcome: InviteOutcome | null): void => {
+    current = next;
+    inviteOutcome = outcome;
+    const receipt: ExecutionReceipt = {
+      status: 'applied',
+      eventId: event.id,
+      appliedAtRevision,
+      effects: next,
+      inviteOutcome: outcome,
+    };
+    const result = deps.dialogueSessions.set(
+      key,
+      { ...sessionShell, status: 'executed', executionReceipt: receipt, updatedAt: Date.now() },
+      revision,
+    );
+    // A mismatch means a concurrent writer touched this row after this call already won its
+    // reservation for the whole execution — should not happen; best-effort continue with the
+    // last-known-good revision rather than discarding the already-durable event/ledger work.
+    if (result.ok) revision = result.revision;
+  };
+
+  if (current.invitations === 'pending') {
+    persist({ ...current, invitations: 'unknown' }, inviteOutcome);
+    try {
+      const outcome = await inviteResolvedPeople(event, user, draft.people, ctx.lang, deps);
+      persist({ ...current, invitations: 'applied' }, outcome);
+    } catch {
+      persist({ ...current, invitations: 'unknown' }, inviteOutcome);
+    }
+  }
+
+  if (current.postCreateHooks === 'pending') {
+    persist({ ...current, postCreateHooks: 'unknown' }, inviteOutcome);
+    try {
+      await runPostCreateHooks(event, user, deps);
+      persist({ ...current, postCreateHooks: 'applied' }, inviteOutcome);
+    } catch {
+      persist({ ...current, postCreateHooks: 'unknown' }, inviteOutcome);
+    }
+  }
+
+  if (current.receipt === 'pending') {
+    persist({ ...current, receipt: 'unknown' }, inviteOutcome);
+    try {
+      // A crash-recovered resume that never re-ran invitations (still `unknown`/`failed`) has no
+      // real outcome to disclose — the empty fallback is an honest "nothing more is known here",
+      // never a claim that everyone was successfully invited.
+      await sendReceipt(ctx, event, sessionShell.timezone, draft.title ?? '', inviteOutcome ?? EMPTY_INVITE_OUTCOME);
+      persist({ ...current, receipt: 'applied' }, inviteOutcome);
+    } catch {
+      persist({ ...current, receipt: 'unknown' }, inviteOutcome);
+    }
+  }
+
+  return { ledger: current, revision, inviteOutcome };
+}
+
 /**
  * The one irreversible transition. Compare-and-swap reserves the session as `executing` at the
  * caller's `expectedRevision` BEFORE creating anything — a second concurrent call for the same
  * session (a duplicate webhook, a retried update) loses the CAS race and returns `race_lost`
  * without ever calling `EventService.createEvent`, so the event can never be created twice for
- * one draft. On success the session row is deleted (matches the existing external contract:
- * once executed, no session remains) only AFTER the event and every durable write exist.
+ * one draft. The all-day boundary instant is resolved BEFORE that reservation: a calendar day
+ * whose local midnight a clock change skipped (`localMidnightOrThrow`) throws before any durable
+ * state exists, never leaving a stray `executing` row behind.
+ *
+ * The session is deleted only once EVERY durable post-create effect (real invitation delivery,
+ * the Google-push/place-verification hooks, the receipt card — `runDurableEffects`) is `applied`
+ * — never immediately after the event row exists. A crash/failure anywhere in that sequence
+ * leaves the session durably `executed` with the real `eventId` and an honest per-effect ledger,
+ * so a later `resumeExecutedSession` call can find it, run only what is still `pending`, and
+ * never blind-retry an effect whose outcome is genuinely unknown.
  */
 export async function executeDraft(
   ctx: BotCommandContext,
@@ -315,6 +416,14 @@ export async function executeDraft(
   deps: SessionRuntimeDeps,
 ): Promise<ExecuteOutcome> {
   if (!draft.title || !draft.schedule) throw new Error('executeDraft called on a not-ready draft');
+
+  const startAt =
+    draft.schedule.kind === 'timed' ? draft.schedule.startAt : localMidnightOrThrow(draft.schedule.startDate, timezone);
+  const endAt =
+    draft.schedule.kind === 'timed'
+      ? (draft.endAt ?? applyDefaultDuration(draft.schedule.startAt, user.default_event_duration_minutes ?? 60))
+      : localMidnightOrThrow(draft.schedule.endDateExclusive, timezone);
+
   const reservation = deps.dialogueSessions.set(
     key,
     {
@@ -325,13 +434,6 @@ export async function executeDraft(
     expectedRevision,
   );
   if (!reservation.ok) return { kind: 'race_lost' };
-
-  const startAt =
-    draft.schedule.kind === 'timed' ? draft.schedule.startAt : gapSafeLocalMidnight(draft.schedule.startDate, timezone);
-  const endAt =
-    draft.schedule.kind === 'timed'
-      ? (draft.endAt ?? applyDefaultDuration(draft.schedule.startAt, user.default_event_duration_minutes ?? 60))
-      : gapSafeLocalMidnight(draft.schedule.endDateExclusive, timezone);
 
   const event = deps.eventService.createEvent({
     user_id: user.telegram_id,
@@ -357,25 +459,102 @@ export async function executeDraft(
     metadata: JSON.stringify({ startAt, endAt, allDay: draft.schedule.kind === 'all_day' }),
   });
 
-  // Best-effort bookkeeping only — this caller already exclusively owns execution via the
-  // successful reservation CAS above, so a mismatch here (should not happen) does not undo the
-  // already-durable event; the session is deleted unconditionally next regardless.
-  deps.dialogueSessions.set(
-    key,
-    {
-      ...sessionShell,
-      status: 'executed',
-      executionReceipt: { status: 'applied', eventId: event.id, appliedAtRevision: reservation.revision },
+  // The event and this initial ledger write are the durable record from this point on — a crash
+  // during any effect below leaves exactly this (or a further-progressed) ledger for
+  // `resumeExecutedSession` to find, never a deleted row with no trace of the created event.
+  const executedSession: DialogueV3Session = {
+    ...sessionShell,
+    status: 'executed',
+    executionReceipt: {
+      status: 'applied',
+      eventId: event.id,
+      appliedAtRevision: reservation.revision,
+      effects: PENDING_EFFECT_LEDGER,
+      inviteOutcome: null,
     },
-    reservation.revision,
-  );
-  deps.dialogueSessions.delete(key);
+    updatedAt: Date.now(),
+  };
+  const executedWrite = deps.dialogueSessions.set(key, executedSession, reservation.revision);
+  const ledgerRevision = executedWrite.ok ? executedWrite.revision : reservation.revision;
 
-  const inviteOutcome = await inviteResolvedPeople(event, user, draft.people, ctx.lang, deps);
-  runPostCreateHooks(event, user, deps);
-  await sendReceipt(ctx, event, timezone, draft.title, inviteOutcome);
+  const { ledger } = await runDurableEffects(
+    ctx,
+    event,
+    user,
+    draft,
+    executedSession,
+    ledgerRevision,
+    reservation.revision,
+    key,
+    PENDING_EFFECT_LEDGER,
+    null,
+    deps,
+  );
+
+  if (isEffectLedgerReconciled(ledger)) deps.dialogueSessions.delete(key);
 
   return { kind: 'executed', event };
+}
+
+/**
+ * Crash/restart recovery for a session left `executed` with an unreconciled effect ledger (see
+ * `executeDraft`'s doc comment). Re-reads the durable `eventId` — never calls
+ * `EventService.createEvent` again — and resumes only the effects still `pending`; an `unknown`
+ * or `failed` effect from a prior attempt is left exactly as it is, surfaced for operator/user
+ * reconciliation rather than blind-retried. Deletes the session once every effect is `applied`.
+ */
+export async function resumeExecutedSession(
+  ctx: BotCommandContext,
+  user: User,
+  session: DialogueV3Session,
+  key: DialogueSessionKey,
+  deps: SessionRuntimeDeps,
+): Promise<{ readonly reconciled: boolean }> {
+  if (session.status !== 'executed' || session.executionReceipt?.status !== 'applied') {
+    return { reconciled: false };
+  }
+  const { eventId, effects, inviteOutcome, appliedAtRevision } = session.executionReceipt;
+  const event = deps.eventService.getEvent(eventId, user.telegram_id);
+  if (!event) {
+    // The event itself is gone (e.g. deleted since) — no effect here can durably attach to
+    // anything anymore; leave the row for manual inspection rather than looping forever.
+    return { reconciled: false };
+  }
+  const result = await runDurableEffects(
+    ctx,
+    event,
+    user,
+    session.draft,
+    session,
+    session.revision,
+    appliedAtRevision,
+    key,
+    effects,
+    inviteOutcome,
+    deps,
+  );
+  if (!isEffectLedgerReconciled(result.ledger)) return { reconciled: false };
+  deps.dialogueSessions.delete(key);
+  return { reconciled: true };
+}
+
+/**
+ * Opportunistic crash recovery before a NEW turn is allowed to touch this key. An `executed`
+ * session with unresolved durable effects is the only record of what happened after the event
+ * already exists — a fresh draft must never silently CAS-overwrite it. Attempts reconciliation
+ * first; only once it is fully reconciled (or there was nothing to reconcile) does the caller
+ * proceed as if the key were free.
+ */
+export async function reconcileBeforeNewTurn(
+  ctx: BotCommandContext,
+  user: User,
+  key: DialogueSessionKey,
+  deps: SessionRuntimeDeps,
+): Promise<{ readonly blocked: boolean; readonly existing: DialogueV3Session | null }> {
+  const existing = deps.dialogueSessions.get(key);
+  if (!existing || existing.status !== 'executed') return { blocked: false, existing };
+  const resumed = await resumeExecutedSession(ctx, user, existing, key, deps);
+  return resumed.reconciled ? { blocked: false, existing: null } : { blocked: true, existing };
 }
 
 /** Fixed identity fields a session keeps for its whole lifetime — everything `advance()` does NOT itself decide each turn. */

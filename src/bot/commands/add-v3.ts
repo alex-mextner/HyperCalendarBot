@@ -25,6 +25,7 @@ import {
   advance,
   applyParseResultToDraft,
   emptyDraft,
+  reconcileBeforeNewTurn,
   type SessionRuntimeDeps,
   type SessionShell,
   toPendingConfirmations,
@@ -100,6 +101,12 @@ export async function tryFullFieldAdd(
   }
 
   const key = { chatId: Number(ctx.chatId ?? user.telegram_id), userId: user.telegram_id, topicId: 0 };
+  // Opportunistic crash recovery: an `executed` session with unresolved durable effects
+  // (session-runtime.ts's `EffectLedger`) is the only record of what happened after the event
+  // already exists — reconciled here (or found to already be fully reconciled) before this
+  // insert-only write below, so a genuinely stuck ledger from a prior crash does not
+  // permanently block every future `/add` at this key without ever attempting recovery.
+  await reconcileBeforeNewTurn(ctx, user, key, deps);
   const shell: SessionShell = {
     version: 3,
     sessionId: crypto.randomUUID(),
