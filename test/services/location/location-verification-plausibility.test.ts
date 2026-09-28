@@ -16,8 +16,10 @@ import { EventRepository } from '../../../src/database/repositories/event.reposi
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
+import { SecretaryRepository } from '../../../src/database/repositories/secretary.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import type { SecretaryPermission, SecretaryStatus } from '../../../src/database/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import { AddressCache } from '../../../src/services/location/address-cache.ts';
@@ -222,6 +224,13 @@ afterEach(() => db.close());
 function setup(
   profile: { timezone: string; city?: string; countryCode?: string; title?: string },
   geocodingService: GeocodingService,
+  secretary?: {
+    id: number;
+    timezone?: string;
+    city?: string;
+    permission?: SecretaryPermission;
+    status?: SecretaryStatus;
+  },
 ) {
   db = new Database(':memory:');
   runMigrations(db, migrations);
@@ -234,6 +243,23 @@ function setup(
   });
   userRepo.create({ telegram_id: INVITEE_ID, language: 'ru', timezone: 'Europe/Belgrade' });
   if (profile.city) userRepo.update(USER_ID, { city: profile.city });
+  const secretaryRepo = new SecretaryRepository(db);
+  if (secretary) {
+    userRepo.create({
+      telegram_id: secretary.id,
+      language: 'ru',
+      // Defaults deliberately differ from the owner's profile, so a bias/cache test that
+      // accidentally scopes to the secretary instead of the owner is caught (#421).
+      timezone: secretary.timezone ?? 'Asia/Novosibirsk',
+      ...(secretary.city ? { city: secretary.city } : {}),
+    });
+    const grant = secretaryRepo.upsert({
+      owner_id: USER_ID,
+      secretary_id: secretary.id,
+      permission: secretary.permission ?? 'write',
+    });
+    secretaryRepo.updateStatus(grant.id, secretary.status ?? 'active');
+  }
   const eventRepo = new EventRepository(db);
   const start = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const event = eventRepo.create({
@@ -266,6 +292,7 @@ function setup(
     invitationRepo,
     agendaRepository: new AgendaRepository(db),
     candidateStore,
+    secretaryRepo,
     sendMessage: async (userId, text, options) => {
       sent.push({ userId, text, replyMarkup: options?.reply_markup });
     },
@@ -279,14 +306,19 @@ function setup(
     if (!row) throw new Error('test user missing');
     return row;
   };
+  const userById = (id: number) => {
+    const row = userRepo.findByTelegramId(id);
+    if (!row) throw new Error(`test user ${id} missing`);
+    return row;
+  };
   const storedEvent = () => {
     const row = eventRepo.findById(event.id, USER_ID);
     if (!row) throw new Error('test event missing');
     return row;
   };
 
-  /** Press an inline button as the creator, through the real callback handler. */
-  async function tap(data: string): Promise<EditedMessage[]> {
+  /** Press an inline button as `actorId` (the owner by default), through the real callback handler. */
+  async function tap(data: string, actorId: number = USER_ID): Promise<EditedMessage[]> {
     const bot = new Bot('123:test');
     const edits: EditedMessage[] = [];
     bot.api.answerCallbackQuery = async () => true;
@@ -300,7 +332,7 @@ function setup(
       date: 0,
       chat: { id: Number(params.chat_id), type: 'private' },
     });
-    const dbUser = user();
+    const dbUser = userById(actorId);
     const ctx = Object.assign(
       new CallbackQueryContext({
         bot,
@@ -309,9 +341,9 @@ function setup(
         payload: {
           id: 'callback',
           chat_instance: 'test',
-          from: { id: USER_ID, is_bot: false, first_name: 'Owner' },
+          from: { id: actorId, is_bot: false, first_name: actorId === USER_ID ? 'Owner' : 'Secretary' },
           data,
-          message: { message_id: 10, date: 0, chat: { id: USER_ID, type: 'private' } },
+          message: { message_id: 10, date: 0, chat: { id: actorId, type: 'private' } },
         },
       }),
       { dbUser, userTimezone: dbUser.timezone, lang: 'ru' as const, scene: { enter: async () => {} } },
@@ -357,7 +389,10 @@ function setup(
     service,
     event,
     eventRepo,
+    userRepo,
+    secretaryRepo,
     user,
+    userById,
     storedEvent,
     addressRedis,
     addressCache,
