@@ -41,7 +41,7 @@ export function createEditValueScene(
   eventService: EventService,
   userComposer: UserResolverComposer,
   actionLogRepo?: ActionLogRepository,
-  locationVerification?: Pick<LocationVerificationService, 'verifyEventLocation'>,
+  locationVerification?: Pick<LocationVerificationService, 'verifyEventLocation' | 'refreshInvitationCards'>,
 ) {
   return (
     new Scene('edit_value')
@@ -111,6 +111,8 @@ export function createEditValueScene(
           }
         }
 
+        // Delivered invitation cards show the location as it was before this edit
+        const before = field === 'location' ? eventService.getEvent(eventId, user.telegram_id) : null;
         const updated = eventService.updateEvent(eventId, user.telegram_id, updateData);
         const { chatId, messageId } = context.scene.params;
 
@@ -126,6 +128,11 @@ export function createEditValueScene(
           metadata: JSON.stringify(updateData),
           success: !!updated,
         });
+
+        // Cards before the question, whose answer re-renders them again (see update_event)
+        if (updated && before && locationVerification) {
+          await locationVerification.refreshInvitationCards(before, updated);
+        }
 
         // Same verification and clarification flow as the AI update_event tool.
         if (updated && updateData.location && locationVerification) {

@@ -369,6 +369,7 @@ function makeLocationVerificationSpy(): { service: LocationVerificationService; 
       verifiedEventIds.push(event.id);
       return { resolved: true, geocoded: null, cityExtracted: null, candidates: [] };
     },
+    refreshInvitationCards: async () => {},
   };
   return { service: partial as unknown as LocationVerificationService, verifiedEventIds };
 }

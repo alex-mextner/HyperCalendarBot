@@ -603,6 +603,12 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
     output += t(ctx.user.language).aiTools.events.participantHint(acceptedParticipants.length);
   }
 
+  if (ctx.locationVerification) {
+    // Before the question below: a place the creator confirms from it re-renders the cards again,
+    // and this edit's render must not land after that one
+    await ctx.locationVerification.refreshInvitationCards(beforeUpdate, updated);
+  }
+
   // Trigger background location verification if location was updated with a concrete location
   if (input.location && ctx.locationVerification && !input.location_abstract) {
     ctx.locationVerification
