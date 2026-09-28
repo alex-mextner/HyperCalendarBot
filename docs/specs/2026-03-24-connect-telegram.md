@@ -467,9 +467,9 @@ Tool for AI agent to check if user has a connected session:
 }
 ```
 
-Returns: `{ connected: false } | { connected: true, phone_masked: string, status: string }` —
-`phone_masked` is the `+7 ••• 4567` format computed from `encrypted_phone`. No `phone_last4` field
-is exposed (it was in an earlier draft that stored `phone_last4` as a plain column).
+Returns: `{ connected: false, dismissed_recently: boolean } | { connected: true }` — connected
+yes/no only. The result lands in chat history and every AI debug log, so it carries no part of
+the phone number, not even the masked one.
 
 Used by AI agent to provide contextual help when the user creates an event with
 participants who haven't started the bot. See Section 10.1.

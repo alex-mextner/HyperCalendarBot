@@ -256,9 +256,7 @@ export interface AgentContext {
   retryAttempt?: number;
 }
 
-export type TelegramSessionData =
-  | { connected: false; dismissed_recently: boolean }
-  | { connected: true; phone_masked: string; status: string };
+export type TelegramSessionData = { connected: false; dismissed_recently: boolean } | { connected: true };
 
 /**
  * Must be `type`, not `interface` — needed for structural compatibility with

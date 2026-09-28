@@ -300,10 +300,12 @@ export function handleConnectTelegramStatus(ctx: AgentContext): ToolResult {
     };
   }
 
+  // Connected yes/no only: a tool result is kept in chat history and every AI debug log, so it carries
+  // no part of the phone number, masked or not.
   return {
     success: true,
-    output: t(lang).aiTools.meta.telegramConnectedStatus(session.phone_masked),
-    data: { connected: true, phone_masked: session.phone_masked, status: session.status },
+    output: t(lang).aiTools.meta.telegramConnectedStatus,
+    data: { connected: true },
   };
 }
 handleConnectTelegramStatus.meta = {

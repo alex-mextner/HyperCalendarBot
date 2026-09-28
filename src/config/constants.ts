@@ -621,7 +621,7 @@ export const MSG = {
         tableSent: (title: string) => `Table "${title}" has been sent to the chat.`,
         tableFailed: (title: string) => `Failed to render or send the table "${title}".`,
         tableRenderingVoice: 'Check the chat — the table is there.',
-        telegramConnectedStatus: (masked: string) => `Telegram account connected (${masked})`,
+        telegramConnectedStatus: 'Telegram account connected',
         telegramNotConnectedStatus: 'Telegram account not connected. Connect via /connect_telegram',
       },
       slots: {
@@ -1605,7 +1605,7 @@ export const MSG = {
         tableSent: (title: string) => `Таблица «${title}» отправлена в чат.`,
         tableFailed: (title: string) => `Не удалось отрендерить или отправить таблицу «${title}».`,
         tableRenderingVoice: 'Загляни в чат — там таблица.',
-        telegramConnectedStatus: (masked: string) => `Telegram-аккаунт подключён (${masked})`,
+        telegramConnectedStatus: 'Telegram-аккаунт подключён',
         telegramNotConnectedStatus: 'Telegram-аккаунт не подключён. Подключить: /connect_telegram',
       },
       slots: {
