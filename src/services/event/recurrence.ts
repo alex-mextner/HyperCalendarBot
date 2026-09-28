@@ -118,13 +118,32 @@ export function expandRecurrence(
     // exact original occurrence *instant* (spec §5), i.e. real UTC values — rrule's own
     // exdate/rdate matching would compare them against fake-local dates and never line up, so
     // they are applied below, against the resolved real instant, instead of handed to rrule.
+    //
+    // A repeated wall-clock reading (fall-back) denotes its first occurrence by default —
+    // COUNT counts it once, not twice; an explicit RDATE or exception targeting the exact
+    // second instant is the only way to also surface it. `ambiguousLocalDates` still records
+    // every collision for a caller that wants to offer disambiguation.
     const dtstartWall = wallClockAt(dtstart, template.timezone);
     const dtstartFakeUtc = new Date(
       Date.UTC(dtstartWall.y, dtstartWall.mo - 1, dtstartWall.d, dtstartWall.h, dtstartWall.mi, dtstartWall.s),
     );
+
+    // COUNT is an exact target the user configured; RFC 5545 leaves DST handling to the
+    // implementation, and a wall-clock gap must not silently consume one of them (spec §3 /
+    // #657 acceptance criteria: "skip the nonexistent time without consuming a repetition").
+    // COUNT is stripped from the rule text fed to rrule — its own internal cutoff would count
+    // the (invalid) gap occurrence — and generation instead continues, driven by this
+    // function, until exactly COUNT *valid* instants are collected. UNTIL-bounded and
+    // unbounded rules have no such "exact target"; they use the simpler windowed fetch below,
+    // where a gap is simply omitted.
+    const rruleBodyForCount = parsed.rruleLine.slice(parsed.rruleLine.indexOf(':') + 1);
+    const countMatch = /(?:^|;)COUNT=(\d+)/i.exec(rruleBodyForCount);
+    const targetCount = countMatch ? Number(countMatch[1]) : null;
+    const rruleLineForGeneration = targetCount === null ? parsed.rruleLine : stripCount(parsed.rruleLine);
+
     let rule: RRule;
     try {
-      rule = rrulestr(`DTSTART:${formatRRuleDate(dtstartFakeUtc)}\n${parsed.rruleLine}`) as RRule;
+      rule = rrulestr(`DTSTART:${formatRRuleDate(dtstartFakeUtc)}\n${rruleLineForGeneration}`) as RRule;
     } catch (err) {
       throw new RecurrenceUnsupportedError(
         'invalid_rrule_syntax',
@@ -132,48 +151,71 @@ export function expandRecurrence(
       );
     }
 
-    // Query range boundaries, reinterpreted in the same fake-local space as DTSTART. Padded
-    // generously — any single IANA zone's UTC offset plus DST shift is well under 24h — so the
-    // coarse rrule fetch can never lose a boundary occurrence; results are re-filtered
-    // precisely against the real [rangeStart, rangeEnd] after DST resolution, below.
-    const paddedStartWall = wallClockAt(new Date(rangeStart.getTime() - DST_FETCH_PAD_MS), template.timezone);
-    const paddedEndWall = wallClockAt(new Date(rangeEnd.getTime() + DST_FETCH_PAD_MS), template.timezone);
-    const paddedStartFake = new Date(
-      Date.UTC(
-        paddedStartWall.y,
-        paddedStartWall.mo - 1,
-        paddedStartWall.d,
-        paddedStartWall.h,
-        paddedStartWall.mi,
-        paddedStartWall.s,
-      ),
-    );
-    const paddedEndFake = new Date(
-      Date.UTC(
-        paddedEndWall.y,
-        paddedEndWall.mo - 1,
-        paddedEndWall.d,
-        paddedEndWall.h,
-        paddedEndWall.mi,
-        paddedEndWall.s,
-      ),
-    );
-    const rawDates = rule.between(paddedStartFake, paddedEndFake, true);
+    if (targetCount !== null) {
+      const maxIterations = targetCount * 20 + 200; // generous safety cap, never unbounded
+      let iterations = 0;
+      rule.all((raw) => {
+        iterations++;
+        if (resolvedInstants.length >= targetCount || iterations > maxIterations) return false;
+        const wall = wallClockFromFakeUtc(raw);
+        const localKey = `${wall.y}-${String(wall.mo).padStart(2, '0')}-${String(wall.d).padStart(2, '0')}`;
+        const resolution = resolveWallClock(wall, template.timezone);
+        if (resolution.kind === 'gap') {
+          nonexistentLocalDates.add(localKey);
+          return true; // does not consume a place in COUNT
+        }
+        if (resolution.kind === 'ambiguous') {
+          ambiguousLocalDates.add(localKey);
+          resolvedInstants.push(resolution.first);
+          return resolvedInstants.length < targetCount;
+        }
+        resolvedInstants.push(resolution.instant);
+        return resolvedInstants.length < targetCount;
+      });
+    } else {
+      // Query range boundaries, reinterpreted in the same fake-local space as DTSTART. Padded
+      // generously — any single IANA zone's UTC offset plus DST shift is well under 24h — so
+      // the coarse rrule fetch can never lose a boundary occurrence; results are re-filtered
+      // precisely against the real [rangeStart, rangeEnd] after DST resolution, below.
+      const paddedStartWall = wallClockAt(new Date(rangeStart.getTime() - DST_FETCH_PAD_MS), template.timezone);
+      const paddedEndWall = wallClockAt(new Date(rangeEnd.getTime() + DST_FETCH_PAD_MS), template.timezone);
+      const paddedStartFake = new Date(
+        Date.UTC(
+          paddedStartWall.y,
+          paddedStartWall.mo - 1,
+          paddedStartWall.d,
+          paddedStartWall.h,
+          paddedStartWall.mi,
+          paddedStartWall.s,
+        ),
+      );
+      const paddedEndFake = new Date(
+        Date.UTC(
+          paddedEndWall.y,
+          paddedEndWall.mo - 1,
+          paddedEndWall.d,
+          paddedEndWall.h,
+          paddedEndWall.mi,
+          paddedEndWall.s,
+        ),
+      );
+      const rawDates = rule.between(paddedStartFake, paddedEndFake, true);
 
-    for (const raw of rawDates) {
-      const wall = wallClockFromFakeUtc(raw);
-      const localKey = `${wall.y}-${String(wall.mo).padStart(2, '0')}-${String(wall.d).padStart(2, '0')}`;
-      const resolution = resolveWallClock(wall, template.timezone);
-      if (resolution.kind === 'gap') {
-        nonexistentLocalDates.add(localKey);
-        continue;
+      for (const raw of rawDates) {
+        const wall = wallClockFromFakeUtc(raw);
+        const localKey = `${wall.y}-${String(wall.mo).padStart(2, '0')}-${String(wall.d).padStart(2, '0')}`;
+        const resolution = resolveWallClock(wall, template.timezone);
+        if (resolution.kind === 'gap') {
+          nonexistentLocalDates.add(localKey);
+          continue;
+        }
+        if (resolution.kind === 'ambiguous') {
+          ambiguousLocalDates.add(localKey);
+          resolvedInstants.push(resolution.first);
+          continue;
+        }
+        resolvedInstants.push(resolution.instant);
       }
-      if (resolution.kind === 'ambiguous') {
-        ambiguousLocalDates.add(localKey);
-        resolvedInstants.push(resolution.first, resolution.second);
-        continue;
-      }
-      resolvedInstants.push(resolution.instant);
     }
 
     const excludeMs = new Set<number>();
@@ -362,6 +404,22 @@ function formatRRuleDate(date: Date): string {
     .toISOString()
     .replace(/[-:]/g, '')
     .replace(/\.\d{3}/, '');
+}
+
+/** Remove the COUNT= parameter from a prefixed RRULE line, keeping every other parameter.
+ * Case-insensitive to match the COUNT detection above — RFC 5545 property/parameter names
+ * are case-insensitive (§3.1). */
+function stripCount(rruleLine: string): string {
+  const colonIdx = rruleLine.indexOf(':');
+  const prefix = rruleLine.slice(0, colonIdx + 1);
+  const body = rruleLine.slice(colonIdx + 1);
+  return (
+    prefix +
+    body
+      .split(';')
+      .filter((p) => !/^count=/i.test(p))
+      .join(';')
+  );
 }
 
 /** Legacy fixed-time DST adjustment (pre-583) — see `expandLegacy`. */

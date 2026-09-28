@@ -76,6 +76,29 @@ describe('parseRecurrenceBlock — supported cases', () => {
     expect(parsed.exdateLines).toEqual(['EXDATE;VALUE=DATE:20260301']);
   });
 
+  test('EXDATE;VALUE=DATE-TIME param on a date-time series is accepted, not misread as DATE by a `DATE\\b` regex', () => {
+    // #657 blocker: ;VALUE=DATE\b also matches ";VALUE=DATE-TIME" because "-" is a word
+    // boundary right after "DATE" — value kind must be read from the structured param list,
+    // not a regex over the raw header text.
+    const parsed = parseRecurrenceBlock(
+      'RRULE:FREQ=WEEKLY;COUNT=6\nEXDATE;VALUE=DATE-TIME:20260113T100000Z',
+      'date-time',
+    );
+    expect(parsed.exdateLines).toEqual(['EXDATE;VALUE=DATE-TIME:20260113T100000Z']);
+  });
+
+  test('EXDATE;VALUE=DATE-TIME param on an all-day series is rejected as a real value-type mismatch', () => {
+    // Same misdetection, the dangerous direction: an all-day series must not silently accept a
+    // date-time-typed EXDATE just because the buggy regex reported it as `date`.
+    try {
+      parseRecurrenceBlock('RRULE:FREQ=MONTHLY;COUNT=6\nEXDATE;VALUE=DATE-TIME:20260113T100000Z', 'date');
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(RecurrenceUnsupportedError);
+      expect((err as RecurrenceUnsupportedError).reason).toBe('value_type_mismatch');
+    }
+  });
+
   test('EXDATE;TZID=... param does not change the inferred value kind', () => {
     const parsed = parseRecurrenceBlock(
       'RRULE:FREQ=WEEKLY;COUNT=6\nEXDATE;TZID=Europe/Belgrade:20260113T120000',
@@ -154,5 +177,43 @@ describe('parseRecurrenceBlock — explicit rejects (spec §9)', () => {
       expect(err).toBeInstanceOf(RecurrenceUnsupportedError);
       expect((err as RecurrenceUnsupportedError).reason).toBe('count_and_until_conflict');
     }
+  });
+
+  test('COUNT above the wizard-consistent cap (999) is rejected, not iterated unbounded', () => {
+    // security review finding: a validated-in-one-place COUNT bound stops an untrusted
+    // recurrence_rule (ICS import, AI tool, Google sync — none of which run through the
+    // /add wizard's own 1-999 check) from making expandRecurrence's COUNT-generation loop
+    // iterate an attacker-controlled number of times.
+    try {
+      parseRecurrenceBlock('RRULE:FREQ=SECONDLY;COUNT=50000000', 'date-time');
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(RecurrenceUnsupportedError);
+      expect((err as RecurrenceUnsupportedError).reason).toBe('count_out_of_range');
+    }
+  });
+
+  test('a COUNT digit string so long it overflows to Infinity is rejected, not treated as unbounded', () => {
+    try {
+      parseRecurrenceBlock(`RRULE:FREQ=DAILY;COUNT=${'9'.repeat(400)}`, 'date-time');
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(RecurrenceUnsupportedError);
+      expect((err as RecurrenceUnsupportedError).reason).toBe('count_out_of_range');
+    }
+  });
+
+  test('COUNT=0 is rejected', () => {
+    try {
+      parseRecurrenceBlock('RRULE:FREQ=DAILY;COUNT=0', 'date-time');
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(RecurrenceUnsupportedError);
+      expect((err as RecurrenceUnsupportedError).reason).toBe('count_out_of_range');
+    }
+  });
+
+  test('COUNT within the cap (999) is fine', () => {
+    expect(() => parseRecurrenceBlock('RRULE:FREQ=DAILY;COUNT=999', 'date-time')).not.toThrow();
   });
 });

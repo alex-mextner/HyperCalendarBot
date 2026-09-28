@@ -195,18 +195,73 @@ describe('expandRecurrence', () => {
       expect(result.nonexistentLocalDates).toEqual(['2026-03-29']);
     });
 
-    test('fall-back repeat: both candidate instants are returned with distinct UTC offsets', () => {
-      // daily_02_30_europe_belgrade — recurrence-dst-repeat-001
+    test('fall-back repeat: the wall clock denotes its first occurrence by default, not both', () => {
+      // daily_02_30_europe_belgrade — recurrence-dst-repeat-001, refined by #657's acceptance
+      // criteria: "a repeated wall time denotes its first occurrence unless an explicit
+      // additional date selects the other instant."
       const template = makeTemplate({
         start_at: '2026-01-01T01:30:00Z',
         timezone: 'Europe/Belgrade',
         recurrence_rule: 'FREQ=DAILY;COUNT=400',
       });
       const result = expandRecurrence(template, [], '2026-10-25T00:00:00Z', '2026-10-26T00:00:00Z');
-      expect(result.occurrences.length).toBe(2);
+      expect(result.occurrences.length).toBe(1);
       expect(result.ambiguousLocalDates).toEqual(['2026-10-25']);
-      const starts = result.occurrences.map((o) => o.occurrence_start).sort();
-      expect(starts).toEqual(['2026-10-25T00:30:00.000Z', '2026-10-25T01:30:00.000Z']);
+      // CEST (first instant, UTC+2), not the later CET (second) instant.
+      expect(result.occurrences[0]!.occurrence_start).toBe('2026-10-25T00:30:00.000Z');
+    });
+
+    test('#657 acceptance: Belgrade daily 02:30 COUNT=3 from 2026-03-28 skips the gap without consuming a repetition', () => {
+      const template = makeTemplate({
+        start_at: '2026-03-28T01:30:00Z', // 02:30 Belgrade (CET, winter, still before the transition)
+        timezone: 'Europe/Belgrade',
+        recurrence_rule: 'FREQ=DAILY;COUNT=3',
+      });
+      const { occurrences } = expandRecurrence(template, [], '2026-03-01T00:00:00Z', '2026-04-30T00:00:00Z');
+      const localDates = occurrences.map((o) => o.occurrence_start.slice(0, 10));
+      // March 28, 30, 31 — March 29 (the nonexistent 02:30) is skipped and does NOT reduce the
+      // series to 2 occurrences; a 4th raw step (March 31) fills in for it.
+      expect(occurrences.length).toBe(3);
+      expect(localDates).not.toContain('2026-03-29');
+      // Verify the exact local dates via each occurrence's own zone-correct offset.
+      const offsets = occurrences.map((o) => new Date(o.occurrence_start).getUTCHours());
+      expect(offsets).toEqual([1, 0, 0]); // 02:30 CET=01:30Z (Mar28), 02:30 CEST=00:30Z (Mar30, Mar31)
+    });
+
+    test('COUNT detection is not sensitive to RRULE parameter order (RFC 5545 imposes none)', () => {
+      // review finding: COUNT was only detected when preceded by ";" — a rule with COUNT as
+      // the FIRST parameter (immediately after the "RRULE:" prefix, e.g. from ICS import or
+      // the AI tool, which don't enforce a canonical order) silently fell through to the
+      // windowed rrule path, which lets rrule's own COUNT cutoff consume the DST gap.
+      const template = makeTemplate({
+        start_at: '2026-03-28T01:30:00Z',
+        timezone: 'Europe/Belgrade',
+        recurrence_rule: 'RRULE:COUNT=3;FREQ=DAILY',
+      });
+      const { occurrences } = expandRecurrence(template, [], '2026-03-01T00:00:00Z', '2026-04-30T00:00:00Z');
+      const localDates = occurrences.map((o) => o.occurrence_start.slice(0, 10));
+      expect(occurrences.length).toBe(3);
+      expect(localDates).not.toContain('2026-03-29');
+    });
+
+    test('#657 acceptance: Belgrade daily 02:30 COUNT=3 from 2026-10-24 returns exactly three, not four', () => {
+      const template = makeTemplate({
+        start_at: '2026-10-24T00:30:00Z', // 02:30 Belgrade (CEST, summer, still before the transition)
+        timezone: 'Europe/Belgrade',
+        recurrence_rule: 'FREQ=DAILY;COUNT=3',
+      });
+      const { occurrences, ambiguousLocalDates } = expandRecurrence(
+        template,
+        [],
+        '2026-10-01T00:00:00Z',
+        '2026-11-30T00:00:00Z',
+      );
+      expect(occurrences.length).toBe(3);
+      expect(ambiguousLocalDates).toEqual(['2026-10-25']);
+      const localDates = occurrences.map((o) => o.occurrence_start.slice(0, 10));
+      expect(localDates).toEqual(['2026-10-24', '2026-10-25', '2026-10-26']);
+      // Oct 25 resolves to its first (earlier) candidate instant, not both.
+      expect(occurrences[1]!.occurrence_start).toBe('2026-10-25T00:30:00.000Z');
     });
   });
 
