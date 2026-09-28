@@ -14,6 +14,7 @@ import { buildUserSessionInvitationText } from '../../services/telegram-session/
 import { SessionBridge } from '../../services/telegram-session/session-bridge.ts';
 import { formatDateShort, formatTime } from '../../utils/date.ts';
 import { logger } from '../../utils/logger.ts';
+import { describeBridgeError, describeFailure } from '../../utils/safe-failure.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 
 export interface ConnectTelegramConfig {
@@ -301,7 +302,8 @@ export function createConnectTelegramScene(
             const minutes = Math.ceil(result.retryAfter / 60);
             await context.send(ct.floodWait(minutes));
           } else {
-            sceneLogger.error({ err: new Error(result.message), userId }, 'sendCode failed');
+            // The bridge's message may repeat the phone number: only its known error code is logged.
+            sceneLogger.error({ bridgeError: describeBridgeError(result.error), userId }, 'sendCode failed');
             await context.send(ct.featureUnavailable);
           }
           await SessionBridge.cleanupTempFile(sessionPath);
@@ -741,7 +743,8 @@ async function finalizeSession(
     await context.scene.exit();
     return false;
   } catch (err) {
-    sceneLogger.error({ err, userId }, 'Failed to finalize session');
+    // The error may carry the session, the phone or its hash: only its class is logged.
+    sceneLogger.error({ ...describeFailure(err), userId }, 'Failed to finalize session');
     await context.send(ct.featureUnavailable);
     await context.scene.exit();
     return false;

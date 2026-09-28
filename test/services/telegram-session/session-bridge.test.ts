@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { SessionBridge } from '../../../src/services/telegram-session/session-bridge.ts';
+import { captureLogs } from '../../helpers/log-capture.ts';
 
 describe('SessionBridge.parseResult', () => {
   test('success: send_code JSON', () => {
@@ -110,6 +111,22 @@ describe('SessionBridge.parseResult', () => {
     const result = SessionBridge.parseResult('{"phone_code_hash":"abc123"}\n', '', 0);
     expect(result.success).toBe(true);
     if (result.success) expect(result.data).toEqual({ phone_code_hash: 'abc123' });
+  });
+
+  test('bridge output naming the phone, the code or the password is never logged, only the exit code', () => {
+    const secrets = ['+15550104471', '97531', 'Synth-2FA pass phrase'];
+    const output = `Traceback: sign_in(${secrets[0]}, code=${secrets[1]}, password=${secrets[2]})`;
+    const logs = captureLogs();
+    try {
+      SessionBridge.parseResult(output, output, 0);
+      SessionBridge.parseResult(output, output, 1);
+      SessionBridge.parseResult(output, output, 2);
+    } finally {
+      logs.restore();
+    }
+    const logged = logs.text();
+    expect(logged).toContain('"exitCode":2');
+    expect(secrets.filter((secret) => logged.includes(secret))).toEqual([]);
   });
 });
 
