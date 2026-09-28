@@ -66,7 +66,20 @@ export class ContactAliasRepository {
     })();
   }
 
-  /** Sets `aliasId` as the contact's primary alias and mirrors its text onto `contacts.name`. */
+  /**
+   * Sets `aliasId` as the contact's primary alias and mirrors its text onto `contacts.name`.
+   *
+   * Display contract (GH-654 confirmed blocker): `contacts.preferred_name`, when set, overrides
+   * `name` everywhere the UI and the AI tools compute a display label (`preferred_name ?? name`).
+   * any stale `preferred_name` override — otherwise the promotion has no visible effect. The old
+   * override is not silently discarded: unless it already exists as an alias (case-insensitive),
+   * matches the alias being promoted, or collides with an existing group's alias (the same
+   * cross-namespace check `add()` enforces — see its doc comment), it is inserted as a new
+   * non-primary alias, so it stays reachable. A group-name collision is the one case it is
+   * dropped rather than inserted: promote() is a best-effort preservation, not an identity merge,
+   * and it must never create an alias that would be immediately shadowed by a same-named group at
+   * exact-match resolution time.
+   */
   promote(userId: number, contactId: number, aliasId: number): void {
     this.db.transaction(() => {
       const target = this.db
@@ -74,9 +87,30 @@ export class ContactAliasRepository {
         .get(aliasId, userId, contactId) as ContactAlias | null;
       if (!target) throw new Error('CONTACT_ALIAS_NOT_FOUND: alias does not belong to this contact');
       if (target.is_primary === 1) return;
+      const owner = this.db
+        .prepare('SELECT preferred_name FROM contacts WHERE id = ? AND user_id = ?')
+        .get(contactId, userId) as { preferred_name: string | null } | undefined;
+      const stalePreferred = owner?.preferred_name?.trim() ?? '';
+      if (stalePreferred && stalePreferred.toLowerCase() !== target.alias.trim().toLowerCase()) {
+        const alreadyAliased = this.db
+          .prepare('SELECT id FROM contact_aliases WHERE contact_id = ? AND LOWER(alias) = LOWER(?)')
+          .get(contactId, stalePreferred);
+        const shadowedByGroup = this.db
+          .prepare('SELECT id FROM contact_groups WHERE user_id = ? AND LOWER(alias) = LOWER(?)')
+          .get(userId, stalePreferred);
+        if (!alreadyAliased && !shadowedByGroup) {
+          this.db
+            .prepare(
+              "INSERT INTO contact_aliases (user_id, contact_id, alias, is_primary, source) VALUES (?, ?, ?, 0, 'manual')",
+            )
+            .run(userId, contactId, stalePreferred);
+        }
+      }
       this.db.prepare('UPDATE contact_aliases SET is_primary = 0 WHERE contact_id = ?').run(contactId);
       this.db.prepare('UPDATE contact_aliases SET is_primary = 1 WHERE id = ?').run(aliasId);
-      this.db.prepare('UPDATE contacts SET name = ? WHERE id = ? AND user_id = ?').run(target.alias, contactId, userId);
+      this.db
+        .prepare('UPDATE contacts SET name = ?, preferred_name = NULL WHERE id = ? AND user_id = ?')
+        .run(target.alias, contactId, userId);
     })();
   }
 

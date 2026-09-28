@@ -98,6 +98,57 @@ describe('ContactAliasRepository', () => {
     expect(contacts.findById(USER_ID, contact.id)?.name).toBe('Lenka');
   });
 
+  // GH-654 confirmed blocker (parent's exact-head review of PR693): promote() mirrored the
+  // promoted alias onto contacts.name but left contacts.preferred_name untouched. Every display
+  // site (bot UI and AI tools) reads `preferred_name ?? name`, so a contact with a preferred_name
+  // override kept showing the stale label after "make primary". Contract: the promoted alias
+  // becomes the displayed primary label; a stale preferred_name is preserved as a plain alias
+  // (not silently dropped) rather than merged into any other identity.
+  test('promote clears a stale preferred_name and preserves it as a non-primary alias', () => {
+    const contact = contacts.add(USER_ID, 'Elena Smirnova', undefined, undefined, 'Lenka');
+    const nickname = repo.add(USER_ID, contact.id, 'Lenusik', 'manual');
+    repo.promote(USER_ID, contact.id, nickname.id);
+    const updated = contacts.findById(USER_ID, contact.id);
+    expect(updated?.name).toBe('Lenusik');
+    expect(updated?.preferred_name).toBeNull();
+    const aliases = repo.listForContact(USER_ID, contact.id);
+    const preserved = aliases.find((a) => a.alias === 'Lenka');
+    expect(preserved?.is_primary).toBe(0);
+  });
+
+  test('promote does not duplicate an alias already matching the stale preferred_name', () => {
+    const contact = contacts.add(USER_ID, 'Elena Smirnova', undefined, undefined, 'Lenka');
+    repo.add(USER_ID, contact.id, 'Lenka', 'manual');
+    const nickname = repo.add(USER_ID, contact.id, 'Lenusik', 'manual');
+    repo.promote(USER_ID, contact.id, nickname.id);
+    const aliases = repo.listForContact(USER_ID, contact.id);
+    expect(aliases.filter((a) => a.alias === 'Lenka')).toHaveLength(1);
+  });
+
+  test('promoting the alias matching the current preferred_name just clears the override', () => {
+    const contact = contacts.add(USER_ID, 'Elena Smirnova', undefined, undefined, 'Lenka');
+    const nickname = repo.add(USER_ID, contact.id, 'Lenka', 'manual');
+    repo.promote(USER_ID, contact.id, nickname.id);
+    const updated = contacts.findById(USER_ID, contact.id);
+    expect(updated?.preferred_name).toBeNull();
+    const aliases = repo.listForContact(USER_ID, contact.id);
+    expect(aliases.filter((a) => a.alias.toLowerCase() === 'lenka')).toHaveLength(1);
+  });
+
+  // Independent review finding: the auto-preserved alias must never land on a name a
+  // contact_groups row already owns — that alias would be immediately and permanently shadowed at
+  // exact-match resolution time, the same collision add() already refuses outright.
+  test('promote drops the stale preferred_name instead of shadowing an existing group alias', () => {
+    groups.create(USER_ID, 'Lenka');
+    const contact = contacts.add(USER_ID, 'Elena Smirnova', undefined, undefined, 'Lenka');
+    const nickname = repo.add(USER_ID, contact.id, 'Lenusik', 'manual');
+    repo.promote(USER_ID, contact.id, nickname.id);
+    const updated = contacts.findById(USER_ID, contact.id);
+    expect(updated?.preferred_name).toBeNull();
+    const aliases = repo.listForContact(USER_ID, contact.id);
+    expect(aliases.some((a) => a.alias.toLowerCase() === 'lenka')).toBe(false);
+  });
+
   test('promote refuses an alias belonging to another owner or contact', () => {
     const contact = contacts.add(USER_ID, 'Lena');
     const other = contacts.add(USER_ID, 'Vova');
