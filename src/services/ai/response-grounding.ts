@@ -37,6 +37,8 @@ export interface GroundingReport {
    * the user's own words, or the arguments the model chose for its tool calls.
    */
   contextOnly: string[];
+  /** The contextOnly tokens that name a day: only today's or tomorrow's date backs them. */
+  contextOnlyDays: string[];
 }
 
 interface EvidenceIndex {
@@ -76,7 +78,8 @@ const ISO_DATETIME = /(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::\d{2}(?:\
 const COLON_TIME = /(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?!\d)/g;
 const DOTTED = /(?<![\d.])(\d{1,2})\.(\d{2})(?:\.(\d{4}|\d{2}))?(?!\d|\.\d)/g;
 const UTC_LABEL = /\b(?:UTC|GMT)\b/i;
-const QUOTED = /«([^«»\n]{1,80})»|“([^“”\n]{1,80})”|„([^“”\n]{1,80})“|"([^"\n]{1,80})"/g;
+/** A quoted span: an event title or someone's words. */
+export const QUOTED = /«([^«»\n]{1,80})»|“([^“”\n]{1,80})”|„([^“”\n]{1,80})“|"([^"\n]{1,80})"/g;
 const EVENT_ID = /\bid\s*[:#№]?\s*(\d{1,9})\b/gi;
 
 const RU_MONTHS = [
@@ -387,13 +390,18 @@ export function checkGrounding(
 ): GroundingReport {
   const index = indexEvidence(tools, timezone);
   const context = groundingContext(tools, timezone, userMessage, now);
-  const report: GroundingReport = { checked: 0, ungrounded: [], contextOnly: [] };
+  const report: GroundingReport = { checked: 0, ungrounded: [], contextOnly: [], contextOnlyDays: [] };
   for (const fact of extractFacts(response, timezone)) {
     report.checked++;
     // Context only widens what counts, so the evidence-only check comes first.
     if (isGrounded(fact, index, null)) continue;
-    if (isGrounded(fact, index, context)) report.contextOnly.push(fact.token);
-    else report.ungrounded.push(fact.token);
+    if (isGrounded(fact, index, context)) {
+      report.contextOnly.push(fact.token);
+      // The context backs a quote with words and a day, instant or day-or-time fact with its day.
+      if (fact.kind === 'day' || fact.kind === 'instant' || fact.kind === 'dayOrTime') {
+        report.contextOnlyDays.push(fact.token);
+      }
+    } else report.ungrounded.push(fact.token);
   }
   return report;
 }

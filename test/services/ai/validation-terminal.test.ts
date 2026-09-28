@@ -466,6 +466,15 @@ describe('re-validation accepts answers grounded in the same run (#492)', () => 
     expect(script.counts.validator).toBe(0);
   });
 
+  test('a supplement calling tomorrow free without any read is dropped (#515)', async () => {
+    seedWeekPlan(true);
+    const script = scripted([{ text: '28 сентября – свободный весь день' }], []);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe('');
+    expect(script.counts.validator).toBe(0);
+  });
+
   test('a supplement backed by its own reads is still delivered (#515)', async () => {
     seedWeekPlan(true);
     const text = 'Во вторник, 29 сентября, в 12:30 и 13:30 — английский.';
@@ -503,5 +512,24 @@ describe('re-validation accepts answers grounded in the same run (#492)', () => 
     expect(script.counts.validator).toBe(1);
     expect(result.responseText).toBe(grounded);
     expect(history()).not.toContain('свободный весь день');
+  });
+
+  test('a first answer calling tomorrow empty after reading other days is validated (#515)', async () => {
+    seedWeekPlan(false);
+    const grounded = '28 сентября в 20:30 — «Отвезти посылку».';
+    const script = scripted(
+      [
+        { text: '', tool: { name: 'get_events', input: { start_date: '2026-09-29', end_date: '2026-09-30' } } },
+        { text: 'Завтра, 28 сентября, ничего не запланировано.' },
+        { text: '', tool: { name: 'get_events', input: { start_date: '2026-09-28', end_date: '2026-09-28' } } },
+        { text: grounded },
+      ],
+      ['REJECT: 28 September was not read'],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(script.counts.validator).toBe(1);
+    expect(result.responseText).toBe(grounded);
+    expect(history()).not.toContain('ничего не запланировано');
   });
 });

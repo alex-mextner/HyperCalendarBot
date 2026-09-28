@@ -47,6 +47,12 @@ const WEEK_FROM_SUNDAY: ToolEvidence = {
   data: [{ id: 41, title: 'Английский с Томом', date: '2026-09-29', time: '12:30', all_day: false }],
 };
 
+/** A read of Tuesday and Wednesday only: Monday 28.09, tomorrow, is not in it. */
+const TUESDAY_AND_WEDNESDAY: ToolEvidence = {
+  ...WEEK_FROM_SUNDAY,
+  input: { start_date: '2026-09-29', end_date: '2026-09-30' },
+};
+
 describe('tool-run evidence prefilter', () => {
   beforeEach(() => setSystemTime(SUNDAY_NIGHT));
   afterEach(() => setSystemTime());
@@ -85,6 +91,42 @@ describe('tool-run evidence prefilter', () => {
   test('after a failed read, a completeness claim is validated (#515)', () => {
     expect(prefilter([], 'Больше ничего не запланировано.', [{ ...WEEK_FROM_SUNDAY, success: false }])).toBe(true);
   });
+
+  test('a free day with no read is validated, in either language (#515)', () => {
+    expect(prefilter(['create_event'], '28 сентября – свободный весь день.')).toBe(true);
+    expect(prefilter(['create_event'], 'Готово. Завтра ты свободен весь день.')).toBe(true);
+    expect(prefilter(['create_event'], 'Tomorrow, September 28, you are free all day.')).toBe(true);
+    expect(prefilter(['create_event'], 'Tomorrow, September 28, you are free from meetings.')).toBe(true);
+    expect(prefilter(['create_event'], 'Your calendar is clear on Tuesday.')).toBe(true);
+  });
+
+  test('an empty day named only by its date is validated when the read covered other days (#515)', () => {
+    expect(prefilter([], 'Завтра, 28 сентября, ничего не запланировано.', [TUESDAY_AND_WEDNESDAY])).toBe(true);
+    expect(prefilter([], 'Завтра, 28 сентября, свободно.', [TUESDAY_AND_WEDNESDAY])).toBe(true);
+  });
+
+  test('a title, "feel free" or a clear sky is no schedule claim', () => {
+    expect(prefilter(['create_event'], 'Готово, добавил событие на 18:30. Feel free to ask!')).toBe(false);
+    expect(prefilter(['create_event'], 'Готово! Чувствуй себя свободно и пиши, если что.')).toBe(false);
+    expect(prefilter(['create_event'], 'Готово! Создал «Свободный день» на 28 сентября, 18:00.')).toBe(false);
+    expect(prefilter(['create_event'], 'Done, added "Free consultation" tomorrow at 18:30.')).toBe(false);
+    expect(prefilter(['create_event'], 'Added to your calendar. All clear?')).toBe(false);
+    expect(prefilter(['render_day_image'], 'Tomorrow is clear and sunny.')).toBe(false);
+  });
+
+  test('a busy day or a word that only contains a day name is no free-day claim', () => {
+    expect(prefilter(['create_event'], 'Готово. Завтра ты не свободен — три встречи.')).toBe(false);
+    expect(prefilter(['create_event'], 'Готово. Завтра ты не будешь свободен до вечера.')).toBe(false);
+    expect(prefilter(['create_event'], "Done. You won't be free tomorrow: the event fills it.")).toBe(false);
+    expect(prefilter(['create_event'], 'Готово! Если будешь свободен — напиши позднее.')).toBe(false);
+    expect(prefilter(['create_event'], 'Added a stress-free weekend walk.')).toBe(false);
+  });
+
+  test('a quote known from the search is no reason to doubt a free day the read covered', () => {
+    const search: ToolEvidence = { name: 'search_events', input: { query: 'Йога' }, success: true };
+    const text = 'В понедельник, 28 сентября, «Йога» не запланирована — день свободный.';
+    expect(prefilter([], text, [WEEK_FROM_SUNDAY, search])).toBe(false);
+  });
 });
 
 describe('supplementIsGrounded (#515)', () => {
@@ -114,6 +156,20 @@ describe('supplementIsGrounded (#515)', () => {
 
   test('a completeness claim after only a failed read is not grounded', () => {
     expect(supplement('Больше ничего не запланировано.', [{ ...WEEK_FROM_SUNDAY, success: false }])).toBe(false);
+  });
+
+  test('a free day with no read of its own is not grounded, even when the date is tomorrow', () => {
+    expect(supplement('28 сентября – свободный весь день', [])).toBe(false);
+    expect(supplement('Завтра ты свободен весь день', [])).toBe(false);
+    expect(supplement('Tomorrow, September 28, you are free all day.', [])).toBe(false);
+  });
+
+  test('a sign-off that mentions being free is no schedule claim', () => {
+    expect(supplement('Хорошей недели! Если будешь свободен — отдыхай.', [])).toBe(true);
+  });
+
+  test('an empty day its reads did not cover is not grounded by being tomorrow', () => {
+    expect(supplement('Завтра, 28 сентября, ничего не запланировано.', [TUESDAY_AND_WEDNESDAY])).toBe(false);
   });
 });
 
