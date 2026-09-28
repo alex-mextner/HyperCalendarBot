@@ -245,7 +245,13 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
 
   // Decided here, not by the model: a prompt step asking it to check connect_telegram_status first
   // made weak models call that tool on plain event creation (#511).
-  const connectSuggestion = takeConnectTelegramSuggestion(ctx, delivery, isGroupTarget);
+  let connectSuggestion: string | null = null;
+  try {
+    connectSuggestion = takeConnectTelegramSuggestion(ctx, delivery, isGroupTarget);
+  } catch (err) {
+    // The invitation is already sent; an optional hint must not turn it into a failed write.
+    deliveryLogger.warn({ err, invitationId: invitation.id }, 'Connect-Telegram suggestion check failed');
+  }
   const deliveryHint = delivery.delivered
     ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
     : delivery.viaDeepLink
@@ -271,7 +277,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
       ...(connectSuggestion ? [connectSuggestion] : []),
     ].join('\n'),
     agentHint: connectSuggestion
-      ? `${deliveryHint} The bot could not reach the invitee directly: end your reply with the /connect_telegram line above, verbatim. If the user declines it, call dismiss_connect_telegram_prompt.`
+      ? `${deliveryHint} The bot could not reach the invitee directly: end your reply with the /connect_telegram line above, verbatim.`
       : deliveryHint,
   };
 }

@@ -1144,8 +1144,6 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       }
     }
 
-    // Each workflow step gets a fresh context; the suggestion latch must span the whole message.
-    let connectTelegramSuggested = false;
     const intentLayer =
       deps.intentMatcher && deps.intentRepo && deps.intentExecutor
         ? createIntentMatcherLayer(
@@ -1179,10 +1177,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
                   cmdLogger.error({ err: err, userId: user.telegram_id }, 'Failed to persist last mentioned event');
                 });
               };
-              agentCtx.connectTelegramSuggested = connectTelegramSuggested;
-              return executeTool(agentCtx, toolName, input).finally(() => {
-                connectTelegramSuggested = agentCtx.connectTelegramSuggested === true;
-              });
+              return executeTool(agentCtx, toolName, input);
             },
             workflowSessions,
             notifyAdmin,

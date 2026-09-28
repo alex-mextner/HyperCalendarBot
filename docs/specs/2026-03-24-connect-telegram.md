@@ -495,7 +495,8 @@ Answers explicit user questions ("is my Telegram connected?"). It is NOT part of
 flow: the system prompt does not tell the agent to call it, because weaker models then called it
 on every event creation (#511). The contextual suggestion is decided in code — see Section 10.1.
 
-`dismiss_connect_telegram_prompt` records `users.connect_telegram_dismissed_at = now`.
+`dismiss_connect_telegram_prompt` records `users.connect_telegram_dismissed_at = now`. The column
+is the start of a 30-day snooze of the suggestion (Section 10.1); showing the suggestion sets it too.
 
 ### 10.1 Contextual Connect Prompt
 
@@ -509,27 +510,33 @@ suggest connecting. The suggestion is added when ALL of these hold:
 - the conversation is a private chat (`/connect_telegram` refuses to run in groups);
 - the feature is enabled (`TELEGRAM_SESSION_MASTER_KEY` is configured);
 - the user has no `active` row in `user_telegram_sessions`;
-- `users.connect_telegram_dismissed_at` is empty or older than 30 days (a dismissal earlier in the
-  same request counts);
-- no earlier invitation in the same request already carried the suggestion, so inviting several
-  people yields one suggestion.
+- the suggestion is not snoozed: `users.connect_telegram_dismissed_at` is empty or older than
+  30 days.
 
-The whole decision lives in `takeConnectTelegramSuggestion` (`tool-handlers/settings.ts`). When it
-applies, the localized `botTips.connect_telegram` line becomes the last line of the tool `output`,
-and the `agentHint` tells the agent to end its reply with that line verbatim and to call
-`dismiss_connect_telegram_prompt` if the user declines. An intent workflow that sends `output`
-directly shows the line as is. Example (ru):
+Showing the suggestion starts the 30-day snooze (row and in-memory user snapshot). Therefore:
+
+- the suggestion appears at most once per 30 days, whether or not the user answers it — no
+  "not now" has to be understood. The intent path shows `output` verbatim and cannot relay the
+  agent hint, and the prompt no longer describes the dismissal;
+- inviting several people in one message yields one suggestion. This includes intent workflows,
+  which build a fresh context per step around the same user object, and a workflow resumed in a
+  later message;
+- an explicit `dismiss_connect_telegram_prompt` restarts the same snooze.
+
+The whole decision lives in `takeConnectTelegramSuggestion` (`tool-handlers/settings.ts`). A
+failure inside it is logged and yields no suggestion; it never changes the reported outcome of an
+invitation that was already sent. When it applies, the localized `botTips.connect_telegram` line
+becomes the last line of the tool `output`, and the `agentHint` tells the agent to end its reply
+with that line verbatim. An intent workflow that sends `output` directly shows the line as is.
+Example (ru):
 
 ```
 📱 Подключи свой Telegram-аккаунт — тогда приглашения на встречи будут приходить от тебя лично, а не от бота. Люди отвечают гораздо охотнее. /connect_telegram
 ```
 
 No suggestion is made when creating an event without inviting anyone, when the invitee received
-the invitation from the bot, when the user is connected, or within 30 days of a dismissal.
-
-Intent workflows build a fresh context per step, so the message handler carries the
-"already suggested" latch across the steps of one message, and a dismissal updates the shared
-user snapshot in place. Invitations sent through the native user picker (`pick_users` →
+the invitation from the bot, when the user is connected, or within 30 days of the previous
+suggestion or a dismissal. Invitations sent through the native user picker (`pick_users` →
 `picker-invitation.ts`) do not add the suggestion yet — tracked in
 https://github.com/alex-mextner/HyperCalendarBot/issues/552.
 

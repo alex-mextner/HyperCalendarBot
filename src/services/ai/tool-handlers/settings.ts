@@ -279,17 +279,30 @@ function updateVoice(ctx: AgentContext, updates: VoiceUpdates): ToolResult {
 
 const CONNECT_PROMPT_SNOOZE_MS = 30 * 24 * 60 * 60 * 1000;
 
-function dismissedConnectPromptRecently(ctx: AgentContext): boolean {
-  const dismissedAt = ctx.user.connect_telegram_dismissed_at;
-  if (!dismissedAt) return false;
-  return Date.now() - new Date(dismissedAt).getTime() < CONNECT_PROMPT_SNOOZE_MS;
+/**
+ * `users.connect_telegram_dismissed_at` is the start of a 30-day snooze. It is set both by an
+ * explicit dismissal and whenever the suggestion is shown, so the suggestion appears at most once
+ * per 30 days whether or not the user answers it (the intent path cannot relay a "not now").
+ */
+function connectPromptSnoozed(ctx: AgentContext): boolean {
+  const snoozedAt = ctx.user.connect_telegram_dismissed_at;
+  if (!snoozedAt) return false;
+  return Date.now() - new Date(snoozedAt).getTime() < CONNECT_PROMPT_SNOOZE_MS;
+}
+
+function snoozeConnectPrompt(ctx: AgentContext): void {
+  const at = new Date().toISOString();
+  ctx.userRepo.setConnectTelegramDismissedAt(ctx.user.telegram_id, at);
+  // Later steps of the same message read the user snapshot, not the row: intent workflows build a
+  // fresh context per step around the same user object, so update that object in place.
+  ctx.user.connect_telegram_dismissed_at = at;
 }
 
 /**
  * The /connect_telegram suggestion for an invitation that was just sent, or null (#511, spec
  * §10.1). It is offered only when the bot itself could not reach a person invitee, the feature is
- * enabled, the user has no active session, has not dismissed it in the last 30 days, is in a
- * private chat (the command refuses to run in groups), and has not been shown it earlier in this run.
+ * enabled, the user has no active session, is in a private chat (the command refuses to run in
+ * groups), and the suggestion is not snoozed. Showing it starts the snooze.
  */
 export function takeConnectTelegramSuggestion(
   ctx: AgentContext,
@@ -302,22 +315,17 @@ export function takeConnectTelegramSuggestion(
     !delivery.viaBotApi &&
     !isGroupTarget &&
     !ctx.isGroup &&
-    !ctx.connectTelegramSuggested &&
     ctx.telegramMasterKey !== undefined &&
     ctx.telegramSessionRepo !== undefined &&
     !ctx.telegramSessionRepo.getActive(ctx.user.telegram_id) &&
-    !dismissedConnectPromptRecently(ctx);
+    !connectPromptSnoozed(ctx);
   if (!eligible) return null;
-  ctx.connectTelegramSuggested = true;
+  snoozeConnectPrompt(ctx);
   return t(ctx.user.language).botTips.connect_telegram;
 }
 
 export function handleDismissConnectTelegramPrompt(ctx: AgentContext): ToolResult {
-  const dismissedAt = new Date().toISOString();
-  ctx.userRepo.setConnectTelegramDismissedAt(ctx.user.telegram_id, dismissedAt);
-  // Later steps of the same message read the user snapshot, not the row: intent workflows build a
-  // fresh context per step around the same user object, so update that object in place.
-  ctx.user.connect_telegram_dismissed_at = dismissedAt;
+  snoozeConnectPrompt(ctx);
   return { success: true, output: 'Noted. Will not suggest again for 30 days.' };
 }
 handleDismissConnectTelegramPrompt.meta = { skipActionLog: true } satisfies import('../types.ts').ToolHandlerMeta;
@@ -330,7 +338,7 @@ export function handleConnectTelegramStatus(ctx: AgentContext): ToolResult {
     return {
       success: true,
       output: t(lang).aiTools.meta.telegramNotConnectedStatus,
-      data: { connected: false, dismissed_recently: dismissedConnectPromptRecently(ctx) },
+      data: { connected: false, dismissed_recently: connectPromptSnoozed(ctx) },
     };
   }
 

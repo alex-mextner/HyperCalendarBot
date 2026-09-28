@@ -213,8 +213,6 @@ export interface AgentContext {
    * so delete_event does not demand the bot-rendered delete list.
    */
   toolOrigin?: 'intent_workflow';
-  /** The /connect_telegram suggestion was already attached to an invitation during this run. */
-  connectTelegramSuggested?: boolean;
   /** Event participant registry (used independently by events and sharing). */
   participantRepo?: ParticipantRepository;
   /** Type of the current message being processed. */

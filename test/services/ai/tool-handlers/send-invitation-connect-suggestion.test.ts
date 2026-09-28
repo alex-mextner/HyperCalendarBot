@@ -120,8 +120,31 @@ describe('send_invitation /connect_telegram suggestion', () => {
     const result = await handleSendInvitation(makeCtx(), { event_id: eventId, invitee_id: INVITEE_ID });
     expect(result.success).toBe(true);
     expect(result.output?.split('\n').at(-1)).toBe(SUGGESTION);
-    // The dismissal path lives with the suggestion, not in the system prompt.
-    expect(result.agentHint).toContain('dismiss_connect_telegram_prompt');
+  });
+
+  test('an unanswered suggestion is not repeated in a later message within 30 days', async () => {
+    // The intent path shows the line verbatim and cannot relay a later "not now", so showing it
+    // is what snoozes it.
+    await handleSendInvitation(makeCtx(), { event_id: eventId, invitee_id: INVITEE_ID });
+    const nextMessage = makeCtx({ messageText: `Invite Telegram ID ${INVITEE_ID + 1}` });
+    const result = await handleSendInvitation(nextMessage, { event_id: eventId, invitee_id: INVITEE_ID + 1 });
+    expect(result.success).toBe(true);
+    expect(mentionsSuggestion(result)).toBe(false);
+  });
+
+  test('a failing suggestion check leaves the sent invitation reported as sent, without a suggestion', async () => {
+    const brokenSessions = new TelegramSessionRepository(db);
+    brokenSessions.getActive = () => {
+      throw new Error('SQLITE_BUSY');
+    };
+    const result = await handleSendInvitation(makeCtx({ telegramSessionRepo: brokenSessions }), {
+      event_id: eventId,
+      invitee_id: INVITEE_ID,
+    });
+    expect(result.success).toBe(true);
+    expect(result.mutationState).toBe('confirmed');
+    expect(result.effect).toEqual({ kind: 'invitation', delivery: 'delivered' });
+    expect(mentionsSuggestion(result)).toBe(false);
   });
 
   test('the suggestion comes back after a dismissal older than 30 days', async () => {
