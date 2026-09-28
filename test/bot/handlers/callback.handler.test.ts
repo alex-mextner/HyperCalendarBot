@@ -151,13 +151,38 @@ describe('createCallbackHandler', () => {
       expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
     });
 
-    test('a duplicate tap on an already answered question does not continue the AI twice', async () => {
+    // Two taps racing on the original question: the second edit changes nothing.
+    test('a racing duplicate tap does not continue the AI twice', async () => {
       const onAiButtonClick = mock<ButtonClick>(() => Promise.resolve());
       const ctx = makeCtx('ai_btn:Да');
       Object.assign(ctx.message, { text: 'Удалить?' });
       ctx.editText.mockImplementation(() => Promise.reject(new Error('Bad Request: message is not modified')));
       await aiButtonHandler(onAiButtonClick)(ctx);
       expect(onAiButtonClick).not.toHaveBeenCalled();
+    });
+
+    // A later tap from a client that still shows the buttons arrives with the message as it is
+    // now: the answer is already appended, or is the whole text after the too-long fallback.
+    test.each([
+      ['kept question', 'Удалить?\n\n✅ Да'],
+      ['too-long fallback', '✅ Да'],
+    ])('a repeat tap on an answered message (%s) does not continue the AI again', async (_state, text) => {
+      const onAiButtonClick = mock<ButtonClick>(() => Promise.resolve());
+      const ctx = makeCtx('ai_btn:Да');
+      Object.assign(ctx.message, { text });
+      await aiButtonHandler(onAiButtonClick)(ctx);
+      expect(ctx.editText).not.toHaveBeenCalled();
+      expect(onAiButtonClick).not.toHaveBeenCalled();
+    });
+
+    test('a failed edit that is not about length keeps the question and still hands the answer on', async () => {
+      const onAiButtonClick = mock<ButtonClick>(() => Promise.resolve());
+      const ctx = makeCtx('ai_btn:Да');
+      Object.assign(ctx.message, { text: 'Удалить?' });
+      ctx.editText.mockImplementation(() => Promise.reject(new Error('Too Many Requests: retry after 5')));
+      await aiButtonHandler(onAiButtonClick)(ctx);
+      expect(ctx.editText).toHaveBeenCalledTimes(1);
+      expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
     });
 
     test('preserves a private time answer containing a colon', async () => {

@@ -1163,13 +1163,25 @@ export function createCallbackHandler(
     const question = ctx.message?.text ?? '';
     const entities = ctx.message?.entities?.map((entity) => entity.payload) ?? [];
     const answered = `✅ ${answerText}`;
+    // A later tap from a client that still shows the buttons sees the answer already recorded:
+    // the AI must not get it twice (a destructive confirmation would run again).
+    if (question === answered || question.endsWith(`\n\n${answered}`)) return;
+    const kept = question ? `${question}\n\n${answered}` : answered;
     try {
-      await ctx.editText(question ? `${question}\n\n${answered}` : answered, { entities });
+      try {
+        await ctx.editText(kept, { entities });
+      } catch (err) {
+        // Question plus answer can exceed Telegram's 4096 characters: record the answer alone.
+        // editMessageText reports MESSAGE_TOO_LONG, sendMessage 'message is too long'.
+        if (kept === answered || !/MESSAGE_TOO_LONG|message is too long/i.test(String(err))) throw err;
+        await ctx.editText(answered);
+      }
     } catch (err) {
-      // A duplicate tap must still stop here, so the AI does not get the answer twice.
-      if (!question || String(err).includes('message is not modified')) throw err;
-      // Question plus answer can exceed Telegram's 4096 characters: record the answer alone.
-      await ctx.editText(answered);
+      // Two taps racing on the same question: the second edit changes nothing, so stop here.
+      if (String(err).includes('message is not modified')) throw err;
+      // The edit only shows the answer in the chat; as with the delete confirmation, a failed
+      // edit must not drop the user's answer.
+      cmdLogger.warn({ err }, 'Failed to record the ask_user answer');
     }
     const cbChatId = ctx.chatId;
     if (onAiButtonClick && cbChatId) {
