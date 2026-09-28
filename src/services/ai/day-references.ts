@@ -404,8 +404,8 @@ const COLON_CLOCK = /(?<!\d)\d{1,2}:\d{2}(?!\d)/;
 const DOTTED_DATE = /(?<![\d.])(?:(?:2[4-9]|3[01])\.(?:0?[1-9]|1[0-2])|\d{1,2}\.\d{1,2}\.\d{2,4})(?![\d:])/;
 /** "9.10-10.00": a dotted number that opens a range is a clock time. */
 const RANGE_AFTER = /^[ \t]*[-–—][ \t]*\d{1,2}[.:]\d{2}/;
-/** "2.5 часа": a dotted number followed by a unit is a quantity. */
-const UNIT_AFTER = /^[ \t]*(?:час\p{L}*|ч|мин\p{L}*|hours?|hrs?|h|min\p{L}*)(?!\p{L})/u;
+/** "2.5 часа", "2.5-часовая": a dotted number followed by a unit is a quantity. */
+const UNIT_AFTER = /^[ \t-]*(?:час\p{L}*|ч|мин\p{L}*|hours?|hrs?|h|min\p{L}*)(?!\p{L})/u;
 /** The lower-case English "may" is the verb ("may 30 people join"), not the month. */
 const MAY_VERB = /(?<!\p{L})may(?!\p{L})/u;
 
@@ -416,6 +416,17 @@ interface PairParts {
   d: string;
   /** "10.09" without a year could also be 10:09. */
   dotted?: boolean;
+}
+
+/** A slashed date is month first next to an English weekday ("Wed 9/28"), day first next to a Russian one. */
+function slashParts(weekday: string, first: string, second: string, year: string | undefined): PairParts {
+  const monthFirst = /^[a-z]/.test(weekday);
+  return {
+    weekday,
+    month: Number(monthFirst ? first : second),
+    d: monthFirst ? second : first,
+    y: year?.padStart(4, '20'),
+  };
 }
 
 const PAIR_PATTERNS: [RegExp, (m: RegExpMatchArray) => PairParts][] = [
@@ -460,6 +471,21 @@ const PAIR_PATTERNS: [RegExp, (m: RegExpMatchArray) => PairParts][] = [
   [
     new RegExp(`(?<![\\d.:])(\\d{1,2})\\.(\\d{1,2})(?:\\.(\\d{4}|\\d{2}))?${GAP}${WD}(?![\\p{L}])`, 'gu'),
     (m) => ({ d: m[1]!, month: Number(m[2]), y: m[3]?.padStart(4, '20'), weekday: m[4]!, dotted: true }),
+  ],
+  // "Wednesday, 9/28", "ср 28/09" and "9/28/2026 (Wed)"; "1/2" with no two-digit part is a fraction
+  [
+    new RegExp(
+      `(?<![\\p{L}])${WD}${GAP}(?=\\d{2}|\\d/\\d{2})(\\d{1,2})/(\\d{1,2})(?:/(\\d{4}|\\d{2}))?(?![\\d/])`,
+      'gu',
+    ),
+    (m) => slashParts(m[1]!, m[2]!, m[3]!, m[4]),
+  ],
+  [
+    new RegExp(
+      `(?<![\\d/])(?=\\d{2}|\\d/\\d{2})(\\d{1,2})/(\\d{1,2})(?:/(\\d{4}|\\d{2}))?${GAP}${WD}(?![\\p{L}])`,
+      'gu',
+    ),
+    (m) => slashParts(m[4]!, m[1]!, m[2]!, m[3]),
   ],
   // "Sun 2026-09-28" and "2026-09-28, воскресенье"
   [

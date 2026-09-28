@@ -49,6 +49,12 @@ describe('a weekday written next to a date on another weekday', () => {
       { date: '2026-09-28', said: 'Wednesday', actual: 'Monday' },
     ]);
     expect(mismatches('28.09, среда')).toEqual([{ date: '2026-09-28', said: 'Wednesday', actual: 'Monday' }]);
+    // Slashes: month first after an English weekday, day first after a Russian one.
+    expect(mismatches('Wednesday, 9/28: nothing planned')).toEqual([
+      { date: '2026-09-28', said: 'Wednesday', actual: 'Monday' },
+    ]);
+    expect(mismatches('ср 28/09')).toEqual([{ date: '2026-09-28', said: 'Wednesday', actual: 'Monday' }]);
+    expect(mismatches('9/28/2026 (Wed)')).toEqual([{ date: '2026-09-28', said: 'Wednesday', actual: 'Monday' }]);
   });
 
   test('the pair quoted back is the one written, whatever else the text holds', () => {
@@ -97,6 +103,9 @@ describe('a weekday written next to a date on another weekday', () => {
       'Воскресенье 27 сентября 2026',
       // A dotted quantity is no date, and the lower-case English "may" is the verb.
       'В пятницу 2.5 часа свободно, начнём в 12:30',
+      'В пятницу 2.5-часовая встреча, начнём в 12:30',
+      'Wed 9/30 and Mon 28/09',
+      'в пятницу 1/2 дня свободна',
       'On Friday, may 30 people join the call at 12:30?',
     ])
       expect(mismatches(text)).toEqual([]);

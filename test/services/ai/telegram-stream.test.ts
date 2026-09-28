@@ -271,6 +271,22 @@ describe('TelegramStreamWriter', () => {
     expect(final).not.toContain('Среда');
   });
 
+  test('tool arguments that would need the check are never shown in the label or the execution log', async () => {
+    const writer = new TelegramStreamWriter(sender, 123, 'ru', {
+      holdDraftWhen: (draft) => draft.includes('Понедельник'),
+    });
+    await writer.init();
+    // The guard rejects this question before it is sent; its label must not show it either.
+    writer.setToolLabel('ask_user', { question: 'Создать: Понедельник 27 сентября в 12:30?' });
+    await writer.flush(true);
+    writer.markToolResult(false);
+    writer.commitIntermediate();
+    writer.appendText('Уточни, какой день нужен.');
+    await writer.finalize();
+    for (const call of editMock.mock.calls) expect(call[2] as string).not.toContain('Понедельник');
+    expect(editMock.mock.calls.at(-1)![2] as string).toContain('ask_user');
+  });
+
   test('finalize without tools has no blockquote', async () => {
     const writer = new TelegramStreamWriter(sender, 123);
     await writer.init();

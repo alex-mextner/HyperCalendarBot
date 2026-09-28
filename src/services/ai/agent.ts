@@ -1313,6 +1313,7 @@ export class CalendarBotAgent {
               const retryMismatches = retryOutcome.lastRoundMismatches ?? [];
               if (retryMismatches.length > 0) {
                 unresolvedWeekdays = retryMismatches;
+                responseUnverified = true;
               } else {
                 const reValidation = await validateResponse(
                   {
@@ -1621,7 +1622,8 @@ export class CalendarBotAgent {
       const lastRoundMismatches = checkRoundWeekdays(writer, result.text, ctx.user.timezone);
 
       if (result.toolCalls.length === 0) {
-        if (!ctx.supplementMode) saveAssistant(result.assistantMessage);
+        // A reply pairing a weekday with another weekday's date is never kept for history.
+        if (!ctx.supplementMode && lastRoundMismatches.length === 0) saveAssistant(result.assistantMessage);
         return { hitStopLoop: false, lastRoundText: result.text, lastRoundHadToolCalls: false, lastRoundMismatches };
       }
 

@@ -217,7 +217,9 @@ export class TelegramStreamWriter {
     const labels = TOOL_LABELS[toolName];
     const label = labels?.[this.lang] ?? labels?.en ?? toolName;
     const details = input ? formatToolInput(input) : '';
-    const detailsSuffix = details ? `: ${details}` : '';
+    // Arguments are never checked; ones that would need the draft's check (an ask_user
+    // question pairing a weekday with another weekday's date) are not shown at all.
+    const detailsSuffix = details && !this.holdDraftWhen?.(details) ? `: ${details}` : '';
     this.toolLabel = `<i>${escapeHtml(label)}${detailsSuffix}...</i>`;
     this.pendingIndicators.push(`${escapeHtml(label)}${detailsSuffix}`);
   }
