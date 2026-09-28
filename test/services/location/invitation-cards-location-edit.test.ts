@@ -109,7 +109,11 @@ function setup(
     },
     addressCache: new AddressCache({
       get: async (key) => redis.get(key) ?? null,
-      set: async (key, value) => redis.set(key, value),
+      compareAndSet: async (key, expected, value) => {
+        if ((redis.get(key) ?? null) !== expected) return false;
+        redis.set(key, value);
+        return true;
+      },
     }),
     eventRepo: events,
     userRepo: users,

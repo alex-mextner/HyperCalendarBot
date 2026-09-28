@@ -123,9 +123,10 @@ function setup(options: { ownerSynced?: boolean; groupEvent?: boolean } = {}) {
     geocodingService,
     addressCache: new AddressCache({
       get: async (key) => store.get(key) ?? null,
-      set: async (key, value) => {
+      compareAndSet: async (key, expected, value) => {
+        if ((store.get(key) ?? null) !== expected) return false;
         store.set(key, value);
-        return 'OK';
+        return true;
       },
     }),
     eventRepo,
