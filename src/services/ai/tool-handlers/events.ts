@@ -354,9 +354,29 @@ function parseRangeBound(value: string, timezone: string, edge: 'start' | 'end')
   return Number.isFinite(instant.getTime()) ? instant : null;
 }
 
+const UTC_DAY_START_RE = /^(\d{4}-\d{2}-\d{2})T00:00:00(?:\.000)?Z$/;
+const UTC_DAY_END_RE = /^(\d{4}-\d{2}-\d{2})T23:59:59(?:\.999)?Z$/;
+
+/**
+ * Models often send a user's day as UTC day edges (`…T00:00:00Z`..`…T23:59:59Z`). Outside UTC that
+ * window is shifted by the offset: it misses the day's early events and takes in the next day's
+ * (#550). Such a pair is read as those local days; any other instant, an explicit offset or half a
+ * pair stays verbatim, and a zone at UTC on those days keeps the exact input.
+ */
+function localDaysForUtcDayEdges(input: GetEventsInput, timezone: string): { start_date: string; end_date: string } {
+  const startDay = UTC_DAY_START_RE.exec(input.start_date)?.[1];
+  const endDay = UTC_DAY_END_RE.exec(input.end_date)?.[1];
+  if (!startDay || !endDay || !isRealCalendarDate(startDay) || !isRealCalendarDate(endDay)) return input;
+  const utcEquivalent =
+    expandDateOnly(startDay, timezone).start === `${startDay}T00:00:00.000Z` &&
+    expandDateOnly(endDay, timezone).end === `${endDay}T23:59:59.999Z`;
+  return utcEquivalent ? input : { start_date: startDay, end_date: endDay };
+}
+
 function resolveRangeInterval(input: GetEventsInput, timezone: string): AgendaInterval | null {
-  const start = parseRangeBound(input.start_date, timezone, 'start');
-  const end = parseRangeBound(input.end_date, timezone, 'end');
+  const bounds = localDaysForUtcDayEdges(input, timezone);
+  const start = parseRangeBound(bounds.start_date, timezone, 'start');
+  const end = parseRangeBound(bounds.end_date, timezone, 'end');
   if (!start || !end || start.getTime() >= end.getTime()) return null;
   return { start, end };
 }
