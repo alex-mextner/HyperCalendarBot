@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { AgentLayerDeps } from '../../../src/bot/pipeline/ai-agent-layer.ts';
 import { createAiAgentLayer } from '../../../src/bot/pipeline/ai-agent-layer.ts';
 import type { BotCommandContext } from '../../../src/bot/types.ts';
@@ -271,6 +271,10 @@ describe('supplement mode', () => {
 });
 
 describe('retry / backoff', () => {
+  // The notice tracker is module state; a give-up left on file by one test would
+  // silence the next one's give-up.
+  beforeEach(() => aiFailureNotices.reset());
+
   function makeRetrySetup(jobStoreGetImpl: () => Promise<string | null> = async () => null) {
     const captured: { ctx?: AgentContext } = {};
     const addDelayed = mock(async (_data: unknown, _delay: number): Promise<string> => 'job-123');
@@ -367,7 +371,6 @@ describe('retry / backoff', () => {
   });
 
   test('graceful fail when MAX_RETRY_ATTEMPTS exhausted: sends agent_give_up, no addDelayed', async () => {
-    aiFailureNotices.reset();
     const { deps, addDelayed, jobStoreDel, captured } = makeRetrySetup();
     const ctx = makeCtx();
     // MAX_RETRY_ATTEMPTS = 3

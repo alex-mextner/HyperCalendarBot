@@ -576,6 +576,7 @@ describe('agent failure notices', () => {
     ctx.retryEnqueue = async () => {
       const giveUp = agentGiveUpMessage(USER_ID, 'ru');
       if (giveUp) await lastProbe.sender.sendMessage(USER_ID, giveUp);
+      return false;
     };
     await new CalendarBotAgent(config, lastProbe.sender, { streamImpl: failingStream(hard) }).run(ctx);
 
