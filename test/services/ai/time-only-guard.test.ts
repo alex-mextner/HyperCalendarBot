@@ -164,6 +164,14 @@ describe('a message with only a clock time', () => {
     expect(timeOnlyToday('в 12:30 ночи созвон', WEDNESDAY_MORNING, TZ)).toBeNull();
   });
 
+  test('am and pm are read: "12:30 am" is after midnight, not today; "7:30 pm" is this evening', () => {
+    const eight = new Date('2026-09-16T06:00:00Z');
+    for (const text of ['call at 12:30 am', 'call at 12:30am', 'call at 12:30 a.m.'])
+      expect(timeOnlyToday(text, eight, TZ)).toBeNull();
+    expect(timeOnlyToday('Meeting at 7:30 pm', WEDNESDAY_MORNING, TZ)?.allowedDates).toEqual(new Set(['2026-09-16']));
+    expect(timeOnlyToday('Meeting at 7:30 PM', WEDNESDAY_MORNING, TZ)?.references[0]?.phrase).toBe('7:30 pm');
+  });
+
   test('counts and other zones are no clock time for today', () => {
     expect(timeOnlyToday('поливай цветы раз в 3 дня', WEDNESDAY_MORNING, TZ)).toBeNull();
     const halfPastMidnight = new Date('2026-09-15T22:30:00Z');

@@ -658,9 +658,9 @@ export function describeWeekdayDateMismatches(mismatches: WeekdayDateMismatch[])
     .join('; ');
 }
 
-/** "18:30", "18.30", "12-30", "7:30 вечера" — clock times as users type them. */
+/** "18:30", "18.30", "12-30", "7:30 вечера", "7:30 pm" — clock times as users type them. */
 const CLOCK_TIMES =
-  /(?<![\d.:-])([01]?\d|2[0-3])([:.-])([0-5]\d)(?![\d:-]|\.\d)(?:\s*(утра|дня|вечера|ночи)(?!\p{L}))?/gu;
+  /(?<![\d.:-])([01]?\d|2[0-3])([:.-])([0-5]\d)(?![\d:-]|\.\d)(?:\s*(утра|дня|вечера|ночи|a\.?m\.?|p\.?m\.?)(?!\p{L}))?/gu;
 /**
  * "в 8", "в 7 вечера", "в 12 часов ночи": an hour after "в", with an optional hour word and
  * part of the day; "в 18.30" is a clock time.
@@ -677,8 +677,11 @@ const COUNT_AFTER =
  */
 const NUMBERED_PLACE = /^\s+\p{L}*(?:[^\P{L}иь]е|ии|[ую])(?![\p{L}])/u;
 
-/** The hour an hour word means, or null for midnight: "в 12 ночи" is the start of tomorrow. */
+/** The hour an hour word means, or null for midnight: "в 12 ночи" and "12:30 am" are the start of tomorrow. */
 function clockHour(hour: number, part: string | undefined): number | null {
+  const meridiem = part?.replaceAll('.', '');
+  if (meridiem === 'am') return hour === 12 ? null : hour;
+  if (meridiem === 'pm') return hour < 12 ? hour + 12 : hour;
   // "в 11 ночи" is 23:00, "в 3 ночи" and "в 6 ночи" the early morning.
   if (part === 'вечера' || (part === 'ночи' && hour >= 9)) {
     if (hour === 12) return null;
