@@ -130,6 +130,19 @@ describe('a weekday written next to a date on another weekday', () => {
     expect(mismatches('Wed 28/09')).toEqual([{ date: '2026-09-28', said: 'Wednesday', actual: 'Monday' }]);
   });
 
+  test('a quoted title is the user’s own text, not a claim about the date', () => {
+    for (const text of [
+      'Удалить «Вторник 25 декабря» (25 дек, 19:00)?',
+      'Событие “Ужин в пятницу 3 октября” перенесено.',
+      'Renamed "Tuesday, December 25" as asked.',
+    ])
+      expect(mismatches(text)).toEqual([]);
+    // A pair outside the quotes is still read.
+    expect(mismatches('«Английский с Алексом» в среду, 28 сентября')).toEqual([
+      { date: '2026-09-28', said: 'Wednesday', actual: 'Monday' },
+    ]);
+  });
+
   test('a date without a year is read in the year nearest to now', () => {
     // 5 January is next year's (2027-01-05, a Tuesday), not 2026's Monday.
     expect(findWeekdayDateMismatches('вторник, 5 января', NOW, TZ)).toEqual([]);

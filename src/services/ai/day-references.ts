@@ -534,13 +534,21 @@ export function mentionsWeekday(text: string): boolean {
   return WEEKDAY_WORD.test(text.toLowerCase().replaceAll('ё', 'е'));
 }
 
+/**
+ * «Вторник 25 декабря», "Tuesday, December 25": a quoted span is an event title or the user's
+ * own words, not the bot's claim about a date. It is masked with a mark no pair can span.
+ */
+const QUOTED = /«[^«»\n]*»|“[^“”\n]*”|"[^"\n]*"/g;
+
 /** Every weekday name in `text` written next to a date that falls on another weekday. */
 export function findWeekdayDateMismatches(text: string, now: Date, timezone: string): WeekdayDateMismatch[] {
-  // Case folding only the letters day words use, "ё" and the heading line breaks turned into
-  // spaces keep every offset, so a match in `normalized` slices the same pair out of `text`.
+  // Case folding only the letters day words use, "ё", the heading line breaks turned into
+  // spaces and quoted spans masked char for char keep every offset, so a match in `normalized`
+  // slices the same pair out of `text`.
   const normalized = text
     .replace(/[A-ZА-ЯЁ]/g, (letter) => letter.toLowerCase())
     .replaceAll('ё', 'е')
+    .replace(QUOTED, (quoted) => '#'.repeat(quoted.length))
     .replace(WEEKDAY_HEADING, (heading) => heading.replace(/[\r\n]/g, ' '));
   const datesDotted = COLON_CLOCK.test(normalized) || DOTTED_DATE.test(normalized);
   const { today } = localToday(now, timezone);
