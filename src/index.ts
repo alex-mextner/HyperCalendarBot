@@ -20,6 +20,7 @@ import { configureProviderCircuit } from './services/ai/provider-circuit.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
 import { runSyntheticIntent } from './services/intent/synthetic-intent-run.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
+import { createVoiceSender } from './services/voice/voice-sender.ts';
 import { hasChainAnswered, initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
 import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
@@ -472,12 +473,8 @@ if (config.REDIS_URL && serviceSessionEnabled && !config.DISABLE_VOICE) {
       botLogger.warn('DEEPGRAM_API_KEY is not set — STT will not work');
     }
 
-    // TelegramSender for voice calls — forwards to botRef which wraps bot.api.
-    // Used for: call protocol messages (listening indicator, blockquote), ask_user, etc.
-    const voiceSender: import('./services/ai/types.ts').TelegramSender = {
-      sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
-      editMessageText: (chatId, messageId, text, parseMode) => botRef.editMessage(chatId, messageId, text, parseMode),
-    };
+    // TelegramSender for voice calls — forwards to botRef, which wraps bot.api once the bot exists.
+    const voiceSender = createVoiceSender(botRef);
     const voiceAgent = new CalendarBotAgent({ debugLogger: aiDebugLogger, summarizer: historySummarizer }, voiceSender);
     voiceAgentRef = voiceAgent;
 
