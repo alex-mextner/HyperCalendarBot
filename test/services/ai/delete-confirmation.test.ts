@@ -310,17 +310,36 @@ describe('bot-rendered delete confirmation', () => {
     expect(alive(ids.lesson)).toBe(false);
   });
 
-  test('on a call the spoken list approves only upcoming events', async () => {
-    const call = context({ inputMode: 'live_call' });
-    const spoken = await executeTool(call, 'ask_user', {
-      question: 'Удалить?',
-      options: ['Да', 'Нет'],
-      event_ids: [ids.sep1, ids.lesson],
-    });
+  // Ticket 608: speaking the list used to approve its upcoming events at once, so a caller who
+  // said no could still lose them. A call now gets the same bot list in the chat, and only a tap
+  // there deletes.
+  test('on a call the list goes to the chat, and a delete after the caller says no is refused', async () => {
+    const spoken = await executeTool(
+      context({ inputMode: 'live_call', messageText: 'удали урок во вторник' }),
+      'ask_user',
+      {
+        question: 'Удалить?',
+        options: ['Да', 'Нет'],
+        event_ids: [ids.sep1, ids.lesson],
+      },
+    );
+    expect(spoken.success).toBe(true);
     expect(spoken.awaitingInput).toEqual(expect.objectContaining({ kind: 'speech' }));
-    expect(String(spoken.output)).toContain('13:30–14:30');
-    expect((await executeTool(call, 'delete_event', { event_id: ids.lesson })).success).toBe(true);
-    expect((await executeTool(call, 'delete_event', { event_id: ids.sep1 })).success).toBe(false);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.chatId).toBe(ACTOR);
+    expect(sent[0]!.text).toContain('вт, 29 сентября, 13:30–14:30');
+
+    for (const answer of ['нет', 'да']) {
+      const later = await executeTool(context({ inputMode: 'live_call', messageText: answer }), 'delete_event', {
+        event_id: ids.lesson,
+      });
+      expect(later.success).toBe(false);
+      expect(later.mutationState).toBe('not_applied');
+    }
+    expect(alive(ids.lesson)).toBe(true);
+
+    await callbackHandler()(tap(sent[0]!.buttons[0]!.data, sent[0]!));
+    expect(alive(ids.lesson)).toBe(false);
     expect(alive(ids.sep1)).toBe(true);
   });
 });
