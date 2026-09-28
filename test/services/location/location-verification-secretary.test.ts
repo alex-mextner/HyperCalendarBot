@@ -449,6 +449,36 @@ describe("a write secretary completes the place picker for the owner's personal 
     expect(s.eventRepo.findById(created.id, OWNER_ID)?.location_verified).toBe(0);
   });
 
+  test("write access revoked while the pin's reverse geocode is in flight: the pin does not mutate the event", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const geocoder = scriptedGeocoder([place()]);
+    geocoder.service.reverseGeocode = async () => {
+      await gate;
+      return place();
+    };
+    const s = setup({ geocoder: geocoder.service });
+    const created = s.eventRepo.create({
+      user_id: OWNER_ID,
+      title: 'Планёрка',
+      start_at: futureStart(),
+      timezone: 'Europe/Belgrade',
+      location: RAW_LOCATION,
+    });
+
+    const resolving = s.service.resolveFromCoordinates(created.id, place().latitude, place().longitude, SECRETARY_ID);
+    s.revokeSecretary();
+    release();
+    const success = await resolving;
+
+    expect(success).toBe(false);
+    const stored = s.eventRepo.findById(created.id, OWNER_ID);
+    expect(stored?.location_verified).toBe(0);
+    expect(stored?.resolved_address).toBeNull();
+  });
+
   test('a stale picker replaced by a newer one cannot be answered by the secretary; the current one can', async () => {
     const script = { places: [place()] };
     const geocoder = scriptedGeocoder(script.places);

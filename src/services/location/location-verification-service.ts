@@ -171,10 +171,19 @@ export class LocationVerificationService {
     // secretary acting on the owner's personal event: a delegate's own history or home area must
     // not leak into the owner's calendar. A group event's `user_id` is just its creator, so another
     // member editing it keeps using their own profile, exactly as before #421. The picker itself
-    // always goes to whoever is asking (`user`, below).
-    const scopeUser = this.isDelegatedPersonalAccess(event, user.telegram_id)
-      ? (this.deps.userRepo.findByTelegramId(event.user_id) ?? user)
-      : user;
+    // always goes to whoever is asking (`user`, below). An unresolvable owner profile fails closed
+    // (no search at all) rather than falling back to the delegate's own history/bias — in practice
+    // unreachable, since `getEventVisibleToActor` already requires the owner to resolve before it
+    // grants delegated access at all, but kept explicit rather than a silent `?? user` fallback.
+    let scopeUser = user;
+    if (this.isDelegatedPersonalAccess(event, user.telegram_id)) {
+      const ownerUser = this.deps.userRepo.findByTelegramId(event.user_id);
+      if (!ownerUser) {
+        logger.warn({ eventId: event.id, ownerId: event.user_id }, 'Delegated owner profile not found; not asking');
+        return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
+      }
+      scopeUser = ownerUser;
+    }
     const { candidates, remembered } = await this.findCandidates(event, scopeUser, location);
 
     // The event changed while the search ran: its text (a newer text starts its own verification,
@@ -218,7 +227,9 @@ export class LocationVerificationService {
    * (`EventRepository.findById`, which also covers group visibility — unchanged, never widened),
    * or — for a personal event owned by someone else — the owner's view, granted only while
    * `actorId` currently holds active write secretary access to that owner. Checked fresh on every
-   * call: a grant revoked between two calls stops granting on the next one (#421). Never grants a
+   * call: a grant revoked between two calls stops granting on the next one (#421). Requires the
+   * owner's own profile to resolve, so a delegated grant never falls back to the delegate's own
+   * profile when the owner's row is somehow unresolvable — it simply grants nothing. Never grants a
    * group event through a secretary relationship — that stays governed by group membership alone.
    */
   getEventVisibleToActor(eventId: number, actorId: number): CalendarEvent | null {
@@ -229,6 +240,7 @@ export class LocationVerificationService {
     if (!unfiltered || unfiltered.owner_type === 'group' || unfiltered.user_id === actorId) return null;
     const record = this.deps.secretaryRepo.findByOwnerAndSecretary(unfiltered.user_id, actorId);
     if (!record || record.status !== 'active' || record.permission !== 'write') return null;
+    if (!this.deps.userRepo.findByTelegramId(unfiltered.user_id)) return null;
     return this.deps.eventRepo.findById(eventId, unfiltered.user_id);
   }
 
@@ -374,8 +386,7 @@ export class LocationVerificationService {
   async resolveFromSharedLocation(eventId: number, shared: SharedLocation, userId: number): Promise<boolean> {
     // Verify the user can currently act on the event before doing any work — same contract as the
     // candidate picker (#421): the owner, or a live active write secretary of the owner.
-    const event = this.getEventVisibleToActor(eventId, userId);
-    if (!event) return false;
+    if (!this.getEventVisibleToActor(eventId, userId)) return false;
 
     // A venue is the place as the user picked it; a reverse geocode would replace its name with the
     // street address at its coordinates
@@ -393,6 +404,12 @@ export class LocationVerificationService {
         }
       : await this.deps.geocodingService.reverseGeocode(shared.latitude, shared.longitude);
     if (!geo) return false;
+
+    // Re-read live access after the geocoding await (a real network round trip): a revoke, or an
+    // edit/delete of the event, that lands during it must not let the pin still mutate the owner's
+    // event (#421). Use this freshly-read event for the mutation, not the pre-await one.
+    const event = this.getEventVisibleToActor(eventId, userId);
+    if (!event) return false;
 
     // Cache/history and the city fill are scoped to the calendar owner only for a secretary acting
     // on the owner's personal event; a group co-editor keeps using their own profile (#421).
