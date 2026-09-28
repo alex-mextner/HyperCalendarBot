@@ -58,7 +58,11 @@ async function biasCountryFor(timezone: string): Promise<{ located: (string | nu
     geocodingService: geocoder,
     addressCache: new AddressCache({
       get: async (key) => addressStore.get(key) ?? null,
-      set: async (key, value) => addressStore.set(key, value),
+      compareAndSet: async (key, expected, value) => {
+        if ((addressStore.get(key) ?? null) !== expected) return false;
+        addressStore.set(key, value);
+        return true;
+      },
     }),
     eventRepo: events,
     userRepo: users,
