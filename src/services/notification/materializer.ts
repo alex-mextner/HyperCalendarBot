@@ -51,7 +51,9 @@ export class ReminderMaterializer {
   constructor(
     private reminderRepo: EventReminderRepository,
     private prefsRepo: NotificationPreferencesRepository,
-    private legacyRecurrenceEngine = false,
+    /** Capability-gated recurrence-engine rollout (spec §10) — see `RECURRENCE_V2_ENABLED` in
+     * src/config/env.ts. Defaults to the pre-583 single-RRULE-line engine (safe/unchanged). */
+    private recurrenceV2Enabled = false,
   ) {}
 
   materialize(event: MaterializeEventData, userId: number): void {
@@ -228,7 +230,7 @@ export class ReminderMaterializer {
       let occurrences: EventOccurrence[];
       try {
         occurrences = expandRecurrence(template, exceptions, rangeStart, rangeEnd, {
-          legacyEngine: this.legacyRecurrenceEngine,
+          legacyEngine: !this.recurrenceV2Enabled,
         }).occurrences;
       } catch (err) {
         materializeLogger.warn(

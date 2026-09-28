@@ -32,9 +32,10 @@ export interface EventServiceDeps {
   groupMemberRepo?: GroupMemberRepository;
   changeNotifier?: EventChangeNotifier;
   domainEvents?: DomainEventBus;
-  /** Capability-gated recurrence-engine rollback (spec §10) — see `RECURRENCE_LEGACY_ENGINE`
-   * in src/config/env.ts. Defaults to the multiline RRULE/EXDATE/RDATE engine. */
-  legacyRecurrenceEngine?: boolean;
+  /** Capability-gated recurrence-engine rollout (spec §10) — see `RECURRENCE_V2_ENABLED` in
+   * src/config/env.ts. Defaults to the pre-583 single-RRULE-line engine (safe/unchanged); set
+   * true only once the multiline RRULE/EXDATE/RDATE engine has passed final consumer parity. */
+  recurrenceV2Enabled?: boolean;
 }
 
 export class EventService {
@@ -45,7 +46,7 @@ export class EventService {
   private groupMemberRepo?: GroupMemberRepository;
   private changeNotifier?: EventChangeNotifier;
   private domainEvents?: DomainEventBus;
-  private legacyRecurrenceEngine: boolean;
+  private recurrenceV2Enabled: boolean;
 
   constructor(deps: EventServiceDeps) {
     this.agendaRepository = deps.agendaRepository;
@@ -55,7 +56,7 @@ export class EventService {
     this.groupMemberRepo = deps.groupMemberRepo;
     this.changeNotifier = deps.changeNotifier;
     this.domainEvents = deps.domainEvents;
-    this.legacyRecurrenceEngine = deps.legacyRecurrenceEngine ?? false;
+    this.recurrenceV2Enabled = deps.recurrenceV2Enabled ?? false;
   }
 
   /**
@@ -72,7 +73,7 @@ export class EventService {
   ): EventOccurrence[] {
     try {
       return expandRecurrence(template, exceptions, startUtc, endUtc, {
-        legacyEngine: this.legacyRecurrenceEngine,
+        legacyEngine: !this.recurrenceV2Enabled,
       }).occurrences;
     } catch (err) {
       logger.warn(

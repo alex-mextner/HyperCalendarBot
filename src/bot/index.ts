@@ -152,7 +152,7 @@ export interface CreateBotOpts {
     | 'BOT_USERNAME'
     | 'INLINE_BOT_TOKEN'
     | 'TELEGRAM_SESSION_MASTER_KEY'
-    | 'RECURRENCE_LEGACY_ENGINE'
+    | 'RECURRENCE_V2_ENABLED'
   >;
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
   broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
@@ -186,7 +186,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const materializer = new ReminderMaterializer(
     db.eventReminders,
     db.notificationPreferences,
-    envConfig?.RECURRENCE_LEGACY_ENGINE,
+    envConfig?.RECURRENCE_V2_ENABLED,
   );
   const eventService = new EventService({
     eventRepo: db.events,
@@ -196,7 +196,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     groupMemberRepo: db.groupMembers,
     domainEvents: domainEventBus,
     changeNotifier,
-    legacyRecurrenceEngine: envConfig?.RECURRENCE_LEGACY_ENGINE,
+    recurrenceV2Enabled: envConfig?.RECURRENCE_V2_ENABLED,
   });
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();

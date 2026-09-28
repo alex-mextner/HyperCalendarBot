@@ -206,8 +206,19 @@ describe('EventService free slots', () => {
       expect(service.getFreeSlots(USER_ID, new Date('2026-03-14T18:00:00Z'), tz)).toHaveLength(1);
     });
 
-    test('an exception moved into the day blocks its new time', () => {
-      const template = personal('Daily', '2026-06-01T09:00:00Z', '2026-06-01T10:00:00Z', {
+    test('an exception moved into the day blocks its new time (new engine, spec §5 "moved into range")', () => {
+      // Matching an exception whose original_start_at falls on a different calendar day than
+      // its new start_at requires the new engine's exact-instant matching (recurrence-move-
+      // into-range, spec §5) — the pre-583 legacy engine (the RECURRENCE_V2_ENABLED default
+      // until final consumer parity is proven) only matches exceptions by calendar day and
+      // never surfaces this one, so this scenario is exercised against a v2-enabled service.
+      const v2Service = new EventService({ eventRepo, recurrenceV2Enabled: true });
+      const template = v2Service.createEvent({
+        user_id: USER_ID,
+        title: 'Daily',
+        start_at: '2026-06-01T09:00:00Z',
+        end_at: '2026-06-01T10:00:00Z',
+        timezone: 'UTC',
         recurrence_rule: 'FREQ=DAILY',
       });
       eventRepo.createException(template.id, {
@@ -218,7 +229,7 @@ describe('EventService free slots', () => {
         timezone: 'UTC',
         original_start_at: '2026-06-02T09:00:00Z',
       });
-      const slots = service.getFreeSlots(USER_ID, DAY, 'UTC');
+      const slots = v2Service.getFreeSlots(USER_ID, DAY, 'UTC');
       expect(slots.some((s) => s.start <= '2026-06-10T15:30:00.000Z' && s.end >= '2026-06-10T15:30:00.000Z')).toBe(
         false,
       );
