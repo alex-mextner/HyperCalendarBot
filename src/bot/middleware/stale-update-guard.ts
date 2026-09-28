@@ -39,23 +39,25 @@ interface StaleUpdateGuardDeps {
 }
 
 export function createStaleUpdateGuard(deps: StaleUpdateGuardDeps) {
-  const notifiedChats = new Set<number>();
+  // When each private chat was last told. Webhook deliveries run concurrently and out of order,
+  // so a backlog is bounded by time, not by the first fresh update that happens to arrive.
+  const notedAt = new Map<number, number>();
   return async (context: StaleUpdateContext, next: Next): Promise<unknown> => {
     const message = context.update?.message ?? context.update?.edited_message;
     if (!message) return next();
-    const ageMs = deps.now() - (message.edit_date ?? message.date) * 1000;
-    if (ageMs <= deps.maxAgeMs) {
-      // Telegram delivers pending updates in order: a fresh one ends the backlog,
-      // so the next outage notifies again and the set never outgrows one backlog.
-      notifiedChats.clear();
-      return next();
-    }
+    const now = deps.now();
+    const ageMs = now - (message.edit_date ?? message.date) * 1000;
+    if (ageMs <= deps.maxAgeMs) return next();
 
     const chatId = message.chat.id;
     botLogger.warn({ chatId, ageMs }, 'Skipping a message that waited past the stale-update window');
-    // One note per chat per backlog: a long outage can leave many queued messages behind.
-    if (message.chat.type !== 'private' || notifiedChats.has(chatId)) return;
-    notifiedChats.add(chatId);
+    if (message.chat.type !== 'private') return;
+    // One note per chat per outage: a long outage can leave many queued messages behind.
+    for (const [notedChat, at] of notedAt) {
+      if (now - at > deps.maxAgeMs) notedAt.delete(notedChat);
+    }
+    if (notedAt.has(chatId)) return;
+    notedAt.set(chatId, now);
     await deps.sendNote(chatId, t(toLang(message.from?.language_code)).stale_update_skipped).catch((err: unknown) => {
       botLogger.warn({ err, chatId }, 'Failed to send the stale-update note');
     });

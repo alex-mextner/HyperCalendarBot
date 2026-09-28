@@ -16,11 +16,11 @@ function messageUpdate(chatId: number, sentAt: string, type = 'private'): StaleU
   };
 }
 
-function makeGuard() {
+function makeGuard(clock = { now: NOW_MS }) {
   const notes: { chatId: number; text: string }[] = [];
   const guard = createStaleUpdateGuard({
     maxAgeMs: STALE_UPDATE_MAX_AGE_MS,
-    now: () => NOW_MS,
+    now: () => clock.now,
     sendNote: async (chatId, text) => {
       notes.push({ chatId, text });
     },
@@ -73,11 +73,20 @@ describe('stale update guard', () => {
     expect(notes).toHaveLength(1);
   });
 
-  test('a fresh message ends the backlog, so the next outage notifies the chat again', async () => {
+  test('a fresh message from another chat mid-backlog does not repeat the note (webhook order is not kept)', async () => {
     const { guard, notes } = makeGuard();
     await passes(guard, messageUpdate(501, '2026-09-27T14:00:00Z'));
-    await passes(guard, messageUpdate(501, '2026-09-27T17:13:00Z'));
-    await passes(guard, messageUpdate(501, '2026-09-27T15:00:00Z'));
+    await passes(guard, messageUpdate(777, '2026-09-27T17:13:00Z'));
+    await passes(guard, messageUpdate(501, '2026-09-27T14:05:00Z'));
+    expect(notes).toHaveLength(1);
+  });
+
+  test('a later outage notifies the chat again', async () => {
+    const clock = { now: NOW_MS };
+    const { guard, notes } = makeGuard(clock);
+    await passes(guard, messageUpdate(501, '2026-09-27T14:00:00Z'));
+    clock.now = Date.parse('2026-09-27T20:00:00Z');
+    await passes(guard, messageUpdate(501, '2026-09-27T19:00:00Z'));
     expect(notes).toHaveLength(2);
   });
 
