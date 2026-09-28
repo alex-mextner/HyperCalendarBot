@@ -27,7 +27,8 @@ export interface SyntheticPipelineRunnerDeps {
 export class SyntheticPipelineRunner {
   constructor(private deps: SyntheticPipelineRunnerDeps) {}
 
-  async run(user: User, jobData: AiMessageJobData): Promise<void> {
+  async run(user: User, jobData: AiMessageJobData, jobId?: string): Promise<void> {
+    let retryEnqueueCalled = false;
     try {
       const agentCtx = this.deps.contextBuilder(user, user.telegram_id, jobData.message);
       const currentAttempt = jobData.retryAttempt ?? 0;
@@ -39,6 +40,7 @@ export class SyntheticPipelineRunner {
         const lang = toLang(user.language);
 
         agentCtx.retryEnqueue = async (msg: string) => {
+          retryEnqueueCalled = true;
           if (currentAttempt >= MAX_RETRY_ATTEMPTS) {
             const giveUp = agentGiveUpMessage(user.telegram_id, lang);
             if (giveUp) {
@@ -55,17 +57,28 @@ export class SyntheticPipelineRunner {
             return;
           }
           const delay = BACKOFF_DELAYS_MS[currentAttempt]!;
-          const jobId = await queue.addDelayed(
+          const newJobId = await queue.addDelayed(
             { userId: user.telegram_id, message: msg, source: 'trigger', retryAttempt: currentAttempt + 1 },
             delay,
           );
-          if (jobStore) await jobStore.set(user.telegram_id, jobId);
+          if (jobStore) await jobStore.set(user.telegram_id, newJobId);
         };
       }
 
       const intentResult = await this.deps.intentRun(agentCtx, jobData.message);
       if (!intentResult.handled) {
         await this.deps.agentRun(agentCtx);
+      }
+
+      // A scheduled retry job that finishes without calling retryEnqueue needed no
+      // further retry — but the store still holds *this* job's own ID from when it was
+      // originally scheduled. Clear it so a cancellation lookup doesn't hit a
+      // stale/completed job for up to the full TTL. delIfMatch only clears when the
+      // store still holds this job's ID, so it never clobbers a newer job's ID that a
+      // concurrently-processed job for the same user (worker concurrency is 5) may
+      // already have written.
+      if (!retryEnqueueCalled && jobId && this.deps.retryJobStore) {
+        await this.deps.retryJobStore.delIfMatch(user.telegram_id, jobId);
       }
     } catch (err: unknown) {
       queueLogger.error({ err, userId: user.telegram_id, message: jobData.message }, 'SyntheticPipelineRunner error');
@@ -143,7 +156,7 @@ export function createAiMessagesWorker(
         return;
       }
 
-      await runner.run(user, job.data);
+      await runner.run(user, job.data, job.id);
 
       if (scheduleId && onRunComplete) {
         onRunComplete(scheduleId);

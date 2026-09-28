@@ -225,6 +225,129 @@ describe('SyntheticPipelineRunner', () => {
   });
 });
 
+// ─── SyntheticPipelineRunner: retry job store cleanup on success (issue #126) ──
+
+describe('SyntheticPipelineRunner retry job store cleanup', () => {
+  /** Real in-memory RetryJobStore (not a Bun.RedisClient fake) — matches the store's own contract exactly. */
+  function makeInMemoryJobStore() {
+    const data = new Map<number, string>();
+    return {
+      set: mock(async (userId: number, jobId: string) => {
+        data.set(userId, jobId);
+      }),
+      get: mock(async (userId: number) => data.get(userId) ?? null),
+      del: mock(async (userId: number) => {
+        data.delete(userId);
+      }),
+      delIfMatch: mock(async (userId: number, jobId: string) => {
+        if (data.get(userId) === jobId) data.delete(userId);
+      }),
+      data,
+    };
+  }
+
+  test('a scheduled retry job that succeeds without re-enqueuing clears its own stale store entry', async () => {
+    const jobStore = makeInMemoryJobStore();
+    jobStore.data.set(fakeUser.telegram_id, 'job-current');
+
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: mock(() => agentCtx),
+      intentRun: mock(async () => ({ handled: true })), // handled — agentRun/retryEnqueue never runs
+      agentRun: mock(async () => {}),
+      retryQueue: { addDelayed: mock(async () => 'unused') },
+      retryJobStore: jobStore,
+    });
+
+    await runner.run(
+      fakeUser,
+      { userId: fakeUser.telegram_id, message: 'done for now', source: 'scheduled', retryAttempt: 1 },
+      'job-current',
+    );
+
+    expect(jobStore.delIfMatch).toHaveBeenCalledWith(fakeUser.telegram_id, 'job-current');
+    expect(await jobStore.get(fakeUser.telegram_id)).toBeNull();
+  });
+
+  test('does not clear the store when a newer job already overwrote it before this job finished', async () => {
+    const jobStore = makeInMemoryJobStore();
+    jobStore.data.set(fakeUser.telegram_id, 'job-current');
+
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: mock(() => agentCtx),
+      intentRun: mock(async () => {
+        // Simulate a concurrently-processed job for the same user (worker concurrency is 5)
+        // scheduling a fresh retry and overwriting the store mid-flight, before this job's
+        // own success-cleanup runs.
+        await jobStore.set(fakeUser.telegram_id, 'job-newer');
+        return { handled: true };
+      }),
+      agentRun: mock(async () => {}),
+      retryQueue: { addDelayed: mock(async () => 'unused') },
+      retryJobStore: jobStore,
+    });
+
+    await runner.run(
+      fakeUser,
+      { userId: fakeUser.telegram_id, message: 'done for now', source: 'scheduled', retryAttempt: 1 },
+      'job-current',
+    );
+
+    expect(jobStore.delIfMatch).toHaveBeenCalledWith(fakeUser.telegram_id, 'job-current');
+    // The newer job's id must survive — delIfMatch only deletes on an exact match.
+    expect(await jobStore.get(fakeUser.telegram_id)).toBe('job-newer');
+  });
+
+  test('does not touch the store when retryEnqueue itself was called (another retry was scheduled)', async () => {
+    const jobStore = makeInMemoryJobStore();
+    jobStore.data.set(fakeUser.telegram_id, 'job-current');
+    const addDelayed = mock(async () => 'job-next');
+
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: mock(() => ({ user: fakeUser }) as unknown as AgentContext),
+      intentRun: mock(async () => ({ handled: false })),
+      // Mirrors CalendarBotAgent.run() (src/services/ai/agent.ts): it fires
+      // ctx.retryEnqueue(...) without awaiting it, but the call itself — including this
+      // synchronous flag flip — happens before agent.run()'s own promise resolves.
+      agentRun: mock(async (ctx: AgentContext) => {
+        void ctx.retryEnqueue?.('still working on it');
+      }),
+      retryQueue: { addDelayed },
+      retryJobStore: jobStore,
+    });
+
+    await runner.run(
+      fakeUser,
+      { userId: fakeUser.telegram_id, message: 'still working on it', source: 'scheduled', retryAttempt: 1 },
+      'job-current',
+    );
+    // Let retryEnqueue's own async work (addDelayed + jobStore.set) settle.
+    await Bun.sleep(0);
+
+    // retryEnqueue's own jobStore.set already wrote the new job's id — the success-path
+    // cleanup must not run delIfMatch on top of it and must not have wiped anything.
+    expect(jobStore.delIfMatch).not.toHaveBeenCalled();
+    expect(await jobStore.get(fakeUser.telegram_id)).toBe('job-next');
+  });
+
+  test('does not call delIfMatch when no jobId is supplied to run()', async () => {
+    const jobStore = makeInMemoryJobStore();
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: mock(() => agentCtx),
+      intentRun: mock(async () => ({ handled: true })),
+      agentRun: mock(async () => {}),
+      retryQueue: { addDelayed: mock(async () => 'unused') },
+      retryJobStore: jobStore,
+    });
+
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'no job id', source: 'trigger' });
+
+    expect(jobStore.delIfMatch).not.toHaveBeenCalled();
+  });
+});
+
 // ─── createAiMessagesQueue ─────────────────────────────────────────────────────
 
 describe('createAiMessagesQueue', () => {
@@ -383,6 +506,38 @@ describe('createAiMessagesWorker', () => {
     expect(intentRun).toHaveBeenCalledTimes(1);
   });
 
+  test('processor threads the BullMQ job id into runner.run for success-path store cleanup', async () => {
+    const jobStoreDelIfMatch = mock(async () => {});
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const contextBuilder = mock(() => agentCtx);
+    const intentRun = mock(async () => ({ handled: true }));
+    const agentRun = mock(async () => {});
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder,
+      intentRun,
+      agentRun,
+      retryQueue: { addDelayed: mock(async () => 'unused') },
+      retryJobStore: {
+        set: mock(async () => {}),
+        get: mock(async () => null),
+        del: mock(async () => {}),
+        delIfMatch: jobStoreDelIfMatch,
+      },
+    });
+
+    createAiMessagesWorker({ host: 'localhost', port: 6379 }, runner, (id) =>
+      id === fakeUser.telegram_id ? fakeUser : null,
+    );
+
+    const job = {
+      id: 'job-xyz',
+      data: { userId: fakeUser.telegram_id, message: 'ok', source: 'scheduled', retryAttempt: 1 },
+    };
+    await capturedProcessor(job as never);
+
+    expect(jobStoreDelIfMatch).toHaveBeenCalledWith(fakeUser.telegram_id, 'job-xyz');
+  });
+
   test('processor calls onRunComplete with scheduleId when provided', async () => {
     const agentCtx = { user: fakeUser } as unknown as AgentContext;
     const contextBuilder = mock(() => agentCtx);
@@ -447,7 +602,12 @@ describe('createAiMessagesWorker', () => {
       }),
       agentRun: mock(async () => {}),
       retryQueue: { addDelayed: mock(async () => 'job-1') },
-      retryJobStore: { set: mock(async () => {}), get: mock(async () => null), del: jobStoreDel },
+      retryJobStore: {
+        set: mock(async () => {}),
+        get: mock(async () => null),
+        del: jobStoreDel,
+        delIfMatch: mock(async () => {}),
+      },
     });
     await runner.run(fakeUser, {
       userId: fakeUser.telegram_id,

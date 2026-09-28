@@ -46,6 +46,13 @@ export interface RetryJobStore {
   set(userId: number, jobId: string): Promise<void>;
   get(userId: number): Promise<string | null>;
   del(userId: number): Promise<void>;
+  /**
+   * Compare-and-delete: clears the entry only if it still holds `jobId`. Used when a
+   * scheduled retry job completes without re-enqueuing, so its own stale ID isn't left
+   * lingering for the full TTL — and so it never wipes a newer job's ID that a
+   * concurrently-processed job for the same user may have already written.
+   */
+  delIfMatch(userId: number, jobId: string): Promise<void>;
 }
 
 /** Dependency injection interface for the job queue. */
