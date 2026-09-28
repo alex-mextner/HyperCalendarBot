@@ -260,6 +260,7 @@ describe('event tool handlers', () => {
         ['0', '1'],
         ['2026-09-20T09:00:00Z', 'next week'],
         ['2026-02-30T09:00:00Z', '2026-03-05T09:00:00Z'],
+        ['2026-02-30T00:00:00Z', '2026-02-30T23:59:59Z'],
       ])('a reversed, zero-length or unparseable interval %s .. %s is rejected before any read', async (start, end) => {
         let reads = 0;
         ctx.eventService.getEventsInRange = () => {
@@ -338,6 +339,22 @@ describe('event tool handlers', () => {
           end_date: '2026-09-28T23:30:00Z',
         });
         expect(halfDay.data).toEqual(events('Synthetic night call'));
+        const dayEnd = await handleGetEvents(ctx, {
+          start_date: '2026-09-28T12:00:00Z',
+          end_date: '2026-09-28T23:59:59Z',
+        });
+        expect(dayEnd.data).toEqual(events('Synthetic night call'));
+      });
+
+      test('a UTC+14 user gets the requested local day, not the following one', async () => {
+        ctx.user.timezone = 'Pacific/Kiritimati'; // 28.09 local is 2026-09-27T10:00Z..2026-09-28T09:59:59.999Z
+        const edges = await handleGetEvents(ctx, {
+          start_date: '2026-09-28T00:00:00Z',
+          end_date: '2026-09-28T23:59:59Z',
+        });
+        expect(edges.data).toEqual(events('Synthetic early swim'));
+        const dateOnly = await handleGetEvents(ctx, { start_date: '2026-09-28', end_date: '2026-09-28' });
+        expect(dateOnly.data).toEqual(events('Synthetic early swim'));
       });
 
       test('a UTC user keeps the UTC day', async () => {

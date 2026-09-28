@@ -46,11 +46,11 @@ async function weatherSuffix(ctx: AgentContext, startAt: string, allDay: boolean
   }
 }
 
+/** UTC edges of a local calendar day. Throws on an impossible date, so callers validate first. */
 function expandDateOnly(dateStr: string, timezone: string): { start: string; end: string } {
-  // Interpret dateStr as noon in the user's local timezone (not UTC noon) to avoid
-  // the anchor landing on the wrong calendar day for UTC±10–12 offsets.
-  const d = new TZDate(`${dateStr}T12:00:00`, timezone);
-  return getDayRangeUtc(d, timezone);
+  // Built from components in the user's zone: an offset-less string would be parsed in the host
+  // zone and land on the next local day for UTC+13/+14 users.
+  return getDayRangeUtc(localCalendarDate(dateStr, timezone), timezone);
 }
 
 /**
@@ -339,8 +339,9 @@ function isRealCalendarDate(dateOnly: string): boolean {
 
 /**
  * One get_events bound as an instant. A date-only value is the edge of that local day; a datetime
- * without an offset is UTC, as the tool contract states. Anything else is null, so the formatter
- * and the SQLite query can never read the same string as two different instants.
+ * without an offset is UTC, as the tool contract states (a pair of UTC day edges is first turned
+ * into local days by `localDaysForUtcDayEdges`). Anything else is null, so the formatter and the
+ * SQLite query can never read the same string as two different instants.
  */
 function parseRangeBound(value: string, timezone: string, edge: 'start' | 'end'): Date | null {
   if (!isRealCalendarDate(value.slice(0, 10))) return null;
@@ -366,6 +367,7 @@ const UTC_DAY_END_RE = /^(\d{4}-\d{2}-\d{2})T23:59:59(?:\.999)?Z$/;
 function localDaysForUtcDayEdges(input: GetEventsInput, timezone: string): { start_date: string; end_date: string } {
   const startDay = UTC_DAY_START_RE.exec(input.start_date)?.[1];
   const endDay = UTC_DAY_END_RE.exec(input.end_date)?.[1];
+  // The date checks also keep an impossible day (2026-02-30) out of expandDateOnly, which throws.
   if (!startDay || !endDay || !isRealCalendarDate(startDay) || !isRealCalendarDate(endDay)) return input;
   const utcEquivalent =
     expandDateOnly(startDay, timezone).start === `${startDay}T00:00:00.000Z` &&
