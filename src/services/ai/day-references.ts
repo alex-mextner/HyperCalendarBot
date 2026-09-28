@@ -131,11 +131,12 @@ const ZONE_ABBREVIATION =
 /** "America/New_York", "Asia/Tokyo": an IANA zone name. */
 const IANA_ZONE = /(?<![\p{L}/])[A-Z][A-Za-z]+\/[A-Z][A-Za-z_]+/u;
 /**
- * "в 23:30 по нью-йорку", "в 23:30 по токийскому времени с Анной": a lower-case place right after
- * a time, ending the phrase or followed by "времени".
+ * "в 23:30 по нью-йорку", "в 23:30 по токийскому времени с Анной": a hyphenated lower-case place
+ * ending the phrase, or any place followed by "времени". A plain word ending the phrase
+ * ("завтра в 9 по работе") is no zone, so it does not widen the named day.
  */
 const TIME_BY_PLACE =
-  /(?:\d|утра|дня|вечера|ночи|час\p{L}*)\s+по\s+[\p{L}-]+(?:\s+времени(?!\p{L})|\s*(?:$|[.,;!?)]))/u;
+  /(?:\d|утра|дня|вечера|ночи|час\p{L}*)\s+по\s+(?:[\p{L}-]+\s+времени(?!\p{L})|\p{L}+-[\p{L}-]*\p{L}\s*(?:$|[.,;!?)]))/u;
 
 /** Whether a time or day in `text` is given in another time zone, so it may fall on a neighbouring day here. */
 function mentionsOtherZone(text: string): boolean {
@@ -696,8 +697,10 @@ function clockHour(hour: number, part: string | undefined): number | null {
  * is safer than rejecting a correct event.
  */
 const QUALIFIED_TIME = /(?:\d|утра|дня|вечера|ночи|час\p{L}*)\s+по\s+\p{L}/u;
-/** "23:30 New York time". */
-const PLACE_TIME = /\d\s+(?:[A-Z][\p{L}.-]*\s+){1,3}time(?!\p{L})/u;
+/** "23:30 New York time", "23:30 tokyo time". */
+const PLACE_TIME = /\d\s+(?:[\p{L}.-]+\s+){1,3}time(?!\p{L})/iu;
+/** "13/06", "9/13": a slashed day and month, which this rule does not read. */
+const SLASHED_DATE = /(?<![\d/])\d{1,2}\/\d{1,2}(?!\d)/;
 
 /**
  * A message that states clock times but no day at all ("18:30 помочь Соне с кошкой")
@@ -711,7 +714,8 @@ export function timeOnlyToday(text: string, now: Date, timezone: string): DayRef
     readDayContent(text, now, timezone).kind !== 'none' ||
     mentionsOtherZone(text) ||
     QUALIFIED_TIME.test(text.toLowerCase()) ||
-    PLACE_TIME.test(text)
+    PLACE_TIME.test(text) ||
+    SLASHED_DATE.test(text)
   )
     return null;
   // "17:00-18:00" is two times: the dash between them is a space for the time pattern.

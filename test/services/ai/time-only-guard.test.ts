@@ -196,6 +196,12 @@ describe('a message with only a clock time', () => {
     // A named day is not widened to its neighbours by an ordinary "по".
     const turn = resolveTurnDayReferences('созвон завтра в 9 утра по дороге домой', [], WEDNESDAY_MORNING, TZ);
     expect(turn && [...turn.allowedDates]).toEqual(['2026-09-17']);
+    // Nor by an ordinary "по" that ends the message.
+    const work = resolveTurnDayReferences('созвон завтра в 9 по работе', [], WEDNESDAY_MORNING, TZ);
+    expect(work && [...work.allowedDates]).toEqual(['2026-09-17']);
+    // "<Place> time" in any case: 23:30 in Tokyo or New York is not 23:30 here.
+    for (const text of ['Meeting at 23:30 New York Time', 'call at 23:30 tokyo time', 'CALL AT 23:30 TOKYO TIME'])
+      expect(timeOnlyToday(text, eight, TZ)).toBeNull();
   });
 
   test('"по … времени" is a zone wherever the phrase ends', () => {
@@ -286,6 +292,11 @@ describe('a message with only a clock time', () => {
     expect(timeOnlyToday('Встреча 12-10', WEDNESDAY_MORNING, TZ)).toBeNull();
     // "в 6 ночи" is early morning, already past at 11:06.
     expect(timeOnlyToday('в 6 ночи рейс', WEDNESDAY_MORNING, TZ)).toBeNull();
+  });
+
+  test('a slashed date with a time is no time-only message', () => {
+    for (const text of ['встреча 13/06 в 18:00', 'Lunch 9/13 at 18:00'])
+      expect(timeOnlyToday(text, WEDNESDAY_MORNING, TZ)).toBeNull();
   });
 
   test('a lower-case place after a time widens a named day like a capitalised one', () => {
