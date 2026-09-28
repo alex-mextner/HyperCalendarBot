@@ -124,6 +124,13 @@ describe('a message with only a clock time', () => {
     expect(resolveTurnDayReferences('в 18:30', history.getRecent(USER, 30), WEDNESDAY_MORNING, TZ)).toBeNull();
   });
 
+  test('a message that is not the newest saved one (a live-call answer) imposes nothing', () => {
+    // The call transcript is never saved: "в 18:30" may answer "Во сколько?" about Friday.
+    history.save(USER, 'user', 'запиши в пятницу встречу');
+    history.save(USER, 'assistant', JSON.stringify({ kind: 'bot', text: 'Во сколько?' }));
+    expect(resolveTurnDayReferences('в 18:30', history.getRecent(USER, 30), WEDNESDAY_MORNING, TZ)).toBeNull();
+  });
+
   test('imposes nothing when one of several times has passed', () => {
     expect(timeOnlyToday('09:00 зал, 18:30 кошка', WEDNESDAY_MORNING, TZ)).toBeNull();
   });

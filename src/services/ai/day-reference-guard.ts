@@ -162,8 +162,13 @@ export function resolveTurnDayReferences(
   const pending = pendingQuestion(messageText, history);
   // An answer to a question keeps the date context the question was asked in (for ask_user
   // the days named then); a fresh message that states only a clock time means today while
-  // that time is still ahead.
-  if (!pending) return answersPlainQuestion(messageText, history) ? null : timeOnlyToday(messageText, now, timezone);
+  // that time is still ahead. A message that is not the newest saved one (a live-call
+  // transcript, a synthetic run) may be answering something, so it imposes nothing.
+  if (!pending) {
+    const newestUser = history.findLast((row) => row.role === 'user');
+    if (newestUser?.content.trim() !== messageText.trim() || answersPlainQuestion(messageText, history)) return null;
+    return timeOnlyToday(messageText, now, timezone);
+  }
   if (!answersQuestion(messageText, pending.options)) return null;
   // Each message is read as of when it was written: a "Да" given days later confirms the
   // Tuesday meant then, not the one coming now.
