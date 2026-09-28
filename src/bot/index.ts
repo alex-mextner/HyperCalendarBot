@@ -48,7 +48,6 @@ import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import type { ParseMode } from '../utils/telegram.ts';
-import { resolveCallbackButtonLabel } from './callback-label.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
@@ -74,12 +73,13 @@ import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
 import { isGroup } from './group-context.ts';
-import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
+import { createCallbackHandler } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps } from './handlers/message.handler.ts';
 import { createPickerAckIo, runChatShareWithAck, runPickerBatchWithAck } from './handlers/picker-invitation.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
+import { createChatLogging } from './middleware/chat-logging.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
 import { createUserResolver, createUserResolverComposer } from './middleware/user-resolver.ts';
@@ -214,8 +214,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
 
   // Build the scene storage up-front so it can be shared with msgDeps (via sceneStorage)
   // BEFORE the scene plugin itself is constructed. The plugin is built at the bottom of
-  // this function — by that point agent + msgDeps exist, and we pass a real forwardToAi
-  // closure with no late-bound refs.
+  // this function — by that point the closures it receives exist, with no late-bound refs.
   const scopedStorage = createScopedSceneStorage(db);
 
   const intentRepo = new IntentRepository(db.db);
@@ -495,8 +494,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     weatherService,
   };
 
-  // Now that agent and msgDeps are fully built, construct the scene plugin with real
-  // closures for sendAsConnectedUser and forwardToAi — no late-bound refs.
+  // Now that agent and msgDeps are fully built, construct the scene plugin with a real
+  // sendAsConnectedUser closure — no late-bound refs.
   // INVARIANT: nothing may read msgDeps.onboardingScene between the msgDeps literal
   // above and the `msgDeps.onboardingScene = ...` assignment below. Only handlers
   // registered on `bot` read it, and they cannot fire until createBot() returns.
@@ -516,11 +515,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       sendAsConnectedUser,
       deepLinkService,
       botUsername: envConfig?.BOT_USERNAME,
-      forwardToAi: async (userId: number, chatId: number, text: string) => {
-        const user = db.users.findByTelegramId(userId);
-        if (!user) return;
-        await agent.run(buildAgentContextFactory(msgDeps)(user, chatId, text));
-      },
     },
     locationVerification,
   );
@@ -555,123 +549,19 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       }
       return next();
     })
+    // Chat logging runs before the command escape: a typed "/…" closes an open Telegram-connect
+    // wizard, and the logger must still see that wizard so a password starting with "/" is redacted.
+    .use(
+      createChatLogging({
+        conversationLogger,
+        actionLog: db.actionLog,
+        chatHistoryIds,
+        sceneStorage: scenesSetup.storage,
+      }),
+    )
     // Storage<Record<string, any>> is not assignable to Storage (unparameterized) due to generic invariance
     .use(createSceneCommandEscape(scenesSetup.storage))
     .use(createCallbackFallback(scenesSetup.storage))
-    .use(async (context, next) => {
-      const user = context.dbUser;
-      if (!user) return next();
-
-      const chatId = context.update?.message?.chat?.id ?? context.update?.callback_query?.message?.chat?.id;
-      const isPrivate = !chatId || chatId === user.telegram_id;
-      const logChatId = isPrivate ? undefined : chatId;
-
-      // Incoming text message (regular or command)
-      const incomingText = context.update?.message?.text;
-      const incomingMsgId = context.update?.message?.message_id;
-      if (incomingText) {
-        if (incomingText.match(/^\/cal(\s|$)/)) {
-          // /cal is an AI command — save args as plain user message, not a command event.
-          // In groups, bare /cal means "look at the recent context above"; save the literal
-          // "/cal" so the agent has a new user turn to respond to. In DMs, bare /cal just
-          // prints usage help, so there's nothing to save.
-          const calArgs = incomingText.replace(/^\/cal\s*/, '').trim();
-          const savedText = calArgs || (logChatId ? '/cal' : '');
-          if (savedText) {
-            chatHistoryIds.set(
-              user.telegram_id,
-              conversationLogger.logUserMessage(user.telegram_id, savedText, logChatId),
-            );
-          }
-        } else if (incomingText.startsWith('/')) {
-          const spaceIdx = incomingText.indexOf(' ');
-          const cmdName = spaceIdx >= 0 ? incomingText.slice(0, spaceIdx) : incomingText;
-          const cmdArgs = spaceIdx >= 0 ? incomingText.slice(spaceIdx + 1).trim() : undefined;
-          conversationLogger.logCommand(user.telegram_id, cmdName, cmdArgs || undefined, logChatId);
-          // Log command to action log
-          db.actionLog.insert({
-            user_id: user.telegram_id,
-            chat_id: chatId ?? user.telegram_id,
-            action_type: 'command',
-            action_name: cmdName,
-            message_id: incomingMsgId,
-            input_summary: cmdArgs,
-          });
-        } else {
-          chatHistoryIds.set(
-            user.telegram_id,
-            conversationLogger.logUserMessage(user.telegram_id, incomingText, logChatId),
-          );
-        }
-      }
-
-      // Edited message
-      const editedText = context.update?.edited_message?.text;
-      if (editedText) {
-        conversationLogger.logEditedMessage(user.telegram_id, editedText, logChatId);
-      }
-
-      // Callback query (button press or ai_btn answer) — universal, no per-handler logging needed
-      const callbackData = context.update?.callback_query?.data;
-      if (callbackData) {
-        const firstColon = callbackData.indexOf(':');
-        const action = firstColon >= 0 ? callbackData.slice(0, firstColon) : callbackData;
-        const payload = firstColon >= 0 ? callbackData.slice(firstColon + 1) : '';
-
-        if (action === 'ai_btn') {
-          const callbackChatType = context.update?.callback_query?.message?.chat?.type;
-          const isGroupCallback = callbackChatType === 'group' || callbackChatType === 'supergroup';
-          const { answerText } = parseAiBtnPayload(payload, isGroupCallback);
-          chatHistoryIds.set(
-            user.telegram_id,
-            conversationLogger.logUserMessage(user.telegram_id, answerText, logChatId),
-          );
-        } else {
-          const callbackMessage = context.update?.callback_query?.message;
-          const replyMarkup =
-            callbackMessage && 'reply_markup' in callbackMessage ? callbackMessage.reply_markup : undefined;
-          const buttonLabel = resolveCallbackButtonLabel(replyMarkup, callbackData, action);
-          conversationLogger.logButtonPress(user.telegram_id, buttonLabel, payload || undefined, logChatId);
-          // Log callback to action log
-          const cbMsgId = context.update?.callback_query?.message?.message_id;
-          db.actionLog.insert({
-            user_id: user.telegram_id,
-            chat_id: chatId ?? user.telegram_id,
-            action_type: 'callback',
-            action_name: action,
-            message_id: cbMsgId,
-            input_summary: payload || undefined,
-          });
-        }
-      }
-
-      // Wrap send and editText — logs every bot response (intent matcher, scenes, commands, callbacks)
-      // Note: AI agent uses TelegramSender.sendMessage() directly; those are logged via logAiTurn
-      // GramIO attaches send/editText at runtime on specific contexts; accessed here at the framework boundary.
-      type SendFn = (text: string, opts?: { [key: string]: unknown }) => Promise<unknown>;
-      type EditTextFn = (text: string, opts?: { [key: string]: unknown }) => Promise<unknown>;
-      const mutableCtx = context as { send?: SendFn; editText?: EditTextFn };
-
-      const originalSend = mutableCtx.send?.bind(mutableCtx);
-      if (originalSend) {
-        mutableCtx.send = async (text, opts) => {
-          const result = await originalSend(text, opts);
-          conversationLogger.logBotResponse(user.telegram_id, text, logChatId);
-          return result;
-        };
-      }
-
-      const originalEditText = mutableCtx.editText?.bind(mutableCtx);
-      if (originalEditText) {
-        mutableCtx.editText = async (text, opts) => {
-          const result = await originalEditText(text, opts);
-          conversationLogger.logBotEdit(user.telegram_id, text, logChatId);
-          return result;
-        };
-      }
-
-      return next();
-    })
     .extend(scenesSetup.plugin)
     // Feature usage tracking for commands
     .on('message', (ctx, next) => {

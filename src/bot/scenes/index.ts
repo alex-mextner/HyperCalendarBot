@@ -29,14 +29,12 @@ interface ConnectTelegramSceneDeps {
   ) => Promise<boolean>;
   deepLinkService?: DeepLinkService;
   botUsername?: string;
-  forwardToAi?: (userId: number, chatId: number, text: string) => Promise<void>;
 }
 
 /**
  * Build the SQLite-backed, chat-scoped scene storage.
  * Split out so that msgDeps can reference it BEFORE scenes are constructed —
- * that in turn lets the caller build the AI agent and pass a real
- * `forwardToAi` closure into the scene plugin, avoiding late-bound refs.
+ * the scene plugin is built last, once the closures it receives exist, avoiding late-bound refs.
  */
 export function createScopedSceneStorage(db: DatabaseService): ReturnType<typeof createSceneStorage> {
   const storage = createSceneStorage(db.db);
@@ -91,7 +89,6 @@ export function createScenesPlugin(
         sendAsConnectedUser: connectTelegramSceneDeps.sendAsConnectedUser,
         deepLinkService: connectTelegramSceneDeps.deepLinkService,
         botUsername: connectTelegramSceneDeps.botUsername,
-        forwardToAi: connectTelegramSceneDeps.forwardToAi,
       }
     : undefined;
   const connectTelegramScene = createConnectTelegramScene(

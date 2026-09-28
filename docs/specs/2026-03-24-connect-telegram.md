@@ -166,7 +166,8 @@ If Telegram returns `SessionPasswordNeeded`:
 Введи пароль (он не будет сохранён):
 ```
 
-Password is used once for `client.check_password()`, then discarded. Not stored anywhere.
+Password is used once for `client.check_password()`, then discarded. Not stored anywhere — see
+"Wizard input stays out of logs and the AI" below.
 
 **Step 5: Success**
 ```
@@ -205,19 +206,31 @@ chat level, so the button stays in the input area even after the source message 
 gone. The visible prompt ("Введи номер телефона…") then ships with the inline
 cancel button.
 
-When the user taps the button:
+When the user taps the button, the bot acknowledges the callback, stops the live MTProto auth
+process, cleans up the temp session file if present, replies with the fixed "Авторизация
+отменена." (removing the phone-share reply keyboard) and exits. Nothing typed into the wizard is
+handed to the AI or anywhere else — any of it may be the phone number, the login code or the 2FA
+password (typed at the wrong prompt, or as a sentence), so the scene keeps none of it in its state.
 
-1. Acknowledge the callback and clean up the temp session file if present.
-2. If the user's last input at the OTP/phone step was **natural-language text** (non-OTP-shaped
-   / non-phone-shaped), the bot replies "Авторизация отменена. Отвечаю…" and hands the
-   original message off to the AI agent — the conversation continues where it was.
-3. Otherwise the bot replies with the plain "Авторизация отменена." and exits.
+### Wizard input stays out of logs and the AI
 
-`pendingForwardText` (scene state) tracks the last natural-language input and is explicitly
-cleared when:
-- user enters a valid-shape code (to avoid leaking stale input into 2FA cancel),
-- 2FA prompt is shown,
-- OTP code is digits-only but rejected by Telegram.
+While the `connect-telegram` scene is open, the chat-logging middleware
+(`src/bot/middleware/chat-logging.ts`) stores every typed or edited text as
+`[redacted: connect wizard input]`: the phone number, the login code and the 2FA password never
+reach `chat_history`, so they are never in the AI history, the AI debug logs (`logs/chats/`) or
+`get_history`. Slash-prefixed text is redacted the same way and gets no `user_action_log` row
+(a password may start with `/`); the middleware runs before the scene command escape so it
+still sees the open wizard. The command escape then treats that text as wizard input, not a
+command: it deletes the message, ends the wizard like the cancel button (stops the live MTProto
+auth process and removes its temp session file), replies with the same fixed "Авторизация
+отменена." and stops, so no command handler, feature-usage record or AI turn sees it. Bot
+replies inside the wizard are logged as usual — they echo only the masked phone.
+
+The scene deletes every text the user types in it — at the consent screen and at the phone,
+code and 2FA prompts — once it has read it, so that message cannot be edited later: an edit
+arriving after the wizard closed would be logged verbatim. A failed deletion is logged without
+the message text and does not stop the flow; the edit of such a message after the wizard closed
+is still logged verbatim (GH-630).
 
 ---
 

@@ -24,31 +24,15 @@ const sceneLogger = logger.child({ module: 'connect-telegram-scene' });
 
 // --- Exported helpers ---
 
+export const CONNECT_TELEGRAM_SCENE = 'connect-telegram';
+/**
+ * Everything the user types while this wizard is open — phone number, login code, 2FA password —
+ * is stored in chat_history as this marker only, never verbatim.
+ */
+export const CONNECT_WIZARD_REDACTION = '[redacted: connect wizard input]';
+
 export const PHONE_REGEX = /^\+\d{7,15}$/;
 export const CODE_REGEX = /^\d{5}$/;
-// isOtpLikeText and isPhoneLikeText share a purpose: filter out "shaped-but-invalid"
-// input at the OTP / phone steps so a cancel click doesn't forward meaningless digit
-// soup — or a leaked authentication code — to the AI. PHONE_LIKE_REGEX is a superset
-// of OTP_LIKE_REGEX (adds '+', '(', ')'). If either invariant changes, update both.
-const OTP_LIKE_REGEX = /^[\d\s-]+$/;
-const PHONE_LIKE_REGEX = /^[+\d\s\-()]+$/;
-
-/**
- * True if the text is OTP-shaped (digits/spaces/dashes only) OR embeds 3+ digit
- * characters anywhere. The OTP prompt's whole purpose is collecting a 5-digit code,
- * so any text with that many digits — "Code: 12345", "код 12345" — may itself BE
- * (or contain) the real authentication code and must never be forwarded to the AI.
- */
-export function isOtpLikeText(text: string): boolean {
-  if (OTP_LIKE_REGEX.test(text)) return true;
-  const digitCount = (text.match(/\d/g) ?? []).length;
-  return digitCount >= 3;
-}
-
-/** True if the text looks like a phone attempt (digits, '+', spaces, dashes, parens only). */
-export function isPhoneLikeText(text: string): boolean {
-  return PHONE_LIKE_REGEX.test(text);
-}
 
 const CONNECT_COOLDOWN_MS = 60_000;
 const connectAttempts = new Map<number, number>();
@@ -89,8 +73,6 @@ export interface ConnectTelegramState {
   sessionPath?: string;
   codeAttempts?: number;
   passwordAttempts?: number;
-  /** Last non-OTP-shaped text the user sent at the OTP step — forwarded to AI on cancel. */
-  pendingForwardText?: string;
 }
 
 /** Encrypt phone for safe storage in scene state (SQLite). */
@@ -133,17 +115,39 @@ export interface ConnectTelegramDeps {
   ) => Promise<boolean>;
   deepLinkService?: DeepLinkService;
   botUsername?: string;
-  /** Hand off a user message to the AI agent (used when cancelling auth to keep a conversation going). */
-  forwardToAi?: (userId: number, chatId: number, text: string) => Promise<void>;
 }
 
-// --- Cancel-authorization helper ---
+// --- Ending the wizard ---
+
+/**
+ * Stop an unfinished login: kill the live MTProto auth process and remove its temp session file.
+ * `state` is the wizard's scene state — read back from scene storage when the wizard ends outside
+ * its own steps, hence `unknown`.
+ */
+export async function abortConnectAuth(userId: number, state: unknown): Promise<void> {
+  SessionBridge.removeLiveAuthHandle(userId);
+  const sessionPath =
+    typeof state === 'object' && state !== null && 'sessionPath' in state ? state.sessionPath : undefined;
+  if (typeof sessionPath === 'string') await SessionBridge.cleanupTempFile(sessionPath);
+}
+
+/**
+ * Take a message typed into the wizard off the chat once it is read: it may hold the phone number,
+ * the login code or the 2FA password, and an edit arriving after the wizard closed would be logged
+ * verbatim. A failed deletion is logged without the text and does not stop the flow.
+ */
+export async function deleteWizardInput(message: { delete(): Promise<unknown> }, userId: number): Promise<void> {
+  await message
+    .delete()
+    .catch((err: unknown) =>
+      sceneLogger.warn({ err, userId }, 'failed to delete a message typed into the connect wizard'),
+    );
+}
 
 interface CancelAuthContext {
   answer: () => Promise<unknown>;
   send: (text: string, options?: { reply_markup?: InlineKeyboard | { remove_keyboard: true } }) => Promise<unknown>;
   from: { id: number };
-  chatId: number | bigint | undefined;
   scene: {
     state: ConnectTelegramState;
     exit: () => Promise<boolean> | boolean;
@@ -153,28 +157,15 @@ interface CancelAuthContext {
 /**
  * Handle the "Cancel authorization" inline button.
  * Kills the live MTProto auth process, cleans up the temp session file, removes the
- * leftover phone-share reply keyboard, exits the scene, and — if the user's last
- * input was natural-language (stashed in `pendingForwardText`) — hands it off to the AI.
+ * leftover phone-share reply keyboard and exits the scene with a fixed message. Nothing the
+ * user typed into the wizard is handed on: any of it may be the phone, the code or the password.
  */
 async function handleCancelAuth(
   context: CancelAuthContext,
   ct: ReturnType<typeof t>['connectTelegram'],
-  deps: ConnectTelegramDeps | undefined,
 ): Promise<void> {
   await context.answer();
-  const userId = context.from.id;
-  const { sessionPath, pendingForwardText } = context.scene.state;
-  SessionBridge.removeLiveAuthHandle(userId);
-  if (sessionPath) await SessionBridge.cleanupTempFile(sessionPath);
-  const chatId = context.chatId;
-  if (pendingForwardText && chatId !== undefined && deps?.forwardToAi) {
-    await context.send(ct.authCancelledAnswering, { reply_markup: { remove_keyboard: true } });
-    await context.scene.exit();
-    deps
-      .forwardToAi(userId, Number(chatId), pendingForwardText)
-      .catch((err) => sceneLogger.warn({ err, userId }, 'forwardToAi after cancel failed'));
-    return;
-  }
+  await abortConnectAuth(context.from.id, context.scene.state);
   await context.send(ct.authCancelled, { reply_markup: { remove_keyboard: true } });
   await context.scene.exit();
 }
@@ -188,7 +179,7 @@ export function createConnectTelegramScene(
   deps?: ConnectTelegramDeps,
 ) {
   return (
-    new Scene('connect-telegram')
+    new Scene(CONNECT_TELEGRAM_SCENE)
       .state<ConnectTelegramState>()
       .params<ConnectTelegramParams>()
       // extend() AFTER params() — params() uses Modify which replaces Derives.global
@@ -264,7 +255,11 @@ export function createConnectTelegramScene(
             await context.scene.step.next();
             return;
           }
+          return;
         }
+
+        // Text typed before "Connect" may already be a credential: take it off the chat like at the prompts.
+        if (context.text?.trim()) await deleteWizardInput(context, userId);
       })
 
       // Step 1: Phone number
@@ -276,7 +271,7 @@ export function createConnectTelegramScene(
 
         if (context.is('callback_query')) {
           if (context.data === CB_CANCEL_AUTH) {
-            await handleCancelAuth(context, ct, deps);
+            await handleCancelAuth(context, ct);
           }
           return;
         }
@@ -290,15 +285,13 @@ export function createConnectTelegramScene(
 
         // Accept phone from shared contact or typed text
         const raw = context.text?.trim();
+        // Whatever was typed here may be the phone number: take it off the chat.
+        if (raw) await deleteWizardInput(context, userId);
         const sharedPhone = context.contact?.phoneNumber;
         const phoneInput = sharedPhone ?? raw;
         const phone = phoneInput ? normalizePhone(phoneInput) : undefined;
 
         if (!phone || !PHONE_REGEX.test(phone)) {
-          // Stash non-phone-shaped text so cancel can forward it to the AI.
-          // Pure digits/+/spaces/dashes/parens are phone-shaped — nothing worth forwarding.
-          const forwardText = raw && !isPhoneLikeText(raw) ? raw : undefined;
-          await context.scene.update({ pendingForwardText: forwardText }, { step: undefined });
           const invalidKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
           await context.send(ct.invalidPhone, { reply_markup: invalidKb });
           return;
@@ -346,9 +339,6 @@ export function createConnectTelegramScene(
             encryptedPhoneHex: encryptPhoneForState(phone, masterKeyHex),
             sessionPath,
             codeAttempts: 0,
-            // A stale pendingForwardText from an earlier invalid-phone attempt must not
-            // leak into a cancel click at the OTP step that follows.
-            pendingForwardText: undefined,
           },
           { step: undefined },
         );
@@ -366,7 +356,7 @@ export function createConnectTelegramScene(
 
         if (context.is('callback_query')) {
           if (context.data === CB_CANCEL_AUTH) {
-            await handleCancelAuth(context, ct, deps);
+            await handleCancelAuth(context, ct);
           }
           return;
         }
@@ -377,6 +367,8 @@ export function createConnectTelegramScene(
         if (guardHit || context.contact) return;
 
         const text = context.text?.trim();
+        // Whatever was typed here may be the login code (or the 2FA password typed too early): take it off the chat.
+        if (text) await deleteWizardInput(context, userId);
         const { encryptedPhoneHex, sessionPath, codeAttempts } = context.scene.state;
 
         const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
@@ -390,9 +382,6 @@ export function createConnectTelegramScene(
         // Normalize: user enters "1 2 3 4 5" or "12-345" to avoid Telegram anti-phishing
         const code = text ? normalizeOtpCode(text) : undefined;
         if (!code || !CODE_REGEX.test(code)) {
-          // Save the non-OTP-shaped text for AI forwarding on cancel; pure digits/spaces/dashes go nowhere
-          const forwardText = text && !isOtpLikeText(text) ? text : undefined;
-          await context.scene.update({ pendingForwardText: forwardText }, { step: undefined });
           const kb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
           await context.send(ct.invalidCode, { reply_markup: kb });
           return;
@@ -435,8 +424,6 @@ export function createConnectTelegramScene(
             return;
           }
 
-          // Valid-shape OTP rejected by Telegram — nothing worth forwarding, just offer to bail out
-          await context.scene.update({ pendingForwardText: undefined }, { step: undefined });
           const retryKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
           await context.send(ct.invalidCode, { reply_markup: retryKb });
           return;
@@ -453,9 +440,7 @@ export function createConnectTelegramScene(
         if (result.data.status === '2fa_required') {
           const enter2faKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
           await context.send(ct.enter2fa, { reply_markup: enter2faKb });
-          // Clear pendingForwardText so a stale natural-language input from step 2
-          // does not leak into a cancel click at step 3.
-          await context.scene.update({ passwordAttempts: 0, pendingForwardText: undefined }, { step: undefined });
+          await context.scene.update({ passwordAttempts: 0 }, { step: undefined });
           pendingStepTransitions.add(userId);
           await context.scene.step.next();
           return;
@@ -478,18 +463,19 @@ export function createConnectTelegramScene(
 
         if (context.is('callback_query')) {
           if (context.data === CB_CANCEL_AUTH) {
-            await handleCancelAuth(context, ct, deps);
+            await handleCancelAuth(context, ct);
           }
           return;
         }
 
-        const guardHit = pendingStepTransitions.delete(context.from.id);
-        // Fallback: if text looks like an OTP code (digits with optional spaces/dashes), it's re-processing
-        const trimmed = context.text?.trim();
-        const maybeOtp = trimmed ? normalizeOtpCode(trimmed) : undefined;
-        if (guardHit || (maybeOtp && CODE_REGEX.test(maybeOtp))) return;
-
+        if (pendingStepTransitions.delete(context.from.id)) return;
         const text = context.text?.trim();
+        // Every message at this prompt is a password attempt (or the code sent again): take it off the chat.
+        if (text) await deleteWizardInput(context, userId);
+        // Fallback: if text looks like an OTP code (digits with optional spaces/dashes), it's re-processing
+        const maybeOtp = text ? normalizeOtpCode(text) : undefined;
+        if (maybeOtp && CODE_REGEX.test(maybeOtp)) return;
+
         const { encryptedPhoneHex, sessionPath, passwordAttempts } = context.scene.state;
         const cancelKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
 
