@@ -148,6 +148,17 @@ describe('correctUtcClockTimes', () => {
     expect(correctUtcClockTimes(text, [lesson, errand], TZ)).toBe(text);
   });
 
+  test.each([
+    ['«AM»', `The ${LESSON} is at 10:30 AM`],
+    ['«pm» with no space', `The ${LESSON} is at 10:30pm`],
+    ['«AM» after two spaces', `The ${LESSON} is at 10:30  AM`],
+    ['«a.m.» on both ends of a range', `${LESSON}: 10:30 a.m. – 11:30 a.m.`],
+    ['«AM» after a range', `${LESSON}: 10:30 – 11:30 AM`],
+    ['«p.m.» and «am» on one line', `${ERRAND} at 6:30 p.m., ${LESSON} at 10:30 am`],
+  ])('leaves a 12-hour time with %s as the model wrote it', (_label, text) => {
+    expect(correctUtcClockTimes(text, [lesson, errand], TZ)).toBe(text);
+  });
+
   test('a schedule-window event alone never triggers a rewrite', () => {
     // Without a tool result the model may be quoting another event entirely.
     const text = `- 18:30 – 19:30 ${ERRAND}\n- свободно 19:30 – 23:59`;

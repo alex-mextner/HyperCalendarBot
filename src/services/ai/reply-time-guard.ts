@@ -7,7 +7,8 @@
 // The guard never calls a model and only touches clock times it can tie to a real
 // event: a line that names an event (by title or "id N") and shows that event's UTC
 // start instead of its local start is rewritten with the clocks of every event it names.
-// Times on lines that name no event (free windows computed from the wrong times) are rewritten
+// 12-hour times ("10:30 AM") are not 24-hour clock values and are left alone. Times on
+// lines that name no event (free windows computed from the wrong times) are rewritten
 // with the same mapping only when no named event really happens at one of the
 // replaced times. Anything ambiguous is left as the model wrote it.
 
@@ -48,6 +49,8 @@ const CLOCK_TIME_RE = /(?<![\d:T])(\d{1,2}):(\d{2})(?![\d:])/g;
 const UTC_LABEL_AFTER_RE =
   /^\s*(?:[-–—]\s*\d{1,2}:\d{2}\s*)?\(?\s*(?:по\s+)?(?:UTC|GMT|Z(?![A-Za-z])|Гринвич|всемирному)/i;
 const UTC_LABEL_BEFORE_RE = /(?:UTC|GMT|Гринвичу|всемирному времени)\s*:?\s*(?:\d{1,2}:\d{2}\s*[-–—]\s*)?$/i;
+/** A 12-hour clock time (alone or as a range): its hour is not a 24-hour clock value. */
+const MERIDIEM_AFTER_RE = /^(?:\s*[-–—]\s*\d{1,2}:\d{2})?\s*[ap]\.?m\.?(?![a-z])/i;
 const ID_ANCHOR_RE = /(?:\bid\s*[:#№]?\s*|#)(\d{1,9})\b/gi;
 /** Shorter titles ("Я", "ДР") would anchor to unrelated words. */
 const MIN_TITLE_LENGTH = 3;
@@ -78,10 +81,11 @@ function toClockTimes(event: EventClock, timezone: string): ClockTimes {
   };
 }
 
-/** The HH:MM a reader takes as a local time, or null (invalid, or labelled UTC). */
+/** The HH:MM a reader takes as a 24-hour local time, or null (invalid, labelled UTC, or AM/PM). */
 function shownLocalTime(line: string, index: number, length: number, hour: string, minute: string): string | null {
   if (Number(hour) > 23 || Number(minute) > 59) return null;
-  if (UTC_LABEL_AFTER_RE.test(line.slice(index + length))) return null;
+  const after = line.slice(index + length);
+  if (UTC_LABEL_AFTER_RE.test(after) || MERIDIEM_AFTER_RE.test(after)) return null;
   if (UTC_LABEL_BEFORE_RE.test(line.slice(0, index))) return null;
   return `${hour.padStart(2, '0')}:${minute}`;
 }
