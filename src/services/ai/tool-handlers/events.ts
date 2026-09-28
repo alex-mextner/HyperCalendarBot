@@ -362,9 +362,13 @@ const UTC_DAY_END_RE = /^(\d{4}-\d{2}-\d{2})T23:59:59(?:\.999)?Z$/;
  * Models often send a user's day as UTC day edges (`…T00:00:00Z`..`…T23:59:59Z`). Outside UTC that
  * window is shifted by the offset: it misses the day's early events and takes in the next day's
  * (#550). Such a pair is read as those local days; any other instant, an explicit offset or half a
- * pair stays verbatim, and a zone at UTC on those days keeps the exact input.
+ * pair stays verbatim, and a zone at UTC on those days keeps the exact input. The day-reference
+ * guard judges a get_events call by these same bounds, so it checks the days actually read.
  */
-function localDaysForUtcDayEdges(input: GetEventsInput, timezone: string): { start_date: string; end_date: string } {
+export function localDaysForUtcDayEdges(
+  input: { start_date: string; end_date: string },
+  timezone: string,
+): { start_date: string; end_date: string } {
   const startDay = UTC_DAY_START_RE.exec(input.start_date)?.[1];
   const endDay = UTC_DAY_END_RE.exec(input.end_date)?.[1];
   // The date checks also keep an impossible day (2026-02-30) out of expandDateOnly, which throws.
