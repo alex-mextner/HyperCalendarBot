@@ -18,3 +18,4 @@ Case с `event_writes > 0` обязан нести `requires_confirmed_revision`
 В manifest отдельно считаются semantic cases и уникальные текстовые строки. Повтор одного числа при разных pending fields намеренный: `2` как время, номер контакта и число повторений имеет разные смыслы.
 Не вычислять expected production-парсером. При адаптации к runner сохранять независимые ожидаемые значения, отрицательные случаи, failed/unknown outcomes и замороженные часы.
 Полный дизайн: [2026-09-28-unified-calendar-dialogue-design.md](2026-09-28-unified-calendar-dialogue-design.md).
+Полная семантика повторений (RRULE/RDATE/EXDATE, DST, идентичность исключения, Google/ICS round-trip): [2026-09-28-recurrence-semantics-583.md](2026-09-28-recurrence-semantics-583.md).
