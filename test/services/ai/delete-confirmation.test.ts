@@ -225,6 +225,23 @@ describe('bot-rendered delete confirmation', () => {
     expect(Object.values(ids).map(alive)).toEqual([true, true, true, true]);
   });
 
+  // Replay of 2026-09-23: six events confirmed, the model deleted five and replied "all deleted".
+  // Now the tap deletes every confirmed event, and one that cannot be deleted is named everywhere.
+  test('every confirmed event is deleted by the tap, and a failed one is reported, not hidden', async () => {
+    const message = await askAll();
+    eventService.deleteEvent(ids.lesson, ACTOR); // gone before the tap, e.g. from another device
+    const ctx = tap(message.buttons[1]!.data, message);
+    await callbackHandler()(ctx as never);
+
+    expect([ids.sep1, ids.sep8, ids.lessonWithAlex].map(alive)).toEqual([false, false, false]);
+    const [edited] = ctx.editText.mock.calls[0]!;
+    expect(edited).toContain('✅ Удалено: 3');
+    expect(edited).toContain('⚠️ Не удалось удалить: «Английский»');
+    const report = continuations[0]!.text;
+    expect(report).toContain(`Failed: #${ids.lesson} «Английский»`);
+    expect(report).toContain(`#${ids.lessonWithAlex} «Английский с Алексом»`);
+  });
+
   test('a tap can be used once', async () => {
     const message = await askAll();
     await callbackHandler()(tap(message.buttons[0]!.data, message) as never);

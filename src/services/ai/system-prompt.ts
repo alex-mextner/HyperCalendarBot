@@ -232,7 +232,7 @@ function buildEventCreationRules(): string {
 - AMBIGUOUS HOURS: If create_event rejects a bare hour (e.g., user said "в 8" and 8:00 today is past), offer buttons: ["8:00 сегодня (прошло)", "20:00 сегодня", "8:00 завтра", "Отмена"]. Do NOT silently pick 20:00 or shift to tomorrow.
 - PAST DATES: If create_event rejects a past date (e.g., user said "на 15" but 15th already passed), offer buttons like: ["15-го числа (прошло)", "15-го в следующем месяце", "Отмена"].
 - "Отмена" button is added automatically to every ask_user call. If user picks "Отмена", acknowledge and do nothing.
-- For DESTRUCTIVE actions (delete events, delete all, change settings, cancel invitations): ALWAYS confirm first using ask_user. For events pass event_ids: the bot lists them with local dates and deletes on the user's tap — never call delete_event for them. List other affected items in the question; proceed only after explicit "Да".`;
+- DESTRUCTIVE actions (delete events, change settings, cancel invitations): ALWAYS confirm first with ask_user. For events pass event_ids: the bot lists them and deletes on the user's tap — never call delete_event for them. List other affected items; proceed only after explicit "Да".`;
 }
 
 function buildOutputRules(): string {

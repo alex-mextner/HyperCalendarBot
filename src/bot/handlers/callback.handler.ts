@@ -320,7 +320,15 @@ export function createCallbackHandler(
     const summary = [tr.deleteDone(deleted.length)];
     if (kept.length > 0) summary.push(tr.deleteKeptPast(kept.length));
     if (failed.length > 0) summary.push(tr.deleteFailed(failed.map((target) => `«${target.title}»`).join(', ')));
-    await ctx.editText(withResult(summary.join('\n')), { entities });
+    // The deletes are done: a failed edit (e.g. over 4096 characters) must not skip the report.
+    const result = summary.join('\n');
+    try {
+      await ctx.editText(withResult(result), { entities });
+    } catch {
+      await ctx
+        .editText(result)
+        .catch((err: unknown) => cmdLogger.warn({ err }, 'Failed to edit the delete confirmation'));
+    }
     await continueWithAgent(
       user,
       deleteReportForAgent({ deleted, kept, failed }, user.timezone),

@@ -19,6 +19,7 @@ import { UserRepository } from '../../../src/database/repositories/user.reposito
 import { runMigrations } from '../../../src/database/schema.ts';
 import { AssistantMessageCodec, aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
+import { approveDeletes } from '../../../src/services/ai/delete-confirmation.ts';
 import { HistorySummarizer } from '../../../src/services/ai/history-summarizer.ts';
 import {
   AllProvidersFailedError,
@@ -904,6 +905,7 @@ describe('CalendarBotAgent.run()', () => {
       start_at: new Date(Date.now() + 86400000).toISOString(),
       timezone: 'UTC',
     });
+    approveDeletes(USER_ID, ctx.chatId, [event.id]);
     ctx.participantRepo = new ParticipantRepository(db);
     ctx.participantRepo.add(event.id, USER_ID, 'accepted');
     const script = makeStreamImpl([
@@ -971,6 +973,7 @@ describe('CalendarBotAgent.run()', () => {
 
   test('confirmed write survives provider interruption without whole-request retry', async () => {
     const event = createOwnedEvent();
+    approveDeletes(USER_ID, ctx.chatId, [event.id]);
     const enqueue = mock(async () => {});
     ctx.retryEnqueue = enqueue;
     const script = makeStreamImpl([
@@ -1045,6 +1048,7 @@ describe('CalendarBotAgent.run()', () => {
       start_at: '2030-01-01T10:00:00Z',
       timezone: 'UTC',
     });
+    approveDeletes(USER_ID, ctx.chatId, [event.id]);
     const script = makeStreamImpl([
       { kind: 'text', text: 'Unverified answer' },
       { kind: 'tool', callId: 'retry-delete', name: 'delete_event', input: { event_id: String(event.id) } },
@@ -1404,6 +1408,7 @@ describe('CalendarBotAgent.run()', () => {
       start_at: '2030-01-01T10:00:00Z',
       timezone: 'UTC',
     });
+    approveDeletes(USER_ID, ctx.chatId, [event.id]);
     const script = makeStreamImpl([
       {
         kind: 'tool',

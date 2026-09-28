@@ -563,6 +563,8 @@ function fixture(
       chatHistory: history,
       eventReminderRepo: new EventReminderRepository(db),
       conversationLogger: new ConversationLogger(history),
+      // As in message.handler: the intent layer's own confirmation step guards its writes.
+      toolOrigin: 'intent_workflow',
       notifications: {
         notificationPrefs: {
           ensureDefaults: (id: number) => prefsRepo.ensureDefaults(id),
