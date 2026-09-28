@@ -14,6 +14,7 @@ const HELP_EN = `📖 <b>HyperCalendar Commands</b>
   /edit — modify event
   /delete — remove event
   /search — find events
+  /event — show one event by id or title
 
 ⚙️ <b>Settings</b>
   /settings — all preferences
@@ -47,6 +48,7 @@ const HELP_RU = `📖 <b>Команды HyperCalendar</b>
   /edit — редактировать
   /delete — удалить
   /search — поиск событий
+  /event — показать одно событие по id или названию
 
 ⚙️ <b>Настройки</b>
   /settings — все настройки

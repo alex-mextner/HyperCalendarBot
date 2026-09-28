@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "fingerprint": "8e646726da7e4e31ad50a14988c2b40451b804a2ee15e202c46b7d0aebddea41",
+  "fingerprint": "44b080f80b90dc5056fbffb91692498f183b780c50901ad9a72f78dd9dedcec1",
   "runtimeVerification": null,
   "engine": {
     "document": "engine.md",
@@ -23,7 +23,7 @@
       {
         "type": "date",
         "title": "календарный день: слово или полная дата",
-        "uses": 7
+        "uses": 8
       },
       {
         "type": "time",
@@ -68,11 +68,11 @@
     ]
   },
   "counts": {
-    "rules": 52,
+    "rules": 53,
     "categories": {
       "calendar": 7,
       "slots": 3,
-      "events": 9,
+      "events": 10,
       "reminders": 4,
       "invitations": 2,
       "contacts": 7,
@@ -85,12 +85,12 @@
       "bot": 1
     },
     "risks": {
-      "read": 18,
+      "read": 19,
       "write": 23,
       "private_read": 10,
       "sensitive_write": 1
     },
-    "tools": 38
+    "tools": 39
   },
   "entries": [
     {
@@ -1911,6 +1911,132 @@
         },
         {
           "example": "покажи события #12",
+          "result": "fallthrough"
+        }
+      ],
+      "invalidInputMatching": []
+    },
+    {
+      "name": "basis.event.show_relative_day",
+      "title": "Показать событие сегодняшнего/завтрашнего дня",
+      "sourceTitle": "Show the one event on today's/tomorrow's/yesterday's date",
+      "category": "events",
+      "risk": "read",
+      "origin": "canonical",
+      "source": "src/services/intent/seed-catalog.ts",
+      "deployed": null,
+      "examples": [
+        "покажи сегодняшнюю встречу",
+        "покажи завтрашнюю встречу",
+        "show today's meeting",
+        "open tomorrow's event"
+      ],
+      "negativeExamples": [
+        "покажи сегодня",
+        "покажи встречу",
+        "не показывай сегодняшнюю встречу",
+        "покажи сегодняшние события"
+      ],
+      "invalidInputExamples": [],
+      "pattern": "^(?:\\u043F\\u043E\\u043A\\u0430\\u0436\\u0438|\\u043E\\u0442\\u043A\\u0440\\u043E\\u0439|show|open)\\s+(?:\\u043C\\u043D\\u0435\\s+|me\\s+)?((?:послезавтрашнюю|послезавтрашнее|послезавтрашний|сегодняшнюю|сегодняшнее|сегодняшний|yesterday's|завтрашнюю|завтрашнее|завтрашний|tomorrow's|yesterdays|tomorrows|вчерашнюю|вчерашнее|вчерашний|today's|todays))\\s+(?:событие|встречу|meeting|event)$",
+      "workflow": {
+        "version": 2,
+        "bindings": {
+          "day": {
+            "type": "date",
+            "from": "{{$1}}",
+            "words": {
+              "сегодняшнюю": "today",
+              "сегодняшнее": "today",
+              "сегодняшний": "today",
+              "today s": "today",
+              "todays": "today",
+              "завтрашнюю": "tomorrow",
+              "завтрашнее": "tomorrow",
+              "завтрашний": "tomorrow",
+              "tomorrow s": "tomorrow",
+              "tomorrows": "tomorrow",
+              "послезавтрашнюю": "day_after_tomorrow",
+              "послезавтрашнее": "day_after_tomorrow",
+              "послезавтрашний": "day_after_tomorrow",
+              "вчерашнюю": "yesterday",
+              "вчерашнее": "yesterday",
+              "вчерашний": "yesterday",
+              "yesterday s": "yesterday",
+              "yesterdays": "yesterday"
+            }
+          }
+        },
+        "steps": [
+          {
+            "call": "show_event",
+            "input": {
+              "start_date": "{{bind.day}}",
+              "end_date": "{{bind.day}}",
+              "scope": "{{env.scope}}"
+            }
+          }
+        ],
+        "i18n": {
+          "ru": {},
+          "en": {}
+        }
+      },
+      "tools": [
+        "show_event"
+      ],
+      "bindingTypes": [
+        "date"
+      ],
+      "notes": null,
+      "predecessors": [],
+      "issues": [],
+      "audit": {
+        "schemaValid": true,
+        "contractErrors": 0,
+        "tools": [
+          "show_event"
+        ],
+        "requiredCaptures": [
+          "$1"
+        ],
+        "exampleCount": 1,
+        "examplesMatched": 1,
+        "examplesMissingCaptures": 0
+      },
+      "matching": [
+        {
+          "example": "покажи сегодняшнюю встречу",
+          "result": "own"
+        },
+        {
+          "example": "покажи завтрашнюю встречу",
+          "result": "own"
+        },
+        {
+          "example": "show today's meeting",
+          "result": "own"
+        },
+        {
+          "example": "open tomorrow's event",
+          "result": "own"
+        }
+      ],
+      "negativeMatching": [
+        {
+          "example": "покажи сегодня",
+          "result": "matched"
+        },
+        {
+          "example": "покажи встречу",
+          "result": "fallthrough"
+        },
+        {
+          "example": "не показывай сегодняшнюю встречу",
+          "result": "fallthrough"
+        },
+        {
+          "example": "покажи сегодняшние события",
           "result": "fallthrough"
         }
       ],

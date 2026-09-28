@@ -1,6 +1,13 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
+import type { BotCallbackContext } from '../../../src/bot/types.ts';
 import { png } from '../../fixtures/png.ts';
+
+/** Centralized cast per CLAUDE.md's test-factory exception: the partial mock context built by
+ *  `makeCtx()` implements only what the dispatched route reads, not the full BotCallbackContext. */
+function toCallbackCtx(ctx: ReturnType<typeof makeCtx>): BotCallbackContext {
+  return ctx as unknown as BotCallbackContext;
+}
 
 function makeCtx(data: string, language = 'en', extras: { chat?: unknown; message?: unknown } = {}) {
   return {
@@ -17,6 +24,7 @@ function makeCtx(data: string, language = 'en', extras: { chat?: unknown; messag
 function makeEventService(overrides: { [key: string]: unknown } = {}) {
   return {
     getEvent: mock(() => null),
+    getEventForGroup: mock(() => null),
     getEventsForDay: mock(() => []),
     getEventsInRange: mock(() => []),
     editOccurrence: mock(() => null),
@@ -100,6 +108,55 @@ describe('EVENT_VIEW callback', () => {
     const opts = callArgs[1] as { parse_mode: string; reply_markup: unknown };
     expect(opts.parse_mode).toBe('HTML');
     expect(opts.reply_markup).toBeDefined();
+  });
+
+  test('group chat resolves via getEventForGroup, not the personal getEvent', async () => {
+    const eventService = makeEventService({
+      getEvent: mock(() => null),
+      getEventForGroup: mock(() => ({
+        id: 42,
+        title: 'Team sync',
+        start_at: '2026-03-15T10:00:00Z',
+        end_at: '2026-03-15T10:30:00Z',
+        description: null,
+        location: null,
+        recurrence_rule: null,
+        user_id: 999,
+        owner_type: 'group',
+        group_id: -500,
+      })),
+    });
+    const ctx = makeCtx('ev:42', 'en', { chat: { type: 'supergroup', id: -500 } });
+    const handler = makeHandler({ eventService });
+    await handler(toCallbackCtx(ctx));
+    expect(eventService.getEventForGroup).toHaveBeenCalledWith(42, -500);
+    expect(eventService.getEvent).not.toHaveBeenCalled();
+    const callArgs = ctx.editText.mock.calls[0] as unknown[];
+    expect(callArgs[0]).toContain('Team sync');
+  });
+
+  test('occurrence-date payload projects the occurrence start/end and uses the occurrence keyboard', async () => {
+    const eventService = makeEventService({
+      getEvent: mock(() => ({
+        id: 42,
+        title: 'Standup',
+        start_at: '2026-03-11T09:00:00Z',
+        end_at: '2026-03-11T09:30:00Z',
+        description: null,
+        location: null,
+        recurrence_rule: 'FREQ=WEEKLY',
+        user_id: 100,
+      })),
+    });
+    const ctx = makeCtx('ev:42:2026-03-18T09:00:00Z');
+    const handler = makeHandler({ eventService });
+    await handler(toCallbackCtx(ctx));
+    const callArgs = ctx.editText.mock.calls[0] as unknown[];
+    // Occurrence date (March 18), not the template's original date (March 11).
+    expect(callArgs[0]).toContain('18');
+    expect(callArgs[0]).not.toMatch(/\b11\b/);
+    const opts = callArgs[1] as { reply_markup: unknown };
+    expect(JSON.stringify(opts.reply_markup)).toContain('42:2026-03-18T09:00:00Z');
   });
 });
 

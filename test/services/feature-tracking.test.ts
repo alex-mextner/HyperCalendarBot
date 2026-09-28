@@ -75,6 +75,7 @@ describe('trackFeatureUsage', () => {
       'edit',
       'delete',
       'search',
+      'event',
       'free',
       'settings',
       'import',

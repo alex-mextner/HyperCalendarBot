@@ -22,6 +22,7 @@ import {
   handleGetUpcoming,
   handleNotifyParticipants,
   handleSearchEvents,
+  handleShowEvent,
   handleSnoozeEvent,
   handleUpdateEvent,
 } from './tool-handlers/events.ts';
@@ -93,6 +94,13 @@ export interface ToolInputMap {
   supplement_skip: Record<never, never>;
   end_conversation: Record<never, never>;
   get_events: { start_date: string; end_date: string; scope?: 'personal' | 'group' };
+  show_event: {
+    event_id?: number;
+    start_date?: string;
+    end_date?: string;
+    scope?: 'personal' | 'group';
+    owner_id?: number;
+  };
   create_event: {
     title: string;
     start_at: string;
@@ -269,6 +277,7 @@ const THROTTLE_MARKER =
 const HANDLER_MAP: { [tool: string]: { meta?: import('./types.ts').ToolHandlerMeta } & ((...args: any[]) => any) } = {
   get_events: handleGetEvents,
   get_event: handleGetEvent,
+  show_event: handleShowEvent,
   get_upcoming: handleGetUpcoming,
   get_free_slots: handleGetFreeSlots,
   search_events: handleSearchEvents,
@@ -368,6 +377,7 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   delete_event: 'events_edit',
   snooze_event: 'events_edit',
   get_event: 'events_create',
+  show_event: 'events_create',
   get_events: 'events_create',
   get_upcoming: 'events_create',
   search_events: 'events_create',
@@ -639,6 +649,9 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
 
       case 'get_event':
         return handleGetEvent(ctx, input as ToolInputMap['get_event']);
+
+      case 'show_event':
+        return handleShowEvent(ctx, input as ToolInputMap['show_event']);
 
       case 'notify_participants':
         return handleNotifyParticipants(ctx, input as ToolInputMap['notify_participants']);

@@ -122,6 +122,16 @@ const getEventSchema = z
   })
   .passthrough();
 
+const showEventSchema = z
+  .object({
+    event_id: numericId.optional(),
+    start_date: z.string().optional(),
+    end_date: z.string().optional(),
+    scope: scopeField,
+    owner_id: numericId.optional(),
+  })
+  .passthrough();
+
 const notifyParticipantsSchema = z
   .object({
     event_id: numericId,
@@ -448,6 +458,7 @@ export const toolSchemas: Record<ToolName, z.ZodType> = {
   get_upcoming: getUpcomingSchema,
   snooze_event: snoozeEventSchema,
   get_event: getEventSchema,
+  show_event: showEventSchema,
   notify_participants: notifyParticipantsSchema,
 
   // Reminder tools
