@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -153,6 +153,31 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(ctx);
     // Pattern: "YYYY-MM-DD Mon 14:00" — day name lets AI compute Monday of current week
     expect(prompt).toMatch(/Current local time: \d{4}-\d{2}-\d{2} (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{2}:\d{2}/);
+  });
+
+  test.each([
+    // Sunday 23:00 in Belgrade, the evening "среда" was read as the 28th.
+    ['2026-09-27T21:00:00Z', '2026-09-28'],
+    // Saturday 22:00 before the clocks go back on Sunday 2026-10-25.
+    ['2026-10-24T20:00:00Z', '2026-10-25'],
+    // 00:30 local is already the next day although UTC is still the previous one.
+    ['2026-09-27T22:30:00Z', '2026-09-29'],
+  ])('coming days at %s list the next seven local dates, each with its real weekday', (instant, first) => {
+    setSystemTime(new Date(instant));
+    try {
+      ctx.user = { ...ctx.user, timezone: 'Europe/Belgrade' };
+      const line = /- Coming days: (.+)/.exec(buildSystemPrompt(ctx))?.[1] ?? '';
+      const entries = line.split(', ').map((entry) => entry.split(' '));
+      const firstMs = Date.parse(`${first}T00:00:00Z`);
+      expect(entries).toEqual(
+        Array.from({ length: 7 }, (_, index) => {
+          const day = new Date(firstMs + index * 86_400_000);
+          return [['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day.getUTCDay()]!, day.toISOString().slice(5, 10)];
+        }),
+      );
+    } finally {
+      setSystemTime();
+    }
   });
 
   test('DM prompt has two event creation modes: create or ask', () => {
