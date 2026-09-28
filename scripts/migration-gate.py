@@ -70,6 +70,9 @@ ENTRY_NAME = re.compile(r"\n  \{\n    name: '([A-Za-z0-9_]+)',\n")
 # boundary the strict split misses (an entry named by a constant, a template or a reindent) is
 # still counted here, so the counts diverge instead of the entry vanishing into its neighbour.
 ANY_ENTRY_START = re.compile(r"(?<=[\[,])\s*\{\s*name\s*:")
+# The array closes at the file's last line starting with "];". A line like that inside the last
+# entry (a multi-line template literal) then stays in that entry, so an edit below it is an edit
+# of a shipped migration, never a change to the code outside the entries.
 ARRAY_END = "\n];"
 
 
@@ -91,7 +94,7 @@ def parse_migrations(text: str) -> ParsedMigrations:
     preamble, entries = parts[0], parts[1:]
     if not entries:
         raise ValueError("no migration entry found")
-    end = entries[-1].find(ARRAY_END)
+    end = entries[-1].rfind(ARRAY_END)
     if end < 0:
         raise ValueError("the migrations array has no closing line '];'")
     trailer = entries[-1][end:]

@@ -14,6 +14,10 @@ ADDED = "  {\n    name: '002_y',\n    up(db) {\n      db.exec('CREATE TABLE y (i
 TAIL = "];\n"
 RUNNING = (HEAD + SHIPPED + TAIL).encode()
 RELEASE = (HEAD + SHIPPED + ADDED + TAIL).encode()
+# A line starting with "];" inside a migration (a multi-line template literal), not the array close.
+SHIPPED_WITH_CLOSE_SHAPED_LINE = SHIPPED.replace(
+    "    up(db) {\n", "    up(db) {\n      db.exec(`INSERT INTO seeds(json) VALUES ('[\n];')`);\n"
+)
 
 
 def doc(name="002_y", rollback="yes", deletion="no", body="Creates table y.\n"):
@@ -74,6 +78,14 @@ class MigrationParserTests(unittest.TestCase):
         before, after = self.parse(self.real_text), self.parse(edited)
         self.assertNotEqual(before.outside, after.outside)
         self.assertEqual(before.digests, after.digests)
+
+    def test_a_close_shaped_line_inside_the_last_migration_does_not_end_the_array(self):
+        # Appending after such an entry leaves its digest and the outside fingerprint alone;
+        # otherwise every later release reads as an edit of that shipped migration.
+        shipped = self.parse(HEAD + SHIPPED_WITH_CLOSE_SHAPED_LINE + TAIL)
+        appended = self.parse(HEAD + SHIPPED_WITH_CLOSE_SHAPED_LINE + ADDED + TAIL)
+        self.assertEqual(appended.digests["001_x"], shipped.digests["001_x"])
+        self.assertEqual(appended.outside, shipped.outside)
 
     def test_a_concatenated_name_raises_instead_of_parsing_its_first_literal(self):
         concatenated = self.real_text.replace(
@@ -285,6 +297,15 @@ class GateDecisionTests(unittest.TestCase):
                 else:
                     decision = self.decide(release=release, reviewed=self.pair(release), **case)
                 self.assertEqual(decision.mode, "refused", decision.refusals)
+
+    def test_an_edit_below_a_close_shaped_line_in_the_last_shipped_migration_is_never_overridable(self):
+        # That "];" line is not the array close, so the edit is one of the shipped entry, which the
+        # runner never re-runs, not a change to the code outside the entries.
+        running = (HEAD + SHIPPED_WITH_CLOSE_SHAPED_LINE + TAIL).encode()
+        release = (HEAD + SHIPPED_WITH_CLOSE_SHAPED_LINE.replace("id INTEGER", "id TEXT") + TAIL).encode()
+        decision = self.decide(running=running, release=release, reviewed=self.pair(release, running))
+        self.assertEqual(decision.mode, "refused", decision.refusals)
+        self.assertIn("001_x", "\n".join(decision.refusals))
 
     def test_an_unreadable_or_empty_migrations_file_is_never_overridable(self):
         for running, release in [(None, RELEASE), (RUNNING, None), (b"", RELEASE)]:
