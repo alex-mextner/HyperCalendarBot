@@ -1008,20 +1008,42 @@ describe('handleConvertToTimezone', () => {
 
   // 2026-07-10 incident (#516): an offset-free wall clock was read in the server's zone (UTC).
   test.each([
-    ['2026-07-11T11:00:00', 'Africa/Cairo', '2026-07-11 11:00 Africa/Cairo to UTC'],
+    ['2026-07-11T11:00:00', 'Africa/Cairo', '2026-07-11 11:00:00 Africa/Cairo to UTC'],
     ['2026-07-11T11:00', 'Europe/Belgrade', '2026-07-11 11:00 Europe/Belgrade to UTC'],
     ['2026-07-11 11:00', 'Europe/Belgrade', '2026-07-11 11:00 Europe/Belgrade to UTC'],
+    ['2026-07-11T11:00:30', 'Europe/Belgrade', '2026-07-11 11:00:30 Europe/Belgrade to UTC'],
   ])('refuses the offset-free datetime %s instead of guessing its zone', (datetime, timezone, calculateForm) => {
     const result = handleConvertToTimezone({ datetime, timezone });
     expect(result.success).toBe(false);
     expect(result.error).toContain('no Z or UTC offset');
+    // The suggested call names the same moment: it runs and keeps every given digit.
     expect(result.error).toContain(`calculate("${calculateForm}")`);
+    expect(handleCalculate({ expression: calculateForm }).success).toBe(true);
   });
 
-  test('refuses a bare date, which names no moment', () => {
+  test('refuses a bare date without a copyable call that needs filling in', () => {
     const result = handleConvertToTimezone({ datetime: '2026-07-11', timezone: 'Europe/Belgrade' });
     expect(result.success).toBe(false);
-    expect(result.error).toContain('no Z or UTC offset');
+    expect(result.error).toContain('no time of day');
+    expect(result.error).not.toContain('calculate("');
+  });
+
+  test.each([
+    ['2026-07-11T11:00:00+02', '2026-07-11T05:00:00-04:00'],
+    ['2026-07-11 09:00:00Z', '2026-07-11T05:00:00-04:00'],
+  ])('accepts the offset-bearing instant %s it accepted before', (datetime, local) => {
+    const result = handleConvertToTimezone({ datetime, timezone: 'America/New_York' });
+    expect(result.success).toBe(true);
+    expect(JSON.parse(result.output!).local_datetime).toBe(local);
+  });
+
+  test.each([
+    '2026-13-45T10:00:00Z',
+    '2026-07-11T11:00:00+02:00 tomorrow',
+  ])('rejects the invalid datetime %s', (datetime) => {
+    const result = handleConvertToTimezone({ datetime, timezone: 'Europe/Belgrade' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid datetime');
   });
 
   test.each([
@@ -1039,6 +1061,8 @@ describe('handleConvertToTimezone', () => {
     const previous = process.env.TZ;
     process.env.TZ = 'Asia/Tokyo';
     try {
+      // Sanity: the process zone really changed, so this test exercises its premise.
+      expect(new Date('2026-07-11T00:00:00Z').getHours()).toBe(9);
       const instant = handleConvertToTimezone({ datetime: '2026-07-11T09:00:00Z', timezone: 'Europe/Belgrade' });
       expect(JSON.parse(instant.output!).local_datetime).toBe('2026-07-11T11:00:00+02:00');
       expect(handleConvertToTimezone({ datetime: '2026-07-11T11:00:00', timezone: 'Europe/Belgrade' }).success).toBe(

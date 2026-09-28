@@ -175,29 +175,39 @@ export async function handleGetTimezoneInfoWithCityFallback(input: {
 }
 handleGetTimezoneInfoWithCityFallback.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
-/** An ISO instant: date, time and an explicit Z or UTC offset. */
-const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/i;
-const WALL_CLOCK_RE = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{1,2}:\d{2}))?/;
+/** An ISO/RFC 3339 instant: date, time and an explicit Z or UTC offset (hour-only offsets too). */
+const ISO_INSTANT_RE =
+  /^(?<date>\d{4}-\d{2}-\d{2})[T ](?<time>\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(?<zone>Z|[+-]\d{2}(?::?\d{2})?)$/i;
+/** A wall clock with nothing that names its zone. */
+const WALL_CLOCK_RE = /^(?<date>\d{4}-\d{2}-\d{2})(?:[T ](?<time>\d{1,2}:\d{2}(?::\d{2})?))?$/;
 
 export function handleConvertToTimezone(input: { datetime: string; timezone: string }): ToolResult {
   const datetime = input.datetime.trim();
-  if (!ISO_INSTANT_RE.test(datetime)) {
+  const invalid: ToolResult = {
+    success: false,
+    error: `Invalid datetime: ${datetime}. Send UTC ("2026-07-11T09:00:00Z") or an explicit offset ("2026-07-11T11:00:00+02:00").`,
+  };
+  const instant = ISO_INSTANT_RE.exec(datetime)?.groups;
+  if (!instant) {
     // new Date() would read an offset-free wall clock in the SERVER's zone (UTC in the
     // container) and silently answer for a different moment (2026-07-10 incident, #516).
-    const wallClock = WALL_CLOCK_RE.exec(datetime);
-    if (!wallClock) return { success: false, error: `Invalid datetime: ${input.datetime}` };
+    const wallClock = WALL_CLOCK_RE.exec(datetime)?.groups;
+    if (!wallClock) return invalid;
+    const localToUtc = wallClock.time
+      ? `use calculate("${wallClock.date} ${wallClock.time} ${input.timezone} to UTC")`
+      : 'add the local time of day and call calculate as "<date> <HH:MM> <IANA zone> to UTC"';
     return {
       success: false,
       error:
-        `Datetime "${input.datetime}" has no Z or UTC offset, so it names no single moment. ` +
-        'Send UTC ("2026-07-11T09:00:00Z") or an explicit offset ("2026-07-11T11:00:00+02:00"). ' +
-        `To turn a local wall clock into UTC, use calculate("${wallClock[1]} ${wallClock[2] ?? 'HH:MM'} ${input.timezone} to UTC").`,
+        `Datetime "${datetime}" has no Z or UTC offset${wallClock.time ? '' : ' and no time of day'}, so it names no single moment. ` +
+        `Send UTC ("2026-07-11T09:00:00Z") or an explicit offset ("2026-07-11T11:00:00+02:00"). To turn a local wall clock into UTC, ${localToUtc}.`,
     };
   }
-  const dt = new Date(datetime);
-  if (Number.isNaN(dt.getTime())) {
-    return { success: false, error: `Invalid datetime: ${input.datetime}` };
-  }
+  // Normalize the RFC 3339 variants (space separator, hour-only offset) to a form every
+  // engine parses the same way.
+  const zone = /^[+-]\d{2}$/.test(instant.zone!) ? `${instant.zone}:00` : instant.zone;
+  const dt = new Date(`${instant.date}T${instant.time}${zone}`);
+  if (Number.isNaN(dt.getTime())) return invalid;
 
   let offsetStr: string;
   let offsetMinutes: number;
