@@ -131,7 +131,7 @@ export class TelegramStreamWriter {
   /** Streamed text from this offset on is not shown until the agent releases or drops it. */
   private heldFrom: number | null = null;
   private holdDraftWhen: ((draft: string) => boolean) | undefined;
-  private hideToolDetailsWhen: ((details: string) => boolean) | undefined;
+  private hideToolDetailsWhen: ((input: { [key: string]: unknown }) => boolean) | undefined;
 
   constructor(
     private sender: TelegramSender,
@@ -143,8 +143,11 @@ export class TelegramStreamWriter {
       noPlaceholder?: boolean;
       /** Draft text that must be checked before anyone sees it; held from the chunk that matched. */
       holdDraftWhen?: (draft: string) => boolean;
-      /** Tool arguments that fail the draft's check (a rejected ask_user question) are not shown. */
-      hideToolDetailsWhen?: (details: string) => boolean;
+      /**
+       * Tool arguments that fail the draft's check (a rejected ask_user question) are not shown.
+       * It reads the arguments as given, not the escaped and shortened label.
+       */
+      hideToolDetailsWhen?: (input: { [key: string]: unknown }) => boolean;
     },
   ) {
     this.userTranscript = opts?.userTranscript;
@@ -220,10 +223,10 @@ export class TelegramStreamWriter {
   setToolLabel(toolName: string, input?: { [key: string]: unknown }): void {
     const labels = TOOL_LABELS[toolName];
     const label = labels?.[this.lang] ?? labels?.en ?? toolName;
-    const details = input ? formatToolInput(input) : '';
     // An ask_user question pairing a weekday with another weekday's date is rejected before
     // it is sent; its label must not show the pair either.
-    const detailsSuffix = details && !this.hideToolDetailsWhen?.(details) ? `: ${details}` : '';
+    const details = input && !this.hideToolDetailsWhen?.(input) ? formatToolInput(input) : '';
+    const detailsSuffix = details ? `: ${details}` : '';
     this.toolLabel = `<i>${escapeHtml(label)}${detailsSuffix}...</i>`;
     this.pendingIndicators.push(`${escapeHtml(label)}${detailsSuffix}`);
   }

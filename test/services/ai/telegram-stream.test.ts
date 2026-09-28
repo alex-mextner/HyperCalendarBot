@@ -274,7 +274,7 @@ describe('TelegramStreamWriter', () => {
   test('only tool arguments that fail the check are hidden from the label and the execution log', async () => {
     const writer = new TelegramStreamWriter(sender, 123, 'ru', {
       holdDraftWhen: (draft) => /понедельник|пятниц/i.test(draft),
-      hideToolDetailsWhen: (details) => details.includes('Понедельник 27 сентября'),
+      hideToolDetailsWhen: (input) => JSON.stringify(input).includes('Понедельник 27 сентября'),
     });
     await writer.init();
     // A weekday in an event title is no contradiction: its arguments stay in the log.

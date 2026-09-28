@@ -2460,6 +2460,26 @@ describe('CalendarBotAgent.run()', () => {
     }
   });
 
+  test('a rejected ask_user question never shows its pair in the label, even when the label is cut short', async () => {
+    setSystemTime(new Date('2026-09-27T21:12:00Z'));
+    try {
+      ctx.user = { ...ctx.user, timezone: 'Europe/Belgrade', language: 'ru' };
+      ctx.messageText = 'Перенеси встречу';
+      // 27 January 2027 is a Wednesday; the label cuts the question inside "января".
+      const question = 'Сдвинуть всю встречу с Леной на понедельник 27 января?';
+      const { impl } = makeStreamImpl([
+        { kind: 'tool', callId: 'ask', name: 'ask_user', input: { question, options: ['Да', 'Нет'] } },
+        { kind: 'text', text: 'Уточни, на какой день перенести встречу.' },
+      ]);
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+      await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+      expect(shownEdits(sender).filter((text) => text.includes('понедельник 27'))).toEqual([]);
+    } finally {
+      setSystemTime();
+    }
+  });
+
   test('a validator retry that pairs a weekday with the wrong date is not delivered', async () => {
     setSystemTime(new Date('2026-09-27T21:12:00Z'));
     try {
