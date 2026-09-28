@@ -385,6 +385,29 @@ describe('which turn text counts', () => {
     expect(resolveTurnDayReferences('поставь звонок маме на 3 часа', history30, SUNDAY_NIGHT, TZ)).toBeNull();
   });
 
+  test("a fresh request that ignores an open question is not tied to the question's day", () => {
+    say('во вторник в 10 стоматолог');
+    toolTurn(
+      'c1',
+      'ask_user',
+      { question: 'Поставить на вторник, 29 сентября?', options: ['Да', 'Нет'] },
+      'Вопрос отправлен.',
+    );
+    // The user skips the question and asks for something else, naming no day: that is today's
+    // or tomorrow's call, and the guard must not push it onto Tuesday.
+    const fresh = 'поставь созвон с Петей в 15:00 про отчёт';
+    say(fresh);
+    expect(resolveTurnDayReferences(fresh, history.getRecent(USER, 30), SUNDAY_NIGHT, TZ)).toBeNull();
+  });
+
+  test('a short free-text reply still answers the open question', () => {
+    say('во вторник в 10 стоматолог');
+    toolTurn('c1', 'ask_user', { question: 'Во сколько?', options: ['10:00', '11:00'] }, 'Вопрос отправлен.');
+    say('давай в 12');
+    const set = resolveTurnDayReferences('давай в 12', history.getRecent(USER, 30), SUNDAY_NIGHT, TZ);
+    expect(set && [...set.allowedDates]).toEqual(['2026-09-29']);
+  });
+
   test('"эту среду" is this calendar week\'s or the coming one, never last week\'s', () => {
     const monday = new Date('2026-09-21T08:00:00Z');
     const set = resolveTurnDayReferences('отмени английский в эту среду', [], monday, TZ);

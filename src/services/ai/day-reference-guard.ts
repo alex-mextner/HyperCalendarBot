@@ -51,19 +51,19 @@ const ActivityCodec = jsonCodec(z.object({ kind: z.string() }));
 function pendingQuestion(
   messageText: string,
   history: ChatHistoryMessage[],
-): { origin: ChatHistoryMessage; question: string; askedAt: string } | null {
+): { origin: ChatHistoryMessage; question: string; options: string[]; askedAt: string } | null {
   let index = history.length - 1;
   // The current message is the newest user row; bot edits of the question may follow it.
   while (index >= 0 && history[index]!.role !== 'user') index--;
   if (index < 0 || history[index]!.content.trim() !== messageText.trim()) return null;
   index--;
-  let question: { text: string; askedAt: string } | null = null;
+  let question: { text: string; options: string[]; askedAt: string } | null = null;
   for (; index >= 0; index--) {
     const row = history[index]!;
     if (row.role === 'tool') continue;
     if (row.role === 'user') {
       if (question === null || ActivityCodec.safeParse(row.content).success) return null;
-      return { origin: row, question: question.text, askedAt: question.askedAt };
+      return { origin: row, question: question.text, options: question.options, askedAt: question.askedAt };
     }
     if (ActivityCodec.safeParse(row.content).success) continue;
     const turn = AssistantToolCallsCodec.safeParse(row.content);
@@ -72,11 +72,27 @@ function pendingQuestion(
     if (question === null) {
       if (!ask) return null;
       const args = AskUserArgsCodec.safeParse(ask.function.arguments);
-      const text = args.success ? [args.data.question ?? '', ...(args.data.options ?? [])].join('\n') : '';
-      question = { text, askedAt: row.created_at };
+      const options = args.success ? (args.data.options ?? []) : [];
+      const text = args.success ? [args.data.question ?? '', ...options].join('\n') : '';
+      question = { text, options, askedAt: row.created_at };
     }
   }
   return null;
+}
+
+/** Longest free-text reply still read as an answer ("Да", "давай в 12"); a longer one is a new request. */
+const MAX_ANSWER_WORDS = 4;
+
+/**
+ * Whether the message answers the open question rather than skipping it for a new request:
+ * one of the question's options, or a reply short enough to be an answer. A new request that
+ * names no day must not inherit the question's day. Missing a real answer only switches the
+ * guard off for that turn, as before this check.
+ */
+function answersQuestion(messageText: string, options: readonly string[]): boolean {
+  const reply = messageText.trim().toLowerCase();
+  if (options.some((option) => option.trim().toLowerCase() === reply)) return true;
+  return reply.split(/\s+/).length <= MAX_ANSWER_WORDS;
 }
 
 /**
@@ -94,7 +110,7 @@ export function resolveTurnDayReferences(
   if (own.kind === 'named') return own.set;
   if (own.kind === 'open') return null;
   const pending = pendingQuestion(messageText, history);
-  if (!pending) return null;
+  if (!pending || !answersQuestion(messageText, pending.options)) return null;
   // Each message is read as of when it was written: a "Да" given days later confirms the
   // Tuesday meant then, not the one coming now.
   const originAt = storedInstantMs(pending.origin.created_at);
