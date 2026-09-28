@@ -239,7 +239,11 @@ command: it ends the wizard like the cancel button (stops the live MTProto auth 
 removes its temp session file), replies with the same fixed "Авторизация отменена." and stops, so
 no command handler, feature-usage record or AI turn sees it.
 
-Bot replies inside the wizard are logged as usual.
+Bot replies inside the wizard are logged as usual. The replies that show the connected account —
+the success message, the "already connected" prompt and the Telegram section of /settings — show
+the user the masked phone (`+7 ••• 4567`); their `chat_history` copy has `[masked phone]` in its
+place (`src/bot/reply-history-text.ts`), so no digit of the phone reaches the AI (GH-643). Only
+these replies opt in; nothing else is rewritten.
 
 The guard deletes every text typed at the consent screen and at the phone, code and 2FA prompts,
 before the rate limiter can drop it, so the message cannot be edited later. It also records the
@@ -476,6 +480,11 @@ If not connected:
 
 Callback prefix: `settings:tg_connect` / `settings:tg_disconnect`.
 Disconnect via settings uses the same logic as `/disconnect_telegram` — confirm → revoke → log_out.
+
+The masked phone stays visible here, in the connect success message and in the "already connected"
+prompt: it is a server-generated identifier of the connected account, not a credential (product
+decision of 2026-09-28, recorded on GH-643). Its `chat_history` copy leaves it out — see "Wizard
+input stays out of logs and the AI".
 
 ---
 

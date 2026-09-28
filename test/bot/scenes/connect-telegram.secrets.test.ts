@@ -27,7 +27,7 @@ import {
 } from '../../../src/bot/scenes/connect-telegram.scene.ts';
 import { createConnectWizardTraces } from '../../../src/bot/scenes/connect-wizard-trace.ts';
 import { createScopedSceneStorage } from '../../../src/bot/scenes/index.ts';
-import { RATE_LIMIT, t } from '../../../src/config/constants.ts';
+import { maskPhone, RATE_LIMIT, t } from '../../../src/config/constants.ts';
 import { DatabaseService } from '../../../src/database/index.ts';
 import type { User } from '../../../src/database/types.ts';
 import { type AgentRunResult, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
@@ -1178,5 +1178,43 @@ describe('releasing a message held because the wizard state could not be read', 
     // The newer wizard still waits for its phone number.
     await r.send(TYPED_PHONE);
     expect(r.botReplies().at(-1)).toBe(ct.codeSent);
+  });
+});
+
+describe('the masked phone is shown to the user but kept out of history and the AI (GH-643)', () => {
+  test('success, already-connected and /settings show it; chat history, the next AI turn and its debug log do not', async () => {
+    const r = makeRuntime();
+    // A number from Ofcom's range reserved for fiction: valid, so maskPhone keeps its last four digits.
+    const typedPhone = '+44 20 7946 0958';
+    const masked = maskPhone('+442079460958');
+    // Every form the number could leak in. Its two-digit groups ("44", "20") are checked with the
+    // leading "+" or as part of the longer forms: on their own they occur in any date or time.
+    const phoneForms = ['+442079460958', '442079460958', typedPhone, '+44', '7946', '0958'];
+    expect(masked).toContain('0958');
+    await r.send('/connect_telegram');
+    await r.click('ct:connect');
+    await r.send(typedPhone);
+    await r.send(TYPED_CODE);
+    await r.send(PASSWORD);
+
+    expect(r.botReplies()).toContain(ct.success(masked));
+    advanceClock(61_000); // past the reconnect cooldown
+    await r.send('/connect_telegram');
+    expect(r.botReplies().at(-1)).toBe(ct.alreadyConnected(masked));
+    await r.clickButton(ct.btnCancel);
+    await r.pressButton('stg:telegram', r.lastBotMessage().id);
+    expect(r.botReplies().at(-1)).toBe(t('ru').settings.telegramConnected(masked));
+
+    await r.send(QUESTION);
+    const history = r.storedText().history;
+    const leaks = (haystack: string) => phoneForms.filter((form) => haystack.includes(form));
+    expect(history.flatMap(leaks)).toEqual([]);
+    expect(leaks(r.storedText().actions)).toEqual([]);
+    // The replies stay in history, only the account number is left out.
+    expect(history.some((content) => content.includes('Telegram-аккаунт подключён'))).toBe(true);
+    expect(history.some((content) => content.includes('Telegram: подключён'))).toBe(true);
+    expect(r.aiTurns).toHaveLength(1);
+    expect(leaks(r.aiTurns[0]!)).toEqual([]);
+    expect(leaks(r.debugLogText())).toEqual([]);
   });
 });
