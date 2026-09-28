@@ -481,8 +481,8 @@ interface Evaluation {
   userCtx: UserContext;
   i18n: I18nMap | undefined;
   now: Date;
-  /** Read marked date words said just after midnight as counted from the day that has just ended. */
-  dayBefore: boolean;
+  /** The marked date binding read as counted from the day that has just ended, if any. */
+  dayBefore: string | null;
 }
 
 function resolveFrom(template: string, evaluation: Evaluation): string {
@@ -496,7 +496,12 @@ function isBlank(raw: string): boolean {
   return raw.trim() === '';
 }
 
-function evaluateOne(binding: Binding, bound: BindValues, evaluation: Evaluation): WorkflowInputValue {
+function evaluateOne(
+  binding: Binding,
+  bound: BindValues,
+  evaluation: Evaluation,
+  dayBefore: boolean,
+): WorkflowInputValue {
   const { userCtx, now } = evaluation;
   if (binding.type === 'datetime') return buildDatetime(binding, bound, now, userCtx.timezone);
   if (binding.type === 'relative_instant') {
@@ -516,7 +521,7 @@ function evaluateOne(binding: Binding, bound: BindValues, evaluation: Evaluation
     case 'date':
       return optionalDefault
         ? isoDay(addDays(today(now, userCtx.timezone), DAY_WORD_OFFSETS[binding.default ?? fail()]))
-        : parseDate(raw, binding, now, userCtx.timezone, evaluation.dayBefore);
+        : parseDate(raw, binding, now, userCtx.timezone, dayBefore);
     case 'time':
       return optionalDefault ? (binding.default ?? fail()) : parseTime(raw);
     case 'period':
@@ -544,7 +549,7 @@ function periodKey(values: { [key: string]: (typeof PERIOD_KEYS)[number] }, raw:
 function evaluateAll(bindings: Bindings, evaluation: Evaluation): BindValues {
   const bound: BindValues = {};
   for (const [name, binding] of Object.entries(bindings)) {
-    bound[name] = evaluateOne(binding, bound, evaluation);
+    bound[name] = evaluateOne(binding, bound, evaluation, name === evaluation.dayBefore);
   }
   return bound;
 }
@@ -557,7 +562,7 @@ export function evaluateBindings(
   i18n: I18nMap | undefined,
   now: Date = new Date(),
 ): BindValues {
-  return evaluateAll(bindings, { captures, userCtx, i18n, now, dayBefore: false });
+  return evaluateAll(bindings, { captures, userCtx, i18n, now, dayBefore: null });
 }
 
 /** The bindings as read for one of the days a marked date word may mean. */
@@ -569,8 +574,9 @@ export interface DayReading {
 
 /**
  * The literal reading of the bindings and, when the date binding marked `after_midnight: 'both'`
- * (the validator allows one) reads 'today' or 'tomorrow' before 04:00 local, one reading per day
- * that word may mean, the earlier day first and the literal reading last.
+ * reads 'today' or 'tomorrow' before 04:00 local, one reading per day that word may mean, the
+ * earlier day first and the literal reading last. The validator allows one marked binding; should
+ * a rule carry more, only the first is shifted, so each answer is labelled with the day it read.
  */
 export function evaluateBindingReadings(
   bindings: Bindings,
@@ -587,7 +593,7 @@ export function evaluateBindingReadings(
   if (marked === undefined) return { literal, afterMidnight: null };
   let before: BindValues;
   try {
-    before = evaluateAll(bindings, { captures, userCtx, i18n, now, dayBefore: true });
+    before = evaluateAll(bindings, { captures, userCtx, i18n, now, dayBefore: marked });
   } catch (error) {
     // The earlier day is an extra reading, never a reason to fail: its wall time may not exist.
     if (error instanceof WorkflowInputError) return { literal, afterMidnight: null };

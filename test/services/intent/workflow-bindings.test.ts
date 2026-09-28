@@ -346,4 +346,22 @@ describe('reading both days after midnight', () => {
     expect(literal.day).toBe('2027-03-29');
     expect(afterMidnight).toBeNull();
   });
+
+  test('an unvalidated rule with two marked dates shifts only the one its answers are labelled with', () => {
+    // 01:00 on Mon 2026-09-21 in Belgrade.
+    const { literal, afterMidnight } = evaluateBindingReadings(
+      {
+        reference: { type: 'date', from: '{{$1}}', words: DAY_WORDS, after_midnight: 'both' },
+        query: { type: 'date', from: '{{$2}}', words: DAY_WORDS, after_midnight: 'both' },
+      },
+      { $1: 'сегодня', $2: 'завтра' },
+      { timezone: 'Europe/Belgrade', language: 'ru' },
+      undefined,
+      new Date('2026-09-20T23:00:00Z'),
+    );
+    expect(afterMidnight?.map(({ day, bind }) => [day, bind.reference, bind.query])).toEqual([
+      ['2026-09-20', '2026-09-20', literal.query],
+      ['2026-09-21', '2026-09-21', literal.query],
+    ]);
+  });
 });
