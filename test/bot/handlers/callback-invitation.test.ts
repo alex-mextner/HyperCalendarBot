@@ -1,9 +1,20 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, mock, test } from 'bun:test';
 import type { InlineKeyboard } from 'gramio';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
 import { t } from '../../../src/config/constants.ts';
+import { migrations } from '../../../src/database/migrations.ts';
+import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
+import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
+import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
+import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
+import { EventService } from '../../../src/services/event/event-service.ts';
 import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
+import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 import { png } from '../../fixtures/png.ts';
+import { makeCallbackHandler, makeCallbackTap } from '../../helpers/callback-handler.ts';
 import { flushPromises } from '../../helpers/mock-context.ts';
 
 function makeCtx(data: string, language: 'en' | 'ru' = 'en') {
@@ -718,5 +729,93 @@ describe('conflict image on accept', () => {
     await handler(ctx as never);
     await flushPromises();
     expect(sendPhoto).not.toHaveBeenCalled();
+  });
+});
+
+describe('inviter acting on a time proposal that is already closed', () => {
+  const INVITER = 100;
+  const INVITEE = 200;
+
+  function setupRealInvitation() {
+    const db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    const userRepo = new UserRepository(db);
+    userRepo.create({ telegram_id: INVITER, timezone: 'UTC', language: 'en' });
+    userRepo.create({ telegram_id: INVITEE, timezone: 'UTC', language: 'en' });
+    const eventRepo = new EventRepository(db);
+    const eventService = new EventService({ eventRepo });
+    const invRepo = new InvitationRepository(db);
+    const participantRepo = new ParticipantRepository(db);
+    const invitationService = new InvitationService(
+      invRepo,
+      eventRepo,
+      new SharingSettingsRepository(db),
+      participantRepo,
+    );
+    const event = eventService.createEvent({
+      user_id: INVITER,
+      title: 'Fixture meetup',
+      start_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      timezone: 'UTC',
+    });
+    const invitation = invitationService.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+    const notifyDeps = { userRepo, sendMessage: mock(() => Promise.resolve()) };
+    const handler = makeCallbackHandler(
+      { invitationService, eventRepo, invitationRepo: invRepo, invitationNotifyDeps: notifyDeps },
+      eventService,
+    );
+    return { handler, invitationService, invRepo, eventRepo, participantRepo, event, invitation, notifyDeps };
+  }
+
+  test('a decline after proposing survives the inviter tapping Reschedule', async () => {
+    const { handler, invitationService, invRepo, eventRepo, participantRepo, event, invitation, notifyDeps } =
+      setupRealInvitation();
+    const proposedTime = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    invitationService.proposeTime(invitation.id, INVITEE, proposedTime);
+    invitationService.declineInvitation(invitation.id, INVITEE);
+
+    const tap = makeCallbackTap(`inv:reschedule:${invitation.id}`, { telegram_id: INVITER, language: 'en' });
+    await handler(tap.ctx);
+    await flushPromises();
+
+    expect(invRepo.findById(invitation.id)!.status).toBe('declined');
+    expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
+    expect(eventRepo.findById(event.id, INVITER)!.start_at).toBe(event.start_at);
+    expect(tap.answer).toHaveBeenCalledWith({ text: t('en').invite_proposal_closed });
+    expect(tap.editText).toHaveBeenCalledWith(t('en').invite_proposal_closed, { parse_mode: 'HTML' });
+    expect(notifyDeps.sendMessage).not.toHaveBeenCalled();
+  });
+
+  test('a second tap on an already settled proposal keeps the invitation pending and the event in place', async () => {
+    const { handler, invitationService, invRepo, eventRepo, participantRepo, event, invitation, notifyDeps } =
+      setupRealInvitation();
+    // Two notices reach the inviter: the invitee first suggests one time, then another.
+    const firstProposal = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const secondProposal = new Date(Date.now() + 9 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    invitationService.proposeTime(invitation.id, INVITEE, firstProposal);
+    invitationService.proposeTime(invitation.id, INVITEE, secondProposal);
+
+    const keep = makeCallbackTap(`inv:dismiss:${invitation.id}`, { telegram_id: INVITER, language: 'en' });
+    await handler(keep.ctx);
+    await flushPromises();
+    expect(keep.editText).toHaveBeenCalledWith(t('en').invite_kept_inviter, { parse_mode: 'HTML' });
+    const sentAfterKeep = notifyDeps.sendMessage.mock.calls.length;
+
+    // A double tap on the settled notice, then Reschedule on the second notice.
+    for (const data of [`inv:dismiss:${invitation.id}`, `inv:reschedule:${invitation.id}`]) {
+      const tap = makeCallbackTap(data, { telegram_id: INVITER, language: 'en' });
+      await handler(tap.ctx);
+      await flushPromises();
+      expect(tap.answer).toHaveBeenCalledWith({ text: t('en').invite_proposal_closed });
+      expect(tap.editText).toHaveBeenCalledWith(t('en').invite_proposal_closed, { parse_mode: 'HTML' });
+    }
+
+    const stored = invRepo.findById(invitation.id)!;
+    expect(stored.status).toBe('pending');
+    expect(stored.proposed_time).toBeNull();
+    expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
+    expect(eventRepo.findById(event.id, INVITER)!.start_at).toBe(event.start_at);
+    expect(notifyDeps.sendMessage).toHaveBeenCalledTimes(sentAfterKeep);
   });
 });

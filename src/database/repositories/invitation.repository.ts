@@ -26,11 +26,12 @@ export class InvitationRepository {
     return (this.db.prepare('SELECT * FROM invitations WHERE id = ?').get(id) as Invitation | null) ?? null;
   }
 
+  /** Any status change settles the invitee's pending time proposal, so it also clears proposed_time. */
   updateStatus(id: number, newStatus: InvitationStatus, expectedCurrent: InvitationStatus): boolean {
     const result = this.db
       .prepare(
         `UPDATE invitations
-         SET status = ?, updated_at = datetime('now'), responded_at = datetime('now')
+         SET status = ?, proposed_time = NULL, updated_at = datetime('now'), responded_at = datetime('now')
          WHERE id = ? AND status = ?`,
       )
       .run(newStatus, id, expectedCurrent);
@@ -126,17 +127,28 @@ export class InvitationRepository {
       .run(proposedTime, id);
   }
 
-  clearProposedTime(id: number): void {
-    this.db.prepare("UPDATE invitations SET proposed_time = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+  /** Drops the proposed time while that exact proposal is still open; false once the invitee answered or changed it. */
+  clearProposedTime(id: number, expectedProposedTime: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE invitations SET proposed_time = NULL, updated_at = datetime('now')
+         WHERE id = ? AND status = 'pending' AND proposed_time = ?`,
+      )
+      .run(id, expectedProposedTime);
+    return result.changes > 0;
   }
 
-  clearProposedTimeAndAccept(id: number, expectedStatus: string): boolean {
-    const result = this.db.transaction(() => {
-      this.db.prepare("UPDATE invitations SET proposed_time = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
-      return this.db
-        .prepare("UPDATE invitations SET status = 'accepted', updated_at = datetime('now') WHERE id = ? AND status = ?")
-        .run(id, expectedStatus);
-    })();
+  /**
+   * Accepts the invitation at its proposed time, only while that exact proposal is still open: the
+   * invitation is pending and still carries it. Returns false once the invitee has answered or changed it.
+   */
+  clearProposedTimeAndAccept(id: number, expectedProposedTime: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE invitations SET status = 'accepted', proposed_time = NULL, updated_at = datetime('now')
+         WHERE id = ? AND status = 'pending' AND proposed_time = ?`,
+      )
+      .run(id, expectedProposedTime);
     return result.changes > 0;
   }
 }

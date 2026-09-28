@@ -11,7 +11,23 @@ export interface InvitationResult {
   success: boolean;
   invitation?: Invitation;
   error?: string;
+  /**
+   * Set when the invitee's time proposal was already settled: they answered, or the inviter acted on it.
+   * Each value is the `t(lang)` key of the message that tells the user why.
+   */
+  reason?: 'invite_proposal_closed';
   proposedTime?: string;
+}
+
+const PROPOSAL_CLOSED: InvitationResult = {
+  success: false,
+  reason: 'invite_proposal_closed',
+  error: 'This time proposal is no longer open',
+};
+
+/** A proposal stays open until the invitee answers the invitation or the inviter settles it. */
+function hasOpenProposal(invitation: Invitation): invitation is Invitation & { proposed_time: string } {
+  return invitation.status === 'pending' && !!invitation.proposed_time;
 }
 
 export class InvitationService {
@@ -141,13 +157,12 @@ export class InvitationService {
     if (invitation.inviter_id !== userId) {
       return { success: false, error: 'Not authorized to reschedule' };
     }
-    if (!invitation.proposed_time) {
-      return { success: false, error: 'No proposed time on this invitation' };
+    if (!hasOpenProposal(invitation)) {
+      return PROPOSAL_CLOSED;
     }
     const proposedTime = invitation.proposed_time;
-    const ok = this.invRepo.clearProposedTimeAndAccept(invitationId, invitation.status);
-    if (!ok) {
-      return { success: false, error: 'Cannot update status — already changed' };
+    if (!this.invRepo.clearProposedTimeAndAccept(invitationId, proposedTime)) {
+      return PROPOSAL_CLOSED;
     }
     if (this.participantRepo) {
       const existing = this.participantRepo.findByEventAndUser(invitation.event_id, invitation.invitee_id);
@@ -168,7 +183,9 @@ export class InvitationService {
     if (invitation.inviter_id !== userId) {
       return { success: false, error: 'Not authorized' };
     }
-    this.invRepo.clearProposedTime(invitationId);
+    if (!hasOpenProposal(invitation) || !this.invRepo.clearProposedTime(invitationId, invitation.proposed_time)) {
+      return PROPOSAL_CLOSED;
+    }
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
 
