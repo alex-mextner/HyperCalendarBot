@@ -11,6 +11,7 @@ import { SecretaryRepository } from '../../../src/database/repositories/secretar
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { resolveTurnDayReferences } from '../../../src/services/ai/day-reference-guard.ts';
+import { approveDeletes } from '../../../src/services/ai/delete-confirmation.ts';
 import { _resetToolThrottleForTest, executeTool } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
@@ -228,6 +229,8 @@ describe('deleting on a day the user did not name', () => {
     const coming = addLesson('2026-09-29T10:30:00Z');
     say('Во вторник отмени весь английский');
     const ctx = context('Во вторник отмени весь английский');
+    // The user tapped the coming lesson on the bot's list (#509); the day guard still rules out the past one.
+    approveDeletes(USER, ctx.chatId, [coming]);
 
     const wrong = await executeTool(ctx, 'delete_event', { event_id: past });
     expect(wrong.success).toBe(false);
@@ -251,6 +254,7 @@ describe('deleting on a day the user did not name', () => {
     say('Да');
     save('assistant', JSON.stringify({ kind: 'bot_edit', text: '✅ Да' }));
     const ctx = context('Да');
+    approveDeletes(USER, ctx.chatId, [coming]);
 
     const wrong = await executeTool(ctx, 'delete_event', { event_id: past });
     expect(wrong.success).toBe(false);
@@ -270,6 +274,7 @@ describe('deleting on a day the user did not name', () => {
     setSystemTime(thursday);
     say('Да');
     const ctx = context('Да', thursday);
+    approveDeletes(USER, ctx.chatId, [meant]);
 
     const wrong = await executeTool(ctx, 'delete_event', { event_id: nextWeek });
     expect(wrong.error).toContain('«вторник» = Tuesday 2026-09-29');
