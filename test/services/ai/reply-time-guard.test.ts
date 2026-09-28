@@ -91,6 +91,34 @@ describe('correctUtcClockTimes', () => {
     expect(correctUtcClockTimes(utcDeleteQuestion, tuesdayLessons, TZ)).toBe(localDeleteQuestion);
   });
 
+  test('converts every named event’s times on a line shown in UTC', () => {
+    // 11:30 is the lesson's UTC end, 18:30 the errand's UTC start: both belong to the window.
+    expect(correctUtcClockTimes(`Между «${LESSON}» и «${ERRAND}» свободно 11:30 – 18:30`, [lesson, errand], TZ)).toBe(
+      `Между «${LESSON}» и «${ERRAND}» свободно 13:30 – 20:30`,
+    );
+  });
+
+  test('an unshown UTC clock of a named event does not block the line', () => {
+    // July (UTC+2) maps 14:30 → 16:30, January (UTC+1) maps 14:30 → 15:30; 14:30 is not on the line.
+    const summer: EventClock = {
+      id: 1,
+      title: 'Летний курс',
+      startUtc: '2026-07-15T10:30:00.000Z',
+      endUtc: '2026-07-15T14:30:00.000Z',
+      fromTool: true,
+    };
+    const winter: EventClock = {
+      id: 2,
+      title: 'Зимний курс',
+      startUtc: '2026-01-15T14:30:00.000Z',
+      endUtc: '2026-01-15T16:30:00.000Z',
+      fromTool: true,
+    };
+    expect(correctUtcClockTimes('Летний курс в 10:30, Зимний курс до 16:30', [summer, winter], TZ)).toBe(
+      'Летний курс в 12:30, Зимний курс до 17:30',
+    );
+  });
+
   test('leaves a reply that already shows local times untouched', () => {
     expect(correctUtcClockTimes(localDayPlan, [lesson, errand], TZ)).toBe(localDayPlan);
   });

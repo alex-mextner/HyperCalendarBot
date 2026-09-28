@@ -6,8 +6,8 @@
 //
 // The guard never calls a model and only touches clock times it can tie to a real
 // event: a line that names an event (by title or "id N") and shows that event's UTC
-// start instead of its local start is rewritten with that event's own clock. Times on
-// lines that name no event (free windows computed from the wrong times) are rewritten
+// start instead of its local start is rewritten with the clocks of every event it names.
+// Times on lines that name no event (free windows computed from the wrong times) are rewritten
 // with the same mapping only when no named event really happens at one of the
 // replaced times. Anything ambiguous is left as the model wrote it.
 
@@ -119,14 +119,27 @@ function namedEvents(line: string, events: readonly ClockTimes[]): ClockTimes[] 
   );
 }
 
-/** Merge mappings into target; false when one UTC time would map to two local times. */
-function mergeMapping(target: Map<string, string>, source: ReadonlyMap<string, string>): boolean {
+/**
+ * Merge mappings into target, only the UTC times in `only` when given; false when one UTC
+ * time would map to two local times.
+ */
+function mergeMapping(
+  target: Map<string, string>,
+  source: ReadonlyMap<string, string>,
+  only?: ReadonlySet<string>,
+): boolean {
   for (const [utc, local] of source) {
+    if (only && !only.has(utc)) continue;
     const existing = target.get(utc);
     if (existing !== undefined && existing !== local) return false;
     target.set(utc, local);
   }
   return true;
+}
+
+function showsUtcClock(event: ClockTimes, shown: ReadonlySet<string>): boolean {
+  for (const utc of event.mapping.keys()) if (shown.has(utc)) return true;
+  return false;
 }
 
 /**
@@ -156,11 +169,16 @@ export function correctUtcClockTimes(text: string, events: readonly EventClock[]
     if (named.some((event) => shown.has(event.localStart))) return;
     const shownInUtc = named.filter((event) => shown.has(event.utcStart));
     if (shownInUtc.length === 0) return;
+    // The line is in UTC, so every named event's UTC time shown on it is converted: a window
+    // between two events shows one's UTC end and the other's UTC start. Times the line does
+    // not show cannot make it ambiguous.
     const mapping = new Map<string, string>();
-    if (!shownInUtc.every((event) => mergeMapping(mapping, event.mapping))) return;
+    if (!named.every((event) => mergeMapping(mapping, event.mapping, shown))) return;
     lines[index] = rewriteLine(line, mapping);
     toolEventShownInUtc ||= shownInUtc.some((event) => event.fromTool);
-    derivedConsistent = derivedConsistent && mergeMapping(derivedMapping, mapping);
+    // Free windows are built from both ends of each converted event, shown here or not.
+    const converted = named.filter((event) => showsUtcClock(event, shown));
+    derivedConsistent &&= converted.every((event) => mergeMapping(derivedMapping, event.mapping));
   });
 
   if (!toolEventShownInUtc) return text;
