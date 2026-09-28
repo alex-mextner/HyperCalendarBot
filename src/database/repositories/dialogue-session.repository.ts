@@ -1,13 +1,21 @@
 // src/database/repositories/dialogue-session.repository.ts
 //
 // Durable store for GH-652's workflow v3 dialogue sessions (src/services/dialogue/v3-types.ts),
-// backed by the `dialogue_v3_sessions` table (migrations.ts `066_dialogue_v3_sessions`). Same
-// idiom as WorkflowSessionRepository (workflow-session.repository.ts) — TEXT-JSON payload, a
-// zod codec, row-age TTL — deliberately a SEPARATE table; see that migration's comment for why
-// reusing `workflow_sessions` or `gramio_scenes` was rejected.
+// backed by the `dialogue_v3_sessions` table (migrations.ts `066_dialogue_v3_sessions`,
+// `067_dialogue_v3_sessions_revision`). Same idiom as WorkflowSessionRepository
+// (workflow-session.repository.ts) — TEXT-JSON payload, a zod codec, row-age TTL —
+// deliberately a SEPARATE table; see that migration's comment for why reusing
+// `workflow_sessions` or `gramio_scenes` was rejected.
 //
 // Scope key is (chat_id, user_id, topic_id) — `topic_id` is 0 when the chat has no forum
 // topics, matching how callers already normalize a Telegram `message_thread_id`.
+//
+// Writes are compare-and-swap on `revision` (067): `set()` requires the caller's
+// `expectedRevision` — `null` means "this session must not already exist", a number means "the
+// stored row must currently be at exactly this revision". A mismatch returns `{ ok: false }`
+// rather than silently overwriting — the caller re-reads and decides, so a late/duplicate write
+// (a retried webhook, a slow AI callback) can never clobber newer state or double-execute a
+// session past its one irreversible transition (see v3-types.ts's `DialogueV3Status.executing`).
 
 import type { Database } from 'bun:sqlite';
 import { z } from 'zod';
@@ -33,15 +41,34 @@ const DraftPlaceSchema = z.object({
   longitude: z.number().optional(),
 });
 
+const FieldProvenanceValueSchema = z.union([
+  z.literal('missing'),
+  z.literal('defaulted'),
+  z.literal('supplied'),
+  z.literal('ambiguous'),
+  z.literal('cleared'),
+]);
+
+const FieldProvenanceMapSchema = z.object({
+  title: FieldProvenanceValueSchema,
+  schedule: FieldProvenanceValueSchema,
+  people: FieldProvenanceValueSchema,
+  place: FieldProvenanceValueSchema,
+  description: FieldProvenanceValueSchema,
+  recurrence: FieldProvenanceValueSchema,
+});
+
 const EventCreateDraftSchema = z.object({
   title: z.string().optional(),
   schedule: ScheduleSchema.optional(),
+  endAt: z.string().optional(),
   people: z.array(DraftPersonSchema),
   place: DraftPlaceSchema.optional(),
   description: z.string().optional(),
   recurrenceRule: z.string().optional(),
   scope: z.union([z.literal('personal'), z.literal('group')]),
   groupId: z.number().optional(),
+  provenance: FieldProvenanceMapSchema,
 });
 
 const PendingPersonCandidateSchema = z.object({
@@ -56,6 +83,11 @@ const PendingFuzzyPersonSchema = z.object({
   candidates: z.array(PendingPersonCandidateSchema),
 });
 
+const ExecutionReceiptSchema = z.union([
+  z.object({ status: z.literal('unknown'), attemptedAtRevision: z.number() }),
+  z.object({ status: z.literal('applied'), eventId: z.number(), appliedAtRevision: z.number() }),
+]);
+
 const DialogueV3SessionSchema = z.object({
   version: z.literal(3),
   sessionId: z.string(),
@@ -63,16 +95,21 @@ const DialogueV3SessionSchema = z.object({
   chatId: z.number(),
   topicId: z.number(),
   operation: z.literal('event.create'),
+  timezone: z.string(),
+  selectedDate: z.string(),
   draft: EventCreateDraftSchema,
   pendingField: z.string().nullable(),
   pendingFuzzyPeople: z.array(PendingFuzzyPersonSchema),
   status: z.union([
     z.literal('collecting'),
     z.literal('ready'),
+    z.literal('executing'),
     z.literal('executed'),
     z.literal('cancelled'),
     z.literal('handed_off'),
   ]),
+  revision: z.number(),
+  executionReceipt: ExecutionReceiptSchema.nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
   sourceText: z.string(),
@@ -96,6 +133,17 @@ export interface DialogueSessionKey {
   readonly topicId: number;
 }
 
+/**
+ * `ok: true` carries the new stored revision so the caller's in-memory session object can be
+ * kept in sync without a re-read. `ok: false` on `revision_mismatch` means someone else already
+ * wrote a newer version of this session (or it no longer exists) — the caller MUST re-read
+ * (`get()`) and decide, never retry the same write blindly. `already_exists` is the insert-only
+ * (`expectedRevision: null`) case where a row is already there.
+ */
+export type DialogueSessionWriteResult =
+  | { readonly ok: true; readonly revision: number }
+  | { readonly ok: false; readonly reason: 'revision_mismatch' | 'already_exists' };
+
 export class DialogueSessionRepository {
   constructor(private db: Database) {}
 
@@ -112,16 +160,42 @@ export class DialogueSessionRepository {
     return result.success ? result.data : null;
   }
 
-  set(key: DialogueSessionKey, session: DialogueV3Session): void {
-    this.db
+  /**
+   * Compare-and-swap write. `expectedRevision: null` means "insert a brand-new session — fail
+   * if one already exists for this key" (starting a fresh draft must never silently resurrect
+   * or overwrite an existing one). `expectedRevision: N` means "update only if the stored row
+   * is still at revision N". The written session's own `revision` field is ignored and always
+   * set to the actually-persisted value (`1` for a fresh insert, `N + 1` for an update) so a
+   * caller can never desync the in-band revision from the one the CAS check used.
+   */
+  set(
+    key: DialogueSessionKey,
+    session: DialogueV3Session,
+    expectedRevision: number | null,
+  ): DialogueSessionWriteResult {
+    if (expectedRevision === null) {
+      const newRevision = 1;
+      const payload = JSON.stringify({ ...session, revision: newRevision });
+      const result = this.db
+        .prepare(
+          `INSERT INTO dialogue_v3_sessions (chat_id, user_id, topic_id, data, revision, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (chat_id, user_id, topic_id) DO NOTHING`,
+        )
+        .run(key.chatId, key.userId, key.topicId, payload, newRevision, session.createdAt, session.updatedAt);
+      if (result.changes === 0) return { ok: false, reason: 'already_exists' };
+      return { ok: true, revision: newRevision };
+    }
+    const newRevision = expectedRevision + 1;
+    const payload = JSON.stringify({ ...session, revision: newRevision });
+    const result = this.db
       .prepare(
-        `INSERT INTO dialogue_v3_sessions (chat_id, user_id, topic_id, data, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT (chat_id, user_id, topic_id) DO UPDATE SET
-           data = excluded.data,
-           updated_at = excluded.updated_at`,
+        `UPDATE dialogue_v3_sessions SET data = ?, revision = ?, updated_at = ?
+         WHERE chat_id = ? AND user_id = ? AND topic_id = ? AND revision = ?`,
       )
-      .run(key.chatId, key.userId, key.topicId, JSON.stringify(session), session.createdAt, session.updatedAt);
+      .run(payload, newRevision, session.updatedAt, key.chatId, key.userId, key.topicId, expectedRevision);
+    if (result.changes === 0) return { ok: false, reason: 'revision_mismatch' };
+    return { ok: true, revision: newRevision };
   }
 
   delete(key: DialogueSessionKey): void {

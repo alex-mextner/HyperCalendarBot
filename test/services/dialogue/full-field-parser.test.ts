@@ -193,3 +193,122 @@ describe('a bare time with no "at"/"в" prefix still resolves via the trailing-s
     expect(result.patch.title).toBe('Meeting');
   });
 });
+
+describe('anchorDate threading — a follow-up turn keeps the date a previous turn selected (blocker: "Встреча завтра" must retain the selected date for the next time question)', () => {
+  let ctx: ParseContext;
+  beforeEach(() => {
+    const db = createTestDb();
+    new UserRepository(db).create({ telegram_id: USER_ID });
+    ctx = makeContext(db);
+  });
+
+  test('a turn with no date phrase defaults to today when no anchor is supplied', () => {
+    const result = parseFullField('Meeting at 14:00', ctx);
+    expect(result.selectedDate).toBe('2026-09-29');
+  });
+
+  test('"Встреча завтра" resolves and reports tomorrow as selectedDate even with no time yet', () => {
+    const result = parseFullField('Встреча завтра', ctx);
+    expect(result.selectedDate).toBe('2026-09-30');
+    expect(result.patch.schedule).toBeUndefined();
+  });
+
+  test('a bare time-only follow-up resolves against the anchor date, not the day it arrived on', () => {
+    const first = parseFullField('Встреча завтра', ctx);
+    const second = parseFullField('14:00', { ...ctx, anchorDate: first.selectedDate });
+    expect(second.patch.schedule).toEqual({ kind: 'timed', startAt: '2026-09-30T12:00:00.000Z' });
+  });
+
+  test('without the anchor, the same bare time-only follow-up would wrongly resolve against today — proving the anchor is load-bearing', () => {
+    const withoutAnchor = parseFullField('14:00', ctx);
+    expect(withoutAnchor.patch.schedule).toEqual({ kind: 'timed', startAt: '2026-09-29T12:00:00.000Z' });
+  });
+
+  test('a fresh date phrase in a later turn overrides the carried-forward anchor', () => {
+    const first = parseFullField('Встреча завтра', ctx);
+    const second = parseFullField('послезавтра в 14:00', { ...ctx, anchorDate: first.selectedDate });
+    expect(second.selectedDate).toBe('2026-10-01');
+    expect(second.patch.schedule).toEqual({ kind: 'timed', startAt: '2026-10-01T12:00:00.000Z' });
+  });
+});
+
+describe('unsupported date/time/duration clauses never become a phantom place (blocker: parent probes of the full-field parser)', () => {
+  let ctx: ParseContext;
+  beforeEach(() => {
+    const db = createTestDb();
+    new UserRepository(db).create({ telegram_id: USER_ID });
+    ctx = makeContext(db);
+  });
+
+  test('"Встреча в пятницу в 14:00" — the unsupported weekday clause stays in the title, never becomes a place', () => {
+    const result = parseFullField('Встреча в пятницу в 14:00', ctx);
+    expect(result.patch.schedule).toEqual({ kind: 'timed', startAt: '2026-09-29T12:00:00.000Z' });
+    expect(result.patch.place).toBeUndefined();
+    expect(result.remainderText).toContain('пятницу');
+  });
+
+  test('"Встреча в 25:00" — an impossible clock value stays unresolved in the title, never becomes a place', () => {
+    const result = parseFullField('Встреча в 25:00', ctx);
+    expect(result.patch.schedule).toBeUndefined();
+    expect(result.patch.place).toBeUndefined();
+    expect(result.remainderText).toContain('25:00');
+  });
+
+  test('"Встреча в 14:00 на 30 минут" — a duration clause stays unresolved in the title, never becomes a place', () => {
+    const result = parseFullField('Встреча в 14:00 на 30 минут', ctx);
+    expect(result.patch.place).toBeUndefined();
+    expect(result.remainderText).toContain('на 30 минут');
+  });
+
+  test('a genuine place clause is still recognized once the guard is in place (no false-positive rejection)', () => {
+    const result = parseFullField('Встреча завтра в 14:00 в офисе', ctx);
+    expect(result.patch.place).toEqual({ kind: 'manual', label: 'офисе' });
+  });
+});
+
+describe('collective people resolution (blocker: an exact collective/alias adds every member, never a choose-one prompt)', () => {
+  test('a collective resolution adds every member as a confirmed person in one pass', () => {
+    const db = createTestDb();
+    new UserRepository(db).create({ telegram_id: USER_ID });
+    const ctx: ParseContext = {
+      timezone: 'Europe/Belgrade',
+      now: NOW,
+      actorId: USER_ID,
+      peopleResolver: {
+        resolve: (_userId, rawName) =>
+          rawName === 'родители'
+            ? {
+                kind: 'collective',
+                members: [
+                  { contactId: 1, telegramId: 701, displayName: 'Mom', confidence: 1 },
+                  { contactId: 2, telegramId: 702, displayName: 'Dad', confidence: 1 },
+                ],
+              }
+            : { kind: 'none' },
+      },
+      placeResolver: createManualPlaceResolver(),
+    };
+    const result = parseFullField('Meeting tomorrow at 14:00 with родители', ctx);
+    expect(result.patch.people).toEqual([
+      { contactId: 1, telegramId: 701, displayName: 'Mom', confirmed: true },
+      { contactId: 2, telegramId: 702, displayName: 'Dad', confirmed: true },
+    ]);
+    expect(result.unresolvedPeopleNames).toEqual([]);
+    expect(result.fuzzyPeople).toEqual([]);
+  });
+
+  test('a collective resolution with zero members is treated as unresolved, never a silent no-op', () => {
+    const db = createTestDb();
+    new UserRepository(db).create({ telegram_id: USER_ID });
+    const ctx: ParseContext = {
+      timezone: 'Europe/Belgrade',
+      now: NOW,
+      actorId: USER_ID,
+      peopleResolver: { resolve: () => ({ kind: 'collective', members: [] }) },
+      placeResolver: createManualPlaceResolver(),
+    };
+    const result = parseFullField('Meeting tomorrow at 14:00 with пустаягруппа', ctx);
+    expect(result.patch.people).toBeUndefined();
+    expect(result.unresolvedPeopleNames).toEqual(['пустаягруппа']);
+  });
+});

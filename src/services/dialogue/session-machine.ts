@@ -36,24 +36,41 @@ export function nextQuestion(draft: EventCreateDraft): Question | null {
 export type ReadinessBlocker =
   | { readonly kind: 'missing_title' }
   | { readonly kind: 'missing_schedule' }
-  | { readonly kind: 'unconfirmed_person'; readonly rawName: string };
+  | { readonly kind: 'unconfirmed_person'; readonly rawName: string }
+  /** An explicit "не"/"not"/"don't" marker was seen in a turn that fed this draft — a negated request must never quietly execute as if the negation were not there (blocker: parseResult.negated MUST block event.create). */
+  | { readonly kind: 'negated' }
+  /** A name was explicitly stated but matched no contact at all — dropping it silently would create the event without someone the user named (blocker: unresolvedPeopleNames MUST block event.create). */
+  | { readonly kind: 'unresolved_person'; readonly rawName: string };
 
 export interface ReadinessCheck {
   readonly ready: boolean;
   readonly blockedBy: readonly ReadinessBlocker[];
 }
 
+export interface ReadinessInput {
+  /** Names mentioned this turn that still need an explicit yes/no before being added. */
+  readonly fuzzyPeople: readonly FuzzyPersonMention[];
+  /** `parseFullField`'s negation marker for the turn that produced (or last touched) this draft. */
+  readonly negated: boolean;
+  /** Names mentioned this turn that matched no contact at all. */
+  readonly unresolvedPeopleNames: readonly string[];
+}
+
 /**
  * Whether a draft can execute right now with no further question. A fully specified explicit
  * request executes once, with no redundant confirmation the legacy wizard used to always ask —
- * but an unconfirmed fuzzy person still blocks (design: "a single fuzzy contact match ...
- * requires explicit confirmation", never bypassed just because the rest of the draft is done).
+ * but an unconfirmed fuzzy person, an unresolved explicit name, or a negation marker still
+ * blocks (design: "a single fuzzy contact match ... requires explicit confirmation", never
+ * bypassed just because the rest of the draft is done; a negated or partially-unresolved
+ * explicit request must never silently execute as if it were complete).
  */
-export function checkReadiness(draft: EventCreateDraft, fuzzyPeople: readonly FuzzyPersonMention[]): ReadinessCheck {
+export function checkReadiness(draft: EventCreateDraft, input: ReadinessInput): ReadinessCheck {
   const blockedBy: ReadinessBlocker[] = [];
   if (!draft.title) blockedBy.push({ kind: 'missing_title' });
   if (!draft.schedule) blockedBy.push({ kind: 'missing_schedule' });
-  for (const fuzzy of fuzzyPeople) blockedBy.push({ kind: 'unconfirmed_person', rawName: fuzzy.rawName });
+  if (input.negated) blockedBy.push({ kind: 'negated' });
+  for (const fuzzy of input.fuzzyPeople) blockedBy.push({ kind: 'unconfirmed_person', rawName: fuzzy.rawName });
+  for (const rawName of input.unresolvedPeopleNames) blockedBy.push({ kind: 'unresolved_person', rawName });
   return { ready: blockedBy.length === 0, blockedBy };
 }
 

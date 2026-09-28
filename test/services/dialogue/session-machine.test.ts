@@ -49,7 +49,11 @@ describe('the time-only prompt button contract — never Today/Tomorrow', () => 
 
 describe('checkReadiness — no redundant confirmation once every required/blocking field resolves', () => {
   test('an empty draft is never ready', () => {
-    const check = checkReadiness(emptyDraft('personal'), []);
+    const check = checkReadiness(emptyDraft('personal'), {
+      fuzzyPeople: [],
+      negated: false,
+      unresolvedPeopleNames: [],
+    });
     expect(check.ready).toBe(false);
     expect(check.blockedBy).toEqual([{ kind: 'missing_title' }, { kind: 'missing_schedule' }]);
   });
@@ -60,7 +64,10 @@ describe('checkReadiness — no redundant confirmation once every required/block
       title: 'Meeting',
       schedule: { kind: 'timed' as const, startAt: '2026-09-30T12:00:00.000Z' },
     };
-    expect(checkReadiness(draft, [])).toEqual({ ready: true, blockedBy: [] });
+    expect(checkReadiness(draft, { fuzzyPeople: [], negated: false, unresolvedPeopleNames: [] })).toEqual({
+      ready: true,
+      blockedBy: [],
+    });
   });
 
   test('a single unconfirmed fuzzy person still blocks readiness even though it is optional', () => {
@@ -69,9 +76,35 @@ describe('checkReadiness — no redundant confirmation once every required/block
       title: 'Meeting',
       schedule: { kind: 'timed' as const, startAt: '2026-09-30T12:00:00.000Z' },
     };
-    const check = checkReadiness(draft, [{ rawName: 'Kristin', candidates: [] }]);
+    const check = checkReadiness(draft, {
+      fuzzyPeople: [{ rawName: 'Kristin', candidates: [] }],
+      negated: false,
+      unresolvedPeopleNames: [],
+    });
     expect(check.ready).toBe(false);
     expect(check.blockedBy).toEqual([{ kind: 'unconfirmed_person', rawName: 'Kristin' }]);
+  });
+
+  test('a negated turn blocks even a fully specified draft — never silently executes a "don\'t create" request', () => {
+    const draft = {
+      ...emptyDraft('personal'),
+      title: 'Meeting',
+      schedule: { kind: 'timed' as const, startAt: '2026-09-30T12:00:00.000Z' },
+    };
+    const check = checkReadiness(draft, { fuzzyPeople: [], negated: true, unresolvedPeopleNames: [] });
+    expect(check.ready).toBe(false);
+    expect(check.blockedBy).toContainEqual({ kind: 'negated' });
+  });
+
+  test('an explicit name that matched no contact at all blocks readiness — never silently created without them', () => {
+    const draft = {
+      ...emptyDraft('personal'),
+      title: 'Meeting',
+      schedule: { kind: 'timed' as const, startAt: '2026-09-30T12:00:00.000Z' },
+    };
+    const check = checkReadiness(draft, { fuzzyPeople: [], negated: false, unresolvedPeopleNames: ['Zorblax'] });
+    expect(check.ready).toBe(false);
+    expect(check.blockedBy).toContainEqual({ kind: 'unresolved_person', rawName: 'Zorblax' });
   });
 });
 

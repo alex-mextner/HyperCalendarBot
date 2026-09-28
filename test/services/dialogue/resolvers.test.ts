@@ -66,10 +66,21 @@ describe('createContactPeopleResolver — backed by the real, live ContactReposi
       displayName: 'Саша',
     });
   });
-
   test('no match at all resolves to none, never a false positive', () => {
     const resolver = createContactPeopleResolver(contacts);
     expect(resolver.resolve(USER_ID, 'Nobody Here')).toEqual({ kind: 'none' });
+  });
+
+  test('a name tied across two distinct contacts (name vs. preferred_name) is ambiguous, never a silent first-match (blocker: duplicate-name resolution must be ambiguity-safe)', () => {
+    const dima = contacts.add(USER_ID, 'Дима', undefined, 111);
+    const dmitry = contacts.add(USER_ID, 'Dmitry Petrov', undefined, 222, 'Дима');
+    const resolver = createContactPeopleResolver(contacts);
+    const resolution = resolver.resolve(USER_ID, 'Дима');
+    expect(resolution.kind).toBe('fuzzy');
+    if (resolution.kind !== 'fuzzy') throw new Error('unreachable');
+    const contactIds = resolution.candidates.map((c) => c.contactId).sort();
+    expect(contactIds).toEqual([dima.id, dmitry.id].sort());
+    for (const candidate of resolution.candidates) expect(candidate.confidence).toBe(1);
   });
 });
 
@@ -103,6 +114,33 @@ describe('createManualPlaceResolver — the existing manual/native behavior, not
       label: '1,2',
       latitude: 1,
       longitude: 2,
+    });
+  });
+});
+
+describe('createManualPlaceResolver.resolveNative — coordinate validation (blocker: native coordinates must be finite and range-checked)', () => {
+  test('non-finite coordinates (NaN/Infinity) are rejected, never accepted as a place', () => {
+    const resolver = createManualPlaceResolver();
+    expect(resolver.resolveNative({ latitude: Number.NaN, longitude: 20.46 })).toEqual({ kind: 'unresolved' });
+    expect(resolver.resolveNative({ latitude: 44.8, longitude: Number.POSITIVE_INFINITY })).toEqual({
+      kind: 'unresolved',
+    });
+  });
+
+  test('out-of-range coordinates are rejected, never accepted as a place', () => {
+    const resolver = createManualPlaceResolver();
+    expect(resolver.resolveNative({ latitude: 91, longitude: 20 })).toEqual({ kind: 'unresolved' });
+    expect(resolver.resolveNative({ latitude: 44, longitude: 181 })).toEqual({ kind: 'unresolved' });
+    expect(resolver.resolveNative({ latitude: -91, longitude: -181 })).toEqual({ kind: 'unresolved' });
+  });
+
+  test('boundary coordinates (exactly 90/180) are still accepted', () => {
+    const resolver = createManualPlaceResolver();
+    expect(resolver.resolveNative({ latitude: 90, longitude: 180, title: 'Pole' })).toEqual({
+      kind: 'native',
+      label: 'Pole',
+      latitude: 90,
+      longitude: 180,
     });
   });
 });

@@ -32,6 +32,14 @@ export interface ParseContext {
   readonly actorId: number;
   readonly peopleResolver: PeopleResolver;
   readonly placeResolver: PlaceResolver;
+  /**
+   * The local calendar day (`yyyy-mm-dd`) a bare time-of-day answer in THIS turn's text should
+   * resolve against when the text itself states no date phrase — e.g. turn 1 "Meeting
+   * tomorrow" sets the session's anchor to tomorrow; turn 2's bare "14:00" reply must still
+   * resolve against tomorrow, not the day the reply happened to arrive on. Omitted on a fresh
+   * (first) turn, where "no date phrase" genuinely means today.
+   */
+  readonly anchorDate?: string;
 }
 
 export interface FuzzyPersonMention {
@@ -42,6 +50,13 @@ export interface FuzzyPersonMention {
 export interface ParseResult {
   /** Whatever this pass resolved — apply on top of the existing draft, never replacing it. */
   readonly patch: DraftPatch;
+  /**
+   * The local calendar day this turn resolved (or carried forward from `ctx.anchorDate`) —
+   * always present, independent of whether a time-of-day was also found this turn, so the
+   * caller can persist it as the next turn's `anchorDate` (blocker: "Встреча завтра" must keep
+   * "tomorrow" selected for the follow-up time-only answer).
+   */
+  readonly selectedDate: string;
   /**
    * The raw time-of-day resolution this turn produced, INCLUDING an ambiguous one (bare hour
    * or DST fold) — `patch.schedule` only ever carries a fully resolved value, so a caller that
@@ -82,11 +97,12 @@ function addDaysIso(iso: string, days: number): string {
 
 const DATE_PHRASE = /(?:^|\s)(послезавтра|day after tomorrow|завтра|tomorrow|сегодня|today|\d{4}-\d{2}-\d{2})(?=\s|$)/i;
 
-/** Removes a recognized date phrase and returns the resolved selectedDate; defaults to today. */
+/** Removes a recognized date phrase and returns the resolved selectedDate; defaults to the caller's anchor, else today. */
 function extractDate(text: string, ctx: ParseContext): { text: string; selectedDate: string } {
   const today = isoDate(ctx.now, ctx.timezone);
+  const fallback = ctx.anchorDate ?? today;
   const match = DATE_PHRASE.exec(text);
-  if (!match) return { text, selectedDate: today };
+  if (!match) return { text, selectedDate: fallback };
   const token = match[1]!.toLowerCase();
   const isoMatch = /^\d{4}-\d{2}-\d{2}$/.exec(token);
   const selectedDate = isoMatch
@@ -137,6 +153,59 @@ function isTimeShaped(content: string, ctx: ParseContext, selectedDate: string):
     : null;
 }
 
+// Closed weekday lexicon (RU short/long + EN), reused only to recognize "this marker clause is
+// an unsupported date phrase", never to resolve it to an actual date — this module's own scope
+// boundary (header comment) deliberately excludes weekday/month-name parsing.
+const WEEKDAY_TOKENS: Readonly<Record<string, true>> = {
+  пн: true,
+  понедельник: true,
+  mon: true,
+  monday: true,
+  вт: true,
+  вторник: true,
+  tue: true,
+  tuesday: true,
+  ср: true,
+  среда: true,
+  среду: true,
+  wed: true,
+  wednesday: true,
+  чт: true,
+  четверг: true,
+  thu: true,
+  thursday: true,
+  пт: true,
+  пятница: true,
+  пятницу: true,
+  fri: true,
+  friday: true,
+  сб: true,
+  суббота: true,
+  субботу: true,
+  sat: true,
+  saturday: true,
+  вс: true,
+  воскресенье: true,
+};
+
+const DURATION_SUFFIX = /(?:^|\s)(?:на|for)\s*\d+\s*(?:минут\w*|час\w*|min\w*|hour\w*)/i;
+
+/**
+ * A marker clause this module cannot resolve as a time must never be silently reclassified as
+ * a place just because it wasn't recognized — a weekday name (unsupported date grammar, see
+ * this module's scope boundary), a clock-shaped-but-impossible value ("25:00"), or a bare
+ * number/duration phrase is never a plausible place. Flagged clauses are left untouched in the
+ * remainder text (preserved, unconsumed) rather than dropped or misfiled.
+ */
+function looksLikeUnresolvedDateTimeOrDuration(content: string): boolean {
+  const normalized = content.trim().toLowerCase();
+  if (WEEKDAY_TOKENS[normalized.split(/\s+/)[0] ?? '']) return true;
+  if (/^\d{1,2}$/.test(normalized)) return true;
+  if (/^\d{1,2}:\d{2}(?:\s|$)/.test(normalized)) return true;
+  if (DURATION_SUFFIX.test(normalized)) return true;
+  return false;
+}
+
 function removeRange(text: string, start: number, end: number): string {
   return (text.slice(0, start) + text.slice(end)).replace(/\s+/g, ' ').trim();
 }
@@ -157,7 +226,9 @@ function extractTimeAndPlace(
 ): { text: string; resolution: WallTimeResolution | null; place: DraftPatch['place'] } {
   const clauses = findMarkerClauses(text);
   const timeClause = clauses.find((clause) => isTimeShaped(clause.content, ctx, selectedDate) !== null);
-  const placeClause = clauses.find((clause) => clause !== timeClause);
+  const placeClause = clauses.find(
+    (clause) => clause !== timeClause && !looksLikeUnresolvedDateTimeOrDuration(clause.content),
+  );
 
   let resolution: WallTimeResolution | null = null;
   let remaining = text;
@@ -237,6 +308,20 @@ function extractPeople(
         displayName: resolution.displayName,
         confirmed: true,
       });
+    } else if (resolution.kind === 'collective') {
+      // An exact alias/group naming more than one known person — every member is added at
+      // once, never a choose-one prompt (see resolvers.ts's header comment; GH-654 extension
+      // point). A collective with zero members resolved is treated as unresolved, never a
+      // silent no-op that looks like the name was handled.
+      if (resolution.members.length === 0) unresolved.push(rawName);
+      for (const member of resolution.members) {
+        resolved.push({
+          contactId: member.contactId,
+          telegramId: member.telegramId,
+          displayName: member.displayName,
+          confirmed: true,
+        });
+      }
     } else if (resolution.kind === 'fuzzy') {
       fuzzy.push({ rawName, candidates: resolution.candidates });
     } else {
@@ -285,6 +370,7 @@ export function parseFullField(rawText: string, ctx: ParseContext): ParseResult 
 
   return {
     patch,
+    selectedDate: dateResult.selectedDate,
     timeResolution,
     unresolvedPeopleNames: peopleResult.unresolved,
     fuzzyPeople: peopleResult.fuzzy,

@@ -4,9 +4,13 @@
 // calendar-dialogue-design.md in PR562). One declarative field/permission contract per
 // operation, read by every entry point that can produce that operation instead of each
 // entry point inventing its own description:
-//   - src/bot/commands/add.ts (the /add command's full-field parser, GH-652)
-//   - src/services/ai/tools.ts (the create_event AI tool schema — kept in exact sync via
-//     `operationToToolInputSchema`, see that file for the wiring)
+//   - src/bot/commands/add-v3.ts (the /add command's full-field fast path, GH-652)
+//   - src/services/ai/tools.ts's `create_event` tool: its JSON-schema `required` array is
+//     DERIVED from `requiredFields(EVENT_CREATE_OPERATION)` via an explicit field-to-wire-name
+//     map (`createEventRegistryRequiredFields`, tools.ts) — not the whole schema, since the
+//     registry's field model is abstract (one `schedule` field covers start_at/end_at/all_day
+//     together, and `people` maps to the separate `send_invitation` tool, not a create_event
+//     property). See test/services/ai/tools.test.ts for the sync coverage.
 //   - the local natural-text "operation starter" (src/services/dialogue/*, GH-652)
 //
 // Per the 2026-09-28T17:22Z owner review on GH-554 (issuecomment-5875070277), this registry

@@ -343,26 +343,46 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   // GH-652: workflow v3 dialogue runtime, off by default (DIALOGUE_V3_ENABLED). When on, both
   // /add (handleAdd's dialogueV3 param) and plain-text natural-start messages
   // (msgDeps.dialogueV3, dialogue-v3-layer.ts) share this exact same registry-backed
-  // parser/resolver set — one operation definition, not two.
+  // parser/resolver set — one operation definition, not two. Both also share the exact same
+  // execution engine (session-runtime.ts's `advance`/`executeDraft`): real invitation delivery
+  // (InvitationService.sendInvitation + deliverInvitation — the same plumbing send_invitation's
+  // AI tool handler uses, never a raw participantRepo.add('pending')), the existing
+  // googleSchedulePush post-create hook and place-verification service add-event.scene.ts's
+  // own wizard already reuses, and the v1/v2 workflow-session store for the one-active-owner
+  // precedence check documented in dialogue-v3-layer.ts's header comment.
   const dialogueV3Enabled = envConfig?.DIALOGUE_V3_ENABLED === true;
   const dialogueV3PeopleResolver = createContactPeopleResolver(db.contacts);
   const dialogueV3PlaceResolver = createManualPlaceResolver();
-  const dialogueV3AddDeps: DialogueV3AddDeps = {
-    enabled: dialogueV3Enabled,
+  const dialogueV3RuntimeDeps = {
     eventService,
-    participantRepo: db.participants,
+    dialogueSessions: db.dialogueSessions,
+    invitationService,
+    invitationDelivery: {
+      sender: telegramSender,
+      invitationRepo: db.invitations,
+      userRepo: db.users,
+      deepLinkService,
+      botUsername: envConfig?.BOT_USERNAME,
+      contactRepo: db.contacts,
+    },
     actionLogRepo: db.actionLog,
+    onEventCreated: googleSchedulePush
+      ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create')
+      : undefined,
+    locationVerification,
+  };
+  const dialogueV3AddDeps: DialogueV3AddDeps = {
+    ...dialogueV3RuntimeDeps,
+    enabled: dialogueV3Enabled,
     peopleResolver: dialogueV3PeopleResolver,
     placeResolver: dialogueV3PlaceResolver,
   };
   const dialogueV3LayerDeps: DialogueV3LayerDeps = {
+    ...dialogueV3RuntimeDeps,
     enabled: dialogueV3Enabled,
-    dialogueSessions: db.dialogueSessions,
-    eventService,
-    participantRepo: db.participants,
-    actionLogRepo: db.actionLog,
     peopleResolver: dialogueV3PeopleResolver,
     placeResolver: dialogueV3PlaceResolver,
+    workflowSessions: db.workflowSessions,
   };
 
   const botAdminId = envConfig?.BOT_ADMIN_ID;

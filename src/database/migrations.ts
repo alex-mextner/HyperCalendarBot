@@ -1141,4 +1141,20 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '067_dialogue_v3_sessions_revision',
+    up(db) {
+      // GH-652 correction pass: a v3 draft (title/schedule/people/place) is mutated by ordinary
+      // chat turns AND can be reached by a late/duplicate delivery (a retried Telegram webhook,
+      // a slow AI handoff that resolves after the user already answered locally). A plain
+      // upsert (066's original `set()`) always wins regardless of write order — a late write
+      // can silently clobber a newer answer, or double-fire event creation for the same draft.
+      // `revision` makes every write a compare-and-swap: the repository only accepts a write
+      // when the caller's `expectedRevision` still matches the stored row, otherwise the caller
+      // must re-read and decide, never blindly overwrite (see DialogueSessionRepository.set).
+      // Pure additive column with a default — every existing row (there are none pre-GA, since
+      // the whole v3 runtime is still `DIALOGUE_V3_ENABLED=false`) reads as revision 1.
+      db.exec('ALTER TABLE dialogue_v3_sessions ADD COLUMN revision INTEGER NOT NULL DEFAULT 1');
+    },
+  },
 ];
