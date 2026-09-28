@@ -621,7 +621,7 @@ export const MSG = {
         tableSent: (title: string) => `Table "${title}" has been sent to the chat.`,
         tableFailed: (title: string) => `Failed to render or send the table "${title}".`,
         tableRenderingVoice: 'Check the chat — the table is there.',
-        telegramConnectedStatus: (masked: string) => `Telegram account connected (${masked})`,
+        telegramConnectedStatus: 'Telegram account connected',
         telegramNotConnectedStatus: 'Telegram account not connected. Connect via /connect_telegram',
       },
       slots: {
@@ -815,6 +815,8 @@ export const MSG = {
       btnCancelAuth: 'Cancel authorization',
       authCancelled: 'Authorization cancelled.',
       codeExpired: 'Code expired. Start over: /connect_telegram',
+      wizardExpired:
+        'The Telegram connection timed out. Your message was deleted in case it held a code or password. Start over: /connect_telegram',
       tooManyAttempts: 'Too many failed attempts. Start over: /connect_telegram',
       enter2fa: 'You have two-factor authentication enabled.\nEnter your password (it will not be stored):',
       invalid2fa: 'Wrong password. Try again.',
@@ -1605,7 +1607,7 @@ export const MSG = {
         tableSent: (title: string) => `Таблица «${title}» отправлена в чат.`,
         tableFailed: (title: string) => `Не удалось отрендерить или отправить таблицу «${title}».`,
         tableRenderingVoice: 'Загляни в чат — там таблица.',
-        telegramConnectedStatus: (masked: string) => `Telegram-аккаунт подключён (${masked})`,
+        telegramConnectedStatus: 'Telegram-аккаунт подключён',
         telegramNotConnectedStatus: 'Telegram-аккаунт не подключён. Подключить: /connect_telegram',
       },
       slots: {
@@ -1801,6 +1803,8 @@ export const MSG = {
       btnCancelAuth: 'Отменить авторизацию',
       authCancelled: 'Авторизация отменена.',
       codeExpired: 'Код истёк. Начни заново: /connect_telegram',
+      wizardExpired:
+        'Время на подключение Telegram вышло. Сообщение удалено — вдруг там был код или пароль. Начни заново: /connect_telegram',
       tooManyAttempts: 'Слишком много попыток. Начни заново: /connect_telegram',
       enter2fa: 'У тебя включена двухфакторная аутентификация.\nВведи пароль (он не будет сохранён):',
       invalid2fa: 'Неверный пароль. Попробуй ещё раз.',

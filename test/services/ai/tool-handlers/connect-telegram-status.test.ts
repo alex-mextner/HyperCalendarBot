@@ -108,7 +108,7 @@ describe('handleConnectTelegramStatus', () => {
     expect(result.data).toEqual({ connected: false, dismissed_recently: false });
   });
 
-  test('returns connected: true with masked phone when active session exists', () => {
+  test('returns only connected: true, never the masked phone (it would land in chat history and AI logs)', () => {
     const userRepo = new UserRepository(db);
     userRepo.create({
       telegram_id: USER_ID,
@@ -127,11 +127,8 @@ describe('handleConnectTelegramStatus', () => {
     });
     const result = handleConnectTelegramStatus(ctx);
     expect(result.success).toBe(true);
-    expect(result.data).toEqual({
-      connected: true,
-      phone_masked: '+7 ••• 4567',
-      status: 'active',
-    });
+    expect(result.data).toEqual({ connected: true });
+    expect(JSON.stringify(result)).not.toContain('4567');
   });
 
   test('returns not connected for expired session', () => {

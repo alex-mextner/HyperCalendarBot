@@ -12,6 +12,7 @@ import { createAddEventScene } from './add-event.scene.ts';
 import { wrapWithChatId } from './chat-scoped-storage.ts';
 import type { ConnectTelegramConfig } from './connect-telegram.scene.ts';
 import { createConnectTelegramScene } from './connect-telegram.scene.ts';
+import { createConnectWizardTraces, trackConnectWizard } from './connect-wizard-trace.ts';
 import { createEditValueScene } from './edit-value.scene.ts';
 import { createImportScene } from './import.scene.ts';
 import { createOnboardingScene } from './onboarding.scene.ts';
@@ -32,12 +33,13 @@ interface ConnectTelegramSceneDeps {
 }
 
 /**
- * Build the SQLite-backed, chat-scoped scene storage.
+ * Build the SQLite-backed, chat-scoped scene storage. Every write and delete of a scene row also
+ * updates that chat's connect-wizard trace (see connect-wizard-trace.ts).
  * Split out so that msgDeps can reference it BEFORE scenes are constructed —
  * the scene plugin is built last, once the closures it receives exist, avoiding late-bound refs.
  */
 export function createScopedSceneStorage(db: DatabaseService): ReturnType<typeof createSceneStorage> {
-  const storage = createSceneStorage(db.db);
+  const storage = trackConnectWizard(createSceneStorage(db.db), createConnectWizardTraces(db.db));
   // Cast satisfies GramIO's generic Storage<Data> structural contract:
   // wrapWithChatId returns a plain string-keyed interface that is a superset at runtime.
   return wrapWithChatId(storage) as ReturnType<typeof createSceneStorage>;

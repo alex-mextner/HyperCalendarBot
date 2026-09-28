@@ -214,23 +214,43 @@ password (typed at the wrong prompt, or as a sentence), so the scene keeps none 
 
 ### Wizard input stays out of logs and the AI
 
-While the `connect-telegram` scene is open, the chat-logging middleware
-(`src/bot/middleware/chat-logging.ts`) stores every typed or edited text as
+Every update first passes the connect-wizard guard (`src/bot/middleware/connect-wizard-guard.ts`),
+registered before the rate limiter, chat logging and the scene command escape. While the
+`connect-telegram` scene is open, the guard takes every text typed in that chat for wizard input,
+and chat logging (`src/bot/middleware/chat-logging.ts`) stores it — and every edited text — as
 `[redacted: connect wizard input]`: the phone number, the login code and the 2FA password never
 reach `chat_history`, so they are never in the AI history, the AI debug logs (`logs/chats/`) or
 `get_history`. Slash-prefixed text is redacted the same way and gets no `user_action_log` row
-(a password may start with `/`); the middleware runs before the scene command escape so it
-still sees the open wizard. The command escape then treats that text as wizard input, not a
-command: it deletes the message, ends the wizard like the cancel button (stops the live MTProto
-auth process and removes its temp session file), replies with the same fixed "Авторизация
-отменена." and stops, so no command handler, feature-usage record or AI turn sees it. Bot
-replies inside the wizard are logged as usual — they echo only the masked phone.
+(a password may start with `/`). The command escape then treats that text as wizard input, not a
+command: it ends the wizard like the cancel button (stops the live MTProto auth process and
+removes its temp session file), replies with the same fixed "Авторизация отменена." and stops, so
+no command handler, feature-usage record or AI turn sees it. Bot replies inside the wizard are
+logged as usual — they echo only the masked phone. If the scene store cannot be read, the text is
+logged as the marker and otherwise handled as usual.
 
-The scene deletes every text the user types in it — at the consent screen and at the phone,
-code and 2FA prompts — once it has read it, so that message cannot be edited later: an edit
-arriving after the wizard closed would be logged verbatim. A failed deletion is logged without
-the message text and does not stop the flow; the edit of such a message after the wizard closed
-is still logged verbatim (GH-630).
+The guard deletes every text typed at the consent screen and at the phone, code and 2FA prompts,
+before the rate limiter can drop it, so the message cannot be edited later. It also records the
+message ids (never the text) in a per-chat trace, `src/bot/scenes/connect-wizard-trace.ts`,
+kept beside the scene rows in `gramio_scenes` for 30 days after the wizard's last activity; ids
+stay at least 48 hours. An edit of a recorded message is logged only as the marker even after the
+wizard closed — the case where Telegram refused the deletion (GH-630). A failed deletion is logged
+without the message text and does not stop the flow.
+
+The trace also covers text that no longer finds the wizard's scene row (GH-639):
+
+- **Sent before the wizard closed, handled after.** Webhook deliveries run concurrently, so a
+  password can be handled after a `/cancel` or the cancel button sent later. The trace keeps the
+  highest update id handled while the wizard was open; a text whose update id is not above it (and
+  arrives within 5 minutes of it) was sent into the wizard: it is deleted and goes nowhere, with
+  no reply. Text that the guard saw in the open wizard but whose wizard a concurrent update closed
+  before the scene read it is stopped right after the scenes plugin.
+- **Typed after an idle wizard expired.** The scene store drops a wizard idle for 30 minutes; the
+  trace, updated on every write and delete of the scene row, still says it is open. The first text
+  after that, when the wizard was at the phone, code or 2FA prompt, is deleted, never logged or
+  handed to the AI, and answered with "Время на подключение Telegram вышло. Сообщение удалено —
+  вдруг там был код или пароль. Начни заново: /connect_telegram". The wizard then counts as
+  closed: the next message is ordinary. A wizard that expired at the consent screen or after the
+  connection holds nothing back. The trace is in SQLite, so this survives a restart.
 
 ---
 
@@ -467,9 +487,9 @@ Tool for AI agent to check if user has a connected session:
 }
 ```
 
-Returns: `{ connected: false } | { connected: true, phone_masked: string, status: string }` —
-`phone_masked` is the `+7 ••• 4567` format computed from `encrypted_phone`. No `phone_last4` field
-is exposed (it was in an earlier draft that stored `phone_last4` as a plain column).
+Returns: `{ connected: false, dismissed_recently: boolean } | { connected: true }` — connected
+yes/no only. The result lands in chat history and every AI debug log, so it carries no part of
+the phone number, not even the masked one.
 
 Used by AI agent to provide contextual help when the user creates an event with
 participants who haven't started the bot. See Section 10.1.

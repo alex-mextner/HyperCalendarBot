@@ -39,7 +39,6 @@ type UpdateMock = ReturnType<typeof mock<(patch: Partial<SceneState>, opts?: unk
 interface MockCtx {
   send: SendMock;
   answer: ReturnType<typeof mock<() => Promise<void>>>;
-  delete: ReturnType<typeof mock<() => Promise<true>>>;
   lang: 'en' | 'ru';
   text?: string;
   data?: string;
@@ -71,7 +70,6 @@ function makeCtx(overrides: {
     _activeType: activeType,
     send: mock(() => Promise.resolve({ id: 1 })),
     answer: mock(() => Promise.resolve()),
-    delete: mock(() => Promise.resolve(true as const)),
     lang: overrides.lang ?? 'ru',
     text: overrides.text,
     data: overrides.data,
@@ -184,7 +182,7 @@ describe('connect-telegram: Cancel authorization button', () => {
     'what is on today?',
     '1 2 3 4',
     'Code: 12345',
-  ])('code step: %p is not a code — invalidCode with the cancel button, and the message leaves the chat', async (typed) => {
+  ])('code step: %p is not a code — invalidCode with the cancel button', async (typed) => {
     const scene = makeScene();
     const otpStep = getStepFns(scene)[2]!;
 
@@ -196,8 +194,6 @@ describe('connect-telegram: Cancel authorization button', () => {
 
     await otpStep(ctx, NOOP_NEXT);
 
-    // Anything typed at this prompt may be the login code or the 2FA password.
-    expect(ctx.delete).toHaveBeenCalledTimes(1);
     expect(ctx.send).toHaveBeenCalledTimes(1);
     const [text, opts] = ctx.send.mock.calls[0] as unknown as [string, { reply_markup?: unknown }];
     expect(text).toBe('Неверный код. Введи 5 цифр через пробелы или дефисы (напр. 1 2 3 4 5 или 123-45).');
@@ -289,7 +285,7 @@ describe('connect-telegram: Cancel authorization button', () => {
   test.each([
     'что у меня по работе',
     '12345',
-  ])('phone step: %p is not a phone number — invalidPhone with the cancel button, and the message leaves the chat', async (typed) => {
+  ])('phone step: %p is not a phone number — invalidPhone with the cancel button', async (typed) => {
     const scene = makeScene();
     const phoneStep = getStepFns(scene)[1]!;
 
@@ -297,7 +293,6 @@ describe('connect-telegram: Cancel authorization button', () => {
 
     await phoneStep(ctx, NOOP_NEXT);
 
-    expect(ctx.delete).toHaveBeenCalledTimes(1);
     expect(ctx.send).toHaveBeenCalledTimes(1);
     const [text, opts] = ctx.send.mock.calls[0] as unknown as [string, { reply_markup?: unknown }];
     expect(text).toBe('Неверный формат. Используй международный формат: +79001234567');
