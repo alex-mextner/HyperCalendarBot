@@ -313,23 +313,30 @@ export class SyncService {
     if (notify) await notify();
   }
 
+  /**
+   * `knownCopy` is the Google copy captured when the delete was queued: the event delete removes
+   * the participant_google_sync row before the worker runs, so the row alone cannot be trusted.
+   */
   async pushParticipantEvent(
     api: GoogleCalendarApi,
     participantUserId: number,
     eventId: number,
     action: 'create' | 'update' | 'delete',
     participantSyncRepoOverride?: ParticipantGoogleSyncRepository,
+    knownCopy?: { googleEventId?: string; calendarId?: string | null },
   ): Promise<void> {
     const participantSyncRepo = participantSyncRepoOverride ?? this.participantSyncRepo;
     if (!participantSyncRepo) throw new Error('participantSyncRepo required for pushParticipantEvent');
     if (action === 'delete') {
       const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
-      if (!syncRecord?.google_event_id) {
+      const googleEventId = syncRecord?.google_event_id ?? knownCopy?.googleEventId;
+      if (!googleEventId) {
         participantSyncRepo.delete(participantUserId, eventId);
         return;
       }
+      const calendarId = syncRecord?.google_calendar_id ?? knownCopy?.calendarId ?? 'primary';
       try {
-        await api.deleteEvent(syncRecord.google_calendar_id, syncRecord.google_event_id);
+        await api.deleteEvent(calendarId, googleEventId);
       } catch (err) {
         const code = (err as { code?: number }).code;
         if (code !== 404 && code !== 410) throw err;
@@ -338,7 +345,7 @@ export class SyncService {
       this.syncRepo.logSync({
         user_id: participantUserId,
         event_id: eventId,
-        google_event_id: syncRecord.google_event_id,
+        google_event_id: googleEventId,
         direction: 'push',
         action: 'delete',
         details: 'participant_sync',

@@ -204,7 +204,7 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
         }
         case 'push-participant-event': {
           if (!eventId || !action) throw new Error('eventId and action required for push-participant-event');
-          await syncService.pushParticipantEvent(api, userId, eventId, action);
+          await syncService.pushParticipantEvent(api, userId, eventId, action, undefined, job.data);
           break;
         }
         case 'refresh-calendars': {
