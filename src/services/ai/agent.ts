@@ -266,7 +266,8 @@ function regroupToolCallBlocks(messages: MessageParam[]): MessageParam[] {
     }
     if (pendingIds.size > 0 || interleaved.length === 0) continue;
     ordered.splice(i + 1, j - i - 1, ...results, ...interleaved);
-    // Continue at the first moved row: it may itself be another call block.
+    // Resume at the first interleaved row, which may itself be another call
+    // block; the moved results before it are tool messages, never call blocks.
     i += results.length;
   }
   return ordered;
@@ -718,8 +719,9 @@ export class CalendarBotAgent {
     // chat_history — the newest stored turn is the bot's own "one sec". Without
     // this the model is asked to continue from its own stall phrase and has no
     // idea which question it still owes an answer to.
+    // The check reads the newest saved row, before regrouping moved anything to the end.
     if ((ctx.retryAttempt ?? 0) > 0 && ctx.messageText.trim().length > 0) {
-      const last = ordered[ordered.length - 1];
+      const last = messages[messages.length - 1];
       const alreadyAsked =
         last?.role === 'user' && typeof last.content === 'string' && last.content.includes(ctx.messageText);
       if (!alreadyAsked) {

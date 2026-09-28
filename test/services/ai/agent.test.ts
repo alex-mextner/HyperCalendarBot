@@ -342,6 +342,46 @@ describe('CalendarBotAgent', () => {
         'user:last',
       ]);
     });
+
+    test('regroups a multi-call block whose results are split and then the call block it moved', async () => {
+      ctx.chatHistory.save(USER_ID, 'user', 'first', GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(calls(['call_x', 'call_y'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(results(['call_x'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'assistant', JSON.stringify(calls(['call_z'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'user', 'between', GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(results(['call_y'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'tool', JSON.stringify(results(['call_z'])), GROUP_CHAT_ID);
+
+      const messages = await buildGroupMessages();
+
+      expect(shape(messages).slice(1)).toEqual([
+        'call:call_x,call_y',
+        'tool:call_x',
+        'tool:call_y',
+        'call:call_z',
+        'tool:call_z',
+        `user:[From: Member (id:${OTHER_MEMBER_ID})] between`,
+      ]);
+    });
+
+    test('a retry re-asks its question even when a moved row repeats that question', async () => {
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText, GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(calls(['call_x'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'user', ctx.messageText, GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(results(['call_x'])), GROUP_CHAT_ID);
+      ctx.retryAttempt = 1;
+
+      const messages = await buildGroupMessages();
+
+      // The newest saved row is the tool result, not the other member's question,
+      // so the retried question still goes last.
+      expect(shape(messages).slice(1)).toEqual([
+        'call:call_x',
+        'tool:call_x',
+        `user:[From: Member (id:${OTHER_MEMBER_ID})] ${ctx.messageText}`,
+        `user:${ctx.messageText}`,
+      ]);
+    });
   });
 
   test('buildMessages drops legacy Anthropic tool_result rows that cannot be mapped', async () => {
