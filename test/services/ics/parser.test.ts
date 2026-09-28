@@ -70,3 +70,87 @@ END:VCALENDAR`;
     expect(events[0]!.start_at).toBe('2026-03-12T15:00:00Z');
   });
 });
+
+describe('recurrence lines (spec §8 — EXDATE/RDATE honored, unsupported explicitly rejected)', () => {
+  test('reads EXDATE and RDATE lines into the canonical recurrence_rule block', () => {
+    // recurrence-ics-roundtrip-002
+    const ics = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTART:20260106T100000Z
+SUMMARY:Weekly sync
+RRULE:FREQ=WEEKLY;COUNT=6
+EXDATE:20260113T100000Z
+RDATE:20260301T100000Z
+END:VEVENT
+END:VCALENDAR`;
+    const events = parseIcs(ics);
+    expect(events.length).toBe(1);
+    expect(events[0]!.recurrence_rule).toBe(
+      'RRULE:FREQ=WEEKLY;COUNT=6\nEXDATE:20260113T100000Z\nRDATE:20260301T100000Z',
+    );
+    expect(events[0]!.recurrenceUnsupportedReason).toBeUndefined();
+  });
+
+  test('rejects multiple RRULE lines instead of silently keeping the first one', () => {
+    const ics = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTART:20260101T100000Z
+SUMMARY:Bad series
+RRULE:FREQ=WEEKLY;COUNT=6
+RRULE:FREQ=DAILY;COUNT=3
+END:VEVENT
+END:VCALENDAR`;
+    const events = parseIcs(ics);
+    expect(events.length).toBe(1);
+    expect(events[0]!.recurrence_rule).toBeUndefined();
+    expect(events[0]!.recurrenceUnsupportedReason).toBe('multi_rrule_unsupported');
+  });
+
+  test('rejects EXRULE instead of applying it', () => {
+    const ics = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTART:20260101T100000Z
+SUMMARY:Legacy series
+RRULE:FREQ=WEEKLY;COUNT=6
+EXRULE:FREQ=WEEKLY;COUNT=2
+END:VEVENT
+END:VCALENDAR`;
+    const events = parseIcs(ics);
+    expect(events.length).toBe(1);
+    expect(events[0]!.recurrence_rule).toBeUndefined();
+    expect(events[0]!.recurrenceUnsupportedReason).toBe('exrule_unsupported');
+  });
+
+  test('rejects an EXDATE value type mismatched with a date-time DTSTART', () => {
+    // recurrence-ics-roundtrip-003
+    const ics = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTART:20260101T100000Z
+SUMMARY:Mismatched series
+RRULE:FREQ=WEEKLY;COUNT=6
+EXDATE:20260108
+END:VEVENT
+END:VCALENDAR`;
+    const events = parseIcs(ics);
+    expect(events.length).toBe(1);
+    expect(events[0]!.recurrence_rule).toBeUndefined();
+    expect(events[0]!.recurrenceUnsupportedReason).toBe('value_type_mismatch');
+  });
+
+  test('a locally-created bare rule still round-trips (single RRULE line, no exceptions)', () => {
+    const ics = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTART:20260101T100000Z
+SUMMARY:Simple series
+RRULE:FREQ=DAILY
+END:VEVENT
+END:VCALENDAR`;
+    const events = parseIcs(ics);
+    expect(events[0]!.recurrence_rule).toBe('RRULE:FREQ=DAILY');
+  });
+});

@@ -218,7 +218,11 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   };
 
   const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
-  const syncMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
+  const syncMaterializer = new ReminderMaterializer(
+    db.eventReminders,
+    db.notificationPreferences,
+    config.RECURRENCE_LEGACY_ENGINE,
+  );
 
   const sendSyncNotification = (telegramId: number, text: string) =>
     botRef
@@ -478,10 +482,15 @@ if (config.REDIS_URL && serviceSessionEnabled && !config.DISABLE_VOICE) {
     const voiceAgent = new CalendarBotAgent({ debugLogger: aiDebugLogger, summarizer: historySummarizer }, voiceSender);
     voiceAgentRef = voiceAgent;
 
-    const voiceMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
+    const voiceMaterializer = new ReminderMaterializer(
+      db.eventReminders,
+      db.notificationPreferences,
+      config.RECURRENCE_LEGACY_ENGINE,
+    );
     const voiceEventService = new EventService({
       eventRepo: db.events,
       materializer: voiceMaterializer,
+      legacyRecurrenceEngine: config.RECURRENCE_LEGACY_ENGINE,
     });
     const voiceHolidayService = new HolidayService(db.holidays);
 
@@ -597,6 +606,7 @@ if (config.REDIS_URL) {
 
   const notifEventService = new EventService({
     eventRepo: db.events,
+    legacyRecurrenceEngine: config.RECURRENCE_LEGACY_ENGINE,
   });
 
   const scheduler = new NotificationScheduler({
@@ -663,7 +673,11 @@ if (config.REDIS_URL) {
   const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
   const { processSessionKeepalive } = await import('./worker/session-keepalive.ts');
 
-  const cronMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
+  const cronMaterializer = new ReminderMaterializer(
+    db.eventReminders,
+    db.notificationPreferences,
+    config.RECURRENCE_LEGACY_ENGINE,
+  );
   const cronBirthdayService = new BirthdayService(
     db.events,
     db.birthdayMeta,

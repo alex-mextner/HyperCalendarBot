@@ -622,7 +622,7 @@ export class EventRepository {
     const otherLines = lines.filter((_, i) => i !== (rruleIdx >= 0 ? rruleIdx : 0));
     const baseRule = rruleLine
       .split(';')
-      .filter((p) => !p.startsWith('UNTIL='))
+      .filter((p) => !p.startsWith('UNTIL=') && !p.startsWith('COUNT='))
       .join(';');
     const newRruleLine = `${baseRule};UNTIL=${untilStr}`;
     const newRule = [newRruleLine, ...otherLines].join('\n');
