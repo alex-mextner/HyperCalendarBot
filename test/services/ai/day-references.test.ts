@@ -99,6 +99,8 @@ describe('what cannot be pinned imposes no constraint', () => {
     'через неделю в среду',
     'после среды',
     'второй вторник октября',
+    'ко второму вторнику подготовить отчёт',
+    'к пятому четвергу месяца',
     'в октябре во вторник',
   ])('%s', (text) => {
     expect(readDayContent(text, SUNDAY_NIGHT, TZ).kind).toBe('open');

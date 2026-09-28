@@ -110,8 +110,9 @@ const PAST_MARKER = /^(?:прошл|прошедш)|^(?:был|была|было
 const THIS_MARKER = /^(?:этот|эту|этой|this)$/;
 /** Words that make the day unpinnable: recurrence, offsets, "after", ordinals handled separately. */
 const OPEN_WORD = /^(?:кажд|ежедневн|еженедел|позапрошл)|^(?:через|после|every|each|daily|weekly|after)$/;
+// "втор…" and "пят…" need their ordinal endings: the bare stems also start "вторник" and "пятница".
 const ORDINAL_WORD =
-  /^(?:перв|втор(?:ой|ую|ое)$|трет|четв[её]рт|пят(?:ый|ую|ое)$|последн)|^(?:first|second|third|fourth|fifth)$/;
+  /^(?:перв|втор(?:ой|ая|ую|ое|ого|ому|ым|ом|ые|ых)$|трет|четв[её]рт|пят(?:ый|ая|ую|ое|ого|ому|ым|ом|ые|ых)$|последн)|^(?:first|second|third|fourth|fifth)$/;
 /** Words that talk about days without naming one; they open the message only when nothing is named. */
 const PERIOD_WORD = /^(?:недел|выходн|будн|месяц|week|weekend|weekday|month|year)/;
 const UNTIL_WORDS = new Set(['до', 'к', 'ко', 'by', 'until', 'till', 'before']);
