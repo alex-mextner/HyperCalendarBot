@@ -197,6 +197,7 @@ interface ExplicitDates {
 /** A day number next to a month word, in either order, with an optional year. */
 const DAY_MONTH = /(?<![\p{L}\d])(\d{1,2})(?:-?го|-?е|st|nd|rd|th)?\s+(?:of\s+)?(\p{L}+)\.?(?:,?\s+(\d{4}))?/gu;
 const MONTH_DAY = /(?<![\p{L}\d])(\p{L}+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?(?![\p{L}\d])/gu;
+const CLOCK_PREPOSITION = /(?<![\p{L}])в\s+$/u;
 
 function explicitDates(text: string, today: string): ExplicitDates {
   const year = Number(today.slice(0, 4));
@@ -213,7 +214,10 @@ function explicitDates(text: string, today: string): ExplicitDates {
     [MONTH_DAY, (m) => addDay(m[3] ? Number(m[3]) : null, monthIndex(m[1]!) + 1, Number(m[2]))],
     [
       /(?<![\d.:])(\d{1,2})\.(\d{1,2})(?:\.(\d{4}|\d{2}))?(?![\d:])/g,
-      (m) => addDay(m[3] === undefined ? null : Number(m[3].padStart(4, '20')), Number(m[2]), Number(m[1])),
+      // "в 12.05" is a clock time; a dotted date after "в" carries its year.
+      (m) =>
+        !(m[3] === undefined && CLOCK_PREPOSITION.test(text.slice(0, m.index))) &&
+        addDay(m[3] === undefined ? null : Number(m[3].padStart(4, '20')), Number(m[2]), Number(m[1])),
     ],
     [
       /(?<![\p{L}\d])(\d{1,2})(?:-?го|\s+числа)(?![\p{L}])/gu,
@@ -628,28 +632,47 @@ export function describeWeekdayDateMismatches(mismatches: WeekdayDateMismatch[])
     .join('; ');
 }
 
-/** "18:30", "18.30", "12-30", "в 8", "в 7 вечера" — clock times as users type them. */
+/** "18:30", "18.30", "12-30" — clock times as users type them. */
 const CLOCK_TIMES = /(?<![\d.:-])([01]?\d|2[0-3])[:.-]([0-5]\d)(?![\d.:-])/g;
+/** "в 8", "в 7 вечера": an hour after "в", with an optional part of the day; "в 18.30" is a clock time. */
 const BARE_HOUR =
-  /(?:^|[^\p{L}\d])в\s+([01]?\d|2[0-3])(?:\s*(утра|дня|вечера|ночи|час[аов]*|ч)(?!\p{L}))?(?=$|[\s,.;!?)])/gu;
+  /(?<![\p{L}\d])в\s+([01]?\d|2[0-3])(?:\s*(утра|дня|вечера|ночи|час[аов]*|ч)(?!\p{L}))?(?=$|[\s,;!?)]|\.(?!\d))/gu;
+/** "раз в 3 дня", "в 2 раза": a count, not a clock time. */
+const COUNT_BEFORE = /(?<![\p{L}])раз\s*$/u;
+const COUNT_AFTER = /^\s*раза?(?![\p{L}])/u;
+
+/** The hour an hour word means, or null for midnight: "в 12 ночи" is the start of tomorrow. */
+function clockHour(hour: number, part: string | undefined): number | null {
+  if (part === 'вечера' || (part === 'ночи' && hour >= 6)) {
+    if (hour === 12) return null;
+    return hour < 12 ? hour + 12 : hour;
+  }
+  return part === 'дня' && hour < 12 ? hour + 12 : hour;
+}
 
 /**
  * A message that states clock times but no day at all ("18:30 помочь Соне с кошкой")
  * means today — as long as every time it names is still ahead today. On 2026-09-16 at
  * 11:06 such a message was filed for the next day. When a time has already passed the
- * create tool's PAST_EVENT flow asks the user, so no constraint is imposed.
+ * create tool's PAST_EVENT flow asks the user, so no constraint is imposed; nor for
+ * midnight or a time in another zone, which may be tomorrow here.
  */
 export function timeOnlyToday(text: string, now: Date, timezone: string): DayReferenceSet | null {
   if (readDayContent(text, now, timezone).kind !== 'none') return null;
   const normalized = text.toLowerCase();
+  if (FOREIGN_ZONE.test(text) || tokens(normalized).some((token) => ZONE_ABBREVIATION.test(token.word))) return null;
   const minutes: { phrase: string; at: number }[] = [];
   for (const match of normalized.matchAll(CLOCK_TIMES)) {
     minutes.push({ phrase: match[0], at: Number(match[1]) * 60 + Number(match[2]) });
   }
   for (const match of normalized.matchAll(BARE_HOUR)) {
-    const hour = Number(match[1]);
-    const afternoon = (match[2] === 'дня' || match[2] === 'вечера') && hour < 12;
-    minutes.push({ phrase: match[0].trim(), at: (afternoon ? hour + 12 : hour) * 60 });
+    const start = match.index ?? 0;
+    const before = normalized.slice(0, start);
+    const after = normalized.slice(start + match[0].length);
+    if (COUNT_BEFORE.test(before) || COUNT_AFTER.test(after)) continue;
+    const hour = clockHour(Number(match[1]), match[2]);
+    if (hour === null) return null;
+    minutes.push({ phrase: match[0], at: hour * 60 });
   }
   if (minutes.length === 0) return null;
   const local = new TZDate(now.getTime(), timezone);

@@ -102,6 +102,34 @@ describe('a message with only a clock time', () => {
     expect(timeOnlyToday('в 7 утра пробежка', WEDNESDAY_MORNING, TZ)).toBeNull();
   });
 
+  test('a dotted time is one time, read as a time even when its minutes could be a month', () => {
+    // 18:10 local: "в 18.30" is still ahead, and "в 12.05" at 11:06 is 12:05, not 12 May.
+    const sixTen = new Date('2026-09-16T16:10:00Z');
+    expect(timeOnlyToday('в 18.30 ужин', sixTen, TZ)?.allowedDates).toEqual(new Set(['2026-09-16']));
+    expect(timeOnlyToday('в 12.05 английский', WEDNESDAY_MORNING, TZ)?.allowedDates).toEqual(new Set(['2026-09-16']));
+  });
+
+  test('evening and night hours: "в 11 ночи" is 23:00 today, midnight is not today', () => {
+    expect(timeOnlyToday('в 11 ночи созвон', WEDNESDAY_MORNING, TZ)?.allowedDates).toEqual(new Set(['2026-09-16']));
+    const eight = new Date('2026-09-16T06:00:00Z');
+    expect(timeOnlyToday('напомни в 12 ночи', eight, TZ)).toBeNull();
+    expect(timeOnlyToday('в 12 вечера фильм', eight, TZ)).toBeNull();
+  });
+
+  test('counts and other zones are no clock time for today', () => {
+    expect(timeOnlyToday('поливай цветы раз в 3 дня', WEDNESDAY_MORNING, TZ)).toBeNull();
+    const halfPastMidnight = new Date('2026-09-15T22:30:00Z');
+    expect(timeOnlyToday('в 2 раза больше воды', halfPastMidnight, TZ)).toBeNull();
+    const eight = new Date('2026-09-16T18:00:00Z');
+    expect(timeOnlyToday('созвон в 23:30 по Токио', eight, TZ)).toBeNull();
+    expect(timeOnlyToday('созвон в 23:30 мск', eight, TZ)).toBeNull();
+  });
+
+  test('the phrase quoted back to the model is the time itself', () => {
+    const set = timeOnlyToday('ужин.в 7 вечера', WEDNESDAY_MORNING, TZ);
+    expect(set?.references.map((reference) => reference.phrase)).toEqual(['в 7 вечера']);
+  });
+
   test('a message with its own day word follows that day, not this rule', () => {
     const set = timeOnlyToday('завтра 18:30 кошка', WEDNESDAY_MORNING, TZ);
     expect(set).toBeNull();
