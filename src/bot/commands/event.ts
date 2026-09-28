@@ -13,6 +13,7 @@ import type { EventService } from '../../services/event/event-service.ts';
 import { getDayRangeUtc } from '../../utils/date.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
+import { sendAgendaText } from './agenda-text.ts';
 
 const NUMERIC_ID_RE = /^\d+$/;
 
@@ -37,7 +38,7 @@ async function sendOccurrenceResult(
     return;
   }
   const card = buildCanonicalEventCard(decision.event, timezone, lang, decision.occurrenceDate);
-  await ctx.send(card.text, { parse_mode: 'HTML', reply_markup: card.keyboard });
+  await sendAgendaText(ctx, card.text, { reply_markup: card.keyboard });
 }
 
 export async function handleEvent(
@@ -68,7 +69,7 @@ export async function handleEvent(
     }
     const displayEvent = enrichAgendaEvents([event], viewer, eventService.agendaRepository)[0]!;
     const card = buildCanonicalEventCard(displayEvent, timezone, lang);
-    await ctx.send(card.text, { parse_mode: 'HTML', reply_markup: card.keyboard });
+    await sendAgendaText(ctx, card.text, { reply_markup: card.keyboard });
     return;
   }
 

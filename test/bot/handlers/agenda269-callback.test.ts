@@ -344,3 +344,107 @@ for (const prefix of [CB.IMG_DAILY, CB.IMG_WEEKLY]) {
     expect(errors.length).toBeGreaterThan(0);
   });
 }
+
+test('view rejects a fabricated occurrence timestamp instead of rendering an invented instance', async () => {
+  const { handler, ctx, service, bot } = setup('', 1, 'private');
+  const template = service.createEvent({
+    user_id: 1,
+    title: 'Weekly Standup',
+    start_at: '2099-06-01T12:00:00Z', // a Monday
+    end_at: '2099-06-01T12:30:00Z',
+    timezone: 'UTC',
+    recurrence_rule: 'FREQ=WEEKLY',
+  });
+  // Two days off the real weekly cadence — never a real occurrence.
+  Object.defineProperty(ctx, 'data', { value: `${CB.EVENT_VIEW}:${template.id}:2099-06-03T12:00:00Z` });
+  const answers: unknown[] = [];
+  bot.api.answerCallbackQuery = async (params) => {
+    answers.push(params);
+    return true;
+  };
+  const edits: unknown[] = [];
+  bot.api.editMessageText = async (params) => {
+    edits.push(params);
+    return { message_id: 10, date: 0, chat: { id: 1, type: 'private' as const } };
+  };
+  await handler(ctx);
+  expect(edits).toHaveLength(0);
+  expect(JSON.stringify(answers)).toContain('Not found');
+});
+
+test('view resolves a moved recurring exception by its own stable identity, not the template', async () => {
+  const { handler, ctx, service, bot } = setup('', 1, 'private');
+  const template = service.createEvent({
+    user_id: 1,
+    title: 'Weekly Standup',
+    start_at: '2099-06-01T12:00:00Z',
+    end_at: '2099-06-01T12:30:00Z',
+    timezone: 'UTC',
+    recurrence_rule: 'FREQ=WEEKLY',
+  });
+  const exception = service.editOccurrence(template.id, '2099-06-15T12:00:00Z', 1)!;
+  // The organizer pushed this one instance two hours later and renamed it.
+  const moved = service.updateEvent(exception.id, 1, {
+    title: 'Standup (moved)',
+    start_at: '2099-06-15T14:00:00Z',
+    end_at: '2099-06-15T14:30:00Z',
+  })!;
+  Object.defineProperty(ctx, 'data', {
+    value: `${CB.EVENT_VIEW}:${moved.id}:2099-06-15T14:00:00Z`,
+    configurable: true,
+  });
+  const edits: string[] = [];
+  const controls: unknown[] = [];
+  bot.api.editMessageText = async (params) => {
+    edits.push(String(params.text));
+    controls.push(params.reply_markup);
+    return { message_id: 10, date: 0, chat: { id: 1, type: 'private' as const } };
+  };
+  await handler(ctx);
+  expect(edits.join('')).toContain('Standup (moved)');
+  // 14:00 UTC is 07:00 in the viewer's own America/Los_Angeles zone (personal chat, no group) —
+  // the moved time, not the original 12:00 UTC / 05:00 local slot.
+  expect(edits.join('')).toContain('07:00');
+  // Stable identity: the buttons reference the exception's own row, not the template's.
+  expect(JSON.stringify(controls.at(-1))).toContain(`${moved.id}:2099-06-15T14:00:00Z`);
+  // A stale claim of the exception's pre-move slot is rejected, not silently re-rendered.
+  Object.defineProperty(ctx, 'data', {
+    value: `${CB.EVENT_VIEW}:${moved.id}:2099-06-15T12:00:00Z`,
+    configurable: true,
+  });
+  const answers: unknown[] = [];
+  bot.api.answerCallbackQuery = async (params) => {
+    answers.push(params);
+    return true;
+  };
+  const editsBefore = edits.length;
+  await handler(ctx);
+  expect(edits.length).toBe(editsBefore);
+  expect(JSON.stringify(answers)).toContain('Not found');
+});
+
+test('view uses the group timezone, not the actor timezone, when actor and group zones differ', async () => {
+  // setup()'s default user is America/Los_Angeles; its default group -10 is Asia/Tokyo.
+  const { handler, ctx, service, bot } = setup('', -10, 'supergroup');
+  const event = service.createEvent({
+    user_id: 1,
+    owner_type: 'group',
+    group_id: -10,
+    title: 'Group sync',
+    start_at: '2099-06-01T12:00:00Z',
+    end_at: '2099-06-01T12:30:00Z',
+    timezone: 'Asia/Tokyo',
+  });
+  Object.defineProperty(ctx, 'data', { value: `${CB.EVENT_VIEW}:${event.id}` });
+  const edits: string[] = [];
+  bot.api.editMessageText = async (params) => {
+    edits.push(String(params.text));
+    return { message_id: 10, date: 0, chat: { id: -10, type: 'supergroup' as const } };
+  };
+  await handler(ctx);
+  const text = edits.join('');
+  // 2099-06-01T12:00:00Z is 21:00 in Asia/Tokyo (the group's zone), 05:00 in
+  // America/Los_Angeles (the tapping actor's own zone) — only the group's time must appear.
+  expect(text).toContain('21:00');
+  expect(text).not.toContain('05:00');
+});

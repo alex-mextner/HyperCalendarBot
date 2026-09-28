@@ -224,6 +224,119 @@ describe('EventService', () => {
     });
   });
 
+  describe('resolveOccurrenceView', () => {
+    test('rejects a fabricated timestamp that the RRULE never produces', () => {
+      const template = service.createEvent({
+        user_id: USER_ID,
+        title: 'Weekly Standup',
+        start_at: '2026-03-02T10:00:00Z', // Monday
+        end_at: '2026-03-02T10:30:00Z',
+        timezone: TZ,
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+      // Forged: two days off the real weekly slot, never produced by the RRULE.
+      const resolved = service.resolveOccurrenceView(template, '2026-03-04T10:00:00Z');
+      expect(resolved).toBeNull();
+    });
+
+    test('accepts a real, currently-scheduled occurrence and projects start/end', () => {
+      const template = service.createEvent({
+        user_id: USER_ID,
+        title: 'Weekly Standup',
+        start_at: '2026-03-02T10:00:00Z',
+        end_at: '2026-03-02T10:30:00Z',
+        timezone: TZ,
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+      const resolved = service.resolveOccurrenceView(template, '2026-03-16T10:00:00.000Z');
+      expect(resolved).not.toBeNull();
+      expect(resolved!.start_at).toBe('2026-03-16T10:00:00.000Z');
+      expect(resolved!.end_at).toBe('2026-03-16T10:30:00.000Z');
+      expect(resolved!.title).toBe('Weekly Standup');
+    });
+
+    test('rejects a cancelled occurrence', () => {
+      const template = service.createEvent({
+        user_id: USER_ID,
+        title: 'Weekly Standup',
+        start_at: '2026-03-02T10:00:00Z',
+        end_at: '2026-03-02T10:30:00Z',
+        timezone: TZ,
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+      service.cancelOccurrence(template.id, USER_ID, '2026-03-16T10:00:00Z');
+      expect(service.resolveOccurrenceView(template, '2026-03-16T10:00:00Z')).toBeNull();
+    });
+
+    test('a moved exception is reached by its own row, not by the template projecting the new time', () => {
+      const template = service.createEvent({
+        user_id: USER_ID,
+        title: 'Weekly Standup',
+        start_at: '2026-03-02T10:00:00Z',
+        end_at: '2026-03-02T10:30:00Z',
+        timezone: TZ,
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+      const exception = service.editOccurrence(template.id, '2026-03-16T10:00:00Z', USER_ID)!;
+      // Move it: the organizer pushed this one instance two hours later and renamed it.
+      const moved = service.updateEvent(exception.id, USER_ID, {
+        title: 'Standup (moved)',
+        start_at: '2026-03-16T12:00:00Z',
+        end_at: '2026-03-16T12:30:00Z',
+      })!;
+      // Reached directly by its own id: its real, moved time is authoritative.
+      const resolved = service.resolveOccurrenceView(moved, '2026-03-16T12:00:00Z');
+      expect(resolved).not.toBeNull();
+      expect(resolved!.id).toBe(exception.id);
+      expect(resolved!.title).toBe('Standup (moved)');
+      expect(resolved!.start_at).toBe('2026-03-16T12:00:00Z');
+      // A stale/forged claim of the exception's own id at its old (pre-move) time is rejected.
+      expect(service.resolveOccurrenceView(moved, '2026-03-16T10:00:00Z')).toBeNull();
+      // The template's original slot is now covered by the exception, not a raw template
+      // projection: a forged claim on the template id at the original date is rejected too.
+      const templateNow = service.getEvent(template.id, USER_ID)!;
+      expect(service.resolveOccurrenceView(templateNow, '2026-03-16T10:00:00Z')).toBeNull();
+    });
+
+    test('preserves an intentionally null end on a moved exception instead of the template duration', () => {
+      const template = service.createEvent({
+        user_id: USER_ID,
+        title: 'Weekly Standup',
+        start_at: '2026-03-02T10:00:00Z',
+        end_at: '2026-03-02T10:30:00Z',
+        timezone: TZ,
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+      const exception = service.editOccurrence(template.id, '2026-03-16T10:00:00Z', USER_ID)!;
+      const cleared = service.updateEvent(exception.id, USER_ID, { end_at: null })!;
+      const resolved = service.resolveOccurrenceView(cleared, cleared.start_at);
+      expect(resolved).not.toBeNull();
+      expect(resolved!.end_at).toBeNull();
+    });
+
+    test('a one-off event rejects a claimed date that is not its own start', () => {
+      const event = service.createEvent({
+        user_id: USER_ID,
+        title: 'One-off',
+        start_at: '2026-03-02T10:00:00Z',
+        end_at: '2026-03-02T10:30:00Z',
+        timezone: TZ,
+      });
+      expect(service.resolveOccurrenceView(event, '2099-01-01T00:00:00Z')).toBeNull();
+      expect(service.resolveOccurrenceView(event, event.start_at)).toBe(event);
+    });
+
+    test('no occurrenceDate claimed returns the event unchanged', () => {
+      const event = service.createEvent({
+        user_id: USER_ID,
+        title: 'One-off',
+        start_at: '2026-03-02T10:00:00Z',
+        timezone: TZ,
+      });
+      expect(service.resolveOccurrenceView(event, undefined)).toBe(event);
+    });
+  });
+
   describe('group calendar', () => {
     const GROUP_ID = -100999;
 

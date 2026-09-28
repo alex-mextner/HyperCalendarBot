@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
 import type { BotCallbackContext } from '../../../src/bot/types.ts';
+import type { GroupChatRepository } from '../../../src/database/repositories/group-chat.repository.ts';
 import { png } from '../../fixtures/png.ts';
 
 /** Centralized cast per CLAUDE.md's test-factory exception: the partial mock context built by
@@ -31,6 +32,12 @@ function makeEventService(overrides: { [key: string]: unknown } = {}) {
     splitRecurrence: mock(() => null),
     cancelOccurrence: mock(() => undefined),
     deleteFuture: mock(() => undefined),
+    // Passthrough by default: no occurrenceDate claimed → return the event unchanged. Tests that
+    // claim an occurrenceDate must supply their own resolveOccurrenceView to state what the real
+    // occurrence set allows, matching the real EventService's "never trust the callback" contract.
+    resolveOccurrenceView: mock((event: unknown, occurrenceDate?: unknown) =>
+      occurrenceDate === undefined ? event : null,
+    ),
     ...overrides,
   };
 }
@@ -47,6 +54,7 @@ function makeHandler(
     renderService?: unknown;
     invitationService?: unknown;
     eventRepo?: unknown;
+    groupRepo?: unknown;
   } = {},
 ) {
   return createCallbackHandler(
@@ -61,6 +69,7 @@ function makeHandler(
       renderService: overrides.renderService as never,
       invitationService: overrides.invitationService as never,
       eventRepo: overrides.eventRepo as never,
+      groupRepo: overrides.groupRepo as unknown as GroupChatRepository | undefined,
     },
   );
 }
@@ -136,6 +145,16 @@ describe('EVENT_VIEW callback', () => {
   });
 
   test('occurrence-date payload projects the occurrence start/end and uses the occurrence keyboard', async () => {
+    const projected = {
+      id: 42,
+      title: 'Standup',
+      start_at: '2026-03-18T09:00:00Z',
+      end_at: '2026-03-18T09:30:00Z',
+      description: null,
+      location: null,
+      recurrence_rule: 'FREQ=WEEKLY',
+      user_id: 100,
+    };
     const eventService = makeEventService({
       getEvent: mock(() => ({
         id: 42,
@@ -147,16 +166,71 @@ describe('EVENT_VIEW callback', () => {
         recurrence_rule: 'FREQ=WEEKLY',
         user_id: 100,
       })),
+      resolveOccurrenceView: mock(() => projected),
     });
     const ctx = makeCtx('ev:42:2026-03-18T09:00:00Z');
     const handler = makeHandler({ eventService });
     await handler(toCallbackCtx(ctx));
+    expect(eventService.resolveOccurrenceView).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 42 }),
+      '2026-03-18T09:00:00Z',
+    );
     const callArgs = ctx.editText.mock.calls[0] as unknown[];
     // Occurrence date (March 18), not the template's original date (March 11).
     expect(callArgs[0]).toContain('18');
     expect(callArgs[0]).not.toMatch(/\b11\b/);
     const opts = callArgs[1] as { reply_markup: unknown };
     expect(JSON.stringify(opts.reply_markup)).toContain('42:2026-03-18T09:00:00Z');
+  });
+
+  test('a fabricated occurrence date is rejected as not found, never rendered as an invented instance', async () => {
+    const eventService = makeEventService({
+      getEvent: mock(() => ({
+        id: 42,
+        title: 'Standup',
+        start_at: '2026-03-11T09:00:00Z',
+        end_at: '2026-03-11T09:30:00Z',
+        description: null,
+        location: null,
+        recurrence_rule: 'FREQ=WEEKLY',
+        user_id: 100,
+      })),
+      resolveOccurrenceView: mock(() => null),
+    });
+    const ctx = makeCtx('ev:42:2099-01-01T00:00:00Z');
+    const handler = makeHandler({ eventService });
+    await handler(toCallbackCtx(ctx));
+    expect(eventService.resolveOccurrenceView).toHaveBeenCalled();
+    expect(ctx.answer).toHaveBeenCalledWith({ text: 'Not found' });
+    expect(ctx.editText).not.toHaveBeenCalled();
+  });
+
+  test('group chat card uses the group timezone, not the actor timezone', async () => {
+    const eventService = makeEventService({
+      getEvent: mock(() => null),
+      getEventForGroup: mock(() => ({
+        id: 42,
+        title: 'Team sync',
+        start_at: '2026-03-15T12:00:00Z',
+        end_at: '2026-03-15T12:30:00Z',
+        description: null,
+        location: null,
+        recurrence_rule: null,
+        user_id: 999,
+        owner_type: 'group',
+        group_id: -500,
+      })),
+    });
+    const groupRepo = { getTimezone: mock(() => 'Asia/Tokyo') };
+    const ctx = makeCtx('ev:42', 'en', { chat: { type: 'supergroup', id: -500 } });
+    ctx.dbUser.timezone = 'America/Los_Angeles'; // actor timezone differs from the group's
+    const handler = makeHandler({ eventService, groupRepo });
+    await handler(toCallbackCtx(ctx));
+    expect(groupRepo.getTimezone).toHaveBeenCalledWith(-500);
+    const callArgs = ctx.editText.mock.calls[0] as unknown[];
+    // 2026-03-15T12:00:00Z is 21:00 in Asia/Tokyo, 05:00 in America/Los_Angeles.
+    expect(callArgs[0]).toContain('21:00');
+    expect(callArgs[0]).not.toContain('05:00');
   });
 });
 
