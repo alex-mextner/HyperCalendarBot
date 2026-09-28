@@ -68,6 +68,31 @@ describe('a fully specified natural-start message creates the event in one turn,
     // No dialogue session left behind once the draft executes.
     expect(h.db.dialogueSessions.get({ chatId: 42, userId: 42, topicId: 0 })).toBeNull();
   });
+
+  test('a timed event gets a real end time, never left NULL (regression: was hardcoded undefined)', async () => {
+    const h = makeHarness();
+    await h.layer(h.ctx, 'сделай встречу завтра в 14:00');
+    const events = eventsOf(h.db, 42);
+    expect(events[0]?.end_at).not.toBeNull();
+    expect(events[0]?.end_at).toBe('2026-09-30T13:00:00.000Z'); // default 60-minute duration
+  });
+
+  test('a group-triggered draft creates a group event, never silently personal (regression)', async () => {
+    const h = makeHarness();
+    const groupCtx = { ...h.ctx } as unknown as BotCommandContext;
+    const result = await h.layer(groupCtx, 'сделай встречу завтра в 14:00', {
+      groupContext: { isGroup: true, groupChatId: 42 },
+    });
+    expect(result).toEqual({ handled: true });
+    // getVisibleInRange requires group membership setup unrelated to this assertion — read the
+    // raw row to check owner_type/group_id directly.
+    const row = h.db.db.prepare('SELECT owner_type, group_id FROM events WHERE user_id = ?').get(42) as {
+      owner_type: string | null;
+      group_id: number | null;
+    };
+    expect(row.owner_type).toBe('group');
+    expect(row.group_id).toBe(42);
+  });
 });
 
 describe('an incomplete natural-start message asks the next question and persists a session', () => {
@@ -116,7 +141,7 @@ describe('cancel — a plain-text cancel word deletes the session', () => {
 });
 
 describe('a single fuzzy person on a natural-start message blocks the fast path', () => {
-  test('an unconfirmed fuzzy match keeps the session collecting instead of auto-adding the person', async () => {
+  test('an unconfirmed fuzzy match parks the draft on a yes/no question, never auto-adds and never auto-fires (regression)', async () => {
     const h = makeHarness();
     h.db.contacts.add(42, 'Kristina', undefined, 501);
     const result = await h.layer(h.ctx, 'сделай встречу завтра в 14:00 with Kristin');
@@ -124,6 +149,60 @@ describe('a single fuzzy person on a natural-start message blocks the fast path'
     expect(eventsOf(h.db, 42)).toHaveLength(0);
     const session = h.db.dialogueSessions.get({ chatId: 42, userId: 42, topicId: 0 });
     expect(session?.status).toBe('collecting');
+    expect(session?.pendingField).toBe('people');
+    expect(session?.pendingFuzzyPeople).toHaveLength(1);
+    expect(session?.pendingFuzzyPeople[0]?.rawName).toBe('Kristin');
+    // The confirmation question was actually sent — not silently swallowed.
+    expect(h.send).toHaveBeenCalledTimes(1);
+    expect(h.send.mock.calls[0]?.[0]).toContain('Kristina');
+  });
+
+  test('an unrelated next message does NOT resolve the pending confirmation or auto-fire the event (regression: was silently dropped + wrong auto-create)', async () => {
+    const h = makeHarness();
+    h.db.contacts.add(42, 'Kristina', undefined, 501);
+    await h.layer(h.ctx, 'сделай встречу завтра в 14:00 with Kristin');
+    const result = await h.layer(h.ctx, 'какая сегодня погода?');
+    expect(result).toEqual({ handled: true });
+    expect(eventsOf(h.db, 42)).toHaveLength(0);
+    const session = h.db.dialogueSessions.get({ chatId: 42, userId: 42, topicId: 0 });
+    expect(session?.status).toBe('collecting');
+    expect(session?.pendingFuzzyPeople).toHaveLength(1);
+  });
+
+  test('replying "yes" confirms the candidate, adds the participant, and fires the event', async () => {
+    const h = makeHarness();
+    h.db.contacts.add(42, 'Kristina', undefined, 501);
+    await h.layer(h.ctx, 'сделай встречу завтра в 14:00 with Kristin');
+    const result = await h.layer(h.ctx, 'да');
+    expect(result).toEqual({ handled: true });
+    const events = eventsOf(h.db, 42);
+    expect(events).toHaveLength(1);
+    const participants = h.db.participants.getByEvent(events[0]!.id);
+    expect(participants).toHaveLength(1);
+    expect(participants[0]?.user_id).toBe(501);
+    expect(h.db.dialogueSessions.get({ chatId: 42, userId: 42, topicId: 0 })).toBeNull();
+  });
+
+  test('replying "no" declines the candidate and still fires the event without that person', async () => {
+    const h = makeHarness();
+    h.db.contacts.add(42, 'Kristina', undefined, 501);
+    await h.layer(h.ctx, 'сделай встречу завтра в 14:00 with Kristin');
+    const result = await h.layer(h.ctx, 'нет');
+    expect(result).toEqual({ handled: true });
+    const events = eventsOf(h.db, 42);
+    expect(events).toHaveLength(1);
+    expect(h.db.participants.getByEvent(events[0]!.id)).toHaveLength(0);
+  });
+
+  test('an unrecognized reply to the confirmation re-asks locally, never hands off to the AI path', async () => {
+    const h = makeHarness();
+    h.db.contacts.add(42, 'Kristina', undefined, 501);
+    await h.layer(h.ctx, 'сделай встречу завтра в 14:00 with Kristin');
+    const result = await h.layer(h.ctx, 'maybe idk');
+    expect(result).toEqual({ handled: true });
+    expect(eventsOf(h.db, 42)).toHaveLength(0);
+    const session = h.db.dialogueSessions.get({ chatId: 42, userId: 42, topicId: 0 });
+    expect(session?.pendingFuzzyPeople).toHaveLength(1);
   });
 });
 

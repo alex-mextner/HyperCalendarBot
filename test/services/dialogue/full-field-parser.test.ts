@@ -185,4 +185,11 @@ describe('a bare time with no "at"/"в" prefix still resolves via the trailing-s
     expect(result.patch.schedule).toEqual({ kind: 'timed', startAt: '2026-09-30T12:00:00.000Z' });
     expect(result.patch.title).toBe('Meeting');
   });
+
+  test('an unmarked bare time is still found even when a marked place clause is also present', () => {
+    const result = parseFullField('Meeting tomorrow 14:00 at the office', ctx);
+    expect(result.patch.schedule).toEqual({ kind: 'timed', startAt: '2026-09-30T12:00:00.000Z' });
+    expect(result.patch.place).toEqual({ kind: 'manual', label: 'the office' });
+    expect(result.patch.title).toBe('Meeting');
+  });
 });

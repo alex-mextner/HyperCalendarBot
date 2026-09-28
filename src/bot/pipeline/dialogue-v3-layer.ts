@@ -7,7 +7,9 @@
 // closed grammar doesn't recognize, or a continuation turn that resolved nothing — falls
 // through to the existing AI agent exactly once, per the design brief's "unmatched complex
 // input hands off to the existing AI path ONCE; local invalid/ambiguity does not invoke LLM."
-// Entirely inert (never constructed) unless `DIALOGUE_V3_ENABLED` is on — see src/bot/index.ts.
+// The layer object is always constructed when `deps.dialogueV3` is wired (see bot/index.ts);
+// the actual gate is `deps.enabled` (DIALOGUE_V3_ENABLED) — checked first thing below, so a
+// disabled flag is a true no-op regardless of construction.
 
 import { t } from '../../config/constants.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
@@ -21,11 +23,17 @@ import { type CalendarDay, resolveWallInstant } from '../../services/calendar/wa
 import { parseFullField } from '../../services/dialogue/full-field-parser.ts';
 import type { PeopleResolver, PlaceResolver } from '../../services/dialogue/resolvers.ts';
 import { checkReadiness, nextQuestion } from '../../services/dialogue/session-machine.ts';
-import { type DialogueV3Session, type EventCreateDraft, emptyDraft } from '../../services/dialogue/v3-types.ts';
+import {
+  type DialogueV3Session,
+  type EventCreateDraft,
+  emptyDraft,
+  type PendingFuzzyPerson,
+} from '../../services/dialogue/v3-types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import { escapeHtml, splitMessage } from '../../utils/telegram.ts';
 import { eventActionsKeyboard } from '../keyboards.ts';
+import { applyDefaultDuration } from '../scenes/add-event.scene.ts';
 import type { BotCommandContext } from '../types.ts';
 import type { GroupContext, PipelineResult } from './types.ts';
 
@@ -54,6 +62,8 @@ const STARTER_VERBS: ReadonlySet<string> = new Set([
 ]);
 
 const CANCEL_WORDS: ReadonlySet<string> = new Set(['cancel', 'отмена', 'отменить']);
+const YES_WORDS: ReadonlySet<string> = new Set(['yes', 'y', 'да', 'ага']);
+const NO_WORDS: ReadonlySet<string> = new Set(['no', 'n', 'нет']);
 
 function firstWord(text: string): string {
   return text.trim().toLowerCase().split(/\s+/)[0] ?? '';
@@ -68,6 +78,16 @@ function localMidnightInstant(isoDay: string, timezone: string): string {
   return `${isoDay}T00:00:00.000Z`;
 }
 
+/** Group-scoped when the pipeline reports a group chat; personal otherwise — never hardcoded. */
+function draftScope(extra: { groupContext?: GroupContext } | undefined): {
+  scope: 'personal' | 'group';
+  groupId?: number;
+} {
+  return extra?.groupContext?.isGroup && extra.groupContext.groupChatId !== undefined
+    ? { scope: 'group', groupId: extra.groupContext.groupChatId }
+    : { scope: 'personal' };
+}
+
 async function sendQuestion(ctx: BotCommandContext, field: string, lang: 'en' | 'ru'): Promise<void> {
   const prompts: Record<string, { en: string; ru: string }> = {
     title: { en: 'What should I call this event?', ru: 'Как назвать событие?' },
@@ -75,6 +95,21 @@ async function sendQuestion(ctx: BotCommandContext, field: string, lang: 'en' | 
   };
   const prompt = prompts[field];
   await ctx.send(prompt ? prompt[lang] : field);
+}
+
+/** Never auto-adds or drops a fuzzy match — always asks, one candidate at a time (design §23). */
+async function sendFuzzyQuestion(
+  ctx: BotCommandContext,
+  pending: PendingFuzzyPerson,
+  lang: 'en' | 'ru',
+): Promise<void> {
+  const candidate = pending.candidates[0];
+  const name = candidate?.displayName ?? pending.rawName;
+  await ctx.send(
+    lang === 'ru'
+      ? `Ты имел в виду ${name} (для "${pending.rawName}")? Ответь да/нет.`
+      : `Did you mean ${name} for "${pending.rawName}"? Reply yes/no.`,
+  );
 }
 
 async function executeDraft(
@@ -88,7 +123,9 @@ async function executeDraft(
   const startAt =
     draft.schedule.kind === 'timed' ? draft.schedule.startAt : localMidnightInstant(draft.schedule.startDate, timezone);
   const endAt =
-    draft.schedule.kind === 'timed' ? undefined : localMidnightInstant(draft.schedule.endDateExclusive, timezone);
+    draft.schedule.kind === 'timed'
+      ? applyDefaultDuration(draft.schedule.startAt, user.default_event_duration_minutes ?? 60)
+      : localMidnightInstant(draft.schedule.endDateExclusive, timezone);
 
   const event = deps.eventService.createEvent({
     user_id: user.telegram_id,
@@ -138,6 +175,95 @@ function mergeDraft(base: EventCreateDraft, patch: Partial<EventCreateDraft>): E
   };
 }
 
+/**
+ * Shared "what happens with this draft next" step for both the starter-verb turn and every
+ * continuation turn: a fresh fuzzy-person match is NEVER auto-added or dropped — it always
+ * parks the session on a yes/no confirmation before anything else, even when title+schedule
+ * are already otherwise complete. Only once there is nothing left pending does readiness get
+ * to decide execute-vs-ask.
+ */
+async function advance(
+  ctx: BotCommandContext,
+  user: User,
+  draft: EventCreateDraft,
+  newFuzzyPeople: readonly PendingFuzzyPerson[],
+  base: Omit<DialogueV3Session, 'draft' | 'pendingField' | 'pendingFuzzyPeople' | 'updatedAt'>,
+  key: DialogueSessionKey,
+  timezone: string,
+  deps: DialogueV3LayerDeps,
+): Promise<PipelineResult> {
+  if (newFuzzyPeople.length > 0) {
+    const [pending] = newFuzzyPeople;
+    const session: DialogueV3Session = {
+      ...base,
+      draft,
+      pendingField: 'people',
+      pendingFuzzyPeople: newFuzzyPeople,
+      updatedAt: Date.now(),
+    };
+    deps.dialogueSessions.set(key, session);
+    await sendFuzzyQuestion(ctx, pending!, ctx.lang);
+    return { handled: true };
+  }
+  const readiness = checkReadiness(draft, []);
+  if (readiness.ready) {
+    deps.dialogueSessions.delete(key);
+    await executeDraft(ctx, user, draft, timezone, deps);
+    return { handled: true };
+  }
+  const question = nextQuestion(draft);
+  const session: DialogueV3Session = {
+    ...base,
+    draft,
+    pendingField: question?.field ?? null,
+    pendingFuzzyPeople: [],
+    updatedAt: Date.now(),
+  };
+  deps.dialogueSessions.set(key, session);
+  if (question) await sendQuestion(ctx, question.field, ctx.lang);
+  return { handled: true };
+}
+
+/** Resolves one pending fuzzy-person yes/no reply; unrecognized replies re-ask locally, never hand off. */
+async function continueFuzzyConfirmation(
+  ctx: BotCommandContext,
+  user: User,
+  existing: DialogueV3Session,
+  messageText: string,
+  key: DialogueSessionKey,
+  timezone: string,
+  deps: DialogueV3LayerDeps,
+): Promise<PipelineResult> {
+  const [pending, ...rest] = existing.pendingFuzzyPeople;
+  if (!pending) return advance(ctx, user, existing.draft, [], existing, key, timezone, deps);
+
+  const answer = messageText.trim().toLowerCase();
+  if (YES_WORDS.has(answer)) {
+    const candidate = pending.candidates[0];
+    const draft: EventCreateDraft = candidate
+      ? {
+          ...existing.draft,
+          people: [
+            ...existing.draft.people,
+            {
+              contactId: candidate.contactId,
+              telegramId: candidate.telegramId,
+              displayName: candidate.displayName,
+              confirmed: true,
+            },
+          ],
+        }
+      : existing.draft;
+    return advance(ctx, user, draft, rest, existing, key, timezone, deps);
+  }
+  if (NO_WORDS.has(answer)) {
+    return advance(ctx, user, existing.draft, rest, existing, key, timezone, deps);
+  }
+  // Local ambiguity on a KNOWN field stays local — never a reason to hand off to the AI path.
+  await sendFuzzyQuestion(ctx, pending, ctx.lang);
+  return { handled: true };
+}
+
 export function createDialogueV3Layer(deps: DialogueV3LayerDeps) {
   return async (
     ctx: BotCommandContext,
@@ -161,6 +287,11 @@ export function createDialogueV3Layer(deps: DialogueV3LayerDeps) {
         await ctx.send(t(ctx.lang).cancelled);
         return { handled: true };
       }
+
+      if (existing.pendingField === 'people' && existing.pendingFuzzyPeople.length > 0) {
+        return continueFuzzyConfirmation(ctx, user, existing, messageText, key, timezone, deps);
+      }
+
       const parseResult = parseFullField(messageText, {
         timezone,
         now: deps.now ? deps.now() : new Date(),
@@ -193,23 +324,7 @@ export function createDialogueV3Layer(deps: DialogueV3LayerDeps) {
         return { handled: false };
       }
       const draft = mergeDraft(existing.draft, parseResult.patch);
-      const readiness = checkReadiness(draft, parseResult.fuzzyPeople);
-      if (readiness.ready) {
-        deps.dialogueSessions.delete(key);
-        await executeDraft(ctx, user, draft, timezone, deps);
-        return { handled: true };
-      }
-      const question = nextQuestion(draft);
-      const now = Date.now();
-      const session: DialogueV3Session = {
-        ...existing,
-        draft,
-        pendingField: question?.field ?? null,
-        updatedAt: now,
-      };
-      deps.dialogueSessions.set(key, session);
-      if (question) await sendQuestion(ctx, question.field, ctx.lang);
-      return { handled: true };
+      return advance(ctx, user, draft, parseResult.fuzzyPeople, existing, key, timezone, deps);
     }
 
     if (firstWord(messageText) === '' || !STARTER_VERBS.has(firstWord(messageText))) return { handled: false };
@@ -222,18 +337,12 @@ export function createDialogueV3Layer(deps: DialogueV3LayerDeps) {
       placeResolver: deps.placeResolver,
     });
     const draft: EventCreateDraft = {
-      ...emptyDraft('personal'),
+      ...emptyDraft(draftScope(extra).scope, draftScope(extra).groupId),
       ...parseResult.patch,
       people: parseResult.patch.people ?? [],
     };
-    const readiness = checkReadiness(draft, parseResult.fuzzyPeople);
-    if (readiness.ready) {
-      await executeDraft(ctx, user, draft, timezone, deps);
-      return { handled: true };
-    }
-    const question = nextQuestion(draft);
     const now = Date.now();
-    const session: DialogueV3Session = {
+    const base: DialogueV3Session = {
       version: 3,
       sessionId: crypto.randomUUID(),
       actorId: user.telegram_id,
@@ -241,14 +350,13 @@ export function createDialogueV3Layer(deps: DialogueV3LayerDeps) {
       topicId: key.topicId,
       operation: 'event.create',
       draft,
-      pendingField: question?.field ?? null,
+      pendingField: null,
+      pendingFuzzyPeople: [],
       status: 'collecting',
       createdAt: now,
       updatedAt: now,
       sourceText: messageText,
     };
-    deps.dialogueSessions.set(key, session);
-    if (question) await sendQuestion(ctx, question.field, ctx.lang);
-    return { handled: true };
+    return advance(ctx, user, draft, parseResult.fuzzyPeople, base, key, timezone, deps);
   };
 }

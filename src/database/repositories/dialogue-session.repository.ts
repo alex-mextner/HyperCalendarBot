@@ -44,6 +44,18 @@ const EventCreateDraftSchema = z.object({
   groupId: z.number().optional(),
 });
 
+const PendingPersonCandidateSchema = z.object({
+  contactId: z.number(),
+  telegramId: z.number().nullable(),
+  displayName: z.string(),
+  confidence: z.number(),
+});
+
+const PendingFuzzyPersonSchema = z.object({
+  rawName: z.string(),
+  candidates: z.array(PendingPersonCandidateSchema),
+});
+
 const DialogueV3SessionSchema = z.object({
   version: z.literal(3),
   sessionId: z.string(),
@@ -53,6 +65,7 @@ const DialogueV3SessionSchema = z.object({
   operation: z.literal('event.create'),
   draft: EventCreateDraftSchema,
   pendingField: z.string().nullable(),
+  pendingFuzzyPeople: z.array(PendingFuzzyPersonSchema),
   status: z.union([
     z.literal('collecting'),
     z.literal('ready'),

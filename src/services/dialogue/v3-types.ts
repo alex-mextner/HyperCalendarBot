@@ -58,6 +58,19 @@ export interface Question {
 /** A partial, provenance-free update to the draft produced by parsing one turn of input. */
 export type DraftPatch = Partial<EventCreateDraft>;
 
+export interface PendingPersonCandidate {
+  readonly contactId: number;
+  readonly telegramId: number | null;
+  readonly displayName: string;
+  readonly confidence: number;
+}
+
+/** A name that matched no contact exactly — parked here, never silently dropped or auto-added, until the user confirms or declines it (design §23). */
+export interface PendingFuzzyPerson {
+  readonly rawName: string;
+  readonly candidates: readonly PendingPersonCandidate[];
+}
+
 export interface DialogueV3Session {
   readonly version: 3;
   readonly sessionId: string;
@@ -67,6 +80,8 @@ export interface DialogueV3Session {
   readonly operation: 'event.create';
   readonly draft: EventCreateDraft;
   readonly pendingField: string | null;
+  /** Unconfirmed fuzzy-name matches awaiting a yes/no from the user, oldest first. */
+  readonly pendingFuzzyPeople: readonly PendingFuzzyPerson[];
   readonly status: DialogueV3Status;
   readonly createdAt: number;
   readonly updatedAt: number;

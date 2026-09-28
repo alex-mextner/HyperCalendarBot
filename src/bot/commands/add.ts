@@ -30,10 +30,12 @@ export async function handleAdd(
   const input = ctx.args?.trim();
   if (input) {
     // GH-652: a fully specified command (title + time/all-day, zero LLM calls, reading the
-    // shared event.create registration) executes here directly. `deps?.dialogueV3` is
-    // undefined unless explicitly wired with the feature flag on (src/config/env.ts
-    // DIALOGUE_V3_ENABLED) — with it undefined this branch never runs and `workingInput`
-    // stays exactly `input`, so the rest of this function is byte-identical to before GH-652.
+    // shared event.create registration) executes here directly. Production (bot/index.ts)
+    // always passes `deps.dialogueV3`; the actual on/off switch is `deps.dialogueV3.enabled`
+    // (DIALOGUE_V3_ENABLED, src/config/env.ts), checked first thing inside `tryFullFieldAdd` —
+    // when it's false, `tryFullFieldAdd` returns `{handled:false, seed:{}}` immediately and
+    // `workingInput` stays exactly `input`, so the rest of this function is byte-identical to
+    // before GH-652. A caller that omits `deps` entirely (e.g. an older test) skips this branch.
     let workingInput = input;
     if (deps?.dialogueV3) {
       const outcome = await tryFullFieldAdd(ctx, user, timezone, groupId, input, deps.dialogueV3);

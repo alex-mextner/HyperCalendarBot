@@ -175,23 +175,27 @@ function extractTimeAndPlace(
     removals.push(placeClause);
   }
 
-  if (removals.length > 0) {
-    for (const range of removals.sort((a, b) => b.start - a.start)) {
-      remaining = removeRange(remaining, range.start, range.end);
-    }
-  } else {
-    // No "at"/"в"-prefixed clause parsed as a time — fall back to a trailing-suffix scan
-    // (same idea add.ts already uses for the legacy wizard) for a bare time with no marker.
-    const boundaries = [0, ...[...text].map((c, i) => (c === ' ' ? i + 1 : -1)).filter((i) => i >= 0)].sort(
+  for (const range of removals.sort((a, b) => b.start - a.start)) {
+    remaining = removeRange(remaining, range.start, range.end);
+  }
+
+  if (!timeClause) {
+    // No "at"/"в"-marked clause parsed as a time — scan the remaining text (any place clause
+    // already stripped above) for a bare/unmarked trailing time, same idea add.ts uses for the
+    // legacy wizard. Gating this on "no time CLAUSE" rather than "no removal happened at all"
+    // matters: a place clause with no separate time clause (e.g. "Meeting 14:00 at the office",
+    // time unmarked) must still let this fallback find the bare "14:00" — it must not be
+    // skipped just because the place clause was already removed.
+    const boundaries = [0, ...[...remaining].map((c, i) => (c === ' ' ? i + 1 : -1)).filter((i) => i >= 0)].sort(
       (a, b) => a - b,
     );
     for (const start of boundaries) {
-      const candidate = text.slice(start).trim();
+      const candidate = remaining.slice(start).trim();
       if (!candidate) continue;
       const candidateResolution = isTimeShaped(candidate, ctx, selectedDate);
       if (candidateResolution) {
         resolution = candidateResolution;
-        remaining = text.slice(0, start).trim();
+        remaining = remaining.slice(0, start).trim();
         break;
       }
     }

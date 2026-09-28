@@ -96,7 +96,20 @@ export async function tryFullFieldAdd(
     ...(draft.title ? { title: draft.title } : {}),
     ...(draft.schedule?.kind === 'timed' ? { startAt: draft.schedule.startAt } : {}),
   };
-  if (!readiness.ready || !draft.title || !draft.schedule) return { handled: false, seed };
+  if (!readiness.ready || !draft.title || !draft.schedule) {
+    // The legacy wizard (AddEventParams) has no people/place fields to seed — never silently
+    // drop what was already resolved from the same input; tell the user to re-add it once the
+    // wizard finishes (design brief: "significant unconsumed text ... can't be dropped").
+    if (draft.people.length > 0 || draft.place) {
+      const names = draft.people.map((p) => p.displayName);
+      await ctx.send(
+        ctx.lang === 'ru'
+          ? `Заметил ${[...names, draft.place?.label].filter(Boolean).join(', ')} — добавь ещё раз после того, как ответишь на оставшиеся вопросы ниже.`
+          : `Noted ${[...names, draft.place?.label].filter(Boolean).join(', ')} — please re-add it after finishing the questions below.`,
+      );
+    }
+    return { handled: false, seed };
+  }
 
   const startAt =
     draft.schedule.kind === 'timed' ? draft.schedule.startAt : localMidnightInstant(draft.schedule.startDate, timezone);

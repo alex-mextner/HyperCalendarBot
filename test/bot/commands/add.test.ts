@@ -155,3 +155,17 @@ test('a single fuzzy person match blocks the fast path — falls through, never 
   expect(events).toHaveLength(0);
   expect(r.enter).toHaveBeenCalledTimes(1);
 });
+
+test('an exact-matched person resolved before a later blocker is announced, never silently dropped on fallback', async () => {
+  const r = makeInput('Meeting tomorrow at 14:00 with Lena and Kristin');
+  r.db.contacts.add(42, 'Lena', undefined, 501);
+  r.db.contacts.add(42, 'Kristina', undefined, 502);
+  const deps = makeDialogueV3Deps(r.db, new Date('2026-09-29T08:00:00Z'));
+  await handleAdd(r.context, r.scene, undefined, { dialogueV3: deps });
+
+  expect(r.db.events.getVisibleInRange(42, '2020-01-01T00:00:00Z', '2030-01-01T00:00:00Z')).toHaveLength(0);
+  expect(r.enter).toHaveBeenCalledTimes(1);
+  // Lena resolved exactly and would otherwise be silently discarded by the wizard fallback
+  // (AddEventParams has no people field) — the user must be told to re-add her.
+  expect(r.send.mock.calls[0]?.[0]).toContain('Lena');
+});

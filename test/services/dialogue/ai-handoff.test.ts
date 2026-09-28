@@ -14,6 +14,7 @@ function makeSession(overrides: Partial<DialogueV3Session> = {}): DialogueV3Sess
     operation: 'event.create',
     draft: { ...emptyDraft('personal'), title: 'Meeting' },
     pendingField: 'schedule',
+    pendingFuzzyPeople: [],
     status: 'collecting',
     createdAt: now,
     updatedAt: now,
