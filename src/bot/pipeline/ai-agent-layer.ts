@@ -94,7 +94,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
           const giveUp = agentGiveUpMessage(user.telegram_id, lang);
           if (giveUp) await ctx.send(giveUp);
           if (jobStore) await jobStore.del(user.telegram_id);
-          return;
+          return false;
         }
         const delay = BACKOFF_DELAYS_MS[currentAttempt]!;
         const jobId = await queue.addDelayed(
@@ -102,6 +102,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
           delay,
         );
         if (jobStore) await jobStore.set(user.telegram_id, jobId);
+        return true;
       };
     }
 

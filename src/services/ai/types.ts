@@ -242,8 +242,11 @@ export interface AgentContext {
   preloadedAddressContext?: string;
   /** Preloaded pending geo coordinates for the user (set by agent before run if pin is fresh) */
   preloadedPendingGeo?: { latitude: number; longitude: number } | null;
-  /** When set, schedules a backoff retry of the current message. Delay is determined by retryAttempt. */
-  retryEnqueue?: (messageText: string) => Promise<void>;
+  /**
+   * When set, schedules a backoff retry of the current message. Delay is determined by retryAttempt.
+   * Resolves true only when a retry job was stored; false once the budget is spent (the give-up line is sent instead).
+   */
+  retryEnqueue?: (messageText: string) => Promise<boolean>;
   /** True when the user explicitly addressed the bot (DM, @mention, "Бот,", reply to bot).
    *  False for keyword-only or session-continuation group messages.
    *  Stall phrases and retry queue fire only when true. */

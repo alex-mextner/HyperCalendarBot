@@ -122,7 +122,7 @@ describe('agent failure notices', () => {
       conversationLogger: new ConversationLogger(chatHistoryRepo),
       userRepo,
       eventReminderRepo: new EventReminderRepository(db),
-      retryEnqueue: async () => {},
+      retryEnqueue: async () => true,
     };
     config = {};
     probe = makeSenderProbe();

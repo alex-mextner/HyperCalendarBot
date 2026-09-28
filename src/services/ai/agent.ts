@@ -669,7 +669,12 @@ export class CalendarBotAgent {
    * tracker, which decides between a playful stall, an honest "the AI is down,
    * here is what still works", and silence.
    */
-  private announceFailure(ctx: AgentContext, error: unknown, writer: TelegramStreamWriter): void {
+  private announceFailure(
+    ctx: AgentContext,
+    error: unknown,
+    writer: TelegramStreamWriter,
+    retryScheduled: boolean,
+  ): void {
     if (ctx.supplementMode || ctx.wasExplicitInvocation === false) return;
 
     if (error instanceof ProviderSafetyStopError) {
@@ -680,7 +685,8 @@ export class CalendarBotAgent {
     }
     // Before the quiet-retry rule: a retry cut short by a restart is also told so.
     if (this.shutdown.signal.aborted) {
-      const text = t(ctx.user.language).agent_restarting(typeof ctx.retryEnqueue === 'function');
+      // Promise a comeback only when a retry job was actually stored.
+      const text = t(ctx.user.language).agent_restarting(retryScheduled);
       writer.appendText(`\n\n${text}`);
       this.saveAssistantTurn(ctx, { role: 'assistant', content: text });
       return;
@@ -770,17 +776,24 @@ export class CalendarBotAgent {
   }
 
   run(ctx: AgentContext): Promise<AgentRunResult> {
-    const dbg: AiDebugRunContext | null =
-      this.debugLogger?.createRunContext(
-        ctx.user.telegram_id,
-        ctx.chatId,
-        ctx.user.username,
-        ctx.user.first_name,
-        ctx.groupTitle ?? null,
-        !!ctx.supplementMode,
-        ctx.messageText,
-        ctx.supplementAutoResponse,
-      ) ?? null;
+    // Never throws synchronously: an untracked turn would escape the shutdown drain.
+    let dbg: AiDebugRunContext | null = null;
+    try {
+      dbg =
+        this.debugLogger?.createRunContext(
+          ctx.user.telegram_id,
+          ctx.chatId,
+          ctx.user.username,
+          ctx.user.first_name,
+          ctx.groupTitle ?? null,
+          !!ctx.supplementMode,
+          ctx.messageText,
+          ctx.supplementAutoResponse,
+        ) ?? null;
+    } catch (err) {
+      // Debug logging is evidence, not a dependency: the turn still runs without it.
+      aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'AI debug log unavailable for this turn');
+    }
     const turn = this.runTurn(ctx, dbg).finally(() => {
       this.inFlight.delete(turn);
       // Every exit leaves the turn's evidence, including one that threw after its failure path.
@@ -927,6 +940,7 @@ export class CalendarBotAgent {
 
     let currentMessages: MessageParam[] = [];
     let runFailed = false;
+    let retryScheduled = false;
     // Stays set until a validation retry produces an explicitly approved answer.
     let responseUnverified = false;
     let runError: unknown;
@@ -1252,8 +1266,9 @@ export class CalendarBotAgent {
         ctx.wasExplicitInvocation !== false
       ) {
         // Awaited: a shutdown drain must not close the queue before the retry is stored.
-        await ctx.retryEnqueue(ctx.messageText).catch((err) => {
+        retryScheduled = await ctx.retryEnqueue(ctx.messageText).catch((err: unknown) => {
           aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to handle retry enqueue');
+          return false;
         });
       }
     }
@@ -1298,7 +1313,7 @@ export class CalendarBotAgent {
       // Execution evidence is durable even in quiet mode; a notice is persisted only when delivered.
       if (validationNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: validationNotice });
     }
-    if (runFailed && !evidence && !validationNotice) this.announceFailure(ctx, runError, writer);
+    if (runFailed && !evidence && !validationNotice) this.announceFailure(ctx, runError, writer, retryScheduled);
 
     if (!runFailed && !responseUnverified && !ctx.supplementMode) {
       // The bot answered — any comeback it promised earlier is now settled.

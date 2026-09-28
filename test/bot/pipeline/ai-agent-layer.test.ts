@@ -305,7 +305,8 @@ describe('retry / backoff', () => {
   test('attempt=0 → addDelayed called with 30s delay', async () => {
     const { deps, addDelayed, captured } = makeRetrySetup();
     await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 0 });
-    await captured.ctx!.retryEnqueue!('retry msg');
+    // The agent promises a comeback only on true.
+    expect(await captured.ctx!.retryEnqueue!('retry msg')).toBe(true);
     const [, delay] = addDelayed.mock.calls[0] as unknown as [unknown, number];
     expect(delay).toBe(30_000);
   });
@@ -363,7 +364,7 @@ describe('retry / backoff', () => {
     const { deps, captured } = makeRetrySetup();
     const ctx = makeCtx();
     await createAiAgentLayer(deps)(ctx, 'msg', { retryAttempt: 3 });
-    await captured.ctx!.retryEnqueue!('retry msg');
+    expect(await captured.ctx!.retryEnqueue!('retry msg')).toBe(false);
 
     const [sentText] = (ctx.send as ReturnType<typeof mock>).mock.calls[0] as unknown as [string];
     expect(sentText).toContain('Обещал вернуться');

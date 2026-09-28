@@ -1335,13 +1335,19 @@ bot.onStart(async ({ info }) => {
 // bot.stop() (in-flight handlers get up to 3 s) + this drain + the closes below must
 // fit the 8 s shutdown timeout and Docker's 10 s stop grace.
 const AGENT_DRAIN_SETTLE_MS = 2_500;
+/** Second, shorter drain: turns started by handlers that outlived bot.stop() while the queues closed. */
+const LATE_AGENT_DRAIN_SETTLE_MS = 1_000;
+
+async function drainAgents(settleMs: number): Promise<void> {
+  await Promise.all([agent.drain(settleMs), voiceAgentRef?.drain(settleMs)]);
+}
 
 // Graceful shutdown. Stop taking updates first, then abort the AI turns still
 // running so each one tells its user, queues its retry and writes its debug log
 // while the queues, Redis and the database are still open.
 async function shutdown(): Promise<void> {
   await bot.stop();
-  await Promise.all([agent.drain(AGENT_DRAIN_SETTLE_MS), voiceAgentRef?.drain(AGENT_DRAIN_SETTLE_MS)]);
+  await drainAgents(AGENT_DRAIN_SETTLE_MS);
   if (aiMessagesQueueCleanup) await aiMessagesQueueCleanup.close();
   if (eventCheckerQueueCleanup) await eventCheckerQueueCleanup.close();
   if (notificationQueueCleanup) await notificationQueueCleanup.close();
@@ -1350,6 +1356,8 @@ async function shutdown(): Promise<void> {
   if (imageQueueCleanup) await imageQueueCleanup.close();
   if (broadcastQueueCleanup) await broadcastQueueCleanup.close();
   if (callQueueCleanup) await callQueueCleanup.close();
+  // Nothing may still be writing when Redis and SQLite close.
+  await drainAgents(LATE_AGENT_DRAIN_SETTLE_MS);
   if (googleRedisClient) googleRedisClient.close();
   summarizerRedis.close();
   if (webServerHandle) webServerHandle.stop();

@@ -110,6 +110,7 @@ describe('agent drain on shutdown', () => {
         setImmediate(stored.resolve);
         await stored.promise;
         enqueued.push(message);
+        return true;
       },
     };
     chatHistory.save(USER_ID, 'user', REQUEST);
@@ -249,6 +250,78 @@ describe('agent drain on shutdown', () => {
     expect(probe.delivered.join('\n')).toContain(t('ru').agent_restarting(true));
   });
 
+  test('a retry whose budget is spent is not promised a comeback', async () => {
+    ctx.retryAttempt = 3;
+    // The last attempt: the pipeline sends its give-up line and schedules nothing.
+    ctx.retryEnqueue = async () => false;
+    const probe = makeSender();
+    const { impl, secondRoundStarted } = stalledAfterTool({
+      name: 'calculate',
+      input: { expression: '2026-09-28 20:30 Europe/Belgrade to UTC' },
+    });
+    const agent = new CalendarBotAgent({}, probe.sender, { streamImpl: impl });
+
+    const running = agent.run(ctx);
+    await secondRoundStarted;
+    await agent.drain(DRAIN_BOUND_MS);
+    await running;
+
+    const text = probe.delivered.join('\n');
+    expect(text).not.toContain(t('ru').agent_restarting(true));
+    expect(text).toContain(t('ru').agent_restarting(false));
+    const history = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
+    expect(history).not.toContain(t('ru').agent_restarting(true));
+  });
+
+  test('a debug log that cannot be opened never throws out of run()', async () => {
+    const probe = makeSender();
+    const { impl } = stalledAfterTool({ name: 'calculate', input: { expression: '1 + 1' } });
+    const brokenLogger = new AiDebugLogger(true, logsDir);
+    brokenLogger.createRunContext = () => {
+      throw new Error('EACCES: logs directory is read-only');
+    };
+    const agent = new CalendarBotAgent({ debugLogger: brokenLogger }, probe.sender, { streamImpl: impl });
+
+    let running: Promise<unknown> | undefined;
+    expect(() => {
+      running = agent.run(ctx);
+    }).not.toThrow();
+    await agent.drain(DRAIN_BOUND_MS);
+    await running;
+    expect(enqueued).toEqual([REQUEST]);
+  });
+
+  test('a run still stuck at the deadline is left behind and the drain returns', async () => {
+    // The retry store never answers (Redis hung): the turn cannot finish its failure path.
+    ctx.retryEnqueue = () => Promise.withResolvers<boolean>().promise;
+    const probe = makeSender();
+    const { impl, secondRoundStarted } = stalledAfterTool({ name: 'calculate', input: { expression: '1 + 1' } });
+    const agent = new CalendarBotAgent({}, probe.sender, { streamImpl: impl });
+
+    let settled = false;
+    void agent.run(ctx).finally(() => {
+      settled = true;
+    });
+    await secondRoundStarted;
+    // A real deadline on purpose: this exercises drain's own timer.
+    await agent.drain(20);
+
+    expect(settled).toBe(false);
+  });
+
+  test('a second drain waits for a turn that started after the first one returned', async () => {
+    const probe = makeSender();
+    const { impl } = stalledAfterTool({ name: 'calculate', input: { expression: '1 + 1' } });
+    const agent = new CalendarBotAgent({}, probe.sender, { streamImpl: impl });
+
+    await agent.drain(DRAIN_BOUND_MS);
+    // A handler that outlived bot.stop() starts its turn while the queues close.
+    void agent.run(ctx);
+    await agent.drain(DRAIN_BOUND_MS);
+
+    expect(enqueued).toEqual([REQUEST]);
+  });
+
   test('a turn that starts while the drain is waiting is waited for as well', async () => {
     const probe = makeSender();
     const { impl, secondRoundStarted } = stalledAfterTool({
@@ -271,6 +344,7 @@ describe('agent drain on shutdown', () => {
           await tick.promise;
         }
         enqueued.push(message);
+        return true;
       },
     });
     await draining;

@@ -216,7 +216,7 @@ describe('SyntheticPipelineRunner', () => {
       retryQueue: { addDelayed },
     });
     await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'check calendar', source: 'scheduled' });
-    await captured.ctx!.retryEnqueue!('check calendar');
+    expect(await captured.ctx!.retryEnqueue!('check calendar')).toBe(true);
 
     const [, delay] = addDelayed.mock.calls[0] as unknown as [unknown, number];
     expect(delay).toBe(30_000);
@@ -487,7 +487,7 @@ describe('createAiMessagesWorker', () => {
       source: 'trigger',
       retryAttempt: 3,
     });
-    await captured.ctx!.retryEnqueue!('что у меня завтра?');
+    expect(await captured.ctx!.retryEnqueue!('что у меня завтра?')).toBe(false);
 
     expect(sendMessage).not.toHaveBeenCalled();
   });

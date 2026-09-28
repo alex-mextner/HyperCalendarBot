@@ -52,7 +52,7 @@ export class SyntheticPipelineRunner {
               }
             }
             if (jobStore) await jobStore.del(user.telegram_id);
-            return;
+            return false;
           }
           const delay = BACKOFF_DELAYS_MS[currentAttempt]!;
           const jobId = await queue.addDelayed(
@@ -60,6 +60,7 @@ export class SyntheticPipelineRunner {
             delay,
           );
           if (jobStore) await jobStore.set(user.telegram_id, jobId);
+          return true;
         };
       }
 
