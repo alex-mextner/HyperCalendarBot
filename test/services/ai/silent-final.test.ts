@@ -232,32 +232,61 @@ describe('silent final guard (#508)', () => {
     expect(delivered.at(-1)).toContain(`${tr.completed}: ${tr.operations.create_event}`);
   });
 
-  test.each([
-    ['[SKIP]', '[SKIP]'],
-    ['empty', ''],
-  ])('a rendered image already answered the request: %s final adds no notice and no bare "..."', async (_label, finalText) => {
-    // Smallest header sendAgendaImage accepts: PNG signature + IHDR 1×1.
-    const png = Buffer.concat([
-      Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
-      Buffer.from([0, 0, 0, 1, 0, 0, 0, 1]),
-    ]);
+  /** Wires a renderer and records every photo actually sent to the chat. */
+  const stubRenderer = (renderDirect: () => Promise<Buffer>) => {
     const photos: File[] = [];
     sender.sendPhoto = async (_chatId, photo) => {
       photos.push(photo);
       return { message_id: 44 };
     };
     ctx.sender = sender;
-    ctx.renderService = { renderDirect: async () => png };
-    const result = await run([
-      { tool: 'render_table', input: () => ({ title: 'Неделя', markdown: '| a |\n|---|\n| b |' }) },
-      { text: finalText },
-    ]);
+    ctx.renderService = { renderDirect };
+    return photos;
+  };
+  // Smallest header sendAgendaImage accepts: PNG signature + IHDR 1×1.
+  const png = Buffer.concat([
+    Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
+    Buffer.from([0, 0, 0, 1, 0, 0, 0, 1]),
+  ]);
+  const renderTable = { tool: 'render_table', input: () => ({ title: 'Неделя', markdown: '| a |\n|---|\n| b |' }) };
+
+  test.each([
+    ['[SKIP]', '[SKIP]'],
+    ['empty', ''],
+  ])('a rendered image already answered the request: %s final adds no notice and no bare "..."', async (_label, finalText) => {
+    const photos = stubRenderer(async () => png);
+    const result = await run([renderTable, { text: finalText }]);
 
     expect(photos).toHaveLength(1);
     expect(result.responseText).toBe('');
     expect(deleted).toEqual([42]);
     expect(delivered.join('\n')).not.toContain(t('ru').ai_unanswered);
     expect(delivered.some((text) => text.endsWith('...'))).toBe(false);
+  });
+
+  test("a throttled repeat render sent no photo, so '[SKIP]' still gets the could-not-answer line", async () => {
+    const photos = stubRenderer(async () => png);
+    await run([renderTable, { text: '[SKIP]' }]);
+    delivered.length = 0;
+    deleted.length = 0;
+
+    // The identical call within the 5 s throttle window is skipped without sending anything.
+    await run([renderTable, { text: '[SKIP]' }]);
+
+    expect(photos).toHaveLength(1);
+    expect(deleted).toEqual([]);
+    expect(delivered.at(-1)).toContain(t('ru').ai_unanswered);
+  });
+
+  test("a failed render sent no photo, so '[SKIP]' still gets the could-not-answer line", async () => {
+    const photos = stubRenderer(async () => {
+      throw new Error('synthetic renderer outage');
+    });
+    await run([renderTable, { text: '[SKIP]' }]);
+
+    expect(photos).toHaveLength(0);
+    expect(deleted).toEqual([]);
+    expect(delivered.at(-1)).toContain(t('ru').ai_unanswered);
   });
 
   describe('legitimate silence stays silent', () => {

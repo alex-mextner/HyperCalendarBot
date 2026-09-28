@@ -28,7 +28,7 @@ import {
 } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
-import { ANSWERING_TOOLS, executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
+import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
 import { createToolExposure, DISCOVERY_TOOL, runRoundRevealingRejectedTools } from './tool-exposure.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import { getToolDefinitions } from './tools.ts';
@@ -1359,9 +1359,7 @@ export class CalendarBotAgent {
       ctx.inputMode !== 'live_call' &&
       termination !== 'waiting';
     const writes = writeOutcomes.summary(ctx.user.language);
-    const answeredByTool =
-      writes === null &&
-      allToolCalls.some((call, i) => ANSWERING_TOOLS.has(call.name) && allToolResults[i]?.success === true);
+    const answeredByTool = writes === null && writeOutcomes.toolAnswered;
     let unansweredNotice: string | null = null;
     // Every guarded, non-silent exit above appended its own notice, so its draft is never empty here.
     if (answersDirectMessage && modelStayedSilent && !answeredByTool) {
