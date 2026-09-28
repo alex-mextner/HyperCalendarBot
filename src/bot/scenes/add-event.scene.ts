@@ -7,11 +7,12 @@ import { InlineKeyboard } from 'gramio';
 import { CB, type Lang, t } from '../../config/constants.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import { handleCalculate } from '../../services/ai/tool-handlers/calculate.ts';
+import { type CalendarDay, localMidnightInstant } from '../../services/calendar/wall-clock.ts';
 import { resolveWizardWallTime } from '../../services/calendar/wall-time-adapters.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import type { LocationVerificationService } from '../../services/location/location-verification-service.ts';
-import { parseDuration, parseRecurrence, parseSimpleDate } from '../../utils/date.ts';
+import { formatCalendarDateMedium, parseDuration, parseRecurrence, parseSimpleDate } from '../../utils/date.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { escapeHtml, splitMessage } from '../../utils/telegram.ts';
 import { eventActionsKeyboard } from '../keyboards.ts';
@@ -58,6 +59,13 @@ function calendarDate(year: number, month: number, day: number, timezone: string
   return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
     ? new Date(date.getTime())
     : null;
+}
+
+/** Parses the shared parser's plain `YYYY-MM-DD` `Schedule.startDate`/`endDateExclusive` into the
+ * `CalendarDay` shape `localMidnightInstant` expects. */
+function calendarDayFromIso(dateIso: string): CalendarDay {
+  const [y, m, d] = dateIso.split('-').map(Number) as [number, number, number];
+  return { y, m, d };
 }
 
 function parseWizardDate(input: string, timezone: string, refDate = new Date(), bareDay = false): Date | null {
@@ -263,7 +271,7 @@ function draftPreview(state: AddEventState, lang: Lang, timezone: string): strin
     escapeHtml(value ? value.slice(0, limit) + (value.length > limit ? '…' : '') : wizardText.none);
   const dateLine = state.startAt
     ? state.allDay
-      ? `${new Intl.DateTimeFormat(lang, { timeZone: timezone, dateStyle: 'medium' }).format(new Date(state.startAt))} (${wizardText.allDay})`
+      ? `${formatCalendarDateMedium(state.startAt.slice(0, 10), lang)} (${wizardText.allDay})`
       : local(state.startAt)
     : '—';
   const lines = [
@@ -425,15 +433,20 @@ export function createAddEventScene(
                 allDay: false,
               });
             } else {
-              await context.scene.update(
-                {
-                  startAt: `${resolution.schedule.startDate}T00:00:00.000Z`,
-                  endAt: `${resolution.schedule.endDateExclusive}T00:00:00.000Z`,
-                  pendingDate: undefined,
-                  allDay: true,
-                },
-                { step: 3 },
-              );
+              // All-day is a DATE range [startDate, endDateExclusive), not a UTC-midnight 24h
+              // block: store each boundary as the actual local-midnight instant in this timezone
+              // (offset-preserving ISO, e.g. "2027-03-10T00:00:00.000-05:00") so the date prefix
+              // Google's mapper and free-slots.ts's allDaySpan already read, and the julianday()
+              // day-range query in EventRepository.getVisibleInRange, all agree with the calendar
+              // day the user actually picked — a naive "...T00:00:00.000Z" reads back as the
+              // previous local day in any negative-offset zone (GH-652 parent review).
+              const startAt = localMidnightInstant(calendarDayFromIso(resolution.schedule.startDate), timezone);
+              const endAt = localMidnightInstant(calendarDayFromIso(resolution.schedule.endDateExclusive), timezone);
+              if (!startAt || !endAt) {
+                await show(wizardText.invalidDate);
+                return;
+              }
+              await context.scene.update({ startAt, endAt, pendingDate: undefined, allDay: true }, { step: 3 });
             }
             return;
           case 'ambiguous_number':
