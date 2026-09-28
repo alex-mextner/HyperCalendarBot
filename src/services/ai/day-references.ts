@@ -408,6 +408,23 @@ const RANGE_AFTER = /^[ \t]*[-–—][ \t]*\d{1,2}[.:]\d{2}/;
 const UNIT_AFTER = /^[ \t-]*(?:час\p{L}*|ч|мин\p{L}*|hours?|hrs?|h|min\p{L}*)(?!\p{L})/u;
 /** The lower-case English "may" is the verb ("may 30 people join"), not the month. */
 const MAY_VERB = /(?<!\p{L})may(?!\p{L})/u;
+/** A point then a space ends a sentence, unless it ends one of these abbreviations. */
+const SENTENCE_END = /\.[ \t]/;
+const ABBREVIATION =
+  /^(?:пн|вт|ср|чт|пт|сб|вс|mon|tues?|wed|thu(?:rs?)?|fri|sat|sun|янв|фев|мар|апр|авг|сент?|окт|нояб?|дек|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)$/;
+const GAP_START = /^[ \t,:*_()\-–—.]+/;
+const GAP_END = /[ \t,:*_()\-–—.]+$/;
+
+/** Whether the text between a matched weekday and its date crosses into another sentence. */
+function crossesSentence(pair: string, weekday: string): boolean {
+  const weekdayFirst = pair.startsWith(weekday);
+  const beside = weekdayFirst ? pair.slice(weekday.length) : pair.slice(0, pair.length - weekday.length);
+  const gap = (weekdayFirst ? GAP_START : GAP_END).exec(beside)?.[0] ?? '';
+  if (!SENTENCE_END.test(gap)) return false;
+  const before = weekdayFirst ? weekday : beside.slice(0, beside.length - gap.length);
+  // "ср. 28 сентября", "28 сент. среда": the point closes the word right before it.
+  return !(gap.startsWith('.') && ABBREVIATION.test(/\p{L}+$/u.exec(before)?.[0] ?? ''));
+}
 
 interface PairParts {
   weekday: string;
@@ -536,6 +553,7 @@ export function findWeekdayDateMismatches(text: string, now: Date, timezone: str
       )
         continue;
       if (parts.month === 5 && MAY_VERB.test(text.slice(at, end))) continue;
+      if (crossesSentence(match[0], parts.weekday)) continue;
       const weekday = PAIR_WEEKDAYS.get(parts.weekday);
       const date =
         parts.y === undefined

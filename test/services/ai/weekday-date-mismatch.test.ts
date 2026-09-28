@@ -111,6 +111,18 @@ describe('a weekday written next to a date on another weekday', () => {
       expect(mismatches(text)).toEqual([]);
   });
 
+  test('a sentence end parts a weekday from a date; an abbreviation point does not', () => {
+    for (const text of [
+      'Не смогу в среду. 28 сентября уже занято.',
+      'Busy on Wednesday. September 28 is taken.',
+      'Занято 28 сентября. Среда свободна.',
+      'Встреча 2026-09-28. Среда свободна.',
+    ])
+      expect(mismatches(text)).toEqual([]);
+    for (const text of ['ср. 28 сентября', '28 сент. среда', 'Wed. Sep 28'])
+      expect(mismatches(text)).toEqual([{ date: '2026-09-28', said: 'Wednesday', actual: 'Monday' }]);
+  });
+
   test('a date without a year is read in the year nearest to now', () => {
     // 5 January is next year's (2027-01-05, a Tuesday), not 2026's Monday.
     expect(findWeekdayDateMismatches('вторник, 5 января', NOW, TZ)).toEqual([]);
