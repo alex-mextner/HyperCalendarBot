@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, setSystemTime, spyOn, test } from 'bun:test';
 import type OpenAI from 'openai';
 import { EN_AGENT_ERROR_PHRASES, RU_AGENT_ERROR_PHRASES, t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
@@ -198,7 +198,9 @@ describe('CalendarBotAgent.run()', () => {
     ctx = {
       user: userRepo.findByTelegramId(USER_ID)!,
       chatId: USER_ID,
-      messageText: 'Show my events today',
+      // No day word: tests here script tool calls on arbitrary dates, and a named day
+      // ("today") would make the weekday guard reject them.
+      messageText: 'Show my events',
       isGroup: false,
       eventService,
       holidayService,
@@ -1512,7 +1514,7 @@ describe('CalendarBotAgent.run()', () => {
     const history = ctx.chatHistory.getRecent(USER_ID);
     expect(history.length).toBe(2);
     expect(history[0]!.role).toBe('user');
-    expect(history[0]!.content).toBe('Show my events today');
+    expect(history[0]!.content).toBe('Show my events');
     expect(history[1]!.role).toBe('assistant');
     const parsed = JSON.parse(history[1]!.content) as OpenAI.ChatCompletionMessageParam;
     expect(parsed.role).toBe('assistant');
@@ -1633,7 +1635,7 @@ describe('CalendarBotAgent.run()', () => {
     expect(messages.length).toBe(3);
     expect(messages[0]!.content as string).toContain('group message');
     expect(messages[1]!.content as string).toContain('group reply');
-    expect(messages[2]!.content as string).toContain('Show my events today');
+    expect(messages[2]!.content as string).toContain('Show my events');
   });
 
   test('[SKIP] response in group sends nothing (no placeholder, no delete)', async () => {
@@ -2286,5 +2288,95 @@ describe('CalendarBotAgent.run()', () => {
     const toolMessage = script.calls[1]?.messages.find((m) => m.role === 'tool' && m.tool_call_id === 'lookup');
     expect(toolMessage?.content).toStartWith('Error: ');
     expect(toolMessage?.content).toContain('\n[AGENT: Use find_contact for a personal name.');
+  });
+
+  test('a create for a day the user did not name is rejected before dispatch and redone for the named day', async () => {
+    // 2026-09-27 23:01 Belgrade: "Среда английский 12:30" was resolved to Monday the 28th.
+    setSystemTime(new Date('2026-09-27T21:00:00Z'));
+    try {
+      ctx.user = { ...ctx.user, timezone: 'Europe/Belgrade' };
+      ctx.messageText = 'Среда английский 12:30';
+      const { impl, calls } = makeStreamImpl([
+        {
+          kind: 'tool',
+          callId: 'call-1',
+          name: 'create_event',
+          input: { title: 'Английский', start_at: '2026-09-28T10:30:00Z' },
+        },
+        {
+          kind: 'tool',
+          callId: 'call-2',
+          name: 'create_event',
+          input: { title: 'Английский', start_at: '2026-09-30T10:30:00Z' },
+        },
+        { kind: 'text', text: 'Записала английский на среду, 30 сентября, 12:30.' },
+      ]);
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+      await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+      const rejection = calls[1]?.messages.find((m) => m.role === 'tool' && m.tool_call_id === 'call-1');
+      expect(String(rejection?.content)).toContain('WRONG_DAY');
+      expect(String(rejection?.content)).toContain('«среда» = Wednesday 2026-09-30');
+      const rows = db.query<{ start_at: string }, []>('SELECT start_at FROM events WHERE is_deleted = 0').all();
+      expect(rows.map((row) => row.start_at)).toEqual(['2026-09-30T10:30:00Z']);
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test('a "Да" in a group is checked against the question asked in that group', async () => {
+    const GROUP = -100777;
+    setSystemTime(new Date('2026-09-27T21:00:00Z'));
+    try {
+      ctx.user = { ...ctx.user, timezone: 'Europe/Belgrade' };
+      ctx.isGroup = true;
+      ctx.groupChatId = GROUP;
+      ctx.messageText = 'Да';
+      const past = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Английский',
+        start_at: '2026-09-01T11:30:00Z',
+        timezone: 'Europe/Belgrade',
+        owner_type: 'group',
+        group_id: GROUP,
+        created_by: USER_ID,
+      }).id;
+      const ask = {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'ask-1',
+            type: 'function',
+            function: {
+              name: 'ask_user',
+              arguments: JSON.stringify({ question: 'Удалить английский во вторник, 29 сентября?', options: ['Да'] }),
+            },
+          },
+        ],
+      };
+      ctx.chatHistory.save(USER_ID, 'user', 'Во вторник отмени английский', GROUP);
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(ask), GROUP);
+      ctx.chatHistory.save(
+        USER_ID,
+        'tool',
+        JSON.stringify([{ role: 'tool', tool_call_id: 'ask-1', content: 'Вопрос отправлен.' }]),
+        GROUP,
+      );
+      ctx.chatHistory.save(USER_ID, 'user', 'Да', GROUP);
+      // Rows carry the mocked clock, as production rows carry the real one.
+      db.run('UPDATE chat_history SET created_at = ?', ['2026-09-27 21:00:00']);
+      const { impl, calls } = makeStreamImpl([
+        { kind: 'tool', callId: 'call-1', name: 'delete_event', input: { event_id: past } },
+        { kind: 'text', text: 'Не удалила: это было 1 сентября.' },
+      ]);
+      await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+      const rejection = calls[1]?.messages.find((m) => m.role === 'tool' && m.tool_call_id === 'call-1');
+      expect(String(rejection?.content)).toContain('«вторник» = Tuesday 2026-09-29');
+      expect(ctx.eventService.getEventForGroup(past, GROUP)).not.toBeNull();
+    } finally {
+      setSystemTime();
+    }
   });
 });

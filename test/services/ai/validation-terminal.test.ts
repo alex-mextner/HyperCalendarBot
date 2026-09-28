@@ -91,7 +91,8 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
     ctx = {
       user,
       chatId: 456,
-      messageText: 'Show my events today',
+      // No day word: scripted writes use arbitrary dates the weekday guard would reject after "today".
+      messageText: 'Show my events',
       isGroup: false,
       inputMode: 'text',
       eventService: new EventService({ eventRepo: new EventRepository(db) }),

@@ -399,3 +399,14 @@ export function localCalendarDate(dateIso: string, timezone: string): TZDate {
     throw new Error('Invalid calendar date');
   return date;
 }
+
+const SQLITE_DATETIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+
+/**
+ * Epoch ms of a stored timestamp. SQLite `datetime('now')` values have a space
+ * separator and no zone (UTC); ISO values carry `T` and a zone. Comparing the
+ * strings lexically mixes the two spellings, so callers compare these numbers.
+ */
+export function storedInstantMs(value: string): number {
+  return Date.parse(SQLITE_DATETIME.test(value) ? `${value.replace(' ', 'T')}Z` : value);
+}
