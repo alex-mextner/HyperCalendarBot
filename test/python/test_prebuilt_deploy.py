@@ -140,7 +140,7 @@ elif args[:2]==['inspect','hypercal-bot']:print(current.read_text())
 elif args[:3]==['exec','hypercal-bot','cat']:print(old_content,end='')
 elif args[:3]==['exec','hypercal-bot','bun']:recorded('APPLIED_FAILURE')
 elif args[:2]==['stop','hypercal-bot']:sys.exit(1 if os.environ.get('STOP_FAILURE')=='1' else 0)
-elif args[:2]==['start','hypercal-bot']:pass
+elif args[:2]==['start','hypercal-bot']:sys.exit(1 if os.environ.get('START_FAILURE')=='1' else 0)
 elif args and args[0]=='run':
     entrypoint=args[args.index('--entrypoint')+1] if '--entrypoint' in args else ''
     if entrypoint=='cat':print(new_content,end='')
@@ -527,6 +527,13 @@ print(body,end='')
         self.assertFalse((self.dep / "releases/current.json").exists())
         calls = [json.loads(line) for line in self.log.read_text().splitlines()]
         self.assertEqual([c[0] for c in calls if c[0] in ("stop", "start")], ["stop", "start"])
+
+    def test_failed_release_that_does_not_start_again_is_reported_as_a_failed_rollback(self):
+        # ROLLBACK_SKIPPED leaves the release to the operator; if it does not start, nothing runs.
+        result = self.run_failing_release(RISKY_DOC, START_FAILURE="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ROLLBACK_SKIPPED", result.stderr)
+        self.assertIn("ROLLBACK FAILED", result.stderr)
 
     def test_failed_release_whose_incompatible_migration_did_not_commit_restores_the_old_image(self):
         result = self.run_failing_release(RISKY_DOC, RELEASE_MIGRATION_FAILS="1")
