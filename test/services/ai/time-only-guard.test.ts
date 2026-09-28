@@ -117,6 +117,13 @@ describe('a message with only a clock time', () => {
     expect(resolveTurnDayReferences(MESSAGE, history.getRecent(USER, 30), WEDNESDAY_EVENING, TZ)).toBeNull();
   });
 
+  test('a question the bot sent outside the model (a scene, a rule) counts as asked too', () => {
+    history.save(USER, 'user', 'запиши в пятницу встречу');
+    history.save(USER, 'assistant', JSON.stringify({ kind: 'bot', text: 'Во сколько?' }));
+    history.save(USER, 'user', 'в 18:30');
+    expect(resolveTurnDayReferences('в 18:30', history.getRecent(USER, 30), WEDNESDAY_MORNING, TZ)).toBeNull();
+  });
+
   test('imposes nothing when one of several times has passed', () => {
     expect(timeOnlyToday('09:00 зал, 18:30 кошка', WEDNESDAY_MORNING, TZ)).toBeNull();
   });
