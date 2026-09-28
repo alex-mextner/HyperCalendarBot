@@ -29,6 +29,11 @@ export interface DayReferenceSet {
   references: DayReference[];
   /** Every reference's dates plus explicit dates written in the same message. */
   allowedDates: ReadonlySet<string>;
+  /**
+   * Only a clock time was given ("18:30 кошка"): it dates a new event in a private chat and
+   * says nothing about an existing event or about a group, where it may answer anyone.
+   */
+  timeOnly?: true;
 }
 
 /**
@@ -120,7 +125,29 @@ const FROM_WORDS = new Set(['с', 'со', 'from']);
 const TO_WORDS = new Set(['по', 'to', 'through']);
 /** "по Москве", "по Токио": a place-named time, written with a capital as city names are. */
 const FOREIGN_ZONE = /(?:^|[^\p{L}])[Пп]о\s+[А-ЯЁA-Z]/u;
-const ZONE_ABBREVIATION = /^(?:мск|msk|utc|gmt)$/;
+/** Zone abbreviations as whole lower-case tokens; a closed list, since "GPT" or "MEET" is no zone. */
+const ZONE_ABBREVIATION =
+  /^(?:мск|msk|utc|gmt|pst|pdt|est|edt|cst|cdt|mst|mdt|hst|hdt|akst|akdt|cet|cest|eet|eest|bst|ist|pkt|ict|wib|sgt|hkt|pht|kst|jst|awst|acst|acdt|aest|aedt|nzst|nzdt)$/;
+/** "America/New_York", "Asia/Tokyo": an IANA zone name. */
+const IANA_ZONE = /(?<![\p{L}/])[A-Z][A-Za-z]+\/[A-Z][A-Za-z_]+/u;
+/**
+ * "в 23:30 по нью-йорку", "в 23:30 по токийскому времени с Анной": a hyphenated lower-case place
+ * ending the phrase, or any place followed by "времени". A plain word ending the phrase
+ * ("завтра в 9 по работе") is no zone, so it does not widen the named day.
+ */
+const TIME_BY_PLACE =
+  /(?:\d|утра|дня|вечера|ночи|час\p{L}*)\s+по\s+(?:[\p{L}-]+\s+времени(?!\p{L})|\p{L}+-[\p{L}-]*\p{L}\s*(?:$|[.,;!?)]))/u;
+
+/** Whether a time or day in `text` is given in another time zone, so it may fall on a neighbouring day here. */
+function mentionsOtherZone(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    FOREIGN_ZONE.test(text) ||
+    IANA_ZONE.test(text) ||
+    TIME_BY_PLACE.test(lower) ||
+    tokens(lower).some((token) => ZONE_ABBREVIATION.test(token.word))
+  );
+}
 
 /** Month words as whole lower-case tokens, January first. */
 const MONTH_TOKENS: readonly RegExp[] = [
@@ -197,6 +224,7 @@ interface ExplicitDates {
 /** A day number next to a month word, in either order, with an optional year. */
 const DAY_MONTH = /(?<![\p{L}\d])(\d{1,2})(?:-?го|-?е|st|nd|rd|th)?\s+(?:of\s+)?(\p{L}+)\.?(?:,?\s+(\d{4}))?/gu;
 const MONTH_DAY = /(?<![\p{L}\d])(\p{L}+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?(?![\p{L}\d])/gu;
+const CLOCK_PREPOSITION = /(?<![\p{L}])в\s+$/u;
 
 function explicitDates(text: string, today: string): ExplicitDates {
   const year = Number(today.slice(0, 4));
@@ -213,7 +241,10 @@ function explicitDates(text: string, today: string): ExplicitDates {
     [MONTH_DAY, (m) => addDay(m[3] ? Number(m[3]) : null, monthIndex(m[1]!) + 1, Number(m[2]))],
     [
       /(?<![\d.:])(\d{1,2})\.(\d{1,2})(?:\.(\d{4}|\d{2}))?(?![\d:])/g,
-      (m) => addDay(m[3] === undefined ? null : Number(m[3].padStart(4, '20')), Number(m[2]), Number(m[1])),
+      // "в 12.05" is a clock time; a dotted date after "в" carries its year.
+      (m) =>
+        !(m[3] === undefined && CLOCK_PREPOSITION.test(text.slice(0, m.index))) &&
+        addDay(m[3] === undefined ? null : Number(m[3].padStart(4, '20')), Number(m[2]), Number(m[1])),
     ],
     [
       /(?<![\p{L}\d])(\d{1,2})(?:-?го|\s+числа)(?![\p{L}])/gu,
@@ -312,7 +343,7 @@ export function readDayContent(text: string, now: Date, timezone: string): DayCo
   const allowed = new Set<string>(explicit.dates);
   // "завтра в 3 по Токио" is a day earlier in Belgrade: a day named in another zone may
   // land on the neighbouring day of the user's own calendar.
-  const otherZone = FOREIGN_ZONE.test(text) || has(ZONE_ABBREVIATION);
+  const otherZone = mentionsOtherZone(text);
   let rangeStart: string | undefined;
   for (const reference of references) {
     for (const date of reference.dates) {
@@ -626,4 +657,97 @@ export function describeWeekdayDateMismatches(mismatches: WeekdayDateMismatch[])
         `«${phrase}»: ${date} is a ${actual}, not a ${said}; the nearest ${said} is ${nearest}`,
     )
     .join('; ');
+}
+
+/** "18:30", "18.30", "12-30", "7:30 вечера", "7:30 pm" — clock times as users type them. */
+const CLOCK_TIMES =
+  /(?<![\d.:-])([01]?\d|2[0-3])([:.-])([0-5]\d)(?![\d:-]|\.\d)(?:\s*(утра|дня|вечера|ночи|a\.?m\.?|p\.?m\.?)(?!\p{L}))?/gu;
+/**
+ * "в 8", "в 7 вечера", "в 12 часов ночи": an hour after "в", with an optional hour word and
+ * part of the day; "в 18.30" is a clock time.
+ */
+const BARE_HOUR =
+  /(?<![\p{L}\d])в\s+([01]?\d|2[0-3])(?:\s*(?:час[аов]*|ч)(?!\p{L}))?(?:\s*(утра|дня|вечера|ночи)(?!\p{L}))?(?=$|[\s;!?)]|[.,](?!\d))/gu;
+/** "раз в 3 дня", "в 2 раза", "в 3 подхода": a count or a measure, not a clock time. */
+const COUNT_BEFORE = /(?<![\p{L}])раз\s*$/u;
+const COUNT_AFTER =
+  /^\s*(?:раза?|подход\p{L}*|шаг\p{L}*|человек\p{L}*|км|километр\p{L}*|метр\p{L}*|литр\p{L}*|минут\p{L}*|штук\p{L}*|процент\p{L}*)(?![\p{L}])/u;
+/**
+ * "в 7 классе", "в 3 корпусе", "в 5 ряду": a number naming a place, whose noun is in the locative.
+ * "в 7 собрание" keeps its hour; a noun this also skips ("в 10 кофе") only loses the constraint.
+ */
+const NUMBERED_PLACE = /^\s+\p{L}*(?:[^\P{L}иь]е|ии|[ую])(?![\p{L}])/u;
+
+/** The hour an hour word means, or null for midnight: "в 12 ночи" and "12:30 am" are the start of tomorrow. */
+function clockHour(hour: number, part: string | undefined): number | null {
+  const meridiem = part?.replaceAll('.', '');
+  if (meridiem === 'am') return hour === 12 ? null : hour;
+  if (meridiem === 'pm') return hour < 12 ? hour + 12 : hour;
+  // "в 11 ночи" is 23:00, "в 3 ночи" and "в 6 ночи" the early morning.
+  if (part === 'вечера' || (part === 'ночи' && hour >= 9)) {
+    if (hour === 12) return null;
+    return hour < 12 ? hour + 12 : hour;
+  }
+  return part === 'дня' && hour < 12 ? hour + 12 : hour;
+}
+
+/**
+ * "в 23:30 по нью йорку", "в 18:30 по работе": a time followed by "по …" may be given in
+ * another zone. Only a time with nothing of the kind is pinned to today; a missed constraint
+ * is safer than rejecting a correct event.
+ */
+const QUALIFIED_TIME = /(?:\d|утра|дня|вечера|ночи|час\p{L}*)\s+по\s+\p{L}/u;
+/** "23:30 New York time", "23:30 tokyo time". */
+const PLACE_TIME = /\d\s+(?:[\p{L}.-]+\s+){1,3}time(?!\p{L})/iu;
+/** "13/06", "9/13": a slashed day and month, which this rule does not read. */
+const SLASHED_DATE = /(?<![\d/])\d{1,2}\/\d{1,2}(?!\d)/;
+
+/**
+ * A message that states clock times but no day at all ("18:30 помочь Соне с кошкой")
+ * means today — as long as every time it names is still ahead today. On 2026-09-16 at
+ * 11:06 such a message was filed for the next day. When a time has already passed the
+ * create tool's PAST_EVENT flow asks the user, so no constraint is imposed; nor for
+ * midnight or a time in another zone, which may be tomorrow here.
+ */
+export function timeOnlyToday(text: string, now: Date, timezone: string): DayReferenceSet | null {
+  if (
+    readDayContent(text, now, timezone).kind !== 'none' ||
+    mentionsOtherZone(text) ||
+    QUALIFIED_TIME.test(text.toLowerCase()) ||
+    PLACE_TIME.test(text) ||
+    SLASHED_DATE.test(text)
+  )
+    return null;
+  // "17:00-18:00" is two times: the dash between them is a space for the time pattern.
+  const normalized = text.toLowerCase().replace(/(\d[:.]\d\d)-(?=\d{1,2}[:.]\d\d)/g, '$1 ');
+  const minutes: { phrase: string; at: number }[] = [];
+  for (const match of normalized.matchAll(CLOCK_TIMES)) {
+    // "в 12.05" may equally be 12 May, "12-10" 12 October: a time that can also be a date says
+    // nothing about today.
+    if (match[2] !== ':' && Number(match[3]) >= 1 && Number(match[3]) <= 12) return null;
+    const hour = clockHour(Number(match[1]), match[4]);
+    if (hour === null) return null;
+    minutes.push({ phrase: match[0], at: hour * 60 + Number(match[3]) });
+  }
+  for (const match of normalized.matchAll(BARE_HOUR)) {
+    const start = match.index ?? 0;
+    const before = normalized.slice(0, start);
+    const after = normalized.slice(start + match[0].length);
+    // A bare "в 7" before a numbered place names the place; "в 7 часов"/"в 7 утра" is an hour.
+    const place = /\d$/.test(match[0]) && NUMBERED_PLACE.test(after);
+    if (COUNT_BEFORE.test(before) || COUNT_AFTER.test(after) || place) continue;
+    const hour = clockHour(Number(match[1]), match[2]);
+    if (hour === null) return null;
+    minutes.push({ phrase: match[0], at: hour * 60 });
+  }
+  if (minutes.length === 0) return null;
+  const local = new TZDate(now.getTime(), timezone);
+  const nowMinutes = local.getHours() * 60 + local.getMinutes();
+  if (minutes.some(({ at }) => at <= nowMinutes)) return null;
+  const { today } = localToday(now, timezone);
+  return {
+    references: minutes.map(({ phrase }) => ({ phrase, label: 'today', dates: [today] })),
+    allowedDates: new Set([today]),
+    timeOnly: true,
+  };
 }

@@ -12,6 +12,7 @@ import {
   localDayOf,
   readDayContent,
   shiftDay,
+  timeOnlyToday,
   type WeekdayDateMismatch,
   weekdayOf,
 } from './day-references.ts';
@@ -44,6 +45,8 @@ const AskUserArgsCodec = jsonCodec(
   z.object({ question: z.string().optional(), options: z.array(z.string()).optional() }),
 );
 const ActivityCodec = jsonCodec(z.object({ kind: z.string() }));
+/** A bot message sent outside the model (a scene, a rule's response), as the logger saves it. */
+const BotMessageCodec = jsonCodec(z.object({ kind: z.enum(['bot', 'bot_edit']), text: z.string() }));
 
 /**
  * The ask_user question the current message answers, with the user message that led to
@@ -113,6 +116,35 @@ function answersQuestion(messageText: string, options: readonly string[]): boole
   return words.length > 0 && words.every((word) => CONFIRMATIONS[word] === true);
 }
 
+/** The text an assistant row showed the user; empty for a tool-call turn or another activity. */
+function assistantText(content: string): string {
+  const sent = BotMessageCodec.safeParse(content);
+  if (sent.success) return sent.data.text;
+  if (ActivityCodec.safeParse(content).success) return '';
+  const turn = AssistantToolCallsCodec.safeParse(content);
+  return turn.success ? (turn.data.content ?? '') : content;
+}
+
+/**
+ * Whether the bot's last reply before this message asked something in plain text ("Во
+ * сколько?"): the message then answers it, and the day may have been named before. Any
+ * question counts, a closing "Что-то ещё?" too: the time-only rule then imposes nothing.
+ */
+function answersPlainQuestion(messageText: string, history: ChatHistoryMessage[]): boolean {
+  let index = history.length - 1;
+  while (index >= 0 && history[index]!.role !== 'user') index--;
+  if (index < 0 || history[index]!.content.trim() !== messageText.trim()) return false;
+  for (index--; index >= 0; index--) {
+    const row = history[index]!;
+    if (row.role === 'tool') continue;
+    if (row.role === 'user') return false;
+    const text = assistantText(row.content);
+    if (text.trim() === '') continue;
+    return text.includes('?');
+  }
+  return false;
+}
+
 /**
  * The days this turn is allowed to touch: the ones named in the message, or — for an
  * answer to ask_user that names no day itself ("Да") — the ones named in the message
@@ -128,7 +160,16 @@ export function resolveTurnDayReferences(
   if (own.kind === 'named') return own.set;
   if (own.kind === 'open') return null;
   const pending = pendingQuestion(messageText, history);
-  if (!pending || !answersQuestion(messageText, pending.options)) return null;
+  // An answer to a question keeps the date context the question was asked in (for ask_user
+  // the days named then); a fresh message that states only a clock time means today while
+  // that time is still ahead. A message that is not the newest saved one (a live-call
+  // transcript, a synthetic run) may be answering something, so it imposes nothing.
+  if (!pending) {
+    const newestUser = history.findLast((row) => row.role === 'user');
+    if (newestUser?.content.trim() !== messageText.trim() || answersPlainQuestion(messageText, history)) return null;
+    return timeOnlyToday(messageText, now, timezone);
+  }
+  if (!answersQuestion(messageText, pending.options)) return null;
   // Each message is read as of when it was written: a "Да" given days later confirms the
   // Tuesday meant then, not the one coming now.
   const originAt = storedInstantMs(pending.origin.created_at);
@@ -316,6 +357,7 @@ function targetOf(ctx: AgentContext, toolName: string, input: unknown): Target |
 export function checkDayReferences(ctx: AgentContext, toolName: string, input: unknown): ToolResult | undefined {
   const named = ctx.dayReferences;
   if (!named) return undefined;
+  if (named.timeOnly && (toolName !== 'create_event' || ctx.isGroup)) return undefined;
   const target = targetOf(ctx, toolName, input);
   if (!target) return undefined;
   for (const day of named.allowedDates) if (day >= target.first && day <= target.last) return undefined;
