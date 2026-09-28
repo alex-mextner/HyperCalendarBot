@@ -10,6 +10,7 @@ import { SharedEventRepository } from '../../../src/database/repositories/shared
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import { approveDeletes } from '../../../src/services/ai/delete-confirmation.ts';
 import { _resetToolThrottleForTest, executeTool } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
@@ -80,6 +81,7 @@ describe('executeTool', () => {
     const input = { event_id: String(event.id), title: 'Changed' };
     expect((await executeTool(outsider, name, input)).success).toBe(false);
     expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe('Synthetic');
+    approveDeletes(USER_ID, ctx.chatId, [event.id]);
     expect((await executeTool(ctx, name, input)).success).toBe(true);
     expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe(name === 'delete_event' ? undefined : 'Changed');
     await executeTool(ctx, name, { ...input, event_id: event.id });
@@ -181,6 +183,7 @@ describe('executeTool', () => {
       start_at: '2026-03-15T10:00:00Z',
       timezone: 'UTC',
     });
+    approveDeletes(USER_ID, ctx.chatId, [event.id]);
     const result = await executeTool(ctx, 'delete_event', { event_id: event.id });
     expect(result.success).toBe(true);
   });

@@ -13,6 +13,7 @@ import { ParticipantRepository } from '../../../../src/database/repositories/par
 import { SecretaryRepository } from '../../../../src/database/repositories/secretary.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
+import { approveDeletes } from '../../../../src/services/ai/delete-confirmation.ts';
 import {
   handleCreateEvent,
   handleDeleteEvent,
@@ -567,6 +568,7 @@ describe('event tool handlers', () => {
         start_at: '2026-03-15T10:00:00Z',
         timezone: 'UTC',
       });
+      approveDeletes(ctx.user.telegram_id, ctx.chatId, [event.id]);
       const result = await handleDeleteEvent(ctx, { event_id: event.id });
       expect(result.success).toBe(true);
     });
@@ -849,6 +851,7 @@ describe('event tool handlers', () => {
     test('handleDeleteEvent with scope=group deletes from group calendar', async () => {
       const event = createGroupEvent('To Delete Group', '2026-03-15T10:00:00Z');
       const gCtx = makeGroupCtx();
+      approveDeletes(gCtx.user.telegram_id, gCtx.chatId, [event.id]);
       const result = await handleDeleteEvent(gCtx, { event_id: event.id, scope: 'group' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('To Delete Group');
@@ -1281,6 +1284,7 @@ describe('event tool handlers', () => {
         created_by: USER_ID,
       });
 
+      approveDeletes(ctx.user.telegram_id, ctx.chatId, [event.id]);
       const result = await handleDeleteEvent(ctx, { event_id: event.id });
 
       expect(result.success).toBe(true);

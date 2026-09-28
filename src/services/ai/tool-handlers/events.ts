@@ -1,7 +1,7 @@
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { Lang } from '../../../config/constants.ts';
-import { t } from '../../../config/constants.ts';
+import { t, toLang } from '../../../config/constants.ts';
 import { CLEARED_LOCATION } from '../../../database/repositories/event.repository.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
 import { getDayRangeUtc, localCalendarDate } from '../../../utils/date.ts';
@@ -12,6 +12,17 @@ import { formatEventDetail } from '../../event/formatters.ts';
 import type { EventSummary } from '../../intent/variable-resolver.ts';
 import { formatLocationPlain } from '../../location/format-location.ts';
 import { formatEventWeatherLine } from '../../weather/format.ts';
+import {
+  approveDeletes,
+  chooseTargets,
+  consumeDeleteApproval,
+  type DeleteTarget,
+  deleteConfirmationKeyboard,
+  dropDeleteConfirmation,
+  isPastEvent,
+  issueDeleteConfirmation,
+  renderDeleteConfirmation,
+} from '../delete-confirmation.ts';
 import { type AgendaInterval, type AgendaScope, formatEmptyAgenda } from '../empty-agenda.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { formatReminderDuration } from './reminders.ts';
@@ -443,6 +454,8 @@ async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, us
         created_by: ctx.user.telegram_id,
       }),
     });
+    ctx.createdEventIds ??= new Set();
+    ctx.createdEventIds.add(event.id);
 
     const parts = [`id: ${event.id}`, `title: ${event.title}`, `start: ${event.start_at}`];
     if (event.end_at) parts.push(`end: ${event.end_at}`);
@@ -651,6 +664,103 @@ export async function handleAttachPendingLocationToEvent(
   };
 }
 
+/**
+ * The event a delete_event call from this user would reach, resolved the same way the delete
+ * resolves it: the group calendar in a group, the user's own calendar, a calendar they are a
+ * write secretary of, or an event they accepted (the delete then declines it).
+ */
+function resolveDeleteTarget(ctx: AgentContext, eventId: number, now: number): DeleteTarget | null {
+  const actorId = ctx.user.telegram_id;
+  const target = (event: CalendarEvent, scope: DeleteTarget['scope'], ownerId?: number): DeleteTarget => ({
+    eventId: event.id,
+    scope,
+    ...(ownerId !== undefined && { ownerId }),
+    title: event.title,
+    startAt: event.start_at,
+    endAt: event.end_at,
+    allDay: event.all_day === 1,
+    recurring: event.recurrence_rule !== null,
+    past: isPastEvent(event, now),
+  });
+  if (ctx.isGroup && ctx.groupChatId !== undefined) {
+    const groupEvent = ctx.eventService.getEventForGroup(eventId, ctx.groupChatId);
+    if (groupEvent) return target(groupEvent, 'group');
+  }
+  const own = ctx.eventService.getEvent(eventId, actorId);
+  if (own) return target(own, 'personal');
+  const ownerId = ctx.eventService.getEventOwnerId(eventId);
+  if (ownerId === null || ownerId === actorId) return null;
+  const ownersEvent = ctx.eventService.getEvent(eventId, ownerId);
+  if (!ownersEvent) return null;
+  if (checkSecretaryAccess(actorId, ownerId, ctx.secretary?.secretaryRepo ?? null, 'write').ok) {
+    return target(ownersEvent, 'personal', ownerId);
+  }
+  const participant = ctx.participantRepo?.findByEventAndUser(eventId, actorId);
+  return participant?.status === 'accepted' ? target(ownersEvent, 'personal') : null;
+}
+
+/**
+ * ask_user with event_ids: the bot, not the model, lists the events with their local dates and
+ * owns the buttons, and the callback deletes exactly what the user tapped.
+ */
+export async function handleDeleteConfirmationRequest(ctx: AgentContext, eventIds: number[]): Promise<ToolResult> {
+  const lang = toLang(ctx.user.language);
+  const tr = t(lang).aiTools.meta;
+  const now = Date.now();
+  const targets: DeleteTarget[] = [];
+  const missing: number[] = [];
+  for (const eventId of new Set(eventIds)) {
+    const resolved = resolveDeleteTarget(ctx, eventId, now);
+    if (resolved) targets.push(resolved);
+    else missing.push(eventId);
+  }
+  if (missing.length > 0) {
+    return { success: false, mutationState: 'not_applied', error: tr.deleteTargetsNotFound(missing.join(', ')) };
+  }
+  const text = renderDeleteConfirmation(targets, ctx.user.timezone, lang, now);
+  if (ctx.inputMode === 'live_call') {
+    // A call has no buttons: the list is spoken, and a spoken yes can only cover upcoming events.
+    const upcoming = chooseTargets(targets, 'upcoming').map((target) => target.eventId);
+    approveDeletes(ctx.user.telegram_id, ctx.chatId, upcoming, now);
+    return {
+      success: true,
+      mutationState: 'not_applied',
+      output: text,
+      awaitingInput: { kind: 'speech', question: text },
+      stopLoop: true,
+      agentHint: `Delete only after the user says yes, and only these upcoming ids: ${upcoming.join(', ') || 'none'}. Past events cannot be deleted during a call.`,
+    };
+  }
+  if (!ctx.sender?.sendMessageWithKeyboard) {
+    return { success: false, mutationState: 'not_applied', error: 'Buttons not supported.' };
+  }
+  const confirmationId = issueDeleteConfirmation(ctx.user.telegram_id, ctx.chatId, targets, now);
+  try {
+    await ctx.sender.sendMessageWithKeyboard(
+      ctx.chatId,
+      text,
+      deleteConfirmationKeyboard(confirmationId, targets, lang),
+    );
+  } catch (err) {
+    dropDeleteConfirmation(confirmationId);
+    logger.error({ err }, 'Failed to send delete confirmation');
+    return {
+      success: false,
+      mutationState: 'not_applied',
+      error: 'ASK_USER_DELIVERY_FAILED: failed to send the delete confirmation.',
+    };
+  }
+  return {
+    success: true,
+    mutationState: 'not_applied',
+    output: tr.deleteConfirmationSent,
+    awaitingInput: { kind: 'chat' },
+    stopLoop: true,
+    agentHint:
+      'The bot deletes exactly what the user taps and then tells you what was deleted. Do not call delete_event for these events.',
+  };
+}
+
 export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
@@ -660,6 +770,19 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
   );
   if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
   const userId = access.effectiveUserId;
+  // Checked only once the event is known to exist, so a wrong id still gets "not found".
+  const unconfirmed = (): ToolResult | null =>
+    ctx.toolOrigin === 'intent_workflow' ||
+    ctx.createdEventIds?.has(input.event_id) === true ||
+    consumeDeleteApproval(ctx.user.telegram_id, ctx.chatId, input.event_id)
+      ? null
+      : {
+          success: false,
+          mutationState: 'not_applied',
+          error: t(ctx.user.language).aiTools.meta.deleteNeedsConfirmation,
+          agentHint:
+            'Call ask_user with event_ids listing every event to delete: the bot shows them with local dates and deletes on the user’s tap. A typed "да" or your own question does not confirm a delete.',
+        };
   const scope = resolveScope(input, ctx);
 
   if (scope === 'group') {
@@ -674,6 +797,8 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
         error: `Event ${input.event_id} not found in group calendar.`,
       };
     }
+    const refusal = unconfirmed();
+    if (refusal) return refusal;
     // Remove from all group members' Google Calendars before deleting (parallel)
     if (ctx.google?.scheduleParticipantPush && ctx.group) {
       const pushParticipant = ctx.google.scheduleParticipantPush;
@@ -704,6 +829,8 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
   if (!event && ctx.participantRepo) {
     const participant = ctx.participantRepo.findByEventAndUser(input.event_id, userId);
     if (participant && participant.status === 'accepted') {
+      const refusal = unconfirmed();
+      if (refusal) return refusal;
       ctx.participantRepo.updateStatus(input.event_id, userId, 'declined');
       // Remove from this participant's Google Calendar
       if (ctx.google?.scheduleParticipantPush) {
@@ -728,6 +855,8 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
       error: `Event ${input.event_id} not found or not owned by you.`,
     };
   }
+  const refusal = unconfirmed();
+  if (refusal) return refusal;
 
   // Remove from all participants' Google Calendars before deleting (parallel)
   if (ctx.google?.scheduleParticipantPush && ctx.participantRepo) {

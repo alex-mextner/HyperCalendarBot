@@ -10,6 +10,7 @@ import { SharingSettingsRepository } from '../../../src/database/repositories/sh
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { User } from '../../../src/database/types.ts';
+import { approveDeletes } from '../../../src/services/ai/delete-confirmation.ts';
 import { handleDeleteEvent } from '../../../src/services/ai/tool-handlers/events.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
@@ -445,6 +446,7 @@ describe('invitee deletes shared event = decline', () => {
     participantRepo.add(shared.id, INVITEE, 'accepted');
 
     const ctx = makeCtx(inviteeUser);
+    approveDeletes(ctx.user.telegram_id, ctx.chatId, [shared.id]);
     const result = await handleDeleteEvent(ctx, { event_id: shared.id });
 
     expect(result.success).toBe(true);
@@ -470,6 +472,7 @@ describe('invitee deletes shared event = decline', () => {
     });
 
     const ctx = makeCtx(creatorUser);
+    approveDeletes(ctx.user.telegram_id, ctx.chatId, [event.id]);
     const result = await handleDeleteEvent(ctx, { event_id: event.id });
 
     expect(result.success).toBe(true);
@@ -503,6 +506,7 @@ describe('invitee deletes shared event = decline', () => {
     participantRepo.add(shared.id, INVITEE, 'accepted');
 
     const ctx = makeCtx(inviteeUser);
+    approveDeletes(ctx.user.telegram_id, ctx.chatId, [shared.id]);
     handleDeleteEvent(ctx, { event_id: shared.id });
 
     const visible = eventRepo.getVisibleInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
@@ -687,6 +691,7 @@ describe('full shared event lifecycle', () => {
       participantRepo,
       conversationLogger: null as never,
     };
+    approveDeletes(ctx.user.telegram_id, ctx.chatId, [event.id]);
     const deleteResult = await handleDeleteEvent(ctx, { event_id: event.id });
     expect(deleteResult.success).toBe(true);
     expect(deleteResult.output).toContain('declined');

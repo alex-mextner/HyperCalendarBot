@@ -156,6 +156,7 @@ const askUserSchema = z
   .object({
     question: z.string(),
     options: z.array(z.string()),
+    event_ids: z.array(numericId.pipe(z.number().positive())).min(1).max(30).optional(),
   })
   .passthrough();
 

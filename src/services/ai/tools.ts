@@ -166,8 +166,7 @@ const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'delete_event',
-    description:
-      'Delete a calendar event by its ID. If the user is a participant (not the creator), this declines the invitation instead of deleting — the event stays for the creator and other participants.',
+    description: 'Delete an event by ID. For a participant it declines instead; the event stays for the others.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -546,6 +545,11 @@ const toolDefinitions: ToolDefinition[] = [
           type: 'array',
           items: { type: 'string' },
           description: 'Short button labels (e.g., ["Да", "Нет"])',
+        },
+        event_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Events to delete: the bot lists them with dates, deletes the tapped ones, reports back.',
         },
       },
       required: ['question', 'options'],
