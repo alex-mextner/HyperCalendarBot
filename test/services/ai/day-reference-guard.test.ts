@@ -1,10 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
+import { CalendarProposalRepository } from '../../../src/database/repositories/calendar-proposal.repository.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
+import { SecretaryRepository } from '../../../src/database/repositories/secretary.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { resolveTurnDayReferences } from '../../../src/services/ai/day-reference-guard.ts';
@@ -38,7 +40,7 @@ function context(messageText: string, now = SUNDAY_NIGHT): AgentContext {
     userRepo: users,
     eventReminderRepo: new EventReminderRepository(db),
   };
-  ctx.dayReferences = resolveTurnDayReferences(messageText, history.getRecent(USER, 30), now, TZ);
+  ctx.dayReferences = resolveTurnDayReferences(messageText, history.getRecent(USER, 30), now, ctx.user.timezone);
   return ctx;
 }
 
@@ -144,6 +146,28 @@ describe('creating on a day the user did not name', () => {
     const created = await executeTool(ctx, 'create_event', { title: 'Английский', start_at: '2026-09-28T10:30:00Z' });
     expect(created.success).toBe(true);
   });
+
+  test('a date-only all-day start is the written day, also west of UTC', async () => {
+    // 2026-09-27 17:00 in New York; Wednesday is 2026-09-30 there too.
+    db.run('UPDATE users SET timezone = ? WHERE telegram_id = ?', ['America/New_York', USER]);
+    say('в среду весь день конференция');
+    const ctx = context('в среду весь день конференция');
+    const created = await executeTool(ctx, 'create_event', {
+      title: 'Конференция',
+      start_at: '2026-09-30',
+      all_day: true,
+    });
+    expect(created.error).toBeUndefined();
+    expect(created.success).toBe(true);
+
+    const tuesday = await executeTool(ctx, 'create_event', {
+      title: 'Конференция',
+      start_at: '2026-09-29',
+      all_day: true,
+    });
+    expect(tuesday.error).toContain('Tuesday 2026-09-29');
+    expect(tuesday.error).toContain('start_at "2026-09-30"');
+  });
 });
 
 describe('reading a day the user did not name', () => {
@@ -172,6 +196,17 @@ describe('reading a day the user did not name', () => {
     const picture = await executeTool(ctx, 'render_day_image', { date: '2026-09-01' });
     expect(picture.success).toBe(false);
     expect(picture.error).toContain('Tuesday 2026-09-01');
+  });
+
+  test('a week or month picture must contain the named day', async () => {
+    say('Планы на среду');
+    const ctx = context('Планы на среду');
+    const lastWeek = await executeTool(ctx, 'render_week_image', { week_start: '2026-09-21' });
+    expect(lastWeek.success).toBe(false);
+    expect(lastWeek.error).toContain('2026-09-21..2026-09-27');
+    expect(lastWeek.error).toContain('render_week_image with week_start "2026-09-30"');
+    const lastMonth = await executeTool(ctx, 'render_month_image', { month: '2026-08' });
+    expect(lastMonth.error).toContain('2026-08-01..2026-08-31');
   });
 });
 
@@ -214,6 +249,50 @@ describe('deleting on a day the user did not name', () => {
     expect((await executeTool(ctx, 'delete_event', { event_id: coming })).success).toBe(true);
     expect(liveRows().map((row) => row.id)).toEqual([past]);
   });
+
+  test('an edit that keeps the date must be on a named day; a move must land on one', async () => {
+    const monday = addLesson('2026-09-28T10:30:00Z');
+    const tuesday = addLesson('2026-09-29T10:30:00Z');
+    say('Во вторник переименуй английский в «Разговорный английский»');
+    const ctx = context('Во вторник переименуй английский в «Разговорный английский»');
+
+    const wrong = await executeTool(ctx, 'update_event', { event_id: monday, title: 'Разговорный английский' });
+    expect(wrong.success).toBe(false);
+    expect(wrong.error).toContain(`Event ${monday} «Английский» is on Monday 2026-09-28`);
+    const right = await executeTool(ctx, 'update_event', { event_id: tuesday, title: 'Разговорный английский' });
+    expect(right.success).toBe(true);
+
+    // "Перенеси английский на вторник": the lesson leaves a day the user did not name.
+    say('Перенеси английский на вторник');
+    const move = context('Перенеси английский на вторник');
+    const moved = await executeTool(move, 'update_event', { event_id: monday, start_at: '2026-09-29T12:00:00Z' });
+    expect(moved.success).toBe(true);
+  });
+
+  test("a secretary's delete in the owner's calendar is checked the same way", async () => {
+    const OWNER = 9102;
+    new UserRepository(db).create({ telegram_id: OWNER, timezone: TZ, language: 'ru' });
+    const secretaryRepo = new SecretaryRepository(db);
+    const access = secretaryRepo.upsert({ owner_id: OWNER, secretary_id: USER, permission: 'write' });
+    secretaryRepo.updateStatus(access.id, 'active');
+    const monday = events.createEvent({
+      user_id: OWNER,
+      title: 'Английский',
+      start_at: '2026-09-28T10:30:00Z',
+      timezone: TZ,
+    }).id;
+    say('Во вторник отмени английский у Алекса');
+    const ctx = context('Во вторник отмени английский у Алекса');
+    ctx.secretary = {
+      secretaryRepo,
+      secretaryForLine: undefined,
+      calendarProposalRepo: new CalendarProposalRepository(db),
+    };
+
+    const wrong = await executeTool(ctx, 'delete_event', { event_id: monday, owner_id: OWNER });
+    expect(wrong.error).toContain(`Event ${monday} «Английский» is on Monday 2026-09-28`);
+    expect(liveRows().map((row) => row.id)).toEqual([monday]);
+  });
 });
 
 describe('which turn text counts', () => {
@@ -243,5 +322,23 @@ describe('which turn text counts', () => {
     history.save(USER, 'assistant', JSON.stringify({ role: 'assistant', content: 'Записала. Что-то ещё?' }));
     say('Да');
     expect(resolveTurnDayReferences('Да', history.getRecent(USER, 30), SUNDAY_NIGHT, TZ)).toBeNull();
+  });
+
+  test('a message that is not the newest saved one answers no question', () => {
+    // A live-call transcript is never saved: the answered question before it is not its own.
+    say('во вторник в 10 стоматолог');
+    toolTurn('c1', 'ask_user', { question: 'Поставить на вторник, 29 сентября?', options: ['Да'] }, 'Отправлен.');
+    say('Да');
+    const history30 = history.getRecent(USER, 30);
+    expect(resolveTurnDayReferences('поставь звонок маме на 3 часа', history30, SUNDAY_NIGHT, TZ)).toBeNull();
+  });
+
+  test('"эту среду" is this calendar week\'s or the coming one, never last week\'s', () => {
+    const monday = new Date('2026-09-21T08:00:00Z');
+    const set = resolveTurnDayReferences('отмени английский в эту среду', [], monday, TZ);
+    expect(set && [...set.allowedDates].sort()).toEqual(['2026-09-23']);
+    // On Sunday this week's Wednesday is past and the coming one is next week's: both readings stay.
+    const sunday = resolveTurnDayReferences('отмени английский в эту среду', [], SUNDAY_NIGHT, TZ);
+    expect(sunday && [...sunday.allowedDates].sort()).toEqual(['2026-09-23', '2026-09-30']);
   });
 });

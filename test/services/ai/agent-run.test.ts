@@ -2323,4 +2323,58 @@ describe('CalendarBotAgent.run()', () => {
       setSystemTime();
     }
   });
+
+  test('a "Да" in a group is checked against the question asked in that group', async () => {
+    const GROUP = -100777;
+    setSystemTime(new Date('2026-09-27T21:00:00Z'));
+    try {
+      ctx.user = { ...ctx.user, timezone: 'Europe/Belgrade' };
+      ctx.isGroup = true;
+      ctx.groupChatId = GROUP;
+      ctx.messageText = 'Да';
+      const past = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Английский',
+        start_at: '2026-09-01T11:30:00Z',
+        timezone: 'Europe/Belgrade',
+        owner_type: 'group',
+        group_id: GROUP,
+        created_by: USER_ID,
+      }).id;
+      const ask = {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'ask-1',
+            type: 'function',
+            function: {
+              name: 'ask_user',
+              arguments: JSON.stringify({ question: 'Удалить английский во вторник, 29 сентября?', options: ['Да'] }),
+            },
+          },
+        ],
+      };
+      ctx.chatHistory.save(USER_ID, 'user', 'Во вторник отмени английский', GROUP);
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(ask), GROUP);
+      ctx.chatHistory.save(
+        USER_ID,
+        'tool',
+        JSON.stringify([{ role: 'tool', tool_call_id: 'ask-1', content: 'Вопрос отправлен.' }]),
+        GROUP,
+      );
+      ctx.chatHistory.save(USER_ID, 'user', 'Да', GROUP);
+      const { impl, calls } = makeStreamImpl([
+        { kind: 'tool', callId: 'call-1', name: 'delete_event', input: { event_id: past } },
+        { kind: 'text', text: 'Не удалила: это было 1 сентября.' },
+      ]);
+      await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+      const rejection = calls[1]?.messages.find((m) => m.role === 'tool' && m.tool_call_id === 'call-1');
+      expect(String(rejection?.content)).toContain('«вторник» = Tuesday 2026-09-29');
+      expect(ctx.eventService.getEventForGroup(past, GROUP)).not.toBeNull();
+    } finally {
+      setSystemTime();
+    }
+  });
 });

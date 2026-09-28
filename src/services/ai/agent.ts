@@ -982,7 +982,10 @@ export class CalendarBotAgent {
     try {
       await writer.init();
       const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
-      ctx.dayReferences = resolveTurnDayReferences(ctx.messageText, history, new Date(), ctx.user.timezone);
+      // A bare "Да" answers the ask_user of the conversation it was saved to: the group's own.
+      const turnHistory =
+        ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 30) : history;
+      ctx.dayReferences = resolveTurnDayReferences(ctx.messageText, turnHistory, new Date(), ctx.user.timezone);
       const { systemPrompt, messages: rawHistoryMessages } = await waitForAbort(
         () => this.buildMessages(ctx, history, summaryStream, requestSignal),
         requestSignal,

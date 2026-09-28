@@ -147,7 +147,7 @@ function dayKey(y: number, m: number, d: number): string {
   return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
-function shiftDay(key: string, delta: number): string {
+export function shiftDay(key: string, delta: number): string {
   const [y, m, d] = key.split('-').map(Number);
   const date = new Date(Date.UTC(y!, m! - 1, d! + delta));
   return dayKey(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
@@ -259,7 +259,9 @@ export function readDayContent(text: string, now: Date, timezone: string): DayCo
   const has = (pattern: RegExp) => words.some((token) => pattern.test(token.word));
 
   const nextMarked = has(NEXT_MARKER);
-  const pastMarked = has(PAST_MARKER) || has(THIS_MARKER);
+  const pastMarked = has(PAST_MARKER);
+  const thisMarked = has(THIS_MARKER);
+  const thisMonday = shiftDay(today, -weekdayOf(today));
   // Just after midnight "завтра" often still means the day that has just begun.
   const night = hour < 5;
 
@@ -291,7 +293,9 @@ export function readDayContent(text: string, now: Date, timezone: string): DayCo
     const base = shiftDay(today, (form.weekday - weekdayOf(today) + 7) % 7);
     const dates = [base];
     if (base === today || nextMarked) dates.push(shiftDay(base, 7));
-    if (pastMarked) dates.push(shiftDay(base, -7));
+    // "эту среду" is this calendar week's Wednesday or the coming one — never last week's.
+    const previous = shiftDay(base, -7);
+    if (pastMarked || (thisMarked && previous >= thisMonday)) dates.push(previous);
     references.push({ phrase: token.word, label: WEEKDAY_NAMES[form.weekday]!, dates, base, before });
   }
 

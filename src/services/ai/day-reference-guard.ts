@@ -1,7 +1,17 @@
 import { z } from 'zod';
-import type { ChatHistoryMessage } from '../../database/types.ts';
+import type { CalendarEvent, ChatHistoryMessage } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
-import { type DayReferenceSet, describeDay, describeReferences, localDayOf, readDayContent } from './day-references.ts';
+import {
+  type DayReferenceSet,
+  describeDay,
+  describeReferences,
+  localDayOf,
+  readDayContent,
+  shiftDay,
+  weekdayOf,
+} from './day-references.ts';
+import { checkSecretaryAccess } from './tool-handlers/secretary-access.ts';
+import { resolveScope } from './tool-handlers/shared.ts';
 import type { AgentContext, ToolResult } from './types.ts';
 
 /**
@@ -32,12 +42,17 @@ const ActivityCodec = jsonCodec(z.object({ kind: z.string() }));
 
 /**
  * The ask_user question the current message answers, with the user message that led to
- * it — or null when the turn before this message did not end in ask_user.
+ * it — or null when the turn before this message did not end in ask_user, or when the
+ * newest saved user message is not this one (a live-call transcript is never saved).
  */
-function pendingQuestion(history: ChatHistoryMessage[]): { origin: string; question: string } | null {
+function pendingQuestion(
+  messageText: string,
+  history: ChatHistoryMessage[],
+): { origin: string; question: string } | null {
   let index = history.length - 1;
   // The current message is the newest user row; bot edits of the question may follow it.
   while (index >= 0 && history[index]!.role !== 'user') index--;
+  if (index < 0 || history[index]!.content.trim() !== messageText.trim()) return null;
   index--;
   let question: string | null = null;
   for (; index >= 0; index--) {
@@ -74,7 +89,7 @@ export function resolveTurnDayReferences(
   const own = readDayContent(messageText, now, timezone);
   if (own.kind === 'named') return own.set;
   if (own.kind === 'open') return null;
-  const pending = pendingQuestion(history);
+  const pending = pendingQuestion(messageText, history);
   if (!pending) return null;
   const origin = readDayContent(pending.origin, now, timezone);
   if (origin.kind !== 'named') return null;
@@ -95,6 +110,8 @@ const EventRefInput = z.object({
   owner_id: z.number().optional(),
   scope: z.string().optional(),
 });
+const WeekInput = z.object({ week_start: z.string() });
+const MonthInput = z.object({ month: z.string() });
 
 const DATE_PREFIX = /^(\d{4}-\d{2}-\d{2})/;
 
@@ -103,6 +120,11 @@ function daysOfArgument(value: string, timezone: string): string[] {
   const written = DATE_PREFIX.exec(value)?.[1];
   const local = value.includes('T') ? localDayOf(value, timezone) : null;
   return [written, local].filter((day): day is string => typeof day === 'string');
+}
+
+/** The local day a start falls on: a date-only (all-day) start is the day written. */
+function dayOfStart(startAt: string, timezone: string): string | null {
+  return startAt.includes('T') ? localDayOf(startAt, timezone) : (DATE_PREFIX.exec(startAt)?.[1] ?? null);
 }
 
 interface Target {
@@ -122,8 +144,11 @@ function localClock(instant: string, timezone: string): string {
 }
 
 function startTarget(what: string, startAt: string, timezone: string): Target | null {
-  const day = localDayOf(startAt, timezone);
+  const day = dayOfStart(startAt, timezone);
   if (!day) return null;
+  if (!startAt.includes('T')) {
+    return { what: `${what} (${describeDay(day)})`, first: day, last: day, redo: (named) => `start_at "${named}"` };
+  }
   const clock = localClock(startAt, timezone);
   return {
     what: `${what} (${describeDay(day)} ${clock} local)`,
@@ -133,40 +158,55 @@ function startTarget(what: string, startAt: string, timezone: string): Target | 
   };
 }
 
+/** The event a delete or an edit refers to, looked up the way its handler will look it up. */
+function referencedEvent(ctx: AgentContext, input: unknown): CalendarEvent | null {
+  const parsed = EventRefInput.safeParse(input);
+  if (!parsed.success) return null;
+  const { event_id: eventId, owner_id: ownerId } = parsed.data;
+  // Without write access to someone else's calendar the handler refuses; nothing is revealed here.
+  const access = checkSecretaryAccess(ctx.user.telegram_id, ownerId, ctx.secretary?.secretaryRepo ?? null, 'write');
+  if (!access.ok) return null;
+  if (resolveScope(parsed.data, ctx) !== 'group') return ctx.eventService.getEvent(eventId, access.effectiveUserId);
+  return ctx.groupChatId === undefined ? null : ctx.eventService.getEventForGroup(eventId, ctx.groupChatId);
+}
+
+function eventTarget(ctx: AgentContext, input: unknown, action: string): Target | null {
+  const event = referencedEvent(ctx, input);
+  // A series spans many days; changing it is not a single-day action.
+  if (!event || event.recurrence_rule) return null;
+  const day = dayOfStart(event.start_at, ctx.user.timezone);
+  if (!day) return null;
+  return {
+    what: `Event ${event.id} «${event.title}» is on ${describeDay(day)}`,
+    first: day,
+    last: day,
+    redo: (named) => `${action} only events that fall on ${named}`,
+  };
+}
+
+function rangeTarget(first: string, last: string, redo: (day: string) => string): Target {
+  return { what: `This call reads ${first}..${last}`, first, last, redo };
+}
+
 function targetOf(ctx: AgentContext, toolName: string, input: unknown): Target | null {
   const timezone = ctx.user.timezone;
   switch (toolName) {
-    case 'create_event':
-    case 'update_event': {
+    case 'create_event': {
       const parsed = StartInput.safeParse(input);
       if (!parsed.success || parsed.data.start_at === undefined) return null;
-      return startTarget(
-        toolName === 'create_event' ? 'This event starts' : 'The new start',
-        parsed.data.start_at,
-        timezone,
-      );
+      return startTarget('This event starts', parsed.data.start_at, timezone);
     }
-    case 'delete_event': {
-      const parsed = EventRefInput.safeParse(input);
-      if (!parsed.success) return null;
-      const { event_id: eventId, owner_id: ownerId, scope } = parsed.data;
-      // Someone else's calendar is checked for access by the handler; never reveal its dates here.
-      if (ownerId !== undefined && ownerId !== ctx.user.telegram_id) return null;
-      const event =
-        scope === 'group' && ctx.groupChatId !== undefined
-          ? ctx.eventService.getEventForGroup(eventId, ctx.groupChatId)
-          : ctx.eventService.getEvent(eventId, ctx.user.telegram_id);
-      // A series spans many days; deleting it is not a single-day action.
-      if (!event || event.recurrence_rule) return null;
-      const day = localDayOf(event.start_at, timezone);
-      if (!day) return null;
-      return {
-        what: `Event ${eventId} «${event.title}» is on ${describeDay(day)}`,
-        first: day,
-        last: day,
-        redo: (named) => `delete only events that fall on ${named}`,
-      };
+    case 'update_event': {
+      // A move must land on a named day (it may leave any day); any other edit must be of an
+      // event on a named day.
+      const parsed = StartInput.safeParse(input);
+      if (parsed.success && parsed.data.start_at !== undefined) {
+        return startTarget('The new start', parsed.data.start_at, timezone);
+      }
+      return eventTarget(ctx, input, 'edit');
     }
+    case 'delete_event':
+      return eventTarget(ctx, input, 'delete');
     case 'get_events': {
       const parsed = RangeInput.safeParse(input);
       if (!parsed.success) return null;
@@ -175,12 +215,11 @@ function targetOf(ctx: AgentContext, toolName: string, input: unknown): Target |
         ...daysOfArgument(parsed.data.end_date, timezone),
       ].sort();
       if (days.length === 0) return null;
-      return {
-        what: `This call reads ${days[0]}..${days.at(-1)}`,
-        first: days[0]!,
-        last: days.at(-1)!,
-        redo: (named) => `get_events with start_date "${named}" and end_date "${named}"`,
-      };
+      return rangeTarget(
+        days[0]!,
+        days.at(-1)!,
+        (named) => `get_events with start_date "${named}" and end_date "${named}"`,
+      );
     }
     case 'get_free_slots':
     case 'render_day_image': {
@@ -194,6 +233,26 @@ function targetOf(ctx: AgentContext, toolName: string, input: unknown): Target |
         last: days.at(-1)!,
         redo: (named) => `${toolName} with date "${named}"`,
       };
+    }
+    case 'render_week_image': {
+      // The picture is the Monday–Sunday week that contains week_start.
+      const parsed = WeekInput.safeParse(input);
+      const day = parsed.success ? /^\d{4}-\d{2}-\d{2}$/.exec(parsed.data.week_start)?.[0] : undefined;
+      if (!day) return null;
+      const monday = shiftDay(day, -weekdayOf(day));
+      return rangeTarget(monday, shiftDay(monday, 6), (named) => `render_week_image with week_start "${named}"`);
+    }
+    case 'render_month_image': {
+      const parsed = MonthInput.safeParse(input);
+      const match = parsed.success ? /^(\d{4})-(\d{2})/.exec(parsed.data.month) : null;
+      if (!match) return null;
+      const [year, month] = [Number(match[1]), Number(match[2])];
+      const last = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+      return rangeTarget(
+        `${match[1]}-${match[2]}-01`,
+        last,
+        (named) => `render_month_image with month "${named.slice(0, 7)}"`,
+      );
     }
     default:
       return null;
@@ -210,7 +269,8 @@ export function checkDayReferences(ctx: AgentContext, toolName: string, input: u
   const target = targetOf(ctx, toolName, input);
   if (!target) return undefined;
   for (const day of named.allowedDates) if (day >= target.first && day <= target.last) return undefined;
-  const suggested = named.references[0]?.dates[0] ?? [...named.allowedDates].sort()[0]!;
+  // A named set always holds at least one reference with at least one date.
+  const suggested = named.references[0]!.dates[0]!;
   return {
     success: false,
     mutationState: 'not_applied',
