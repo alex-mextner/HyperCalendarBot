@@ -166,6 +166,9 @@ describe('createCallbackHandler', () => {
     test.each([
       ['kept question', 'Удалить?\n\n✅ Да'],
       ['too-long fallback', '✅ Да'],
+      // The user already answered "Нет": a stale "Да" must not run the confirmation after the decline.
+      ['another option already chosen', 'Удалить?\n\n✅ Нет'],
+      ['another option, too-long fallback', '✅ Нет'],
     ])('a repeat tap on an answered message (%s) does not continue the AI again', async (_state, text) => {
       const onAiButtonClick = mock<ButtonClick>(() => Promise.resolve());
       const ctx = makeCtx('ai_btn:Да');

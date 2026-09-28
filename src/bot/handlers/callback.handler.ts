@@ -1163,9 +1163,13 @@ export function createCallbackHandler(
     const question = ctx.message?.text ?? '';
     const entities = ctx.message?.entities?.map((entity) => entity.payload) ?? [];
     const answered = `✅ ${answerText}`;
-    // A later tap from a client that still shows the buttons sees the answer already recorded:
-    // the AI must not get it twice (a destructive confirmation would run again).
-    if (question === answered || question.endsWith(`\n\n${answered}`)) return;
+    // A later tap from a client that still shows the buttons finds an answer already recorded,
+    // the same option or another one: the AI must not get a second answer (a destructive
+    // confirmation would run again, or run after the user declined it).
+    if (/(?:^|\n\n)✅ [^\n]*$/.test(question)) {
+      cmdLogger.info({ userId: user.telegram_id }, 'ai_btn tap on an already answered question ignored');
+      return;
+    }
     const kept = question ? `${question}\n\n${answered}` : answered;
     try {
       try {
@@ -1178,7 +1182,7 @@ export function createCallbackHandler(
       }
     } catch (err) {
       // Two taps racing on the same question: the second edit changes nothing, so stop here.
-      if (String(err).includes('message is not modified')) throw err;
+      if (String(err).includes('message is not modified')) return;
       // The edit only shows the answer in the chat; as with the delete confirmation, a failed
       // edit must not drop the user's answer.
       cmdLogger.warn({ err }, 'Failed to record the ask_user answer');
