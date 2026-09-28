@@ -2437,6 +2437,29 @@ describe('CalendarBotAgent.run()', () => {
     }
   });
 
+  test('a mismatched reply in the last allowed round is replaced by the real weekdays, not left blank', async () => {
+    setSystemTime(new Date('2026-09-27T21:12:00Z'));
+    try {
+      ctx.user = { ...ctx.user, timezone: 'Europe/Belgrade', language: 'ru' };
+      ctx.messageText = 'Планы на среду';
+      const wrong = 'Среда, 28 сентября: событий нет.';
+      const reads = Array.from({ length: 14 }, (_, index) => ({
+        kind: 'tool' as const,
+        callId: `call-${index}`,
+        name: 'get_events',
+        input: { start_date: '2026-09-30', end_date: `2026-10-${String(index + 1).padStart(2, '0')}` },
+      }));
+      const { impl, calls } = makeStreamImpl([...reads, { kind: 'text', text: wrong }]);
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+      expect(calls).toHaveLength(15);
+      expect(result.responseText).toContain('28 сентября — понедельник, а не среда; среда — 30 сентября');
+    } finally {
+      setSystemTime();
+    }
+  });
+
   test('a validator retry that pairs a weekday with the wrong date is not delivered', async () => {
     setSystemTime(new Date('2026-09-27T21:12:00Z'));
     try {

@@ -1094,8 +1094,8 @@ export class CalendarBotAgent {
         if (result.toolCalls.length === 0) {
           // "в среду, 28 сентября" when the 28th is a Monday: the user trusts the weekday
           // name, so such a reply is never delivered as is — the model gets one round to
-          // fix it with the real weekdays in hand.
-          if (mismatches.length > 0 && !weekdaysCorrected) {
+          // fix it with the real weekdays in hand, if a round is left.
+          if (mismatches.length > 0 && !weekdaysCorrected && round < MAX_ROUNDS - 1) {
             weekdaysCorrected = true;
             aiLogger.warn(
               { userId: ctx.user.telegram_id, dates: mismatches.map((mismatch) => mismatch.date) },
