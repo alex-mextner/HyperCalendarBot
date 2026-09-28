@@ -54,7 +54,8 @@ export function pickerStatusLine(lang: 'en' | 'ru', name: string, outcome: Picke
  * escaped too, so the text cannot start a line that looks like our own structure. Approach ported
  * from PR #199 (#95).
  */
-function quoteUntrusted(value: unknown): string {
+// Only a string or an array: JSON.stringify of undefined returns undefined, and .replace would throw.
+function quoteUntrusted(value: string | readonly unknown[]): string {
   return JSON.stringify(value).replace(
     /[\u0085\u2028\u2029]/g,
     (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`,
