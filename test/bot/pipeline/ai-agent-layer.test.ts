@@ -367,6 +367,7 @@ describe('retry / backoff', () => {
   });
 
   test('graceful fail when MAX_RETRY_ATTEMPTS exhausted: sends agent_give_up, no addDelayed', async () => {
+    aiFailureNotices.reset();
     const { deps, addDelayed, jobStoreDel, captured } = makeRetrySetup();
     const ctx = makeCtx();
     // MAX_RETRY_ATTEMPTS = 3
@@ -383,7 +384,7 @@ describe('retry / backoff', () => {
   test('give-up after a promised comeback acknowledges the promise and lists the commands', async () => {
     aiFailureNotices.reset();
     // The bot told this user "one sec, be right back" on the first failure.
-    aiFailureNotices.decide(1, 'ru', { hardOutage: false, willRetry: true });
+    aiFailureNotices.decide(1, 'ru', { hardOutage: false, willRetry: true, isRetryAttempt: false });
 
     const { deps, captured } = makeRetrySetup();
     const ctx = makeCtx();
@@ -399,7 +400,7 @@ describe('retry / backoff', () => {
   test('give-up stays quiet when the user was already told the AI is unavailable', async () => {
     aiFailureNotices.reset();
     // Hard outage: the bot already sent the honest notice with the command list.
-    aiFailureNotices.decide(1, 'ru', { hardOutage: true, willRetry: true });
+    aiFailureNotices.decide(1, 'ru', { hardOutage: true, willRetry: true, isRetryAttempt: false });
 
     const { deps, jobStoreDel, captured } = makeRetrySetup();
     const ctx = makeCtx();

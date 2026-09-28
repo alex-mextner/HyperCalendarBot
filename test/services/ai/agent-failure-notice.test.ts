@@ -15,7 +15,7 @@ import { EventReminderRepository } from '../../../src/database/repositories/even
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
-import { aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
+import { agentGiveUpMessage, aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import {
   AllProvidersFailedError,
   type StreamCallbacks,
@@ -323,10 +323,15 @@ describe('agent failure notices', () => {
     const seen: string[] = [];
     for (let i = 0; i < 25; i++) {
       aiFailureNotices.reset();
-      const first = aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true });
+      const first = aiFailureNotices.decide(USER_ID, 'ru', {
+        hardOutage: false,
+        willRetry: true,
+        isRetryAttempt: false,
+      });
       const second = aiFailureNotices.decide(USER_ID, 'ru', {
         hardOutage: false,
         willRetry: true,
+        isRetryAttempt: false,
         now: Date.now() + 10 * 60 * 1000,
       });
       expect(first.kind).toBe('stall');
@@ -361,25 +366,232 @@ describe('agent failure notices', () => {
     expect(secondText).toContain(RU_AI_COMMANDS_HINT);
   });
 
-  test('third and later messages during one outage stay quiet', () => {
-    expect(aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true }).kind).toBe('stall');
-    expect(aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true }).kind).toBe('honest');
-    expect(aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true }).kind).toBe('silent');
-    expect(aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true }).kind).toBe('silent');
+  test('third and later messages during one outage get a one-line status, not a full repeat', () => {
+    expect(
+      aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true, isRetryAttempt: false }).kind,
+    ).toBe('stall');
+    expect(
+      aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true, isRetryAttempt: false }).kind,
+    ).toBe('honest');
+    const third = aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true, isRetryAttempt: false });
+    const fourth = aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: true, willRetry: true, isRetryAttempt: false });
+    const noRetry = aiFailureNotices.decide(USER_ID, 'ru', {
+      hardOutage: false,
+      willRetry: false,
+      isRetryAttempt: false,
+    });
+    expect(third).toEqual({ kind: 'still_down', text: t('ru').ai_still_down(true) });
+    // A retry of a hard outage cannot succeed, so the line does not promise one.
+    expect(fourth).toEqual({ kind: 'still_down', text: t('ru').ai_still_down(false) });
+    expect(noRetry).toEqual({ kind: 'still_down', text: t('ru').ai_still_down(false) });
   });
 
-  test('a silent decision delivers no message and leaves no dangling placeholder', async () => {
-    aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true });
-    aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true });
-
-    const agent = new CalendarBotAgent(config, probe.sender, {
-      streamImpl: failingStream(new Error('Provider timed out')),
+  test('the full notice comes back once the cooldown of the honest notice runs out', () => {
+    const start = Date.now();
+    const at = (minutes: number) => ({
+      hardOutage: false,
+      willRetry: true,
+      isRetryAttempt: false,
+      now: start + minutes * 60_000,
     });
-    await agent.run(ctx);
+    expect(aiFailureNotices.decide(USER_ID, 'ru', at(0)).kind).toBe('stall');
+    expect(aiFailureNotices.decide(USER_ID, 'ru', at(1)).kind).toBe('honest');
+    // Short lines do not push the window forward: it is measured from the honest notice.
+    expect(aiFailureNotices.decide(USER_ID, 'ru', at(3)).kind).toBe('still_down');
+    expect(aiFailureNotices.decide(USER_ID, 'ru', at(5.5)).kind).toBe('still_down');
+    expect(aiFailureNotices.decide(USER_ID, 'ru', at(6.5)).kind).toBe('stall');
+  });
 
-    // The ⏳ placeholder must be deleted, not edited into a meaningless "...".
-    expect(probe.deleted()).toContain(42);
-    expect(probe.delivered().join('\n')).not.toContain('...');
+  test('a retry that hits a hard outage still tells the truth when the user was not told honestly yet', () => {
+    const start = Date.now();
+    const hardRetry = (minutes: number) => ({
+      hardOutage: true,
+      willRetry: true,
+      isRetryAttempt: true,
+      now: start + minutes * 60_000,
+    });
+    // The first failure promised a comeback; the retry finds the chain dead for good.
+    aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true, isRetryAttempt: false, now: start });
+    expect(aiFailureNotices.decide(USER_ID, 'ru', hardRetry(1)).kind).toBe('honest');
+    // Within the honest notice's cooldown the retry has nothing new to say.
+    expect(aiFailureNotices.decide(USER_ID, 'ru', hardRetry(2)).kind).toBe('silent');
+    // A retry firing long after the honest notice repeats it once.
+    expect(aiFailureNotices.decide(USER_ID, 'ru', hardRetry(7)).kind).toBe('honest');
+  });
+
+  test('a retry after a restart that finds a hard outage tells the user honestly', async () => {
+    // The tracker is in-memory: after a restart it no longer knows about the
+    // "one sec" this message got. The retry must not hide the outage until give-up.
+    ctx.retryAttempt = 1;
+    await new CalendarBotAgent(config, probe.sender, {
+      streamImpl: failingStream(new Error('Insufficient balance for this request')),
+    }).run(ctx);
+
+    expect(probe.delivered().join('\n')).toContain(t('ru').ai_degraded);
+  });
+
+  // Regression: a fresh request typed seconds after the honest "AI unavailable"
+  // notice got no reply at all — the placeholder was deleted and nothing else
+  // arrived, so the user resent it and then re-recorded it as a voice message.
+  test('a fresh message failing right after the honest notice is told it was not done', async () => {
+    const outage = new Error('Insufficient balance for this request');
+    await new CalendarBotAgent(config, probe.sender, { streamImpl: failingStream(outage) }).run(ctx);
+    expect(probe.delivered().join('\n')).toContain(t('ru').ai_degraded);
+
+    const secondProbe = makeSenderProbe();
+    await new CalendarBotAgent(config, secondProbe.sender, { streamImpl: failingStream(outage) }).run(ctx);
+
+    const text = secondProbe.delivered().join('\n');
+    // Before the fix the ⏳ placeholder was deleted and nothing else was sent.
+    expect(secondProbe.delivered().filter((body) => body !== '⏳')).not.toEqual([]);
+    // A hard outage: retries are futile, so no "I'll retry it myself" promise.
+    expect(text).toContain(t('ru').ai_still_down(false));
+    expect(text).not.toContain(t('ru').ai_still_down(true));
+    // Short on purpose: no second stall joke, no second copy of the command list.
+    expect(text).not.toContain(RU_AI_COMMANDS_HINT);
+    for (const phrase of RU_AGENT_ERROR_PHRASES) {
+      expect(text).not.toContain(phrase);
+    }
+    // The model sees what the user was told, like with every other notice.
+    const history = ctx.chatHistory.getRecent(USER_ID, 10).map((row) => row.content);
+    expect(history.some((content) => content.includes(t('ru').ai_still_down(false)))).toBe(true);
+  });
+
+  test('with a retry that can still succeed, the short line promises it instead of asking for a resend', async () => {
+    const flaky = new Error('Provider timed out');
+    await new CalendarBotAgent(config, probe.sender, { streamImpl: failingStream(flaky) }).run(ctx);
+    await new CalendarBotAgent(config, makeSenderProbe().sender, { streamImpl: failingStream(flaky) }).run(ctx);
+
+    const thirdProbe = makeSenderProbe();
+    await new CalendarBotAgent(config, thirdProbe.sender, { streamImpl: failingStream(flaky) }).run(ctx);
+
+    // A retry of this very message is scheduled: asking for a resend would cancel it.
+    const text = thirdProbe.delivered().join('\n');
+    expect(text).toContain(t('ru').ai_still_down(true));
+    expect(text).not.toContain(t('ru').ai_still_down(false));
+    expect(text).not.toContain(RU_AI_COMMANDS_HINT);
+    for (const phrase of RU_AGENT_ERROR_PHRASES) {
+      expect(text).not.toContain(phrase);
+    }
+    const history = ctx.chatHistory.getRecent(USER_ID, 10).map((row) => row.content);
+    expect(history.some((content) => content.includes(t('ru').ai_still_down(true)))).toBe(true);
+  });
+
+  test('without a scheduled retry the fresh message is told it was not done and to send it again', async () => {
+    ctx.retryEnqueue = undefined;
+    const outage = new Error('Insufficient balance for this request');
+    await new CalendarBotAgent(config, probe.sender, { streamImpl: failingStream(outage) }).run(ctx);
+
+    const secondProbe = makeSenderProbe();
+    await new CalendarBotAgent(config, secondProbe.sender, { streamImpl: failingStream(outage) }).run(ctx);
+
+    const text = secondProbe.delivered().join('\n');
+    expect(text).toContain(t('ru').ai_still_down(false));
+    expect(text).not.toContain(t('ru').ai_still_down(true));
+    expect(text).not.toContain(RU_AI_COMMANDS_HINT);
+  });
+
+  test('the short status line carries no stall joke and no command list in either language', () => {
+    for (const lang of ['ru', 'en'] as const) {
+      for (const retrying of [true, false]) {
+        const line = t(lang).ai_still_down(retrying);
+        expect(line).not.toContain('\n');
+        expect(line).not.toContain(lang === 'ru' ? RU_AI_COMMANDS_HINT : EN_AI_COMMANDS_HINT);
+        expect(line).not.toContain('/help');
+        for (const phrase of [...RU_AGENT_ERROR_PHRASES, ...EN_AGENT_ERROR_PHRASES]) {
+          expect(line).not.toContain(phrase);
+        }
+      }
+    }
+    // With a retry scheduled the line must not ask for a resend.
+    expect(t('ru').ai_still_down(true)).not.toMatch(/Пришли|ещё раз/);
+    expect(t('en').ai_still_down(true)).not.toMatch(/send|again/i);
+    for (const retrying of [true, false]) {
+      expect(t('ru').ai_still_down(retrying)).not.toMatch(/Попробуйте|Используйте|Напишите|Подождите|Повторите/);
+    }
+  });
+
+  test('a mid-chain retry during a known outage stays quiet and deletes its placeholder', async () => {
+    aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: true, willRetry: true, isRetryAttempt: false });
+    ctx.retryAttempt = 1;
+
+    for (const error of [new Error('Insufficient balance for this request'), new Error('Provider timed out')]) {
+      const retryProbe = makeSenderProbe();
+      await new CalendarBotAgent(config, retryProbe.sender, { streamImpl: failingStream(error) }).run(ctx);
+      expect(retryProbe.delivered().filter((body) => body !== '⏳')).toEqual([]);
+      expect(retryProbe.deleted()).toContain(42);
+    }
+  });
+
+  test('supplement and non-explicit runs say nothing about a known outage', async () => {
+    aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: true, willRetry: true, isRetryAttempt: false });
+
+    const variants: Array<Partial<AgentContext>> = [{ supplementMode: true }, { wasExplicitInvocation: false }];
+    for (const variant of variants) {
+      const quietProbe = makeSenderProbe();
+      await new CalendarBotAgent(config, quietProbe.sender, {
+        streamImpl: failingStream(new Error('Insufficient balance for this request')),
+      }).run({ ...ctx, ...variant });
+      expect(quietProbe.delivered().filter((body) => body !== '⏳')).toEqual([]);
+    }
+  });
+
+  test('repeated short status lines without a retry do not turn the give-up into a duplicate notice', async () => {
+    ctx.retryEnqueue = undefined;
+    const outage = new Error('Insufficient balance for this request');
+    await new CalendarBotAgent(config, probe.sender, { streamImpl: failingStream(outage) }).run(ctx);
+    for (let i = 0; i < 2; i++) {
+      const repeatProbe = makeSenderProbe();
+      await new CalendarBotAgent(config, repeatProbe.sender, { streamImpl: failingStream(outage) }).run(ctx);
+      expect(repeatProbe.delivered().join('\n')).toContain(t('ru').ai_still_down(false));
+    }
+    // The honest notice already told the user the AI is down, and nothing was promised.
+    expect(agentGiveUpMessage(USER_ID, 'ru')).toBeNull();
+  });
+
+  test('a short line that promised a retry is closed by the give-up if the retries run out', async () => {
+    const flaky = new Error('Provider timed out');
+    await new CalendarBotAgent(config, probe.sender, { streamImpl: failingStream(flaky) }).run(ctx);
+    await new CalendarBotAgent(config, makeSenderProbe().sender, { streamImpl: failingStream(flaky) }).run(ctx);
+    const repeatProbe = makeSenderProbe();
+    await new CalendarBotAgent(config, repeatProbe.sender, { streamImpl: failingStream(flaky) }).run(ctx);
+    expect(repeatProbe.delivered().join('\n')).toContain(t('ru').ai_still_down(true));
+
+    // The retries fail quietly; the final give-up must not leave "I'll retry" hanging.
+    expect(agentGiveUpMessage(USER_ID, 'ru')).toBe(t('ru').agent_give_up(true));
+  });
+
+  // The retry layers deliver the give-up from inside retryEnqueue, which the agent
+  // calls before announcing the failure. A last attempt that hits a hard outage
+  // must not follow that give-up with a second full "AI unavailable" notice.
+  test('the last retry failing hard closes the promise with one message, not two', async () => {
+    const hard = new Error('Insufficient balance for this request');
+    await new CalendarBotAgent(config, probe.sender, { streamImpl: failingStream(hard) }).run(ctx);
+    await new CalendarBotAgent(config, makeSenderProbe().sender, {
+      streamImpl: failingStream(new Error('Provider timed out')),
+    }).run(ctx);
+
+    const lastProbe = makeSenderProbe();
+    ctx.retryAttempt = 3;
+    ctx.retryEnqueue = async () => {
+      const giveUp = agentGiveUpMessage(USER_ID, 'ru');
+      if (giveUp) await lastProbe.sender.sendMessage(USER_ID, giveUp);
+    };
+    await new CalendarBotAgent(config, lastProbe.sender, { streamImpl: failingStream(hard) }).run(ctx);
+
+    expect(lastProbe.delivered().filter((body) => body !== '⏳')).toEqual([t('ru').agent_give_up(true)]);
+  });
+
+  test('a promised retry is settled once the bot answers', async () => {
+    const flaky = new Error('Provider timed out');
+    for (let i = 0; i < 3; i++) {
+      await new CalendarBotAgent(config, makeSenderProbe().sender, { streamImpl: failingStream(flaky) }).run(ctx);
+    }
+    await new CalendarBotAgent(config, makeSenderProbe().sender, {
+      streamImpl: answeringStream('Завтра у тебя свободный день.'),
+    }).run(ctx);
+
+    expect(aiFailureNotices.closeChain(USER_ID)).toBeNull();
   });
 
   // ── The promise is kept when the retry succeeds ──────────────────────────
@@ -399,7 +611,7 @@ describe('agent failure notices', () => {
 
     expect(retryProbe.delivered().join('\n')).toContain('Завтра у тебя лазер в 19:00.');
     // Promise kept → nothing left to acknowledge later.
-    expect(aiFailureNotices.takeNotice(USER_ID)).toBeNull();
+    expect(aiFailureNotices.closeChain(USER_ID)).toBeNull();
   });
 
   test('retry run puts the retried question back in front of the model', async () => {
@@ -430,14 +642,17 @@ describe('agent failure notices', () => {
 
   // ── Give-up closes the loop ──────────────────────────────────────────────
 
-  test('takeNotice reports the outstanding promise once, then clears it', async () => {
+  test('closing a chain reports the outstanding promise once; the give-up then counts as the honest notice', async () => {
     const agent = new CalendarBotAgent(config, probe.sender, {
       streamImpl: failingStream(new Error('Provider timed out')),
     });
     await agent.run(ctx);
 
-    expect(aiFailureNotices.takeNotice(USER_ID)).toBe('stall');
-    expect(aiFailureNotices.takeNotice(USER_ID)).toBeNull();
+    expect(agentGiveUpMessage(USER_ID, 'ru')).toBe(t('ru').agent_give_up(true));
+    expect(agentGiveUpMessage(USER_ID, 'ru')).toBeNull();
+    // A new request right after the give-up gets the short line, not the full list again.
+    const next = aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: true, willRetry: true, isRetryAttempt: false });
+    expect(next.kind).toBe('still_down');
   });
 
   test('give-up message acknowledges the earlier promise and lists the commands', () => {
@@ -482,12 +697,12 @@ describe('agent failure notices', () => {
 
   test('tracker evicts the least recently notified users past its cap', () => {
     for (let userId = 1; userId <= 10_050; userId++) {
-      aiFailureNotices.decide(userId, 'ru', { hardOutage: false, willRetry: true });
+      aiFailureNotices.decide(userId, 'ru', { hardOutage: false, willRetry: true, isRetryAttempt: false });
     }
     expect(aiFailureNotices.size()).toBe(10_000);
     // The first users notified are the ones dropped; the newest are kept.
-    expect(aiFailureNotices.takeNotice(1)).toBeNull();
-    expect(aiFailureNotices.takeNotice(10_050)).toBe('stall');
+    expect(aiFailureNotices.closeChain(1)).toBeNull();
+    expect(aiFailureNotices.closeChain(10_050)).toBe('stall');
   });
 
   test('Russian failure strings address the user informally', () => {
@@ -499,10 +714,10 @@ describe('agent failure notices', () => {
   });
 
   test('stall phrase pools are localized per language', () => {
-    const ru = aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true });
+    const ru = aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: false, willRetry: true, isRetryAttempt: false });
     expect(RU_AGENT_ERROR_PHRASES.some((phrase) => phrase === ru.text)).toBe(true);
     aiFailureNotices.reset();
-    const en = aiFailureNotices.decide(USER_ID, 'en', { hardOutage: false, willRetry: true });
+    const en = aiFailureNotices.decide(USER_ID, 'en', { hardOutage: false, willRetry: true, isRetryAttempt: false });
     expect(EN_AGENT_ERROR_PHRASES.some((phrase) => phrase === en.text)).toBe(true);
   });
 });

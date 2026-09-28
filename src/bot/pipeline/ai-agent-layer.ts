@@ -91,6 +91,9 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
         if (currentAttempt >= MAX_RETRY_ATTEMPTS) {
           // All retries exhausted — close the loop on whatever the bot promised
           // earlier, then clear Redis state.
+          // Must run before the first await: the agent announces the failure right
+          // after calling retryEnqueue, and stays quiet only because the give-up is
+          // already the notice on file by then.
           const giveUp = agentGiveUpMessage(user.telegram_id, lang);
           if (giveUp) await ctx.send(giveUp);
           // Best effort: the give-up line is out, so the answer stays "gave up" whatever Redis says.

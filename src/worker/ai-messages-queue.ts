@@ -44,6 +44,7 @@ export class SyntheticPipelineRunner {
 
         agentCtx.retryEnqueue = async (msg: string) => {
           if (currentAttempt >= MAX_RETRY_ATTEMPTS) {
+            // Before the first await on purpose — see the same call in ai-agent-layer.ts.
             const giveUp = agentGiveUpMessage(user.telegram_id, lang);
             if (giveUp) {
               if (agentCtx.sender) {

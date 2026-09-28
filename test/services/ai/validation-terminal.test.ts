@@ -200,7 +200,7 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
   });
   test('quiet implicit repair failure does not speak or erase an outstanding notice', async () => {
     ctx.wasExplicitInvocation = false;
-    aiFailureNotices.decide(ctx.user.telegram_id, 'en', { hardOutage: false, willRetry: true });
+    aiFailureNotices.decide(ctx.user.telegram_id, 'en', { hardOutage: false, willRetry: true, isRetryAttempt: false });
     const script = scripted(
       [{ text: INITIAL }, { text: UNSUPPORTED, error: new Error('Synthetic repair outage') }],
       ['REJECT: no evidence'],
@@ -212,7 +212,7 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
       unverifiedResponseNotice('en', 'UTC', []),
     );
     expect(JSON.stringify(ctx.chatHistory.getRecent(ctx.user.telegram_id))).not.toContain(UNSUPPORTED);
-    expect(aiFailureNotices.takeNotice(ctx.user.telegram_id)).toBe('stall');
+    expect(aiFailureNotices.closeChain(ctx.user.telegram_id)).toBe('stall');
     expect(enqueue).not.toHaveBeenCalled();
   });
 
