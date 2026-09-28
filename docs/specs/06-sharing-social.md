@@ -119,7 +119,8 @@ Inviter                     Bot                         Invitee
 **Invitation card roster.** Every invitation card (bot delivery, `/start` deep link, onboarding
 re-display, the answered card and every in-place re-render) ends with the event's roster: the
 organizer, then each invitee with their answer, ordered going, maybe, no answer yet, not going.
-Withdrawn and expired invitations are left out. A member's answer through a group's card is listed
+Withdrawn and expired invitations are left out; an invitee's latest invitation is the one sent last.
+A member's answer through a group's card is listed
 while that group invitation is live, and a group chat sees only its own members' answers
 (`event_participants.source_group_id`; answers of unknown origin are never listed as group answers).
 At most ten invitees are named and the rest

@@ -198,6 +198,26 @@ describe('invitation card roster', () => {
     expect(card(event, invitations, -1002)).not.toContain('Mila');
   });
 
+  test("an invitee's latest invitation is the one sent last, even after the clock stepped back", () => {
+    const { db, event, invitations, invite, person } = seed();
+    person(201, 'Boris');
+    person(202, 'Vera');
+    invite(202);
+    // Past dates, so no later insert's datetime('now') can collide with UNIQUE(event_id, invitee_id, created_at)
+    const sentAt = db.prepare('UPDATE invitations SET created_at = ? WHERE id = ?');
+    sentAt.run('2020-01-01 12:00:00', invite(201, 'accepted').id);
+    sentAt.run('2020-01-01 11:00:00', invite(201, 'cancelled').id);
+    expect(card(event, invitations, 202)).not.toContain('Boris');
+
+    sentAt.run('2020-01-01 10:00:00', invite(201, 'accepted').id);
+    expect(card(event, invitations, 202)).toContain('✅ Boris — going');
+
+    // A group whose re-invitation was withdrawn no longer sees the roster.
+    sentAt.run('2020-01-01 12:00:00', invite(GROUP_CHAT).id);
+    sentAt.run('2020-01-01 11:00:00', invite(GROUP_CHAT, 'cancelled').id);
+    expect(card(event, invitations, GROUP_CHAT)).not.toContain('Participants:');
+  });
+
   test('names come from the profile, then the username, then the organizer contact, else a neutral label', () => {
     const { event, invitations, contacts, invite, person } = seed();
     person(201, 'Boris', 'boris_tg');

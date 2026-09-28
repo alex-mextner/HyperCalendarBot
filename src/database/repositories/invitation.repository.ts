@@ -134,13 +134,14 @@ export class InvitationRepository {
 
   /**
    * Everyone an invitation card can list, in one read: the event owner, the latest invitation per
-   * invitee (group invitations included), and the per-member answers in event_participants.
+   * invitee (group invitations included; latest by id, like the lookups above), and the per-member
+   * answers in event_participants.
    */
   getRoster(eventId: number): InvitationRosterRow[] {
     return this.db
       .query<InvitationRosterRow, [number]>(`
         WITH latest AS (
-          SELECT i.*, ROW_NUMBER() OVER (PARTITION BY i.invitee_id ORDER BY i.created_at DESC, i.id DESC) AS recipient_rank
+          SELECT i.*, ROW_NUMBER() OVER (PARTITION BY i.invitee_id ORDER BY i.id DESC) AS recipient_rank
           FROM invitations i WHERE i.event_id = ?1
         )
         SELECT source, user_id, status, first_name, username, contact_name, source_group_id FROM (
