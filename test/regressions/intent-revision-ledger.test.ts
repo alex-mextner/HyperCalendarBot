@@ -1,8 +1,10 @@
 // A managed intent catalogue must keep loading its approved rules when a new build ships a
-// different source seed (#426, #548 edit the seed): the source is a candidate, never the runtime
-// authority. Rows that drift from the manifest must still fail closed.
+// different source seed (#426 changes serialized workflows): the source is a candidate, never the
+// runtime authority. Rows that drift from the manifest must still fail closed.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { IntentRepository } from '../../src/database/repositories/intent.repository.ts';
+import { WorkflowSessionRepository } from '../../src/database/repositories/workflow-session.repository.ts';
+import { IntentRevisionService } from '../../src/services/intent/revision-service.ts';
 import { seedIntents } from '../../src/services/intent/seed-catalog.ts';
 import { installSeed, openTempRegistry, type TempRegistry } from '../helpers/intent-registry.ts';
 
@@ -78,4 +80,15 @@ test('a manifest rule count that disagrees with the rows disables the catalogue'
   installSeed(registry.db, seedIntents);
   registry.db.run('UPDATE intent_basis_manifest SET rule_count = 0');
   expect(new IntentRepository(registry.db).getApproved()).toEqual([]);
+});
+
+test('the full source catalogue forms a validated baseline draft at startup and stays inactive', () => {
+  installSeed(registry.db, withoutLast);
+  const service = new IntentRevisionService(registry.db, { sessions: new WorkflowSessionRepository(registry.db) });
+  const active = service.activeRevisionId();
+  const draft = service.ensureSourceBaselineDraft(seedIntents);
+  expect(draft).toMatchObject({ kind: 'source_baseline', status: 'validated' });
+  expect(draft?.validation).toMatchObject({ ok: true, inserted: [seedIntents[ALL - 1]!.canonical_name] });
+  expect(service.activeRevisionId()).toBe(active);
+  expect(new IntentRepository(registry.db).getApproved()).toHaveLength(ALL - 1);
 });
