@@ -28,6 +28,7 @@ import { AddressCache } from '../../../src/services/location/address-cache.ts';
 import type { GeocodedLocation, GeocodingService } from '../../../src/services/location/geocoding-service.ts';
 import { InMemoryLocationCandidateStore } from '../../../src/services/location/location-candidate-store.ts';
 import { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
+import type { SharedLocation } from '../../../src/services/location/pending-geo-store.ts';
 
 const OWNER_ID = 1001;
 const INVITEE_ID = 2002;
@@ -56,6 +57,8 @@ const PIN: GeocodedLocation = {
   googleMapsUrl: 'https://www.google.com/maps/search/?api=1&query=44.8176,20.4569&query_place_id=place-pin',
   venueName: null,
 };
+/** A plain pin at PIN's coordinates, reverse-geocoded to PIN. */
+const PIN_SHARED: SharedLocation = { latitude: PIN.latitude, longitude: PIN.longitude, venue: null };
 
 /** A Google Calendar update: which copy was written and the location it now shows. */
 interface GoogleWrite {
@@ -195,7 +198,7 @@ describe('the answer to the location question re-pushes the Google copies', () =
   test('a pin shared for the event pushes the pinned place', async () => {
     const s = setup();
 
-    expect(await s.service.resolveFromCoordinates(s.event.id, PIN.latitude, PIN.longitude, OWNER_ID)).toBe(true);
+    expect(await s.service.resolveFromSharedLocation(s.event.id, PIN_SHARED, OWNER_ID)).toBe(true);
 
     expect(await s.runPushJobs()).toEqual([
       { copy: 'g-owner', location: PIN.formattedAddress },
@@ -208,13 +211,13 @@ describe('the answer to the location question re-pushes the Google copies', () =
     expect(await s.service.handleLocationChoice(s.event.id, OWNER_ID, await s.askedWith([CAFE]), 0)).toBe(true);
     await s.runPushJobs();
 
-    expect(await s.service.resolveFromCoordinates(s.event.id, PIN.latitude, PIN.longitude, OWNER_ID)).toBe(true);
+    expect(await s.service.resolveFromSharedLocation(s.event.id, PIN_SHARED, OWNER_ID)).toBe(true);
     expect(await s.runPushJobs()).toEqual([
       { copy: 'g-owner', location: PIN.formattedAddress },
       { copy: 'g-invitee', location: PIN.formattedAddress },
     ]);
 
-    expect(await s.service.resolveFromCoordinates(s.event.id, PIN.latitude, PIN.longitude, OWNER_ID)).toBe(true);
+    expect(await s.service.resolveFromSharedLocation(s.event.id, PIN_SHARED, OWNER_ID)).toBe(true);
     expect(s.jobs).toEqual([]);
   });
 

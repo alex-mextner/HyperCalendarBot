@@ -481,7 +481,8 @@ describe('no geocode is applied before the creator taps a candidate', () => {
     const card = s.invitationEdits.at(-1);
     expect(card?.text).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
     expect(card?.text).not.toContain(escapeHtml(NIS_CAFE.formattedAddress));
-    expect(card?.options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(s.invitation.id, 'ru').toJSON());
+    // The dropped place takes the Map button with it
+    expect(card?.options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(s.invitation.id, 'ru', null).toJSON());
   });
 
   test('a location changed by a user who cannot see the event drops the old place, without searching or asking', async () => {

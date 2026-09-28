@@ -172,7 +172,8 @@ describe('a location edit re-renders delivered invitation cards that showed the 
     expect(s.cards).toHaveLength(1);
     expect(s.cards[0]?.text).toContain('at Ira’s place');
     expectNoOldPlace(s.cards[0]);
-    expect(s.cards[0]?.keyboard).toEqual(invitationRsvpKeyboard(s.invitation.id, 'en'));
+    // No place: the dropped place takes the Map button with it
+    expect(s.cards[0]?.keyboard).toEqual(invitationRsvpKeyboard(s.invitation.id, 'en', null));
   });
 
   test('an abstract location: the card shows the typed text, no old place', async () => {
@@ -183,7 +184,7 @@ describe('a location edit re-renders delivered invitation cards that showed the 
     expect(s.cards).toHaveLength(1);
     expect(s.cards[0]?.text).toContain('home');
     expectNoOldPlace(s.cards[0]);
-    expect(s.cards[0]?.keyboard).toEqual(invitationRsvpKeyboard(s.invitation.id, 'en'));
+    expect(s.cards[0]?.keyboard).toEqual(invitationRsvpKeyboard(s.invitation.id, 'en', null));
   });
 
   test('the same text asked again drops the confirmed place: the card loses it even when nothing is found', async () => {
@@ -208,7 +209,7 @@ describe('a location edit re-renders delivered invitation cards that showed the 
     expect(s.cards.length).toBeGreaterThan(0);
     for (const card of s.cards) expectNoOldPlace(card);
     expect(s.cards.at(-1)?.text).toContain('harbor cafe');
-    expect(s.cards.at(-1)?.keyboard).toEqual(invitationRsvpKeyboard(s.invitation.id, 'en'));
+    expect(s.cards.at(-1)?.keyboard).toEqual(invitationRsvpKeyboard(s.invitation.id, 'en', null));
   });
 
   test('an edit that leaves the location as it was does not touch the cards', async () => {
