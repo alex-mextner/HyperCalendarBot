@@ -2367,4 +2367,37 @@ describe('CalendarBotAgent.run()', () => {
       setSystemTime();
     }
   });
+
+  test('a reply pairing a weekday with a date on another weekday is corrected before delivery', async () => {
+    // 2026-09-27 23:12 Belgrade: "Планы на среду" was answered "Среда, 28 сентября" (a Monday).
+    setSystemTime(new Date('2026-09-27T21:12:00Z'));
+    try {
+      ctx.user = { ...ctx.user, timezone: 'Europe/Belgrade' };
+      ctx.messageText = 'Планы на среду';
+      const wrong = 'Среда, 28 сентября: событий нет.';
+      const right = 'Среда, 30 сентября: событий нет.';
+      const { impl, calls } = makeStreamImpl([
+        {
+          kind: 'tool',
+          callId: 'call-1',
+          name: 'get_events',
+          input: { start_date: '2026-09-30', end_date: '2026-09-30' },
+        },
+        { kind: 'text', text: wrong },
+        { kind: 'text', text: right },
+      ]);
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+      expect(result.responseText).toBe(right);
+      const correction = calls[2]?.messages.at(-1);
+      expect(String(correction?.content)).toContain('2026-09-28 is a Monday, not a Wednesday');
+      expect(String(correction?.content)).toContain('the nearest Wednesday is 2026-09-30');
+      const edits = (sender.editMessageText as ReturnType<typeof mock>).mock.calls;
+      expect(String((edits.at(-1) as unknown[])[2])).not.toContain('28 сентября');
+      expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain(wrong);
+    } finally {
+      setSystemTime();
+    }
+  });
 });
