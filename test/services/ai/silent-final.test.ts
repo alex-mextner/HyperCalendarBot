@@ -289,6 +289,18 @@ describe('silent final guard (#508)', () => {
     expect(delivered.at(-1)).toContain(t('ru').ai_unanswered);
   });
 
+  test("a reaction then a failed render: the reaction does not excuse '[SKIP]'", async () => {
+    // The user asked for a picture; the 👍 came through but the picture did not.
+    const photos = stubRenderer(async () => {
+      throw new Error('synthetic renderer outage');
+    });
+    await run([{ tool: 'set_reaction', input: () => ({ emoji: '👍' }) }, renderTable, { text: '[SKIP]' }]);
+
+    expect(photos).toHaveLength(0);
+    expect(deleted).toEqual([]);
+    expect(delivered.at(-1)).toContain(t('ru').ai_unanswered);
+  });
+
   describe('legitimate silence stays silent', () => {
     const expectSilent = () => {
       const notices = [t('ru').ai_unanswered, t('ru').ai_unanswered_writes('').trim()];
