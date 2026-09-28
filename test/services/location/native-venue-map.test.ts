@@ -122,9 +122,10 @@ function memoryRedis() {
   const store = new Map<string, string>();
   return {
     get: async (key: string) => store.get(key) ?? null,
-    set: async (key: string, value: string) => {
+    compareAndSet: async (key: string, expected: string | null, value: string) => {
+      if ((store.get(key) ?? null) !== expected) return false;
       store.set(key, value);
-      return 'OK';
+      return true;
     },
   };
 }
