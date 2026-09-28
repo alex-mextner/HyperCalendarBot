@@ -1,4 +1,4 @@
-import { agendaDetailsCSS, renderAgendaDetails } from './agenda-details.ts';
+import { compactMetadataCSS, renderCompactMetadata } from './compact-metadata.ts';
 import { escapeHtml, formatTime } from './helpers.ts';
 import { sharedCSS } from './shared-css.ts';
 import type { MiniEvent, MonthDay, MonthlyCalendarData, TemplateRenderer } from './types.ts';
@@ -7,7 +7,7 @@ function renderEventDot(ev: MiniEvent): string {
   const timeStr = ev.isAllDay ? '' : formatTime(ev.startMinutes);
   const timeHtml = timeStr ? `<span class="ev-time">${timeStr}</span>` : '';
   return `<div class="ev-dot" style="background:${ev.color}18;border-left:2px solid ${ev.color};color:${ev.color};">
-    <span class="ev-inner">${timeHtml}<span class="ev-title">${escapeHtml(ev.title)}</span></span>
+    <span class="ev-inner">${timeHtml}<span class="ev-title">${escapeHtml(ev.title)}</span></span>${renderCompactMetadata(ev)}
   </div>`;
 }
 
@@ -143,7 +143,7 @@ function render(data: MonthlyCalendarData): string {
 <html>
 <head>
 <meta charset="utf-8">
-<style>${css(data)}${agendaDetailsCSS}</style>
+<style>${css(data)}${compactMetadataCSS}</style>
 </head>
 <body>
 <div id="__root">
@@ -154,10 +154,7 @@ function render(data: MonthlyCalendarData): string {
     ${dowHtml}
     ${weeksHtml}
   </div>
-  ${renderAgendaDetails(
-    data.weeks.flat().flatMap((day) => day.events.map((event) => ({ ...event, context: String(day.dayNumber) }))),
-    data.locale,
-  )}
+
   <div class="footer">HyperCalendar</div>
 </div>
 </body>
