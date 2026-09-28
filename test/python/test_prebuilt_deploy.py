@@ -45,86 +45,34 @@ REVIEWED_PAIR = sha(MIGRATIONS) + ":" + sha(NEW_MIGRATION_ADDED)
 
 class DeployTests(unittest.TestCase):
 
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.path = Path(self.tmp.name)
-        self.dep = self.path / "deploy"
-        self.src = self.dep / (".incoming-" + SHA + "-123-1")
-        self.bin = self.path / "bin"
-        for d in [
-            self.dep / "scripts",
-            self.dep / "data",
-            self.src / "scripts",
-            self.bin,
-        ]:
-            d.mkdir(parents=True)
-        for d in [self.dep, self.src]:
-            (d / "docker-compose.yml").write_text(
-                "name: fixture\nservices:\n  bot:\n    image: old:latest\n"
-            )
-            (d / "Caddyfile").write_text("fixture config")
-        self.db = self.dep / "data/calendar.db"
-        c = sqlite3.connect(self.db)
-        c.execute("CREATE TABLE evidence(value TEXT)")
-        c.execute("INSERT INTO evidence VALUES ('before')")
-        c.execute("CREATE TABLE migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE)")
-        c.execute("INSERT INTO migrations(name) VALUES ('001_x')")
-        c.commit()
-        c.close()
-        self.exe(
-            self.dep / "scripts/backup-db.sh",
-            "#!/bin/sh\ncp data/calendar.db data/before.db\n",
-        )
-        for name in ["backup-db.sh", "healthcheck-alert.sh", "prepare-runtime-dirs.sh"]:
-            self.exe(self.src / "scripts" / name, "#!/bin/sh\nexit 0\n")
-        shutil.copy(
-            ROOT / "scripts/release-artifact.py",
-            self.src / "scripts/release-artifact.py",
-        )
-        config = json.dumps(
-            {
-                "architecture": "amd64",
-                "os": "linux",
-                "config": {"Labels": {"org.opencontainers.image.revision": SHA}},
-            }
-        ).encode()
-        self.config_id = "sha256:" + hashlib.sha256(config).hexdigest()
-        cfg = "blobs/sha256/" + self.config_id[7:]
-        manifest = [{"Config": cfg, "RepoTags": [TAG], "Layers": ["blobs/sha256/layer"]}]
-        with tarfile.open(self.src / "image.tar.gz", "w:gz") as tar:
-            for name, data in [
-                ("manifest.json", json.dumps(manifest).encode()),
-                (cfg, config),
-                # A layer large enough that the disk check's 2x margin spans whole KiB.
-                ("blobs/sha256/layer", bytes(1024 * 1024)),
-            ]:
-                info = tarfile.TarInfo(name)
-                info.size = len(data)
-                tar.addfile(info, io.BytesIO(data))
-        with tarfile.open(self.src / "image.tar.gz") as tar:
-            self.image_bytes = sum(m.size for m in tar.getmembers() if m.isfile())
-        self.digest = hashlib.sha256(
-            (self.src / "image.tar.gz").read_bytes()
-        ).hexdigest()
-        (self.dep / "current").write_text("sha256:old")
-        self.log = self.path / "calls.jsonl"
-        self.exe(self.bin / "flock", "#!/bin/sh\nexit ${LOCK_FAILURE:-0}\n")
-        self.exe(self.bin / "caddy", "#!/bin/sh\nexit 0\n")
-        self.exe(self.bin / "uname", "#!/bin/sh\nprintf 'x86_64\\n'\n")
-        self.exe(self.bin / "seq", "#!/bin/sh\nprintf '1\\n'\n")
-        self.exe(self.bin / "sleep", "#!/bin/sh\nexit 0\n")
-        self.exe(
-            self.bin / "df",
+    @classmethod
+    def setUpClass(cls):
+        # The fakes are stateless (all fixture state comes from env and the cwd), so write them
+        # once. macOS scans every newly created executable on its first exec (~150 ms, far more
+        # under load); writing a dozen fresh executables per test made this file time out under
+        # full-suite load (#445). Tests hard-link the deployed backup script, so it is not a new file.
+        shared = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(shared.cleanup)
+        cls.bin = Path(shared.name) / "bin"
+        cls.bin.mkdir()
+        cls.backup_script = Path(shared.name) / "backup-db.sh"
+        cls.exe(cls.backup_script, "#!/bin/sh\ncp data/calendar.db data/before.db\n")
+        cls.exe(cls.bin / "flock", "#!/bin/sh\nexit ${LOCK_FAILURE:-0}\n")
+        cls.exe(cls.bin / "caddy", "#!/bin/sh\nexit 0\n")
+        cls.exe(cls.bin / "uname", "#!/bin/sh\nprintf 'x86_64\\n'\n")
+        cls.exe(cls.bin / "seq", "#!/bin/sh\nprintf '1\\n'\n")
+        cls.exe(cls.bin / "sleep", "#!/bin/sh\nexit 0\n")
+        cls.exe(
+            cls.bin / "df",
             "#!/bin/sh\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n"
             "/dev/fixture 999999999 0 %s 1%% /\\n' \"${DF_AVAIL_KIB:-999999999}\"\n",
         )
-        self.exe(
-            self.bin / "sha256sum",
+        cls.exe(
+            cls.bin / "sha256sum",
             "#!/usr/bin/env python3\nimport hashlib,sys\nprint(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest()+'  '+sys.argv[1])\n",
         )
-        self.exe(
-            self.bin / "docker",
+        cls.exe(
+            cls.bin / "docker",
             r"""#!/usr/bin/env python3
 import io,os,json,re,sys,sqlite3,tarfile
 from pathlib import Path
@@ -191,8 +139,8 @@ elif args and args[0]=='compose' and 'up' in args:
         c.commit();c.close()
 """,
         )
-        self.exe(
-            self.bin / "curl",
+        cls.exe(
+            cls.bin / "curl",
             r"""#!/usr/bin/env python3
 import os,sys
 from pathlib import Path
@@ -204,6 +152,67 @@ if body=='unreachable':sys.exit(7)
 print(body,end='')
 """,
         )
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name)
+        self.dep = self.path / "deploy"
+        self.src = self.dep / (".incoming-" + SHA + "-123-1")
+        for d in [
+            self.dep / "scripts",
+            self.dep / "data",
+            self.src / "scripts",
+        ]:
+            d.mkdir(parents=True)
+        for d in [self.dep, self.src]:
+            (d / "docker-compose.yml").write_text(
+                "name: fixture\nservices:\n  bot:\n    image: old:latest\n"
+            )
+            (d / "Caddyfile").write_text("fixture config")
+        self.db = self.dep / "data/calendar.db"
+        c = sqlite3.connect(self.db)
+        c.execute("CREATE TABLE evidence(value TEXT)")
+        c.execute("INSERT INTO evidence VALUES ('before')")
+        c.execute("CREATE TABLE migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE)")
+        c.execute("INSERT INTO migrations(name) VALUES ('001_x')")
+        c.commit()
+        c.close()
+        # The deploy replaces this file via `install` (unlink + create), never writes it in place.
+        os.link(self.backup_script, self.dep / "scripts/backup-db.sh")
+        for name in ["backup-db.sh", "healthcheck-alert.sh", "prepare-runtime-dirs.sh"]:
+            self.exe(self.src / "scripts" / name, "#!/bin/sh\nexit 0\n")
+        shutil.copy(
+            ROOT / "scripts/release-artifact.py",
+            self.src / "scripts/release-artifact.py",
+        )
+        config = json.dumps(
+            {
+                "architecture": "amd64",
+                "os": "linux",
+                "config": {"Labels": {"org.opencontainers.image.revision": SHA}},
+            }
+        ).encode()
+        self.config_id = "sha256:" + hashlib.sha256(config).hexdigest()
+        cfg = "blobs/sha256/" + self.config_id[7:]
+        manifest = [{"Config": cfg, "RepoTags": [TAG], "Layers": ["blobs/sha256/layer"]}]
+        with tarfile.open(self.src / "image.tar.gz", "w:gz") as tar:
+            for name, data in [
+                ("manifest.json", json.dumps(manifest).encode()),
+                (cfg, config),
+                # A layer large enough that the disk check's 2x margin spans whole KiB.
+                ("blobs/sha256/layer", bytes(1024 * 1024)),
+            ]:
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        with tarfile.open(self.src / "image.tar.gz") as tar:
+            self.image_bytes = sum(m.size for m in tar.getmembers() if m.isfile())
+        self.digest = hashlib.sha256(
+            (self.src / "image.tar.gz").read_bytes()
+        ).hexdigest()
+        (self.dep / "current").write_text("sha256:old")
+        self.log = self.path / "calls.jsonl"
         self.remote = ROOT / "scripts/deploy-prebuilt-image.sh"
         baseline = os.environ.get("HCB_TEST_DEPLOY_SCRIPT")
         if baseline:
@@ -213,7 +222,8 @@ print(body,end='')
                 text.split("<<'REMOTE'\n", 1)[1].split("\nREMOTE\n", 1)[0]
             )
 
-    def exe(self, path, body):
+    @staticmethod
+    def exe(path, body):
         path.write_text(body)
         path.chmod(0o755)
 
