@@ -12,6 +12,7 @@ import { approveDeletes } from '../../../../src/services/ai/delete-confirmation.
 import {
   handleCreateEvent,
   handleDeleteEvent,
+  handleSnoozeEvent,
   handleUpdateEvent,
 } from '../../../../src/services/ai/tool-handlers/events.ts';
 import { handleRenderDayImage } from '../../../../src/services/ai/tool-handlers/render.ts';
@@ -103,6 +104,17 @@ test('create and update in the same run steer a past-day picture to the earliest
 
   expect(renderedDates).toEqual(['2026-09-30']);
   expect(result.output).toContain('2026-09-30');
+});
+
+test('a snoozed event counts as a change for the day picture', async () => {
+  const { ctx, lesson, renderedDates } = setup();
+  const lateLesson = lesson('2026-09-29T21:55:00Z'); // 23:55 in Belgrade, snoozed past midnight
+  expect(handleSnoozeEvent(ctx, { event_id: lateLesson.id, minutes: 10 }).success).toBe(true);
+
+  const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+
+  expect(renderedDates).toEqual(['2026-09-29']);
+  expect(result.output).toContain('2026-09-29');
 });
 
 test('a past-day picture in a run without changes renders the requested day', async () => {

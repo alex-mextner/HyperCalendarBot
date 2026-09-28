@@ -1067,8 +1067,12 @@ export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): T
     return { success: false, error: 'Failed to snooze event.' };
   }
 
+  recordChangedDay(ctx, event);
+  recordChangedDay(ctx, updated);
+
   // Snoozing shifts the start by minutes, so even an all-day event now has an exact instant.
   const newStartParts = timeParts(updated.start_at, null, false, ctx.user.timezone);
+
   return {
     success: true,
     output: t(ctx.user.language).aiTools.events.snoozed(updated.title, minutes, newStartParts.join(', ')),

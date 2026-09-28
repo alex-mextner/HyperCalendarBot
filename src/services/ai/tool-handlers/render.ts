@@ -125,7 +125,7 @@ export async function handleRenderDayImage(
   } catch (err) {
     const imageError = agendaImageErrorMessage(err);
     if (imageError) return { success: false, error: imageError };
-    renderLogger.error({ err, date }, 'Day image render failed');
+    renderLogger.error({ err, date, requested: input.date }, 'Day image render failed');
     return { success: false, error: tr.dayImageFailed(date) };
   }
 }
