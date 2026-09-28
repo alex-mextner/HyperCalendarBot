@@ -32,6 +32,11 @@ export interface GroundingReport {
   checked: number;
   /** The prose tokens no same-run tool result supports. */
   ungrounded: string[];
+  /**
+   * Tokens supported only by context, not by calendar data: today's or tomorrow's date,
+   * the user's own words, or the arguments the model chose for its tool calls.
+   */
+  contextOnly: string[];
 }
 
 interface EvidenceIndex {
@@ -42,7 +47,15 @@ interface EvidenceIndex {
   /** MM-DD calendar days the evidence covers, in the user's zone and in UTC. */
   days: Set<string>;
   ids: Set<number>;
-  /** Normalized text of the successful results and their inputs, for quotes. */
+  /** Normalized text of the successful results, for quotes. */
+  text: string;
+}
+
+/** What the prose may mention without it being calendar data. */
+interface GroundingContext {
+  /** Today and tomorrow in the user's zone (MM-DD): naming them needs no read. */
+  days: Set<string>;
+  /** Normalized user message and tool-call arguments. */
   text: string;
 }
 
@@ -281,7 +294,7 @@ function addReadRange(index: EvidenceIndex, start: unknown, end: unknown, timezo
   }
 }
 
-function indexEvidence(tools: readonly ToolEvidence[], timezone: string, now: Date): EvidenceIndex {
+function indexEvidence(tools: readonly ToolEvidence[], timezone: string): EvidenceIndex {
   const index: EvidenceIndex = {
     localTimes: new Set(),
     utcTimes: new Set(),
@@ -290,9 +303,6 @@ function indexEvidence(tools: readonly ToolEvidence[], timezone: string, now: Da
     text: '',
   };
   const texts: string[] = [];
-  const today = new TZDate(now.getTime(), timezone);
-  index.days.add(format(today, 'MM-dd'));
-  index.days.add(format(addDays(today, 1), 'MM-dd'));
 
   for (const tool of tools) {
     if (!tool.success) continue;
@@ -302,9 +312,6 @@ function indexEvidence(tools: readonly ToolEvidence[], timezone: string, now: Da
       if (SCHEDULE_READ_TOOLS.has(tool.name)) {
         for (const fact of extractFacts(tool.output, timezone)) addFact(index, fact);
       }
-    }
-    for (const value of Object.values(tool.input)) {
-      if (typeof value === 'string') texts.push(value);
     }
     for (const event of eventSummaries(tool.data)) {
       index.ids.add(event.id);
@@ -322,22 +329,44 @@ function indexEvidence(tools: readonly ToolEvidence[], timezone: string, now: Da
   return index;
 }
 
-function isGrounded(fact: Fact, index: EvidenceIndex, userText: string): boolean {
+function groundingContext(
+  tools: readonly ToolEvidence[],
+  timezone: string,
+  userMessage: string,
+  now: Date,
+): GroundingContext {
+  const today = new TZDate(now.getTime(), timezone);
+  const texts = [userMessage];
+  for (const tool of tools) {
+    if (!tool.success) continue;
+    for (const value of Object.values(tool.input)) {
+      if (typeof value === 'string') texts.push(value);
+    }
+  }
+  return {
+    days: new Set([format(today, 'MM-dd'), format(addDays(today, 1), 'MM-dd')]),
+    text: normalizeText(texts.join('\n')),
+  };
+}
+
+/** Whether the evidence backs the fact; with `context`, today's and tomorrow's dates and the user's and tool-call words count too. */
+function isGrounded(fact: Fact, index: EvidenceIndex, context: GroundingContext | null): boolean {
+  const hasDay = (day: string) => index.days.has(day) || context?.days.has(day) === true;
   switch (fact.kind) {
     case 'time':
       return index.localTimes.has(fact.value) || (fact.utc && index.utcTimes.has(fact.value));
     case 'instant':
       return (
-        fact.days.some((day) => index.days.has(day)) &&
+        fact.days.some(hasDay) &&
         ((fact.utcTime !== null && index.utcTimes.has(fact.utcTime)) ||
           (fact.localTime !== null && index.localTimes.has(fact.localTime)))
       );
     case 'day':
-      return index.days.has(fact.value);
+      return hasDay(fact.value);
     case 'dayOrTime':
-      return (fact.day !== null && index.days.has(fact.day)) || (fact.time !== null && index.localTimes.has(fact.time));
+      return (fact.day !== null && hasDay(fact.day)) || (fact.time !== null && index.localTimes.has(fact.time));
     case 'quote':
-      return index.text.includes(fact.value) || userText.includes(fact.value);
+      return index.text.includes(fact.value) || context?.text.includes(fact.value) === true;
     case 'id':
       return index.ids.has(fact.value);
   }
@@ -356,13 +385,17 @@ export function checkGrounding(
   userMessage: string,
   now: Date = new Date(),
 ): GroundingReport {
-  const index = indexEvidence(tools, timezone, now);
-  const userText = normalizeText(userMessage);
-  const facts = extractFacts(response, timezone);
-  return {
-    checked: facts.length,
-    ungrounded: facts.filter((fact) => !isGrounded(fact, index, userText)).map((fact) => fact.token),
-  };
+  const index = indexEvidence(tools, timezone);
+  const context = groundingContext(tools, timezone, userMessage, now);
+  const report: GroundingReport = { checked: 0, ungrounded: [], contextOnly: [] };
+  for (const fact of extractFacts(response, timezone)) {
+    report.checked++;
+    // Context only widens what counts, so the evidence-only check comes first.
+    if (isGrounded(fact, index, null)) continue;
+    if (isGrounded(fact, index, context)) report.contextOnly.push(fact.token);
+    else report.ungrounded.push(fact.token);
+  }
+  return report;
 }
 
 /** Whether the prose states that a calendar change has already been made. */

@@ -132,7 +132,8 @@ function claimsCompleteOrEmptySchedule(response: string): boolean {
  * is accepted without a model verdict when a schedule read succeeded in this
  * run, no write was attempted (the prose may narrate one, successful or not),
  * the prose states at least one concrete fact, every such fact is in the run's
- * tool results, and the prose does not claim a calendar change was made.
+ * calendar data (not merely today's date or words the user or the model's own
+ * tool call supplied), and the prose does not claim a calendar change was made.
  */
 function isGroundedInRun(input: ValidationInput): boolean {
   if (!input.tools.some((tool) => tool.success && SCHEDULE_READ_TOOLS.has(tool.name))) return false;
@@ -140,20 +141,42 @@ function isGroundedInRun(input: ValidationInput): boolean {
   if (claimsCompletedWrite(input.response)) return false;
   const report = checkGrounding(input.response, input.tools, input.timezone, input.userMessage);
   aiLogger.info(
-    { checkedFacts: report.checked, ungroundedFacts: report.ungrounded.length },
+    {
+      checkedFacts: report.checked,
+      ungroundedFacts: report.ungrounded.length,
+      contextOnlyFacts: report.contextOnly.length,
+    },
     'Response grounding against same-run tool results',
   );
-  return report.checked > 0 && report.ungrounded.length === 0;
+  return report.checked > 0 && report.ungrounded.length === 0 && report.contextOnly.length === 0;
+}
+
+/** The start of a tag naming an untrusted block: spacing, attributes and self-closing forms included. */
+const UNTRUSTED_BLOCK_TAG_START = /<\s*\/?\s*(?=(?:user_message|tool_results|assistant_response)\b)/gi;
+
+/**
+ * Stored or typed text must not open or close an untrusted block. The `<` of every such tag
+ * becomes a space, repeated until none is left, so no removal can join or wrap into a new tag.
+ */
+function neutralizeBlockTags(text: string): string {
+  let out = text;
+  for (let previous = ''; out !== previous; ) {
+    previous = out;
+    out = out.replace(UNTRUSTED_BLOCK_TAG_START, ' ');
+  }
+  return out;
 }
 
 /** Successful results (bounded) and failures by name only: an error text is not calendar evidence. */
 function toolResultsBlock(tools: readonly ToolEvidence[]): string {
   if (tools.length === 0) return '(none)';
-  return tools
-    .map((tool) => `[${tool.name}] ${tool.success ? (tool.output ?? 'OK').slice(0, MAX_TOOL_RESULT_CHARS) : 'failed'}`)
-    .join('\n')
-    .replace(/<\/?tool_results\s*>/gi, '')
-    .slice(0, MAX_TOOL_RESULTS_CHARS);
+  return neutralizeBlockTags(
+    tools
+      .map(
+        (tool) => `[${tool.name}] ${tool.success ? (tool.output ?? 'OK').slice(0, MAX_TOOL_RESULT_CHARS) : 'failed'}`,
+      )
+      .join('\n'),
+  ).slice(0, MAX_TOOL_RESULTS_CHARS);
 }
 
 /**
@@ -225,7 +248,7 @@ export async function validateResponse(
     `USER TIMEZONE: ${input.timezone}`,
     '',
     '<user_message>',
-    input.userMessage.slice(0, MAX_USER_MESSAGE_CHARS),
+    neutralizeBlockTags(input.userMessage).slice(0, MAX_USER_MESSAGE_CHARS),
     '</user_message>',
     '',
     '<tool_results>',
@@ -233,7 +256,7 @@ export async function validateResponse(
     '</tool_results>',
     '',
     '<assistant_response>',
-    input.response.slice(0, MAX_RESPONSE_CHARS),
+    neutralizeBlockTags(input.response).slice(0, MAX_RESPONSE_CHARS),
     '</assistant_response>',
   ].join('\n');
 

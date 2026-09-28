@@ -96,8 +96,11 @@ describe('checkGrounding — calendar days', () => {
     expect(ungrounded('12 октября ничего нет.', [read])).toEqual(['12 октября']);
   });
 
-  test('today and tomorrow need no read', () => {
-    expect(ungrounded('Сегодня 27 сентября, завтра 28 сентября.', [])).toEqual([]);
+  test('today and tomorrow need no read, but only a read that covered them makes them calendar evidence', () => {
+    const days = (tools: ToolEvidence[]) =>
+      checkGrounding('Сегодня 27 сентября, завтра 28 сентября.', tools, TZ, '', NOW);
+    expect(days([])).toMatchObject({ ungrounded: [], contextOnly: ['27 сентября', '28 сентября'] });
+    expect(days([WEEK_READ])).toMatchObject({ ungrounded: [], contextOnly: [] });
   });
 });
 
@@ -106,6 +109,18 @@ describe('checkGrounding — quotes and ids', () => {
     expect(ungrounded('Это «английский с томом», в описании "Учебник, стр. 12".')).toEqual([]);
     expect(ungrounded('Ты спросил про «перенос на пятницу».', [WEEK_READ], 'Перенос на пятницу возможен?')).toEqual([]);
     expect(ungrounded('Это «Французский».')).toEqual(['«Французский»']);
+  });
+
+  test('a quote found only in the user message or a tool argument is context, not calendar data', () => {
+    const search: ToolEvidence = { name: 'search_events', input: { query: 'Совет директоров' }, success: true };
+    const report = checkGrounding(
+      '«Совет директоров» и «перенос на пятницу».',
+      [search],
+      TZ,
+      'Перенос на пятницу?',
+      NOW,
+    );
+    expect(report).toMatchObject({ ungrounded: [], contextOnly: ['«Совет директоров»', '«перенос на пятницу»'] });
   });
 
   test('ё and е are the same letter for quote matching', () => {
