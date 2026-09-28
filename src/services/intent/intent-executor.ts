@@ -123,6 +123,8 @@ function buildEventStepResults(userCtx: ExecutorUserContext): RuntimeStepResults
 
 interface ExecutorResult {
   success: boolean;
+  /** Only a direct final tool answer can carry this; never a handoff or custom response. */
+  completeResponse?: boolean;
   response?: string;
   /**
    * Structured events behind `response`, when the last tool returned any. The
@@ -248,6 +250,7 @@ async function runLevel1(
 ): Promise<ExecutorResult> {
   let lastOutput: string | undefined;
   let lastData: ToolResultData | undefined;
+  let completeResponse = false;
 
   const eventCtx = buildEventStepResults(userCtx);
   if (bind) eventCtx.bind = bind;
@@ -267,9 +270,15 @@ async function runLevel1(
     }
     lastOutput = result.output;
     lastData = result.data;
+    completeResponse = result.completeResponse === true;
   }
 
-  return { success: true, response: lastOutput, responseEvents: extractEventSummaries(lastData) };
+  return {
+    success: true,
+    response: lastOutput,
+    responseEvents: extractEventSummaries(lastData),
+    ...(completeResponse && evidence.state === 'none' ? { completeResponse: true } : {}),
+  };
 }
 
 /**
@@ -414,6 +423,7 @@ async function runLevel2(
   let mentionedEventId: number | undefined;
   let lastToolOutput: string | undefined;
   let lastToolData: ToolResultData | undefined;
+  let completeResponse = false;
 
   for (let i = startIndex; i < steps.length; i++) {
     const step = steps[i];
@@ -516,6 +526,7 @@ async function runLevel2(
 
     lastToolOutput = result.output;
     lastToolData = result.data;
+    completeResponse = result.completeResponse === true;
 
     // If result carries structured event data, update last_mentioned_event in-workflow
     // and track the ID for cross-request persistence via mentionedEventId.
@@ -548,6 +559,7 @@ async function runLevel2(
   return {
     success: true,
     response: lastToolOutput,
+    ...(completeResponse && evidence.state === 'none' ? { completeResponse: true } : {}),
     responseEvents: extractEventSummaries(lastToolData),
     stepResults,
     mentionedEventId,

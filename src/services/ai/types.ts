@@ -329,6 +329,8 @@ export type ToolResultData =
  */
 export interface ToolResult {
   success: boolean;
+  /** This direct read-only answer is complete; no speculative AI supplement is needed. */
+  completeResponse?: boolean;
   output?: string;
   error?: string;
   stopLoop?: boolean;
