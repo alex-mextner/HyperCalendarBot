@@ -194,6 +194,11 @@ function memoryRedis() {
       store.set(key, value);
       return 'OK';
     },
+    compareAndSet: async (key: string, expected: string | null, value: string) => {
+      if ((store.get(key) ?? null) !== expected) return false;
+      store.set(key, value);
+      return true;
+    },
   };
 }
 

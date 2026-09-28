@@ -242,7 +242,11 @@ describe('edit_value scene: Location button with real verification', () => {
     const redis = new Map<string, string>();
     addressCache = new AddressCache({
       get: async (key) => redis.get(key) ?? null,
-      set: async (key, value) => redis.set(key, value),
+      compareAndSet: async (key, expected, value) => {
+        if ((redis.get(key) ?? null) !== expected) return false;
+        redis.set(key, value);
+        return true;
+      },
     });
     candidates = new InMemoryLocationCandidateStore();
     invitationCards = [];
