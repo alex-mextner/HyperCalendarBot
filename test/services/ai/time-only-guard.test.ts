@@ -178,10 +178,13 @@ describe('a message with only a clock time', () => {
     expect(timeOnlyToday('созвон в 23:30 HST', eight, TZ)).toBeNull();
   });
 
-  test('"по" after a time is a zone only when a place ends the phrase', () => {
-    expect(timeOnlyToday('напомни в 18:30 по работе позвонить', WEDNESDAY_MORNING, TZ)?.allowedDates).toEqual(
-      new Set(['2026-09-16']),
-    );
+  test('a time qualified by a place imposes nothing: it may be another zone', () => {
+    const eight = new Date('2026-09-16T18:00:00Z');
+    // "по нью йорку" in lower case and in two words, "New York time": neither is pinned to today.
+    expect(timeOnlyToday('созвон в 23:30 по нью йорку', eight, TZ)).toBeNull();
+    expect(timeOnlyToday('Meeting at 23:30 New York time', eight, TZ)).toBeNull();
+    // An ordinary "по" is let through as well: a missed constraint is safer than a wrong rejection.
+    expect(timeOnlyToday('напомни в 18:30 по работе позвонить', WEDNESDAY_MORNING, TZ)).toBeNull();
     // A named day is not widened to its neighbours by an ordinary "по".
     const turn = resolveTurnDayReferences('созвон завтра в 9 утра по дороге домой', [], WEDNESDAY_MORNING, TZ);
     expect(turn && [...turn.allowedDates]).toEqual(['2026-09-17']);
