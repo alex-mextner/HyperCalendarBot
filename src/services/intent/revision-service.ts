@@ -24,7 +24,7 @@ import {
 } from './revision-body.ts';
 import { type RegistryIntegrity, readApprovedRules, registryIntegrity, type StoredRule } from './revision-ledger.ts';
 import { type RegistryView, type RevisionOutcome, validateRevision } from './revision-validator.ts';
-import { RuleListCodec, seedFingerprint } from './rule-fingerprint.ts';
+import { digestsByName, RuleListCodec, seedFingerprint } from './rule-fingerprint.ts';
 import type { CanonicalSeed } from './seed-replacement.ts';
 
 export interface AdminPrincipal {
@@ -232,8 +232,9 @@ export class IntentRevisionService {
 
   /**
    * Records the build's source catalogue as a reviewable draft when it differs from the active
-   * revision. Idempotent per body and base, whatever that draft's status: a rejected source
-   * catalogue stays rejected until the active revision moves. It never approves or activates.
+   * revision. Idempotent per body and base: a rejected source catalogue stays rejected until the
+   * active revision moves. Only a draft that failed validation is retried, and it is superseded by
+   * a new draft once the same body validates. It never approves or activates.
    */
   ensureSourceBaselineDraft(seed: readonly CanonicalSeed[]): IntentRevision | null {
     const fingerprint = seedFingerprint(seed);
@@ -256,9 +257,13 @@ export class IntentRevisionService {
         }
         if (integrity.fingerprint === fingerprint) return null;
         const existing = this.revisions.findSourceBaseline(revisionBodyHash(body), integrity.active.id);
-        if (existing) return toRevision(existing);
+        // A draft that failed validation is retried: it may have failed on a history since repaired.
+        if (existing && (existing.status !== 'draft' || !validateRevision(body, this.view(integrity.rules)).ok))
+          return toRevision(existing);
         const author = `source:${fingerprint.slice(0, 16)}`;
-        return toRevision(this.insertValidated({ body, kind: 'source_baseline', author, parentId: null }, integrity));
+        const created = this.insertValidated({ body, kind: 'source_baseline', author, parentId: null }, integrity);
+        if (existing) this.revisions.setStatus(existing.id, 'superseded');
+        return toRevision(created);
       })
       .immediate();
   }
@@ -325,15 +330,32 @@ export class IntentRevisionService {
     return { rules, reservedNames: this.revisions.reservedNames(), provenance: this.provenance() };
   }
 
-  /** The kind of the activated revision that last introduced each rule name. */
-  private provenance(): Map<string, RevisionKind> {
+  /**
+   * The kind of the activated revision that last changed each rule's definition. Each activation
+   * is compared with the one before it, so a whole-catalogue revision claims only the rules it
+   * added or changed, never the ones it carried over unchanged. Null (origins unknown) when any
+   * activation's stored rules do not decode or match its target fingerprint, or when its base is
+   * not the target of the activation before it (including a based activation with none before it).
+   * Only a source baseline with no base at all (the first one, or an operator replacement recorded
+   * after the active revision was lost) starts the history over. The history is checked for
+   * consistency, not authenticated: a coherent rewrite of several rows is not detected.
+   */
+  private provenance(): Map<string, RevisionKind> | null {
     const kinds = new Map<string, RevisionKind>();
+    let previous: { id: number; fingerprint: string | null; digests: Map<string, string> } | null = null;
     for (const row of this.revisions.decidedActivations()) {
-      const body = RevisionBodyCodec.safeParse(row.body);
-      if (!body.success) continue;
-      const rules =
-        body.data.type === 'replace_all' ? body.data.rules : body.data.operations.flatMap((op) => op.intents);
-      for (const rule of rules) kinds.set(rule.canonical_name, row.kind);
+      const target = RuleListCodec.safeParse(row.target_rules ?? '');
+      const restarts = row.kind === 'source_baseline' && row.base_revision_id === null && row.base_fingerprint === null;
+      const linked =
+        restarts || (row.base_revision_id === previous?.id && row.base_fingerprint === previous.fingerprint);
+      if (!target.success || seedFingerprint(target.data) !== row.target_fingerprint || !linked) {
+        dbLogger.error({ revisionId: row.id }, 'intent revision history does not verify; rule origins unknown');
+        return null;
+      }
+      const before = restarts || !previous ? new Map<string, string>() : previous.digests;
+      const current = digestsByName(target.data);
+      for (const [name, hash] of current) if (before.get(name) !== hash) kinds.set(name, row.kind);
+      previous = { id: row.id, fingerprint: row.target_fingerprint, digests: current };
     }
     return kinds;
   }

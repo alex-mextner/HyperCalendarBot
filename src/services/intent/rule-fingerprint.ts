@@ -67,6 +67,10 @@ export const digest = (value: unknown) =>
     .update(JSON.stringify(stable(value)))
     .digest('hex');
 
+/** Per-rule digests by name: the one definition-equality both revision diffs and provenance use. */
+export const digestsByName = (rules: readonly RuleDefinition[]): Map<string, string> =>
+  new Map(rules.map((rule) => [rule.canonical_name, digest(definitionFields(rule))]));
+
 export function seedFingerprint(seed: readonly FingerprintInput[]): string {
   return digest(seed.map(definitionFields).sort((a, b) => a.canonical_name.localeCompare(b.canonical_name)));
 }

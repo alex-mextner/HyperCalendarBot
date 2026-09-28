@@ -8,7 +8,7 @@ import { IntentMatcher } from './intent-matcher.ts';
 import { normalize } from './normalizer.ts';
 import type { DroppedRules, ExampleDisposition, RevisionBody, RevisionOperation } from './revision-body.ts';
 import type { StoredRule } from './revision-ledger.ts';
-import { digest, type RuleDefinition, seedFingerprint } from './rule-fingerprint.ts';
+import { digestsByName, type RuleDefinition, seedFingerprint } from './rule-fingerprint.ts';
 import { canonicalMetadata } from './seed-catalog.ts';
 import { type CanonicalSeed, validateCanonicalSeed } from './seed-replacement.ts';
 import { readWorkflowVersion } from './workflow-input.ts';
@@ -18,8 +18,12 @@ import { validateWorkflow } from './workflow-validator.ts';
 export interface RegistryView {
   rules: StoredRule[];
   reservedNames: string[];
-  /** Which kind of revision last introduced each active rule name. */
-  provenance: Map<string, RevisionKind>;
+  /**
+   * Which kind of revision last changed each active rule's definition, comparing each activation's
+   * rule digests with the activation before it; carrying a rule over unchanged does not claim it.
+   * Null when that history does not verify.
+   */
+  provenance: Map<string, RevisionKind> | null;
 }
 
 export type RevisionOutcome =
@@ -101,21 +105,37 @@ const definitionOf = (rule: StoredRule): RuleDefinition => ({
 
 /** Names whose definition disappears or changes (removed) and whose definition is new (inserted). */
 function diffRuleSets(current: readonly RuleDefinition[], target: readonly RuleDefinition[]) {
-  const before = new Map(current.map((rule) => [rule.canonical_name, digest(rule)]));
-  const after = new Map(target.map((rule) => [rule.canonical_name, digest(rule)]));
+  const before = digestsByName(current);
+  const after = digestsByName(target);
   const removed = [...before].filter(([name, hash]) => after.get(name) !== hash).map(([name]) => name);
   const inserted = [...after].filter(([name, hash]) => before.get(name) !== hash).map(([name]) => name);
   return { removed: removed.sort(), inserted: inserted.sort() };
 }
 
-function success(current: readonly RuleDefinition[], targetRules: RuleDefinition[], dropped?: DroppedRules) {
+/**
+ * Every active definition the target drops (the `removed` names: gone, or replaced under the same
+ * name), under the kind of revision that last changed it; a source catalogue that reverts a manual
+ * edit lists it.
+ */
+function droppedBy(removed: readonly string[], provenance: Map<string, RevisionKind>): DroppedRules {
+  const dropped: DroppedRules = { learned: [], manual: [], source_baseline: [] };
+  for (const name of removed) dropped[provenance.get(name) ?? 'source_baseline'].push(name);
+  return dropped;
+}
+
+/** With `provenance`, the outcome also lists what it drops by origin (whole-catalogue revisions). */
+function success(
+  current: readonly RuleDefinition[],
+  targetRules: RuleDefinition[],
+  provenance?: Map<string, RevisionKind>,
+) {
   const diff = diffRuleSets(current, targetRules);
   return {
     ok: true as const,
     targetRules,
     targetFingerprint: seedFingerprint(targetRules),
     ...diff,
-    ...(dropped ? { dropped } : {}),
+    ...(provenance === undefined ? {} : { dropped: droppedBy(diff.removed, provenance) }),
   };
 }
 
@@ -306,14 +326,6 @@ function validateOperations(operations: readonly RevisionOperation[], registry: 
   );
 }
 
-function droppedBy(registry: RegistryView, target: readonly RuleDefinition[]): DroppedRules {
-  const kept = new Set(target.map((rule) => rule.canonical_name));
-  const dropped: DroppedRules = { learned: [], manual: [], source_baseline: [] };
-  for (const { canonical_name: name } of registry.rules)
-    if (!kept.has(name)) dropped[registry.provenance.get(name) ?? 'source_baseline'].push(name);
-  return dropped;
-}
-
 /** A whole source catalogue replaces the active set; it lists every rule it would drop. */
 function validateReplaceAll(rules: RuleDefinition[], registry: RegistryView): RevisionOutcome {
   const seed: CanonicalSeed[] = [];
@@ -334,7 +346,10 @@ function validateReplaceAll(rules: RuleDefinition[], registry: RegistryView): Re
   } catch (err) {
     return { ok: false, errors: [err instanceof Error ? err.message : String(err)] };
   }
-  return success(registry.rules.map(definitionOf), rules, droppedBy(registry, rules));
+  // Without a verified history the draft could not say whose rules it drops.
+  if (registry.provenance === null)
+    return { ok: false, errors: ['Revision history does not verify; the origin of dropped rules is unknown'] };
+  return success(registry.rules.map(definitionOf), rules, registry.provenance);
 }
 
 export function validateRevision(body: RevisionBody, registry: RegistryView): RevisionOutcome {

@@ -32,24 +32,18 @@ const timeNow = seedIntents.find((rule) => rule.canonical_name === 'basis.time.n
 const seed = [help, timeNow];
 const NOW = 1_900_000_000_000;
 
+const helpWithSpravka: CanonicalSeed = {
+  ...help,
+  workflow: HELP_WORKFLOW,
+  pattern: '^(?:помощь|help|справка)$',
+  phrases: ['помощь', 'help', 'справка'],
+  trigger_words: ['помощь', 'help', 'справка'],
+};
 const generalizeHelp: RevisionBodyInput = {
   type: 'operations',
   summary: 'Accept "справка" as help',
   operations: [
-    {
-      kind: 'generalize',
-      sourceNames: ['basis.help'],
-      reason: 'users ask for справка',
-      intents: [
-        {
-          ...help,
-          workflow: HELP_WORKFLOW,
-          pattern: '^(?:помощь|help|справка)$',
-          phrases: ['помощь', 'help', 'справка'],
-          trigger_words: ['помощь', 'help', 'справка'],
-        },
-      ],
-    },
+    { kind: 'generalize', sourceNames: ['basis.help'], reason: 'users ask for справка', intents: [helpWithSpravka] },
   ],
 };
 const createPing: RevisionBodyInput = {
@@ -68,6 +62,28 @@ const createPing: RevisionBodyInput = {
           phrases: ['пинг бота'],
           trigger_words: ['пинг'],
           source_message: 'пинг бота',
+        },
+      ],
+    },
+  ],
+};
+
+const createManualNote: RevisionBodyInput = {
+  type: 'operations',
+  summary: 'Answer a note request',
+  operations: [
+    {
+      kind: 'create',
+      sourceNames: [],
+      reason: 'admin shortcut',
+      intents: [
+        {
+          canonical_name: 'manual.note',
+          pattern: '^(?:заметка бота)$',
+          workflow: HELP_WORKFLOW,
+          phrases: ['заметка бота'],
+          trigger_words: ['заметка'],
+          source_message: 'заметка бота',
         },
       ],
     },
@@ -552,6 +568,130 @@ describe('source baseline', () => {
     const draft = service.ensureSourceBaselineDraft(seed);
     expect(draft?.validation).toMatchObject({ ok: true, dropped: { learned: ['learned.ping'], manual: [] } });
     expect(names()).toContain('learned.ping');
+  });
+
+  test('the source baseline lists a manual rule it would drop, next to a learned one', () => {
+    const learned = service.propose(createPing, { kind: 'learned', jobId: 'job-4' });
+    if (learned.status !== 'created') throw new Error(learned.code);
+    approveRevision(learned.revision.id);
+    approveRevision(proposeManual(createManualNote).id);
+    const draft = service.ensureSourceBaselineDraft(seed);
+    expect(draft?.validation).toMatchObject({
+      ok: true,
+      dropped: { learned: ['learned.ping'], manual: ['manual.note'], source_baseline: [] },
+    });
+    expect(names()).toEqual(['basis.help', 'basis.time.now', 'learned.ping', 'manual.note']);
+  });
+
+  test('the source baseline lists a manual edit of a source rule that it would overwrite', () => {
+    approveRevision(proposeManual(generalizeHelp).id);
+    const draft = service.ensureSourceBaselineDraft(seed);
+    expect(draft?.validation).toMatchObject({
+      ok: true,
+      removed: ['basis.help'],
+      dropped: { learned: [], manual: ['basis.help'], source_baseline: [] },
+    });
+  });
+
+  test('a whole-catalogue activation keeps the origin of rules it did not change', () => {
+    // A manual edit of basis.help that the next source catalogue adopts unchanged.
+    approveRevision(proposeManual(generalizeHelp).id);
+    const botInfo = seedIntents.find((rule) => rule.canonical_name === 'basis.bot.info')!;
+    const withBotInfo = service.ensureSourceBaselineDraft([helpWithSpravka, timeNow, botInfo])!;
+    expect(approveRevision(withBotInfo.id, adminFromOperatorCli())).toMatchObject({ inserted: ['basis.bot.info'] });
+    const next = service.ensureSourceBaselineDraft([timeNow, botInfo]);
+    expect(next?.validation).toMatchObject({
+      ok: true,
+      dropped: { learned: [], manual: ['basis.help'], source_baseline: [] },
+    });
+  });
+
+  describe('with an earlier activation rewritten', () => {
+    // The rewritten activation is superseded, so the active catalogue itself stays intact.
+    const baselineTarget = () =>
+      db
+        .query<{ target_rules: string; target_fingerprint: string }, []>(
+          'SELECT target_rules, target_fingerprint FROM intent_revisions ORDER BY id LIMIT 1',
+        )
+        .get()!;
+    const rewrites: [string, (id: number) => void][] = [
+      [
+        'its rules no longer decode',
+        (id) => db.run("UPDATE intent_revisions SET target_rules = 'x' WHERE id = ?", [id]),
+      ],
+      [
+        'its rules differ from its fingerprint',
+        (id) => db.run("UPDATE intent_revisions SET target_fingerprint = '0' WHERE id = ?", [id]),
+      ],
+      [
+        'it no longer leads to the activation after it',
+        (id) => {
+          const { target_rules, target_fingerprint } = baselineTarget();
+          db.run('UPDATE intent_revisions SET target_rules = ?, target_fingerprint = ? WHERE id = ?', [
+            target_rules,
+            target_fingerprint,
+            id,
+          ]);
+        },
+      ],
+      [
+        'its base is erased so it poses as a fresh baseline',
+        (id) =>
+          db.run('UPDATE intent_revisions SET base_revision_id = NULL, base_fingerprint = NULL WHERE id = ?', [id]),
+      ],
+      [
+        'its base names a revision other than the one before it',
+        (id) => db.run('UPDATE intent_revisions SET base_revision_id = id WHERE id = ?', [id]),
+      ],
+      [
+        'the activation before it was deleted',
+        (id) => {
+          // Only raw access with foreign keys off can remove a referenced revision.
+          db.run('PRAGMA foreign_keys = OFF');
+          db.run('DELETE FROM intent_revisions WHERE id < ?', [id]);
+          db.run('PRAGMA foreign_keys = ON');
+        },
+      ],
+    ];
+    function rewriteManualEdit(rewrite: (id: number) => void) {
+      const manual = proposeManual(generalizeHelp);
+      approveRevision(manual.id);
+      approveRevision(proposeManual(createManualNote).id);
+      rewrite(manual.id);
+      expect(names()).toEqual(['basis.help', 'basis.time.now', 'manual.note']);
+    }
+
+    test.each(rewrites)('a source baseline is not validated when %s', (_case, rewrite) => {
+      rewriteManualEdit(rewrite);
+      const botInfo = seedIntents.find((rule) => rule.canonical_name === 'basis.bot.info')!;
+      const draft = service.ensureSourceBaselineDraft([help, timeNow, botInfo]);
+      expect(draft).toMatchObject({ status: 'draft', validation: { ok: false } });
+      expect(JSON.stringify(draft?.validation)).toContain('Revision history');
+    });
+
+    test('a manual revision still validates, since it lists no origins', () => {
+      rewriteManualEdit(rewrites[0]![1]);
+      expect(proposeManual(createPing).status).toBe('validated');
+    });
+
+    test('once the history is restored, the same source catalogue gets a validated draft', () => {
+      const manual = proposeManual(generalizeHelp);
+      approveRevision(manual.id);
+      approveRevision(proposeManual(createManualNote).id);
+      const stored = db
+        .query<{ target_rules: string }, [number]>('SELECT target_rules FROM intent_revisions WHERE id = ?')
+        .get(manual.id)!.target_rules;
+      db.run("UPDATE intent_revisions SET target_rules = 'x' WHERE id = ?", [manual.id]);
+      const botInfo = seedIntents.find((rule) => rule.canonical_name === 'basis.bot.info')!;
+      const source = [help, timeNow, botInfo];
+      const failed = service.ensureSourceBaselineDraft(source)!;
+      expect(failed.status).toBe('draft');
+      db.run('UPDATE intent_revisions SET target_rules = ? WHERE id = ?', [stored, manual.id]);
+      const retried = service.ensureSourceBaselineDraft(source);
+      expect(retried).toMatchObject({ status: 'validated', validation: { ok: true } });
+      expect(service.get(failed.id)?.status).toBe('superseded');
+      expect(service.ensureSourceBaselineDraft(source)?.id).toBe(retried!.id);
+    });
   });
 
   test('an operator can approve the source baseline', () => {
