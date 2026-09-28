@@ -1,5 +1,5 @@
 // test/services/ai/response-validator.test.ts
-import { afterEach, describe, expect, setSystemTime, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import type OpenAI from 'openai';
 import type { ToolEvidence } from '../../../src/services/ai/response-grounding.ts';
 import {
@@ -35,6 +35,9 @@ function prefilter(names: string[], response: string, tools: ToolEvidence[] = ex
   return shouldValidateResponse({ userMessage: 'Что у меня?', timezone: 'Europe/Belgrade', tools, response });
 }
 
+/** Sunday 2026-09-27, 23:00 in Belgrade: today and tomorrow count as context, so the #515 tests pin them. */
+const SUNDAY_NIGHT = new Date('2026-09-27T21:00:00Z');
+
 /** A read of 27.09–04.10 (Belgrade) that returned one Tuesday lesson at 12:30 local. */
 const WEEK_FROM_SUNDAY: ToolEvidence = {
   name: 'get_events',
@@ -45,6 +48,9 @@ const WEEK_FROM_SUNDAY: ToolEvidence = {
 };
 
 describe('tool-run evidence prefilter', () => {
+  beforeEach(() => setSystemTime(SUNDAY_NIGHT));
+  afterEach(() => setSystemTime());
+
   test('production completeness claim is validated after write/image tools', () => {
     expect(
       prefilter(['create_event', 'render_day_image'], 'Готово. На этот день больше ничего не запланировано.'),
@@ -76,6 +82,9 @@ describe('tool-run evidence prefilter', () => {
 });
 
 describe('supplementIsGrounded (#515)', () => {
+  beforeEach(() => setSystemTime(SUNDAY_NIGHT));
+  afterEach(() => setSystemTime());
+
   function supplement(response: string, tools: ToolEvidence[]): boolean {
     return supplementIsGrounded({ userMessage: 'План на неделю', timezone: 'Europe/Belgrade', tools, response });
   }
