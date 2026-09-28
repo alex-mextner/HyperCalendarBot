@@ -160,6 +160,8 @@ def parse_doc(raw: bytes, name: str) -> DocContract:
 class NewMigration:
     name: str
     doc: DocContract | None
+    # Recorded in the database already although the running image lacks it (after an image rollback).
+    applied: bool = False
 
     @property
     def doc_path(self) -> str:
@@ -189,8 +191,8 @@ class Decision:
 
     @property
     def rollback_guard(self) -> list[str]:
-        """Accepted migrations the old image is not declared to survive."""
-        return [m.name for m in self.migrations if m.doc is None or not m.doc.rollback_compatible]
+        """Accepted new migrations the old image is not declared to survive (it already runs on applied ones)."""
+        return [m.name for m in self.migrations if not m.applied and (m.doc is None or not m.doc.rollback_compatible)]
 
     def audit_line(self) -> str:
         if self.mode == "unchanged":
@@ -257,20 +259,21 @@ def decide(
         decision.refuse(f"new migrations must follow the shipped ones; the release order is {list(new.names)}")
     recorded = set(applied)
     for name in new.names:
-        if name in recorded:
-            if name not in old.digests:
-                decision.require_review(
-                    f"migration {name} is already applied in the database but the running image does not "
-                    "carry it (an image rollback?); the runner will not run the release's version"
-                )
+        applied_already = name in recorded
+        if applied_already and name in old.digests:
             continue
+        if applied_already:
+            decision.require_review(
+                f"migration {name} is already applied in the database but the running image does not "
+                "carry it (an image rollback?); the runner will not run the release's version"
+            )
         raw = (docs or {}).get(f"{name}.md")
-        migration = NewMigration(name, None)
+        migration = NewMigration(name, None, applied_already)
         if raw is None:
             decision.refuse(f"migration {name} has no reviewed doc: {migration.doc_path}")
         else:
             try:
-                migration = NewMigration(name, parse_doc(raw, name))
+                migration = NewMigration(name, parse_doc(raw, name), applied_already)
             except ValueError as error:
                 decision.refuse(f"migration {name}: {migration.doc_path} is not a valid migration doc: {error}")
         if migration.doc is not None and not migration.doc.rollback_compatible:

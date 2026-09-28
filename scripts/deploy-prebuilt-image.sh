@@ -108,7 +108,10 @@ restore_image() {
 # the read fails, start the release again and leave it to the migration doc's Rollback section.
 old_image_may_run() {
   [[ -s "$ROLLBACK_GUARD" ]] || return 0
-  docker stop hypercal-bot >/dev/null && python3 "$GATE" unapplied "$CURRENT_IMAGE_ID" "$DEPLOY_PATH/data" "$ROLLBACK_GUARD" && return 0
+  # A release that already exited can fail `docker stop`; what matters is that it no longer runs.
+  docker stop hypercal-bot >/dev/null 2>&1
+  [[ "$(docker inspect hypercal-bot --format '{{.State.Running}}' 2>/dev/null)" == false ]] \
+    && python3 "$GATE" unapplied "$CURRENT_IMAGE_ID" "$DEPLOY_PATH/data" "$ROLLBACK_GUARD" && return 0
   docker start hypercal-bot >/dev/null
   printf 'ROLLBACK_SKIPPED image=%s: the database may hold %s, which the old image is not declared to survive; follow the Rollback section of docs/reference/migrations/<name>.md\n' \
     "$(docker inspect hypercal-bot --format '{{.Image}}' 2>/dev/null)" "$(paste -sd ' ' "$ROLLBACK_GUARD")" >&2

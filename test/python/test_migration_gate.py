@@ -225,6 +225,19 @@ class GateDecisionTests(unittest.TestCase):
         decision = self.decide(docs={"002_y.md": doc(deletion="yes")}, reviewed=self.pair())
         self.assertEqual((decision.mode, decision.rollback_guard), ("reviewed-override", []))
 
+    def test_a_migration_the_database_is_ahead_on_still_needs_its_doc(self):
+        # The override accepts a database that already records 002_y while the running image lacks
+        # it, but only with 002_y's reviewed doc, which the audit line names. The old image already
+        # runs on that database, so the migration does not join the rollback guard.
+        applied = ("001_x", "002_y")
+        missing = self.decide(applied=applied, docs={}, reviewed=self.pair())
+        self.assertEqual(missing.mode, "refused", missing.refusals)
+        risky = {"002_y.md": doc(rollback="no", body="## Rollback\n\nSteps.\n")}
+        decision = self.decide(applied=applied, docs=risky, reviewed=self.pair())
+        self.assertEqual(decision.mode, "reviewed-override")
+        self.assertEqual([m.name for m in decision.migrations], ["002_y"])
+        self.assertEqual(decision.rollback_guard, [])
+
     def test_new_is_judged_by_the_database_not_the_running_image(self):
         # After an image-only rollback the database records 002_y but the running image lacks
         # it: the release's 002_y never runs, so neither its doc nor its body can vouch for it.

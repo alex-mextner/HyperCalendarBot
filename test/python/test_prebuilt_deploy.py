@@ -135,10 +135,12 @@ if args and args[0]=='tag' and args[-1].endswith(':latest') and os.environ.get('
 if args[:2]==['image','inspect']:
     fmt=args[-1]
     print(os.environ['FIXTURE_ID'] if '.Id' in fmt else os.environ['FIXTURE_SHA'])
+elif args[:2]==['inspect','hypercal-bot'] and '.State.Running' in args[-1]:print('false')
 elif args[:2]==['inspect','hypercal-bot']:print(current.read_text())
 elif args[:3]==['exec','hypercal-bot','cat']:print(old_content,end='')
 elif args[:3]==['exec','hypercal-bot','bun']:recorded('APPLIED_FAILURE')
-elif args[:2] in (['stop','hypercal-bot'],['start','hypercal-bot']):pass
+elif args[:2]==['stop','hypercal-bot']:sys.exit(1 if os.environ.get('STOP_FAILURE')=='1' else 0)
+elif args[:2]==['start','hypercal-bot']:pass
 elif args and args[0]=='run':
     entrypoint=args[args.index('--entrypoint')+1] if '--entrypoint' in args else ''
     if entrypoint=='cat':print(new_content,end='')
@@ -530,6 +532,13 @@ print(body,end='')
         result = self.run_failing_release(RISKY_DOC, RELEASE_MIGRATION_FAILS="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("002_new_thing", self.recorded())
+        self.assertIn("ROLLBACK image=sha256:old health=ok", result.stderr)
+        self.assertEqual((self.dep / "current").read_text(), "sha256:old")
+
+    def test_failed_release_that_already_exited_is_still_checked_and_rolled_back(self):
+        # `docker stop` may fail on a release that already exited; it is quiesced all the same.
+        result = self.run_failing_release(RISKY_DOC, RELEASE_MIGRATION_FAILS="1", STOP_FAILURE="1")
+        self.assertNotEqual(result.returncode, 0)
         self.assertIn("ROLLBACK image=sha256:old health=ok", result.stderr)
         self.assertEqual((self.dep / "current").read_text(), "sha256:old")
 

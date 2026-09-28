@@ -115,9 +115,9 @@ The two values are `sha256sum /app/src/database/migrations.ts` in the running co
 Every activation logs one audit line before the backup. Its keys are fixed:
 
 - `SCHEMA_GATE decision=unchanged migrations_sha256=<sha256>`
-- `SCHEMA_GATE decision=automatic|reviewed-override from=<running sha256> to=<release sha256>`, followed by one `migration=<name> doc=docs/reference/migrations/<name>.md doc_sha256=<sha256> rollback-compatible=yes|no data-deletion=yes|no` group per new migration. A reviewed override first logs the refusals it overrode as `Schema gate refusal: …` lines.
+- `SCHEMA_GATE decision=automatic|reviewed-override from=<running sha256> to=<release sha256>`, followed by one `migration=<name> doc=docs/reference/migrations/<name>.md doc_sha256=<sha256> rollback-compatible=yes|no data-deletion=yes|no` group per migration that the database does not record yet, or that it records while the running image lacks it. A reviewed override first logs the refusals it overrode as `Schema gate refusal: …` lines.
 
-If a release that the override accepted with `rollback-compatible: no` fails verification, the script stops it and reads the `migrations` table with the previous image. It restores the previous image only when none of those migrations is recorded. Otherwise, or when the read fails, it starts the release again, logs `ROLLBACK_SKIPPED`, and the operator follows the doc's `## Rollback` section. The database is never restored automatically.
+If a release that the override accepted with `rollback-compatible: no` fails verification, the script stops it (a release that already exited counts as stopped) and reads the `migrations` table with the previous image. It restores the previous image only when none of those migrations is recorded. Otherwise, or when the read fails, it starts the release again, logs `ROLLBACK_SKIPPED`, and the operator follows the doc's `## Rollback` section. The database is never restored automatically.
 
 ## Docker
 
