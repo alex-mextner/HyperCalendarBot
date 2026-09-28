@@ -143,6 +143,115 @@ describe('"time unknown" is not all-day (unknown-time family)', () => {
   });
 });
 
+describe('day-part suffix ranges cover the whole stated period, not just its typical hours (GH-650 follow-up)', () => {
+  test.each([
+    ['в 1 утра', '01:00'],
+    ['в 2 утра', '02:00'],
+    ['в 3 утра', '03:00'],
+    ['1 утра', '01:00'],
+    ['2 утра', '02:00'],
+  ])('%s is explicit early morning, never rejected', (raw, expectedLocal) => {
+    const outcome = parseWallTimeInput(raw, ctx());
+    expect(outcome.decision).toBe('accepted');
+    if (outcome.decision !== 'accepted')
+      throw new Error(`expected accepted for ${raw}, got ${JSON.stringify(outcome)}`);
+    const [hh, mm] = expectedLocal.split(':').map(Number) as [number, number];
+    const utcHour = (hh - 2 + 24) % 24;
+    const utcDay = hh - 2 < 0 ? '2026-09-28' : '2026-09-29';
+    expect(outcome.schedule).toEqual({
+      kind: 'timed',
+      startAt: `${utcDay}T${String(utcHour).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00.000Z`,
+    });
+  });
+});
+
+describe('a prefix before a word-time is stripped, not just before digits (GH-650 follow-up)', () => {
+  test.each([
+    ['в полдень', '12:00'],
+    ['at noon', '12:00'],
+    ['в полночь', '00:00'],
+    ['at midnight', '00:00'],
+  ])('%s resolves the same as the bare word', (raw, expectedLocal) => {
+    const outcome = parseWallTimeInput(raw, ctx());
+    expect(outcome.decision).toBe('accepted');
+    if (outcome.decision !== 'accepted')
+      throw new Error(`expected accepted for ${raw}, got ${JSON.stringify(outcome)}`);
+    const bare = parseWallTimeInput(expectedLocal === '12:00' ? 'полдень' : 'полночь', ctx());
+    if (bare.decision !== 'accepted') throw new Error(`expected accepted bare word, got ${JSON.stringify(bare)}`);
+    expect(outcome.schedule).toEqual(bare.schedule);
+  });
+});
+
+describe('WORD_TIMES only recognizes its own keys, never inherited Object.prototype members (GH-650 follow-up)', () => {
+  test.each([
+    'constructor',
+    '__proto__',
+    'toString',
+    'hasOwnProperty',
+    'valueOf',
+  ])('%s is unparseable, not a false DST-gap/prototype value', (raw) => {
+    const outcome = parseWallTimeInput(raw, ctx());
+    expect(outcome.decision).toBe('invalid');
+    if (outcome.decision !== 'invalid') throw new Error('unreachable');
+    expect(outcome.reason).toBe('unparseable');
+  });
+});
+
+describe('Russian spelled-out hours 1-12 behave exactly like their digit form, a closed lexicon (GH-650 follow-up)', () => {
+  test.each([
+    ['один', '1'],
+    ['два', '2'],
+    ['три', '3'],
+    ['четыре', '4'],
+    ['пять', '5'],
+    ['шесть', '6'],
+    ['семь', '7'],
+    ['восемь', '8'],
+    ['девять', '9'],
+    ['десять', '10'],
+    ['одиннадцать', '11'],
+    ['двенадцать', '12'],
+  ])('bare "%s" is ambiguous exactly like bare "%s"', (word, digit) => {
+    const wordOutcome = parseWallTimeInput(word, ctx());
+    const digitOutcome = parseWallTimeInput(digit, ctx());
+    expect(wordOutcome).toEqual(digitOutcome);
+  });
+
+  test.each([
+    ['два ночи', '2 ночи'],
+    ['в два дня', 'в 2 дня'],
+    ['два утра', '2 утра'],
+  ])('"%s" resolves exactly like "%s"', (wordForm, digitForm) => {
+    const wordOutcome = parseWallTimeInput(wordForm, ctx());
+    const digitOutcome = parseWallTimeInput(digitForm, ctx());
+    expect(wordOutcome).toEqual(digitOutcome);
+    expect(wordOutcome.decision).toBe('accepted');
+  });
+
+  test('"в два" is still ambiguous exactly like "в 2" — a prefix alone never disambiguates', () => {
+    const wordOutcome = parseWallTimeInput('в два', ctx());
+    const digitOutcome = parseWallTimeInput('в 2', ctx());
+    expect(wordOutcome).toEqual(digitOutcome);
+    expect(wordOutcome.decision).toBe('ambiguous');
+  });
+
+  test('a Russian number word above the closed 1-12 lexicon is unparseable, not guessed', () => {
+    const outcome = parseWallTimeInput('тринадцать', ctx());
+    expect(outcome.decision).toBe('invalid');
+    if (outcome.decision !== 'invalid') throw new Error('unreachable');
+    expect(outcome.reason).toBe('unparseable');
+  });
+});
+
+describe('24:00 is already rejected outright with a repair-offering reason, not silently rolled over (regression pin, no change)', () => {
+  test('24:00 stays invalid with explicit_date_or_time_repair, never accepted as next-day midnight', () => {
+    const outcome = parseWallTimeInput('24:00', ctx());
+    expect(outcome.decision).toBe('invalid');
+    if (outcome.decision !== 'invalid') throw new Error('unreachable');
+    expect(outcome.reason).toBe('explicit_date_or_time_repair');
+  });
+});
+
 describe('no pending time means a bare number is not guessed as a time (number-context family)', () => {
   test('the same digit with pendingField null returns unhandled, not a time guess', () => {
     const outcome = parseWallTimeInput('2', ctx({ pendingField: null }));
