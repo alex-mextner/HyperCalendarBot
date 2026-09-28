@@ -402,15 +402,19 @@ function periodKind(key: (typeof PERIOD_KEYS)[number]): 'day' | 'week' | 'month'
   return key === 'weekend' ? 'weekend' : 'day';
 }
 
+/** Saturday in the Monday-zero weekday index; Saturday and Sunday are the weekend. */
+const SATURDAY = 5;
+
 /**
  * Monday of the Monday–Sunday calendar week that pictures the period, for tools that can only
- * draw a whole calendar week. 'week' on a Saturday or Sunday gives the coming week: the current
- * one has at most a day left, and the rolling 'week' range lies mostly in the next one.
+ * draw a whole calendar week; workflows read it only for week periods. 'week' on a Saturday or
+ * Sunday gives the coming week: the current one has at most a day left, and the rolling 'week'
+ * range lies mostly in the next one.
  */
 function calendarWeekStart(key: (typeof PERIOD_KEYS)[number], start: CalendarDay): CalendarDay {
   const weekday = weekdayMondayZero(start);
   const monday = addDays(start, -weekday);
-  return key === 'week' && weekday >= 5 ? addDays(monday, 7) : monday;
+  return key === 'week' && weekday >= SATURDAY ? addDays(monday, 7) : monday;
 }
 
 function buildPeriod(key: (typeof PERIOD_KEYS)[number], now: Date, timezone: string): WorkflowInputValue {
