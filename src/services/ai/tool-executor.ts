@@ -43,6 +43,7 @@ import {
   handleMakeCall,
   handlePickUsers,
 } from './tool-handlers/meta.ts';
+import { handleManagePlace, handleManagePlaceRole, handleResolvePlace } from './tool-handlers/places.ts';
 import type { ProposeInput } from './tool-handlers/proposals.ts';
 import { handleProposeCalendarChange } from './tool-handlers/proposals.ts';
 import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
@@ -168,6 +169,40 @@ export interface ToolInputMap {
     alias?: string;
     alias_id?: number;
     group_id?: number;
+  };
+  resolve_place: { query: string };
+  manage_place: {
+    action:
+      | 'add'
+      | 'update'
+      | 'list'
+      | 'get'
+      | 'set_favorite'
+      | 'delete'
+      | 'restore'
+      | 'purge'
+      | 'add_alias'
+      | 'list_aliases'
+      | 'delete_alias';
+    place_id?: number;
+    label?: string;
+    venue_name?: string;
+    address?: string;
+    latitude?: number;
+    longitude?: number;
+    map_url?: string;
+    notes?: string;
+    confirmed?: boolean;
+    favorite?: boolean;
+    alias?: string;
+    alias_id?: number;
+  };
+  manage_place_role: {
+    action: 'set' | 'get' | 'clear';
+    role: 'home' | 'work';
+    owner_type: 'self' | 'contact' | 'group';
+    owner_ref_id?: number;
+    place_id?: number;
   };
   render_day_image: { date: string; scope?: 'personal' | 'group'; owner_id?: number };
   render_week_image: { week_start: string; scope?: 'personal' | 'group'; owner_id?: number };
@@ -299,6 +334,7 @@ const HANDLER_MAP: { [tool: string]: { meta?: import('./types.ts').ToolHandlerMe
   get_user_info: handleGetUserInfo,
   find_contact: handleFindContact,
   resolve_contact: handleResolveContact,
+  resolve_place: handleResolvePlace,
   find_user: handleFindUser,
   get_history: handleGetHistory,
   get_holidays: handleGetHolidays,
@@ -414,6 +450,9 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   delete_contact: 'contacts',
   resolve_contact: 'contacts',
   manage_contact_directory: 'contacts',
+  resolve_place: 'places',
+  manage_place: 'places',
+  manage_place_role: 'places',
   get_holidays: 'holidays',
   get_google_calendar_status: 'google_calendar',
   list_google_calendars: 'google_calendar',
@@ -709,6 +748,15 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
 
       case 'manage_contact_directory':
         return handleManageContactDirectory(ctx, input as ToolInputMap['manage_contact_directory']);
+
+      case 'resolve_place':
+        return handleResolvePlace(ctx, input as ToolInputMap['resolve_place']);
+
+      case 'manage_place':
+        return handleManagePlace(ctx, input as ToolInputMap['manage_place']);
+
+      case 'manage_place_role':
+        return handleManagePlaceRole(ctx, input as ToolInputMap['manage_place_role']);
 
       case 'render_day_image':
         return handleRenderDayImage(ctx, input as ToolInputMap['render_day_image']);

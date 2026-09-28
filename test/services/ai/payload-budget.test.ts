@@ -37,11 +37,19 @@ import { HolidayService } from '../../../src/services/holiday/holiday-service.ts
  * operations, the same consolidation pattern as `manage_settings`/
  * `manage_secretaries`, in place of what would otherwise have been 12 separate
  * tool schemas). Measured cost after that consolidation: +1 706 catalog chars,
- * +490 catalog `estimateTokens` units. Budgets below move by the same measured
- * amount, not further — this is real added capability, not creep.
+ * +490 catalog `estimateTokens` units.
+ *
+ * 2026-09-29 (GH-655): saved places added three tools — `resolve_place` (the
+ * same typed exact/ambiguous/fuzzy lookup as resolve_contact, for the place
+ * book), `manage_place` (one action-based tool covering 11 CRUD/alias/trash
+ * operations), and `manage_place_role` (link/unlink a place as someone's
+ * home/work — own, a contact's, or a household's). Measured cost: +2 935
+ * catalog chars, +841 catalog `estimateTokens` units. Budgets below move by
+ * the same measured amounts, not further — this is real added capability,
+ * not creep.
  */
-const TOOL_CATALOG_CHAR_BUDGET = 37_800;
-const TOOL_CATALOG_TOKEN_BUDGET = 11_000;
+const TOOL_CATALOG_CHAR_BUDGET = 40_800;
+const TOOL_CATALOG_TOKEN_BUDGET = 11_900;
 /**
  * The catalog is the largest part of a request but not the whole of it: the
  * system prompt travels with it every time. Guarding only the catalog would let
@@ -51,10 +59,10 @@ const TOOL_CATALOG_TOKEN_BUDGET = 11_000;
  * leave the largest real requests free to grow.
  */
 const FULL_REQUEST_TOKEN_BUDGETS = {
-  direct: 15_600,
-  group: 17_900,
-  supplement: 15_900,
-  liveCall: 15_200,
+  direct: 16_600,
+  group: 18_900,
+  supplement: 16_900,
+  liveCall: 16_200,
 } as const;
 
 function names(tools: OpenAI.ChatCompletionTool[]): string[] {

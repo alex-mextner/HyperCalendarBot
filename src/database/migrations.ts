@@ -1175,4 +1175,80 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    name: '067_saved_places',
+    up(db) {
+      // GH-655 (#398, design §13/§24). A persistent, owner-scoped place directory — the Redis
+      // AddressCache stays a derived cache (frequency/recency hints), never the source of
+      // ownership truth. Nothing here reads or migrates AddressCache data.
+      db.exec(`
+        CREATE TABLE saved_places (
+          id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id            INTEGER NOT NULL,
+          label              TEXT NOT NULL,
+          venue_name         TEXT,
+          address            TEXT,
+          latitude           REAL,
+          longitude          REAL,
+          provider           TEXT,
+          provider_place_id  TEXT,
+          map_url            TEXT,
+          notes              TEXT,
+          favorite           INTEGER NOT NULL DEFAULT 0,
+          verification       TEXT NOT NULL DEFAULT 'unconfirmed' CHECK (verification IN ('unconfirmed', 'confirmed')),
+          provenance         TEXT,
+          revision           INTEGER NOT NULL DEFAULT 1,
+          created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at         TEXT NOT NULL DEFAULT (datetime('now')),
+          deleted_at         TEXT,
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        )
+      `);
+      db.exec('CREATE INDEX idx_saved_places_user ON saved_places(user_id)');
+      db.exec('CREATE INDEX idx_saved_places_user_deleted ON saved_places(user_id, deleted_at)');
+
+      // Owner-scoped search aliases ("Ушће", "Ušće", "Usce park" for one place). Scoped per-place,
+      // not per-user — like #654's contact_aliases, two different places MAY share an alias text
+      // (the design doc's own example: "дом", "офис" are personal labels, not global places), so a
+      // lookup returning more than one holder is a disambiguation case, never a write-time conflict.
+      db.exec(`
+        CREATE TABLE place_aliases (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id    INTEGER NOT NULL,
+          place_id   INTEGER NOT NULL,
+          alias      TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+          FOREIGN KEY (place_id) REFERENCES saved_places(id) ON DELETE CASCADE
+        )
+      `);
+      db.exec('CREATE UNIQUE INDEX idx_place_aliases_place_alias ON place_aliases(place_id, LOWER(alias))');
+      db.exec('CREATE INDEX idx_place_aliases_place ON place_aliases(place_id)');
+
+      // Home/work role bindings (design §24): a link to a saved_places row, never a copy of its
+      // address — "owner-scoped home/work" (owner_type='self'), a contact-bound place like "Lena's
+      // home" (owner_type='contact', a private note of the requesting owner, never published or
+      // requiring Lena's consent), and a household's agreed shared home (owner_type='group', e.g.
+      // the "Грюковы" collective alias from #654) are the same mechanism: one role per
+      // (owner_type, owner_ref_id, role). owner_ref_id is 0 (not NULL) for 'self' so the unique
+      // index actually enforces "at most one home per self/contact/group", which SQLite's
+      // multi-NULL-is-never-equal semantics would silently fail to do.
+      db.exec(`
+        CREATE TABLE place_roles (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id      INTEGER NOT NULL,
+          place_id     INTEGER NOT NULL,
+          role         TEXT NOT NULL CHECK (role IN ('home', 'work')),
+          owner_type   TEXT NOT NULL CHECK (owner_type IN ('self', 'contact', 'group')),
+          owner_ref_id INTEGER NOT NULL DEFAULT 0,
+          created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+          CHECK ((owner_type = 'self' AND owner_ref_id = 0) OR (owner_type != 'self' AND owner_ref_id > 0)),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+          FOREIGN KEY (place_id) REFERENCES saved_places(id) ON DELETE CASCADE
+        )
+      `);
+      db.exec('CREATE UNIQUE INDEX idx_place_roles_owner ON place_roles(user_id, role, owner_type, owner_ref_id)');
+      db.exec('CREATE INDEX idx_place_roles_place ON place_roles(place_id)');
+    },
+  },
 ];

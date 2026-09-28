@@ -21,6 +21,9 @@ import type { GroupMemberRepository } from '../../database/repositories/group-me
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
+import type { PlaceRepository } from '../../database/repositories/place.repository.ts';
+import type { PlaceAliasRepository } from '../../database/repositories/place-alias.repository.ts';
+import type { PlaceRoleRepository } from '../../database/repositories/place-role.repository.ts';
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
@@ -54,6 +57,7 @@ import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
 import { validateWorkflow } from '../../services/intent/workflow-validator.ts';
 import type { NliClassifier } from '../../services/nli/nli-classifier.ts';
+import { PlaceResolver } from '../../services/places/place-resolver.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
@@ -103,6 +107,9 @@ export interface MessageHandlerDeps {
   contactRepo?: ContactRepository;
   contactAliasRepo?: ContactAliasRepository;
   contactGroupRepo?: ContactGroupRepository;
+  placeRepo?: PlaceRepository;
+  placeAliasRepo?: PlaceAliasRepository;
+  placeRoleRepo?: PlaceRoleRepository;
   participantRepo?: ParticipantRepository;
   editProposalRepo?: EditProposalRepository;
   secretaryRepo?: SecretaryRepository;
@@ -398,6 +405,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       userRepo: deps.userRepo,
       eventReminderRepo: deps.eventReminderRepo,
       contactRepo: deps.contactRepo,
+      placeRepo: deps.placeRepo,
       participantRepo: deps.participantRepo,
       renderService: deps.renderService,
       deepLinkService: deps.deepLinkService,
@@ -513,6 +521,14 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
               contactAliasRepo: deps.contactAliasRepo,
               contactGroupRepo: deps.contactGroupRepo,
               contactResolver: new ContactResolver(deps.contactRepo, deps.contactAliasRepo, deps.contactGroupRepo),
+            }
+          : undefined,
+      placeDirectory:
+        deps.placeRepo && deps.placeAliasRepo && deps.placeRoleRepo
+          ? {
+              placeAliasRepo: deps.placeAliasRepo,
+              placeRoleRepo: deps.placeRoleRepo,
+              placeResolver: new PlaceResolver(deps.placeRepo, deps.placeAliasRepo),
             }
           : undefined,
       locationVerification: deps.locationVerification,
