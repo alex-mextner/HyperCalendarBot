@@ -101,7 +101,13 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
           { userId: user.telegram_id, message: msg, source: 'trigger', retryAttempt: currentAttempt + 1 },
           delay,
         );
-        if (jobStore) await jobStore.set(user.telegram_id, jobId);
+        // The job is stored and will run: a lost cancellation pointer must not turn it into "not scheduled".
+        await jobStore?.set(user.telegram_id, jobId).catch((err: unknown) => {
+          cmdLogger.warn(
+            { err, userId: user.telegram_id, jobId },
+            'Retry scheduled but its cancellation pointer was not saved',
+          );
+        });
         return true;
       };
     }

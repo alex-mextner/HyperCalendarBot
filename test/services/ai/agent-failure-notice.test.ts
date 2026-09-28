@@ -285,6 +285,20 @@ describe('agent failure notices', () => {
     }
   });
 
+  test('a retry store that never answers does not hold back the failure notice', async () => {
+    // Redis hung: before the bound, the turn waited on it forever and said nothing.
+    ctx.retryEnqueue = () => Promise.withResolvers<boolean>().promise;
+    const agent = new CalendarBotAgent(config, probe.sender, {
+      streamImpl: failingStream(new Error('Provider timed out')),
+      retryStoreTimeoutMs: 20,
+    });
+
+    await agent.run(ctx);
+
+    const text = probe.delivered().join('\n');
+    expect(RU_AGENT_ERROR_PHRASES.some((phrase) => text.includes(phrase))).toBe(true);
+  });
+
   // ── Stall phrase selection ───────────────────────────────────────────────
 
   test('transient failure with a retry scheduled → stall phrase is sent', async () => {

@@ -198,6 +198,30 @@ describe('SyntheticPipelineRunner', () => {
     expect(captured.ctx?.retryEnqueue).toBeFunction();
   });
 
+  test('a stored retry counts even when its cancellation pointer cannot be saved', async () => {
+    const captured: { ctx?: AgentContext } = {};
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const intentRun = mock(async (ctx: AgentContext) => {
+      captured.ctx = ctx;
+      return { handled: false };
+    });
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: mock(() => agentCtx),
+      intentRun,
+      agentRun: mock(async () => {}),
+      retryQueue: { addDelayed: mock(async () => 'job-1') },
+      retryJobStore: {
+        set: mock(async () => {
+          throw new Error('READONLY You can not write against a read only replica');
+        }),
+        get: mock(async () => null),
+        del: mock(async () => {}),
+      },
+    });
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'check calendar', source: 'scheduled' });
+    expect(await captured.ctx!.retryEnqueue!('check calendar')).toBe(true);
+  });
+
   test('scheduled call at attempt=0: retryEnqueue queues with 30s delay', async () => {
     const captured: { ctx?: AgentContext } = {};
     const agentCtx = { user: fakeUser } as unknown as AgentContext;

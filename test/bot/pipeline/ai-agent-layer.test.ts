@@ -302,6 +302,17 @@ describe('retry / backoff', () => {
     expect(captured.ctx?.retryEnqueue).toBeFunction();
   });
 
+  test('a stored retry counts even when its cancellation pointer cannot be saved', async () => {
+    const { deps, addDelayed, jobStoreSet, captured } = makeRetrySetup();
+    jobStoreSet.mockImplementation(async () => {
+      throw new Error('READONLY You can not write against a read only replica');
+    });
+    await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 0 });
+    // The job is in the queue and will run: telling the user "send it again" would duplicate it.
+    expect(await captured.ctx!.retryEnqueue!('retry msg')).toBe(true);
+    expect(addDelayed).toHaveBeenCalledTimes(1);
+  });
+
   test('attempt=0 → addDelayed called with 30s delay', async () => {
     const { deps, addDelayed, captured } = makeRetrySetup();
     await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 0 });

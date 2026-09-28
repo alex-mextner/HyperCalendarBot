@@ -38,6 +38,8 @@ const aiLogger = logger.child({ module: 'ai-agent' });
 
 const MAX_ROUNDS = 15;
 const TIMEOUT_MS = 90_000;
+/** How long a failed turn waits to learn whether its retry was stored before it answers anyway. */
+const RETRY_STORE_TIMEOUT_MS = 3_000;
 
 /**
  * One apology covers a user for this long. A user who keeps writing during an
@@ -569,6 +571,7 @@ export class CalendarBotAgent {
   private streamImpl: typeof aiStreamRound;
   private summarizer?: HistorySummarizer;
   private requestTimeoutMs: number;
+  private readonly retryStoreTimeoutMs: number;
   /** Aborts every in-flight and later run once the process starts shutting down. */
   private readonly shutdown = new AbortController();
   /** Runs not yet settled, including their debug-log flush — what a shutdown drain waits for. */
@@ -577,7 +580,7 @@ export class CalendarBotAgent {
   constructor(
     config: AgentConfig,
     sender: TelegramSender,
-    opts?: { streamImpl?: typeof aiStreamRound; requestTimeoutMs?: number },
+    opts?: { streamImpl?: typeof aiStreamRound; requestTimeoutMs?: number; retryStoreTimeoutMs?: number },
   ) {
     this.toolSchemaMode = config.toolSchemaMode ?? 'full';
     this.toolSchemaUserIds = config.toolSchemaUserIds ? new Set(config.toolSchemaUserIds) : undefined;
@@ -586,6 +589,7 @@ export class CalendarBotAgent {
     this.streamImpl = opts?.streamImpl ?? aiStreamRound;
     this.summarizer = config.summarizer;
     this.requestTimeoutMs = opts?.requestTimeoutMs ?? TIMEOUT_MS;
+    this.retryStoreTimeoutMs = opts?.retryStoreTimeoutMs ?? RETRY_STORE_TIMEOUT_MS;
     if (!Number.isSafeInteger(this.requestTimeoutMs) || this.requestTimeoutMs < 1 || this.requestTimeoutMs > TIMEOUT_MS)
       throw new Error(`requestTimeoutMs must be between 1 and ${TIMEOUT_MS}`);
   }
@@ -1265,11 +1269,23 @@ export class CalendarBotAgent {
         !ctx.supplementMode &&
         ctx.wasExplicitInvocation !== false
       ) {
-        // Awaited: a shutdown drain must not close the queue before the retry is stored.
-        retryScheduled = await ctx.retryEnqueue(ctx.messageText).catch((err: unknown) => {
+        // Awaited so a shutdown drain does not close the queue under the write, but bounded:
+        // a hung retry store must never hold back the user's failure notice.
+        const stored = ctx.retryEnqueue(ctx.messageText).catch((err: unknown) => {
           aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to handle retry enqueue');
           return false;
         });
+        const storeDeadline = Promise.withResolvers<'timeout'>();
+        const storeTimer = setTimeout(() => storeDeadline.resolve('timeout'), this.retryStoreTimeoutMs);
+        const outcome = await Promise.race([stored, storeDeadline.promise]);
+        clearTimeout(storeTimer);
+        if (outcome === 'timeout') {
+          aiLogger.warn(
+            { userId: ctx.user.telegram_id },
+            'Retry store did not answer in time — not promising a comeback',
+          );
+        }
+        retryScheduled = outcome === true;
       }
     }
 
