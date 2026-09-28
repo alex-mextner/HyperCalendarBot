@@ -8,6 +8,7 @@ import { EventReminderRepository } from '../../../../src/database/repositories/e
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
+import { approveDeletes } from '../../../../src/services/ai/delete-confirmation.ts';
 import {
   handleCreateEvent,
   handleDeleteEvent,
@@ -70,12 +71,18 @@ function setup() {
   return { ctx, lesson, renderedDates };
 }
 
+/** delete_event as it runs after the user tapped the bot's delete list for this event. */
+function deleteApproved(ctx: AgentContext, eventId: number) {
+  approveDeletes(ctx.user.telegram_id, ctx.chatId, [eventId]);
+  return handleDeleteEvent(ctx, { event_id: eventId });
+}
+
 test('after deleting a past and an upcoming lesson, a past-day picture shows the upcoming changed day', async () => {
   const { ctx, lesson, renderedDates } = setup();
   const pastTuesday = lesson('2026-09-01T16:00:00Z');
   const nextTuesday = lesson('2026-09-29T16:00:00Z');
-  expect((await handleDeleteEvent(ctx, { event_id: pastTuesday.id })).success).toBe(true);
-  expect((await handleDeleteEvent(ctx, { event_id: nextTuesday.id })).success).toBe(true);
+  expect((await deleteApproved(ctx, pastTuesday.id)).success).toBe(true);
+  expect((await deleteApproved(ctx, nextTuesday.id)).success).toBe(true);
 
   const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
 
@@ -112,8 +119,8 @@ test('a past-day picture after changes only on past days renders the requested d
   const { ctx, lesson, renderedDates } = setup();
   const pastTuesday = lesson('2026-09-01T16:00:00Z');
   const earlierTuesday = lesson('2026-08-25T16:00:00Z');
-  expect((await handleDeleteEvent(ctx, { event_id: pastTuesday.id })).success).toBe(true);
-  expect((await handleDeleteEvent(ctx, { event_id: earlierTuesday.id })).success).toBe(true);
+  expect((await deleteApproved(ctx, pastTuesday.id)).success).toBe(true);
+  expect((await deleteApproved(ctx, earlierTuesday.id)).success).toBe(true);
 
   const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
 
@@ -124,7 +131,7 @@ test('a past-day picture after changes only on past days renders the requested d
 test('an upcoming-day picture is never redirected by other changed days', async () => {
   const { ctx, lesson, renderedDates } = setup();
   const nextTuesday = lesson('2026-09-29T16:00:00Z');
-  expect((await handleDeleteEvent(ctx, { event_id: nextTuesday.id })).success).toBe(true);
+  expect((await deleteApproved(ctx, nextTuesday.id)).success).toBe(true);
 
   await handleRenderDayImage(ctx, { date: '2026-10-05' });
 
