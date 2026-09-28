@@ -365,11 +365,9 @@ function buildDatetime(
 }
 
 /**
- * 'week' ("на неделю", "на этой неделе", "this week") is the next seven local days
- * starting today: a week plan is asked for to see what is coming, and Monday–Sunday
- * of the current week turns into a list of past days late in the week (on a Sunday
- * evening, 2026-09-27, it showed nothing from the next morning on). On a Monday the
- * two coincide. 'next_week' stays the next calendar week, Monday to Sunday.
+ * 'week' ("на неделю", "на этой неделе", "this week") is today and the six following
+ * local days, so a week plan never starts in the past; on a Monday it equals the
+ * calendar week. 'next_week' is the next calendar week, Monday to Sunday.
  */
 function periodRange(
   key: (typeof PERIOD_KEYS)[number],
