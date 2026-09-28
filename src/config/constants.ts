@@ -686,6 +686,7 @@ export const MSG = {
         invitationsFor: (title: string, id: number, lines: string) =>
           `Invitations for "${title}" (id: ${id}):\n${lines}`,
         rsvpAttending: (count: number) => `attending (going): ${count}`,
+        rsvpOrganizer: (userId: number) => `organizer: ${userId}`,
         rsvpInviteeLine: (userId: number, status: string, note: string) =>
           `invitee: ${userId}, status: ${status}${note}`,
         rsvpMemberLine: (userId: number, status: string) => `  member: ${userId}, status: ${status}`,
@@ -1643,6 +1644,7 @@ export const MSG = {
         invitationsFor: (title: string, id: number, lines: string) =>
           `Приглашения для «${title}» (id: ${id}):\n${lines}`,
         rsvpAttending: (count: number) => `идут (подтвердили): ${count}`,
+        rsvpOrganizer: (userId: number) => `организатор: ${userId}`,
         rsvpInviteeLine: (userId: number, status: string, note: string) =>
           `приглашённый: ${userId}, статус: ${status}${note}`,
         rsvpMemberLine: (userId: number, status: string) => `  участник: ${userId}, статус: ${status}`,

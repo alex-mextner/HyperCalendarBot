@@ -10,7 +10,9 @@ import {
   guardPrivate,
   QUOTED_OR_ID_RX,
   resolveEvent,
+  resolveEventByName,
   SCOPE,
+  type SeedStep,
   TIME_RX,
   USERNAME_RX,
 } from './seed-fragments.ts';
@@ -427,6 +429,13 @@ const inviteSend: FamilyDefinition = {
     'Recipient must be an exact @username or numeric Telegram ID from the message; the invitation tool verifies it and force is never set.',
 };
 
+/** A get_invitation_status step for `eventId`, run only when `when` holds. */
+const invitationStatusStep = (eventId: string, when: string): SeedStep => ({
+  when,
+  call: 'get_invitation_status',
+  input: { event_id: eventId },
+});
+
 const inviteStatus: FamilyDefinition = {
   name: 'basis.invite.status',
   title: 'Who is invited to an event',
@@ -435,7 +444,14 @@ const inviteStatus: FamilyDefinition = {
   pattern: String.raw`^(?:кто\s+приглашен|кто\s+приглашён|статус\s+приглашений|invitation\s+status|who\s+is\s+invited)\s+(?:на|to|for)\s+(?:(?:событие|встречу|event|meeting)\s+)?([^;\n]{1,120})$`,
   triggers: ['приглашен', 'приглашён', 'статус', 'invitation', 'who'],
   bindings: { ref: eventRef('{{$1}}') },
-  steps: [guardPrivate(), ...resolveEvent(), { call: 'get_invitation_status', input: { event_id: TARGET_ID } }],
+  // A number goes straight to get_invitation_status, which admits invitees as well as the owner;
+  // get_event would turn an invitee away first. A title is searched in the actor's own calendar.
+  steps: [
+    guardPrivate(),
+    invitationStatusStep('{{bind.ref.id}}', "bind.ref.kind == 'id'"),
+    ...resolveEventByName(),
+    invitationStatusStep(TARGET_ID, "bind.ref.kind == 'name'"),
+  ],
   strings: { ru: {}, en: {} },
   examples: [
     'кто приглашен на событие #12',
