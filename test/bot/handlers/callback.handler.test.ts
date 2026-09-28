@@ -109,6 +109,29 @@ describe('createCallbackHandler', () => {
     expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
   });
 
+  test('ai_btn records the answer alone when question plus answer is too long, and still continues', async () => {
+    const onAiButtonClick = mock(() => Promise.resolve());
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
+    const editText = mock((text: string, _opts?: object) =>
+      text.length > 4096 ? Promise.reject(new Error('Bad Request: MESSAGE_TOO_LONG')) : Promise.resolve(),
+    );
+    const ctx = { ...makeCtx('ai_btn:Да'), editText };
+    Object.assign(ctx.message, { text: 'x'.repeat(4096) });
+    await handler(ctx as never);
+    expect(editText).toHaveBeenLastCalledWith('✅ Да');
+    expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
+  });
+
+  test('ai_btn duplicate tap on an already answered question does not continue the AI twice', async () => {
+    const onAiButtonClick = mock(() => Promise.resolve());
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
+    const ctx = makeCtx('ai_btn:Да');
+    Object.assign(ctx.message, { text: 'Удалить?' });
+    ctx.editText.mockImplementation(() => Promise.reject(new Error('Bad Request: message is not modified')));
+    await handler(ctx as never);
+    expect(onAiButtonClick).not.toHaveBeenCalled();
+  });
+
   test('ai_btn preserves a private time answer containing a colon', async () => {
     const onAiButtonClick = mock(() => Promise.resolve());
     const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
