@@ -1,6 +1,7 @@
 import { TZDate } from '@date-fns/tz';
 import { addDays } from 'date-fns';
 import type { EventOccurrence } from '../../database/types.ts';
+import { compactText } from '../../worker/templates/compact-metadata.ts';
 import { formatDuration, formatTime } from '../../worker/templates/helpers.ts';
 import { getLabels } from '../../worker/templates/labels.ts';
 import type {
@@ -73,6 +74,7 @@ function mapToAgendaEvent(
     endMinutes: occ.occurrence_end ? toMinutes(occ.occurrence_end, tz) : toMinutes(occ.occurrence_start, tz) + 60,
     location: formatLocationPlain(ev) || undefined,
     displayMetadata: ev.displayMetadata,
+    descriptionPreview: compactText(ev.description, 60) || undefined,
     calendarColor: isBirthday ? BIRTHDAY_COLOR : colors[colorIdx % colors.length]!,
     isAllDay: ev.all_day === 1,
   };
@@ -158,6 +160,7 @@ export function mapWeeklyOverviewData(params: {
           title: eventTitle(o, locale),
           location: formatLocationPlain(o.event) || undefined,
           displayMetadata: o.event.displayMetadata,
+          descriptionPreview: compactText(o.event.description, 60) || undefined,
           startMinutes: o.event.all_day === 1 ? 0 : toMinutes(o.occurrence_start, timezone),
           endMinutes:
             o.event.all_day === 1
@@ -309,6 +312,7 @@ function makeDay(
         title: eventTitle(o, params.locale),
         location: formatLocationPlain(o.event) || undefined,
         displayMetadata: o.event.displayMetadata,
+        descriptionPreview: compactText(o.event.description, 60) || undefined,
         startMinutes: o.event.all_day === 1 ? 0 : toMinutes(o.occurrence_start, params.timezone),
         endMinutes:
           o.event.all_day === 1
