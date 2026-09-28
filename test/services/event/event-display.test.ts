@@ -86,9 +86,9 @@ describe('eventForOccurrence', () => {
     expect(occ.event.start_at).toBe('2026-03-11T09:00:00Z');
   });
 
-  test('falls back to the template end when the occurrence has none (open-ended)', () => {
+  test('preserves an intentional null occurrence end instead of falling back to the template end', () => {
     const occ = makeOccurrence({ end_at: '2026-03-11T10:00:00Z' }, '2026-03-18T09:00:00Z', null);
-    expect(eventForOccurrence(occ).end_at).toBe('2026-03-11T10:00:00Z');
+    expect(eventForOccurrence(occ).end_at).toBeNull();
   });
 });
 
@@ -153,6 +153,17 @@ describe('buildEventPicker', () => {
     const occs = [makeOccurrence({ id: 7 }, '2026-03-18T09:00:00Z')];
     const kb = buildEventPicker(occs, 'UTC', 'ev', 'en');
     expect(JSON.stringify(kb)).toContain('"ev:7:2026-03-18T09:00:00Z"');
+  });
+
+  test('two occurrences of the same series get distinct payloads, not deduplicated to one button', () => {
+    const occs = [
+      makeOccurrence({ id: 7, title: 'Standup' }, '2026-03-18T09:00:00Z'),
+      makeOccurrence({ id: 7, title: 'Standup' }, '2026-03-25T09:00:00Z'),
+    ];
+    const kb = buildEventPicker(occs, 'UTC', 'ev', 'en');
+    const text = JSON.stringify(kb);
+    expect(text).toContain('"ev:7:2026-03-18T09:00:00Z"');
+    expect(text).toContain('"ev:7:2026-03-25T09:00:00Z"');
   });
 });
 

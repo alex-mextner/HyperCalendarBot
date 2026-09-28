@@ -76,6 +76,26 @@ describe('handleEvent', () => {
       expect(svc.getEventForGroup).toHaveBeenCalledWith(7, -500);
       expect(svc.getEvent).not.toHaveBeenCalled();
     });
+
+    test('a long description is split into bounded chunks without losing the action keyboard', async () => {
+      const event = makeEvent({ id: 42, title: 'Long event', description: 'x'.repeat(5000) });
+      const svc = makeSvc({ getEvent: mock(() => event) });
+      const ctx = makeCtx({ args: '42' });
+      await handleEvent(ctx, svc);
+      const calls = (ctx.send as ReturnType<typeof mock>).mock.calls as unknown[][];
+      expect(calls.length).toBeGreaterThan(1);
+      for (const call of calls) {
+        const text = call[0] as string;
+        expect(text.length).toBeLessThanOrEqual(4000);
+      }
+      const last = calls[calls.length - 1]!;
+      const lastOpts = last[1] as { reply_markup: unknown };
+      expect(lastOpts.reply_markup).toBeDefined();
+      for (const call of calls.slice(0, -1)) {
+        const opts = call[1] as { reply_markup?: unknown } | undefined;
+        expect(opts?.reply_markup).toBeUndefined();
+      }
+    });
   });
 
   describe('by title query', () => {

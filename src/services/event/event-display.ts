@@ -33,7 +33,7 @@ export interface CanonicalEventCard {
  * template's. Pure — returns a new object, never touches the database.
  */
 export function eventForOccurrence(occ: EventOccurrence): CalendarEvent {
-  return { ...occ.event, start_at: occ.occurrence_start, end_at: occ.occurrence_end ?? occ.event.end_at };
+  return { ...occ.event, start_at: occ.occurrence_start, end_at: occ.occurrence_end };
 }
 
 /**

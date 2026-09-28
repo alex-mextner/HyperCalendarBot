@@ -34,7 +34,7 @@ import type { SecretaryRepository } from '../../database/repositories/secretary.
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { CreateEventData, Invitation, UpdateEventData, User } from '../../database/types.ts';
-import { buildCanonicalEventCard, eventAtOccurrenceStart } from '../../services/event/event-display.ts';
+import { buildCanonicalEventCard } from '../../services/event/event-display.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import {
   formatDayAgenda,
@@ -369,6 +369,9 @@ export function createCallbackHandler(
   // Event view — payload: "42" (master) or "42:2026-03-15T10:00:00Z" (a specific occurrence,
   // e.g. tapped from a show_event picker). Group chats resolve via getEventForGroup first: a
   // personal-only lookup here previously 404'd on tap for every group search result (#653).
+  // The occurrenceDate is never trusted as-is: resolveOccurrenceView validates it against the
+  // event's real, current occurrence set (RRULE slot or stored exception), rejecting a
+  // fabricated/stale timestamp instead of rendering an invented instance (#653).
   dispatch.set(CB.EVENT_VIEW, async (ctx, payload, _parts, user) => {
     if (payload === 'cancel') {
       await ctx.answer();
@@ -384,9 +387,10 @@ export function createCallbackHandler(
         ? eventService.getEventForGroup(eventId, groupId)
         : eventService.getEvent(eventId, user.telegram_id);
     if (!event) return ctx.answer({ text: t(lang).callbackErrors.notFound });
-    const projected = occurrenceDate ? eventAtOccurrenceStart(event, occurrenceDate) : event;
+    const resolved = eventService.resolveOccurrenceView(event, occurrenceDate);
+    if (!resolved) return ctx.answer({ text: t(lang).callbackErrors.notFound });
     const displayEvent = enrichAgendaEvents(
-      [projected],
+      [resolved],
       {
         userId: user.telegram_id,
         language: user.language as 'en' | 'ru',
@@ -394,7 +398,8 @@ export function createCallbackHandler(
       },
       eventService.agendaRepository,
     )[0]!;
-    const card = buildCanonicalEventCard(displayEvent, user.timezone, user.language as 'en' | 'ru', occurrenceDate);
+    const timezone = groupId !== null ? (groupRepo?.getTimezone(groupId) ?? user.timezone) : user.timezone;
+    const card = buildCanonicalEventCard(displayEvent, timezone, user.language as 'en' | 'ru', occurrenceDate);
     await ctx.answer();
     return editAgendaText(ctx, card.text, { parse_mode: 'HTML', reply_markup: card.keyboard });
   });
