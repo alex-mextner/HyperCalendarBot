@@ -196,6 +196,18 @@ describe.skipIf(!COMPOSE)('docker-compose.yml keeps the Redis password out of ar
   });
 
   test.each([
+    ['a slash', 'Synth/pw-4f2c9'],
+    ['a question mark', 'Synth?pw-4f2c9'],
+    ['a hash', 'Synth#pw-4f2c9'],
+    ['a percent sign', 'Synth%41pw-4f2c9'],
+  ])('a password containing %s stops redis instead of giving the bot a REDIS_URL it cannot use', (_, password) => {
+    const started = startRedis(render(password).redis!);
+    expect(started.exitCode).not.toBe(0);
+    expect(started.stderr).toContain('REDIS_PASSWORD');
+    expect(started.argv).toEqual([]);
+  });
+
+  test.each([
     ['empty', ''],
     ['unset', null],
   ])('an %s password stops redis with an error instead of starting it without auth', (_, password) => {

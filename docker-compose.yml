@@ -14,7 +14,9 @@ services:
     # The value goes into a double-quoted redis.conf string, where `"` and `\`
     # would be read as syntax, so such a password stops the container loudly
     # instead of starting redis with a different password. The old string
-    # command could not carry those characters either. An empty value would mean
+    # command could not carry those characters either. The bot's REDIS_URL embeds
+    # the password without percent-encoding, where `/`, `?`, `#` and `%` break or
+    # rewrite it, so those stop the container too. An empty value would mean
     # `requirepass ""` (no auth at all), so an unset password stops it too.
     environment:
       REDISCLI_AUTH: ${REDIS_PASSWORD}
@@ -25,6 +27,7 @@ services:
         case "$$REDISCLI_AUTH" in
           '') echo 'REDIS_PASSWORD must be set' >&2; exit 1 ;;
           *[\"\\]*) echo 'REDIS_PASSWORD must not contain a double quote or backslash' >&2; exit 1 ;;
+          *[/?#%]*) echo 'REDIS_PASSWORD must not contain / ? # or % (REDIS_URL embeds it unencoded)' >&2; exit 1 ;;
         esac
         exec docker-entrypoint.sh redis-server --appendonly yes --appendfsync everysec --maxmemory 200mb --maxmemory-policy noeviction - <<EOF
         requirepass "$$REDISCLI_AUTH"
