@@ -84,6 +84,18 @@ const DAY_PHRASES = [
 export const DAY_WORDS = phraseTable(DAY_PHRASES);
 export const DAY_WORD_RX = alt(DAY_PHRASES.flatMap(([phrases]) => phrases));
 
+/** Adjectival day forms ("сегодняшнюю встречу", "today's meeting") — a separate table from
+ *  DAY_WORDS because these agree in gender/case with the noun that follows, unlike the bare
+ *  adverbs "сегодня"/"today". Maps to the same day tokens the `date` binding understands. */
+const DAY_ADJ_PHRASES = [
+  [['сегодняшнюю', 'сегодняшнее', 'сегодняшний', "today's", 'todays'], 'today'],
+  [['завтрашнюю', 'завтрашнее', 'завтрашний', "tomorrow's", 'tomorrows'], 'tomorrow'],
+  [['послезавтрашнюю', 'послезавтрашнее', 'послезавтрашний'], 'day_after_tomorrow'],
+  [['вчерашнюю', 'вчерашнее', 'вчерашний', "yesterday's", 'yesterdays'], 'yesterday'],
+] as const;
+export const DAY_ADJ_WORDS = phraseTable(DAY_ADJ_PHRASES);
+export const DAY_ADJ_WORD_RX = alt(DAY_ADJ_PHRASES.flatMap(([phrases]) => phrases));
+
 const MONTH_RX = '(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)';
 const MONTH_EN_RX =
   '(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)';

@@ -11,6 +11,7 @@ const COMMAND_FEATURE_MAP: { [cmd: string]: FeatureKey } = {
   edit: 'events_edit',
   delete: 'events_edit',
   search: 'events_create',
+  event: 'events_create',
   free: 'free_slots',
   settings: 'settings',
   import: 'import',

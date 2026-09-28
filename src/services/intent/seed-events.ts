@@ -2,6 +2,8 @@ import {
   ANY_DAY_RX,
   BULK_WORDS,
   confirmStep,
+  DAY_ADJ_WORD_RX,
+  DAY_ADJ_WORDS,
   DAY_WORDS,
   DURATION_UNIT_RX,
   DURATION_UNITS,
@@ -101,6 +103,25 @@ const eventShow: FamilyDefinition = {
   strings: { ru: {}, en: {} },
   examples: ['покажи событие #12', 'открой встречу «Стендап»', 'show event #7', 'open meeting "Retro"'],
   negatives: ['покажи событие про стендап', 'покажи событие', 'покажи события #12'],
+};
+
+const eventShowRelativeDay: FamilyDefinition = {
+  name: 'basis.event.show_relative_day',
+  title: "Show the one event on today's/tomorrow's/yesterday's date",
+  category: 'events',
+  risk: 'read',
+  pattern: String.raw`^(?:покажи|открой|show|open)\s+(?:мне\s+|me\s+)?(${DAY_ADJ_WORD_RX})\s+${EVENT_NOUN_RX}$`,
+  triggers: ['покажи', 'открой', 'show', 'open'],
+  bindings: { day: { type: 'date', from: '{{$1}}', words: DAY_ADJ_WORDS } },
+  steps: [{ call: 'show_event', input: { start_date: '{{bind.day}}', end_date: '{{bind.day}}', scope: SCOPE } }],
+  strings: { ru: {}, en: {} },
+  examples: [
+    'покажи сегодняшнюю встречу',
+    'покажи завтрашнюю встречу',
+    "show today's meeting",
+    "open tomorrow's event",
+  ],
+  negatives: ['покажи сегодня', 'покажи встречу', 'не показывай сегодняшнюю встречу', 'покажи сегодняшние события'],
 };
 
 const eventReschedule: FamilyDefinition = {
@@ -465,6 +486,7 @@ const inviteStatus: FamilyDefinition = {
 export const eventFamilies: FamilyDefinition[] = [
   eventCreate,
   eventShow,
+  eventShowRelativeDay,
   eventReschedule,
   eventRename,
   eventSetDetail,

@@ -1,13 +1,20 @@
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { Lang } from '../../../config/constants.ts';
-import { t, toLang } from '../../../config/constants.ts';
+import { CB, t, toLang } from '../../../config/constants.ts';
 import { CLEARED_LOCATION, RESOLVED_PLACE_COLUMNS } from '../../../database/repositories/event.repository.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
 import { allDayDates, formatLocalEventSpan, getDayRangeUtc, localCalendarDate } from '../../../utils/date.ts';
 import { eventTimestampError } from '../../../utils/event-timestamps.ts';
 import { logger } from '../../../utils/logger.ts';
-import { escapeHtml } from '../../../utils/telegram.ts';
+import { escapeHtml, splitMessage } from '../../../utils/telegram.ts';
+import { enrichAgenda, enrichAgendaEvents } from '../../event/agenda-enrichment.ts';
+import {
+  buildCanonicalEventCard,
+  buildEventPicker,
+  type CanonicalEventCard,
+  decideEventDisplay,
+} from '../../event/event-display.ts';
 import { formatEventDetail } from '../../event/formatters.ts';
 import type { EventSummary } from '../../intent/variable-resolver.ts';
 import { formatLocationPlain } from '../../location/format-location.ts';
@@ -313,6 +320,14 @@ interface SnoozeEventInput {
 
 interface GetEventInput {
   event_id: number;
+  scope?: Scope;
+  owner_id?: number;
+}
+
+interface ShowEventInput {
+  event_id?: number;
+  start_date?: string;
+  end_date?: string;
   scope?: Scope;
   owner_id?: number;
 }
@@ -1164,6 +1179,180 @@ export async function handleGetEvent(ctx: AgentContext, input: GetEventInput): P
   return { success: true, output: parts.join(', ') + weather, data: eventToSummary(event, ctx.user.timezone) };
 }
 handleGetEvent.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
+
+const EVENT_CARD_CHUNK_LEN = 4000;
+
+/**
+ * Send a canonical event card, splitting a long description across messages the same way
+ * `sendAgendaText`/`editAgendaText` do for the agenda transport — the keyboard lands on the
+ * final chunk only, never repeated.
+ */
+async function sendCanonicalCard(
+  sender: NonNullable<AgentContext['sender']>,
+  chatId: number,
+  card: CanonicalEventCard,
+): Promise<void> {
+  const chunks = splitMessage(card.text, EVENT_CARD_CHUNK_LEN, 'HTML');
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]!;
+    if (i === chunks.length - 1) await sender.sendMessageWithKeyboard!(chatId, chunk, card.keyboard, 'HTML');
+    else await sender.sendMessage(chatId, chunk, 'HTML');
+  }
+}
+
+/**
+ * Explicit read-and-display operation for GH-653 (design doc §26): unlike `get_event`/`get_events`
+ * (read-only planning data the model turns into its own prose), this tool IS the presentation —
+ * it sends the same canonical card `/edit`, `CB.EVENT_VIEW` and a picker tap already use, directly
+ * to the chat, and returns no `output` text so neither the intent engine nor the model repeats it.
+ * Called identically from three places: the AI tool-call path, the deterministic intent-matcher
+ * family (`basis.event.show_relative_day` in seed-events.ts — 0 LLM calls, same `executeTool` dispatch),
+ * and indirectly by `/event` (which uses the same `event-display.ts` helpers without this tool
+ * layer at all, since a slash command needs no AI/intent context).
+ *
+ * A read failure is reported to the user as a distinct, delivered error card (`success: true`,
+ * not `success: false`) — never as "no events". This is deliberate: `success: false` here would
+ * make the intent-matcher layer fall through to the AI agent for a retry (see
+ * `intent-matcher-layer.ts` step 6), spending an LLM call the design corpus (`read-card-003`)
+ * explicitly requires stay at zero. The failure is fully handled either way — the user already
+ * saw the honest error — so `success: true` correctly reports "the display operation completed".
+ */
+export async function handleShowEvent(ctx: AgentContext, input: ShowEventInput): Promise<ToolResult> {
+  if (!ctx.sender?.sendMessageWithKeyboard) {
+    return { success: false, error: 'Buttons not supported.' };
+  }
+  const sender = ctx.sender;
+  const lang = toLang(ctx.user.language);
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'read',
+  );
+  if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
+  const userId = access.effectiveUserId;
+  const scope = resolveScope(input, ctx);
+  if (scope === 'group' && ctx.groupChatId === undefined) {
+    return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
+  }
+  if (input.event_id === undefined && (input.start_date === undefined || input.end_date === undefined)) {
+    return {
+      success: false,
+      mutationState: 'not_applied',
+      error: 'Provide event_id to show one specific event, or both start_date and end_date to show a period.',
+    };
+  }
+  const viewer = {
+    userId,
+    language: ctx.user.language as 'en' | 'ru',
+    groupId: scope === 'group' ? ctx.groupChatId : undefined,
+  };
+
+  type PendingSend =
+    | { kind: 'card'; card: CanonicalEventCard }
+    | { kind: 'empty'; text: string }
+    | { kind: 'picker'; occurrences: EventOccurrence[] };
+
+  // Read phase only — no Telegram I/O below. A DB failure here is reported as a distinct read
+  // error (see the docstring above); a failure sending the already-decided result is a different
+  // problem and must not be relabeled as "could not read your calendar".
+  let pending: PendingSend;
+  try {
+    if (input.event_id !== undefined) {
+      const event =
+        scope === 'group'
+          ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)
+          : ctx.eventService.getEvent(input.event_id, userId);
+      if (!event) {
+        return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
+      }
+      const displayEvent = enrichAgendaEvents([event], viewer, ctx.eventService.agendaRepository)[0]!;
+      pending = { kind: 'card', card: buildCanonicalEventCard(displayEvent, ctx.user.timezone, lang, undefined) };
+    } else {
+      if (input.start_date === undefined || input.end_date === undefined) {
+        return {
+          success: false,
+          mutationState: 'not_applied',
+          error: 'Provide event_id to show one specific event, or both start_date and end_date to show a period.',
+        };
+      }
+      const interval = resolveRangeInterval(
+        { start_date: input.start_date, end_date: input.end_date, scope: input.scope, owner_id: input.owner_id },
+        ctx.user.timezone,
+      );
+      if (!interval) {
+        return {
+          success: false,
+          mutationState: 'not_applied',
+          error:
+            'INVALID_RANGE: start_date and end_date must be real ISO 8601 dates or timestamps, with start before end.',
+        };
+      }
+      const startDate = interval.start.toISOString();
+      const endDate = interval.end.toISOString();
+      const occurrences =
+        scope === 'group'
+          ? ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, startDate, endDate)
+          : ctx.eventService.getEventsInRange(userId, startDate, endDate);
+      const enriched = enrichAgenda(occurrences, viewer, ctx.eventService.agendaRepository);
+      const decision = decideEventDisplay(enriched);
+
+      if (decision.kind === 'empty') {
+        const calendar: AgendaScope =
+          scope === 'group' ? 'group' : userId === ctx.user.telegram_id ? 'personal' : 'delegated';
+        pending = {
+          kind: 'empty',
+          text: formatEmptyAgenda({ interval, timezone: ctx.user.timezone, language: lang, scope: calendar }),
+        };
+      } else if (decision.kind === 'multiple') {
+        pending = { kind: 'picker', occurrences: decision.occurrences };
+      } else {
+        pending = {
+          kind: 'card',
+          card: buildCanonicalEventCard(decision.event, ctx.user.timezone, lang, decision.occurrenceDate),
+        };
+      }
+    }
+  } catch (err) {
+    eventsLogger.error({ err }, 'show_event read failed');
+    try {
+      await sender.sendMessage(ctx.chatId, t(lang).aiTools.meta.showEventReadFailed);
+    } catch (sendErr) {
+      eventsLogger.error({ err: sendErr }, 'show_event failed to report the read failure');
+    }
+    return {
+      success: true,
+      agentHint:
+        'A calendar read error has already been reported to the user as an explicit error — it is not an empty calendar. Do not repeat it or claim the calendar is empty.',
+    };
+  }
+
+  // Delivery phase: a throw here is a genuine send failure, not a read failure, and is
+  // deliberately NOT caught above — it surfaces as success:false via the outer tool-executor catch.
+  if (pending.kind === 'empty') {
+    await sender.sendMessage(ctx.chatId, pending.text);
+    return {
+      success: true,
+      agentHint: 'The "nothing found" message has already been sent to the chat. Do not repeat it.',
+    };
+  }
+  if (pending.kind === 'picker') {
+    const keyboard = buildEventPicker(pending.occurrences, ctx.user.timezone, CB.EVENT_VIEW, lang);
+    await sender.sendMessageWithKeyboard!(ctx.chatId, t(lang).aiTools.meta.showEventPickPrompt, keyboard);
+    return {
+      success: true,
+      agentHint:
+        'A picker listing every matching event has already been sent to the chat; the user will tap one. Do not list or describe the events yourself.',
+    };
+  }
+  await sendCanonicalCard(sender, ctx.chatId, pending.card);
+  return {
+    success: true,
+    agentHint:
+      'The event card has already been sent to the chat with full details and buttons. Do not restate the event details in your reply; reply [SKIP] if you have nothing else to add.',
+  };
+}
+handleShowEvent.meta = { skipActionLog: true, delivers: true } satisfies ToolHandlerMeta;
 
 interface NotifyParticipantsInput {
   event_id: number;

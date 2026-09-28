@@ -54,7 +54,7 @@ const GROUPS: Readonly<Record<string, readonly string[]>> = {
     'list_triggers',
     'remove_trigger',
   ],
-  presentation: ['render_day_image', 'render_week_image', 'render_month_image', 'render_table'],
+  presentation: ['render_day_image', 'render_week_image', 'render_month_image', 'render_table', 'show_event'],
   calculator: ['calculate'],
   interaction: [
     'ask_user',
