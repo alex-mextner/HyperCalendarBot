@@ -40,6 +40,8 @@ const guardLogger = logger.child({ module: 'connect-wizard-guard' });
 
 /** The consent screen (0) and the phone, code and 2FA prompts (1–3) read typed text; 1–3 ask for a credential. */
 const FIRST_CREDENTIAL_STEP = 1;
+/** The phone prompt: the only step that shows the "share phone number" reply keyboard. */
+const PHONE_STEP = 1;
 const LAST_TYPING_STEP = 3;
 const STEP_NAMES = ['consent', 'phone', 'code', 'password', 'pending_invitations'];
 /**
@@ -115,8 +117,11 @@ interface HeldMessage extends InputRef {
 }
 
 type Verdict =
-  /** Not wizard input. `wizardOpen`: the wizard was open before this update, as far as the guard can tell. */
-  | { kind: 'none'; wizardOpen: boolean }
+  /**
+   * Not wizard input. `openRun`: the run of the wizard open before this update ('' for a run started
+   * before runs were named), undefined when none was open, null when the guard cannot tell.
+   */
+  | { kind: 'none'; openRun: string | null | undefined }
   | { kind: 'typed'; step: number; removeFromChat: boolean }
   | { kind: 'redact'; step?: number }
   /** Sent while the wizard was open, handled after it closed. */
@@ -205,10 +210,13 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
           removeFromChat: row.step <= LAST_TYPING_STEP && message.text.trim() !== '',
         };
       }
-      return edited?.text !== undefined ? { kind: 'redact', step: row.step } : { kind: 'none', wizardOpen: true };
+      return edited?.text !== undefined
+        ? { kind: 'redact', step: row.step }
+        : { kind: 'none', openRun: row.wizardId ?? '' };
     }
 
-    const notInput: Verdict = { kind: 'none', wizardOpen: row === 'unreadable' || trace?.open === true };
+    const openRunBefore = trace?.open ? (trace.wizardId ?? '') : undefined;
+    const notInput: Verdict = { kind: 'none', openRun: row === 'unreadable' ? null : openRunBefore };
     if (trace === undefined) return notInput;
     // Another scene row would have closed the trace, so an open trace with an unreadable row may be the wizard.
     const mayBeInWizard = row === 'unreadable' && trace.open;
@@ -335,7 +343,7 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
    * not take it: ends that run (its scene row, its trace, and then its login). A newer run, or a state
    * that still cannot be read, makes the release unsafe — the message is not processed.
    */
-  function endHeldWizard(held: HeldMessage): { ended: boolean; state?: unknown } | 'unsafe' {
+  function endHeldWizard(held: HeldMessage, closingUpdateId: number): { ended: boolean; state?: unknown } | 'unsafe' {
     const key = `@gramio/scenes:${held.userId}`;
     const rowKey = connectWizardRowKey(held.userId, held.chatId);
     try {
@@ -354,7 +362,7 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
         }
         const trace = traces.read(rowKey);
         if (held.reason === 'state_unreadable' && trace?.open && trace.wizardId === held.wizardId) {
-          traces.write(rowKey, { ...trace, open: false });
+          closeTrace(rowKey, trace, closingUpdateId);
           return { ended: true, state: { sessionPath: trace.sessionPath } };
         }
         return { ended: false };
@@ -368,9 +376,37 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
     }
   }
 
-  /** Hands an update that is not wizard input on; records the opening of the wizard if it opened it. */
-  async function passOn(next: Next, ref: Omit<InputRef, 'messageId'> & { messageId?: number }, wizardOpen: boolean) {
-    if (wizardOpen || ref.messageId === undefined) return next();
+  /**
+   * Closes a run's trace as of the update that closed it, so that text sent before that update but
+   * handled after it still counts as late.
+   */
+  function closeTrace(rowKey: string, trace: ConnectWizardTrace, closingUpdateId: number): void {
+    traces.write(rowKey, {
+      ...trace,
+      open: false,
+      lastOpenUpdateId: Math.max(trace.lastOpenUpdateId ?? 0, closingUpdateId),
+      lastOpenAt: Date.now(),
+    });
+  }
+
+  /** The run open in a chat's trace now; null when the trace cannot be read. */
+  function openRunNow(userId: number, chatId: number): string | null | undefined {
+    try {
+      const trace = traces.read(connectWizardRowKey(userId, chatId));
+      return trace?.open ? (trace.wizardId ?? '') : undefined;
+    } catch (err) {
+      guardLogger.warn({ ...describeFailure(err), userId, chatId }, 'connect-wizard trace unreadable');
+      return null;
+    }
+  }
+
+  /** Hands an update that is not wizard input on; records the opening of a run if it opened one. */
+  async function passOn(
+    next: Next,
+    ref: Omit<InputRef, 'messageId'> & { messageId?: number },
+    openRun: string | null | undefined,
+  ) {
+    if (openRun === null || ref.messageId === undefined) return next();
     const result = await next();
     let trace: ConnectWizardTrace | undefined;
     try {
@@ -382,7 +418,9 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
       );
       return result;
     }
-    if (trace?.open) audit({ ...ref, messageId: ref.messageId, step: trace.step }, 'opened', { outcome: 'opened' });
+    if (trace?.open && (trace.wizardId ?? '') !== openRun) {
+      audit({ ...ref, messageId: ref.messageId, step: trace.step }, 'opened', { outcome: 'opened' });
+    }
     return result;
   }
 
@@ -396,7 +434,9 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
     if (update === undefined || chatId === undefined || userId === undefined) return next();
     const updateMessageId = message?.message_id ?? callback?.message?.message_id;
     // Released by its owner: an ordinary request from here on.
-    if (released.delete(update)) return passOn(next, { userId, chatId, messageId: updateMessageId }, false);
+    if (released.delete(update)) {
+      return passOn(next, { userId, chatId, messageId: updateMessageId }, openRunNow(userId, chatId));
+    }
 
     let verdict: Verdict;
     try {
@@ -406,10 +446,10 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
       guardLogger.warn({ ...describeFailure(err), userId, chatId }, 'connect-wizard trace unreadable');
       const isPrivate = (message ?? edited)?.chat.type === 'private';
       if (message?.text !== undefined && isPrivate) verdict = { kind: 'hold', reason: 'state_unreadable' };
-      else verdict = edited?.text !== undefined ? { kind: 'redact' } : { kind: 'none', wizardOpen: true };
+      else verdict = edited?.text !== undefined ? { kind: 'redact' } : { kind: 'none', openRun: null };
     }
     if (verdict.kind === 'none') {
-      return passOn(next, { userId, chatId, messageId: updateMessageId }, verdict.wizardOpen);
+      return passOn(next, { userId, chatId, messageId: updateMessageId }, verdict.openRun);
     }
     const messageId = (message ?? edited)?.message_id;
     if (messageId === undefined) return next();
@@ -452,6 +492,14 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
   async function sendHeldNotice(context: GuardContext, ref: InputRef, nonce: string, reason: HoldReason) {
     const ct = t(toLang(context.dbUser?.language)).connectTelegram;
     const notice = reason === 'expired' ? ct.wizardExpired : ct.wizardStateUnknown;
+    // A message carries one keyboard: the phone prompt's reply keyboard (whose button would send the phone
+    // number) is removed by a throwaway message, as the scene installs it.
+    if (ref.step === undefined || ref.step === PHONE_STEP) {
+      await bestEffort(ref, 'phone-share keyboard not removed', async () => {
+        const cleared: unknown = await context.send?.('…', { reply_markup: { remove_keyboard: true } });
+        if (isDeletable(cleared)) await cleared.delete();
+      });
+    }
     const keyboard = new InlineKeyboard()
       .text(ct.btnProcessHeld, `${CB_HELD}:p:${nonce}`)
       .text(ct.btnDiscardHeld, `${CB_HELD}:d:${nonce}`);
@@ -479,6 +527,7 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
     nonce: string,
     userId: number,
     chatId: number,
+    updateId: number,
   ) {
     const ct = t(toLang(context.dbUser?.language)).connectTelegram;
     const held = takeHeld(nonce, userId, chatId);
@@ -499,7 +548,7 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
       return;
     }
     // Still synchronous with taking it out: nothing can interleave before the wizard question is settled.
-    const wizard = endHeldWizard(held);
+    const wizard = endHeldWizard(held, updateId);
     if (wizard === 'unsafe') {
       audit(held, 'release_refused', { outcome: 'not_processed' });
       await context.answer?.();
@@ -529,7 +578,9 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
       );
       return;
     }
-    audit(held, 'replayed', { outcome: 'handled' });
+    // handleUpdate reports handler errors to the bot's error hook, not here: the release was handed to
+    // the bot, which is all this row claims.
+    audit(held, 'replayed', { outcome: 'dispatched' });
   }
 
   /** A notice or cleanup around a release: its failure is logged safely and never stops the release. */
@@ -547,6 +598,7 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
   async function answerCancelButton(
     context: GuardContext,
     button: CancelButton,
+    updateId: number,
     userId: number,
     chatId: number,
     next: Next,
@@ -567,7 +619,7 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
     const trace = row === undefined ? traces.read(rowKey) : undefined;
     if (trace?.open && trace.wizardId === button.wizardId) {
       // The run's scene row expired together with its state: close the run, stop its login process.
-      traces.write(rowKey, { ...trace, open: false });
+      closeTrace(rowKey, trace, updateId);
       await abortConnectAuth(userId, { sessionPath: trace.sessionPath });
       await context.answer?.();
       const reply = button.kind === 'auth' ? ct.authCancelled : ct.cancelled;
@@ -589,13 +641,16 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
     async callbacks(context, next) {
       const callback = context.update?.callback_query;
       const chatId = callback?.message?.chat.id;
-      if (callback?.data === undefined || chatId === undefined) return next();
+      const updateId = context.update?.update_id;
+      if (callback?.data === undefined || chatId === undefined || updateId === undefined) return next();
       const [prefix, action, nonce] = callback.data.split(':');
       if (prefix === CB_HELD && action !== undefined && nonce !== undefined) {
-        return answerHeldButton(context, action, nonce, callback.from.id, chatId);
+        return answerHeldButton(context, action, nonce, callback.from.id, chatId, updateId);
       }
       const cancel = parseCancelButton(callback.data);
-      if (cancel !== undefined) return answerCancelButton(context, cancel, callback.from.id, chatId, next);
+      if (cancel !== undefined) {
+        return answerCancelButton(context, cancel, updateId, callback.from.id, chatId, next);
+      }
       return next();
     },
     async stopUnhandledInput(context, next) {
@@ -606,6 +661,11 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
       );
     },
   };
+}
+
+/** A sent message whose context can delete it. */
+function isDeletable(value: unknown): value is { delete(): Promise<unknown> } {
+  return typeof value === 'object' && value !== null && 'delete' in value && typeof value.delete === 'function';
 }
 
 /**
