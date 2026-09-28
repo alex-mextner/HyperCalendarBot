@@ -193,8 +193,10 @@ export function handleConvertToTimezone(input: { datetime: string; timezone: str
     // container) and silently answer for a different moment (2026-07-10 incident, #516).
     const wallClock = WALL_CLOCK_RE.exec(datetime)?.groups;
     if (!wallClock) return invalid;
+    // The target zone is not necessarily the zone the wall clock is in ("11:00 my time in New
+    // York"), so the suggestion keeps the given digits and leaves that zone to the caller.
     const localToUtc = wallClock.time
-      ? `use calculate("${wallClock.date} ${wallClock.time} ${input.timezone} to UTC")`
+      ? `use calculate("${wallClock.date} ${wallClock.time} <IANA zone of that local time> to UTC")`
       : 'add the local time of day and call calculate as "<date> <HH:MM> <IANA zone> to UTC"';
     return {
       success: false,

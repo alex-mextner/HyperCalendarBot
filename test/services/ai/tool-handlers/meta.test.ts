@@ -1008,17 +1008,26 @@ describe('handleConvertToTimezone', () => {
 
   // 2026-07-10 incident (#516): an offset-free wall clock was read in the server's zone (UTC).
   test.each([
-    ['2026-07-11T11:00:00', 'Africa/Cairo', '2026-07-11 11:00:00 Africa/Cairo to UTC'],
-    ['2026-07-11T11:00', 'Europe/Belgrade', '2026-07-11 11:00 Europe/Belgrade to UTC'],
-    ['2026-07-11 11:00', 'Europe/Belgrade', '2026-07-11 11:00 Europe/Belgrade to UTC'],
-    ['2026-07-11T11:00:30', 'Europe/Belgrade', '2026-07-11 11:00:30 Europe/Belgrade to UTC'],
-  ])('refuses the offset-free datetime %s instead of guessing its zone', (datetime, timezone, calculateForm) => {
+    ['2026-07-11T11:00:00', 'Africa/Cairo', '2026-07-11 11:00:00'],
+    ['2026-07-11T11:00', 'Europe/Belgrade', '2026-07-11 11:00'],
+    ['2026-07-11 11:00', 'Europe/Belgrade', '2026-07-11 11:00'],
+    ['2026-07-11T11:00:30', 'Europe/Belgrade', '2026-07-11 11:00:30'],
+  ])('refuses the offset-free datetime %s instead of guessing its zone', (datetime, timezone, wallClock) => {
     const result = handleConvertToTimezone({ datetime, timezone });
     expect(result.success).toBe(false);
     expect(result.error).toContain('no Z or UTC offset');
-    // The suggested call names the same moment: it runs and keeps every given digit.
-    expect(result.error).toContain(`calculate("${calculateForm}")`);
-    expect(handleCalculate({ expression: calculateForm }).success).toBe(true);
+    // The suggested call keeps every given digit and leaves the zone of that wall clock to the
+    // caller; with a zone filled in, it runs.
+    expect(result.error).toContain(`calculate("${wallClock} <IANA zone of that local time> to UTC")`);
+    expect(handleCalculate({ expression: `${wallClock} Africa/Cairo to UTC` }).success).toBe(true);
+  });
+
+  test('never suggests reading an offset-free wall clock in the target zone', () => {
+    // "11:00 my time (Belgrade) in New York": the target zone is not the zone the wall clock is in,
+    // so calculate("… America/New_York to UTC") would silently answer for a different moment.
+    const result = handleConvertToTimezone({ datetime: '2026-07-11T11:00:00', timezone: 'America/New_York' });
+    expect(result.success).toBe(false);
+    expect(result.error).not.toContain('America/New_York');
   });
 
   test('refuses a bare date without a copyable call that needs filling in', () => {
