@@ -121,4 +121,21 @@ describe('quick +30/+60 time proposal', () => {
     expect(invitationRepo.findById(invitation.id)!.status).toBe('declined');
     expect(chat.get(CARD_MESSAGE_ID)).toEqual({ text: declinedText, keyboard: null });
   });
+
+  test('a proposal superseded while the tap awaits Telegram does not overwrite the card', async () => {
+    const { invitationRepo, invitation, chat, handler } = setup();
+    const cardBefore = chat.get(CARD_MESSAGE_ID);
+    const newerProposal = new Date(Date.now() + 9 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const tap = makeCallbackTap(`inv:propose:${invitation.id}:+30`, INVITEE_USER);
+    // Another proposal (a second quick tap or a typed time) is stored while this tap is answered.
+    tap.answer.mockImplementation(async () => {
+      invitationRepo.setProposedTime(invitation.id, newerProposal);
+      return true;
+    });
+
+    await handler(tap.ctx);
+
+    expect(invitationRepo.findById(invitation.id)!.proposed_time).toBe(newerProposal);
+    expect(chat.get(CARD_MESSAGE_ID)).toEqual(cardBefore);
+  });
 });
