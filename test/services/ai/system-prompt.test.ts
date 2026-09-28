@@ -160,8 +160,12 @@ describe('buildSystemPrompt', () => {
     ['2026-09-27T21:00:00Z', '2026-09-28'],
     // Saturday 22:00 before the clocks go back on Sunday 2026-10-25.
     ['2026-10-24T20:00:00Z', '2026-10-25'],
+    // Saturday 23:30 before the clocks go forward: calendar days, not 24-hour steps.
+    ['2027-03-27T22:30:00Z', '2027-03-28'],
     // 00:30 local is already the next day although UTC is still the previous one.
     ['2026-09-27T22:30:00Z', '2026-09-29'],
+    // The week crosses New Year: every date carries its own year.
+    ['2026-12-28T20:00:00Z', '2026-12-29'],
   ])('coming days at %s list the next seven local dates, each with its real weekday', (instant, first) => {
     setSystemTime(new Date(instant));
     try {
@@ -172,7 +176,7 @@ describe('buildSystemPrompt', () => {
       expect(entries).toEqual(
         Array.from({ length: 7 }, (_, index) => {
           const day = new Date(firstMs + index * 86_400_000);
-          return [['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day.getUTCDay()]!, day.toISOString().slice(5, 10)];
+          return [['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day.getUTCDay()]!, day.toISOString().slice(0, 10)];
         }),
       );
     } finally {
