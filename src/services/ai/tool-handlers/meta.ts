@@ -1,7 +1,7 @@
 import { t, toLang } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
 import { canResolveRecipientUsername, normalizeRecipientUsername } from '../recipient-identity.ts';
-import { correctUtcClockTimes, eventClocksForRun } from '../reply-time-guard.ts';
+import { correctAskedQuestion, eventClocksForRun } from '../reply-time-guard.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { handleDeleteConfirmationRequest } from './events.ts';
 
@@ -96,9 +96,12 @@ export async function handleAskUser(
 ): Promise<ToolResult> {
   if (input.event_ids && input.event_ids.length > 0) return handleDeleteConfirmationRequest(ctx, input.event_ids);
   // The question and buttons go to the user verbatim, so the reply-time guard runs here too (#498).
-  const clocks = eventClocksForRun(ctx);
-  const question = correctUtcClockTimes(input.question, clocks, ctx.user.timezone);
-  const askedOptions = input.options.map((option) => correctUtcClockTimes(option, clocks, ctx.user.timezone));
+  const { question, options: askedOptions } = correctAskedQuestion(
+    input.question,
+    input.options,
+    eventClocksForRun(ctx),
+    ctx.user.timezone,
+  );
   const corrected = question !== input.question || askedOptions.some((option, i) => option !== input.options[i]);
   const agentHint = corrected
     ? `Your question showed event times in UTC; the user saw them in local time instead: "${question}" [${askedOptions.join(' | ')}]`

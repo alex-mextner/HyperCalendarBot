@@ -384,6 +384,22 @@ describe('UTC-as-local guard on delivered text', () => {
     expect(buttons[0]).toBe(`Оставить ${LESSON} в 12:30`);
   });
 
+  test('a bare-time ask_user button follows the question it answers', async () => {
+    const id = createEvent(LESSON, lesson.startUtc, lesson.endUtc!).id;
+    let question = '';
+    let buttons: string[] = [];
+    sender.sendButtons = async (_chatId: number, text: string, options: string[]) => {
+      question = text;
+      buttons = options;
+      return { message_id: 45 };
+    };
+    expect((await executeTool(ctx, 'get_event', { event_id: id })).success).toBe(true);
+    await executeTool(ctx, 'ask_user', { question: `${LESSON} в 10:30. Оставить так?`, options: ['10:30', 'Нет'] });
+    expect(question).toBe(`${LESSON} в 12:30. Оставить так?`);
+    // The user must not confirm 10:30 under a question that now says 12:30.
+    expect(buttons).toEqual(['12:30', 'Нет', 'Отмена']);
+  });
+
   test('an ask_user confirmation after search_events is sent with local times', async () => {
     const ids = tuesdayLessons.map((clock) => createEvent(LESSON, clock.startUtc, clock.endUtc!).id);
     const question = utcDeleteQuestion.replace(/\(id (\d+)\)/g, (_m, n: string) => `(id ${ids[Number(n) - 11]})`);

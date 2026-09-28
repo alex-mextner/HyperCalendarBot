@@ -170,6 +170,30 @@ export function correctUtcClockTimes(text: string, events: readonly EventClock[]
 }
 
 /**
+ * An ask_user question and its buttons reach the user as one message, so they are corrected
+ * as one text: a button that only carries a clock ("10:30") follows the question that names
+ * the event, under the same rules as an unnamed line of a reply.
+ */
+export function correctAskedQuestion(
+  question: string,
+  options: readonly string[],
+  events: readonly EventClock[],
+  timezone: string,
+): { question: string; options: string[] } {
+  const questionLineCount = question.split('\n').length;
+  const lines = correctUtcClockTimes([question, ...options].join('\n'), events, timezone).split('\n');
+  let next = questionLineCount;
+  return {
+    question: lines.slice(0, questionLineCount).join('\n'),
+    options: options.map((option) => {
+      const start = next;
+      next += option.split('\n').length;
+      return lines.slice(start, next).join('\n');
+    }),
+  };
+}
+
+/**
  * Events this run could have described: every event a tool result showed the model,
  * plus the preloaded schedule window. A tool result is fresher than the window snapshot
  * (an update in this run moved the event), so a surfaced id replaces its window rows.
