@@ -22,8 +22,15 @@ export type RecurrenceRejectReason =
   | 'exrule_unsupported'
   | 'value_type_mismatch'
   | 'count_and_until_conflict'
+  | 'count_out_of_range'
   | 'invalid_rrule_syntax'
   | 'recurrence_display_unsupported_disabled';
+
+/** Same cap the /add wizard already enforces on a typed COUNT (`add-event.scene.ts`) —
+ * applied here too so ICS import, Google sync and the AI tool (none of which go through the
+ * wizard's own check) can't hand expandRecurrence's COUNT-driven generation loop an
+ * attacker-controlled iteration count (security review finding, #657). */
+export const MAX_RECURRENCE_COUNT = 999;
 
 /** Thrown instead of silently taking the first RRULE line or dropping EXDATE/RDATE — every
  * reject reason names an RFC 5545 construct this engine explicitly does not support. */
@@ -79,8 +86,16 @@ function lineValueKind(line: string): RecurrenceValueKind {
   const colonIdx = line.indexOf(':');
   const head = colonIdx >= 0 ? line.slice(0, colonIdx) : '';
   const value = colonIdx >= 0 ? line.slice(colonIdx + 1) : '';
-  if (/;VALUE=DATE\b/i.test(head)) return 'date';
-  if (/;VALUE=DATE-TIME\b/i.test(head)) return 'date-time';
+  // Read the VALUE parameter from the structured param list (split on `;`), not a regex over
+  // the raw header: `/;VALUE=DATE\b/` also matches ";VALUE=DATE-TIME" because `\b` only needs
+  // a word/non-word transition, and "-" right after "DATE" already satisfies that — see #657.
+  const params = head.split(';').slice(1);
+  const valueParam = params.find((p) => p.toUpperCase().startsWith('VALUE='));
+  if (valueParam) {
+    const kind = valueParam.slice('VALUE='.length).toUpperCase();
+    if (kind === 'DATE') return 'date';
+    if (kind === 'DATE-TIME') return 'date-time';
+  }
   const firstToken = value.split(',')[0] ?? '';
   return isDateOnlyToken(firstToken) ? 'date' : 'date-time';
 }
@@ -117,6 +132,16 @@ export function parseRecurrenceBlock(raw: string, dtstartValueKind: RecurrenceVa
   const rruleBody = rruleLine.slice(rruleLine.indexOf(':') + 1);
   if (/(^|;)COUNT=/.test(rruleBody) && /(^|;)UNTIL=/.test(rruleBody)) {
     throw new RecurrenceUnsupportedError('count_and_until_conflict', 'RRULE cannot set both COUNT and UNTIL.');
+  }
+  const countMatch = /(?:^|;)COUNT=(\d+)/i.exec(rruleBody);
+  if (countMatch) {
+    const count = Number(countMatch[1]);
+    if (!Number.isFinite(count) || count < 1 || count > MAX_RECURRENCE_COUNT) {
+      throw new RecurrenceUnsupportedError(
+        'count_out_of_range',
+        `COUNT must be between 1 and ${MAX_RECURRENCE_COUNT} (found ${countMatch[1]}).`,
+      );
+    }
   }
 
   for (const line of [...exdateLines, ...rdateLines]) {
