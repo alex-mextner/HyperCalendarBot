@@ -824,8 +824,30 @@ export function createCallbackHandler(
           return;
         }
         const formatted = formatProposedTime(proposedTime, user.timezone, lang);
+        const proposalSent = t(lang).invite_propose_sent(formatted);
         await ctx.answer();
-        await ctx.editText(t(lang).invite_propose_sent(formatted), { parse_mode: 'HTML' }).catch(() => {});
+        await ctx.editText(proposalSent, { parse_mode: 'HTML' }).catch(() => {});
+        // The +30/+60 buttons sit on a separate prompt, so the invitation card still has its RSVP buttons.
+        // Replace it with the notice a typed proposal leaves: the location refresh skips pending cards
+        // with a proposed time, relying on no such card still showing live buttons.
+        // Re-read first: an answer given before this stale tap, or during the awaits above, must stay visible.
+        const latest = invitationRepo?.findById(invId);
+        if (
+          latest?.status === 'pending' &&
+          latest.proposed_time === proposedTime &&
+          latest.message_id &&
+          latest.chat_id &&
+          invitationNotifyDeps?.editMessage
+        ) {
+          await invitationNotifyDeps
+            .editMessage(latest.chat_id, latest.message_id, proposalSent)
+            .catch((err: unknown) => {
+              cmdLogger.warn(
+                { err, invitationId: invId },
+                'Failed to replace the invitation card after a quick proposal',
+              );
+            });
+        }
         if (invitationNotifyDeps && event) {
           notifyInviterProposal(
             inv,
