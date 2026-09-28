@@ -220,8 +220,10 @@ before the scene sees it (GH-645):
 - the open run's own button goes to its scene, as above;
 - a button from another run ends nothing and gets a "Эта кнопка от прошлой попытки подключения."
   toast — a stale button cannot cancel a newer connection;
-- the button of a run whose scene row expired closes that run's trace, stops its login process and
-  replies "Авторизация отменена.", so the next message is ordinary again;
+- the button of a run whose scene row expired closes that run's trace, stops its login process,
+  removes its temp session file (the trace keeps its path) and replies "Авторизация отменена.", so
+  the next message is ordinary again. The trace is closed as of the press: text sent before it but
+  handled after it still counts as late (deleted, never logged);
 - when the scene row cannot be read, the button ends nothing.
 
 ### Wizard input stays out of logs and the AI
@@ -266,8 +268,10 @@ pointing at the marker, the time, and in `metadata` the step (`consent`, `phone`
 `password`), the deletion (`deleted`, `failed`, `not_attempted`) and the outcome. `action_name` is
 the reason: `typed`, `slash`, `edited`, `late`, `expired`, `state_unreadable`, then `rate_limited`
 when the rate limiter dropped it, and `released`, `replayed`, `discarded` or `release_refused` for a
-held message. The update that opens the wizard is recorded as `opened`. A failed deletion sets
-`success = 0`. Nothing in these rows is derived from the text: no fragment, length or digest.
+held message (`replayed` says the message was handed to the bot — `dispatched` — not how its handlers
+ended). Each update that opens a new run of the wizard is recorded as `opened`, also when an earlier
+run was left open until it expired. A failed deletion sets `success = 0`. Nothing in these rows is
+derived from the text: no fragment, length or digest.
 
 #### Text that no longer finds the wizard's scene row (GH-639)
 
@@ -293,7 +297,8 @@ at most 3 per user and 100 in all (the oldest go first); a one-shot timer remove
 restart forgets it. Nothing about it is persisted except its audit row. The bot answers, without
 repeating it, "Время на подключение Telegram вышло, поэтому твоё сообщение я удалил и не обработал —
 вдруг там был код или пароль…" (or, for an unreadable state, "Не смог проверить, не код ли это…"),
-with two buttons:
+with two buttons. When the wizard was at the phone prompt, its "share phone number" reply keyboard is
+removed first (by a throwaway message, as the scene installs it):
 
 - **"Это обычный запрос — обработать"** (`ctw:p:<nonce>`) — only its owner in its chat can use it;
   a press from anyone else takes nothing. The press takes the message out of memory before anything

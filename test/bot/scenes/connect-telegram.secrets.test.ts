@@ -61,7 +61,9 @@ const ButtonSchema = z.object({ text: z.string(), callback_data: z.string().opti
 const RequestSchema = z.object({
   text: z.string().optional(),
   message_id: z.number().optional(),
-  reply_markup: z.object({ inline_keyboard: z.array(z.array(ButtonSchema)).optional() }).optional(),
+  reply_markup: z
+    .object({ inline_keyboard: z.array(z.array(ButtonSchema)).optional(), remove_keyboard: z.boolean().optional() })
+    .optional(),
 });
 /** What an audit row may say about a protected input: never its text, length or a digest of it. */
 const AuditMetadataSchema = z
@@ -101,7 +103,13 @@ function makeRuntime(options: { messagesPerMinute?: number; sendCodeFailure?: st
   const logs = captureLogs();
 
   /** Every message the bot sent or edited, with its inline buttons. */
-  const sent: { id: number; method: string; text: string; buttons: { text: string; data: string }[] }[] = [];
+  const sent: {
+    id: number;
+    method: string;
+    text: string;
+    buttons: { text: string; data: string }[];
+    removesKeyboard: boolean;
+  }[] = [];
   /** Texts of callback-query answers (toasts). */
   const toasts: string[] = [];
   const deletedMessageIds: number[] = [];
@@ -135,7 +143,13 @@ function makeRuntime(options: { messagesPerMinute?: number; sendCodeFailure?: st
         .flatMap((button) =>
           button.callback_data === undefined ? [] : [{ text: button.text, data: button.callback_data }],
         );
-      sent.push({ id, method: method ?? '', text: payload.text ?? '', buttons });
+      sent.push({
+        id,
+        method: method ?? '',
+        text: payload.text ?? '',
+        buttons,
+        removesKeyboard: payload.reply_markup?.remove_keyboard === true,
+      });
       return Response.json({
         ok: true,
         result: { message_id: id, date: 1, chat, from: { id: 1, is_bot: true, first_name: 'Bot' }, text: payload.text },
@@ -992,13 +1006,23 @@ describe('every protected input leaves one safe history row and one audit row', 
     expect(rows.map((row) => [row.action_name, row.metadata.step, row.metadata.outcome])).toEqual([
       ['expired', 'password', 'held'],
       ['released', 'password', 'processing'],
-      ['replayed', 'password', 'handled'],
+      ['replayed', 'password', 'dispatched'],
     ]);
     const history = r.historyRows();
     const markerIndex = history.findIndex((row) => row.id === rows[0]!.chat_history_id);
     expect(history[markerIndex]!.content).toBe(CONNECT_WIZARD_REDACTION);
     expect(history[markerIndex + 1]!.role).toBe('assistant');
     expect(history[markerIndex + 1]!.content).toContain('Время на подключение Telegram вышло');
+  });
+
+  test('each opening of the wizard is audited, also when an earlier run was left open until it expired', async () => {
+    const r = makeRuntime();
+    const firstId = await r.send('/connect_telegram');
+    advanceClock(31 * 60_000); // the consent screen is forgotten; its trace stays open
+    const secondId = await r.send('/connect_telegram');
+
+    const opened = r.auditRows().filter((row) => row.action_name === 'opened');
+    expect(opened.map((row) => row.message_id)).toEqual([firstId, secondId]);
   });
 
   test('ordinary messages outside the wizard are logged verbatim with no audit rows', async () => {
@@ -1040,6 +1064,31 @@ describe('a cancel button pressed after the wizard is gone', () => {
     // The newer consent screen still connects.
     await r.clickButton(ct.btnConnect);
     expect(r.botReplies().at(-1)).toBe(ct.enterPhone);
+  });
+
+  test('a password sent before a stale Cancel but handled after it is dropped as late, never logged', async () => {
+    const r = makeRuntime();
+    await expireAtPasswordStep(r);
+    // Typed first, but its delivery is handled after the Cancel press that followed it.
+    const password = r.typed(PASSWORD);
+    await r.clickButton(ct.btnCancelAuth);
+    await password.deliver();
+
+    expect(r.deletedMessageIds).toContain(password.id);
+    expectNoCredentialKeptOrHandedOn(r);
+    expect(r.auditRows().find((row) => row.message_id === password.id)?.action_name).toBe('late');
+  });
+
+  test('the phone-share keyboard of a wizard that expired at the phone prompt is removed with the notice', async () => {
+    const r = makeRuntime();
+    await r.send('/connect_telegram');
+    await r.click('ct:connect');
+    advanceClock(31 * 60_000);
+    const sentBefore = r.sent.length;
+    await r.send(QUESTION);
+
+    expect(r.lastBotMessage().text).toBe(ct.wizardExpired);
+    expect(r.sent.slice(sentBefore).some((message) => message.removesKeyboard)).toBe(true);
   });
 
   test('after the wizard expired, its cancel button closes it and the next request is handled normally', async () => {
