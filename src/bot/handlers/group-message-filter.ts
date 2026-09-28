@@ -147,13 +147,17 @@ export function mentionsBot(text: string): boolean {
 // problem above: fuzzy matching would collapse them with "месть", "тесто",
 // "бремя", and stem matching hits "местоимение", "местный", "заместитель",
 // "адресат", "временно" — the reason the stems were dropped once already.
-// Match an explicit list of word forms as whole words instead. The idiom
-// "на твоём месте я бы…" ("if I were you") is excluded by rejecting "месте"
-// when the conditional "(я/ты/…) бы" follows; the pronoun before "месте" is
-// not the marker, since "давай на нашем месте" names a real meeting spot.
+// Match an explicit list of word forms as whole words instead. "месте" is
+// dropped only in the idiom "на твоём (же) месте я бы…" ("if I were you"),
+// which needs both a possessive before it and the conditional "(я/ты/…) бы"
+// after it: "давай на нашем месте" and "я уже на месте, я бы вышел" name a
+// real spot. "где" stays generous: "встретимся где-нибудь у метро" arranges a
+// meeting, and a dropped message never reaches the second stage.
+const POSSESSIVE_BEFORE_PLACE = '(?:тво[её]м|мо[её]м|нашем|вашем|сво[её]м|его|е[её]|их)\\s+(?:же\\s+)?';
 const PLACE_OR_TIME_RE = new RegExp(
   '(?<![\\p{L}\\p{N}])(?:' +
     'место|места|месту|местом|мест|местам|местами|местах|' +
+    `(?<!(?<![\\p{L}\\p{N}])${POSSESSIVE_BEFORE_PLACE})месте|` +
     'месте(?![\\s,—–-]+(?:(?:я|ты|мы|вы|он|она|оно|они)\\s+)?бы(?![\\p{L}\\p{N}]))|' +
     'локация|локации|локацию|локацией|локаций|локациям|локациями|локациях|' +
     'адрес|адреса|адресу|адресом|адресе|адресов|адресам|адресами|адресах|' +

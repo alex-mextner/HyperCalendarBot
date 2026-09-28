@@ -190,6 +190,10 @@ describe('isGroupRelevant — meeting place and time words (#400)', () => {
     'где увидимся',
     'давай на нашем месте',
     'встретимся на вашем месте',
+    // A conditional after "месте" alone is not the idiom: nobody's place is named.
+    'Я уже на месте, я бы вышел но жду',
+    'Мы на месте бы начинали',
+    'Встретимся где-нибудь у метро?',
   ];
   for (const text of relevant) {
     test(`relevant: ${text}`, () => expect(isGroupRelevant(text, bot)).toBe(true));
@@ -205,6 +209,10 @@ describe('isGroupRelevant — meeting place and time words (#400)', () => {
     'на моём месте ты бы тоже расстроился',
     'на его месте, я бы ушёл',
     'На твоём месте — я бы не стал',
+    'На твоём же месте я бы не пошёл',
+    'на её месте я бы не осталась',
+    'на их месте я бы подождал',
+    'на своём месте я бы не ныл',
     'везде пробки',
     'нигде не найду ключи',
     'адресат выбыл',
