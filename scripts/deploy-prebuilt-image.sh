@@ -46,73 +46,16 @@ docker load -i "$REMOTE_SRC/image.tar.gz"
 CURRENT_IMAGE_ID="$(docker inspect hypercal-bot --format '{{.Image}}' 2>/dev/null)" || { echo 'Existing HyperCalendar container is required; use a reviewed first-install procedure' >&2; exit 1; }
 ROLLBACK_TAG="$IMAGE:rollback-$STAMP"
 docker tag "$CURRENT_IMAGE_ID" "$ROLLBACK_TAG"
-# Generic image rollback is allowed only when migration code is unchanged. A schema-changing
-# release requires a docs/reference/migrations/<name>.md for every newly added migration entry,
-# shipped inside the image: that doc is the reviewed procedure. Renaming or removing a migration
-# that already shipped, editing one in place, or a hash diff with no identifiable new migration
-# at all, has no such doc to point at, so all three fail closed like before -- one documented new
-# migration never vouches for a renamed, removed or silently edited one riding along with it.
-run_in_new_image() {
-  docker run --rm --network none --entrypoint "$1" "$IMAGE:$SHA" "${@:2}"
-}
-
-migration_fingerprints() {
-  python3 "$(dirname "${BASH_SOURCE[0]}")/migration-fingerprints.py"
-}
-
-# Exact-string lookup by name, never a regex: a migration name can contain characters that
-# would otherwise be interpreted as a pattern (e.g. "001.x" matching "0010x").
-fingerprint_lookup() {
-  awk -F'\t' -v n="$2" '$1==n{print $2}' <<< "$1"
-}
-
-check_no_migration_disappeared() {
-  local old_fingerprints="$1" new_fingerprints="$2" name _
-  while IFS=$'\t' read -r name _; do
-    [[ -n "$name" ]] || continue
-    [[ -n "$(fingerprint_lookup "$new_fingerprints" "$name")" ]] && continue
-    echo "Migration $name is missing from the new release; migrations must never be renamed or removed once shipped" >&2
-    return 1
-  done <<< "$old_fingerprints"
-}
-
-check_migrations_unchanged_or_documented() {
-  local old_fingerprints="$1" new_fingerprints="$2" new_docs="$3" name new_digest old_digest found_new=0
-  while IFS=$'\t' read -r name new_digest; do
-    [[ -n "$name" ]] || continue
-    old_digest="$(fingerprint_lookup "$old_fingerprints" "$name")"
-    if [[ -z "$old_digest" ]]; then
-      found_new=1
-      grep -qxF "$name.md" <<< "$new_docs" && continue
-      echo "Missing reviewed migration doc for $name: docs/reference/migrations/$name.md" >&2
-      return 1
-    elif [[ "$old_digest" != "$new_digest" ]]; then
-      echo "Migration $name changed after it already shipped; edits to an applied migration have no reviewed auto-deploy path" >&2
-      return 1
-    fi
-  done <<< "$new_fingerprints"
-  if [[ "$found_new" != 1 ]]; then
-    echo "migrations.ts changed but no new or edited migration entry could be identified" >&2
-    return 1
-  fi
-}
-
-check_new_migrations_documented() {
-  local old_fingerprints new_fingerprints new_docs
-  old_fingerprints="$(docker exec hypercal-bot cat /app/src/database/migrations.ts | migration_fingerprints)"
-  new_fingerprints="$(run_in_new_image cat /app/src/database/migrations.ts | migration_fingerprints)"
-  new_docs="$(run_in_new_image ls /app/docs/reference/migrations 2>/dev/null || true)"
-  [[ -n "$old_fingerprints" && -n "$new_fingerprints" ]] || return 1
-  check_no_migration_disappeared "$old_fingerprints" "$new_fingerprints" || return 1
-  check_migrations_unchanged_or_documented "$old_fingerprints" "$new_fingerprints" "$new_docs"
-}
-
-old_migrations_hash="$(docker exec hypercal-bot sha256sum /app/src/database/migrations.ts | cut -d ' ' -f1)"
-new_migrations_hash="$(run_in_new_image sha256sum /app/src/database/migrations.ts | cut -d ' ' -f1)"
-[[ -n "$old_migrations_hash" ]] || { echo 'Schema-changing release requires reviewed migration procedure' >&2; exit 1; }
-if [[ "$old_migrations_hash" != "$new_migrations_hash" ]]; then
-  check_new_migrations_documented || { echo 'Schema-changing release requires reviewed migration procedure' >&2; exit 1; }
-fi
+# Generic image rollback is safe only while the old image still works on the database the release
+# may already have migrated. scripts/migration-gate.py therefore accepts unchanged migration code,
+# or new migrations whose shipped docs declare "rollback-compatible: yes" and "data-deletion: no",
+# and logs one SCHEMA_GATE audit line. A reviewed migration procedure can accept more by naming
+# the one transition it reviewed, as HYPERCAL_REVIEWED_SCHEMA_TRANSITION="<running sha256>:<release
+# sha256>" of migrations.ts; hosted CI and the local fallback never set it.
+GATE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/migration-gate.py"
+ROLLBACK_GUARD="$REMOTE_SRC/rollback-guard"
+python3 "$GATE" check hypercal-bot "$IMAGE:$SHA" "${HYPERCAL_REVIEWED_SCHEMA_TRANSITION:-}" "$ROLLBACK_GUARD" \
+  || { echo 'Schema-changing release requires reviewed migration procedure' >&2; exit 1; }
 CONFIG_BACKUP="$DEPLOY_PATH/releases/config-$SHA-$STAMP"
 mkdir -p "$CONFIG_BACKUP/scripts"
 cp "$DEPLOY_PATH/docker-compose.yml" "$DEPLOY_PATH/Caddyfile" "$CONFIG_BACKUP/"
@@ -130,12 +73,50 @@ restore_host_files() {
   done
 }
 
+HEALTH=""
+READY=""
+# Poll until /health is ok and, unless $1 is "health", /ready answers ok or "ok (unverified)".
+wait_for_bot() {
+  for _ in $(seq 1 15); do
+    HEALTH="$(curl -fsS --max-time 20 https://hypercal.invntrm.ru/health 2>/dev/null || true)"
+    READY="$(curl -fsS --max-time 20 https://hypercal.invntrm.ru/ready 2>/dev/null || true)"
+    if [[ "$HEALTH" == ok ]]; then
+      if [[ "$1" == health ]]; then return 0; fi
+      case "$READY" in ok|"ok (unverified)") return 0 ;; esac
+    fi
+    sleep 4
+  done
+  return 1
+}
+
+# The previous image ID alone does not show a running bot. Readiness is reported, not required:
+# an AI provider outage fails it for every image.
 restore_image() {
   printf 'services:\n  bot:\n    image: "%s"\n' "$CURRENT_IMAGE_ID" > "$REMOTE_SRC/rollback.yml"
   (cd "$DEPLOY_PATH" && docker compose -f docker-compose.yml -f "$REMOTE_SRC/rollback.yml" up -d --no-deps --no-build --pull never --force-recreate bot) || return 1
   restored="$(docker inspect hypercal-bot --format '{{.Image}}' 2>/dev/null)"
-  printf 'ROLLBACK image=%s data=preserved\n' "$restored" >&2
-  [[ "$restored" == "$CURRENT_IMAGE_ID" ]]
+  wait_for_bot health
+  printf 'ROLLBACK image=%s health=%s ready=%s data=preserved\n' "$restored" "${HEALTH:-<none>}" "${READY:-<none>}" >&2
+  [[ "$restored" == "$CURRENT_IMAGE_ID" && "$HEALTH" == ok ]] && return 0
+  echo "ROLLBACK FAILED: the container is not the previous image $CURRENT_IMAGE_ID answering /health=ok; the bot may be down" >&2
+  return 1
+}
+
+# The rollback guard lists accepted migrations that do not declare rollback-compatible: yes (only
+# a reviewed override accepts them). The old image may start only on a database that records none
+# of them: stop the release first so none can commit after the read, and when any is recorded, or
+# the read fails, start the release again and leave it to the migration doc's Rollback section.
+old_image_may_run() {
+  [[ -s "$ROLLBACK_GUARD" ]] || return 0
+  # A release that already exited can fail `docker stop`; what matters is that it no longer runs.
+  docker stop hypercal-bot >/dev/null 2>&1
+  [[ "$(docker inspect hypercal-bot --format '{{.State.Running}}' 2>/dev/null)" == false ]] \
+    && python3 "$GATE" unapplied "$CURRENT_IMAGE_ID" "$DEPLOY_PATH/data" "$ROLLBACK_GUARD" && return 0
+  docker start hypercal-bot >/dev/null \
+    || echo 'ROLLBACK FAILED: the release could not be started again; the bot may be down' >&2
+  printf 'ROLLBACK_SKIPPED image=%s: the database may hold %s, which the old image is not declared to survive; follow the Rollback section of docs/reference/migrations/<name>.md\n' \
+    "$(docker inspect hypercal-bot --format '{{.Image}}' 2>/dev/null)" "$(paste -sd ' ' "$ROLLBACK_GUARD")" >&2
+  return 1
 }
 
 switched=0
@@ -143,7 +124,7 @@ rollback() {
   rc=$?
   trap - EXIT INT TERM
   set +e
-  if [[ "$rc" != 0 && "$switched" == 1 ]]; then
+  if [[ "$rc" != 0 && "$switched" == 1 ]] && old_image_may_run; then
     echo 'Verification failed; restoring image and host files, never restoring an older user database' >&2
     restore_host_files || rc=1
     restore_image || rc=1
@@ -189,18 +170,7 @@ if [[ "$ACTUAL_IMAGE_ID" != "$EXPECTED_IMAGE_ID" ]]; then
   exit 1
 fi
 
-HEALTH=""
-READY=""
-for _ in $(seq 1 15); do
-  HEALTH="$(curl -fsS --max-time 20 https://hypercal.invntrm.ru/health 2>/dev/null || true)"
-  READY="$(curl -fsS --max-time 20 https://hypercal.invntrm.ru/ready 2>/dev/null || true)"
-  case "$READY" in
-    ok|"ok (unverified)")
-      [[ "$HEALTH" == ok ]] && break
-      ;;
-  esac
-  sleep 4
-done
+wait_for_bot ready || true
 
 if [[ "$HEALTH" != ok ]]; then
   echo "Health check failed after deploy" >&2

@@ -36,13 +36,6 @@ describe('local deploy transport contracts (behavior exercised in Python harness
     expect(remote).toContain('Loaded config identity mismatch');
     expect(remote).toContain('"$REVISION" == "$SHA"');
   });
-  test('only unchanged or fully documented migration code uses generic image rollback', () => {
-    expect(remote).toContain('"$old_migrations_hash" != "$new_migrations_hash"');
-    expect(remote).toContain('check_new_migrations_documented');
-    expect(remote).toContain('docs/reference/migrations/');
-    expect(remote).toContain('never restoring an older user database');
-    expect(remote.indexOf('Schema-changing release')).toBeLessThan(remote.indexOf('scripts/backup-db.sh"'));
-  });
   test('readiness must be healthy, not just routed to a bot', () => {
     expect(remote).toContain('"$HEALTH" == ok');
     expect(remote).toContain('ok|"ok (unverified)")');

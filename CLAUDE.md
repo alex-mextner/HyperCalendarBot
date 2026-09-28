@@ -559,6 +559,7 @@ Full runbook: `docs/reference/deploy-runbook.md` (Docker, Dockerfile, bun lockfi
 - **Cron**: `0 3 * * *` backup, `*/2 * * * *` healthcheck (both log to `/opt/hypercal/logs/`).
 - **Alerts**: `healthcheck-alert.sh` posts to `/admin/alerts` on DOWN. CI `notify-failure` does the same.
 - **Never renumber existing migrations** — only append new ones at the end.
+- **Every new migration ships `docs/reference/migrations/<name>.md`** starting with the front matter from the runbook's "Schema gate" section (`rollback-compatible`, `data-deletion`). Without it the deploy refuses the release; `rollback-compatible: no` or `data-deletion: yes` needs a reviewed migration procedure. `test/python/test_migration_gate.py` checks every checked-in doc.
 - **Shared server**: never `pm2 delete all`, `docker system prune`, or kill PIDs without checking. Port 3001 = HyperCalendarBot.
 
 ## MCP Tools

@@ -1,3 +1,9 @@
+---
+migration: 065_intent_revisions
+rollback-compatible: yes
+data-deletion: no
+---
+
 # Migration 065: intent revisions
 
 `src/database/migrations.ts`, migration `065_intent_revisions`. Part of GH-334.
@@ -25,6 +31,11 @@ No existing row is updated or deleted. `intents`, `events`, `users` and every ot
 untouched.
 
 ## Why it is safe to deploy automatically
+
+065 was deployed on 2026-09-28 by the earlier gate, which only checked that this doc existed.
+Under the current gate the `import` it added to `migrations.ts` is code outside the migration
+entries, so the same release would need a reviewed transition (see the deploy runbook's "Schema
+gate" section).
 
 - Additive DDL only; the only pre-existing table named is created with `IF NOT EXISTS` and the
   same columns.
