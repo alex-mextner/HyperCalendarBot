@@ -9,6 +9,7 @@ describe('formatLocationHtml', () => {
       google_maps_url: null,
       resolved_address: null,
       venue_name: null,
+      location_verified: 0,
     });
     expect(result).toBe('');
   });
@@ -19,6 +20,7 @@ describe('formatLocationHtml', () => {
       google_maps_url: null,
       resolved_address: null,
       venue_name: null,
+      location_verified: 0,
     });
     expect(result).toContain('<a href="');
     expect(result).toContain('Кофемания');
@@ -31,6 +33,7 @@ describe('formatLocationHtml', () => {
       google_maps_url: 'https://www.google.com/maps/search/?api=1&query=55.75,37.60',
       resolved_address: 'Кофемания, ул. Большая Никитская, 12',
       venue_name: null,
+      location_verified: 1,
     });
     expect(result).toContain('55.75,37.60');
     expect(result).toContain('ул. Большая Никитская');
@@ -42,6 +45,7 @@ describe('formatLocationHtml', () => {
       google_maps_url: 'https://maps.test',
       resolved_address: 'Кофемания, ул. Большая Никитская, 12, Москва',
       venue_name: null,
+      location_verified: 1,
     });
     expect(result).toContain('Кофемания, ул. Большая Никитская, 12, Москва');
     expect(result).not.toContain('>кофемания<');
@@ -53,6 +57,7 @@ describe('formatLocationHtml', () => {
       google_maps_url: null,
       resolved_address: null,
       venue_name: null,
+      location_verified: 0,
     });
     expect(result).toContain('&lt;script&gt;');
     expect(result).not.toContain('<script>');
@@ -64,6 +69,7 @@ describe('formatLocationHtml', () => {
       google_maps_url: 'https://maps.google.com/?q=55.75,37.6',
       resolved_address: 'ул. Большая Никитская, 12, Москва',
       venue_name: 'Кофемания',
+      location_verified: 1,
     });
     expect(result).toContain('Кофемания — ул. Большая Никитская, 12, Москва');
   });
@@ -74,6 +80,7 @@ describe('formatLocationHtml', () => {
       google_maps_url: null,
       resolved_address: null,
       venue_name: 'Кофемания',
+      location_verified: 1,
     });
     expect(result).toContain('>Кофемания</a>');
     // Should not have the dash separator if no address
@@ -86,9 +93,21 @@ describe('formatLocationHtml', () => {
       google_maps_url: null,
       resolved_address: null,
       venue_name: '<script>alert(1)</script>',
+      location_verified: 1,
     });
     expect(result).toContain('&lt;script&gt;');
     expect(result).not.toContain('<script>alert');
+  });
+
+  test('an unconfirmed place shows only the typed text, linked to a map search for it', () => {
+    const result = formatLocationHtml({
+      location: 'sonder',
+      google_maps_url: 'https://www.google.com/maps/place/?q=place_id:dutch-hotel',
+      resolved_address: 'Damrak 1, Amsterdam',
+      venue_name: 'Sonder Hotel',
+      location_verified: 0,
+    });
+    expect(result).toBe('<a href="https://www.google.com/maps/search/?api=1&amp;query=sonder">sonder</a>');
   });
 });
 

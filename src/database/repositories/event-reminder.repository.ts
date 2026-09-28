@@ -31,7 +31,8 @@ export class EventReminderRepository {
                 e.location AS event_location,
                 e.resolved_address AS event_resolved_address,
                 e.google_maps_url AS event_google_maps_url,
-                e.venue_name AS event_venue_name
+                e.venue_name AS event_venue_name,
+                e.location_verified AS event_location_verified
          FROM event_reminders er
          JOIN events e ON e.id = er.event_id
          WHERE er.remind_at_utc >= ? AND er.remind_at_utc < ? AND er.sent = 0

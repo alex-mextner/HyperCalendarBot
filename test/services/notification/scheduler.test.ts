@@ -1,6 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { z } from 'zod';
 import { migrations } from '../../../src/database/migrations.ts';
+import { CallLogRepository } from '../../../src/database/repositories/call-log.repository.ts';
+import { CallSettingsRepository } from '../../../src/database/repositories/call-settings.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
@@ -744,5 +747,91 @@ describe('NotificationScheduler', () => {
 
     // Should not throw, just skip weather
     await weatherScheduler.tick(new Date('2026-03-15T08:00:30Z'));
+  });
+});
+
+describe('resolved place in reminders and agendas', () => {
+  const ReminderPayload = z.object({ text: z.string() });
+  const confirmedLink =
+    '<a href="https://www.google.com/maps/place/?q=place_id:dutch-hotel">Sonder Hotel — Damrak 1, Amsterdam</a>';
+
+  /**
+   * Delivers a single reminder (Drinks), a batch reminder (Dinner + Show) and the morning agenda for
+   * events whose typed text 'sonder' has a resolved place with the given verification state.
+   */
+  async function deliver(verified: 0 | 1): Promise<{ texts: { [type: string]: string }; spoken: string[] }> {
+    const placeDb = setupDb();
+    placeDb.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
+    placeDb.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");
+    const insertEvent = placeDb.prepare(
+      `INSERT INTO events (id, user_id, title, start_at, end_at, timezone, location, resolved_address, venue_name,
+                           google_maps_url, location_verified)
+       VALUES (?, 42, ?, ?, ?, 'UTC', 'sonder', 'Damrak 1, Amsterdam', 'Sonder Hotel',
+               'https://www.google.com/maps/place/?q=place_id:dutch-hotel', ?)`,
+    );
+    const insertReminder = placeDb.prepare(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (?, 42, ?, 15, '15 minutes')",
+    );
+    insertEvent.run(1, 'Drinks', '2026-03-15T10:00:00Z', '2026-03-15T11:00:00Z', verified);
+    insertEvent.run(2, 'Dinner', '2026-03-15T12:00:00Z', '2026-03-15T13:00:00Z', verified);
+    insertEvent.run(3, 'Show', '2026-03-15T12:00:00Z', '2026-03-15T13:00:00Z', verified);
+    insertReminder.run(1, '2026-03-15T09:45:00Z');
+    insertReminder.run(2, '2026-03-15T11:45:00Z');
+    insertReminder.run(3, '2026-03-15T11:45:00Z');
+
+    const callSettingsRepo = new CallSettingsRepository(placeDb);
+    callSettingsRepo.ensureDefaults(42);
+    callSettingsRepo.setEnabled(42, true);
+    callSettingsRepo.setQuietHours(42, null, null);
+
+    const logRepo = new NotificationLogRepository(placeDb);
+    const texts: { [type: string]: string } = {};
+    const spoken: string[] = [];
+    const placeScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(placeDb),
+      reminderRepo: new EventReminderRepository(placeDb),
+      logRepo,
+      userRepo: new UserRepository(placeDb),
+      getEventsInRange: makeGetEventsInRange(placeDb),
+      enqueue: (type, _userId, logId) => {
+        const payload = logRepo.getById(logId)?.payload ?? '';
+        // Reminder payloads carry the rendered text in JSON; the agenda payload is the text itself.
+        texts[type] = type.startsWith('event_reminder') ? ReminderPayload.parse(JSON.parse(payload)).text : payload;
+      },
+      callSettingsRepo,
+      callLogRepo: new CallLogRepository(placeDb),
+      enqueueCall: (data) => {
+        if (data.eventId === 1) spoken.push(data.ttsText);
+      },
+    });
+    await placeScheduler.tick(new Date('2026-03-15T08:00:30Z'));
+    await placeScheduler.tick(new Date('2026-03-15T09:45:30Z'));
+    await placeScheduler.tick(new Date('2026-03-15T11:45:30Z'));
+    return { texts, spoken };
+  }
+
+  test('an unconfirmed place shows only the typed text in reminders, the agenda and the reminder call', async () => {
+    const { texts, spoken } = await deliver(0);
+    expect(Object.keys(texts).sort()).toEqual(['event_reminder', 'event_reminder_batch', 'morning_agenda']);
+    for (const [type, text] of Object.entries(texts)) {
+      expect({ type, text }).toEqual({ type, text: expect.stringContaining('>sonder</a>') });
+      expect({ type, text }).toEqual({ type, text: expect.stringContaining('google.com/maps/search/') });
+      expect({ type, text }).toEqual({ type, text: expect.not.stringContaining('Damrak') });
+      expect({ type, text }).toEqual({ type, text: expect.not.stringContaining('Sonder Hotel') });
+      expect({ type, text }).toEqual({ type, text: expect.not.stringContaining('dutch-hotel') });
+    }
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0]).toContain('sonder');
+    expect(spoken[0]).not.toContain('Sonder Hotel');
+  });
+
+  test('a confirmed place shows "Venue — Address" with its map link and the call speaks the venue', async () => {
+    const { texts, spoken } = await deliver(1);
+    expect(Object.keys(texts).sort()).toEqual(['event_reminder', 'event_reminder_batch', 'morning_agenda']);
+    for (const [type, text] of Object.entries(texts)) {
+      expect({ type, text }).toEqual({ type, text: expect.stringContaining(`📍 ${confirmedLink}`) });
+    }
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0]).toContain('Sonder Hotel');
   });
 });
