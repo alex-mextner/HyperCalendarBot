@@ -1,20 +1,17 @@
 // src/bot/middleware/chat-logging.ts
 // Saves every conversation turn to chat_history — user text, commands, edits, button presses and the
 // bot's own send/editText replies — and records commands and button presses in the action log.
-// Text typed into the Telegram-connect wizard (phone, login code, 2FA password) is stored only as
-// a redaction marker.
+// Text the connect-wizard guard took for Telegram-connect wizard input (phone, login code, 2FA
+// password) is stored only as a redaction marker.
 
 import type { Next, TelegramUpdate } from 'gramio';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
-import { logger } from '../../utils/logger.ts';
 import { resolveCallbackButtonLabel } from '../callback-label.ts';
 import { parseAiBtnPayload } from '../handlers/callback.handler.ts';
-import { runWithChatId } from '../scenes/chat-scoped-storage.ts';
-import { CONNECT_TELEGRAM_SCENE, CONNECT_WIZARD_REDACTION } from '../scenes/connect-telegram.scene.ts';
-
-const chatLoggingLogger = logger.child({ module: 'chat-logging' });
+import { CONNECT_WIZARD_REDACTION } from '../scenes/connect-telegram.scene.ts';
+import type { ConnectWizardGuard } from './connect-wizard-guard.ts';
 
 type ReplyFn = (text: string, opts?: { [key: string]: unknown }) => Promise<unknown>;
 
@@ -34,26 +31,12 @@ export interface ChatLoggingDeps {
   actionLog: Pick<ActionLogRepository, 'insert'>;
   /** Latest user chat_history row per user, read by the AI pipeline for the current turn. */
   chatHistoryIds: Map<number, number>;
-  /** Chat-scoped scene storage (`@gramio/scenes:<userId>` keys), read to recognise the connect wizard. */
-  sceneStorage: { get(key: string): unknown };
-}
-
-/**
- * Whether the Telegram-connect wizard is open for this user in this chat. An unreadable scene store
- * counts as open: a redacted turn loses less than a logged password.
- */
-async function isInConnectWizard(sceneStorage: ChatLoggingDeps['sceneStorage'], userId: number, chatId: number) {
-  try {
-    const scene = await runWithChatId(chatId, () => sceneStorage.get(`@gramio/scenes:${userId}`));
-    return typeof scene === 'object' && scene !== null && 'name' in scene && scene.name === CONNECT_TELEGRAM_SCENE;
-  } catch (err) {
-    chatLoggingLogger.warn({ err, userId }, 'scene storage unreadable — logging the text as connect-wizard input');
-    return true;
-  }
+  /** The connect-wizard guard's verdict on this update's text or edit, reached before this middleware. */
+  isConnectWizardInput: ConnectWizardGuard['isConnectWizardInput'];
 }
 
 export function createChatLogging(deps: ChatLoggingDeps) {
-  const { conversationLogger, actionLog, chatHistoryIds, sceneStorage } = deps;
+  const { conversationLogger, actionLog, chatHistoryIds, isConnectWizardInput } = deps;
   return async (context: ChatLoggingContext, next: Next) => {
     const user = context.dbUser;
     if (!user) return next();
@@ -66,11 +49,7 @@ export function createChatLogging(deps: ChatLoggingDeps) {
     const incomingText = context.update?.message?.text;
     const incomingMsgId = context.update?.message?.message_id;
     const editedMessage = context.update?.edited_message;
-    const typedInChatId = context.update?.message?.chat?.id ?? editedMessage?.chat?.id;
-    const inConnectWizard =
-      typedInChatId !== undefined &&
-      (incomingText !== undefined || editedMessage?.text !== undefined) &&
-      (await isInConnectWizard(sceneStorage, user.telegram_id, typedInChatId));
+    const inConnectWizard = isConnectWizardInput(context);
     if (incomingText) {
       if (inConnectWizard) {
         // A phone number, login code or 2FA password: keep the turn, never its text. Slash text is

@@ -131,19 +131,6 @@ export async function abortConnectAuth(userId: number, state: unknown): Promise<
   if (typeof sessionPath === 'string') await SessionBridge.cleanupTempFile(sessionPath);
 }
 
-/**
- * Take a message typed into the wizard off the chat once it is read: it may hold the phone number,
- * the login code or the 2FA password, and an edit arriving after the wizard closed would be logged
- * verbatim. A failed deletion is logged without the text and does not stop the flow.
- */
-export async function deleteWizardInput(message: { delete(): Promise<unknown> }, userId: number): Promise<void> {
-  await message
-    .delete()
-    .catch((err: unknown) =>
-      sceneLogger.warn({ err, userId }, 'failed to delete a message typed into the connect wizard'),
-    );
-}
-
 interface CancelAuthContext {
   answer: () => Promise<unknown>;
   send: (text: string, options?: { reply_markup?: InlineKeyboard | { remove_keyboard: true } }) => Promise<unknown>;
@@ -257,9 +244,7 @@ export function createConnectTelegramScene(
           }
           return;
         }
-
-        // Text typed before "Connect" may already be a credential: take it off the chat like at the prompts.
-        if (context.text?.trim()) await deleteWizardInput(context, userId);
+        // Text typed before "Connect" goes nowhere; the connect-wizard guard has taken it off the chat.
       })
 
       // Step 1: Phone number
@@ -283,10 +268,8 @@ export function createConnectTelegramScene(
           return;
         }
 
-        // Accept phone from shared contact or typed text
+        // Accept phone from shared contact or typed text (the connect-wizard guard took the text off the chat)
         const raw = context.text?.trim();
-        // Whatever was typed here may be the phone number: take it off the chat.
-        if (raw) await deleteWizardInput(context, userId);
         const sharedPhone = context.contact?.phoneNumber;
         const phoneInput = sharedPhone ?? raw;
         const phone = phoneInput ? normalizePhone(phoneInput) : undefined;
@@ -367,8 +350,6 @@ export function createConnectTelegramScene(
         if (guardHit || context.contact) return;
 
         const text = context.text?.trim();
-        // Whatever was typed here may be the login code (or the 2FA password typed too early): take it off the chat.
-        if (text) await deleteWizardInput(context, userId);
         const { encryptedPhoneHex, sessionPath, codeAttempts } = context.scene.state;
 
         const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
@@ -470,8 +451,6 @@ export function createConnectTelegramScene(
 
         if (pendingStepTransitions.delete(context.from.id)) return;
         const text = context.text?.trim();
-        // Every message at this prompt is a password attempt (or the code sent again): take it off the chat.
-        if (text) await deleteWizardInput(context, userId);
         // Fallback: if text looks like an OTP code (digits with optional spaces/dashes), it's re-processing
         const maybeOtp = text ? normalizeOtpCode(text) : undefined;
         if (maybeOtp && CODE_REGEX.test(maybeOtp)) return;

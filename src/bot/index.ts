@@ -80,10 +80,12 @@ import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps
 import { createPickerAckIo, runChatShareWithAck, runPickerBatchWithAck } from './handlers/picker-invitation.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { createChatLogging } from './middleware/chat-logging.ts';
+import { createConnectWizardGuard } from './middleware/connect-wizard-guard.ts';
 import { createRateLimitMiddleware, RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
 import { createUserResolver, createUserResolverComposer } from './middleware/user-resolver.ts';
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
+import { createConnectWizardTraces } from './scenes/connect-wizard-trace.ts';
 import { createScenesPlugin, createScopedSceneStorage } from './scenes/index.ts';
 import type { SceneKvStorage } from './scenes/types.ts';
 
@@ -524,6 +526,12 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   // are wired — this is the last in-createBot() mutation.
   msgDeps.onboardingScene = scenesSetup.scenes.onboardingScene;
 
+  // Recognises text typed into the Telegram-connect wizard; see connect-wizard-guard.ts.
+  const connectWizardGuard = createConnectWizardGuard({
+    sceneStorage: scenesSetup.storage,
+    traces: createConnectWizardTraces(db.db),
+  });
+
   // AI Assistant commands (not in setMyCommands — internal use only)
 
   bot
@@ -535,21 +543,24 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         context.update?.my_chat_member?.chat?.id;
       return runWithChatId(chatId ?? 0, next);
     })
+    // Before the rate limiter: wizard input it drops must still be taken off the chat, and before chat
+    // logging and the command escape, which close the wizard on a typed "/…" and must not log a password.
+    .use(connectWizardGuard.middleware)
     .use(createRateLimitMiddleware(rateLimiter))
-    // Chat logging runs before the command escape: a typed "/…" closes an open Telegram-connect
-    // wizard, and the logger must still see that wizard so a password starting with "/" is redacted.
     .use(
       createChatLogging({
         conversationLogger,
         actionLog: db.actionLog,
         chatHistoryIds,
-        sceneStorage: scenesSetup.storage,
+        isConnectWizardInput: connectWizardGuard.isConnectWizardInput,
       }),
     )
     // Storage<Record<string, any>> is not assignable to Storage (unparameterized) due to generic invariance
     .use(createSceneCommandEscape(scenesSetup.storage))
     .use(createCallbackFallback(scenesSetup.storage))
     .extend(scenesSetup.plugin)
+    // Wizard input whose wizard a concurrent update closed before the scene read it goes no further.
+    .use(connectWizardGuard.stopUnhandledInput)
     // Feature usage tracking for commands
     .on('message', (ctx, next) => {
       const text = ctx.text;

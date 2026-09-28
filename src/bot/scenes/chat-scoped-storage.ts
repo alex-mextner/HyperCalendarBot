@@ -3,6 +3,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 const als = new AsyncLocalStorage<number>();
 
+/** The key under which a chat-scoped storage keeps `key` for `chatId`. */
+export function chatScopedKey(key: string, chatId: number): string {
+  return `${key}:${chatId}`;
+}
+
 /**
  * Wraps a storage so every key is scoped to the current chat.
  * The ALS must be populated via runWithChatId() before any storage access.
@@ -16,7 +21,7 @@ export function wrapWithChatId(storage: {
   delete(key: string): unknown;
   has?(key: string): unknown;
 }): typeof storage {
-  const scoped = (key: string) => `${key}:${als.getStore() ?? 0}`;
+  const scoped = (key: string) => chatScopedKey(key, als.getStore() ?? 0);
   return {
     get: (key) => storage.get(scoped(key)),
     set: (key, value) => storage.set(scoped(key), value),
