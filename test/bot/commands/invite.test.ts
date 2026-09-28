@@ -17,6 +17,7 @@ const makeEvent = (id: number) => ({
   recurrence_end_at: null,
   parent_event_id: null,
   original_start_at: null,
+  identity_status: null,
   is_cancelled: 0,
   is_deleted: 0,
   created_at: '2026-03-01T00:00:00Z',

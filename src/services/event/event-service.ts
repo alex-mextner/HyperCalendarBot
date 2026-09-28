@@ -11,13 +11,8 @@ import { computeEventDiff, snapshotFromCalendarEvent } from '../google/change-de
 import type { ReminderMaterializer } from '../notification/materializer.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import type { ChangeNotifierOptions, EventChangeNotifier } from './event-change-notifier.ts';
-import {
-  computeFreeSpans,
-  isWithinMembership,
-  movedExceptionOccurrences,
-  recurrenceExpansionRange,
-} from './free-slots.ts';
-import { expandRecurrence } from './recurrence.ts';
+import { computeFreeSpans, isWithinMembership, recurrenceExpansionRange } from './free-slots.ts';
+import { expandRecurrence, RecurrenceUnsupportedError } from './recurrence.ts';
 
 export interface FreeSlot {
   start: string;
@@ -37,6 +32,10 @@ export interface EventServiceDeps {
   groupMemberRepo?: GroupMemberRepository;
   changeNotifier?: EventChangeNotifier;
   domainEvents?: DomainEventBus;
+  /** Capability-gated recurrence-engine rollout (spec §10) — see `RECURRENCE_V2_ENABLED` in
+   * src/config/env.ts. Defaults to the pre-583 single-RRULE-line engine (safe/unchanged); set
+   * true only once the multiline RRULE/EXDATE/RDATE engine has passed final consumer parity. */
+  recurrenceV2Enabled?: boolean;
 }
 
 export class EventService {
@@ -47,6 +46,7 @@ export class EventService {
   private groupMemberRepo?: GroupMemberRepository;
   private changeNotifier?: EventChangeNotifier;
   private domainEvents?: DomainEventBus;
+  private recurrenceV2Enabled: boolean;
 
   constructor(deps: EventServiceDeps) {
     this.agendaRepository = deps.agendaRepository;
@@ -56,6 +56,36 @@ export class EventService {
     this.groupMemberRepo = deps.groupMemberRepo;
     this.changeNotifier = deps.changeNotifier;
     this.domainEvents = deps.domainEvents;
+    this.recurrenceV2Enabled = deps.recurrenceV2Enabled ?? false;
+  }
+
+  /**
+   * Expand one recurring template, isolating an unsupported series (spec §9: multiple RRULE,
+   * EXRULE, mismatched EXDATE/RDATE value types, or — capability-gated rollback, spec §10 — an
+   * EXDATE/RDATE-bearing series while the legacy engine is forced) so it never breaks the rest
+   * of a user's agenda/free-busy/reminder query.
+   */
+  private expandTemplate(
+    template: CalendarEvent,
+    exceptions: CalendarEvent[],
+    startUtc: string,
+    endUtc: string,
+  ): EventOccurrence[] {
+    try {
+      return expandRecurrence(template, exceptions, startUtc, endUtc, {
+        legacyEngine: !this.recurrenceV2Enabled,
+      }).occurrences;
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          eventId: template.id,
+          reason: err instanceof RecurrenceUnsupportedError ? err.reason : undefined,
+        },
+        'Skipping unsupported recurrence series while expanding occurrences',
+      );
+      return [];
+    }
   }
 
   createEvent(data: CreateEventData): CalendarEvent {
@@ -217,7 +247,7 @@ export class EventService {
     const recurring: EventOccurrence[] = [];
     for (const template of templates) {
       const exceptions = this.eventRepo.getExceptions(template.id);
-      let expanded = expandRecurrence(template, exceptions, startUtc, endUtc);
+      let expanded = this.expandTemplate(template, exceptions, startUtc, endUtc);
 
       // Clip group event occurrences to membership window
       if (template.owner_type === 'group' && template.group_id && this.groupMemberRepo) {
@@ -286,8 +316,7 @@ export class EventService {
   private expandTemplateForOverlap(template: CalendarEvent, startUtc: string, endUtc: string): EventOccurrence[] {
     const exceptions = this.eventRepo.getExceptions(template.id);
     const { fromUtc, toUtc } = recurrenceExpansionRange(template, startUtc, endUtc);
-    const expanded = expandRecurrence(template, exceptions, fromUtc, toUtc);
-    return [...expanded, ...movedExceptionOccurrences(template, exceptions, expanded)];
+    return this.expandTemplate(template, exceptions, fromUtc, toUtc);
   }
 
   getFreeSlots(userId: number, date: Date, timezone: string): FreeSlot[] {
@@ -396,7 +425,7 @@ export class EventService {
     const recurring: EventOccurrence[] = [];
     for (const template of templates) {
       const exceptions = this.eventRepo.getExceptions(template.id);
-      const expanded = expandRecurrence(template, exceptions, startUtc, endUtc);
+      const expanded = this.expandTemplate(template, exceptions, startUtc, endUtc);
       recurring.push(...expanded);
     }
 
@@ -459,7 +488,7 @@ export class EventService {
     const templates = events.filter((e) => e.recurrence_rule);
     for (const template of templates) {
       const exceptions = this.eventRepo.getExceptions(template.id);
-      const expanded = expandRecurrence(template, exceptions, now, farFuture);
+      const expanded = this.expandTemplate(template, exceptions, now, farFuture);
       recurring.push(...expanded.slice(0, limit));
     }
 
@@ -495,12 +524,16 @@ export class EventService {
     const rangeEnd = new Date(now.getTime() + HORIZON_DAYS * 24 * 60 * 60_000).toISOString();
 
     const exceptions = this.eventRepo.getExceptions(event.id);
-    const occurrences = expandRecurrence(event, exceptions, rangeStart, rangeEnd);
+    const occurrences = this.expandTemplate(event, exceptions, rangeStart, rangeEnd);
 
+    const baseInstantMs = Date.parse(event.start_at);
     for (const occ of occurrences) {
       if (occ.is_exception && occ.event.is_cancelled) continue;
-      // Skip the base occurrence — already materialized by the caller
-      if (occ.occurrence_start === event.start_at) continue;
+      // Skip the base occurrence — already materialized by the caller. Compare instants, not
+      // raw strings: event.start_at may not be in canonical toISOString() form (no
+      // milliseconds, an explicit offset, …) while occ.occurrence_start always is, so a string
+      // compare could miss the match and materialize a duplicate base reminder.
+      if (Date.parse(occ.occurrence_start) === baseInstantMs) continue;
 
       this.materializer.materializeForOccurrence(
         event.id,

@@ -147,7 +147,12 @@ export interface CreateBotOpts {
   pendingGeoStore?: import('../services/location/pending-geo-store.ts').PendingGeoStore;
   envConfig?: Pick<
     EnvConfig,
-    'BOT_ADMIN_ID' | 'INTENT_LEARNER_DAILY_LIMIT' | 'BOT_USERNAME' | 'INLINE_BOT_TOKEN' | 'TELEGRAM_SESSION_MASTER_KEY'
+    | 'BOT_ADMIN_ID'
+    | 'INTENT_LEARNER_DAILY_LIMIT'
+    | 'BOT_USERNAME'
+    | 'INLINE_BOT_TOKEN'
+    | 'TELEGRAM_SESSION_MASTER_KEY'
+    | 'RECURRENCE_V2_ENABLED'
   >;
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
   broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
@@ -178,7 +183,11 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     broadcastEnqueuer,
     changeNotifier,
   } = opts;
-  const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
+  const materializer = new ReminderMaterializer(
+    db.eventReminders,
+    db.notificationPreferences,
+    envConfig?.RECURRENCE_V2_ENABLED,
+  );
   const eventService = new EventService({
     eventRepo: db.events,
     agendaRepository: new AgendaRepository(db.db),
@@ -187,6 +196,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     groupMemberRepo: db.groupMembers,
     domainEvents: domainEventBus,
     changeNotifier,
+    recurrenceV2Enabled: envConfig?.RECURRENCE_V2_ENABLED,
   });
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();

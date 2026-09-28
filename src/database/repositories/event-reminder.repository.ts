@@ -57,10 +57,29 @@ export class EventReminderRepository {
     this.db.prepare('DELETE FROM event_reminders WHERE user_id = ? AND sent = 0').run(userId);
   }
 
-  existsForEventAt(eventId: number, remindAtUtc: string): boolean {
+  /**
+   * Reminder identity is (event, recipient, occurrence, interval, label) — NOT
+   * (event_id, remind_at_utc). Two different recipients of the same event/occurrence
+   * legitimately share remind_at_utc, and so do two different occurrences of a
+   * multi-time-of-day series (e.g. BYHOUR=10,14) whose independently configured intervals
+   * happen to compute the same remind_at_utc; interval_label additionally distinguishes the
+   * two same-interval_minutes(-1) all-day reminders ("day before" / "day of"). See spec §7,
+   * docs/superpowers/specs/2026-09-28-recurrence-semantics-583.md (corrected after #554
+   * review — an earlier draft proposed UNIQUE(event_id, remind_at_utc), which collides on
+   * both of the cases above and was never implemented).
+   */
+  existsForOccurrence(
+    eventId: number,
+    userId: number,
+    occurrenceStart: string,
+    intervalMinutes: number,
+    intervalLabel: string,
+  ): boolean {
     const row = this.db
-      .prepare('SELECT 1 FROM event_reminders WHERE event_id = ? AND remind_at_utc = ?')
-      .get(eventId, remindAtUtc);
+      .prepare(
+        'SELECT 1 FROM event_reminders WHERE event_id = ? AND user_id = ? AND occurrence_start = ? AND interval_minutes = ? AND interval_label = ?',
+      )
+      .get(eventId, userId, occurrenceStart, intervalMinutes, intervalLabel);
     return row != null;
   }
 
