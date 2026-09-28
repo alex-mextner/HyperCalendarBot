@@ -7,6 +7,7 @@ import { InlineKeyboard } from 'gramio';
 import { CB, type Lang, t } from '../../config/constants.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import { handleCalculate } from '../../services/ai/tool-handlers/calculate.ts';
+import { resolveWizardWallTime } from '../../services/calendar/wall-time-adapters.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import type { LocationVerificationService } from '../../services/location/location-verification-service.ts';
@@ -161,6 +162,33 @@ export function parseWizardDateTime(
   return { kind: 'invalid' };
 }
 
+/** Button label for one ambiguous-time candidate: a bare "HH:MM" as-is, an offset-qualified DST-fold instant as "HH:MM (UTCoffset)". */
+function formatTimeCandidate(candidate: string): string {
+  const offsetInstant = /^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2}):\d{2}([+-]\d{2}:\d{2})$/.exec(candidate);
+  return offsetInstant ? `${offsetInstant[1]} (UTC${offsetInstant[2]})` : candidate;
+}
+
+/**
+ * Resolves one of the two candidates offered for an ambiguous time selection to a UTC instant.
+ * A bare "HH:MM" candidate (bare-hour ambiguity) is re-run through the shared parser as literal
+ * 24h input, anchored to the same pendingDate/timezone — never re-guessed, and still DST-checked.
+ * An offset-qualified instant (DST-fold ambiguity) names its exact UTC offset, but the callback
+ * data carrying it is client-controlled, so it is only accepted if it is exactly one of the two
+ * candidates the parser itself would (re-)offer for that HH:MM on this same pendingDate — never
+ * an arbitrary attacker-supplied date/offset smuggled through a crafted "add:time:<iso>" click.
+ */
+function resolveChosenCandidate(candidate: string, pendingDate: string, timezone: string): string | null {
+  if (/^\d{2}:\d{2}$/.test(candidate)) {
+    const resolution = resolveWizardWallTime(candidate, { selectedDate: pendingDate, timezone });
+    return resolution.kind === 'complete' && resolution.schedule.kind === 'timed' ? resolution.schedule.startAt : null;
+  }
+  const offsetInstant = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):\d{2}[+-]\d{2}:\d{2}$/.exec(candidate);
+  if (!offsetInstant || offsetInstant[1] !== pendingDate) return null;
+  const resolution = resolveWizardWallTime(offsetInstant[2]!, { selectedDate: pendingDate, timezone });
+  if (resolution.kind !== 'ambiguous_instant' || !resolution.candidates.includes(candidate)) return null;
+  return new Date(candidate).toISOString();
+}
+
 function recurrenceUntilDate(input: string, timezone: string, startAt?: string): Date | null {
   return parseWizardDate(input, timezone, startAt && /\d/.test(input) ? new Date(startAt) : new Date(), true);
 }
@@ -181,10 +209,24 @@ function recurrenceUntilValue(date: Date, timezone: string): string {
     .replace(/\.\d{3}/, '');
 }
 
-function wizardKeyboard(step: number, lang: Lang, number?: string): InlineKeyboard {
+function wizardKeyboard(
+  step: number,
+  lang: Lang,
+  opts: { number?: string; pendingDate?: string; timeCandidates?: readonly [string, string] } = {},
+): InlineKeyboard {
   const kb = new InlineKeyboard();
   const wizardText = t(lang).addWizard;
-  if (step === 1) kb.text(wizardText.today, 'add:date:today').text(wizardText.tomorrow, 'add:date:tomorrow').row();
+  if (step === 1) {
+    if (opts.timeCandidates) {
+      for (const candidate of opts.timeCandidates)
+        kb.text(formatTimeCandidate(candidate), `${CB.ADD_TIME_CHOICE}:${candidate}`);
+      kb.row();
+    } else if (opts.pendingDate) {
+      kb.text(wizardText.allDay, CB.ADD_ALL_DAY).text(wizardText.changeDate, CB.ADD_CHANGE_DATE).row();
+    } else {
+      kb.text(wizardText.today, 'add:date:today').text(wizardText.tomorrow, 'add:date:tomorrow').row();
+    }
+  }
   if (step === 2)
     kb.text(wizardText.duration30, 'add:duration:30')
       .text(wizardText.duration60, 'add:duration:60')
@@ -196,9 +238,9 @@ function wizardKeyboard(step: number, lang: Lang, number?: string): InlineKeyboa
       kb.text(wizardText.frequencies[freq], `${CB.ADD_RECURRENCE}:${freq}`).row();
   }
   if (step === 4) {
-    if (number)
-      kb.text(wizardText.untilChoice(number), `${CB.ADD_REC_END}:until:${number}`)
-        .text(wizardText.countChoice(number), `${CB.ADD_REC_END}:count:${number}`)
+    if (opts.number)
+      kb.text(wizardText.untilChoice(opts.number), `${CB.ADD_REC_END}:until:${opts.number}`)
+        .text(wizardText.countChoice(opts.number), `${CB.ADD_REC_END}:count:${opts.number}`)
         .row();
     kb.text(wizardText.noEnd, `${CB.ADD_REC_END}:forever`)
       .text(wizardText.untilDate, `${CB.ADD_REC_END}:until`)
@@ -219,12 +261,17 @@ function draftPreview(state: AddEventState, lang: Lang, timezone: string): strin
     );
   const field = (value: string | undefined, limit: number) =>
     escapeHtml(value ? value.slice(0, limit) + (value.length > limit ? '…' : '') : wizardText.none);
+  const dateLine = state.startAt
+    ? state.allDay
+      ? `${new Intl.DateTimeFormat(lang, { timeZone: timezone, dateStyle: 'medium' }).format(new Date(state.startAt))} (${wizardText.allDay})`
+      : local(state.startAt)
+    : '—';
   const lines = [
     `<b>${wizardText.preview}</b>`,
     `${wizardText.title}: ${field(state.title, 300)}`,
-    `${wizardText.date}: ${state.startAt ? local(state.startAt) : '—'} (${escapeHtml(timezone)})`,
+    `${wizardText.date}: ${dateLine} (${escapeHtml(timezone)})`,
   ];
-  if (state.endAt) lines.push(`${wizardText.end}: ${local(state.endAt)}`);
+  if (state.endAt && !state.allDay) lines.push(`${wizardText.end}: ${local(state.endAt)}`);
   let repeat: string = wizardText.none;
   const freq = /FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)/.exec(state.recurrenceRule ?? '')?.[1];
   if (freq === 'DAILY' || freq === 'WEEKLY' || freq === 'MONTHLY' || freq === 'YEARLY') {
@@ -264,12 +311,14 @@ export function createAddEventScene(
       const wizardText = t(lang).addWizard;
       const state = context.scene.state;
       const timezone = state.timezone ?? context.scene.params?.timezone ?? user.timezone;
-      const show = async (text: string, number?: string, html = false) => {
+      const show = async (text: string, number?: string, html = false, timeCandidates?: readonly [string, string]) => {
         const chunks = splitMessage(text, 4000, html ? 'HTML' : undefined);
         for (const [index, chunk] of chunks.entries()) {
           const last = index === chunks.length - 1;
           const message = await context.send(chunk, {
-            ...(last ? { reply_markup: wizardKeyboard(step, lang, number) } : {}),
+            ...(last
+              ? { reply_markup: wizardKeyboard(step, lang, { number, pendingDate: state.pendingDate, timeCandidates }) }
+              : {}),
             ...(html ? { parse_mode: 'HTML' as const } : {}),
           });
           if (last) await context.scene.update({ promptMessageId: message.id }, { step: undefined });
@@ -319,7 +368,7 @@ export function createAddEventScene(
           return;
         }
         if (callback === `add:back:${step}` && step > 0) {
-          const previous = step === 5 && !state.recurrenceRule ? 3 : step - 1;
+          const previous = step === 5 && !state.recurrenceRule ? 3 : step === 3 && state.allDay ? 1 : step - 1;
           await context.scene.step.go(previous, true);
           return;
         }
@@ -335,19 +384,116 @@ export function createAddEventScene(
           return;
         }
         await context.scene.update({ title: text });
+      } else if (step === 1 && state.pendingDate) {
+        // A date is already chosen — resolve TIME OF DAY / all-day via the shared, DST-aware
+        // parser (GH-650/GH-652: replaces the old completeWizardTime, which silently guessed a
+        // bare "2" as 02:00 instead of asking — see wall-time-parser.ts's bare-hour invariant).
+        const pendingDate = state.pendingDate;
+        if (callback === CB.ADD_CHANGE_DATE) {
+          await context.scene.update(
+            { pendingDate: undefined, startAt: undefined, endAt: undefined, allDay: false },
+            { step: undefined },
+          );
+          await show(t(lang).add_time_prompt);
+          return;
+        }
+        if (callback === CB.ADD_ALL_DAY) text = 'весь день';
+        const chosenCandidate = callback.startsWith(`${CB.ADD_TIME_CHOICE}:`)
+          ? callback.slice(CB.ADD_TIME_CHOICE.length + 1)
+          : undefined;
+        if (chosenCandidate !== undefined) {
+          const startAt = resolveChosenCandidate(chosenCandidate, pendingDate, timezone);
+          if (!startAt) {
+            await show(wizardText.invalidDate);
+            return;
+          }
+          await context.scene.update({ startAt, endAt: undefined, pendingDate: undefined, allDay: false });
+          return;
+        }
+        if (!text) {
+          await show(wizardText.unsupported);
+          return;
+        }
+        const resolution = resolveWizardWallTime(text, { selectedDate: pendingDate, timezone });
+        switch (resolution.kind) {
+          case 'complete':
+            if (resolution.schedule.kind === 'timed') {
+              await context.scene.update({
+                startAt: resolution.schedule.startAt,
+                endAt: undefined,
+                pendingDate: undefined,
+                allDay: false,
+              });
+            } else {
+              await context.scene.update(
+                {
+                  startAt: `${resolution.schedule.startDate}T00:00:00.000Z`,
+                  endAt: `${resolution.schedule.endDateExclusive}T00:00:00.000Z`,
+                  pendingDate: undefined,
+                  allDay: true,
+                },
+                { step: 3 },
+              );
+            }
+            return;
+          case 'ambiguous_number':
+          case 'ambiguous_instant':
+            await show(wizardText.ambiguousTime, undefined, false, resolution.candidates);
+            return;
+          case 'clarify':
+            await show(wizardText.timeUnknown);
+            return;
+          case 'invalid': {
+            // Not recognized as any kind of time phrase — it might still be a full date
+            // correction ("26 сен 20:00"), which is the free-form date grammar's job,
+            // unchanged from before.
+            const corrected = resolution.reason === 'unparseable' ? parseWizardDateTime(text, timezone) : null;
+            if (corrected?.kind === 'needs_time') {
+              await context.scene.update(
+                { pendingDate: corrected.localDate, startAt: undefined, endAt: undefined, allDay: false },
+                { step: undefined },
+              );
+              await show(wizardText.askTime(corrected.localDate));
+              return;
+            }
+            if (corrected?.kind === 'complete') {
+              await context.scene.update({
+                startAt: corrected.startAt,
+                pendingDate: undefined,
+                endAt: undefined,
+                allDay: false,
+              });
+              return;
+            }
+            await show(wizardText.invalidDate);
+            return;
+          }
+          default:
+            // Unreachable — selectedDate/pendingField are always supplied above.
+            await show(wizardText.invalidDate);
+        }
       } else if (step === 1) {
+        // No date chosen yet — resolve the DATE. Free-form date grammar, unchanged.
         if (callback === 'add:date:today') text = 'today';
         if (callback === 'add:date:tomorrow') text = 'tomorrow';
         if (!text) {
           await show(wizardText.unsupported);
           return;
         }
-        const parsed = parseWizardDateTime(text, timezone, state.pendingDate);
+        const parsed = parseWizardDateTime(text, timezone);
         if (parsed.kind === 'needs_time') {
-          await context.scene.update({ pendingDate: parsed.localDate, startAt: undefined }, { step: undefined });
+          await context.scene.update(
+            { pendingDate: parsed.localDate, startAt: undefined, endAt: undefined, allDay: false },
+            { step: undefined },
+          );
           await show(wizardText.askTime(parsed.localDate));
         } else if (parsed.kind === 'complete') {
-          await context.scene.update({ startAt: parsed.startAt, pendingDate: undefined, endAt: undefined });
+          await context.scene.update({
+            startAt: parsed.startAt,
+            pendingDate: undefined,
+            endAt: undefined,
+            allDay: false,
+          });
         } else await show(parsed.kind === 'ambiguous_number' ? wizardText.ambiguousDate : wizardText.invalidDate);
       } else if (step === 2) {
         const quick = /^add:duration:(30|60|120)$/.exec(callback)?.[1];
@@ -468,6 +614,7 @@ export function createAddEventScene(
               title,
               start_at: startAt,
               end_at: endAt,
+              all_day: state.allDay,
               timezone,
               description,
               location,

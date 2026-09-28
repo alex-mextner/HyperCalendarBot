@@ -30,7 +30,7 @@ const closes: (() => void)[] = [];
 afterEach(() => {
   for (const close of closes.splice(0)) close();
 });
-function makeRuntime(groupTimezone?: string) {
+function makeRuntime(groupTimezone?: string, lang: 'en' | 'ru' = 'ru') {
   const db = new DatabaseService(':memory:');
   const service = new EventService({ eventRepo: db.events });
   const storage = createSceneStorage(db.db);
@@ -39,7 +39,7 @@ function makeRuntime(groupTimezone?: string) {
     groupTimezone === undefined
       ? { id: userId, type: 'private' as const }
       : { id: -700002, type: 'group' as const, title: 'Synthetic group' };
-  db.users.create({ telegram_id: userId, language: 'ru', timezone: 'Europe/Belgrade' });
+  db.users.create({ telegram_id: userId, language: lang, timezone: 'Europe/Belgrade' });
   if (groupTimezone !== undefined) {
     db.groupChats.upsertGroup({ chat_id: chat.id, title: 'Synthetic group', added_by: userId });
     db.groupMembers.upsert(chat.id, userId);
@@ -284,4 +284,182 @@ test('Back allows editing a title seeded by the command without applying it agai
   await r.click('ask:2');
   await r.click('ar:none');
   expect((await finishDraft(r)).title).toBe('Changed title');
+});
+
+// ---------------------------------------------------------------------------
+// Legacy /add wizard time step wired to the shared wall-time parser (GH-650/GH-652
+// bounded repair, PR682): bare-hour ambiguity, DST fold/gap, all-day, and the keyboard
+// that now depends on what is actually pending, not just the numeric step.
+// ---------------------------------------------------------------------------
+
+test('the date question offers Today/Tomorrow; the time question swaps to All day and Change date', async () => {
+  const r = makeRuntime();
+  await r.send('/add');
+  await r.send('Встреча');
+  const dateButtons = r.messages
+    .at(-1)!
+    .keyboard?.inline_keyboard.flat()
+    .map((b) => b.callback_data);
+  expect(dateButtons).toEqual(expect.arrayContaining(['add:date:today', 'add:date:tomorrow']));
+  await r.send('завтра');
+  expect(r.messages.at(-1)!.text).toMatch(/во сколько/i);
+  const timeButtons = r.messages
+    .at(-1)!
+    .keyboard?.inline_keyboard.flat()
+    .map((b) => b.callback_data);
+  expect(timeButtons).toEqual(expect.arrayContaining(['add:allday', 'add:changedate']));
+  expect(timeButtons).not.toContain('add:date:today');
+  expect(timeButtons).not.toContain('add:date:tomorrow');
+});
+
+test('a bare hour after the date offers 02:00/14:00 and writes nothing until one is chosen', async () => {
+  const r = makeRuntime();
+  await r.send('/add Йога 2027-01-15');
+  expect(r.messages.at(-1)!.text).toMatch(/во сколько/i);
+  await r.send('2');
+  expect(r.count()).toBe(0);
+  const candidates = r.messages
+    .at(-1)!
+    .keyboard?.inline_keyboard.flat()
+    .map((b) => b.callback_data);
+  expect(candidates).toEqual(expect.arrayContaining(['add:time:02:00', 'add:time:14:00']));
+  await r.click('add:time:14:00');
+  expect(r.messages.at(-1)!.text).toMatch(/длится/i);
+  await r.click('add:duration:30');
+  await r.click('ar:none');
+  const event = await finishDraft(r);
+  expect(event.start_at).toBe('2027-01-15T13:00:00.000Z');
+  expect(event.all_day).toBe(0);
+});
+
+test('a spelled-out Russian hour resolves through the same ambiguity as its digit form', async () => {
+  const r = makeRuntime();
+  await r.send('/add Йога 2027-01-15');
+  await r.send('два');
+  const candidates = r.messages
+    .at(-1)!
+    .keyboard?.inline_keyboard.flat()
+    .map((b) => b.callback_data);
+  expect(candidates).toEqual(expect.arrayContaining(['add:time:02:00', 'add:time:14:00']));
+  await r.click('add:time:02:00');
+  await r.click('add:duration:30');
+  await r.click('ar:none');
+  expect((await finishDraft(r)).start_at).toBe('2027-01-15T01:00:00.000Z');
+});
+
+test('a time repeated by the fall-back fold offers both offsets; the chosen one is exact, never guessed', async () => {
+  const r = makeRuntime();
+  await r.send('/add Звонок 2026-10-25');
+  await r.send('02:00');
+  expect(r.count()).toBe(0);
+  const candidates = (
+    r.messages
+      .at(-1)!
+      .keyboard?.inline_keyboard.flat()
+      .map((b) => b.callback_data) ?? []
+  ).filter((d): d is string => !!d?.startsWith('add:time:'));
+  expect(candidates).toHaveLength(2);
+  expect(candidates[0]).not.toBe(candidates[1]);
+  await r.click(candidates[0]!);
+  await r.click('add:duration:30');
+  await r.click('ar:none');
+  const event = await finishDraft(r);
+  expect(['2026-10-25T00:00:00.000Z', '2026-10-25T01:00:00.000Z']).toContain(event.start_at);
+});
+
+test('a bare-hour candidate landing inside a spring-forward gap is rejected, never silently accepted', async () => {
+  const r = makeRuntime();
+  await r.send('/add Йога 2026-03-29');
+  await r.send('2');
+  await r.click('add:time:02:00');
+  expect(r.count()).toBe(0);
+  expect(r.messages.at(-1)!.text).toMatch(/разобрать/i);
+});
+
+test('the All day button sets all_day, skips the duration step, and stores an exclusive next-day end', async () => {
+  const r = makeRuntime();
+  await r.send('/add Отпуск 2027-03-10');
+  await r.click('add:allday');
+  expect(r.messages.at(-1)!.text).toMatch(/повторять/i);
+  await r.click('ar:none');
+  const event = await finishDraft(r);
+  expect(event.all_day).toBe(1);
+  expect(event.start_at).toBe('2027-03-10T00:00:00.000Z');
+  expect(event.end_at).toBe('2027-03-11T00:00:00.000Z');
+});
+
+test('typing "весь день" is equivalent to the All day button', async () => {
+  const r = makeRuntime();
+  await r.send('/add Отпуск 2027-06-01');
+  await r.send('весь день');
+  expect(r.messages.at(-1)!.text).toMatch(/повторять/i);
+  await r.click('ar:none');
+  const event = await finishDraft(r);
+  expect(event.all_day).toBe(1);
+  expect(event.start_at).toBe('2027-06-01T00:00:00.000Z');
+  expect(event.end_at).toBe('2027-06-02T00:00:00.000Z');
+});
+
+test('going back out of an all-day draft returns to the date question, skipping the removed duration step', async () => {
+  const r = makeRuntime();
+  await r.send('/add Отпуск 2027-04-01');
+  await r.click('add:allday');
+  await r.click('add:back:3');
+  expect(r.messages.at(-1)!.text).toMatch(/когда/i);
+  await r.send('2027-04-02 15:00');
+  expect(r.messages.at(-1)!.text).toMatch(/длится/i);
+  await r.click('add:duration:30');
+  await r.click('ar:none');
+  const event = await finishDraft(r);
+  expect(event.all_day).toBe(0);
+  expect(event.start_at).toBe('2027-04-02T13:00:00.000Z');
+  expect(event.end_at).toBe('2027-04-02T13:30:00.000Z');
+});
+
+test('Change date clears only the pending date/time, keeping the title', async () => {
+  const r = makeRuntime();
+  await r.send('/add Йога 2027-01-15');
+  await r.click('add:changedate');
+  expect(r.messages.at(-1)!.text).toMatch(/когда/i);
+  await r.send('2027-02-01');
+  expect(r.messages.at(-1)!.text).toMatch(/во сколько/i);
+  await r.send('09:00');
+  await r.click('add:duration:30');
+  await r.click('ar:none');
+  const event = await finishDraft(r);
+  expect(event.title).toBe('Йога');
+  expect(event.start_at).toBe('2027-02-01T08:00:00.000Z');
+  expect(event.all_day).toBe(0);
+});
+
+test('a stale All day button from a superseded time question is rejected without altering the draft', async () => {
+  const r = makeRuntime();
+  await r.send('/add Прогулка 2027-05-05');
+  const staleId = r.messages.at(-1)!.id;
+  await r.send('10:00');
+  await r.click('add:allday', staleId);
+  expect(r.count()).toBe(0);
+  await r.click('add:duration:30');
+  await r.click('ar:none');
+  const event = await finishDraft(r);
+  expect(event.all_day).toBe(0);
+  expect(event.start_at).toBe('2027-05-05T08:00:00.000Z');
+});
+
+test('English locale: the time question keyboard and ambiguous-time prompt are in English', async () => {
+  const r = makeRuntime(undefined, 'en');
+  await r.send('/add Yoga 2027-01-15');
+  expect(r.messages.at(-1)!.text).toMatch(/what time/i);
+  const timeButtons = r.messages
+    .at(-1)!
+    .keyboard?.inline_keyboard.flat()
+    .map((b) => b.callback_data);
+  expect(timeButtons).toEqual(expect.arrayContaining(['add:allday', 'add:changedate']));
+  await r.send('2');
+  expect(r.messages.at(-1)!.text).toMatch(/which time/i);
+  await r.click('add:time:14:00');
+  await r.click('add:duration:30');
+  await r.click('ar:none');
+  const event = await finishDraft(r);
+  expect(event.start_at).toBe('2027-01-15T13:00:00.000Z');
 });

@@ -1,11 +1,15 @@
 // src/services/calendar/wall-time-adapters.ts
 //
-// The two future call-site shapes for the shared parser (GH-650): one matching the add
-// wizard's existing `WizardDateTimeResult` tagged-union convention (add-event.scene.ts),
-// one matching the intent binding's existing accept/reject convention
-// (workflow-bindings.ts). Neither is wired into its production call site by this slice —
-// GH-652 owns swapping `parseWizardDateTime`/`parseTime` for these once the legacy
-// wrapper's compatibility for active sessions is explicitly flag-gated.
+// Two call-site shapes for the shared parser (GH-650): one matching the add wizard's
+// existing `WizardDateTimeResult` tagged-union convention (add-event.scene.ts), one
+// matching the intent binding's existing accept/reject convention (workflow-bindings.ts).
+//
+// `resolveWizardWallTime` is wired into add-event.scene.ts's step-1 time question as of
+// the bounded GH-652 legacy-UX repair (PR682) — it now owns bare-hour/DST-fold ambiguity
+// and all-day for that path; `parseWizardDateTime` still owns free-form date parsing only.
+// `resolveIntentWallTime` remains unused: GH-652's full v3 runtime still owns swapping
+// `parseTime` in workflow-bindings.ts for it, and flag-gating the legacy wrapper's
+// compatibility for in-flight intent sessions across that cutover.
 //
 // Both adapters are thin transforms of one shared `resolve()` call, and `resolve()`
 // switches on `WallTimeOutcome['decision']` with a `never`-typed default — so adding a

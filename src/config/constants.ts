@@ -81,6 +81,9 @@ export const CB = {
   GEO_TZ_DISMISS: 'gtzd',
   SCENE_HELP: 'scene_help',
   ADD_CANCEL: 'add:cancel',
+  ADD_ALL_DAY: 'add:allday',
+  ADD_CHANGE_DATE: 'add:changedate',
+  ADD_TIME_CHOICE: 'add:time',
   LOCATION_GEO: 'loc_geo',
   LOCATION_CANDIDATE: 'loc_cand',
   CT_TZ_UPDATE: 'ct_tzu',
@@ -283,6 +286,11 @@ export const MSG = {
         'I cannot parse that date and time, or it falls in a clock change. Try “25 Sep 19:00” or send another time.',
       ambiguousDate: 'Is that a day of the month or a time? For example: “15 Sep” or “15:00”.',
       askTime: (date: string) => `📅 ${date}. What time? For example: “19:00” or “7 pm”.`,
+      allDay: 'All day',
+      changeDate: 'Change date',
+      ambiguousTime: 'Which time did you mean?',
+      timeUnknown:
+        'That doesn\u2019t set all day or a specific time. Try \u201c19:00\u201d, \u201c7 pm\u201d, or choose All day.',
       duration: (minutes: number) =>
         `⏱ 3/6 · How long?\nChoose a button or type a duration. Skip uses your default: ${minutes} min.`,
       invalidDuration: 'Try “30m”, “1h” or “1h30m”, or choose a button.',
@@ -1279,6 +1287,10 @@ export const MSG = {
         'Не могу разобрать дату и время, либо это время перевода часов. Например: «25 сен 19:00». Можно выбрать другое время.',
       ambiguousDate: 'Это число месяца или время? Например: «15 сен» или «15:00».',
       askTime: (date: string) => `📅 ${date}. Во сколько? Например: «19:00» или «7 вечера».`,
+      allDay: 'Весь день',
+      changeDate: 'Изменить дату',
+      ambiguousTime: 'Какое время ты имел в виду?',
+      timeUnknown: 'Это не задаёт ни время, ни весь день. Напиши «19:00», «7 вечера» или выбери «Весь день».',
       duration: (minutes: number) =>
         `⏱ 3/6 · Сколько длится?\nВыбери кнопку или напиши длительность. «Пропустить» — твои ${minutes} мин по умолчанию.`,
       invalidDuration: 'Напиши «30м», «1ч» или «1ч30м», либо выбери кнопку.',
