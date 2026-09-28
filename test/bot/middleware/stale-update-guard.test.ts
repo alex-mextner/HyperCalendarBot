@@ -10,8 +10,9 @@ const NOW_MS = Date.parse('2026-09-27T17:14:00Z');
 
 function messageUpdate(chatId: number, sentAt: string, type = 'private'): StaleUpdateContext {
   return {
-    update: { message: { date: Date.parse(sentAt) / 1000, chat: { id: chatId, type } } },
-    dbUser: { language: 'ru' },
+    update: {
+      message: { date: Date.parse(sentAt) / 1000, chat: { id: chatId, type }, from: { language_code: 'ru' } },
+    },
   };
 }
 
@@ -61,12 +62,23 @@ describe('stale update guard', () => {
     expect(await passes(guard, messageUpdate(502, pastLimit))).toBe(false);
   });
 
-  test('a stale edit is not replayed either', async () => {
+  test('an edit is aged by when it was edited, not when the message was first sent', async () => {
     const { guard, notes } = makeGuard();
-    const stale = messageUpdate(501, '2026-09-27T14:00:00Z');
-    const edit: StaleUpdateContext = { update: { edited_message: stale.update?.message }, dbUser: stale.dbUser };
-    expect(await passes(guard, edit)).toBe(false);
+    const original = messageUpdate(501, '2026-09-27T14:00:00Z').update?.message;
+    if (!original) throw new Error('fixture has no message');
+    const freshEdit = { ...original, edit_date: Date.parse('2026-09-27T17:13:30Z') / 1000 };
+    const staleEdit = { ...original, edit_date: Date.parse('2026-09-27T14:05:00Z') / 1000 };
+    expect(await passes(guard, { update: { edited_message: freshEdit } })).toBe(true);
+    expect(await passes(guard, { update: { edited_message: staleEdit } })).toBe(false);
     expect(notes).toHaveLength(1);
+  });
+
+  test('a fresh message ends the backlog, so the next outage notifies the chat again', async () => {
+    const { guard, notes } = makeGuard();
+    await passes(guard, messageUpdate(501, '2026-09-27T14:00:00Z'));
+    await passes(guard, messageUpdate(501, '2026-09-27T17:13:00Z'));
+    await passes(guard, messageUpdate(501, '2026-09-27T15:00:00Z'));
+    expect(notes).toHaveLength(2);
   });
 
   test('a note that cannot be delivered (bot blocked) still skips quietly', async () => {
@@ -88,7 +100,7 @@ describe('stale update guard', () => {
 
   test('updates without a message date (button presses, membership changes) pass through', async () => {
     const { guard, notes } = makeGuard();
-    expect(await passes(guard, { update: {}, dbUser: { language: 'ru' } })).toBe(true);
+    expect(await passes(guard, { update: {} })).toBe(true);
     expect(notes).toEqual([]);
   });
 });

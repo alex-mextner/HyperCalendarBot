@@ -553,7 +553,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     // Before the rate limiter: wizard input it drops must still be taken off the chat, and before chat
     // logging and the command escape, which close the wizard on a typed "/…" and must not log a password.
     .use(connectWizardGuard.middleware)
-    // Before rate limiting and history: a skipped stale message is neither counted nor saved.
+    // After the wizard guard, so a late credential is still taken off the chat. Before rate limiting
+    // and history: a skipped stale message is neither counted nor saved.
     .use(
       createStaleUpdateGuard({
         maxAgeMs: STALE_UPDATE_MAX_AGE_MS,
