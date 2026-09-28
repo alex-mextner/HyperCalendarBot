@@ -129,6 +129,13 @@ describe('calculate: forms from production logs', () => {
   ])('date-shaped operand is refused: %s', async (expression) => {
     await expectSelfCorrectingRefusal(expression, 'YYYY-MM-DD');
   });
+
+  test('an impossible date is refused in a datetime difference too, not rolled over', async () => {
+    const result = await calc('2026-02-31T18:00:00Z - 2026-02-21T17:00:00Z');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Cannot parse datetime');
+    expect((await calc('2026-03-21T18:00:00Z - 2026-03-21T17:00:00+01:00')).output).toBe('2h');
+  });
 });
 
 describe('calculate: double conversion of an offset-bearing operand', () => {

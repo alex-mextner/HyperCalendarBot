@@ -333,11 +333,12 @@ export function handleCalculate(input: { expression: string }): ToolResult {
   const isoDatetimeDiffMatch = expr.match(new RegExp(`^(${ISO_DT_RE})\\s*-\\s*(${ISO_DT_RE})$`));
   if (isoDatetimeDiffMatch) {
     const [, aStr, bStr] = isoDatetimeDiffMatch;
-    const a = new Date(aStr!);
-    const b = new Date(bStr!);
-    if (Number.isNaN(a.getTime())) return { success: false, error: `Cannot parse datetime: ${aStr}` };
-    if (Number.isNaN(b.getTime())) return { success: false, error: `Cannot parse datetime: ${bStr}` };
-    return { success: true, output: formatDiffMs(Math.abs(a.getTime() - b.getTime())) };
+    // Same validation as the other instant forms: "2026-02-31T…" is refused, not rolled over.
+    const a = parseIsoInstant(aStr!);
+    const b = parseIsoInstant(bStr!);
+    if (!a || 'error' in a) return { success: false, error: `Cannot parse datetime: ${aStr}` };
+    if (!b || 'error' in b) return { success: false, error: `Cannot parse datetime: ${bStr}` };
+    return { success: true, output: formatDiffMs(Math.abs(a.ms - b.ms)) };
   }
 
   // Date-only difference: "2026-04-10 - 2026-03-21"
@@ -460,7 +461,7 @@ export function handleCalculate(input: { expression: string }): ToolResult {
 
   return {
     success: false,
-    error: `Cannot parse: "${expr}". Supported: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days/weeks/months/years, YYYY-MM-DD ± N days/weeks/months/years, ISO datetime - ISO datetime`,
+    error: `Cannot parse: "${expr}". Supported: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days/weeks/months/years, YYYY-MM-DD ± N days/weeks/months/years, ISO datetime - ISO datetime, "YYYY-MM-DD HH:MM <zone> to UTC", "<UTC instant> to <IANA zone>", "YYYY-MM-DD day_of_week"`,
   };
 }
 handleCalculate.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
