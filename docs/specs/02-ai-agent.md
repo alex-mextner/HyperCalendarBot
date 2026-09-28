@@ -2,6 +2,8 @@
 
 Design spec for the conversational AI interface of HyperCalendarBot.
 
+> 2026-09-28 integration note: the positive quality/admission contract and verified send-then-cosmetic-edit component are documented in [Answer release](../reference/quality-policy/2026-09-28-answer-release.md), implementing a bounded part of the approved PR568 design. This original architecture document is historical; the new component does not imply that the current agent already has a calibrated factual assessor or a qualified model route. Simple matched requests remain on the shared intent/workflow path.
+
 ## 1. Architecture Overview
 
 ### Agent Loop
