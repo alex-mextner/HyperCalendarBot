@@ -514,7 +514,8 @@ describe('agent failure notices', () => {
         for (const phrase of [...RU_AGENT_ERROR_PHRASES, ...EN_AGENT_ERROR_PHRASES]) {
           expect(line).not.toContain(phrase);
         }
-        expect(t('ru').ai_still_down(next)).not.toMatch(/Попробуйте|Используйте|Напишите|Подождите|Повторите/);
+        // Russian copy uses the informal ты-form: no formal вы-imperatives.
+        if (lang === 'ru') expect(line).not.toMatch(/Попробуйте|Используйте|Напишите|Подождите|Повторите/);
       }
     }
     // With a retry scheduled the line must not ask for a resend.
