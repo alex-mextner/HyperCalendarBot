@@ -4,6 +4,7 @@ import type OpenAI from 'openai';
 import type { ToolEvidence } from '../../../src/services/ai/response-grounding.ts';
 import {
   shouldValidateResponse,
+  supplementIsGrounded,
   unverifiedResponseNotice,
   validateResponse,
 } from '../../../src/services/ai/response-validator.ts';
@@ -30,26 +31,74 @@ function executed(names: string[]): ToolEvidence[] {
   return names.map((name) => ({ name, input: {}, success: true }));
 }
 
+function prefilter(names: string[], response: string, tools: ToolEvidence[] = executed(names)): boolean {
+  return shouldValidateResponse({ userMessage: 'Что у меня?', timezone: 'Europe/Belgrade', tools, response });
+}
+
+/** A read of 27.09–04.10 (Belgrade) that returned one Tuesday lesson at 12:30 local. */
+const WEEK_FROM_SUNDAY: ToolEvidence = {
+  name: 'get_events',
+  input: { start_date: '2026-09-27T00:00:00.000Z', end_date: '2026-10-04T23:59:59.999Z' },
+  success: true,
+  output: 'id: 41, title: Английский с Томом, start: 2026-09-29T10:30:00Z, end: 2026-09-29T11:30:00Z',
+  data: [{ id: 41, title: 'Английский с Томом', date: '2026-09-29', time: '12:30', all_day: false }],
+};
+
 describe('tool-run evidence prefilter', () => {
   test('production completeness claim is validated after write/image tools', () => {
     expect(
-      shouldValidateResponse(
-        ['create_event', 'render_day_image'],
-        'Готово. На этот день больше ничего не запланировано.',
-      ),
+      prefilter(['create_event', 'render_day_image'], 'Готово. На этот день больше ничего не запланировано.'),
     ).toBe(true);
   });
 
   test('ordinary write confirmation keeps the no-extra-validator fast path', () => {
-    expect(shouldValidateResponse(['create_event'], 'Готово, добавил событие на 18:30.')).toBe(false);
+    expect(prefilter(['create_event'], 'Готово, добавил событие на 18:30.')).toBe(false);
   });
 
   test('a schedule read supplies evidence for a completeness claim', () => {
-    expect(shouldValidateResponse(['create_event', 'get_events'], 'На этот день больше ничего не запланировано.')).toBe(
-      false,
-    );
+    expect(prefilter(['create_event', 'get_events'], 'На этот день больше ничего не запланировано.')).toBe(false);
   });
 
+  test('after a read, an answer whose days and times the read covers keeps the fast path (#515)', () => {
+    expect(
+      prefilter([], 'Вторник, 29 сентября: 12:30 «Английский с Томом». 30 сентября свободно.', [WEEK_FROM_SUNDAY]),
+    ).toBe(false);
+  });
+
+  test('after a read, a day no read covered or a time no result has is validated (#515)', () => {
+    expect(prefilter([], 'Вторник 22 сентября – свободный весь день.', [WEEK_FROM_SUNDAY])).toBe(true);
+    expect(prefilter([], 'Во вторник, 29 сентября, урок в 10:30.', [WEEK_FROM_SUNDAY])).toBe(true);
+  });
+
+  test('a failed read covers nothing', () => {
+    expect(prefilter([], '30 сентября свободно.', [{ ...WEEK_FROM_SUNDAY, success: false }])).toBe(true);
+  });
+});
+
+describe('supplementIsGrounded (#515)', () => {
+  function supplement(response: string, tools: ToolEvidence[]): boolean {
+    return supplementIsGrounded({ userMessage: 'План на неделю', timezone: 'Europe/Belgrade', tools, response });
+  }
+
+  test('a supplement claiming a day its own reads never covered is not grounded', () => {
+    const shorter: ToolEvidence = {
+      ...WEEK_FROM_SUNDAY,
+      input: { start_date: '2026-09-27T00:00:00.000Z', end_date: '2026-09-30T23:59:59.999Z' },
+    };
+    expect(supplement('**Вторник 22 сентября** – свободный весь день', [WEEK_FROM_SUNDAY, shorter])).toBe(false);
+  });
+
+  test('a supplement backed by its own reads, or stating no concrete fact, is grounded', () => {
+    expect(supplement('Во вторник, 29 сентября, в 12:30 — английский.', [WEEK_FROM_SUNDAY])).toBe(true);
+    expect(supplement('Хорошей недели!', [])).toBe(true);
+  });
+
+  test('restating a time without any read of its own is not grounded', () => {
+    expect(supplement('Не забудь про концерт в 18:30.', [])).toBe(false);
+  });
+});
+
+describe('tool-run evidence prefilter — deterministic rejection', () => {
   test('unsupported completeness claim is rejected deterministically without another model call', async () => {
     let called = false;
     const result = await validateResponse(
@@ -558,7 +607,7 @@ describe('unverifiedResponseNotice — verified data instead of a dead end (#492
 
 test('content refusal after calculate is still validated instead of leaking through', async () => {
   const response = 'Я не могу создавать события с таким содержанием.';
-  expect(shouldValidateResponse(['calculate'], response)).toBe(true);
+  expect(prefilter(['calculate'], response)).toBe(true);
   const result = await validateResponse(
     {
       userMessage: 'Создай событие завтра в 10 с этим названием',

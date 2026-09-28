@@ -179,13 +179,35 @@ function toolResultsBlock(tools: readonly ToolEvidence[]): string {
   ).slice(0, MAX_TOOL_RESULTS_CHARS);
 }
 
+function hasUngroundedFacts(input: ValidationInput): boolean {
+  return checkGrounding(input.response, input.tools, input.timezone, input.userMessage).ungrounded.length > 0;
+}
+
 /**
- * Keep the normal fast path after tool-backed writes, but re-enable validation
- * when the final prose claims knowledge that those tools did not provide.
+ * Keep the normal fast path after tool-backed writes and after reads whose
+ * results contain every day and time the prose names; validate everything
+ * else. A read of other days is no evidence for the day the prose talks about.
  */
-export function shouldValidateResponse(toolCalls: string[], response: string): boolean {
-  if (toolCalls.length === 0 || CALENDAR_WRITE_REFUSAL_PATTERNS.some((pattern) => pattern.test(response))) return true;
-  return !hasScheduleRead(toolCalls) && claimsCompleteOrEmptySchedule(response);
+export function shouldValidateResponse(input: ValidationInput): boolean {
+  const toolNames = input.tools.map((tool) => tool.name);
+  if (toolNames.length === 0 || CALENDAR_WRITE_REFUSAL_PATTERNS.some((pattern) => pattern.test(input.response))) {
+    return true;
+  }
+  if (!hasScheduleRead(toolNames)) return claimsCompleteOrEmptySchedule(input.response);
+  return hasUngroundedFacts(input);
+}
+
+/**
+ * A supplement is optional text after an answer the user already has, so it
+ * is never retried or sent to the validator model: it ships only when every
+ * concrete fact comes from its own tool results (the fast-path answer is not
+ * evidence of what a day holds) and it claims no complete or empty schedule
+ * without a read.
+ */
+export function supplementIsGrounded(input: ValidationInput): boolean {
+  const toolNames = input.tools.map((tool) => tool.name);
+  if (!hasScheduleRead(toolNames) && claimsCompleteOrEmptySchedule(input.response)) return false;
+  return !hasUngroundedFacts(input);
 }
 
 export type ValidationResult = { approved: true } | { approved: false; reason: string };

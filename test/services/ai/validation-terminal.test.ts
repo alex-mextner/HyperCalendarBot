@@ -425,4 +425,83 @@ describe('re-validation accepts answers grounded in the same run (#492)', () => 
     const remaining = db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM events').get();
     expect(remaining?.n).toBe(5);
   });
+
+  // #515, anonymized from 2026-09-27 21:15Z: after the week-plan fast path, the
+  // supplement read 27.09–04.10 and 27.09–30.09, then called 22.09 free.
+  function weekReads(): Round[] {
+    return [
+      {
+        text: '',
+        tool: {
+          name: 'get_events',
+          input: { start_date: '2026-09-27T00:00:00.000Z', end_date: '2026-10-04T23:59:59.999Z', scope: 'personal' },
+        },
+      },
+      {
+        text: '',
+        tool: {
+          name: 'get_events',
+          input: { start_date: '2026-09-27T00:00:00.000Z', end_date: '2026-09-30T23:59:59.999Z', scope: 'personal' },
+        },
+      },
+    ];
+  }
+
+  function seedWeekPlan(supplement: boolean) {
+    seedLessons();
+    ctx.messageText = 'План на неделю';
+    addEvent('concert', 'Концерт', '2026-09-22T16:30:00Z', '2026-09-22T18:30:00Z');
+    if (supplement) {
+      ctx.supplementMode = true;
+      ctx.supplementAutoResponse = `2026-09-22 18:30  Концерт\n12:30  ${LESSON}`;
+    }
+  }
+
+  test('a supplement calling a day free that its reads never covered is dropped (#515)', async () => {
+    seedWeekPlan(true);
+    const script = scripted([...weekReads(), { text: '**Вторник 22 сентября** – свободный весь день' }], []);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe('');
+    expect(script.counts.validator).toBe(0);
+  });
+
+  test('a supplement backed by its own reads is still delivered (#515)', async () => {
+    seedWeekPlan(true);
+    const text = 'Во вторник, 29 сентября, в 12:30 и 13:30 — английский.';
+    const script = scripted([...weekReads(), { text }], []);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(text);
+    expect(script.counts.validator).toBe(0);
+  });
+
+  test('a first answer whose days and times the reads cover ships with zero validator calls (#515)', async () => {
+    seedWeekPlan(false);
+    const text = `Вторник, 29 сентября: 12:30 «${LESSON}», 13:30 «Английский». 30 сентября свободно.`;
+    const script = scripted([...weekReads(), { text }], []);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(text);
+    expect(script.counts.validator).toBe(0);
+  });
+
+  test('a first answer naming a day no read covered is validated instead of shipped (#515)', async () => {
+    seedWeekPlan(false);
+    const grounded = '22 сентября в 18:30 — «Концерт».';
+    const script = scripted(
+      [
+        ...weekReads(),
+        { text: 'Вторник 22 сентября – свободный весь день.' },
+        { text: '', tool: { name: 'get_events', input: { start_date: '2026-09-22', end_date: '2026-09-22' } } },
+        { text: grounded },
+      ],
+      ['REJECT: 22 September was not read'],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(script.counts.validator).toBe(1);
+    expect(result.responseText).toBe(grounded);
+    expect(history()).not.toContain('свободный весь день');
+  });
 });
