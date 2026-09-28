@@ -1,6 +1,16 @@
 // test/bot/handlers/message-handler-propose-time.test.ts
+import { Database } from 'bun:sqlite';
 import { describe, expect, mock, test } from 'bun:test';
-import { createMessageHandler } from '../../../src/bot/handlers/message.handler';
+import { createMessageHandler, type MessageHandlerDeps } from '../../../src/bot/handlers/message.handler';
+import type { BotCommandContext } from '../../../src/bot/types.ts';
+import { t } from '../../../src/config/constants.ts';
+import { migrations } from '../../../src/database/migrations.ts';
+import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
+import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
+import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
+import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 
 function makeUser(overrides = {}) {
   return { telegram_id: 200, language: 'en', timezone: 'UTC', ...overrides };
@@ -14,6 +24,27 @@ function makeCtx(text: string, userId = 200) {
     send: mock(() => Promise.resolve()),
     chat: { type: 'private' },
   };
+}
+
+/** A handler whose AI, history and reminder collaborators are inert stand-ins, cast in this one factory. */
+function makeProposeTimeHandler(deps: Partial<MessageHandlerDeps>) {
+  return createMessageHandler({
+    agent: { run: mock(() => Promise.resolve({ responseText: '' })) },
+    eventService: { getEventsInRange: mock(() => []) },
+    holidayService: {},
+    chatHistory: { save: mock(() => {}), getLast: mock(() => []) },
+    eventReminderRepo: {},
+    sceneStorage: { get: mock(() => Promise.resolve(null)), delete: mock(() => {}) },
+    conversationLogger: null,
+    ...deps,
+  } as unknown as MessageHandlerDeps);
+}
+
+/** A private-chat text message; `send` records the bot's replies. */
+function makePrivateMessage(text: string, userId: number) {
+  const send = mock((_text: string, _params?: unknown) => Promise.resolve());
+  const message = { text, dbUser: makeUser({ telegram_id: userId }), chatId: userId, send, chat: { type: 'private' } };
+  return { ctx: message as unknown as BotCommandContext, send };
 }
 
 describe('message handler: propose time session', () => {
@@ -154,5 +185,43 @@ describe('message handler: propose time session', () => {
 
     expect(invitationService.proposeTime).not.toHaveBeenCalled();
     expect(proposeTimeSessions.has(200)).toBe(true); // session NOT consumed
+  });
+
+  test('a typed time for a cancelled invitation is refused and says so', async () => {
+    const db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    const users = new UserRepository(db);
+    users.create({ telegram_id: 100, timezone: 'UTC', language: 'en' });
+    users.create({ telegram_id: 200, timezone: 'UTC', language: 'en' });
+    const eventRepo = new EventRepository(db);
+    const invitationRepo = new InvitationRepository(db);
+    const invitationService = new InvitationService(invitationRepo, eventRepo, new SharingSettingsRepository(db));
+    const event = eventRepo.create({
+      user_id: 100,
+      title: 'Fixture meetup',
+      start_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      timezone: 'UTC',
+    });
+    const invitation = invitationService.sendInvitation(event.id, 100, 200).invitation!;
+    invitationService.cancelInvitation(invitation.id, 100);
+    const proposeTimeSessions = new Map<number, { invitationId: number }>();
+    proposeTimeSessions.set(200, { invitationId: invitation.id });
+    const notifyInviterProposal = mock(() => Promise.resolve());
+
+    const handler = makeProposeTimeHandler({
+      userRepo: users,
+      proposeTimeSessions,
+      invitationService,
+      invitationRepo,
+      notifyInviterProposal,
+    });
+
+    const { ctx, send } = makePrivateMessage('tomorrow 15:00', 200);
+    await handler(ctx);
+
+    expect(invitationRepo.findById(invitation.id)!.proposed_time).toBeNull();
+    expect(send).toHaveBeenCalledWith(t('en').invitation_cancelled);
+    expect(notifyInviterProposal).not.toHaveBeenCalled();
   });
 });
