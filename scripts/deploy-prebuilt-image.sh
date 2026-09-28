@@ -41,6 +41,17 @@ flock -n 9 || { echo 'Another release owns this service' >&2; exit 1; }
 [[ "$(sha256sum "$REMOTE_SRC/image.tar.gz" | cut -d ' ' -f1)" == "$ARCHIVE_SUM" ]] || { echo 'Archive checksum mismatch' >&2; exit 1; }
 python3 "$REMOTE_SRC/scripts/release-artifact.py" "$REMOTE_SRC/image.tar.gz" "$SHA" "$IMAGE:$SHA" > "$REMOTE_SRC/artifact.json"
 [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$REMOTE_SRC/artifact.json")" == "$CONFIG_ID" ]] || exit 1
+# docker load unpacks the whole archive before it registers the layers, so it needs about twice
+# the unpacked image free on the Docker root. Refuse here, with the numbers, rather than fail
+# halfway with a bare "no space left on device" as the 2026-09-28 release did (#481).
+IMAGE_BYTES="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image_bytes"])' "$REMOTE_SRC/artifact.json")"
+DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}')"
+FREE_KIB="$(df -Pk "$DOCKER_ROOT" | awk 'NR == 2 {print $4}')"
+[[ "$FREE_KIB" =~ ^[0-9]+$ ]] || { echo "Cannot read free space on $DOCKER_ROOT" >&2; exit 1; }
+if (( FREE_KIB * 1024 < 2 * IMAGE_BYTES )); then
+  echo "Not enough disk to load the release: $((FREE_KIB * 1024)) bytes free on $DOCKER_ROOT, need $((2 * IMAGE_BYTES)) (twice the $IMAGE_BYTES-byte image). Remove superseded $IMAGE tags first (docs/reference/deploy-runbook.md, Disk space)." >&2
+  exit 1
+fi
 docker load -i "$REMOTE_SRC/image.tar.gz"
 [[ "$(docker image inspect "$IMAGE:$SHA" --format '{{.Id}}')" == "$CONFIG_ID" ]] || { echo 'Loaded config identity mismatch' >&2; exit 1; }
 CURRENT_IMAGE_ID="$(docker inspect hypercal-bot --format '{{.Image}}' 2>/dev/null)" || { echo 'Existing HyperCalendar container is required; use a reviewed first-install procedure' >&2; exit 1; }
@@ -195,3 +206,29 @@ os.replace(path+'.tmp',path)
 RECEIPT
 docker tag "$IMAGE:$SHA" "$IMAGE:latest"
 printf 'DEPLOYED sha=%s image=%s health=%s ready=%s\n' "$REVISION" "$ACTUAL_IMAGE_ID" "$HEALTH" "$READY"
+
+# Every release keeps the previous image under a new ~2 GB rollback tag; 42 of them filled the
+# shared host on 2026-09-28 (#481). Keep the five newest rollback tags and the current and previous
+# releases, and remove every other tag of this repository. Docker removes an image with its last
+# tag and refuses (without -f) one a container still uses. This runs after the commit point, so a
+# failure is reported and never fails or undoes the verified release.
+python3 - "$IMAGE" "$SHA" "$CURRENT_IMAGE_ID" 5 <<'RETENTION' || echo 'IMAGE_RETENTION failed; the verified release stays in place' >&2
+import re,subprocess,sys
+image,sha,previous,keep=sys.argv[1],sys.argv[2],sys.argv[3],int(sys.argv[4])
+listing=subprocess.run(["docker","images","--no-trunc","--format","{{.Tag}}\t{{.ID}}",image],check=True,capture_output=True,text=True).stdout
+tags=dict(line.split("\t") for line in listing.splitlines())
+tags.pop("<none>",None)
+# The stamp is %Y-%m-%d_%H-%M-%S, so name order is age order; other rollback-* names count as oldest.
+rollbacks=sorted((t for t in tags if re.fullmatch(r"rollback-\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d",t)),reverse=True)
+keep_tags={sha,"latest",*rollbacks[:keep]}
+keep_ids={previous,*(tags[t] for t in keep_tags if t in tags)}
+failed=False
+for tag in sorted(t for t in tags if t not in keep_tags and tags[t] not in keep_ids):
+    result=subprocess.run(["docker","image","rm",f"{image}:{tag}"],capture_output=True,text=True)
+    if result.returncode:
+        failed=True
+        print(f"IMAGE_RETENTION kept={image}:{tag} error={result.stderr.strip()}",file=sys.stderr)
+    else:
+        print(f"IMAGE_RETENTION removed={image}:{tag}")
+sys.exit(1 if failed else 0)
+RETENTION

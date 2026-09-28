@@ -91,15 +91,19 @@ class DeployTests(unittest.TestCase):
         ).encode()
         self.config_id = "sha256:" + hashlib.sha256(config).hexdigest()
         cfg = "blobs/sha256/" + self.config_id[7:]
-        manifest = [{"Config": cfg, "RepoTags": [TAG], "Layers": []}]
+        manifest = [{"Config": cfg, "RepoTags": [TAG], "Layers": ["blobs/sha256/layer"]}]
         with tarfile.open(self.src / "image.tar.gz", "w:gz") as tar:
             for name, data in [
                 ("manifest.json", json.dumps(manifest).encode()),
                 (cfg, config),
+                # A layer large enough that the disk check's 2x margin spans whole KiB.
+                ("blobs/sha256/layer", bytes(1024 * 1024)),
             ]:
                 info = tarfile.TarInfo(name)
                 info.size = len(data)
                 tar.addfile(info, io.BytesIO(data))
+        with tarfile.open(self.src / "image.tar.gz") as tar:
+            self.image_bytes = sum(m.size for m in tar.getmembers() if m.isfile())
         self.digest = hashlib.sha256(
             (self.src / "image.tar.gz").read_bytes()
         ).hexdigest()
@@ -110,6 +114,11 @@ class DeployTests(unittest.TestCase):
         self.exe(self.bin / "uname", "#!/bin/sh\nprintf 'x86_64\\n'\n")
         self.exe(self.bin / "seq", "#!/bin/sh\nprintf '1\\n'\n")
         self.exe(self.bin / "sleep", "#!/bin/sh\nexit 0\n")
+        self.exe(
+            self.bin / "df",
+            "#!/bin/sh\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n"
+            "/dev/fixture 999999999 0 %s 1%% /\\n' \"${DF_AVAIL_KIB:-999999999}\"\n",
+        )
         self.exe(
             self.bin / "sha256sum",
             "#!/usr/bin/env python3\nimport hashlib,sys\nprint(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest()+'  '+sys.argv[1])\n",
@@ -122,6 +131,10 @@ from pathlib import Path
 DEFAULT_MIGRATION_CONTENT="export const migrations = [\n  {\n    name: '001_x',\n    up(db){},\n  },\n];\n"
 args=sys.argv[1:];root=Path(os.environ['FIXTURE_DEP']);current=root/'current'
 with open(os.environ['FIXTURE_LOG'],'a') as f:f.write(json.dumps(args)+'\n')
+# Tag -> image ID store, only for tests that set FIXTURE_IMAGES.
+store_path=os.environ.get('FIXTURE_IMAGES');store=json.loads(Path(store_path).read_text()) if store_path else {}
+def save():
+    if store_path:Path(store_path).write_text(json.dumps(store))
 old_content=os.environ.get('OLD_MIGRATION_CONTENT',DEFAULT_MIGRATION_CONTENT)
 new_content=os.environ.get('NEW_MIGRATION_CONTENT',DEFAULT_MIGRATION_CONTENT)
 def names(text):return re.findall(r"name: '(\w+)'",text)
@@ -131,8 +144,17 @@ def recorded(failure):
     c=sqlite3.connect(root/'data/calendar.db');rows=[r[0] for r in c.execute('SELECT name FROM migrations ORDER BY id')];c.close()
     print(''.join(n+'\n' for n in rows),end='')
 if args and args[0]=='load' and os.environ.get('LOAD_FAILURE')=='1':sys.exit(42)
+if args and args[0]=='load':store['repo/image:'+os.environ['FIXTURE_SHA']]=os.environ['FIXTURE_ID'];save()
 if args and args[0]=='tag' and args[-1].endswith(':latest') and os.environ.get('TAG_FAILURE')=='1':sys.exit(43)
-if args[:2]==['image','inspect']:
+if args and args[0]=='tag':store[args[2]]=store.get(args[1],args[1]);save()
+if args[:1]==['info']:print(root)
+elif args[:1]==['images']:
+    print(''.join(f"{t.rsplit(':',1)[1]}\t{i}\n" for t,i in store.items() if t.rsplit(':',1)[0]==args[-1]),end='')
+elif args[:2]==['image','rm']:
+    if os.environ.get('RM_FAILURE')=='1':sys.exit(1)
+    for t in args[2:]:store.pop(t)
+    save()
+elif args[:2]==['image','inspect']:
     fmt=args[-1]
     print(os.environ['FIXTURE_ID'] if '.Id' in fmt else os.environ['FIXTURE_SHA'])
 elif args[:2]==['inspect','hypercal-bot'] and '.State.Running' in args[-1]:print('true' if os.environ.get('STILL_RUNNING')=='1' else 'false')
@@ -597,6 +619,69 @@ print(body,end='')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual((self.dep / "current").read_text(), "sha256:old")
         self.assertNotIn('"compose"', self.log.read_text())
+
+    def calls(self):
+        return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def test_release_that_does_not_fit_twice_on_disk_is_refused_before_load(self):
+        # docker load unpacks the whole archive before it registers the layers.
+        needed = 2 * self.image_bytes
+        free = (needed - 1) // 1024 * 1024
+        result = self.run_deploy(DF_AVAIL_KIB=str(free // 1024))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(str(free), result.stderr)
+        self.assertIn(str(needed), result.stderr)
+        self.assertNotIn("load", [c[0] for c in self.calls()])
+        self.assertEqual((self.dep / "current").read_text(), "sha256:old")
+        self.assertEqual(self.rows(), ["before"])
+
+    def test_release_with_exactly_twice_its_size_free_is_deployed(self):
+        result = self.run_deploy(DF_AVAIL_KIB=str(-(-2 * self.image_bytes // 1024)))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.dep / "current").read_text(), self.config_id)
+
+    def image_store(self):
+        tags = {
+            "repo/image:" + "d" * 40: "sha256:old",  # the release running before this deploy
+            "repo/image:latest": "sha256:old",
+            "repo/image:" + "b" * 40: "sha256:r6",  # a release that is also a recent rollback image
+            "repo/image:" + "c" * 40: "sha256:c",  # an older release without a rollback tag
+            "repo/image:rollback-20190101": "sha256:legacy",
+            "other/app:latest": "sha256:r1",
+        }
+        for i in range(1, 7):
+            tags[f"repo/image:rollback-2020-01-0{i}_00-00-00"] = f"sha256:r{i}"
+        path = self.path / "images.json"
+        path.write_text(json.dumps(tags))
+        return tags, path
+
+    def test_verified_release_keeps_five_newest_rollbacks_and_the_current_and_previous_images(self):
+        before, store = self.image_store()
+        result = self.run_deploy(FIXTURE_IMAGES=str(store))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        left = json.loads(store.read_text())
+        new_rollback = [t for t in left if ":rollback-" in t and t not in before]
+        self.assertEqual(len(new_rollback), 1)
+        kept = {t: before[t] for t in [
+            "repo/image:" + "d" * 40,
+            "repo/image:" + "b" * 40,
+            "other/app:latest",
+            *[f"repo/image:rollback-2020-01-0{i}_00-00-00" for i in range(3, 7)],
+        ]}
+        kept.update({new_rollback[0]: "sha256:old", "repo/image:latest": self.config_id, TAG: self.config_id})
+        self.assertEqual(left, kept)
+        removals = [c for c in self.calls() if c[:2] == ["image", "rm"]]
+        self.assertTrue(removals)
+        for call in removals:
+            self.assertFalse({"-f", "--force"} & set(call), call)
+
+    def test_failed_image_retention_does_not_fail_the_verified_release(self):
+        _, store = self.image_store()
+        result = self.run_deploy(FIXTURE_IMAGES=str(store), RM_FAILURE="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.dep / "current").read_text(), self.config_id)
+        self.assertEqual(json.loads((self.dep / "releases/current.json").read_text())["revision"], SHA)
+        self.assertNotIn("ROLLBACK", result.stderr)
 
 
 if __name__ == "__main__":
