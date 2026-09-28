@@ -289,16 +289,45 @@ describe('silent final guard (#508)', () => {
     expect(delivered.at(-1)).toContain(t('ru').ai_unanswered);
   });
 
-  test("a reaction then a failed render: the reaction does not excuse '[SKIP]'", async () => {
-    // The user asked for a picture; the 👍 came through but the picture did not.
+  test.each([
+    ['a reaction then a failed render', 'reaction-first'],
+    ['a failed render then a reaction', 'render-first'],
+  ])("%s: a 👍 does not stand in for the picture that never came, so '[SKIP]' gets the could-not-answer line", async (_label, order) => {
     const photos = stubRenderer(async () => {
       throw new Error('synthetic renderer outage');
     });
-    await run([{ tool: 'set_reaction', input: () => ({ emoji: '👍' }) }, renderTable, { text: '[SKIP]' }]);
+    const reaction = { tool: 'set_reaction', input: () => ({ emoji: '👍' }) };
+    await run([
+      ...(order === 'reaction-first' ? [reaction, renderTable] : [renderTable, reaction]),
+      { text: '[SKIP]' },
+    ]);
 
     expect(photos).toHaveLength(0);
     expect(deleted).toEqual([]);
     expect(delivered.at(-1)).toContain(t('ru').ai_unanswered);
+  });
+
+  test("a reaction then a throttled repeat render (no photo sent) does not excuse '[SKIP]'", async () => {
+    const photos = stubRenderer(async () => png);
+    await run([renderTable, { text: '[SKIP]' }]);
+    delivered.length = 0;
+    deleted.length = 0;
+
+    await run([{ tool: 'set_reaction', input: () => ({ emoji: '👍' }) }, renderTable, { text: '[SKIP]' }]);
+
+    expect(photos).toHaveLength(1);
+    expect(delivered.at(-1)).toContain(t('ru').ai_unanswered);
+  });
+
+  test("a delivered picture stays the answer when a reaction after it fails: '[SKIP]' adds no notice", async () => {
+    const photos = stubRenderer(async () => png);
+    sender.setReaction = async () => {
+      throw new Error('synthetic REACTION_INVALID');
+    };
+    await run([renderTable, { tool: 'set_reaction', input: () => ({ emoji: '👍' }) }, { text: '[SKIP]' }]);
+
+    expect(photos).toHaveLength(1);
+    expect(delivered.join('\n')).not.toContain(t('ru').ai_unanswered);
   });
 
   describe('legitimate silence stays silent', () => {

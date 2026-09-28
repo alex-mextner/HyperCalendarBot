@@ -2,7 +2,7 @@
 import { t, toLang } from '../../config/constants.ts';
 import { EVENT_UPDATE_FIELDS } from '../../database/repositories/event.repository.ts';
 import { normalizeNumericId } from './numeric-id.ts';
-import { ANSWERING_TOOLS, type ExecutorDisposition, isMutationTool } from './tool-executor.ts';
+import { DELIVERING_TOOLS, type ExecutorDisposition, isMutationTool, SILENT_TOOLS } from './tool-executor.ts';
 import type { ToolResult } from './types.ts';
 
 const targets = {
@@ -35,21 +35,32 @@ export class WriteOutcomes {
   >();
   private attempts = 0;
   mayHaveMutated = false;
-  /**
-   * The turn's latest reaction or rendered image reached the chat. A throttled call sent
-   * nothing and changes nothing; a failed one means what the user asked for did not arrive,
-   * so an earlier 👍 no longer excuses a silent final.
-   */
-  toolAnswered = false;
+  /** A rendered image reached the chat. */
+  private delivered = false;
+  /** A render was asked for but sent nothing: it failed, or the throttle skipped it. */
+  private deliveryMissed = false;
+  /** A silent answering tool (a reaction) reached the chat. */
+  private reacted = false;
   speechQuestion = '';
+
+  /**
+   * The request was answered by a tool, so a silent final is fine: a picture arrived, or the
+   * turn only reacted. A 👍 does not stand in for a picture that was asked for and never came.
+   */
+  get toolAnswered(): boolean {
+    return this.delivered || (this.reacted && !this.deliveryMissed);
+  }
 
   constructor(private readonly writes: ReadonlySet<string> = new Set(Object.keys(targets))) {}
 
   record(operation: string, input: unknown, result: ToolResult & { disposition: ExecutorDisposition }): void {
     if (result.awaitingInput?.kind === 'speech') this.speechQuestion = result.awaitingInput.question;
     if (result.mutationState === 'confirmed' || result.mutationState === 'uncertain') this.mayHaveMutated = true;
-    if (ANSWERING_TOOLS.has(operation) && result.disposition === 'executed' && result.success) this.toolAnswered = true;
-    else if (ANSWERING_TOOLS.has(operation) && result.disposition === 'failed') this.toolAnswered = false;
+    const sent = result.disposition === 'executed' && result.success;
+    if (DELIVERING_TOOLS.has(operation)) {
+      if (sent) this.delivered = true;
+      else this.deliveryMissed = true;
+    } else if (SILENT_TOOLS.has(operation) && sent) this.reacted = true;
     if (!this.writes.has(operation) || !isMutationTool(operation, input) || result.disposition === 'waiting') return;
     const fields = typeof input === 'object' && input !== null ? input : {};
     const attempt = ++this.attempts;
