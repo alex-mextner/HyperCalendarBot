@@ -278,6 +278,8 @@ function updateVoice(ctx: AgentContext, updates: VoiceUpdates): ToolResult {
 }
 
 const CONNECT_PROMPT_SNOOZE_MS = 30 * 24 * 60 * 60 * 1000;
+/** Tolerated clock drift between requests; a snooze stamped further ahead is treated as invalid. */
+const CONNECT_PROMPT_SKEW_MS = 24 * 60 * 60 * 1000;
 
 /**
  * `users.connect_telegram_dismissed_at` is the start of a 30-day snooze. It is set both by an
@@ -287,7 +289,10 @@ const CONNECT_PROMPT_SNOOZE_MS = 30 * 24 * 60 * 60 * 1000;
 function connectPromptSnoozed(ctx: AgentContext): boolean {
   const snoozedAt = ctx.user.connect_telegram_dismissed_at;
   if (!snoozedAt) return false;
-  return Date.now() - new Date(snoozedAt).getTime() < CONNECT_PROMPT_SNOOZE_MS;
+  const elapsed = Date.now() - new Date(snoozedAt).getTime();
+  // A timestamp far in the future is clock skew, not a snooze; malformed text yields NaN. Neither
+  // counts, and claimConnectTelegramSnooze overwrites both.
+  return elapsed > -CONNECT_PROMPT_SKEW_MS && elapsed < CONNECT_PROMPT_SNOOZE_MS;
 }
 
 /**
@@ -316,7 +321,8 @@ export function takeConnectTelegramSuggestion(
   const now = Date.now();
   const at = new Date(now).toISOString();
   const activeSince = new Date(now - CONNECT_PROMPT_SNOOZE_MS).toISOString();
-  if (!ctx.userRepo.claimConnectTelegramSnooze(ctx.user.telegram_id, at, activeSince)) return null;
+  const futureLimit = new Date(now + CONNECT_PROMPT_SKEW_MS).toISOString();
+  if (!ctx.userRepo.claimConnectTelegramSnooze(ctx.user.telegram_id, at, activeSince, futureLimit)) return null;
   // Later steps of the same message read the user snapshot, not the row: intent workflows build a
   // fresh context per step around the same user object, so update that object in place.
   ctx.user.connect_telegram_dismissed_at = at;

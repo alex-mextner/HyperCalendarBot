@@ -156,6 +156,21 @@ describe('send_invitation /connect_telegram suggestion', () => {
     expect(result.output?.split('\n').at(-1)).toBe(SUGGESTION);
   });
 
+  test.each([
+    ['a clock-skewed stamp far in the future', '2099-01-01T00:00:00.000Z'],
+    ['malformed text', 'not-a-date'],
+  ])('a snooze stored as %s does not block the suggestion forever', async (_name, stored) => {
+    userRepo.setConnectTelegramDismissedAt(INVITER_ID, stored);
+    const shown = await handleSendInvitation(makeCtx(), { event_id: eventId, invitee_id: INVITEE_ID });
+    expect(shown.output?.split('\n').at(-1)).toBe(SUGGESTION);
+    // The claim replaced the bad value with a real snooze.
+    const again = await handleSendInvitation(makeCtx({ messageText: `Invite Telegram ID ${INVITEE_ID + 1}` }), {
+      event_id: eventId,
+      invitee_id: INVITEE_ID + 1,
+    });
+    expect(mentionsSuggestion(again)).toBe(false);
+  });
+
   test('a user with a connected account gets no suggestion', async () => {
     sessionRepo.upsert(INVITER_ID, Buffer.from('session'), '+7 ••• 4567', 'hash');
     const result = await handleSendInvitation(makeCtx(), { event_id: eventId, invitee_id: INVITEE_ID });
