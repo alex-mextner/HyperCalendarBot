@@ -1,10 +1,20 @@
 import { describe, expect, mock, test } from 'bun:test';
+import type { AnyScene } from '@gramio/scenes';
+import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler.ts';
 import {
   buildAgentContextFactory,
   createMessageHandler,
+  type MessageHandlerDeps,
   stripJsonFences,
   toEventSummary,
 } from '../../../src/bot/handlers/message.handler.ts';
+import type { BotCallbackContext, BotCommandContext } from '../../../src/bot/types.ts';
+import type { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import type { EventService } from '../../../src/services/event/event-service.ts';
+import type { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import type { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
+import type { PendingGeoStore } from '../../../src/services/location/pending-geo-store.ts';
+import type { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
 
 function makeDeps(overrides: { [key: string]: unknown } = {}) {
   return {
@@ -845,6 +855,111 @@ describe('createMessageHandler', () => {
 
       const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
       expect(msg).not.toContain('Lunch');
+    });
+  });
+
+  describe('pin prompt for a recent unverified event', () => {
+    const PIN = { latitude: 48.8566, longitude: 2.3522 };
+
+    function makeGeoStore(): PendingGeoStore {
+      const pins = new Map<number, { latitude: number; longitude: number }>();
+      return {
+        set: async (userId, data) => {
+          pins.set(userId, data);
+        },
+        get: async (userId) => pins.get(userId) ?? null,
+        delete: async (userId) => {
+          pins.delete(userId);
+        },
+      };
+    }
+
+    function makeLocationVerification(
+      resolveFromCoordinates: LocationVerificationService['resolveFromCoordinates'],
+    ): LocationVerificationService {
+      return { resolveFromCoordinates } as unknown as LocationVerificationService;
+    }
+
+    async function sendPin(title: string, geoStore: PendingGeoStore, verification: LocationVerificationService) {
+      const event = {
+        id: 42,
+        title,
+        location: 'Somewhere downtown',
+        location_verified: 0,
+        created_at: new Date().toISOString(),
+      };
+      const deps = makeDeps({
+        eventService: { getEventsInRange: mock(() => []), getLatestCreated: mock(() => event) },
+        locationVerification: verification,
+        pendingGeoStore: geoStore,
+      }) as unknown as MessageHandlerDeps;
+      const ctx = {
+        ...makeCtx({
+          text: undefined,
+          dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+        }),
+        location: PIN,
+      };
+      await createMessageHandler(deps)(ctx as unknown as BotCommandContext);
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const [text, opts] = ctx.send.mock.calls[0] as unknown as [
+        string,
+        { parse_mode: string; reply_markup: { toJSON(): { inline_keyboard: { callback_data: string }[][] } } },
+      ];
+      return { text, opts };
+    }
+
+    async function pressButton(
+      callbackData: string,
+      geoStore: PendingGeoStore,
+      verification: LocationVerificationService,
+    ) {
+      const handler = createCallbackHandler(
+        {} as unknown as EventService,
+        {} as unknown as AnyScene,
+        {} as unknown as HolidayService,
+        {} as unknown as NotificationPreferencesService,
+        { locationVerification: verification, pendingGeoStore: geoStore, userRepo: {} as unknown as UserRepository },
+      );
+      const ctx = {
+        data: callbackData,
+        chatId: 100,
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC' },
+        answer: mock(() => Promise.resolve()),
+        editText: mock(() => Promise.resolve()),
+        message: { id: 1, text: '', chat: { id: 100, type: 'private' } },
+        from: { id: 100 },
+      };
+      await handler(ctx as unknown as BotCallbackContext);
+    }
+
+    test('HTML-escapes a title containing & and < so Telegram accepts the prompt', async () => {
+      const { text, opts } = await sendPin(
+        'Q&A <meetup>',
+        makeGeoStore(),
+        makeLocationVerification(mock(() => Promise.resolve(false))),
+      );
+      expect(opts.parse_mode).toBe('HTML');
+      expect(text).toContain('Q&amp;A &lt;meetup&gt;');
+      expect(text).not.toContain('Q&A');
+      expect(text).not.toContain('<meetup>');
+    });
+
+    test('shows a plain title unchanged and its confirm button attaches the pin to that event', async () => {
+      const geoStore = makeGeoStore();
+      const resolveFromCoordinates = mock<LocationVerificationService['resolveFromCoordinates']>(() =>
+        Promise.resolve(false),
+      );
+      const verification = makeLocationVerification(resolveFromCoordinates);
+      const { text, opts } = await sendPin('Team lunch', geoStore, verification);
+      expect(text).toBe('📍 Got your location! Is this for the event "Team lunch"?');
+
+      const confirm = opts.reply_markup.toJSON().inline_keyboard[0]?.[0];
+      if (!confirm) throw new Error('prompt has no confirm button');
+      await pressButton(confirm.callback_data, geoStore, verification);
+
+      expect(resolveFromCoordinates).toHaveBeenCalledTimes(1);
+      expect(resolveFromCoordinates.mock.calls[0]).toEqual([42, PIN.latitude, PIN.longitude, 100]);
     });
   });
 });
