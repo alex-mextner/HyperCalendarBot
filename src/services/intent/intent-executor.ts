@@ -554,13 +554,14 @@ async function runLevel2(
   };
 }
 
-/** Running a workflow once per day is safe only when every step only reads. */
+/**
+ * Running a workflow once per day is safe only when every step only reads. A written
+ * response is not a read: repeated, it would say the same text under both days.
+ * Classification uses the unresolved step input, so it can only err towards running once.
+ */
 function isReadOnly(workflow: Workflow): boolean {
-  const calls =
-    'tools' in workflow
-      ? workflow.tools.map((tool) => ({ name: tool.name, input: tool.input }))
-      : workflow.steps.flatMap((step) => (step.call === undefined ? [] : [{ name: step.call, input: step.input }]));
-  return calls.every(({ name, input }) => isReadOnlyCall(name, input));
+  if ('tools' in workflow) return workflow.tools.every((tool) => isReadOnlyCall(tool.name, tool.input));
+  return workflow.steps.every((step) => step.call !== undefined && isReadOnlyCall(step.call, step.input));
 }
 
 export class IntentExecutor {
