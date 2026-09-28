@@ -27,15 +27,32 @@ const TraceSchema = z.object({
   lastOpenAt: z.number().optional(),
   /** Messages typed into the wizard, with when they were seen (ms). */
   typed: z.array(z.object({ messageId: z.number(), at: z.number() })),
+  /** The run of the wizard its cancel buttons name (absent for a run started before runs were named). */
+  wizardId: z.string().optional(),
+  /** The run's temporary login session file, so that a cancel after its scene row expired removes it. */
+  sessionPath: z.string().optional(),
 });
 export type ConnectWizardTrace = z.infer<typeof TraceSchema>;
 
-const ConnectWizardRowSchema = z.object({ name: z.literal(CONNECT_TELEGRAM_SCENE), stepId: z.number() });
+const ConnectWizardRowSchema = z.object({
+  name: z.literal(CONNECT_TELEGRAM_SCENE),
+  stepId: z.number(),
+  state: z.object({ wizardId: z.string().optional(), sessionPath: z.string().optional() }).optional(),
+});
 
-/** The step of a scene row that holds the connect wizard; undefined for any other value. */
-export function connectWizardStep(sceneRow: unknown): number | undefined {
+/** What a scene row holding the connect wizard tells: its step, its run and its temp session file. */
+export interface ConnectWizardRow {
+  step: number;
+  wizardId?: string;
+  sessionPath?: string;
+}
+
+/** The connect wizard in a scene row; undefined for any other value. */
+export function connectWizardRow(sceneRow: unknown): ConnectWizardRow | undefined {
   const parsed = ConnectWizardRowSchema.safeParse(sceneRow);
-  return parsed.success ? parsed.data.stepId : undefined;
+  if (!parsed.success) return undefined;
+  const { stepId, state } = parsed.data;
+  return { step: stepId, wizardId: state?.wizardId, sessionPath: state?.sessionPath };
 }
 
 /** Scene-row key (below chat scoping) of a user's scene in a chat — the key its trace is filed under. */
@@ -97,9 +114,16 @@ export function trackConnectWizard<S extends SceneRowStorage>(storage: S, traces
       const result = storage.set(key, value);
       if (key.startsWith(SCENE_ROW_PREFIX)) {
         const trace = traces.read(key);
-        const step = connectWizardStep(value);
-        if (step !== undefined) traces.write(key, { ...(trace ?? { typed: [] }), open: true, step });
-        else if (trace?.open) traces.write(key, { ...trace, open: false });
+        const row = connectWizardRow(value);
+        if (row !== undefined) {
+          traces.write(key, {
+            ...(trace ?? { typed: [] }),
+            open: true,
+            step: row.step,
+            wizardId: row.wizardId,
+            sessionPath: row.sessionPath,
+          });
+        } else if (trace?.open) traces.write(key, { ...trace, open: false });
       }
       return result;
     },

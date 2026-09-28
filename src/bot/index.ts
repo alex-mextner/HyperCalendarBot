@@ -536,6 +536,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const connectWizardGuard = createConnectWizardGuard({
     sceneStorage: scenesSetup.storage,
     traces: createConnectWizardTraces(db.db),
+    conversationLogger,
+    actionLog: db.actionLog,
+    // A held message its owner released goes through the whole bot again, as an ordinary request.
+    replay: (update) => bot.updates.handleUpdate(update),
   });
 
   // AI Assistant commands (not in setMyCommands — internal use only)
@@ -552,7 +556,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     // Before the rate limiter: wizard input it drops must still be taken off the chat, and before chat
     // logging and the command escape, which close the wizard on a typed "/…" and must not log a password.
     .use(connectWizardGuard.middleware)
-    .use(createRateLimitMiddleware(rateLimiter))
+    .use(createRateLimitMiddleware(rateLimiter, connectWizardGuard.recordRateLimited))
     .use(
       createChatLogging({
         conversationLogger,
@@ -561,6 +565,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         isConnectWizardInput: connectWizardGuard.isConnectWizardInput,
       }),
     )
+    // After chat logging, which logs the press: buttons under a held message, stale cancel buttons.
+    .use(connectWizardGuard.callbacks)
     // Storage<Record<string, any>> is not assignable to Storage (unparameterized) due to generic invariance
     .use(createSceneCommandEscape(scenesSetup.storage))
     .use(createCallbackFallback(scenesSetup.storage))
