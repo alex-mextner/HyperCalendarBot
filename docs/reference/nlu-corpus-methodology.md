@@ -42,8 +42,12 @@ predictions, and are never reported as accuracy.
 - Every free-text field is pseudonymized with `redact_candidate()`: URLs,
   emails, `@handles`, coordinates, and phone-number-shaped digit runs become
   `[KIND_<hmac>]` tokens; known contact/user names from the same database are
-  redacted the same way. Calendar-shaped date literals (`YYYY-MM-DD`) survive
-  redaction deliberately — they are needed to interpret compound requests and
+  redacted the same way. Calendar-shaped date literals survive redaction
+  deliberately — both ISO `YYYY-MM-DD` and day-first `DD-MM(-YYYY)` (the
+  latter checked with the same day/month range test the bot's own
+  `NUMERIC_DATE_CANDIDATE_RE` in `src/bot/handlers/group-message-filter.ts`
+  uses) are recognized before the phone-number-shaped digit-run rule would
+  otherwise destroy them; they are needed to interpret compound requests and
   are not personally identifying on their own.
 - Any row matching `AUTH` (an OTP/2FA/session/API-key pattern) is replaced
   outright with `[QUARANTINED_AUTH]`, and every other row in the same
@@ -97,12 +101,20 @@ so coverage accounting stays honest about what was excluded and why.
 
 ## Input bounds
 
-- `collect()` refuses symlinks and any path that would resolve outside
-  `--root` (`is_safe_source_file`) before ever opening a source file, and caps
-  both SQLite files and debug logs at a fixed byte ceiling before reading them
-  fully into memory.
-- `--merge` archives go through the same symlink-rejecting, size-bounded
-  reader (`read_bounded_merge_archive`).
+- `collect()` and `read_bounded_merge_archive()` open every source through
+  `open_regular_bounded()`, which opens with `O_NOFOLLOW` and checks the
+  *already-open descriptor* via `fstat` (regular file, under a byte ceiling)
+  before any byte is read. `is_safe_source_file()` is a separate, faster
+  path-based pre-check used only to produce an accurate `skipped_unsafe_path`
+  inventory entry up front — it is not itself race-free (a plain
+  check-then-open has a window where the path could be swapped to a symlink
+  afterward). `open_regular_bounded()` is the actual security boundary: the
+  kernel refuses the open outright if the final path component is a symlink
+  at open time, so nothing can be swapped in between a check and a read.
+- Both SQLite files (plain and gzip) and debug logs are capped at a fixed
+  byte ceiling on the source file itself via that same `fstat` check, and gz
+  sources are additionally capped on their *decompressed* size while
+  streaming, since a small compressed file can still decompress unboundedly.
 
 ## Gold import: what exists and what does not
 
@@ -132,7 +144,20 @@ in-place atomic package rewriting, corpus-hash recomputation, and a durable
 review workflow in the same bounded slice that just landed the pairing fixes
 above — a second, separately reviewable piece of work. The validator and
 importer functions are ready for it; the CLI wiring is the next gated step
-(see below).
+(see below). **When it is built**, `corpus_candidate_sha256` binding must be
+computed once, from the pre-adjudication `candidates.private.json` that
+`collect()`+`audit()` originally produced, and never recomputed from a
+post-import file: recomputing it after writing gold would let a *second*,
+independently-adjudicated gold batch — bound to that same original
+pre-adjudication package — incorrectly fail to match, because the file it
+is compared against would have silently changed underneath it.
+
+`apply_gold_import`'s report distinguishes `gold_fully_approved` (all four
+review dimensions approved; this is what populates `gold` and sets
+`train_eligible`) from `gold_partial_or_rejected_recorded` (bound and kept in
+`gold_adjudication` for the audit trail, but never written into `gold`
+itself) — a single combined "applied" counter would otherwise overstate how
+much of a batch is actually validated, train-eligible gold.
 
 ## Current numbers (weak labels, not measured traffic truth)
 

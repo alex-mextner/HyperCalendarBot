@@ -29,11 +29,14 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import stat
 import tempfile
 from typing import Literal, TypedDict
 
 SCHEMA_VERSION = 2
 SESSION_GAP_SECONDS = 1800  # single source of truth for the auth-quarantine window, session boundary and stale-attachment cutoff
+MAX_DATABASE_BYTES = 512*1024*1024  # single bound enforced at both fstat-open time and while streaming a gz's decompressed bytes
+MAX_LOG_BYTES = 64*1024*1024        # same, for debug logs and --merge archives
 
 AUTH = re.compile(r'connect_telegram|one.?time.?code|2fa|otp|two.factor|password|парол|код.{0,35}(?:вход|telegram|телеграм)|(?:telegram|телеграм).{0,35}код|session_string|api[_ -]?key|Bearer\s+[A-Za-z0-9]', re.I)
 COMMANDS = {'add':'event.create','edit':'event.update','delete':'event.delete','search':'event.search', 'today':'calendar.read','tomorrow':'calendar.read','week':'calendar.read','month':'calendar.read', 'free':'availability.read','invite':'invitation.send','invitations':'invitation.status', 'contacts':'contacts.manage','places':'places.manage','settings':'settings.manage', 'help':'help','start':'onboarding','log':'history.read','history':'history.read', 'cancel':'dialogue.cancel','import':'calendar.import','holidays':'calendar.holidays','birthdays':'calendar.birthdays','ping':'diagnostics','connect_google':'integration.manage','disconnect_google':'integration.manage','connect_telegram':'auth.sensitive'}
@@ -62,6 +65,24 @@ def pseudonym(value: str, key: bytes, kind: str) -> str:
     digest = hmac.new(key, (kind + ':' + value.casefold()).encode(), hashlib.sha256).hexdigest()[:16]
     return f'[{kind}_{digest}]'
 
+def _looks_like_calendar_date(value: str) -> bool:
+    """Mirror the bot's own NUMERIC_DATE_CANDIDATE_RE day-first convention
+    (src/bot/handlers/group-message-filter.ts) so a real DD-MM(-YYYY) date the
+    bot itself would parse never gets destroyed as a fake phone number.
+    """
+    iso = re.fullmatch(r'\d{4}-\d{2}-\d{2}', value)
+    if iso:
+        try:
+            dt.date.fromisoformat(value)
+            return True
+        except ValueError:
+            return False
+    day_month = re.fullmatch(r'(\d{1,2})-(\d{1,2})(?:-\d{2,4})?', value)
+    if day_month:
+        day, month = int(day_month[1]), int(day_month[2])
+        return 1 <= day <= 31 and 1 <= month <= 12
+    return False
+
 def redact_candidate(text: str, key: bytes, lexicon: dict[str, str] | None = None) -> str:
     if AUTH.search(text):
         return '[QUARANTINED_AUTH]'
@@ -69,12 +90,8 @@ def redact_candidate(text: str, key: bytes, lexicon: dict[str, str] | None = Non
     for kind, pattern in rules:
         def replace(match):
             value = match[0]
-            if kind == 'NUMBER' and re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
-                try:
-                    dt.date.fromisoformat(value)
-                    return value
-                except ValueError:
-                    pass
+            if kind == 'NUMBER' and _looks_like_calendar_date(value):
+                return value
             return pseudonym(value, key, kind)
         text = re.sub(pattern, replace, text)
     for name, kind in sorted((lexicon or {}).items(), key=lambda entry: -len(entry[0])):
@@ -174,7 +191,8 @@ def apply_gold_import(candidates: list[dict], gold_records: list[dict], expected
     leaves the candidate as-is except for a bookkeeping label_status.
     """
     by_ref = {candidate.get('source_ref'): candidate for candidate in candidates}
-    applied = 0
+    fully_approved = 0
+    partial_or_rejected = 0
     rejected_unknown_source = 0
     rejected_corpus_mismatch = 0
     for record in gold_records:
@@ -192,8 +210,11 @@ def apply_gold_import(candidates: list[dict], gold_records: list[dict], expected
         candidate['gold'] = adjudication if all_approved else None
         candidate['label_status'] = 'gold_approved' if all_approved else 'gold_partial_or_rejected'
         candidate['train_eligible'] = all_approved
-        applied += 1
-    return candidates, {'gold_applied': applied, 'gold_rejected_unknown_source': rejected_unknown_source, 'gold_rejected_corpus_mismatch': rejected_corpus_mismatch}
+        if all_approved:
+            fully_approved += 1
+        else:
+            partial_or_rejected += 1
+    return candidates, {'gold_fully_approved': fully_approved, 'gold_partial_or_rejected_recorded': partial_or_rejected, 'gold_rejected_unknown_source': rejected_unknown_source, 'gold_rejected_corpus_mismatch': rejected_corpus_mismatch}
 
 def suggest_labels(text: str) -> list[str]:
     text = text.strip()
@@ -248,7 +269,13 @@ def row_key(row: dict) -> str:
     return hashlib.sha256(json.dumps(selected,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
 
 def is_safe_source_file(path: Path, root: Path) -> bool:
-    """Reject symlinks and anything resolving outside root before it is ever opened."""
+    """Fast, best-effort pre-filter used only to produce an accurate
+    'skipped_unsafe_path' inventory entry before an attempt to open. This is
+    NOT the security boundary: it is a plain path-based check-then-open by
+    itself would be racy (the path could be swapped to a symlink afterward).
+    The actual guarantee against that race is `open_regular_bounded`'s
+    O_NOFOLLOW open plus an fstat check on the already-open descriptor.
+    """
     try:
         if path.is_symlink() or not path.is_file():
             return False
@@ -257,6 +284,33 @@ def is_safe_source_file(path: Path, root: Path) -> bool:
         return resolved == root_resolved or root_resolved in resolved.parents
     except OSError:
         return False
+
+def open_regular_bounded(path: Path, max_bytes: int) -> int:
+    """Open a file descriptor that cannot be a symlink and cannot exceed a
+    byte bound, without a window between checking and opening. `O_NOFOLLOW`
+    makes the kernel refuse the open outright if the final path component is
+    (or has become, since any earlier plain-path check) a symlink; `fstat` on
+    the resulting descriptor -- not a fresh path lookup -- is what confirms
+    it is a bounded regular file, so nothing can be swapped in between.
+    Caller owns the returned fd and must close it.
+    """
+    flags = os.O_RDONLY
+    if hasattr(os, 'O_NOFOLLOW'):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError('not_a_regular_file')
+        if info.st_size > max_bytes:
+            raise ValueError('oversized_source')
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+def _is_gzip_source(path: Path) -> bool:
+    return path.suffix == '.gz'
 
 def collect(root: Path) -> tuple[list[dict], list[dict], dict[str,str]]:
     rows: dict[str,dict] = {}; sources = []; lexicon = {}
@@ -269,17 +323,16 @@ def collect(root: Path) -> tuple[list[dict], list[dict], dict[str,str]]:
             sources.append(source)
             continue
         try:
-            if path.name.endswith('.gz'):
-                with tempfile.NamedTemporaryFile(suffix='.db') as temporary, gzip.open(path,'rb') as stream:
-                    total = 0
-                    while chunk := stream.read(1024*1024):
-                        total += len(chunk)
-                        if total > 512*1024*1024: raise ValueError('oversized_database')
-                        temporary.write(chunk)
-                    temporary.flush(); extracted, names = read_database(Path(temporary.name))
-            else:
-                if path.stat().st_size > 512*1024*1024: raise ValueError('oversized_database')
-                extracted, names = read_database(path)
+            fd = open_regular_bounded(path, MAX_DATABASE_BYTES)
+            with os.fdopen(fd, 'rb') as raw_stream, tempfile.NamedTemporaryFile(suffix='.db') as temporary:
+                opener = gzip.GzipFile(fileobj=raw_stream) if _is_gzip_source(path) else raw_stream
+                total = 0
+                while chunk := opener.read(1024*1024):
+                    total += len(chunk)
+                    if total > MAX_DATABASE_BYTES: raise ValueError('oversized_database')
+                    temporary.write(chunk)
+                temporary.flush()
+                extracted, names = read_database(Path(temporary.name))
             lexicon.update(names)
             digests = [row_key(row) for row in extracted]
             logical_sha256 = hashlib.sha256(''.join(digests).encode()).hexdigest()
@@ -298,9 +351,11 @@ def collect(root: Path) -> tuple[list[dict], list[dict], dict[str,str]]:
             sources.append(source)
             continue
         try:
-            with (gzip.open(path,'rb') if path.suffix=='.gz' else path.open('rb')) as stream:
-                raw = stream.read(64*1024*1024+1)
-            if len(raw)>64*1024*1024: raise ValueError('oversized_log')
+            fd = open_regular_bounded(path, MAX_LOG_BYTES)
+            with os.fdopen(fd, 'rb') as raw_stream:
+                stream = gzip.GzipFile(fileobj=raw_stream) if _is_gzip_source(path) else raw_stream
+                raw = stream.read(MAX_LOG_BYTES+1)
+            if len(raw)>MAX_LOG_BYTES: raise ValueError('oversized_log')
             runs = parse_debug_runs(raw.decode('utf-8', errors='replace'))
             source.update(status='read' if runs else 'no_direct_dialogues',rows=len(runs),sha256=hashlib.sha256(raw).hexdigest())
             for index, row in enumerate(runs):
@@ -422,15 +477,16 @@ def load_merge_archive(content, archive_digest: str) -> tuple[list[dict], list[d
         return rows, [], {}
     raise ValueError('Unsupported archive schema')
 
-def read_bounded_merge_archive(path: Path, max_bytes: int = 512*1024*1024) -> bytes:
-    """Read one --merge input under the same guards collect() applies to its own sources."""
-    if path.is_symlink():
-        raise ValueError('merge_archive_symlink_rejected')
-    if not path.is_file():
-        raise ValueError('merge_archive_not_a_regular_file')
-    if path.stat().st_size > max_bytes:
-        raise ValueError('merge_archive_oversized')
-    with path.open('rb') as stream:
+def read_bounded_merge_archive(path: Path, max_bytes: int = MAX_DATABASE_BYTES) -> bytes:
+    """Read one --merge input under the same O_NOFOLLOW+fstat guard collect() uses.
+
+    The read itself, not just the open-time fstat, is bounded: fstat only
+    reflects the file's size at open time, so a file that grows afterward
+    (still the same inode, same fd) must not be allowed to make this read
+    unbounded.
+    """
+    fd = open_regular_bounded(path, max_bytes)
+    with os.fdopen(fd, 'rb') as stream:
         raw = stream.read(max_bytes + 1)
     if len(raw) > max_bytes:
         raise ValueError('merge_archive_oversized')

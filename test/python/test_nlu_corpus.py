@@ -40,6 +40,19 @@ class NluCorpusTests(unittest.TestCase):
         self.assertIn('2026-09-29', safe)
         self.assertIn('14:00', safe)
 
+    def test_hyphenated_day_month_year_dates_survive_redaction(self):
+        # The production bot itself parses DD-MM(-YYYY) as a calendar date
+        # (src/bot/handlers/group-message-filter.ts NUMERIC_DATE_CANDIDATE_RE);
+        # the NUMBER-redaction rule must not destroy it as a fake phone number.
+        safe = MODULE.redact_candidate('Встреча 29-09-2026 в 14:00', b'key', {})
+        self.assertIn('29-09-2026', safe)
+        safe_short = MODULE.redact_candidate('Событие 5-3-2026 утром', b'key', {})
+        self.assertIn('5-3-2026', safe_short)
+
+    def test_invalid_month_hyphenated_digit_run_is_still_redacted(self):
+        safe = MODULE.redact_candidate('код 12-34-56-78', b'key', {})
+        self.assertNotIn('12-34-56-78', safe)
+
     def test_debug_history_is_not_mistaken_for_new_messages(self):
         text = ('[2026-09-28T10:00:00Z]\nCHAT: 12 | USER: uid:34\nSUPPLEMENT: false\nMESSAGE: создай встречу\n' + '='*50 + '\nHISTORY: old message\nTOOL CALL: create_event\nTOOL RESULT: create_event → OK\nResponse (6 chars):\nГотово\n' + '='*50 + '\n')
         rows = MODULE.parse_debug_runs(text)
@@ -172,7 +185,9 @@ class NluCorpusTests(unittest.TestCase):
             outside.write_text('{}')
             link = pathlib.Path(tmp) / 'merge-link.json'
             link.symlink_to(outside)
-            with self.assertRaises(ValueError):
+            # O_NOFOLLOW makes the kernel itself refuse the open (ELOOP), a
+            # stronger guarantee than a prior path-based check-then-open.
+            with self.assertRaises(OSError):
                 MODULE.read_bounded_merge_archive(link)
 
     def test_read_bounded_merge_archive_rejects_an_oversized_file(self):
@@ -181,6 +196,34 @@ class NluCorpusTests(unittest.TestCase):
             big.write_bytes(b'0')
             with self.assertRaises(ValueError):
                 MODULE.read_bounded_merge_archive(big, max_bytes=0)
+
+    def test_read_bounded_merge_archive_bounds_the_read_even_if_fstat_under_reports_size(self):
+        # open_regular_bounded's fstat check only reflects the size at open
+        # time; if the file grows afterward (same fd, same inode) the read
+        # itself -- not just that earlier check -- must stay bounded.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'grows.json'
+            path.write_bytes(b'y' * 1000)
+            original_fstat = os.fstat
+
+            class LyingStat:
+                def __init__(self, real):
+                    self._real = real
+                def __getattr__(self, name):
+                    return getattr(self._real, name)
+                @property
+                def st_size(self):
+                    return 10  # lies: claims the file is small
+
+            def fake_fstat(fd):
+                return LyingStat(original_fstat(fd))
+
+            os.fstat = fake_fstat
+            try:
+                with self.assertRaises(ValueError):
+                    MODULE.read_bounded_merge_archive(path, max_bytes=10)
+            finally:
+                os.fstat = original_fstat
 
     def test_read_bounded_merge_archive_reads_a_regular_file_within_bounds(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -324,7 +367,7 @@ class NluCorpusTests(unittest.TestCase):
         updated, report = MODULE.apply_gold_import([candidate], gold, self._digest('sha-1'))
         self.assertEqual(updated[0]['gold']['intent'], 'event.create')
         self.assertTrue(updated[0]['train_eligible'])
-        self.assertEqual(report['gold_applied'], 1)
+        self.assertEqual(report['gold_fully_approved'], 1)
 
     def test_apply_gold_import_withholds_train_eligible_when_a_single_dimension_is_not_approved(self):
         candidate = MODULE.candidate_record('Создай встречу', [], b'key')
@@ -351,3 +394,56 @@ class NluCorpusTests(unittest.TestCase):
         updated, report = MODULE.apply_gold_import([candidate], gold, self._digest('current-sha'))
         self.assertIsNone(updated[0]['gold'])
         self.assertEqual(report['gold_rejected_corpus_mismatch'], 1)
+
+    def test_open_regular_bounded_rejects_a_symlink_via_no_follow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = pathlib.Path(tmp) / 'target.db'
+            target.write_bytes(b'data')
+            link = pathlib.Path(tmp) / 'link.db'
+            link.symlink_to(target)
+            with self.assertRaises(OSError):
+                MODULE.open_regular_bounded(link, 1024)
+
+    def test_open_regular_bounded_rejects_an_oversized_regular_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            big = pathlib.Path(tmp) / 'big.db'
+            big.write_bytes(b'0123456789')
+            with self.assertRaises(ValueError):
+                MODULE.open_regular_bounded(big, 5)
+
+    def test_open_regular_bounded_returns_a_readable_fd_for_a_safe_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            small = pathlib.Path(tmp) / 'small.db'
+            small.write_bytes(b'hello')
+            fd = MODULE.open_regular_bounded(small, 1024)
+            try:
+                self.assertEqual(os.read(fd, 1024), b'hello')
+            finally:
+                os.close(fd)
+
+    def test_collect_still_rejects_a_symlinked_database_end_to_end(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / 'root'
+            (root / 'data').mkdir(parents=True)
+            (root / 'logs').mkdir()
+            outside = pathlib.Path(tmp) / 'outside.db'
+            outside.write_bytes(b'not a real db')
+            (root / 'data' / 'evil.db').symlink_to(outside)
+            rows, sources, lexicon = MODULE.collect(root)
+            evil = [s for s in sources if s['name'] == 'data/evil.db']
+            self.assertEqual(len(evil), 1)
+            self.assertIn(evil[0]['status'], {'skipped_unsafe_path', 'unreadable'})
+
+    def test_apply_gold_import_separates_fully_approved_from_partial_counts(self):
+        approved = MODULE.candidate_record('Создай встречу', ['create_event'], b'key')
+        approved['source_ref'] = 'ref-approved'
+        partial = MODULE.candidate_record('Другое', [], b'key')
+        partial['source_ref'] = 'ref-partial'
+        gold = [
+            self._gold_record('ref-approved', 'sha-1'),
+            self._gold_record('ref-partial', 'sha-1', statuses={'slots': 'needs_more_info'}),
+        ]
+        updated, report = MODULE.apply_gold_import([approved, partial], gold, self._digest('sha-1'))
+        self.assertEqual(report['gold_fully_approved'], 1)
+        self.assertEqual(report['gold_partial_or_rejected_recorded'], 1)
+        self.assertNotIn('gold_applied', report, 'a single combined counter would overstate validated, train-eligible gold')
