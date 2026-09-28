@@ -1067,19 +1067,33 @@ describe('handleConvertToTimezone', () => {
   });
 
   test('the answer does not depend on the process timezone', () => {
-    const previous = process.env.TZ;
-    process.env.TZ = 'Asia/Tokyo';
-    try {
-      // Sanity: the process zone really changed, so this test exercises its premise.
-      expect(new Date('2026-07-11T00:00:00Z').getHours()).toBe(9);
+    // A child process with its own TZ: several test files replace process.env with a plain
+    // object, after which assigning process.env.TZ in this process no longer reaches Date.
+    const handlerPath = Bun.fileURLToPath(
+      new URL('../../../../src/services/ai/tool-handlers/timezone.ts', import.meta.url),
+    );
+    const script = `
+      const { handleConvertToTimezone } = await import(${JSON.stringify(handlerPath)});
       const instant = handleConvertToTimezone({ datetime: '2026-07-11T09:00:00Z', timezone: 'Europe/Belgrade' });
-      expect(JSON.parse(instant.output!).local_datetime).toBe('2026-07-11T11:00:00+02:00');
-      expect(handleConvertToTimezone({ datetime: '2026-07-11T11:00:00', timezone: 'Europe/Belgrade' }).success).toBe(
-        false,
-      );
-    } finally {
-      if (previous === undefined) delete process.env.TZ;
-      else process.env.TZ = previous;
-    }
+      const wallClock = handleConvertToTimezone({ datetime: '2026-07-11T11:00:00', timezone: 'Europe/Belgrade' });
+      console.log(JSON.stringify({
+        processHour: new Date('2026-07-11T00:00:00Z').getHours(),
+        local: JSON.parse(instant.output).local_datetime,
+        wallClockAccepted: wallClock.success,
+      }));`;
+    const child = Bun.spawnSync([process.execPath, '--no-env-file', '-e', script], {
+      env: { ...process.env, TZ: 'Asia/Tokyo' },
+      timeout: 30_000,
+    });
+    expect({ exitCode: child.exitCode, stderr: child.exitCode === 0 ? '' : child.stderr.toString() }).toEqual({
+      exitCode: 0,
+      stderr: '',
+    });
+    // processHour 9 proves the child really runs in Asia/Tokyo, so the test exercises its premise.
+    expect(JSON.parse(child.stdout.toString().trim().split('\n').at(-1)!)).toEqual({
+      processHour: 9,
+      local: '2026-07-11T11:00:00+02:00',
+      wallClockAccepted: false,
+    });
   });
 });
