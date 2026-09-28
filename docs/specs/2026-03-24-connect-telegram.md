@@ -514,9 +514,10 @@ delivery attempt, whether to suggest connecting. The suggestion is added when AL
   30 days, more than a day in the future (clock skew), or unparsable. The claim below overwrites
   such values.
 
-Showing the suggestion starts the 30-day snooze. The snooze is claimed with one conditional `UPDATE`
-(`UserRepository.claimConnectTelegramSnooze`), so concurrent requests of the same user cannot both
-show it; the in-memory user snapshot is updated too. Therefore:
+Showing the suggestion starts the 30-day snooze. The snooze is claimed with a compare-and-swap
+(`UserRepository.claimConnectTelegramSnooze`: `UPDATE … WHERE connect_telegram_dismissed_at IS
+<value judged above>`), so concurrent requests of the same user cannot both show it; the in-memory
+user snapshot is updated too. Therefore:
 
 - the suggestion appears at most once per 30 days, whether or not the user answers it — no
   "not now" has to be understood. The intent path shows `output` verbatim and cannot relay the

@@ -110,19 +110,15 @@ export class UserRepository {
   }
 
   /**
-   * Starts the connect-suggestion snooze at `at` unless one is active: set at or after
-   * `activeSince` and not later than `futureLimit` (a later value is clock skew or malformed text,
-   * which compares above any ISO timestamp). Returns false when a concurrent request already
-   * claimed it. ISO timestamps compare correctly as text.
+   * Compare-and-swap for the connect-suggestion snooze: sets it to `at` only if the stored value is
+   * still `expected` (the value the caller judged). Returns false when another request changed it.
    */
-  claimConnectTelegramSnooze(userId: number, at: string, activeSince: string, futureLimit: string): boolean {
+  claimConnectTelegramSnooze(userId: number, at: string, expected: string | null): boolean {
     const result = this.db
       .prepare(
-        `UPDATE users SET connect_telegram_dismissed_at = ?
-         WHERE telegram_id = ? AND (connect_telegram_dismissed_at IS NULL
-           OR connect_telegram_dismissed_at < ? OR connect_telegram_dismissed_at > ?)`,
+        'UPDATE users SET connect_telegram_dismissed_at = ? WHERE telegram_id = ? AND connect_telegram_dismissed_at IS ?',
       )
-      .run(at, userId, activeSince, futureLimit);
+      .run(at, userId, expected);
     return result.changes === 1;
   }
 

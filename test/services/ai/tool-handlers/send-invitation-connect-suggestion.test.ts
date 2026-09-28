@@ -159,6 +159,8 @@ describe('send_invitation /connect_telegram suggestion', () => {
   test.each([
     ['a clock-skewed stamp far in the future', '2099-01-01T00:00:00.000Z'],
     ['malformed text', 'not-a-date'],
+    // Sorts between "30 days ago" and "tomorrow" as text, yet is not a date.
+    ['a recent-looking but invalid stamp', `${new Date().toISOString()}junk`],
   ])('a snooze stored as %s does not block the suggestion forever', async (_name, stored) => {
     userRepo.setConnectTelegramDismissedAt(INVITER_ID, stored);
     const shown = await handleSendInvitation(makeCtx(), { event_id: eventId, invitee_id: INVITEE_ID });

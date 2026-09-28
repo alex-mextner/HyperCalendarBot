@@ -291,7 +291,7 @@ function connectPromptSnoozed(ctx: AgentContext): boolean {
   if (!snoozedAt) return false;
   const elapsed = Date.now() - new Date(snoozedAt).getTime();
   // A timestamp far in the future is clock skew, not a snooze; malformed text yields NaN. Neither
-  // counts, and claimConnectTelegramSnooze overwrites both.
+  // counts, and the compare-and-swap claim replaces both.
   return elapsed > -CONNECT_PROMPT_SKEW_MS && elapsed < CONNECT_PROMPT_SNOOZE_MS;
 }
 
@@ -299,8 +299,8 @@ function connectPromptSnoozed(ctx: AgentContext): boolean {
  * The /connect_telegram suggestion for an invitation that was just sent, or null (#511, spec
  * §10.1). It is offered only when the bot itself could not reach a person invitee, the feature is
  * enabled, the user has no active session, is in a private chat (the command refuses to run in
- * groups), and the suggestion is not snoozed. Showing it claims the snooze atomically, so
- * concurrent requests of one user cannot both show it.
+ * groups), and the suggestion is not snoozed. Showing it claims the snooze with a compare-and-swap
+ * on the value judged here, so concurrent requests of one user cannot both show it.
  */
 export function takeConnectTelegramSuggestion(
   ctx: AgentContext,
@@ -318,11 +318,10 @@ export function takeConnectTelegramSuggestion(
     !ctx.telegramSessionRepo.getActive(ctx.user.telegram_id) &&
     !connectPromptSnoozed(ctx);
   if (!eligible) return null;
-  const now = Date.now();
-  const at = new Date(now).toISOString();
-  const activeSince = new Date(now - CONNECT_PROMPT_SNOOZE_MS).toISOString();
-  const futureLimit = new Date(now + CONNECT_PROMPT_SKEW_MS).toISOString();
-  if (!ctx.userRepo.claimConnectTelegramSnooze(ctx.user.telegram_id, at, activeSince, futureLimit)) return null;
+  const at = new Date().toISOString();
+  if (!ctx.userRepo.claimConnectTelegramSnooze(ctx.user.telegram_id, at, ctx.user.connect_telegram_dismissed_at)) {
+    return null;
+  }
   // Later steps of the same message read the user snapshot, not the row: intent workflows build a
   // fresh context per step around the same user object, so update that object in place.
   ctx.user.connect_telegram_dismissed_at = at;
