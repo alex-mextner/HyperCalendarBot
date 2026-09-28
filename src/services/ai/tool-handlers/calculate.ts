@@ -4,17 +4,22 @@ import type { ToolHandlerMeta, ToolResult } from '../types.ts';
 import { formatLocalIso, validateAndGetOffset } from './timezone.ts';
 
 const ISO_DT_RE = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})';
-/** Same shape as ISO_DT_RE, with every component captured. */
+/** Same shape as ISO_DT_RE, with every component captured by name. */
 const ISO_INSTANT_RE =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d+))?(?:Z|([+-])(\d{2}):?(\d{2}))$/i;
+  /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})T(?<hour>\d{2}):(?<minute>\d{2})(?::(?<second>\d{2}))?(?:\.(?<fraction>\d+))?(?:Z|(?<sign>[+-])(?<offsetHour>\d{2}):?(?<offsetMinute>\d{2}))$/i;
 const DATETIME_LIKE_RE = /^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}/;
-const DATE_TOKEN_RE = /(?<!\d)\d{4}-(?:0?[1-9]|1[0-2])-(?:0?[1-9]|[12]\d|3[01])(?!\d)/;
+/** Anything date-shaped, valid or not: "2026-13-01" must not become 2026 - 13 - 1. */
+const DATE_TOKEN_RE = /(?<!\d)\d{4}-\d{1,2}-\d{1,2}(?!\d)/;
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DURATION_UNITS = 'min|minutes?|h|hr|hours?|d|days?|w|weeks?|mo|months?|y|years?';
 const IANA_ZONE = '[A-Za-z_]+(?:\\/[A-Za-z0-9_+.-]+)+';
-const DATED_WALL_CLOCK = '(\\d{4})-(\\d{2})-(\\d{2})[ T](\\d{1,2}):(\\d{2})(?::(\\d{2}))?';
-const UTC_SOURCE_RE = new RegExp(`^${DATED_WALL_CLOCK}\\s+UTC(?:([+-])(\\d{1,2})(?::?(\\d{2}))?)?$`, 'i');
-const IANA_SOURCE_RE = new RegExp(`^${DATED_WALL_CLOCK}\\s+(${IANA_ZONE})$`);
+const DATED_WALL_CLOCK =
+  '(?<year>\\d{4})-(?<month>\\d{2})-(?<day>\\d{2})[ T](?<hour>\\d{1,2}):(?<minute>\\d{2})(?::(?<second>\\d{2}))?';
+const UTC_SOURCE_RE = new RegExp(
+  `^${DATED_WALL_CLOCK}\\s+UTC(?:(?<sign>[+-])(?<offsetHour>\\d{1,2})(?::?(?<offsetMinute>\\d{2}))?)?$`,
+  'i',
+);
+const IANA_SOURCE_RE = new RegExp(`^${DATED_WALL_CLOCK}\\s+(?<zone>${IANA_ZONE})$`);
 const CONVERSION_RE = new RegExp(`^(.+?)\\s+to\\s+(UTC|${IANA_ZONE})$`, 'i');
 const DATELESS_SOURCE_RE = new RegExp(
   `^\\d{1,2}:\\d{2}(?::\\d{2})?\\s+(?:UTC(?:[+-]\\d{1,2}(?::?\\d{2})?)?|${IANA_ZONE})$`,
@@ -32,10 +37,8 @@ const WEEKDAY_FORMAT = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZ
 // retries with exactly these strings (pinned by calculate-model-forms.test.ts).
 const DATETIME_SYNTAX_HINT =
   'Datetime arithmetic requires ISO 8601 with T and an explicit Z/offset, e.g. "2026-09-17T10:49:00+02:00 + 2hours". Local-to-UTC conversion accepts a dated IANA zone, e.g. "2026-09-23 12:30 Europe/Belgrade to UTC", or an explicit fixed UTC offset. UTC to local: "2026-09-27 10:30 UTC to Europe/Belgrade". Weekday of a date: "2026-09-28 day_of_week". For arithmetic forms, do not append "to UTC".';
-const DATE_REQUIRED_HINT =
-  'Conversion with an IANA timezone needs the calendar date because the UTC offset depends on DST on that date, e.g. "2026-09-23 12:00 Europe/Belgrade to UTC".';
 const WEEKDAY_HINT =
-  'Weekday needs the local calendar date as YYYY-MM-DD, e.g. "2026-09-28 day_of_week". For a datetime, first convert it to the user timezone, e.g. "2026-09-27T22:30:00Z to Europe/Belgrade", and pass the local date it returns.';
+  'Weekday needs the local calendar date as YYYY-MM-DD, e.g. "2026-09-28 day_of_week". For a datetime, first convert it with "<datetime> to <user IANA timezone>" and pass the local date it returns.';
 const DATE_SYNTAX_HINT =
   'A YYYY-MM-DD date is not a number. Date forms: weekday "2026-09-28 day_of_week", shift "2026-09-28 + 7days", days between "2026-10-10 - 2026-09-28", dated conversion "2026-09-28 12:30 Europe/Belgrade to UTC".';
 
@@ -171,34 +174,53 @@ interface WallClock {
   second: number;
 }
 
-/** Six captured "YYYY MM DD HH MM [SS]" groups; an absent seconds group means :00. */
-function wallClock(groups: readonly (string | undefined)[]): WallClock {
-  const [year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0] = groups.map((group) => Number(group ?? '0'));
-  return { year, month, day, hour, minute, second };
+type RegExpGroups = { [name: string]: string | undefined };
+
+/** Named year/month/day/hour/minute[/second] groups; an absent second means :00. */
+function parseWallClock(groups: RegExpGroups): WallClock {
+  const read = (name: string) => Number(groups[name] ?? '0');
+  return {
+    year: read('year'),
+    month: read('month'),
+    day: read('day'),
+    hour: read('hour'),
+    minute: read('minute'),
+    second: read('second'),
+  };
 }
 
 function validWallClock({ year, month, day, hour, minute, second }: WallClock): boolean {
   return validCalendarDate(year, month, day) && hour <= 23 && minute <= 59 && second <= 59;
 }
 
-/** Signed minutes of a "±H[:MM]" UTC offset; null outside the real-world ±14:00 range. */
-function fixedOffsetMinutes(sign: string, hoursRaw: string, minutesRaw: string | undefined): number | null {
-  const hours = Number(hoursRaw);
-  const minutes = Number(minutesRaw ?? '0');
+/** Signed minutes of the named sign/offsetHour/offsetMinute groups (0 when absent); null outside ±14:00. */
+function parseOffsetMinutes(groups: RegExpGroups): number | null {
+  if (!groups.sign) return 0;
+  const hours = Number(groups.offsetHour);
+  const minutes = Number(groups.offsetMinute ?? '0');
   if (hours > 14 || minutes > 59 || (hours === 14 && minutes !== 0)) return null;
-  return (sign === '+' ? 1 : -1) * (hours * 60 + minutes);
+  return (groups.sign === '+' ? 1 : -1) * (hours * 60 + minutes);
+}
+
+/** "YYYY-MM-DD" as UTC noon, or null for an impossible date such as 2026-02-31 (never rolled over). */
+function parseCalendarDate(text: string): Date | null {
+  const match = text.match(DATE_ONLY_RE);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return validCalendarDate(year, month, day) ? new Date(Date.UTC(year, month - 1, day, 12)) : null;
 }
 
 /** ISO 8601 instant with an explicit Z/offset. Null when `text` has another shape. */
 function parseIsoInstant(text: string): IsoInstant | { error: string } | null {
-  const match = text.match(ISO_INSTANT_RE);
-  if (!match) return null;
-  const clock = wallClock(match.slice(1, 7));
-  const [fractionRaw, signRaw, offsetHourRaw, offsetMinuteRaw] = match.slice(7);
-  const offsetMinutes = signRaw ? fixedOffsetMinutes(signRaw, offsetHourRaw!, offsetMinuteRaw) : 0;
+  const groups = text.match(ISO_INSTANT_RE)?.groups;
+  if (!groups) return null;
+  const clock = parseWallClock(groups);
+  const offsetMinutes = parseOffsetMinutes(groups);
   if (!validWallClock(clock) || offsetMinutes === null) return { error: `Invalid datetime: ${text}` };
   const { year, month, day, hour, minute, second } = clock;
-  const millis = Number((fractionRaw ?? '').padEnd(3, '0').slice(0, 3));
+  const millis = Number((groups.fraction ?? '').padEnd(3, '0').slice(0, 3));
   return { ms: Date.UTC(year, month - 1, day, hour, minute, second, millis) - offsetMinutes * 60_000, offsetMinutes };
 }
 
@@ -211,29 +233,31 @@ function parseSourceInstant(source: string): { ms: number } | { error: string } 
   const iso = parseIsoInstant(source);
   if (iso) return iso;
 
-  const utcMatch = source.match(UTC_SOURCE_RE);
-  if (utcMatch) {
-    const clock = wallClock(utcMatch.slice(1, 7));
-    const [signRaw, offsetHourRaw, offsetMinuteRaw] = utcMatch.slice(7);
-    const offsetMinutes = signRaw ? fixedOffsetMinutes(signRaw, offsetHourRaw!, offsetMinuteRaw) : 0;
+  const utcGroups = source.match(UTC_SOURCE_RE)?.groups;
+  if (utcGroups) {
+    const clock = parseWallClock(utcGroups);
+    const offsetMinutes = parseOffsetMinutes(utcGroups);
+    if (offsetMinutes === null || !validWallClock(clock)) return { error: `Invalid datetime: ${source}` };
     const { year, month, day, hour, minute, second } = clock;
-    if (offsetMinutes === null || hour > 23 || minute > 59 || second > 59)
-      return { error: `Invalid fixed-offset datetime: ${source}` };
-    if (!validCalendarDate(year, month, day)) return { error: `Invalid date: ${source}` };
     return { ms: Date.UTC(year, month - 1, day, hour, minute, second) - offsetMinutes * 60_000 };
   }
 
   // TZDate resolves the offset for the requested calendar date, so future DST
   // changes never reuse today's offset.
-  const ianaMatch = source.match(IANA_SOURCE_RE);
-  if (!ianaMatch) return null;
-  const clock = wallClock(ianaMatch.slice(1, 7));
-  const timezone = ianaMatch[7]!;
+  const ianaGroups = source.match(IANA_SOURCE_RE)?.groups;
+  if (!ianaGroups) return null;
+  const clock = parseWallClock(ianaGroups);
+  const timezone = ianaGroups.zone ?? '';
   if (!validWallClock(clock)) return { error: `Invalid local datetime: ${source}` };
+  // TZDate does not validate the name: "A/B" gives NaN and "Etc/GMT+99" a
+  // made-up offset. Intl rejects both, as it does for the target zone.
+  try {
+    validateAndGetOffset(timezone, new Date(0));
+  } catch {
+    return { error: `Invalid timezone: ${timezone}` };
+  }
   const { year, month, day, hour, minute, second } = clock;
-  // An unknown zone name does not throw: TZDate yields an Invalid Date (NaN).
   const local = TZDate.tz(timezone, year, month - 1, day, hour, minute, second, 0);
-  if (Number.isNaN(local.getTime())) return { error: `Invalid timezone: ${timezone}` };
   if (!sameWallClock(local, year, month, day, hour, minute, second))
     return { error: `Local time does not exist in ${timezone} because of a clock change.` };
   if (localTimeIsAmbiguous(local.getTime(), timezone, year, month, day, hour, minute, second))
@@ -275,13 +299,11 @@ export function handleCalculate(input: { expression: string }): ToolResult {
 
   const weekdayMatch = expr.match(WEEKDAY_RE);
   if (weekdayMatch) {
-    const dateMatch = (weekdayMatch[1] ?? weekdayMatch[2] ?? weekdayMatch[3] ?? '').match(DATE_ONLY_RE);
-    if (!dateMatch) return { success: false, error: WEEKDAY_HINT };
-    const year = Number(dateMatch[1]);
-    const month = Number(dateMatch[2]);
-    const day = Number(dateMatch[3]);
-    if (!validCalendarDate(year, month, day)) return { success: false, error: `Invalid date: ${dateMatch[0]}` };
-    return { success: true, output: WEEKDAY_FORMAT.format(new Date(Date.UTC(year, month - 1, day))) };
+    const dateStr = weekdayMatch[1] ?? weekdayMatch[2] ?? weekdayMatch[3] ?? '';
+    if (!DATE_ONLY_RE.test(dateStr)) return { success: false, error: WEEKDAY_HINT };
+    const date = parseCalendarDate(dateStr);
+    if (!date) return { success: false, error: `Invalid date: ${dateStr}` };
+    return { success: true, output: WEEKDAY_FORMAT.format(date) };
   }
 
   // Date-less fixed offsets are deterministic and retained for explicit user
@@ -292,7 +314,11 @@ export function handleCalculate(input: { expression: string }): ToolResult {
     const hour = Number(hourRaw);
     const minute = Number(minuteRaw);
     const second = Number(secondRaw ?? '0');
-    const offsetMinutes = fixedOffsetMinutes(signRaw!, offsetHourRaw!, offsetMinuteRaw);
+    const offsetMinutes = parseOffsetMinutes({
+      sign: signRaw,
+      offsetHour: offsetHourRaw,
+      offsetMinute: offsetMinuteRaw,
+    });
     if (hour > 23 || minute > 59 || second > 59 || offsetMinutes === null)
       return { success: false, error: `Invalid fixed-offset datetime: ${expr}` };
     const utcMinutes = (((hour * 60 + minute - offsetMinutes) % 1440) + 1440) % 1440;
@@ -307,11 +333,12 @@ export function handleCalculate(input: { expression: string }): ToolResult {
   const conversionMatch = expr.match(CONVERSION_RE);
   if (conversionMatch) {
     const [, source, target] = conversionMatch;
+    const targetIsUtc = /^(?:etc\/)?utc$/i.test(target!);
     const instant = parseSourceInstant(source!);
     if (instant && 'error' in instant) return { success: false, error: instant.error };
     if (instant) {
       const date = new Date(instant.ms);
-      if (/^(?:etc\/)?utc$/i.test(target!)) return { success: true, output: date.toISOString() };
+      if (targetIsUtc) return { success: true, output: date.toISOString() };
       try {
         return { success: true, output: formatLocalIso(date, validateAndGetOffset(target!, date)) };
       } catch {
@@ -319,7 +346,13 @@ export function handleCalculate(input: { expression: string }): ToolResult {
         return { success: false, error: `Invalid timezone: ${target}` };
       }
     }
-    if (DATELESS_SOURCE_RE.test(source!)) return { success: false, error: DATE_REQUIRED_HINT };
+    // Only an IANA zone on either side makes the offset date-dependent; the
+    // example keeps the model's own time and zones and only adds a date.
+    if (DATELESS_SOURCE_RE.test(source!) && (source!.includes('/') || !targetIsUtc))
+      return {
+        success: false,
+        error: `Conversion with an IANA timezone needs the calendar date because the UTC offset depends on DST on that date. Put the event's date first, e.g. "2026-09-23 ${source} to ${target}".`,
+      };
   }
 
   // A bare ISO instant with Z/offset is already unambiguous: normalize to UTC.
@@ -345,10 +378,10 @@ export function handleCalculate(input: { expression: string }): ToolResult {
   const dateOnlyDiffMatch = expr.match(/^(\d{4}-\d{2}-\d{2})\s*-\s*(\d{4}-\d{2}-\d{2})$/);
   if (dateOnlyDiffMatch) {
     const [, aStr, bStr] = dateOnlyDiffMatch;
-    const a = new Date(`${aStr}T12:00:00Z`);
-    const b = new Date(`${bStr}T12:00:00Z`);
-    if (Number.isNaN(a.getTime())) return { success: false, error: `Cannot parse date: ${aStr}` };
-    if (Number.isNaN(b.getTime())) return { success: false, error: `Cannot parse date: ${bStr}` };
+    const a = parseCalendarDate(aStr!);
+    const b = parseCalendarDate(bStr!);
+    if (!a) return { success: false, error: `Invalid date: ${aStr}` };
+    if (!b) return { success: false, error: `Invalid date: ${bStr}` };
     const days = Math.round(Math.abs(a.getTime() - b.getTime()) / 86_400_000);
     return { success: true, output: `${days} days` };
   }
@@ -401,8 +434,8 @@ export function handleCalculate(input: { expression: string }): ToolResult {
   );
   if (dateOnlyMatch) {
     const [, dateStr, op, amtStr, unit] = dateOnlyMatch;
-    const date = new Date(`${dateStr}T12:00:00Z`);
-    if (Number.isNaN(date.getTime())) return { success: false, error: `Cannot parse date: ${dateStr}` };
+    const date = parseCalendarDate(dateStr!);
+    if (!date) return { success: false, error: `Invalid date: ${dateStr}` };
     const amt = Number.parseInt(amtStr!, 10);
     const unitL = unit!.toLowerCase();
     if (unitL.startsWith('mo') || unitL.startsWith('month')) {

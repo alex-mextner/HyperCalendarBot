@@ -100,10 +100,10 @@ describe('calculate: forms from production logs', () => {
   });
 
   test.each([
-    '12:00 Europe/Belgrade to UTC',
-    '16:00 Europe/Belgrade to UTC',
-  ])('date-less IANA conversion asks for the calendar date: %s', async (expression) => {
-    await expectSelfCorrectingRefusal(expression, 'calendar date', 'DST', '"2026-09-23 12:00 Europe/Belgrade to UTC"');
+    ['12:00 Europe/Belgrade to UTC', '"2026-09-23 12:00 Europe/Belgrade to UTC"'],
+    ['16:00 Europe/Belgrade to UTC', '"2026-09-23 16:00 Europe/Belgrade to UTC"'],
+  ])('date-less IANA conversion asks for the calendar date: %s', async (expression, example) => {
+    await expectSelfCorrectingRefusal(expression, 'calendar date', 'DST', example);
   });
 
   test('offset-free local datetime arithmetic stays refused with the accepted forms named', async () => {
@@ -126,8 +126,20 @@ describe('calculate: forms from production logs', () => {
     '2026-9-24',
     '2026-09-24 * 2',
     '(2026-09-24)',
+    '2026-13-01',
+    '2026-00-10',
+    '2026-09-32',
   ])('date-shaped operand is refused: %s', async (expression) => {
     await expectSelfCorrectingRefusal(expression, 'YYYY-MM-DD');
+  });
+
+  test.each([
+    '2026-02-31 - 2026-02-28',
+    '2026-02-28 - 2026-02-31',
+    '2026-02-31 + 1day',
+    '2026-02-29 + 1month',
+  ])('an impossible calendar date is refused, not rolled over: %s', async (expression) => {
+    expect(await calc(expression)).toMatchObject({ success: false, error: expect.stringContaining('Invalid date') });
   });
 
   test('an impossible date is refused in a datetime difference too, not rolled over', async () => {
@@ -210,6 +222,7 @@ describe('calculate: instant to zone', () => {
     ['2026-09-27T10:30:00Z to Asia/Kolkata', '2026-09-27T16:00:00+05:30'],
     ['2026-09-27 10:30:15 UTC to Europe/Belgrade', '2026-09-27T12:30:15+02:00'],
     ['2026-09-27 10:30 utc TO Europe/Belgrade', '2026-09-27T12:30:00+02:00'],
+    ['2026-09-28 12:30 europe/moscow to europe/belgrade', '2026-09-28T11:30:00+02:00'],
   ])('%s → %s', async (expression, expected) => {
     expect(await calc(expression)).toMatchObject({ success: true, output: expected });
   });
@@ -220,6 +233,7 @@ describe('calculate: instant to zone', () => {
     ['2026-07-15 12:00 America/New_York to UTC', '2026-07-15T16:00:00.000Z'],
     ['2026-01-15 12:00 America/New_York to UTC', '2026-01-15T17:00:00.000Z'],
     ['2026-09-27 10:30 UTC to UTC', '2026-09-27T10:30:00.000Z'],
+    ['2026-09-23 12:30 europe/belgrade to UTC', '2026-09-23T10:30:00.000Z'],
   ])('UTC target keeps the ISO Z contract: %s → %s', async (expression, expected) => {
     expect(await calc(expression)).toMatchObject({ success: true, output: expected });
   });
@@ -237,16 +251,25 @@ describe('calculate: instant to zone', () => {
     ['2026-09-27 10:30 UTC to Europe/Nowhere', 'Invalid timezone: Europe/Nowhere'],
     ['2026-09-27 10:30 Europe/Nowhere to Europe/Belgrade', 'Invalid timezone: Europe/Nowhere'],
     ['2026-09-27T10:30:00Z to Mars/Olympus', 'Invalid timezone: Mars/Olympus'],
+    ['2026-09-27 10:30 Etc/GMT+99 to UTC', 'Invalid timezone: Etc/GMT+99'],
+    ['2026-09-27 10:30 A/B to Europe/Belgrade', 'Invalid timezone: A/B'],
   ])('unknown zone %s', async (expression, error) => {
     expect(await calc(expression)).toMatchObject({ success: false, error });
   });
 
   test.each([
-    '10:30 UTC to Europe/Belgrade',
-    '13:30 UTC+2 to Europe/Belgrade',
-    '12:00 Europe/Belgrade to Europe/Moscow',
-  ])('date-less conversion involving an IANA zone asks for the date: %s', async (expression) => {
-    await expectSelfCorrectingRefusal(expression, 'calendar date');
+    ['10:30 UTC to Europe/Belgrade', '"2026-09-23 10:30 UTC to Europe/Belgrade"'],
+    ['13:30 UTC+2 to Europe/Belgrade', '"2026-09-23 13:30 UTC+2 to Europe/Belgrade"'],
+    ['12:00 Europe/Belgrade to Europe/Moscow', '"2026-09-23 12:00 Europe/Belgrade to Europe/Moscow"'],
+    ['12:00 America/New_York to UTC', '"2026-09-23 12:00 America/New_York to UTC"'],
+  ])('date-less conversion keeps its zones and asks only for the date: %s', async (expression, example) => {
+    await expectSelfCorrectingRefusal(expression, 'calendar date', example);
+  });
+
+  test('a date-less UTC to UTC conversion is not blamed on DST', async () => {
+    const result = await calc('10:30 UTC to UTC');
+    expect(result.success).toBe(false);
+    expect(result.error).not.toContain('DST');
   });
 
   test.each([
@@ -289,7 +312,9 @@ describe('calculate: weekday of a calendar date', () => {
     'weekday 2026-09-28 12:30',
     'day_of_week(2026-09-28T00:30:00+02:00)',
   ])('a datetime needs its local calendar date first: %s', async (expression) => {
-    await expectSelfCorrectingRefusal(expression, 'local calendar date');
+    const error = await expectSelfCorrectingRefusal(expression, 'local calendar date');
+    // The user's zone is unknown here; a fixed example zone would pick the wrong local date.
+    expect(error).not.toContain('Europe/Belgrade');
   });
 });
 
