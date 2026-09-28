@@ -4,7 +4,7 @@
 
 **Это целевой сид из исходного кода: правил — 52.** Документ строится из исходников и **не утверждает, что сид уже установлен**: сборка не открывает базу и не видит сервер. Установку подтверждает отдельная проверка живой базы: отпечаток ниже должен совпасть со значением в таблице `intent_basis_manifest` (подробности в [описании движка](engine.md#что-здесь-утверждается-а-что-нет)).
 
-Отпечаток целевого сида: `66274f699a93fd1438041ab624b7388960171b511868bcef7dc6e27eca0e2891`
+Отпечаток целевого сида: `6784bb007d70cee9930a1e9ab27b5e70962c8eb45fb8153f624e8a3b6a33f317`
 
 Навигация: [описание движка и правил безопасности](engine.md) · [HTML-страница с поиском и фильтрами](index.html) · [машиночитаемый каталог](catalogue.json) · [заметки по каталогу и приватному отчёту](../intent-catalogue.md) · [план перестройки](../plans/2026-09-18-intent-redesign.md)
 
@@ -3298,7 +3298,7 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 <a id="basis.invite.status"></a>
 ### Кто приглашён на событие
 
-` basis.invite.status ` · Приглашения · Чтение личных данных · инструменты: ` get_event `, ` search_events `, ` get_invitation_status `
+` basis.invite.status ` · Приглашения · Чтение личных данных · инструменты: ` get_invitation_status `, ` search_events `, ` get_event `
 
 **Примеры фраз.**
 
@@ -3315,12 +3315,12 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 **Что делает правило по шагам.**
 
 1. Если выполняется условие ` group.is_group == true `, то ответить пользователю: «Это личные данные — работаю с ними только в личке с ботом.»
-2. Если выполняется условие ` bind.ref.kind == 'id' `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{bind.ref.id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
+2. Если выполняется условие ` bind.ref.kind == 'id' `, то вызвать инструмент ` get_invitation_status ` с параметрами: ` event_id ` = ` {{bind.ref.id}} `
 3. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` search_events ` с параметрами: ` query ` = ` {{bind.ref.query}} `; ` scope ` = ` {{env.scope}} `; ` event_type ` = ` regular `; результат сохранить как ` found `
 4. Если выполняется условие ` count(found) == 0 && bind.ref.kind == "name" `, то ответить пользователю: «Не нашёл такое событие. Назови точное название или номер, например &#35;12.»
 5. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
 6. Если выполняется условие ` count(found) == 1 `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{tool_outputs.found[0].id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
-7. Вызвать инструмент ` get_invitation_status ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `
+7. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` get_invitation_status ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `
 
 **Что читается из сообщения (привязки).**
 
@@ -3361,12 +3361,10 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
     },
     {
       "when": "bind.ref.kind == 'id'",
-      "call": "get_event",
+      "call": "get_invitation_status",
       "input": {
-        "event_id": "{{bind.ref.id}}",
-        "scope": "{{env.scope}}"
-      },
-      "as": "target"
+        "event_id": "{{bind.ref.id}}"
+      }
     },
     {
       "when": "bind.ref.kind == 'name'",
@@ -3396,6 +3394,7 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
       "as": "target"
     },
     {
+      "when": "bind.ref.kind == 'name'",
       "call": "get_invitation_status",
       "input": {
         "event_id": "{{tool_outputs.target.id}}"

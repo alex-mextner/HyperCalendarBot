@@ -251,9 +251,17 @@ function buildDataRules(durationMins: number): string {
 - Default event duration: ${durationMins} minutes. When creating an event with no explicit end time or duration, set end_at = start_at + ${durationMins} minutes.`;
 }
 
-function buildPeopleRules(): string {
-  return `- NAMES: Always use the name form the user used. If a user says "Алекс", call them "Алекс" — never "Алексей", "Александр", or any other form. If they say "Вова", use "Вова" — never "Владимир". Save the preferred name via add_contact. When referring to contacts, use their preferred_name if set, otherwise their display name.
-- CONTACTS RESULT DISPLAY: After any add_contact or update_contact call — immediately call get_contacts and show the full updated list to the user. Never assume success without showing the result.
+function buildPeopleRules(ctx: AgentContext, durationMins: number, now: TZDate): string {
+  // Tomorrow 15:00 in the user's zone, in the exact form calculate returns, with the default duration.
+  const start = new TZDate(now.getFullYear(), now.getMonth(), now.getDate() + 1, 15, 0, 0, ctx.user.timezone);
+  const example = JSON.stringify({
+    title: 'Встреча с Леной',
+    start_at: new Date(start.getTime()).toISOString(),
+    end_at: new Date(start.getTime() + durationMins * 60_000).toISOString(),
+  });
+  return `- NAMES: Use exactly the user's name form: "Алекс", never "Алексей"/"Александр"; "Вова", never "Владимир". Save it via add_contact. For contacts use preferred_name if set, otherwise their display name.
+- CONTACTS RESULT DISPLAY: After add_contact/update_contact, immediately call get_contacts and show the full updated list; never assume success without that result.
+- PARTICIPANTS: invite them as below, never list them in description; attendance only from get_invitation_status. The user ("мной"/"me") is the organizer: never invite, pick or list them. "завтра в 15 с Леной и мной" → create_event(${example}), invite Лена.
 - IMPORTANT: When the user mentions OTHER PEOPLE in an event, follow this sequence:
   1. Create the event first.
   2. For each mentioned person, determine how they were referenced:
@@ -264,7 +272,7 @@ function buildPeopleRules(): string {
 - DELIVERY LANGUAGE: When send_invitation or resend_invitation returns success, say the invitation was *created and is being sent*. NEVER say it was delivered, received, or that you are waiting for a response — delivery is async and may fail.`;
 }
 
-function buildRulesSection(ctx: AgentContext, utcOffset: string, durationMins: number): string {
+function buildRulesSection(ctx: AgentContext, utcOffset: string, durationMins: number, now: TZDate): string {
   return [
     '## Rules',
     `- ${buildLanguageRule(ctx)}`,
@@ -273,7 +281,7 @@ function buildRulesSection(ctx: AgentContext, utcOffset: string, durationMins: n
     buildEventCreationRules(),
     buildOutputRules(),
     buildDataRules(durationMins),
-    buildPeopleRules(),
+    buildPeopleRules(ctx, durationMins, now),
   ].join('\n');
 }
 
@@ -535,7 +543,9 @@ You MUST help complete the action. When done:
 export function buildSystemPrompt(ctx: AgentContext): string {
   const durationMins = ctx.user.default_event_duration_minutes ?? 60;
   const utcOffset = formatUtcOffset(ctx.user.timezone);
-  const nowLocal = format(new TZDate(new Date(), ctx.user.timezone), 'yyyy-MM-dd EEE HH:mm');
+  // One instant for the displayed local time and the dated example, so midnight cannot fall between them.
+  const now = new TZDate(Date.now(), ctx.user.timezone);
+  const nowLocal = format(now, 'yyyy-MM-dd EEE HH:mm');
 
   const sections = [
     'You are a calendar assistant for a Telegram bot. You help users manage their schedule.',
@@ -545,7 +555,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
     buildPendingGeoSection(ctx),
     buildContextSection(),
     buildEventsWindowSection(ctx),
-    buildRulesSection(ctx, utcOffset, durationMins),
+    buildRulesSection(ctx, utcOffset, durationMins, now),
     buildProactiveSection(),
     buildSharedEventsSection(),
     buildConnectTelegramSection(),

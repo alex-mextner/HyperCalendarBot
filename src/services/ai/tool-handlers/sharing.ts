@@ -441,36 +441,73 @@ function describeGroupRsvp(
   };
 }
 
+/**
+ * The prompt answers "who takes part" only from this tool, so besides whoever can see the event,
+ * its invitees read the same roster (Telegram ids and statuses, never the owner's event details).
+ * Invited means a personal invitation that was not cancelled or expired, or current membership of
+ * a group with a live invitation. A leftover participant row alone never grants access: it records
+ * no source group and outlives both a cancelled invitation and leaving the group.
+ */
 export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitationStatusInput): ToolResult {
   if (!ctx.sharing?.invitationRepo) {
     return { success: false, error: 'Invitations are not configured.' };
   }
 
-  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
-  if (!event) {
-    return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
-  }
-
   const lang = ctx.user.language;
+  const requesterId = ctx.user.telegram_id;
+  let event = ctx.eventService.getEvent(input.event_id, requesterId);
 
   // One authoritative row per (event, user). A group invitation stores the (negative) group chat id
   // as invitee_id and never leaves "pending"; members RSVP per-member into event_participants. Build
   // a per-user view from the personal invitation rows plus the participant rows (the source of truth
   // synced to Google), deduping so every user appears exactly once across both sections.
   const personalInvByUser = new Map<number, Invitation>();
-  let hasGroupInvite = false;
+  const liveGroupChatIds: number[] = [];
   for (const inv of ctx.sharing.invitationRepo.getByEvent(input.event_id)) {
     if (inv.invitee_id < 0) {
-      if (inv.status === 'pending' || inv.status === 'accepted' || inv.status === 'maybe') hasGroupInvite = true;
+      if (inv.status === 'pending' || inv.status === 'accepted' || inv.status === 'maybe') {
+        liveGroupChatIds.push(inv.invitee_id);
+      }
       continue;
     }
     personalInvByUser.set(inv.invitee_id, inv);
   }
+  const hasGroupInvite = liveGroupChatIds.length > 0;
 
   const participantRows = ctx.participantRepo ? ctx.participantRepo.getByEvent(input.event_id) : null;
   const participantByUser = new Map<number, ParticipantStatus>();
   if (participantRows) {
     for (const p of participantRows) participantByUser.set(p.user_id, p.status);
+  }
+
+  let organizerId: number | null = null;
+  if (!event) {
+    const ownerId = ctx.eventService.getEventOwnerId(input.event_id);
+    // Same rule as propose_edit: the latest personal invitation, unless cancelled or expired.
+    const hasPersonalInvitation =
+      ctx.sharing.invitationRepo.findActiveOrRespondedByEventAndInvitee(input.event_id, requesterId) !== null;
+    // A group invitation invites every current member, whether or not they answered yet.
+    const isInvitedGroupMember = liveGroupChatIds.some(
+      (chatId) => ctx.group?.groupMemberRepo.getMembership(chatId, requesterId)?.left_at === null,
+    );
+    const isInvited = hasPersonalInvitation || isInvitedGroupMember;
+    if (ownerId !== null && isInvited) {
+      // The roster is the owner's to share: never post it into a group chat the owner did not invite.
+      // Say why, so the model sends the invitee to a private chat instead of calling them uninvited.
+      const isAllowedChat =
+        !ctx.isGroup || (ctx.groupChatId !== undefined && liveGroupChatIds.includes(ctx.groupChatId));
+      if (!isAllowedChat) {
+        return {
+          success: false,
+          error: `Event ${input.event_id}: its roster can only be read in a private chat or in a group invited to it.`,
+        };
+      }
+      event = ctx.eventService.getEvent(input.event_id, ownerId);
+      organizerId = ownerId;
+    }
+  }
+  if (!event) {
+    return { success: false, error: `Event ${input.event_id} not found or you are not invited to it.` };
   }
 
   const personal = buildPersonalRsvpLines(lang, personalInvByUser, participantByUser);
@@ -496,6 +533,10 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
 
   if (listedCount > 0 && !isGroupDegraded) {
     lines.unshift(t(lang).aiTools.sharing.rsvpAttending(attending));
+  }
+  // An invitee reading the roster is not its organizer; say who is.
+  if (organizerId !== null) {
+    lines.unshift(t(lang).aiTools.sharing.rsvpOrganizer(organizerId));
   }
 
   if (lines.length === 0) {
