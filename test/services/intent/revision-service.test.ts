@@ -526,6 +526,92 @@ describe('retirement', () => {
   });
 });
 
+describe('replacement dispositions', () => {
+  const aiHandles = (example: string) => ({ example, disposition: 'handled_by_ai' as const, note: 'AI answers it' });
+  const helpRussianOnly = {
+    ...help,
+    workflow: HELP_WORKFLOW,
+    pattern: '^(?:помощь)$',
+    phrases: ['помощь'],
+    trigger_words: ['помощь'],
+  };
+  const narrowHelp = (dispositions: ReturnType<typeof aiHandles>[]): RevisionBodyInput => ({
+    type: 'operations',
+    summary: 'Russian-only help',
+    operations: [
+      {
+        kind: 'generalize',
+        sourceNames: ['basis.help'],
+        reason: 'english goes to AI',
+        intents: [helpRussianOnly],
+        dispositions,
+      },
+    ],
+  });
+  const mergePingIntoHelp = (dispositions: ReturnType<typeof aiHandles>[]): RevisionBodyInput => ({
+    type: 'operations',
+    summary: 'One help rule',
+    operations: [
+      {
+        kind: 'consolidate',
+        sourceNames: ['basis.help', 'learned.ping'],
+        reason: 'merge',
+        intents: [{ ...help, workflow: HELP_WORKFLOW }],
+        dispositions,
+      },
+    ],
+  });
+  function approvePing() {
+    const ping = service.propose(createPing, { kind: 'learned', jobId: 'job-5' });
+    if (ping.status !== 'created') throw new Error(ping.code);
+    approveRevision(ping.revision.id);
+  }
+
+  test('a replacement that loses an example without a disposition is refused', () => {
+    const draft = proposeManual(narrowHelp([]));
+    expect(draft.status).toBe('draft');
+    expect(draft.validation).toEqual({
+      ok: false,
+      errors: ['generalize of basis.help: example "help" needs exactly one disposition'],
+    });
+    expect(approveRevision(draft.id)).toEqual({ status: 'refused', code: 'not_validated' });
+  });
+
+  test('a replacement with a disposition for the lost example is accepted', () => {
+    const draft = proposeManual(narrowHelp([aiHandles('help')]));
+    expect(draft.status).toBe('validated');
+    expect(approveRevision(draft.id)).toMatchObject({ status: 'active', removed: ['basis.help'] });
+    const phrases = db.query<{ phrases: string }, []>("SELECT phrases FROM intents WHERE canonical_name='basis.help'");
+    expect(phrases.get()?.phrases).toBe('["помощь"]');
+  });
+
+  test('a replacement disposes of each lost example exactly once, and of nothing else', () => {
+    const twice = proposeManual(narrowHelp([aiHandles('help'), aiHandles('help')]));
+    expect(JSON.stringify(twice.validation)).toContain('example \\"help\\" needs exactly one disposition');
+    const unrelated = proposeManual(narrowHelp([aiHandles('help'), aiHandles('помощь')]));
+    expect(unrelated.validation).toMatchObject({ ok: false });
+    expect(JSON.stringify(unrelated.validation)).toContain('Disposition for \\"помощь\\" matches no lost example');
+  });
+
+  test('a consolidation that loses an example without a disposition is refused', () => {
+    approvePing();
+    const draft = proposeManual(mergePingIntoHelp([]));
+    expect(draft.validation).toEqual({
+      ok: false,
+      errors: ['consolidate of basis.help, learned.ping: example "пинг бота" needs exactly one disposition'],
+    });
+    expect(names()).toEqual(['basis.help', 'basis.time.now', 'learned.ping']);
+  });
+
+  test('a consolidation with a disposition for the lost example is accepted', () => {
+    approvePing();
+    const draft = proposeManual(mergePingIntoHelp([aiHandles('пинг бота')]));
+    expect(draft.status).toBe('validated');
+    expect(approveRevision(draft.id)).toMatchObject({ status: 'active' });
+    expect(names()).toEqual(['basis.help', 'basis.time.now']);
+  });
+});
+
 describe('source baseline', () => {
   test('startup drafts a differing source seed once and never activates it', () => {
     const active = service.activeRevisionId();
