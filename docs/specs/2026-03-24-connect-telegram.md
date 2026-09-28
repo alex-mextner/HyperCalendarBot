@@ -510,8 +510,9 @@ delivery attempt, whether to suggest connecting. The suggestion is added when AL
 - the conversation is a private chat (`/connect_telegram` refuses to run in groups);
 - the feature is enabled (`TELEGRAM_SESSION_MASTER_KEY` is configured);
 - the user has no `active` row in `user_telegram_sessions`;
-- the suggestion is not snoozed: `users.connect_telegram_dismissed_at` is empty or older than
-  30 days.
+- the suggestion is not snoozed: `users.connect_telegram_dismissed_at` is empty, older than
+  30 days, more than a day in the future (clock skew), or unparsable. The claim below overwrites
+  such values.
 
 Showing the suggestion starts the 30-day snooze. The snooze is claimed with one conditional `UPDATE`
 (`UserRepository.claimConnectTelegramSnooze`), so concurrent requests of the same user cannot both
