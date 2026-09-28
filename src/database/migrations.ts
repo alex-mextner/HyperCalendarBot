@@ -1106,4 +1106,39 @@ export const migrations: Migration[] = [
       backfillActiveRevision(db);
     },
   },
+  {
+    name: '066_dialogue_v3_sessions',
+    up(db) {
+      // GH-652's workflow v3 dialogue runtime needs a durable, cross-restart session store for
+      // an in-progress /add or natural-text draft (title/schedule/people/place/description/
+      // recurrence), keyed by actor+chat+topic and carrying an explicit anchor for stale/foreign
+      // callback rejection. Reusing `workflow_sessions` (033_workflow_sessions) was considered and
+      // rejected: its `data` column is validated against WorkflowSessionSchema, which REQUIRES
+      // `intentId`/`workflow`/`stepResults` (see workflow-session.repository.ts) — a v3 draft has
+      // no such fields, so storing it there would mean either corrupting that schema for the
+      // live regex-intent engine or inventing a fake placeholder Workflow just to pass validation.
+      // The two session concepts also share no natural single-row identity: `workflow_sessions` is
+      // keyed by (chat_id, user_id) only, with no topic axis, and a real chat can have BOTH an
+      // active regex-intent workflow suspension and an unrelated /add draft in flight for the same
+      // user at once — sharing one PK would make one silently clobber the other. `gramio_scenes`
+      // (add-event.scene.ts's own storage, scenes/storage.ts) is GramIO-framework-owned and keyed
+      // by `@gramio/scenes:${userId}` with no chat/topic scoping of its own (chat-scoped-storage.ts
+      // exists only to bolt that on) — reusing it would mean either modifying the untouched legacy
+      // wizard's own storage contract or fighting its key format. This new table follows the exact
+      // same idiom as `workflow_sessions` (same Database instance, same TEXT-JSON-payload +
+      // created_at/updated_at + row-level TTL-by-age shape, its own repository class registered on
+      // DatabaseService) rather than a new migration engine or a second database file.
+      db.exec(`
+        CREATE TABLE dialogue_v3_sessions (
+          chat_id    INTEGER NOT NULL,
+          user_id    INTEGER NOT NULL,
+          topic_id   INTEGER NOT NULL DEFAULT 0,
+          data       TEXT    NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (chat_id, user_id, topic_id)
+        )
+      `);
+    },
+  },
 ];
