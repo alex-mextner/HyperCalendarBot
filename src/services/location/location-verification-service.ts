@@ -5,6 +5,7 @@ import { CB, t } from '../../config/constants.ts';
 import type { AgendaRepository } from '../../database/repositories/agenda.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
+import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { CalendarEvent, Invitation, InvitationStatus, User } from '../../database/types.ts';
 import { botLogger } from '../../utils/logger.ts';
@@ -71,6 +72,12 @@ export interface LocationVerificationDeps {
   weatherService?: WeatherService;
   /** Temporary store for location candidates (Redis-backed with TTL) */
   candidateStore: LocationCandidateStore;
+  /**
+   * Live secretary-access lookup, used only to let a current active write-secretary act on the
+   * owner's personal event (#421). Absent means no delegated access is ever granted — the service
+   * falls back to requiring the acting user to own or otherwise see the event, exactly as before.
+   */
+  secretaryRepo?: Pick<SecretaryRepository, 'findByOwnerAndSecretary'>;
   /** Callback to send a message to a user (for confirmation/clarification) */
   sendMessage: (
     userId: number,
@@ -117,7 +124,7 @@ export class LocationVerificationService {
    * 5. No candidates → tell the creator to send a pin or the full address.
    */
   async verifyEventLocation(event: CalendarEvent, user: User): Promise<LocationVerificationResult> {
-    const canSeeEvent = this.deps.eventRepo.findById(event.id, user.telegram_id) !== null;
+    const canSeeEvent = this.getEventVisibleToActor(event.id, user.telegram_id) !== null;
     if (canSeeEvent) {
       // A new verification supersedes the previous picker: a tap on it must not apply a place
       // chosen for an earlier text
@@ -142,8 +149,8 @@ export class LocationVerificationService {
       this.deps.eventRepo.clearLocationFields(event.id);
     }
 
-    // Only a user who can see the event is asked. A secretary updating the owner's event could not
-    // answer the picker (#421), so no search is made and the owner's open picker stays.
+    // Only a user who can see the event is asked: the owner, or (for a personal event) a current
+    // active write secretary of the owner (#421).
     if (!canSeeEvent) {
       logger.info({ eventId: event.id, userId: user.telegram_id }, 'User cannot see the event; not asking');
       return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
@@ -151,14 +158,23 @@ export class LocationVerificationService {
 
     logger.info({ eventId: event.id, location, userId: user.telegram_id }, 'Starting location verification');
 
-    const { candidates, remembered } = await this.findCandidates(event, user, location);
+    // The search and any remembered mapping are scoped to the calendar owner only when `user` is a
+    // secretary acting on the owner's personal event: a delegate's own history or home area must
+    // not leak into the owner's calendar. A group event's `user_id` is just its creator, so another
+    // member editing it keeps using their own profile, exactly as before #421. The picker itself
+    // always goes to whoever is asking (`user`, below).
+    const scopeUser = this.isDelegatedPersonalAccess(event, user.telegram_id)
+      ? (this.deps.userRepo.findByTelegramId(event.user_id) ?? user)
+      : user;
+    const { candidates, remembered } = await this.findCandidates(event, scopeUser, location);
 
     // The event changed while the search ran: its text (a newer text starts its own verification,
     // which may already have stored its picker), or it was deleted, or a pin confirmed a place
-    // (this verification cleared any earlier one). Asking now would replace the newer question or
-    // let a keep tap erase the pin. No await may come between this check and the picker's `set` in
-    // `askUserToChoose`.
-    const current = this.deps.eventRepo.findById(event.id, user.telegram_id);
+    // (this verification cleared any earlier one), or — for a delegate — write access was revoked
+    // mid-search. Asking now would replace the newer question, let a keep tap erase the pin, or ask
+    // someone no longer allowed to answer. No await may come between this check and the picker's
+    // `set` in `askUserToChoose`.
+    const current = this.getEventVisibleToActor(event.id, user.telegram_id);
     if (current?.location !== typed || current.location_verified !== 0) {
       logger.info({ eventId: event.id }, 'Event location changed or was confirmed during verification; not asking');
       return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
@@ -172,6 +188,36 @@ export class LocationVerificationService {
 
     await this.askUserToChoose(event, user, { location: typed, candidates, remembered });
     return { resolved: false, geocoded: null, cityExtracted: candidates[0]?.city ?? null, candidates };
+  }
+
+  /**
+   * The event `eventId` as `actorId` may act on it right now: the actor's own view
+   * (`EventRepository.findById`, which also covers group visibility — unchanged, never widened),
+   * or — for a personal event owned by someone else — the owner's view, granted only while
+   * `actorId` currently holds active write secretary access to that owner. Checked fresh on every
+   * call: a grant revoked between two calls stops granting on the next one (#421). Never grants a
+   * group event through a secretary relationship — that stays governed by group membership alone.
+   */
+  getEventVisibleToActor(eventId: number, actorId: number): CalendarEvent | null {
+    const own = this.deps.eventRepo.findById(eventId, actorId);
+    if (own) return own;
+    if (!this.deps.secretaryRepo) return null;
+    const unfiltered = this.deps.eventRepo.findByIdUnfiltered(eventId);
+    if (!unfiltered || unfiltered.owner_type === 'group' || unfiltered.user_id === actorId) return null;
+    const record = this.deps.secretaryRepo.findByOwnerAndSecretary(unfiltered.user_id, actorId);
+    if (!record || record.status !== 'active' || record.permission !== 'write') return null;
+    return this.deps.eventRepo.findById(eventId, unfiltered.user_id);
+  }
+
+  /**
+   * True only when `actorId` is a secretary acting on behalf of the owner of a personal event —
+   * never for a group event, where a differing `event.user_id` just means someone other than its
+   * creator is editing it, and never when `actorId` already is the owner. Gates every place the
+   * owner's profile (search bias, address cache, city auto-fill) replaces the acting user's own —
+   * a group co-editor keeps using their own profile, exactly as before #421.
+   */
+  private isDelegatedPersonalAccess(event: Pick<CalendarEvent, 'owner_type' | 'user_id'>, actorId: number): boolean {
+    return event.owner_type !== 'group' && event.user_id !== actorId;
   }
 
   /** The remembered place for this text, else the places a search biased to the home area finds. */
@@ -249,31 +295,40 @@ export class LocationVerificationService {
     const chosen = answered?.picker.candidates[choiceIndex];
     if (!answered || !chosen) return false;
 
-    const user = this.deps.userRepo.findByTelegramId(userId);
-    if (!user) return false;
+    // Cache/history and the city fill are scoped to the calendar owner only for a secretary acting
+    // on the owner's personal event; a group co-editor keeps using their own profile, and a
+    // delegated tap never touches the owner's city either (#421).
+    const delegated = this.isDelegatedPersonalAccess(answered.event, userId);
+    const scopeUser = delegated
+      ? this.deps.userRepo.findByTelegramId(answered.event.user_id)
+      : this.deps.userRepo.findByTelegramId(userId);
+    if (!scopeUser) return false;
 
     await this.applyResolvedLocation(answered.event, chosen);
-    await this.cacheAndUpdateCity(user, answered.picker.location, chosen);
+    await this.cacheAndUpdateCity(scopeUser, answered.picker.location, chosen, !delegated);
 
     return true;
   }
 
   /**
    * Answer the event's open picker `pickerId` (`LocationCandidateStore.take`). Only a user who can
-   * see the event consumes it, and it counts only while the event still has the text the picker was
-   * built for: an edit that does not re-verify (the /edit scene, an abstract location, a calendar
-   * sync) may have changed it, and then the picker's places answer the old text. The event is read
-   * again after the take, which yields, so an edit during it is seen too.
+   * currently act on the event (its owner, or — for a personal event — a live active write
+   * secretary of the owner) consumes it, and it counts only while the event still has the text the
+   * picker was built for: an edit that does not re-verify (the /edit scene, an abstract location, a
+   * calendar sync) may have changed it, and then the picker's places answer the old text. The
+   * access check runs again after the take, which yields, so a revoke or an edit during it is seen
+   * too, and an unauthorized call never reaches `take` in the first place — it can't consume the
+   * picker for the rightful user.
    */
   private async answerPicker(
     eventId: number,
     userId: number,
     pickerId: string,
   ): Promise<{ picker: LocationPicker; event: CalendarEvent } | null> {
-    if (!this.deps.eventRepo.findById(eventId, userId)) return null;
+    if (!this.getEventVisibleToActor(eventId, userId)) return null;
     const picker = await this.deps.candidateStore.take(eventId, pickerId);
     if (!picker) return null;
-    const event = this.deps.eventRepo.findById(eventId, userId);
+    const event = this.getEventVisibleToActor(eventId, userId);
     if (!event || event.location !== picker.location) return null;
     return { picker, event };
   }
@@ -287,15 +342,21 @@ export class LocationVerificationService {
 
   /** Resolve location from coordinates (when user sends 📍 for an event) */
   async resolveFromCoordinates(eventId: number, lat: number, lng: number, userId: number): Promise<boolean> {
-    // Verify user has access to the event before doing any work
-    const event = this.deps.eventRepo.findById(eventId, userId);
+    // Verify the user can currently act on the event before doing any work — same contract as the
+    // candidate picker (#421): the owner, or a live active write secretary of the owner.
+    const event = this.getEventVisibleToActor(eventId, userId);
     if (!event) return false;
 
     const geo = await this.deps.geocodingService.reverseGeocode(lat, lng);
     if (!geo) return false;
 
-    const user = this.deps.userRepo.findByTelegramId(userId);
-    if (!user) return false;
+    // Cache/history and the city fill are scoped to the calendar owner only for a secretary acting
+    // on the owner's personal event; a group co-editor keeps using their own profile (#421).
+    const delegated = this.isDelegatedPersonalAccess(event, userId);
+    const scopeUser = delegated
+      ? this.deps.userRepo.findByTelegramId(event.user_id)
+      : this.deps.userRepo.findByTelegramId(userId);
+    if (!scopeUser) return false;
 
     // The pin answers any open picker for this event; closing it before applying means a keep tap
     // on it either lands before the pin (and the pin wins) or finds it answered.
@@ -304,7 +365,7 @@ export class LocationVerificationService {
     });
     await this.applyResolvedLocation(event, geo);
     if (event.location) {
-      await this.cacheAndUpdateCity(user, event.location, geo);
+      await this.cacheAndUpdateCity(scopeUser, event.location, geo, !delegated);
     }
     return true;
   }
@@ -333,7 +394,11 @@ export class LocationVerificationService {
         latitude: offered.latitude,
         longitude: offered.longitude,
       };
-      await this.deps.addressCache.forgetMapping(userId, picker.location, rejected).catch((err) => {
+      // The rejected mapping is forgotten in the owner's cache only for a delegated personal
+      // confirmation — the same scope the offer came from; a group co-editor's own cache is used
+      // otherwise, exactly as before #421.
+      const forgetScopeId = this.isDelegatedPersonalAccess(event, userId) ? event.user_id : userId;
+      await this.deps.addressCache.forgetMapping(forgetScopeId, picker.location, rejected).catch((err) => {
         logger.warn({ err, eventId, userId }, 'Failed to forget rejected address mapping');
       });
     }
@@ -342,11 +407,20 @@ export class LocationVerificationService {
 
   /**
    * Learn from a place the creator explicitly confirmed (candidate tap or a pin shared for the
-   * event): remember the typed text → place mapping, and fill an empty home city, but only with a
-   * place in the creator's region (their timezone zone or home country), so a venue abroad never
-   * becomes the home city. An existing city is never overwritten.
+   * event): remember the typed text → place mapping, and — only when `allowCityUpdate` — fill an
+   * empty home city, but only with a place in the creator's region (their timezone zone or home
+   * country), so a venue abroad never becomes the home city. An existing city is never overwritten.
+   * `allowCityUpdate` is false for a delegated confirmation (a secretary answering the owner's
+   * picker): the owner's cache/history still records the place, but no profile city is auto-filled
+   * from a delegate's tap, and a delegate's own city is never touched — `user` here is always the
+   * calendar owner, never the delegate (#421).
    */
-  private async cacheAndUpdateCity(user: User, inputLocation: string, geo: GeocodedLocation): Promise<void> {
+  private async cacheAndUpdateCity(
+    user: User,
+    inputLocation: string,
+    geo: GeocodedLocation,
+    allowCityUpdate: boolean,
+  ): Promise<void> {
     // Cache the mapping
     await this.deps.addressCache.recordMapping(user.telegram_id, inputLocation, {
       resolvedAddress: geo.formattedAddress,
@@ -357,7 +431,7 @@ export class LocationVerificationService {
       venueName: geo.venueName,
     });
 
-    if (!user.city && geo.city && isInUserRegion(user, geo)) {
+    if (allowCityUpdate && !user.city && geo.city && isInUserRegion(user, geo)) {
       this.deps.userRepo.update(user.telegram_id, { city: geo.city });
       logger.info({ userId: user.telegram_id, city: geo.city }, 'User city set from confirmed location');
     }
