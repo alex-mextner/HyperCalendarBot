@@ -327,9 +327,13 @@ describe('silent final guard (#508)', () => {
       expectSilent();
     });
 
-    test('supplement_skip in supplement mode sends nothing', async () => {
+    test.each([
+      ['supplement_skip', [{ tool: 'supplement_skip', input: () => ({}) }]],
+      ["a bare '[SKIP]'", [{ text: '[SKIP]' }]],
+      ['an empty final', [{ text: '' }]],
+    ] satisfies [string, Round[]][])('supplement mode ending with %s sends nothing', async (_label, rounds) => {
       ctx.supplementMode = true;
-      const result = await run([{ tool: 'supplement_skip', input: () => ({}) }]);
+      const result = await run(rounds);
 
       expect(result.responseText).toBe('');
       expect(delivered).toEqual([]);

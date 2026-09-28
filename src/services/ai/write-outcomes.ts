@@ -89,9 +89,9 @@ export class WriteOutcomes {
     return this.describe(language, hideTargets, interrupted);
   }
 
-  /** Every recorded write, clean successes included, with targets shown — private chats only. */
-  summary(language: string): string | null {
-    return this.describe(language, false, false);
+  /** Every recorded write, clean successes included — for a turn the model left without an answer. */
+  summary(language: string, hideTargets: boolean): string | null {
+    return this.describe(language, hideTargets, false);
   }
 
   private describe(language: string, hideTargets: boolean, interrupted: boolean): string | null {

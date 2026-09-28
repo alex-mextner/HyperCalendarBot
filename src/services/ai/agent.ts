@@ -1358,10 +1358,11 @@ export class CalendarBotAgent {
       !ctx.unprompted &&
       ctx.inputMode !== 'live_call' &&
       termination !== 'waiting';
-    const writes = writeOutcomes.summary(ctx.user.language);
+    const writes = writeOutcomes.summary(ctx.user.language, ctx.isGroup);
     const answeredByTool = writes === null && writeOutcomes.toolAnswered;
     let unansweredNotice: string | null = null;
-    // Every guarded, non-silent exit above appended its own notice, so its draft is never empty here.
+    // Every guarded, non-silent exit above appended its own notice (evidence, validation
+    // notice or spoken question, each a non-empty string), so its draft is never empty here.
     if (answersDirectMessage && modelStayedSilent && !answeredByTool) {
       unansweredNotice = writes
         ? t(ctx.user.language).ai_unanswered_writes(writes)

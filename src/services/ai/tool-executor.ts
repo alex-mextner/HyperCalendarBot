@@ -343,9 +343,10 @@ export const SILENT_TOOLS = new Set(
 
 /** Derived: tools whose successful call is itself the answer (a reaction, a rendered image). */
 export const ANSWERING_TOOLS = new Set(
-  [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter(
-    (k) => getToolMeta(k)?.silent || getToolMeta(k)?.delivers,
-  ),
+  [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => {
+    const meta = getToolMeta(k);
+    return meta?.silent || meta?.delivers;
+  }),
 );
 
 /** Derived: tools whose results must NOT be saved to chat_history (meta/query tools). */

@@ -263,7 +263,7 @@ export interface AgentContext {
   retryAttempt?: number;
   /** True for a scheduled/trigger run (or its retry) that answers no user message.
    *  Only such runs may end with an empty or [SKIP] final and say nothing in a private chat;
-   *  retries of a user's own message leave this unset. */
+   *  False or unset for everything else, including retries of a user's own message. */
   unprompted?: boolean;
 }
 
