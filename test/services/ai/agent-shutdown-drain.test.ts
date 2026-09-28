@@ -331,7 +331,11 @@ describe('agent drain on shutdown', () => {
 
     expect(settled).toBe(true);
     await running;
-    expect(probe.delivered.join('\n')).toContain(t('ru').agent_restarting(false));
+    // The job may still land: neither promise a comeback nor ask for a resend that could run it twice.
+    const text = probe.delivered.join('\n');
+    expect(text).toContain(t('ru').agent_restarting_unconfirmed);
+    expect(text).not.toContain(t('ru').agent_restarting(false));
+    expect(text).not.toContain(t('ru').agent_restarting(true));
   }, 10_000);
 
   test('a second drain waits for a turn that started after the first one returned', async () => {

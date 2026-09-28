@@ -302,15 +302,28 @@ describe('retry / backoff', () => {
     expect(captured.ctx?.retryEnqueue).toBeFunction();
   });
 
-  test('a stored retry counts even when its cancellation pointer cannot be saved', async () => {
+  test.each([
+    ['cannot be saved', () => Promise.reject(new Error('READONLY You can not write against a read only replica'))],
+    ['never answers', () => Promise.withResolvers<void>().promise],
+  ])('a stored retry counts at once even when its cancellation pointer %s', async (_label, pointerWrite) => {
     const { deps, addDelayed, jobStoreSet, captured } = makeRetrySetup();
-    jobStoreSet.mockImplementation(async () => {
-      throw new Error('READONLY You can not write against a read only replica');
-    });
+    jobStoreSet.mockImplementation(pointerWrite);
     await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 0 });
     // The job is in the queue and will run: telling the user "send it again" would duplicate it.
     expect(await captured.ctx!.retryEnqueue!('retry msg')).toBe(true);
     expect(addDelayed).toHaveBeenCalledTimes(1);
+  });
+
+  test('a spent budget still reports "gave up" when clearing the pointer fails', async () => {
+    const { deps, jobStoreDel, captured } = makeRetrySetup();
+    jobStoreDel.mockImplementation(async () => {
+      throw new Error('READONLY You can not write against a read only replica');
+    });
+    const ctx = makeCtx();
+    await createAiAgentLayer(deps)(ctx, 'msg', { retryAttempt: 3 });
+    // The give-up line went out; a rejection here would make the agent add a contradicting notice.
+    expect(await captured.ctx!.retryEnqueue!('retry msg')).toBe(false);
+    expect(ctx.send).toHaveBeenCalledTimes(1);
   });
 
   test('attempt=0 → addDelayed called with 30s delay', async () => {

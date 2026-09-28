@@ -51,7 +51,10 @@ export class SyntheticPipelineRunner {
                 );
               }
             }
-            if (jobStore) await jobStore.del(user.telegram_id);
+            // Best effort: the give-up decision is made, so the answer stays "gave up" whatever Redis says.
+            await jobStore?.del(user.telegram_id).catch((err: unknown) => {
+              queueLogger.warn({ err, userId: user.telegram_id }, 'Failed to clear retry job store');
+            });
             return false;
           }
           const delay = BACKOFF_DELAYS_MS[currentAttempt]!;
@@ -59,8 +62,9 @@ export class SyntheticPipelineRunner {
             { userId: user.telegram_id, message: msg, source: 'trigger', retryAttempt: currentAttempt + 1 },
             delay,
           );
-          // The job is stored and will run: a lost cancellation pointer must not turn it into "not scheduled".
-          await jobStore?.set(user.telegram_id, jobId).catch((err: unknown) => {
+          // The job is stored and will run: the cancellation pointer is written in the background, so a
+          // slow or lost pointer write can neither hold back nor turn this into "not scheduled".
+          void jobStore?.set(user.telegram_id, jobId).catch((err: unknown) => {
             queueLogger.warn(
               { err, userId: user.telegram_id, jobId },
               'Retry scheduled but its cancellation pointer was not saved',

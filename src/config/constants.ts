@@ -240,6 +240,8 @@ export const MSG = {
       willRetry
         ? '🔄 Restarting for an update — I will answer this in a minute.'
         : '🔄 Restarting for an update — this request was not done, send it again in a minute.',
+    agent_restarting_unconfirmed:
+      '🔄 Restarting for an update — if I have not answered this in a few minutes, send it again.',
     agent_timeout: '⚠️ That took too long — timing out.',
     ai_response_blocked: 'The provider stopped this response. I will not automatically repeat the request.',
     rate_limited: 'Slow down, too many messages.',
@@ -1221,6 +1223,8 @@ export const MSG = {
       willRetry
         ? '🔄 Перезапускаюсь на обновление — отвечу на это через минуту.'
         : '🔄 Перезапускаюсь на обновление — этот запрос не выполнен, повтори его через минуту.',
+    agent_restarting_unconfirmed:
+      '🔄 Перезапускаюсь на обновление — если не отвечу на это через пару минут, повтори запрос.',
     agent_timeout: '⚠️ Что-то долго думаю — прерываю.',
     ai_response_blocked: 'Провайдер остановил ответ. Я не буду автоматически повторять этот запрос.',
     rate_limited: 'Слишком много сообщений, подождите.',

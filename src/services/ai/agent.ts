@@ -40,7 +40,8 @@ const MAX_ROUNDS = 15;
 const TIMEOUT_MS = 90_000;
 /**
  * How long a failed turn waits to learn whether its retry was stored before it answers anyway.
- * Kept well inside the shutdown drain below, so a hung store never makes the drain abandon the turn.
+ * Kept inside the first shutdown drain below, so a hung store never makes that drain abandon the
+ * turn. The late drain in index.ts is shorter: turns that start then meet queues already closed.
  */
 const RETRY_STORE_TIMEOUT_MS = 1_500;
 /**
@@ -49,8 +50,11 @@ const RETRY_STORE_TIMEOUT_MS = 1_500;
  */
 export const AGENT_DRAIN_SETTLE_MS = RETRY_STORE_TIMEOUT_MS + 1_000;
 
-/** What became of a failed turn's retry: stored, declined with the pipeline's give-up line, or not stored. */
-type RetryOutcome = 'stored' | 'gave_up' | 'not_stored';
+/**
+ * What became of a failed turn's retry: stored, declined with the pipeline's give-up line,
+ * not stored, or unknown because the store did not answer in time (the job may still land).
+ */
+type RetryOutcome = 'stored' | 'gave_up' | 'not_stored' | 'unknown';
 
 /**
  * One apology covers a user for this long. A user who keeps writing during an
@@ -697,8 +701,12 @@ export class CalendarBotAgent {
     if (this.shutdown.signal.aborted) {
       // The pipeline's give-up line already closed this retry chain; a restart notice would contradict it.
       if (retry === 'gave_up') return;
-      // Promise a comeback only when a retry job was actually stored.
-      const text = t(ctx.user.language).agent_restarting(retry === 'stored');
+      // Promise a comeback only when a retry job was actually stored; when that is unknown, neither
+      // promise one nor ask for a resend that could run the request twice.
+      const text =
+        retry === 'unknown'
+          ? t(ctx.user.language).agent_restarting_unconfirmed
+          : t(ctx.user.language).agent_restarting(retry === 'stored');
       writer.appendText(`\n\n${text}`);
       this.saveAssistantTurn(ctx, { role: 'assistant', content: text });
       return;
@@ -789,7 +797,7 @@ export class CalendarBotAgent {
   }
 
   run(ctx: AgentContext): Promise<AgentRunResult> {
-    // Never throws synchronously: an untracked turn would escape the shutdown drain.
+    // Registers the exact promise the caller holds, synchronously: the drain must wait for every turn.
     let dbg: AiDebugRunContext | null = null;
     try {
       dbg =
@@ -1294,10 +1302,10 @@ export class CalendarBotAgent {
         if (outcome === 'timeout') {
           aiLogger.warn(
             { userId: ctx.user.telegram_id },
-            'Retry store did not answer in time — not promising a comeback',
+            'Retry store did not answer in time — not promising a comeback, not asking for a resend',
           );
         }
-        retry = outcome === 'timeout' ? 'not_stored' : outcome;
+        retry = outcome === 'timeout' ? 'unknown' : outcome;
       }
     }
 
