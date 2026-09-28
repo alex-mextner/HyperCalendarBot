@@ -1,5 +1,8 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, mock, test } from 'bun:test';
+import { Scene } from '@gramio/scenes';
 import {
+  type CallbackHandlerOpts,
   createCallbackHandler,
   handleProposalAccept,
   handleProposalDecline,
@@ -9,6 +12,15 @@ import {
   parseAiBtnPayload,
   type SecretaryDeps,
 } from '../../../src/bot/handlers/callback.handler.ts';
+import type { BotCallbackContext } from '../../../src/bot/types.ts';
+import { migrations } from '../../../src/database/migrations.ts';
+import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
+import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
+import { EventService } from '../../../src/services/event/event-service.ts';
+import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
 
 interface MockCallbackCtxOverrides {
   from?: { id: number };
@@ -86,42 +98,124 @@ describe('createCallbackHandler', () => {
     // Should return without error
   });
 
-  test('ai_btn triggers callback', async () => {
-    const onAiButtonClick = mock(() => Promise.resolve());
-    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
-    const ctx = makeCtx('ai_btn:Да');
-    await handler(ctx as never);
-    expect(ctx.editText).toHaveBeenCalledWith('✅ Да');
-    expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
-  });
+  describe('ai_btn', () => {
+    type ButtonClick = NonNullable<CallbackHandlerOpts['onAiButtonClick']>;
 
-  test('ai_btn preserves a private time answer containing a colon', async () => {
-    const onAiButtonClick = mock(() => Promise.resolve());
-    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
-    const ctx = makeCtx('ai_btn:19:00');
-    await handler(ctx as never);
-    expect(ctx.editText).toHaveBeenCalledWith('✅ 19:00');
-    expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, '19:00');
-  });
+    // ai_btn reads only the tap and the click hook. Real services satisfy the handler's other
+    // parameters, and the one cast to the full callback context lives here, not at each test.
+    function aiButtonHandler(onAiButtonClick?: ButtonClick): <Tap>(tap: Tap) => Promise<void> {
+      const db = new Database(':memory:');
+      runMigrations(db, migrations);
+      const handler = createCallbackHandler(
+        new EventService({ eventRepo: new EventRepository(db) }),
+        new Scene('unused'),
+        new HolidayService(new HolidayRepository(db)),
+        new NotificationPreferencesService(new NotificationPreferencesRepository(db)),
+        { onAiButtonClick },
+      );
+      return async (tap) => {
+        await handler(tap as unknown as BotCallbackContext);
+      };
+    }
 
-  test('ai_btn with userId restriction allows matching user', async () => {
-    const onAiButtonClick = mock(() => Promise.resolve());
-    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
-    // User 100 clicks on button restricted to user 100
-    const ctx = makeCtx('ai_btn:100:Да', { from: { id: 100 } });
-    ctx.message.chat.type = 'group';
-    await handler(ctx as never);
-    expect(ctx.editText).toHaveBeenCalledWith('✅ Да');
-  });
+    // Incident 2026-09-27: the tap replaced a four-event delete list with just '✅ Да', so the
+    // chat no longer showed what the user had confirmed.
+    test('keeps the question and its formatting and appends the chosen answer', async () => {
+      const onAiButtonClick = mock<ButtonClick>(() => Promise.resolve());
+      const ctx = makeCtx('ai_btn:Да');
+      const question = 'Удалить:\n• Урок (вт, 29 сен, 12:30)\n• Урок (вт, 29 сен, 13:30)\nТочно?';
+      const bold = { type: 'bold', offset: 0, length: 8 };
+      Object.assign(ctx.message, { text: question, entities: [{ payload: bold }] });
+      await aiButtonHandler(onAiButtonClick)(ctx);
+      expect(ctx.editText).toHaveBeenCalledWith(`${question}\n\n✅ Да`, { entities: [bold] });
+      expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
+    });
 
-  test('ai_btn with userId restriction blocks wrong user', async () => {
-    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never);
-    // User 200 clicks on button restricted to user 100
-    const ctx = makeCtx('ai_btn:100:Нет', { from: { id: 200 } });
-    ctx.message.chat.type = 'group';
-    await handler(ctx as never);
-    expect(ctx.answer).toHaveBeenCalledWith({ text: 'Не твой вопрос', show_alert: false });
-    expect(ctx.editText).not.toHaveBeenCalled();
+    test('on a message whose text is unavailable still records the answer', async () => {
+      const onAiButtonClick = mock<ButtonClick>(() => Promise.resolve());
+      const ctx = makeCtx('ai_btn:Да');
+      await aiButtonHandler(onAiButtonClick)(ctx);
+      expect(ctx.editText).toHaveBeenCalledWith('✅ Да', { entities: [] });
+      expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
+    });
+
+    test('records the answer alone when question plus answer is too long, and still continues', async () => {
+      const onAiButtonClick = mock<ButtonClick>(() => Promise.resolve());
+      const editText = mock((text: string, _opts?: { [key: string]: unknown }) =>
+        text.length > 4096 ? Promise.reject(new Error('Bad Request: MESSAGE_TOO_LONG')) : Promise.resolve(),
+      );
+      const ctx = { ...makeCtx('ai_btn:Да'), editText };
+      Object.assign(ctx.message, { text: 'x'.repeat(4096) });
+      await aiButtonHandler(onAiButtonClick)(ctx);
+      expect(editText).toHaveBeenLastCalledWith('✅ Да');
+      expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
+    });
+
+    // Two taps racing on the original question: the second edit changes nothing.
+    test('a racing duplicate tap does not continue the AI twice', async () => {
+      const onAiButtonClick = mock<ButtonClick>(() => Promise.resolve());
+      const ctx = makeCtx('ai_btn:Да');
+      Object.assign(ctx.message, { text: 'Удалить?' });
+      ctx.editText.mockImplementation(() => Promise.reject(new Error('Bad Request: message is not modified')));
+      await aiButtonHandler(onAiButtonClick)(ctx);
+      expect(onAiButtonClick).not.toHaveBeenCalled();
+    });
+
+    // A later tap from a client that still shows the buttons arrives with the message as it is
+    // now: the answer is already appended, or is the whole text after the too-long fallback.
+    test.each([
+      ['kept question', 'Удалить?\n\n✅ Да'],
+      ['too-long fallback', '✅ Да'],
+      // The user already answered "Нет": a stale "Да" must not run the confirmation after the decline.
+      ['another option already chosen', 'Удалить?\n\n✅ Нет'],
+      ['another option, too-long fallback', '✅ Нет'],
+    ])('a repeat tap on an answered message (%s) does not continue the AI again', async (_state, text) => {
+      const onAiButtonClick = mock<ButtonClick>(() => Promise.resolve());
+      const ctx = makeCtx('ai_btn:Да');
+      Object.assign(ctx.message, { text });
+      await aiButtonHandler(onAiButtonClick)(ctx);
+      expect(ctx.editText).not.toHaveBeenCalled();
+      expect(onAiButtonClick).not.toHaveBeenCalled();
+    });
+
+    test('a failed edit that is not about length keeps the question and still hands the answer on', async () => {
+      const onAiButtonClick = mock<ButtonClick>(() => Promise.resolve());
+      const ctx = makeCtx('ai_btn:Да');
+      Object.assign(ctx.message, { text: 'Удалить?' });
+      ctx.editText.mockImplementation(() => Promise.reject(new Error('Too Many Requests: retry after 5')));
+      await aiButtonHandler(onAiButtonClick)(ctx);
+      expect(ctx.editText).toHaveBeenCalledTimes(1);
+      expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
+    });
+
+    test('preserves a private time answer containing a colon', async () => {
+      const onAiButtonClick = mock<ButtonClick>(() => Promise.resolve());
+      const ctx = makeCtx('ai_btn:19:00');
+      Object.assign(ctx.message, { text: 'Во сколько?' });
+      await aiButtonHandler(onAiButtonClick)(ctx);
+      expect(ctx.editText).toHaveBeenCalledWith('Во сколько?\n\n✅ 19:00', { entities: [] });
+      expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, '19:00');
+    });
+
+    test('with userId restriction allows matching user', async () => {
+      const onAiButtonClick = mock<ButtonClick>(() => Promise.resolve());
+      // User 100 clicks on button restricted to user 100
+      const ctx = makeCtx('ai_btn:100:Да', { from: { id: 100 } });
+      ctx.message.chat.type = 'group';
+      Object.assign(ctx.message, { text: 'Удалить?' });
+      await aiButtonHandler(onAiButtonClick)(ctx);
+      expect(ctx.editText).toHaveBeenCalledWith('Удалить?\n\n✅ Да', { entities: [] });
+      expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
+    });
+
+    test('with userId restriction blocks wrong user', async () => {
+      // User 200 clicks on button restricted to user 100
+      const ctx = makeCtx('ai_btn:100:Нет', { from: { id: 200 } });
+      ctx.message.chat.type = 'group';
+      await aiButtonHandler()(ctx);
+      expect(ctx.answer).toHaveBeenCalledWith({ text: 'Не твой вопрос', show_alert: false });
+      expect(ctx.editText).not.toHaveBeenCalled();
+    });
   });
 
   test('share_evt:today shows events for today', async () => {
