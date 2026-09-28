@@ -753,7 +753,8 @@ export interface UserMemoryEntry {
 
 // --- User Action Log ---
 
-export type ActionType = 'command' | 'ai_tool' | 'callback' | 'intent_match' | 'scene';
+/** `connect_wizard_input`: a safe audit record of Telegram-connect wizard input — never its text. */
+export type ActionType = 'command' | 'ai_tool' | 'callback' | 'intent_match' | 'scene' | 'connect_wizard_input';
 
 export interface UserActionLog {
   id: number;

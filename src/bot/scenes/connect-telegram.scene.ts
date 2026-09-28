@@ -1,5 +1,6 @@
 // src/bot/scenes/connect-telegram.scene.ts
 
+import { randomBytes } from 'node:crypto';
 import { Scene } from '@gramio/scenes';
 import { InlineKeyboard, Keyboard } from 'gramio';
 import { maskPhone, t } from '../../config/constants.ts';
@@ -74,6 +75,8 @@ export interface ConnectTelegramState {
   sessionPath?: string;
   codeAttempts?: number;
   passwordAttempts?: number;
+  /** Names this run of the wizard in its cancel buttons, so a button left from an earlier run cannot end it. */
+  wizardId?: string;
 }
 
 /** Encrypt phone for safe storage in scene state (SQLite). */
@@ -101,6 +104,34 @@ const CB_CANCEL = `${CB_PREFIX}:cancel`;
 const CB_RECONNECT = `${CB_PREFIX}:reconnect`;
 const CB_SKIP_PENDING = `${CB_PREFIX}:skip_pending`;
 const CB_CANCEL_AUTH = `${CB_PREFIX}:cancel_auth`;
+
+/** Callback data of a cancel button of one run of the wizard (none for a run started before runs were named). */
+function cancelButtonData(button: string, wizardId: string | undefined): string {
+  return wizardId === undefined ? button : `${button}:${wizardId}`;
+}
+
+/** The "Cancel authorization" button of one run of the wizard. */
+function cancelAuthKeyboard(label: string, wizardId: string | undefined): InlineKeyboard {
+  return new InlineKeyboard().text(label, cancelButtonData(CB_CANCEL_AUTH, wizardId));
+}
+
+/** A cancel button: on the consent screen (`ct:cancel`) or at a prompt (`ct:cancel_auth`), and its run. */
+export interface CancelButton {
+  kind: 'consent' | 'auth';
+  wizardId?: string;
+}
+
+/** The cancel button `data` stands for, or undefined when it is none. */
+export function parseCancelButton(data: string | undefined): CancelButton | undefined {
+  for (const [button, kind] of [
+    [CB_CANCEL_AUTH, 'auth'],
+    [CB_CANCEL, 'consent'],
+  ] as const) {
+    if (data === button) return { kind };
+    if (data?.startsWith(`${button}:`)) return { kind, wizardId: data.slice(button.length + 1) };
+  }
+  return undefined;
+}
 
 export interface ConnectTelegramDeps {
   eventRepo: EventRepository;
@@ -197,16 +228,21 @@ export function createConnectTelegramScene(
             return;
           }
 
+          // Name this run: its cancel buttons carry the id, so a button left from another run ends nothing.
+          const wizardId = randomBytes(6).toString('base64url');
+          await context.scene.update({ wizardId }, { step: undefined });
+          const cancelData = cancelButtonData(CB_CANCEL, wizardId);
+
           // Check if already connected — show masked phone and reconnect option
           const existing = sessionRepo.findByUserId(userId);
           if (existing?.status === 'active') {
-            const kb = new InlineKeyboard().text(ct.btnReconnect, CB_RECONNECT).text(ct.btnCancel, CB_CANCEL);
+            const kb = new InlineKeyboard().text(ct.btnReconnect, CB_RECONNECT).text(ct.btnCancel, cancelData);
             await context.send(ct.alreadyConnected(existing.phone_masked), { reply_markup: kb });
             return;
           }
 
           // Show consent
-          const kb = new InlineKeyboard().text(ct.btnConnect, CB_CONNECT).text(ct.btnCancel, CB_CANCEL);
+          const kb = new InlineKeyboard().text(ct.btnConnect, CB_CONNECT).text(ct.btnCancel, cancelData);
           await context.send(ct.consent, { reply_markup: kb });
           return;
         }
@@ -216,7 +252,7 @@ export function createConnectTelegramScene(
           const data = context.data;
           if (!data) return;
 
-          if (data === CB_CANCEL) {
+          if (parseCancelButton(data)?.kind === 'consent') {
             await context.answer();
             await context.send(ct.cancelled);
             await context.scene.exit();
@@ -225,6 +261,7 @@ export function createConnectTelegramScene(
 
           if (data === CB_CONNECT || data === CB_RECONNECT) {
             registerConnectAttempt(userId);
+            const wizardId = context.scene.state.wizardId;
             await context.answer();
             const phoneKb = new Keyboard().requestContact(ct.btnSharePhone).resized().oneTime();
             // Telegram persists the reply-keyboard at chat level (not per message),
@@ -238,7 +275,7 @@ export function createConnectTelegramScene(
               .catch((err: unknown) =>
                 sceneLogger.warn({ err, userId }, 'failed to delete throwaway reply-keyboard message'),
               );
-            const cancelKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+            const cancelKb = cancelAuthKeyboard(ct.btnCancelAuth, wizardId);
             await context.send(ct.enterPhone, { reply_markup: cancelKb });
             await context.scene.step.next();
             return;
@@ -256,7 +293,7 @@ export function createConnectTelegramScene(
         const ct = t(l).connectTelegram;
 
         if (context.is('callback_query')) {
-          if (context.data === CB_CANCEL_AUTH) {
+          if (parseCancelButton(context.data)?.kind === 'auth') {
             await handleCancelAuth(context, ct);
           }
           return;
@@ -276,7 +313,7 @@ export function createConnectTelegramScene(
         const phone = phoneInput ? normalizePhone(phoneInput) : undefined;
 
         if (!phone || !PHONE_REGEX.test(phone)) {
-          const invalidKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+          const invalidKb = cancelAuthKeyboard(ct.btnCancelAuth, context.scene.state.wizardId);
           await context.send(ct.invalidPhone, { reply_markup: invalidKb });
           return;
         }
@@ -340,7 +377,7 @@ export function createConnectTelegramScene(
         const ct = t(l).connectTelegram;
 
         if (context.is('callback_query')) {
-          if (context.data === CB_CANCEL_AUTH) {
+          if (parseCancelButton(context.data)?.kind === 'auth') {
             await handleCancelAuth(context, ct);
           }
           return;
@@ -365,7 +402,7 @@ export function createConnectTelegramScene(
         // Normalize: user enters "1 2 3 4 5" or "12-345" to avoid Telegram anti-phishing
         const code = text ? normalizeOtpCode(text) : undefined;
         if (!code || !CODE_REGEX.test(code)) {
-          const kb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+          const kb = cancelAuthKeyboard(ct.btnCancelAuth, context.scene.state.wizardId);
           await context.send(ct.invalidCode, { reply_markup: kb });
           return;
         }
@@ -407,7 +444,7 @@ export function createConnectTelegramScene(
             return;
           }
 
-          const retryKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+          const retryKb = cancelAuthKeyboard(ct.btnCancelAuth, context.scene.state.wizardId);
           await context.send(ct.invalidCode, { reply_markup: retryKb });
           return;
         }
@@ -421,7 +458,7 @@ export function createConnectTelegramScene(
         }
 
         if (result.data.status === '2fa_required') {
-          const enter2faKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+          const enter2faKb = cancelAuthKeyboard(ct.btnCancelAuth, context.scene.state.wizardId);
           await context.send(ct.enter2fa, { reply_markup: enter2faKb });
           await context.scene.update({ passwordAttempts: 0 }, { step: undefined });
           pendingStepTransitions.add(userId);
@@ -445,7 +482,7 @@ export function createConnectTelegramScene(
         const ct = t(l).connectTelegram;
 
         if (context.is('callback_query')) {
-          if (context.data === CB_CANCEL_AUTH) {
+          if (parseCancelButton(context.data)?.kind === 'auth') {
             await handleCancelAuth(context, ct);
           }
           return;
@@ -458,7 +495,7 @@ export function createConnectTelegramScene(
         if (maybeOtp && CODE_REGEX.test(maybeOtp)) return;
 
         const { encryptedPhoneHex, sessionPath, passwordAttempts } = context.scene.state;
-        const cancelKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+        const cancelKb = cancelAuthKeyboard(ct.btnCancelAuth, context.scene.state.wizardId);
 
         const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
         if (!encryptedPhoneHex || !sessionPath || !masterKeyHex) {

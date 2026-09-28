@@ -861,7 +861,15 @@ export const MSG = {
       authCancelled: 'Authorization cancelled.',
       codeExpired: 'Code expired. Start over: /connect_telegram',
       wizardExpired:
-        'The Telegram connection timed out. Your message was deleted in case it held a code or password. Start over: /connect_telegram',
+        'The Telegram connection timed out, so I deleted your message without processing it — it might have held a code or password. If it is an ordinary request, tap “This is an ordinary request — process it”. To connect Telegram: /connect_telegram',
+      wizardStateUnknown:
+        'I could not check whether your message was a code or password for connecting Telegram, so I deleted it without processing it. If it is an ordinary request, tap “This is an ordinary request — process it”.',
+      btnProcessHeld: 'This is an ordinary request — process it',
+      btnDiscardHeld: 'Discard',
+      heldProcessing: '✅ Processing it as an ordinary request.',
+      heldDiscarded: '🗑 Discarded — I will not process that message.',
+      heldGone: 'I no longer have that message — if it was an ordinary request, please send it again.',
+      staleCancel: 'This button belongs to an earlier connection attempt.',
       tooManyAttempts: 'Too many failed attempts. Start over: /connect_telegram',
       enter2fa: 'You have two-factor authentication enabled.\nEnter your password (it will not be stored):',
       invalid2fa: 'Wrong password. Try again.',
@@ -1892,7 +1900,15 @@ export const MSG = {
       authCancelled: 'Авторизация отменена.',
       codeExpired: 'Код истёк. Начни заново: /connect_telegram',
       wizardExpired:
-        'Время на подключение Telegram вышло. Сообщение удалено — вдруг там был код или пароль. Начни заново: /connect_telegram',
+        'Время на подключение Telegram вышло, поэтому твоё сообщение я удалил и не обработал — вдруг там был код или пароль. Если это обычный запрос, нажми «Это обычный запрос — обработать». Подключить Telegram: /connect_telegram',
+      wizardStateUnknown:
+        'Не смог проверить, не код ли это или пароль для подключения Telegram, поэтому сообщение удалил и не обработал. Если это обычный запрос, нажми «Это обычный запрос — обработать».',
+      btnProcessHeld: 'Это обычный запрос — обработать',
+      btnDiscardHeld: 'Удалить',
+      heldProcessing: '✅ Обрабатываю как обычный запрос.',
+      heldDiscarded: '🗑 Удалено — это сообщение я не обработаю.',
+      heldGone: 'Этого сообщения у меня уже нет — если это был обычный запрос, отправь его ещё раз.',
+      staleCancel: 'Эта кнопка от прошлой попытки подключения.',
       tooManyAttempts: 'Слишком много попыток. Начни заново: /connect_telegram',
       enter2fa: 'У тебя включена двухфакторная аутентификация.\nВведи пароль (он не будет сохранён):',
       invalid2fa: 'Неверный пароль. Попробуй ещё раз.',
