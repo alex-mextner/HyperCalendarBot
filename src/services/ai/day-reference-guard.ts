@@ -339,6 +339,7 @@ function targetOf(ctx: AgentContext, toolName: string, input: unknown): Target |
 export function checkDayReferences(ctx: AgentContext, toolName: string, input: unknown): ToolResult | undefined {
   const named = ctx.dayReferences;
   if (!named) return undefined;
+  if (named.timeOnly && (toolName !== 'create_event' || ctx.isGroup)) return undefined;
   const target = targetOf(ctx, toolName, input);
   if (!target) return undefined;
   for (const day of named.allowedDates) if (day >= target.first && day <= target.last) return undefined;

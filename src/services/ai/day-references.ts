@@ -29,6 +29,11 @@ export interface DayReferenceSet {
   references: DayReference[];
   /** Every reference's dates plus explicit dates written in the same message. */
   allowedDates: ReadonlySet<string>;
+  /**
+   * Only a clock time was given ("18:30 кошка"): it dates a new event in a private chat and
+   * says nothing about an existing event or about a group, where it may answer anyone.
+   */
+  timeOnly?: true;
 }
 
 /**
@@ -661,7 +666,7 @@ const CLOCK_TIMES =
  * part of the day; "в 18.30" is a clock time.
  */
 const BARE_HOUR =
-  /(?<![\p{L}\d])в\s+([01]?\d|2[0-3])(?:\s*(?:час[аов]*|ч)(?!\p{L}))?(?:\s*(утра|дня|вечера|ночи)(?!\p{L}))?(?=$|[\s,;!?)]|\.(?!\d))/gu;
+  /(?<![\p{L}\d])в\s+([01]?\d|2[0-3])(?:\s*(?:час[аов]*|ч)(?!\p{L}))?(?:\s*(утра|дня|вечера|ночи)(?!\p{L}))?(?=$|[\s;!?)]|[.,](?!\d))/gu;
 /** "раз в 3 дня", "в 2 раза", "в 3 подхода": a count or a measure, not a clock time. */
 const COUNT_BEFORE = /(?<![\p{L}])раз\s*$/u;
 const COUNT_AFTER =
@@ -721,5 +726,6 @@ export function timeOnlyToday(text: string, now: Date, timezone: string): DayRef
   return {
     references: minutes.map(({ phrase }) => ({ phrase, label: 'today', dates: [today] })),
     allowedDates: new Set([today]),
+    timeOnly: true,
   };
 }

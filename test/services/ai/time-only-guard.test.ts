@@ -86,6 +86,32 @@ describe('a message with only a clock time', () => {
     expect(startsOf()).toEqual(['2026-09-16T16:30:00Z']);
   });
 
+  test('dates only a new event in a private chat: a move of tomorrow’s event and a group create run', async () => {
+    setSystemTime(WEDNESDAY_MORNING);
+    const lesson = new EventService({ eventRepo: new EventRepository(db) }).createEvent({
+      user_id: USER,
+      title: 'Урок',
+      start_at: '2026-09-17T08:00:00Z',
+      timezone: TZ,
+    });
+    history.save(USER, 'user', 'перенеси урок на 18:30');
+    const move = await executeTool(context('перенеси урок на 18:30', WEDNESDAY_MORNING), 'update_event', {
+      event_id: lesson.id,
+      start_at: '2026-09-17T16:30:00Z',
+    });
+    expect(move.success).toBe(true);
+
+    // In a group the time may answer a question asked there; the rule does not apply.
+    const group = { ...context(MESSAGE, WEDNESDAY_MORNING), isGroup: true };
+    const created = await executeTool(group, 'create_event', { title: 'Кошка', start_at: '2026-09-17T16:30:00Z' });
+    expect(created.error ?? '').not.toContain('WRONG_DAY');
+  });
+
+  test('a decimal comma is no hour: "в 7,5 литра"', () => {
+    const six = new Date('2026-09-16T04:00:00Z');
+    expect(timeOnlyToday('долить в 7,5 литра', six, TZ)).toBeNull();
+  });
+
   test('imposes nothing once the time has passed (the past-event flow asks instead)', () => {
     history.save(USER, 'user', MESSAGE);
     expect(resolveTurnDayReferences(MESSAGE, history.getRecent(USER, 30), WEDNESDAY_EVENING, TZ)).toBeNull();
