@@ -212,7 +212,7 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
       unverifiedResponseNotice('en', 'UTC', []),
     );
     expect(JSON.stringify(ctx.chatHistory.getRecent(ctx.user.telegram_id))).not.toContain(UNSUPPORTED);
-    expect(aiFailureNotices.closeChain(ctx.user.telegram_id)).toBe('stall');
+    expect(aiFailureNotices.takeNotice(ctx.user.telegram_id)).toBe('stall');
     expect(enqueue).not.toHaveBeenCalled();
   });
 

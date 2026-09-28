@@ -97,9 +97,11 @@ const MAX_TRACKED_USERS = 10_000;
  *                   No promise, so nothing to break.
  *  - `still_down` — a new request failed right after `honest`: one line saying it
  *                   is not done, without repeating the joke or the command list.
- *                   When a retry is scheduled and can succeed (not a hard outage)
+ *                   When a retry is stored and can succeed (not a hard outage)
  *                   it says the bot will retry by itself, since a resend would
- *                   cancel that retry; otherwise it asks for a resend later.
+ *                   cancel that retry; when the store did not answer in time it
+ *                   asks for a resend only if no answer comes; otherwise it asks
+ *                   for a resend later.
  *  - `silent`     — a scheduled retry failed after the user was already told.
  */
 export type FailureNoticeKind = 'stall' | 'honest' | 'still_down' | 'silent';
@@ -125,6 +127,8 @@ export interface FailureNoticeOptions {
   willRetry: boolean;
   /** This run is a scheduled retry, not a message the user just sent. */
   isRetryAttempt: boolean;
+  /** The retry store did not answer in time: a job may exist, so neither promise nor demand a resend. */
+  retryUnconfirmed?: boolean;
   now?: number;
 }
 
@@ -159,7 +163,8 @@ class AiFailureNoticeTracker {
       // the cooldown keeps anchoring on it; only the owed comeback is noted.
       if (canPromiseComeback) previous.owesComeback = true;
       this.store(userId, previous);
-      return { kind: 'still_down', text: t(lang).ai_still_down(canPromiseComeback) };
+      const next = canPromiseComeback ? 'retry' : opts.retryUnconfirmed && !opts.hardOutage ? 'unsure' : 'resend';
+      return { kind: 'still_down', text: t(lang).ai_still_down(next) };
     }
     // Tell the truth instead of promising a comeback when a retry cannot deliver
     // one, or when a comeback promised within the cooldown is still undelivered —
@@ -184,18 +189,16 @@ class AiFailureNoticeTracker {
   }
 
   /**
-   * The retry budget is spent and the give-up is about to go out. Returns
-   * `stall` when the bot promised a comeback it still owes, `honest` when it
-   * already admitted the outage (nothing new to say), `null` when it has no
-   * memory of the chain (a restart). The give-up itself is an honest notice with
-   * the command list, so it becomes the record on file: the last attempt's own
-   * failure, announced right after, stays quiet instead of repeating it.
+   * Read and clear the outstanding notice for a user. Returns `stall` when the
+   * bot promised a comeback it still owes (the "one sec" or a short "I'll retry
+   * it myself"), `honest` when it only admitted the outage, `null` when it said
+   * nothing (or the process restarted).
    */
-  closeChain(userId: number): 'stall' | 'honest' | null {
+  takeNotice(userId: number): 'stall' | 'honest' | null {
     const record = this.byUser.get(userId);
-    if (record?.kind === 'honest' && !record.owesComeback) return 'honest';
-    this.store(userId, { kind: 'honest', text: '', sentAt: Date.now(), owesComeback: false });
-    return record ? 'stall' : null;
+    if (!record) return null;
+    this.byUser.delete(userId);
+    return record.owesComeback ? 'stall' : record.kind;
   }
 
   /** The bot answered — any outstanding promise is settled. */
@@ -238,7 +241,7 @@ export const aiFailureNotices = new AiFailureNoticeTracker();
  * would be noise.
  */
 export function agentGiveUpMessage(userId: number, lang: Lang): string | null {
-  const notice = aiFailureNotices.closeChain(userId);
+  const notice = aiFailureNotices.takeNotice(userId);
   if (notice === 'honest') return null;
   return t(lang).agent_give_up(notice === 'stall');
 }
@@ -796,12 +799,16 @@ export class CalendarBotAgent {
     const hardOutage = isHardOutage(error);
     const isRetryAttempt = (ctx.retryAttempt ?? 0) > 0;
     if (isRetryAttempt && !hardOutage) return;
+    // The give-up line was delivered and closed the chain; another notice would repeat it.
+    // A give-up that failed to send rejects instead, so the notice below still goes out.
+    if (retry === 'gave_up') return;
 
     const notice = aiFailureNotices.decide(ctx.user.telegram_id, toLang(ctx.user.language), {
       hardOutage,
       // A stall phrase promises a comeback: only a stored retry can keep it.
       willRetry: retry === 'stored',
       isRetryAttempt,
+      retryUnconfirmed: retry === 'unknown',
     });
     aiLogger.info({ userId: ctx.user.telegram_id, notice: notice.kind, hardOutage }, 'AI failure notice');
     if (notice.kind === 'silent') return;
