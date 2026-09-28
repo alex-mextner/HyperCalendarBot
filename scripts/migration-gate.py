@@ -247,7 +247,7 @@ def decide(
         decision.refuse("the database's applied migrations could not be read through the running container")
     if docs is None:
         decision.refuse(f"the release image's {DOCS_DIR} could not be read")
-    if old is None or new is None or applied is None:
+    if old is None or new is None or applied is None or docs is None:
         return finish(decision, reviewed_transition)
 
     if old.outside != new.outside:
@@ -270,7 +270,7 @@ def decide(
                 f"migration {name} is already applied in the database but the running image does not "
                 "carry it (an image rollback?); the runner will not run the release's version"
             )
-        raw = (docs or {}).get(f"{name}.md")
+        raw = docs.get(f"{name}.md")
         migration = NewMigration(name, None, applied_already)
         if raw is None:
             decision.refuse(f"migration {name} has no reviewed doc: {migration.doc_path}")

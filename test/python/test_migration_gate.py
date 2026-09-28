@@ -307,6 +307,13 @@ class GateDecisionTests(unittest.TestCase):
         self.assertEqual(decision.mode, "refused", decision.refusals)
         self.assertIn("001_x", "\n".join(decision.refusals))
 
+    def test_unreadable_docs_are_not_reported_as_a_missing_doc(self):
+        # 002_y's doc may well ship; the gate could not read the directory and says only that.
+        decision = self.gate.decide(RUNNING, RELEASE, ["001_x"], ["001_x", "002_y"], None, self.pair())
+        self.assertEqual(decision.mode, "refused")
+        self.assertEqual(len(decision.refusals), 1, decision.refusals)
+        self.assertNotIn("002_y", decision.refusals[0])
+
     def test_an_unreadable_or_empty_migrations_file_is_never_overridable(self):
         for running, release in [(None, RELEASE), (RUNNING, None), (b"", RELEASE)]:
             with self.subTest(running=running, release=release):
