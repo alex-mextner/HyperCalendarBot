@@ -6,6 +6,11 @@ import type { BotCommandContext } from '../types.ts';
 
 export interface WorkflowSession {
   intentId: number;
+  /**
+   * Identity of the rule the run was matched on (see IntentRepository.currentRuleFingerprint).
+   * Absent on sessions stored before it existed; those are refused on resume.
+   */
+  ruleFingerprint?: string;
   stepIndex: number;
   stepResults: StepResults;
   workflow: Workflow;

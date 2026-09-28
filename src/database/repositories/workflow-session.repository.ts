@@ -89,6 +89,7 @@ export interface StepResults {
 
 const WorkflowSessionSchema = z.object({
   intentId: z.number(),
+  ruleFingerprint: z.string().optional(),
   stepIndex: z.number(),
   stepResults: StepResultsSchema,
   workflow: WorkflowSchema,

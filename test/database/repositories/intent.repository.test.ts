@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { IntentRepository } from '../../../src/database/repositories/intent.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import { seedIntents } from '../../../src/services/intent/seed-catalog.ts';
 import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
+import { installSeed, openTempRegistry } from '../../helpers/intent-registry.ts';
 
 function createTestDb(): Database {
   const db = new Database(':memory:');
@@ -206,5 +208,54 @@ describe('IntentRepository', () => {
     expect(JSON.parse(intent!.phrases)).toEqual(['updated']);
     expect(JSON.parse(intent!.workflow)).toEqual(originalWorkflow);
     expect(intent!.format).toBe('json');
+  });
+});
+
+describe('IntentRepository.currentRuleFingerprint', () => {
+  const approved = (repo: IntentRepository, phrases = ['show today']) => {
+    const id = repo.create({ canonical_name: 'show_today', phrases, workflow: stubWorkflow, format: 'text' });
+    repo.updateStatus(id, 'approved');
+    return id;
+  };
+
+  test('an approved rule on an unmanaged registry has an identity that tracks its definition', () => {
+    const repo = new IntentRepository(createTestDb());
+    const id = approved(repo);
+    const before = repo.currentRuleFingerprint(id);
+    expect(before).toMatch(/^[0-9a-f]{64}$/);
+    expect(repo.currentRuleFingerprint(id)).toBe(before);
+    repo.update(id, { phrases: ['show today', 'today please'] });
+    expect(repo.currentRuleFingerprint(id)).not.toBe(before);
+  });
+
+  test('a rule that is missing or no longer approved has no identity', () => {
+    const repo = new IntentRepository(createTestDb());
+    const id = approved(repo);
+    expect(repo.currentRuleFingerprint(id + 1)).toBeNull();
+    repo.updateStatus(id, 'rejected');
+    expect(repo.currentRuleFingerprint(id)).toBeNull();
+  });
+
+  test('a rule whose stored JSON does not decode has no identity', () => {
+    const db = createTestDb();
+    const repo = new IntentRepository(db);
+    const id = approved(repo);
+    db.run('UPDATE intents SET phrases = ? WHERE id = ?', ['{not json', id]);
+    expect(repo.currentRuleFingerprint(id)).toBeNull();
+  });
+
+  test('an intact managed rule has an identity; a registry without its ledger entry gives none', () => {
+    const registry = openTempRegistry();
+    try {
+      const time = seedIntents.find((seed) => seed.canonical_name === 'basis.time.now')!;
+      installSeed(registry.db, [time]);
+      const repo = new IntentRepository(registry.db);
+      const id = repo.getApproved()[0]!.id;
+      expect(repo.currentRuleFingerprint(id)).toMatch(/^[0-9a-f]{64}$/);
+      registry.db.run("DELETE FROM intent_revisions WHERE status = 'active'");
+      expect(repo.currentRuleFingerprint(id)).toBeNull();
+    } finally {
+      registry.close();
+    }
   });
 });

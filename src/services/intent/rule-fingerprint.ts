@@ -100,3 +100,13 @@ export function ruleFromRow(row: StoredRuleRow): RuleDefinition | null {
     source_message: row.source_message ?? '',
   };
 }
+
+/**
+ * The identity of one stored rule a run executes: its definition (every field a revision diff
+ * compares, so any revision change alters it) plus the response format the run's output is
+ * rendered with. Null when a JSON column does not decode.
+ */
+export function ruleFingerprint(row: StoredRuleRow & Pick<Intent, 'format'>): string | null {
+  const rule = ruleFromRow(row);
+  return rule ? digest({ ...rule, format: row.format }) : null;
+}

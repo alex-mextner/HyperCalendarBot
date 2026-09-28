@@ -38,6 +38,36 @@ untouched.
   revision agree, independently of the build's source seed. The production catalogue (52 rules)
   therefore keeps loading after this deploy, and after later deploys that only change the seed.
 
+## Suspended and running workflows
+
+A workflow session stores the identity of the rule it was matched on (`ruleFingerprint`: a
+digest of every definition field a revision diff compares, plus the rule's response format).
+Before a suspended workflow resumes, and before every tool call of a running one, the layer
+re-reads that rule (`IntentRepository.currentRuleFingerprint`). If the rule is gone, no longer
+approved, changed, or the managed registry fails its integrity check, the run stops before that
+call: the session is cleared, no further step runs, and the user is told nothing was changed
+(`failedUnchanged`; if a write had already happened earlier in the same run, the existing
+applied or unknown outcome message is used instead). A rule that is unaffected by an approval
+keeps resuming normally.
+
+The identity a first pass carries is computed from the same row read that produced its
+workflow. The check (`src/services/intent/rule-run-guard.ts`) runs right before each call is
+dispatched: a tool call whose check ran before an approval committed is ordered before that
+approval and completes, including a write it makes after its own first `await` (or, for an
+approval from another process such as the operator CLI, a write that follows the check); every
+call whose check runs after the change is refused unapplied. Steps that call no tool (a
+response) do not re-check, so a run whose last tool call was dispatched before the change
+finishes with its own response; if it suspends instead, its resume is refused. Active runs hold
+no lease that an approval would wait for. Each check re-verifies the registry integrity (about
+2 ms for the 52-rule catalogue on a developer machine).
+
+Sessions stored before this change carry no identity and are refused on their resume
+(fail closed, deterministic). Sessions live at most five minutes, so at most the conversations
+suspended in the five minutes before the deploy are affected, each once.
+
+Approval itself still refuses while a live suspended session refers to an affected rule; that
+check and the swap run in the same `IMMEDIATE` transaction (`IntentRevisionService.approve`).
+
 ## Rollback
 
 Rolling the image back to a pre-065 build leaves `intent_revisions` in place; older code never
