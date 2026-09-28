@@ -57,9 +57,26 @@ function memoryRedis() {
   };
 }
 
-let db: Database;
+/** A geocoder that answers from `AREAS` and records every area it is asked for as `city|country`. */
+function countingGeocoder() {
+  const located: string[] = [];
+  const service: GeocodingService = {
+    findPlace: async () => [],
+    geocodeAddress: async () => [],
+    reverseGeocode: async () => null,
+    locateArea: async ({ city, countryCode }) => {
+      const key = `${city ?? ''}|${countryCode ?? ''}`;
+      located.push(key);
+      return AREAS[key] ?? null;
+    },
+  };
+  return { service, located };
+}
+
+let db: Database | undefined;
 afterEach(() => {
-  db.close();
+  db?.close();
+  db = undefined;
   setSystemTime();
 });
 
@@ -76,20 +93,10 @@ function setup(profile: { city: string | null; countryCode: string | null; timez
   if (profile.city) users.update(USER_ID, { city: profile.city });
   const events = new EventRepository(db);
 
-  const located: string[] = [];
-  const geocoder: GeocodingService = {
-    findPlace: async () => [],
-    geocodeAddress: async () => [],
-    reverseGeocode: async () => null,
-    locateArea: async ({ city, countryCode }) => {
-      const key = `${city ?? ''}|${countryCode ?? ''}`;
-      located.push(key);
-      return AREAS[key] ?? null;
-    },
-  };
+  const geocoder = countingGeocoder();
   const addressStore = new Map<string, string>();
   const service = new LocationVerificationService({
-    geocodingService: withCachedAreas(geocoder, memoryRedis()),
+    geocodingService: withCachedAreas(geocoder.service, memoryRedis()),
     addressCache: new AddressCache({
       get: async (key) => addressStore.get(key) ?? null,
       compareAndSet: async (key, expected, value) => {
@@ -120,7 +127,7 @@ function setup(profile: { city: string | null; countryCode: string | null; timez
     await service.verifyEventLocation(event, user);
   }
 
-  return { users, located, check };
+  return { users, located: geocoder.located, check };
 }
 
 describe('the home area is located once, not on every location check', () => {
@@ -182,5 +189,43 @@ describe('the home area is located once, not on every location check', () => {
 
     // The unknown city and then the country each time; only the found country is cached
     expect(s.located).toEqual(['Atlantis|RS', '|RS', 'Atlantis|RS']);
+  });
+});
+
+describe('a broken area cache never stops the area from being located', () => {
+  const belgradeQuery = { city: 'Belgrade', countryCode: 'RS' };
+
+  test('a cache that can be neither read nor written answers from the geocoder', async () => {
+    const geocoder = countingGeocoder();
+    const areas = withCachedAreas(geocoder.service, {
+      get: async () => {
+        throw new Error('ECONNREFUSED');
+      },
+      set: async () => {
+        throw new Error('ECONNREFUSED');
+      },
+    });
+
+    expect(await areas.locateArea(belgradeQuery)).toEqual(BELGRADE);
+    expect(await areas.locateArea(belgradeQuery)).toEqual(BELGRADE);
+    expect(geocoder.located).toEqual(['Belgrade|RS', 'Belgrade|RS']);
+  });
+
+  test('an unreadable cached area is located again and replaced by the located one', async () => {
+    const geocoder = countingGeocoder();
+    const redis = memoryRedis();
+    let firstRead = true;
+    const areas = withCachedAreas(geocoder.service, {
+      get: async (key) => {
+        if (!firstRead) return redis.get(key);
+        firstRead = false;
+        return '{"latitude":"not a number"}';
+      },
+      set: redis.set,
+    });
+
+    expect(await areas.locateArea(belgradeQuery)).toEqual(BELGRADE);
+    expect(await areas.locateArea(belgradeQuery)).toEqual(BELGRADE);
+    expect(geocoder.located).toEqual(['Belgrade|RS']);
   });
 });
