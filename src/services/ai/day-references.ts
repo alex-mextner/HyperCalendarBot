@@ -123,6 +123,25 @@ const FOREIGN_ZONE = /(?:^|[^\p{L}])[Пп]о\s+[А-ЯЁA-Z]/u;
 /** Zone abbreviations as whole lower-case tokens; a closed list, since "GPT" or "MEET" is no zone. */
 const ZONE_ABBREVIATION =
   /^(?:мск|msk|utc|gmt|pst|pdt|est|edt|cst|cdt|mst|mdt|hst|hdt|akst|akdt|cet|cest|eet|eest|bst|ist|pkt|ict|wib|sgt|hkt|pht|kst|jst|awst|acst|acdt|aest|aedt|nzst|nzdt)$/;
+/** "America/New_York", "Asia/Tokyo": an IANA zone name. */
+const IANA_ZONE = /(?<![\p{L}/])[A-Z][A-Za-z]+\/[A-Z][A-Za-z_]+/u;
+/**
+ * "в 23:30 по нью-йорку", "в 23:30 по токийскому времени с Анной": a lower-case place right after
+ * a time, ending the phrase or followed by "времени".
+ */
+const TIME_BY_PLACE =
+  /(?:\d|утра|дня|вечера|ночи|час\p{L}*)\s+по\s+[\p{L}-]+(?:\s+времени(?!\p{L})|\s*(?:$|[.,;!?)]))/u;
+
+/** Whether a time or day in `text` is given in another time zone, so it may fall on a neighbouring day here. */
+function mentionsOtherZone(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    FOREIGN_ZONE.test(text) ||
+    IANA_ZONE.test(text) ||
+    TIME_BY_PLACE.test(lower) ||
+    tokens(lower).some((token) => ZONE_ABBREVIATION.test(token.word))
+  );
+}
 
 /** Month words as whole lower-case tokens, January first. */
 const MONTH_TOKENS: readonly RegExp[] = [
@@ -318,7 +337,7 @@ export function readDayContent(text: string, now: Date, timezone: string): DayCo
   const allowed = new Set<string>(explicit.dates);
   // "завтра в 3 по Токио" is a day earlier in Belgrade: a day named in another zone may
   // land on the neighbouring day of the user's own calendar.
-  const otherZone = FOREIGN_ZONE.test(text) || has(ZONE_ABBREVIATION);
+  const otherZone = mentionsOtherZone(text);
   let rangeStart: string | undefined;
   for (const reference of references) {
     for (const date of reference.dates) {
@@ -638,12 +657,6 @@ export function describeWeekdayDateMismatches(mismatches: WeekdayDateMismatch[])
 const CLOCK_TIMES =
   /(?<![\d.:-])([01]?\d|2[0-3])([:.-])([0-5]\d)(?![\d:-]|\.\d)(?:\s*(утра|дня|вечера|ночи)(?!\p{L}))?/gu;
 /**
- * "в 23:30 по нью-йорку", "в 23:30 по токийскому времени с Анной": a lower-case place right after
- * a time, ending the phrase or followed by "времени".
- */
-const TIME_BY_PLACE =
-  /(?:\d|утра|дня|вечера|ночи|час\p{L}*)\s+по\s+[\p{L}-]+(?:\s+времени(?!\p{L})|\s*(?:$|[.,;!?)]))/u;
-/**
  * "в 8", "в 7 вечера", "в 12 часов ночи": an hour after "в", with an optional hour word and
  * part of the day; "в 18.30" is a clock time.
  */
@@ -661,7 +674,8 @@ const NUMBERED_PLACE = /^\s+\p{L}*(?:[^\P{L}иь]е|ии|[ую])(?![\p{L}])/u;
 
 /** The hour an hour word means, or null for midnight: "в 12 ночи" is the start of tomorrow. */
 function clockHour(hour: number, part: string | undefined): number | null {
-  if (part === 'вечера' || (part === 'ночи' && hour >= 6)) {
+  // "в 11 ночи" is 23:00, "в 3 ночи" and "в 6 ночи" the early morning.
+  if (part === 'вечера' || (part === 'ночи' && hour >= 9)) {
     if (hour === 12) return null;
     return hour < 12 ? hour + 12 : hour;
   }
@@ -676,19 +690,14 @@ function clockHour(hour: number, part: string | undefined): number | null {
  * midnight or a time in another zone, which may be tomorrow here.
  */
 export function timeOnlyToday(text: string, now: Date, timezone: string): DayReferenceSet | null {
-  if (readDayContent(text, now, timezone).kind !== 'none') return null;
+  if (readDayContent(text, now, timezone).kind !== 'none' || mentionsOtherZone(text)) return null;
   // "17:00-18:00" is two times: the dash between them is a space for the time pattern.
   const normalized = text.toLowerCase().replace(/(\d[:.]\d\d)-(?=\d{1,2}[:.]\d\d)/g, '$1 ');
-  if (
-    FOREIGN_ZONE.test(text) ||
-    TIME_BY_PLACE.test(normalized) ||
-    tokens(normalized).some((token) => ZONE_ABBREVIATION.test(token.word))
-  )
-    return null;
   const minutes: { phrase: string; at: number }[] = [];
   for (const match of normalized.matchAll(CLOCK_TIMES)) {
-    // "в 12.05" may equally be 12 May: a time that can also be a date says nothing about today.
-    if (match[2] === '.' && Number(match[3]) >= 1 && Number(match[3]) <= 12) return null;
+    // "в 12.05" may equally be 12 May, "12-10" 12 October: a time that can also be a date says
+    // nothing about today.
+    if (match[2] !== ':' && Number(match[3]) >= 1 && Number(match[3]) <= 12) return null;
     const hour = clockHour(Number(match[1]), match[4]);
     if (hour === null) return null;
     minutes.push({ phrase: match[0], at: hour * 60 + Number(match[3]) });

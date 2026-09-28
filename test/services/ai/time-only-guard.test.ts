@@ -219,4 +219,33 @@ describe('a message with only a clock time', () => {
     history.save(USER, 'user', 'в 18:30');
     expect(resolveTurnDayReferences('в 18:30', history.getRecent(USER, 30), WEDNESDAY_MORNING, TZ)).toBeNull();
   });
+
+  test('an answer to a question asked in plain text is not constrained either', () => {
+    history.save(USER, 'user', 'встреча завтра');
+    history.save(USER, 'assistant', JSON.stringify({ role: 'assistant', content: 'Во сколько?' }));
+    history.save(USER, 'user', 'в 18:30');
+    expect(resolveTurnDayReferences('в 18:30', history.getRecent(USER, 30), WEDNESDAY_MORNING, TZ)).toBeNull();
+    // After a reply that asks nothing, a time-only message is a new request for today.
+    history.save(
+      USER,
+      'assistant',
+      JSON.stringify({ role: 'assistant', content: 'Записал встречу на завтра, 18:30.' }),
+    );
+    history.save(USER, 'user', '19:00 кошка');
+    const turn = resolveTurnDayReferences('19:00 кошка', history.getRecent(USER, 30), WEDNESDAY_MORNING, TZ);
+    expect(turn && [...turn.allowedDates]).toEqual(['2026-09-16']);
+  });
+
+  test('an IANA zone, a hyphenated day-month and "6 ночи" impose nothing', () => {
+    expect(timeOnlyToday('Созвон в 18:30 America/New_York', WEDNESDAY_MORNING, TZ)).toBeNull();
+    // "12-10" may be 12 October as well as 12:10.
+    expect(timeOnlyToday('Встреча 12-10', WEDNESDAY_MORNING, TZ)).toBeNull();
+    // "в 6 ночи" is early morning, already past at 11:06.
+    expect(timeOnlyToday('в 6 ночи рейс', WEDNESDAY_MORNING, TZ)).toBeNull();
+  });
+
+  test('a lower-case place after a time widens a named day like a capitalised one', () => {
+    const turn = resolveTurnDayReferences('завтра в 9 по нью-йорку', [], WEDNESDAY_MORNING, TZ);
+    expect(turn && [...turn.allowedDates].sort()).toEqual(['2026-09-16', '2026-09-17', '2026-09-18']);
+  });
 });

@@ -115,6 +115,26 @@ function answersQuestion(messageText: string, options: readonly string[]): boole
 }
 
 /**
+ * Whether the bot's last reply before this message asked something in plain text ("Во
+ * сколько?"): the message then answers it, and the day may have been named before.
+ */
+function answersPlainQuestion(messageText: string, history: ChatHistoryMessage[]): boolean {
+  let index = history.length - 1;
+  while (index >= 0 && history[index]!.role !== 'user') index--;
+  if (index < 0 || history[index]!.content.trim() !== messageText.trim()) return false;
+  for (index--; index >= 0; index--) {
+    const row = history[index]!;
+    if (row.role === 'tool') continue;
+    if (row.role === 'user') return false;
+    const turn = AssistantToolCallsCodec.safeParse(row.content);
+    const text = turn.success ? (turn.data.content ?? '') : row.content;
+    if (text.trim() === '') continue;
+    return text.includes('?');
+  }
+  return false;
+}
+
+/**
  * The days this turn is allowed to touch: the ones named in the message, or — for an
  * answer to ask_user that names no day itself ("Да") — the ones named in the message
  * that led to the question, together with any day the question itself offered.
@@ -131,7 +151,7 @@ export function resolveTurnDayReferences(
   const pending = pendingQuestion(messageText, history);
   // An answer to a question inherits the question's date context; a fresh message that
   // states only a clock time means today while that time is still ahead.
-  if (!pending || !answersQuestion(messageText, pending.options)) return timeOnlyToday(messageText, now, timezone);
+  if (!pending || !answersQuestion(messageText, pending.options)) return answersPlainQuestion(messageText, history) ? null : timeOnlyToday(messageText, now, timezone);
   // Each message is read as of when it was written: a "Да" given days later confirms the
   // Tuesday meant then, not the one coming now.
   const originAt = storedInstantMs(pending.origin.created_at);
