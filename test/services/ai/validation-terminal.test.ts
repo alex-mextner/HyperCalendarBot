@@ -475,6 +475,56 @@ describe('re-validation accepts answers grounded in the same run (#492)', () => 
     expect(script.counts.validator).toBe(0);
   });
 
+  test('a dropped supplement still reports the calendar change it made (#515)', async () => {
+    seedWeekPlan(true);
+    const script = scripted(
+      [
+        { text: '', tool: { name: 'create_event', input: { title: 'Пробежка', start_at: '2026-09-30T05:00:00Z' } } },
+        { text: 'Добавил пробежку. Вторник 22 сентября – свободный весь день.' },
+      ],
+      [],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toContain('Выполнено: Создание события');
+    expect(result.responseText).not.toContain('22 сентября');
+    expect(script.counts.validator).toBe(0);
+    const created = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events WHERE title = 'Пробежка'").get();
+    expect(created?.n).toBe(1);
+  });
+
+  test('a supplement that fails after a write still reports the change (#515)', async () => {
+    seedWeekPlan(true);
+    const script = scripted(
+      [
+        { text: '', tool: { name: 'create_event', input: { title: 'Пробежка', start_at: '2026-09-30T05:00:00Z' } } },
+        { text: '', error: new Error('Synthetic supplement outage') },
+      ],
+      [],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toContain('Выполнено: Создание события');
+    const created = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events WHERE title = 'Пробежка'").get();
+    expect(created?.n).toBe(1);
+  });
+
+  test('a supplement whose write needs a receipt reports it instead of going silent (#515)', async () => {
+    seedWeekPlan(true);
+    const script = scripted(
+      [
+        { text: '', tool: { name: 'create_event', input: { title: 'Пробежка', start_at: '2026-09-30T05:00:00Z' } } },
+        { text: '', tool: { name: 'delete_event', input: { event_id: 999_999 } } },
+        { text: 'Добавил пробежку.' },
+      ],
+      [],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toContain('Выполнено: Создание события');
+    expect(result.responseText).toContain('Не выполнено: Удаление события');
+  });
+
   test('a supplement backed by its own reads is still delivered (#515)', async () => {
     seedWeekPlan(true);
     const text = 'Во вторник, 29 сентября, в 12:30 и 13:30 — английский.';

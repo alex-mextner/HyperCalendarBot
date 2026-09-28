@@ -1450,8 +1450,11 @@ export class CalendarBotAgent {
       ctx.isGroup,
       (runFailed || responseUnverified) && writeOutcomes.mayHaveMutated,
     );
+    // A supplement is optional text and stays quiet when guarded, unless it may have changed the
+    // calendar: then the receipt is its reply, or the user would never learn of the change.
+    const supplementQuiet = ctx.supplementMode && !(evidence !== null && writeOutcomes.mayHaveMutated);
     const silent =
-      ctx.supplementMode ||
+      supplementQuiet ||
       ctx.wasExplicitInvocation === false ||
       (termination === 'waiting' && !writeOutcomes.speechQuestion);
     const validationNotice =
