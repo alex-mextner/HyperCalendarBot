@@ -59,6 +59,6 @@
     "time-words": 7,
     "unknown-time": 3
   },
-  "sha256": "cef4fedafb32578785fcdd6e12fce663d858b29241fcf506c3f875e78ee7287a",
+  "sha256": "3e5e42b52efad126c50cc2ea34923f51d4e982bdfb5be01ed182b72440b29590",
   "semantics": "Expectations for future runner. llm_calls counts model calls caused by this transition; classifier_calls counts local non-generative advisory calls (e.g. Laya) separate from llm_calls; agent_patch is already received and ASR is separate. Directory writes are distinct from event/invitation writes. Entry adapters are applicability metadata, not additional counted tests. Recurrence families (583-*) use expander_pure/reminder_materializer/google_sync/ics_export/ics_import entrypoints against synthetic fixtures, not live Google/ICS I/O. A recurrence-edit-scope case with event_writes>0 carries confirmedEntityRevision matching the current entityRevision, actorRole, operationKey, requires_confirmed_revision, actor_permission_checked, idempotency_key_reused_on_retry and receipt — the same consent/CAS/idempotency/effect-ledger gates as event creation (design doc §15/§20); stale confirmedEntityRevision or missing consent yields event_writes=0, and a duplicate confirm with the same operationKey returns the same receipt with zero additional writes/notifications."
 }
