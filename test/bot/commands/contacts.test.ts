@@ -1,0 +1,304 @@
+import { Database } from 'bun:sqlite';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import {
+  buildContactDetailKeyboard,
+  buildContactsListKeyboard,
+  buildGroupDetailKeyboard,
+  buildGroupsListKeyboard,
+  type ContactsDeps,
+  formatContactDetailText,
+  formatGroupDetailText,
+  handleContacts,
+  handleContactsCallback,
+} from '../../../src/bot/commands/contacts.ts';
+import { migrations } from '../../../src/database/migrations.ts';
+import { ContactRepository } from '../../../src/database/repositories/contact.repository.ts';
+import { ContactAliasRepository } from '../../../src/database/repositories/contact-alias.repository.ts';
+import { ContactGroupRepository } from '../../../src/database/repositories/contact-group.repository.ts';
+import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
+import type { Contact, ContactAlias, ContactGroup } from '../../../src/database/types.ts';
+
+interface InlineButton {
+  text: string;
+  callback_data?: string;
+}
+
+function rows(kb: { toJSON(): { inline_keyboard: InlineButton[][] } }): InlineButton[][] {
+  return kb.toJSON().inline_keyboard;
+}
+
+const USER_ID = 42;
+
+function createTestDb(): Database {
+  const db = new Database(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  runMigrations(db, migrations);
+  return db;
+}
+
+function makeDeps(db: Database): ContactsDeps {
+  return {
+    contactRepo: new ContactRepository(db),
+    contactAliasRepo: new ContactAliasRepository(db),
+    contactGroupRepo: new ContactGroupRepository(db),
+  };
+}
+
+describe('buildContactsListKeyboard', () => {
+  function makeContact(id: number, name: string): Contact {
+    return { id, user_id: USER_ID, name, username: null, telegram_id: null, preferred_name: null, created_at: '' };
+  }
+
+  test('one row per contact, plus a groups button', () => {
+    const kb = buildContactsListKeyboard([makeContact(1, 'Anna'), makeContact(2, 'Boris')], 'en', 0);
+    const r = rows(kb);
+    expect(r[0]?.[0]?.text).toBe('Anna');
+    expect(r[1]?.[0]?.text).toBe('Boris');
+    expect(r.at(-1)?.[0]?.text).toBe('👥 Groups');
+  });
+
+  test('shows next button when more contacts than one page', () => {
+    const contacts = Array.from({ length: 9 }, (_, i) => makeContact(i + 1, `C${i + 1}`));
+    const kb = buildContactsListKeyboard(contacts, 'en', 0);
+    const flat = rows(kb).flat();
+    expect(flat.some((b) => b.text === '▶️')).toBe(true);
+    expect(flat.some((b) => b.text === '◀️')).toBe(false);
+  });
+
+  test('shows prev button on a later page', () => {
+    const contacts = Array.from({ length: 9 }, (_, i) => makeContact(i + 1, `C${i + 1}`));
+    const kb = buildContactsListKeyboard(contacts, 'en', 8);
+    const flat = rows(kb).flat();
+    expect(flat.some((b) => b.text === '◀️')).toBe(true);
+  });
+});
+
+describe('buildContactDetailKeyboard / formatContactDetailText', () => {
+  function makeAlias(id: number, contactId: number, alias: string, isPrimary: number): ContactAlias {
+    return {
+      id,
+      user_id: USER_ID,
+      contact_id: contactId,
+      alias,
+      is_primary: isPrimary,
+      source: 'manual',
+      created_at: '',
+    };
+  }
+
+  const contact: Contact = {
+    id: 1,
+    user_id: USER_ID,
+    name: 'Elena',
+    username: null,
+    telegram_id: null,
+    preferred_name: null,
+    created_at: '',
+  };
+
+  test('primary alias has no promote/delete buttons, non-primary aliases do', () => {
+    const aliases = [makeAlias(1, 1, 'Elena', 1), makeAlias(2, 1, 'Ленка', 0)];
+    const kb = buildContactDetailKeyboard(contact, aliases, 0, 'en');
+    const flat = rows(kb).flat();
+    expect(flat.some((b) => b.text.includes('Elena'))).toBe(false);
+    expect(flat.some((b) => b.text.includes('Ленка'))).toBe(true);
+    expect(flat.some((b) => b.text === '🗑 Delete contact')).toBe(true);
+    expect(flat.some((b) => b.text === '⬅️ Back')).toBe(true);
+  });
+
+  test('detail text marks the primary alias', () => {
+    const aliases = [makeAlias(1, 1, 'Elena', 1), makeAlias(2, 1, 'Ленка', 0)];
+    const text = formatContactDetailText(contact, aliases, 'en');
+    expect(text).toContain('Elena (primary)');
+    expect(text).toContain('Ленка');
+    expect(text).not.toContain('Ленка (primary)');
+  });
+});
+
+describe('buildGroupsListKeyboard / buildGroupDetailKeyboard / formatGroupDetailText', () => {
+  const group: ContactGroup = { id: 1, user_id: USER_ID, alias: 'грюковы', created_at: '' };
+
+  test('one row per group', () => {
+    const kb = buildGroupsListKeyboard([group]);
+    expect(rows(kb)[0]?.[0]?.text).toBe('грюковы');
+  });
+
+  test('member rows plus delete-group and back buttons', () => {
+    const anna: Contact = {
+      id: 5,
+      user_id: USER_ID,
+      name: 'Anna',
+      username: null,
+      telegram_id: null,
+      preferred_name: null,
+      created_at: '',
+    };
+    const kb = buildGroupDetailKeyboard(group, [anna], 'en');
+    const flat = rows(kb).flat();
+    expect(flat.some((b) => b.text.includes('Anna'))).toBe(true);
+    expect(flat.some((b) => b.text === '🗑 Delete group')).toBe(true);
+  });
+
+  test('detail text lists members', () => {
+    const anna: Contact = {
+      id: 5,
+      user_id: USER_ID,
+      name: 'Anna',
+      username: null,
+      telegram_id: null,
+      preferred_name: null,
+      created_at: '',
+    };
+    expect(formatGroupDetailText(group, [anna], 'en')).toContain('Anna');
+    expect(formatGroupDetailText(group, [], 'en')).toContain('No members yet');
+  });
+});
+
+describe('handleContacts command', () => {
+  let db: Database;
+  let deps: ContactsDeps;
+
+  beforeEach(() => {
+    db = createTestDb();
+    new UserRepository(db).create({ telegram_id: USER_ID, timezone: 'UTC' });
+    deps = makeDeps(db);
+  });
+
+  function makeCtx(args: string | null, chatType: 'private' | 'group' = 'private') {
+    return {
+      dbUser: { telegram_id: USER_ID, language: 'en' as const },
+      args,
+      chat: { type: chatType, id: chatType === 'group' ? -100 : USER_ID },
+      send: mock(() => Promise.resolve()),
+    };
+  }
+
+  test('refuses to run in a group chat', async () => {
+    const ctx = makeCtx(null, 'group');
+    await handleContacts(ctx as never, deps);
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('private'));
+  });
+
+  test('no args, empty book shows the empty message', async () => {
+    const ctx = makeCtx(null);
+    await handleContacts(ctx as never, deps);
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('empty'), expect.anything());
+  });
+
+  test('add creates a contact', async () => {
+    const ctx = makeCtx('add Elena Larichkina');
+    await handleContacts(ctx as never, deps);
+    expect(deps.contactRepo.findByName(USER_ID, 'Elena Larichkina')).not.toBeNull();
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('Elena Larichkina'));
+  });
+
+  test('alias adds an alias to an existing contact', async () => {
+    const contact = deps.contactRepo.add(USER_ID, 'Elena');
+    const ctx = makeCtx(`alias ${contact.id} Ленка`);
+    await handleContacts(ctx as never, deps);
+    expect(deps.contactAliasRepo.listForContact(USER_ID, contact.id).map((a) => a.alias)).toContain('Ленка');
+  });
+
+  test('alias reports a conflict without throwing', async () => {
+    const contact = deps.contactRepo.add(USER_ID, 'Elena');
+    deps.contactAliasRepo.add(USER_ID, contact.id, 'Ленка', 'manual');
+    const ctx = makeCtx(`alias ${contact.id} Ленка`);
+    await handleContacts(ctx as never, deps);
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('already an alias'));
+  });
+
+  test('group create then group add wires a member', async () => {
+    const contact = deps.contactRepo.add(USER_ID, 'Anna');
+    await handleContacts(makeCtx('group create грюковы') as never, deps);
+    const group = deps.contactGroupRepo.findByAlias(USER_ID, 'грюковы')!;
+    await handleContacts(makeCtx(`group add ${group.id} ${contact.id}`) as never, deps);
+    expect(deps.contactGroupRepo.listMembers(USER_ID, group.id).map((c) => c.id)).toEqual([contact.id]);
+  });
+
+  test('group create rejects a duplicate alias', async () => {
+    await handleContacts(makeCtx('group create грюковы') as never, deps);
+    const ctx = makeCtx('group create грюковы');
+    await handleContacts(ctx as never, deps);
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('already used'));
+  });
+
+  test('group delete removes the group without deleting members', async () => {
+    const contact = deps.contactRepo.add(USER_ID, 'Anna');
+    await handleContacts(makeCtx('group create грюковы') as never, deps);
+    const group = deps.contactGroupRepo.findByAlias(USER_ID, 'грюковы')!;
+    deps.contactGroupRepo.addMember(USER_ID, group.id, contact.id);
+    await handleContacts(makeCtx(`group delete ${group.id}`) as never, deps);
+    expect(deps.contactGroupRepo.listGroups(USER_ID)).toEqual([]);
+    expect(deps.contactRepo.findById(USER_ID, contact.id)).not.toBeNull();
+  });
+});
+
+describe('handleContactsCallback', () => {
+  let db: Database;
+  let deps: ContactsDeps;
+
+  beforeEach(() => {
+    db = createTestDb();
+    new UserRepository(db).create({ telegram_id: USER_ID, timezone: 'UTC' });
+    deps = makeDeps(db);
+  });
+
+  function makeCtx() {
+    return { answer: mock(() => Promise.resolve()), editText: mock(() => Promise.resolve()) };
+  }
+
+  const user = { telegram_id: USER_ID, language: 'en' as const };
+
+  test('view shows the contact detail with its aliases', async () => {
+    const contact = deps.contactRepo.add(USER_ID, 'Elena');
+    const ctx = makeCtx();
+    await handleContactsCallback(ctx as never, `view:${contact.id}:0`, user, deps);
+    expect(ctx.editText).toHaveBeenCalledWith(expect.stringContaining('Elena'), expect.anything());
+  });
+
+  test('promote makes a non-primary alias primary', async () => {
+    const contact = deps.contactRepo.add(USER_ID, 'Elena');
+    const alias = deps.contactAliasRepo.add(USER_ID, contact.id, 'Ленка', 'manual');
+    const ctx = makeCtx();
+    await handleContactsCallback(ctx as never, `promote:${contact.id}:${alias.id}:0`, user, deps);
+    expect(deps.contactRepo.findById(USER_ID, contact.id)?.name).toBe('Ленка');
+  });
+
+  test('delcontact then delcontactok deletes the contact', async () => {
+    const contact = deps.contactRepo.add(USER_ID, 'Elena');
+    const askCtx = makeCtx();
+    await handleContactsCallback(askCtx as never, `delcontact:${contact.id}:0`, user, deps);
+    expect(askCtx.editText).toHaveBeenCalledWith(expect.stringContaining('Delete'), expect.anything());
+
+    const confirmCtx = makeCtx();
+    await handleContactsCallback(confirmCtx as never, `delcontactok:${contact.id}:0`, user, deps);
+    expect(deps.contactRepo.findById(USER_ID, contact.id)).toBeNull();
+  });
+
+  test('groupview then groupremove removes a member without deleting the contact', async () => {
+    const group = deps.contactGroupRepo.create(USER_ID, 'грюковы');
+    const anna = deps.contactRepo.add(USER_ID, 'Anna');
+    deps.contactGroupRepo.addMember(USER_ID, group.id, anna.id);
+
+    const viewCtx = makeCtx();
+    await handleContactsCallback(viewCtx as never, `groupview:${group.id}`, user, deps);
+    expect(viewCtx.editText).toHaveBeenCalledWith(expect.stringContaining('Anna'), expect.anything());
+
+    const removeCtx = makeCtx();
+    await handleContactsCallback(removeCtx as never, `groupremove:${group.id}:${anna.id}`, user, deps);
+    expect(deps.contactGroupRepo.listMembers(USER_ID, group.id)).toEqual([]);
+    expect(deps.contactRepo.findById(USER_ID, anna.id)).not.toBeNull();
+  });
+
+  test('groupdel then groupdelok deletes the group', async () => {
+    const group = deps.contactGroupRepo.create(USER_ID, 'грюковы');
+    const askCtx = makeCtx();
+    await handleContactsCallback(askCtx as never, `groupdel:${group.id}`, user, deps);
+    expect(askCtx.editText).toHaveBeenCalledWith(expect.stringContaining('Delete group'), expect.anything());
+
+    const confirmCtx = makeCtx();
+    await handleContactsCallback(confirmCtx as never, `groupdelok:${group.id}`, user, deps);
+    expect(deps.contactGroupRepo.listGroups(USER_ID)).toEqual([]);
+  });
+});

@@ -10,6 +10,8 @@ import { CB, t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
+import type { ContactAliasRepository } from '../../database/repositories/contact-alias.repository.ts';
+import type { ContactGroupRepository } from '../../database/repositories/contact-group.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
@@ -35,6 +37,7 @@ import { aiStreamRound } from '../../services/ai/streaming.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
 import type { BirthdayService } from '../../services/birthday/birthday-service.ts';
+import { ContactResolver } from '../../services/contacts/contact-resolver.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatAdminReply, sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
@@ -98,6 +101,8 @@ export interface MessageHandlerDeps {
   userRepo: UserRepository;
   eventReminderRepo: EventReminderRepository;
   contactRepo?: ContactRepository;
+  contactAliasRepo?: ContactAliasRepository;
+  contactGroupRepo?: ContactGroupRepository;
   participantRepo?: ParticipantRepository;
   editProposalRepo?: EditProposalRepository;
   secretaryRepo?: SecretaryRepository;
@@ -500,6 +505,14 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
           ? {
               scheduledCallService: deps.scheduledCallService,
               triggerService: deps.triggerService,
+            }
+          : undefined,
+      contactDirectory:
+        deps.contactRepo && deps.contactAliasRepo && deps.contactGroupRepo
+          ? {
+              contactAliasRepo: deps.contactAliasRepo,
+              contactGroupRepo: deps.contactGroupRepo,
+              contactResolver: new ContactResolver(deps.contactRepo, deps.contactAliasRepo, deps.contactGroupRepo),
             }
           : undefined,
       locationVerification: deps.locationVerification,

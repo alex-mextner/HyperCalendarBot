@@ -1,6 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { migrations } from '../../src/database/migrations.ts';
 import { ContactRepository } from '../../src/database/repositories/contact.repository.ts';
+import { UserRepository } from '../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../src/database/schema.ts';
 import { resolveInvitationRecipient } from '../../src/services/ai/recipient-identity.ts';
 import { inspectRecipientProfile } from '../../src/services/ai/recipient-profile.ts';
 import type { AgentContext } from '../../src/services/ai/types.ts';
@@ -9,9 +12,8 @@ let db: Database;
 let contacts: ContactRepository;
 beforeEach(() => {
   db = new Database(':memory:');
-  db.exec(
-    "CREATE TABLE contacts(id INTEGER PRIMARY KEY, user_id INTEGER, name TEXT, username TEXT, telegram_id INTEGER, preferred_name TEXT, created_at TEXT DEFAULT (datetime('now')))",
-  );
+  runMigrations(db, migrations);
+  new UserRepository(db).create({ telegram_id: 10, timezone: 'UTC' });
   contacts = new ContactRepository(db);
 });
 afterEach(() => db.close());

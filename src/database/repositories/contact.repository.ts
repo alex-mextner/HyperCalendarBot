@@ -131,15 +131,51 @@ export class ContactRepository {
     })();
   }
 
+  /**
+   * Every contact always has exactly one primary alias row in contact_aliases (#654 migration
+   * 066_contact_directory) — that invariant is created here, not left to callers, so
+   * ContactAliasRepository.promote()/delete() can rely on a primary always existing.
+   */
   add(userId: number, name: string, username?: string, telegramId?: number, preferredName?: string): Contact {
-    const inserted = this.db
-      .query<Contact, [number, string, string | null, number | null, string | null]>(
-        `INSERT INTO contacts (user_id, name, username, telegram_id, preferred_name) VALUES (?, ?, ?, ?, ?)
+    return this.db.transaction(() => {
+      const inserted = this.db
+        .query<Contact, [number, string, string | null, number | null, string | null]>(
+          `INSERT INTO contacts (user_id, name, username, telegram_id, preferred_name) VALUES (?, ?, ?, ?, ?)
        RETURNING id, user_id, name, username, telegram_id, preferred_name, created_at`,
-      )
-      .get(userId, name, username ? normalizeUsername(username) : null, telegramId ?? null, preferredName ?? null);
-    if (!inserted) throw new Error('Contact insert returned no row');
-    return inserted;
+        )
+        .get(userId, name, username ? normalizeUsername(username) : null, telegramId ?? null, preferredName ?? null);
+      if (!inserted) throw new Error('Contact insert returned no row');
+      this.db
+        .prepare(
+          "INSERT INTO contact_aliases (user_id, contact_id, alias, is_primary, source) VALUES (?, ?, ?, 1, 'primary_name')",
+        )
+        .run(userId, inserted.id, name);
+      return inserted;
+    })();
+  }
+
+  /**
+   * Mirrors a `contacts.name` rename onto the contact's primary alias row. If the new name
+   * already exists as a different (non-primary) alias on this contact, that alias is promoted
+   * instead of writing a duplicate — contact_aliases stays unique per (contact_id, LOWER(alias)).
+   * A no-op pre-066 defensive guard: every contact created via add()/upsert() has a primary row.
+   */
+  private syncPrimaryAliasOnRename(contactId: number, newName: string): void {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    const primary = this.db
+      .prepare('SELECT id, alias FROM contact_aliases WHERE contact_id = ? AND is_primary = 1')
+      .get(contactId) as { id: number; alias: string } | undefined;
+    if (!primary || primary.alias.trim().toLowerCase() === trimmed.toLowerCase()) return;
+    const existingAlias = this.db
+      .prepare('SELECT id FROM contact_aliases WHERE contact_id = ? AND LOWER(alias) = LOWER(?) AND id != ?')
+      .get(contactId, trimmed, primary.id) as { id: number } | undefined;
+    if (existingAlias) {
+      this.db.prepare('UPDATE contact_aliases SET is_primary = 0 WHERE id = ?').run(primary.id);
+      this.db.prepare('UPDATE contact_aliases SET is_primary = 1 WHERE id = ?').run(existingAlias.id);
+    } else {
+      this.db.prepare('UPDATE contact_aliases SET alias = ? WHERE id = ?').run(trimmed, primary.id);
+    }
   }
 
   update(id: number, patch: { name?: string; username?: string; telegram_id?: number; preferred_name?: string }): void {
@@ -180,6 +216,7 @@ export class ContactRepository {
       if (fields.length === 0) return;
       values.push(id);
       this.db.prepare(`UPDATE contacts SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+      if (patch.name !== undefined) this.syncPrimaryAliasOnRename(id, patch.name);
     })();
   }
 

@@ -11,6 +11,8 @@ import {
   handleFindContact,
   handleGetContacts,
   handleGetUserInfo,
+  handleManageContactDirectory,
+  handleResolveContact,
   handleUpdateContact,
 } from './tool-handlers/contacts.ts';
 import {
@@ -147,6 +149,25 @@ export interface ToolInputMap {
   add_contact: { name: string; username?: string };
   find_contact: { name: string };
   update_contact: { search: string; name?: string; preferred_name?: string; username?: string };
+  resolve_contact: { query: string };
+  manage_contact_directory: {
+    action:
+      | 'add_alias'
+      | 'confirm_alias'
+      | 'list_aliases'
+      | 'promote_alias'
+      | 'delete_alias'
+      | 'create_group'
+      | 'list_groups'
+      | 'list_group_members'
+      | 'add_group_member'
+      | 'remove_group_member'
+      | 'delete_group';
+    contact_id?: number;
+    alias?: string;
+    alias_id?: number;
+    group_id?: number;
+  };
   render_day_image: { date: string; scope?: 'personal' | 'group'; owner_id?: number };
   render_week_image: { week_start: string; scope?: 'personal' | 'group'; owner_id?: number };
   render_month_image: { month: string; scope?: 'personal' | 'group'; owner_id?: number };
@@ -276,6 +297,7 @@ const HANDLER_MAP: { [tool: string]: { meta?: import('./types.ts').ToolHandlerMe
   get_contacts: handleGetContacts,
   get_user_info: handleGetUserInfo,
   find_contact: handleFindContact,
+  resolve_contact: handleResolveContact,
   find_user: handleFindUser,
   get_history: handleGetHistory,
   get_holidays: handleGetHolidays,
@@ -389,6 +411,8 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   find_contact: 'contacts',
   update_contact: 'contacts',
   delete_contact: 'contacts',
+  resolve_contact: 'contacts',
+  manage_contact_directory: 'contacts',
   get_holidays: 'holidays',
   get_google_calendar_status: 'google_calendar',
   list_google_calendars: 'google_calendar',
@@ -678,6 +702,12 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
           return handleDeleteContact(ctx, { contact_id: input.contact_id });
         }
         return { success: false, error: 'A contact_id from your address book is required.' };
+
+      case 'resolve_contact':
+        return handleResolveContact(ctx, input as ToolInputMap['resolve_contact']);
+
+      case 'manage_contact_directory':
+        return handleManageContactDirectory(ctx, input as ToolInputMap['manage_contact_directory']);
 
       case 'render_day_image':
         return handleRenderDayImage(ctx, input as ToolInputMap['render_day_image']);
