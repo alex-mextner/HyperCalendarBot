@@ -1,12 +1,15 @@
 import { Database } from 'bun:sqlite';
-import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, type Mock, mock, setSystemTime, test } from 'bun:test';
+import { Scene } from '@gramio/scenes';
 import type { InlineKeyboard } from 'gramio';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler.ts';
+import type { BotCallbackContext } from '../../../src/bot/types.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
+import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { User } from '../../../src/database/types.ts';
@@ -15,6 +18,7 @@ import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
 
 // Replay of 2026-09-27 (synthetic ids): on Sunday night the user asked to cancel "all English on
 // Tuesday". The model listed two PAST Tuesdays and the two lessons of the coming Tuesday, printed
@@ -28,6 +32,17 @@ interface Sent {
   chatId: number;
   text: string;
   buttons: { label: string; data: string }[];
+}
+
+/** The callback fields the delete-confirmation route reads from a button tap. */
+interface Tap {
+  data: string;
+  chatId: number;
+  dbUser: User;
+  from: { id: number };
+  answer: Mock<() => Promise<void>>;
+  editText: Mock<(text: string, opts?: { [key: string]: unknown }) => Promise<void>>;
+  message: { id: number; text: string; entities: []; chat: { id: number; type: 'private' } };
 }
 
 function keyboardButtons(keyboard: InlineKeyboard): { label: string; data: string }[] {
@@ -69,35 +84,46 @@ describe('bot-rendered delete confirmation', () => {
     };
   }
 
-  function callbackHandler() {
-    return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
-      agentContinuation: {
-        agent: {
-          run: async (ctx: AgentContext) => {
-            continuations.push({ text: ctx.messageText, chatId: ctx.chatId });
-            return {} as never;
+  // A tap carries only the fields the delete-confirmation route reads, so the one cast to the full
+  // callback context lives here instead of at every call site.
+  function callbackHandler(): (press: Tap) => Promise<void> {
+    const handler = createCallbackHandler(
+      eventService,
+      new Scene('unused'),
+      new HolidayService(new HolidayRepository(db)),
+      new NotificationPreferencesService(new NotificationPreferencesRepository(db)),
+      {
+        agentContinuation: {
+          agent: {
+            run: async (ctx: AgentContext) => {
+              continuations.push({ text: ctx.messageText, chatId: ctx.chatId });
+              return { responseText: '', toolCalls: [], toolResults: [] };
+            },
           },
+          buildContext: (u, chatId, messageText, groupInfo) =>
+            context({
+              user: u,
+              chatId,
+              messageText,
+              isGroup: groupInfo?.isGroup ?? false,
+              groupChatId: groupInfo?.groupChatId,
+            }),
         },
-        buildContext: (u, chatId, messageText, groupInfo) =>
-          context({
-            user: u,
-            chatId,
-            messageText,
-            isGroup: groupInfo?.isGroup ?? false,
-            groupChatId: groupInfo?.groupChatId,
-          }),
       },
-    });
+    );
+    return async (press) => {
+      await handler(press as unknown as BotCallbackContext);
+    };
   }
 
-  function tap(data: string, message: Sent, clickerId = ACTOR) {
+  function tap(data: string, message: Sent, clickerId = ACTOR): Tap {
     return {
       data,
       chatId: message.chatId,
       dbUser: clickerId === ACTOR ? user : { ...user, telegram_id: clickerId },
       from: { id: clickerId },
       answer: mock(() => Promise.resolve()),
-      editText: mock((_text: string, _opts?: object) => Promise.resolve()),
+      editText: mock((_text: string, _opts?: { [key: string]: unknown }) => Promise.resolve()),
       message: { id: 50, text: message.text, entities: [], chat: { id: message.chatId, type: 'private' } },
     };
   }
@@ -164,7 +190,7 @@ describe('bot-rendered delete confirmation', () => {
     const message = await askAll();
     const upcomingOnly = message.buttons[0]!.data;
     const ctx = tap(upcomingOnly, message);
-    await callbackHandler()(ctx as never);
+    await callbackHandler()(ctx);
 
     expect(alive(ids.lessonWithAlex)).toBe(false);
     expect(alive(ids.lesson)).toBe(false);
@@ -186,7 +212,7 @@ describe('bot-rendered delete confirmation', () => {
 
   test('past events are deleted only with the explicit including-past button', async () => {
     const message = await askAll();
-    await callbackHandler()(tap(message.buttons[1]!.data, message) as never);
+    await callbackHandler()(tap(message.buttons[1]!.data, message));
     expect(Object.values(ids).map(alive)).toEqual([false, false, false, false]);
   });
 
@@ -206,7 +232,7 @@ describe('bot-rendered delete confirmation', () => {
   test('cancel deletes nothing and keeps the list', async () => {
     const message = await askAll();
     const ctx = tap(message.buttons[2]!.data, message);
-    await callbackHandler()(ctx as never);
+    await callbackHandler()(ctx);
     expect(Object.values(ids).map(alive)).toEqual([true, true, true, true]);
     expect(ctx.editText.mock.calls[0]![0]).toStartWith(message.text);
     expect(continuations).toHaveLength(0);
@@ -216,12 +242,12 @@ describe('bot-rendered delete confirmation', () => {
     const groupCtx = context({ chatId: GROUP_CHAT, isGroup: true, groupChatId: GROUP_CHAT });
     const message = await askAll(groupCtx);
     const foreign = tap(message.buttons[1]!.data, message, OTHER_MEMBER);
-    await callbackHandler()(foreign as never);
+    await callbackHandler()(foreign);
     expect(foreign.answer).toHaveBeenCalledWith(expect.objectContaining({ show_alert: true }));
     expect(Object.values(ids).map(alive)).toEqual([true, true, true, true]);
 
     setSystemTime(new Date(NOW.getTime() + 31 * 60_000));
-    await callbackHandler()(tap(message.buttons[1]!.data, message) as never);
+    await callbackHandler()(tap(message.buttons[1]!.data, message));
     expect(Object.values(ids).map(alive)).toEqual([true, true, true, true]);
   });
 
@@ -231,7 +257,7 @@ describe('bot-rendered delete confirmation', () => {
     const message = await askAll();
     eventService.deleteEvent(ids.lesson, ACTOR); // gone before the tap, e.g. from another device
     const ctx = tap(message.buttons[1]!.data, message);
-    await callbackHandler()(ctx as never);
+    await callbackHandler()(ctx);
 
     expect([ids.sep1, ids.sep8, ids.lessonWithAlex].map(alive)).toEqual([false, false, false]);
     const [edited] = ctx.editText.mock.calls[0]!;
@@ -244,9 +270,9 @@ describe('bot-rendered delete confirmation', () => {
 
   test('a tap can be used once', async () => {
     const message = await askAll();
-    await callbackHandler()(tap(message.buttons[0]!.data, message) as never);
+    await callbackHandler()(tap(message.buttons[0]!.data, message));
     const second = tap(message.buttons[1]!.data, message);
-    await callbackHandler()(second as never);
+    await callbackHandler()(second);
     expect(alive(ids.sep1)).toBe(true);
     expect(second.answer).toHaveBeenCalledWith(expect.objectContaining({ show_alert: true }));
   });
