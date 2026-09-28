@@ -16,7 +16,7 @@ import { EventReminderRepository } from '../../../src/database/repositories/even
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
-import { aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
+import { AGENT_DRAIN_SETTLE_MS, aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
 import type { AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
@@ -250,11 +250,15 @@ describe('agent drain on shutdown', () => {
     expect(probe.delivered.join('\n')).toContain(t('ru').agent_restarting(true));
   });
 
-  test('a retry whose budget is spent is not promised a comeback', async () => {
+  test('a retry whose budget is spent ends with the give-up line alone, not a restart notice on top', async () => {
     ctx.retryAttempt = 3;
-    // The last attempt: the pipeline sends its give-up line and schedules nothing.
-    ctx.retryEnqueue = async () => false;
+    const giveUp = t('ru').agent_give_up(true);
     const probe = makeSender();
+    // The last attempt: the pipeline sends its give-up line and schedules nothing.
+    ctx.retryEnqueue = async () => {
+      await probe.sender.sendMessage(USER_ID, giveUp);
+      return false;
+    };
     const { impl, secondRoundStarted } = stalledAfterTool({
       name: 'calculate',
       input: { expression: '2026-09-28 20:30 Europe/Belgrade to UTC' },
@@ -267,10 +271,11 @@ describe('agent drain on shutdown', () => {
     await running;
 
     const text = probe.delivered.join('\n');
+    expect(text).toContain(giveUp);
     expect(text).not.toContain(t('ru').agent_restarting(true));
-    expect(text).toContain(t('ru').agent_restarting(false));
+    expect(text).not.toContain(t('ru').agent_restarting(false));
     const history = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
-    expect(history).not.toContain(t('ru').agent_restarting(true));
+    expect(history).not.toContain(t('ru').agent_restarting(false));
   });
 
   test('a debug log that cannot be opened never throws out of run()', async () => {
@@ -308,6 +313,26 @@ describe('agent drain on shutdown', () => {
 
     expect(settled).toBe(false);
   });
+
+  test('a turn whose retry store hangs still tells its user inside the production drain window', async () => {
+    // Redis hung: the turn's own bound on the retry write must end before the drain gives up on it,
+    // or the drain abandons exactly the failure path it exists to protect.
+    ctx.retryEnqueue = () => Promise.withResolvers<boolean>().promise;
+    const probe = makeSender();
+    const { impl, secondRoundStarted } = stalledAfterTool({ name: 'calculate', input: { expression: '1 + 1' } });
+    const agent = new CalendarBotAgent({}, probe.sender, { streamImpl: impl });
+
+    let settled = false;
+    const running = agent.run(ctx).finally(() => {
+      settled = true;
+    });
+    await secondRoundStarted;
+    await agent.drain(AGENT_DRAIN_SETTLE_MS);
+
+    expect(settled).toBe(true);
+    await running;
+    expect(probe.delivered.join('\n')).toContain(t('ru').agent_restarting(false));
+  }, 10_000);
 
   test('a second drain waits for a turn that started after the first one returned', async () => {
     const probe = makeSender();

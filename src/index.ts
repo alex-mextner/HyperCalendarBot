@@ -13,6 +13,7 @@ import { t } from './config/constants.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
 import { AgendaRepository } from './database/repositories/agenda.repository.ts';
+import { AGENT_DRAIN_SETTLE_MS } from './services/ai/agent.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { HistorySummarizer } from './services/ai/history-summarizer.ts';
 import { configureProviderCircuit } from './services/ai/provider-circuit.ts';
@@ -1332,9 +1333,8 @@ bot.onStart(async ({ info }) => {
   botLogger.info({ username: info.username }, 'Bot started');
 });
 
-// bot.stop() (in-flight handlers get up to 3 s) + this drain + the closes below must
-// fit the 8 s shutdown timeout and Docker's 10 s stop grace.
-const AGENT_DRAIN_SETTLE_MS = 2_500;
+// bot.stop() (in-flight handlers get up to 3 s) + the AGENT_DRAIN_SETTLE_MS drain + the closes below
+// must fit the 8 s shutdown timeout and Docker's 10 s stop grace.
 /** Second, shorter drain: turns started by handlers that outlived bot.stop() while the queues closed. */
 const LATE_AGENT_DRAIN_SETTLE_MS = 1_000;
 

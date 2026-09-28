@@ -38,8 +38,19 @@ const aiLogger = logger.child({ module: 'ai-agent' });
 
 const MAX_ROUNDS = 15;
 const TIMEOUT_MS = 90_000;
-/** How long a failed turn waits to learn whether its retry was stored before it answers anyway. */
-const RETRY_STORE_TIMEOUT_MS = 3_000;
+/**
+ * How long a failed turn waits to learn whether its retry was stored before it answers anyway.
+ * Kept well inside the shutdown drain below, so a hung store never makes the drain abandon the turn.
+ */
+const RETRY_STORE_TIMEOUT_MS = 1_500;
+/**
+ * How long the shutdown drain gives in-flight turns to take their failure path: the
+ * retry-store bound plus a second for the notice and the history write.
+ */
+export const AGENT_DRAIN_SETTLE_MS = RETRY_STORE_TIMEOUT_MS + 1_000;
+
+/** What became of a failed turn's retry: stored, declined with the pipeline's give-up line, or not stored. */
+type RetryOutcome = 'stored' | 'gave_up' | 'not_stored';
 
 /**
  * One apology covers a user for this long. A user who keeps writing during an
@@ -673,12 +684,7 @@ export class CalendarBotAgent {
    * tracker, which decides between a playful stall, an honest "the AI is down,
    * here is what still works", and silence.
    */
-  private announceFailure(
-    ctx: AgentContext,
-    error: unknown,
-    writer: TelegramStreamWriter,
-    retryScheduled: boolean,
-  ): void {
+  private announceFailure(ctx: AgentContext, error: unknown, writer: TelegramStreamWriter, retry: RetryOutcome): void {
     if (ctx.supplementMode || ctx.wasExplicitInvocation === false) return;
 
     if (error instanceof ProviderSafetyStopError) {
@@ -689,8 +695,10 @@ export class CalendarBotAgent {
     }
     // Before the quiet-retry rule: a retry cut short by a restart is also told so.
     if (this.shutdown.signal.aborted) {
+      // The pipeline's give-up line already closed this retry chain; a restart notice would contradict it.
+      if (retry === 'gave_up') return;
       // Promise a comeback only when a retry job was actually stored.
-      const text = t(ctx.user.language).agent_restarting(retryScheduled);
+      const text = t(ctx.user.language).agent_restarting(retry === 'stored');
       writer.appendText(`\n\n${text}`);
       this.saveAssistantTurn(ctx, { role: 'assistant', content: text });
       return;
@@ -700,7 +708,8 @@ export class CalendarBotAgent {
 
     const notice = aiFailureNotices.decide(ctx.user.telegram_id, toLang(ctx.user.language), {
       hardOutage,
-      willRetry: typeof ctx.retryEnqueue === 'function',
+      // A stall phrase promises a comeback: only a stored retry can keep it.
+      willRetry: retry === 'stored',
     });
     aiLogger.info({ userId: ctx.user.telegram_id, notice: notice.kind, hardOutage }, 'AI failure notice');
     if (notice.kind === 'silent') return;
@@ -762,7 +771,7 @@ export class CalendarBotAgent {
   async drain(settleMs: number): Promise<void> {
     this.shutdown.abort(new Error('Bot is shutting down'));
     if (this.inFlight.size === 0) return;
-    const drained = this.inFlight.size;
+    const initialInFlight = this.inFlight.size;
     const deadline = Promise.withResolvers<'timeout'>();
     const timer = setTimeout(() => deadline.resolve('timeout'), settleMs);
     try {
@@ -772,8 +781,8 @@ export class CalendarBotAgent {
       }
       const stillRunning = this.inFlight.size;
       if (stillRunning > 0)
-        aiLogger.warn({ inFlight: drained, stillRunning }, 'Agent runs abandoned at shutdown deadline');
-      else aiLogger.info({ inFlight: drained }, 'Agent runs drained for shutdown');
+        aiLogger.warn({ initialInFlight, stillRunning }, 'Agent runs abandoned at shutdown deadline');
+      else aiLogger.info({ initialInFlight }, 'Agent runs drained for shutdown');
     } finally {
       clearTimeout(timer);
     }
@@ -944,7 +953,7 @@ export class CalendarBotAgent {
 
     let currentMessages: MessageParam[] = [];
     let runFailed = false;
-    let retryScheduled = false;
+    let retry: RetryOutcome = 'not_stored';
     // Stays set until a validation retry produces an explicitly approved answer.
     let responseUnverified = false;
     let runError: unknown;
@@ -1271,10 +1280,13 @@ export class CalendarBotAgent {
       ) {
         // Awaited so a shutdown drain does not close the queue under the write, but bounded:
         // a hung retry store must never hold back the user's failure notice.
-        const stored = ctx.retryEnqueue(ctx.messageText).catch((err: unknown) => {
-          aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to handle retry enqueue');
-          return false;
-        });
+        const stored = ctx.retryEnqueue(ctx.messageText).then(
+          (scheduled): RetryOutcome => (scheduled ? 'stored' : 'gave_up'),
+          (err: unknown): RetryOutcome => {
+            aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to handle retry enqueue');
+            return 'not_stored';
+          },
+        );
         const storeDeadline = Promise.withResolvers<'timeout'>();
         const storeTimer = setTimeout(() => storeDeadline.resolve('timeout'), this.retryStoreTimeoutMs);
         const outcome = await Promise.race([stored, storeDeadline.promise]);
@@ -1285,7 +1297,7 @@ export class CalendarBotAgent {
             'Retry store did not answer in time — not promising a comeback',
           );
         }
-        retryScheduled = outcome === true;
+        retry = outcome === 'timeout' ? 'not_stored' : outcome;
       }
     }
 
@@ -1329,7 +1341,7 @@ export class CalendarBotAgent {
       // Execution evidence is durable even in quiet mode; a notice is persisted only when delivered.
       if (validationNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: validationNotice });
     }
-    if (runFailed && !evidence && !validationNotice) this.announceFailure(ctx, runError, writer, retryScheduled);
+    if (runFailed && !evidence && !validationNotice) this.announceFailure(ctx, runError, writer, retry);
 
     if (!runFailed && !responseUnverified && !ctx.supplementMode) {
       // The bot answered — any comeback it promised earlier is now settled.

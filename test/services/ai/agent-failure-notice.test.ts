@@ -285,9 +285,12 @@ describe('agent failure notices', () => {
     }
   });
 
-  test('a retry store that never answers does not hold back the failure notice', async () => {
-    // Redis hung: before the bound, the turn waited on it forever and said nothing.
-    ctx.retryEnqueue = () => Promise.withResolvers<boolean>().promise;
+  test.each([
+    // Redis hung: the turn must not wait on it forever, nor promise a retry it cannot confirm.
+    ['never answers', () => Promise.withResolvers<boolean>().promise],
+    ['rejects the job', () => Promise.reject(new Error('Connection is closed.'))],
+  ])('a retry store that %s → honest message now, no comeback promise', async (_label, retryEnqueue) => {
+    ctx.retryEnqueue = retryEnqueue;
     const agent = new CalendarBotAgent(config, probe.sender, {
       streamImpl: failingStream(new Error('Provider timed out')),
       retryStoreTimeoutMs: 20,
@@ -296,7 +299,10 @@ describe('agent failure notices', () => {
     await agent.run(ctx);
 
     const text = probe.delivered().join('\n');
-    expect(RU_AGENT_ERROR_PHRASES.some((phrase) => text.includes(phrase))).toBe(true);
+    expect(text).toContain(t('ru').ai_degraded);
+    for (const phrase of RU_AGENT_ERROR_PHRASES) {
+      expect(text).not.toContain(phrase);
+    }
   });
 
   // ── Stall phrase selection ───────────────────────────────────────────────
