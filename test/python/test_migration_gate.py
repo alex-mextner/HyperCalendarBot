@@ -2,7 +2,11 @@
 
 import hashlib
 import importlib.util
+import os
 import re
+import sqlite3
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -181,6 +185,53 @@ class MigrationDocContractTests(unittest.TestCase):
             with self.subTest(path.name):
                 self.assertIn(path.stem, names)
                 self.gate.parse_doc(path.read_bytes(), path.stem)
+
+    def test_every_migration_from_063_on_ships_its_doc(self):
+        # The gate refuses a new migration without its doc for good, after the merge. 063 is the
+        # first migration shipped under the doc requirement; a later one without a doc fails here.
+        names = list(self.gate.parse_migrations((ROOT / "src/database/migrations.ts").read_text()).names)
+        for name in names[names.index("063_unconfirm_legacy_verified_locations") :]:
+            with self.subTest(name):
+                self.assertTrue((ROOT / "docs/reference/migrations" / f"{name}.md").is_file())
+
+
+class ProbeScriptTests(unittest.TestCase):
+    """The gate's bun snippets, run as the deploy runs them: a fresh directory, no app environment."""
+
+    def setUp(self):
+        self.gate = load_gate()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def bun(self, script):
+        return subprocess.run(
+            ["bun", "-e", script],
+            cwd=self.tmp.name,
+            env={"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]},
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=120,
+        )
+
+    def test_the_release_export_probe_prints_exactly_the_parsed_migrations(self):
+        # A migration importing code that needs the app's environment, or logs on import, would
+        # make every schema-changing deploy refuse for good; it fails here first.
+        script = self.gate.EXPORTED_MIGRATIONS_JS.replace("'/app/src/", f"'{ROOT}/src/")
+        result = self.bun(script)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        names = self.gate.parse_migrations((ROOT / "src/database/migrations.ts").read_text()).names
+        self.assertEqual(result.stdout.decode().splitlines(), list(names))
+
+    def test_the_applied_probe_lists_what_the_database_records_in_order(self):
+        (Path(self.tmp.name) / "data").mkdir()
+        db = sqlite3.connect(Path(self.tmp.name) / "data/calendar.db")
+        db.execute("CREATE TABLE migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE)")
+        db.executemany("INSERT INTO migrations(name) VALUES (?)", [("002_y",), ("001_x",)])
+        db.commit()
+        db.close()
+        result = self.bun(self.gate.APPLIED_MIGRATIONS_JS)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual(result.stdout.decode().splitlines(), ["002_y", "001_x"])
 
 
 class GateDecisionTests(unittest.TestCase):
