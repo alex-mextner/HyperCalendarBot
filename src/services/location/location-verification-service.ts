@@ -3,7 +3,7 @@
 import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { CB, t } from '../../config/constants.ts';
 import type { AgendaRepository } from '../../database/repositories/agenda.repository.ts';
-import type { EventRepository } from '../../database/repositories/event.repository.ts';
+import { type EventRepository, UNRESOLVED_PLACE } from '../../database/repositories/event.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { CalendarEvent, Invitation, InvitationStatus, User } from '../../database/types.ts';
@@ -15,6 +15,7 @@ import { groupRsvpKeyboard, invitationRsvpKeyboard } from '../sharing/invitation
 import { guessCountryFromTimezone, resolveTimezone } from '../timezone/timezone-service.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
 import type { AddressCache } from './address-cache.ts';
+import { formatLocationPlain } from './format-location.ts';
 import type { GeocodedLocation, GeocodingBias, GeocodingService } from './geocoding-service.ts';
 import type { LocationCandidateStore, LocationPicker } from './location-candidate-store.ts';
 
@@ -79,6 +80,8 @@ export interface LocationVerificationDeps {
   ) => Promise<void>;
   /** Callback to edit an existing invitation message; the edit replaces its inline keyboard with `reply_markup` */
   editMessage?: (chatId: number, messageId: number, text: string, options: InvitationEditOptions) => Promise<void>;
+  /** Re-pushes the event's Google Calendar copies (owner and participants); absent without Google sync */
+  pushGoogleCopies?: (event: CalendarEvent) => Promise<void>;
 }
 
 export interface LocationVerificationResult {
@@ -100,8 +103,9 @@ export class LocationVerificationService {
    *
    * The bot always asks: nothing is applied before the creator taps a candidate. The event keeps
    * only the typed text, unverified: no venue, address or map link is written (a place confirmed
-   * for an earlier text is dropped), delivered invitations are not edited, and neither the
-   * address cache nor `users.city` is touched. The previous picker of the event is closed.
+   * for an earlier text is dropped, and Google copies showing it are re-pushed), delivered
+   * invitations are not edited, and neither the address cache nor `users.city` is touched. The
+   * previous picker of the event is closed.
    *
    * Flow:
    * 1. A place the creator confirmed earlier for this text (address cache) is the candidate; no
@@ -138,9 +142,7 @@ export class LocationVerificationService {
     // Until the creator answers, the event holds only the typed text: a place confirmed for an
     // earlier text must not stay on it, whoever changed the text. Invitation cards are re-rendered
     // only on the answer.
-    if (event.location_verified !== 0 || event.resolved_address !== null) {
-      this.deps.eventRepo.clearLocationFields(event.id);
-    }
+    await this.dropResolvedPlace(event);
 
     // Only a user who can see the event is asked. A secretary updating the owner's event could not
     // answer the picker (#421), so no search is made and the owner's open picker stays.
@@ -206,7 +208,10 @@ export class LocationVerificationService {
     return { candidates, remembered: false };
   }
 
-  /** Apply the place the creator confirmed (candidate tap or pin) and update delivered invitations. */
+  /**
+   * Apply the place the creator confirmed (candidate tap or pin), then re-push the Google copies
+   * and update delivered invitations.
+   */
   async applyResolvedLocation(event: CalendarEvent, geo: GeocodedLocation): Promise<void> {
     const venueName = geo.venueName ?? null;
     // Update event in DB
@@ -232,6 +237,7 @@ export class LocationVerificationService {
       venue_name: venueName,
     };
 
+    await this.pushGoogleCopiesIfShownPlaceChanged(event, updatedEvent);
     // Update invitation messages
     await this.updateInvitationMessages(updatedEvent);
   }
@@ -387,25 +393,41 @@ export class LocationVerificationService {
   }
 
   /**
-   * The creator kept the typed text: drop any resolved place and re-render every delivered
-   * invitation card. A card may still show a place dropped before this answer (when the text
-   * changed or an earlier question was asked), and the answer is rare and idempotent, so the cards
-   * are always refreshed rather than tracking what they last showed.
+   * The creator kept the typed text: drop any resolved place (re-pushing the Google copies if they
+   * showed it) and re-render every delivered invitation card. A card may still show a place dropped
+   * before this answer (when the text changed or an earlier question was asked), and the answer is
+   * rare and idempotent, so the cards are always refreshed rather than tracking what they last showed.
    */
   private async keepOnlyTypedText(event: CalendarEvent): Promise<void> {
-    if (event.location_verified !== 0 || event.resolved_address !== null) {
-      this.deps.eventRepo.clearLocationFields(event.id);
-    }
+    const typedOnly = await this.dropResolvedPlace(event);
     logger.info({ eventId: event.id }, 'Event location kept as typed');
 
-    await this.updateInvitationMessages({
-      ...event,
-      resolved_address: null,
-      latitude: null,
-      longitude: null,
-      google_maps_url: null,
-      location_verified: 0,
-      venue_name: null,
+    await this.updateInvitationMessages(typedOnly);
+  }
+
+  /**
+   * Drop the event's resolved place, if it has one, so only the typed text remains, unverified, and
+   * re-push the Google copies that showed it. Returns the event as it now is.
+   */
+  private async dropResolvedPlace(event: CalendarEvent): Promise<CalendarEvent> {
+    const typedOnly: CalendarEvent = { ...event, ...UNRESOLVED_PLACE };
+    if (event.location_verified !== 0 || event.resolved_address !== null) {
+      this.deps.eventRepo.clearLocationFields(event.id);
+      await this.pushGoogleCopiesIfShownPlaceChanged(event, typedOnly);
+    }
+    return typedOnly;
+  }
+
+  /**
+   * Google Calendar copies were pushed when the event was saved, before the creator answered, and
+   * show the location as `formatLocationPlain` renders it (event-mapper). Re-push them when that
+   * text changed; an answer that leaves it as it was queues nothing.
+   */
+  private async pushGoogleCopiesIfShownPlaceChanged(before: CalendarEvent, after: CalendarEvent): Promise<void> {
+    const push = this.deps.pushGoogleCopies;
+    if (!push || formatLocationPlain(before) === formatLocationPlain(after)) return;
+    await push(after).catch((err) => {
+      logger.error({ err, eventId: after.id }, 'Failed to schedule Google Calendar pushes for the event place');
     });
   }
 
