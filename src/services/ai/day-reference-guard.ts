@@ -163,7 +163,8 @@ export function resolveTurnDayReferences(
   // An answer to a question keeps the date context the question was asked in (for ask_user
   // the days named then); a fresh message that states only a clock time means today while
   // that time is still ahead.
-  if (!pending || !answersQuestion(messageText, pending.options)) return answersPlainQuestion(messageText, history) ? null : timeOnlyToday(messageText, now, timezone);
+  if (!pending) return answersPlainQuestion(messageText, history) ? null : timeOnlyToday(messageText, now, timezone);
+  if (!answersQuestion(messageText, pending.options)) return null;
   // Each message is read as of when it was written: a "Да" given days later confirms the
   // Tuesday meant then, not the one coming now.
   const originAt = storedInstantMs(pending.origin.created_at);
