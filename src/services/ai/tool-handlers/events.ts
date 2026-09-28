@@ -55,12 +55,13 @@ function expandDateOnly(dateStr: string, timezone: string): { start: string; end
 /**
  * Event time for the assistant: the user's wall clock first, so it is never tempted to present a
  * UTC clock time as local, then the stored instants explicitly labelled as UTC. All-day values are
- * floating dates and pass through unchanged.
+ * floating calendar dates, labelled as dates, not as UTC instants.
  */
 function timeParts(start: string, end: string | null | undefined, allDay: boolean, timezone: string): string[] {
-  const utc = (value: string) => (allDay ? value : new Date(value).toISOString());
-  const parts = [`local: ${formatLocalEventSpan(start, end ?? null, allDay, timezone)}`, `start_utc: ${utc(start)}`];
-  if (end) parts.push(`end_utc: ${utc(end)}`);
+  const local = `local: ${formatLocalEventSpan(start, end ?? null, allDay, timezone)}`;
+  if (allDay) return [local, `start_date: ${start.slice(0, 10)}`, ...(end ? [`end_date: ${end.slice(0, 10)}`] : [])];
+  const parts = [local, `start_utc: ${new Date(start).toISOString()}`];
+  if (end) parts.push(`end_utc: ${new Date(end).toISOString()}`);
   return parts;
 }
 
@@ -1049,7 +1050,8 @@ export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): T
     return { success: false, error: 'Failed to snooze event.' };
   }
 
-  const newStartParts = timeParts(updated.start_at, null, updated.all_day === 1, ctx.user.timezone);
+  // Snoozing shifts the start by minutes, so even an all-day event now has an exact instant.
+  const newStartParts = timeParts(updated.start_at, null, false, ctx.user.timezone);
   return {
     success: true,
     output: t(ctx.user.language).aiTools.events.snoozed(updated.title, minutes, newStartParts.join(', ')),

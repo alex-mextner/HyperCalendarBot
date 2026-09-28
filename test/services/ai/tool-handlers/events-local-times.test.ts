@@ -164,7 +164,8 @@ describe('local rendering edge cases', () => {
     const ctx = buildCtx('America/Los_Angeles');
     const id = seed(ctx, { start_at: '2026-09-28T00:00:00Z', all_day: true });
     const output = await getEventOutput(ctx, id);
-    expect(output).toContain('local: Mon 2026-09-28 all day, start_utc: 2026-09-28T00:00:00Z');
+    expect(output).toContain('local: Mon 2026-09-28 all day, start_date: 2026-09-28');
+    expect(output).not.toContain('start_utc');
     expect(output).not.toMatch(/local: [^,]*\d{2}:\d{2}/);
   });
 
@@ -172,6 +173,15 @@ describe('local rendering edge cases', () => {
     const ctx = buildCtx('Europe/Belgrade');
     const id = seed(ctx, { start_at: '2026-09-27', end_at: '2026-09-30', all_day: true });
     expect(await getEventOutput(ctx, id)).toContain('local: Sun 2026-09-27 – Tue 2026-09-29 all day');
+  });
+
+  test('a snoozed all-day event reports the exact new start, not an unchanged day', async () => {
+    const ctx = buildCtx('Europe/Belgrade');
+    const id = seed(ctx, { start_at: '2026-09-28T00:00:00Z', all_day: true });
+    const result = handleSnoozeEvent(ctx, { event_id: id, minutes: 10 });
+    expect(result.output).toContain(
+      'local: Mon 2026-09-28 02:10 (Europe/Belgrade), start_utc: 2026-09-28T00:10:00.000Z',
+    );
   });
 
   test('after the autumn DST shift 09:00Z is 10:00 in Belgrade', async () => {
