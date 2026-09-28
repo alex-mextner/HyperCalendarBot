@@ -1,7 +1,9 @@
 import { Database } from 'bun:sqlite';
-import { createHash } from 'node:crypto';
+import { IntentRevisionRepository } from '../../database/repositories/intent-revision.repository.ts';
 import type { Intent } from '../../database/types.ts';
 import { IntentMatcher } from './intent-matcher.ts';
+import { recordOperatorBaseline, registryIntegrity } from './revision-ledger.ts';
+import { digest, ruleFromRow, seedFingerprint } from './rule-fingerprint.ts';
 import { WorkflowSchema } from './workflow-schema.ts';
 import { validateWorkflow } from './workflow-validator.ts';
 
@@ -19,31 +21,6 @@ export interface SeedReplacementPlan {
   seedFingerprint: string;
   previousCount: number;
   targetCount: number;
-}
-function stable(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stable);
-  if (value && typeof value === 'object')
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, item]) => [key, stable(item)]),
-    );
-  return value;
-}
-const digest = (value: unknown) =>
-  createHash('sha256')
-    .update(JSON.stringify(stable(value)))
-    .digest('hex');
-export function seedFingerprint(seed: readonly CanonicalSeed[]): string {
-  const definitions = seed.map(({ canonical_name, pattern, workflow, phrases, trigger_words, source_message }) => ({
-    canonical_name,
-    pattern,
-    workflow,
-    phrases,
-    trigger_words,
-    source_message,
-  }));
-  return digest(definitions.sort((a, b) => a.canonical_name.localeCompare(b.canonical_name)));
 }
 
 export function intentRows(db: Database): Intent[] {
@@ -99,6 +76,8 @@ function schemaContains(db: Database, name: string): boolean {
   return db.query('SELECT 1 FROM sqlite_master WHERE type=? AND name=?').get('table', name) !== null;
 }
 export function assertReplacementWindow(db: Database, now = Date.now()): void {
+  if (!schemaContains(db, 'intent_revisions'))
+    throw new Error('Migration 065_intent_revisions must be applied before seed replacement');
   if (db.query('SELECT 1 FROM sqlite_master WHERE type=? AND tbl_name=?').get('trigger', 'intents'))
     throw new Error('Intent triggers require separate review');
   if (
@@ -140,25 +119,21 @@ export function applySeedReplacement(
     .transaction(() => {
       const rows = intentRows(db);
       if (installedSeedFingerprint(db) === plan.seedFingerprint) {
-        try {
-          const current = rows.map(({ canonical_name, pattern, workflow, phrases, trigger_words, source_message }) => ({
-            canonical_name,
-            pattern: pattern ?? '',
-            workflow: JSON.parse(workflow),
-            phrases: JSON.parse(phrases),
-            trigger_words: JSON.parse(trigger_words ?? '[]'),
-            source_message: source_message ?? '',
-          }));
-          if (seedFingerprint(current) === plan.seedFingerprint && rows.every((row) => row.status === 'approved'))
-            return {
-              status: 'already_installed',
-              removed: 0,
-              installed: rows.length,
-              fingerprint: plan.seedFingerprint,
-            };
-        } catch {
-          /* Broken active definitions are not an already installed seed. */
-        }
+        // Broken active definitions, or a ledger that no longer vouches for them, are not an
+        // already installed seed: the replacement below repairs both.
+        const current = rows.map(ruleFromRow).filter((rule) => rule !== null);
+        if (
+          current.length === rows.length &&
+          seedFingerprint(current) === plan.seedFingerprint &&
+          rows.every((row) => row.status === 'approved') &&
+          registryIntegrity(new IntentRevisionRepository(db)).state === 'intact'
+        )
+          return {
+            status: 'already_installed',
+            removed: 0,
+            installed: rows.length,
+            fingerprint: plan.seedFingerprint,
+          };
       }
       if (rows.length !== plan.previousCount || digest(rows) !== plan.previousFingerprint)
         throw new Error('Current intent definitions changed after planning');
@@ -189,13 +164,7 @@ export function applySeedReplacement(
           'text',
           'approved',
         );
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS intent_basis_manifest (singleton INTEGER PRIMARY KEY CHECK(singleton=1), fingerprint TEXT NOT NULL, installed_at TEXT NOT NULL, rule_count INTEGER NOT NULL)',
-      );
-      db.run(
-        "INSERT INTO intent_basis_manifest VALUES(1,?,datetime('now'),?) ON CONFLICT(singleton) DO UPDATE SET fingerprint=excluded.fingerprint,installed_at=excluded.installed_at,rule_count=excluded.rule_count",
-        [plan.seedFingerprint, seed.length],
-      );
+      recordOperatorBaseline(db, seed, plan.seedFingerprint);
       if (
         digest(db.query('SELECT * FROM events ORDER BY id').all()) !== beforeEvents ||
         digest(db.query('SELECT * FROM users ORDER BY telegram_id').all()) !== beforeUsers

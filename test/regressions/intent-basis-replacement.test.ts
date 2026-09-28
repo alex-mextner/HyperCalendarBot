@@ -94,7 +94,7 @@ test('source-managed catalogue rejects old admin and learner mutation paths', as
   const plan = planSeedReplacement(db, seed);
   const saved = backup();
   applySeedReplacement(db, seed, plan, saved);
-  const repository = new IntentRepository(db, seed);
+  const repository = new IntentRepository(db);
   expect(repository.isManagedBasis()).toBe(true);
   expect(repository.getApproved()).toHaveLength(1);
   const row = intentRows(db)[0]!;
@@ -114,12 +114,12 @@ test('malformed old JSON can be archived and replaced, not interpreted', () => {
   const saved = backup();
   expect(applySeedReplacement(db, seed, plan, saved).status).toBe('replaced');
 });
-test('stale source revision cannot load an otherwise approved managed basis', async () => {
+test('a build with a different source seed keeps loading the installed managed basis', async () => {
   const { IntentRepository } = await import('../../src/database/repositories/intent.repository.ts');
   const plan = planSeedReplacement(db, seed);
   applySeedReplacement(db, seed, plan, backup());
-  const other = [{ ...seed[0]!, phrases: ['помощь', 'help', 'changed'] }];
-  expect(new IntentRepository(db, other).getApproved()).toHaveLength(0);
+  // The running build compiles the full source catalogue, which differs from this one-rule seed.
+  expect(new IntentRepository(db).getApproved().map((row) => row.canonical_name)).toEqual(['basis.help']);
 });
 test('new unrelated user writes made before replacement survive; stale backup is never restored', () => {
   const plan = planSeedReplacement(db, seed);

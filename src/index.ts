@@ -17,7 +17,7 @@ import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { HistorySummarizer } from './services/ai/history-summarizer.ts';
 import { configureProviderCircuit } from './services/ai/provider-circuit.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
-import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
+import { runSyntheticIntent } from './services/intent/synthetic-intent-run.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { hasChainAnswered, initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
 import { jsonCodec } from './utils/json-codec.ts';
@@ -1186,30 +1186,12 @@ if (config.REDIS_URL) {
       }
       return ctx;
     },
-    intentRun: async (agentCtx, message) => {
-      const match = intentMatcher.match(message);
-      if (!match) return { handled: false };
-      const intent = msgDeps.intentRepo?.getById(match.intentId);
-      if (!intent) return { handled: false };
-      const workflowResult = jsonCodec(WorkflowSchema).safeParse(intent.workflow);
-      if (!workflowResult.success) return { handled: false };
-      const workflow: Workflow = workflowResult.data;
-      const userCtx = {
-        workflowInteraction: 'unavailable' as const,
-        userId: agentCtx.user.telegram_id,
-        language: agentCtx.user.language,
-        timezone: agentCtx.user.timezone,
-        username: agentCtx.user.username ?? undefined,
-        firstName: agentCtx.user.first_name ?? undefined,
-      };
-      const result = await intentExecutor.run(workflow, match.captures, userCtx, (toolName: string, input: unknown) =>
-        executeTool(agentCtx, toolName, input),
-      );
-      if (result.response && agentCtx.sender) {
-        await agentCtx.sender.sendMessage(agentCtx.user.telegram_id, result.response);
-      }
-      return { handled: true, response: result.response };
-    },
+    intentRun: (agentCtx, message) =>
+      runSyntheticIntent(
+        { matcher: intentMatcher, intentRepo: msgDeps.intentRepo, executor: intentExecutor, executeTool },
+        agentCtx,
+        message,
+      ),
     agentRun: async (agentCtx) => {
       await agent.run(agentCtx);
     },

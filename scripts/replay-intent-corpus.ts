@@ -4,8 +4,8 @@ import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import type { Intent } from '../src/database/types.ts';
 import { IntentMatcher } from '../src/services/intent/intent-matcher.ts';
+import { seedFingerprint } from '../src/services/intent/rule-fingerprint.ts';
 import { seedIntents } from '../src/services/intent/seed-catalog.ts';
-import { seedFingerprint } from '../src/services/intent/seed-replacement.ts';
 import { evaluateBindings } from '../src/services/intent/workflow-bindings.ts';
 import { WorkflowSchema } from '../src/services/intent/workflow-schema.ts';
 

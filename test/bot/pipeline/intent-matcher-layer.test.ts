@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { createIntentMatcherLayer } from '../../../src/bot/pipeline/intent-matcher-layer.ts';
 import type { WorkflowSession, WorkflowSessionStore } from '../../../src/bot/pipeline/types.ts';
 import type { BotCommandContext } from '../../../src/bot/types.ts';
+import { t } from '../../../src/config/constants.ts';
 import type { Intent, User } from '../../../src/database/types.ts';
 import type { ToolResult } from '../../../src/services/ai/types.ts';
 import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
@@ -67,7 +68,12 @@ interface MockMatcher {
 
 interface MockIntentRepo {
   getById: ReturnType<typeof mock<(id: number) => Partial<Intent> | null>>;
+  currentRuleFingerprint: ReturnType<typeof mock<(id: number) => string | null>>;
+  runnableFingerprint: ReturnType<typeof mock<(row: Partial<Intent>) => string | null>>;
 }
+
+/** Identity every mocked rule reports; sessions carry it as if stored by a first pass. */
+const RULE = 'rule-fingerprint';
 
 interface MockExecutor {
   run: ReturnType<typeof mock<(...args: unknown[]) => Promise<ExecutorResult>>>;
@@ -91,8 +97,12 @@ function makeMatcher(match: MatchResult | null = null): MockMatcher {
   return { match: mock(() => match), load: mock(() => {}) };
 }
 
-function makeIntentRepo(intent: Partial<Intent> | null = null): MockIntentRepo {
-  return { getById: mock(() => intent) };
+function makeIntentRepo(intent: Partial<Intent> | null = null, fingerprint: string | null = RULE): MockIntentRepo {
+  return {
+    getById: mock(() => intent),
+    currentRuleFingerprint: mock(() => fingerprint),
+    runnableFingerprint: mock(() => fingerprint),
+  };
 }
 
 function makeExecutor(result: ExecutorResult = { success: true, response: 'done' }): MockExecutor {
@@ -205,6 +215,7 @@ describe('createIntentMatcherLayer', () => {
     // Seed an active session
     workflowSessions.set(userId, userId, {
       intentId: 3,
+      ruleFingerprint: RULE,
       stepIndex: 0,
       stepResults: {},
       workflow,
@@ -212,13 +223,77 @@ describe('createIntentMatcherLayer', () => {
       createdAt: Date.now(),
     });
 
-    const layer = callLayer(makeMatcher(null), makeIntentRepo(null), executor, makeToolExecutor(), workflowSessions);
+    const stored = makeIntentRepo({ id: 3, format: 'text' });
+    const layer = callLayer(makeMatcher(null), stored, executor, makeToolExecutor(), workflowSessions);
 
     const result = await layer(ctx, 'yes');
     expect(result.handled).toBe(true);
     expect(ctx.send).toHaveBeenCalledWith('Created!');
     // Session must be deleted after use
     expect(workflowSessions.has(userId, userId)).toBe(false);
+  });
+
+  test('a session whose rule identity no longer matches is dropped without running', async () => {
+    const userId = 8;
+    const executor = makeExecutor({ success: true, response: 'Created!' });
+    const ctx = makeCtx(makeUser({ telegram_id: userId }));
+    workflowSessions.set(userId, userId, {
+      intentId: 3,
+      ruleFingerprint: 'identity-before-the-change',
+      stepIndex: 0,
+      stepResults: {},
+      workflow: { steps: [{ call: 'ask_user', as: 'answer' }] },
+      captures: {},
+      createdAt: Date.now(),
+    });
+    const layer = callLayer(makeMatcher(null), makeIntentRepo(null), executor, makeToolExecutor(), workflowSessions);
+
+    expect(await layer(ctx, 'yes')).toEqual({ handled: true });
+    expect(executor.run).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalledWith(t('ru').intentWorkflow.failedUnchanged);
+    expect(workflowSessions.has(userId, userId)).toBe(false);
+  });
+
+  test('an undelivered prompt of a changed rule is refused, not delivered again', async () => {
+    const userId = 9;
+    const ctx = makeCtx(makeUser({ telegram_id: userId }));
+    workflowSessions.set(userId, userId, {
+      intentId: 3,
+      ruleFingerprint: 'identity-before-the-change',
+      stepIndex: 1,
+      stepResults: {},
+      workflow: { version: 2, steps: [{ call: 'ask_user', input: { question: 'Apply?' }, as: 'confirm' }] },
+      captures: {},
+      createdAt: Date.now(),
+      pendingPrompt: { text: 'Apply?', delivered: false },
+    });
+    const layer = callLayer(
+      makeMatcher(null),
+      makeIntentRepo(null),
+      makeExecutor(),
+      makeToolExecutor(),
+      workflowSessions,
+    );
+
+    await layer(ctx, 'anything');
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+    expect(ctx.send).toHaveBeenCalledWith(t('ru').intentWorkflow.failedUnchanged);
+    expect(workflowSessions.has(userId, userId)).toBe(false);
+  });
+
+  test('a matched rule that is no longer runnable is not executed', async () => {
+    const intent: Partial<Intent> = { id: 4, workflow: JSON.stringify({ steps: [] }), format: 'text' };
+    const executor = makeExecutor();
+    const layer = callLayer(
+      makeMatcher({ intentId: 4, captures: {} }),
+      makeIntentRepo(intent, null),
+      executor,
+      makeToolExecutor(),
+      workflowSessions,
+    );
+
+    expect(await layer(makeCtx(), 'query')).toEqual({ handled: false });
+    expect(executor.run).not.toHaveBeenCalled();
   });
 
   test('formats structured events when a resumed workflow ends in get_events', async () => {
@@ -233,6 +308,7 @@ describe('createIntentMatcherLayer', () => {
 
     workflowSessions.set(userId, userId, {
       intentId: 3,
+      ruleFingerprint: RULE,
       stepIndex: 0,
       stepResults: {},
       workflow,
@@ -260,6 +336,7 @@ describe('createIntentMatcherLayer', () => {
     // Seed an expired session (>5 min old)
     workflowSessions.set(userId, userId, {
       intentId: 1,
+      ruleFingerprint: RULE,
       stepIndex: 0,
       stepResults: {},
       workflow: { steps: [] },
@@ -365,6 +442,7 @@ describe('createIntentMatcherLayer', () => {
 
     workflowSessions.set(userId, userId, {
       intentId: 7,
+      ruleFingerprint: RULE,
       stepIndex: 0,
       stepResults: {},
       workflow,
@@ -372,7 +450,8 @@ describe('createIntentMatcherLayer', () => {
       createdAt: Date.now(),
     });
 
-    const layer = callLayer(makeMatcher(null), makeIntentRepo(null), executor, makeToolExecutor(), workflowSessions);
+    const stored = makeIntentRepo({ id: 7, format: 'text' });
+    const layer = callLayer(makeMatcher(null), stored, executor, makeToolExecutor(), workflowSessions);
 
     await layer(ctx, '  Время  ');
 
@@ -464,6 +543,7 @@ describe('needsSupplement', () => {
     const sessionStore = makeWorkflowStore();
     sessionStore.set(1, 1, {
       intentId: 1,
+      ruleFingerprint: RULE,
       stepIndex: 1,
       stepResults: {},
       workflow: { steps: [] },

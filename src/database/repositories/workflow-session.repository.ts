@@ -89,6 +89,7 @@ export interface StepResults {
 
 const WorkflowSessionSchema = z.object({
   intentId: z.number(),
+  ruleFingerprint: z.string().optional(),
   stepIndex: z.number(),
   stepResults: StepResultsSchema,
   workflow: WorkflowSchema,
@@ -102,7 +103,16 @@ const WorkflowSessionSchema = z.object({
 
 const WorkflowSessionCodec = jsonCodec(WorkflowSessionSchema);
 
-const TTL_MS = 5 * 60 * 1000;
+export const WORKFLOW_SESSION_TTL_MS = 5 * 60 * 1000;
+
+/** The one expiry predicate: a session is gone once its age reaches the TTL. */
+const isExpired = (createdAt: number, now: number) => now - createdAt >= WORKFLOW_SESSION_TTL_MS;
+
+export interface LiveSessionIntents {
+  intentIds: Set<number>;
+  /** Live rows whose data does not decode; their intent is unknown. */
+  unreadable: number;
+}
 
 export class WorkflowSessionRepository implements WorkflowSessionStore {
   constructor(private db: Database) {}
@@ -112,7 +122,7 @@ export class WorkflowSessionRepository implements WorkflowSessionStore {
       .prepare('SELECT data, created_at FROM workflow_sessions WHERE chat_id = ? AND user_id = ?')
       .get(chatId, userId) as { data: string; created_at: number } | null;
     if (!row) return null;
-    if (Date.now() - row.created_at >= TTL_MS) {
+    if (isExpired(row.created_at, Date.now())) {
       this.delete(chatId, userId);
       return null;
     }
@@ -141,6 +151,22 @@ export class WorkflowSessionRepository implements WorkflowSessionStore {
   }
 
   cleanup(): void {
-    this.db.prepare('DELETE FROM workflow_sessions WHERE created_at < ?').run(Date.now() - TTL_MS);
+    // Same boundary as isExpired: a row whose age has reached the TTL is gone.
+    this.db.prepare('DELETE FROM workflow_sessions WHERE created_at <= ?').run(Date.now() - WORKFLOW_SESSION_TTL_MS);
+  }
+
+  /** Intent ids that a live (unexpired) suspended workflow still refers to. Never throws on bad data. */
+  liveIntentIds(now: number): LiveSessionIntents {
+    const rows = this.db
+      .query<{ data: string; created_at: number }, []>('SELECT data, created_at FROM workflow_sessions')
+      .all();
+    const live: LiveSessionIntents = { intentIds: new Set(), unreadable: 0 };
+    for (const row of rows) {
+      if (isExpired(row.created_at, now)) continue;
+      const session = WorkflowSessionCodec.safeParse(row.data);
+      if (session.success) live.intentIds.add(session.data.intentId);
+      else live.unreadable += 1;
+    }
+    return live;
   }
 }

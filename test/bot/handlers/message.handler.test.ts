@@ -1036,6 +1036,8 @@ describe('intent supplement integration', () => {
         trigger_words: '[]',
         pattern: null,
       })),
+      currentRuleFingerprint: mock(() => 'rule-fingerprint'),
+      runnableFingerprint: mock(() => 'rule-fingerprint'),
     };
     const intentExecutor = {
       run: mock(() => Promise.resolve({ success: true, response: 'Вот твои события.' })),

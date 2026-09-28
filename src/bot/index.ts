@@ -27,6 +27,8 @@ import type { EventMentionStore } from '../services/intent/event-mention-store.t
 import { IntentExecutor } from '../services/intent/intent-executor.ts';
 import { IntentLearner } from '../services/intent/intent-learner.ts';
 import { IntentMatcher } from '../services/intent/intent-matcher.ts';
+import { IntentRevisionService } from '../services/intent/revision-service.ts';
+import { seedIntents } from '../services/intent/seed-catalog.ts';
 import { ReminderMaterializer } from '../services/notification/materializer.ts';
 import { NotificationPreferencesService } from '../services/notification/preferences.ts';
 import { ScenePauseService } from '../services/scene-pause.ts';
@@ -230,6 +232,14 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     { threadId: number; userId: number; chatId?: number; topicThreadId?: number }
   >();
   const proposeTimeSessions = new Map<number, { invitationId: number }>();
+
+  // A build whose source catalogue differs from the active revision only records a draft for the
+  // administrator; the active catalogue keeps running and nothing is activated here.
+  try {
+    new IntentRevisionService(db.db, { sessions: db.workflowSessions }).ensureSourceBaselineDraft(seedIntents);
+  } catch (err) {
+    botLogger.error({ err }, 'recording the source intent catalogue as a revision draft failed');
+  }
 
   // Load approved intents into matcher on startup
   intentMatcher.load(intentRepo.getApproved());

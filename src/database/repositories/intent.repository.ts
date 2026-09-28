@@ -1,29 +1,24 @@
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import { z } from 'zod';
-import { seedIntents } from '../../services/intent/seed-catalog.ts';
-import {
-  type CanonicalSeed,
-  installedSeedFingerprint,
-  seedFingerprint,
-} from '../../services/intent/seed-replacement.ts';
+import { registryIntegrity } from '../../services/intent/revision-ledger.ts';
+import { ruleFingerprint } from '../../services/intent/rule-fingerprint.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
+import { dbLogger } from '../../utils/logger.ts';
 import type { CreateIntentData, Intent, IntentStatus } from '../types.ts';
+import { IntentRevisionRepository } from './intent-revision.repository.ts';
 
 const StringArrayCodec = jsonCodec(z.array(z.string()));
 
 export class IntentRepository {
-  constructor(
-    private db: Database,
-    private readonly canonicalSeed: readonly CanonicalSeed[] = seedIntents,
-  ) {}
+  constructor(private db: Database) {}
 
   isManagedBasis(): boolean {
-    return installedSeedFingerprint(this.db) !== null;
+    return new IntentRevisionRepository(this.db).manifest() !== null;
   }
 
   private requireUnmanaged(): void {
     if (this.isManagedBasis())
-      throw new Error('INTENT_BASIS_READ_ONLY: edit the versioned source and apply its reviewed migration');
+      throw new Error('INTENT_BASIS_READ_ONLY: propose a revision and have an administrator approve it');
   }
 
   create(data: CreateIntentData): number {
@@ -50,23 +45,42 @@ export class IntentRepository {
     return this.db.prepare('SELECT * FROM intents WHERE id = ?').get(id) as Intent | null;
   }
 
+  /**
+   * Identity of an approved rule that may still run: null when the row is gone or no longer
+   * approved, a column does not decode, or the managed registry fails its integrity check.
+   */
+  currentRuleFingerprint(id: number): string | null {
+    return this.db.transaction(() => {
+      const row = this.getById(id);
+      return row ? this.runnableFingerprint(row) : null;
+    })();
+  }
+
+  /** The same identity for a row already read, so a run and its identity come from one read. */
+  runnableFingerprint(row: Intent): string | null {
+    if (row.status !== 'approved') return null;
+    return this.registryState() === 'usable' ? ruleFingerprint(row) : null;
+  }
+
+  /**
+   * Approved rows. A managed registry loads only while its rows, manifest and active revision
+   * agree; the build's source seed is never consulted, so a source-only deploy keeps the active
+   * catalogue. Any disagreement disables the whole catalogue (fail closed) and is logged.
+   */
   getApproved(): Intent[] {
-    const rows = this.db.prepare('SELECT * FROM intents WHERE status = ?').all('approved') as Intent[];
-    const managed = installedSeedFingerprint(this.db);
-    if (managed === null) return rows;
-    try {
-      const actual = rows.map((row) => ({
-        canonical_name: row.canonical_name,
-        pattern: row.pattern ?? '',
-        workflow: JSON.parse(row.workflow),
-        phrases: JSON.parse(row.phrases),
-        trigger_words: JSON.parse(row.trigger_words ?? '[]'),
-        source_message: row.source_message ?? '',
-      }));
-      return managed === seedFingerprint(this.canonicalSeed) && managed === seedFingerprint(actual) ? rows : [];
-    } catch {
+    return this.db.transaction(() => {
+      const rows = this.db.query<Intent, [string]>('SELECT * FROM intents WHERE status = ?').all('approved');
+      const state = this.registryState();
+      if (state === 'usable') return rows;
+      dbLogger.error({ state }, `intent_registry_${state}: managed intent catalogue disabled`);
       return [];
-    }
+    })();
+  }
+
+  /** The one fail-closed gate: an unmanaged or intact registry may serve its rules. */
+  private registryState(): 'usable' | 'tampered' | 'unledgered' {
+    const { state } = registryIntegrity(new IntentRevisionRepository(this.db));
+    return state === 'unmanaged' || state === 'intact' ? 'usable' : state;
   }
 
   updateStatus(id: number, status: IntentStatus): void {
