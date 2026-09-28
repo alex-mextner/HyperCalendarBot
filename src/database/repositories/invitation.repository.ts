@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import type { CreateInvitationData, Invitation, InvitationStatus, ParticipantStatus } from '../types.ts';
+import { sourceGroupSql } from './participant.repository.ts';
 
 /** One person on an event's invitation roster, as stored: the answer rules are applied by the reader. */
 export interface InvitationRosterRow {
@@ -12,7 +13,7 @@ export interface InvitationRosterRow {
   username: string | null;
   /** The organizer's own address-book name for this person */
   contact_name: string | null;
-  /** Participant rows: the group chat whose card carried the answer; null when personal or unknown */
+  /** Participant rows: the group chat whose card carried the answer; null when personal or unknown (sourceGroupSql) */
   source_group_id: number | null;
 }
 
@@ -135,7 +136,7 @@ export class InvitationRepository {
   /**
    * Everyone an invitation card can list, in one read: the event owner, the latest invitation per
    * invitee (group invitations included; latest by id, like the lookups above), and the per-member
-   * answers in event_participants.
+   * answers in event_participants with the origin ParticipantRepository reads.
    */
   getRoster(eventId: number): InvitationRosterRow[] {
     return this.db
@@ -159,7 +160,7 @@ export class InvitationRepository {
           SELECT 'participant', p.id, p.user_id, p.status, u.first_name, u.username,
             (SELECT c.name FROM contacts c WHERE c.user_id = e.user_id AND c.telegram_id = p.user_id
               ORDER BY c.id LIMIT 1),
-            p.source_group_id
+            ${sourceGroupSql('p')}
           FROM event_participants p JOIN events e ON e.id = p.event_id
           LEFT JOIN users u ON u.telegram_id = p.user_id
           WHERE p.event_id = ?1 AND p.role != 'organizer'

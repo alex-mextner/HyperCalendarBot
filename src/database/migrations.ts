@@ -1107,12 +1107,13 @@ export const migrations: Migration[] = [
     },
   },
   {
-    // Which group chat an answer came through, so a group's invitation card lists only its own
-    // members' answers. Personal answers and rows from before this column stay NULL (unknown origin)
-    // and are never shown as group answers.
     name: '064_event_participant_source_group',
     up(db) {
+      // Which group chat's card carried an answer, so a group's invitation card lists only its own
+      // members' answers (#468). When the origin counts: sourceGroupSql in participant.repository.ts.
+      // Every existing row has no known origin and is never listed as a group answer.
       db.exec('ALTER TABLE event_participants ADD COLUMN source_group_id INTEGER');
+      db.exec('ALTER TABLE event_participants ADD COLUMN source_group_recorded_at TEXT');
     },
   },
 ];

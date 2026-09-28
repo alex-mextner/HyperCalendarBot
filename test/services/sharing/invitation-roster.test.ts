@@ -12,6 +12,7 @@ import type { CalendarEvent, InvitationStatus } from '../../../src/database/type
 import { formatInvitation } from '../../../src/services/event/formatters.ts';
 import { formatAnsweredInvitationCard } from '../../../src/services/sharing/answered-invitation-card.ts';
 import { readInvitationRoster } from '../../../src/services/sharing/invitation-roster.ts';
+import { ageAnswers, answerAsPre064Image } from '../../helpers/pre-064-image.ts';
 
 const ORGANIZER = 100;
 const GROUP_CHAT = -1001;
@@ -196,6 +197,40 @@ describe('invitation card roster', () => {
     expect(groupA).not.toContain('Oleg');
     expect(groupA).not.toContain('Legacy');
     expect(card(event, invitations, -1002)).not.toContain('Mila');
+  });
+
+  test('an answer given on an image without origins never shows under the group recorded before it', () => {
+    const { db, event, invitations, participants, invite, person } = seed();
+    person(301, 'Mila');
+    invite(GROUP_CHAT);
+    invite(-1002);
+    participants.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT);
+    ageAnswers(db, event.id);
+    // Rolled back to an image from before migration 064, Mila answers on group -1002's card.
+    answerAsPre064Image(db, event.id, 301, 'declined');
+
+    expect(card(event, invitations, GROUP_CHAT)).not.toContain('Mila');
+    expect(card(event, invitations, -1002)).not.toContain('Mila');
+
+    // Back on the new image, a decline through the assistant keeps the origin void.
+    participants.updateStatus(event.id, 301, 'declined');
+    expect(card(event, invitations, GROUP_CHAT)).not.toContain('Mila');
+
+    // Her next answer on a card records its origin again.
+    participants.updateStatus(event.id, 301, 'maybe', -1002);
+    expect(card(event, invitations, -1002)).toContain('🤔 Mila — maybe');
+    expect(card(event, invitations, GROUP_CHAT)).not.toContain('Mila');
+  });
+
+  test('a later answer outside any card, such as a decline through the assistant, stays with its group', () => {
+    const { db, event, invitations, participants, invite, person } = seed();
+    person(301, 'Mila');
+    invite(GROUP_CHAT);
+    participants.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT);
+    ageAnswers(db, event.id);
+    participants.updateStatus(event.id, 301, 'declined');
+
+    expect(card(event, invitations, GROUP_CHAT)).toContain('❌ Mila — not going');
   });
 
   test("an invitee's latest invitation is the one sent last, even after the clock stepped back", () => {

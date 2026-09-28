@@ -14,7 +14,11 @@ import { applySeedReplacement, planSeedReplacement } from '../../src/services/in
 import { openTempRegistry, type TempRegistry } from '../helpers/intent-registry.ts';
 
 const MIGRATION = '065_intent_revisions';
-const before = migrations.filter((migration) => migration.name !== MIGRATION);
+// Everything listed before 065; later entries (064 ships after it) are not part of the pre-065 shape.
+const before = migrations.slice(
+  0,
+  migrations.findIndex((migration) => migration.name === MIGRATION),
+);
 let registry: TempRegistry | undefined;
 afterEach(() => registry?.close());
 

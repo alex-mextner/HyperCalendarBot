@@ -119,14 +119,17 @@ Inviter                     Bot                         Invitee
 **Invitation card roster.** Every invitation card (bot delivery, `/start` deep link, onboarding
 re-display, the answered card and every in-place re-render) ends with the event's roster: the
 organizer, then each invitee with their answer, ordered going, maybe, no answer yet, not going.
-Withdrawn and expired invitations are left out; an invitee's latest invitation is the one sent last.
-A member's answer through a group's card is listed
-while that group invitation is live, and a group chat sees only its own members' answers
-(`event_participants.source_group_id`; answers of unknown origin are never listed as group answers).
-At most ten invitees are named and the rest
-counted ("…и ещё 3 человека"); invitees that would push the card past Telegram's 4096-character
-limit are counted instead of named. The roster is the organizer's to share: a group chat sees it
-only while it holds a live invitation to the event, a private reader only when on the roster.
+Withdrawn and expired invitations are left out; of an invitee's invitations the last one created (by
+id) counts, whatever its `created_at` says after a clock step back. A member's answer through a
+group's card is listed while that group invitation is live, and a group chat sees only its own
+members' answers (`event_participants.source_group_id`, migration 064). An answer of unknown origin
+(given before 064, or stored by an image without it after a rollback) is never listed as a group
+answer; `get_invitation_status` follows the same rule, except that a reader who sees the event
+itself (the organizer, or a reader it is shared with) still sees it in a private chat. At most ten
+invitees are named and the rest counted ("…и ещё 3 человека"); invitees that would push the card
+past Telegram's 4096-character limit are counted instead of named. The roster is the organizer's
+to share: a group chat sees it only while it holds a live invitation to the event, a private reader
+only when on the roster.
 Whenever someone is invited, answers or is withdrawn, the other delivered cards of the event are
 re-rendered in place, each keeping its buttons (RSVP keyboard on a pending card, Going/Not going on a
 group card, both with the 🗺 Map button while the event's place is confirmed; none on an answered
