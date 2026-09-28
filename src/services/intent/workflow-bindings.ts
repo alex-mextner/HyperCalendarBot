@@ -568,9 +568,9 @@ export interface DayReading {
 }
 
 /**
- * The literal reading of the bindings and, when a date binding marked `after_midnight: 'both'`
- * reads 'today' or 'tomorrow' before 04:00 local, one reading per day that word may mean, the
- * earlier day first and the literal reading last.
+ * The literal reading of the bindings and, when the date binding marked `after_midnight: 'both'`
+ * (the validator allows one) reads 'today' or 'tomorrow' before 04:00 local, one reading per day
+ * that word may mean, the earlier day first and the literal reading last.
  */
 export function evaluateBindingReadings(
   bindings: Bindings,
@@ -580,19 +580,25 @@ export function evaluateBindingReadings(
   now: Date = new Date(),
 ): { literal: BindValues; afterMidnight: DayReading[] | null } {
   const literal = evaluateBindings(bindings, captures, userCtx, i18n, now);
-  const marked = Object.keys(bindings).filter((name) => {
+  const marked = Object.keys(bindings).find((name) => {
     const binding = bindings[name];
     return binding?.type === 'date' && binding.after_midnight === 'both';
   });
-  if (marked.length === 0) return { literal, afterMidnight: null };
-  const before = evaluateAll(bindings, { captures, userCtx, i18n, now, dayBefore: true });
-  const shifted = marked.find((name) => before[name] !== literal[name]);
-  if (shifted === undefined) return { literal, afterMidnight: null };
+  if (marked === undefined) return { literal, afterMidnight: null };
+  let before: BindValues;
+  try {
+    before = evaluateAll(bindings, { captures, userCtx, i18n, now, dayBefore: true });
+  } catch (error) {
+    // The earlier day is an extra reading, never a reason to fail: its wall time may not exist.
+    if (error instanceof WorkflowInputError) return { literal, afterMidnight: null };
+    throw error;
+  }
+  if (before[marked] === literal[marked]) return { literal, afterMidnight: null };
   return {
     literal,
     afterMidnight: [
-      { day: String(before[shifted]), bind: before },
-      { day: String(literal[shifted]), bind: literal },
+      { day: String(before[marked]), bind: before },
+      { day: String(literal[marked]), bind: literal },
     ],
   };
 }
