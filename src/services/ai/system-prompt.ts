@@ -1,5 +1,5 @@
 import { TZDate } from '@date-fns/tz';
-import { format } from 'date-fns';
+import { addDays, format } from 'date-fns';
 import type { EventOccurrence } from '../../database/types.ts';
 import { formatUtcOffset } from '../../utils/telegram.ts';
 import { collapseToOneLine } from '../../utils/text.ts';
@@ -176,7 +176,7 @@ function buildPendingGeoSection(ctx: AgentContext): string {
 The user just sent a 📍 location pin (lat=${geo.latitude}, lng=${geo.longitude}). It is currently waiting to be assigned to an event. If the user mentions which event it's for, call attach_pending_location_to_event with that event_id. You can also proactively offer: "Хочешь, я привяжу эту локацию к какому-то событию? К какому?" / "Would you like me to attach this location to an event? Which one?" Use get_events or get_upcoming to find candidate events first.`;
 }
 
-function buildUserInfoSection(ctx: AgentContext, utcOffset: string, nowLocal: string): string {
+function buildUserInfoSection(ctx: AgentContext, utcOffset: string, now: TZDate): string {
   const tzUpdatedAt = ctx.user.timezone_updated_at;
   const tzFreshness = tzUpdatedAt
     ? `Last timezone update: ${tzUpdatedAt}`
@@ -189,15 +189,19 @@ function buildUserInfoSection(ctx: AgentContext, utcOffset: string, nowLocal: st
   const secretaryLine = ctx.secretary?.secretaryForLine
     ? `\n- Calendars you can manage as secretary: ${ctx.secretary.secretaryForLine}`
     : '';
+  // The model maps "в понедельник" to a date by itself and gets it wrong (on Friday
+  // 2026-09-25 it put Monday on the 27th, a Sunday); the next seven local dates, each with
+  // its year and weekday, remove that arithmetic.
+  const comingDays = Array.from({ length: 7 }, (_, index) => format(addDays(now, index + 1), 'EEE yyyy-MM-dd'));
 
   return `## User Info
 - Name: ${ctx.user.first_name ?? ctx.user.username ?? 'User'}
 - Language: ${ctx.user.language}
 - Timezone: ${ctx.user.timezone} (${utcOffset})
-- Current local time: ${nowLocal}
+- Current local time: ${format(now, 'yyyy-MM-dd EEE HH:mm')}
+- Coming days: ${comingDays.join(', ')}
 - ${tzFreshness}
-${cityLine}
-- Current offset ${utcOffset} is informational for the current instant; NEVER reuse it blindly for a future date because DST may differ. Use calculate with the full local date and IANA timezone for local → UTC conversion.${secretaryLine}`;
+${cityLine}${secretaryLine}`;
 }
 
 function buildContextSection(): string {
@@ -545,11 +549,10 @@ export function buildSystemPrompt(ctx: AgentContext): string {
   const utcOffset = formatUtcOffset(ctx.user.timezone);
   // One instant for the displayed local time and the dated example, so midnight cannot fall between them.
   const now = new TZDate(Date.now(), ctx.user.timezone);
-  const nowLocal = format(now, 'yyyy-MM-dd EEE HH:mm');
 
   const sections = [
     'You are a calendar assistant for a Telegram bot. You help users manage their schedule.',
-    buildUserInfoSection(ctx, utcOffset, nowLocal),
+    buildUserInfoSection(ctx, utcOffset, now),
     buildMemorySection(ctx),
     buildAddressSection(ctx),
     buildPendingGeoSection(ctx),
