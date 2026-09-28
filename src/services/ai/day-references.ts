@@ -627,3 +627,37 @@ export function describeWeekdayDateMismatches(mismatches: WeekdayDateMismatch[])
     )
     .join('; ');
 }
+
+/** "18:30", "18.30", "12-30", "в 8", "в 7 вечера" — clock times as users type them. */
+const CLOCK_TIMES = /(?<![\d.:-])([01]?\d|2[0-3])[:.-]([0-5]\d)(?![\d.:-])/g;
+const BARE_HOUR =
+  /(?:^|[^\p{L}\d])в\s+([01]?\d|2[0-3])(?:\s*(утра|дня|вечера|ночи|час[аов]*|ч)(?!\p{L}))?(?=$|[\s,.;!?)])/gu;
+
+/**
+ * A message that states clock times but no day at all ("18:30 помочь Соне с кошкой")
+ * means today — as long as every time it names is still ahead today. On 2026-09-16 at
+ * 11:06 such a message was filed for the next day. When a time has already passed the
+ * create tool's PAST_EVENT flow asks the user, so no constraint is imposed.
+ */
+export function timeOnlyToday(text: string, now: Date, timezone: string): DayReferenceSet | null {
+  if (readDayContent(text, now, timezone).kind !== 'none') return null;
+  const normalized = text.toLowerCase();
+  const minutes: { phrase: string; at: number }[] = [];
+  for (const match of normalized.matchAll(CLOCK_TIMES)) {
+    minutes.push({ phrase: match[0], at: Number(match[1]) * 60 + Number(match[2]) });
+  }
+  for (const match of normalized.matchAll(BARE_HOUR)) {
+    const hour = Number(match[1]);
+    const afternoon = (match[2] === 'дня' || match[2] === 'вечера') && hour < 12;
+    minutes.push({ phrase: match[0].trim(), at: (afternoon ? hour + 12 : hour) * 60 });
+  }
+  if (minutes.length === 0) return null;
+  const local = new TZDate(now.getTime(), timezone);
+  const nowMinutes = local.getHours() * 60 + local.getMinutes();
+  if (minutes.some(({ at }) => at <= nowMinutes)) return null;
+  const { today } = localToday(now, timezone);
+  return {
+    references: minutes.map(({ phrase }) => ({ phrase, label: 'today', dates: [today] })),
+    allowedDates: new Set([today]),
+  };
+}

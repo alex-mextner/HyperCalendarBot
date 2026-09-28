@@ -13,6 +13,7 @@ import {
   readDayContent,
   shiftDay,
   type WeekdayDateMismatch,
+  timeOnlyToday,
   weekdayOf,
 } from './day-references.ts';
 import { checkSecretaryAccess } from './tool-handlers/secretary-access.ts';
@@ -128,7 +129,9 @@ export function resolveTurnDayReferences(
   if (own.kind === 'named') return own.set;
   if (own.kind === 'open') return null;
   const pending = pendingQuestion(messageText, history);
-  if (!pending || !answersQuestion(messageText, pending.options)) return null;
+  // An answer to a question inherits the question's date context; a fresh message that
+  // states only a clock time means today while that time is still ahead.
+  if (!pending || !answersQuestion(messageText, pending.options)) return timeOnlyToday(messageText, now, timezone);
   // Each message is read as of when it was written: a "Да" given days later confirms the
   // Tuesday meant then, not the one coming now.
   const originAt = storedInstantMs(pending.origin.created_at);
