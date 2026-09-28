@@ -59,6 +59,12 @@ const PIN: GeocodedLocation = {
 };
 /** A plain pin at PIN's coordinates, reverse-geocoded to PIN. */
 const PIN_SHARED: SharedLocation = { latitude: PIN.latitude, longitude: PIN.longitude, venue: null };
+/** A venue picked in Telegram's place search: no geocoder fixture has its name or address. */
+const VENUE_SHARED: SharedLocation = {
+  latitude: 44.8149,
+  longitude: 20.4612,
+  venue: { title: 'Supermarket Café', address: 'Višnjićeva 9, Beograd', googlePlaceId: 'ChIJ-venue' },
+};
 
 /** A Google Calendar update: which copy was written and the location it now shows. */
 interface GoogleWrite {
@@ -203,6 +209,17 @@ describe('the answer to the location question re-pushes the Google copies', () =
     expect(await s.runPushJobs()).toEqual([
       { copy: 'g-owner', location: PIN.formattedAddress },
       { copy: 'g-invitee', location: PIN.formattedAddress },
+    ]);
+  });
+
+  test('a venue picked in Telegram pushes the venue as the user picked it', async () => {
+    const s = setup();
+
+    expect(await s.service.resolveFromSharedLocation(s.event.id, VENUE_SHARED, OWNER_ID)).toBe(true);
+
+    expect(await s.runPushJobs()).toEqual([
+      { copy: 'g-owner', location: 'Supermarket Café — Višnjićeva 9, Beograd' },
+      { copy: 'g-invitee', location: 'Supermarket Café — Višnjićeva 9, Beograd' },
     ]);
   });
 
