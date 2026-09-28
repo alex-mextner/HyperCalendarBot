@@ -78,6 +78,12 @@ describe('tool-run evidence prefilter', () => {
 
   test('a failed read covers nothing', () => {
     expect(prefilter([], '30 сентября свободно.', [{ ...WEEK_FROM_SUNDAY, success: false }])).toBe(true);
+    // No completeness claim: a failed read still makes every fact answer to the results.
+    expect(prefilter([], 'Урок 30 сентября в 15:00.', [{ ...WEEK_FROM_SUNDAY, success: false }])).toBe(true);
+  });
+
+  test('after a failed read, a completeness claim is validated (#515)', () => {
+    expect(prefilter([], 'Больше ничего не запланировано.', [{ ...WEEK_FROM_SUNDAY, success: false }])).toBe(true);
   });
 });
 
@@ -105,6 +111,10 @@ describe('supplementIsGrounded (#515)', () => {
   test('restating a time without any read of its own is not grounded', () => {
     expect(supplement('Не забудь про концерт в 18:30.', [])).toBe(false);
   });
+
+  test('a completeness claim after only a failed read is not grounded', () => {
+    expect(supplement('Больше ничего не запланировано.', [{ ...WEEK_FROM_SUNDAY, success: false }])).toBe(false);
+  });
 });
 
 describe('tool-run evidence prefilter — deterministic rejection', () => {
@@ -116,6 +126,24 @@ describe('tool-run evidence prefilter — deterministic rejection', () => {
         timezone: 'UTC',
         tools: executed(['create_event', 'render_day_image']),
         response: 'На этот день больше ничего не запланировано.',
+      },
+      async () => {
+        called = true;
+        return stubText('APPROVE')({ messages: [], maxTokens: 1 });
+      },
+    );
+    expect(result.approved).toBe(false);
+    expect(called).toBe(false);
+  });
+
+  test('a completeness claim after only a failed read is rejected without a model call (#515)', async () => {
+    let called = false;
+    const result = await validateResponse(
+      {
+        userMessage: 'Что у меня на неделе?',
+        timezone: 'Europe/Belgrade',
+        tools: [{ ...WEEK_FROM_SUNDAY, success: false }],
+        response: 'Больше ничего не запланировано.',
       },
       async () => {
         called = true;

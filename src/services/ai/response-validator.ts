@@ -119,8 +119,9 @@ interface ValidationInput {
   tools: readonly ToolEvidence[];
 }
 
-function hasScheduleRead(toolCalls: readonly string[]): boolean {
-  return toolCalls.some((tool) => SCHEDULE_READ_TOOLS.has(tool));
+/** A read that failed returned no calendar data, so it backs no claim. */
+function hasSuccessfulScheduleRead(tools: readonly ToolEvidence[]): boolean {
+  return tools.some((tool) => tool.success && SCHEDULE_READ_TOOLS.has(tool.name));
 }
 
 function claimsCompleteOrEmptySchedule(response: string): boolean {
@@ -136,7 +137,7 @@ function claimsCompleteOrEmptySchedule(response: string): boolean {
  * tool call supplied), and the prose does not claim a calendar change was made.
  */
 function isGroundedInRun(input: ValidationInput): boolean {
-  if (!input.tools.some((tool) => tool.success && SCHEDULE_READ_TOOLS.has(tool.name))) return false;
+  if (!hasSuccessfulScheduleRead(input.tools)) return false;
   if (input.tools.some((tool) => isMutationTool(tool.name, tool.input))) return false;
   if (claimsCompletedWrite(input.response)) return false;
   const report = checkGrounding(input.response, input.tools, input.timezone, input.userMessage);
@@ -186,15 +187,16 @@ function hasUngroundedFacts(input: ValidationInput): boolean {
 /**
  * Keep the normal fast path after tool-backed writes and after reads whose
  * results contain every day and time the prose names; validate everything
- * else. A read of other days is no evidence for the day the prose talks about.
+ * else. A read of other days, or a read that failed, is no evidence for the
+ * day the prose talks about.
  */
 export function shouldValidateResponse(input: ValidationInput): boolean {
-  const toolNames = input.tools.map((tool) => tool.name);
-  if (toolNames.length === 0 || CALENDAR_WRITE_REFUSAL_PATTERNS.some((pattern) => pattern.test(input.response))) {
+  if (input.tools.length === 0 || CALENDAR_WRITE_REFUSAL_PATTERNS.some((pattern) => pattern.test(input.response))) {
     return true;
   }
-  if (!hasScheduleRead(toolNames)) return claimsCompleteOrEmptySchedule(input.response);
-  return hasUngroundedFacts(input);
+  if (!hasSuccessfulScheduleRead(input.tools) && claimsCompleteOrEmptySchedule(input.response)) return true;
+  // Writes alone keep the fast path; once the run tried to read, even without success, every fact must be in the results.
+  return input.tools.some((tool) => SCHEDULE_READ_TOOLS.has(tool.name)) && hasUngroundedFacts(input);
 }
 
 /**
@@ -202,11 +204,10 @@ export function shouldValidateResponse(input: ValidationInput): boolean {
  * is never retried or sent to the validator model: it ships only when every
  * concrete fact comes from its own tool results (the fast-path answer is not
  * evidence of what a day holds) and it claims no complete or empty schedule
- * without a read.
+ * without a successful read.
  */
 export function supplementIsGrounded(input: ValidationInput): boolean {
-  const toolNames = input.tools.map((tool) => tool.name);
-  if (!hasScheduleRead(toolNames) && claimsCompleteOrEmptySchedule(input.response)) return false;
+  if (!hasSuccessfulScheduleRead(input.tools) && claimsCompleteOrEmptySchedule(input.response)) return false;
   return !hasUngroundedFacts(input);
 }
 
@@ -250,17 +251,21 @@ export async function validateResponse(
     };
   }
 
-  const toolNames = input.tools.map((tool) => tool.name);
-  if (toolNames.length > 0 && !hasScheduleRead(toolNames) && claimsCompleteOrEmptySchedule(input.response)) {
+  if (
+    input.tools.length > 0 &&
+    !hasSuccessfulScheduleRead(input.tools) &&
+    claimsCompleteOrEmptySchedule(input.response)
+  ) {
     return {
       approved: false,
-      reason: 'Claimed the complete/empty schedule without a schedule-read tool',
+      reason: 'Claimed the complete/empty schedule without a successful schedule read',
     };
   }
 
   if (isGroundedInRun(input)) return { approved: true };
 
-  const toolCallsSummary = toolNames.length > 0 ? toolNames.join(', ') : '(none — no tools were called)';
+  const toolCallsSummary =
+    input.tools.length > 0 ? input.tools.map((tool) => tool.name).join(', ') : '(none — no tools were called)';
 
   // User-influenced strings are wrapped in clearly-delimited XML-style tags.
   // The system prompt above instructs the validator to treat their contents
