@@ -38,12 +38,12 @@ afterEach(() => {
   setSystemTime();
 });
 
-function setup() {
+function setup(timezone = TIMEZONE) {
   const users = new UserRepository(db);
-  users.create({ telegram_id: USER_ID, first_name: 'Learner', timezone: TIMEZONE, language: 'en' });
+  users.create({ telegram_id: USER_ID, first_name: 'Learner', timezone, language: 'en' });
   const eventService = new EventService({ eventRepo: new EventRepository(db) });
   const lesson = (startAt: string) =>
-    eventService.createEvent({ user_id: USER_ID, title: 'English lesson', start_at: startAt, timezone: TIMEZONE });
+    eventService.createEvent({ user_id: USER_ID, title: 'English lesson', start_at: startAt, timezone });
   const renderedDates: string[] = [];
   const chatHistory = new ChatHistoryRepository(db);
   const ctx: AgentContext = {
@@ -148,4 +148,16 @@ test('an upcoming-day picture is never redirected by other changed days', async 
   await handleRenderDayImage(ctx, { date: '2026-10-05' });
 
   expect(renderedDates).toEqual(['2026-10-05']);
+});
+
+test('an all-day change west of UTC counts for the day written, not the day before', async () => {
+  // New York, Sunday 2026-09-27 17:12: a date-only start is that calendar day, not UTC midnight.
+  const { ctx, renderedDates } = setup('America/New_York');
+  const created = await handleCreateEvent(ctx, { title: 'Field trip', start_at: '2026-09-29', all_day: true });
+  expect(created.success).toBe(true);
+
+  const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+
+  expect(renderedDates).toEqual(['2026-09-29']);
+  expect(result.output).toContain('2026-09-29');
 });

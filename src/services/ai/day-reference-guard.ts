@@ -207,7 +207,7 @@ function daysOfArgument(value: string, timezone: string): string[] {
 }
 
 /** The local day a start falls on: a date-only (all-day) start is the day written. */
-function dayOfStart(startAt: string, timezone: string): string | null {
+export function dayOfStart(startAt: string, timezone: string): string | null {
   return startAt.includes('T') ? localDayOf(startAt, timezone) : (DATE_PREFIX.exec(startAt)?.[1] ?? null);
 }
 

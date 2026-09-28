@@ -12,6 +12,7 @@ import { formatEventDetail } from '../../event/formatters.ts';
 import type { EventSummary } from '../../intent/variable-resolver.ts';
 import { formatLocationPlain } from '../../location/format-location.ts';
 import { formatEventWeatherLine } from '../../weather/format.ts';
+import { dayOfStart } from '../day-reference-guard.ts';
 import {
   consumeDeleteApproval,
   type DeleteTarget,
@@ -120,10 +121,16 @@ function eventToSummary(event: CalendarEvent, timezone: string): EventSummary {
   return summary;
 }
 
-/** Remember the event's local start day so a later day picture in this run can show it (#506). */
+/**
+ * Remember the event's local start day so a later day picture in this run can show it (#506).
+ * A date-only (all-day) start is the day written, not UTC midnight shifted into the user's zone;
+ * an unreadable start records nothing, which leaves a later picture on the requested day.
+ */
 function recordChangedDay(ctx: AgentContext, event: CalendarEvent): void {
+  const day = dayOfStart(event.start_at, ctx.user.timezone);
+  if (!day) return;
   ctx.changedDays ??= new Set();
-  ctx.changedDays.add(format(new TZDate(new Date(event.start_at), ctx.user.timezone), 'yyyy-MM-dd'));
+  ctx.changedDays.add(day);
 }
 
 function buildOrganizerLink(user: AgentContext['user']): string {
