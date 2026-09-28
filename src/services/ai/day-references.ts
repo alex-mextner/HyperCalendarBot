@@ -378,16 +378,17 @@ export interface WeekdayDateMismatch {
   nearest: string;
 }
 
+/** English weekday abbreviations; "sat" and "sun" are ordinary words too, so only "Sat"/"SUN" count. */
+const ENGLISH_ABBREVIATIONS = ['mon', 'tue', 'tues', 'wed', 'thu', 'thur', 'thurs', 'fri', 'sat', 'sun'] as const;
+const ENGLISH_ABBREVIATION = new RegExp(`^(?:${ENGLISH_ABBREVIATIONS.join('|')})$`);
 const PAIR_WEEKDAYS: ReadonlyMap<string, number> = new Map([
   ...[...WEEKDAY_FORMS]
     .filter(([, form]) => !form.plural)
     .map(([word, form]): [string, number] => [word, form.weekday]),
-  ...(['mon', 'tue', 'tues', 'wed', 'thu', 'thur', 'thurs', 'fri', 'sat', 'sun'] as const).map(
-    (abbreviation): [string, number] => [
-      abbreviation,
-      WEEKDAY_NAMES.findIndex((name) => name.toLowerCase().startsWith(abbreviation.slice(0, 3))),
-    ],
-  ),
+  ...ENGLISH_ABBREVIATIONS.map((abbreviation): [string, number] => [
+    abbreviation,
+    WEEKDAY_NAMES.findIndex((name) => name.toLowerCase().startsWith(abbreviation.slice(0, 3))),
+  ]),
 ]);
 const WD = `(${[...PAIR_WEEKDAYS.keys()].sort((a, b) => b.length - a.length).join('|')})`;
 /** What may stand between a weekday and its date on one line: spaces, commas, colons, dashes, markdown. */
@@ -435,9 +436,12 @@ interface PairParts {
   dotted?: boolean;
 }
 
-/** A slashed date is month first next to an English weekday ("Wed 9/28"), day first next to a Russian one. */
+/**
+ * A slashed date is month first next to an English weekday ("Wed 9/28"), day first next to a
+ * Russian one, and day first whenever the first number cannot be a month ("Wed 28/09").
+ */
 function slashParts(weekday: string, first: string, second: string, year: string | undefined): PairParts {
-  const monthFirst = /^[a-z]/.test(weekday);
+  const monthFirst = /^[a-z]/.test(weekday) && Number(first) <= 12;
   return {
     weekday,
     month: Number(monthFirst ? first : second),
@@ -554,6 +558,8 @@ export function findWeekdayDateMismatches(text: string, now: Date, timezone: str
         continue;
       if (parts.month === 5 && MAY_VERB.test(text.slice(at, end))) continue;
       if (crossesSentence(match[0], parts.weekday)) continue;
+      const weekdayAt = match[0].startsWith(parts.weekday) ? at : end - parts.weekday.length;
+      if (ENGLISH_ABBREVIATION.test(parts.weekday) && !/[A-Z]/.test(text.charAt(weekdayAt))) continue;
       const weekday = PAIR_WEEKDAYS.get(parts.weekday);
       const date =
         parts.y === undefined

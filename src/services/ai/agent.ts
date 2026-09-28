@@ -966,6 +966,7 @@ export class CalendarBotAgent {
       noPlaceholder: ctx.isGroup,
       // A weekday next to a date is shown only after checkRoundWeekdays() found them consistent.
       holdDraftWhen: mentionsWeekday,
+      hideToolDetailsWhen: (details) => findWeekdayDateMismatches(details, new Date(), ctx.user.timezone).length > 0,
     });
     const allToolCalls: AgentToolCallRecord[] = [];
     const allToolResults: AgentToolResultRecord[] = [];

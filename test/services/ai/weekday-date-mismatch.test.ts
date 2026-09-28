@@ -123,6 +123,13 @@ describe('a weekday written next to a date on another weekday', () => {
       expect(mismatches(text)).toEqual([{ date: '2026-09-28', said: 'Wednesday', actual: 'Monday' }]);
   });
 
+  test('an English abbreviation counts only when capitalised; a day-first slash after one is still read', () => {
+    for (const text of ['We sat, 28 September, and planned the trip', 'The sun, 21 June, was bright'])
+      expect(mismatches(text)).toEqual([]);
+    expect(mismatches('Sat, 28 September')).toEqual([{ date: '2026-09-28', said: 'Saturday', actual: 'Monday' }]);
+    expect(mismatches('Wed 28/09')).toEqual([{ date: '2026-09-28', said: 'Wednesday', actual: 'Monday' }]);
+  });
+
   test('a date without a year is read in the year nearest to now', () => {
     // 5 January is next year's (2027-01-05, a Tuesday), not 2026's Monday.
     expect(findWeekdayDateMismatches('вторник, 5 января', NOW, TZ)).toEqual([]);
