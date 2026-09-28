@@ -325,6 +325,16 @@ export async function handleContactsCallback(
   const lang = user.language;
   const userId = user.telegram_id;
   const tr = t(lang).contacts;
+
+  // GH-654 confirmed blocker: a contacts callback tapped in a group must never read or render
+  // the actor's private address book into that group message. Owner-scoped repository ids alone
+  // are not enough — the rendered message itself would leak. Checked first, before the payload
+  // is even parsed, so no branch below can run against group scope.
+  if (isGroup(ctx)) {
+    await ctx.answer({ text: tr.groupNotAllowed, show_alert: true });
+    return;
+  }
+
   const [sub, ...args] = payload.split(':');
 
   await ctx.answer();
