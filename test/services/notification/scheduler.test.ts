@@ -757,24 +757,29 @@ describe('resolved place in reminders and agendas', () => {
 
   /**
    * Delivers a single reminder (Drinks), a batch reminder (Dinner + Show) and the morning agenda for
-   * events whose typed text 'sonder' has a resolved place with the given verification state.
+   * events whose typed text has a resolved place with the given verification state. Without typed
+   * text the place is one a pin set: reverse geocoding gives an address and a map link, no venue.
    */
-  async function deliver(verified: 0 | 1): Promise<{ texts: { [type: string]: string }; spoken: string[] }> {
+  async function deliver(
+    verified: 0 | 1,
+    typed: string | null = 'sonder',
+  ): Promise<{ texts: { [type: string]: string }; spoken: string[] }> {
     const placeDb = setupDb();
     placeDb.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
     placeDb.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");
     const insertEvent = placeDb.prepare(
       `INSERT INTO events (id, user_id, title, start_at, end_at, timezone, location, resolved_address, venue_name,
                            google_maps_url, location_verified)
-       VALUES (?, 42, ?, ?, ?, 'UTC', 'sonder', 'Damrak 1, Amsterdam', 'Sonder Hotel',
+       VALUES (?, 42, ?, ?, ?, 'UTC', ?, 'Damrak 1, Amsterdam', ?,
                'https://www.google.com/maps/place/?q=place_id:dutch-hotel', ?)`,
     );
     const insertReminder = placeDb.prepare(
       "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (?, 42, ?, 15, '15 minutes')",
     );
-    insertEvent.run(1, 'Drinks', '2026-03-15T10:00:00Z', '2026-03-15T11:00:00Z', verified);
-    insertEvent.run(2, 'Dinner', '2026-03-15T12:00:00Z', '2026-03-15T13:00:00Z', verified);
-    insertEvent.run(3, 'Show', '2026-03-15T12:00:00Z', '2026-03-15T13:00:00Z', verified);
+    const venue = typed === null ? null : 'Sonder Hotel';
+    insertEvent.run(1, 'Drinks', '2026-03-15T10:00:00Z', '2026-03-15T11:00:00Z', typed, venue, verified);
+    insertEvent.run(2, 'Dinner', '2026-03-15T12:00:00Z', '2026-03-15T13:00:00Z', typed, venue, verified);
+    insertEvent.run(3, 'Show', '2026-03-15T12:00:00Z', '2026-03-15T13:00:00Z', typed, venue, verified);
     insertReminder.run(1, '2026-03-15T09:45:00Z');
     insertReminder.run(2, '2026-03-15T11:45:00Z');
     insertReminder.run(3, '2026-03-15T11:45:00Z');
@@ -833,5 +838,27 @@ describe('resolved place in reminders and agendas', () => {
     }
     expect(spoken).toHaveLength(1);
     expect(spoken[0]).toContain('Sonder Hotel');
+  });
+
+  test('a place confirmed with a pin on an event without typed text shows in reminders and the agenda', async () => {
+    const { texts } = await deliver(1, null);
+    expect(Object.keys(texts).sort()).toEqual(['event_reminder', 'event_reminder_batch', 'morning_agenda']);
+    for (const [type, text] of Object.entries(texts)) {
+      expect({ type, text }).toEqual({
+        type,
+        text: expect.stringContaining(
+          '📍 <a href="https://www.google.com/maps/place/?q=place_id:dutch-hotel">Damrak 1, Amsterdam</a>',
+        ),
+      });
+    }
+  });
+
+  test('a stale unconfirmed place on an event without typed text shows no place', async () => {
+    const { texts } = await deliver(0, null);
+    expect(Object.keys(texts).sort()).toEqual(['event_reminder', 'event_reminder_batch', 'morning_agenda']);
+    for (const [type, text] of Object.entries(texts)) {
+      expect({ type, text }).toEqual({ type, text: expect.not.stringContaining('📍') });
+      expect({ type, text }).toEqual({ type, text: expect.not.stringContaining('Damrak') });
+    }
   });
 });

@@ -969,6 +969,27 @@ describe('resolved place on event cards, invitation cards and agendas', () => {
       });
     }
   });
+
+  // A 📍 pin resolves the place by reverse geocoding: an address and a map link, no venue name.
+  const pinPlace: Partial<CalendarEvent> = { ...confirmedPlace, location: null, venue_name: null };
+
+  test('a place confirmed with a pin on an event without typed text shows with its map link', () => {
+    for (const [surface, text] of Object.entries(renderedSurfaces(pinPlace))) {
+      expect({ surface, text }).toEqual({
+        surface,
+        text: expect.stringContaining(
+          '📍 <a href="https://www.google.com/maps/place/?q=place_id:dutch-hotel">Damrak 1, Amsterdam</a>',
+        ),
+      });
+    }
+  });
+
+  test('a stale unconfirmed place on an event without typed text shows no place', () => {
+    for (const [surface, text] of Object.entries(renderedSurfaces({ ...pinPlace, location_verified: 0 }))) {
+      expect({ surface, text }).toEqual({ surface, text: expect.not.stringContaining('📍') });
+      expect({ surface, text }).toEqual({ surface, text: expect.not.stringContaining('Damrak') });
+    }
+  });
 });
 
 describe('ruPlural', () => {

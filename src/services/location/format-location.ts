@@ -9,16 +9,18 @@ type LocationFields = Pick<CalendarEvent, 'location' | 'google_maps_url' | 'reso
 
 /**
  * Format event location as an HTML link to Google Maps.
- * A verified location shows the resolved place (see formatLocationPlain) linked to its map URL; an
- * unverified one shows exactly the typed text linked to a map search for it, so an unconfirmed
- * geocode never reaches the bot's cards, agendas or reminders.
+ * A verified location shows the resolved place (see formatLocationPlain) linked to its map URL, also
+ * on an event with no typed text that a pin resolved; an unverified one shows exactly the typed text
+ * linked to a map search for it, so an unconfirmed geocode never reaches the bot's cards, agendas or
+ * reminders. Returns '' when there is nothing to show.
  */
 export function formatLocationHtml(event: LocationFields): string {
-  if (!event.location) return '';
+  const place = formatLocationPlain(event);
+  if (!place.trim()) return '';
 
-  const displayText = escapeHtml(formatLocationPlain(event));
+  const displayText = escapeHtml(place);
   const verifiedUrl = event.location_verified === 1 ? event.google_maps_url : null;
-  const url = verifiedUrl ?? buildGoogleMapsSearchUrl(event.location);
+  const url = verifiedUrl ?? buildGoogleMapsSearchUrl(event.location?.trim() || place);
   // Encoded Unicode queries can exceed the HTML transport's indivisible tag budget.
   if (escapeHtml(url).length > 2000) return displayText;
 
