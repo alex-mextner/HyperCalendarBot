@@ -47,8 +47,8 @@ unambiguous, and flags the rest for manual resolution rather than guessing.
 - `rollback-compatible: yes`. `identity_status` is a new, nullable column that pre-066 code never
   reads or writes. Rolling back to pre-066 code with this migration already applied changes
   nothing observable — the old code path (matching by calendar date) is preserved verbatim as
-  `expandLegacy()` behind the `RECURRENCE_LEGACY_ENGINE` capability flag (spec §10), independent
-  of this migration having run.
+  `expandLegacy()`, which is the *default* engine until the `RECURRENCE_V2_ENABLED` capability
+  flag (spec §10) is explicitly turned on, independent of this migration having run.
 - `data-deletion: no`. `original_start_at` is only ever replaced with a value that resolves to
   the exact same local calendar date it already pointed at (the runtime engine that computed the
   original value and the migration's own resolution use the identical `expandRecurrence` call).

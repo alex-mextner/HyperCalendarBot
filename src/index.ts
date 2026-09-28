@@ -217,7 +217,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const syncMaterializer = new ReminderMaterializer(
     db.eventReminders,
     db.notificationPreferences,
-    config.RECURRENCE_LEGACY_ENGINE,
+    config.RECURRENCE_V2_ENABLED,
   );
 
   const sendSyncNotification = (telegramId: number, text: string) =>
@@ -475,12 +475,12 @@ if (config.REDIS_URL && serviceTier.enabled && !config.DISABLE_VOICE) {
     const voiceMaterializer = new ReminderMaterializer(
       db.eventReminders,
       db.notificationPreferences,
-      config.RECURRENCE_LEGACY_ENGINE,
+      config.RECURRENCE_V2_ENABLED,
     );
     const voiceEventService = new EventService({
       eventRepo: db.events,
       materializer: voiceMaterializer,
-      legacyRecurrenceEngine: config.RECURRENCE_LEGACY_ENGINE,
+      recurrenceV2Enabled: config.RECURRENCE_V2_ENABLED,
     });
     const voiceHolidayService = new HolidayService(db.holidays);
 
@@ -595,7 +595,7 @@ if (config.REDIS_URL) {
 
   const notifEventService = new EventService({
     eventRepo: db.events,
-    legacyRecurrenceEngine: config.RECURRENCE_LEGACY_ENGINE,
+    recurrenceV2Enabled: config.RECURRENCE_V2_ENABLED,
   });
 
   const scheduler = new NotificationScheduler({
@@ -666,7 +666,7 @@ if (config.REDIS_URL) {
   const cronMaterializer = new ReminderMaterializer(
     db.eventReminders,
     db.notificationPreferences,
-    config.RECURRENCE_LEGACY_ENGINE,
+    config.RECURRENCE_V2_ENABLED,
   );
   const cronBirthdayService = new BirthdayService(
     db.events,
