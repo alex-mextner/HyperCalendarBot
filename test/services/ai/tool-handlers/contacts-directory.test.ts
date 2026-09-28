@@ -16,8 +16,10 @@ import {
   handleListContactAliases,
   handleListContactGroupMembers,
   handleListContactGroups,
+  handleManageContactDirectory,
   handlePromoteContactAlias,
   handleRemoveContactGroupMember,
+  handleRenameContactGroup,
   handleResolveContact,
 } from '../../../../src/services/ai/tool-handlers/contacts.ts';
 import type { AgentContext, ToolResult } from '../../../../src/services/ai/types.ts';
@@ -160,6 +162,61 @@ describe('contact alias/group AI tool handlers', () => {
     void contact;
     const dupe = handleCreateContactGroup(ctx, { alias: 'Lena' });
     expect(dupe.success).toBe(false);
+  });
+
+  test('rename_contact_group changes the alias', () => {
+    const group = ctx.contactDirectory!.contactGroupRepo.create(USER_ID, 'грюковы');
+    const result = handleRenameContactGroup(ctx, { group_id: group.id, alias: 'семья Грюковых' });
+    expect(result.success).toBe(true);
+    expect(ctx.contactDirectory!.contactGroupRepo.findById(USER_ID, group.id)?.alias).toBe('семья Грюковых');
+  });
+
+  test('rename_contact_group rejects landing on an existing person alias', () => {
+    const group = ctx.contactDirectory!.contactGroupRepo.create(USER_ID, 'грюковы');
+    ctx.contactRepo!.add(USER_ID, 'Lena');
+    const result = handleRenameContactGroup(ctx, { group_id: group.id, alias: 'Lena' });
+    expect(result.success).toBe(false);
+  });
+
+  test('manage_contact_directory routes every action to its handler', () => {
+    const contact = ctx.contactRepo!.add(USER_ID, 'Elena');
+    expect(
+      handleManageContactDirectory(ctx, { action: 'add_alias', contact_id: contact.id, alias: 'Ленка' }).success,
+    ).toBe(true);
+    expect(handleManageContactDirectory(ctx, { action: 'list_aliases', contact_id: contact.id }).output).toContain(
+      'Ленка',
+    );
+    const aliasId = ctx
+      .contactDirectory!.contactAliasRepo.listForContact(USER_ID, contact.id)
+      .find((a) => a.alias === 'Ленка')!.id;
+    expect(
+      handleManageContactDirectory(ctx, { action: 'promote_alias', contact_id: contact.id, alias_id: aliasId }).success,
+    ).toBe(true);
+    expect(ctx.contactRepo!.findById(USER_ID, contact.id)?.name).toBe('Ленка');
+
+    expect(handleManageContactDirectory(ctx, { action: 'create_group', alias: 'грюковы' }).success).toBe(true);
+    const group = ctx.contactDirectory!.contactGroupRepo.findByAlias(USER_ID, 'грюковы')!;
+    expect(
+      handleManageContactDirectory(ctx, { action: 'rename_group', group_id: group.id, alias: 'семья' }).success,
+    ).toBe(true);
+    expect(
+      handleManageContactDirectory(ctx, { action: 'add_group_member', group_id: group.id, contact_id: contact.id })
+        .success,
+    ).toBe(true);
+    expect(handleManageContactDirectory(ctx, { action: 'list_group_members', group_id: group.id }).output).toContain(
+      'Ленка',
+    );
+    expect(
+      handleManageContactDirectory(ctx, { action: 'remove_group_member', group_id: group.id, contact_id: contact.id })
+        .success,
+    ).toBe(true);
+    expect(handleManageContactDirectory(ctx, { action: 'delete_group', group_id: group.id }).success).toBe(true);
+  });
+
+  test('manage_contact_directory reports a missing required field instead of throwing', () => {
+    const result = handleManageContactDirectory(ctx, { action: 'add_alias' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('contact_id');
   });
 
   test('add_contact_group_member and list_contact_group_members show the members', () => {

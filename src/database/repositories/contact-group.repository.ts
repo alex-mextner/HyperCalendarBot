@@ -45,12 +45,7 @@ export class ContactGroupRepository {
       if (groups.some((row) => row.alias.trim().toLowerCase() === lower)) {
         throw new Error('CONTACT_GROUP_ALIAS_CONFLICT: a group with that alias already exists');
       }
-      const personAliases = this.db.prepare('SELECT alias FROM contact_aliases WHERE user_id = ?').all(userId) as {
-        alias: string;
-      }[];
-      if (personAliases.some((row) => row.alias.trim().toLowerCase() === lower)) {
-        throw new Error('CONTACT_GROUP_ALIAS_CONFLICT: that alias already names a person in your contacts');
-      }
+      this.assertNoPersonAliasCollision(userId, lower);
       const inserted = this.db
         .query<ContactGroup, [number, string]>(
           'INSERT INTO contact_groups (user_id, alias) VALUES (?, ?) RETURNING id, user_id, alias, created_at',
@@ -61,6 +56,12 @@ export class ContactGroupRepository {
     })();
   }
 
+  /**
+   * Same collision policy as `create()` — a rename must not land a group onto an existing
+   * person alias either: that would leave the person's alias exact-matchable while the
+   * resolver's group branch (checked first) now also matches the same text, making the two
+   * ambiguous in exactly the way the shared namespace exists to prevent.
+   */
   rename(userId: number, groupId: number, newAlias: string): void {
     const trimmed = newAlias.trim();
     if (!trimmed) throw new Error('CONTACT_GROUP_ALIAS_EMPTY: group alias must not be blank');
@@ -75,8 +76,18 @@ export class ContactGroupRepository {
       if (groups.some((row) => row.id !== groupId && row.alias.trim().toLowerCase() === lower)) {
         throw new Error('CONTACT_GROUP_ALIAS_CONFLICT: a group with that alias already exists');
       }
+      this.assertNoPersonAliasCollision(userId, lower);
       this.db.prepare('UPDATE contact_groups SET alias = ? WHERE id = ?').run(trimmed, groupId);
     })();
+  }
+
+  private assertNoPersonAliasCollision(userId: number, lowerAlias: string): void {
+    const personAliases = this.db.prepare('SELECT alias FROM contact_aliases WHERE user_id = ?').all(userId) as {
+      alias: string;
+    }[];
+    if (personAliases.some((row) => row.alias.trim().toLowerCase() === lowerAlias)) {
+      throw new Error('CONTACT_GROUP_ALIAS_CONFLICT: that alias already names a person in your contacts');
+    }
   }
 
   delete(userId: number, groupId: number): boolean {

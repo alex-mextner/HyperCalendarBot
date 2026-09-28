@@ -233,6 +233,33 @@ async function handleGroupSubcommand(
     return;
   }
 
+  if (sub === 'rename') {
+    const [groupIdStr, ...aliasParts] = subRest;
+    const groupId = Number(groupIdStr);
+    const newAlias = aliasParts.join(' ');
+    if (!groupIdStr || !Number.isFinite(groupId) || !newAlias) {
+      await ctx.send(t(lang).contacts.groupUsage);
+      return;
+    }
+    const group = deps.contactGroupRepo.findById(userId, groupId);
+    if (!group) {
+      await ctx.send(t(lang).contacts.groupNotFound);
+      return;
+    }
+    const oldAlias = group.alias;
+    try {
+      deps.contactGroupRepo.rename(userId, groupId, newAlias);
+      await ctx.send(t(lang).contacts.groupRenamed(oldAlias, newAlias));
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('CONTACT_GROUP_ALIAS_CONFLICT:')) {
+        await ctx.send(t(lang).contacts.groupConflict(newAlias));
+        return;
+      }
+      throw error;
+    }
+    return;
+  }
+
   if (sub === 'add' || sub === 'remove') {
     const [groupIdStr, contactIdStr] = subRest;
     const groupId = Number(groupIdStr);

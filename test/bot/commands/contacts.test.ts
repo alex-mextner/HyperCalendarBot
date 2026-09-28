@@ -223,6 +223,27 @@ describe('handleContacts command', () => {
     expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('already used'));
   });
 
+  test('group rename changes the alias', async () => {
+    await handleContacts(makeCtx('group create грюковы') as never, deps);
+    const group = deps.contactGroupRepo.findByAlias(USER_ID, 'грюковы')!;
+    const ctx = makeCtx(`group rename ${group.id} семья Грюковых`);
+    await handleContacts(ctx as never, deps);
+    expect(deps.contactGroupRepo.findById(USER_ID, group.id)?.alias).toBe('семья Грюковых');
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('renamed'));
+  });
+
+  // GH-654 review finding: renaming a group onto an existing person's alias must be refused,
+  // the same as creating a group with that alias would be.
+  test('group rename rejects landing on an existing person alias', async () => {
+    await handleContacts(makeCtx('group create грюковы') as never, deps);
+    const group = deps.contactGroupRepo.findByAlias(USER_ID, 'грюковы')!;
+    deps.contactRepo.add(USER_ID, 'Lena');
+    const ctx = makeCtx(`group rename ${group.id} Lena`);
+    await handleContacts(ctx as never, deps);
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('already used'));
+    expect(deps.contactGroupRepo.findById(USER_ID, group.id)?.alias).toBe('грюковы');
+  });
+
   test('group delete removes the group without deleting members', async () => {
     const contact = deps.contactRepo.add(USER_ID, 'Anna');
     await handleContacts(makeCtx('group create грюковы') as never, deps);

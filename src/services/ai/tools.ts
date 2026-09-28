@@ -551,9 +551,9 @@ const toolDefinitions: ToolDefinition[] = [
     description:
       'Manage a contact\'s aliases and collective group aliases (e.g. "грюковы", expanded by resolve_contact). ' +
       'Alias (need contact_id): add_alias/confirm_alias (alias), list_aliases, promote_alias/delete_alias ' +
-      '(alias_id). Group: create_group (alias, explicit requests only — never for coincidental shared names), ' +
-      'list_groups, list_group_members/delete_group (group_id), add_group_member/remove_group_member ' +
-      '(group_id, contact_id).',
+      '(alias_id). Group: create_group/rename_group (alias, explicit requests only — never for coincidental ' +
+      'shared names), list_groups, list_group_members/delete_group (group_id), add_group_member/' +
+      'remove_group_member (group_id, contact_id).',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -566,6 +566,7 @@ const toolDefinitions: ToolDefinition[] = [
             'promote_alias',
             'delete_alias',
             'create_group',
+            'rename_group',
             'list_groups',
             'list_group_members',
             'add_group_member',
@@ -574,7 +575,7 @@ const toolDefinitions: ToolDefinition[] = [
           ],
         },
         contact_id: { type: 'integer', description: 'Required for alias and group-member actions.' },
-        alias: { type: 'string', description: 'Required for add_alias/confirm_alias/create_group.' },
+        alias: { type: 'string', description: 'Required for add_alias/confirm_alias/create_group/rename_group.' },
         alias_id: { type: 'integer', description: 'Required for promote_alias/delete_alias.' },
         group_id: { type: 'integer', description: 'Required for every group action but create_group/list_groups.' },
       },

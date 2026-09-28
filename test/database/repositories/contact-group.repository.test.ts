@@ -62,6 +62,28 @@ describe('ContactGroupRepository', () => {
     expect(repo.findByAlias(USER_ID, 'Лена')).toBeNull();
   });
 
+  test('rename changes the group alias', () => {
+    const group = repo.create(USER_ID, 'грюковы');
+    repo.rename(USER_ID, group.id, 'семья Грюковых');
+    expect(repo.findById(USER_ID, group.id)?.alias).toBe('семья Грюковых');
+  });
+
+  test("rename refuses landing on another group's alias", () => {
+    repo.create(USER_ID, 'грюковы');
+    const other = repo.create(USER_ID, 'ивановы');
+    expect(() => repo.rename(USER_ID, other.id, 'Грюковы')).toThrow(/CONTACT_GROUP_ALIAS_CONFLICT/);
+  });
+
+  // GH-654 review finding: rename previously only checked other groups, not person aliases —
+  // a group could be renamed onto an existing person's exact alias, leaving that person shadowed
+  // at exact-match resolution (the resolver checks groups first).
+  test('rename refuses landing on an existing person alias', () => {
+    const group = repo.create(USER_ID, 'грюковы');
+    contacts.add(USER_ID, 'Lena');
+    expect(() => repo.rename(USER_ID, group.id, 'Lena')).toThrow(/CONTACT_GROUP_ALIAS_CONFLICT/);
+    expect(repo.findById(USER_ID, group.id)?.alias).toBe('грюковы');
+  });
+
   test('findByAlias is case-insensitive and owner-scoped', () => {
     repo.create(USER_ID, 'грюковы');
     repo.create(OTHER_USER_ID, 'грюковы');

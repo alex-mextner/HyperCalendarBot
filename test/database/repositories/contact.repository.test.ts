@@ -126,6 +126,27 @@ describe('ContactRepository', () => {
     expect(contacts[0]!.preferred_name).toBe('Ленок');
   });
 
+  // #654 acceptance criterion: after two different identities share the same name, exact-name
+  // lookup must report ambiguity, never silently pick the first row. Two contacts with the exact
+  // same name are possible since migration 066 dropped the per-user unique name index — a third
+  // upsert() by that bare name must not guess which of the two existing rows to patch.
+  test('upsert creates a new contact instead of guessing which of two same-named contacts to patch', () => {
+    const first = repo.add(USER_ID, 'Лена');
+    const second = repo.add(USER_ID, 'Лена');
+    const third = repo.upsert(USER_ID, 'Лена', undefined, undefined, 'Coworker Lena');
+    expect(third.id).not.toBe(first.id);
+    expect(third.id).not.toBe(second.id);
+    expect(repo.list(USER_ID).filter((c) => c.name === 'Лена')).toHaveLength(3);
+    expect(repo.findById(USER_ID, first.id)?.preferred_name).toBeNull();
+    expect(repo.findById(USER_ID, second.id)?.preferred_name).toBeNull();
+  });
+
+  test('findByNameStrict returns null, not an arbitrary row, when two contacts share the exact name', () => {
+    repo.add(USER_ID, 'Лена');
+    repo.add(USER_ID, 'Лена');
+    expect(repo.findByNameStrict(USER_ID, 'Лена')).toBeNull();
+  });
+
   test('findByTelegramId returns correct contact', () => {
     repo.add(USER_ID, 'Лена', 'larichkina_b', 716928723);
     const contact = repo.findByTelegramId(USER_ID, 716928723);

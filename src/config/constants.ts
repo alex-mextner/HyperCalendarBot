@@ -647,6 +647,7 @@ export const MSG = {
         contactAliasPrimaryUndeletable: 'Cannot delete the primary alias — promote a different alias first.',
         contactAliasNotFound: 'That alias was not found for this contact.',
         contactGroupCreated: (alias: string) => `Group "${alias}" created.`,
+        contactGroupRenamed: (oldAlias: string, newAlias: string) => `Group "${oldAlias}" renamed to "${newAlias}".`,
         contactGroupAliasConflict: (alias: string) => `"${alias}" is already used by a group or a contact alias.`,
         contactGroupsList: (lines: string) => `Groups:\n${lines}`,
         contactGroupsEmpty: 'No contact groups yet.',
@@ -1203,8 +1204,9 @@ export const MSG = {
       groupsTitle: '👥 Groups',
       groupsEmpty: 'No groups yet. Create one: /contacts group create <alias>',
       groupUsage:
-        'Usage:\n/contacts group create <alias>\n/contacts group add <group_id> <contact_id>\n/contacts group remove <group_id> <contact_id>\n/contacts group delete <group_id>',
+        'Usage:\n/contacts group create <alias>\n/contacts group rename <group_id> <new alias>\n/contacts group add <group_id> <contact_id>\n/contacts group remove <group_id> <contact_id>\n/contacts group delete <group_id>',
       groupCreated: (alias: string) => `✅ Group "${alias}" created.`,
+      groupRenamed: (oldAlias: string, newAlias: string) => `✅ Group "${oldAlias}" renamed to "${newAlias}".`,
       groupConflict: (alias: string) => `"${alias}" is already used by a group or a contact.`,
       groupNotFound: 'Group not found.',
       groupDetailHeader: (alias: string) => `👥 ${alias}`,
@@ -1718,6 +1720,8 @@ export const MSG = {
         contactAliasPrimaryUndeletable: 'Нельзя удалить основной алиас — сначала сделай другой алиас основным.',
         contactAliasNotFound: 'Такой алиас у этого контакта не найден.',
         contactGroupCreated: (alias: string) => `Группа «${alias}» создана.`,
+        contactGroupRenamed: (oldAlias: string, newAlias: string) =>
+          `Группа «${oldAlias}» переименована в «${newAlias}».`,
         contactGroupAliasConflict: (alias: string) => `«${alias}» уже занято группой или алиасом контакта.`,
         contactGroupsList: (lines: string) => `Группы:\n${lines}`,
         contactGroupsEmpty: 'Групп контактов пока нет.',
@@ -2283,8 +2287,9 @@ export const MSG = {
       groupsTitle: '👥 Группы',
       groupsEmpty: 'Групп пока нет. Создай: /contacts group create <алиас>',
       groupUsage:
-        'Использование:\n/contacts group create <алиас>\n/contacts group add <group_id> <contact_id>\n/contacts group remove <group_id> <contact_id>\n/contacts group delete <group_id>',
+        'Использование:\n/contacts group create <алиас>\n/contacts group rename <group_id> <новый алиас>\n/contacts group add <group_id> <contact_id>\n/contacts group remove <group_id> <contact_id>\n/contacts group delete <group_id>',
       groupCreated: (alias: string) => `✅ Группа «${alias}» создана.`,
+      groupRenamed: (oldAlias: string, newAlias: string) => `✅ Группа «${oldAlias}» переименована в «${newAlias}».`,
       groupConflict: (alias: string) => `«${alias}» уже занято группой или контактом.`,
       groupNotFound: 'Группа не найдена.',
       groupDetailHeader: (alias: string) => `👥 ${alias}`,

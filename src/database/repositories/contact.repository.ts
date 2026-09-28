@@ -36,12 +36,19 @@ export class ContactRepository {
    *
    * Done in JS (not SQL) because SQLite's built-in LOWER() is ASCII-only —
    * "Лена" stays "Лена", breaking Cyrillic case-insensitive comparison.
+   *
+   * #654: since migration 066 two different contacts of the same owner may now share an exact
+   * name (the old unique index that made this impossible is gone). More than one exact match is
+   * therefore ambiguous, never "pick the first row" — returns null so `upsert()` creates a new
+   * contact instead of silently patching an arbitrary same-named one. Disambiguating an existing
+   * duplicate by identity is `ContactResolver`'s job (exact_ambiguous), not this method's.
    */
   findByNameStrict(userId: number, name: string): Contact | null {
     const lower = name.trim().toLowerCase();
     if (lower.length === 0) return null;
     const contacts = this.db.prepare('SELECT * FROM contacts WHERE user_id = ?').all(userId) as Contact[];
-    return contacts.find((c) => c.name.trim().toLowerCase() === lower) ?? null;
+    const matches = contacts.filter((c) => c.name.trim().toLowerCase() === lower);
+    return matches.length === 1 ? matches[0]! : null;
   }
 
   /**

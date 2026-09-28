@@ -392,6 +392,25 @@ export function handleCreateContactGroup(ctx: AgentContext, input: { alias: stri
   }
 }
 
+export function handleRenameContactGroup(ctx: AgentContext, input: { group_id: number; alias: string }): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  const group = ctx.contactDirectory.contactGroupRepo.findById(userId, input.group_id);
+  if (!group) return { success: false, error: tr.contactGroupNotFound };
+  const oldAlias = group.alias;
+  try {
+    ctx.contactDirectory.contactGroupRepo.rename(userId, input.group_id, input.alias);
+    return { success: true, output: tr.contactGroupRenamed(oldAlias, input.alias) };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('CONTACT_GROUP_ALIAS_CONFLICT:')) {
+      return { success: false, error: tr.contactGroupAliasConflict(input.alias) };
+    }
+    throw error;
+  }
+}
+
 export function handleListContactGroups(ctx: AgentContext): ToolResult {
   const tr = t(ctx.user.language).aiTools.meta;
   if (!ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
@@ -541,6 +560,7 @@ export function handleManageContactDirectory(
       | 'promote_alias'
       | 'delete_alias'
       | 'create_group'
+      | 'rename_group'
       | 'list_groups'
       | 'list_group_members'
       | 'add_group_member'
@@ -580,6 +600,10 @@ export function handleManageContactDirectory(
     case 'create_group':
       if (input.alias === undefined) return missing('alias', 'create_group');
       return handleCreateContactGroup(ctx, { alias: input.alias });
+    case 'rename_group':
+      if (input.group_id === undefined) return missing('group_id', 'rename_group');
+      if (input.alias === undefined) return missing('alias', 'rename_group');
+      return handleRenameContactGroup(ctx, { group_id: input.group_id, alias: input.alias });
     case 'list_groups':
       return handleListContactGroups(ctx);
     case 'list_group_members':

@@ -158,6 +158,7 @@ export interface ToolInputMap {
       | 'promote_alias'
       | 'delete_alias'
       | 'create_group'
+      | 'rename_group'
       | 'list_groups'
       | 'list_group_members'
       | 'add_group_member'
