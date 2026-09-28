@@ -5,10 +5,14 @@
 // behavior of `parseWizardDateTime` (src/bot/scenes/add-event.scene.ts) and `parseTime`
 // (src/services/intent/workflow-bindings.ts): PR562 documented that the add wizard
 // accepted a bare "2" as an implicit 02:00 while the intent path rejected the identical
-// input outright, on the same commit. Both legacy functions are left untouched by this
-// slice and keep serving live traffic; this module is not wired into either call site yet
-// (that wiring, and preserving the legacy wrapper for active sessions until it is flag-
-// gated, is GH-652). See wall-time-adapters.ts for the two future call-site shapes.
+// input outright, on the same commit.
+//
+// Wired into add-event.scene.ts's step-1 time question (bounded GH-652 legacy-UX repair,
+// PR682/GH-682-live-add-time — see resolveWizardWallTime in wall-time-adapters.ts and its
+// call site) once a date is pending: the bare-"2" guess above no longer happens on that
+// path. `parseTime` in workflow-bindings.ts (the intent entry point) is untouched by this
+// slice — GH-652's full v3 runtime still owns wiring `resolveIntentWallTime` there and
+// flag-gating the legacy wrapper for in-flight sessions across that cutover.
 //
 // Scope: this parser resolves TIME OF DAY and the all-day/timed axis against an already-
 // resolved `selectedDate`. It does not parse free-text dates (weekdays, month names,
