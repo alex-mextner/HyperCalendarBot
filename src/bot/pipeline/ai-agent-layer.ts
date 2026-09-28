@@ -93,15 +93,26 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
           // earlier, then clear Redis state.
           const giveUp = agentGiveUpMessage(user.telegram_id, lang);
           if (giveUp) await ctx.send(giveUp);
-          if (jobStore) await jobStore.del(user.telegram_id);
-          return;
+          // Best effort: the give-up line is out, so the answer stays "gave up" whatever Redis says.
+          await jobStore?.del(user.telegram_id).catch((err: unknown) => {
+            cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to clear retry job store');
+          });
+          return false;
         }
         const delay = BACKOFF_DELAYS_MS[currentAttempt]!;
         const jobId = await queue.addDelayed(
           { userId: user.telegram_id, message: msg, source: 'trigger', retryAttempt: currentAttempt + 1 },
           delay,
         );
-        if (jobStore) await jobStore.set(user.telegram_id, jobId);
+        // The job is stored and will run: the cancellation pointer is written in the background, so a
+        // slow or lost pointer write can neither hold back nor turn this into "not scheduled".
+        void jobStore?.set(user.telegram_id, jobId).catch((err: unknown) => {
+          cmdLogger.warn(
+            { err, userId: user.telegram_id, jobId },
+            'Retry scheduled but its cancellation pointer was not saved',
+          );
+        });
+        return true;
       };
     }
 

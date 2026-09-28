@@ -198,6 +198,57 @@ describe('SyntheticPipelineRunner', () => {
     expect(captured.ctx?.retryEnqueue).toBeFunction();
   });
 
+  test.each([
+    ['cannot be saved', () => Promise.reject(new Error('READONLY You can not write against a read only replica'))],
+    ['never answers', () => Promise.withResolvers<void>().promise],
+  ])('a stored retry counts at once even when its cancellation pointer %s', async (_label, pointerWrite) => {
+    const captured: { ctx?: AgentContext } = {};
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const intentRun = mock(async (ctx: AgentContext) => {
+      captured.ctx = ctx;
+      return { handled: false };
+    });
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: mock(() => agentCtx),
+      intentRun,
+      agentRun: mock(async () => {}),
+      retryQueue: { addDelayed: mock(async () => 'job-1') },
+      retryJobStore: { set: mock(pointerWrite), get: mock(async () => null), del: mock(async () => {}) },
+    });
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'check calendar', source: 'scheduled' });
+    expect(await captured.ctx!.retryEnqueue!('check calendar')).toBe(true);
+  });
+
+  test('a spent budget still reports "gave up" when clearing the pointer fails', async () => {
+    const captured: { ctx?: AgentContext } = {};
+    const sendMessage = mock(async (_userId: number, _text: string) => ({ message_id: 1 }));
+    const agentCtx = { user: fakeUser, sender: { sendMessage } } as unknown as AgentContext;
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: mock(() => agentCtx),
+      intentRun: mock(async (ctx: AgentContext) => {
+        captured.ctx = ctx;
+        return { handled: false };
+      }),
+      agentRun: mock(async () => {}),
+      retryQueue: { addDelayed: mock(async () => 'job-1') },
+      retryJobStore: {
+        set: mock(async () => {}),
+        get: mock(async () => null),
+        del: mock(async () => {
+          throw new Error('READONLY You can not write against a read only replica');
+        }),
+      },
+    });
+    await runner.run(fakeUser, {
+      userId: fakeUser.telegram_id,
+      message: 'что у меня завтра?',
+      source: 'trigger',
+      retryAttempt: 3,
+    });
+    // The give-up line decision is made; a rejection here would make the agent add a contradicting notice.
+    expect(await captured.ctx!.retryEnqueue!('что у меня завтра?')).toBe(false);
+  });
+
   test('scheduled call at attempt=0: retryEnqueue queues with 30s delay', async () => {
     const captured: { ctx?: AgentContext } = {};
     const agentCtx = { user: fakeUser } as unknown as AgentContext;
@@ -216,7 +267,7 @@ describe('SyntheticPipelineRunner', () => {
       retryQueue: { addDelayed },
     });
     await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'check calendar', source: 'scheduled' });
-    await captured.ctx!.retryEnqueue!('check calendar');
+    expect(await captured.ctx!.retryEnqueue!('check calendar')).toBe(true);
 
     const [, delay] = addDelayed.mock.calls[0] as unknown as [unknown, number];
     expect(delay).toBe(30_000);
@@ -487,7 +538,7 @@ describe('createAiMessagesWorker', () => {
       source: 'trigger',
       retryAttempt: 3,
     });
-    await captured.ctx!.retryEnqueue!('что у меня завтра?');
+    expect(await captured.ctx!.retryEnqueue!('что у меня завтра?')).toBe(false);
 
     expect(sendMessage).not.toHaveBeenCalled();
   });

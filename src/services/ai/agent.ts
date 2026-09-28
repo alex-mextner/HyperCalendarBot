@@ -38,6 +38,23 @@ const aiLogger = logger.child({ module: 'ai-agent' });
 
 const MAX_ROUNDS = 15;
 const TIMEOUT_MS = 90_000;
+/**
+ * How long a failed turn waits to learn whether its retry was stored before it answers anyway.
+ * Kept inside the first shutdown drain below, so a hung store never makes that drain abandon the
+ * turn. The late drain in index.ts is shorter: turns that start then meet queues already closed.
+ */
+const RETRY_STORE_TIMEOUT_MS = 1_500;
+/**
+ * How long the shutdown drain gives in-flight turns to take their failure path: the
+ * retry-store bound plus a second for the notice and the history write.
+ */
+export const AGENT_DRAIN_SETTLE_MS = RETRY_STORE_TIMEOUT_MS + 1_000;
+
+/**
+ * What became of a failed turn's retry: stored, declined with the pipeline's give-up line,
+ * not stored, or unknown because the store did not answer in time (the job may still land).
+ */
+type RetryOutcome = 'stored' | 'gave_up' | 'not_stored' | 'unknown';
 
 /**
  * One apology covers a user for this long. A user who keeps writing during an
@@ -569,11 +586,16 @@ export class CalendarBotAgent {
   private streamImpl: typeof aiStreamRound;
   private summarizer?: HistorySummarizer;
   private requestTimeoutMs: number;
+  private readonly retryStoreTimeoutMs: number;
+  /** Aborts every in-flight and later run once the process starts shutting down. */
+  private readonly shutdown = new AbortController();
+  /** Runs not yet settled, including their debug-log flush — what a shutdown drain waits for. */
+  private readonly inFlight = new Set<Promise<AgentRunResult>>();
 
   constructor(
     config: AgentConfig,
     sender: TelegramSender,
-    opts?: { streamImpl?: typeof aiStreamRound; requestTimeoutMs?: number },
+    opts?: { streamImpl?: typeof aiStreamRound; requestTimeoutMs?: number; retryStoreTimeoutMs?: number },
   ) {
     this.toolSchemaMode = config.toolSchemaMode ?? 'full';
     this.toolSchemaUserIds = config.toolSchemaUserIds ? new Set(config.toolSchemaUserIds) : undefined;
@@ -582,6 +604,7 @@ export class CalendarBotAgent {
     this.streamImpl = opts?.streamImpl ?? aiStreamRound;
     this.summarizer = config.summarizer;
     this.requestTimeoutMs = opts?.requestTimeoutMs ?? TIMEOUT_MS;
+    this.retryStoreTimeoutMs = opts?.retryStoreTimeoutMs ?? RETRY_STORE_TIMEOUT_MS;
     if (!Number.isSafeInteger(this.requestTimeoutMs) || this.requestTimeoutMs < 1 || this.requestTimeoutMs > TIMEOUT_MS)
       throw new Error(`requestTimeoutMs must be between 1 and ${TIMEOUT_MS}`);
   }
@@ -660,11 +683,12 @@ export class CalendarBotAgent {
    * Tell the user what happened when a run failed.
    *
    * Mid-chain retries stay quiet: the comeback was already promised on the first
-   * failure and repeating it every 30 seconds only adds noise. Everything else
-   * goes through the notice tracker, which decides between a playful stall, an
-   * honest "the AI is down, here is what still works", and silence.
+   * failure and repeating it every 30 seconds only adds noise. A run cut short by
+   * a shutdown says exactly that. Everything else goes through the notice
+   * tracker, which decides between a playful stall, an honest "the AI is down,
+   * here is what still works", and silence.
    */
-  private announceFailure(ctx: AgentContext, error: unknown, writer: TelegramStreamWriter): void {
+  private announceFailure(ctx: AgentContext, error: unknown, writer: TelegramStreamWriter, retry: RetryOutcome): void {
     if (ctx.supplementMode || ctx.wasExplicitInvocation === false) return;
 
     if (error instanceof ProviderSafetyStopError) {
@@ -673,12 +697,27 @@ export class CalendarBotAgent {
       this.saveAssistantTurn(ctx, { role: 'assistant', content: text });
       return;
     }
+    // Before the quiet-retry rule: a retry cut short by a restart is also told so.
+    if (this.shutdown.signal.aborted) {
+      // The pipeline's give-up line already closed this retry chain; a restart notice would contradict it.
+      if (retry === 'gave_up') return;
+      // Promise a comeback only when a retry job was actually stored; when that is unknown, neither
+      // promise one nor ask for a resend that could run the request twice.
+      const text =
+        retry === 'unknown'
+          ? t(ctx.user.language).agent_restarting_unconfirmed
+          : t(ctx.user.language).agent_restarting(retry === 'stored');
+      writer.appendText(`\n\n${text}`);
+      this.saveAssistantTurn(ctx, { role: 'assistant', content: text });
+      return;
+    }
     const hardOutage = isHardOutage(error);
     if ((ctx.retryAttempt ?? 0) > 0 && !hardOutage) return;
 
     const notice = aiFailureNotices.decide(ctx.user.telegram_id, toLang(ctx.user.language), {
       hardOutage,
-      willRetry: typeof ctx.retryEnqueue === 'function',
+      // A stall phrase promises a comeback: only a stored retry can keep it.
+      willRetry: retry === 'stored',
     });
     aiLogger.info({ userId: ctx.user.telegram_id, notice: notice.kind, hardOutage }, 'AI failure notice');
     if (notice.kind === 'silent') return;
@@ -729,9 +768,65 @@ export class CalendarBotAgent {
     ctx.conversationLogger.logToolResults(ctx.user.telegram_id, toSave, chatId);
   }
 
-  async run(ctx: AgentContext): Promise<AgentRunResult> {
+  /**
+   * Shutdown hook: abort every in-flight run and wait until each has taken its
+   * failure path — user notice, durable retry or write evidence, debug log — so
+   * nothing is still writing when the caller closes the queues and the database.
+   * Runs that start while it waits (a queue job, a handler finishing its download)
+   * fail fast and are waited for too. Anything still running after `settleMs` is
+   * logged and left behind.
+   */
+  async drain(settleMs: number): Promise<void> {
+    this.shutdown.abort(new Error('Bot is shutting down'));
+    if (this.inFlight.size === 0) return;
+    const initialInFlight = this.inFlight.size;
+    const deadline = Promise.withResolvers<'timeout'>();
+    const timer = setTimeout(() => deadline.resolve('timeout'), settleMs);
+    try {
+      while (this.inFlight.size > 0) {
+        const outcome = await Promise.race([Promise.allSettled([...this.inFlight]), deadline.promise]);
+        if (outcome === 'timeout') break;
+      }
+      const stillRunning = this.inFlight.size;
+      if (stillRunning > 0)
+        aiLogger.warn({ initialInFlight, stillRunning }, 'Agent runs abandoned at shutdown deadline');
+      else aiLogger.info({ initialInFlight }, 'Agent runs drained for shutdown');
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  run(ctx: AgentContext): Promise<AgentRunResult> {
+    // Registers the exact promise the caller holds, synchronously: the drain must wait for every turn.
+    let dbg: AiDebugRunContext | null = null;
+    try {
+      dbg =
+        this.debugLogger?.createRunContext(
+          ctx.user.telegram_id,
+          ctx.chatId,
+          ctx.user.username,
+          ctx.user.first_name,
+          ctx.groupTitle ?? null,
+          !!ctx.supplementMode,
+          ctx.messageText,
+          ctx.supplementAutoResponse,
+        ) ?? null;
+    } catch (err) {
+      // Debug logging is evidence, not a dependency: the turn still runs without it.
+      aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'AI debug log unavailable for this turn');
+    }
+    const turn = this.runTurn(ctx, dbg).finally(() => {
+      this.inFlight.delete(turn);
+      // Every exit leaves the turn's evidence, including one that threw after its failure path.
+      dbg?.flush();
+    });
+    this.inFlight.add(turn);
+    return turn;
+  }
+
+  private async runTurn(ctx: AgentContext, dbg: AiDebugRunContext | null): Promise<AgentRunResult> {
     const startTime = Date.now();
-    const requestSignal = AbortSignal.timeout(this.requestTimeoutMs);
+    const requestSignal = AbortSignal.any([AbortSignal.timeout(this.requestTimeoutMs), this.shutdown.signal]);
     const requestMetrics = new AgentRequestMetrics();
     const requestId = requestMetrics.requestId;
     aiLogger.info(
@@ -824,17 +919,6 @@ export class CalendarBotAgent {
     const validatorStream = measuredStream('validator');
     const retryStream = measuredStream('retry');
 
-    const dbg: AiDebugRunContext | null =
-      this.debugLogger?.createRunContext(
-        ctx.user.telegram_id,
-        ctx.chatId,
-        ctx.user.username,
-        ctx.user.first_name,
-        ctx.groupTitle ?? null,
-        !!ctx.supplementMode,
-        ctx.messageText,
-        ctx.supplementAutoResponse,
-      ) ?? null;
     const exposure =
       this.toolSchemaMode === 'lazy' &&
       ctx.inputMode !== 'live_call' &&
@@ -877,6 +961,7 @@ export class CalendarBotAgent {
 
     let currentMessages: MessageParam[] = [];
     let runFailed = false;
+    let retry: RetryOutcome = 'not_stored';
     // Stays set until a validation retry produces an explicitly approved answer.
     let responseUnverified = false;
     let runError: unknown;
@@ -1201,9 +1286,26 @@ export class CalendarBotAgent {
         !ctx.supplementMode &&
         ctx.wasExplicitInvocation !== false
       ) {
-        ctx.retryEnqueue(ctx.messageText).catch((err) => {
-          aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to handle retry enqueue');
-        });
+        // Awaited so a shutdown drain does not close the queue under the write, but bounded:
+        // a hung retry store must never hold back the user's failure notice.
+        const stored = ctx.retryEnqueue(ctx.messageText).then(
+          (scheduled): RetryOutcome => (scheduled ? 'stored' : 'gave_up'),
+          (err: unknown): RetryOutcome => {
+            aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to handle retry enqueue');
+            return 'not_stored';
+          },
+        );
+        const storeDeadline = Promise.withResolvers<'timeout'>();
+        const storeTimer = setTimeout(() => storeDeadline.resolve('timeout'), this.retryStoreTimeoutMs);
+        const outcome = await Promise.race([stored, storeDeadline.promise]);
+        clearTimeout(storeTimer);
+        if (outcome === 'timeout') {
+          aiLogger.warn(
+            { userId: ctx.user.telegram_id },
+            'Retry store did not answer in time — not promising a comeback, not asking for a resend',
+          );
+        }
+        retry = outcome === 'timeout' ? 'unknown' : outcome;
       }
     }
 
@@ -1247,7 +1349,7 @@ export class CalendarBotAgent {
       // Execution evidence is durable even in quiet mode; a notice is persisted only when delivered.
       if (validationNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: validationNotice });
     }
-    if (runFailed && !evidence && !validationNotice) this.announceFailure(ctx, runError, writer);
+    if (runFailed && !evidence && !validationNotice) this.announceFailure(ctx, runError, writer, retry);
 
     if (!runFailed && !responseUnverified && !ctx.supplementMode) {
       // The bot answered — any comeback it promised earlier is now settled.
@@ -1256,7 +1358,6 @@ export class CalendarBotAgent {
 
     const finalText = writer.getText().trim();
     dbg?.logFinal(finalText, allToolCalls.length);
-    dbg?.flush();
 
     if (allToolCalls.some((tc) => tc.name === 'end_conversation')) {
       this.debugLogger?.endSession(ctx.chatId);

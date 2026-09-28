@@ -208,7 +208,7 @@ describe('CalendarBotAgent.run()', () => {
       eventReminderRepo,
       // A stall phrase promises a comeback, so the agent only sends one when a
       // retry is actually scheduled. Wire a no-op enqueue for the error tests.
-      retryEnqueue: async () => {},
+      retryEnqueue: async () => true,
     };
     config = {};
     sender = {
@@ -222,7 +222,7 @@ describe('CalendarBotAgent.run()', () => {
   });
 
   test('a validator safety stop is not converted into an execution retry', async () => {
-    const enqueue = mock(async () => {});
+    const enqueue = mock(async () => true);
     ctx.retryEnqueue = enqueue;
     const script = makeStreamImpl([{ kind: 'text', text: 'A response requiring validation.' }]);
     let calls = 0;
@@ -300,7 +300,7 @@ describe('CalendarBotAgent.run()', () => {
 
   test('a completed write survives a later deadline without scheduling a replay', async () => {
     const event = createOwnedEvent();
-    const enqueue = mock(async () => {});
+    const enqueue = mock(async () => true);
     ctx.retryEnqueue = enqueue;
     const script = makeStreamImpl([
       {
@@ -673,7 +673,7 @@ describe('CalendarBotAgent.run()', () => {
         : name === 'update_event'
           ? { event_id: 999999, title: 'Synthetic' }
           : { event_id: 999999, invitee_id: 456 };
-    const enqueue = mock(async () => {});
+    const enqueue = mock(async () => true);
     ctx.retryEnqueue = enqueue;
     const script = makeStreamImpl([
       { kind: 'tool', callId: 'rejected', name, input },
@@ -743,7 +743,7 @@ describe('CalendarBotAgent.run()', () => {
       start_at: '2030-01-01T12:00:00Z',
       timezone: 'UTC',
     });
-    const enqueue = mock(async () => {});
+    const enqueue = mock(async () => true);
     ctx.retryEnqueue = enqueue;
     const script = makeStreamImpl([
       {
@@ -974,7 +974,7 @@ describe('CalendarBotAgent.run()', () => {
   test('confirmed write survives provider interruption without whole-request retry', async () => {
     const event = createOwnedEvent();
     approveDeletes(USER_ID, ctx.chatId, [event.id]);
-    const enqueue = mock(async () => {});
+    const enqueue = mock(async () => true);
     ctx.retryEnqueue = enqueue;
     const script = makeStreamImpl([
       { kind: 'tool', callId: 'delete', name: 'delete_event', input: { event_id: event.id } },
@@ -1126,7 +1126,7 @@ describe('CalendarBotAgent.run()', () => {
           ? Array.from({ length: 14 }, (_, i) => ({ ...failure, callId: `failure-${i}` }))
           : [{ kind: 'error', text: 'Successfully deleted everything.', error: new Error('provider secret') }];
     if (ending === 'quiet-retry') ctx.retryAttempt = 1;
-    const enqueue = mock(async () => {});
+    const enqueue = mock(async () => true);
     ctx.retryEnqueue = enqueue;
     let delivered = '';
     sender.editMessageText = async (_chatId, _messageId, text) => {
@@ -1437,7 +1437,7 @@ describe('CalendarBotAgent.run()', () => {
     sender.editMessageText = async (_chatId, _messageId, text) => {
       delivered = text;
     };
-    ctx.retryEnqueue = async () => {};
+    ctx.retryEnqueue = async () => true;
     await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
     expect(delivered).toContain('<blockquote expandable>');
     expect(delivered).toContain('Удаляю событие');
@@ -1473,7 +1473,7 @@ describe('CalendarBotAgent.run()', () => {
   test('implicit failure stays silent and persists authoritative evidence', async () => {
     ctx.wasExplicitInvocation = false;
     sender.deleteMessage = mock(async () => {});
-    const enqueue = mock(async () => {});
+    const enqueue = mock(async () => true);
     ctx.retryEnqueue = enqueue;
     const { impl } = makeStreamImpl([
       { kind: 'tool', callId: 'failed', name: 'delete_event', input: { event_id: 999999 } },
@@ -2078,7 +2078,7 @@ describe('CalendarBotAgent.run()', () => {
     const { impl } = makeStreamImpl([{ kind: 'error', error: new Error('provider failed') }]);
     const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
 
-    const retryEnqueue = mock(() => Promise.resolve());
+    const retryEnqueue = mock(() => Promise.resolve(true));
     ctx.wasExplicitInvocation = false;
     ctx.retryEnqueue = retryEnqueue;
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);

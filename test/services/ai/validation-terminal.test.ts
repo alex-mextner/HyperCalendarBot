@@ -76,7 +76,7 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
   let ctx: AgentContext;
   let delivered: string[];
   let sender: TelegramSender;
-  const enqueue = mock(async () => {});
+  const enqueue = mock(async () => true);
 
   beforeEach(() => {
     _resetToolThrottleForTest();

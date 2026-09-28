@@ -302,10 +302,35 @@ describe('retry / backoff', () => {
     expect(captured.ctx?.retryEnqueue).toBeFunction();
   });
 
+  test.each([
+    ['cannot be saved', () => Promise.reject(new Error('READONLY You can not write against a read only replica'))],
+    ['never answers', () => Promise.withResolvers<void>().promise],
+  ])('a stored retry counts at once even when its cancellation pointer %s', async (_label, pointerWrite) => {
+    const { deps, addDelayed, jobStoreSet, captured } = makeRetrySetup();
+    jobStoreSet.mockImplementation(pointerWrite);
+    await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 0 });
+    // The job is in the queue and will run: telling the user "send it again" would duplicate it.
+    expect(await captured.ctx!.retryEnqueue!('retry msg')).toBe(true);
+    expect(addDelayed).toHaveBeenCalledTimes(1);
+  });
+
+  test('a spent budget still reports "gave up" when clearing the pointer fails', async () => {
+    const { deps, jobStoreDel, captured } = makeRetrySetup();
+    jobStoreDel.mockImplementation(async () => {
+      throw new Error('READONLY You can not write against a read only replica');
+    });
+    const ctx = makeCtx();
+    await createAiAgentLayer(deps)(ctx, 'msg', { retryAttempt: 3 });
+    // The give-up line went out; a rejection here would make the agent add a contradicting notice.
+    expect(await captured.ctx!.retryEnqueue!('retry msg')).toBe(false);
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+  });
+
   test('attempt=0 → addDelayed called with 30s delay', async () => {
     const { deps, addDelayed, captured } = makeRetrySetup();
     await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 0 });
-    await captured.ctx!.retryEnqueue!('retry msg');
+    // The agent promises a comeback only on true.
+    expect(await captured.ctx!.retryEnqueue!('retry msg')).toBe(true);
     const [, delay] = addDelayed.mock.calls[0] as unknown as [unknown, number];
     expect(delay).toBe(30_000);
   });
@@ -363,7 +388,7 @@ describe('retry / backoff', () => {
     const { deps, captured } = makeRetrySetup();
     const ctx = makeCtx();
     await createAiAgentLayer(deps)(ctx, 'msg', { retryAttempt: 3 });
-    await captured.ctx!.retryEnqueue!('retry msg');
+    expect(await captured.ctx!.retryEnqueue!('retry msg')).toBe(false);
 
     const [sentText] = (ctx.send as ReturnType<typeof mock>).mock.calls[0] as unknown as [string];
     expect(sentText).toContain('Обещал вернуться');

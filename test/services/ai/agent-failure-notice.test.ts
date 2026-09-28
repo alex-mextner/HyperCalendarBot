@@ -122,7 +122,7 @@ describe('agent failure notices', () => {
       conversationLogger: new ConversationLogger(chatHistoryRepo),
       userRepo,
       eventReminderRepo: new EventReminderRepository(db),
-      retryEnqueue: async () => {},
+      retryEnqueue: async () => true,
     };
     config = {};
     probe = makeSenderProbe();
@@ -274,6 +274,26 @@ describe('agent failure notices', () => {
     ctx.retryEnqueue = undefined;
     const agent = new CalendarBotAgent(config, probe.sender, {
       streamImpl: failingStream(new Error('socket hang up')),
+    });
+
+    await agent.run(ctx);
+
+    const text = probe.delivered().join('\n');
+    expect(text).toContain(t('ru').ai_degraded);
+    for (const phrase of RU_AGENT_ERROR_PHRASES) {
+      expect(text).not.toContain(phrase);
+    }
+  });
+
+  test.each([
+    // Redis hung: the turn must not wait on it forever, nor promise a retry it cannot confirm.
+    ['never answers', () => Promise.withResolvers<boolean>().promise],
+    ['rejects the job', () => Promise.reject(new Error('Connection is closed.'))],
+  ])('a retry store that %s → honest message now, no comeback promise', async (_label, retryEnqueue) => {
+    ctx.retryEnqueue = retryEnqueue;
+    const agent = new CalendarBotAgent(config, probe.sender, {
+      streamImpl: failingStream(new Error('Provider timed out')),
+      retryStoreTimeoutMs: 20,
     });
 
     await agent.run(ctx);
