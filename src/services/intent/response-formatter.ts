@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { t, toLang } from '../../config/constants.ts';
 import { formatTime } from '../../utils/date.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
-import { relativeDayWord } from '../ai/empty-agenda.ts';
+import { DAY_MS, relativeDayWord } from '../ai/empty-agenda.ts';
 import type { EventSummary } from './variable-resolver.ts';
 
 const TextMapCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
@@ -76,8 +76,6 @@ export function formatResponse(
     return toolOutput;
   }
 }
-
-const DAY_MS = 86_400_000;
 
 /** One day of a several-day answer: the day that was read and what the read returned for it. */
 export interface DayAnswer {

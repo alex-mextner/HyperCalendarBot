@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { StepResults } from '../../database/repositories/workflow-session.repository.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
-import { isMutationTool } from '../ai/tool-executor.ts';
+import { isMutationTool, isReadOnlyCall } from '../ai/tool-executor.ts';
 import type { ToolResult, ToolResultData } from '../ai/types.ts';
 import { evaluate } from './expression-evaluator.ts';
 import { applyFilters, parseFilterChain } from './filter-parser.ts';
@@ -554,13 +554,13 @@ async function runLevel2(
   };
 }
 
-/** Running a workflow once per day is safe only when it can neither write nor ask. */
+/** Running a workflow once per day is safe only when every step only reads. */
 function isReadOnly(workflow: Workflow): boolean {
   const calls =
     'tools' in workflow
       ? workflow.tools.map((tool) => ({ name: tool.name, input: tool.input }))
       : workflow.steps.flatMap((step) => (step.call === undefined ? [] : [{ name: step.call, input: step.input }]));
-  return calls.every(({ name, input }) => name !== 'ask_user' && !isMutationTool(name, input));
+  return calls.every(({ name, input }) => isReadOnlyCall(name, input));
 }
 
 export class IntentExecutor {

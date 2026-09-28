@@ -336,6 +336,14 @@ export function isMutationTool(toolName: string, input: unknown): boolean {
   );
 }
 
+/**
+ * A call that only reads: its handler is marked readonly and this input writes nothing.
+ * Tools outside the action log can still show something (a picture, a reaction).
+ */
+export function isReadOnlyCall(toolName: string, input: unknown): boolean {
+  return getToolMeta(toolName)?.readonly === true && !isMutationTool(toolName, input);
+}
+
 /** Derived: tools that always result in [SKIP] — no status message or tool label. */
 export const SILENT_TOOLS = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.silent),
