@@ -63,6 +63,16 @@ describe('checkGrounding — clock times', () => {
     const failed: ToolEvidence = { ...WEEK_READ, success: false };
     expect(ungrounded('Урок в 12:30.', [failed])).toEqual(['12:30']);
   });
+
+  test('a computed conversion is not calendar evidence for the UTC clock shown as local', () => {
+    const conversion: ToolEvidence = {
+      name: 'calculate',
+      input: { expression: '2026-09-29 10:30 Europe/Belgrade to UTC' },
+      success: true,
+      output: '2026-09-29T08:30:00.000Z',
+    };
+    expect(ungrounded('Урок во вторник в 10:30.', [WEEK_READ, conversion])).toEqual(['10:30']);
+  });
 });
 
 describe('checkGrounding — calendar days', () => {

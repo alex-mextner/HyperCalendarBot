@@ -298,7 +298,10 @@ function indexEvidence(tools: readonly ToolEvidence[], timezone: string, now: Da
     if (!tool.success) continue;
     if (tool.output) {
       texts.push(tool.output);
-      for (const fact of extractFacts(tool.output, timezone)) addFact(index, fact);
+      // A conversion or other computed output is the model's arithmetic, not calendar data.
+      if (SCHEDULE_READ_TOOLS.has(tool.name)) {
+        for (const fact of extractFacts(tool.output, timezone)) addFact(index, fact);
+      }
     }
     for (const value of Object.values(tool.input)) {
       if (typeof value === 'string') texts.push(value);
