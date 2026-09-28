@@ -34,6 +34,7 @@ import type { SecretaryRepository } from '../../database/repositories/secretary.
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { CreateEventData, Invitation, UpdateEventData, User } from '../../database/types.ts';
+import { buildCanonicalEventCard } from '../../services/event/event-display.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import {
   formatDayAgenda,
@@ -84,7 +85,7 @@ import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
 import { handleSettingsCallback, pendingGroupTzInput } from '../commands/settings.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
-import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
+import { editFieldKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
 import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
 import type { BotCallbackContext } from '../types.ts';
 import { type AgentContinuationDeps, continueWithAgent } from './agent-continuation.ts';
@@ -365,34 +366,42 @@ export function createCallbackHandler(
     await ctx.send(t(lang).callbackErrors.sceneHelpPrompt);
   });
 
-  // Event view
+  // Event view — payload: "42" (master) or "42:2026-03-15T10:00:00Z" (a specific occurrence,
+  // e.g. tapped from a show_event picker). Group chats resolve via getEventForGroup first: a
+  // personal-only lookup here previously 404'd on tap for every group search result (#653).
+  // The occurrenceDate is never trusted as-is: resolveOccurrenceView validates it against the
+  // event's real, current occurrence set (RRULE slot or stored exception), rejecting a
+  // fabricated/stale timestamp instead of rendering an invented instance (#653).
   dispatch.set(CB.EVENT_VIEW, async (ctx, payload, _parts, user) => {
     if (payload === 'cancel') {
       await ctx.answer();
       return ctx.editText(t((user.language ?? 'en') as Lang).callbackErrors.closed);
     }
-    const eventId = Number(payload);
-    const event = eventService.getEvent(eventId, user.telegram_id);
+    const colonIdx = payload.indexOf(':');
+    const eventId = Number(colonIdx === -1 ? payload : payload.slice(0, colonIdx));
+    const occurrenceDate = colonIdx === -1 ? undefined : payload.slice(colonIdx + 1);
     const lang = (user.language ?? 'en') as Lang;
+    const groupId = isGroup(ctx) ? getGroupId(ctx) : null;
+    const event =
+      groupId !== null
+        ? eventService.getEventForGroup(eventId, groupId)
+        : eventService.getEvent(eventId, user.telegram_id);
     if (!event) return ctx.answer({ text: t(lang).callbackErrors.notFound });
-    const detail = formatEventDetail(
-      enrichAgendaEvents(
-        [event],
-        {
-          userId: user.telegram_id,
-          language: user.language as 'en' | 'ru',
-          groupId: isGroup(ctx) ? (getGroupId(ctx) ?? undefined) : undefined,
-        },
-        eventService.agendaRepository,
-      )[0]!,
-      user.timezone,
-      user.language,
-    );
+    const resolved = eventService.resolveOccurrenceView(event, occurrenceDate);
+    if (!resolved) return ctx.answer({ text: t(lang).callbackErrors.notFound });
+    const displayEvent = enrichAgendaEvents(
+      [resolved],
+      {
+        userId: user.telegram_id,
+        language: user.language as 'en' | 'ru',
+        groupId: groupId ?? undefined,
+      },
+      eventService.agendaRepository,
+    )[0]!;
+    const timezone = groupId !== null ? (groupRepo?.getTimezone(groupId) ?? user.timezone) : user.timezone;
+    const card = buildCanonicalEventCard(displayEvent, timezone, user.language as 'en' | 'ru', occurrenceDate);
     await ctx.answer();
-    return editAgendaText(ctx, detail, {
-      parse_mode: 'HTML',
-      reply_markup: eventActionsKeyboard(eventId, user.language as 'en' | 'ru'),
-    });
+    return editAgendaText(ctx, card.text, { parse_mode: 'HTML', reply_markup: card.keyboard });
   });
 
   // Event edit — payload: "42" (one-off) or "42:2026-03-15T10:00:00Z" (recurring)

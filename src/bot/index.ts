@@ -55,6 +55,7 @@ import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
 import { handleEdit } from './commands/edit.ts';
+import { handleEvent } from './commands/event.ts';
 import { handleFree } from './commands/free.ts';
 import { handleGoogleStatus } from './commands/google-status.ts';
 import { handleHelp } from './commands/help.ts';
@@ -619,6 +620,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .command('edit', (ctx) => handleEdit(ctx, eventService, db.groupChats))
     .command('delete', (ctx) => handleDelete(ctx, eventService, db.groupChats))
     .command('search', (ctx) => handleSearch(ctx, eventService, db.groupChats))
+    .command('event', (ctx) => handleEvent(ctx, eventService, db.groupChats))
     .command('free', (ctx) => handleFree(ctx, eventService, holidayService, db.groupChats))
     .command('settings', (ctx) => handleSettings(ctx, db.groupChats))
     .command('import', (ctx) => handleImport(ctx, scenesSetup.scenes.importScene, db.groupChats))
