@@ -5,10 +5,14 @@
 // behavior of `parseWizardDateTime` (src/bot/scenes/add-event.scene.ts) and `parseTime`
 // (src/services/intent/workflow-bindings.ts): PR562 documented that the add wizard
 // accepted a bare "2" as an implicit 02:00 while the intent path rejected the identical
-// input outright, on the same commit. Both legacy functions are left untouched by this
-// slice and keep serving live traffic; this module is not wired into either call site yet
-// (that wiring, and preserving the legacy wrapper for active sessions until it is flag-
-// gated, is GH-652). See wall-time-adapters.ts for the two future call-site shapes.
+// input outright, on the same commit.
+//
+// Wired into add-event.scene.ts's step-1 time question (bounded GH-652 legacy-UX repair,
+// PR682/GH-682-live-add-time — see resolveWizardWallTime in wall-time-adapters.ts and its
+// call site) once a date is pending: the bare-"2" guess above no longer happens on that
+// path. `parseTime` in workflow-bindings.ts (the intent entry point) is untouched by this
+// slice — GH-652's full v3 runtime still owns wiring `resolveIntentWallTime` there and
+// flag-gating the legacy wrapper for in-flight sessions across that cutover.
 //
 // Scope: this parser resolves TIME OF DAY and the all-day/timed axis against an already-
 // resolved `selectedDate`. It does not parse free-text dates (weekdays, month names,
@@ -90,6 +94,26 @@ const WORD_TIMES: Record<string, { hour: number; minute: number }> = {
   midnight: { hour: 0, minute: 0 },
 };
 
+// Closed lexicon (GH-650 follow-up): spelled-out Russian hour words 1-12 only, exactly the
+// bare-hour ambiguity window. Not a general numeral parser — an hour above this range (or any
+// other spelled-out number) stays unparseable rather than guessed.
+const RUSSIAN_HOUR_WORDS: Readonly<Record<string, number>> = {
+  один: 1,
+  два: 2,
+  три: 3,
+  четыре: 4,
+  пять: 5,
+  шесть: 6,
+  семь: 7,
+  восемь: 8,
+  девять: 9,
+  десять: 10,
+  одиннадцать: 11,
+  двенадцать: 12,
+};
+
+const PREFIX_SHAPE = /^(?:в|at)\s+/;
+
 const CLOCK_SHAPE = /^(?:(?:в|at)\s+)?(\d{1,2})(?::(\d{2}))?(?:\s*(am|pm|утра|дня|вечера|ночи))?$/;
 
 type ClockShape =
@@ -102,7 +126,10 @@ type ClockShape =
 function hourFromSuffix(hour: number, suffix: string): number | 'invalid' {
   if (suffix === 'am') return hour >= 1 && hour <= 12 ? hour % 12 : 'invalid';
   if (suffix === 'pm') return hour >= 1 && hour <= 12 ? (hour % 12) + 12 : 'invalid';
-  if (suffix === 'утра') return hour >= 4 && hour <= 11 ? hour : 'invalid';
+  // 1-11 covers the whole stated morning period, including the early "2 утра"/"3 утра" hours
+  // that are grammatically identical to "2/3 ночи" — both forms are accepted, never rejected
+  // just because a hand-picked "typical" sub-range excluded them (GH-650 follow-up).
+  if (suffix === 'утра') return hour >= 1 && hour <= 11 ? hour : 'invalid';
   if (suffix === 'дня') return hour === 12 ? 12 : hour >= 1 && hour <= 6 ? hour + 12 : 'invalid';
   if (suffix === 'вечера') return hour >= 4 && hour <= 11 ? hour + 12 : 'invalid';
   if (suffix === 'ночи')
@@ -110,11 +137,28 @@ function hourFromSuffix(hour: number, suffix: string): number | 'invalid' {
   return 'invalid';
 }
 
-function parseClockShape(normalized: string): ClockShape {
-  const word = WORD_TIMES[normalized];
-  if (word) return { kind: 'literal', hour: word.hour, minute: word.minute };
+/** Replaces a bare Russian hour-word token ("два") with its digit ("2"); every other token is untouched. */
+function substituteRussianHourWords(normalized: string): string {
+  return normalized
+    .split(' ')
+    .map((token) => (Object.hasOwn(RUSSIAN_HOUR_WORDS, token) ? String(RUSSIAN_HOUR_WORDS[token]) : token))
+    .join(' ');
+}
 
-  const match = CLOCK_SHAPE.exec(normalized);
+function parseClockShape(normalized: string): ClockShape {
+  // Word-times (полдень/noon/полночь/midnight) are looked up with the "в"/"at" prefix already
+  // stripped — WORD_TIMES only stores the bare word, so "в полдень"/"at midnight" must be
+  // stripped first or the lookup always misses (GH-650 follow-up). `Object.hasOwn` (not a
+  // truthy/`in` check) guards against inherited Object.prototype members: an input that happens
+  // to equal "constructor"/"__proto__"/"toString" must stay unparseable, never resolve to a
+  // function value that then produces a false DST-gap result downstream.
+  const stripped = normalized.replace(PREFIX_SHAPE, '');
+  if (Object.hasOwn(WORD_TIMES, stripped)) {
+    const word = WORD_TIMES[stripped]!;
+    return { kind: 'literal', hour: word.hour, minute: word.minute };
+  }
+
+  const match = CLOCK_SHAPE.exec(substituteRussianHourWords(normalized));
   if (!match) return { kind: 'unparseable' };
   const hour = Number(match[1]);
   const minuteText = match[2];

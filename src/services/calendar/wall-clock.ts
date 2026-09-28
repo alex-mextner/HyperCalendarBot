@@ -121,3 +121,22 @@ export function resolveWallInstant(
     ],
   };
 }
+
+/**
+ * UTC instant of local midnight for a calendar day in a zone, rendered with that zone's actual
+ * offset (via `TZDate#toISOString`) so the date prefix always equals the calendar day — the
+ * minimal storage shape an all-day event needs to survive julianday() range queries AND naive
+ * date-prefix extraction (Google's `start.date`/`end.date`, `free-slots.ts`'s `allDaySpan`)
+ * without a second schema or a UTC-midnight approximation that silently shifts in negative zones.
+ * `null` when that midnight was skipped entirely by a clock change (e.g. Pacific/Apia's
+ * 2011-12-30, erased outright when the International Date Line moved) — reject rather than
+ * silently normalize onto a neighboring day. A repeated (fall-back) midnight resolves to its
+ * earliest instant: the day boundary itself, not a chosen wall-clock time, has no ambiguity to ask
+ * the user about.
+ */
+export function localMidnightInstant(day: CalendarDay, timezone: string): string | null {
+  const resolution = resolveWallInstant(day, 0, 0, timezone);
+  if (resolution.kind === 'gap') return null;
+  const ms = resolution.kind === 'unique' ? resolution.ms : resolution.instants[0].ms;
+  return new TZDate(ms, timezone).toISOString();
+}

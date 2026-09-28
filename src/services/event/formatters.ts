@@ -4,6 +4,7 @@ import { TZDate } from '@date-fns/tz';
 import { type Lang, t } from '../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import {
+  formatCalendarDateShort,
   formatDateHeader,
   formatDateShort,
   formatDuration,
@@ -157,10 +158,10 @@ export function formatEventDetail(
     }
   }
 
-  const dateStr = formatDateShort(event.start_at, timezone, lang);
   if (event.all_day) {
-    lines.push(`📅 ${dateStr}, ${l.allDayInline}`);
+    lines.push(`📅 ${formatCalendarDateShort(event.start_at.slice(0, 10), lang)}, ${l.allDayInline}`);
   } else {
+    const dateStr = formatDateShort(event.start_at, timezone, lang);
     const time = formatTimeRange(event.start_at, event.end_at, timezone);
     if (event.end_at) {
       const duration = formatDuration(event.start_at, event.end_at, lang);

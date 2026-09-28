@@ -369,6 +369,163 @@ describe('add_event step handlers', () => {
       expect(patch.pendingDate).toMatch(/-25$/);
       expect(options).toEqual({ step: undefined });
     });
+
+    test('pendingDate set — a bare ambiguous hour offers candidates and writes nothing', async () => {
+      const ctx = makeCtx({ stepId: 1, text: '2', lang: 'ru', state: { pendingDate: '2026-06-15' } });
+      await fns[1]!(ctx, NOOP_NEXT);
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
+      expect(msg).toMatch(/время/i);
+    });
+
+    test('pendingDate set — picking the "add:time:HH:MM" candidate resolves that exact instant', async () => {
+      const ctx = makeCtx({
+        activeType: 'callback_query',
+        stepId: 1,
+        data: `${CB.ADD_TIME_CHOICE}:14:00`,
+        state: { pendingDate: '2026-06-15' },
+      });
+      await fns[1]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update).toHaveBeenCalledWith({
+        startAt: '2026-06-15T11:00:00.000Z',
+        endAt: undefined,
+        pendingDate: undefined,
+        allDay: false,
+      });
+    });
+
+    test('pendingDate set — a candidate re-resolved into a DST gap is rejected, not silently accepted', async () => {
+      const ctx = makeCtx({
+        activeType: 'callback_query',
+        stepId: 1,
+        data: `${CB.ADD_TIME_CHOICE}:02:00`,
+        state: { pendingDate: '2026-03-29' },
+        lang: 'ru',
+        text: undefined,
+      });
+      ctx.dbUser.timezone = 'Europe/Belgrade';
+      await fns[1]!(ctx, NOOP_NEXT);
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
+      expect(msg).toMatch(/разобрать/);
+    });
+
+    test('pendingDate set — a forged fold-candidate callback for an arbitrary date is rejected', async () => {
+      const ctx = makeCtx({
+        activeType: 'callback_query',
+        stepId: 1,
+        data: `${CB.ADD_TIME_CHOICE}:2099-01-01T00:00:00+00:00`,
+        state: { pendingDate: '2026-06-15' },
+        lang: 'ru',
+      });
+      await fns[1]!(ctx, NOOP_NEXT);
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
+      expect(msg).toMatch(/разобрать/);
+    });
+
+    test('pendingDate set — a real fold candidate for this exact pendingDate is accepted', async () => {
+      const ctx = makeCtx({
+        activeType: 'callback_query',
+        stepId: 1,
+        data: `${CB.ADD_TIME_CHOICE}:2026-10-25T02:00:00+02:00`,
+        state: { pendingDate: '2026-10-25' },
+      });
+      ctx.dbUser.timezone = 'Europe/Belgrade';
+      await fns[1]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update).toHaveBeenCalledWith({
+        startAt: '2026-10-25T00:00:00.000Z',
+        endAt: undefined,
+        pendingDate: undefined,
+        allDay: false,
+      });
+    });
+
+    test('pendingDate set — the All day callback marks all_day and stores an exclusive next-day end', async () => {
+      const ctx = makeCtx({
+        activeType: 'callback_query',
+        stepId: 1,
+        data: CB.ADD_ALL_DAY,
+        state: { pendingDate: '2026-06-15' },
+      });
+      await fns[1]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update).toHaveBeenCalledWith(
+        {
+          // The default mock user's timezone is Europe/Moscow (+03:00, no DST), so local
+          // midnight renders "+03:00", not "Z" — @date-fns/tz's TZDate#toISOString always
+          // spells out an explicit offset.
+          startAt: '2026-06-15T00:00:00.000+03:00',
+          endAt: '2026-06-16T00:00:00.000+03:00',
+          pendingDate: undefined,
+          allDay: true,
+        },
+        { step: 3 },
+      );
+    });
+
+    test('pendingDate set — the All day callback in a negative-offset zone keeps the chosen calendar date', async () => {
+      const ctx = makeCtx({
+        activeType: 'callback_query',
+        stepId: 1,
+        data: CB.ADD_ALL_DAY,
+        state: { pendingDate: '2027-03-10' },
+      });
+      ctx.dbUser.timezone = 'America/New_York';
+      await fns[1]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update).toHaveBeenCalledWith(
+        {
+          // Naive "...T00:00:00.000Z" storage would read back as March 9 anywhere west of UTC;
+          // the actual local-midnight instant (-05:00 in March, before New York's DST start)
+          // keeps both the start and the exclusive end on their real calendar day.
+          startAt: '2027-03-10T00:00:00.000-05:00',
+          endAt: '2027-03-11T00:00:00.000-05:00',
+          pendingDate: undefined,
+          allDay: true,
+        },
+        { step: 3 },
+      );
+    });
+
+    test('pendingDate set — Change date clears the pending time state and re-asks the date question', async () => {
+      const ctx = makeCtx({
+        activeType: 'callback_query',
+        stepId: 1,
+        data: CB.ADD_CHANGE_DATE,
+        lang: 'ru',
+        state: { pendingDate: '2026-06-15', startAt: '2026-06-15T00:00:00.000Z', allDay: true },
+      });
+      await fns[1]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update).toHaveBeenCalledWith(
+        { pendingDate: undefined, startAt: undefined, endAt: undefined, allDay: false },
+        { step: undefined },
+      );
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
+      expect(msg).toMatch(/когда/i);
+    });
+
+    test('pendingDate set — an unknown-time phrase asks for a time or All day, without writing', async () => {
+      const ctx = makeCtx({ stepId: 1, text: 'время пока не знаю', lang: 'ru', state: { pendingDate: '2026-06-15' } });
+      await fns[1]!(ctx, NOOP_NEXT);
+      expect(
+        ctx.scene.update.mock.calls.filter(([patch]) => Object.keys(patch).some((key) => key !== 'promptMessageId')),
+      ).toHaveLength(0);
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
+      expect(msg).toMatch(/весь день/i);
+    });
+
+    test('pendingDate set — a full date correction replaces the stale pending date instead of failing as a time', async () => {
+      const ctx = makeCtx({ stepId: 1, text: '26 сен 20:00', lang: 'ru', state: { pendingDate: '2026-01-01' } });
+      await fns[1]!(ctx, NOOP_NEXT);
+      const [patch] = ctx.scene.update.mock.calls[0] as unknown as [{ startAt?: string; pendingDate?: string }];
+      expect(patch.pendingDate).toBeUndefined();
+      expect(typeof patch.startAt).toBe('string');
+    });
   });
 
   // --- Step 2: Duration ---
