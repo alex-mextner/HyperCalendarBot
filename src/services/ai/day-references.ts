@@ -118,9 +118,12 @@ const PERIOD_WORD = /^(?:недел|выходн|будн|месяц|week|weeken
 const UNTIL_WORDS = new Set(['до', 'к', 'ко', 'by', 'until', 'till', 'before']);
 const FROM_WORDS = new Set(['с', 'со', 'from']);
 const TO_WORDS = new Set(['по', 'to', 'through']);
-/** "по Москве", "по Токио": a place-named time, written with a capital as city names are. */
-const FOREIGN_ZONE = /(?:^|[^\p{L}])[Пп]о\s+[А-ЯЁA-Z]/u;
-const ZONE_ABBREVIATION = /^(?:мск|msk|utc|gmt)$/;
+/**
+ * "по Москве", "по Токио": a place-named time, written with a capital as city names are;
+ * right after a time ("в 23:30 по нью-йорку", "в 10 утра по киеву") a place in any case.
+ */
+const FOREIGN_ZONE = /(?:^|[^\p{L}])[Пп]о\s+[А-ЯЁA-Z]|(?:\d|утра|дня|вечера|ночи|час\p{L}*)\s+по\s+\p{L}/u;
+const ZONE_ABBREVIATION = /^(?:мск|msk|utc|gmt|pst|pdt|est|edt|cst|cdt|mst|mdt|cet|cest|eet|eest|bst|jst|aest|aedt)$/;
 
 /** Month words as whole lower-case tokens, January first. */
 const MONTH_TOKENS: readonly RegExp[] = [
@@ -633,13 +636,17 @@ export function describeWeekdayDateMismatches(mismatches: WeekdayDateMismatch[])
 }
 
 /** "18:30", "18.30", "12-30" — clock times as users type them. */
-const CLOCK_TIMES = /(?<![\d.:-])([01]?\d|2[0-3])[:.-]([0-5]\d)(?![\d.:-])/g;
-/** "в 8", "в 7 вечера": an hour after "в", with an optional part of the day; "в 18.30" is a clock time. */
+const CLOCK_TIMES = /(?<![\d.:-])([01]?\d|2[0-3])([:.-])([0-5]\d)(?![\d.:-])/g;
+/**
+ * "в 8", "в 7 вечера", "в 12 часов ночи": an hour after "в", with an optional hour word and
+ * part of the day; "в 18.30" is a clock time.
+ */
 const BARE_HOUR =
-  /(?<![\p{L}\d])в\s+([01]?\d|2[0-3])(?:\s*(утра|дня|вечера|ночи|час[аов]*|ч)(?!\p{L}))?(?=$|[\s,;!?)]|\.(?!\d))/gu;
-/** "раз в 3 дня", "в 2 раза": a count, not a clock time. */
+  /(?<![\p{L}\d])в\s+([01]?\d|2[0-3])(?:\s*(?:час[аов]*|ч)(?!\p{L}))?(?:\s*(утра|дня|вечера|ночи)(?!\p{L}))?(?=$|[\s,;!?)]|\.(?!\d))/gu;
+/** "раз в 3 дня", "в 2 раза", "в 3 подхода": a count or a measure, not a clock time. */
 const COUNT_BEFORE = /(?<![\p{L}])раз\s*$/u;
-const COUNT_AFTER = /^\s*раза?(?![\p{L}])/u;
+const COUNT_AFTER =
+  /^\s*(?:раза?|подход\p{L}*|шаг\p{L}*|человек\p{L}*|км|километр\p{L}*|метр\p{L}*|литр\p{L}*|минут\p{L}*|штук\p{L}*|процент\p{L}*)(?![\p{L}])/u;
 
 /** The hour an hour word means, or null for midnight: "в 12 ночи" is the start of tomorrow. */
 function clockHour(hour: number, part: string | undefined): number | null {
@@ -659,11 +666,14 @@ function clockHour(hour: number, part: string | undefined): number | null {
  */
 export function timeOnlyToday(text: string, now: Date, timezone: string): DayReferenceSet | null {
   if (readDayContent(text, now, timezone).kind !== 'none') return null;
-  const normalized = text.toLowerCase();
+  // "17:00-18:00" is two times: the dash between them is a space for the time pattern.
+  const normalized = text.toLowerCase().replace(/(\d[:.]\d\d)-(?=\d{1,2}[:.]\d\d)/g, '$1 ');
   if (FOREIGN_ZONE.test(text) || tokens(normalized).some((token) => ZONE_ABBREVIATION.test(token.word))) return null;
   const minutes: { phrase: string; at: number }[] = [];
   for (const match of normalized.matchAll(CLOCK_TIMES)) {
-    minutes.push({ phrase: match[0], at: Number(match[1]) * 60 + Number(match[2]) });
+    // "в 12.05" may equally be 12 May: a time that can also be a date says nothing about today.
+    if (match[2] === '.' && Number(match[3]) >= 1 && Number(match[3]) <= 12) return null;
+    minutes.push({ phrase: match[0], at: Number(match[1]) * 60 + Number(match[3]) });
   }
   for (const match of normalized.matchAll(BARE_HOUR)) {
     const start = match.index ?? 0;
