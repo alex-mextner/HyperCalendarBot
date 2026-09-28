@@ -384,8 +384,11 @@ test('the All day button sets all_day, skips the duration step, and stores an ex
   await r.click('ar:none');
   const event = await finishDraft(r);
   expect(event.all_day).toBe(1);
-  expect(event.start_at).toBe('2027-03-10T00:00:00.000Z');
-  expect(event.end_at).toBe('2027-03-11T00:00:00.000Z');
+  // Belgrade is UTC+1 in March (before its DST start): local midnight is 00:00+01:00, not
+  // 00:00Z — the naive UTC-midnight bug this fix replaces happened to still name the right day
+  // for this positive offset (see the New York/negative-offset regression test below).
+  expect(event.start_at).toBe('2027-03-10T00:00:00.000+01:00');
+  expect(event.end_at).toBe('2027-03-11T00:00:00.000+01:00');
 });
 
 test('typing "весь день" is equivalent to the All day button', async () => {
@@ -396,8 +399,9 @@ test('typing "весь день" is equivalent to the All day button', async () 
   await r.click('ar:none');
   const event = await finishDraft(r);
   expect(event.all_day).toBe(1);
-  expect(event.start_at).toBe('2027-06-01T00:00:00.000Z');
-  expect(event.end_at).toBe('2027-06-02T00:00:00.000Z');
+  // Belgrade is UTC+2 in June (DST active).
+  expect(event.start_at).toBe('2027-06-01T00:00:00.000+02:00');
+  expect(event.end_at).toBe('2027-06-02T00:00:00.000+02:00');
 });
 
 test('going back out of an all-day draft returns to the date question, skipping the removed duration step', async () => {
@@ -462,4 +466,101 @@ test('English locale: the time question keyboard and ambiguous-time prompt are i
   await r.click('ar:none');
   const event = await finishDraft(r);
   expect(event.start_at).toBe('2027-01-15T13:00:00.000Z');
+});
+
+// ---------------------------------------------------------------------------
+// All-day calendar-date semantics across timezones (GH-652 parent review,
+// issuecomment-5878910926 / PR682 review comment 5345159046): all-day is a DATE range, not a
+// UTC-midnight instant. A negative-offset zone (New York) is the case the parent's real-scene
+// probe (/tmp/hcb-live-add-parent-review.test.ts) caught showing "Mar 9" instead of "Mar 10".
+// ---------------------------------------------------------------------------
+
+test('PARENT all-day case: preview, receipt, storage and the day query all keep the chosen date in a negative-offset zone', async () => {
+  const r = makeRuntime('America/New_York', 'en');
+  await r.send('/add Holiday 2027-03-10');
+  await r.click('add:allday');
+  await r.click('ar:none');
+  await r.click('ask:5');
+  await r.click('ask:6');
+  const preview = r.messages.at(-1)!.text;
+  expect(preview).toContain('Mar 10, 2027');
+  expect(preview).not.toContain('Mar 9, 2027');
+  expect(r.count()).toBe(0);
+  await r.click('add:confirm');
+  expect(r.count()).toBe(1);
+  const event = r.db.events.findById(1, r.userId)!;
+  expect(event.all_day).toBe(1);
+  // Naive UTC midnight ("...T00:00:00.000Z") reads back as March 9 in America/New_York (-05:00
+  // in March); the actual local-midnight instant keeps the real calendar day on both ends.
+  expect(event.start_at).toBe('2027-03-10T00:00:00.000-05:00');
+  expect(event.end_at).toBe('2027-03-11T00:00:00.000-05:00');
+  expect(event.start_at.slice(0, 10)).toBe('2027-03-10');
+  expect(event.end_at!.slice(0, 10)).toBe('2027-03-11');
+  const receipt = r.messages.at(-1)!.text;
+  expect(receipt).toContain('Wed 10');
+  expect(receipt).not.toContain('Tue 9');
+  // The actual EventRepository day-range query (via EventService.getEventsForDay), not just the
+  // stored string: the event must be found on March 10 and NOT bleed into March 9's query.
+  const service = new EventService({ eventRepo: r.db.events });
+  const onChosenDay = service.getEventsForDay(r.userId, new Date('2027-03-10T12:00:00Z'), 'America/New_York');
+  expect(onChosenDay.map((occ) => occ.event.id)).toContain(event.id);
+  const onPriorDay = service.getEventsForDay(r.userId, new Date('2027-03-09T12:00:00Z'), 'America/New_York');
+  expect(onPriorDay.map((occ) => occ.event.id)).not.toContain(event.id);
+});
+
+test('a positive-offset zone (Tokyo) also keeps the chosen all-day calendar date exactly', async () => {
+  const r = makeRuntime('Asia/Tokyo', 'en');
+  await r.send('/add Sakura 2027-04-10');
+  await r.click('add:allday');
+  await r.click('ar:none');
+  await r.click('ask:5');
+  await r.click('ask:6');
+  expect(r.messages.at(-1)!.text).toContain('Apr 10, 2027');
+  await r.click('add:confirm');
+  const event = r.db.events.findById(1, r.userId)!;
+  expect(event.all_day).toBe(1);
+  expect(event.start_at).toBe('2027-04-10T00:00:00.000+09:00');
+  expect(event.end_at).toBe('2027-04-11T00:00:00.000+09:00');
+  const service = new EventService({ eventRepo: r.db.events });
+  const onChosenDay = service.getEventsForDay(r.userId, new Date('2027-04-10T00:30:00Z'), 'Asia/Tokyo');
+  expect(onChosenDay.map((occ) => occ.event.id)).toContain(event.id);
+});
+
+test('a spring-forward all-day event spans 23 real hours, never a fixed 86,400,000ms day', async () => {
+  // New York's clocks skip forward on 2027-03-14 (02:00 -> 03:00): the calendar day from
+  // midnight to midnight is only 23 real hours, not 24 — an implementation that adds
+  // 86_400_000ms instead of resolving the real next local midnight would end 1 hour early.
+  const r = makeRuntime('America/New_York', 'en');
+  await r.send('/add Conference 2027-03-14');
+  await r.click('add:allday');
+  await r.click('ar:none');
+  await r.click('ask:5');
+  await r.click('ask:6');
+  await r.click('add:confirm');
+  const event = r.db.events.findById(1, r.userId)!;
+  expect(event.start_at).toBe('2027-03-14T00:00:00.000-05:00');
+  expect(event.end_at).toBe('2027-03-15T00:00:00.000-04:00');
+  expect(event.end_at!.slice(0, 10)).toBe('2027-03-15');
+  const spanMs = Date.parse(event.end_at!) - Date.parse(event.start_at);
+  expect(spanMs).toBe(23 * 60 * 60 * 1000);
+  expect(spanMs).not.toBe(86_400_000);
+});
+
+test('a fall-back all-day event spans 25 real hours, never a fixed 86,400,000ms day', async () => {
+  // New York's clocks fall back on 2027-11-07 (02:00 -> 01:00): that calendar day is 25 real
+  // hours long.
+  const r = makeRuntime('America/New_York', 'en');
+  await r.send('/add Conference 2027-11-07');
+  await r.click('add:allday');
+  await r.click('ar:none');
+  await r.click('ask:5');
+  await r.click('ask:6');
+  await r.click('add:confirm');
+  const event = r.db.events.findById(1, r.userId)!;
+  expect(event.start_at).toBe('2027-11-07T00:00:00.000-04:00');
+  expect(event.end_at).toBe('2027-11-08T00:00:00.000-05:00');
+  expect(event.end_at!.slice(0, 10)).toBe('2027-11-08');
+  const spanMs = Date.parse(event.end_at!) - Date.parse(event.start_at);
+  expect(spanMs).toBe(25 * 60 * 60 * 1000);
+  expect(spanMs).not.toBe(86_400_000);
 });

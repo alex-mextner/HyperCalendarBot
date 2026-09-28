@@ -457,8 +457,34 @@ describe('add_event step handlers', () => {
       await fns[1]!(ctx, NOOP_NEXT);
       expect(ctx.scene.update).toHaveBeenCalledWith(
         {
-          startAt: '2026-06-15T00:00:00.000Z',
-          endAt: '2026-06-16T00:00:00.000Z',
+          // The default mock user's timezone is Europe/Moscow (+03:00, no DST), so local
+          // midnight renders "+03:00", not "Z" — @date-fns/tz's TZDate#toISOString always
+          // spells out an explicit offset.
+          startAt: '2026-06-15T00:00:00.000+03:00',
+          endAt: '2026-06-16T00:00:00.000+03:00',
+          pendingDate: undefined,
+          allDay: true,
+        },
+        { step: 3 },
+      );
+    });
+
+    test('pendingDate set — the All day callback in a negative-offset zone keeps the chosen calendar date', async () => {
+      const ctx = makeCtx({
+        activeType: 'callback_query',
+        stepId: 1,
+        data: CB.ADD_ALL_DAY,
+        state: { pendingDate: '2027-03-10' },
+      });
+      ctx.dbUser.timezone = 'America/New_York';
+      await fns[1]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update).toHaveBeenCalledWith(
+        {
+          // Naive "...T00:00:00.000Z" storage would read back as March 9 anywhere west of UTC;
+          // the actual local-midnight instant (-05:00 in March, before New York's DST start)
+          // keeps both the start and the exclusive end on their real calendar day.
+          startAt: '2027-03-10T00:00:00.000-05:00',
+          endAt: '2027-03-11T00:00:00.000-05:00',
           pendingDate: undefined,
           allDay: true,
         },
