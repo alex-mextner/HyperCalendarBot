@@ -61,7 +61,7 @@ function timeParts(start: string, end: string | null | undefined, allDay: boolea
   const endIso = end ?? null;
   const parts = [`local: ${formatLocalEventSpan(start, endIso, allDay, timezone)}`];
   if (allDay) {
-    const { first, endExclusive } = allDayDates(start, endIso);
+    const { first, endExclusive } = allDayDates(start, endIso, timezone);
     parts.push(`start_date: ${first}`);
     if (endExclusive) parts.push(`end_date_exclusive: ${endExclusive}`);
     return parts;

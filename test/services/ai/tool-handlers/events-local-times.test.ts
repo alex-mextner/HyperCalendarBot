@@ -169,6 +169,25 @@ describe('local rendering edge cases', () => {
     expect(output).not.toMatch(/local: [^,]*\d{2}:\d{2}/);
   });
 
+  test('an all-day event stored as the local midnight instant keeps its local date', async () => {
+    // The prompt makes the model convert local times to UTC: Belgrade midnight of Mon 28 is 27T22:00Z.
+    const ctx = buildCtx('Europe/Belgrade');
+    const id = seed(ctx, { start_at: '2026-09-27T22:00:00Z', end_at: '2026-09-29T22:00:00Z', all_day: true });
+    expect(await getEventOutput(ctx, id)).toContain(
+      'local: Mon 2026-09-28 – Tue 2026-09-29 all day, start_date: 2026-09-28, end_date_exclusive: 2026-09-30',
+    );
+  });
+
+  test('recurring all-day occurrences stored with an offset stay on their local dates', async () => {
+    const ctx = buildCtx('Europe/Belgrade');
+    seed(ctx, { start_at: '2026-09-28T00:00:00+02:00', all_day: true, recurrence_rule: 'FREQ=DAILY;COUNT=2' });
+    const result = await handleGetEvents(ctx, { start_date: '2026-09-28', end_date: '2026-09-29' });
+    const output = result.output ?? '';
+    expect(output).toContain('local: Mon 2026-09-28 all day, start_date: 2026-09-28');
+    expect(output).toContain('local: Tue 2026-09-29 all day, start_date: 2026-09-29');
+    expect(output).not.toContain('Sun 2026-09-27');
+  });
+
   test('a multi-day all-day event treats the later end date as exclusive', async () => {
     const ctx = buildCtx('Europe/Belgrade');
     const id = seed(ctx, { start_at: '2026-09-27', end_at: '2026-09-30', all_day: true });

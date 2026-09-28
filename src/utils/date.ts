@@ -45,13 +45,29 @@ export function formatTimeRange(startUtc: string, endUtc: string | null, timezon
 const LOCAL_DAY = 'EEE yyyy-MM-dd';
 
 /**
- * The calendar dates of an all-day value: the date part of each (all-day values are floating
- * dates). A later end date is exclusive (the Google convention); a missing or earlier-or-equal end
- * means a single day, so `endExclusive` is null.
+ * The calendar date an all-day value stands for. Date-only values and UTC midnights (Google sync,
+ * birthdays) are floating dates: their UTC date part. Any other instant is the user's local midnight
+ * converted to UTC (the model resolves local dates to UTC, e.g. Belgrade Mon 28 → 27T22:00Z), so it
+ * is read on the user's wall clock.
  */
-export function allDayDates(startIso: string, endIso: string | null): { first: string; endExclusive: string | null } {
-  const first = startIso.slice(0, 10);
-  const end = endIso?.slice(0, 10);
+function allDayCalendarDate(value: string, timezone: string): string {
+  const ms = Date.parse(value);
+  if (ms % 86_400_000 === 0) return new Date(ms).toISOString().slice(0, 10);
+  return format(new TZDate(ms, timezone), 'yyyy-MM-dd');
+}
+
+/**
+ * The calendar dates of an all-day event (see allDayCalendarDate). A later end date is exclusive
+ * (the Google convention); a missing or earlier-or-equal end means a single day, so `endExclusive`
+ * is null.
+ */
+export function allDayDates(
+  startIso: string,
+  endIso: string | null,
+  timezone: string,
+): { first: string; endExclusive: string | null } {
+  const first = allDayCalendarDate(startIso, timezone);
+  const end = endIso ? allDayCalendarDate(endIso, timezone) : null;
   return { first, endExclusive: end && end > first ? end : null };
 }
 
@@ -67,12 +83,13 @@ export function formatLocalEventSpan(
   timezone: string,
 ): string {
   if (allDay) {
-    const { first, endExclusive } = allDayDates(startIso, endIso);
+    const { first, endExclusive } = allDayDates(startIso, endIso, timezone);
     const firstDay = format(localCalendarDate(first, timezone), LOCAL_DAY);
     if (!endExclusive) return `${firstDay} all day`;
     const lastDay = format(addDays(localCalendarDate(endExclusive, timezone), -1), LOCAL_DAY);
     return lastDay === firstDay ? `${firstDay} all day` : `${firstDay} – ${lastDay} all day`;
   }
+  // Parse to an instant first: a date-only string passed to TZDate would be read as zone midnight.
   const start = new TZDate(new Date(startIso), timezone);
   const zone = `(${timezone})`;
   if (!endIso) return `${format(start, `${LOCAL_DAY} HH:mm`)} ${zone}`;
