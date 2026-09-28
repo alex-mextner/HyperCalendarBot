@@ -154,6 +154,37 @@ describe('a message with only a clock time', () => {
     expect(turn && [...turn.allowedDates]).toEqual(['2026-09-17']);
   });
 
+  test('"по … времени" is a zone wherever the phrase ends', () => {
+    const eight = new Date('2026-09-16T18:00:00Z');
+    expect(timeOnlyToday('созвон в 23:30 по токийскому времени с Анной', eight, TZ)).toBeNull();
+  });
+
+  test('a capitalised word ending in T is no zone: GPT, TEXT, MEET', () => {
+    for (const text of ['18:30 скинуть TEXT Соне', 'в 18:30 MEET с Леной', '18:30 проверить GPT']) {
+      expect(timeOnlyToday(text, WEDNESDAY_MORNING, TZ)?.allowedDates).toEqual(new Set(['2026-09-16']));
+    }
+    // Nor does it widen a named day to its neighbours.
+    const turn = resolveTurnDayReferences('Напомни завтра проверить GPT', [], WEDNESDAY_MORNING, TZ);
+    expect(turn && [...turn.allowedDates]).toEqual(['2026-09-17']);
+    expect(timeOnlyToday('созвон в 23:30 hst', new Date('2026-09-16T18:00:00Z'), TZ)).toBeNull();
+  });
+
+  test('a time at the end of a sentence is still a time', () => {
+    expect(timeOnlyToday('ужин в 18:30.', WEDNESDAY_MORNING, TZ)?.allowedDates).toEqual(new Set(['2026-09-16']));
+    expect(timeOnlyToday('ужин в 18.30.', WEDNESDAY_MORNING, TZ)?.allowedDates).toEqual(new Set(['2026-09-16']));
+    // A dotted date is not.
+    expect(timeOnlyToday('встреча 18.10.2026', WEDNESDAY_MORNING, TZ)).toBeNull();
+  });
+
+  test('a numbered place after "в" is no hour: "в 7 классе", "в 3 корпусе"', () => {
+    const six = new Date('2026-09-16T04:00:00Z');
+    for (const text of ['У ребёнка в 7 классе родительское собрание', 'лекция в 3 корпусе', 'сидим в 5 ряду']) {
+      expect(timeOnlyToday(text, six, TZ)).toBeNull();
+    }
+    // An event word after the hour keeps it an hour.
+    expect(timeOnlyToday('в 7 собрание', six, TZ)?.allowedDates).toEqual(new Set(['2026-09-16']));
+  });
+
   test('the phrase quoted back to the model is the time itself', () => {
     const set = timeOnlyToday('ужин.в 7 вечера', WEDNESDAY_MORNING, TZ);
     expect(set?.references.map((reference) => reference.phrase)).toEqual(['в 7 вечера']);

@@ -120,9 +120,9 @@ const FROM_WORDS = new Set(['с', 'со', 'from']);
 const TO_WORDS = new Set(['по', 'to', 'through']);
 /** "по Москве", "по Токио": a place-named time, written with a capital as city names are. */
 const FOREIGN_ZONE = /(?:^|[^\p{L}])[Пп]о\s+[А-ЯЁA-Z]/u;
-/** "HST", "KST", "CEST": an upper-case zone abbreviation, beyond the ones listed below. */
-const ZONE_ACRONYM = /(?<![\p{L}])[A-Z]{2,4}T(?![\p{L}])/u;
-const ZONE_ABBREVIATION = /^(?:мск|msk|utc|gmt|pst|pdt|est|edt|cst|cdt|mst|mdt|cet|cest|eet|eest|bst|jst|aest|aedt)$/;
+/** Zone abbreviations as whole lower-case tokens; a closed list, since "GPT" or "MEET" is no zone. */
+const ZONE_ABBREVIATION =
+  /^(?:мск|msk|utc|gmt|pst|pdt|est|edt|cst|cdt|mst|mdt|hst|hdt|akst|akdt|cet|cest|eet|eest|bst|ist|pkt|ict|wib|sgt|hkt|pht|kst|jst|awst|acst|acdt|aest|aedt|nzst|nzdt)$/;
 
 /** Month words as whole lower-case tokens, January first. */
 const MONTH_TOKENS: readonly RegExp[] = [
@@ -318,7 +318,7 @@ export function readDayContent(text: string, now: Date, timezone: string): DayCo
   const allowed = new Set<string>(explicit.dates);
   // "завтра в 3 по Токио" is a day earlier in Belgrade: a day named in another zone may
   // land on the neighbouring day of the user's own calendar.
-  const otherZone = FOREIGN_ZONE.test(text) || ZONE_ACRONYM.test(text) || has(ZONE_ABBREVIATION);
+  const otherZone = FOREIGN_ZONE.test(text) || has(ZONE_ABBREVIATION);
   let rangeStart: string | undefined;
   for (const reference of references) {
     for (const date of reference.dates) {
@@ -635,9 +635,14 @@ export function describeWeekdayDateMismatches(mismatches: WeekdayDateMismatch[])
 }
 
 /** "18:30", "18.30", "12-30", "7:30 вечера" — clock times as users type them. */
-const CLOCK_TIMES = /(?<![\d.:-])([01]?\d|2[0-3])([:.-])([0-5]\d)(?![\d.:-])(?:\s*(утра|дня|вечера|ночи)(?!\p{L}))?/gu;
-/** "в 23:30 по нью-йорку": a lower-case place right after a time, ending the phrase. */
-const TIME_BY_PLACE = /(?:\d|утра|дня|вечера|ночи|час\p{L}*)\s+по\s+[\p{L}-]+(?:\s+времени)?\s*(?:$|[.,;!?)])/u;
+const CLOCK_TIMES =
+  /(?<![\d.:-])([01]?\d|2[0-3])([:.-])([0-5]\d)(?![\d:-]|\.\d)(?:\s*(утра|дня|вечера|ночи)(?!\p{L}))?/gu;
+/**
+ * "в 23:30 по нью-йорку", "в 23:30 по токийскому времени с Анной": a lower-case place right after
+ * a time, ending the phrase or followed by "времени".
+ */
+const TIME_BY_PLACE =
+  /(?:\d|утра|дня|вечера|ночи|час\p{L}*)\s+по\s+[\p{L}-]+(?:\s+времени(?!\p{L})|\s*(?:$|[.,;!?)]))/u;
 /**
  * "в 8", "в 7 вечера", "в 12 часов ночи": an hour after "в", with an optional hour word and
  * part of the day; "в 18.30" is a clock time.
@@ -648,6 +653,11 @@ const BARE_HOUR =
 const COUNT_BEFORE = /(?<![\p{L}])раз\s*$/u;
 const COUNT_AFTER =
   /^\s*(?:раза?|подход\p{L}*|шаг\p{L}*|человек\p{L}*|км|километр\p{L}*|метр\p{L}*|литр\p{L}*|минут\p{L}*|штук\p{L}*|процент\p{L}*)(?![\p{L}])/u;
+/**
+ * "в 7 классе", "в 3 корпусе", "в 5 ряду": a number naming a place, whose noun is in the locative.
+ * "в 7 собрание" keeps its hour; a noun this also skips ("в 10 кофе") only loses the constraint.
+ */
+const NUMBERED_PLACE = /^\s+\p{L}*(?:[^\P{L}иь]е|ии|[ую])(?![\p{L}])/u;
 
 /** The hour an hour word means, or null for midnight: "в 12 ночи" is the start of tomorrow. */
 function clockHour(hour: number, part: string | undefined): number | null {
@@ -671,7 +681,6 @@ export function timeOnlyToday(text: string, now: Date, timezone: string): DayRef
   const normalized = text.toLowerCase().replace(/(\d[:.]\d\d)-(?=\d{1,2}[:.]\d\d)/g, '$1 ');
   if (
     FOREIGN_ZONE.test(text) ||
-    ZONE_ACRONYM.test(text) ||
     TIME_BY_PLACE.test(normalized) ||
     tokens(normalized).some((token) => ZONE_ABBREVIATION.test(token.word))
   )
@@ -688,7 +697,9 @@ export function timeOnlyToday(text: string, now: Date, timezone: string): DayRef
     const start = match.index ?? 0;
     const before = normalized.slice(0, start);
     const after = normalized.slice(start + match[0].length);
-    if (COUNT_BEFORE.test(before) || COUNT_AFTER.test(after)) continue;
+    // A bare "в 7" before a numbered place names the place; "в 7 часов"/"в 7 утра" is an hour.
+    const place = /\d$/.test(match[0]) && NUMBERED_PLACE.test(after);
+    if (COUNT_BEFORE.test(before) || COUNT_AFTER.test(after) || place) continue;
     const hour = clockHour(Number(match[1]), match[2]);
     if (hour === null) return null;
     minutes.push({ phrase: match[0], at: hour * 60 });
