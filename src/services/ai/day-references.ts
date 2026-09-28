@@ -415,6 +415,14 @@ const ABBREVIATION =
   /^(?:пн|вт|ср|чт|пт|сб|вс|mon|tues?|wed|thu(?:rs?)?|fri|sat|sun|янв|фев|мар|апр|авг|сент?|окт|нояб?|дек|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)$/;
 const GAP_START = /^[ \t,:*_()\-–—.]+/;
 const GAP_END = /[ \t,:*_()\-–—.]+$/;
+/**
+ * "в среду и пятницу, 30 сентября и 2 октября": a weekday listed with another one is paired
+ * with its date by position in the list, not with the date written next to it.
+ */
+const LIST_JOIN =
+  '[ \\t]*(?:,[ \\t]*(?:(?:и|или|and|or)[ \\t]+)?|(?:и|или|and|or)[ \\t]+|[&/][ \\t]*)(?:(?:в|во|on)[ \\t]+)?';
+const LISTED_AFTER = new RegExp(`(?<![\\p{L}])${WD}${LIST_JOIN}$`, 'u');
+const LISTED_BEFORE = new RegExp(`^${LIST_JOIN}${WD}(?![\\p{L}])`, 'u');
 
 /** Whether the text between a matched weekday and its date crosses into another sentence. */
 function crossesSentence(pair: string, weekday: string): boolean {
@@ -542,17 +550,21 @@ const QUOTED = /«[^«»\n]*»|“[^“”\n]*”|"[^"\n]*"/g;
 
 /** Every weekday name in `text` written next to a date that falls on another weekday. */
 export function findWeekdayDateMismatches(text: string, now: Date, timezone: string): WeekdayDateMismatch[] {
-  // Case folding only the letters day words use, "ё", the heading line breaks turned into
-  // spaces and quoted spans masked char for char keep every offset, so a match in `normalized`
-  // slices the same pair out of `text`.
+  // Case folding only the letters day words use, "ё", every Unicode space made a plain one, the
+  // heading line breaks turned into spaces and quoted spans masked char for char keep every
+  // offset, so a match in `normalized` slices the same pair out of `text`.
   const normalized = text
     .replace(/[A-ZА-ЯЁ]/g, (letter) => letter.toLowerCase())
     .replaceAll('ё', 'е')
+    .replace(/(?! )\p{Zs}/gu, ' ')
     .replace(QUOTED, (quoted) => '#'.repeat(quoted.length))
     .replace(WEEKDAY_HEADING, (heading) => heading.replace(/[\r\n]/g, ' '));
   const datesDotted = COLON_CLOCK.test(normalized) || DOTTED_DATE.test(normalized);
   const { today } = localToday(now, timezone);
-  const found = new Map<string, { at: number; mismatch: WeekdayDateMismatch }>();
+  // "Среда, 30 сентября, пятница, 2 октября" also reads as "30 сентября, пятница": a pair
+  // that overlaps one whose weekday agrees with its date is that pair's neighbour, not a claim.
+  const agreed: { at: number; end: number }[] = [];
+  const candidates: { at: number; end: number; key: string; mismatch: WeekdayDateMismatch }[] = [];
   for (const [pattern, read] of PAIR_PATTERNS) {
     for (const match of normalized.matchAll(pattern)) {
       const parts = read(match);
@@ -568,16 +580,25 @@ export function findWeekdayDateMismatches(text: string, now: Date, timezone: str
       if (crossesSentence(match[0], parts.weekday)) continue;
       const weekdayAt = match[0].startsWith(parts.weekday) ? at : end - parts.weekday.length;
       if (ENGLISH_ABBREVIATION.test(parts.weekday) && !/[A-Z]/.test(text.charAt(weekdayAt))) continue;
+      const weekdayEnd = weekdayAt + parts.weekday.length;
+      if (LISTED_AFTER.test(normalized.slice(0, weekdayAt)) || LISTED_BEFORE.test(normalized.slice(weekdayEnd)))
+        continue;
       const weekday = PAIR_WEEKDAYS.get(parts.weekday);
       const date =
         parts.y === undefined
           ? nearestDate(parts.month, Number(parts.d), today)
           : validDayKey(Number(parts.y), parts.month, Number(parts.d));
-      if (weekday === undefined || date === null || weekdayOf(date) === weekday) continue;
+      if (weekday === undefined || date === null) continue;
+      if (weekdayOf(date) === weekday) {
+        agreed.push({ at, end });
+        continue;
+      }
       // Step at most three days either way from the date to reach the named weekday.
       const forward = (weekday - weekdayOf(date) + 7) % 7;
-      found.set(`${date}|${weekday}`, {
+      candidates.push({
         at,
+        end,
+        key: `${date}|${weekday}`,
         mismatch: {
           phrase: text
             .slice(at, end)
@@ -591,6 +612,9 @@ export function findWeekdayDateMismatches(text: string, now: Date, timezone: str
       });
     }
   }
+  const found = new Map<string, { at: number; mismatch: WeekdayDateMismatch }>();
+  for (const { at, end, key, mismatch } of candidates)
+    if (!agreed.some((pair) => pair.at < end && at < pair.end)) found.set(key, { at, mismatch });
   return [...found.values()].sort((a, b) => a.at - b.at).map(({ mismatch }) => mismatch);
 }
 

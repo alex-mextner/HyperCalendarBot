@@ -143,6 +143,36 @@ describe('a weekday written next to a date on another weekday', () => {
     ]);
   });
 
+  test('a no-break or narrow space between the words still makes a pair', () => {
+    for (const text of [
+      'Wednesday\u00a0September\u00a028',
+      'Среда\u202f28\u00a0сентября',
+      '28\u00a0сентября,\u2009среда',
+    ])
+      expect(mismatches(text)).toEqual([{ date: '2026-09-28', said: 'Wednesday', actual: 'Monday' }]);
+  });
+
+  test('weekdays listed together are paired with their dates in order, not with the nearest one', () => {
+    // Wednesday 30 September and Friday 2 October, both correct.
+    for (const text of [
+      'В среду и пятницу, 30 сентября и 2 октября: встречи.',
+      'On Wednesday and Friday, September 30 and October 2',
+      '30 сентября и 2 октября, среда и пятница',
+      'в среду, пятницу 30 сентября и 2 октября',
+    ])
+      expect(mismatches(text)).toEqual([]);
+    // Separate pairs in one line are still read one by one, and a date keeps the weekday that
+    // agrees with it rather than the next pair's.
+    for (const text of ['Среда, 30 сентября, пятница, 2 октября', 'Wednesday, September 30, Friday, October 2'])
+      expect(mismatches(text)).toEqual([]);
+    expect(mismatches('в среду, 30 сентября, и в пятницу, 1 октября')).toEqual([
+      { date: '2026-10-01', said: 'Friday', actual: 'Thursday' },
+    ]);
+    expect(mismatches('Среда, 30 сентября, четверг, 2 октября')).toEqual([
+      { date: '2026-10-02', said: 'Thursday', actual: 'Friday' },
+    ]);
+  });
+
   test('a date without a year is read in the year nearest to now', () => {
     // 5 January is next year's (2027-01-05, a Tuesday), not 2026's Monday.
     expect(findWeekdayDateMismatches('вторник, 5 января', NOW, TZ)).toEqual([]);
