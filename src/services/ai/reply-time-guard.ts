@@ -45,8 +45,9 @@ interface ClockTimes {
 /** HH:MM not inside an ISO timestamp (T10:30) or a longer h:m:s value. */
 const CLOCK_TIME_RE = /(?<![\d:T])(\d{1,2}):(\d{2})(?![\d:])/g;
 /** A clock time the model explicitly labelled as UTC (alone or as a range) is not presented as local. */
-const UTC_LABEL_AFTER_RE = /^\s*(?:[-–—]\s*\d{1,2}:\d{2}\s*)?\(?\s*(?:по\s+)?(?:UTC|GMT|Z)(?![A-Za-z])/i;
-const UTC_LABEL_BEFORE_RE = /(?:UTC|GMT)\s*:?\s*(?:\d{1,2}:\d{2}\s*[-–—]\s*)?$/i;
+const UTC_LABEL_AFTER_RE =
+  /^\s*(?:[-–—]\s*\d{1,2}:\d{2}\s*)?\(?\s*(?:по\s+)?(?:UTC|GMT|Z(?![A-Za-z])|Гринвич|всемирному)/i;
+const UTC_LABEL_BEFORE_RE = /(?:UTC|GMT|Гринвичу|всемирному времени)\s*:?\s*(?:\d{1,2}:\d{2}\s*[-–—]\s*)?$/i;
 const ID_ANCHOR_RE = /(?:\bid\s*[:#№]?\s*|#)(\d{1,9})\b/gi;
 /** Shorter titles ("Я", "ДР") would anchor to unrelated words. */
 const MIN_TITLE_LENGTH = 3;
@@ -180,11 +181,13 @@ export function eventClocksForRun(
   const surfacedIds = new Set<number>();
   for (const summary of ctx.surfacedEvents ?? []) {
     if (summary.all_day || !summary.time) continue;
-    surfacedIds.add(summary.id);
     const [year, month, day] = summary.date.split('-').map(Number);
     const [hour, minute] = summary.time.split(':').map(Number);
     // The summary keeps the local wall clock; on a DST fold this picks the first instant.
     const start = TZDate.tz(ctx.user.timezone, year!, month! - 1, day!, hour!, minute!);
+    // A malformed row must degrade to "no correction", never crash the reply after the run.
+    if (Number.isNaN(start.getTime()) || (summary.end_at && Number.isNaN(Date.parse(summary.end_at)))) continue;
+    surfacedIds.add(summary.id);
     clocks.push({
       id: summary.id,
       title: summary.title,
@@ -195,6 +198,8 @@ export function eventClocksForRun(
   }
   for (const occurrence of ctx.recentEventsWindow ?? []) {
     if (occurrence.event.all_day || surfacedIds.has(occurrence.event.id)) continue;
+    if (Number.isNaN(Date.parse(occurrence.occurrence_start))) continue;
+    if (occurrence.occurrence_end && Number.isNaN(Date.parse(occurrence.occurrence_end))) continue;
     clocks.push({
       id: occurrence.event.id,
       title: occurrence.event.title,

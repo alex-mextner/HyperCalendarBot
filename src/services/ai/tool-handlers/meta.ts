@@ -95,17 +95,19 @@ export async function handleAskUser(
   input: { question: string; options: string[]; event_ids?: number[] },
 ): Promise<ToolResult> {
   if (input.event_ids && input.event_ids.length > 0) return handleDeleteConfirmationRequest(ctx, input.event_ids);
-  // The question goes to the user verbatim, so the reply-time guard runs here too (#498).
-  const question = correctUtcClockTimes(input.question, eventClocksForRun(ctx), ctx.user.timezone);
-  const agentHint =
-    question === input.question
-      ? undefined
-      : `Your question showed event times in UTC; the user saw them in local time instead: "${question}"`;
+  // The question and buttons go to the user verbatim, so the reply-time guard runs here too (#498).
+  const clocks = eventClocksForRun(ctx);
+  const question = correctUtcClockTimes(input.question, clocks, ctx.user.timezone);
+  const askedOptions = input.options.map((option) => correctUtcClockTimes(option, clocks, ctx.user.timezone));
+  const corrected = question !== input.question || askedOptions.some((option, i) => option !== input.options[i]);
+  const agentHint = corrected
+    ? `Your question showed event times in UTC; the user saw them in local time instead: "${question}" [${askedOptions.join(' | ')}]`
+    : undefined;
   if (agentHint)
     metaLogger.warn({ userId: ctx.user.telegram_id }, 'ask_user question showed UTC times as local — corrected');
   if (ctx.inputMode === 'live_call') {
     // During a call, no buttons — speak the question with options as numbered list
-    const optionText = input.options.map((o, i) => `${i + 1}. ${o}`).join(', ');
+    const optionText = askedOptions.map((o, i) => `${i + 1}. ${o}`).join(', ');
     return {
       success: true,
       output: t(toLang(ctx.user.language)).writeOutcomes.spokenQuestion(question, optionText),
@@ -121,7 +123,7 @@ export async function handleAskUser(
     return { success: false, error: 'Buttons not supported.' };
   }
   const CANCEL = 'Отмена';
-  const options = input.options.some((o) => o === CANCEL) ? input.options : [...input.options, CANCEL];
+  const options = askedOptions.some((o) => o === CANCEL) ? askedOptions : [...askedOptions, CANCEL];
   const userId = ctx.isGroup ? ctx.user.telegram_id : undefined;
   try {
     await ctx.sender.sendButtons(ctx.chatId, question, options, 'HTML', userId);

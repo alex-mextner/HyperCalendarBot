@@ -1578,6 +1578,8 @@ export class CalendarBotAgent {
       writer.resetDraft();
       writer.appendText(corrected);
     }
+    // Prose narrated in tool rounds is shown in the execution log; it gets the same correction.
+    writer.rewriteReasoning((text) => correctUtcClockTimes(text, events, ctx.user.timezone));
     pendingHistory.forEach((message, index) => {
       if (message.role !== 'assistant' || typeof message.content !== 'string') return;
       const fixed = correctUtcClockTimes(message.content, events, ctx.user.timezone);

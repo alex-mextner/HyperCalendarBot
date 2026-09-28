@@ -113,6 +113,7 @@ describe('correctUtcClockTimes', () => {
     ['a range labelled UTC after its end', `${LESSON}: 10:30–11:30 UTC`],
     ['a range labelled UTC before its start', `${LESSON}: UTC 10:30 – 11:30`],
     ['a time after «UTC:»', `${LESSON} (UTC: 10:30)`],
+    ['a time labelled «по Гринвичу»', `${LESSON} начинается в 10:30 по Гринвичу`],
     ['an ISO timestamp', `${LESSON}: 2026-09-28T10:30:00.000Z`],
     ['a time with no event named on its line', 'В Токио сейчас 10:30'],
   ])('does not touch %s', (_label, text) => {
@@ -174,7 +175,7 @@ describe('correctUtcClockTimes', () => {
 
 type ScriptedRound =
   | { kind: 'text'; text: string }
-  | { kind: 'tool'; callId: string; name: string; input: { [key: string]: unknown } };
+  | { kind: 'tool'; callId: string; name: string; input: { [key: string]: unknown }; text?: string };
 
 function scriptedStream(script: ScriptedRound[]) {
   let round = 0;
@@ -205,6 +206,7 @@ function scriptedStream(script: ScriptedRound[]) {
         providerUsed: 'mock',
       };
     }
+    cbs.onTextDelta?.(current.text ?? '');
     cbs.onToolCallStart?.(current.name);
     const args = JSON.stringify(current.input);
     const assistantMessage: OpenAI.ChatCompletionMessageParam = {
@@ -331,6 +333,55 @@ describe('UTC-as-local guard on delivered text', () => {
       expect(text).toContain(`20:30 – 21:30** — *${ERRAND}*`);
       expect(text).toContain('00:00 – 12:30');
     }
+  });
+
+  test('narration in a tool round is corrected in the execution log too', async () => {
+    createEvent(LESSON, lesson.startUtc, lesson.endUtc!);
+    const impl = scriptedStream([
+      {
+        kind: 'tool',
+        callId: 'read',
+        name: 'get_events',
+        input: { start_date: '2026-09-28', end_date: '2026-09-28' },
+      },
+      {
+        kind: 'tool',
+        callId: 'read-again',
+        name: 'get_events',
+        input: { start_date: '2026-09-28', end_date: '2026-09-29' },
+        text: `Вижу: ${LESSON} 10:30–11:30, проверю следующий день.`,
+      },
+      { kind: 'text', text: `${LESSON}: 10:30–11:30` },
+    ]);
+
+    await new CalendarBotAgent({}, sender, { streamImpl: impl }).run(ctx);
+
+    expect(delivered).toContain(`${LESSON} 12:30–13:30, проверю`);
+    expect(delivered).not.toContain('10:30');
+  });
+
+  test('a malformed event row never breaks the reply', async () => {
+    ctx.surfacedEvents = [
+      { id: 5, title: LESSON, date: '2026-09-28', time: '10:30', all_day: false, end_at: 'garbage' },
+    ];
+    const impl = scriptedStream([{ kind: 'text', text: `${LESSON}: 10:30` }]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: impl }).run(ctx);
+    expect(result.responseText).toContain(`${LESSON}: 10:30`);
+  });
+
+  test('ask_user buttons get the same correction as the question', async () => {
+    const id = createEvent(LESSON, lesson.startUtc, lesson.endUtc!).id;
+    let buttons: string[] = [];
+    sender.sendButtons = async (_chatId: number, _text: string, options: string[]) => {
+      buttons = options;
+      return { message_id: 44 };
+    };
+    expect((await executeTool(ctx, 'get_event', { event_id: id })).success).toBe(true);
+    await executeTool(ctx, 'ask_user', {
+      question: `Перенести ${LESSON}?`,
+      options: [`Оставить ${LESSON} в 10:30`, 'Нет'],
+    });
+    expect(buttons[0]).toBe(`Оставить ${LESSON} в 12:30`);
   });
 
   test('an ask_user confirmation after search_events is sent with local times', async () => {
