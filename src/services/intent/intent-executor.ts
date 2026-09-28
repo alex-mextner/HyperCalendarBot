@@ -3,12 +3,13 @@ import { z } from 'zod';
 import type { StepResults } from '../../database/repositories/workflow-session.repository.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
-import { isMutationTool } from '../ai/tool-executor.ts';
+import { isMutationTool, isReadOnlyCall } from '../ai/tool-executor.ts';
 import type { ToolResult, ToolResultData } from '../ai/types.ts';
 import { evaluate } from './expression-evaluator.ts';
 import { applyFilters, parseFilterChain } from './filter-parser.ts';
+import { type DayAnswer, formatDayAnswers } from './response-formatter.ts';
 import { type EventSummary, type UserContext as ExecutorUserContext, resolveVariables } from './variable-resolver.ts';
-import { type BindValues, evaluateBindings } from './workflow-bindings.ts';
+import { type BindValues, evaluateBindingReadings } from './workflow-bindings.ts';
 import { isBoundedJson, readWorkflowVersion, WorkflowInputError } from './workflow-input.ts';
 import type { I18nMap, Level1Tool, Level2Step, Workflow } from './workflow-schema.ts';
 import { WorkflowSchema } from './workflow-schema.ts';
@@ -553,16 +554,14 @@ async function runLevel2(
   };
 }
 
-function bindingsFor(
-  workflow: Workflow,
-  captures: Record<string, string>,
-  userCtx: ExecutorUserContext,
-  resumed: boolean,
-): BindValues | undefined {
-  // A resumed run keeps the values bound when the request was made: a relative date
-  // must not shift if the answer arrives after midnight.
-  if (resumed || !('bindings' in workflow) || workflow.bindings === undefined) return undefined;
-  return evaluateBindings(workflow.bindings, captures, userCtx, workflow.i18n);
+/**
+ * Running a workflow once per day is safe only when every step only reads. A written
+ * response is not a read: repeated, it would say the same text under both days.
+ * Classification uses the unresolved step input, so it can only err towards running once.
+ */
+function isReadOnly(workflow: Workflow): boolean {
+  if ('tools' in workflow) return workflow.tools.every((tool) => isReadOnlyCall(tool.name, tool.input));
+  return workflow.steps.every((step) => step.call !== undefined && isReadOnlyCall(step.call, step.input));
 }
 
 export class IntentExecutor {
@@ -616,7 +615,7 @@ export class IntentExecutor {
     }
   }
 
-  private execute(
+  private async execute(
     workflow: Workflow,
     captures: Record<string, string>,
     userCtx: ExecutorUserContext,
@@ -625,19 +624,30 @@ export class IntentExecutor {
     strict: boolean,
     resumeState?: ResumeState,
   ): Promise<ExecutorResult> {
-    const bind = bindingsFor(workflow, captures, userCtx, resumeState !== undefined);
-    if ('tools' in workflow)
-      return runLevel1(workflow.tools, captures, userCtx, executeTool, evidence, bind, workflow.i18n, strict);
-    return runLevel2(
-      workflow.steps,
+    const run = (bind: BindValues | undefined): Promise<ExecutorResult> =>
+      'tools' in workflow
+        ? runLevel1(workflow.tools, captures, userCtx, executeTool, evidence, bind, workflow.i18n, strict)
+        : runLevel2(workflow.steps, captures, userCtx, executeTool, evidence, bind, resumeState, workflow.i18n, strict);
+    // A resumed run keeps the values bound when the request was made: a relative date
+    // must not shift if the answer arrives after midnight.
+    if (resumeState !== undefined || !('bindings' in workflow) || workflow.bindings === undefined)
+      return run(undefined);
+    const now = new Date();
+    const { literal, afterMidnight } = evaluateBindingReadings(
+      workflow.bindings,
       captures,
       userCtx,
-      executeTool,
-      evidence,
-      bind,
-      resumeState,
       workflow.i18n,
-      strict,
+      now,
     );
+    if (afterMidnight === null || !isReadOnly(workflow)) return run(literal);
+    // Just after midnight 'today' and 'tomorrow' may mean either of two days: answer for each, labelled.
+    const answers: DayAnswer[] = [];
+    for (const { day, bind } of afterMidnight) {
+      const result = await run(bind);
+      if (!result.success || result.suspended) return result;
+      answers.push({ day, response: result.response, events: result.responseEvents });
+    }
+    return { success: true, response: formatDayAnswers(answers, userCtx.timezone, userCtx.language, now) };
   }
 }

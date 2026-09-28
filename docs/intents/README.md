@@ -4,7 +4,7 @@
 
 **Это целевой сид из исходного кода: правил — 52.** Документ строится из исходников и **не утверждает, что сид уже установлен**: сборка не открывает базу и не видит сервер. Установку подтверждает отдельная проверка живой базы: отпечаток ниже должен совпасть со значением в таблице `intent_basis_manifest` (подробности в [описании движка](engine.md#что-здесь-утверждается-а-что-нет)).
 
-Отпечаток целевого сида: `6784bb007d70cee9930a1e9ab27b5e70962c8eb45fb8153f624e8a3b6a33f317`
+Отпечаток целевого сида: `8e646726da7e4e31ad50a14988c2b40451b804a2ee15e202c46b7d0aebddea41`
 
 Навигация: [описание движка и правил безопасности](engine.md) · [HTML-страница с поиском и фильтрами](index.html) · [машиночитаемый каталог](catalogue.json) · [заметки по каталогу и приватному отчёту](../intent-catalogue.md) · [план перестройки](../plans/2026-09-18-intent-redesign.md)
 
@@ -113,6 +113,8 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 
 ` basis.calendar.day ` · Расписание · Чтение своего календаря · инструменты: ` get_events `
 
+> Пометка из исходника (по-английски): From 00:00 to 04:00 local, today and tomorrow may still count from the day that has just ended, so both days are read and each is answered under its own weekday and date.
+
 **Примеры фраз.**
 
 - что у меня сегодня
@@ -140,7 +142,7 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 
 **Что читается из сообщения (привязки).**
 
-- ` day ` — календарный день: слово или полная дата; ` from = {{$1}} `; таблица «words»: 8 значений
+- ` day ` — календарный день: слово или полная дата; ` from = {{$1}} `; таблица «words»: 8 значений; ` after_midnight = both `
 
 **Заменяет прежние правила:** ` show_day_after_tomorrow ` (Расписание послезавтра; слито в общее правило), ` show_specific_date ` (Расписание на указанную дату; слито в общее правило), ` show_today ` (Расписание сегодня; слито в общее правило), ` show_tomorrow ` (Расписание завтра; слито в общее правило).
 
@@ -169,7 +171,8 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
         "day after tomorrow": "day_after_tomorrow",
         "вчера": "yesterday",
         "yesterday": "yesterday"
-      }
+      },
+      "after_midnight": "both"
     }
   },
   "steps": [

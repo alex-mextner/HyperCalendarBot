@@ -312,6 +312,7 @@ export function validateWorkflowBindings(workflow: Workflow): string[] {
   if (!bindings) return [];
   const errors: string[] = [];
   const seen = new Map<string, string>();
+  const markedAfterMidnight: string[] = [];
   for (const [name, binding] of Object.entries(bindings)) {
     if (binding.type === 'datetime') {
       if (seen.get(binding.date) !== 'date')
@@ -335,7 +336,11 @@ export function validateWorkflowBindings(workflow: Workflow): string[] {
       }
     }
     seen.set(name, binding.type);
+    if (binding.type === 'date' && binding.after_midnight === 'both') markedAfterMidnight.push(name);
   }
+  // The answer for each day is labelled with this binding's day, so only one may shift.
+  if (markedAfterMidnight.length > 1)
+    errors.push(`bindings ${markedAfterMidnight.join(', ')}: only one date binding may set after_midnight`);
   return errors;
 }
 

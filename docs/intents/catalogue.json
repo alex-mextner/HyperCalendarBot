@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "fingerprint": "6784bb007d70cee9930a1e9ab27b5e70962c8eb45fb8153f624e8a3b6a33f317",
+  "fingerprint": "8e646726da7e4e31ad50a14988c2b40451b804a2ee15e202c46b7d0aebddea41",
   "runtimeVerification": null,
   "engine": {
     "document": "engine.md",
@@ -136,7 +136,8 @@
               "day after tomorrow": "day_after_tomorrow",
               "вчера": "yesterday",
               "yesterday": "yesterday"
-            }
+            },
+            "after_midnight": "both"
           }
         },
         "steps": [
@@ -160,7 +161,7 @@
       "bindingTypes": [
         "date"
       ],
-      "notes": null,
+      "notes": "From 00:00 to 04:00 local, today and tomorrow may still count from the day that has just ended, so both days are read and each is answered under its own weekday and date.",
       "predecessors": [
         {
           "key": "show_day_after_tomorrow",

@@ -72,6 +72,8 @@ export const BindingSchema = z.discriminatedUnion('type', [
       future: z.boolean().optional(),
       optional: z.boolean().optional(),
       default: DayWord.optional(),
+      /** 'both': a read that also answers for the day before when 'today'/'tomorrow' is said just after midnight. */
+      after_midnight: z.literal('both').optional(),
     })
     .strict(),
   z
@@ -249,11 +251,29 @@ function parseAbsoluteDay(text: string): { day: Partial<CalendarDay> & { m: numb
   return null;
 }
 
-function parseDate(raw: string, binding: Extract<Binding, { type: 'date' }>, now: Date, timezone: string): string {
+/** Until this local hour, 'today' and 'tomorrow' may still count from the day that has just ended. */
+const AFTER_MIDNIGHT_END_HOUR = 4;
+
+/** `dayBefore` reads a marked word said just after midnight as counted from the day that has just ended. */
+function parseDate(
+  raw: string,
+  binding: Extract<Binding, { type: 'date' }>,
+  now: Date,
+  timezone: string,
+  dayBefore: boolean,
+): string {
   const key = normalize(raw);
   const current = today(now, timezone);
   const word = binding.words && Object.hasOwn(binding.words, key) ? binding.words[key] : undefined;
-  if (word) return isoDay(addDays(current, DAY_WORD_OFFSETS[word]));
+  if (word) {
+    // Someone still awake at 01:22 on Monday may say 'tomorrow' for Monday and 'today' for Sunday.
+    const fromDayBefore =
+      dayBefore &&
+      binding.after_midnight === 'both' &&
+      (word === 'today' || word === 'tomorrow') &&
+      new TZDate(now, timezone).getHours() < AFTER_MIDNIGHT_END_HOUR;
+    return isoDay(addDays(current, DAY_WORD_OFFSETS[word] - (fromDayBefore ? 1 : 0)));
+  }
   const parsed = parseAbsoluteDay(key);
   if (!parsed) return fail();
   const withYear = (year: number): CalendarDay => ({ y: year, m: parsed.day.m, d: parsed.day.d });
@@ -461,6 +481,8 @@ interface Evaluation {
   userCtx: UserContext;
   i18n: I18nMap | undefined;
   now: Date;
+  /** The marked date binding read as counted from the day that has just ended, if any. */
+  dayBefore: string | null;
 }
 
 function resolveFrom(template: string, evaluation: Evaluation): string {
@@ -474,7 +496,12 @@ function isBlank(raw: string): boolean {
   return raw.trim() === '';
 }
 
-function evaluateOne(binding: Binding, bound: BindValues, evaluation: Evaluation): WorkflowInputValue {
+function evaluateOne(
+  binding: Binding,
+  bound: BindValues,
+  evaluation: Evaluation,
+  dayBefore: boolean,
+): WorkflowInputValue {
   const { userCtx, now } = evaluation;
   if (binding.type === 'datetime') return buildDatetime(binding, bound, now, userCtx.timezone);
   if (binding.type === 'relative_instant') {
@@ -494,7 +521,7 @@ function evaluateOne(binding: Binding, bound: BindValues, evaluation: Evaluation
     case 'date':
       return optionalDefault
         ? isoDay(addDays(today(now, userCtx.timezone), DAY_WORD_OFFSETS[binding.default ?? fail()]))
-        : parseDate(raw, binding, now, userCtx.timezone);
+        : parseDate(raw, binding, now, userCtx.timezone, dayBefore);
     case 'time':
       return optionalDefault ? (binding.default ?? fail()) : parseTime(raw);
     case 'period':
@@ -519,6 +546,14 @@ function periodKey(values: { [key: string]: (typeof PERIOD_KEYS)[number] }, raw:
   return Object.hasOwn(values, key) ? values[key]! : fail();
 }
 
+function evaluateAll(bindings: Bindings, evaluation: Evaluation): BindValues {
+  const bound: BindValues = {};
+  for (const [name, binding] of Object.entries(bindings)) {
+    bound[name] = evaluateOne(binding, bound, evaluation, name === evaluation.dayBefore);
+  }
+  return bound;
+}
+
 /** Bindings are evaluated in declaration order; a datetime may only read earlier bindings. */
 export function evaluateBindings(
   bindings: Bindings,
@@ -527,9 +562,49 @@ export function evaluateBindings(
   i18n: I18nMap | undefined,
   now: Date = new Date(),
 ): BindValues {
-  const bound: BindValues = {};
-  for (const [name, binding] of Object.entries(bindings)) {
-    bound[name] = evaluateOne(binding, bound, { captures, userCtx, i18n, now });
+  return evaluateAll(bindings, { captures, userCtx, i18n, now, dayBefore: null });
+}
+
+/** The bindings as read for one of the days a marked date word may mean. */
+export interface DayReading {
+  /** YYYY-MM-DD the marked date binding takes in this reading. */
+  day: string;
+  bind: BindValues;
+}
+
+/**
+ * The literal reading of the bindings and, when the date binding marked `after_midnight: 'both'`
+ * reads 'today' or 'tomorrow' before 04:00 local, one reading per day that word may mean, the
+ * earlier day first and the literal reading last. The validator allows one marked binding; should
+ * a rule carry more, only the first is shifted, so each answer is labelled with the day it read.
+ */
+export function evaluateBindingReadings(
+  bindings: Bindings,
+  captures: { [key: string]: string },
+  userCtx: UserContext,
+  i18n: I18nMap | undefined,
+  now: Date = new Date(),
+): { literal: BindValues; afterMidnight: DayReading[] | null } {
+  const literal = evaluateBindings(bindings, captures, userCtx, i18n, now);
+  const marked = Object.keys(bindings).find((name) => {
+    const binding = bindings[name];
+    return binding?.type === 'date' && binding.after_midnight === 'both';
+  });
+  if (marked === undefined) return { literal, afterMidnight: null };
+  let before: BindValues;
+  try {
+    before = evaluateAll(bindings, { captures, userCtx, i18n, now, dayBefore: marked });
+  } catch (error) {
+    // The earlier day is an extra reading, never a reason to fail: its wall time may not exist.
+    if (error instanceof WorkflowInputError) return { literal, afterMidnight: null };
+    throw error;
   }
-  return bound;
+  if (before[marked] === literal[marked]) return { literal, afterMidnight: null };
+  return {
+    literal,
+    afterMidnight: [
+      { day: String(before[marked]), bind: before },
+      { day: String(literal[marked]), bind: literal },
+    ],
+  };
 }

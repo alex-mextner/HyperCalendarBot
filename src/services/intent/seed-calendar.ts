@@ -31,7 +31,7 @@ const calendarDay: FamilyDefinition = {
   risk: 'read',
   pattern: String.raw`^${CALENDAR_LEAD}\s+(?:на\s+)?(${ANY_DAY_RX})$`,
   triggers: CALENDAR_TRIGGERS,
-  bindings: { day: { type: 'date', from: '{{$1}}', words: DAY_WORDS } },
+  bindings: { day: { type: 'date', from: '{{$1}}', words: DAY_WORDS, after_midnight: 'both' } },
   steps: [{ call: 'get_events', input: { start_date: '{{bind.day}}', end_date: '{{bind.day}}', scope: SCOPE } }],
   strings: { ru: {}, en: {} },
   examples: [
@@ -45,6 +45,8 @@ const calendarDay: FamilyDefinition = {
   ],
   negatives: ['что делать завтра', 'что у меня в кошельке', 'покажи завтра погоду', 'не показывай что у меня сегодня'],
   invalidInputs: ['что у меня 31 февраля'],
+  notes:
+    'From 00:00 to 04:00 local, today and tomorrow may still count from the day that has just ended, so both days are read and each is answered under its own weekday and date.',
 };
 
 const calendarPeriod: FamilyDefinition = {

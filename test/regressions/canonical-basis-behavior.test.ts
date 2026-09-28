@@ -534,12 +534,18 @@ interface Fixture {
 function fixture(
   options: {
     tz?: string;
+    language?: 'en' | 'ru';
     lastMentioned?: EventSummary;
     wrapTool?: (name: string, input: unknown, real: () => Promise<ToolResult>) => Promise<ToolResult>;
   } = {},
 ): Fixture {
   const users = new UserRepository(db);
-  users.create({ telegram_id: USER, timezone: options.tz ?? 'Europe/Belgrade', language: 'en', first_name: 'Ann' });
+  users.create({
+    telegram_id: USER,
+    timezone: options.tz ?? 'Europe/Belgrade',
+    language: options.language ?? 'en',
+    first_name: 'Ann',
+  });
   users.create({ telegram_id: OTHER, timezone: 'UTC', language: 'en' });
   const eventRepo = new EventRepository(db);
   const events = new EventService({ eventRepo });
@@ -633,6 +639,119 @@ function fixture(
 
 const toolNames = (f: Fixture) => f.call.mock.calls.map((entry) => entry[0]);
 const mutationCalls = (f: Fixture) => f.call.mock.calls.filter((entry) => isMutationTool(entry[0], entry[1]));
+
+describe('a day plan just after midnight against real SQLite', () => {
+  // Mon 2026-09-14 01:22 in Belgrade (UTC+2): 'План на завтра' answered with an empty Tuesday
+  // while the user meant Monday, which had four events.
+  const AFTER_MIDNIGHT = new Date('2026-09-13T23:22:00Z');
+
+  function mondayFixture(language: 'en' | 'ru' = 'ru'): Fixture {
+    const f = fixture({ language });
+    f.addEvent('Стендап', '2026-09-14T10:00:00+02:00');
+    f.addEvent('Стоматолог', '2026-09-14T12:30:00+02:00');
+    f.addEvent('Спортзал', '2026-09-14T18:00:00+02:00');
+    f.addEvent('Ужин', '2026-09-14T20:00:00+02:00');
+    return f;
+  }
+  const MONDAY_ROWS = ['10:00  Стендап', '12:30  Стоматолог', '18:00  Спортзал', '20:00  Ужин'];
+  const daysRead = (f: Fixture) =>
+    f.call.mock.calls.map(([name, input]) => {
+      expect(name).toBe('get_events');
+      const { start_date, end_date } = input as { start_date: string; end_date: string };
+      expect(end_date).toBe(start_date);
+      return start_date;
+    });
+  const sections = (f: Fixture) => f.lastText().split('\n\n');
+
+  test("'План на завтра' at 01:22 reads Monday and Tuesday and labels each with its weekday and date", async () => {
+    setSystemTime(AFTER_MIDNIGHT);
+    const f = mondayFixture();
+
+    expect(await f.say('План на завтра')).toMatchObject({ handled: true });
+
+    expect(f.call.mock.calls).toEqual([
+      ['get_events', { start_date: '2026-09-14', end_date: '2026-09-14', scope: 'personal' }],
+      ['get_events', { start_date: '2026-09-15', end_date: '2026-09-15', scope: 'personal' }],
+    ]);
+    const [monday, tuesday, ...rest] = sections(f);
+    expect(rest).toEqual([]);
+    expect(monday).toBe(['Сегодня, пн 14.09:', ...MONDAY_ROWS].join('\n'));
+    expect(tuesday?.split('\n')[0]).toBe('Завтра, вт 15.09:');
+    expect(tuesday).toContain('15 сентября');
+    expect(tuesday).not.toContain('Стендап');
+  });
+
+  test("'План на сегодня' at 01:22 reads Sunday and Monday, each labelled", async () => {
+    setSystemTime(AFTER_MIDNIGHT);
+    const f = mondayFixture();
+
+    await f.say('План на сегодня');
+
+    expect(daysRead(f)).toEqual(['2026-09-13', '2026-09-14']);
+    const [sunday, monday, ...rest] = sections(f);
+    expect(rest).toEqual([]);
+    expect(sunday?.split('\n')[0]).toBe('Вчера, вс 13.09:');
+    expect(sunday).toContain('13 сентября');
+    expect(monday).toBe(['Сегодня, пн 14.09:', ...MONDAY_ROWS].join('\n'));
+  });
+
+  test("'План на завтра' at 10:00 reads only Tuesday and answers without day labels", async () => {
+    setSystemTime(new Date('2026-09-14T08:00:00Z'));
+    const f = mondayFixture();
+    f.addEvent('Урок', '2026-09-15T09:00:00+02:00');
+
+    await f.say('План на завтра');
+
+    expect(f.call.mock.calls).toEqual([
+      ['get_events', { start_date: '2026-09-15', end_date: '2026-09-15', scope: 'personal' }],
+    ]);
+    const text = f.lastText();
+    expect(text).toContain('09:00  Урок');
+    expect(text).not.toContain('Стендап');
+    expect(text).not.toContain('Сегодня');
+  });
+
+  test('both days are read from 00:00 up to, not including, 04:00', async () => {
+    const f = mondayFixture();
+    const tomorrowAt = async (utc: string) => {
+      setSystemTime(new Date(utc));
+      f.call.mockClear();
+      await f.say('План на завтра');
+      return daysRead(f);
+    };
+    expect(await tomorrowAt('2026-09-13T21:59:00Z')).toEqual(['2026-09-14']); // Sun 23:59
+    expect(await tomorrowAt('2026-09-13T22:00:00Z')).toEqual(['2026-09-14', '2026-09-15']); // Mon 00:00
+    expect(await tomorrowAt('2026-09-14T01:59:00Z')).toEqual(['2026-09-14', '2026-09-15']); // Mon 03:59
+    expect(await tomorrowAt('2026-09-14T02:00:00Z')).toEqual(['2026-09-15']); // Mon 04:00
+  });
+
+  test('an English request gets English day labels', async () => {
+    setSystemTime(AFTER_MIDNIGHT);
+    const f = mondayFixture('en');
+
+    await f.say("what's tomorrow");
+
+    const [monday, tuesday] = sections(f);
+    expect(monday?.split('\n')[0]).toBe('Today, Mon 09/14:');
+    expect(tuesday?.split('\n')[0]).toBe('Tomorrow, Tue 09/15:');
+  });
+
+  test('a date or another day word is never doubled after midnight', async () => {
+    setSystemTime(AFTER_MIDNIGHT);
+    const f = mondayFixture();
+    await f.say('План на послезавтра');
+    await f.say('План на 15 сентября');
+    await f.say('План на вчера');
+    expect(daysRead(f)).toEqual(['2026-09-16', '2026-09-15', '2026-09-13']);
+  });
+
+  test('free time for tomorrow keeps its single calendar day after midnight', async () => {
+    setSystemTime(AFTER_MIDNIGHT);
+    const f = mondayFixture();
+    await f.say('когда я свободен завтра');
+    expect(f.call.mock.calls).toEqual([['get_free_slots', { date: '2026-09-15', scope: 'personal' }]]);
+  });
+});
 
 describe('creating an event against real SQLite', () => {
   test('nothing is written before the answer; yes writes once; a repeated yes writes nothing more', async () => {
