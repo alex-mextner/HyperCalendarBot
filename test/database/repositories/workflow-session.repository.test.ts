@@ -1,7 +1,10 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
-import { WorkflowSessionRepository } from '../../../src/database/repositories/workflow-session.repository.ts';
+import {
+  WORKFLOW_SESSION_TTL_MS,
+  WorkflowSessionRepository,
+} from '../../../src/database/repositories/workflow-session.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 
 function createTestDb(): Database {
@@ -84,6 +87,21 @@ describe('WorkflowSessionRepository', () => {
     // No rows with chatId=1 left
     const count = db.prepare('SELECT COUNT(*) as c FROM workflow_sessions WHERE chat_id = 1').get() as { c: number };
     expect(count.c).toBe(0);
+  });
+
+  test('cleanup uses the same expiry boundary as reads', () => {
+    const now = 1_900_000_000_000;
+    setSystemTime(new Date(now));
+    try {
+      repo.set(1, 1, makeSession({ createdAt: now - WORKFLOW_SESSION_TTL_MS }));
+      repo.set(2, 2, makeSession({ createdAt: now - WORKFLOW_SESSION_TTL_MS + 1 }));
+      repo.cleanup();
+      const chats = db.query<{ chat_id: number }, []>('SELECT chat_id FROM workflow_sessions ORDER BY chat_id').all();
+      expect(chats).toEqual([{ chat_id: 2 }]);
+      expect(repo.get(2, 2)).not.toBeNull();
+    } finally {
+      setSystemTime();
+    }
   });
 
   test('set upserts existing session', () => {

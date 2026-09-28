@@ -151,7 +151,8 @@ export class WorkflowSessionRepository implements WorkflowSessionStore {
   }
 
   cleanup(): void {
-    this.db.prepare('DELETE FROM workflow_sessions WHERE created_at < ?').run(Date.now() - WORKFLOW_SESSION_TTL_MS);
+    // Same boundary as isExpired: a row whose age has reached the TTL is gone.
+    this.db.prepare('DELETE FROM workflow_sessions WHERE created_at <= ?').run(Date.now() - WORKFLOW_SESSION_TTL_MS);
   }
 
   /** Intent ids that a live (unexpired) suspended workflow still refers to. Never throws on bad data. */
