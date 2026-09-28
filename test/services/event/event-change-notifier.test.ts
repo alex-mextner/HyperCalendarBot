@@ -81,6 +81,9 @@ function makeDeps(overrides: { participants?: EventParticipant[]; pendingProposa
       deleteForEvent,
       materialize,
     },
+    invitationRepo: {
+      getByEvent: mock(() => []),
+    },
     syncQueue: {
       add: syncQueueAdd,
     },

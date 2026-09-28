@@ -1,6 +1,7 @@
 import type { Queue } from 'bullmq';
 import { type Lang, t } from '../../config/constants.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
+import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ParticipantGoogleSyncRepository } from '../../database/repositories/participant-google-sync.repository.ts';
 import type { CalendarEvent } from '../../database/types.ts';
@@ -22,6 +23,7 @@ export interface EventChangeNotifierDeps {
   participantRepo: ParticipantRepository;
   editProposalRepo: EditProposalRepository;
   participantSyncRepo: ParticipantGoogleSyncRepository;
+  invitationRepo: InvitationRepository;
   materializer: ReminderMaterializer;
   syncQueue: Queue<GoogleSyncJobData>;
   notifyUser: (userId: number, text: string) => Promise<void>;
@@ -114,8 +116,27 @@ export class EventChangeNotifier {
     const copies = new Map(
       active.map((p) => [p.user_id, this.deps.participantSyncRepo.getByUserAndEvent(p.user_id, event.id)]),
     );
+    // Read before the first await: EventService.deleteEvent does not await this method and cancels the
+    // invitations right after it returns, so later reads would no longer see which ones were open.
+    const openCards = this.deps.invitationRepo
+      .getByEvent(event.id)
+      .flatMap(({ id, invitee_id, status, chat_id, message_id }) =>
+        chat_id != null && message_id != null && (status === 'pending' || status === 'maybe' || status === 'accepted')
+          ? [{ id, inviteeId: invitee_id, chatId: chat_id, messageId: message_id }]
+          : [],
+      );
 
     await this.expirePendingProposals(event);
+
+    // Editing without a keyboard removes the RSVP buttons, which could no longer be answered.
+    for (const card of openCards) {
+      const lang = this.deps.getUserLang(card.inviteeId);
+      await this.deps
+        .editMessage(card.chatId, card.messageId, t(lang).sync.eventCancelled(event.title))
+        .catch((err) => {
+          logger.error({ err, invitationId: card.id, eventId: event.id }, 'Failed to edit invitation card on delete');
+        });
+    }
 
     for (const p of active) {
       const lang = this.deps.getUserLang(p.user_id);
