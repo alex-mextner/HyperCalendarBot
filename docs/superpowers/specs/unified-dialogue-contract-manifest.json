@@ -2,8 +2,8 @@
   "status": "design_contract_not_executed",
   "source_revision": "a7d4176077ad40cdb3a1562631c6d4246b2590ff",
   "prior_source_revision": "7399876eeb572e0c021cb44004931aec80624311",
-  "cases": 659,
-  "unique_text_inputs": 446,
+  "cases": 667,
+  "unique_text_inputs": 449,
   "families": {
     "alias-confirm": 6,
     "all-day": 3,
@@ -22,11 +22,12 @@
     "natural-start": 24,
     "negative-entry": 8,
     "number-context": 36,
+    "optional-field-explicit": 3,
     "people-order": 5,
     "people-picker": 4,
     "people-search": 10,
     "picker-isolation": 3,
-    "place-household": 5,
+    "place-household": 6,
     "place-invalid": 4,
     "place-native": 10,
     "place-saved": 12,
@@ -47,7 +48,8 @@
     "recurrence-move-out-of-range": 2,
     "recurrence-multi-rrule-reject": 2,
     "recurrence-rdate": 3,
-    "recurrence-reminder-reconciliation": 3,
+    "recurrence-reminder-reconciliation": 5,
+    "recurrence-rollback": 2,
     "review-boundary": 6,
     "time-ambiguous": 57,
     "time-bare-unambiguous": 11,
@@ -57,6 +59,6 @@
     "time-words": 7,
     "unknown-time": 3
   },
-  "sha256": "49a5395fca4299eaed8c719ee2985884c5952d263f1ee03e63ba585428754baa",
+  "sha256": "cef4fedafb32578785fcdd6e12fce663d858b29241fcf506c3f875e78ee7287a",
   "semantics": "Expectations for future runner. llm_calls counts model calls caused by this transition; classifier_calls counts local non-generative advisory calls (e.g. Laya) separate from llm_calls; agent_patch is already received and ASR is separate. Directory writes are distinct from event/invitation writes. Entry adapters are applicability metadata, not additional counted tests. Recurrence families (583-*) use expander_pure/reminder_materializer/google_sync/ics_export/ics_import entrypoints against synthetic fixtures, not live Google/ICS I/O. A recurrence-edit-scope case with event_writes>0 carries confirmedEntityRevision matching the current entityRevision, actorRole, operationKey, requires_confirmed_revision, actor_permission_checked, idempotency_key_reused_on_retry and receipt — the same consent/CAS/idempotency/effect-ledger gates as event creation (design doc §15/§20); stale confirmedEntityRevision or missing consent yields event_writes=0, and a duplicate confirm with the same operationKey returns the same receipt with zero additional writes/notifications."
 }
