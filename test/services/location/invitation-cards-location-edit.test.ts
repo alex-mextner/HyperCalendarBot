@@ -5,7 +5,7 @@
 // Real SQLite repositories, the real AI update_event handler, the real verification service with a
 // scripted geocoder, and the real callback handler for the keep tap.
 import { Database } from 'bun:sqlite';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { InlineKeyboard } from 'gramio';
 import { t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
@@ -55,8 +55,23 @@ interface CardEdit {
 let db: Database;
 afterEach(() => db.close());
 
+/** Holds the next `del` (the question closing the previous picker) until the test releases it. */
+class GatedCandidateStore extends InMemoryLocationCandidateStore {
+  gate: Promise<void> | null = null;
+
+  override async del(eventId: number): Promise<void> {
+    const gate = this.gate;
+    this.gate = null;
+    if (gate) await gate;
+    await super.del(eventId);
+  }
+}
+
 /** A resolved event with a pending invitation card delivered to the invitee. */
-function setup(search: { [text: string]: GeocodedLocation[] } = {}) {
+function setup(
+  search: { [text: string]: GeocodedLocation[] } = {},
+  candidateStore: InMemoryLocationCandidateStore = new InMemoryLocationCandidateStore(),
+) {
   db = new Database(':memory:');
   runMigrations(db, migrations);
   const users = new UserRepository(db);
@@ -84,7 +99,6 @@ function setup(search: { [text: string]: GeocodedLocation[] } = {}) {
   const cards: CardEdit[] = [];
   const toCreator: { text: string; callbacks: string[] }[] = [];
   let creatorWasTold = Promise.withResolvers<void>();
-  const candidateStore = new InMemoryLocationCandidateStore();
   const redis = new Map<string, string>();
   const verification = new LocationVerificationService({
     geocodingService: {
@@ -200,5 +214,62 @@ describe('a location edit re-renders delivered invitation cards that showed the 
 
     expect(result.success).toBe(true);
     expect(s.cards).toEqual([]);
+  });
+
+  test('an edit landing while the question for the re-sent text starts: the card keeps the newer text', async () => {
+    const store = new GatedCandidateStore();
+    const s = setup({}, store);
+    const questions = spyOn(s.verification, 'verifyEventLocation');
+    const released = Promise.withResolvers<void>();
+    store.gate = released.promise;
+
+    // The assistant re-sends the confirmed text with a new time: its question waits on closing the
+    // previous picker, still holding the event as it was (place confirmed)
+    const first = await handleUpdateEvent(s.agentCtx, {
+      event_id: s.event.id,
+      location: 'seaside hotel',
+      start_at: '2026-10-05T18:00:00Z',
+    });
+    expect(first.success).toBe(true);
+    // A second edit changes the text meanwhile and re-renders the card itself
+    await s.editLocation({ location: 'at Ira’s place' });
+    released.resolve();
+    await Promise.all(questions.mock.results.map((r) => r.value));
+
+    // Only the second edit's render: the question's older snapshot must not repaint the card
+    expect(s.cards).toHaveLength(1);
+    expect(s.cards[0]?.text).toContain('at Ira’s place');
+    expectNoOldPlace(s.cards[0]);
+  });
+
+  test('a time edit landing while the question for the re-sent text starts: the card shows the newer time', async () => {
+    const store = new GatedCandidateStore();
+    const s = setup({}, store);
+    const questions = spyOn(s.verification, 'verifyEventLocation');
+    const released = Promise.withResolvers<void>();
+    store.gate = released.promise;
+
+    const first = await handleUpdateEvent(s.agentCtx, {
+      event_id: s.event.id,
+      location: 'seaside hotel',
+      start_at: '2026-10-05T18:00:00Z',
+    });
+    expect(first.success).toBe(true);
+    // A time-only edit meanwhile leaves the location line alone, so it does not re-render the card
+    const moved = await handleUpdateEvent(s.agentCtx, {
+      event_id: s.event.id,
+      start_at: '2026-10-05T19:30:00Z',
+      end_at: '2026-10-05T20:30:00Z',
+    });
+    expect(moved.success).toBe(true);
+    released.resolve();
+    await Promise.all(questions.mock.results.map((r) => r.value));
+
+    // The question drops the place from the card, with the event's time as it is now
+    expect(s.cards).toHaveLength(1);
+    expect(s.cards[0]?.text).toContain('seaside hotel');
+    expect(s.cards[0]?.text).toContain('19:30');
+    expect(s.cards[0]?.text).not.toContain('18:00');
+    expectNoOldPlace(s.cards[0]);
   });
 });

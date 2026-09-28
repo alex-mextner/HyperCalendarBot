@@ -118,6 +118,7 @@ function makeDeps(overrides: { [key: string]: unknown } = {}) {
     },
     eventRepo: {
       findById: mock(() => makeEvent()),
+      findByIdUnfiltered: mock(() => makeEvent()),
       updateLocationFields: mock(() => {}),
     },
     userRepo: {

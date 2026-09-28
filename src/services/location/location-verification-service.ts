@@ -140,9 +140,16 @@ export class LocationVerificationService {
     }
 
     // Until the creator answers, the event holds only the typed text: a place confirmed for an
-    // earlier text must not stay on it, whoever changed the text, nor on the invitation cards.
-    const typedOnly = await this.dropResolvedPlace(event);
-    await this.refreshInvitationCards(event, typedOnly);
+    // earlier text must not stay on it, whoever changed the text, nor on the invitation cards. The
+    // cards are re-rendered from the stored row, so a time or title edited during the awaits here is
+    // not rolled back, and only while it still holds this text unconfirmed: an edit of the text, or a
+    // place confirmed after the drop, re-renders them itself (best effort: renders already in
+    // flight are not ordered, #678).
+    await this.dropResolvedPlace(event);
+    const stored = this.deps.eventRepo.findByIdUnfiltered(event.id);
+    if (stored?.location === typed && stored.location_verified === 0) {
+      await this.refreshInvitationCards(event, { ...event, ...stored, ...UNRESOLVED_PLACE });
+    }
 
     // Only a user who can see the event is asked. A secretary updating the owner's event could not
     // answer the picker (#421), so no search is made and the owner's open picker stays.
