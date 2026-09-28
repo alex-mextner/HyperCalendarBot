@@ -161,6 +161,8 @@ let callQueue:
   | { enqueue(data: Omit<import('./services/voice/types.ts').CallReminderJobData, 'sessionId'>): Promise<void> }
   | undefined;
 let callQueueCleanup: { close: () => Promise<void> } | undefined;
+/** The live-call agent, drained on shutdown like the chat agent. */
+let voiceAgentRef: { drain: (settleMs: number) => Promise<void> } | undefined;
 let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
 let botTasksQueueCleanup: { close: () => Promise<void> } | undefined;
 let googleRedisClient: Bun.RedisClient | undefined;
@@ -476,6 +478,7 @@ if (config.REDIS_URL && serviceSessionEnabled && !config.DISABLE_VOICE) {
       editMessageText: (chatId, messageId, text, parseMode) => botRef.editMessage(chatId, messageId, text, parseMode),
     };
     const voiceAgent = new CalendarBotAgent({ debugLogger: aiDebugLogger, summarizer: historySummarizer }, voiceSender);
+    voiceAgentRef = voiceAgent;
 
     const voiceMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
     const voiceEventService = new EventService({
@@ -1338,7 +1341,7 @@ const AGENT_DRAIN_SETTLE_MS = 2_500;
 // while the queues, Redis and the database are still open.
 async function shutdown(): Promise<void> {
   await bot.stop();
-  await agent.drain(AGENT_DRAIN_SETTLE_MS);
+  await Promise.all([agent.drain(AGENT_DRAIN_SETTLE_MS), voiceAgentRef?.drain(AGENT_DRAIN_SETTLE_MS)]);
   if (aiMessagesQueueCleanup) await aiMessagesQueueCleanup.close();
   if (eventCheckerQueueCleanup) await eventCheckerQueueCleanup.close();
   if (notificationQueueCleanup) await notificationQueueCleanup.close();

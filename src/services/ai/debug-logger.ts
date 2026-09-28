@@ -158,7 +158,7 @@ export class AiDebugRunContext {
 
   flush(): void {
     if (!this.finalLogged)
-      this.parts.push('', '## END — the turn threw before FINAL; see the application log', '='.repeat(80));
+      this.parts.push('', '## END — no FINAL logged for this turn (it threw); see the application log', '='.repeat(80));
     try {
       appendFileSync(this.file, `${this.parts.join('\n')}\n`);
     } catch (error) {

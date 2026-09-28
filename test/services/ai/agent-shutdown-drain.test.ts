@@ -173,7 +173,9 @@ describe('agent drain on shutdown', () => {
     const created = eventRepo.getInRange(USER_ID, '2026-09-28T00:00:00Z', '2026-09-29T00:00:00Z');
     expect(created.map((event) => event.title)).toEqual(['Отвезти переноску']);
     expect(enqueued).toEqual([]);
-    expect(probe.delivered.join('\n')).toContain(t('ru').writeOutcomes.interrupted);
+    const text = probe.delivered.join('\n');
+    expect(text).toContain(t('ru').writeOutcomes.interrupted);
+    expect(text).not.toContain(t('ru').agent_restarting(true));
   });
 
   test('the aborted turn leaves its debug chat log on disk', async () => {
@@ -226,7 +228,25 @@ describe('agent drain on shutdown', () => {
     const chatDir = path.join(logsDir, 'chats', String(USER_ID));
     const log = readFileSync(path.join(chatDir, readdirSync(chatDir)[0]!), 'utf8');
     expect(log).toContain('TOOL CALL: calculate');
-    expect(log).toContain('## END — the turn threw before FINAL');
+    expect(log).toContain('## END — no FINAL logged for this turn');
+  });
+
+  test('a scheduled retry cut short by a restart is told so and queued again', async () => {
+    ctx.retryAttempt = 1;
+    const probe = makeSender();
+    const { impl, secondRoundStarted } = stalledAfterTool({
+      name: 'calculate',
+      input: { expression: '2026-09-28 20:30 Europe/Belgrade to UTC' },
+    });
+    const agent = new CalendarBotAgent({}, probe.sender, { streamImpl: impl });
+
+    const running = agent.run(ctx);
+    await secondRoundStarted;
+    await agent.drain(DRAIN_BOUND_MS);
+    await running;
+
+    expect(enqueued).toEqual([REQUEST]);
+    expect(probe.delivered.join('\n')).toContain(t('ru').agent_restarting(true));
   });
 
   test('a turn that starts while the drain is waiting is waited for as well', async () => {

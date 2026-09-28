@@ -678,14 +678,15 @@ export class CalendarBotAgent {
       this.saveAssistantTurn(ctx, { role: 'assistant', content: text });
       return;
     }
-    const hardOutage = isHardOutage(error);
-    if ((ctx.retryAttempt ?? 0) > 0 && !hardOutage) return;
+    // Before the quiet-retry rule: a retry cut short by a restart is also told so.
     if (this.shutdown.signal.aborted) {
       const text = t(ctx.user.language).agent_restarting(typeof ctx.retryEnqueue === 'function');
       writer.appendText(`\n\n${text}`);
       this.saveAssistantTurn(ctx, { role: 'assistant', content: text });
       return;
     }
+    const hardOutage = isHardOutage(error);
+    if ((ctx.retryAttempt ?? 0) > 0 && !hardOutage) return;
 
     const notice = aiFailureNotices.decide(ctx.user.telegram_id, toLang(ctx.user.language), {
       hardOutage,
@@ -759,7 +760,10 @@ export class CalendarBotAgent {
         const outcome = await Promise.race([Promise.allSettled([...this.inFlight]), deadline.promise]);
         if (outcome === 'timeout') break;
       }
-      aiLogger.info({ drained, stillRunning: this.inFlight.size }, 'Agent runs drained for shutdown');
+      const stillRunning = this.inFlight.size;
+      if (stillRunning > 0)
+        aiLogger.warn({ inFlight: drained, stillRunning }, 'Agent runs abandoned at shutdown deadline');
+      else aiLogger.info({ inFlight: drained }, 'Agent runs drained for shutdown');
     } finally {
       clearTimeout(timer);
     }
