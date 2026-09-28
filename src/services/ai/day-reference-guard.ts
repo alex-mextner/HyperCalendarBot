@@ -1,6 +1,8 @@
 import { z } from 'zod';
+import { t, toLang } from '../../config/constants.ts';
 import type { CalendarEvent, ChatHistoryMessage } from '../../database/types.ts';
 import { storedInstantMs } from '../../utils/date.ts';
+import { describeCalendarDay } from '../../utils/date.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import {
   type DayReferenceSet,
@@ -11,6 +13,7 @@ import {
   localDayOf,
   readDayContent,
   shiftDay,
+  type WeekdayDateMismatch,
   weekdayOf,
 } from './day-references.ts';
 import { checkSecretaryAccess } from './tool-handlers/secretary-access.ts';
@@ -341,8 +344,10 @@ export function checkQuestionWeekdays(ctx: AgentContext, toolName: string, input
   if (toolName !== 'ask_user') return undefined;
   const parsed = AskUserInput.safeParse(input);
   if (!parsed.success) return undefined;
-  const text = [parsed.data.question, ...(parsed.data.options ?? [])].join('\n');
-  const mismatches = findWeekdayDateMismatches(text, new Date(), ctx.user.timezone);
+  // Each button is its own line of text: a weekday option above a date option is no pair.
+  const mismatches = [parsed.data.question, ...(parsed.data.options ?? [])].flatMap((part) =>
+    findWeekdayDateMismatches(part, new Date(), ctx.user.timezone),
+  );
   if (mismatches.length === 0) return undefined;
   return {
     success: false,
@@ -351,4 +356,20 @@ export function checkQuestionWeekdays(ctx: AgentContext, toolName: string, input
       `WEEKDAY_DATE_MISMATCH: the question was not sent. ${describeWeekdayDateMismatches(mismatches)}. ` +
       'Use the date of the day the user named, make every weekday match its date, then call ask_user again.',
   };
+}
+
+/**
+ * What the user reads instead of a reply whose weekdays still contradict its dates after
+ * the corrective round: the real weekdays, and a request to name the day.
+ */
+export function weekdayMismatchNotice(language: string, mismatches: readonly WeekdayDateMismatch[]): string {
+  const lang = toLang(language);
+  const messages = t(lang).weekdayDateMismatch;
+  return messages.notice(
+    mismatches.map(({ date, nearest }) => {
+      const written = describeCalendarDay(date, lang);
+      const named = describeCalendarDay(nearest, lang);
+      return messages.fact(written.day, written.weekday, named.weekday, named.day);
+    }),
+  );
 }

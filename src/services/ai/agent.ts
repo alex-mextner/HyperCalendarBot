@@ -8,8 +8,13 @@ import { isBalanceExhausted } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
-import { resolveTurnDayReferences } from './day-reference-guard.ts';
-import { describeWeekdayDateMismatches, findWeekdayDateMismatches } from './day-references.ts';
+import { resolveTurnDayReferences, weekdayMismatchNotice } from './day-reference-guard.ts';
+import {
+  describeWeekdayDateMismatches,
+  findWeekdayDateMismatches,
+  mentionsWeekday,
+  type WeekdayDateMismatch,
+} from './day-references.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
 import { waitForAbort } from './provider-deadline.ts';
@@ -485,6 +490,18 @@ function isSkipText(text: string): boolean {
   return t === '[SKIP]' || text.includes('[SKIP]') || t === '...' || t === '…';
 }
 
+/**
+ * Settles a finished round's streamed prose, held by the writer since its first weekday:
+ * consistent prose is released to the screen, prose pairing a weekday with another
+ * weekday's date is dropped unseen. Returns the mismatches for the caller to act on.
+ */
+function checkRoundWeekdays(writer: TelegramStreamWriter, text: string, timezone: string): WeekdayDateMismatch[] {
+  const mismatches = findWeekdayDateMismatches(text, new Date(), timezone);
+  if (mismatches.length > 0) writer.dropDraftText();
+  else writer.releaseDraft();
+  return mismatches;
+}
+
 /** Recursively sort object keys for stable serialization. */
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -947,6 +964,8 @@ export class CalendarBotAgent {
     const writer = new TelegramStreamWriter(effectiveSender, ctx.chatId, ctx.user.language, {
       userTranscript: ctx.inputMode === 'live_call' ? ctx.messageText : undefined,
       noPlaceholder: ctx.isGroup,
+      // A weekday next to a date is shown only after checkRoundWeekdays() found them consistent.
+      holdDraftWhen: mentionsWeekday,
     });
     const allToolCalls: AgentToolCallRecord[] = [];
     const allToolResults: AgentToolResultRecord[] = [];
@@ -960,8 +979,10 @@ export class CalendarBotAgent {
     // hallucination to chat_history before the validator has a chance to reject it.
     let pendingAssistantTurn: MessageParam | null = null;
     let pendingResponseText = '';
-    // A reply that paired a weekday with a date on another weekday gets one corrective round.
+    // A reply that paired a weekday with a date on another weekday gets one corrective round;
+    // if the corrected reply still does, the user gets the real weekdays instead of it.
     let weekdaysCorrected = false;
+    let unresolvedWeekdays: WeekdayDateMismatch[] = [];
 
     let currentMessages: MessageParam[] = [];
     let runFailed = false;
@@ -1068,14 +1089,12 @@ export class CalendarBotAgent {
         // the assistant turn yet — validation runs after the loop and may
         // reject+retry, in which case we don't want the rejected answer in
         // chat_history. Final persistence happens after validation below.
+        const mismatches = checkRoundWeekdays(writer, result.text, ctx.user.timezone);
         if (result.toolCalls.length === 0) {
           // "в среду, 28 сентября" when the 28th is a Monday: the user trusts the weekday
           // name, so such a reply is never delivered as is — the model gets one round to
           // fix it with the real weekdays in hand.
-          const mismatches = weekdaysCorrected
-            ? []
-            : findWeekdayDateMismatches(result.text, new Date(), ctx.user.timezone);
-          if (mismatches.length > 0) {
+          if (mismatches.length > 0 && !weekdaysCorrected) {
             weekdaysCorrected = true;
             aiLogger.warn(
               { userId: ctx.user.telegram_id, dates: mismatches.map((mismatch) => mismatch.date) },
@@ -1096,8 +1115,17 @@ export class CalendarBotAgent {
             continue;
           }
           termination = 'normal';
-          pendingAssistantTurn = result.assistantMessage;
-          pendingResponseText = result.text;
+          if (mismatches.length > 0) {
+            aiLogger.warn(
+              { userId: ctx.user.telegram_id, dates: mismatches.map((mismatch) => mismatch.date) },
+              'Corrected reply still pairs weekdays with other dates — replacing it with the real weekdays',
+            );
+            unresolvedWeekdays = mismatches;
+            responseUnverified = true;
+          } else {
+            pendingAssistantTurn = result.assistantMessage;
+            pendingResponseText = result.text;
+          }
           break;
         }
 
@@ -1281,20 +1309,29 @@ export class CalendarBotAgent {
             // and history on rejection, timeout, exhaustion, or an early stop.
             // The final evidence guard preserves writes and clarification UI.
             if (!retryOutcome.hitStopLoop && retryOutcome.lastRoundText && !retryOutcome.lastRoundHadToolCalls) {
-              const reValidation = await validateResponse(
-                {
-                  userMessage: ctx.messageText,
-                  toolCalls: allToolCalls.map((tc) => tc.name),
-                  response: retryOutcome.lastRoundText,
-                },
-                validatorStream,
+              const retryMismatches = findWeekdayDateMismatches(
+                retryOutcome.lastRoundText,
+                new Date(),
+                ctx.user.timezone,
               );
-              responseUnverified = !reValidation.approved;
-              if (!reValidation.approved) {
-                aiLogger.warn(
-                  { userId: ctx.user.telegram_id, reason: reValidation.reason },
-                  'Retry response rejected by validator — suppressing unverified explanation',
+              if (retryMismatches.length > 0) {
+                unresolvedWeekdays = retryMismatches;
+              } else {
+                const reValidation = await validateResponse(
+                  {
+                    userMessage: ctx.messageText,
+                    toolCalls: allToolCalls.map((tc) => tc.name),
+                    response: retryOutcome.lastRoundText,
+                  },
+                  validatorStream,
                 );
+                responseUnverified = !reValidation.approved;
+                if (!reValidation.approved) {
+                  aiLogger.warn(
+                    { userId: ctx.user.telegram_id, reason: reValidation.reason },
+                    'Retry response rejected by validator — suppressing unverified explanation',
+                  );
+                }
               }
             }
           }
@@ -1358,7 +1395,9 @@ export class CalendarBotAgent {
       (termination === 'waiting' && !writeOutcomes.speechQuestion);
     const validationNotice =
       responseUnverified && !silent && !evidence && termination !== 'waiting'
-        ? unverifiedResponseNotice(ctx.user.language)
+        ? unresolvedWeekdays.length > 0
+          ? weekdayMismatchNotice(ctx.user.language, unresolvedWeekdays)
+          : unverifiedResponseNotice(ctx.user.language)
         : null;
     const guarded = responseUnverified || evidence !== null || termination === 'waiting' || termination === 'error';
     if (guarded) {
@@ -1580,6 +1619,7 @@ export class CalendarBotAgent {
           };
 
       dbg?.logAiText(result.text);
+      checkRoundWeekdays(writer, result.text, ctx.user.timezone);
 
       if (result.toolCalls.length === 0) {
         if (!ctx.supplementMode) saveAssistant(result.assistantMessage);

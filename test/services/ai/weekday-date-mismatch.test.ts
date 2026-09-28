@@ -44,6 +44,28 @@ describe('a weekday written next to a date on another weekday', () => {
     expect(mismatches('Sun 2026-09-28')).toEqual([{ date: '2026-09-28', said: 'Sunday', actual: 'Monday' }]);
   });
 
+  test('a weekday alone on its line heads the date on the next line', () => {
+    expect(mismatches('Среда\n28 сентября: событий нет')).toEqual([
+      { date: '2026-09-28', said: 'Wednesday', actual: 'Monday' },
+    ]);
+    expect(mismatches('**Понедельник:**\n\n- 27 сентября, 12:30 английский')).toEqual([
+      { date: '2026-09-27', said: 'Monday', actual: 'Sunday' },
+    ]);
+    expect(mismatches('### Понедельник\n28 сентября — английский')).toEqual([]);
+    // A weekday that merely ends a line of prose does not head the next line.
+    expect(mismatches('Свободна только среда\n28 сентября — английский в 12:30')).toEqual([]);
+  });
+
+  test('a dotted number after a weekday is a date only when it cannot be a clock time', () => {
+    // Dates: a year, a day past 23, or a text that writes its times with a colon.
+    expect(mismatches('ср 10.09.2026')).toEqual([{ date: '2026-09-10', said: 'Wednesday', actual: 'Thursday' }]);
+    expect(mismatches('ср 10.09 в 12:30')).toEqual([{ date: '2026-09-10', said: 'Wednesday', actual: 'Thursday' }]);
+    expect(mismatches('ср 24.09')).toEqual([{ date: '2026-09-24', said: 'Wednesday', actual: 'Thursday' }]);
+    // Times: nothing says the dotted number is a day and a month.
+    for (const text of ['ср 10.09', 'ср 9.05 английский', 'Ср 9.10-10.00 английский, 12:30 обед'])
+      expect(mismatches(text)).toEqual([]);
+  });
+
   test('correct pairs and unrelated numbers pass', () => {
     for (const text of [
       'понедельник, 28 сентября',
@@ -52,7 +74,7 @@ describe('a weekday written next to a date on another weekday', () => {
       '**Вторник, 29 сентября 2026** — 13:00 Ветеринар',
       'Понедельник 12 чинить машину',
       'среда 12:30 английский',
-      'Понедельник\n27 сентября',
+      'Понедельник\n28 сентября',
       'Воскресенье 27 сентября 2026',
     ])
       expect(mismatches(text)).toEqual([]);
@@ -108,6 +130,15 @@ describe('ask_user with a mismatched weekday and date', () => {
     expect(result.error).toContain('WEEKDAY_DATE_MISMATCH');
     expect(result.error).toContain('2026-09-27 is a Sunday, not a Monday');
     expect(result.error).toContain('the nearest Monday is 2026-09-28');
+    expect(sendButtons).not.toHaveBeenCalled();
+  });
+
+  test('a weekday heading over a date on another weekday is rejected too', async () => {
+    const result = await executeTool(ctx, 'ask_user', {
+      question: 'Создать занятие?\n**Понедельник**\n27 сентября, 12:30',
+      options: ['Создать', 'Отмена'],
+    });
+    expect(result.error).toContain('2026-09-27 is a Sunday, not a Monday');
     expect(sendButtons).not.toHaveBeenCalled();
   });
 

@@ -369,11 +369,13 @@ export function describeReferences(set: DayReferenceSet): string {
  * the user approved; on 2026-09-27 it answered "в среду, 28 сентября" (a Monday).
  */
 export interface WeekdayDateMismatch {
-  /** The pair as written. */
+  /** The pair as written, on one line. */
   phrase: string;
   date: string;
   said: string;
   actual: string;
+  /** The named weekday closest to `date`, at most three days away. */
+  nearest: string;
 }
 
 const PAIR_WEEKDAYS: ReadonlyMap<string, number> = new Map([
@@ -388,14 +390,28 @@ const PAIR_WEEKDAYS: ReadonlyMap<string, number> = new Map([
   ),
 ]);
 const WD = `(${[...PAIR_WEEKDAYS.keys()].sort((a, b) => b.length - a.length).join('|')})`;
-/** What may stand between a weekday and its date on one line: spaces, commas, dashes, markdown. */
-const GAP = '[ \\t,*_()\\-–—.]{1,6}';
+/** What may stand between a weekday and its date on one line: spaces, commas, colons, dashes, markdown. */
+const GAP = '[ \\t,:*_()\\-–—.]{1,8}';
+const WEEKDAY_WORD = new RegExp(`(?<![\\p{L}])${WD}(?![\\p{L}])`, 'u');
+/**
+ * A weekday alone on its line ("**Среда**", "### Понедельник:") and the line break (plus
+ * one blank line) that follows it: such a heading names the day of the date under it.
+ */
+const WEEKDAY_HEADING = new RegExp(`(?<=^|\\n)[^\\p{L}\\d\\n]*${WD}[^\\p{L}\\d\\n]*\\n(?:[ \\t]*\\n)?`, 'gu');
+/** Clock times written with a colon: the author's dotted numbers are then dates. */
+const COLON_CLOCK = /(?<!\d)\d{1,2}:\d{2}(?!\d)/;
+/** A dotted day and month that cannot be a clock time: a day past 23, or a year. */
+const DOTTED_DATE = /(?<![\d.])(?:(?:2[4-9]|3[01])\.(?:0?[1-9]|1[0-2])|\d{1,2}\.\d{1,2}\.\d{2,4})(?![\d:])/;
+/** "9.10-10.00": a dotted number that opens a range is a clock time. */
+const RANGE_AFTER = /^[ \t]*[-–—][ \t]*\d{1,2}[.:]\d{2}/;
 
 interface PairParts {
   weekday: string;
   y: string | undefined;
   month: number;
   d: string;
+  /** "10.09" without a year could also be 10:09. */
+  dotted?: boolean;
 }
 
 const PAIR_PATTERNS: [RegExp, (m: RegExpMatchArray) => PairParts][] = [
@@ -418,7 +434,7 @@ const PAIR_PATTERNS: [RegExp, (m: RegExpMatchArray) => PairParts][] = [
   // "ср 01.10"
   [
     new RegExp(`(?<![\\p{L}])${WD}${GAP}(\\d{1,2})\\.(\\d{1,2})(?:\\.(\\d{4}|\\d{2}))?(?![\\d:])`, 'gu'),
-    (m) => ({ weekday: m[1]!, d: m[2]!, month: Number(m[3]), y: m[4]?.padStart(4, '20') }),
+    (m) => ({ weekday: m[1]!, d: m[2]!, month: Number(m[3]), y: m[4]?.padStart(4, '20'), dotted: true }),
   ],
   // "28 сентября, среда"
   [
@@ -449,40 +465,66 @@ function nearestDate(month: number, day: number, today: string): string | null {
   return candidates.sort((a, b) => Math.abs(Date.parse(a) - todayMs) - Math.abs(Date.parse(b) - todayMs))[0] ?? null;
 }
 
+/** Whether `text` may name a weekday next to a date; streamed text that does is held until checked. */
+export function mentionsWeekday(text: string): boolean {
+  return WEEKDAY_WORD.test(text.toLowerCase().replaceAll('ё', 'е'));
+}
+
 /** Every weekday name in `text` written next to a date that falls on another weekday. */
 export function findWeekdayDateMismatches(text: string, now: Date, timezone: string): WeekdayDateMismatch[] {
-  const normalized = text.toLowerCase().replaceAll('ё', 'е');
+  // Lower-casing, "ё" and the heading line breaks turned into spaces keep every offset, so
+  // a match in `normalized` slices the same pair out of `text`.
+  const normalized = text
+    .toLowerCase()
+    .replaceAll('ё', 'е')
+    .replace(WEEKDAY_HEADING, (heading) => heading.replaceAll('\n', ' '));
+  const datesDotted = COLON_CLOCK.test(normalized) || DOTTED_DATE.test(normalized);
   const { today } = localToday(now, timezone);
-  const found = new Map<string, WeekdayDateMismatch>();
+  const found = new Map<string, { at: number; mismatch: WeekdayDateMismatch }>();
   for (const [pattern, read] of PAIR_PATTERNS) {
     for (const match of normalized.matchAll(pattern)) {
       const parts = read(match);
+      const at = match.index ?? 0;
+      const end = at + match[0].length;
+      if (
+        parts.dotted &&
+        parts.y === undefined &&
+        Number(parts.d) <= 23 &&
+        (!datesDotted || RANGE_AFTER.test(normalized.slice(end)))
+      )
+        continue;
       const weekday = PAIR_WEEKDAYS.get(parts.weekday);
       const date =
         parts.y === undefined
           ? nearestDate(parts.month, Number(parts.d), today)
           : validDayKey(Number(parts.y), parts.month, Number(parts.d));
       if (weekday === undefined || date === null || weekdayOf(date) === weekday) continue;
-      const start = match.index ?? 0;
-      const phrase = text.slice(start, start + match[0].length).replace(/[\s,*_().–—-]+$/u, '');
+      // Step at most three days either way from the date to reach the named weekday.
+      const forward = (weekday - weekdayOf(date) + 7) % 7;
       found.set(`${date}|${weekday}`, {
-        phrase,
-        date,
-        said: WEEKDAY_NAMES[weekday]!,
-        actual: WEEKDAY_NAMES[weekdayOf(date)]!,
+        at,
+        mismatch: {
+          phrase: text
+            .slice(at, end)
+            .replace(/\s+/gu, ' ')
+            .replace(/[\s,:*_().–—-]+$/u, ''),
+          date,
+          said: WEEKDAY_NAMES[weekday]!,
+          actual: WEEKDAY_NAMES[weekdayOf(date)]!,
+          nearest: shiftDay(date, forward <= 3 ? forward : forward - 7),
+        },
       });
     }
   }
-  return [...found.values()].sort((a, b) => text.indexOf(a.phrase) - text.indexOf(b.phrase));
+  return [...found.values()].sort((a, b) => a.at - b.at).map(({ mismatch }) => mismatch);
 }
 
 /** Corrective English for the model: what each pair says, what is true, and the nearest named weekday. */
 export function describeWeekdayDateMismatches(mismatches: WeekdayDateMismatch[]): string {
   return mismatches
-    .map(({ phrase, date, said, actual }) => {
-      const forward = (WEEKDAY_NAMES.findIndex((name) => name === said) - weekdayOf(date) + 7) % 7;
-      const nearest = shiftDay(date, forward <= 3 ? forward : forward - 7);
-      return `«${phrase}»: ${date} is a ${actual}, not a ${said}; the nearest ${said} is ${nearest}`;
-    })
+    .map(
+      ({ phrase, date, said, actual, nearest }) =>
+        `«${phrase}»: ${date} is a ${actual}, not a ${said}; the nearest ${said} is ${nearest}`,
+    )
     .join('; ');
 }

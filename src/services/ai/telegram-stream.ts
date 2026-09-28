@@ -128,16 +128,26 @@ export class TelegramStreamWriter {
    * afterward. resetDraft()/resetForGuard() deliberately never clear this field: by
    * the time either could run again, the request is already over. */
   private discarded = false;
+  /** Streamed text from this offset on is not shown until the agent releases or drops it. */
+  private heldFrom: number | null = null;
+  private holdDraftWhen: ((draft: string) => boolean) | undefined;
 
   constructor(
     private sender: TelegramSender,
     private chatId: number,
     private lang: string = 'en',
-    opts?: { userTranscript?: string; existingMessageId?: number; noPlaceholder?: boolean },
+    opts?: {
+      userTranscript?: string;
+      existingMessageId?: number;
+      noPlaceholder?: boolean;
+      /** Draft text that must be checked before anyone sees it; held from the chunk that matched. */
+      holdDraftWhen?: (draft: string) => boolean;
+    },
   ) {
     this.userTranscript = opts?.userTranscript;
     this.messageId = opts?.existingMessageId ?? null;
     this.noPlaceholder = opts?.noPlaceholder ?? false;
+    this.holdDraftWhen = opts?.holdDraftWhen;
     this.startTypingLoop();
   }
 
@@ -176,7 +186,20 @@ export class TelegramStreamWriter {
   }
 
   appendText(chunk: string): void {
+    if (this.heldFrom === null && this.holdDraftWhen?.(this.text + chunk)) this.heldFrom = this.text.length;
     this.text += chunk;
+  }
+
+  /** The checked draft may be shown: streaming resumes with the held text. */
+  releaseDraft(): void {
+    this.heldFrom = null;
+  }
+
+  /** The draft failed its check: it is never shown, and the next flush clears what was. */
+  dropDraftText(): void {
+    this.text = '';
+    this.lastFlushedLength = 0;
+    this.heldFrom = null;
   }
 
   getText(): string {
@@ -220,6 +243,7 @@ export class TelegramStreamWriter {
     }
     this.text = '';
     this.lastFlushedLength = 0;
+    this.heldFrom = null;
   }
 
   async flush(force: boolean): Promise<void> {
@@ -237,7 +261,8 @@ export class TelegramStreamWriter {
   private async doFlush(force: boolean): Promise<void> {
     if (this.streamRateLimited) return;
 
-    const delta = this.text.length - this.lastFlushedLength;
+    const visibleText = this.heldFrom === null ? this.text : this.text.slice(0, this.heldFrom);
+    const delta = visibleText.length - this.lastFlushedLength;
     const timeSinceFlush = Date.now() - this.lastFlushTime;
 
     // Check content thresholds before creating a placeholder (avoids sending ⏳ for [SKIP])
@@ -272,8 +297,8 @@ export class TelegramStreamWriter {
       if (!this.messageId || this.discarded) return;
     }
 
-    const flushedLength = this.text.length;
-    let displayText = markdownToHtml(this.text) || '⏳';
+    const flushedLength = visibleText.length;
+    let displayText = markdownToHtml(visibleText) || '⏳';
     // Append "..." while still generating — removed on finalize
     if (displayText !== '⏳') {
       displayText += '...';
@@ -461,6 +486,7 @@ export class TelegramStreamWriter {
   resetDraft(): void {
     this.text = '';
     this.lastFlushedLength = 0;
+    this.heldFrom = null;
     this.toolLabel = null;
     this.pendingIndicators = [];
     this.plainResponseText = '';

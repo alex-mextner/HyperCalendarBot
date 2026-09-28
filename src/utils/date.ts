@@ -1,5 +1,5 @@
 import { TZDate } from '@date-fns/tz';
-import { addDays, addMinutes, endOfDay, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns';
+import { addDays, addMinutes, endOfDay, endOfWeek, format, parseISO, startOfDay, startOfWeek } from 'date-fns';
 import { enUS, ru } from 'date-fns/locale';
 
 export function toUserTime(isoUtc: string, timezone: string): string {
@@ -24,6 +24,16 @@ export function formatDateShort(isoUtc: string, timezone: string, lang: string):
   // en: EEE → standard US 3-char weekday (Mon, Tue, ..., Sun).
   const pattern = lang === 'ru' ? 'EEEEEE d' : 'EEE d';
   return format(d, pattern, { locale });
+}
+
+/** "28 сентября" / "September 28" and the weekday name of a YYYY-MM-DD calendar day. */
+export function describeCalendarDay(dayKey: string, lang: string): { day: string; weekday: string } {
+  const date = parseISO(dayKey);
+  const locale = lang === 'ru' ? ru : enUS;
+  return {
+    day: format(date, lang === 'ru' ? 'd MMMM' : 'MMMM d', { locale }),
+    weekday: format(date, 'EEEE', { locale }),
+  };
 }
 
 export function formatTimeRange(startUtc: string, endUtc: string | null, timezone: string): string {

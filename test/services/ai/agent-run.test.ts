@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, mock, setSystemTime, spyOn, test } from 'bun:test';
+import { beforeEach, describe, expect, type Mock, mock, setSystemTime, spyOn, test } from 'bun:test';
 import type OpenAI from 'openai';
 import { EN_AGENT_ERROR_PHRASES, RU_AGENT_ERROR_PHRASES, t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
@@ -106,6 +106,11 @@ function isValidatorCall(opts: StreamRoundOptions): boolean {
   const system = opts.messages[0];
   if (!system || system.role !== 'system' || typeof system.content !== 'string') return false;
   return system.content.includes('strict QA validator');
+}
+
+/** Every text the stream writer showed through message edits, in order. */
+function shownEdits(sender: TelegramSender): string[] {
+  return (sender.editMessageText as Mock<TelegramSender['editMessageText']>).mock.calls.map((call) => String(call[2]));
 }
 
 function makeStreamImpl(script: ScriptedRound[]): {
@@ -2393,9 +2398,123 @@ describe('CalendarBotAgent.run()', () => {
       const correction = calls[2]?.messages.at(-1);
       expect(String(correction?.content)).toContain('2026-09-28 is a Monday, not a Wednesday');
       expect(String(correction?.content)).toContain('the nearest Wednesday is 2026-09-30');
-      const edits = (sender.editMessageText as ReturnType<typeof mock>).mock.calls;
-      expect(String((edits.at(-1) as unknown[])[2])).not.toContain('28 сентября');
+      // The wrong pair is held back while streaming: no edit ever showed it.
+      expect(shownEdits(sender).filter((text) => text.includes('28 сентября'))).toEqual([]);
       expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain(wrong);
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test('a reply still mismatched after the correction is replaced by the real weekdays', async () => {
+    setSystemTime(new Date('2026-09-27T21:12:00Z'));
+    try {
+      ctx.user = { ...ctx.user, timezone: 'Europe/Belgrade', language: 'ru' };
+      ctx.messageText = 'Планы на среду';
+      const wrong = 'Среда, 28 сентября: событий нет.';
+      const { impl, calls } = makeStreamImpl([
+        {
+          kind: 'tool',
+          callId: 'call-1',
+          name: 'get_events',
+          input: { start_date: '2026-09-30', end_date: '2026-09-30' },
+        },
+        { kind: 'text', text: wrong },
+        { kind: 'text', text: wrong },
+      ]);
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+      expect(calls).toHaveLength(3);
+      expect(result.responseText).not.toContain(wrong);
+      expect(result.responseText).toContain('28 сентября — понедельник, а не среда; среда — 30 сентября');
+      expect(shownEdits(sender).filter((text) => text.includes(wrong))).toEqual([]);
+      const history = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
+      expect(history).not.toContain(wrong);
+      expect(history).toContain('28 сентября — понедельник');
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test('a validator retry that pairs a weekday with the wrong date is not delivered', async () => {
+    setSystemTime(new Date('2026-09-27T21:12:00Z'));
+    try {
+      ctx.user = { ...ctx.user, timezone: 'Europe/Belgrade', language: 'en' };
+      ctx.messageText = 'Plans for Wednesday';
+      const script = makeStreamImpl([
+        { kind: 'text', text: 'Nothing planned for Wednesday.' },
+        {
+          kind: 'tool',
+          callId: 'call-1',
+          name: 'get_events',
+          input: { start_date: '2026-09-30', end_date: '2026-09-30' },
+        },
+        { kind: 'text', text: 'Wednesday, September 28: nothing planned.' },
+      ]);
+      let validators = 0;
+      const impl: typeof script.impl = async (opts, cbs) => {
+        if (!isValidatorCall(opts)) return script.impl(opts, cbs);
+        const verdict = validators++ === 0 ? 'REJECT: no calendar evidence' : 'APPROVE';
+        return {
+          text: verdict,
+          toolCalls: [],
+          finishReason: 'stop',
+          assistantMessage: { role: 'assistant' as const, content: verdict },
+          providerUsed: 'mock-validator',
+          metrics: fakeMetrics('groq', 10, 2),
+        };
+      };
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+      expect(result.responseText).not.toContain('Wednesday, September 28');
+      expect(result.responseText).toContain('September 28 is a Monday, not a Wednesday; Wednesday is September 30');
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test('narration before a tool call that pairs a weekday with the wrong date stays out of the reply', async () => {
+    setSystemTime(new Date('2026-09-27T21:12:00Z'));
+    try {
+      ctx.user = { ...ctx.user, timezone: 'Europe/Belgrade' };
+      ctx.messageText = 'Планы на среду';
+      const { impl } = makeStreamImpl([
+        {
+          kind: 'tool',
+          callId: 'call-1',
+          name: 'get_events',
+          text: 'Смотрю среду, 28 сентября, в календаре.',
+          input: { start_date: '2026-09-30', end_date: '2026-09-30' },
+        },
+        { kind: 'text', text: 'Среда, 30 сентября: событий нет.' },
+      ]);
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+      expect(result.responseText).toBe('Среда, 30 сентября: событий нет.');
+      expect(shownEdits(sender).filter((text) => text.includes('28 сентября'))).toEqual([]);
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test('a reply pairing a weekday with the wrong date is never streamed to the user', async () => {
+    // Nothing was flushed yet in this request, so a streamed draft would be shown at once.
+    setSystemTime(new Date('2026-09-27T21:12:00Z'));
+    try {
+      ctx.user = { ...ctx.user, timezone: 'Europe/Belgrade' };
+      ctx.messageText = 'Что у меня в среду?';
+      const { impl } = makeStreamImpl([
+        { kind: 'text', text: 'Среда, 28 сентября: событий нет.' },
+        { kind: 'text', text: 'Среда, 30 сентября: событий нет.' },
+      ]);
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+      expect(result.responseText).toBe('Среда, 30 сентября: событий нет.');
+      expect(shownEdits(sender).filter((text) => text.includes('28 сентября'))).toEqual([]);
     } finally {
       setSystemTime();
     }
