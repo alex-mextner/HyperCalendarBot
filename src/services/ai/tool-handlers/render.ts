@@ -7,6 +7,7 @@ import { getDayRangeUtc, getWeekRangeUtc, localCalendarDate } from '../../../uti
 import { logger } from '../../../utils/logger.ts';
 import { getTheme } from '../../../worker/templates/themes.ts';
 import { enrichAgenda } from '../../event/agenda-enrichment.ts';
+import { formatWeekLabel } from '../../image/data-mapper.ts';
 import { renderDayImage } from '../../image/render-day.ts';
 import { renderMonthImage } from '../../image/render-month.ts';
 import { renderWeekImage } from '../../image/render-week.ts';
@@ -246,7 +247,7 @@ export async function handleRenderWeekImage(
     schedulePinFireAndForget(ctx, sent.message_id);
     return {
       success: true,
-      output: tr.weekImageSent(weekStartIso),
+      output: tr.weekImageSent(formatWeekLabel(weekStartIso, lang)),
       agentHint:
         'The weekly image has already been delivered to the chat. Do NOT call render_week_image again with identical arguments in this turn.',
     };

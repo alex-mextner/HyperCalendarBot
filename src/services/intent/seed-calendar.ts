@@ -168,7 +168,7 @@ const calendarImage: FamilyDefinition = {
     {
       when: "bind.p.kind == 'week'",
       call: 'render_week_image',
-      input: { week_start: '{{bind.p.start}}', scope: SCOPE },
+      input: { week_start: '{{bind.p.calendar_week_start}}', scope: SCOPE },
     },
     { when: "bind.p.kind == 'month'", call: 'render_month_image', input: { month: '{{bind.p.month}}', scope: SCOPE } },
   ],
@@ -182,6 +182,8 @@ const calendarImage: FamilyDefinition = {
     'send me schedule as a picture next week',
   ],
   negatives: ['покажи календарь картинкой', 'покажи календарь на неделю'],
+  notes:
+    'A week picture is always a Monday-to-Sunday calendar week; asked on a Saturday or Sunday, this week means the coming one. The reply names the dates shown.',
 };
 
 const slotsDay: FamilyDefinition = {
