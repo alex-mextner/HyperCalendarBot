@@ -92,7 +92,11 @@ function setup(profile: { city: string | null; countryCode: string | null; timez
     geocodingService: withCachedAreas(geocoder, memoryRedis()),
     addressCache: new AddressCache({
       get: async (key) => addressStore.get(key) ?? null,
-      set: async (key, value) => addressStore.set(key, value),
+      compareAndSet: async (key, expected, value) => {
+        if ((addressStore.get(key) ?? null) !== expected) return false;
+        addressStore.set(key, value);
+        return true;
+      },
     }),
     eventRepo: events,
     userRepo: users,
