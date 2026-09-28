@@ -251,6 +251,26 @@ describe('TelegramStreamWriter', () => {
     expect(text).toContain('Попытка 1: Не выполнено');
   });
 
+  test('a held draft shows only the text before the hold; a dropped one is replaced on screen', async () => {
+    const writer = new TelegramStreamWriter(sender, 123, 'ru', { holdDraftWhen: (draft) => draft.includes('Среда') });
+    await writer.init();
+    writer.appendText('Проверил ваш календарь на эту неделю. ');
+    writer.appendText('Среда, 28 сентября: английский в 12:30');
+    await writer.flush(true);
+    const streamed = editMock.mock.calls.at(-1)![2] as string;
+    expect(streamed).toContain('Проверил ваш календарь');
+    expect(streamed).not.toContain('Среда');
+
+    // The check failed: neither the prefix nor the pair may stay on screen.
+    writer.dropDraftText();
+    writer.appendText('Ничего не нашёл.');
+    await writer.finalize();
+    const final = editMock.mock.calls.at(-1)![2] as string;
+    expect(final).toContain('Ничего не нашёл.');
+    expect(final).not.toContain('Проверил');
+    expect(final).not.toContain('Среда');
+  });
+
   test('finalize without tools has no blockquote', async () => {
     const writer = new TelegramStreamWriter(sender, 123);
     await writer.init();

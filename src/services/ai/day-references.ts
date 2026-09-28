@@ -395,15 +395,19 @@ const GAP = '[ \\t,:*_()\\-–—.]{1,8}';
 const WEEKDAY_WORD = new RegExp(`(?<![\\p{L}])${WD}(?![\\p{L}])`, 'u');
 /**
  * A weekday alone on its line ("**Среда**", "### Понедельник:") and the line break (plus
- * one blank line) that follows it: such a heading names the day of the date under it.
+ * up to two blank lines) that follows it: such a heading names the day of the date under it.
  */
-const WEEKDAY_HEADING = new RegExp(`(?<=^|\\n)[^\\p{L}\\d\\n]*${WD}[^\\p{L}\\d\\n]*\\n(?:[ \\t]*\\n)?`, 'gu');
+const WEEKDAY_HEADING = new RegExp(`(?<=^|\\n)[^\\p{L}\\d\\n]*${WD}[^\\p{L}\\d\\n]*\\n(?:[ \\t]*\\r?\\n){0,2}`, 'gu');
 /** Clock times written with a colon: the author's dotted numbers are then dates. */
 const COLON_CLOCK = /(?<!\d)\d{1,2}:\d{2}(?!\d)/;
 /** A dotted day and month that cannot be a clock time: a day past 23, or a year. */
 const DOTTED_DATE = /(?<![\d.])(?:(?:2[4-9]|3[01])\.(?:0?[1-9]|1[0-2])|\d{1,2}\.\d{1,2}\.\d{2,4})(?![\d:])/;
 /** "9.10-10.00": a dotted number that opens a range is a clock time. */
 const RANGE_AFTER = /^[ \t]*[-–—][ \t]*\d{1,2}[.:]\d{2}/;
+/** "2.5 часа": a dotted number followed by a unit is a quantity. */
+const UNIT_AFTER = /^[ \t]*(?:час\p{L}*|ч|мин\p{L}*|hours?|hrs?|h|min\p{L}*)(?!\p{L})/u;
+/** The lower-case English "may" is the verb ("may 30 people join"), not the month. */
+const MAY_VERB = /(?<!\p{L})may(?!\p{L})/u;
 
 interface PairParts {
   weekday: string;
@@ -415,10 +419,10 @@ interface PairParts {
 }
 
 const PAIR_PATTERNS: [RegExp, (m: RegExpMatchArray) => PairParts][] = [
-  // "Понедельник 27 сентября", "в среду, 28 сентября 2026", "Wed 30 Sep"
+  // "Понедельник 27 сентября", "в среду, 28 сентября 2026", "Wed 30 Sep", "Wednesday, the 28th of September"
   [
     new RegExp(
-      `(?<![\\p{L}])${WD}${GAP}(\\d{1,2})(?:-?го|-?е|st|nd|rd|th)?[ \\t]+(?:of[ \\t]+)?(\\p{L}+)\\.?(?:,?[ \\t]+(\\d{4}))?`,
+      `(?<![\\p{L}])${WD}${GAP}(?:the[ \\t]+)?(\\d{1,2})(?:-?го|-?е|st|nd|rd|th)?[ \\t]+(?:of[ \\t]+)?(\\p{L}+)\\.?(?:,?[ \\t]+(\\d{4}))?`,
       'gu',
     ),
     (m) => ({ weekday: m[1]!, d: m[2]!, month: monthIndex(m[3]!) + 1, y: m[4] }),
@@ -443,6 +447,19 @@ const PAIR_PATTERNS: [RegExp, (m: RegExpMatchArray) => PairParts][] = [
       'gu',
     ),
     (m) => ({ d: m[1]!, month: monthIndex(m[2]!) + 1, y: m[3], weekday: m[4]! }),
+  ],
+  // "September 28, Wednesday"
+  [
+    new RegExp(
+      `(?<![\\p{L}\\d])(\\p{L}+)\\.?[ \\t]+(\\d{1,2})(?:st|nd|rd|th)?(?:,?[ \\t]+(\\d{4}))?${GAP}${WD}(?![\\p{L}])`,
+      'gu',
+    ),
+    (m) => ({ month: monthIndex(m[1]!) + 1, d: m[2]!, y: m[3], weekday: m[4]! }),
+  ],
+  // "28.09, среда"
+  [
+    new RegExp(`(?<![\\d.:])(\\d{1,2})\\.(\\d{1,2})(?:\\.(\\d{4}|\\d{2}))?${GAP}${WD}(?![\\p{L}])`, 'gu'),
+    (m) => ({ d: m[1]!, month: Number(m[2]), y: m[3]?.padStart(4, '20'), weekday: m[4]!, dotted: true }),
   ],
   // "Sun 2026-09-28" and "2026-09-28, воскресенье"
   [
@@ -472,12 +489,12 @@ export function mentionsWeekday(text: string): boolean {
 
 /** Every weekday name in `text` written next to a date that falls on another weekday. */
 export function findWeekdayDateMismatches(text: string, now: Date, timezone: string): WeekdayDateMismatch[] {
-  // Lower-casing, "ё" and the heading line breaks turned into spaces keep every offset, so
-  // a match in `normalized` slices the same pair out of `text`.
+  // Case folding only the letters day words use, "ё" and the heading line breaks turned into
+  // spaces keep every offset, so a match in `normalized` slices the same pair out of `text`.
   const normalized = text
-    .toLowerCase()
+    .replace(/[A-ZА-ЯЁ]/g, (letter) => letter.toLowerCase())
     .replaceAll('ё', 'е')
-    .replace(WEEKDAY_HEADING, (heading) => heading.replaceAll('\n', ' '));
+    .replace(WEEKDAY_HEADING, (heading) => heading.replace(/[\r\n]/g, ' '));
   const datesDotted = COLON_CLOCK.test(normalized) || DOTTED_DATE.test(normalized);
   const { today } = localToday(now, timezone);
   const found = new Map<string, { at: number; mismatch: WeekdayDateMismatch }>();
@@ -488,11 +505,11 @@ export function findWeekdayDateMismatches(text: string, now: Date, timezone: str
       const end = at + match[0].length;
       if (
         parts.dotted &&
-        parts.y === undefined &&
-        Number(parts.d) <= 23 &&
-        (!datesDotted || RANGE_AFTER.test(normalized.slice(end)))
+        (UNIT_AFTER.test(normalized.slice(end)) ||
+          (parts.y === undefined && Number(parts.d) <= 23 && (!datesDotted || RANGE_AFTER.test(normalized.slice(end)))))
       )
         continue;
+      if (parts.month === 5 && MAY_VERB.test(text.slice(at, end))) continue;
       const weekday = PAIR_WEEKDAYS.get(parts.weekday);
       const date =
         parts.y === undefined

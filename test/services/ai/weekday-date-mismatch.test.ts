@@ -42,6 +42,18 @@ describe('a weekday written next to a date on another weekday', () => {
     expect(mismatches('28 сентября, среда')).toEqual([{ date: '2026-09-28', said: 'Wednesday', actual: 'Monday' }]);
     expect(mismatches('вт 29.09 и ср 01.10')).toEqual([{ date: '2026-10-01', said: 'Wednesday', actual: 'Thursday' }]);
     expect(mismatches('Sun 2026-09-28')).toEqual([{ date: '2026-09-28', said: 'Sunday', actual: 'Monday' }]);
+    expect(mismatches('Wednesday, the 28th of September')).toEqual([
+      { date: '2026-09-28', said: 'Wednesday', actual: 'Monday' },
+    ]);
+    expect(mismatches('September 28, Wednesday')).toEqual([
+      { date: '2026-09-28', said: 'Wednesday', actual: 'Monday' },
+    ]);
+    expect(mismatches('28.09, среда')).toEqual([{ date: '2026-09-28', said: 'Wednesday', actual: 'Monday' }]);
+  });
+
+  test('the pair quoted back is the one written, whatever else the text holds', () => {
+    const [found] = findWeekdayDateMismatches('İngilizce dersi: среда, 28 сентября', NOW, TZ);
+    expect(found?.phrase).toBe('среда, 28 сентября');
   });
 
   test('a weekday alone on its line heads the date on the next line', () => {
@@ -54,6 +66,13 @@ describe('a weekday written next to a date on another weekday', () => {
     expect(mismatches('### Понедельник\n28 сентября — английский')).toEqual([]);
     // A weekday that merely ends a line of prose does not head the next line.
     expect(mismatches('Свободна только среда\n28 сентября — английский в 12:30')).toEqual([]);
+    // Windows line breaks and a second blank line still make a heading.
+    expect(mismatches('Среда\r\n28 сентября: событий нет')).toEqual([
+      { date: '2026-09-28', said: 'Wednesday', actual: 'Monday' },
+    ]);
+    expect(mismatches('**Среда**\n\n\n28 сентября: событий нет')).toEqual([
+      { date: '2026-09-28', said: 'Wednesday', actual: 'Monday' },
+    ]);
   });
 
   test('a dotted number after a weekday is a date only when it cannot be a clock time', () => {
@@ -76,6 +95,9 @@ describe('a weekday written next to a date on another weekday', () => {
       'среда 12:30 английский',
       'Понедельник\n28 сентября',
       'Воскресенье 27 сентября 2026',
+      // A dotted quantity is no date, and the lower-case English "may" is the verb.
+      'В пятницу 2.5 часа свободно, начнём в 12:30',
+      'On Friday, may 30 people join the call at 12:30?',
     ])
       expect(mismatches(text)).toEqual([]);
   });

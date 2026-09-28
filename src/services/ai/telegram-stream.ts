@@ -195,7 +195,10 @@ export class TelegramStreamWriter {
     this.heldFrom = null;
   }
 
-  /** The draft failed its check: it is never shown, and the next flush clears what was. */
+  /**
+   * The draft failed its check: it is never shown, and the next flush clears what was.
+   * Every path that empties the draft goes through here so the hold never outlives it.
+   */
   dropDraftText(): void {
     this.text = '';
     this.lastFlushedLength = 0;
@@ -241,9 +244,7 @@ export class TelegramStreamWriter {
       this.intermediateChunks.push({ kind: 'tools', text: this.toolLines.join('\n') });
       this.toolLines = [];
     }
-    this.text = '';
-    this.lastFlushedLength = 0;
-    this.heldFrom = null;
+    this.dropDraftText();
   }
 
   async flush(force: boolean): Promise<void> {
@@ -484,9 +485,7 @@ export class TelegramStreamWriter {
    * instead, which also strips committed reasoning prose.
    */
   resetDraft(): void {
-    this.text = '';
-    this.lastFlushedLength = 0;
-    this.heldFrom = null;
+    this.dropDraftText();
     this.toolLabel = null;
     this.pendingIndicators = [];
     this.plainResponseText = '';

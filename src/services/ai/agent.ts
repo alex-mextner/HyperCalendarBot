@@ -1309,11 +1309,8 @@ export class CalendarBotAgent {
             // and history on rejection, timeout, exhaustion, or an early stop.
             // The final evidence guard preserves writes and clarification UI.
             if (!retryOutcome.hitStopLoop && retryOutcome.lastRoundText && !retryOutcome.lastRoundHadToolCalls) {
-              const retryMismatches = findWeekdayDateMismatches(
-                retryOutcome.lastRoundText,
-                new Date(),
-                ctx.user.timezone,
-              );
+              // The same reading that decided whether the retry's draft was shown.
+              const retryMismatches = retryOutcome.lastRoundMismatches ?? [];
               if (retryMismatches.length > 0) {
                 unresolvedWeekdays = retryMismatches;
               } else {
@@ -1550,6 +1547,8 @@ export class CalendarBotAgent {
     lastRoundText: string;
     /** Whether the last round called any tools. Used to decide if re-validation is needed. */
     lastRoundHadToolCalls: boolean;
+    /** Weekdays the text-only last round paired with dates on other weekdays. */
+    lastRoundMismatches?: WeekdayDateMismatch[];
   }> {
     // Discard the rejected draft text so commitIntermediate() never pushes it
     // into the execution log — but keep any tool history already committed
@@ -1619,11 +1618,11 @@ export class CalendarBotAgent {
           };
 
       dbg?.logAiText(result.text);
-      checkRoundWeekdays(writer, result.text, ctx.user.timezone);
+      const lastRoundMismatches = checkRoundWeekdays(writer, result.text, ctx.user.timezone);
 
       if (result.toolCalls.length === 0) {
         if (!ctx.supplementMode) saveAssistant(result.assistantMessage);
-        return { hitStopLoop: false, lastRoundText: result.text, lastRoundHadToolCalls: false };
+        return { hitStopLoop: false, lastRoundText: result.text, lastRoundHadToolCalls: false, lastRoundMismatches };
       }
 
       const skipPersistIds = new Set(
