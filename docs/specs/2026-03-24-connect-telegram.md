@@ -500,8 +500,8 @@ is the start of a 30-day snooze of the suggestion (Section 10.1); showing the su
 
 ### 10.1 Contextual Connect Prompt
 
-The `send_invitation` handler decides deterministically, after the delivery attempt, whether to
-suggest connecting. The suggestion is added when ALL of these hold:
+The `send_invitation` and `resend_invitation` handlers decide deterministically, after the
+delivery attempt, whether to suggest connecting. The suggestion is added when ALL of these hold:
 
 - the bot itself could not reach the invitee (`deliverInvitation` returned `viaBotApi: false` —
   usually the invitee has not started the bot or blocked it; a transient Bot API error looks the
@@ -513,7 +513,9 @@ suggest connecting. The suggestion is added when ALL of these hold:
 - the suggestion is not snoozed: `users.connect_telegram_dismissed_at` is empty or older than
   30 days.
 
-Showing the suggestion starts the 30-day snooze (row and in-memory user snapshot). Therefore:
+Showing the suggestion starts the 30-day snooze. The snooze is claimed with one conditional `UPDATE`
+(`UserRepository.claimConnectTelegramSnooze`), so concurrent requests of the same user cannot both
+show it; the in-memory user snapshot is updated too. Therefore:
 
 - the suggestion appears at most once per 30 days, whether or not the user answers it — no
   "not now" has to be understood. The intent path shows `output` verbatim and cannot relay the

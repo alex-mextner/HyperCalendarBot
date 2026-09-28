@@ -17,8 +17,11 @@ import { SharingSettingsRepository } from '../../../../src/database/repositories
 import { TelegramSessionRepository } from '../../../../src/database/repositories/telegram-session.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
-import { handleDismissConnectTelegramPrompt } from '../../../../src/services/ai/tool-handlers/settings.ts';
-import { handleSendInvitation } from '../../../../src/services/ai/tool-handlers/sharing.ts';
+import {
+  handleConnectTelegramStatus,
+  handleDismissConnectTelegramPrompt,
+} from '../../../../src/services/ai/tool-handlers/settings.ts';
+import { handleResendInvitation, handleSendInvitation } from '../../../../src/services/ai/tool-handlers/sharing.ts';
 import type { AgentContext, TelegramSender } from '../../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
@@ -264,5 +267,27 @@ describe('send_invitation /connect_telegram suggestion', () => {
     const result = await handleSendInvitation(makeCtx({ sender }), { event_id: eventId, invitee_id: INVITEE_ID });
     expect(result.success).toBe(true);
     expect(mentionsSuggestion(result)).toBe(false);
+  });
+
+  test('two concurrent messages from one user show the suggestion once', async () => {
+    // Both requests loaded the user before either one showed the suggestion.
+    const first = makeCtx();
+    const second = makeCtx({ messageText: `Invite Telegram ID ${INVITEE_ID + 1}` });
+    const a = await handleSendInvitation(first, { event_id: eventId, invitee_id: INVITEE_ID });
+    const b = await handleSendInvitation(second, { event_id: eventId, invitee_id: INVITEE_ID + 1 });
+    expect([mentionsSuggestion(a), mentionsSuggestion(b)]).toEqual([true, false]);
+  });
+
+  test('after the suggestion is shown, connect_telegram_status reports it as recently dismissed', async () => {
+    const ctx = makeCtx();
+    await handleSendInvitation(ctx, { event_id: eventId, invitee_id: INVITEE_ID });
+    expect(handleConnectTelegramStatus(ctx).data).toEqual({ connected: false, dismissed_recently: true });
+  });
+
+  test('resending a pending invitation the bot cannot deliver carries the suggestion', async () => {
+    const pending = invitationRepo.create({ event_id: eventId, inviter_id: INVITER_ID, invitee_id: INVITEE_ID });
+    const result = await handleResendInvitation(makeCtx(), { invitation_id: pending.id });
+    expect(result.success).toBe(true);
+    expect(result.output?.split('\n').at(-1)).toBe(SUGGESTION);
   });
 });

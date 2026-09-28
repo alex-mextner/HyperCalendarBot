@@ -109,6 +109,20 @@ export class UserRepository {
     this.db.prepare('UPDATE users SET connect_telegram_dismissed_at = ? WHERE telegram_id = ?').run(at, userId);
   }
 
+  /**
+   * Starts the connect-suggestion snooze at `at` only if none is active since `activeSince`.
+   * Returns false when a concurrent request already claimed it (ISO timestamps compare as text).
+   */
+  claimConnectTelegramSnooze(userId: number, at: string, activeSince: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE users SET connect_telegram_dismissed_at = ?
+         WHERE telegram_id = ? AND (connect_telegram_dismissed_at IS NULL OR connect_telegram_dismissed_at < ?)`,
+      )
+      .run(at, userId, activeSince);
+    return result.changes === 1;
+  }
+
   update(telegramId: number, data: UpdateUserData): User | null {
     const existing = this.findByTelegramId(telegramId);
     if (!existing) return null;

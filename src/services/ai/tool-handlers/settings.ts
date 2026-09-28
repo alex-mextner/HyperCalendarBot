@@ -1,4 +1,4 @@
-import { t } from '../../../config/constants.ts';
+import { t, toLang } from '../../../config/constants.ts';
 import type {
   NotificationPreferencesRow,
   NotificationPreferencesUpdate,
@@ -290,19 +290,12 @@ function connectPromptSnoozed(ctx: AgentContext): boolean {
   return Date.now() - new Date(snoozedAt).getTime() < CONNECT_PROMPT_SNOOZE_MS;
 }
 
-function snoozeConnectPrompt(ctx: AgentContext): void {
-  const at = new Date().toISOString();
-  ctx.userRepo.setConnectTelegramDismissedAt(ctx.user.telegram_id, at);
-  // Later steps of the same message read the user snapshot, not the row: intent workflows build a
-  // fresh context per step around the same user object, so update that object in place.
-  ctx.user.connect_telegram_dismissed_at = at;
-}
-
 /**
  * The /connect_telegram suggestion for an invitation that was just sent, or null (#511, spec
  * §10.1). It is offered only when the bot itself could not reach a person invitee, the feature is
  * enabled, the user has no active session, is in a private chat (the command refuses to run in
- * groups), and the suggestion is not snoozed. Showing it starts the snooze.
+ * groups), and the suggestion is not snoozed. Showing it claims the snooze atomically, so
+ * concurrent requests of one user cannot both show it.
  */
 export function takeConnectTelegramSuggestion(
   ctx: AgentContext,
@@ -320,12 +313,20 @@ export function takeConnectTelegramSuggestion(
     !ctx.telegramSessionRepo.getActive(ctx.user.telegram_id) &&
     !connectPromptSnoozed(ctx);
   if (!eligible) return null;
-  snoozeConnectPrompt(ctx);
-  return t(ctx.user.language).botTips.connect_telegram;
+  const now = Date.now();
+  const at = new Date(now).toISOString();
+  const activeSince = new Date(now - CONNECT_PROMPT_SNOOZE_MS).toISOString();
+  if (!ctx.userRepo.claimConnectTelegramSnooze(ctx.user.telegram_id, at, activeSince)) return null;
+  // Later steps of the same message read the user snapshot, not the row: intent workflows build a
+  // fresh context per step around the same user object, so update that object in place.
+  ctx.user.connect_telegram_dismissed_at = at;
+  return t(toLang(ctx.user.language)).botTips.connect_telegram;
 }
 
 export function handleDismissConnectTelegramPrompt(ctx: AgentContext): ToolResult {
-  snoozeConnectPrompt(ctx);
+  const at = new Date().toISOString();
+  ctx.userRepo.setConnectTelegramDismissedAt(ctx.user.telegram_id, at);
+  ctx.user.connect_telegram_dismissed_at = at; // same in-place snapshot update as above
   return { success: true, output: 'Noted. Will not suggest again for 30 days.' };
 }
 handleDismissConnectTelegramPrompt.meta = { skipActionLog: true } satisfies import('../types.ts').ToolHandlerMeta;
