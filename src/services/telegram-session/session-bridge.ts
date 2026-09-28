@@ -121,9 +121,12 @@ async function spawnBridge(args: string[], stdinData?: Buffer): Promise<BridgeRe
  */
 function parseResult(stdout: string, stderr: string, exitCode: number): BridgeResult {
   const trimmedStdout = stdout.trim();
+  // The bridge's output may repeat the phone number, the login code or the 2FA password (a traceback
+  // of sign_in, for one), so only the exit code and whether there was output are logged.
+  const hasStderr = stderr.trim() !== '';
 
-  if (stderr.trim()) {
-    bridgeLogger.debug({ stderr: stderr.trim(), exitCode }, 'Bridge stderr');
+  if (hasStderr) {
+    bridgeLogger.debug({ exitCode }, 'Bridge wrote to stderr');
   }
 
   if (exitCode === 0) {
@@ -131,7 +134,7 @@ function parseResult(stdout: string, stderr: string, exitCode: number): BridgeRe
     if (parsed.success) {
       return { success: true, data: parsed.data };
     }
-    bridgeLogger.debug({ stdout: trimmedStdout }, 'Unexpected success output from Python bridge');
+    bridgeLogger.debug({ exitCode }, 'Unexpected success output from Python bridge');
     return { success: false, error: 'UNEXPECTED', message: 'Bridge returned unparseable success output' };
   }
 
@@ -148,8 +151,8 @@ function parseResult(stdout: string, stderr: string, exitCode: number): BridgeRe
     }
   }
 
-  // exit >= 2 or unparseable exit-1 output — log raw output, return sanitized message
-  bridgeLogger.debug({ stdout: trimmedStdout, stderr: stderr.trim(), exitCode }, 'Unexpected bridge error');
+  // exit >= 2 or unparseable exit-1 output — return a sanitized message
+  bridgeLogger.debug({ exitCode, hasStdout: trimmedStdout !== '', hasStderr }, 'Unexpected bridge error');
   return {
     success: false,
     error: 'UNEXPECTED',

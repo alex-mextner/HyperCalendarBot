@@ -1,8 +1,9 @@
 // src/bot/middleware/chat-logging.ts
 // Saves every conversation turn to chat_history — user text, commands, edits, button presses and the
 // bot's own send/editText replies — and records commands and button presses in the action log.
-// Text the connect-wizard guard took for Telegram-connect wizard input (phone, login code, 2FA
-// password) is stored only as a redaction marker.
+// Text or edits the connect-wizard guard recognised as Telegram-connect wizard input (phone, login
+// code, 2FA password) are not stored here: the guard already stored their redaction marker. A reply
+// that registered a separate history copy (the masked phone, GH-643) is stored as that copy.
 
 import type { Next, TelegramUpdate } from 'gramio';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
@@ -10,7 +11,7 @@ import type { User } from '../../database/types.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import { resolveCallbackButtonLabel } from '../callback-label.ts';
 import { parseAiBtnPayload } from '../handlers/callback.handler.ts';
-import { CONNECT_WIZARD_REDACTION } from '../scenes/connect-telegram.scene.ts';
+import { historyTextOf } from '../reply-history-text.ts';
 import type { ConnectWizardGuard } from './connect-wizard-guard.ts';
 
 type ReplyFn = (text: string, opts?: { [key: string]: unknown }) => Promise<unknown>;
@@ -31,7 +32,7 @@ export interface ChatLoggingDeps {
   actionLog: Pick<ActionLogRepository, 'insert'>;
   /** Latest user chat_history row per user, read by the AI pipeline for the current turn. */
   chatHistoryIds: Map<number, number>;
-  /** The connect-wizard guard's verdict on this update's text or edit, reached before this middleware. */
+  /** Whether the connect-wizard guard, reached before this middleware, already stored this update's text or edit. */
   isConnectWizardInput: ConnectWizardGuard['isConnectWizardInput'];
 }
 
@@ -49,16 +50,11 @@ export function createChatLogging(deps: ChatLoggingDeps) {
     const incomingText = context.update?.message?.text;
     const incomingMsgId = context.update?.message?.message_id;
     const editedMessage = context.update?.edited_message;
-    const inConnectWizard = isConnectWizardInput(context);
-    if (incomingText) {
-      if (inConnectWizard) {
-        // A phone number, login code or 2FA password: keep the turn, never its text. Slash text is
-        // not logged as a command either — a password may start with '/'.
-        chatHistoryIds.set(
-          user.telegram_id,
-          conversationLogger.logUserMessage(user.telegram_id, CONNECT_WIZARD_REDACTION, logChatId),
-        );
-      } else if (incomingText.match(/^\/cal(\s|$)/)) {
+    // A phone number, login code or 2FA password — the guard stored its marker. Slash text is not
+    // logged as a command either: a password may start with '/'.
+    const recordedByGuard = isConnectWizardInput(context);
+    if (incomingText && !recordedByGuard) {
+      if (incomingText.match(/^\/cal(\s|$)/)) {
         // /cal is an AI command — save args as plain user message, not a command event.
         // In groups, bare /cal means "look at the recent context above"; save the literal
         // "/cal" so the agent has a new user turn to respond to. In DMs, bare /cal just
@@ -95,12 +91,8 @@ export function createChatLogging(deps: ChatLoggingDeps) {
 
     // Edited message
     const editedText = editedMessage?.text;
-    if (editedText) {
-      conversationLogger.logEditedMessage(
-        user.telegram_id,
-        inConnectWizard ? CONNECT_WIZARD_REDACTION : editedText,
-        logChatId,
-      );
+    if (editedText && !recordedByGuard) {
+      conversationLogger.logEditedMessage(user.telegram_id, editedText, logChatId);
     }
 
     // Callback query (button press or ai_btn answer) — universal, no per-handler logging needed
@@ -143,7 +135,7 @@ export function createChatLogging(deps: ChatLoggingDeps) {
     if (originalSend) {
       context.send = async (text, opts) => {
         const result = await originalSend(text, opts);
-        conversationLogger.logBotResponse(user.telegram_id, text, logChatId);
+        conversationLogger.logBotResponse(user.telegram_id, historyTextOf(context, text), logChatId);
         return result;
       };
     }
@@ -152,7 +144,7 @@ export function createChatLogging(deps: ChatLoggingDeps) {
     if (originalEditText) {
       context.editText = async (text, opts) => {
         const result = await originalEditText(text, opts);
-        conversationLogger.logBotEdit(user.telegram_id, text, logChatId);
+        conversationLogger.logBotEdit(user.telegram_id, historyTextOf(context, text), logChatId);
         return result;
       };
     }

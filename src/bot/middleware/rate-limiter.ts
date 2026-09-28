@@ -81,13 +81,17 @@ interface RateLimitContext {
   send?: (text: string) => Promise<unknown>;
 }
 
-/** Drops messages and button presses from a user over the limit; the first dropped one gets one warning. */
-export function createRateLimitMiddleware(rateLimiter: RateLimiter) {
+/**
+ * Drops messages and button presses from a user over the limit; the first dropped one gets one warning.
+ * `onDropped` hears of every dropped update (the connect-wizard guard audits dropped wizard input).
+ */
+export function createRateLimitMiddleware(rateLimiter: RateLimiter, onDropped: (context: RateLimitContext) => void) {
   return async (context: RateLimitContext, next: Next) => {
     const userId = context.update?.message?.from?.id ?? context.update?.callback_query?.from?.id;
     if (!userId) return next();
     const { allowed, firstBlock } = rateLimiter.checkWithWarning(userId);
     if (!allowed) {
+      onDropped(context);
       if (firstBlock) await context.send?.(t(toLang(context.dbUser?.language)).rate_limited);
       return;
     }

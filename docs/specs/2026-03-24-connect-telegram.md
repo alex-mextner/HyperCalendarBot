@@ -212,45 +212,106 @@ process, cleans up the temp session file if present, replies with the fixed "А�
 handed to the AI or anywhere else — any of it may be the phone number, the login code or the 2FA
 password (typed at the wrong prompt, or as a sentence), so the scene keeps none of it in its state.
 
+The button names its run of the wizard: tapping "Подключить" gives the run a random id kept in its
+scene state and trace, and every cancel button of that run carries it (`ct:cancel_auth:<id>`;
+buttons sent before runs were named carry none). The connect-wizard guard answers a cancel button
+before the scene sees it (GH-645):
+
+- the open run's own button goes to its scene, as above;
+- a button from another run ends nothing and gets a "Эта кнопка от прошлой попытки подключения."
+  toast — a stale button cannot cancel a newer connection;
+- the button of a run whose scene row expired closes that run's trace, stops its login process,
+  removes its temp session file (the trace keeps its path) and replies "Авторизация отменена.", so
+  the next message is ordinary again. The trace is closed as of the press: text sent before it but
+  handled after it still counts as late (deleted, never logged);
+- when the scene row cannot be read, the button ends nothing.
+
 ### Wizard input stays out of logs and the AI
 
 Every update first passes the connect-wizard guard (`src/bot/middleware/connect-wizard-guard.ts`),
 registered before the rate limiter, chat logging and the scene command escape. While the
-`connect-telegram` scene is open, the guard takes every text typed in that chat for wizard input,
-and chat logging (`src/bot/middleware/chat-logging.ts`) stores it — and every edited text — as
-`[redacted: connect wizard input]`: the phone number, the login code and the 2FA password never
-reach `chat_history`, so they are never in the AI history, the AI debug logs (`logs/chats/`) or
-`get_history`. Slash-prefixed text is redacted the same way and gets no `user_action_log` row
-(a password may start with `/`). The command escape then treats that text as wizard input, not a
+`connect-telegram` scene is open, the guard takes every text typed in that chat for wizard input
+and stores it — and every edited text — in `chat_history` as `[redacted: connect wizard input]`,
+written when the update arrives, before any reply; chat logging (`src/bot/middleware/chat-logging.ts`)
+stores nothing more for it. The phone number, the login code and the 2FA password never reach
+`chat_history`, so they are never in the AI history, the AI debug logs (`logs/chats/`) or
+`get_history`. Slash-prefixed text is redacted the same way and is not logged as a command (a
+password may start with `/`). The command escape then treats that text as wizard input, not a
 command: it ends the wizard like the cancel button (stops the live MTProto auth process and
 removes its temp session file), replies with the same fixed "Авторизация отменена." and stops, so
-no command handler, feature-usage record or AI turn sees it. Bot replies inside the wizard are
-logged as usual — they echo only the masked phone. If the scene store cannot be read, the text is
-logged as the marker and otherwise handled as usual.
+no command handler, feature-usage record or AI turn sees it.
+
+Bot replies inside the wizard are logged as usual. The replies that show the connected account —
+the success message, the "already connected" prompt and the Telegram section of /settings — show
+the user the masked phone (`+7 ••• 4567`); their `chat_history` copy has `[masked phone]` in its
+place (`src/bot/reply-history-text.ts`), so no digit of the phone reaches the AI (GH-643). Only
+these replies opt in; nothing else is rewritten.
 
 The guard deletes every text typed at the consent screen and at the phone, code and 2FA prompts,
 before the rate limiter can drop it, so the message cannot be edited later. It also records the
 message ids (never the text) in a per-chat trace, `src/bot/scenes/connect-wizard-trace.ts`,
 kept beside the scene rows in `gramio_scenes` for 30 days after the wizard's last activity; ids
 stay at least 48 hours. An edit of a recorded message is logged only as the marker even after the
-wizard closed — the case where Telegram refused the deletion (GH-630). A failed deletion is logged
-without the message text and does not stop the flow.
+wizard closed — the case where Telegram refused the deletion (GH-630). A failed deletion does not
+stop the flow.
 
-The trace also covers text that no longer finds the wizard's scene row (GH-639):
+Failures on these paths are logged by class only (`src/utils/safe-failure.ts`): `TelegramError`
+with its HTTP-range status, `SQLiteError`, or `Error`, and for the MTProto bridge only an error
+code it is known to report — never an error's message, stack, cause, payload or name, any of which
+may echo the phone number or a password.
+
+#### Audit records
+
+Every protected input leaves exactly one marker row in `chat_history` and a `user_action_log` row
+with `action_type = 'connect_wizard_input'`: the owner, chat and message ids, `chat_history_id`
+pointing at the marker, the time, and in `metadata` the step (`consent`, `phone`, `code`,
+`password`), the deletion (`deleted`, `failed`, `not_attempted`) and the outcome. `action_name` is
+the reason: `typed`, `slash`, `edited`, `late`, `expired`, `state_unreadable`, then `rate_limited`
+when the rate limiter dropped it, and `released`, `replayed`, `discarded` or `release_refused` for a
+held message (`replayed` says the message was handed to the bot — `dispatched` — not how its handlers
+ended). Each update that opens a new run of the wizard is recorded as `opened`, also when an earlier
+run was left open until it expired. A failed deletion sets `success = 0`. Nothing in these rows is
+derived from the text: no fragment, length or digest.
+
+#### Text that no longer finds the wizard's scene row (GH-639)
 
 - **Sent before the wizard closed, handled after.** Webhook deliveries run concurrently, so a
   password can be handled after a `/cancel` or the cancel button sent later. The trace keeps the
   highest update id handled while the wizard was open; a text whose update id is not above it (and
-  arrives within 5 minutes of it) was sent into the wizard: it is deleted and goes nowhere, with
-  no reply. Text that the guard saw in the open wizard but whose wizard a concurrent update closed
-  before the scene read it is stopped right after the scenes plugin.
+  arrives within 5 minutes of it) was sent into the wizard: it is deleted, recorded as `late` and
+  goes nowhere, with no reply. Text that the guard saw in the open wizard but whose wizard a
+  concurrent update closed before the scene read it is stopped right after the scenes plugin.
 - **Typed after an idle wizard expired.** The scene store drops a wizard idle for 30 minutes; the
   trace, updated on every write and delete of the scene row, still says it is open. The first text
-  after that, when the wizard was at the phone, code or 2FA prompt, is deleted, never logged or
-  handed to the AI, and answered with "Время на подключение Telegram вышло. Сообщение удалено —
-  вдруг там был код или пароль. Начни заново: /connect_telegram". The wizard then counts as
-  closed: the next message is ordinary. A wizard that expired at the consent screen or after the
-  connection holds nothing back. The trace is in SQLite, so this survives a restart.
+  after that, when the wizard was at the phone, code or 2FA prompt, is held (below). The wizard
+  then counts as closed: the next message is ordinary. A wizard that expired at the consent screen
+  or after the connection holds nothing back. The trace is in SQLite, so this survives a restart.
+- **The scene row cannot be read.** When the trace shows the wizard open in that chat, the text is
+  held (below); with no open wizard in the trace the message is ordinary. When the trace cannot be
+  read either, text in a private chat — the only place the wizard runs — is held.
+
+#### Held messages (GH-645)
+
+A held message is deleted from the chat and kept only in the bot's memory, for at most 15 minutes,
+at most 3 per user and 100 in all (the oldest go first); a one-shot timer removes it at expiry and a
+restart forgets it. Nothing about it is persisted except its audit row. The bot answers, without
+repeating it, "Время на подключение Telegram вышло, поэтому твоё сообщение я удалил и не обработал —
+вдруг там был код или пароль…" (or, for an unreadable state, "Не смог проверить, не код ли это…"),
+with two buttons. When the wizard was at the phone prompt, its "share phone number" reply keyboard is
+removed first (by a throwaway message, as the scene installs it):
+
+- **"Это обычный запрос — обработать"** (`ctw:p:<nonce>`) — only its owner in its chat can use it;
+  a press from anyone else takes nothing. The press takes the message out of memory before anything
+  is awaited, so it runs at most once. A run of the wizard that may take the message is ended first
+  (its scene row deleted, its trace closed, its login stopped, "Авторизация отменена."); if a newer
+  run is open or the state still cannot be read, the message is not processed. Otherwise it goes
+  through the whole bot again as an ordinary update — commands, intents and the AI alike, logged
+  verbatim and counted in feature usage like any other message.
+- **"Удалить"** (`ctw:d:<nonce>`) forgets it at once.
+
+A press that finds nothing — after "Удалить", expiry, a restart or a release — answers "Этого
+сообщения у меня уже нет — если это был обычный запрос, отправь его ещё раз." and processes
+nothing. The nonce is 12 random bytes; the callback data carries nothing else.
 
 ---
 
@@ -424,6 +485,11 @@ If not connected:
 
 Callback prefix: `settings:tg_connect` / `settings:tg_disconnect`.
 Disconnect via settings uses the same logic as `/disconnect_telegram` — confirm → revoke → log_out.
+
+The masked phone stays visible here, in the connect success message and in the "already connected"
+prompt: it is a server-generated identifier of the connected account, not a credential (product
+decision of 2026-09-28, recorded on GH-643). Its `chat_history` copy leaves it out — see "Wizard
+input stays out of logs and the AI".
 
 ---
 

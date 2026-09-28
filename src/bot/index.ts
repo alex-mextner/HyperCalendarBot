@@ -17,7 +17,7 @@ import { BirthdayService } from '../services/birthday/birthday-service.ts';
 import { ConversationLogger } from '../services/conversation-logger.ts';
 import { EventService } from '../services/event/event-service.ts';
 import { findMostRecentEventWithExternalParticipants } from '../services/event/recent-external-events.ts';
-import { callbackPrefix, trackFeatureUsage } from '../services/feature-tracking.ts';
+import { callbackPrefix, createCommandUsageTracking, trackFeatureUsage } from '../services/feature-tracking.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { GroupSessionManager } from '../services/group/group-session.ts';
 import { GroupMemberService } from '../services/group/member-service.ts';
@@ -536,6 +536,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const connectWizardGuard = createConnectWizardGuard({
     sceneStorage: scenesSetup.storage,
     traces: createConnectWizardTraces(db.db),
+    conversationLogger,
+    actionLog: db.actionLog,
+    // A held message its owner released goes through the whole bot again, as an ordinary request.
+    replay: (update) => bot.updates.handleUpdate(update),
   });
 
   // AI Assistant commands (not in setMyCommands — internal use only)
@@ -552,7 +556,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     // Before the rate limiter: wizard input it drops must still be taken off the chat, and before chat
     // logging and the command escape, which close the wizard on a typed "/…" and must not log a password.
     .use(connectWizardGuard.middleware)
-    .use(createRateLimitMiddleware(rateLimiter))
+    .use(createRateLimitMiddleware(rateLimiter, connectWizardGuard.recordRateLimited))
     .use(
       createChatLogging({
         conversationLogger,
@@ -561,6 +565,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         isConnectWizardInput: connectWizardGuard.isConnectWizardInput,
       }),
     )
+    // After chat logging, which logs the press: buttons under a held message, stale cancel buttons.
+    .use(connectWizardGuard.callbacks)
     // Storage<Record<string, any>> is not assignable to Storage (unparameterized) due to generic invariance
     .use(createSceneCommandEscape(scenesSetup.storage))
     .use(createCallbackFallback(scenesSetup.storage))
@@ -568,15 +574,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     // Wizard input whose wizard a concurrent update closed before the scene read it goes no further.
     .use(connectWizardGuard.stopUnhandledInput)
     // Feature usage tracking for commands
-    .on('message', (ctx, next) => {
-      const text = ctx.text;
-      const userId = ctx.dbUser?.telegram_id;
-      if (text && userId && text.startsWith('/')) {
-        const cmd = text.slice(1).split(/[\s@]/)[0]!;
-        trackFeatureUsage(db.featureUsage, userId, 'command', cmd);
-      }
-      return next();
-    })
+    .on('message', createCommandUsageTracking(db.featureUsage))
     // Commands
     .command('start', (ctx) =>
       handleStart(ctx, {
