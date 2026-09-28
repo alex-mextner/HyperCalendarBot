@@ -120,6 +120,12 @@ function eventToSummary(event: CalendarEvent, timezone: string): EventSummary {
   return summary;
 }
 
+/** Remember the event's local start day so a later day picture in this run can show it (#506). */
+function recordChangedDay(ctx: AgentContext, event: CalendarEvent): void {
+  ctx.changedDays ??= new Set();
+  ctx.changedDays.add(format(new TZDate(new Date(event.start_at), ctx.user.timezone), 'yyyy-MM-dd'));
+}
+
 function buildOrganizerLink(user: AgentContext['user']): string {
   if (user.username) return `@${escapeHtml(user.username)}`;
   const name = user.first_name ?? String(user.telegram_id);
@@ -503,6 +509,7 @@ async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, us
           : 'The group event is saved but no member notifications were queued (no registered members or broadcast queue unavailable). Do NOT call create_event again for this event.'
         : undefined;
 
+    recordChangedDay(ctx, event);
     return {
       success: true,
       output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')),
@@ -642,6 +649,8 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
         : 'The group event is updated but no member notifications were queued (no registered members or broadcast queue unavailable). Do NOT call update_event again with identical arguments.'
       : undefined;
 
+  recordChangedDay(ctx, beforeUpdate);
+  recordChangedDay(ctx, updated);
   return { success: true, output, agentHint: groupHint, data: eventToSummary(updated, ctx.user.timezone) };
 }
 
@@ -835,6 +844,7 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
       }
     }
     ctx.eventService.deleteEventForGroup(input.event_id, ctx.groupChatId!);
+    recordChangedDay(ctx, event);
     return {
       success: true,
       effect: { kind: 'event_deleted' },
@@ -911,6 +921,7 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
     }
   }
 
+  recordChangedDay(ctx, event);
   return {
     success: true,
     effect: { kind: 'event_deleted' },
