@@ -1,4 +1,5 @@
 // src/database/migrations.ts
+import { backfillExceptionIdentity } from '../services/event/backfill-exception-identity.ts';
 import { backfillActiveRevision } from '../services/intent/revision-ledger.ts';
 import type { Migration } from './schema.ts';
 
@@ -1114,6 +1115,55 @@ export const migrations: Migration[] = [
       // Every existing row has no known origin and is never listed as a group answer.
       db.exec('ALTER TABLE event_participants ADD COLUMN source_group_id INTEGER');
       db.exec('ALTER TABLE event_participants ADD COLUMN source_group_recorded_at TEXT');
+    },
+  },
+  {
+    name: '066_recurrence_exception_identity',
+    up(db) {
+      // Exception identity moves from "local calendar date" to "exact original occurrence
+      // instant" (spec §5/§10, docs/superpowers/specs/2026-09-28-recurrence-semantics-583.md).
+      // identity_status flags a legacy exception row the backfill could not resolve
+      // unambiguously (zero or multiple parent-template occurrences landed on the same local
+      // date it was stored against) — expandRecurrence never guesses an unresolved exception
+      // onto a specific occurrence; the row is still shown at its own current start_at.
+      db.exec('ALTER TABLE events ADD COLUMN identity_status TEXT DEFAULT NULL');
+      backfillExceptionIdentity(db);
+    },
+  },
+  {
+    name: '067_event_reminders_identity_index',
+    up: (db) => {
+      // No backfill of legacy NULL occurrence_start rows here — a real one was tried and
+      // reverted during review. A recurring template can have MULTIPLE already-sent legacy
+      // rows sharing (event_id, user_id, interval_minutes, interval_label) with
+      // occurrence_start = NULL — one per historical occurrence that already fired, from
+      // before migration 046 added the column (046 only deleted UNSENT rows). Setting every
+      // such NULL to the template's own current start_at (the only value available without
+      // re-deriving each row's original occurrence, which is not reconstructible from the
+      // row alone) would collapse genuinely distinct historical rows onto one identical key —
+      // manufacturing a duplicate this very migration is about to forbid, aborting the whole
+      // migration transaction. SQLite treats every NULL as distinct from every other NULL in a
+      // UNIQUE index, so leaving them NULL is both correct and safe: these rows (already sent,
+      // never re-queried by occurrence) need no backfill for anything to keep working.
+      //
+      // Reminder identity is (event, recipient, occurrence, interval, label) — NOT
+      // (event_id, remind_at_utc). Two different recipients of the same event/occurrence
+      // legitimately share remind_at_utc, and so do two different occurrences of a
+      // multi-time-of-day series (e.g. BYHOUR=10,14) whose independently configured intervals
+      // happen to compute the same remind_at_utc; interval_label additionally distinguishes
+      // the two same-interval_minutes(-1) all-day reminders ("day before" / "day of"). See
+      // spec §7 — corrected after #554 review, which had wrongly proposed
+      // UNIQUE(event_id, remind_at_utc); that index was never implemented and is not created
+      // here. No *new* row can violate this index: every insert path either deletes and
+      // recreates an event's reminders in one call (`materialize`) or checks-then-inserts by
+      // this exact tuple (`materializeForOccurrence`/`existsForOccurrence`) — verified by
+      // code-path review, not by querying production, since this migration cannot see
+      // production data. Deploy should still run the pre-flight query in this migration's
+      // reviewed deploy document before rollout if that has not already been done.
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_event_reminders_identity
+          ON event_reminders(event_id, user_id, occurrence_start, interval_minutes, interval_label);
+      `);
     },
   },
 ];

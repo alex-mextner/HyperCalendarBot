@@ -120,6 +120,10 @@ export interface EnvConfig {
   OPENWEATHER_API_KEY?: string;
   GOOGLE_API_KEY?: string;
   TELEGRAM_SESSION_MASTER_KEY?: string;
+  /** Capability-gated rollback (spec docs/superpowers/specs/2026-09-28-recurrence-semantics-583.md
+   * §10): true routes recurrence expansion through the pre-583 single-RRULE-line engine. Absent
+   * or false (default) uses the multiline RRULE/EXDATE/RDATE engine. */
+  RECURRENCE_LEGACY_ENGINE?: boolean;
 }
 
 function requireEnv(name: string): string {
@@ -251,5 +255,6 @@ export function loadConfig(): EnvConfig {
     OPENWEATHER_API_KEY: process.env.OPENWEATHER_API_KEY || undefined,
     GOOGLE_API_KEY: process.env.GOOGLE_API_KEY || undefined,
     TELEGRAM_SESSION_MASTER_KEY: telegramSessionMasterKey,
+    RECURRENCE_LEGACY_ENGINE: process.env.RECURRENCE_LEGACY_ENGINE === 'true' || undefined,
   };
 }
