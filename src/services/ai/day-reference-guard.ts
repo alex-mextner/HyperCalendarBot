@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { CalendarEvent, ChatHistoryMessage } from '../../database/types.ts';
+import { storedInstantMs } from '../../utils/date.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import {
   type DayReferenceSet,
@@ -15,10 +16,11 @@ import { resolveScope } from './tool-handlers/shared.ts';
 import type { AgentContext, ToolResult } from './types.ts';
 
 /**
- * Pre-dispatch guard: a date-bearing tool call must target a day the user named in this
- * turn. When the user said "в среду" the model may only create, move, delete or read on
- * that Wednesday; a call for any other day is rejected before anything is written, with
- * an error that names the right date so the model can redo it.
+ * Pre-dispatch guard: the event writes and reads in targetOf must target a day the user
+ * named in this turn. When the user said "в среду" the model may only create, move,
+ * delete or read on that Wednesday; a call for any other day is rejected before anything
+ * is written, with an error that names the right date so the model can redo it. Other
+ * date-bearing tools are not checked yet (#616).
  *
  * Incidents (user 716928723, Europe/Belgrade): on Friday 2026-09-25 "понедельник …
  * среда …" was created on Sunday 27 and Tuesday 29; on Sunday 2026-09-27 "Планы на
@@ -42,25 +44,26 @@ const ActivityCodec = jsonCodec(z.object({ kind: z.string() }));
 
 /**
  * The ask_user question the current message answers, with the user message that led to
- * it — or null when the turn before this message did not end in ask_user, or when the
- * newest saved user message is not this one (a live-call transcript is never saved).
+ * it and when the question was asked — or null when the turn before this message did not
+ * end in ask_user, or when the newest saved user message is not this one (a live-call
+ * transcript is never saved).
  */
 function pendingQuestion(
   messageText: string,
   history: ChatHistoryMessage[],
-): { origin: string; question: string } | null {
+): { origin: ChatHistoryMessage; question: string; askedAt: string } | null {
   let index = history.length - 1;
   // The current message is the newest user row; bot edits of the question may follow it.
   while (index >= 0 && history[index]!.role !== 'user') index--;
   if (index < 0 || history[index]!.content.trim() !== messageText.trim()) return null;
   index--;
-  let question: string | null = null;
+  let question: { text: string; askedAt: string } | null = null;
   for (; index >= 0; index--) {
     const row = history[index]!;
     if (row.role === 'tool') continue;
     if (row.role === 'user') {
       if (question === null || ActivityCodec.safeParse(row.content).success) return null;
-      return { origin: row.content, question };
+      return { origin: row, question: question.text, askedAt: question.askedAt };
     }
     if (ActivityCodec.safeParse(row.content).success) continue;
     const turn = AssistantToolCallsCodec.safeParse(row.content);
@@ -69,7 +72,8 @@ function pendingQuestion(
     if (question === null) {
       if (!ask) return null;
       const args = AskUserArgsCodec.safeParse(ask.function.arguments);
-      question = args.success ? [args.data.question ?? '', ...(args.data.options ?? [])].join('\n') : '';
+      const text = args.success ? [args.data.question ?? '', ...(args.data.options ?? [])].join('\n') : '';
+      question = { text, askedAt: row.created_at };
     }
   }
   return null;
@@ -91,9 +95,14 @@ export function resolveTurnDayReferences(
   if (own.kind === 'open') return null;
   const pending = pendingQuestion(messageText, history);
   if (!pending) return null;
-  const origin = readDayContent(pending.origin, now, timezone);
+  // Each message is read as of when it was written: a "Да" given days later confirms the
+  // Tuesday meant then, not the one coming now.
+  const originAt = storedInstantMs(pending.origin.created_at);
+  const askedAt = storedInstantMs(pending.askedAt);
+  if (!Number.isFinite(originAt) || !Number.isFinite(askedAt)) return null;
+  const origin = readDayContent(pending.origin.content, new Date(originAt), timezone);
   if (origin.kind !== 'named') return null;
-  const offered = readDayContent(pending.question, now, timezone);
+  const offered = readDayContent(pending.question, new Date(askedAt), timezone);
   if (offered.kind === 'open') return null;
   if (offered.kind === 'none') return origin.set;
   return {
@@ -159,19 +168,26 @@ function startTarget(what: string, startAt: string, timezone: string): Target | 
 }
 
 /** The event a delete or an edit refers to, looked up the way its handler will look it up. */
-function referencedEvent(ctx: AgentContext, input: unknown): CalendarEvent | null {
+function referencedEvent(ctx: AgentContext, input: unknown, action: string): CalendarEvent | null {
   const parsed = EventRefInput.safeParse(input);
   if (!parsed.success) return null;
   const { event_id: eventId, owner_id: ownerId } = parsed.data;
   // Without write access to someone else's calendar the handler refuses; nothing is revealed here.
   const access = checkSecretaryAccess(ctx.user.telegram_id, ownerId, ctx.secretary?.secretaryRepo ?? null, 'write');
   if (!access.ok) return null;
-  if (resolveScope(parsed.data, ctx) !== 'group') return ctx.eventService.getEvent(eventId, access.effectiveUserId);
-  return ctx.groupChatId === undefined ? null : ctx.eventService.getEventForGroup(eventId, ctx.groupChatId);
+  if (resolveScope(parsed.data, ctx) === 'group') {
+    return ctx.groupChatId === undefined ? null : ctx.eventService.getEventForGroup(eventId, ctx.groupChatId);
+  }
+  const owned = ctx.eventService.getEvent(eventId, access.effectiveUserId);
+  if (owned || action !== 'delete') return owned;
+  // Deleting an event the user only attends declines it; that event's day is the one touched.
+  const attends = ctx.participantRepo?.findByEventAndUser(eventId, access.effectiveUserId)?.status === 'accepted';
+  const organizer = attends ? ctx.eventService.getEventOwnerId(eventId) : null;
+  return organizer === null ? null : ctx.eventService.getEvent(eventId, organizer);
 }
 
 function eventTarget(ctx: AgentContext, input: unknown, action: string): Target | null {
-  const event = referencedEvent(ctx, input);
+  const event = referencedEvent(ctx, input, action);
   // A series spans many days; changing it is not a single-day action.
   if (!event || event.recurrence_rule) return null;
   const day = dayOfStart(event.start_at, ctx.user.timezone);

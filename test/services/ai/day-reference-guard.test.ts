@@ -6,6 +6,7 @@ import { ChatHistoryRepository } from '../../../src/database/repositories/chat-h
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
+import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
 import { SecretaryRepository } from '../../../src/database/repositories/secretary.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
@@ -44,13 +45,21 @@ function context(messageText: string, now = SUNDAY_NIGHT): AgentContext {
   return ctx;
 }
 
+/** Saves a history row stamped with the mocked clock, the way production stamps it with the real one. */
+function save(role: 'user' | 'assistant' | 'tool', content: string): void {
+  const id = history.save(USER, role, content);
+  db.run('UPDATE chat_history SET created_at = ? WHERE id = ?', [
+    new Date().toISOString().replace('T', ' ').slice(0, 19),
+    id,
+  ]);
+}
+
 function say(text: string): void {
-  history.save(USER, 'user', text);
+  save('user', text);
 }
 
 function toolTurn(id: string, name: string, args: object, result: string): void {
-  history.save(
-    USER,
+  save(
     'assistant',
     JSON.stringify({
       role: 'assistant',
@@ -58,7 +67,7 @@ function toolTurn(id: string, name: string, args: object, result: string): void 
       tool_calls: [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }],
     }),
   );
-  history.save(USER, 'tool', JSON.stringify([{ role: 'tool', tool_call_id: id, content: result }]));
+  save('tool', JSON.stringify([{ role: 'tool', tool_call_id: id, content: result }]));
 }
 
 const liveRows = () =>
@@ -240,7 +249,7 @@ describe('deleting on a day the user did not name', () => {
       'Вопрос отправлен. Ожидаю ответа.',
     );
     say('Да');
-    history.save(USER, 'assistant', JSON.stringify({ kind: 'bot_edit', text: '✅ Да' }));
+    save('assistant', JSON.stringify({ kind: 'bot_edit', text: '✅ Да' }));
     const ctx = context('Да');
 
     const wrong = await executeTool(ctx, 'delete_event', { event_id: past });
@@ -248,6 +257,24 @@ describe('deleting on a day the user did not name', () => {
     expect(wrong.error).toContain('«вторник» = Tuesday 2026-09-29');
     expect((await executeTool(ctx, 'delete_event', { event_id: coming })).success).toBe(true);
     expect(liveRows().map((row) => row.id)).toEqual([past]);
+  });
+
+  test('a late "Да" confirms the Tuesday meant when the question was asked', async () => {
+    // Asked on Sunday the 27th (Tuesday = the 29th), answered on Thursday 1 October, when
+    // the coming Tuesday is already the 6th.
+    const meant = addLesson('2026-09-29T10:30:00Z');
+    const nextWeek = addLesson('2026-10-06T10:30:00Z');
+    say('Во вторник отмени английский');
+    toolTurn('c1', 'ask_user', { question: 'Точно удалить?', options: ['Да', 'Нет'] }, 'Вопрос отправлен.');
+    const thursday = new Date('2026-10-01T09:00:00Z');
+    setSystemTime(thursday);
+    say('Да');
+    const ctx = context('Да', thursday);
+
+    const wrong = await executeTool(ctx, 'delete_event', { event_id: nextWeek });
+    expect(wrong.error).toContain('«вторник» = Tuesday 2026-09-29');
+    expect((await executeTool(ctx, 'delete_event', { event_id: meant })).success).toBe(true);
+    expect(liveRows().map((row) => row.id)).toEqual([nextWeek]);
   });
 
   test('an edit that keeps the date must be on a named day; a move must land on one', async () => {
@@ -293,6 +320,26 @@ describe('deleting on a day the user did not name', () => {
     expect(wrong.error).toContain(`Event ${monday} «Английский» is on Monday 2026-09-28`);
     expect(liveRows().map((row) => row.id)).toEqual([monday]);
   });
+
+  test('declining an event the user attends is checked against that event’s day', async () => {
+    const OWNER = 9103;
+    new UserRepository(db).create({ telegram_id: OWNER, timezone: TZ, language: 'ru' });
+    const tuesday = events.createEvent({
+      user_id: OWNER,
+      title: 'Английский',
+      start_at: '2026-09-29T10:30:00Z',
+      timezone: TZ,
+    }).id;
+    const participants = new ParticipantRepository(db);
+    participants.add(tuesday, USER, 'accepted');
+    say('В среду отмени мой английский');
+    const ctx = context('В среду отмени мой английский');
+    ctx.participantRepo = participants;
+
+    const wrong = await executeTool(ctx, 'delete_event', { event_id: tuesday });
+    expect(wrong.error).toContain(`Event ${tuesday} «Английский» is on Tuesday 2026-09-29`);
+    expect(participants.findByEventAndUser(tuesday, USER)?.status).toBe('accepted');
+  });
 });
 
 describe('which turn text counts', () => {
@@ -319,7 +366,7 @@ describe('which turn text counts', () => {
 
   test('"Да" after a plain text reply is not tied to the earlier message', () => {
     say('во вторник в 10 стоматолог');
-    history.save(USER, 'assistant', JSON.stringify({ role: 'assistant', content: 'Записала. Что-то ещё?' }));
+    save('assistant', JSON.stringify({ role: 'assistant', content: 'Записала. Что-то ещё?' }));
     say('Да');
     expect(resolveTurnDayReferences('Да', history.getRecent(USER, 30), SUNDAY_NIGHT, TZ)).toBeNull();
   });

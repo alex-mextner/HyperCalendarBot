@@ -2364,6 +2364,8 @@ describe('CalendarBotAgent.run()', () => {
         GROUP,
       );
       ctx.chatHistory.save(USER_ID, 'user', 'Да', GROUP);
+      // Rows carry the mocked clock, as production rows carry the real one.
+      db.run('UPDATE chat_history SET created_at = ?', ['2026-09-27 21:00:00']);
       const { impl, calls } = makeStreamImpl([
         { kind: 'tool', callId: 'call-1', name: 'delete_event', input: { event_id: past } },
         { kind: 'text', text: 'Не удалила: это было 1 сентября.' },

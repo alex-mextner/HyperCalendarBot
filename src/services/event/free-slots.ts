@@ -1,5 +1,5 @@
 import type { CalendarEvent, EventOccurrence, GroupMember } from '../../database/types.ts';
-import { getDayRangeUtc, localCalendarDate } from '../../utils/date.ts';
+import { getDayRangeUtc, localCalendarDate, storedInstantMs } from '../../utils/date.ts';
 import { logger } from '../../utils/logger.ts';
 
 const freeSlotsLogger = logger.child({ module: 'free-slots' });
@@ -10,20 +10,10 @@ const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 const DEFAULT_BLOCK_MS = DEFAULT_BLOCK_MINUTES * MINUTE_MS;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-const SQLITE_DATETIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
 
 interface TimeSpan {
   startMs: number;
   endMs: number;
-}
-
-/**
- * Epoch ms of a stored timestamp. SQLite `datetime('now')` values have a space
- * separator and no zone (UTC); ISO values carry `T` and a zone. Comparing the
- * strings lexically mixes the two spellings, so callers compare these numbers.
- */
-function storedInstantMs(value: string): number {
-  return Date.parse(SQLITE_DATETIME.test(value) ? `${value.replace(' ', 'T')}Z` : value);
 }
 
 /** Whether an occurrence start falls inside the member's joined/left window; unreadable bounds deny. */
