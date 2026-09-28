@@ -261,6 +261,10 @@ export interface AgentContext {
   /** Retry attempt index: 0 or absent = original message, 1-3 = subsequent backoff retries.
    *  Stall phrase is suppressed on attempts > 0. */
   retryAttempt?: number;
+  /** True for a scheduled/trigger run (or its retry) that answers no user message.
+   *  Only such runs may end with an empty or [SKIP] final and say nothing in a private chat;
+   *  False or unset for everything else, including retries of a user's own message. */
+  unprompted?: boolean;
 }
 
 export type TelegramSessionData = { connected: false; dismissed_recently: boolean } | { connected: true };
@@ -365,6 +369,8 @@ export interface ToolHandlerMeta {
   skipActionLog?: boolean;
   /** Tool always results in [SKIP] — no status message or tool label shown. */
   silent?: boolean;
+  /** A successful call delivers the answer itself (e.g. a rendered image); no text reply is owed. */
+  delivers?: boolean;
   /**
    * Tool result must NOT be persisted to chat_history.
    * Use for meta/query tools whose output is derived from history itself —

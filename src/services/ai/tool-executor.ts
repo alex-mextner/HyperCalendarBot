@@ -341,6 +341,11 @@ export const SILENT_TOOLS = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.silent),
 );
 
+/** Derived: tools that send the answer itself to the chat (a rendered image). */
+export const DELIVERING_TOOLS = new Set(
+  [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.delivers),
+);
+
 /** Derived: tools whose results must NOT be saved to chat_history (meta/query tools). */
 export const SKIP_PERSIST_TOOLS = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.skipPersist),

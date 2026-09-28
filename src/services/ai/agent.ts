@@ -1343,14 +1343,46 @@ export class CalendarBotAgent {
         if (termination === 'waiting' && writeOutcomes.speechQuestion) writer.appendText(writeOutcomes.speechQuestion);
       }
     }
+    // A direct private-chat request never ends in silence or a bare "...": weak
+    // models answer '[SKIP]' (taught for reactions and group silence) or nothing
+    // after real work, and discarding that deleted every trace of the writes.
+    // Clarification UI or an unprompted scheduled run is real silence, and so is a
+    // tool that delivered the answer itself (a reaction, a rendered image) — but
+    // only when it is the turn's whole outcome, never beside a write.
+    const draft = writer.getText().trim();
+    const modelStayedSilent = draft === '' || isSkipText(draft);
+    const answersDirectMessage =
+      !runFailed &&
+      !silent &&
+      !ctx.isGroup &&
+      !ctx.unprompted &&
+      ctx.inputMode !== 'live_call' &&
+      termination !== 'waiting';
+    const writes = writeOutcomes.summary(ctx.user.language, ctx.isGroup);
+    const answeredByTool = writes === null && writeOutcomes.toolAnswered;
+    let unansweredNotice: string | null = null;
+    // Every guarded, non-silent exit above appended its own notice (evidence, validation
+    // notice or spoken question, each a non-empty string), so its draft is never empty here.
+    if (answersDirectMessage && modelStayedSilent && !answeredByTool) {
+      unansweredNotice = writes
+        ? t(ctx.user.language).ai_unanswered_writes(writes)
+        : t(ctx.user.language).ai_unanswered;
+      aiLogger.warn(
+        { requestId, userId: ctx.user.telegram_id, termination, hadWrites: writes !== null },
+        'Model left a direct request unanswered — delivering fallback notice',
+      );
+      writer.resetForGuard();
+      writer.appendText(unansweredNotice);
+    }
     if (!ctx.supplementMode) {
-      if (!guarded) {
+      if (!guarded && !unansweredNotice) {
         for (const message of pendingHistory) this.saveAssistantTurn(ctx, message);
       }
       if (termination === 'waiting' && writeOutcomes.speechQuestion) {
         this.saveAssistantTurn(ctx, { role: 'assistant', content: writeOutcomes.speechQuestion });
       }
       if (evidence) this.saveAssistantTurn(ctx, { role: 'assistant', content: evidence });
+      if (unansweredNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: unansweredNotice });
       // Execution evidence is durable even in quiet mode; a notice is persisted only when delivered.
       if (validationNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: validationNotice });
     }
@@ -1382,7 +1414,8 @@ export class CalendarBotAgent {
 
     // A failed run with nothing to show must not leave the ⏳ placeholder edited
     // into a bare "..." — that is the silence the user reads as being ignored.
-    if ((silent && guarded) || isSkipText(finalText) || (runFailed && finalText.length === 0)) {
+    // A tool that delivered the answer with no text after it is not a bare "..." either.
+    if ((silent && guarded) || isSkipText(finalText) || (finalText.length === 0 && (runFailed || answeredByTool))) {
       const deliveryStartedAt = performance.now();
       await writer.discard();
       const metrics = requestMetrics.snapshot(termination, 'discarded', elapsedMs(deliveryStartedAt));

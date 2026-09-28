@@ -244,6 +244,8 @@ export const MSG = {
       '🔄 Restarting for an update — if I have not answered this in a few minutes, send it again.',
     agent_timeout: '⚠️ That took too long — timing out.',
     ai_response_blocked: 'The provider stopped this response. I will not automatically repeat the request.',
+    ai_unanswered: '⚠️ I could not answer that — please ask again.',
+    ai_unanswered_writes: (writes: string) => `⚠️ I could not put an answer together — here is what I did:\n${writes}`,
     rate_limited: 'Slow down, too many messages.',
     addWizard: {
       noEnd: 'No end date',
@@ -1228,6 +1230,8 @@ export const MSG = {
       '🔄 Перезапускаюсь на обновление — если не отвечу на это через пару минут, повтори запрос.',
     agent_timeout: '⚠️ Что-то долго думаю — прерываю.',
     ai_response_blocked: 'Провайдер остановил ответ. Я не буду автоматически повторять этот запрос.',
+    ai_unanswered: '⚠️ Не получилось ответить — повтори вопрос.',
+    ai_unanswered_writes: (writes: string) => `⚠️ Ответ не получился — вот что сделано:\n${writes}`,
     rate_limited: 'Слишком много сообщений, подождите.',
     addWizard: {
       noEnd: 'Без конца',

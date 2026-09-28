@@ -2,7 +2,7 @@
 import { t, toLang } from '../../config/constants.ts';
 import { EVENT_UPDATE_FIELDS } from '../../database/repositories/event.repository.ts';
 import { normalizeNumericId } from './numeric-id.ts';
-import { type ExecutorDisposition, isMutationTool } from './tool-executor.ts';
+import { DELIVERING_TOOLS, type ExecutorDisposition, isMutationTool, SILENT_TOOLS } from './tool-executor.ts';
 import type { ToolResult } from './types.ts';
 
 const targets = {
@@ -35,13 +35,32 @@ export class WriteOutcomes {
   >();
   private attempts = 0;
   mayHaveMutated = false;
+  /** A rendered image reached the chat. */
+  private delivered = false;
+  /** A render was asked for but sent nothing: it failed, or the throttle skipped it. */
+  private deliveryMissed = false;
+  /** A silent answering tool (a reaction) reached the chat. */
+  private reacted = false;
   speechQuestion = '';
+
+  /**
+   * The request was answered by a tool, so a silent final is fine: a picture arrived, or the
+   * turn only reacted. A 👍 does not stand in for a picture that was asked for and never came.
+   */
+  get toolAnswered(): boolean {
+    return this.delivered || (this.reacted && !this.deliveryMissed);
+  }
 
   constructor(private readonly writes: ReadonlySet<string> = new Set(Object.keys(targets))) {}
 
   record(operation: string, input: unknown, result: ToolResult & { disposition: ExecutorDisposition }): void {
     if (result.awaitingInput?.kind === 'speech') this.speechQuestion = result.awaitingInput.question;
     if (result.mutationState === 'confirmed' || result.mutationState === 'uncertain') this.mayHaveMutated = true;
+    const sent = result.disposition === 'executed' && result.success;
+    if (DELIVERING_TOOLS.has(operation)) {
+      if (sent) this.delivered = true;
+      else this.deliveryMissed = true;
+    } else if (SILENT_TOOLS.has(operation) && sent) this.reacted = true;
     if (!this.writes.has(operation) || !isMutationTool(operation, input) || result.disposition === 'waiting') return;
     const fields = typeof input === 'object' && input !== null ? input : {};
     const attempt = ++this.attempts;
@@ -76,15 +95,23 @@ export class WriteOutcomes {
   }
 
   finalNotice(language: string, hideTargets = false, interrupted = false): string | null {
-    const outcomes = [...this.outcomes.values()];
-    const needsGuard = outcomes.some(
+    const needsGuard = [...this.outcomes.values()].some(
       (outcome) =>
         !outcome.success ||
         outcome.effect?.kind === 'attendance_declined' ||
         (outcome.effect?.kind === 'invitation' && outcome.effect.delivery !== 'delivered'),
     );
     if (!interrupted && !needsGuard) return null;
+    return this.describe(language, hideTargets, interrupted);
+  }
 
+  /** Every recorded write, clean successes included — for a turn the model left without an answer. */
+  summary(language: string, hideTargets: boolean): string | null {
+    return this.describe(language, hideTargets, false);
+  }
+
+  private describe(language: string, hideTargets: boolean, interrupted: boolean): string | null {
+    const outcomes = [...this.outcomes.values()];
     // Attempt framing is useful only when something actually failed/skipped and
     // a later receipt may correct it. On a clean success (including an
     // interrupted run where writes already landed) it reads like internal debug

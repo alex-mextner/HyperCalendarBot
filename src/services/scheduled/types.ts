@@ -39,6 +39,8 @@ export interface AiMessageJobData {
   triggerId?: string;
   /** Backoff retry attempt index (1 = first retry, 2 = second, 3 = third/last). Absent on original messages. */
   retryAttempt?: number;
+  /** Set on a retry of a scheduled/trigger run: it still answers no user message and may stay silent. */
+  unprompted?: boolean;
 }
 
 /** Stores pending BullMQ retry job IDs per user for cancellation when a new message arrives. */
