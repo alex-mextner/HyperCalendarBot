@@ -17,6 +17,7 @@ import { formatDateShort, formatTime } from '../../utils/date.ts';
 import { logger } from '../../utils/logger.ts';
 import { describeBridgeError, describeFailure } from '../../utils/safe-failure.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
+import { MASKED_PHONE_IN_HISTORY, withHistoryText } from '../reply-history-text.ts';
 
 export interface ConnectTelegramConfig {
   TELEGRAM_SESSION_MASTER_KEY?: string;
@@ -237,7 +238,10 @@ export function createConnectTelegramScene(
           const existing = sessionRepo.findByUserId(userId);
           if (existing?.status === 'active') {
             const kb = new InlineKeyboard().text(ct.btnReconnect, CB_RECONNECT).text(ct.btnCancel, cancelData);
-            await context.send(ct.alreadyConnected(existing.phone_masked), { reply_markup: kb });
+            const shown = ct.alreadyConnected(existing.phone_masked);
+            await context.send(withHistoryText(context, shown, ct.alreadyConnected(MASKED_PHONE_IN_HISTORY)), {
+              reply_markup: kb,
+            });
             return;
           }
 
@@ -767,7 +771,9 @@ async function finalizeSession(
           .row()
           .text(ct.skipPendingBtn, CB_SKIP_PENDING);
 
-        await context.send(ct.successWithPending(phoneMasked, event.title, dateLine, inviteeList), {
+        const shown = ct.successWithPending(phoneMasked, event.title, dateLine, inviteeList);
+        const stored = ct.successWithPending(MASKED_PHONE_IN_HISTORY, event.title, dateLine, inviteeList);
+        await context.send(withHistoryText(context, shown, stored), {
           reply_markup: kb,
           parse_mode: 'HTML',
         });
@@ -776,7 +782,7 @@ async function finalizeSession(
     }
 
     // Generic success — no pending invitation
-    await context.send(ct.success(phoneMasked));
+    await context.send(withHistoryText(context, ct.success(phoneMasked), ct.success(MASKED_PHONE_IN_HISTORY)));
     await context.scene.exit();
     return false;
   } catch (err) {
