@@ -284,14 +284,18 @@ describe('InvitationService', () => {
       expect(participantRepo.findByEventAndUser(event.id, INVITEE)?.status ?? null).toBe(participantBefore);
     });
 
-    test('a proposal made after declining never turns the decline into acceptance', () => {
+    test('a proposal after declining is refused and never turns the decline into acceptance', () => {
       const { db, invRepo, eventRepo, settingsRepo, event } = setup();
       const participantRepo = new ParticipantRepository(db);
       const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo);
       const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
       service.declineInvitation(inv.id, INVITEE);
       // The +30/+60 prompt is a separate message that keeps its buttons after the card is answered.
-      service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+      const proposal = service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+
+      expect(proposal.success).toBe(false);
+      expect(proposal.reason).toBe('invitation_already_answered');
+      expect(invRepo.findById(inv.id)!.proposed_time).toBeNull();
 
       const result = service.rescheduleFromProposal(inv.id, INVITER);
 
