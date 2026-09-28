@@ -369,6 +369,8 @@ export interface ToolHandlerMeta {
   skipActionLog?: boolean;
   /** Tool always results in [SKIP] — no status message or tool label shown. */
   silent?: boolean;
+  /** A successful call delivers the answer itself (e.g. a rendered image); no text reply is owed. */
+  delivers?: boolean;
   /**
    * Tool result must NOT be persisted to chat_history.
    * Use for meta/query tools whose output is derived from history itself —

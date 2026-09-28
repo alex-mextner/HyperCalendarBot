@@ -28,7 +28,7 @@ import {
 } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
-import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
+import { ANSWERING_TOOLS, executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
 import { createToolExposure, DISCOVERY_TOOL, runRoundRevealingRejectedTools } from './tool-exposure.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import { getToolDefinitions } from './tools.ts';
@@ -1346,8 +1346,9 @@ export class CalendarBotAgent {
     // A direct private-chat request never ends in silence or a bare "...": weak
     // models answer '[SKIP]' (taught for reactions and group silence) or nothing
     // after real work, and discarding that deleted every trace of the writes.
-    // Clarification UI or an unprompted scheduled run is real silence, and so is
-    // a reaction — but only when it is the turn's whole outcome, never beside a write.
+    // Clarification UI or an unprompted scheduled run is real silence, and so is a
+    // tool that delivered the answer itself (a reaction, a rendered image) — but
+    // only when it is the turn's whole outcome, never beside a write.
     const draft = writer.getText().trim();
     const modelStayedSilent = draft === '' || isSkipText(draft);
     const answersDirectMessage =
@@ -1358,11 +1359,12 @@ export class CalendarBotAgent {
       ctx.inputMode !== 'live_call' &&
       termination !== 'waiting';
     const writes = writeOutcomes.summary(ctx.user.language);
-    const reactionOnly =
+    const answeredByTool =
       writes === null &&
-      allToolCalls.some((call, i) => SILENT_TOOLS.has(call.name) && allToolResults[i]?.success === true);
+      allToolCalls.some((call, i) => ANSWERING_TOOLS.has(call.name) && allToolResults[i]?.success === true);
     let unansweredNotice: string | null = null;
-    if (answersDirectMessage && modelStayedSilent && !reactionOnly) {
+    // Every guarded, non-silent exit above appended its own notice, so its draft is never empty here.
+    if (answersDirectMessage && modelStayedSilent && !answeredByTool) {
       unansweredNotice = writes
         ? t(ctx.user.language).ai_unanswered_writes(writes)
         : t(ctx.user.language).ai_unanswered;
@@ -1413,8 +1415,8 @@ export class CalendarBotAgent {
 
     // A failed run with nothing to show must not leave the ⏳ placeholder edited
     // into a bare "..." — that is the silence the user reads as being ignored.
-    // A reaction with no text is the whole answer, not a bare "..." either.
-    if ((silent && guarded) || isSkipText(finalText) || (finalText.length === 0 && (runFailed || reactionOnly))) {
+    // A tool that delivered the answer with no text after it is not a bare "..." either.
+    if ((silent && guarded) || isSkipText(finalText) || (finalText.length === 0 && (runFailed || answeredByTool))) {
       const deliveryStartedAt = performance.now();
       await writer.discard();
       const metrics = requestMetrics.snapshot(termination, 'discarded', elapsedMs(deliveryStartedAt));

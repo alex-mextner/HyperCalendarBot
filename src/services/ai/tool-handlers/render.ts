@@ -110,7 +110,7 @@ export async function handleRenderDayImage(
     return { success: false, error: tr.dayImageFailed(input.date) };
   }
 }
-handleRenderDayImage.meta = { skipActionLog: true } satisfies ToolHandlerMeta;
+handleRenderDayImage.meta = { skipActionLog: true, delivers: true } satisfies ToolHandlerMeta;
 
 export async function handleRenderTable(
   ctx: AgentContext,
@@ -159,7 +159,7 @@ export async function handleRenderTable(
     return { success: false, error: tr.tableFailed(input.title) };
   }
 }
-handleRenderTable.meta = { skipActionLog: true } satisfies ToolHandlerMeta;
+handleRenderTable.meta = { skipActionLog: true, delivers: true } satisfies ToolHandlerMeta;
 
 export async function handleRenderWeekImage(
   ctx: AgentContext,
@@ -257,7 +257,7 @@ export async function handleRenderWeekImage(
     return { success: false, error: tr.weekImageFailed(input.week_start) };
   }
 }
-handleRenderWeekImage.meta = { skipActionLog: true } satisfies ToolHandlerMeta;
+handleRenderWeekImage.meta = { skipActionLog: true, delivers: true } satisfies ToolHandlerMeta;
 
 export async function handleRenderMonthImage(
   ctx: AgentContext,
@@ -332,4 +332,4 @@ export async function handleRenderMonthImage(
     return { success: false, error: tr.monthImageFailed(input.month) };
   }
 }
-handleRenderMonthImage.meta = { skipActionLog: true } satisfies ToolHandlerMeta;
+handleRenderMonthImage.meta = { skipActionLog: true, delivers: true } satisfies ToolHandlerMeta;

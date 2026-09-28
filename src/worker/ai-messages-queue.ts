@@ -68,7 +68,7 @@ export class SyntheticPipelineRunner {
               message: msg,
               source: 'trigger',
               retryAttempt: currentAttempt + 1,
-              ...(unprompted && { unprompted }),
+              ...(unprompted ? { unprompted } : {}),
             },
             delay,
           );
