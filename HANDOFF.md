@@ -3,7 +3,9 @@
 - Task: [GH-334](https://github.com/alex-mextner/HyperCalendarBot/issues/334) - contextual
   intents plus server-orchestrated Opus intent learning with admin approval.
 - Branch: `feat/intent-recovery-334-20260927`, based on origin/main
-  `7399876eeb572e0c021cb44004931aec80624311` (production ran the same SHA on 2026-09-27).
+  `7399876eeb572e0c021cb44004931aec80624311` (production ran that SHA when the branch was cut on
+  2026-09-27). Main has since advanced past this base (#575 merged as `e8dfbc3b`); cut new worktrees
+  from current origin/main, not from this branch.
 - Evidence and checkpoint dir (private, gitignored, exists only in the main checkout, not in any
   worktree): `/Users/ultra/xp/hypercalendarbot/logs/intent-resume-20260927-chatgpt-334/` (`checkpoint.json`, `checkpoint.md`).
 
@@ -35,7 +37,7 @@ task and PR state.
 
 | Order | Slice | Task | PR | Depends on |
 | --- | --- | --- | --- | --- |
-| 1 | Revision ledger (migration 065) | [#555](https://github.com/alex-mextner/HyperCalendarBot/issues/555) | not opened; in progress (uncommitted) in `.worktrees/intent-revision-ledger-334`, branch `feat/intent-revision-ledger-334` | none |
+| 1 | Revision ledger (migration 065) | [#555](https://github.com/alex-mextner/HyperCalendarBot/issues/555) | [#575](https://github.com/alex-mextner/HyperCalendarBot/pull/575) merged, deployed, task done (see Outstanding acceptance) | none |
 | 2 | Simulator and coverage harness | [#556](https://github.com/alex-mextner/HyperCalendarBot/issues/556) | not opened | #555 (merge order only) |
 | 3 | Event reference store (migration 066) | [#557](https://github.com/alex-mextner/HyperCalendarBot/issues/557) | not opened | #555 |
 | 4 | Learning service | [#560](https://github.com/alex-mextner/HyperCalendarBot/issues/560) | not opened | #555, #556 |
@@ -52,17 +54,22 @@ spec, reuses our contextual-reference design).
 
 ## Outstanding acceptance
 
-All six GH-334 acceptance criteria remain open. Nothing is merged, deployed or activated. #555 has
-RED tests and uncommitted implementation work in `.worktrees/intent-revision-ledger-334` (RED run
-recorded privately in `/Users/ultra/xp/hypercalendarbot/logs/intent-resume-20260927-chatgpt-334/ledger-red.txt`).
+All six GH-334 acceptance criteria remain open. The first slice is done; for what shipped versus the plan,
+see the plan's PR-1 section. #555 (revision ledger,
+migration 065) merged in PR #575 as `e8dfbc3bb58e4383edfcb5b6c0dd435adf411b36`, deployed on
+2026-09-28T05:16Z, and a read-only production check shows exactly one active `source_baseline`
+revision matching the installed manifest and 52 approved rules still loading (private proof:
+`/Users/ultra/xp/hypercalendarbot/logs/intent-resume-20260927-chatgpt-334/postdeploy-575-proof.txt`).
+No new rules are activated: the administrator approval route does not exist in production yet (#558).
+No real Telegram end-to-end run was done (the QA Telegram session is logged out).
+Follow-ups from the ledger reviews: #577; missing hosted PR checks: #578.
 
 ## Open owner questions
 
-See "Open questions for the owner" in the plan (sample scope, sequencing with #426, reading of
-three-way verification).
+See "Open questions for the owner" in the plan: sample scope and the reading of three-way
+verification remain open; sequencing with #426 is settled (#555 merged first).
 
 ## Next action
 
-Continue #555 in the existing `.worktrees/intent-revision-ledger-334` (do not create a second
-worktree for it): finish the PR-1 tasks in the plan from "RED: migration tests" onward, then review,
-commit and ship.
+Implement #556 (simulator and coverage harness) in a fresh worktree created with
+`rig worktree create`; it is needed to measure the coverage target and gates #560, #563 and #559.

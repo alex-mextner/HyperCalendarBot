@@ -80,28 +80,22 @@ is drafted as a source baseline and the old rules keep running until the adminis
 
 ### PR-1 revision ledger (first code PR)
 
-- [x] Worktree: already created by the coordinator at `.worktrees/intent-revision-ledger-334`
-  (branch `feat/intent-revision-ledger-334`, base 7399876e); RED recorded in the private
-  `ledger-red.txt`. Do not create a second #555 worktree.
-- [x] RED: `test/regressions/intent-revision-ledger.test.ts` case 1 (source-only deploy keeps 52),
-  failing for the right reason (recorded in the private `ledger-red.txt`).
-- [ ] RED: migration tests `test/database/migrations-065.test.ts` (backfill from the live manifest;
-  tamper before backfill inserts nothing and does not throw; unmanaged inserts nothing).
-- [ ] Implement migration 065 and its doc; `registry.ts` (`readRegistry`, `registryIntegrity`).
-- [ ] Change `getApproved()` to the integrity table in the spec; per-rule compatibility skip.
-- [ ] RED then GREEN: cases 2-6, 8-11 (baseline draft idempotent and never active; dropped learned
-  rules listed; approve; revise/hash/not-found; stale base; tamper after proposal; tampered unaffected
-  rule; ledger mismatch; per-rule skip).
-- [ ] RED then GREEN: case 12 (`liveIntentIds` reusing `TTL_MS`, predicate and codec; boundary; corrupt
-  JSON).
-- [ ] RED then GREEN: cases 13-14 (`revisionGuard` before every mutation step; resumed session and
-  in-flight run of a changed rule stop before mutation).
-- [ ] RED then GREEN: case 15 (retire dispositions), case 16 (principals; body `author` ignored).
-- [ ] `replace-intent-basis.ts` records/approves revisions; `scripts/intent-revisions.ts` list/show/
-  approve/reject with operator principal; `engine.md` paragraph corrected.
-- [ ] `tsc --noEmit`, `bun run lint`, full `bun test`, `bunx knip`; `review diff --staged`; commit; `gh ship`.
-- [ ] After deploy: read-only check that production `getApproved()` still returns 52 and one active
-  `source_baseline` revision exists with target equal to the manifest.
+Done: merged in PR #575 as `e8dfbc3bb58e4383edfcb5b6c0dd435adf411b36` and deployed; issue #555 closed
+against the six acceptance criteria in its issue body, each checked with proof. Post-deploy evidence
+lives once, in HANDOFF.md "Outstanding acceptance". The worktree `.worktrees/intent-revision-ledger-334`
+was removed after the merge. The spec's PR-1 acceptance 1-17 was not re-audited item by item; what
+shipped differs from the PR table row above in these known ways:
+
+- The run guard shipped as `src/services/intent/rule-run-guard.ts`, used by the matcher layer and
+  by scheduled/trigger runs (`synthetic-intent-run.ts`), not as a `revisionGuard` in
+  `intent-executor.ts`.
+- `scripts/intent-revisions.ts` (operator list/show/approve/reject CLI) was not built. No production
+  route calls propose, revise, reject or approve; the administrator approval route belongs to #558.
+- The per-rule compatibility skip (spec acceptance 11) is not implemented; it stays with the
+  executor slice (#498) and is tracked with the other deferred review findings in #577.
+- The startup wiring that records the source-baseline draft (`ensureSourceBaselineDraft` in
+  `src/bot/index.ts`, a file the table assigns to PR-4) shipped in PR-1. It only drafts; it never
+  approves or activates.
 
 ### PR-0 simulator and coverage harness
 
@@ -144,8 +138,8 @@ is drafted as a source baseline and the old rules keep running until the adminis
 ### PR-4 wiring and admin commands
 
 - [ ] RED: acceptance 1-4 of PR-4 with real handlers and fake Telegram transport.
-- [ ] Wire capture (keep `toolCalls.length > 0` and no-`ask_user` guards), startup
-  `ensureSourceBaselineDraft`, admin commands with `t(lang)` strings, `COMMAND_FEATURE_MAP`.
+- [ ] Wire capture (keep `toolCalls.length > 0` and no-`ask_user` guards), admin commands with `t(lang)` strings, `COMMAND_FEATURE_MAP`. (The startup
+  `ensureSourceBaselineDraft` call already shipped in PR-1, `src/bot/index.ts`.)
 - [ ] Gates; review; commit; ship; enable `INTENT_LEARNING_ENABLED` in `/opt/hypercal/.env`, recreate
   the container, and prove one real Opus job end to end (three distinct session ids recorded
   server-side, draft visible in `/intents`, nothing approved by the proof).
@@ -175,8 +169,8 @@ proven live (running version, real Opus job, measured coverage).
 1. Learning sample scope: default is all users' requests, minimised and pseudonymised, sensitive
    tools excluded (the 2026-09-19 Opus classification already covered all 402 retained messages).
    Alternative: administrator-only samples.
-2. Sequencing with #426: merge PR-1 before it so its seed deploy cannot empty the
-   catalogue, or accept the current operator-rerun behavior for it.
+2. Settled: PR-1 merged first (PR #575), so a seed deploy for #426 no longer empties the
+   catalogue.
 3. "Three-way verification" is read as the three-answer comparison (historical, simulated intent,
    independent ideal) in a verify session separate from generation and assessment, not three
    separate reviewer sessions.
