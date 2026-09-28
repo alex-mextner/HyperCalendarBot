@@ -22,10 +22,9 @@ import type { AgentContext, ToolResult } from './types.ts';
  * is written, with an error that names the right date so the model can redo it. Other
  * date-bearing tools are not checked yet (#616).
  *
- * Incidents (user 716928723, Europe/Belgrade): on Friday 2026-09-25 "понедельник …
- * среда …" was created on Sunday 27 and Tuesday 29; on Sunday 2026-09-27 "Планы на
- * среду" read Monday 28, and "Во вторник отмени весь английский" deleted the Tuesdays
- * 1 and 8 September besides the misplaced lessons on the 29th.
+ * Incidents (Europe/Belgrade, 2026-09-25 and 2026-09-27): a Monday-and-Wednesday request was
+ * created on the Sunday and Tuesday before; a Wednesday plan request read Monday; and a
+ * "cancel on Tuesday" request deleted two past Tuesdays besides the misplaced ones.
  */
 
 const AssistantToolCallsCodec = jsonCodec(
@@ -80,19 +79,34 @@ function pendingQuestion(
   return null;
 }
 
-/** Longest free-text reply still read as an answer ("Да", "давай в 12"); a longer one is a new request. */
-const MAX_ANSWER_WORDS = 4;
+/** Words that only confirm the question ("Да", "да, давай", "Ок!") without asking for anything new. */
+const CONFIRMATIONS: Record<string, true> = {
+  да: true,
+  ага: true,
+  угу: true,
+  ок: true,
+  окей: true,
+  давай: true,
+  конечно: true,
+  хорошо: true,
+  yes: true,
+  yep: true,
+  ok: true,
+  okay: true,
+  sure: true,
+};
 
 /**
  * Whether the message answers the open question rather than skipping it for a new request:
- * one of the question's options, or a reply short enough to be an answer. A new request that
- * names no day must not inherit the question's day. Missing a real answer only switches the
- * guard off for that turn, as before this check.
+ * one of the question's options (a tapped button sends its text) or a bare confirmation. Any
+ * other reply may be a new request, and tying that to the question's day would reject the call
+ * the user asked for; not inheriting only switches the guard off for the turn.
  */
 function answersQuestion(messageText: string, options: readonly string[]): boolean {
   const reply = messageText.trim().toLowerCase();
   if (options.some((option) => option.trim().toLowerCase() === reply)) return true;
-  return reply.split(/\s+/).length <= MAX_ANSWER_WORDS;
+  const words = reply.split(/[\s,.!?…]+/u).filter((word) => word.length > 0);
+  return words.length > 0 && words.every((word) => CONFIRMATIONS[word] === true);
 }
 
 /**

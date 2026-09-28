@@ -385,7 +385,13 @@ describe('which turn text counts', () => {
     expect(resolveTurnDayReferences('поставь звонок маме на 3 часа', history30, SUNDAY_NIGHT, TZ)).toBeNull();
   });
 
-  test("a fresh request that ignores an open question is not tied to the question's day", () => {
+  test.each([
+    'поставь созвон с Петей в 15:00 про отчёт',
+    // Short is not an answer either: a new request of two words.
+    'позвони маме',
+    // A free-text reply may be an answer or a new request; the guard stays off rather than guess.
+    'давай в 12',
+  ])("a message that is not an option or a bare confirmation is not tied to the question's day: %s", (reply) => {
     say('во вторник в 10 стоматолог');
     toolTurn(
       'c1',
@@ -393,18 +399,21 @@ describe('which turn text counts', () => {
       { question: 'Поставить на вторник, 29 сентября?', options: ['Да', 'Нет'] },
       'Вопрос отправлен.',
     );
-    // The user skips the question and asks for something else, naming no day: that is today's
-    // or tomorrow's call, and the guard must not push it onto Tuesday.
-    const fresh = 'поставь созвон с Петей в 15:00 про отчёт';
-    say(fresh);
-    expect(resolveTurnDayReferences(fresh, history.getRecent(USER, 30), SUNDAY_NIGHT, TZ)).toBeNull();
+    // Tying it to Tuesday would reject the call the user asked for and suggest the wrong day.
+    say(reply);
+    expect(resolveTurnDayReferences(reply, history.getRecent(USER, 30), SUNDAY_NIGHT, TZ)).toBeNull();
   });
 
-  test('a short free-text reply still answers the open question', () => {
+  test.each([
+    'Да',
+    'да, давай',
+    'Ок!',
+    '11:00',
+  ])('an option or a bare confirmation answers the open question: %s', (reply) => {
     say('во вторник в 10 стоматолог');
     toolTurn('c1', 'ask_user', { question: 'Во сколько?', options: ['10:00', '11:00'] }, 'Вопрос отправлен.');
-    say('давай в 12');
-    const set = resolveTurnDayReferences('давай в 12', history.getRecent(USER, 30), SUNDAY_NIGHT, TZ);
+    say(reply);
+    const set = resolveTurnDayReferences(reply, history.getRecent(USER, 30), SUNDAY_NIGHT, TZ);
     expect(set && [...set.allowedDates]).toEqual(['2026-09-29']);
   });
 
