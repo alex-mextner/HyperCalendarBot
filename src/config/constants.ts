@@ -250,6 +250,12 @@ export const MSG = {
     ai_response_blocked: 'The provider stopped this response. I will not automatically repeat the request.',
     ai_unanswered: '⚠️ I could not answer that — please ask again.',
     ai_unanswered_writes: (writes: string) => `⚠️ I could not put an answer together — here is what I did:\n${writes}`,
+    weekdayDateMismatch: {
+      fact: (date: string, actual: string, said: string, nearest: string) =>
+        `${date} is a ${actual}, not a ${said}; ${said} is ${nearest}`,
+      notice: (facts: readonly string[]) =>
+        `⚠️ ${facts.join('\n')}\nThe answer mixed up weekdays and dates, so it was not sent. Tell me which day you mean and I will check again.`,
+    },
     rate_limited: 'Slow down, too many messages.',
     addWizard: {
       noEnd: 'No end date',
@@ -1240,6 +1246,12 @@ export const MSG = {
     ai_response_blocked: 'Провайдер остановил ответ. Я не буду автоматически повторять этот запрос.',
     ai_unanswered: '⚠️ Не получилось ответить — повтори вопрос.',
     ai_unanswered_writes: (writes: string) => `⚠️ Ответ не получился — вот что сделано:\n${writes}`,
+    weekdayDateMismatch: {
+      fact: (date: string, actual: string, said: string, nearest: string) =>
+        `${date} — ${actual}, а не ${said}; ${said} — ${nearest}`,
+      notice: (facts: readonly string[]) =>
+        `⚠️ ${facts.join('\n')}\nВ ответе перепутались дни недели и даты, поэтому он не отправлен. Напиши, какой день нужен, — проверю заново.`,
+    },
     rate_limited: 'Слишком много сообщений, подождите.',
     addWizard: {
       noEnd: 'Без конца',

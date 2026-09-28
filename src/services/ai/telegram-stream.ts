@@ -128,16 +128,33 @@ export class TelegramStreamWriter {
    * afterward. resetDraft()/resetForGuard() deliberately never clear this field: by
    * the time either could run again, the request is already over. */
   private discarded = false;
+  /** Streamed text from this offset on is not shown until the agent releases or drops it. */
+  private heldFrom: number | null = null;
+  private holdDraftWhen: ((draft: string) => boolean) | undefined;
+  private hideToolDetailsWhen: ((input: { [key: string]: unknown }) => boolean) | undefined;
 
   constructor(
     private sender: TelegramSender,
     private chatId: number,
     private lang: string = 'en',
-    opts?: { userTranscript?: string; existingMessageId?: number; noPlaceholder?: boolean },
+    opts?: {
+      userTranscript?: string;
+      existingMessageId?: number;
+      noPlaceholder?: boolean;
+      /** Draft text that must be checked before anyone sees it; held from the chunk that matched. */
+      holdDraftWhen?: (draft: string) => boolean;
+      /**
+       * Tool arguments that fail the draft's check (a rejected ask_user question) are not shown.
+       * It reads the arguments as given, not the escaped and shortened label.
+       */
+      hideToolDetailsWhen?: (input: { [key: string]: unknown }) => boolean;
+    },
   ) {
     this.userTranscript = opts?.userTranscript;
     this.messageId = opts?.existingMessageId ?? null;
     this.noPlaceholder = opts?.noPlaceholder ?? false;
+    this.holdDraftWhen = opts?.holdDraftWhen;
+    this.hideToolDetailsWhen = opts?.hideToolDetailsWhen;
     this.startTypingLoop();
   }
 
@@ -176,7 +193,23 @@ export class TelegramStreamWriter {
   }
 
   appendText(chunk: string): void {
+    if (this.heldFrom === null && this.holdDraftWhen?.(this.text + chunk)) this.heldFrom = this.text.length;
     this.text += chunk;
+  }
+
+  /** The checked draft may be shown: streaming resumes with the held text. */
+  releaseDraft(): void {
+    this.heldFrom = null;
+  }
+
+  /**
+   * The draft failed its check: it is never shown, and the next flush clears what was.
+   * Every path that empties the draft goes through here so the hold never outlives it.
+   */
+  dropDraftText(): void {
+    this.text = '';
+    this.lastFlushedLength = 0;
+    this.heldFrom = null;
   }
 
   getText(): string {
@@ -190,7 +223,9 @@ export class TelegramStreamWriter {
   setToolLabel(toolName: string, input?: { [key: string]: unknown }): void {
     const labels = TOOL_LABELS[toolName];
     const label = labels?.[this.lang] ?? labels?.en ?? toolName;
-    const details = input ? formatToolInput(input) : '';
+    // An ask_user question pairing a weekday with another weekday's date is rejected before
+    // it is sent; its label must not show the pair either.
+    const details = input && !this.hideToolDetailsWhen?.(input) ? formatToolInput(input) : '';
     const detailsSuffix = details ? `: ${details}` : '';
     this.toolLabel = `<i>${escapeHtml(label)}${detailsSuffix}...</i>`;
     this.pendingIndicators.push(`${escapeHtml(label)}${detailsSuffix}`);
@@ -218,8 +253,7 @@ export class TelegramStreamWriter {
       this.intermediateChunks.push({ kind: 'tools', text: this.toolLines.join('\n') });
       this.toolLines = [];
     }
-    this.text = '';
-    this.lastFlushedLength = 0;
+    this.dropDraftText();
   }
 
   async flush(force: boolean): Promise<void> {
@@ -237,7 +271,8 @@ export class TelegramStreamWriter {
   private async doFlush(force: boolean): Promise<void> {
     if (this.streamRateLimited) return;
 
-    const delta = this.text.length - this.lastFlushedLength;
+    const visibleText = this.heldFrom === null ? this.text : this.text.slice(0, this.heldFrom);
+    const delta = visibleText.length - this.lastFlushedLength;
     const timeSinceFlush = Date.now() - this.lastFlushTime;
 
     // Check content thresholds before creating a placeholder (avoids sending ⏳ for [SKIP])
@@ -272,8 +307,8 @@ export class TelegramStreamWriter {
       if (!this.messageId || this.discarded) return;
     }
 
-    const flushedLength = this.text.length;
-    let displayText = markdownToHtml(this.text) || '⏳';
+    const flushedLength = visibleText.length;
+    let displayText = markdownToHtml(visibleText) || '⏳';
     // Append "..." while still generating — removed on finalize
     if (displayText !== '⏳') {
       displayText += '...';
@@ -459,8 +494,7 @@ export class TelegramStreamWriter {
    * instead, which also strips committed reasoning prose.
    */
   resetDraft(): void {
-    this.text = '';
-    this.lastFlushedLength = 0;
+    this.dropDraftText();
     this.toolLabel = null;
     this.pendingIndicators = [];
     this.plainResponseText = '';
