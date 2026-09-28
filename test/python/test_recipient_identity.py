@@ -12,13 +12,15 @@ class FakeClient:
         self.resolved_id = resolved_id
         self.lookups = []
         self.sent = []
+        self.parse_modes = []
 
     async def get_chat(self, username):
         self.lookups.append(username)
         return SimpleNamespace(id=self.resolved_id)
 
-    async def send_message(self, target, text):
+    async def send_message(self, target, text, parse_mode=None):
         self.sent.append((target, text))
+        self.parse_modes.append(parse_mode)
         return SimpleNamespace(id=1)
 
 
