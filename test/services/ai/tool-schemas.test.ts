@@ -3,11 +3,12 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
-import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { EventRepository, UNRESOLVED_PLACE } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import type { CalendarEvent } from '../../../src/database/types.ts';
 import { executeTool } from '../../../src/services/ai/tool-executor.ts';
 import { toolSchemas } from '../../../src/services/ai/tool-schemas.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
@@ -361,18 +362,144 @@ describe('numeric ID boundary', () => {
   });
 });
 
-/** Records every location-verification request made by update_event. */
-function makeLocationVerificationSpy(): { service: LocationVerificationService; verifiedEventIds: number[] } {
+/** Records every location-verification request (the picker) made by an event tool. */
+function makeLocationVerificationSpy(): {
+  service: LocationVerificationService;
+  verifiedEventIds: number[];
+  verifiedEvents: CalendarEvent[];
+} {
   const verifiedEventIds: number[] = [];
+  const verifiedEvents: CalendarEvent[] = [];
   const partial: Partial<LocationVerificationService> = {
     verifyEventLocation: async (event) => {
       verifiedEventIds.push(event.id);
+      verifiedEvents.push(event);
       return { resolved: true, geocoded: null, cityExtracted: null, candidates: [] };
     },
     refreshInvitationCards: async () => {},
   };
-  return { service: partial as unknown as LocationVerificationService, verifiedEventIds };
+  return { service: partial as unknown as LocationVerificationService, verifiedEventIds, verifiedEvents };
 }
+
+/** The resolved-place columns of an event, which only the creator's tap or pin may set. */
+function resolvedPlace(event: CalendarEvent | null | undefined): { [column: string]: unknown } {
+  return Object.fromEntries(Object.keys(UNRESOLVED_PLACE).map((column) => [column, Reflect.get(event ?? {}, column)]));
+}
+
+describe('a model payload never confirms a place (#620)', () => {
+  const USER_ID = 123;
+  /** A place the model made up, in every column the verification service owns. */
+  const MODEL_PLACE = {
+    resolved_address: 'Far Away 1, Sample City',
+    latitude: 10.5,
+    longitude: 20.5,
+    google_maps_url: 'https://www.google.com/maps/search/?api=1&query=10.5,20.5',
+    venue_name: 'Far Away Venue',
+  };
+  let db: Database;
+  let ctx: AgentContext;
+  let verifiedEvents: CalendarEvent[];
+
+  beforeEach(() => {
+    db = createTestDb();
+    const chatHistory = new ChatHistoryRepository(db);
+    const userRepo = new UserRepository(db);
+    userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
+    const spy = makeLocationVerificationSpy();
+    verifiedEvents = spy.verifiedEvents;
+    ctx = {
+      user: userRepo.findByTelegramId(USER_ID)!,
+      chatId: USER_ID,
+      messageText: '',
+      isGroup: false,
+      eventService: new EventService({ eventRepo: new EventRepository(db) }),
+      holidayService: new HolidayService(new HolidayRepository(db)),
+      chatHistory,
+      conversationLogger: new ConversationLogger(chatHistory),
+      userRepo,
+      eventReminderRepo: new EventReminderRepository(db),
+      locationVerification: spy.service,
+    };
+  });
+
+  function createEvent(location?: string): number {
+    return ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Meeting',
+      start_at: '2099-03-15T13:00:00Z',
+      timezone: 'UTC',
+      location,
+    }).id;
+  }
+
+  // Each case uses its own location: the executor throttles identical calls across tests.
+  test.each<[string, { [field: string]: unknown }]>([
+    ['Cafe Prague', { location_verified: true, ...MODEL_PLACE }],
+    ['Cafe Vienna', { location_verified: 1, ...MODEL_PLACE }],
+    ['Cafe Berlin', { location_verified: 'true', ...MODEL_PLACE }],
+    ['Cafe Rome', { resolved_address: MODEL_PLACE.resolved_address }],
+  ])('update_event to %s keeps the new place unconfirmed and asks the creator', async (location, claimed) => {
+    const eventId = createEvent();
+    const result = await executeTool(ctx, 'update_event', { event_id: eventId, location, ...claimed });
+
+    expect(result.success).toBe(true);
+    const stored = ctx.eventService.getEvent(eventId, USER_ID);
+    expect(stored?.location).toBe(location);
+    expect(resolvedPlace(stored)).toEqual(UNRESOLVED_PLACE);
+    expect(result.output).not.toContain('verified place');
+    expect(verifiedEvents.map((event) => [event.id, event.location, resolvedPlace(event)])).toEqual([
+      [eventId, location, UNRESOLVED_PLACE],
+    ]);
+  });
+
+  test('update_event without a new text cannot confirm the typed place', async () => {
+    const eventId = createEvent('Cafe Lisbon');
+    const result = await executeTool(ctx, 'update_event', { event_id: eventId, location_verified: 1, ...MODEL_PLACE });
+
+    expect(result.success).toBe(true);
+    expect(resolvedPlace(ctx.eventService.getEvent(eventId, USER_ID))).toEqual(UNRESOLVED_PLACE);
+    expect(verifiedEvents).toEqual([]);
+  });
+
+  test('update_event cannot drop a place the creator confirmed', async () => {
+    const eventId = createEvent('Cafe Madrid');
+    const confirmed = { ...MODEL_PLACE, venue_name: 'Cafe Madrid', location_verified: 1 };
+    new EventRepository(db).updateLocationFields(eventId, confirmed);
+    const result = await executeTool(ctx, 'update_event', {
+      event_id: eventId,
+      title: 'Lunch',
+      location_verified: 'false',
+      resolved_address: null,
+      venue_name: null,
+    });
+
+    expect(result.success).toBe(true);
+    const stored = ctx.eventService.getEvent(eventId, USER_ID);
+    expect(stored?.title).toBe('Lunch');
+    expect(resolvedPlace(stored)).toEqual(confirmed);
+    expect(verifiedEvents).toEqual([]);
+  });
+
+  test.each<[string, { [field: string]: unknown }]>([
+    ['Cafe Oslo', { location_verified: true, ...MODEL_PLACE }],
+    ['Cafe Bergen', { location_verified: 1, ...MODEL_PLACE }],
+    ['Cafe Tromso', { location_verified: 'true', ...MODEL_PLACE }],
+  ])('create_event at %s keeps the place unconfirmed and asks the creator', async (location, claimed) => {
+    const result = await executeTool(ctx, 'create_event', {
+      title: `Meeting ${location}`,
+      start_at: '2099-03-16T13:00:00Z',
+      location,
+      ...claimed,
+    });
+
+    expect(result.success).toBe(true);
+    const [created] = ctx.eventService.searchEvents(USER_ID, location);
+    if (!created) throw new Error(`create_event at ${location} stored nothing`);
+    expect(created.location).toBe(location);
+    expect(resolvedPlace(created)).toEqual(UNRESOLVED_PLACE);
+    expect(verifiedEvents.map((event) => [event.id, resolvedPlace(event)])).toEqual([[created.id, UNRESOLVED_PLACE]]);
+  });
+});
 
 describe('boolean tool field boundary', () => {
   const USER_ID = 123;
