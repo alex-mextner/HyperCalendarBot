@@ -382,8 +382,10 @@ function makeLocationVerificationSpy(): {
 }
 
 /** The resolved-place columns of an event, which only the creator's tap or pin may set. */
-function resolvedPlace(event: CalendarEvent | null | undefined): { [column: string]: unknown } {
-  return Object.fromEntries(Object.keys(UNRESOLVED_PLACE).map((column) => [column, Reflect.get(event ?? {}, column)]));
+function resolvedPlace(event: CalendarEvent | null | undefined) {
+  if (!event) return null;
+  const { resolved_address, latitude, longitude, google_maps_url, venue_name, location_verified } = event;
+  return { resolved_address, latitude, longitude, google_maps_url, venue_name, location_verified };
 }
 
 describe('a model payload never confirms a place (#620)', () => {
@@ -433,7 +435,7 @@ describe('a model payload never confirms a place (#620)', () => {
   }
 
   // Each case uses its own location: the executor throttles identical calls across tests.
-  test.each<[string, { [field: string]: unknown }]>([
+  test.each<[string, object]>([
     ['Cafe Prague', { location_verified: true, ...MODEL_PLACE }],
     ['Cafe Vienna', { location_verified: 1, ...MODEL_PLACE }],
     ['Cafe Berlin', { location_verified: 'true', ...MODEL_PLACE }],
@@ -480,7 +482,7 @@ describe('a model payload never confirms a place (#620)', () => {
     expect(verifiedEvents).toEqual([]);
   });
 
-  test.each<[string, { [field: string]: unknown }]>([
+  test.each<[string, object]>([
     ['Cafe Oslo', { location_verified: true, ...MODEL_PLACE }],
     ['Cafe Bergen', { location_verified: 1, ...MODEL_PLACE }],
     ['Cafe Tromso', { location_verified: 'true', ...MODEL_PLACE }],
