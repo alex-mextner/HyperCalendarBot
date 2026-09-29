@@ -332,21 +332,6 @@ The user's calendar shows both their own events and events they accepted as a pa
 - Accepted shared events appear in all calendar views (today, week, upcoming) alongside the user's own events.`;
 }
 
-function buildConnectTelegramSection(): string {
-  return `## /connect_telegram suggestion
-
-When you have just created an event that has external participants (people who haven't started the bot),
-consider suggesting /connect_telegram so invitations come from the user's own account:
-
-1. Call connect_telegram_status
-2. If connected: true — do nothing
-3. If connected: false AND dismissed_recently: true — do nothing
-4. Otherwise, add to your response: "Кстати, можешь подключить свой Telegram-аккаунт — тогда приглашения будут приходить от тебя, а не от бота. /connect_telegram"
-5. If user says "нет", "позже", "not now" — call dismiss_connect_telegram_prompt
-
-NEVER pester. One suggestion per event creation, only if not dismissed recently.`;
-}
-
 function buildStallSection(): string {
   return `## Stall Messages
 Occasionally a previous assistant turn may contain a humorous "I need a moment" message — e.g. "Секундочку, перечитываю переписку", "без очков не вижу", "другой бот пришёл за советом", "cat on keyboard", etc. These appear in chat history as normal assistant messages. If the user references or reacts to one (asks "нашёл очки?", "помог тому боту?", "how was the coffee?", etc.) — play along naturally and in character, as if it really happened. Never acknowledge it was a technical glitch or error.`;
@@ -561,7 +546,6 @@ export function buildSystemPrompt(ctx: AgentContext): string {
     buildRulesSection(ctx, utcOffset, durationMins, now),
     buildProactiveSection(),
     buildSharedEventsSection(),
-    buildConnectTelegramSection(),
     buildStallSection(),
     buildInputModeSection(ctx),
     buildGroupSection(ctx),

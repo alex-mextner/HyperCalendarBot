@@ -115,7 +115,7 @@ describe('deliverInvitation', () => {
 
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
 
-    expect(result).toEqual({ delivered: true, viaDeepLink: false });
+    expect(result).toEqual({ delivered: true, viaDeepLink: false, viaBotApi: true });
     expect(sentInvId).toBe(invId);
     const stored = invitationRepo.findById(invId);
     expect(stored?.message_id).toBe(42);
@@ -141,7 +141,7 @@ describe('deliverInvitation', () => {
 
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender), event }));
 
-    expect(result).toEqual({ delivered: true, viaDeepLink: false });
+    expect(result).toEqual({ delivered: true, viaDeepLink: false, viaBotApi: false });
     expect(connectedCalled).toBe(true);
     expect(adminCalled).toBe(false);
   });
@@ -179,7 +179,7 @@ describe('deliverInvitation', () => {
       eventId: event.id,
     });
 
-    expect(result).toEqual({ delivered: true, viaDeepLink: false });
+    expect(result).toEqual({ delivered: true, viaDeepLink: false, viaBotApi: false });
     expect(firstPersonTexts).toHaveLength(1);
     expect(firstPersonTexts[0]).toContain(`📍 Кафе Ромашка — ул. Примерная, 1, Москва\n${mapUrl}`);
     expect(firstPersonTexts[0]).not.toContain('кафе у парка');
@@ -203,7 +203,7 @@ describe('deliverInvitation', () => {
 
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
 
-    expect(result).toEqual({ delivered: false, viaDeepLink: true });
+    expect(result).toEqual({ delivered: false, viaDeepLink: true, viaBotApi: false });
     expect(mtprotoCalled).toBe(true);
     const fallback = sentMessages.find((m) => m.chatId === INVITER_ID);
     expect(fallback).toBeDefined();
@@ -230,7 +230,7 @@ describe('deliverInvitation', () => {
       baseParams({ invitationId: invId, deps: makeDeps(sender), allowMtproto: false }),
     );
 
-    expect(result).toEqual({ delivered: false, viaDeepLink: true });
+    expect(result).toEqual({ delivered: false, viaDeepLink: true, viaBotApi: false });
     expect(mtprotoCalled).toBe(false);
     const fallback = sentMessages.find((m) => m.chatId === INVITER_ID);
     expect(fallback!.text).toContain('t.me/TestBot');
@@ -255,7 +255,7 @@ describe('deliverInvitation', () => {
     // A forward deep-link is meaningless for a group target: it resolves in a USER's private
     // /start and callbacks auth against the user's telegram_id, not the group. So no fallback
     // is sent and the result is an honest non-delivery — never a "link sent" claim.
-    expect(result).toEqual({ delivered: false, viaDeepLink: false });
+    expect(result).toEqual({ delivered: false, viaDeepLink: false, viaBotApi: false });
     expect(sentMessages.find((m) => m.chatId === INVITER_ID)).toBeUndefined();
   });
 
@@ -276,7 +276,7 @@ describe('deliverInvitation', () => {
       isGroupTarget: true,
     });
 
-    expect(result).toEqual({ delivered: true, viaDeepLink: false });
+    expect(result).toEqual({ delivered: true, viaDeepLink: false, viaBotApi: true });
     // A group target must carry the grsvp per-member keyboard keyed by eventId (not the invitation
     // id), so any member can respond for themselves — never the personal inv: keyboard.
     expect(variant).toEqual({
@@ -303,7 +303,7 @@ describe('deliverInvitation', () => {
       baseParams({ invitationId: invId, deps: makeDeps(sender), event: seedEvent }),
     );
 
-    expect(result).toEqual({ delivered: true, viaDeepLink: false });
+    expect(result).toEqual({ delivered: true, viaDeepLink: false, viaBotApi: true });
     // The personal inv: keyboard, with the event so a confirmed place adds the Map button
     expect(variant).toEqual({ kind: 'personal', place: expect.objectContaining({ id: seedEvent.id }) });
     expect(sawLang).toBe('en');
@@ -329,7 +329,7 @@ describe('deliverInvitation', () => {
 
     // No deep link could be built → the fallback message has no link, so reporting
     // "link sent" would be a lie. viaDeepLink must be false (→ honest "not delivered").
-    expect(result).toEqual({ delivered: false, viaDeepLink: false });
+    expect(result).toEqual({ delivered: false, viaDeepLink: false, viaBotApi: false });
     const fallback = sentMessages.find((m) => m.chatId === INVITER_ID);
     expect(fallback).toBeDefined();
     expect(fallback!.text).not.toContain('t.me');
@@ -353,7 +353,7 @@ describe('deliverInvitation', () => {
 
     // The link existed but the fallback message never reached the inviter → no honest
     // claim of "link sent" can be made.
-    expect(result).toEqual({ delivered: false, viaDeepLink: false });
+    expect(result).toEqual({ delivered: false, viaDeepLink: false, viaBotApi: false });
     expect(mtprotoCalled).toBe(true);
   });
 
@@ -378,7 +378,7 @@ describe('deliverInvitation', () => {
       baseParams({ invitationId: invId, deps: makeDeps(sender), event: null, lang: 'en', inviterLang: 'ru' }),
     );
 
-    expect(result).toEqual({ delivered: false, viaDeepLink: true });
+    expect(result).toEqual({ delivered: false, viaDeepLink: true, viaBotApi: false });
     // The invitee-facing invitation stays in the invitee's language.
     expect(inviteeText).toContain('invitation from');
     // The fallback/forwarding message goes to the inviter and must be in the inviter's language.
@@ -398,7 +398,7 @@ describe('deliverInvitation', () => {
       throw new Error('db write failed');
     });
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
-    expect(result).toEqual({ delivered: true, viaDeepLink: false });
+    expect(result).toEqual({ delivered: true, viaDeepLink: false, viaBotApi: true });
   });
 
   test('createInvitationLink throws but Bot API succeeds → delivered, no deep link', async () => {
@@ -417,7 +417,7 @@ describe('deliverInvitation', () => {
       throw new Error('deep-link creation failed');
     });
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
-    expect(result).toEqual({ delivered: true, viaDeepLink: false });
+    expect(result).toEqual({ delivered: true, viaDeepLink: false, viaBotApi: true });
     expect(sentInvId).toBe(invId);
   });
 
@@ -438,7 +438,7 @@ describe('deliverInvitation', () => {
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
     // No link could be built → MTProto (which needs the link) is skipped and the inviter fallback
     // uses the no-link variant, so no honest "link sent" claim can be made.
-    expect(result).toEqual({ delivered: false, viaDeepLink: false });
+    expect(result).toEqual({ delivered: false, viaDeepLink: false, viaBotApi: false });
     const fallback = sentMessages.find((m) => m.chatId === INVITER_ID);
     expect(fallback).toBeDefined();
     expect(fallback!.text).not.toContain('t.me');
@@ -476,13 +476,13 @@ describe('deliverInvitation', () => {
       sendMessage: async () => blocked403(),
     });
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
-    expect(result).toEqual({ delivered: false, viaDeepLink: false });
+    expect(result).toEqual({ delivered: false, viaDeepLink: false, viaBotApi: false });
   });
 
   test('sendInvitation capability missing → not delivered, no deep link', async () => {
     const invId = createInvitation();
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(SENDER_BASE) }));
-    expect(result).toEqual({ delivered: false, viaDeepLink: false });
+    expect(result).toEqual({ delivered: false, viaDeepLink: false, viaBotApi: false });
   });
 });
 
