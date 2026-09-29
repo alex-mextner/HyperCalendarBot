@@ -548,6 +548,31 @@ describe('agent failure notices', () => {
     }
   });
 
+  // Regression (#510): a scheduled/trigger run failing right after the honest
+  // notice asked the user to resend a request they never sent.
+  test('a scheduled run failing within the honest cooldown stays silent while a user request gets the short line', async () => {
+    aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: true, willRetry: true, isRetryAttempt: false });
+
+    for (const error of [new Error('Insufficient balance for this request'), new Error('Provider timed out')]) {
+      const scheduledProbe = makeSenderProbe();
+      await new CalendarBotAgent(config, scheduledProbe.sender, { streamImpl: failingStream(error) }).run({
+        ...ctx,
+        unprompted: true,
+      });
+      expect(scheduledProbe.delivered().filter((body) => body !== '⏳')).toEqual([]);
+      expect(scheduledProbe.deleted()).toContain(42);
+    }
+    // Its stored retry is not a comeback the user was promised.
+    expect(aiFailureNotices.takeNotice(USER_ID)).toBe('honest');
+
+    aiFailureNotices.decide(USER_ID, 'ru', { hardOutage: true, willRetry: true, isRetryAttempt: false });
+    const userProbe = makeSenderProbe();
+    await new CalendarBotAgent(config, userProbe.sender, {
+      streamImpl: failingStream(new Error('Insufficient balance for this request')),
+    }).run(ctx);
+    expect(userProbe.delivered().join('\n')).toContain(t('ru').ai_still_down('resend'));
+  });
+
   test('repeated short status lines without a retry do not turn the give-up into a duplicate notice', async () => {
     ctx.retryEnqueue = undefined;
     const outage = new Error('Insufficient balance for this request');

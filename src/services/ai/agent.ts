@@ -102,7 +102,8 @@ const MAX_TRACKED_USERS = 10_000;
  *                   cancel that retry; when the store did not answer in time it
  *                   asks for a resend only if no answer comes; otherwise it asks
  *                   for a resend later.
- *  - `silent`     — a scheduled retry failed after the user was already told.
+ *  - `silent`     — a scheduled retry or an unprompted scheduled/trigger run
+ *                   failed after the user was already told.
  */
 export type FailureNoticeKind = 'stall' | 'honest' | 'still_down' | 'silent';
 
@@ -127,6 +128,8 @@ export interface FailureNoticeOptions {
   willRetry: boolean;
   /** This run is a scheduled retry, not a message the user just sent. */
   isRetryAttempt: boolean;
+  /** A scheduled/trigger run: the user sent no request, so there is none to report on or resend. */
+  unprompted?: boolean;
   /** The retry store did not answer in time: a job may exist, so neither promise nor demand a resend. */
   retryUnconfirmed?: boolean;
   now?: number;
@@ -157,7 +160,7 @@ class AiFailureNoticeTracker {
     const canPromiseComeback = opts.willRetry && !opts.hardOutage;
 
     if (withinCooldown && previous.kind === 'honest') {
-      if (opts.isRetryAttempt) return { kind: 'silent', text: '' };
+      if (opts.isRetryAttempt || opts.unprompted) return { kind: 'silent', text: '' };
       // Every request the user sends deserves a visible outcome, but the full
       // notice went out moments ago. The honest notice stays the one on file, so
       // the cooldown keeps anchoring on it; only the owed comeback is noted.
@@ -808,6 +811,7 @@ export class CalendarBotAgent {
       // A stall phrase promises a comeback: only a stored retry can keep it.
       willRetry: retry === 'stored',
       isRetryAttempt,
+      unprompted: ctx.unprompted,
       retryUnconfirmed: retry === 'unknown',
     });
     aiLogger.info({ userId: ctx.user.telegram_id, notice: notice.kind, hardOutage }, 'AI failure notice');
