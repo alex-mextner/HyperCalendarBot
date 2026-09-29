@@ -384,20 +384,21 @@ export class SyncService {
       return;
     }
 
-    if (action === 'create') {
-      if (syncRecord?.google_event_id) {
-        const copy = { link: syncRecord, calendarId: gcalId, googleEventId: syncRecord.google_event_id, gEvent };
-        if (!(await this.updateParticipantCopy(api, participantSyncRepo, copy))) return;
-      } else {
-        const created = await api.insertEvent(gcalId, gEvent);
-        participantSyncRepo.upsert(participantUserId, eventId, {
-          google_event_id: created.id,
-          google_calendar_id: gcalId,
-          google_etag: created.etag,
-          sync_status: 'synced',
-          last_synced_at: new Date().toISOString(),
-        });
-      }
+    if (syncRecord?.google_event_id) {
+      const copy = { link: syncRecord, calendarId: gcalId, googleEventId: syncRecord.google_event_id, gEvent };
+      const updated = await this.updateParticipantCopy(api, participantSyncRepo, copy);
+      if (!updated) return;
+      this.syncRepo.logSync({
+        user_id: participantUserId,
+        event_id: eventId,
+        google_event_id: syncRecord.google_event_id,
+        direction: 'push',
+        action,
+        details: 'participant_sync',
+      });
+    } else {
+      const link = { user_id: participantUserId, event_id: eventId };
+      await this.insertParticipantCopy(api, participantSyncRepo, link, gcalId, gEvent);
       this.syncRepo.logSync({
         user_id: participantUserId,
         event_id: eventId,
@@ -405,35 +406,6 @@ export class SyncService {
         action: 'create',
         details: 'participant_sync',
       });
-    } else {
-      if (!syncRecord?.google_event_id) {
-        const created = await api.insertEvent(gcalId, gEvent);
-        participantSyncRepo.upsert(participantUserId, eventId, {
-          google_event_id: created.id,
-          google_calendar_id: gcalId,
-          google_etag: created.etag,
-          sync_status: 'synced',
-          last_synced_at: new Date().toISOString(),
-        });
-        this.syncRepo.logSync({
-          user_id: participantUserId,
-          event_id: eventId,
-          direction: 'push',
-          action: 'create',
-          details: 'participant_sync',
-        });
-      } else {
-        const copy = { link: syncRecord, calendarId: gcalId, googleEventId: syncRecord.google_event_id, gEvent };
-        if (!(await this.updateParticipantCopy(api, participantSyncRepo, copy))) return;
-        this.syncRepo.logSync({
-          user_id: participantUserId,
-          event_id: eventId,
-          google_event_id: syncRecord.google_event_id,
-          direction: 'push',
-          action: 'update',
-          details: 'participant_sync',
-        });
-      }
     }
 
     syncLogger.info({ participantUserId, eventId, action }, 'Participant event synced to Google');
@@ -443,6 +415,25 @@ export class SyncService {
   private hasDeclined(participantUserId: number, eventId: number): boolean {
     const participant = this.participantHandlerDeps?.participantRepo.findByEventAndUser(eventId, participantUserId);
     return participant?.status === 'declined';
+  }
+
+  /** Inserts a fresh copy into the participant's calendar and points their link row at it. */
+  private async insertParticipantCopy(
+    api: GoogleCalendarApi,
+    participantSyncRepo: ParticipantGoogleSyncRepository,
+    link: Pick<ParticipantGoogleSync, 'user_id' | 'event_id'>,
+    calendarId: string,
+    gEvent: GoogleEvent,
+  ): Promise<calendar_v3.Schema$Event> {
+    const created = await api.insertEvent(calendarId, gEvent);
+    participantSyncRepo.upsert(link.user_id, link.event_id, {
+      google_event_id: created.id,
+      google_calendar_id: calendarId,
+      google_etag: created.etag,
+      sync_status: 'synced',
+      last_synced_at: new Date().toISOString(),
+    });
+    return created;
   }
 
   /**
@@ -531,14 +522,7 @@ export class SyncService {
     }
     if (listed) throw err;
 
-    const created = await api.insertEvent(calendarId, copy.gEvent);
-    participantSyncRepo.upsert(link.user_id, link.event_id, {
-      google_event_id: created.id,
-      google_calendar_id: calendarId,
-      google_etag: created.etag,
-      sync_status: 'synced',
-      last_synced_at: new Date().toISOString(),
-    });
+    const created = await this.insertParticipantCopy(api, participantSyncRepo, link, calendarId, copy.gEvent);
     record('create', created.id ?? undefined, {
       probe: 'not_found',
       outcome: 'recreated',

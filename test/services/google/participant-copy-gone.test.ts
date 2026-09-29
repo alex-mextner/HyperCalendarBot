@@ -38,13 +38,13 @@ function timeoutError(): Error {
   return Object.assign(new Error('The operation was aborted due to timeout'), { code: 'TimeoutError' });
 }
 
-/** The sync_log details the push writes for a gone copy; strict, so an unexpected key fails the test. */
+/** The sync_log details the push writes for a gone copy; an unexpected key or value fails the test. */
 const GoneEvidence = jsonCodec(
   z.strictObject({
     reason: z.literal('participant_copy_gone'),
-    http_status: z.number(),
-    probe: z.string(),
-    outcome: z.string(),
+    http_status: z.union([z.literal(404), z.literal(410)]),
+    probe: z.enum(['skipped', 'cancelled', 'not_found']),
+    outcome: z.enum(['unlinked', 'declined', 'recreated']),
     stale_google_event_id: z.string(),
     new_google_event_id: z.string().optional(),
   }),
