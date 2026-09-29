@@ -6,6 +6,14 @@ Detailed deployment reference for HyperCalendarBot. Summary in CLAUDE.md, full d
 
 Single `.env` file: `/opt/hypercal/.env`. Read by `docker compose`.
 
+It holds every production secret and the host is shared with other services, so `.env` and every backup of it must be mode `0600`, owner `root:root`. Plain `cp` creates a `0644` copy under the default umask; back it up with:
+```bash
+install -m 600 -o root -g root /opt/hypercal/.env "/opt/hypercal/.env.backup-$(date +%Y-%m-%d_%H-%M-%S)"
+```
+Appending with `echo ... >> .env` keeps the existing mode.
+
+`REDIS_PASSWORD` never appears in a process argv: `docker-compose.yml` gives it to the redis container as `REDISCLI_AUTH` (read by the healthcheck's `redis-cli`) and feeds `requirepass` to `redis-server` on stdin. It must not contain `"`, `\`, `/`, `?`, `#`, `%`, a tab, a carriage return or a line feed, and redis refuses to start with an error naming the rule: the first two would be read as redis.conf syntax, and `REDIS_URL` embeds the password without percent-encoding, where `/`, `?`, `#` and `%` make the URL invalid or change the password the bot sends, and URL parsing silently drops tab, CR and LF. Spaces, `@`, `:` and the other printable ASCII characters reach both of the bot's Redis clients unchanged. The bot container receives it only inside `REDIS_URL`; the bare `REDIS_PASSWORD` from `env_file` is blanked. A normal deploy recreates only the bot, so after changing the redis service or its password recreate redis too: `docker compose up -d --force-recreate redis bot`.
+
 Adding a new variable (e.g. via GitHub Actions secrets):
 1. Add secret to the repo
 2. Pass to deploy step via `envs:` and write to `.env` via `echo ... >> .env`, **or**

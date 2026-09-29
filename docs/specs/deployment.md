@@ -61,7 +61,7 @@ Optional but recommended:
 - `PUBLIC_DOMAIN=hypercal.invntrm.ru` — required for OAuth redirect
 - `GOOGLE_REDIRECT_URI=https://hypercal.invntrm.ru/oauth/google/callback`
 
-Note: `REDIS_URL` and `NODE_ENV` are overridden by docker-compose.yml — values in .env are ignored for these.
+Note: `REDIS_URL` and `NODE_ENV` are overridden by docker-compose.yml — values in .env are ignored for these. `REDIS_PASSWORD` is used only to build `REDIS_URL` and the redis container's auth; the bot container gets it blanked. Keep `.env` at mode `0600` (see `docs/reference/deploy-runbook.md`).
 
 ### 4. DNS
 
