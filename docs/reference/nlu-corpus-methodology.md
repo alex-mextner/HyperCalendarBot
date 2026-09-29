@@ -49,11 +49,44 @@ predictions, and are never reported as accuracy.
   uses) are recognized before the phone-number-shaped digit-run rule would
   otherwise destroy them; they are needed to interpret compound requests and
   are not personally identifying on their own.
-- Any row matching `AUTH` (an OTP/2FA/session/API-key pattern) is replaced
-  outright with `[QUARANTINED_AUTH]`, and every other row in the same
-  conversation within `SESSION_GAP_SECONDS` (1800s) of it is quarantined too
-  (`quarantined_indices`), because a bystander reply near a credential prompt
-  is not safe to assume is unrelated.
+- Any row matching `AUTH` (an OTP/2FA/session/API-key pattern, or one of the
+  connect wizard's phone and code prompts, which name no credential term; a
+  test checks every credential prompt in both languages), holding
+  `[redacted: connect wizard input]` (the marker chat logging has stored for
+  Telegram-connect wizard input since #617/#641) or whose text is not a string
+  (it may hold either) opens the auth quarantine. So does a debug-log run whose
+  logged block (message, history, tool calls, reply) matches one of these or
+  whose reply is not a string, even in a merged archive that kept only its
+  reply (`response`): before #617
+  a cancelled wizard handed its text to the AI, and the debug log may be the
+  only copy left. The quarantine works like this:
+  a candidate text matching `AUTH` is replaced outright with
+  `[QUARANTINED_AUTH]`, and every row in the same conversation within
+  `SESSION_GAP_SECONDS` (1800s, also the wizard's idle expiry) of it is
+  quarantined too (`quarantined_indices`), because a bystander reply near a
+  credential prompt is not safe to assume is unrelated. However late it comes,
+  the first typed user text after a bot message that opens the window or lies
+  inside it is quarantined as well, with the bot's turn after it (every bot row
+  up to the user's next message): the connect-wizard guard (#641) treats that
+  text as the answer to the prompt of an expired wizard, and before #641 it went
+  to the AI, whose reply could quote it. Any bot message inside the window
+  counts, since it may be a prompt. So
+  the first message after every auth window is dropped even when it is
+  unrelated. Finally, every row of the conversation repeating a quarantined
+  user text is quarantined (such as the debug log's copy of a database row),
+  which also drops that user's other identical short replies.
+- **The raw export holds no connect-wizard input** (GH-721).
+  `selected.private.json` is written by `raw_export()`, not copied from the
+  sources. Backups taken before the #617 fix (2026-09-28) still hold what users
+  typed into the wizard: phone number, login code, 2FA password (GH-519). No row
+  of the auth quarantine is exported, from any source: live databases,
+  `*.db.pre-*` copies, `backups/*.db.gz`, debug logs and `--merge` archives.
+  Every kept row's free text (`content`, `response`) goes through
+  `redact_candidate()`. Only the identifier and structure fields a later
+  `--merge` needs are kept, each with the shape `collect()` gives it; a row that
+  cannot be placed in time or has another shape is left out (fail closed).
+  `summary.json` counts both (`raw_export_quarantined_rows`,
+  `raw_export_omitted_rows`).
 - All private output files (`selected.private.json`, `candidates.private.json`,
   `summary.json`, `pseudonym.key`) are created with `os.open(..., O_EXCL, 0o600)`
   in one syscall, never `open()` followed by a separate `chmod`. The earlier
@@ -96,7 +129,8 @@ the most heavily tested:
 
 Every row skipped by these guards is counted in `summary.json`
 (`evidence_detached_unknown_provenance_rows`, `evidence_detached_stale_session_rows`,
-`quarantined_auth_rows`, `invalid_timestamp_rows`) rather than silently dropped,
+`quarantined_auth_rows`, `invalid_timestamp_rows`, `raw_export_quarantined_rows`,
+`raw_export_omitted_rows`) rather than silently dropped,
 so coverage accounting stays honest about what was excluded and why.
 
 ## Input bounds
@@ -272,8 +306,22 @@ regenerate and then reuse as its own proof of correctness.
   Telegram updates.
 - Historical permissions, entity state, and timezone are not reconstructed —
   `historical_state` is always `not_reconstructed`.
-- Auth-window quarantine is a conservative blast radius, not a fix for the
-  underlying ingress logging issue that put credentials in chat history.
+- Auth-window quarantine is a conservative blast radius reconstructed from
+  history, not the wizard state the bot itself checks. The ingress fix that
+  keeps credentials out of chat history is #617/#641; backups taken before it
+  rotate out around 2026-10-12 (#613). A credential row whose prompt is not
+  among the loaded rows is not recognised. A full snapshot always holds the
+  prompt, because it was written seconds before the answer. The gap is a
+  partial `--merge` archive that starts after the prompt, or the 90-day
+  `chat_history` cleanup cutting between prompt and answer. Pre-GH-721 packages
+  are the only partial archives, and they are redacted under #519.
+- A package built before GH-721 is not safe to open: its
+  `selected.private.json` copied connect-wizard input from old backups
+  verbatim. Such packages from 2026-09-28 are redacted under #519.
+- A later `--merge` of a GH-721 export sees pseudonymized text under that
+  run's key, not the source text. Candidates built from it are pseudonymized
+  twice, and a tool call whose JSON held a redacted bare number (e.g. a chat
+  id) no longer parses, so its tool name is not observed.
 - Assistant/tool attachment is deliberately conservative: legitimate
   continuations that happen to cross a snapshot boundary (e.g. a conversation
   whose tail only survives in a different backup than its head) are reported

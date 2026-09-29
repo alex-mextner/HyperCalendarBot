@@ -38,8 +38,13 @@ SESSION_GAP_SECONDS = 1800  # single source of truth for the auth-quarantine win
 MAX_DATABASE_BYTES = 512*1024*1024  # single bound enforced at both fstat-open time and while streaming a gz's decompressed bytes
 MAX_LOG_BYTES = 64*1024*1024        # same, for debug logs and --merge archives
 QUARANTINED_AUTH_MARKER = '[QUARANTINED_AUTH]'  # single source of truth: redact_candidate's replacement text and apply_gold_import's hard privacy gate must never drift apart
+# What chat logging stores in place of anything typed into the Telegram-connect wizard since #617/#641:
+# CONNECT_WIZARD_REDACTION in src/bot/scenes/connect-telegram.scene.ts (the tests keep the two equal).
+CONNECT_WIZARD_REDACTION = '[redacted: connect wizard input]'
 
-AUTH = re.compile(r'connect_telegram|one.?time.?code|2fa|otp|two.factor|password|парол|код.{0,35}(?:вход|telegram|телеграм)|(?:telegram|телеграм).{0,35}код|session_string|api[_ -]?key|Bearer\s+[A-Za-z0-9]', re.I)
+# The last alternatives match the connect wizard's phone and code prompts that name no credential term
+# (connectTelegram in src/config/constants.ts; a test checks every credential prompt in both languages).
+AUTH = re.compile(r'connect_telegram|one.?time.?code|2fa|otp|two.factor|password|парол|код.{0,35}(?:вход|telegram|телеграм)|(?:telegram|телеграм).{0,35}код|session_string|api[_ -]?key|Bearer\s+[A-Za-z0-9]|verification code|invalid code|неверный код|international format|международн\w* формат', re.I)
 COMMANDS = {'add':'event.create','edit':'event.update','delete':'event.delete','search':'event.search', 'today':'calendar.read','tomorrow':'calendar.read','week':'calendar.read','month':'calendar.read', 'free':'availability.read','invite':'invitation.send','invitations':'invitation.status', 'contacts':'contacts.manage','places':'places.manage','settings':'settings.manage', 'help':'help','start':'onboarding','log':'history.read','history':'history.read', 'cancel':'dialogue.cancel','import':'calendar.import','holidays':'calendar.holidays','birthdays':'calendar.birthdays','ping':'diagnostics','connect_google':'integration.manage','disconnect_google':'integration.manage','connect_telegram':'auth.sensitive'}
 RULES = [
  ('event.create', r'\b(?:создай|создать|добавь|добавить|запланируй|schedule|create)\b.{0,200}(?:встреч|событ|завтра|сегодня|event|meeting)|^настолки\s+у\b'),
@@ -100,20 +105,162 @@ def redact_candidate(text: str, key: bytes, lexicon: dict[str, str] | None = Non
             text = re.sub(r'(?<!\w)' + re.escape(name) + r'(?!\w)', lambda m: pseudonym(m[0], key, kind), text, flags=re.I)
     return text
 
+def opens_auth_window(text: object) -> bool:
+    """A credential term, the marker the bot itself stores for connect-wizard input, or text that
+    cannot be read, which may hold either."""
+    if not isinstance(text, str):
+        return True
+    return CONNECT_WIZARD_REDACTION in text or AUTH.search(text) is not None
+
 def quarantined_indices(rows: list[dict]) -> set[int]:
+    """Rows too close to connect-wizard or other credential input to trust.
+
+    Mirrors how the connect-wizard guard (#617/#641) recognises wizard input, for history it can no
+    longer ask the wizard's scene row about: every row near an auth marker, the late answer to a
+    prompt, and every copy of a quarantined user text. An auth marker is a row whose text opens the
+    auth window, or a debug run whose logged reply or context does (see `_is_auth_marker`).
+    """
+    near_marker = _near_auth_markers(rows)
+    blocked = near_marker | _late_answers(rows, near_marker)
+    return blocked | _copies_of_quarantined_user_text(rows, blocked)
+
+def _is_auth_marker(row: dict) -> bool:
+    """The row's text, a debug run's reply (`response`) or its logged context (`auth_context`) opens the auth window."""
+    return (
+        opens_auth_window(row.get('text', ''))
+        or (row.get('response') is not None and opens_auth_window(row['response']))
+        or bool(row.get('auth_context'))
+    )
+
+def _near_auth_markers(rows: list[dict]) -> set[int]:
+    """Every row of the conversation within SESSION_GAP_SECONDS (the wizard's idle expiry) of an auth marker."""
     markers: dict[str, list[float]] = collections.defaultdict(list)
     for row in rows:
-        if AUTH.search(row.get('text', '')):
+        if _is_auth_marker(row):
             markers[row['scope']].append(row['at'])
     for times in markers.values():
         times.sort()
-    blocked = set()
+    near = set()
     for index, row in enumerate(rows):
         times = markers.get(row['scope'], [])
         at = bisect.bisect_left(times, row['at'] - SESSION_GAP_SECONDS)
         if at < len(times) and times[at] <= row['at'] + SESSION_GAP_SECONDS:
-            blocked.add(index)
-    return blocked
+            near.add(index)
+    return near
+
+def _late_answers(rows: list[dict], near_marker: set[int]) -> set[int]:
+    """However late it comes, the one user text that next answers a bot message inside an auth
+    window (an auth marker included; it may be a wizard prompt), as the guard treats the answer to
+    the prompt of an expired wizard, and the bot's turn after it (every bot row up to the user's next
+    row), which may quote it. A button press is not an answer: the guard reads typed text only."""
+    late = set()
+    awaiting_answer: set[str] = set()
+    answer_turn: set[str] = set()
+    for index in sorted(range(len(rows)), key=lambda i: (rows[i]['scope'], rows[i]['at'], i)):
+        scope = rows[index]['scope']
+        from_user = rows[index].get('role', 'user') == 'user'
+        may_be_prompt = not from_user and index in near_marker  # every auth marker is near itself
+        if from_user:
+            answer_turn.discard(scope)
+        if may_be_prompt:
+            awaiting_answer.add(scope)
+        elif from_user and scope in awaiting_answer and user_text(rows[index].get('text', ''))[1] != 'button':
+            late.add(index)
+            awaiting_answer.discard(scope)
+            answer_turn.add(scope)
+        elif not from_user and scope in answer_turn:
+            late.add(index)
+    return late
+
+def _copies_of_quarantined_user_text(rows: list[dict], blocked: set[int]) -> set[int]:
+    """Rows of the conversation repeating a quarantined user text, such as the AI debug log's copy
+    of a database row. Short common replies in that conversation go with them; empty text does not."""
+    def same_text(row: dict) -> tuple[str, str] | None:
+        text = row.get('text', '')
+        return (row['scope'], text.strip()) if isinstance(text, str) and text.strip() else None
+    quarantined = {same_text(rows[index]) for index in blocked if rows[index].get('role', 'user') == 'user'}
+    quarantined.discard(None)
+    return {index for index, row in enumerate(rows) if same_text(row) in quarantined}
+
+NAME_RE = re.compile('[a-z_]{1,80}')  # a tool name or a chat_history role
+
+def _is_id(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+def _is_name(value: object) -> bool:
+    return isinstance(value, str) and NAME_RE.fullmatch(value) is not None
+
+def _is_tool_result(value: object) -> bool:
+    return isinstance(value, (list, tuple)) and len(value) == 2 and _is_name(value[0]) and value[1] in ('OK', 'ERROR')
+
+# Free text a raw-export row carries, with its shape; each value goes through redact_candidate.
+# `content` is required.
+EXPORT_TEXT_FIELDS = {
+    'content': lambda value: isinstance(value, str),
+    'response': lambda value: value is None or isinstance(value, str),
+}
+# The identifiers, times and structure a later --merge needs, each with the only shape collect() and
+# load_merge_archive() give it. Any other field is dropped from the raw export.
+EXPORT_STRUCTURE_FIELDS = {
+    'id': _is_id,
+    'user_id': _is_id,
+    'chat_id': lambda value: value is None or _is_id(value),
+    'role': _is_name,
+    'created_at': lambda value: isinstance(value, str),
+    'record_kind': lambda value: value == 'debug_run',
+    'partial': lambda value: isinstance(value, bool),
+    'tools': lambda value: isinstance(value, list) and all(_is_name(name) for name in value),
+    'tool_results': lambda value: isinstance(value, list) and all(_is_tool_result(result) for result in value),
+    'source_refs': lambda value: isinstance(value, list) and all(isinstance(ref, str) for ref in value),
+}
+
+EXPORT_FIELDS = EXPORT_TEXT_FIELDS | EXPORT_STRUCTURE_FIELDS
+
+def _has_export_shape(row: dict) -> bool:
+    return 'content' in row and all(check(row[field]) for field, check in EXPORT_FIELDS.items() if field in row)
+
+def place_rows(rows: list[dict]) -> tuple[list[dict], int]:
+    """The rows with their conversation scope, instant and text, sorted by conversation and time, and
+    the number of rows whose timestamp or ids cannot be read."""
+    placed = []
+    unplaced = 0
+    for row in rows:
+        try:
+            value = row['created_at'].replace(' ','T')
+            instant = dt.datetime.fromisoformat(value.replace('Z','+00:00'))
+            if instant.tzinfo is None: instant = instant.replace(tzinfo=dt.timezone.utc)
+            scope = f"{row['user_id']}:{row.get('chat_id') or row['user_id']}"
+            placed.append(dict(row, scope=scope, at=instant.timestamp(), text=row.get('content','')))
+        except (ValueError,KeyError,TypeError,AttributeError): unplaced += 1
+    placed.sort(key=lambda row:(row['scope'], row['at'],row.get('id',0)))
+    return placed, unplaced
+
+def raw_export(rows: list[dict], key: bytes, lexicon: dict[str, str]) -> tuple[list[dict], dict[str, int]]:
+    """The rows selected.private.json may hold, and how many were kept out (GH-721).
+
+    Backups taken before the #617 fix still hold connect-wizard input (GH-519), so no row of the
+    auth-quarantine window is exported, from any source. Every kept row's free text is redacted like
+    candidate text. A row that cannot be placed in time or does not have the shape collect() gives
+    it is left out: fail closed.
+    """
+    placed, unplaced = place_rows(rows)
+    blocked = quarantined_indices(placed)
+    exported = []
+    misshapen = 0
+    for index, row in enumerate(placed):
+        if index in blocked:
+            continue
+        if not _has_export_shape(row):
+            misshapen += 1
+            continue
+        safe = {field: row[field] for field in EXPORT_STRUCTURE_FIELDS if field in row}
+        for field in EXPORT_TEXT_FIELDS:
+            if isinstance(row.get(field), str):
+                safe[field] = redact_candidate(row[field], key, lexicon)
+            elif field in row:
+                safe[field] = None
+        exported.append(safe)
+    return exported, {'raw_export_quarantined_rows': len(blocked), 'raw_export_omitted_rows': unplaced + misshapen}
 
 GOLD_REVIEW_DIMENSIONS = ('privacy', 'intent', 'slots', 'expected_outcome')
 GOLD_REVIEW_STATUSES = {'approved', 'rejected', 'needs_more_info'}
@@ -271,7 +418,8 @@ def parse_debug_runs(text: str) -> list[dict]:
         if match[4] == 'true':
             continue  # Supplement is not a new user request.
         final = re.search(r'^Response \(\d+ chars\):\n([\s\S]*?)(?:\n={40,}|$)', block, re.M)
-        runs.append({'user_id':int(match[3]), 'chat_id':int(match[2]), 'created_at':match[1], 'role':'user', 'content':message, 'record_kind':'debug_run', 'tools':re.findall(r'^TOOL CALL: ([a-z_]+)$',block,re.M), 'tool_results':re.findall(r'^TOOL RESULT: ([a-z_]+) → (OK|ERROR)$',block,re.M), 'response':final[1].strip() if final else None, 'partial':True})
+        runs.append({'user_id':int(match[3]), 'chat_id':int(match[2]), 'created_at':match[1], 'role':'user', 'content':message, 'record_kind':'debug_run', 'tools':re.findall(r'^TOOL CALL: ([a-z_]+)$',block,re.M), 'tool_results':re.findall(r'^TOOL RESULT: ([a-z_]+) → (OK|ERROR)$',block,re.M), 'response':final[1].strip() if final else None, 'partial':True,
+                     'auth_context':opens_auth_window(block)})  # the logged history may hold a wizard prompt the message answered
     return runs
 
 def read_database(path: Path) -> tuple[list[dict], dict[str,str]]:
@@ -443,20 +591,10 @@ def observed_tools(content: str) -> list[str]:
             if value.get('type')=='function' and isinstance(value.get('function'),dict): names.append(value['function'].get('name',''))
             if value.get('type')=='tool_use': names.append(value.get('name',''))
             stack.extend(v for v in value.values() if isinstance(v,(dict,list)))
-    return [name for name in names if isinstance(name,str) and re.fullmatch('[a-z_]{1,80}',name)]
+    return [name for name in names if _is_name(name)]
 
 def audit(rows: list[dict], key: bytes, lexicon: dict[str,str]) -> tuple[list[dict],dict]:
-    normalized = []
-    bad_time = 0
-    for row in rows:
-        try:
-            value = row['created_at'].replace(' ','T')
-            instant = dt.datetime.fromisoformat(value.replace('Z','+00:00'))
-            if instant.tzinfo is None: instant = instant.replace(tzinfo=dt.timezone.utc)
-            scope = f"{row['user_id']}:{row.get('chat_id') or row['user_id']}"
-            normalized.append(dict(row, scope=scope, at=instant.timestamp(), text=row.get('content','')))
-        except (ValueError,KeyError,TypeError): bad_time += 1
-    normalized.sort(key=lambda row:(row['scope'], row['at'],row.get('id',0)))
+    normalized, bad_time = place_rows(rows)
     blocked = quarantined_indices(normalized)
     candidates = []; active = {}; active_lineage: dict[str, frozenset[str]] = {}; active_since: dict[str, float] = {}; sessions = {}; turn_times = {}
     detached_unknown_provenance = 0
@@ -574,10 +712,11 @@ def main() -> None:
         else:
             distinct[identity]=row
     rows=list(distinct.values())
-    private_json(args.out/'selected.private.json',{'rows':rows,'sources':sources,'lexicon':lexicon,'schema_version':SCHEMA_VERSION})
+    exported, export_counts = raw_export(rows, key, lexicon)
+    private_json(args.out/'selected.private.json',{'rows':exported,'sources':sources,'lexicon':lexicon,'schema_version':SCHEMA_VERSION})
     candidates,summary=audit(rows,key,lexicon)
     private_json(args.out/'candidates.private.json',candidates)
-    summary.update(schema_version=SCHEMA_VERSION, captured_at=dt.datetime.now(dt.timezone.utc).isoformat(), source_count=len(sources))
+    summary.update(export_counts, schema_version=SCHEMA_VERSION, captured_at=dt.datetime.now(dt.timezone.utc).isoformat(), source_count=len(sources))
     summary['source_states']=dict(collections.Counter(source['status'] for source in sources))
     summary['source_kinds']=dict(collections.Counter(source['kind'] for source in sources))
     summary['candidate_sha256']=hashlib.sha256((args.out/'candidates.private.json').read_bytes()).hexdigest()
