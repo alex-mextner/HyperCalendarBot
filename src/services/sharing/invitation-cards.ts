@@ -83,8 +83,12 @@ async function renderInvitationCard(
     };
   }
 
+  // The roster lists the reader's current answer, and an answer given later on a group card of the
+  // event outranks this invitation's stored one: the label follows the roster so the card cannot
+  // contradict itself. Only an answered label exists here, so a roster "no answer yet" keeps the stored one.
+  const rosterAnswer = roster?.invitees.find((person) => person.userId === inv.invitee_id)?.answer;
   const text = await formatAnsweredInvitationCard(
-    status,
+    rosterAnswer && rosterAnswer !== 'pending' ? rosterAnswer : status,
     event,
     { userId: inv.invitee_id, language: inviteeLang, timezone: invitee?.timezone ?? event.timezone },
     { agendaRepository: deps.agendaRepository, weatherService: deps.weatherService },

@@ -2,7 +2,7 @@
 // the other cards of the event in place, keeping each card's buttons.
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
-import { CB } from '../../../src/config/constants.ts';
+import { CB, t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
@@ -137,6 +137,36 @@ describe('delivered invitation cards follow the roster', () => {
     expect(lastEdit(13)?.text).toContain('✅ Mila — going');
     expect(lastEdit(13)?.keyboard).toBe(JSON.stringify(groupRsvpKeyboard(event.id, 'en', event)));
     expect(lastEdit(11)?.text).toContain('✅ Mila — going');
+  });
+
+  test('an answer changed on the group card relabels the personal answered card to match its roster', async () => {
+    const { event, service, deliver, settled, lastEdit } = setup();
+    const boris = await deliver(201, 11);
+    await deliver(GROUP_CHAT, 13);
+    service.acceptInvitation(boris.id, 201);
+    await settled();
+
+    service.recordGroupAttendance(event.id, 201, 'declined', GROUP_CHAT);
+    await settled();
+
+    const card = lastEdit(11)!.text;
+    expect(card.startsWith(t('en').invitation_declined)).toBe(true);
+    expect(card).toContain('❌ Boris (you) — not going');
+  });
+
+  test('going on the group card after a personal decline relabels the personal card as going', async () => {
+    const { event, service, deliver, settled, lastEdit } = setup();
+    const boris = await deliver(201, 11);
+    await deliver(GROUP_CHAT, 13);
+    service.declineInvitation(boris.id, 201);
+    await settled();
+
+    service.recordGroupAttendance(event.id, 201, 'accepted', GROUP_CHAT);
+    await settled();
+
+    const card = lastEdit(11)!.text;
+    expect(card.startsWith(t('en').invitation_accepted)).toBe(true);
+    expect(card).toContain('✅ Boris (you) — going');
   });
 
   test('a confirmed place keeps its Map button on the cards a roster change re-renders', async () => {
