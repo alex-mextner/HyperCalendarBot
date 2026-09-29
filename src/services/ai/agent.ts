@@ -26,7 +26,12 @@ import {
   elapsedMs,
 } from './request-metrics.ts';
 import type { ToolEvidence } from './response-grounding.ts';
-import { shouldValidateResponse, unverifiedResponseNotice, validateResponse } from './response-validator.ts';
+import {
+  shouldValidateResponse,
+  supplementIsGrounded,
+  unverifiedResponseNotice,
+  validateResponse,
+} from './response-validator.ts';
 import {
   AllProvidersFailedError,
   aiStreamRound,
@@ -1305,32 +1310,33 @@ export class CalendarBotAgent {
 
       // Response validation: always validate tool-less prose, plus factual claims
       // that the tools used in this run cannot support. The deterministic
-      // prefilter keeps ordinary tool-backed writes on the existing fast path.
+      // prefilter keeps ordinary tool-backed writes and answers whose days and
+      // times the run's reads contain on the existing fast path.
       const availableTools = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
       let rejected = false;
-      if (availableTools.length > 0 && !ctx.supplementMode) {
-        // Use the model's actual emitted text, not the writer buffer — tests
-        // with scripted stream impls can produce an assistantMessage without
-        // calling onTextDelta, so writer.getText() may be empty even when the
-        // model did return content.
-        const responseText = pendingResponseText.trim();
-        if (
-          responseText &&
-          !isSkipText(responseText) &&
-          shouldValidateResponse(
-            allToolCalls.map((tc) => tc.name),
-            responseText,
-          )
-        ) {
-          const validation = await validateResponse(
-            {
-              userMessage: ctx.messageText,
-              timezone: ctx.user.timezone,
-              tools: toolEvidence,
-              response: responseText,
-            },
-            validatorStream,
+      // Use the model's actual emitted text, not the writer buffer — tests
+      // with scripted stream impls can produce an assistantMessage without
+      // calling onTextDelta, so writer.getText() may be empty even when the
+      // model did return content.
+      const finalProse = pendingResponseText.trim();
+      const proseEvidence = {
+        userMessage: ctx.messageText,
+        timezone: ctx.user.timezone,
+        tools: toolEvidence,
+        response: finalProse,
+      };
+      if (ctx.supplementMode) {
+        if (finalProse && !isSkipText(finalProse) && !supplementIsGrounded(proseEvidence)) {
+          aiLogger.info(
+            { userId: ctx.user.telegram_id },
+            'Supplement states facts its own reads do not back — dropped',
           );
+          rejected = true;
+          responseUnverified = true;
+        }
+      } else if (availableTools.length > 0) {
+        if (finalProse && !isSkipText(finalProse) && shouldValidateResponse(proseEvidence)) {
+          const validation = await validateResponse(proseEvidence, validatorStream);
 
           if (!validation.approved) {
             aiLogger.info(
@@ -1343,7 +1349,7 @@ export class CalendarBotAgent {
             const retryOutcome = await this.runRetryAfterRejection(
               ctx,
               currentMessages,
-              responseText,
+              finalProse,
               writer,
               dbg,
               allToolCalls,
@@ -1444,8 +1450,11 @@ export class CalendarBotAgent {
       ctx.isGroup,
       (runFailed || responseUnverified) && writeOutcomes.mayHaveMutated,
     );
+    // A supplement is optional text and stays quiet when guarded, unless it may have changed the
+    // calendar: then the receipt is its reply, or the user would never learn of the change.
+    const supplementQuiet = ctx.supplementMode && !(evidence !== null && writeOutcomes.mayHaveMutated);
     const silent =
-      ctx.supplementMode ||
+      supplementQuiet ||
       ctx.wasExplicitInvocation === false ||
       (termination === 'waiting' && !writeOutcomes.speechQuestion);
     const validationNotice =

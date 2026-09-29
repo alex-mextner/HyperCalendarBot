@@ -1,9 +1,10 @@
 // test/services/ai/response-validator.test.ts
-import { afterEach, describe, expect, setSystemTime, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import type OpenAI from 'openai';
 import type { ToolEvidence } from '../../../src/services/ai/response-grounding.ts';
 import {
   shouldValidateResponse,
+  supplementIsGrounded,
   unverifiedResponseNotice,
   validateResponse,
 } from '../../../src/services/ai/response-validator.ts';
@@ -30,26 +31,149 @@ function executed(names: string[]): ToolEvidence[] {
   return names.map((name) => ({ name, input: {}, success: true }));
 }
 
+function prefilter(names: string[], response: string, tools: ToolEvidence[] = executed(names)): boolean {
+  return shouldValidateResponse({ userMessage: 'Что у меня?', timezone: 'Europe/Belgrade', tools, response });
+}
+
+/** Sunday 2026-09-27, 23:00 in Belgrade: today and tomorrow count as context, so the #515 tests pin them. */
+const SUNDAY_NIGHT = new Date('2026-09-27T21:00:00Z');
+
+/** A read of 27.09–04.10 (Belgrade) that returned one Tuesday lesson at 12:30 local. */
+const WEEK_FROM_SUNDAY: ToolEvidence = {
+  name: 'get_events',
+  input: { start_date: '2026-09-27T00:00:00.000Z', end_date: '2026-10-04T23:59:59.999Z' },
+  success: true,
+  output: 'id: 41, title: Английский с Томом, start: 2026-09-29T10:30:00Z, end: 2026-09-29T11:30:00Z',
+  data: [{ id: 41, title: 'Английский с Томом', date: '2026-09-29', time: '12:30', all_day: false }],
+};
+
+/** A read of Tuesday and Wednesday only: Monday 28.09, tomorrow, is not in it. */
+const TUESDAY_AND_WEDNESDAY: ToolEvidence = {
+  ...WEEK_FROM_SUNDAY,
+  input: { start_date: '2026-09-29', end_date: '2026-09-30' },
+};
+
 describe('tool-run evidence prefilter', () => {
+  beforeEach(() => setSystemTime(SUNDAY_NIGHT));
+  afterEach(() => setSystemTime());
+
   test('production completeness claim is validated after write/image tools', () => {
     expect(
-      shouldValidateResponse(
-        ['create_event', 'render_day_image'],
-        'Готово. На этот день больше ничего не запланировано.',
-      ),
+      prefilter(['create_event', 'render_day_image'], 'Готово. На этот день больше ничего не запланировано.'),
     ).toBe(true);
   });
 
   test('ordinary write confirmation keeps the no-extra-validator fast path', () => {
-    expect(shouldValidateResponse(['create_event'], 'Готово, добавил событие на 18:30.')).toBe(false);
+    expect(prefilter(['create_event'], 'Готово, добавил событие на 18:30.')).toBe(false);
   });
 
   test('a schedule read supplies evidence for a completeness claim', () => {
-    expect(shouldValidateResponse(['create_event', 'get_events'], 'На этот день больше ничего не запланировано.')).toBe(
-      false,
-    );
+    expect(prefilter(['create_event', 'get_events'], 'На этот день больше ничего не запланировано.')).toBe(false);
   });
 
+  test('after a read, an answer whose days and times the read covers keeps the fast path (#515)', () => {
+    expect(
+      prefilter([], 'Вторник, 29 сентября: 12:30 «Английский с Томом». 30 сентября свободно.', [WEEK_FROM_SUNDAY]),
+    ).toBe(false);
+  });
+
+  test('after a read, a day no read covered or a time no result has is validated (#515)', () => {
+    expect(prefilter([], 'Вторник 22 сентября – свободный весь день.', [WEEK_FROM_SUNDAY])).toBe(true);
+    expect(prefilter([], 'Во вторник, 29 сентября, урок в 10:30.', [WEEK_FROM_SUNDAY])).toBe(true);
+  });
+
+  test('a failed read covers nothing', () => {
+    expect(prefilter([], '30 сентября свободно.', [{ ...WEEK_FROM_SUNDAY, success: false }])).toBe(true);
+    // No completeness claim: a failed read still makes every fact answer to the results.
+    expect(prefilter([], 'Урок 30 сентября в 15:00.', [{ ...WEEK_FROM_SUNDAY, success: false }])).toBe(true);
+  });
+
+  test('after a failed read, a completeness claim is validated (#515)', () => {
+    expect(prefilter([], 'Больше ничего не запланировано.', [{ ...WEEK_FROM_SUNDAY, success: false }])).toBe(true);
+  });
+
+  test('a free day with no read is validated, in either language (#515)', () => {
+    expect(prefilter(['create_event'], '28 сентября – свободный весь день.')).toBe(true);
+    expect(prefilter(['create_event'], 'Готово. Завтра ты свободен весь день.')).toBe(true);
+    expect(prefilter(['create_event'], 'Tomorrow, September 28, you are free all day.')).toBe(true);
+    expect(prefilter(['create_event'], 'Tomorrow, September 28, you are free from meetings.')).toBe(true);
+    expect(prefilter(['create_event'], 'Your calendar is clear on Tuesday.')).toBe(true);
+  });
+
+  test('an empty day named only by its date is validated when the read covered other days (#515)', () => {
+    expect(prefilter([], 'Завтра, 28 сентября, ничего не запланировано.', [TUESDAY_AND_WEDNESDAY])).toBe(true);
+    expect(prefilter([], 'Завтра, 28 сентября, свободно.', [TUESDAY_AND_WEDNESDAY])).toBe(true);
+  });
+
+  test('a title, "feel free" or a clear sky is no schedule claim', () => {
+    expect(prefilter(['create_event'], 'Готово, добавил событие на 18:30. Feel free to ask!')).toBe(false);
+    expect(prefilter(['create_event'], 'Готово! Чувствуй себя свободно и пиши, если что.')).toBe(false);
+    expect(prefilter(['create_event'], 'Готово! Создал «Свободный день» на 28 сентября, 18:00.')).toBe(false);
+    expect(prefilter(['create_event'], 'Done, added "Free consultation" tomorrow at 18:30.')).toBe(false);
+    expect(prefilter(['create_event'], 'Added to your calendar. All clear?')).toBe(false);
+    expect(prefilter(['render_day_image'], 'Tomorrow is clear and sunny.')).toBe(false);
+  });
+
+  test('a busy day or a word that only contains a day name is no free-day claim', () => {
+    expect(prefilter(['create_event'], 'Готово. Завтра ты не свободен — три встречи.')).toBe(false);
+    expect(prefilter(['create_event'], 'Готово. Завтра ты не будешь свободен до вечера.')).toBe(false);
+    expect(prefilter(['create_event'], "Done. You won't be free tomorrow: the event fills it.")).toBe(false);
+    expect(prefilter(['create_event'], 'Готово! Если будешь свободен — напиши позднее.')).toBe(false);
+    expect(prefilter(['create_event'], 'Added a stress-free weekend walk.')).toBe(false);
+  });
+
+  test('a quote known from the search is no reason to doubt a free day the read covered', () => {
+    const search: ToolEvidence = { name: 'search_events', input: { query: 'Йога' }, success: true };
+    const text = 'В понедельник, 28 сентября, «Йога» не запланирована — день свободный.';
+    expect(prefilter([], text, [WEEK_FROM_SUNDAY, search])).toBe(false);
+  });
+});
+
+describe('supplementIsGrounded (#515)', () => {
+  beforeEach(() => setSystemTime(SUNDAY_NIGHT));
+  afterEach(() => setSystemTime());
+
+  function supplement(response: string, tools: ToolEvidence[]): boolean {
+    return supplementIsGrounded({ userMessage: 'План на неделю', timezone: 'Europe/Belgrade', tools, response });
+  }
+
+  test('a supplement claiming a day its own reads never covered is not grounded', () => {
+    const shorter: ToolEvidence = {
+      ...WEEK_FROM_SUNDAY,
+      input: { start_date: '2026-09-27T00:00:00.000Z', end_date: '2026-09-30T23:59:59.999Z' },
+    };
+    expect(supplement('**Вторник 22 сентября** – свободный весь день', [WEEK_FROM_SUNDAY, shorter])).toBe(false);
+  });
+
+  test('a supplement backed by its own reads, or stating no concrete fact, is grounded', () => {
+    expect(supplement('Во вторник, 29 сентября, в 12:30 — английский.', [WEEK_FROM_SUNDAY])).toBe(true);
+    expect(supplement('Хорошей недели!', [])).toBe(true);
+  });
+
+  test('restating a time without any read of its own is not grounded', () => {
+    expect(supplement('Не забудь про концерт в 18:30.', [])).toBe(false);
+  });
+
+  test('a completeness claim after only a failed read is not grounded', () => {
+    expect(supplement('Больше ничего не запланировано.', [{ ...WEEK_FROM_SUNDAY, success: false }])).toBe(false);
+  });
+
+  test('a free day with no read of its own is not grounded, even when the date is tomorrow', () => {
+    expect(supplement('28 сентября – свободный весь день', [])).toBe(false);
+    expect(supplement('Завтра ты свободен весь день', [])).toBe(false);
+    expect(supplement('Tomorrow, September 28, you are free all day.', [])).toBe(false);
+  });
+
+  test('a sign-off that mentions being free is no schedule claim', () => {
+    expect(supplement('Хорошей недели! Если будешь свободен — отдыхай.', [])).toBe(true);
+  });
+
+  test('an empty day its reads did not cover is not grounded by being tomorrow', () => {
+    expect(supplement('Завтра, 28 сентября, ничего не запланировано.', [TUESDAY_AND_WEDNESDAY])).toBe(false);
+  });
+});
+
+describe('tool-run evidence prefilter — deterministic rejection', () => {
   test('unsupported completeness claim is rejected deterministically without another model call', async () => {
     let called = false;
     const result = await validateResponse(
@@ -58,6 +182,24 @@ describe('tool-run evidence prefilter', () => {
         timezone: 'UTC',
         tools: executed(['create_event', 'render_day_image']),
         response: 'На этот день больше ничего не запланировано.',
+      },
+      async () => {
+        called = true;
+        return stubText('APPROVE')({ messages: [], maxTokens: 1 });
+      },
+    );
+    expect(result.approved).toBe(false);
+    expect(called).toBe(false);
+  });
+
+  test('a completeness claim after only a failed read is rejected without a model call (#515)', async () => {
+    let called = false;
+    const result = await validateResponse(
+      {
+        userMessage: 'Что у меня на неделе?',
+        timezone: 'Europe/Belgrade',
+        tools: [{ ...WEEK_FROM_SUNDAY, success: false }],
+        response: 'Больше ничего не запланировано.',
       },
       async () => {
         called = true;
@@ -558,7 +700,7 @@ describe('unverifiedResponseNotice — verified data instead of a dead end (#492
 
 test('content refusal after calculate is still validated instead of leaking through', async () => {
   const response = 'Я не могу создавать события с таким содержанием.';
-  expect(shouldValidateResponse(['calculate'], response)).toBe(true);
+  expect(prefilter(['calculate'], response)).toBe(true);
   const result = await validateResponse(
     {
       userMessage: 'Создай событие завтра в 10 с этим названием',
