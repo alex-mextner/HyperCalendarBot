@@ -468,6 +468,8 @@ export class SyncService {
    * as on pull; a copy Google no longer knows at all (purged, or another Google account connected)
    * is recreated, because nothing says they stopped attending. A participant who already declined
    * is only unlinked. A copy that is still live contradicts the error, which is rethrown for a retry.
+   * Google's Events reference (`status`): events.get always returns a deleted event as cancelled until
+   * Google drops it, the same tombstone the pull's incremental feed delivers.
    */
   private async resolveGoneParticipantCopy(
     api: GoogleCalendarApi,
