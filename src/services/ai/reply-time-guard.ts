@@ -53,13 +53,14 @@ const CLOCK_TIME_RE = /(?<![\d:T])(\d{1,2}):(\d{2})(?![\d:])/g;
  * Both patterns spell «всемирное (с)координированное время» the same way; keep them in step.
  */
 const UTC_LABEL_AFTER_RE =
-  /^\s*(?:[-–—]\s*\d{1,2}:\d{2}\s*)?\(?\s*(?:по\s+(?:времени\s+)?)?(?:(?:UTC|GMT)(?!\s*[+\-−]0*[1-9]\d*(?![\d:]))|Z(?![A-Za-z])|Гринвич|всемирному|всемирн(?:ое|ому|ого)\s+(?:с?координированн[а-яё]*\s+)?врем[а-яё]*)/i;
-// One class owns the separator run ("UTC — (", "UTC, "): adjacent \s* groups backtrack cubically on long blanks.
+  /^(?:\s*[-–—]\s*\d{1,2}:\d{2})?[\s(]*(?:по\s+(?:времени\s+)?)?(?:(?:UTC|GMT)(?!\s*[+\-−]0*[1-9]\d*(?![\d:]))|Z(?![A-Za-z])|Гринвич|всемирному|всемирн(?:ое|ому|ого)\s+(?:с?координированн[а-яё]*\s+)?врем[а-яё]*)/i;
+// One quantifier owns each separator run ("UTC — (", "UTC, ", "10:30 (UTC)", "id: 7"): adjacent
+// \s* groups backtrack quadratically or worse on long blanks, which degenerate model output can contain.
 const UTC_LABEL_BEFORE_RE =
   /(?:(?:UTC|GMT)(?:\s*[+\-−]0+(?::0+)?)?|Гринвичу|всемирн(?:ое|ому|ого)\s+(?:с?координированн[а-яё]*\s+)?врем[а-яё]*)[\s:,—–(-]*(?:в\s+)?(?:\d{1,2}:\d{2}\s*[-–—]\s*)?$/i;
 /** A 12-hour clock time (alone or as a range): its hour is not a 24-hour clock value. */
 const MERIDIEM_AFTER_RE = /^(?:\s*[-–—]\s*\d{1,2}:\d{2})?\s*[ap]\.?m\.?(?![a-z])/i;
-const ID_ANCHOR_RE = /(?:\bid\s*[:#№]?\s*|#)(\d{1,9})\b/gi;
+const ID_ANCHOR_RE = /(?:\bid[\s:#№]*|#)(\d{1,9})\b/gi;
 /** Shorter titles ("Я", "ДР") would anchor to unrelated words. */
 const MIN_TITLE_LENGTH = 3;
 

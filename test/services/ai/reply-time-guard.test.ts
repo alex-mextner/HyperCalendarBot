@@ -198,6 +198,15 @@ describe('correctUtcClockTimes', () => {
   });
 
   test.each([
+    ['after a clock time', `${LESSON} в 10:30${' '.repeat(40000)}x`, `${LESSON} в 12:30${' '.repeat(40000)}x`],
+    ['after an «id»', `${LESSON} в 10:30, id${' '.repeat(40000)}x`, `${LESSON} в 12:30, id${' '.repeat(40000)}x`],
+  ])('a long whitespace run %s is scanned in linear time', (_label, text, expected) => {
+    const started = performance.now();
+    expect(correctUtcClockTimes(text, [lesson, errand], TZ)).toBe(expected);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  test.each([
     ['«AM»', `The ${LESSON} is at 10:30 AM`],
     ['«pm» with no space', `The ${LESSON} is at 10:30pm`],
     ['«AM» after two spaces', `The ${LESSON} is at 10:30  AM`],
