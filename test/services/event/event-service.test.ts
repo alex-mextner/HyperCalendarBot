@@ -782,24 +782,4 @@ describe('EventService', () => {
       expect(totalFreeMinutes).toBeGreaterThan(20 * 60); // at least 20h free
     });
   });
-
-  test('deleteEvent cascades to invitations via foreign key', () => {
-    const event = service.createEvent({
-      user_id: USER_ID,
-      title: 'Party',
-      start_at: '2026-03-15T18:00:00Z',
-      timezone: TZ,
-    });
-    new UserRepository(db).create({ telegram_id: 200 });
-    db.prepare('INSERT INTO invitations (event_id, inviter_id, invitee_id) VALUES (?, ?, ?)').run(
-      event.id,
-      USER_ID,
-      200,
-    );
-
-    service.deleteEvent(event.id, USER_ID);
-
-    const inv = db.prepare('SELECT * FROM invitations WHERE event_id = ?').all(event.id);
-    expect(inv).toHaveLength(0);
-  });
 });

@@ -102,13 +102,14 @@ export class EventRepository {
    */
   private readonly cascadeTargets: readonly string[];
   private readonly cascadeDeleteStmts: ReadonlyMap<string, ReturnType<Database['prepare']>>;
+  /** Cancels the pending, maybe and accepted invitations of a soft-deleted event; null when the schema has no invitations table. */
+  private readonly cascadeCancelInvitationsStmt: ReturnType<Database['prepare']> | null;
   private readonly cascadeSoftDeleteExceptionStmt: ReturnType<Database['prepare']>;
   private readonly cascadeFindChildrenStmt: ReturnType<Database['prepare']>;
 
   constructor(private db: Database) {
     const candidates = [
       'event_participants',
-      'invitations',
       'event_visibility',
       'shared_events',
       'group_shared_events',
@@ -127,6 +128,15 @@ export class EventRepository {
       deleteStmts.set(table, db.prepare(`DELETE FROM ${table} WHERE event_id = ?`));
     }
     this.cascadeDeleteStmts = deleteStmts;
+    // Invitations are the record of who was invited, so they outlive the event: pending, maybe
+    // and accepted ones become cancelled, since the event can no longer be attended; declined,
+    // cancelled and expired ones keep their status.
+    this.cascadeCancelInvitationsStmt = existing.has('invitations')
+      ? db.prepare(
+          `UPDATE invitations SET status = 'cancelled', updated_at = datetime('now')
+           WHERE event_id = ? AND status IN ('pending', 'maybe', 'accepted')`,
+        )
+      : null;
     this.cascadeSoftDeleteExceptionStmt = db.prepare(
       "UPDATE events SET is_deleted = 1, updated_at = datetime('now') WHERE id = ?",
     );
@@ -427,10 +437,11 @@ export class EventRepository {
     // paths filter `is_deleted = 0`.
     //
     // Child data that would have been nuked by ON DELETE CASCADE is cleaned
-    // up explicitly here — participants, invitations, sharing state, reminder
-    // rows, birthday metadata, and recursively child exception rows. edit
-    // proposals are intentionally preserved so the proposer notification can
-    // still look up the title.
+    // up explicitly here — participants, sharing state, reminder rows,
+    // birthday metadata, and recursively child exception rows. Invitations
+    // are kept as history; pending, maybe and accepted ones become cancelled.
+    // Edit proposals are intentionally preserved so the proposer notification
+    // can still look up the title.
     return this.db.transaction((): boolean => {
       const result = this.db
         .prepare(
@@ -462,6 +473,7 @@ export class EventRepository {
     for (const table of this.cascadeTargets) {
       this.cascadeDeleteStmts.get(table)!.run(eventId);
     }
+    this.cascadeCancelInvitationsStmt?.run(eventId);
     // Recursively soft-delete child exception rows so the same cleanup chain
     // applies to them.
     const exceptions = this.cascadeFindChildrenStmt.all(eventId) as { id: number }[];
