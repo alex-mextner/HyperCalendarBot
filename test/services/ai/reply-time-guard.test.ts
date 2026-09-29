@@ -142,10 +142,59 @@ describe('correctUtcClockTimes', () => {
     ['a range labelled UTC before its start', `${LESSON}: UTC 10:30 – 11:30`],
     ['a time after «UTC:»', `${LESSON} (UTC: 10:30)`],
     ['a time labelled «по Гринвичу»', `${LESSON} начинается в 10:30 по Гринвичу`],
+    ['a time labelled «по всемирному времени»', `${LESSON} в 10:30 по всемирному времени`],
+    ['a time after «по всемирному времени в»', `${LESSON} по всемирному времени в 10:30`],
+    ['a time labelled «по времени UTC»', `${LESSON} в 10:30 по времени UTC`],
+    ['a time after «по UTC —»', `${LESSON}: по UTC — 10:30`],
+    ['a time after «UTC,»', `${LESSON}: UTC, 10:30`],
+    ['a time labelled «(всемирное время)»', `${LESSON} в 10:30 (всемирное время)`],
+    ['a time labelled «UTC+0»', `${LESSON} в 10:30 по UTC+0`],
+    ['a time labelled «(всемирное координированное время)»', `${LESSON} в 10:30 (всемирное координированное время)`],
+    ['a time after «всемирное координированное время»', `${LESSON}: всемирное координированное время 10:30`],
+    [
+      'a time after «по всемирному координированному времени в»',
+      `${LESSON} по всемирному координированному времени в 10:30`,
+    ],
+    ['a time in parentheses after «UTC»', `${LESSON}: UTC (10:30)`],
+    ['two UTC-labelled times joined by a spaced hyphen', `${LESSON}: 10:30 UTC - 11:30 UTC`],
+    ['two UTC-labelled times joined by a bare hyphen', `${LESSON}: 10:30 UTC-11:30 UTC`],
+    ['a time labelled «(всемирное скоординированное время)»', `${LESSON} в 10:30 (всемирное скоординированное время)`],
+    ['a time after «UTC+0»', `${LESSON}: по UTC+0 в 10:30`],
+    ['a time labelled «UTC+00:00»', `${LESSON} в 10:30 UTC+00:00`],
     ['an ISO timestamp', `${LESSON}: 2026-09-28T10:30:00.000Z`],
     ['a time with no event named on its line', 'В Токио сейчас 10:30'],
   ])('does not touch %s', (_label, text) => {
     expect(correctUtcClockTimes(text, [lesson, errand], TZ)).toBe(text);
+  });
+
+  test.each([
+    [
+      'a non-zero UTC offset after «по времени»',
+      `${LESSON} в 10:30 по времени UTC+2`,
+      `${LESSON} в 12:30 по времени UTC+2`,
+    ],
+    ['a non-zero UTC offset', `${LESSON} в 10:30 UTC+2`, `${LESSON} в 12:30 UTC+2`],
+    ['a spaced non-zero UTC offset', `${LESSON} в 10:30 UTC +2`, `${LESSON} в 12:30 UTC +2`],
+    ['a negative UTC offset', `${LESSON} в 10:30 по UTC-5`, `${LESSON} в 12:30 по UTC-5`],
+    ['a two-digit UTC offset', `${LESSON} в 10:30 GMT+10`, `${LESSON} в 12:30 GMT+10`],
+    ['«по местному времени»', `${LESSON} в 10:30 по местному времени`, `${LESSON} в 12:30 по местному времени`],
+    [
+      'a «всемирное» that is not a time zone',
+      `${LESSON} в 10:30 (всемирное наследие)`,
+      `${LESSON} в 12:30 (всемирное наследие)`,
+    ],
+  ])('still corrects a time next to %s', (_label, text, expected) => {
+    expect(correctUtcClockTimes(text, [lesson, errand], TZ)).toBe(expected);
+  });
+
+  test('a long whitespace run after a UTC label is scanned in linear time', () => {
+    // Degenerate model output must not stall the event loop in regex backtracking.
+    const text = `${LESSON} по UTC${' '.repeat(3000)}x, начало в 10:30`;
+    const started = performance.now();
+    expect(correctUtcClockTimes(text, [lesson, errand], TZ)).toBe(
+      `${LESSON} по UTC${' '.repeat(3000)}x, начало в 12:30`,
+    );
+    expect(performance.now() - started).toBeLessThan(500);
   });
 
   test.each([

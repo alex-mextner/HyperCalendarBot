@@ -45,10 +45,18 @@ interface ClockTimes {
 
 /** HH:MM not inside an ISO timestamp (T10:30) or a longer h:m:s value. */
 const CLOCK_TIME_RE = /(?<![\d:T])(\d{1,2}):(\d{2})(?![\d:])/g;
-/** A clock time the model explicitly labelled as UTC (alone or as a range) is not presented as local. */
+/**
+ * A clock time the model explicitly labelled as UTC (alone or as a range) is not presented as local:
+ * "10:30 по времени UTC", "10:30 (всемирное время)", "по всемирному времени в 10:30", "UTC, 10:30".
+ * A whole-hour non-zero offset ("UTC+2", "UTC +2", "GMT-10") names a local zone, so that time is still
+ * corrected; "UTC+0" and a signed H:MM ("UTC-11:30", a range end or a half-hour zone) keep the label.
+ * Both patterns spell «всемирное (с)координированное время» the same way; keep them in step.
+ */
 const UTC_LABEL_AFTER_RE =
-  /^\s*(?:[-–—]\s*\d{1,2}:\d{2}\s*)?\(?\s*(?:по\s+)?(?:UTC|GMT|Z(?![A-Za-z])|Гринвич|всемирному)/i;
-const UTC_LABEL_BEFORE_RE = /(?:UTC|GMT|Гринвичу|всемирному времени)\s*:?\s*(?:\d{1,2}:\d{2}\s*[-–—]\s*)?$/i;
+  /^\s*(?:[-–—]\s*\d{1,2}:\d{2}\s*)?\(?\s*(?:по\s+(?:времени\s+)?)?(?:(?:UTC|GMT)(?!\s*[+\-−]0*[1-9]\d*(?![\d:]))|Z(?![A-Za-z])|Гринвич|всемирному|всемирн(?:ое|ому|ого)\s+(?:с?координированн[а-яё]*\s+)?врем[а-яё]*)/i;
+// One class owns the separator run ("UTC — (", "UTC, "): adjacent \s* groups backtrack cubically on long blanks.
+const UTC_LABEL_BEFORE_RE =
+  /(?:(?:UTC|GMT)(?:\s*[+\-−]0+(?::0+)?)?|Гринвичу|всемирн(?:ое|ому|ого)\s+(?:с?координированн[а-яё]*\s+)?врем[а-яё]*)[\s:,—–(-]*(?:в\s+)?(?:\d{1,2}:\d{2}\s*[-–—]\s*)?$/i;
 /** A 12-hour clock time (alone or as a range): its hour is not a 24-hour clock value. */
 const MERIDIEM_AFTER_RE = /^(?:\s*[-–—]\s*\d{1,2}:\d{2})?\s*[ap]\.?m\.?(?![a-z])/i;
 const ID_ANCHOR_RE = /(?:\bid\s*[:#№]?\s*|#)(\d{1,9})\b/gi;
