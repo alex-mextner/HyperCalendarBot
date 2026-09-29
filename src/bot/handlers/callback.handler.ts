@@ -33,7 +33,7 @@ import type { InvitationRepository } from '../../database/repositories/invitatio
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { CreateEventData, Invitation, UpdateEventData, User } from '../../database/types.ts';
+import type { CalendarEvent, CreateEventData, Invitation, UpdateEventData, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import {
   formatDayAgenda,
@@ -48,6 +48,7 @@ import { renderConflictImage } from '../../services/image/render-conflict.ts';
 import type { ImageRenderer } from '../../services/image/render-service.ts';
 import type { AdminEditSession } from '../../services/intent/admin-edit-session.ts';
 import { ConflictService } from '../../services/invite/conflict-service.ts';
+import { eventVenue, withMapButton } from '../../services/location/event-venue.ts';
 import { formatLocationHtml } from '../../services/location/format-location.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { SceneName, ScenePauseService } from '../../services/scene-pause.ts';
@@ -55,8 +56,9 @@ import {
   formatAnsweredInvitationCard,
   invitationAnswerLabel,
 } from '../../services/sharing/answered-invitation-card.ts';
+import { readInvitationRoster } from '../../services/sharing/invitation-roster.ts';
 import { invitationRsvpKeyboard } from '../../services/sharing/invitation-rsvp-keyboard.ts';
-import type { InvitationService } from '../../services/sharing/invitation-service.ts';
+import type { InvitationResult, InvitationService } from '../../services/sharing/invitation-service.ts';
 import { guessCountryFromTimezone, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
 import {
@@ -334,6 +336,7 @@ export function createCallbackHandler(
       deleteReportForAgent({ deleted, kept, failed }, user.timezone),
       agentContinuation,
       chatId,
+      agentCtx.changedDays,
     ).catch((err: unknown) => cmdLogger.error({ err }, 'AI continuation after delete confirmation failed'));
   });
 
@@ -391,7 +394,7 @@ export function createCallbackHandler(
     await ctx.answer();
     return editAgendaText(ctx, detail, {
       parse_mode: 'HTML',
-      reply_markup: eventActionsKeyboard(eventId, user.language as 'en' | 'ru'),
+      reply_markup: withMapButton(eventActionsKeyboard(eventId, user.language as 'en' | 'ru'), event, lang),
     });
   });
 
@@ -818,12 +821,36 @@ export function createCallbackHandler(
         const proposedTime = new Date(baseTime + offsetMs).toISOString().replace(/\.\d{3}Z$/, 'Z');
         const propResult = invitationService.proposeTime(invId, user.telegram_id, proposedTime);
         if (!propResult.success) {
-          await ctx.answer({ text: propResult.error ?? t(lang).callbackErrors.error });
+          await ctx.answer({
+            text: propResult.reason ? t(lang)[propResult.reason] : (propResult.error ?? t(lang).callbackErrors.error),
+          });
           return;
         }
         const formatted = formatProposedTime(proposedTime, user.timezone, lang);
+        const proposalSent = t(lang).invite_propose_sent(formatted);
         await ctx.answer();
-        await ctx.editText(t(lang).invite_propose_sent(formatted), { parse_mode: 'HTML' }).catch(() => {});
+        await ctx.editText(proposalSent, { parse_mode: 'HTML' }).catch(() => {});
+        // The +30/+60 buttons sit on a separate prompt, so the invitation card still has its RSVP buttons.
+        // Replace it with the notice a typed proposal leaves: the location refresh skips pending cards
+        // with a proposed time, relying on no such card still showing live buttons.
+        // Re-read first: an answer given before this stale tap, or during the awaits above, must stay visible.
+        const latest = invitationRepo?.findById(invId);
+        if (
+          latest?.status === 'pending' &&
+          latest.proposed_time === proposedTime &&
+          latest.message_id &&
+          latest.chat_id &&
+          invitationNotifyDeps?.editMessage
+        ) {
+          await invitationNotifyDeps
+            .editMessage(latest.chat_id, latest.message_id, proposalSent)
+            .catch((err: unknown) => {
+              cmdLogger.warn(
+                { err, invitationId: invId },
+                'Failed to replace the invitation card after a quick proposal',
+              );
+            });
+        }
         if (invitationNotifyDeps && event) {
           notifyInviterProposal(
             inv,
@@ -848,7 +875,22 @@ export function createCallbackHandler(
     }
 
     if (subAction === 'reschedule') {
-      const reschedResult = invitationService.rescheduleFromProposal(invId, user.telegram_id);
+      const moveEventToProposedTime = (eventId: number, proposedTime: string) => {
+        const event = eventRepo?.findById(eventId, user.telegram_id);
+        if (!event || !eventService) return null;
+        const durationMs = event.end_at ? new Date(event.end_at).getTime() - new Date(event.start_at).getTime() : 0;
+        const newEnd =
+          durationMs > 0 ? new Date(new Date(proposedTime).getTime() + durationMs).toISOString() : undefined;
+        return eventService.updateEvent(event.id, user.telegram_id, {
+          start_at: proposedTime,
+          ...(newEnd ? { end_at: newEnd } : {}),
+        });
+      };
+      const reschedResult = invitationService.rescheduleFromProposal(invId, user.telegram_id, moveEventToProposedTime);
+      if (reschedResult.reason === 'invite_proposal_closed') {
+        await answerProposalClosed(ctx, lang);
+        return;
+      }
       if (!reschedResult.success) {
         await ctx.answer({ text: reschedResult.error ?? t(lang).callbackErrors.error });
         return;
@@ -856,15 +898,6 @@ export function createCallbackHandler(
       const invitation = reschedResult.invitation!;
       const proposedTime = reschedResult.proposedTime!;
       const event = eventRepo?.findById(invitation.event_id, user.telegram_id);
-      if (event && eventService) {
-        const durationMs = event.end_at ? new Date(event.end_at).getTime() - new Date(event.start_at).getTime() : 0;
-        const newEnd =
-          durationMs > 0 ? new Date(new Date(proposedTime).getTime() + durationMs).toISOString() : undefined;
-        eventService.updateEvent(event.id, user.telegram_id, {
-          start_at: proposedTime,
-          ...(newEnd ? { end_at: newEnd } : {}),
-        });
-      }
       const formattedTimeInviter = formatProposedTime(proposedTime, user.timezone, lang);
       await ctx.answer();
       await ctx
@@ -889,6 +922,10 @@ export function createCallbackHandler(
 
     if (subAction === 'dismiss') {
       const keepResult = invitationService.keepOriginalTime(invId, user.telegram_id);
+      if (keepResult.reason === 'invite_proposal_closed') {
+        await answerProposalClosed(ctx, lang);
+        return;
+      }
       if (!keepResult.success) {
         await ctx.answer({ text: keepResult.error ?? t(lang).callbackErrors.error });
         return;
@@ -921,6 +958,7 @@ export function createCallbackHandler(
                 inviterUser?.username ?? undefined,
                 inviteeUser?.timezone ?? null,
                 !!inviteeUser?.onboarding_completed,
+                invitationRepo ? readInvitationRoster(invitationRepo, event.id, invitation.chat_id) : null,
               )
             : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
           invitationNotifyDeps
@@ -928,7 +966,7 @@ export function createCallbackHandler(
               invitation.chat_id,
               invitation.message_id,
               originalText,
-              invitationRsvpKeyboard(invitation.id, inviteeLang),
+              invitationRsvpKeyboard(invitation.id, inviteeLang, event ?? null),
             )
             .catch(() => {});
         }
@@ -936,9 +974,7 @@ export function createCallbackHandler(
       return;
     }
 
-    let result:
-      | { success: boolean; error?: string; invitation?: import('../../database/types.ts').Invitation }
-      | undefined;
+    let result: InvitationResult | undefined;
     if (subAction === 'accept') {
       result = invitationService.acceptInvitation(invId, user.telegram_id);
     } else if (subAction === 'decline') {
@@ -957,6 +993,8 @@ export function createCallbackHandler(
       await ctx.answer(invitationAnswerLabel(answer, lang));
 
       const event = eventRepo?.findById(result.invitation?.event_id ?? 0, result.invitation?.inviter_id ?? 0);
+      // A group chat must be identified to be checked against the roster's privacy rule; fail closed.
+      const rosterChatId = isGroup(ctx) ? getGroupId(ctx) : user.telegram_id;
       const editText = await formatAnsweredInvitationCard(
         answer,
         event ?? null,
@@ -967,6 +1005,9 @@ export function createCallbackHandler(
           groupId: isGroup(ctx) ? (getGroupId(ctx) ?? undefined) : undefined,
         },
         { agendaRepository: eventService.agendaRepository, weatherService },
+        event && invitationRepo && rosterChatId !== null
+          ? readInvitationRoster(invitationRepo, event.id, rosterChatId)
+          : null,
       );
       await editAgendaText(ctx, editText, { parse_mode: 'HTML' }).catch(() => {});
 
@@ -987,7 +1028,7 @@ export function createCallbackHandler(
         await ctx.scene.enter(onboardingScene);
       }
     } else {
-      await ctx.answer(result.error ?? t(lang).callbackErrors.error);
+      await ctx.answer(result.reason ? t(lang)[result.reason] : (result.error ?? t(lang).callbackErrors.error));
     }
   });
 
@@ -1158,7 +1199,35 @@ export function createCallbackHandler(
     }
 
     await ctx.answer();
-    await ctx.editText(`✅ ${answerText}`);
+    // Keep the question: after a destructive confirmation it is the user's only record of
+    // what they agreed to. Appending at the end leaves the entity offsets valid.
+    const question = ctx.message?.text ?? '';
+    const entities = ctx.message?.entities?.map((entity) => entity.payload) ?? [];
+    const answered = `✅ ${answerText}`;
+    // A later tap from a client that still shows the buttons finds an answer already recorded,
+    // the same option or another one: the AI must not get a second answer (a destructive
+    // confirmation would run again, or run after the user declined it).
+    if (/(?:^|\n\n)✅ [^\n]*$/.test(question)) {
+      cmdLogger.info({ userId: user.telegram_id }, 'ai_btn tap on an already answered question ignored');
+      return;
+    }
+    const kept = question ? `${question}\n\n${answered}` : answered;
+    try {
+      try {
+        await ctx.editText(kept, { entities });
+      } catch (err) {
+        // Question plus answer can exceed Telegram's 4096 characters: record the answer alone.
+        // editMessageText reports MESSAGE_TOO_LONG, sendMessage 'message is too long'.
+        if (kept === answered || !/MESSAGE_TOO_LONG|message is too long/i.test(String(err))) throw err;
+        await ctx.editText(answered);
+      }
+    } catch (err) {
+      // Two taps racing on the same question: the second edit changes nothing, so stop here.
+      if (String(err).includes('message is not modified')) return;
+      // The edit only shows the answer in the chat; as with the delete confirmation, a failed
+      // edit must not drop the user's answer.
+      cmdLogger.warn({ err }, 'Failed to record the ask_user answer');
+    }
     const cbChatId = ctx.chatId;
     if (onAiButtonClick && cbChatId) {
       onAiButtonClick(user.telegram_id, cbChatId, answerText).catch((e) => {
@@ -1327,6 +1396,7 @@ export function createCallbackHandler(
             user.username ?? undefined,
             inviteeUser?.timezone ?? null,
             !!inviteeUser?.onboarding_completed,
+            invitationRepo ? readInvitationRoster(invitationRepo, event.id, inviteeId) : null,
           )
         : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
       await ctx.answer();
@@ -1334,7 +1404,7 @@ export function createCallbackHandler(
       forceInviteDeps
         .sendMessage(inviteeId, inviteeText, {
           parse_mode: 'HTML',
-          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang),
+          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang, event),
         })
         .then((sent) => {
           forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
@@ -1394,12 +1464,13 @@ export function createCallbackHandler(
             user.username ?? undefined,
             inviteeUser?.timezone ?? null,
             !!inviteeUser?.onboarding_completed,
+            invitationRepo ? readInvitationRoster(invitationRepo, eventForInv.id, inviteeId) : null,
           )
         : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
       forceInviteDeps
         .sendMessage(inviteeId, inviteeText, {
           parse_mode: 'HTML',
-          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang),
+          reply_markup: invitationRsvpKeyboard(invitation.id, inviteeLang, eventForInv),
         })
         .then((sent) => {
           forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
@@ -1521,8 +1592,7 @@ export function createCallbackHandler(
   /** The confirmation edited into the picker or pin message: the title and the resolved place, linked. */
   function locationResolvedHtml(lang: Lang, eventId: number, userId: number): string {
     const event = eventRepo?.findById(eventId, userId);
-    // A pin can resolve an event that has no typed location; show the resolved address then.
-    const place = event ? formatLocationHtml({ ...event, location: event.location ?? event.resolved_address }) : '';
+    const place = event ? formatLocationHtml(event) : '';
     return t(lang).aiTools.location.locationResolved(escapeHtml(event?.title ?? ''), place);
   }
 
@@ -1546,12 +1616,7 @@ export function createCallbackHandler(
         return;
       }
 
-      const success = await locationVerification.resolveFromCoordinates(
-        eventId,
-        geo.latitude,
-        geo.longitude,
-        user.telegram_id,
-      );
+      const success = await locationVerification.resolveFromSharedLocation(eventId, geo, user.telegram_id);
       await pendingGeoStore.delete(user.telegram_id);
 
       if (success) {
@@ -1625,10 +1690,50 @@ export function createCallbackHandler(
         parse_mode: 'HTML',
         reply_markup: undefined,
       });
+      // The creator chose from text and links: show the chosen point on Telegram's map once. The
+      // picker itself keeps map links; a venue per candidate would flood the chat.
+      const event = eventService.getEvent(eventId, user.telegram_id);
+      const venue = event ? eventVenue(event) : null;
+      if (venue) {
+        await ctx.sendVenue(venue).catch((err: unknown) => {
+          cmdLogger.warn({ err, eventId, userId: user.telegram_id }, 'Failed to send the chosen place as a venue');
+        });
+      }
     } else {
       cmdLogger.warn({ eventId, userId: user.telegram_id }, 'Location picker is outdated or its event is gone');
       await ctx.editText(msgs.aiTools.location.locationChoiceOutdated, { reply_markup: undefined });
     }
+  });
+
+  /**
+   * The event behind a Map button, if the presser may see it: their own or group-visible event, or
+   * an event their personal invitation (or, in a group chat, the group's invitation) points to.
+   */
+  function eventForMap(eventId: number, userId: number, chatId: number | undefined): CalendarEvent | null {
+    const visible = eventService.getEvent(eventId, userId);
+    if (visible) return visible;
+    const invitation =
+      invitationRepo?.findActiveOrRespondedByEventAndInvitee(eventId, userId) ??
+      (chatId !== undefined && chatId < 0
+        ? invitationRepo?.findActiveOrRespondedByEventAndInvitee(eventId, chatId)
+        : null);
+    return invitation ? eventService.getEvent(eventId, invitation.inviter_id) : null;
+  }
+
+  // Map button: `ev_map:<eventId>` — send the event's confirmed place as a native Telegram venue
+  dispatch.set(CB.EVENT_MAP, async (ctx, payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
+    const eventId = Number.parseInt(payload, 10);
+    const event = Number.isNaN(eventId) ? null : eventForMap(eventId, user.telegram_id, ctx.chatId);
+    const venue = event ? eventVenue(event) : null;
+    if (!venue) {
+      await ctx.answer({ text: t(lang).callbackErrors.notFound });
+      return;
+    }
+    await ctx.answer();
+    await ctx.sendVenue(venue).catch((err: unknown) => {
+      cmdLogger.warn({ err, eventId, userId: user.telegram_id }, 'Failed to send the event place as a venue');
+    });
   });
 
   // Group settings: timezone picker
@@ -2272,6 +2377,15 @@ async function notifyInviterProposal(
     .text(t(inviterLang).invite_reschedule_btn, `${CB.INVITATION_ACTION}:reschedule:${invitation.id}`)
     .text(t(inviterLang).invite_keep_btn, `${CB.INVITATION_ACTION}:dismiss:${invitation.id}`);
   await deps.sendMessage(invitation.inviter_id, text, { parse_mode: 'HTML', reply_markup: keyboard });
+}
+
+/** Replaces the inviter's proposal notice, whose Reschedule/Keep buttons can no longer act on anything. */
+async function answerProposalClosed(ctx: BotCallbackContext, lang: Lang): Promise<void> {
+  const text = t(lang).invite_proposal_closed;
+  await ctx.answer({ text });
+  await ctx.editText(text, { parse_mode: 'HTML' }).catch((err: unknown) => {
+    cmdLogger.warn({ err }, 'Failed to close the inviter proposal notice');
+  });
 }
 
 async function notifyInviter(

@@ -724,4 +724,76 @@ describe('IntentExecutor', () => {
       expect(result.response).toBe('Выбери пользователя из списка');
     });
   });
+
+  describe('after midnight', () => {
+    afterEach(() => jest.setSystemTime());
+
+    test('a rule that can write runs once, for the literal day, even when its date is marked for both days', async () => {
+      jest.setSystemTime(new Date('2026-09-13T23:22:00Z')); // Mon 2026-09-14 01:22 in Belgrade
+      const calls: { name: string; input: unknown }[] = [];
+      const workflow: Workflow = {
+        version: 2,
+        bindings: { day: { type: 'date', from: '{{$1}}', words: { завтра: 'tomorrow' }, after_midnight: 'both' } },
+        steps: [{ call: 'create_event', input: { title: 'Standup', start_at: '{{bind.day}}T10:00:00+02:00' } }],
+      };
+
+      const result = await executor.run(
+        workflow,
+        { $1: 'завтра' },
+        { timezone: 'Europe/Belgrade', language: 'ru' },
+        (name, input) => {
+          calls.push({ name, input });
+          return { success: true, output: 'created', mutationState: 'confirmed' };
+        },
+      );
+
+      expect(result.success).toBe(true);
+      expect(calls).toEqual([
+        { name: 'create_event', input: { title: 'Standup', start_at: '2026-09-15T10:00:00+02:00' } },
+      ]);
+    });
+
+    test('a rule whose step shows something (a picture) runs once, for the literal day', async () => {
+      jest.setSystemTime(new Date('2026-09-13T23:22:00Z')); // Mon 2026-09-14 01:22 in Belgrade
+      const calls: { name: string; input: unknown }[] = [];
+      const workflow: Workflow = {
+        version: 2,
+        bindings: { day: { type: 'date', from: '{{$1}}', words: { завтра: 'tomorrow' }, after_midnight: 'both' } },
+        steps: [{ call: 'render_day_image', input: { date: '{{bind.day}}' } }],
+      };
+
+      await executor.run(workflow, { $1: 'завтра' }, { timezone: 'Europe/Belgrade', language: 'ru' }, (name, input) => {
+        calls.push({ name, input });
+        return { success: true, output: 'sent' };
+      });
+
+      expect(calls).toEqual([{ name: 'render_day_image', input: { date: '2026-09-15' } }]);
+    });
+
+    test('a rule with a written response step runs once, for the literal day', async () => {
+      jest.setSystemTime(new Date('2026-09-13T23:22:00Z')); // Mon 2026-09-14 01:22 in Belgrade
+      const calls: { name: string; input: unknown }[] = [];
+      const workflow: Workflow = {
+        version: 2,
+        bindings: { day: { type: 'date', from: '{{$1}}', words: { завтра: 'tomorrow' }, after_midnight: 'both' } },
+        steps: [
+          { call: 'get_events', input: { start_date: '{{bind.day}}', end_date: '{{bind.day}}' } },
+          { respond: 'Готово' },
+        ],
+      };
+
+      const result = await executor.run(
+        workflow,
+        { $1: 'завтра' },
+        { timezone: 'Europe/Belgrade', language: 'ru' },
+        (name, input) => {
+          calls.push({ name, input });
+          return { success: true, output: '[]' };
+        },
+      );
+
+      expect(calls).toEqual([{ name: 'get_events', input: { start_date: '2026-09-15', end_date: '2026-09-15' } }]);
+      expect(result.response).toBe('Готово');
+    });
+  });
 });

@@ -115,7 +115,7 @@ describe('handleStart with deep links', () => {
     expect(msg).toContain('@alex');
     // The invitee gets the canonical RSVP keyboard for this invitation
     const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: InlineKeyboard };
-    expect(opts.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(10, 'en').toJSON());
+    expect(opts.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(10, 'en', null).toJSON());
   });
 
   test('i_ deep link for already responded invitation shows invalid message', async () => {

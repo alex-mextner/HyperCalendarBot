@@ -51,7 +51,7 @@ type Shape =
   | { kind: 'days'; firstDay: number; lastDay: number; lastInstant: Date }
   | { kind: 'window'; sameDay: boolean };
 
-const DAY_MS = 86_400_000;
+export const DAY_MS = 86_400_000;
 
 function toLocal(instant: Date, timezone: string): LocalMoment {
   const local = new TZDate(instant.getTime(), timezone);
@@ -82,7 +82,7 @@ function classify(interval: AgendaInterval, start: LocalMoment, end: LocalMoment
   return { kind: 'window', sameDay: start.dayIndex === end.dayIndex };
 }
 
-function relativeDayWord(
+export function relativeDayWord(
   words: Messages['aiTools']['events']['emptyAgenda']['relativeDay'],
   delta: number,
 ): string | null {

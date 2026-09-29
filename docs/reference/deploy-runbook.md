@@ -6,6 +6,14 @@ Detailed deployment reference for HyperCalendarBot. Summary in CLAUDE.md, full d
 
 Single `.env` file: `/opt/hypercal/.env`. Read by `docker compose`.
 
+It holds every production secret and the host is shared with other services, so `.env` and every backup of it must be mode `0600`, owner `root:root`. Plain `cp` creates a `0644` copy under the default umask; back it up with:
+```bash
+install -m 600 -o root -g root /opt/hypercal/.env "/opt/hypercal/.env.backup-$(date +%Y-%m-%d_%H-%M-%S)"
+```
+Appending with `echo ... >> .env` keeps the existing mode.
+
+`REDIS_PASSWORD` never appears in a process argv: `docker-compose.yml` gives it to the redis container as `REDISCLI_AUTH` (read by the healthcheck's `redis-cli`) and feeds `requirepass` to `redis-server` on stdin. It must not contain `"`, `\`, `/`, `?`, `#`, `%`, a tab, a carriage return or a line feed, and redis refuses to start with an error naming the rule: the first two would be read as redis.conf syntax, and `REDIS_URL` embeds the password without percent-encoding, where `/`, `?`, `#` and `%` make the URL invalid or change the password the bot sends, and URL parsing silently drops tab, CR and LF. Spaces, `@`, `:` and the other printable ASCII characters reach both of the bot's Redis clients unchanged. The bot container receives it only inside `REDIS_URL`; the bare `REDIS_PASSWORD` from `env_file` is blanked. A normal deploy recreates only the bot, so after changing the redis service or its password recreate redis too: `docker compose up -d --force-recreate redis bot`.
+
 Adding a new variable (e.g. via GitHub Actions secrets):
 1. Add secret to the repo
 2. Pass to deploy step via `envs:` and write to `.env` via `echo ... >> .env`, **or**
@@ -85,6 +93,14 @@ scripts/deploy-local-fallback.sh --ref origin/main --skip-tests
 ```
 
 The script keeps the actual running image under a timestamped rollback tag, takes a WAL-safe DB backup before restart, preserves host files, reapplies runtime directory ownership and recreates only the bot service. It requires exact `/health=ok`, `/ready=ok` or `ok (unverified)`, and the expected image identity. An unverified readiness response is recorded as such, not a completed live AI test. A failure restores the previous image and host files without overwriting newer calendar writes, and the rollback counts only when the restored container is the previous image answering `/health=ok` (readiness is logged, not required: an AI provider outage fails it for every image); otherwise the log says `ROLLBACK FAILED` and the bot may be down. Before any backup or restart, the schema gate below decides whether the release's migrations may activate unattended. No broad prune or shared-proxy reload is performed. The receipt is stored in `/opt/hypercal/releases/current.json`. Normal gh-ship invokes this same fallback after its merge and hosted-run checks; manual use remains an operator recovery path. End-to-end AI verification remains tracked under #276.
+
+### Disk space
+
+`docker load` unpacks the whole archive before it registers the layers, so before loading the activator compares free space on the Docker root (`docker info` `DockerRootDir`) with twice the image's unpacked size (`image_bytes` in the artifact from `scripts/release-artifact.py`, the sum of the archive's files). Below that it stops before touching the service and prints both numbers, instead of failing halfway with `no space left on device` as the #599 release did on 2026-09-28 (#481).
+
+After a verified release it keeps the five newest `rollback-<timestamp>` tags plus the current and previous release images, and removes every other tag of the release repository with `docker image rm` (never `-f`: Docker removes an image with its last tag and refuses one a container still uses). Each removal logs `IMAGE_RETENTION removed=<tag>`; a failure logs `IMAGE_RETENTION failed` and leaves the verified release in place. Other repositories on the shared host are never touched.
+
+When the check refuses a release: save `df -h /`, `docker system df` and the image list under `/opt/hypercal/releases/prune-<date>/` (0700); keep the running image, `:latest`, the `rollback_image` named in `releases/current.json` and the newest rollback tags; `docker image rm <repo:tag>` the other `ghcr.io/alex-mextner/hypercalendarbot` tags; then re-run the failed deploy job. Never `docker system prune` or `docker image prune -a` on this host.
 
 ### Schema gate
 

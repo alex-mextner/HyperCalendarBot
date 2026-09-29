@@ -1,34 +1,30 @@
 import type { Lang } from '../../config/constants.ts';
 import { t } from '../../config/constants.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
-import { buildGoogleMapsSearchUrl } from '../location/geocoding-service.ts';
+import { formatLocationHtml } from '../location/format-location.ts';
 import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
 import { formatDayWeatherLine, formatEventWeatherLine } from '../weather/format.ts';
 import type { DayWeather, EventForecast } from '../weather/types.ts';
 import { weatherEmoji } from '../weather/weather-service.ts';
 
-/**
- * Format location as HTML link to Google Maps.
- * Display text priority: venue name → resolved address → raw location.
- * When venue exists AND differs from resolved address, show both: "Venue — Address".
- */
-function locationLink(
-  location: string | null,
-  resolvedAddress?: string | null,
-  googleMapsUrl?: string | null,
-  venueName?: string | null,
-): string {
-  if (!location) return '';
-  let displayText: string;
-  if (venueName) {
-    displayText = resolvedAddress ? `${escapeHtml(venueName)} — ${escapeHtml(resolvedAddress)}` : escapeHtml(venueName);
-  } else if (resolvedAddress) {
-    displayText = escapeHtml(resolvedAddress);
-  } else {
-    displayText = escapeHtml(location);
-  }
-  const url = googleMapsUrl ?? buildGoogleMapsSearchUrl(location);
-  return `<a href="${escapeHtml(url)}">${displayText}</a>`;
+/** An event's typed location and its resolved place, as reminders and agendas receive it. */
+interface EventPlace {
+  location: string | null;
+  resolvedAddress?: string | null;
+  googleMapsUrl?: string | null;
+  venueName?: string | null;
+  /** The user confirmed the resolved place; without it only the typed text is shown. */
+  locationVerified?: boolean;
+}
+
+function locationLink(place: EventPlace): string {
+  return formatLocationHtml({
+    location: place.location,
+    resolved_address: place.resolvedAddress ?? null,
+    google_maps_url: place.googleMapsUrl ?? null,
+    venue_name: place.venueName,
+    location_verified: place.locationVerified ? 1 : 0,
+  });
 }
 
 export interface VoiceRenderInput {
@@ -45,39 +41,27 @@ export interface RenderedNotification {
   text: string;
 }
 
-export interface AgendaEvent {
+export interface AgendaEvent extends EventPlace {
   title: string;
   startTime: string;
   endTime: string;
-  location: string | null;
-  resolvedAddress?: string | null;
-  googleMapsUrl?: string | null;
-  venueName?: string | null;
   duration: string;
   isAllDay?: boolean;
 }
 
-export interface ReminderData {
+export interface ReminderData extends EventPlace {
   title: string;
   startTime: string;
   endTime?: string;
-  location: string | null;
-  resolvedAddress?: string | null;
-  googleMapsUrl?: string | null;
-  venueName?: string | null;
   intervalLabel: string;
   isAllDay?: boolean;
   /** Weather forecast anchored to the event's start time (hourly when possible) */
   forecast?: EventForecast | null;
 }
 
-export interface BatchReminderItem {
+export interface BatchReminderItem extends EventPlace {
   title: string;
   startTime: string;
-  location: string | null;
-  resolvedAddress?: string | null;
-  googleMapsUrl?: string | null;
-  venueName?: string | null;
   intervalLabel: string;
   isAllDay?: boolean;
   /** Weather forecast anchored to the event's start time (hourly when possible) */
@@ -125,9 +109,8 @@ type NotificationLabels = ReturnType<typeof t>['notifications'];
 function formatAgendaEventLine(e: AgendaEvent, l: NotificationLabels): string {
   const safeTitle = escapeHtml(e.title);
   const line = e.isAllDay ? `📅 ${safeTitle} (${l.allDay})` : `${e.startTime} — ${safeTitle} (${e.duration})`;
-  return e.location
-    ? `${line}\n        📍 ${locationLink(e.location, e.resolvedAddress, e.googleMapsUrl, e.venueName)}`
-    : line;
+  const place = locationLink(e);
+  return place ? `${line}\n        📍 ${place}` : line;
 }
 
 interface AgendaConfig {
@@ -217,8 +200,9 @@ export class NotificationRenderer {
     } else {
       lines.push(`🕐 ${data.startTime}`);
     }
-    if (data.location) {
-      lines.push(`📍 ${locationLink(data.location, data.resolvedAddress, data.googleMapsUrl, data.venueName)}`);
+    const place = locationLink(data);
+    if (place) {
+      lines.push(`📍 ${place}`);
     }
     if (data.forecast) {
       lines.push(formatEventWeatherLine(langKey, data.forecast));
@@ -259,8 +243,9 @@ export class NotificationRenderer {
       const timeInfo = item.isAllDay ? l.allDay : item.startTime;
       const safeTitle = escapeHtml(item.title);
       let line = `• ${safeTitle} — ${timeInfo} (${intervalText})`;
-      if (item.location) {
-        line += `\n  📍 ${locationLink(item.location, item.resolvedAddress, item.googleMapsUrl, item.venueName)}`;
+      const place = locationLink(item);
+      if (place) {
+        line += `\n  📍 ${place}`;
       }
       // Per-item weather only when forecasts differ across items
       if (!sharedWeather && formattedForecasts[i]) {

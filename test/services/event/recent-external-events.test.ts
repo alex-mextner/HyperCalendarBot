@@ -51,6 +51,7 @@ function makeParticipant(eventId: number, participantUserId: number): EventParti
     user_id: participantUserId,
     status: 'pending',
     role: 'attendee',
+    source_group_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };

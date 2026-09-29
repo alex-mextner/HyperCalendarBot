@@ -4,7 +4,7 @@
 
 **Это целевой сид из исходного кода: правил — 52.** Документ строится из исходников и **не утверждает, что сид уже установлен**: сборка не открывает базу и не видит сервер. Установку подтверждает отдельная проверка живой базы: отпечаток ниже должен совпасть со значением в таблице `intent_basis_manifest` (подробности в [описании движка](engine.md#что-здесь-утверждается-а-что-нет)).
 
-Отпечаток целевого сида: `6784bb007d70cee9930a1e9ab27b5e70962c8eb45fb8153f624e8a3b6a33f317`
+Отпечаток целевого сида: `6d0ed91ddf04de2ca3b9561433dbfa313fe89b7aab2ef16c3758b2fea0fab5cb`
 
 Навигация: [описание движка и правил безопасности](engine.md) · [HTML-страница с поиском и фильтрами](index.html) · [машиночитаемый каталог](catalogue.json) · [заметки по каталогу и приватному отчёту](../intent-catalogue.md) · [план перестройки](../plans/2026-09-18-intent-redesign.md)
 
@@ -113,6 +113,8 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 
 ` basis.calendar.day ` · Расписание · Чтение своего календаря · инструменты: ` get_events `
 
+> Пометка из исходника (по-английски): From 00:00 to 04:00 local, today and tomorrow may still count from the day that has just ended, so both days are read and each is answered under its own weekday and date.
+
 **Примеры фраз.**
 
 - что у меня сегодня
@@ -140,7 +142,7 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 
 **Что читается из сообщения (привязки).**
 
-- ` day ` — календарный день: слово или полная дата; ` from = {{$1}} `; таблица «words»: 8 значений
+- ` day ` — календарный день: слово или полная дата; ` from = {{$1}} `; таблица «words»: 8 значений; ` after_midnight = both `
 
 **Заменяет прежние правила:** ` show_day_after_tomorrow ` (Расписание послезавтра; слито в общее правило), ` show_specific_date ` (Расписание на указанную дату; слито в общее правило), ` show_today ` (Расписание сегодня; слито в общее правило), ` show_tomorrow ` (Расписание завтра; слито в общее правило).
 
@@ -169,7 +171,8 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
         "day after tomorrow": "day_after_tomorrow",
         "вчера": "yesterday",
         "yesterday": "yesterday"
-      }
+      },
+      "after_midnight": "both"
     }
   },
   "steps": [
@@ -197,6 +200,8 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 ### События недели, месяца или выходных
 
 ` basis.calendar.period ` · Расписание · Чтение своего календаря · инструменты: ` get_events `
+
+> Пометка из исходника (по-английски): This week is today and the six days after it, so a Sunday-evening plan is not a list of past days; next week is Monday to Sunday.
 
 **Примеры фраз.**
 
@@ -543,6 +548,8 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 
 ` basis.calendar.image ` · Расписание · Чтение своего календаря · инструменты: ` render_day_image `, ` render_week_image `, ` render_month_image `
 
+> Пометка из исходника (по-английски): A week picture is always a Monday-to-Sunday calendar week; asked on a Saturday or Sunday, this week means the coming one. The reply names the dates shown.
+
 **Примеры фраз.**
 
 - покажи календарь картинкой на неделю
@@ -560,7 +567,7 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 **Что делает правило по шагам.**
 
 1. Если выполняется условие ` bind.p.kind == 'day' `, то вызвать инструмент ` render_day_image ` с параметрами: ` date ` = ` {{bind.p.start}} `; ` scope ` = ` {{env.scope}} `
-2. Если выполняется условие ` bind.p.kind == 'week' `, то вызвать инструмент ` render_week_image ` с параметрами: ` week_start ` = ` {{bind.p.start}} `; ` scope ` = ` {{env.scope}} `
+2. Если выполняется условие ` bind.p.kind == 'week' `, то вызвать инструмент ` render_week_image ` с параметрами: ` week_start ` = ` {{bind.p.calendar_week_start}} `; ` scope ` = ` {{env.scope}} `
 3. Если выполняется условие ` bind.p.kind == 'month' `, то вызвать инструмент ` render_month_image ` с параметрами: ` month ` = ` {{bind.p.month}} `; ` scope ` = ` {{env.scope}} `
 
 **Что читается из сообщения (привязки).**
@@ -627,7 +634,7 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
       "when": "bind.p.kind == 'week'",
       "call": "render_week_image",
       "input": {
-        "week_start": "{{bind.p.start}}",
+        "week_start": "{{bind.p.calendar_week_start}}",
         "scope": "{{env.scope}}"
       }
     },
@@ -809,7 +816,7 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 
 ` basis.slots.week ` · Свободное время · Чтение своего календаря · инструменты: ` get_free_slots `
 
-> Пометка из исходника (по-английски): Seven explicit day queries, Monday to Sunday, so every day of the week is answered.
+> Пометка из исходника (по-английски): Seven explicit day queries, so every day is answered: this week is today and the six days after it, next week is Monday to Sunday.
 
 **Примеры фраз.**
 

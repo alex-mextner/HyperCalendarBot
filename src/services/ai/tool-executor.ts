@@ -1,7 +1,8 @@
 import type { z } from 'zod';
 import type { FeatureKey } from '../../database/repositories/feature-usage.repository.ts';
 import { logger } from '../../utils/logger.ts';
-import { checkDayReferences } from './day-reference-guard.ts';
+import { checkDayReferences, checkQuestionWeekdays } from './day-reference-guard.ts';
+import { extractEventSummaries } from './event-summaries.ts';
 import { handleGetActionLog } from './tool-handlers/action-log.ts';
 import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
 import { handleCalculate } from './tool-handlers/calculate.ts';
@@ -336,6 +337,14 @@ export function isMutationTool(toolName: string, input: unknown): boolean {
   );
 }
 
+/**
+ * A call that only reads: its handler is marked readonly and this input writes nothing.
+ * Tools outside the action log can still show something (a picture, a reaction).
+ */
+export function isReadOnlyCall(toolName: string, input: unknown): boolean {
+  return getToolMeta(toolName)?.readonly === true && !isMutationTool(toolName, input);
+}
+
 /** Derived: tools that always result in [SKIP] — no status message or tool label. */
 export const SILENT_TOOLS = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.silent),
@@ -420,8 +429,9 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
       input = result.data;
     }
   }
-  // A date-bearing call for a day the user did not name is rejected before any write.
-  validationError ??= checkDayReferences(ctx, toolName, input);
+  // A date-bearing call for a day the user did not name is rejected before any write,
+  // and a question pairing a weekday with a date on another weekday is never sent.
+  validationError ??= checkDayReferences(ctx, toolName, input) ?? checkQuestionWeekdays(ctx, toolName, input);
 
   // Time throttle: identical tool call within THROTTLE_TTL_MS returns a synthetic
   // THROTTLED result without invoking the handler. Prevents rapid cross-run
@@ -455,10 +465,13 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
       throttleMap.set(throttleKey, now);
     }
 
-    // Track which event was touched, for last_mentioned_event resolution in intents
+    // Track which event was touched, for last_mentioned_event resolution in intents,
+    // and every event the model was shown, as evidence for the reply-time guard.
     if (result.success) {
       const eventId = extractEventId(input as ToolInputMap[ToolName], result);
       if (eventId !== undefined) ctx.onEventMentioned?.(eventId);
+      const surfaced = extractEventSummaries(result.data);
+      if (surfaced) ctx.surfacedEvents = [...(ctx.surfacedEvents ?? []), ...surfaced];
     }
 
     // Track feature usage for tip personalization

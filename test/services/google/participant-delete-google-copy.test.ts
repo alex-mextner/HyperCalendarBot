@@ -8,6 +8,7 @@ import { EventRepository } from '../../../src/database/repositories/event.reposi
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { GoogleCalendarRepository } from '../../../src/database/repositories/google-calendar.repository.ts';
 import { GoogleSyncRepository } from '../../../src/database/repositories/google-sync.repository.ts';
+import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
 import { ParticipantGoogleSyncRepository } from '../../../src/database/repositories/participant-google-sync.repository.ts';
@@ -84,6 +85,7 @@ describe('organizer delete removes the participant Google copy', () => {
       participantRepo,
       editProposalRepo: new EditProposalRepository(db),
       participantSyncRepo,
+      invitationRepo: new InvitationRepository(db),
       materializer: new ReminderMaterializer(
         new EventReminderRepository(db),
         new NotificationPreferencesRepository(db),

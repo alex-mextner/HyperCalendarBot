@@ -108,16 +108,23 @@ export function mapDailyAgendaData(params: {
   };
 }
 
-function formatWeekLabel(start: Date, end: Date, locale: string): string {
+/** The week's date range as drawn in the weekly picture header, e.g. "28 сентября – 4 октября 2026". */
+export function formatWeekLabel(weekStartIso: string, locale: string): string {
+  const start = new Date(`${weekStartIso}T12:00:00Z`);
+  const end = addDays(start, 6);
   const labels = getLabels(locale);
   const sm = labels.monthNames[start.getUTCMonth()];
   const sd = start.getUTCDate();
   const ed = end.getUTCDate();
   const y = start.getUTCFullYear();
+  const ey = end.getUTCFullYear();
   if (start.getUTCMonth() === end.getUTCMonth()) {
     return locale === 'ru' ? `${sd}–${ed} ${sm} ${y}` : `${sm} ${sd}–${ed}, ${y}`;
   }
   const em = labels.monthNames[end.getUTCMonth()];
+  if (y !== ey) {
+    return locale === 'ru' ? `${sd} ${sm} ${y} – ${ed} ${em} ${ey}` : `${sm} ${sd}, ${y} – ${em} ${ed}, ${ey}`;
+  }
   return locale === 'ru' ? `${sd} ${sm} – ${ed} ${em} ${y}` : `${sm} ${sd} – ${em} ${ed}, ${y}`;
 }
 
@@ -173,7 +180,7 @@ export function mapWeeklyOverviewData(params: {
     : undefined;
 
   return {
-    weekLabel: formatWeekLabel(start, addDays(start, 6), locale),
+    weekLabel: formatWeekLabel(weekStartIso, locale),
     days,
     todayIndex: todayIndex !== undefined && todayIndex >= 0 ? todayIndex : undefined,
     theme,

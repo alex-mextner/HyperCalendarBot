@@ -7,6 +7,7 @@ import { CLEARED_LOCATION } from '../../database/repositories/event.repository.t
 import type { UpdateEventData } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
+import { withMapButton } from '../../services/location/event-venue.ts';
 import type { LocationVerificationService } from '../../services/location/location-verification-service.ts';
 import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
 import { botLogger } from '../../utils/logger.ts';
@@ -41,7 +42,7 @@ export function createEditValueScene(
   eventService: EventService,
   userComposer: UserResolverComposer,
   actionLogRepo?: ActionLogRepository,
-  locationVerification?: Pick<LocationVerificationService, 'verifyEventLocation'>,
+  locationVerification?: Pick<LocationVerificationService, 'verifyEventLocation' | 'refreshInvitationCards'>,
 ) {
   return (
     new Scene('edit_value')
@@ -111,6 +112,8 @@ export function createEditValueScene(
           }
         }
 
+        // Delivered invitation cards show the location as it was before this edit
+        const before = field === 'location' ? eventService.getEvent(eventId, user.telegram_id) : null;
         const updated = eventService.updateEvent(eventId, user.telegram_id, updateData);
         const { chatId, messageId } = context.scene.params;
 
@@ -126,6 +129,11 @@ export function createEditValueScene(
           metadata: JSON.stringify(updateData),
           success: !!updated,
         });
+
+        // Cards before the question, whose answer re-renders them again (see update_event)
+        if (updated && before && locationVerification) {
+          await locationVerification.refreshInvitationCards(before, updated);
+        }
 
         // Same verification and clarification flow as the AI update_event tool.
         if (updated && updateData.location && locationVerification) {
@@ -144,7 +152,7 @@ export function createEditValueScene(
             message_id: messageId,
             text: editText,
             parse_mode: 'HTML',
-            reply_markup: eventActionsKeyboard(eventId, lang),
+            reply_markup: withMapButton(eventActionsKeyboard(eventId, lang), updated, lang),
           });
         } else {
           await context.send(t(lang).something_wrong);

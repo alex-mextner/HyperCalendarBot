@@ -72,6 +72,8 @@ export const BindingSchema = z.discriminatedUnion('type', [
       future: z.boolean().optional(),
       optional: z.boolean().optional(),
       default: DayWord.optional(),
+      /** 'both': a read that also answers for the day before when 'today'/'tomorrow' is said just after midnight. */
+      after_midnight: z.literal('both').optional(),
     })
     .strict(),
   z
@@ -249,11 +251,29 @@ function parseAbsoluteDay(text: string): { day: Partial<CalendarDay> & { m: numb
   return null;
 }
 
-function parseDate(raw: string, binding: Extract<Binding, { type: 'date' }>, now: Date, timezone: string): string {
+/** Until this local hour, 'today' and 'tomorrow' may still count from the day that has just ended. */
+const AFTER_MIDNIGHT_END_HOUR = 4;
+
+/** `dayBefore` reads a marked word said just after midnight as counted from the day that has just ended. */
+function parseDate(
+  raw: string,
+  binding: Extract<Binding, { type: 'date' }>,
+  now: Date,
+  timezone: string,
+  dayBefore: boolean,
+): string {
   const key = normalize(raw);
   const current = today(now, timezone);
   const word = binding.words && Object.hasOwn(binding.words, key) ? binding.words[key] : undefined;
-  if (word) return isoDay(addDays(current, DAY_WORD_OFFSETS[word]));
+  if (word) {
+    // Someone still awake at 01:22 on Monday may say 'tomorrow' for Monday and 'today' for Sunday.
+    const fromDayBefore =
+      dayBefore &&
+      binding.after_midnight === 'both' &&
+      (word === 'today' || word === 'tomorrow') &&
+      new TZDate(now, timezone).getHours() < AFTER_MIDNIGHT_END_HOUR;
+    return isoDay(addDays(current, DAY_WORD_OFFSETS[word] - (fromDayBefore ? 1 : 0)));
+  }
   const parsed = parseAbsoluteDay(key);
   if (!parsed) return fail();
   const withYear = (year: number): CalendarDay => ({ y: year, m: parsed.day.m, d: parsed.day.d });
@@ -344,6 +364,11 @@ function buildDatetime(
   return formatLocalInstant(start + (binding.plus_minutes ?? 0) * 60_000, timezone);
 }
 
+/**
+ * 'week' ("на неделю", "на этой неделе", "this week") is today and the six following
+ * local days, so a week plan never starts in the past; on a Monday it equals the
+ * calendar week. 'next_week' is the next calendar week, Monday to Sunday.
+ */
 function periodRange(
   key: (typeof PERIOD_KEYS)[number],
   current: CalendarDay,
@@ -351,7 +376,7 @@ function periodRange(
   const monday = addDays(current, -weekdayMondayZero(current));
   switch (key) {
     case 'week':
-      return { start: monday, end: addDays(monday, 6) };
+      return { start: current, end: addDays(current, 6) };
     case 'next_week':
       return { start: addDays(monday, 7), end: addDays(monday, 13) };
     case 'weekend':
@@ -377,10 +402,33 @@ function periodKind(key: (typeof PERIOD_KEYS)[number]): 'day' | 'week' | 'month'
   return key === 'weekend' ? 'weekend' : 'day';
 }
 
+/** Saturday in the Monday-zero weekday index; Saturday and Sunday are the weekend. */
+const SATURDAY = 5;
+
+/**
+ * Monday of the Monday–Sunday calendar week that pictures the period, for tools that can only
+ * draw a whole calendar week; workflows read it only for week periods. 'week' on a Saturday or
+ * Sunday gives the coming week: the current one has at most a day left, and the rolling 'week'
+ * range lies mostly in the next one.
+ */
+function calendarWeekStart(key: (typeof PERIOD_KEYS)[number], start: CalendarDay): CalendarDay {
+  const weekday = weekdayMondayZero(start);
+  const monday = addDays(start, -weekday);
+  return key === 'week' && weekday >= SATURDAY ? addDays(monday, 7) : monday;
+}
+
 function buildPeriod(key: (typeof PERIOD_KEYS)[number], now: Date, timezone: string): WorkflowInputValue {
   const { start, end } = periodRange(key, today(now, timezone));
   const days = Array.from({ length: 7 }, (_, index) => isoDay(addDays(start, index)));
-  return { key, kind: periodKind(key), start: isoDay(start), end: isoDay(end), month: isoDay(start).slice(0, 7), days };
+  return {
+    key,
+    kind: periodKind(key),
+    start: isoDay(start),
+    end: isoDay(end),
+    month: isoDay(start).slice(0, 7),
+    calendar_week_start: isoDay(calendarWeekStart(key, start)),
+    days,
+  };
 }
 
 function parseDuration(raw: string, unitRaw: string, binding: Extract<Binding, { type: 'duration' }>): number {
@@ -461,6 +509,8 @@ interface Evaluation {
   userCtx: UserContext;
   i18n: I18nMap | undefined;
   now: Date;
+  /** The marked date binding read as counted from the day that has just ended, if any. */
+  dayBefore: string | null;
 }
 
 function resolveFrom(template: string, evaluation: Evaluation): string {
@@ -474,7 +524,12 @@ function isBlank(raw: string): boolean {
   return raw.trim() === '';
 }
 
-function evaluateOne(binding: Binding, bound: BindValues, evaluation: Evaluation): WorkflowInputValue {
+function evaluateOne(
+  binding: Binding,
+  bound: BindValues,
+  evaluation: Evaluation,
+  dayBefore: boolean,
+): WorkflowInputValue {
   const { userCtx, now } = evaluation;
   if (binding.type === 'datetime') return buildDatetime(binding, bound, now, userCtx.timezone);
   if (binding.type === 'relative_instant') {
@@ -494,7 +549,7 @@ function evaluateOne(binding: Binding, bound: BindValues, evaluation: Evaluation
     case 'date':
       return optionalDefault
         ? isoDay(addDays(today(now, userCtx.timezone), DAY_WORD_OFFSETS[binding.default ?? fail()]))
-        : parseDate(raw, binding, now, userCtx.timezone);
+        : parseDate(raw, binding, now, userCtx.timezone, dayBefore);
     case 'time':
       return optionalDefault ? (binding.default ?? fail()) : parseTime(raw);
     case 'period':
@@ -519,6 +574,14 @@ function periodKey(values: { [key: string]: (typeof PERIOD_KEYS)[number] }, raw:
   return Object.hasOwn(values, key) ? values[key]! : fail();
 }
 
+function evaluateAll(bindings: Bindings, evaluation: Evaluation): BindValues {
+  const bound: BindValues = {};
+  for (const [name, binding] of Object.entries(bindings)) {
+    bound[name] = evaluateOne(binding, bound, evaluation, name === evaluation.dayBefore);
+  }
+  return bound;
+}
+
 /** Bindings are evaluated in declaration order; a datetime may only read earlier bindings. */
 export function evaluateBindings(
   bindings: Bindings,
@@ -527,9 +590,49 @@ export function evaluateBindings(
   i18n: I18nMap | undefined,
   now: Date = new Date(),
 ): BindValues {
-  const bound: BindValues = {};
-  for (const [name, binding] of Object.entries(bindings)) {
-    bound[name] = evaluateOne(binding, bound, { captures, userCtx, i18n, now });
+  return evaluateAll(bindings, { captures, userCtx, i18n, now, dayBefore: null });
+}
+
+/** The bindings as read for one of the days a marked date word may mean. */
+export interface DayReading {
+  /** YYYY-MM-DD the marked date binding takes in this reading. */
+  day: string;
+  bind: BindValues;
+}
+
+/**
+ * The literal reading of the bindings and, when the date binding marked `after_midnight: 'both'`
+ * reads 'today' or 'tomorrow' before 04:00 local, one reading per day that word may mean, the
+ * earlier day first and the literal reading last. The validator allows one marked binding; should
+ * a rule carry more, only the first is shifted, so each answer is labelled with the day it read.
+ */
+export function evaluateBindingReadings(
+  bindings: Bindings,
+  captures: { [key: string]: string },
+  userCtx: UserContext,
+  i18n: I18nMap | undefined,
+  now: Date = new Date(),
+): { literal: BindValues; afterMidnight: DayReading[] | null } {
+  const literal = evaluateBindings(bindings, captures, userCtx, i18n, now);
+  const marked = Object.keys(bindings).find((name) => {
+    const binding = bindings[name];
+    return binding?.type === 'date' && binding.after_midnight === 'both';
+  });
+  if (marked === undefined) return { literal, afterMidnight: null };
+  let before: BindValues;
+  try {
+    before = evaluateAll(bindings, { captures, userCtx, i18n, now, dayBefore: marked });
+  } catch (error) {
+    // The earlier day is an extra reading, never a reason to fail: its wall time may not exist.
+    if (error instanceof WorkflowInputError) return { literal, afterMidnight: null };
+    throw error;
   }
-  return bound;
+  if (before[marked] === literal[marked]) return { literal, afterMidnight: null };
+  return {
+    literal,
+    afterMidnight: [
+      { day: String(before[marked]), bind: before },
+      { day: String(literal[marked]), bind: literal },
+    ],
+  };
 }

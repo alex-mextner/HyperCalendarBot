@@ -251,6 +251,48 @@ describe('TelegramStreamWriter', () => {
     expect(text).toContain('Попытка 1: Не выполнено');
   });
 
+  test('a held draft shows only the text before the hold; a dropped one is replaced on screen', async () => {
+    const writer = new TelegramStreamWriter(sender, 123, 'ru', { holdDraftWhen: (draft) => draft.includes('Среда') });
+    await writer.init();
+    writer.appendText('Проверил ваш календарь на эту неделю. ');
+    writer.appendText('Среда, 28 сентября: английский в 12:30');
+    await writer.flush(true);
+    const streamed = editMock.mock.calls.at(-1)![2] as string;
+    expect(streamed).toContain('Проверил ваш календарь');
+    expect(streamed).not.toContain('Среда');
+
+    // The check failed: neither the prefix nor the pair may stay on screen.
+    writer.dropDraftText();
+    writer.appendText('Ничего не нашёл.');
+    await writer.finalize();
+    const final = editMock.mock.calls.at(-1)![2] as string;
+    expect(final).toContain('Ничего не нашёл.');
+    expect(final).not.toContain('Проверил');
+    expect(final).not.toContain('Среда');
+  });
+
+  test('only tool arguments that fail the check are hidden from the label and the execution log', async () => {
+    const writer = new TelegramStreamWriter(sender, 123, 'ru', {
+      holdDraftWhen: (draft) => /понедельник|пятниц/i.test(draft),
+      hideToolDetailsWhen: (input) => JSON.stringify(input).includes('Понедельник 27 сентября'),
+    });
+    await writer.init();
+    // A weekday in an event title is no contradiction: its arguments stay in the log.
+    writer.setToolLabel('create_event', { title: 'Ужин в пятницу', start_at: '2026-10-02T17:00:00Z' });
+    writer.markToolResult(true);
+    // The guard rejects this question before it is sent; its label must not show it either.
+    writer.setToolLabel('ask_user', { question: 'Создать: Понедельник 27 сентября в 12:30?' });
+    await writer.flush(true);
+    writer.markToolResult(false);
+    writer.commitIntermediate();
+    writer.appendText('Уточни, какой день нужен.');
+    await writer.finalize();
+    for (const call of editMock.mock.calls) expect(call[2] as string).not.toContain('Понедельник');
+    const final = editMock.mock.calls.at(-1)![2] as string;
+    expect(final).toContain('ask_user');
+    expect(final).toContain('Ужин в пятницу');
+  });
+
   test('finalize without tools has no blockquote', async () => {
     const writer = new TelegramStreamWriter(sender, 123);
     await writer.init();

@@ -2,7 +2,8 @@
 class RecipientMismatch(ValueError):
     """Peer lookup disagrees with the invitation recipient."""
 
-async def send_to_recipient(client, user_id: int, text: str, username: str | None = None):
+async def send_to_recipient(client, user_id: int, text: str, username: str | None = None, parse_mode=None):
+    """parse_mode=None keeps the client's default combined Markdown+HTML parsing."""
     if type(user_id) is not int or user_id == 0:
         raise RecipientMismatch('RECIPIENT_MISMATCH: a nonzero numeric Telegram ID is required')
     if username:
@@ -14,4 +15,4 @@ async def send_to_recipient(client, user_id: int, text: str, username: str | Non
             resolved = await client.get_chat(username.strip().lstrip('@'))
         if resolved.id != user_id:
             raise RecipientMismatch('RECIPIENT_MISMATCH: username hint cannot change the numeric recipient')
-    return await client.send_message(user_id, text)
+    return await client.send_message(user_id, text, parse_mode=parse_mode)

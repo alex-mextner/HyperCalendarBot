@@ -1106,4 +1106,14 @@ export const migrations: Migration[] = [
       backfillActiveRevision(db);
     },
   },
+  {
+    name: '064_event_participant_source_group',
+    up(db) {
+      // Which group chat's card carried an answer, so a group's invitation card lists only its own
+      // members' answers (#468). When the origin counts: sourceGroupSql in participant.repository.ts.
+      // Every existing row has no known origin and is never listed as a group answer.
+      db.exec('ALTER TABLE event_participants ADD COLUMN source_group_id INTEGER');
+      db.exec('ALTER TABLE event_participants ADD COLUMN source_group_recorded_at TEXT');
+    },
+  },
 ];

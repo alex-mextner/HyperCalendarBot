@@ -71,6 +71,8 @@ def inspect_archive(path: Path, revision: str, tag: str) -> dict:
         "image_ref": tag,
         "config_digest": "sha256:" + digest,
         "archive_sha256": hasher.hexdigest(),
+        # What docker load unpacks: the deploy refuses to start without twice this free.
+        "image_bytes": sum(member.size for member in members if member.isfile()),
         "architecture": "amd64",
         "os": "linux",
     }

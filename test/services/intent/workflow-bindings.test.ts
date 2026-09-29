@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { Intent } from '../../../src/database/types.ts';
 import { IntentMatcher } from '../../../src/services/intent/intent-matcher.ts';
-import { type Bindings, evaluateBindings } from '../../../src/services/intent/workflow-bindings.ts';
+import {
+  type Bindings,
+  evaluateBindingReadings,
+  evaluateBindings,
+} from '../../../src/services/intent/workflow-bindings.ts';
 import { WorkflowInputError } from '../../../src/services/intent/workflow-input.ts';
 import { WorkflowSchema } from '../../../src/services/intent/workflow-schema.ts';
 import { validateWorkflow, validateWorkflowBindings } from '../../../src/services/intent/workflow-validator.ts';
@@ -96,14 +100,30 @@ describe('period binding', () => {
   } as const;
   const period = (raw: string) => bind({ p: { type: 'period', from: '{{$1}}', values } }, { $1: raw }).p;
 
-  test('calendar week runs Monday to Sunday and lists all seven days', () => {
+  test('this week is the next seven local days from today, never days already gone', () => {
+    // Saturday 2026-09-19: Monday–Friday of the calendar week are already past.
     expect(period('неделе')).toMatchObject({
       kind: 'week',
-      start: '2026-09-14',
-      end: '2026-09-20',
-      days: ['2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19', '2026-09-20'],
+      start: '2026-09-19',
+      end: '2026-09-25',
+      days: ['2026-09-19', '2026-09-20', '2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25'],
     });
     expect(period('на следующей неделе')).toMatchObject({ start: '2026-09-21', end: '2026-09-27' });
+  });
+
+  test('on a Sunday evening the week runs into the coming week', () => {
+    // Sunday 2026-09-27 23:15 in Belgrade: 'План на неделю' listed Monday 21 – Sunday 27.
+    const sunday = new Date('2026-09-27T21:15:00Z');
+    const at = (raw: string) =>
+      bind({ p: { type: 'period', from: '{{$1}}', values } }, { $1: raw }, 'Europe/Belgrade', sunday).p;
+    expect(at('неделе')).toMatchObject({ start: '2026-09-27', end: '2026-10-03' });
+    expect(at('на следующей неделе')).toMatchObject({ start: '2026-09-28', end: '2026-10-04' });
+  });
+
+  test('on a Monday the week is exactly Monday to Sunday', () => {
+    const monday = new Date('2026-09-21T06:00:00Z');
+    const week = bind({ p: { type: 'period', from: '{{$1}}', values } }, { $1: 'неделе' }, 'Europe/Belgrade', monday).p;
+    expect(week).toMatchObject({ start: '2026-09-21', end: '2026-09-27' });
   });
 
   test('months and weekends', () => {
@@ -309,5 +329,55 @@ describe('bindings inside workflow definitions', () => {
         steps: [{ respond: 'x' }],
       }).success,
     ).toBe(false);
+  });
+
+  test('only one date binding may read both days after midnight: the answers are labelled with its day', () => {
+    const parsed = WorkflowSchema.parse({
+      version: 2,
+      bindings: {
+        reference: { type: 'date', from: '{{$1}}', words: DAY_WORDS, after_midnight: 'both' },
+        query: { type: 'date', from: '{{$2}}', words: DAY_WORDS, after_midnight: 'both' },
+      },
+      steps: [{ call: 'get_events', input: { start_date: '{{bind.query}}', end_date: '{{bind.query}}' } }],
+    });
+    expect(validateWorkflowBindings(parsed).join('\n')).toContain('after_midnight');
+  });
+});
+
+describe('reading both days after midnight', () => {
+  test('a day-before reading that cannot be built leaves the literal reading alone', () => {
+    // 01:00 on Sun 2027-03-28 in Belgrade: that night 02:30 does not exist, on Monday it does.
+    const oneAm = new Date('2027-03-28T00:00:00Z');
+    const { literal, afterMidnight } = evaluateBindingReadings(
+      {
+        day: { type: 'date', from: '{{$1}}', words: DAY_WORDS, after_midnight: 'both' },
+        at: { type: 'time', from: '{{$2}}' },
+        start: { type: 'datetime', date: 'day', time: 'at' },
+      },
+      { $1: 'завтра', $2: '02:30' },
+      { timezone: 'Europe/Belgrade', language: 'ru' },
+      undefined,
+      oneAm,
+    );
+    expect(literal.day).toBe('2027-03-29');
+    expect(afterMidnight).toBeNull();
+  });
+
+  test('an unvalidated rule with two marked dates shifts only the one its answers are labelled with', () => {
+    // 01:00 on Mon 2026-09-21 in Belgrade.
+    const { literal, afterMidnight } = evaluateBindingReadings(
+      {
+        reference: { type: 'date', from: '{{$1}}', words: DAY_WORDS, after_midnight: 'both' },
+        query: { type: 'date', from: '{{$2}}', words: DAY_WORDS, after_midnight: 'both' },
+      },
+      { $1: 'сегодня', $2: 'завтра' },
+      { timezone: 'Europe/Belgrade', language: 'ru' },
+      undefined,
+      new Date('2026-09-20T23:00:00Z'),
+    );
+    expect(afterMidnight?.map(({ day, bind }) => [day, bind.reference, bind.query])).toEqual([
+      ['2026-09-20', '2026-09-20', literal.query],
+      ['2026-09-21', '2026-09-21', literal.query],
+    ]);
   });
 });

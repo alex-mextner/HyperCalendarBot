@@ -6,6 +6,7 @@
 
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, type Mock, mock, test } from 'bun:test';
+import type { InlineKeyboard } from 'gramio';
 import { createUserResolverComposer } from '../../../src/bot/middleware/user-resolver.ts';
 import { createEditValueScene } from '../../../src/bot/scenes/edit-value.scene.ts';
 import type { DatabaseService } from '../../../src/database/index.ts';
@@ -48,7 +49,7 @@ interface EditCtx {
     exit: Mock<() => Promise<void>>;
   };
   send: Mock<(text: string) => Promise<void>>;
-  bot: { api: { editMessageText: Mock<(params: { text: string }) => Promise<void>> } };
+  bot: { api: { editMessageText: Mock<(params: { text: string; reply_markup?: InlineKeyboard }) => Promise<void>> } };
   is: (type: string) => boolean;
 }
 
@@ -89,7 +90,10 @@ describe('edit_value scene: Location button', () => {
     );
     const composer = createUserResolverComposer(userOnlyDb(users));
     step = getStepFn(
-      createEditValueScene(new EventService({ eventRepo: events }), composer, undefined, { verifyEventLocation }),
+      createEditValueScene(new EventService({ eventRepo: events }), composer, undefined, {
+        verifyEventLocation,
+        refreshInvitationCards: mock(() => Promise.resolve()),
+      }),
     );
   });
 
@@ -195,11 +199,26 @@ describe('edit_value scene: Location button', () => {
     expect(events.findById(event.id, USER_ID)).toMatchObject({ title: 'Late dinner', ...OLD_PLACE });
     expect(verifyEventLocation).not.toHaveBeenCalled();
   });
+
+  test('the card re-rendered after editing another field keeps the Map button; a new location drops it', async () => {
+    const mapData = (ctx: EditCtx) =>
+      (ctx.bot.api.editMessageText.mock.calls[0]?.[0].reply_markup?.toJSON().inline_keyboard ?? [])
+        .flat()
+        .flatMap((b) => ('callback_data' in b && b.callback_data?.startsWith('ev_map:') ? [b.callback_data] : []));
+    const event = resolvedEvent();
+    const titleEdit = makeCtx(event.id, 'title', 'Late dinner');
+    await step(titleEdit, () => Promise.resolve());
+    expect(mapData(titleEdit)).toEqual([`ev_map:${event.id}`]);
+
+    const locationEdit = makeCtx(event.id, 'location', 'дома');
+    await step(locationEdit, () => Promise.resolve());
+    expect(mapData(locationEdit)).toEqual([]);
+  });
 });
 
 // The Location button goes through the real verification: nothing is applied before the user
-// answers the picker, and answering "keep as typed" refreshes delivered invitation cards even
-// though the location write itself already dropped the old place.
+// answers the picker. The edit itself re-renders a delivered invitation card that showed the dropped
+// place, and answering "keep as typed" refreshes it again.
 describe('edit_value scene: Location button with real verification', () => {
   const LONE_MATCH: GeocodedLocation = {
     formattedAddress: 'Doma Bistro, Example Street 3, Sampletown',
@@ -239,7 +258,11 @@ describe('edit_value scene: Location button with real verification', () => {
     const redis = new Map<string, string>();
     addressCache = new AddressCache({
       get: async (key) => redis.get(key) ?? null,
-      set: async (key, value) => redis.set(key, value),
+      compareAndSet: async (key, expected, value) => {
+        if ((redis.get(key) ?? null) !== expected) return false;
+        redis.set(key, value);
+        return true;
+      },
     });
     candidates = new InMemoryLocationCandidateStore();
     invitationCards = [];
@@ -349,7 +372,11 @@ describe('edit_value scene: Location button with real verification', () => {
     expect((await candidates.get(event.id))?.candidates).toEqual([LONE_MATCH]);
     expect(events.findById(event.id, USER_ID)).toMatchObject({ location: 'дома', ...UNRESOLVED });
     expect(await addressCache.findMapping(USER_ID, 'дома')).toBeNull();
-    expect(invitationCards).toEqual([]);
+    // The invitation card shows the new text only: neither the dropped place nor the offered one
+    expect(invitationCards).toHaveLength(1);
+    expect(invitationCards[0]).toContain('дома');
+    expect(invitationCards[0]).not.toContain(OLD_PLACE.venue_name);
+    expect(invitationCards[0]).not.toContain(LONE_MATCH.formattedAddress);
   });
 
   test('a remembered place for the typed text is offered, not applied', async () => {
@@ -368,10 +395,10 @@ describe('edit_value scene: Location button with real verification', () => {
     expect(offer.text).toContain(LONE_MATCH.formattedAddress);
     expect(pickerChoices(offer, event.id).choices).toEqual(['0', 'keep']);
     expect(events.findById(event.id, USER_ID)).toMatchObject({ location: 'дома', ...UNRESOLVED });
-    expect(invitationCards).toEqual([]);
+    expect(invitationCards.every((card) => !card.includes(LONE_MATCH.formattedAddress))).toBe(true);
   });
 
-  test('keeping the new text as typed refreshes the invitation card that still shows the old place', async () => {
+  test('keeping the new text as typed leaves the invitation card on the new text, never on the old place', async () => {
     const event = resolvedInvitedEvent();
     await step(locationCtx(event.id, 'harbour cafe'), () => Promise.resolve());
     const { pickerId } = pickerChoices(await offered, event.id);
@@ -379,9 +406,11 @@ describe('edit_value scene: Location button with real verification', () => {
     expect(await verification.keepTypedLocation(event.id, USER_ID, pickerId)).not.toBeNull();
 
     expect(events.findById(event.id, USER_ID)).toMatchObject({ location: 'harbour cafe', ...UNRESOLVED });
-    expect(invitationCards).toHaveLength(1);
-    expect(invitationCards[0]).toContain('harbour cafe');
-    expect(invitationCards[0]).not.toContain(OLD_PLACE.venue_name);
-    expect(invitationCards[0]).not.toContain('SYNTHETIC_OLD_PLACE');
+    expect(invitationCards).toHaveLength(2);
+    for (const card of invitationCards) {
+      expect(card).toContain('harbour cafe');
+      expect(card).not.toContain(OLD_PLACE.venue_name);
+      expect(card).not.toContain('SYNTHETIC_OLD_PLACE');
+    }
   });
 });

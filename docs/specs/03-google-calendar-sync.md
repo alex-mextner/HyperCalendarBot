@@ -657,6 +657,7 @@ async function pushEvent(job: Job<PushEventData>): Promise<void> {
 | Mechanism                | Frequency            | Purpose                               |
 | ------------------------ | -------------------- | ------------------------------------- |
 | Push on local change     | Immediate            | User creates/edits/deletes event      |
+| Push on place answer     | Immediate            | The creator confirms a place (candidate tap, pin), keeps the typed text after a place was shown, or a new location verification drops a confirmed place (also when the editor, e.g. a secretary, cannot see the event and gets no question): the owner copy of a personal event and every participant copy except declined ones are re-pushed, only when the location Google shows (§3.1) changes |
 | Webhook callback         | Real-time            | Google notifies us of changes         |
 | Cron incremental pull    | Every 15 minutes     | Catch missed webhooks                 |
 | Watch channel renewal    | Every 6 hours        | Renew channels expiring within 24h    |

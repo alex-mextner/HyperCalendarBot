@@ -8,17 +8,30 @@ import { isBalanceExhausted } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
-import { resolveTurnDayReferences } from './day-reference-guard.ts';
+import { resolveTurnDayReferences, weekdayMismatchNotice } from './day-reference-guard.ts';
+import {
+  describeWeekdayDateMismatches,
+  findWeekdayDateMismatches,
+  mentionsWeekday,
+  type WeekdayDateMismatch,
+} from './day-references.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
 import { waitForAbort } from './provider-deadline.ts';
+import { correctUtcClockTimes, eventClocksForRun } from './reply-time-guard.ts';
 import {
   type AgentRequestMetricSnapshot,
   AgentRequestMetrics,
   type AgentTermination,
   elapsedMs,
 } from './request-metrics.ts';
-import { shouldValidateResponse, unverifiedResponseNotice, validateResponse } from './response-validator.ts';
+import type { ToolEvidence } from './response-grounding.ts';
+import {
+  shouldValidateResponse,
+  supplementIsGrounded,
+  unverifiedResponseNotice,
+  validateResponse,
+} from './response-validator.ts';
 import {
   AllProvidersFailedError,
   aiStreamRound,
@@ -60,7 +73,8 @@ type RetryOutcome = 'stored' | 'gave_up' | 'not_stored' | 'unknown';
 /**
  * One apology covers a user for this long. A user who keeps writing during an
  * outage gets at most one playful "one sec", then one honest "the AI is down,
- * here is what still works", then silence — not five apologies in a row.
+ * here is what still works", then a one-line "still down" per new request —
+ * not five apologies and command lists in a row.
  */
 const NOTICE_COOLDOWN_MS = 5 * 60_000;
 
@@ -77,13 +91,21 @@ const MAX_TRACKED_USERS = 10_000;
 
 /**
  * What the bot says to the user when a run fails.
- *  - `stall`  — a playful "one sec, be right back". Only legitimate when a retry
- *               is actually scheduled, because it promises a comeback.
- *  - `honest` — the AI is unavailable, here are the commands that still work.
- *               No promise, so nothing to break.
- *  - `silent` — the user has already been told twice; say nothing.
+ *  - `stall`      — a playful "one sec, be right back". Only legitimate when a
+ *                   retry is actually scheduled, because it promises a comeback.
+ *  - `honest`     — the AI is unavailable, here are the commands that still work.
+ *                   No promise, so nothing to break.
+ *  - `still_down` — a new request failed right after `honest`: one line saying it
+ *                   is not done, without repeating the joke or the command list.
+ *                   When a retry is stored and can succeed (not a hard outage)
+ *                   it says the bot will retry by itself, since a resend would
+ *                   cancel that retry; when the store did not answer in time it
+ *                   asks for a resend only if no answer comes; otherwise it asks
+ *                   for a resend later.
+ *  - `silent`     — a scheduled retry or an unprompted scheduled/trigger run
+ *                   failed after the user was already told.
  */
-export type FailureNoticeKind = 'stall' | 'honest' | 'silent';
+export type FailureNoticeKind = 'stall' | 'honest' | 'still_down' | 'silent';
 
 export interface FailureNotice {
   kind: FailureNoticeKind;
@@ -95,6 +117,8 @@ interface NoticeRecord {
   kind: 'stall' | 'honest';
   text: string;
   sentAt: number;
+  /** A later `still_down` promised a retry, so the give-up must close that loop. */
+  owesComeback: boolean;
 }
 
 export interface FailureNoticeOptions {
@@ -102,6 +126,12 @@ export interface FailureNoticeOptions {
   hardOutage: boolean;
   /** A backoff retry will actually be scheduled — without it a promise is a lie. */
   willRetry: boolean;
+  /** This run is a scheduled retry, not a message the user just sent. */
+  isRetryAttempt: boolean;
+  /** A scheduled/trigger run: the user sent no request, so there is none to report on or resend. */
+  unprompted?: boolean;
+  /** The retry store did not answer in time: a job may exist, so neither promise nor demand a resend. */
+  retryUnconfirmed?: boolean;
   now?: number;
 }
 
@@ -125,45 +155,53 @@ class AiFailureNoticeTracker {
     const previous = this.byUser.get(userId);
     const withinCooldown = previous !== undefined && now - previous.sentAt < NOTICE_COOLDOWN_MS;
 
-    if (opts.hardOutage || !opts.willRetry) {
-      return this.record(userId, 'honest', t(lang).ai_degraded, now, withinCooldown && previous.kind === 'honest');
+    // Same rule as for the stall: a comeback is promised only when a retry is
+    // scheduled and can actually succeed. Retries of a hard outage are futile.
+    const canPromiseComeback = opts.willRetry && !opts.hardOutage;
+
+    if (withinCooldown && previous.kind === 'honest') {
+      if (opts.isRetryAttempt || opts.unprompted) return { kind: 'silent', text: '' };
+      // Every request the user sends deserves a visible outcome, but the full
+      // notice went out moments ago. The honest notice stays the one on file, so
+      // the cooldown keeps anchoring on it; only the owed comeback is noted.
+      if (canPromiseComeback) previous.owesComeback = true;
+      this.store(userId, previous);
+      const next = canPromiseComeback ? 'retry' : opts.retryUnconfirmed && !opts.hardOutage ? 'unsure' : 'resend';
+      return { kind: 'still_down', text: t(lang).ai_still_down(next) };
     }
-    if (!withinCooldown) {
-      return this.record(userId, 'stall', t(lang).agent_error(previous?.text), now, false);
+    // Tell the truth instead of promising a comeback when a retry cannot deliver
+    // one, or when a comeback promised within the cooldown is still undelivered —
+    // repeating that promise is what makes the bot look like a broken record.
+    if (!canPromiseComeback || withinCooldown) {
+      return this.record(userId, 'honest', t(lang).ai_degraded, now);
     }
-    // A comeback was already promised and has not been delivered — repeating the
-    // promise is what makes the bot look like a broken record. Tell the truth.
-    if (previous.kind === 'stall') {
-      return this.record(userId, 'honest', t(lang).ai_degraded, now, false);
-    }
-    return { kind: 'silent', text: '' };
+    return this.record(userId, 'stall', t(lang).agent_error(previous?.text), now);
   }
 
-  private record(
-    userId: number,
-    kind: 'stall' | 'honest',
-    text: string,
-    now: number,
-    alreadySaid: boolean,
-  ): FailureNotice {
-    if (alreadySaid) return { kind: 'silent', text: '' };
-    // Delete before set so Map iteration order tracks recency, not first sight.
-    this.byUser.delete(userId);
-    this.byUser.set(userId, { kind, text, sentAt: now });
-    this.evictOverflow();
+  private record(userId: number, kind: 'stall' | 'honest', text: string, now: number): FailureNotice {
+    this.store(userId, { kind, text, sentAt: now, owesComeback: false });
     return { kind, text };
+  }
+
+  private store(userId: number, record: NoticeRecord): void {
+    // Delete before set so Map iteration order tracks recency, not first sight:
+    // an active user must not be the first evicted past the cap.
+    this.byUser.delete(userId);
+    this.byUser.set(userId, record);
+    this.evictOverflow();
   }
 
   /**
    * Read and clear the outstanding notice for a user. Returns `stall` when the
-   * bot promised a comeback it still owes, `honest` when it already admitted the
-   * outage, `null` when it said nothing (or the process restarted).
+   * bot promised a comeback it still owes (the "one sec" or a short "I'll retry
+   * it myself"), `honest` when it only admitted the outage, `null` when it said
+   * nothing (or the process restarted).
    */
   takeNotice(userId: number): 'stall' | 'honest' | null {
     const record = this.byUser.get(userId);
     if (!record) return null;
     this.byUser.delete(userId);
-    return record.kind;
+    return record.owesComeback ? 'stall' : record.kind;
   }
 
   /** The bot answered — any outstanding promise is settled. */
@@ -199,9 +237,11 @@ class AiFailureNoticeTracker {
 export const aiFailureNotices = new AiFailureNoticeTracker();
 
 /**
- * The closing message once the retry budget is spent. It references the earlier
- * "one sec" so the two messages read as one conversation. Returns null when the
- * user was already told the AI is down — a second notice would only be noise.
+ * The closing message once the retry budget is spent. When a comeback was
+ * promised — the "one sec" stall, or a short "I'll retry it myself" line — it
+ * references that promise so the two messages read as one conversation.
+ * Returns null when the user was only told the AI is down: a second notice
+ * would be noise.
  */
 export function agentGiveUpMessage(userId: number, lang: Lang): string | null {
   const notice = aiFailureNotices.takeNotice(userId);
@@ -234,6 +274,37 @@ function isToolMessage(msg: MessageParam): msg is OpenAI.ChatCompletionToolMessa
 function withTimestamp(text: string, createdAt: string, timezone: string): string {
   const local = format(new TZDate(new Date(`${createdAt}Z`), timezone), 'yyyy-MM-dd HH:mm:ss');
   return `[${local}] ${text}`;
+}
+
+/**
+ * Pull each tool-call block back together before sanitizeMessages checks it.
+ * Other chat_history rows can be saved between an assistant tool-call turn and
+ * its results — a button press, an edit, another group member's message — and
+ * sanitizeMessages would then drop the whole pair. Those rows move to just after
+ * the call's last result, keeping their relative order. A call whose results are
+ * not all present later is left in place for sanitizeMessages to strip.
+ */
+function regroupToolCallBlocks(messages: MessageParam[]): MessageParam[] {
+  const ordered = [...messages];
+  for (let i = 0; i < ordered.length; i++) {
+    const msg = ordered[i]!;
+    if (msg.role !== 'assistant' || !msg.tool_calls?.length) continue;
+    const pendingIds = new Set(msg.tool_calls.map((tc) => tc.id));
+    const results: MessageParam[] = [];
+    const interleaved: MessageParam[] = [];
+    let j = i + 1;
+    for (; j < ordered.length && pendingIds.size > 0; j++) {
+      const next = ordered[j]!;
+      if (isToolMessage(next) && pendingIds.delete(next.tool_call_id)) results.push(next);
+      else interleaved.push(next);
+    }
+    if (pendingIds.size > 0 || interleaved.length === 0) continue;
+    ordered.splice(i + 1, j - i - 1, ...results, ...interleaved);
+    // Resume at the first interleaved row, which may itself be another call
+    // block; the moved results before it are tool messages, never call blocks.
+    i += results.length;
+  }
+  return ordered;
 }
 
 /**
@@ -484,6 +555,18 @@ function isSkipText(text: string): boolean {
   return t === '[SKIP]' || text.includes('[SKIP]') || t === '...' || t === '…';
 }
 
+/**
+ * Settles a finished round's streamed prose, held by the writer since its first weekday:
+ * consistent prose is released to the screen, prose pairing a weekday with another
+ * weekday's date is dropped unseen. Returns the mismatches for the caller to act on.
+ */
+function checkRoundWeekdays(writer: TelegramStreamWriter, text: string, timezone: string): WeekdayDateMismatch[] {
+  const mismatches = findWeekdayDateMismatches(text, new Date(), timezone);
+  if (mismatches.length > 0) writer.dropDraftText();
+  else writer.releaseDraft();
+  return mismatches;
+}
+
 /** Recursively sort object keys for stable serialization. */
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -664,20 +747,23 @@ export class CalendarBotAgent {
       }
     }
 
+    const ordered = regroupToolCallBlocks(messages);
+
     // A backoff retry re-runs the original message, but nothing re-saves it to
     // chat_history — the newest stored turn is the bot's own "one sec". Without
     // this the model is asked to continue from its own stall phrase and has no
     // idea which question it still owes an answer to.
+    // The check reads the newest saved row, before regrouping moved anything to the end.
     if ((ctx.retryAttempt ?? 0) > 0 && ctx.messageText.trim().length > 0) {
       const last = messages[messages.length - 1];
       const alreadyAsked =
         last?.role === 'user' && typeof last.content === 'string' && last.content.includes(ctx.messageText);
       if (!alreadyAsked) {
-        messages.push({ role: 'user', content: ctx.messageText });
+        ordered.push({ role: 'user', content: ctx.messageText });
       }
     }
 
-    return { systemPrompt, messages: sanitizeMessages(messages) };
+    return { systemPrompt, messages: sanitizeMessages(ordered) };
   }
 
   /**
@@ -687,7 +773,8 @@ export class CalendarBotAgent {
    * failure and repeating it every 30 seconds only adds noise. A run cut short by
    * a shutdown says exactly that. Everything else goes through the notice
    * tracker, which decides between a playful stall, an honest "the AI is down,
-   * here is what still works", and silence.
+   * here is what still works", and a one-line "still down, not done" for a new
+   * request right after the honest notice.
    */
   private announceFailure(ctx: AgentContext, error: unknown, writer: TelegramStreamWriter, retry: RetryOutcome): void {
     if (ctx.supplementMode || ctx.wasExplicitInvocation === false) return;
@@ -713,12 +800,19 @@ export class CalendarBotAgent {
       return;
     }
     const hardOutage = isHardOutage(error);
-    if ((ctx.retryAttempt ?? 0) > 0 && !hardOutage) return;
+    const isRetryAttempt = (ctx.retryAttempt ?? 0) > 0;
+    if (isRetryAttempt && !hardOutage) return;
+    // The give-up line was delivered and closed the chain; another notice would repeat it.
+    // A give-up that failed to send rejects instead, so the notice below still goes out.
+    if (retry === 'gave_up') return;
 
     const notice = aiFailureNotices.decide(ctx.user.telegram_id, toLang(ctx.user.language), {
       hardOutage,
       // A stall phrase promises a comeback: only a stored retry can keep it.
       willRetry: retry === 'stored',
+      isRetryAttempt,
+      unprompted: ctx.unprompted,
+      retryUnconfirmed: retry === 'unknown',
     });
     aiLogger.info({ userId: ctx.user.telegram_id, notice: notice.kind, hardOutage }, 'AI failure notice');
     if (notice.kind === 'silent') return;
@@ -946,9 +1040,22 @@ export class CalendarBotAgent {
     const writer = new TelegramStreamWriter(effectiveSender, ctx.chatId, ctx.user.language, {
       userTranscript: ctx.inputMode === 'live_call' ? ctx.messageText : undefined,
       noPlaceholder: ctx.isGroup,
+      // A weekday next to a date is shown only after checkRoundWeekdays() found them consistent.
+      holdDraftWhen: mentionsWeekday,
+      // Each argument is read whole, the way checkQuestionWeekdays reads a question and its options.
+      hideToolDetailsWhen: (input) =>
+        Object.values(input)
+          .flatMap((value) => (Array.isArray(value) ? value : [value]))
+          .some(
+            (value) =>
+              typeof value === 'string' && findWeekdayDateMismatches(value, new Date(), ctx.user.timezone).length > 0,
+          ),
     });
     const allToolCalls: AgentToolCallRecord[] = [];
     const allToolResults: AgentToolResultRecord[] = [];
+    // What each executed call returned, including structured data: the evidence
+    // the validator matches the final prose against and the notice falls back to.
+    const toolEvidence: ToolEvidence[] = [];
     // Keys of tool calls already executed in this run — used to short-circuit
     // duplicate calls with identical arguments and prevent agent-level loops
     // where the model keeps invoking the same tool (e.g. render_day_image,
@@ -959,6 +1066,10 @@ export class CalendarBotAgent {
     // hallucination to chat_history before the validator has a chance to reject it.
     let pendingAssistantTurn: MessageParam | null = null;
     let pendingResponseText = '';
+    // A reply that paired a weekday with a date on another weekday gets one corrective round;
+    // if the corrected reply still does, the user gets the real weekdays instead of it.
+    let weekdaysCorrected = false;
+    let unresolvedWeekdays: WeekdayDateMismatch[] = [];
 
     let currentMessages: MessageParam[] = [];
     let runFailed = false;
@@ -1065,10 +1176,43 @@ export class CalendarBotAgent {
         // the assistant turn yet — validation runs after the loop and may
         // reject+retry, in which case we don't want the rejected answer in
         // chat_history. Final persistence happens after validation below.
+        const mismatches = checkRoundWeekdays(writer, result.text, ctx.user.timezone);
         if (result.toolCalls.length === 0) {
+          // "в среду, 28 сентября" when the 28th is a Monday: the user trusts the weekday
+          // name, so such a reply is never delivered as is — the model gets one round to
+          // fix it with the real weekdays in hand, if a round is left.
+          if (mismatches.length > 0 && !weekdaysCorrected && round < MAX_ROUNDS - 1) {
+            weekdaysCorrected = true;
+            aiLogger.warn(
+              { userId: ctx.user.telegram_id, dates: mismatches.map((mismatch) => mismatch.date) },
+              'Reply pairs weekdays with dates on other weekdays — asking for a correction',
+            );
+            writer.resetDraft();
+            currentMessages = [
+              ...currentMessages,
+              result.assistantMessage,
+              {
+                role: 'user',
+                content:
+                  `[SYSTEM] Your reply was not sent: ${describeWeekdayDateMismatches(mismatches)}. ` +
+                  'Rewrite the reply so every weekday matches its date. Use the day the user named; if the ' +
+                  'events you reported belong to another day, read the named day with the calendar tools first.',
+              },
+            ];
+            continue;
+          }
           termination = 'normal';
-          pendingAssistantTurn = result.assistantMessage;
-          pendingResponseText = result.text;
+          if (mismatches.length > 0) {
+            aiLogger.warn(
+              { userId: ctx.user.telegram_id, dates: mismatches.map((mismatch) => mismatch.date) },
+              'Corrected reply still pairs weekdays with other dates — replacing it with the real weekdays',
+            );
+            unresolvedWeekdays = mismatches;
+            responseUnverified = true;
+          } else {
+            pendingAssistantTurn = result.assistantMessage;
+            pendingResponseText = result.text;
+          }
           break;
         }
 
@@ -1157,6 +1301,13 @@ export class CalendarBotAgent {
           if (tc.name !== DISCOVERY_TOOL) {
             allToolCalls.push({ name: tc.name, input });
             allToolResults.push({ success: toolResult.success, output: toolResult.output });
+            toolEvidence.push({
+              name: tc.name,
+              input,
+              success: toolResult.success,
+              output: toolResult.output,
+              data: toolResult.data,
+            });
           }
 
           const content = toolResultContent(toolResult);
@@ -1194,31 +1345,33 @@ export class CalendarBotAgent {
 
       // Response validation: always validate tool-less prose, plus factual claims
       // that the tools used in this run cannot support. The deterministic
-      // prefilter keeps ordinary tool-backed writes on the existing fast path.
+      // prefilter keeps ordinary tool-backed writes and answers whose days and
+      // times the run's reads contain on the existing fast path.
       const availableTools = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
       let rejected = false;
-      if (availableTools.length > 0 && !ctx.supplementMode) {
-        // Use the model's actual emitted text, not the writer buffer — tests
-        // with scripted stream impls can produce an assistantMessage without
-        // calling onTextDelta, so writer.getText() may be empty even when the
-        // model did return content.
-        const responseText = pendingResponseText.trim();
-        if (
-          responseText &&
-          !isSkipText(responseText) &&
-          shouldValidateResponse(
-            allToolCalls.map((tc) => tc.name),
-            responseText,
-          )
-        ) {
-          const validation = await validateResponse(
-            {
-              userMessage: ctx.messageText,
-              toolCalls: allToolCalls.map((tc) => tc.name),
-              response: responseText,
-            },
-            validatorStream,
+      // Use the model's actual emitted text, not the writer buffer — tests
+      // with scripted stream impls can produce an assistantMessage without
+      // calling onTextDelta, so writer.getText() may be empty even when the
+      // model did return content.
+      const finalProse = pendingResponseText.trim();
+      const proseEvidence = {
+        userMessage: ctx.messageText,
+        timezone: ctx.user.timezone,
+        tools: toolEvidence,
+        response: finalProse,
+      };
+      if (ctx.supplementMode) {
+        if (finalProse && !isSkipText(finalProse) && !supplementIsGrounded(proseEvidence)) {
+          aiLogger.info(
+            { userId: ctx.user.telegram_id },
+            'Supplement states facts its own reads do not back — dropped',
           );
+          rejected = true;
+          responseUnverified = true;
+        }
+      } else if (availableTools.length > 0) {
+        if (finalProse && !isSkipText(finalProse) && shouldValidateResponse(proseEvidence)) {
+          const validation = await validateResponse(proseEvidence, validatorStream);
 
           if (!validation.approved) {
             aiLogger.info(
@@ -1231,11 +1384,12 @@ export class CalendarBotAgent {
             const retryOutcome = await this.runRetryAfterRejection(
               ctx,
               currentMessages,
-              responseText,
+              finalProse,
               writer,
               dbg,
               allToolCalls,
               allToolResults,
+              toolEvidence,
               startTime,
               seenToolCallKeys,
               writeOutcomes,
@@ -1252,20 +1406,28 @@ export class CalendarBotAgent {
             // and history on rejection, timeout, exhaustion, or an early stop.
             // The final evidence guard preserves writes and clarification UI.
             if (!retryOutcome.hitStopLoop && retryOutcome.lastRoundText && !retryOutcome.lastRoundHadToolCalls) {
-              const reValidation = await validateResponse(
-                {
-                  userMessage: ctx.messageText,
-                  toolCalls: allToolCalls.map((tc) => tc.name),
-                  response: retryOutcome.lastRoundText,
-                },
-                validatorStream,
-              );
-              responseUnverified = !reValidation.approved;
-              if (!reValidation.approved) {
-                aiLogger.warn(
-                  { userId: ctx.user.telegram_id, reason: reValidation.reason },
-                  'Retry response rejected by validator — suppressing unverified explanation',
+              // The same reading that decided whether the retry's draft was shown.
+              const retryMismatches = retryOutcome.lastRoundMismatches ?? [];
+              if (retryMismatches.length > 0) {
+                unresolvedWeekdays = retryMismatches;
+                responseUnverified = true;
+              } else {
+                const reValidation = await validateResponse(
+                  {
+                    userMessage: ctx.messageText,
+                    timezone: ctx.user.timezone,
+                    tools: toolEvidence,
+                    response: retryOutcome.lastRoundText,
+                  },
+                  validatorStream,
                 );
+                responseUnverified = !reValidation.approved;
+                if (!reValidation.approved) {
+                  aiLogger.warn(
+                    { userId: ctx.user.telegram_id, reason: reValidation.reason },
+                    'Retry response rejected by validator — suppressing unverified explanation',
+                  );
+                }
               }
             }
           }
@@ -1323,13 +1485,18 @@ export class CalendarBotAgent {
       ctx.isGroup,
       (runFailed || responseUnverified) && writeOutcomes.mayHaveMutated,
     );
+    // A supplement is optional text and stays quiet when guarded, unless it may have changed the
+    // calendar: then the receipt is its reply, or the user would never learn of the change.
+    const supplementQuiet = ctx.supplementMode && !(evidence !== null && writeOutcomes.mayHaveMutated);
     const silent =
-      ctx.supplementMode ||
+      supplementQuiet ||
       ctx.wasExplicitInvocation === false ||
       (termination === 'waiting' && !writeOutcomes.speechQuestion);
     const validationNotice =
       responseUnverified && !silent && !evidence && termination !== 'waiting'
-        ? unverifiedResponseNotice(ctx.user.language)
+        ? unresolvedWeekdays.length > 0
+          ? weekdayMismatchNotice(ctx.user.language, unresolvedWeekdays)
+          : unverifiedResponseNotice(ctx.user.language, ctx.user.timezone, ctx.isGroup ? [] : toolEvidence)
         : null;
     const guarded = responseUnverified || evidence !== null || termination === 'waiting' || termination === 'error';
     if (guarded) {
@@ -1343,6 +1510,7 @@ export class CalendarBotAgent {
         if (termination === 'waiting' && writeOutcomes.speechQuestion) writer.appendText(writeOutcomes.speechQuestion);
       }
     }
+    if (!guarded) this.correctUtcClockTimesInReply(ctx, writer, pendingHistory);
     // A direct private-chat request never ends in silence or a bare "...": weak
     // models answer '[SKIP]' (taught for reactions and group silence) or nothing
     // after real work, and discarding that deleted every trace of the writes.
@@ -1450,6 +1618,34 @@ export class CalendarBotAgent {
   }
 
   /**
+   * Deterministic backstop (#498): a trusted final answer must not show an event's UTC
+   * clock time as local. Corrects both what the user receives and what history keeps,
+   * so the next turn does not copy the wrong times back.
+   */
+  private correctUtcClockTimesInReply(
+    ctx: AgentContext,
+    writer: TelegramStreamWriter,
+    pendingHistory: MessageParam[],
+  ): void {
+    const events = eventClocksForRun(ctx);
+    if (events.length === 0) return;
+    const draft = writer.getText();
+    const corrected = correctUtcClockTimes(draft, events, ctx.user.timezone);
+    if (corrected !== draft) {
+      aiLogger.warn({ userId: ctx.user.telegram_id }, 'Reply showed UTC event times as local — corrected');
+      writer.resetDraft();
+      writer.appendText(corrected);
+    }
+    // Prose narrated in tool rounds is shown in the execution log; it gets the same correction.
+    writer.rewriteReasoning((text) => correctUtcClockTimes(text, events, ctx.user.timezone));
+    pendingHistory.forEach((message, index) => {
+      if (message.role !== 'assistant' || typeof message.content !== 'string') return;
+      const fixed = correctUtcClockTimes(message.content, events, ctx.user.timezone);
+      if (fixed !== message.content) pendingHistory[index] = { ...message, content: fixed };
+    });
+  }
+
+  /**
    * Retry the round after the quality validator rejected a tool-less response.
    *
    * NOTE: the validator's REJECT reason is deliberately NOT forwarded to the
@@ -1467,6 +1663,7 @@ export class CalendarBotAgent {
     dbg: AiDebugRunContext | null,
     allToolCalls: AgentToolCallRecord[],
     allToolResults: AgentToolResultRecord[],
+    toolEvidence: ToolEvidence[],
     startTime: number,
     seenToolCallKeys: Set<string>,
     writeOutcomes: WriteOutcomes,
@@ -1482,6 +1679,8 @@ export class CalendarBotAgent {
     lastRoundText: string;
     /** Whether the last round called any tools. Used to decide if re-validation is needed. */
     lastRoundHadToolCalls: boolean;
+    /** Weekdays the text-only last round paired with dates on other weekdays. */
+    lastRoundMismatches?: WeekdayDateMismatch[];
   }> {
     // Discard the rejected draft text so commitIntermediate() never pushes it
     // into the execution log — but keep any tool history already committed
@@ -1551,10 +1750,12 @@ export class CalendarBotAgent {
           };
 
       dbg?.logAiText(result.text);
+      const lastRoundMismatches = checkRoundWeekdays(writer, result.text, ctx.user.timezone);
 
       if (result.toolCalls.length === 0) {
-        if (!ctx.supplementMode) saveAssistant(result.assistantMessage);
-        return { hitStopLoop: false, lastRoundText: result.text, lastRoundHadToolCalls: false };
+        // A reply pairing a weekday with another weekday's date is never kept for history.
+        if (!ctx.supplementMode && lastRoundMismatches.length === 0) saveAssistant(result.assistantMessage);
+        return { hitStopLoop: false, lastRoundText: result.text, lastRoundHadToolCalls: false, lastRoundMismatches };
       }
 
       const skipPersistIds = new Set(
@@ -1617,6 +1818,13 @@ export class CalendarBotAgent {
         if (tc.name !== DISCOVERY_TOOL) {
           allToolCalls.push({ name: tc.name, input });
           allToolResults.push({ success: toolResult.success, output: toolResult.output });
+          toolEvidence.push({
+            name: tc.name,
+            input,
+            success: toolResult.success,
+            output: toolResult.output,
+            data: toolResult.data,
+          });
         }
 
         const content = toolResultContent(toolResult);

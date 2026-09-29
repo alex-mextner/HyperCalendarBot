@@ -1,5 +1,23 @@
 import type { Database } from 'bun:sqlite';
-import type { CreateInvitationData, Invitation, InvitationStatus } from '../types.ts';
+import type { CreateInvitationData, Invitation, InvitationStatus, ParticipantStatus } from '../types.ts';
+import { sourceGroupSql } from './participant.repository.ts';
+
+/**
+ * One person on an event's invitation roster, as stored: the answer rules are applied by the reader.
+ * Names are public Telegram profile data only: every recipient of a card reads them, so the
+ * organizer's private address-book names are never part of a roster.
+ */
+export interface InvitationRosterRow {
+  source: 'organizer' | 'invitation' | 'participant';
+  /** Telegram id; a group invitation carries the (negative) group chat id */
+  user_id: number;
+  /** Latest invitation status or participant status; null for the organizer */
+  status: InvitationStatus | ParticipantStatus | null;
+  first_name: string | null;
+  username: string | null;
+  /** Participant rows: the group chat whose card carried the answer; null when personal or unknown (sourceGroupSql) */
+  source_group_id: number | null;
+}
 
 export class InvitationRepository {
   constructor(private db: Database) {}
@@ -26,32 +44,36 @@ export class InvitationRepository {
     return (this.db.prepare('SELECT * FROM invitations WHERE id = ?').get(id) as Invitation | null) ?? null;
   }
 
+  /** Any status change settles the invitee's pending time proposal, so it also clears proposed_time. */
   updateStatus(id: number, newStatus: InvitationStatus, expectedCurrent: InvitationStatus): boolean {
     const result = this.db
       .prepare(
         `UPDATE invitations
-         SET status = ?, updated_at = datetime('now'), responded_at = datetime('now')
+         SET status = ?, proposed_time = NULL, updated_at = datetime('now'), responded_at = datetime('now')
          WHERE id = ? AND status = ?`,
       )
       .run(newStatus, id, expectedCurrent);
     return result.changes > 0;
   }
 
+  // Latest-row lookups order by the AUTOINCREMENT id, not created_at: datetime('now') has
+  // one-second resolution and follows the wall clock, which can step backwards.
   findActiveByEventAndInvitee(eventId: number, inviteeId: number): Invitation | null {
     return (
       (this.db
         .prepare(
           `SELECT * FROM invitations
            WHERE event_id = ? AND invitee_id = ? AND status IN ('pending', 'maybe', 'accepted')
-           ORDER BY created_at DESC LIMIT 1`,
+           ORDER BY id DESC LIMIT 1`,
         )
         .get(eventId, inviteeId) as Invitation | null) ?? null
     );
   }
 
   /**
-   * Returns the most recent personal invitation for this invitee and event, if it authorizes access.
-   * Fetches the single latest row regardless of status, then rejects if it is cancelled or expired —
+   * Returns the most recently inserted personal invitation for this invitee and event, if it
+   * authorizes access. Fetches the single highest-id row regardless of status (created_at can run
+   * backwards with the wall clock), then rejects if it is cancelled or expired —
    * a newer cancellation supersedes any older responded row (declined, accepted, etc.).
    * Returns null when no invitation exists or when the latest row is cancelled/expired.
    */
@@ -60,7 +82,7 @@ export class InvitationRepository {
       .prepare(
         `SELECT * FROM invitations
          WHERE event_id = ? AND invitee_id = ?
-         ORDER BY created_at DESC LIMIT 1`,
+         ORDER BY id DESC LIMIT 1`,
       )
       .get(eventId, inviteeId) as Invitation | null;
     if (!latest || latest.status === 'cancelled' || latest.status === 'expired') {
@@ -113,6 +135,36 @@ export class InvitationRepository {
     return this.db.prepare('SELECT * FROM invitations WHERE event_id = ? ORDER BY id').all(eventId) as Invitation[];
   }
 
+  /**
+   * Everyone an invitation card can list, in one read: the event owner, the latest invitation per
+   * invitee (group invitations included; latest by id, like the lookups above), and the per-member
+   * answers in event_participants with the origin ParticipantRepository reads.
+   */
+  getRoster(eventId: number): InvitationRosterRow[] {
+    return this.db
+      .query<InvitationRosterRow, [number]>(`
+        WITH latest AS (
+          SELECT i.*, ROW_NUMBER() OVER (PARTITION BY i.invitee_id ORDER BY i.id DESC) AS recipient_rank
+          FROM invitations i WHERE i.event_id = ?1
+        )
+        SELECT source, user_id, status, first_name, username, source_group_id FROM (
+          SELECT 'organizer' AS source, 0 AS position, e.user_id, NULL AS status, u.first_name, u.username,
+            NULL AS source_group_id
+          FROM events e LEFT JOIN users u ON u.telegram_id = e.user_id WHERE e.id = ?1
+          UNION ALL
+          SELECT 'invitation', l.id, l.invitee_id, l.status, u.first_name,
+            COALESCE(u.username, l.invitee_username), NULL
+          FROM latest l LEFT JOIN users u ON u.telegram_id = l.invitee_id WHERE l.recipient_rank = 1
+          UNION ALL
+          SELECT 'participant', p.id, p.user_id, p.status, u.first_name, u.username, ${sourceGroupSql('p')}
+          FROM event_participants p LEFT JOIN users u ON u.telegram_id = p.user_id
+          WHERE p.event_id = ?1 AND p.role != 'organizer'
+        )
+        ORDER BY CASE source WHEN 'organizer' THEN 0 WHEN 'invitation' THEN 1 ELSE 2 END, position
+      `)
+      .all(eventId);
+  }
+
   setMessageInfo(id: number, messageId: number, chatId: number): void {
     this.db.prepare('UPDATE invitations SET message_id = ?, chat_id = ? WHERE id = ?').run(messageId, chatId, id);
   }
@@ -123,17 +175,28 @@ export class InvitationRepository {
       .run(proposedTime, id);
   }
 
-  clearProposedTime(id: number): void {
-    this.db.prepare("UPDATE invitations SET proposed_time = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+  /** Drops the proposed time while that exact proposal is still open; false once the invitee answered or changed it. */
+  clearProposedTime(id: number, expectedProposedTime: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE invitations SET proposed_time = NULL, updated_at = datetime('now')
+         WHERE id = ? AND status = 'pending' AND proposed_time = ?`,
+      )
+      .run(id, expectedProposedTime);
+    return result.changes > 0;
   }
 
-  clearProposedTimeAndAccept(id: number, expectedStatus: string): boolean {
-    const result = this.db.transaction(() => {
-      this.db.prepare("UPDATE invitations SET proposed_time = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
-      return this.db
-        .prepare("UPDATE invitations SET status = 'accepted', updated_at = datetime('now') WHERE id = ? AND status = ?")
-        .run(id, expectedStatus);
-    })();
+  /**
+   * Accepts the invitation at its proposed time, only while that exact proposal is still open: the
+   * invitation is pending and still carries it. Returns false once the invitee has answered or changed it.
+   */
+  clearProposedTimeAndAccept(id: number, expectedProposedTime: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE invitations SET status = 'accepted', proposed_time = NULL, updated_at = datetime('now')
+         WHERE id = ? AND status = 'pending' AND proposed_time = ?`,
+      )
+      .run(id, expectedProposedTime);
     return result.changes > 0;
   }
 }

@@ -31,7 +31,7 @@ const calendarDay: FamilyDefinition = {
   risk: 'read',
   pattern: String.raw`^${CALENDAR_LEAD}\s+(?:на\s+)?(${ANY_DAY_RX})$`,
   triggers: CALENDAR_TRIGGERS,
-  bindings: { day: { type: 'date', from: '{{$1}}', words: DAY_WORDS } },
+  bindings: { day: { type: 'date', from: '{{$1}}', words: DAY_WORDS, after_midnight: 'both' } },
   steps: [{ call: 'get_events', input: { start_date: '{{bind.day}}', end_date: '{{bind.day}}', scope: SCOPE } }],
   strings: { ru: {}, en: {} },
   examples: [
@@ -45,6 +45,8 @@ const calendarDay: FamilyDefinition = {
   ],
   negatives: ['что делать завтра', 'что у меня в кошельке', 'покажи завтра погоду', 'не показывай что у меня сегодня'],
   invalidInputs: ['что у меня 31 февраля'],
+  notes:
+    'From 00:00 to 04:00 local, today and tomorrow may still count from the day that has just ended, so both days are read and each is answered under its own weekday and date.',
 };
 
 const calendarPeriod: FamilyDefinition = {
@@ -67,6 +69,8 @@ const calendarPeriod: FamilyDefinition = {
     'events next month',
   ],
   negatives: ['что у меня на прошлой неделе', 'что у меня на неделе после отпуска', 'что у меня в этом году'],
+  notes:
+    'This week is today and the six days after it, so a Sunday-evening plan is not a list of past days; next week is Monday to Sunday.',
 };
 
 const calendarUpcoming: FamilyDefinition = {
@@ -164,7 +168,7 @@ const calendarImage: FamilyDefinition = {
     {
       when: "bind.p.kind == 'week'",
       call: 'render_week_image',
-      input: { week_start: '{{bind.p.start}}', scope: SCOPE },
+      input: { week_start: '{{bind.p.calendar_week_start}}', scope: SCOPE },
     },
     { when: "bind.p.kind == 'month'", call: 'render_month_image', input: { month: '{{bind.p.month}}', scope: SCOPE } },
   ],
@@ -178,6 +182,8 @@ const calendarImage: FamilyDefinition = {
     'send me schedule as a picture next week',
   ],
   negatives: ['покажи календарь картинкой', 'покажи календарь на неделю'],
+  notes:
+    'A week picture is always a Monday-to-Sunday calendar week; asked on a Saturday or Sunday, this week means the coming one. The reply names the dates shown.',
 };
 
 const slotsDay: FamilyDefinition = {
@@ -237,7 +243,8 @@ const slotsWeek: FamilyDefinition = {
     'free slots next week',
   ],
   negatives: ['свободные окна на неделе после отпуска'],
-  notes: 'Seven explicit day queries, Monday to Sunday, so every day of the week is answered.',
+  notes:
+    'Seven explicit day queries, so every day is answered: this week is today and the six days after it, next week is Monday to Sunday.',
 };
 
 const slotsCheckTime: FamilyDefinition = {

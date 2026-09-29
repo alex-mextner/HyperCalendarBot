@@ -1,16 +1,22 @@
 import { z } from 'zod';
+import { t, toLang } from '../../config/constants.ts';
 import type { CalendarEvent, ChatHistoryMessage } from '../../database/types.ts';
-import { storedInstantMs } from '../../utils/date.ts';
+import { describeCalendarDay, storedInstantMs } from '../../utils/date.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import {
   type DayReferenceSet,
   describeDay,
   describeReferences,
+  describeWeekdayDateMismatches,
+  findWeekdayDateMismatches,
   localDayOf,
   readDayContent,
   shiftDay,
+  timeOnlyToday,
+  type WeekdayDateMismatch,
   weekdayOf,
 } from './day-references.ts';
+import { localDaysForUtcDayEdges } from './tool-handlers/events.ts';
 import { checkSecretaryAccess } from './tool-handlers/secretary-access.ts';
 import { resolveScope } from './tool-handlers/shared.ts';
 import type { AgentContext, ToolResult } from './types.ts';
@@ -40,6 +46,8 @@ const AskUserArgsCodec = jsonCodec(
   z.object({ question: z.string().optional(), options: z.array(z.string()).optional() }),
 );
 const ActivityCodec = jsonCodec(z.object({ kind: z.string() }));
+/** A bot message sent outside the model (a scene, a rule's response), as the logger saves it. */
+const BotMessageCodec = jsonCodec(z.object({ kind: z.enum(['bot', 'bot_edit']), text: z.string() }));
 
 /**
  * The ask_user question the current message answers, with the user message that led to
@@ -109,6 +117,35 @@ function answersQuestion(messageText: string, options: readonly string[]): boole
   return words.length > 0 && words.every((word) => CONFIRMATIONS[word] === true);
 }
 
+/** The text an assistant row showed the user; empty for a tool-call turn or another activity. */
+function assistantText(content: string): string {
+  const sent = BotMessageCodec.safeParse(content);
+  if (sent.success) return sent.data.text;
+  if (ActivityCodec.safeParse(content).success) return '';
+  const turn = AssistantToolCallsCodec.safeParse(content);
+  return turn.success ? (turn.data.content ?? '') : content;
+}
+
+/**
+ * Whether the bot's last reply before this message asked something in plain text ("Во
+ * сколько?"): the message then answers it, and the day may have been named before. Any
+ * question counts, a closing "Что-то ещё?" too: the time-only rule then imposes nothing.
+ */
+function answersPlainQuestion(messageText: string, history: ChatHistoryMessage[]): boolean {
+  let index = history.length - 1;
+  while (index >= 0 && history[index]!.role !== 'user') index--;
+  if (index < 0 || history[index]!.content.trim() !== messageText.trim()) return false;
+  for (index--; index >= 0; index--) {
+    const row = history[index]!;
+    if (row.role === 'tool') continue;
+    if (row.role === 'user') return false;
+    const text = assistantText(row.content);
+    if (text.trim() === '') continue;
+    return text.includes('?');
+  }
+  return false;
+}
+
 /**
  * The days this turn is allowed to touch: the ones named in the message, or — for an
  * answer to ask_user that names no day itself ("Да") — the ones named in the message
@@ -124,7 +161,16 @@ export function resolveTurnDayReferences(
   if (own.kind === 'named') return own.set;
   if (own.kind === 'open') return null;
   const pending = pendingQuestion(messageText, history);
-  if (!pending || !answersQuestion(messageText, pending.options)) return null;
+  // An answer to a question keeps the date context the question was asked in (for ask_user
+  // the days named then); a fresh message that states only a clock time means today while
+  // that time is still ahead. A message that is not the newest saved one (a live-call
+  // transcript, a synthetic run) may be answering something, so it imposes nothing.
+  if (!pending) {
+    const newestUser = history.findLast((row) => row.role === 'user');
+    if (newestUser?.content.trim() !== messageText.trim() || answersPlainQuestion(messageText, history)) return null;
+    return timeOnlyToday(messageText, now, timezone);
+  }
+  if (!answersQuestion(messageText, pending.options)) return null;
   // Each message is read as of when it was written: a "Да" given days later confirms the
   // Tuesday meant then, not the one coming now.
   const originAt = storedInstantMs(pending.origin.created_at);
@@ -162,7 +208,7 @@ function daysOfArgument(value: string, timezone: string): string[] {
 }
 
 /** The local day a start falls on: a date-only (all-day) start is the day written. */
-function dayOfStart(startAt: string, timezone: string): string | null {
+export function dayOfStart(startAt: string, timezone: string): string | null {
   return startAt.includes('T') ? localDayOf(startAt, timezone) : (DATE_PREFIX.exec(startAt)?.[1] ?? null);
 }
 
@@ -256,9 +302,11 @@ function targetOf(ctx: AgentContext, toolName: string, input: unknown): Target |
     case 'get_events': {
       const parsed = RangeInput.safeParse(input);
       if (!parsed.success) return null;
+      // The days the handler reads: a UTC day-edge pair is those local days (#550).
+      const bounds = localDaysForUtcDayEdges(parsed.data, timezone);
       const days = [
-        ...daysOfArgument(parsed.data.start_date, timezone),
-        ...daysOfArgument(parsed.data.end_date, timezone),
+        ...daysOfArgument(bounds.start_date, timezone),
+        ...daysOfArgument(bounds.end_date, timezone),
       ].sort();
       if (days.length === 0) return null;
       return rangeTarget(
@@ -312,6 +360,7 @@ function targetOf(ctx: AgentContext, toolName: string, input: unknown): Target |
 export function checkDayReferences(ctx: AgentContext, toolName: string, input: unknown): ToolResult | undefined {
   const named = ctx.dayReferences;
   if (!named) return undefined;
+  if (named.timeOnly && (toolName !== 'create_event' || ctx.isGroup)) return undefined;
   const target = targetOf(ctx, toolName, input);
   if (!target) return undefined;
   for (const day of named.allowedDates) if (day >= target.first && day <= target.last) return undefined;
@@ -326,4 +375,45 @@ export function checkDayReferences(ctx: AgentContext, toolName: string, input: u
       `Redo it for the day the user named, e.g. ${target.redo(suggested)}. ` +
       'If the user really meant another day, ask them instead of guessing.',
   };
+}
+
+const AskUserInput = z.object({ question: z.string(), options: z.array(z.string()).optional() });
+
+/**
+ * Rejects an ask_user question that pairs a weekday with a date on another weekday
+ * ("Понедельник 27 сентября" when the 27th is a Sunday) before it reaches the user, who
+ * would approve it on the strength of the weekday name.
+ */
+export function checkQuestionWeekdays(ctx: AgentContext, toolName: string, input: unknown): ToolResult | undefined {
+  if (toolName !== 'ask_user') return undefined;
+  const parsed = AskUserInput.safeParse(input);
+  if (!parsed.success) return undefined;
+  // Each button is its own line of text: a weekday option above a date option is no pair.
+  const mismatches = [parsed.data.question, ...(parsed.data.options ?? [])].flatMap((part) =>
+    findWeekdayDateMismatches(part, new Date(), ctx.user.timezone),
+  );
+  if (mismatches.length === 0) return undefined;
+  return {
+    success: false,
+    mutationState: 'not_applied',
+    error:
+      `WEEKDAY_DATE_MISMATCH: the question was not sent. ${describeWeekdayDateMismatches(mismatches)}. ` +
+      'Use the date of the day the user named, make every weekday match its date, then call ask_user again.',
+  };
+}
+
+/**
+ * What the user reads instead of a reply whose weekdays still contradict its dates after
+ * the corrective round: the real weekdays, and a request to name the day.
+ */
+export function weekdayMismatchNotice(language: string, mismatches: readonly WeekdayDateMismatch[]): string {
+  const lang = toLang(language);
+  const messages = t(lang).weekdayDateMismatch;
+  return messages.notice(
+    mismatches.map(({ date, nearest }) => {
+      const written = describeCalendarDay(date, lang);
+      const named = describeCalendarDay(nearest, lang);
+      return messages.fact(written.day, written.weekday, named.weekday, named.day);
+    }),
+  );
 }

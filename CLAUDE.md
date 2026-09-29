@@ -84,7 +84,7 @@ When adding a new command, callback, scene, AI tool, or abstract user action —
 feature tracking map so tip filtering and re-engagement work correctly:
 
 - `COMMAND_FEATURE_MAP` — `/command` → `FeatureKey` (21 entries)
-- `CALLBACK_FEATURE_MAP` — callback prefix → `FeatureKey` (17 entries)
+- `CALLBACK_FEATURE_MAP` — callback prefix → `FeatureKey` (20 entries)
 - `SCENE_FEATURE_MAP` — scene name → `FeatureKey` (4 entries)
 - `ACTION_FEATURE_MAP` — abstract action → `FeatureKey` (3 entries: `voice_message`, `ics_file`, `geolocation`)
 - `TOOL_FEATURE_MAP` in `src/services/ai/tool-executor.ts` — AI tool name → `FeatureKey` (43 entries)
@@ -561,6 +561,7 @@ Full runbook: `docs/reference/deploy-runbook.md` (Docker, Dockerfile, bun lockfi
 - **Never renumber existing migrations** — only append new ones at the end.
 - **Every new migration ships `docs/reference/migrations/<name>.md`** starting with the front matter from the runbook's "Schema gate" section (`rollback-compatible`, `data-deletion`). Without it the deploy refuses the release; `rollback-compatible: no` or `data-deletion: yes` needs a reviewed migration procedure. `test/python/test_migration_gate.py` checks every checked-in doc.
 - **Shared server**: never `pm2 delete all`, `docker system prune`, or kill PIDs without checking. Port 3001 = HyperCalendarBot.
+- **Image retention**: a verified deploy keeps the five newest `rollback-*` tags plus the current and previous release images and removes other hypercalendarbot tags; a release that does not fit twice on the Docker root is refused before `docker load` (runbook "Disk space").
 
 ## MCP Tools
 

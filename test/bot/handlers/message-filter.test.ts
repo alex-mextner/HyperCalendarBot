@@ -161,3 +161,67 @@ describe('isGroupRelevant', () => {
   test('IP address is ignored', () => expect(isGroupRelevant('сервер на 192.168.1.1', bot)).toBe(false));
   test('price is ignored', () => expect(isGroupRelevant('стоит 15.50 руб', bot)).toBe(false));
 });
+
+// #400: the meeting place and time are part of the owner's group trigger list
+// ("location", "place", "time"). They were dropped when stem matching was
+// replaced with full words (stems like "место" also hit "местоимение").
+describe('isGroupRelevant — meeting place and time words (#400)', () => {
+  const bot = 'MyCalBot';
+
+  const relevant = [
+    'Поменяли место на Ушче парк',
+    'Локация: Sonder Dorchol',
+    'Какой адрес у кафе?',
+    'where do we meet',
+    'В том баре нет места',
+    'Я уже на месте',
+    'Скинь локацию',
+    'Скинь адреса обоих баров',
+    'МЕСТО СМЕНИЛИ',
+    'Send me the location',
+    'What is the venue?',
+    "what's the address",
+    'Where?',
+    'Какое время всем удобно?',
+    'Нет времени до пятницы',
+    'Со временем определимся',
+    'Где встретимся?',
+    'Где будем?',
+    'где увидимся',
+    'давай на нашем месте',
+    'встретимся на вашем месте',
+    // A conditional after "месте" alone is not the idiom: nobody's place is named.
+    'Я уже на месте, я бы вышел но жду',
+    'Мы на месте бы начинали',
+    'Встретимся где-нибудь у метро?',
+  ];
+  for (const text of relevant) {
+    test(`relevant: ${text}`, () => expect(isGroupRelevant(text, bot)).toBe(true));
+  }
+
+  const irrelevant = [
+    'планшет купил новый',
+    'это местоимение',
+    'местный рынок закрыт',
+    'заместитель директора в отпуске',
+    'на твоём месте я бы не стал',
+    'На твоем месте я бы подождал',
+    'на моём месте ты бы тоже расстроился',
+    'на его месте, я бы ушёл',
+    'На твоём месте — я бы не стал',
+    'На твоём же месте я бы не пошёл',
+    'на её месте я бы не осталась',
+    'на их месте я бы подождал',
+    'на своём месте я бы не ныл',
+    'везде пробки',
+    'нигде не найду ключи',
+    'адресат выбыл',
+    'кафе временно закрыто',
+    'somewhere over the rainbow',
+    'nowhere to hide',
+    'the addressee is unknown',
+  ];
+  for (const text of irrelevant) {
+    test(`not relevant: ${text}`, () => expect(isGroupRelevant(text, bot)).toBe(false));
+  }
+});

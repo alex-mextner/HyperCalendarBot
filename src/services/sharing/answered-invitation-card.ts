@@ -4,8 +4,9 @@ import type { AgendaRepository } from '../../database/repositories/agenda.reposi
 import type { CalendarEvent } from '../../database/types.ts';
 import { botLogger } from '../../utils/logger.ts';
 import { enrichAgendaEvents } from '../event/agenda-enrichment.ts';
-import { formatEventDetail } from '../event/formatters.ts';
+import { appendInvitationRoster, formatEventDetail } from '../event/formatters.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
+import type { InvitationRoster } from './invitation-roster.ts';
 
 const logger = botLogger.child({ module: 'answered-invitation-card' });
 
@@ -30,12 +31,17 @@ export function invitationAnswerLabel(answer: InvitationAnswer, lang: Lang): str
   return answer === 'declined' ? msgs.invitation_declined : msgs.invitation_maybe;
 }
 
-/** Answer line plus the event card; an accepted card also carries the forecast for the event start. */
+/**
+ * Answer line plus the event card; an accepted card also carries the forecast for the event start.
+ * With a roster the card lists everyone's answer, the reader's included, so the agenda's single
+ * own-answer line is left out.
+ */
 export async function formatAnsweredInvitationCard(
   answer: InvitationAnswer,
   event: CalendarEvent | null,
   viewer: AnsweredInvitationViewer,
   deps: AnsweredInvitationCardDeps,
+  roster: InvitationRoster | null = null,
 ): Promise<string> {
   const label = invitationAnswerLabel(answer, viewer.language);
   if (!event) return label;
@@ -53,15 +59,13 @@ export async function formatAnsweredInvitationCard(
             return null;
           })
       : null;
-  const card = formatEventDetail(
-    enrichAgendaEvents(
-      [event],
-      { userId: viewer.userId, language: viewer.language, groupId: viewer.groupId },
-      deps.agendaRepository,
-    )[0]!,
-    event.timezone,
-    viewer.language,
-    { forecast },
-  );
-  return `${label}\n\n${card}`;
+  const shown = roster
+    ? event
+    : enrichAgendaEvents(
+        [event],
+        { userId: viewer.userId, language: viewer.language, groupId: viewer.groupId },
+        deps.agendaRepository,
+      )[0]!;
+  const card = formatEventDetail(shown, event.timezone, viewer.language, { forecast });
+  return appendInvitationRoster(`${label}\n\n${card}`, roster, viewer.language);
 }
