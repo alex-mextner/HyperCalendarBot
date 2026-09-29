@@ -2110,5 +2110,85 @@ describe('sharing tool handlers', () => {
       handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Better Name' } });
       expect(sentTo).toBe(OTHER_USER_ID);
     });
+
+    // The owner's Accept applies the stored changes verbatim, so a place the model claims in a
+    // proposal would become a confirmed venue without the owner ever tapping a candidate (#620).
+    describe('a proposal never carries a confirmed place (#620)', () => {
+      const MODEL_PLACE = {
+        resolved_address: 'Far Away 1, Sample City',
+        latitude: '10.5',
+        longitude: '20.5',
+        google_maps_url: 'https://www.google.com/maps/search/?api=1&query=10.5,20.5',
+        venue_name: 'Far Away Venue',
+      };
+
+      function proposalCtx(editProposalRepo: EditProposalRepository, notices: string[]) {
+        return makeCtx({
+          sharing: {
+            sharedEventRepo,
+            invitationRepo,
+            invitationService,
+            sharingSettingsRepo,
+            sharingService,
+            privacyService,
+            editProposalRepo,
+          },
+          sender: {
+            sendMessage: async () => ({ message_id: 1 }),
+            editMessageText: async () => {},
+            sendEditProposal: async (_ownerId, text) => {
+              notices.push(text);
+              return { message_id: 42 };
+            },
+          },
+        });
+      }
+
+      function ownerEvent(): number {
+        const event = eventService.createEvent({
+          user_id: OTHER_USER_ID,
+          title: 'Shared Place',
+          start_at: '2026-03-20T10:00:00Z',
+          timezone: 'UTC',
+        });
+        invitationRepo.create({ event_id: event.id, inviter_id: OTHER_USER_ID, invitee_id: USER_ID });
+        return event.id;
+      }
+
+      for (const verified of ['true', '1']) {
+        test(`location_verified "${verified}" and a made-up place are dropped from the proposal`, async () => {
+          const editProposalRepo = new EditProposalRepository(db);
+          const notices: string[] = [];
+          const eventId = ownerEvent();
+          const result = await handleProposeEdit(proposalCtx(editProposalRepo, notices), {
+            event_id: eventId,
+            changes: { location: 'Cafe Prague', location_verified: verified, ...MODEL_PLACE },
+          });
+
+          expect(result.success).toBe(true);
+          const [pending] = editProposalRepo.getPendingForEvent(eventId);
+          expect(JSON.parse(pending?.changes ?? 'null')).toEqual({ location: 'Cafe Prague' });
+          expect(notices).toHaveLength(1);
+          expect(notices[0]).toContain('location: Cafe Prague');
+          expect(notices[0]).not.toContain('Far Away');
+          expect(notices[0]).not.toContain('location_verified');
+        });
+      }
+
+      test.each<[string, { [field: string]: string | null }]>([
+        ['nothing but a claimed place', { location_verified: 'true', ...MODEL_PLACE }],
+        ['no changes at all', {}],
+      ])('a proposal of %s is refused and the owner is not pinged', async (_name, changes) => {
+        const editProposalRepo = new EditProposalRepository(db);
+        const notices: string[] = [];
+        const eventId = ownerEvent();
+        const result = await handleProposeEdit(proposalCtx(editProposalRepo, notices), { event_id: eventId, changes });
+
+        expect(result.success).toBe(false);
+        expect(result.mutationState).toBe('not_applied');
+        expect(editProposalRepo.getPendingForEvent(eventId)).toEqual([]);
+        expect(notices).toEqual([]);
+      });
+    });
   });
 });

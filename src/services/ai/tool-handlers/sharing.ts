@@ -1,5 +1,6 @@
 import { InlineKeyboard } from 'gramio';
 import { type Lang, t, toLang } from '../../../config/constants.ts';
+import { UNRESOLVED_PLACE } from '../../../database/repositories/event.repository.ts';
 import type {
   Contact,
   EventParticipant,
@@ -774,10 +775,24 @@ export async function handleProposeEdit(ctx: AgentContext, input: ProposeEditInp
     return { success: false, error: 'You are not invited to this event.' };
   }
 
+  // The owner's Accept applies these verbatim, so a place the model claims would become confirmed
+  // without a tap (#620); only the verification service sets it
+  const changes = Object.fromEntries(
+    Object.entries(input.changes).filter(([field]) => !Object.hasOwn(UNRESOLVED_PLACE, field)),
+  );
+  if (Object.keys(changes).length === 0) {
+    return {
+      success: false,
+      mutationState: 'not_applied',
+      error:
+        'The proposal has no editable change. Verification-state fields (location_verified, resolved_address, coordinates, map link, venue) are never proposed; the owner confirms a place after a location text change.',
+    };
+  }
+
   const proposal = ctx.sharing.editProposalRepo.create({
     event_id: input.event_id,
     proposer_id: ctx.user.telegram_id,
-    changes: JSON.stringify(input.changes),
+    changes: JSON.stringify(changes),
     reason: input.reason,
   });
 
@@ -786,7 +801,7 @@ export async function handleProposeEdit(ctx: AgentContext, input: ProposeEditInp
     const ownerId = ctx.eventService.getEventOwnerId(input.event_id);
     if (ownerId) {
       const proposerName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
-      const changeLines = Object.entries(input.changes)
+      const changeLines = Object.entries(changes)
         .map(([k, v]) => `  ${k}: ${v ?? '(remove)'}`)
         .join('\n');
       const text = `📝 <b>Edit proposal</b> from ${proposerName}:\n${changeLines}${input.reason ? `\n\nReason: ${input.reason}` : ''}`;
