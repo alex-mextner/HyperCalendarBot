@@ -11,7 +11,7 @@ import { InvitationRepository } from '../../../src/database/repositories/invitat
 import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
 import { ParticipantGoogleSyncRepository } from '../../../src/database/repositories/participant-google-sync.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
-import { GoogleCalendarApi } from '../../../src/services/google/calendar-api.ts';
+import { GoogleCalendarApi, googleGoneStatus } from '../../../src/services/google/calendar-api.ts';
 import { SyncService } from '../../../src/services/google/sync-service.ts';
 import { jsonCodec } from '../../../src/utils/json-codec.ts';
 
@@ -301,7 +301,7 @@ describe('participant push when the Google copy is gone', () => {
       expect(participantRepo.findByEventAndUser(eventId, PARTICIPANT)).toBeNull();
     });
 
-    test('a group member whose copy Google shows as cancelled is unlinked and reported like on pull', async () => {
+    test('a group member whose copy Google shows as cancelled is declined like on pull: unlinked, organizer told', async () => {
       participantRepo.delete(eventId, PARTICIPANT);
       getEvent.mockImplementation(() => Promise.resolve({ id: DEAD_COPY, status: 'cancelled' }));
 
@@ -335,5 +335,43 @@ describe('participant push when the Google copy is gone', () => {
       expect(getEvent).not.toHaveBeenCalled();
       expectUntouched();
     });
+
+    test('without the participant handler deps a gone copy fails the job and keeps the link row', async () => {
+      const bare = new SyncService(
+        db,
+        new EventRepository(db),
+        new GoogleSyncRepository(db),
+        new GoogleCalendarRepository(db),
+        undefined,
+        undefined,
+        participantSyncRepo,
+      );
+
+      await expect(bare.pushParticipantEvent(api, PARTICIPANT, eventId, action)).rejects.toMatchObject({
+        cause: { code: 404 },
+      });
+
+      expect(getEvent).not.toHaveBeenCalled();
+      expectUntouched();
+    });
+  });
+});
+
+describe('googleGoneStatus', () => {
+  test.each([404, 410] as const)('HTTP %i is a definitive answer that the event is gone', (status) => {
+    expect(googleGoneStatus(httpError(status))).toBe(status);
+  });
+
+  test.each([
+    ['HTTP 500', httpError(500)],
+    ['HTTP 403', httpError(403)],
+    ['HTTP 200', httpError(200)],
+    ['a timeout', timeoutError()],
+    ['a string "404" code', Object.assign(new Error('odd'), { code: '404' })],
+    ['an error without a code', new Error('no code')],
+    ['null', null],
+    ['a string', 'Not Found'],
+  ])('%s says nothing about the event', (_label, err) => {
+    expect(googleGoneStatus(err)).toBeNull();
   });
 });

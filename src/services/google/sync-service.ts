@@ -386,8 +386,8 @@ export class SyncService {
 
     if (syncRecord?.google_event_id) {
       const copy = { link: syncRecord, calendarId: gcalId, googleEventId: syncRecord.google_event_id, gEvent };
-      const updated = await this.updateParticipantCopy(api, participantSyncRepo, copy);
-      if (!updated) return;
+      const copyUpdated = await this.updateParticipantCopy(api, participantSyncRepo, copy);
+      if (!copyUpdated) return;
       this.syncRepo.logSync({
         user_id: participantUserId,
         event_id: eventId,
@@ -523,10 +523,11 @@ export class SyncService {
     if (listed) throw err;
 
     const created = await this.insertParticipantCopy(api, participantSyncRepo, link, calendarId, copy.gEvent);
-    record('create', created.id ?? undefined, {
+    const newGoogleEventId = created.id ?? undefined;
+    record('create', newGoogleEventId, {
       probe: 'not_found',
       outcome: 'recreated',
-      new_google_event_id: created.id ?? undefined,
+      new_google_event_id: newGoogleEventId,
     });
   }
 
