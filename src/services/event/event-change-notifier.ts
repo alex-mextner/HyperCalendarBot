@@ -120,9 +120,10 @@ export class EventChangeNotifier {
     // invitations right after it returns, so later reads would no longer see which ones were open.
     const openCards = this.deps.invitationRepo
       .getByEvent(event.id)
-      .flatMap(({ id, invitee_id, status, chat_id, message_id }) =>
+      .flatMap(({ id, invitee_id, inviter_id, status, chat_id, message_id }) =>
         chat_id != null && message_id != null && (status === 'pending' || status === 'maybe' || status === 'accepted')
-          ? [{ id, inviteeId: invitee_id, chatId: chat_id, messageId: message_id }]
+          ? // A group card (negative invitee_id: the chat) was written in the inviter's language.
+            [{ id, langUserId: invitee_id < 0 ? inviter_id : invitee_id, chatId: chat_id, messageId: message_id }]
           : [],
       );
 
@@ -130,7 +131,7 @@ export class EventChangeNotifier {
 
     // Editing without a keyboard removes the RSVP buttons, which could no longer be answered.
     for (const card of openCards) {
-      const lang = this.deps.getUserLang(card.inviteeId);
+      const lang = this.deps.getUserLang(card.langUserId);
       await this.deps
         .editMessage(card.chatId, card.messageId, t(lang).sync.eventCancelled(event.title))
         .catch((err) => {

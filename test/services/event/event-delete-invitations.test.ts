@@ -23,6 +23,7 @@ import type { GoogleSyncJobData } from '../../../src/services/google/sync-queue.
 import { ReminderMaterializer } from '../../../src/services/notification/materializer.ts';
 
 const ORGANIZER = 1001;
+const ENGLISH_INVITEE = 2006;
 const GROUP_CHAT = -1002003;
 const TZ = 'Europe/Belgrade';
 /** Sunday 2026-09-27 21:00Z; the lesson is on Tuesday 2026-09-29. */
@@ -57,6 +58,7 @@ function setup(): Fixture {
   for (const id of [ORGANIZER, 2001, 2002, 2003, 2004, 2005]) {
     users.create({ telegram_id: id, timezone: TZ, language: 'ru' });
   }
+  users.create({ telegram_id: ENGLISH_INVITEE, timezone: TZ, language: 'en' });
   const eventRepo = new EventRepository(db);
   const invitations = new InvitationRepository(db);
   const participants = new ParticipantRepository(db);
@@ -166,6 +168,38 @@ describe('deleting an event keeps its invitations (#505)', () => {
       { chatId: 2001, messageId: 2501, text: cancelledText },
       { chatId: 2002, messageId: 2502, text: cancelledText },
       { chatId: 2003, messageId: 2503, text: cancelledText },
+    ]);
+  });
+
+  // A group card's invitee_id is the group chat id, which has no language of its own; the card was
+  // written in the organizer's language, so its cancelled notice must be too.
+  test("a group invitation card is edited in the organizer's language; a personal card in the invitee's", async () => {
+    const fx = setup();
+    const lesson = fx.service.createEvent({
+      user_id: ORGANIZER,
+      title: 'English lesson',
+      start_at: LESSON_START,
+      timezone: TZ,
+    });
+    fx.invitations.create({
+      event_id: lesson.id,
+      inviter_id: ORGANIZER,
+      invitee_id: GROUP_CHAT,
+      chat_id: GROUP_CHAT,
+      message_id: 700,
+    });
+    invite(fx, lesson.id, ENGLISH_INVITEE, 'pending');
+
+    fx.service.deleteEvent(lesson.id, ORGANIZER);
+    await fx.notifierDone();
+
+    expect(fx.edited.toSorted((a, b) => a.chatId - b.chatId)).toEqual([
+      { chatId: GROUP_CHAT, messageId: 700, text: t('ru').sync.eventCancelled('English lesson') },
+      {
+        chatId: ENGLISH_INVITEE,
+        messageId: 500 + ENGLISH_INVITEE,
+        text: t('en').sync.eventCancelled('English lesson'),
+      },
     ]);
   });
 
