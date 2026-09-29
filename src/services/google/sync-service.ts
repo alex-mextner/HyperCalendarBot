@@ -1,14 +1,15 @@
 // src/services/google/sync-service.ts
 import type { Database } from 'bun:sqlite';
+import type { calendar_v3 } from 'googleapis';
 import { type Lang, t } from '../../config/constants.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
 import type { ParticipantGoogleSyncRepository } from '../../database/repositories/participant-google-sync.repository.ts';
-import type { CalendarEvent } from '../../database/types.ts';
+import type { CalendarEvent, ParticipantGoogleSync } from '../../database/types.ts';
 import { syncLogger } from '../../utils/logger.ts';
 import type { EventChangeNotifier } from '../event/event-change-notifier.ts';
-import type { GoogleCalendarApi } from './calendar-api.ts';
+import { type GoogleCalendarApi, googleGoneStatus } from './calendar-api.ts';
 import { computeEventDiff, snapshotFromCalendarEvent, snapshotFromGoogleLocal } from './change-detection.ts';
 import { type GoogleEvent, googleToLocal, localToGoogle } from './event-mapper.ts';
 import {
@@ -16,6 +17,24 @@ import {
   handleParticipantDelete,
   type ParticipantHandlerDeps,
 } from './participant-change-handler.ts';
+
+/** A participant's linked Google copy about to be updated. */
+interface ParticipantCopy {
+  link: ParticipantGoogleSync;
+  calendarId: string;
+  googleEventId: string;
+  gEvent: GoogleEvent;
+}
+
+/** sync_log details of a participant copy that Google reported gone (#728). */
+interface GoneParticipantCopyEvidence {
+  reason: 'participant_copy_gone';
+  http_status: 404 | 410;
+  probe: 'skipped' | 'cancelled' | 'not_found';
+  outcome: 'unlinked' | 'declined' | 'recreated';
+  stale_google_event_id: string;
+  new_google_event_id?: string;
+}
 
 export class SyncService {
   constructor(
@@ -338,8 +357,7 @@ export class SyncService {
       try {
         await api.deleteEvent(calendarId, googleEventId);
       } catch (err) {
-        const code = (err as { code?: number }).code;
-        if (code !== 404 && code !== 410) throw err;
+        if (googleGoneStatus(err) === null) throw err;
       }
       participantSyncRepo.delete(participantUserId, eventId);
       this.syncRepo.logSync({
@@ -359,25 +377,28 @@ export class SyncService {
     const gcalId = 'primary';
     const gEvent = localToGoogle(event);
 
-    if (action === 'create') {
-      const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
-      if (syncRecord?.google_event_id) {
-        const updated = await api.updateEvent(gcalId, syncRecord.google_event_id, gEvent);
-        participantSyncRepo.updateSyncFields(participantUserId, eventId, {
-          google_etag: updated.etag ?? undefined,
-          sync_status: 'synced',
-          last_synced_at: new Date().toISOString(),
-        });
-      } else {
-        const created = await api.insertEvent(gcalId, gEvent);
-        participantSyncRepo.upsert(participantUserId, eventId, {
-          google_event_id: created.id,
-          google_calendar_id: gcalId,
-          google_etag: created.etag,
-          sync_status: 'synced',
-          last_synced_at: new Date().toISOString(),
-        });
-      }
+    const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
+    // A push queued before the invitee declined must not give them a copy again.
+    if (!syncRecord?.google_event_id && this.hasDeclined(participantUserId, eventId)) {
+      syncLogger.info({ participantUserId, eventId, action }, 'Participant declined; no Google copy inserted');
+      return;
+    }
+
+    if (syncRecord?.google_event_id) {
+      const copy = { link: syncRecord, calendarId: gcalId, googleEventId: syncRecord.google_event_id, gEvent };
+      const copyUpdated = await this.updateParticipantCopy(api, participantSyncRepo, copy);
+      if (!copyUpdated) return;
+      this.syncRepo.logSync({
+        user_id: participantUserId,
+        event_id: eventId,
+        google_event_id: syncRecord.google_event_id,
+        direction: 'push',
+        action,
+        details: 'participant_sync',
+      });
+    } else {
+      const link = { user_id: participantUserId, event_id: eventId };
+      await this.insertParticipantCopy(api, participantSyncRepo, link, gcalId, gEvent);
       this.syncRepo.logSync({
         user_id: participantUserId,
         event_id: eventId,
@@ -385,43 +406,131 @@ export class SyncService {
         action: 'create',
         details: 'participant_sync',
       });
-    } else {
-      const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
-      if (!syncRecord?.google_event_id) {
-        const created = await api.insertEvent(gcalId, gEvent);
-        participantSyncRepo.upsert(participantUserId, eventId, {
-          google_event_id: created.id,
-          google_calendar_id: gcalId,
-          google_etag: created.etag,
-          sync_status: 'synced',
-          last_synced_at: new Date().toISOString(),
-        });
-        this.syncRepo.logSync({
-          user_id: participantUserId,
-          event_id: eventId,
-          direction: 'push',
-          action: 'create',
-          details: 'participant_sync',
-        });
-      } else {
-        const updated = await api.updateEvent(gcalId, syncRecord.google_event_id, gEvent);
-        participantSyncRepo.updateSyncFields(participantUserId, eventId, {
-          google_etag: updated.etag ?? undefined,
-          sync_status: 'synced',
-          last_synced_at: new Date().toISOString(),
-        });
-        this.syncRepo.logSync({
-          user_id: participantUserId,
-          event_id: eventId,
-          google_event_id: syncRecord.google_event_id,
-          direction: 'push',
-          action: 'update',
-          details: 'participant_sync',
-        });
-      }
     }
 
     syncLogger.info({ participantUserId, eventId, action }, 'Participant event synced to Google');
+  }
+
+  /** Whether the participant's RSVP is declined; the pull records a copy deleted in Google as one. */
+  private hasDeclined(participantUserId: number, eventId: number): boolean {
+    const participant = this.participantHandlerDeps?.participantRepo.findByEventAndUser(eventId, participantUserId);
+    return participant?.status === 'declined';
+  }
+
+  /** Inserts a fresh copy into the participant's calendar and points their link row at it. */
+  private async insertParticipantCopy(
+    api: GoogleCalendarApi,
+    participantSyncRepo: ParticipantGoogleSyncRepository,
+    link: Pick<ParticipantGoogleSync, 'user_id' | 'event_id'>,
+    calendarId: string,
+    gEvent: GoogleEvent,
+  ): Promise<calendar_v3.Schema$Event> {
+    const created = await api.insertEvent(calendarId, gEvent);
+    participantSyncRepo.upsert(link.user_id, link.event_id, {
+      google_event_id: created.id,
+      google_calendar_id: calendarId,
+      google_etag: created.etag,
+      sync_status: 'synced',
+      last_synced_at: new Date().toISOString(),
+    });
+    return created;
+  }
+
+  /**
+   * Updates the participant's linked copy. Returns false when Google answered that the copy is gone
+   * and the link was resolved instead; any other error fails the job so BullMQ retries it.
+   */
+  private async updateParticipantCopy(
+    api: GoogleCalendarApi,
+    participantSyncRepo: ParticipantGoogleSyncRepository,
+    copy: ParticipantCopy,
+  ): Promise<boolean> {
+    let updated: calendar_v3.Schema$Event;
+    try {
+      updated = await api.updateEvent(copy.calendarId, copy.googleEventId, copy.gEvent);
+    } catch (err) {
+      const httpStatus = googleGoneStatus(err);
+      if (httpStatus === null) throw err;
+      await this.resolveGoneParticipantCopy(api, participantSyncRepo, copy, httpStatus, err);
+      return false;
+    }
+    participantSyncRepo.updateSyncFields(copy.link.user_id, copy.link.event_id, {
+      google_etag: updated.etag ?? undefined,
+      sync_status: 'synced',
+      last_synced_at: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  /**
+   * Resolves a copy Google reported gone the way the pull reads the same copy (handleDeletedEvent):
+   * a copy Google still lists as cancelled means the participant removed the event, so they decline
+   * as on pull; a copy Google no longer knows at all (purged, or another Google account connected)
+   * is recreated, because nothing says they stopped attending. A participant who already declined
+   * is only unlinked. A copy that is still live contradicts the error, which is rethrown for a retry.
+   * Google's Events reference (`status`): events.get always returns a deleted event as cancelled until
+   * Google drops it, the same tombstone the pull's incremental feed delivers.
+   */
+  private async resolveGoneParticipantCopy(
+    api: GoogleCalendarApi,
+    participantSyncRepo: ParticipantGoogleSyncRepository,
+    copy: ParticipantCopy,
+    httpStatus: 404 | 410,
+    err: unknown,
+  ): Promise<void> {
+    const deps = this.participantHandlerDeps;
+    if (!deps) throw new Error('participantHandlerDeps required to resolve a gone participant copy', { cause: err });
+    const { link, calendarId, googleEventId } = copy;
+    const record = (
+      action: 'create' | 'delete',
+      loggedGoogleEventId: string | undefined,
+      evidence: Pick<GoneParticipantCopyEvidence, 'probe' | 'outcome' | 'new_google_event_id'>,
+    ): void => {
+      const details: GoneParticipantCopyEvidence = {
+        reason: 'participant_copy_gone',
+        http_status: httpStatus,
+        stale_google_event_id: googleEventId,
+        ...evidence,
+      };
+      this.syncRepo.logSync({
+        user_id: link.user_id,
+        event_id: link.event_id,
+        google_event_id: loggedGoogleEventId,
+        direction: 'push',
+        action,
+        details: JSON.stringify(details),
+      });
+      syncLogger.warn({ participantUserId: link.user_id, eventId: link.event_id, ...details }, 'Participant copy gone');
+    };
+
+    if (this.hasDeclined(link.user_id, link.event_id)) {
+      participantSyncRepo.delete(link.user_id, link.event_id);
+      record('delete', googleEventId, { probe: 'skipped', outcome: 'unlinked' });
+      return;
+    }
+
+    let listed: calendar_v3.Schema$Event | null;
+    try {
+      listed = await api.getEvent(calendarId, googleEventId);
+    } catch (probeErr) {
+      if (googleGoneStatus(probeErr) === null) throw probeErr;
+      listed = null;
+    }
+
+    if (listed?.status === 'cancelled') {
+      await handleParticipantDelete(link.user_id, link, deps);
+      record('delete', googleEventId, { probe: 'cancelled', outcome: 'declined' });
+      return;
+    }
+    if (listed) throw err;
+
+    const created = await this.insertParticipantCopy(api, participantSyncRepo, link, calendarId, copy.gEvent);
+    const newGoogleEventId = created.id ?? undefined;
+    record('create', newGoogleEventId, {
+      probe: 'not_found',
+      outcome: 'recreated',
+      new_google_event_id: newGoogleEventId,
+    });
   }
 
   async setupWatchChannel(
