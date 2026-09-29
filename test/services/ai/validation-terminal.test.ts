@@ -1,11 +1,14 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
+import { BirthdayMetadataRepository } from '../../../src/database/repositories/birthday-metadata.repository.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
+import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { UserMemoryRepository } from '../../../src/database/repositories/user-memory.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { CreateUserData } from '../../../src/database/types.ts';
 import { aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
@@ -13,6 +16,7 @@ import { unverifiedResponseNotice } from '../../../src/services/ai/response-vali
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
 import { _resetToolThrottleForTest } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
+import { BirthdayService } from '../../../src/services/birthday/birthday-service.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
@@ -45,7 +49,10 @@ type Round = { text: string; tool?: { name: string; input: { [key: string]: unkn
 const UNSUPPORTED = 'Nothing else scheduled today.';
 const INITIAL = 'There are two invented events today.';
 
-function scripted(rounds: Round[], verdicts: (string | Error)[]) {
+/** A scripted verdict, or one computed from what the validator was shown. */
+type Verdict = string | Error | ((validatorInput: string) => string);
+
+function scripted(rounds: Round[], verdicts: Verdict[]) {
   let roundIndex = 0;
   let verdictIndex = 0;
   const counts = { model: 0, validator: 0 };
@@ -53,9 +60,14 @@ function scripted(rounds: Round[], verdicts: (string | Error)[]) {
     const system = options.messages[0];
     if (typeof system?.content === 'string' && system.content.includes('strict QA validator')) {
       counts.validator++;
-      const verdict = verdicts[verdictIndex++];
-      if (verdict instanceof Error) throw verdict;
-      if (verdict === undefined) throw new Error('Missing scripted verdict');
+      const scriptedVerdict = verdicts[verdictIndex++];
+      if (scriptedVerdict instanceof Error) throw scriptedVerdict;
+      if (scriptedVerdict === undefined) throw new Error('Missing scripted verdict');
+      const shown = options.messages[1]?.content;
+      const verdict =
+        typeof scriptedVerdict === 'function'
+          ? scriptedVerdict(typeof shown === 'string' ? shown : '')
+          : scriptedVerdict;
       return {
         text: verdict,
         toolCalls: [],
@@ -581,5 +593,91 @@ describe('re-validation accepts answers grounded in the same run (#492)', () => 
     expect(script.counts.validator).toBe(1);
     expect(result.responseText).toBe(grounded);
     expect(history()).not.toContain('ничего не запланировано');
+  });
+});
+
+// Anonymized from the production turn of 2026-09-29: asked what the bot knows
+// about them, the user got a true answer built from the prompt's profile and
+// saved facts. The validator was never shown those, rejected the answer and its
+// retry as unsupported personal data, and the user got a calendar dead end.
+describe('answers about the user are checked against the profile the agent saw (#740)', () => {
+  const USER_ID = 789;
+  const FACTS = ['Играю на виолончели в оркестре', 'Аллергия на орехи'];
+  let db: Database;
+  let delivered: string[];
+  let sender: TelegramSender;
+
+  beforeEach(() => {
+    _resetToolThrottleForTest();
+    aiFailureNotices.reset();
+    setSystemTime(new Date('2026-09-29T15:41:18Z'));
+    db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    delivered = [];
+    sender = {
+      sendMessage: async (_chatId, text) => {
+        delivered.push(text);
+        return { message_id: 42 };
+      },
+      editMessageText: async (_chatId, _messageId, text) => {
+        delivered.push(text);
+      },
+    };
+  });
+
+  afterEach(() => {
+    setSystemTime();
+    db.close();
+  });
+
+  function profileContext(language: 'en' | 'ru', messageText: string): AgentContext {
+    const user = { telegram_id: USER_ID, first_name: 'Мира', timezone: 'Europe/Lisbon', language };
+    const ctx = buildContext(
+      db,
+      user,
+      messageText,
+      mock(async () => true),
+    );
+    const userMemoryRepo = new UserMemoryRepository(db);
+    for (const fact of FACTS) userMemoryRepo.append(USER_ID, fact);
+    const birthdayService = new BirthdayService(
+      new EventRepository(db),
+      new BirthdayMetadataRepository(db),
+      new EventReminderRepository(db),
+      new NotificationPreferencesRepository(db),
+    );
+    ctx.birthday = { birthdayService, userMemoryRepo };
+    return ctx;
+  }
+
+  /** A validator can confirm a fact about the user only when its input shows that fact. */
+  function approvesShownProfile(validatorInput: string): string {
+    const shown = ['Мира', 'Europe/Lisbon', ...FACTS].every((fact) => validatorInput.includes(fact));
+    return shown ? 'APPROVE' : 'REJECT: personal data without calling calendar tools';
+  }
+
+  test.each([
+    [
+      'ru' as const,
+      'А что ты знаешь обо мне',
+      'Вот что я о тебе знаю, Мира: твой часовой пояс — Europe/Lisbon, язык — русский. Ещё я помню, что ты играешь на виолончели в оркестре и что у тебя аллергия на орехи.',
+    ],
+    [
+      'en' as const,
+      'what do you know about me',
+      "Here's what I know about you, Mira: your timezone is Europe/Lisbon and you speak English. I also remember that you play the cello in an orchestra and that you're allergic to nuts.",
+    ],
+  ])('a tool-less %s answer drawn from the profile and saved facts reaches the user', async (language, question, answer) => {
+    const ctx = profileContext(language, question);
+    const script = scripted([{ text: answer }, { text: answer }], [approvesShownProfile, approvesShownProfile]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(answer);
+    expect(result.responseText).not.toContain(unverifiedResponseNotice(language, 'Europe/Lisbon', []));
+    expect(result.metrics?.termination).not.toBe('unverified');
+    expect(delivered.at(-1)).toBe(answer);
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).toContain(answer);
+    expect(script.counts).toEqual({ model: 1, validator: 1 });
   });
 });

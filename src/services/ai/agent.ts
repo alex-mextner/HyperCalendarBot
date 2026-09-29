@@ -39,7 +39,7 @@ import {
   providerFailureMetrics,
   type StreamCallbacks,
 } from './streaming.ts';
-import { buildSystemPrompt } from './system-prompt.ts';
+import { buildSystemPrompt, buildUserProfileEvidence } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
 import { createToolExposure, DISCOVERY_TOOL, runRoundRevealingRejectedTools } from './tool-exposure.ts';
@@ -1371,7 +1371,10 @@ export class CalendarBotAgent {
         }
       } else if (availableTools.length > 0) {
         if (finalProse && !isSkipText(finalProse) && shouldValidateResponse(proseEvidence)) {
-          const validation = await validateResponse(proseEvidence, validatorStream);
+          const validation = await validateResponse(
+            { ...proseEvidence, userProfile: buildUserProfileEvidence(ctx) },
+            validatorStream,
+          );
 
           if (!validation.approved) {
             aiLogger.info(
@@ -1418,6 +1421,8 @@ export class CalendarBotAgent {
                     timezone: ctx.user.timezone,
                     tools: toolEvidence,
                     response: retryOutcome.lastRoundText,
+                    // Rebuilt: the retry may have saved a fact that its answer now mentions.
+                    userProfile: buildUserProfileEvidence(ctx),
                   },
                   validatorStream,
                 );

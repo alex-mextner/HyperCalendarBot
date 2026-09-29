@@ -556,3 +556,16 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 
   return sections.filter((section) => section.length > 0).join('\n\n');
 }
+
+/**
+ * What the prompt tells the agent about the user: the User Info and saved-facts
+ * sections, rendered by the same builders as in buildSystemPrompt. An answer
+ * about the user themself is drawn from this text, not from a tool, so this is
+ * the evidence it has to be checked against.
+ */
+export function buildUserProfileEvidence(ctx: AgentContext): string {
+  const now = new TZDate(Date.now(), ctx.user.timezone);
+  return [buildUserInfoSection(ctx, formatUtcOffset(ctx.user.timezone), now), buildMemorySection(ctx)]
+    .filter((section) => section.length > 0)
+    .join('\n\n');
+}
