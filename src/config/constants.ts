@@ -630,7 +630,7 @@ export const MSG = {
         deleteFailed: (titles: string) => `⚠️ Not deleted: ${titles}`,
         deleteCancelled: '❌ Cancelled, nothing was deleted.',
         dayImageSent: (date: string) => `Day calendar image for ${date} has been sent to the chat.`,
-        weekImageSent: (weekStart: string) => `Weekly calendar image starting ${weekStart} has been sent to the chat.`,
+        weekImageSent: (week: string) => `Calendar for ${week} — the picture is in the chat.`,
         monthImageSent: (month: string) => `Monthly calendar image for ${month} has been sent to the chat.`,
         dayImageFailed: (date: string) => `Failed to render or send the day image for ${date}.`,
         weekImageFailed: (weekStart: string) => `Failed to render or send the weekly image starting ${weekStart}.`,
@@ -1649,7 +1649,7 @@ export const MSG = {
         deleteFailed: (titles: string) => `⚠️ Не удалось удалить: ${titles}`,
         deleteCancelled: '❌ Отменено, ничего не удалено.',
         dayImageSent: (date: string) => `Картинка календаря за ${date} отправлена в чат.`,
-        weekImageSent: (weekStart: string) => `Картинка недельного календаря с ${weekStart} отправлена в чат.`,
+        weekImageSent: (week: string) => `Календарь на ${week} — картинка в чате.`,
         monthImageSent: (month: string) => `Картинка месячного календаря за ${month} отправлена в чат.`,
         dayImageFailed: (date: string) => `Не удалось отрендерить или отправить картинку за ${date}.`,
         weekImageFailed: (weekStart: string) =>

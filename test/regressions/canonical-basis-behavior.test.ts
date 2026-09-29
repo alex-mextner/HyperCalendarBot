@@ -20,12 +20,15 @@ import type { AgentContext, ToolResult } from '../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../src/services/conversation-logger.ts';
 import { EventService } from '../../src/services/event/event-service.ts';
 import { HolidayService } from '../../src/services/holiday/holiday-service.ts';
+import type { ImageRenderer } from '../../src/services/image/render-service.ts';
 import { IntentExecutor } from '../../src/services/intent/intent-executor.ts';
 import { IntentMatcher } from '../../src/services/intent/intent-matcher.ts';
 import { canonicalMetadata, seedIntents } from '../../src/services/intent/seed-catalog.ts';
 import type { EventSummary } from '../../src/services/intent/variable-resolver.ts';
 import { WorkflowSchema } from '../../src/services/intent/workflow-schema.ts';
 import { validateWorkflow } from '../../src/services/intent/workflow-validator.ts';
+import type { ImageRenderJob } from '../../src/worker/image-render.queue.ts';
+import { png } from '../fixtures/png.ts';
 
 // Saturday 2026-09-19 10:00 in Belgrade (UTC+2). The clocks go back on 2026-10-25 and forward on 2027-03-28.
 const NOW = new Date('2026-09-19T08:00:00Z');
@@ -537,6 +540,8 @@ function fixture(
     language?: 'en' | 'ru';
     lastMentioned?: EventSummary;
     wrapTool?: (name: string, input: unknown, real: () => Promise<ToolResult>) => Promise<ToolResult>;
+    /** Receives every picture job; without it the context has no renderer, as in a worker-less bot. */
+    renderer?: ImageRenderer;
   } = {},
 ): Fixture {
   const users = new UserRepository(db);
@@ -578,6 +583,15 @@ function fixture(
           update: (id: number, patch: never) => prefsRepo.update(id, patch),
         },
       },
+      ...(options.renderer
+        ? {
+            renderService: options.renderer,
+            sender: {
+              sendPhoto: async () => ({ message_id: 2 }),
+              sendMessage: async () => ({ message_id: 3 }),
+            },
+          }
+        : {}),
     }) as unknown as AgentContext;
   let actor = USER;
   let chat = USER;
@@ -858,6 +872,70 @@ describe('a week plan against real SQLite', () => {
     expect(text).toContain('Vet');
     expect(text).not.toContain('Concert');
     expect(text).not.toContain('Next Sunday');
+  });
+});
+
+describe('a week picture against real SQLite', () => {
+  async function weekPicture(now: string) {
+    setSystemTime(new Date(now));
+    const jobs: ImageRenderJob[] = [];
+    const f = fixture({
+      language: 'ru',
+      renderer: {
+        renderDirect: async (job) => {
+          jobs.push(job);
+          return png();
+        },
+      },
+    });
+    f.addEvent('Concert', '2026-09-22T18:30:00+02:00');
+    f.addEvent('Lesson', '2026-09-28T12:30:00+02:00');
+    expect(await f.say('покажи календарь картинкой на этой неделе')).toMatchObject({ handled: true });
+    const job = jobs[0];
+    if (job?.type !== 'weekly-overview') throw new Error(`expected a weekly picture, got ${job?.type}`);
+    const shown = job.data.days.map((day) => ({
+      day: day.dayNumber,
+      events: day.events.map((event) => event.title),
+    }));
+    return { call: f.call.mock.calls[0], shown, reply: f.lastText() };
+  }
+
+  test('on a Sunday evening the picture is the coming week, and the reply names it', async () => {
+    // 2026-09-27 23:15 Belgrade: the picture showed Monday 21 – Sunday 27, a week already gone.
+    const { call, shown, reply } = await weekPicture('2026-09-27T21:15:00Z');
+    expect(call).toEqual(['render_week_image', { week_start: '2026-09-28', scope: 'personal' }]);
+    expect(shown).toEqual([
+      { day: 28, events: ['Lesson'] },
+      { day: 29, events: [] },
+      { day: 30, events: [] },
+      { day: 1, events: [] },
+      { day: 2, events: [] },
+      { day: 3, events: [] },
+      { day: 4, events: [] },
+    ]);
+    expect(reply).toContain('28 сентября – 4 октября 2026');
+  });
+
+  test('on a Saturday the picture is the coming week too', async () => {
+    const { call, shown, reply } = await weekPicture('2026-09-26T08:00:00Z');
+    expect(call).toEqual(['render_week_image', { week_start: '2026-09-28', scope: 'personal' }]);
+    expect(shown.map((day) => day.day)).toEqual([28, 29, 30, 1, 2, 3, 4]);
+    expect(reply).toContain('28 сентября – 4 октября 2026');
+  });
+
+  test('on a Wednesday the picture is still the current calendar week', async () => {
+    const { call, shown, reply } = await weekPicture('2026-09-23T10:00:00Z');
+    expect(call).toEqual(['render_week_image', { week_start: '2026-09-21', scope: 'personal' }]);
+    expect(shown).toEqual([
+      { day: 21, events: [] },
+      { day: 22, events: ['Concert'] },
+      { day: 23, events: [] },
+      { day: 24, events: [] },
+      { day: 25, events: [] },
+      { day: 26, events: [] },
+      { day: 27, events: [] },
+    ]);
+    expect(reply).toContain('21–27 сентября 2026');
   });
 });
 

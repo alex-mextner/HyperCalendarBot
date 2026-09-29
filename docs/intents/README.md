@@ -4,7 +4,7 @@
 
 **Это целевой сид из исходного кода: правил — 52.** Документ строится из исходников и **не утверждает, что сид уже установлен**: сборка не открывает базу и не видит сервер. Установку подтверждает отдельная проверка живой базы: отпечаток ниже должен совпасть со значением в таблице `intent_basis_manifest` (подробности в [описании движка](engine.md#что-здесь-утверждается-а-что-нет)).
 
-Отпечаток целевого сида: `8e646726da7e4e31ad50a14988c2b40451b804a2ee15e202c46b7d0aebddea41`
+Отпечаток целевого сида: `6d0ed91ddf04de2ca3b9561433dbfa313fe89b7aab2ef16c3758b2fea0fab5cb`
 
 Навигация: [описание движка и правил безопасности](engine.md) · [HTML-страница с поиском и фильтрами](index.html) · [машиночитаемый каталог](catalogue.json) · [заметки по каталогу и приватному отчёту](../intent-catalogue.md) · [план перестройки](../plans/2026-09-18-intent-redesign.md)
 
@@ -548,6 +548,8 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 
 ` basis.calendar.image ` · Расписание · Чтение своего календаря · инструменты: ` render_day_image `, ` render_week_image `, ` render_month_image `
 
+> Пометка из исходника (по-английски): A week picture is always a Monday-to-Sunday calendar week; asked on a Saturday or Sunday, this week means the coming one. The reply names the dates shown.
+
 **Примеры фраз.**
 
 - покажи календарь картинкой на неделю
@@ -565,7 +567,7 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 **Что делает правило по шагам.**
 
 1. Если выполняется условие ` bind.p.kind == 'day' `, то вызвать инструмент ` render_day_image ` с параметрами: ` date ` = ` {{bind.p.start}} `; ` scope ` = ` {{env.scope}} `
-2. Если выполняется условие ` bind.p.kind == 'week' `, то вызвать инструмент ` render_week_image ` с параметрами: ` week_start ` = ` {{bind.p.start}} `; ` scope ` = ` {{env.scope}} `
+2. Если выполняется условие ` bind.p.kind == 'week' `, то вызвать инструмент ` render_week_image ` с параметрами: ` week_start ` = ` {{bind.p.calendar_week_start}} `; ` scope ` = ` {{env.scope}} `
 3. Если выполняется условие ` bind.p.kind == 'month' `, то вызвать инструмент ` render_month_image ` с параметрами: ` month ` = ` {{bind.p.month}} `; ` scope ` = ` {{env.scope}} `
 
 **Что читается из сообщения (привязки).**
@@ -632,7 +634,7 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
       "when": "bind.p.kind == 'week'",
       "call": "render_week_image",
       "input": {
-        "week_start": "{{bind.p.start}}",
+        "week_start": "{{bind.p.calendar_week_start}}",
         "scope": "{{env.scope}}"
       }
     },
