@@ -2,7 +2,7 @@ import type { EventRepository } from '../../database/repositories/event.reposito
 import type { InvitationRepository } from '../../database/repositories/invitation.repository';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository';
-import type { Invitation, InvitationStatus } from '../../database/types';
+import type { CalendarEvent, Invitation, InvitationStatus } from '../../database/types';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 
 const MAX_DECLINES = 3;
@@ -166,7 +166,17 @@ export class InvitationService {
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
 
-  rescheduleFromProposal(invitationId: number, userId: number): InvitationResult {
+  /**
+   * Accept the invitee's proposed time. `moveEvent` moves the event to it before the roster change is
+   * announced, so the cards that change refreshes already show the new time. It returns the moved event
+   * (null when it could not move it) rather than void, so an async mover, still moving the event when
+   * the cards re-render, does not type-check.
+   */
+  rescheduleFromProposal(
+    invitationId: number,
+    userId: number,
+    moveEvent: (eventId: number, proposedTime: string) => CalendarEvent | null,
+  ): InvitationResult {
     const invitation = this.invRepo.findById(invitationId);
     if (!invitation) {
       return { success: false, error: 'Invitation not found' };
@@ -189,11 +199,17 @@ export class InvitationService {
         this.participantRepo.add(invitation.event_id, invitation.invitee_id, 'accepted');
       }
     }
-    this.domainEvents?.emit('invitationRoster.changed', {
-      userId: invitation.inviter_id,
-      eventId: invitation.event_id,
-      answeredInvitationId: invitationId,
-    });
+    try {
+      moveEvent(invitation.event_id, proposedTime);
+    } finally {
+      // The invitation is accepted even if the move failed, so the roster change is announced anyway.
+      // No answeredInvitationId: the acting user is the inviter, who has no invitation card of theirs to
+      // rewrite, so every delivered card re-renders, the proposer's included.
+      this.domainEvents?.emit('invitationRoster.changed', {
+        userId: invitation.inviter_id,
+        eventId: invitation.event_id,
+      });
+    }
     return { success: true, invitation: this.invRepo.findById(invitationId)!, proposedTime };
   }
 

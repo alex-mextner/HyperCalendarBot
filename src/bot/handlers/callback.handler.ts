@@ -875,7 +875,18 @@ export function createCallbackHandler(
     }
 
     if (subAction === 'reschedule') {
-      const reschedResult = invitationService.rescheduleFromProposal(invId, user.telegram_id);
+      const moveEventToProposedTime = (eventId: number, proposedTime: string) => {
+        const event = eventRepo?.findById(eventId, user.telegram_id);
+        if (!event || !eventService) return null;
+        const durationMs = event.end_at ? new Date(event.end_at).getTime() - new Date(event.start_at).getTime() : 0;
+        const newEnd =
+          durationMs > 0 ? new Date(new Date(proposedTime).getTime() + durationMs).toISOString() : undefined;
+        return eventService.updateEvent(event.id, user.telegram_id, {
+          start_at: proposedTime,
+          ...(newEnd ? { end_at: newEnd } : {}),
+        });
+      };
+      const reschedResult = invitationService.rescheduleFromProposal(invId, user.telegram_id, moveEventToProposedTime);
       if (reschedResult.reason === 'invite_proposal_closed') {
         await answerProposalClosed(ctx, lang);
         return;
@@ -887,15 +898,6 @@ export function createCallbackHandler(
       const invitation = reschedResult.invitation!;
       const proposedTime = reschedResult.proposedTime!;
       const event = eventRepo?.findById(invitation.event_id, user.telegram_id);
-      if (event && eventService) {
-        const durationMs = event.end_at ? new Date(event.end_at).getTime() - new Date(event.start_at).getTime() : 0;
-        const newEnd =
-          durationMs > 0 ? new Date(new Date(proposedTime).getTime() + durationMs).toISOString() : undefined;
-        eventService.updateEvent(event.id, user.telegram_id, {
-          start_at: proposedTime,
-          ...(newEnd ? { end_at: newEnd } : {}),
-        });
-      }
       const formattedTimeInviter = formatProposedTime(proposedTime, user.timezone, lang);
       await ctx.answer();
       await ctx
