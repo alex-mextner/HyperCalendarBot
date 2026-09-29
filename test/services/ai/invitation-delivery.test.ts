@@ -27,6 +27,7 @@ const INVITER_ID = 100;
 const INVITEE_ID = 200;
 
 const BotRequestSchema = z.object({
+  chat_id: z.number(),
   reply_markup: z
     .object({
       inline_keyboard: z.array(z.array(z.object({ text: z.string(), callback_data: z.string().optional() }))),
@@ -520,17 +521,22 @@ describe('deliverInvitation', () => {
       );
 
       expect(result).toEqual({ delivered: true, viaDeepLink: false, viaBotApi: true });
-      expect(requests.map((request) => request.reply_markup?.inline_keyboard)).toEqual([
-        [
-          [
-            { text: '✅ Принять', callback_data: `inv:accept:${invId}` },
-            { text: '❌ Отклонить', callback_data: `inv:decline:${invId}` },
+      expect(
+        requests.map((request) => ({ to: request.chat_id, keyboard: request.reply_markup?.inline_keyboard })),
+      ).toEqual([
+        {
+          to: INVITEE_ID,
+          keyboard: [
+            [
+              { text: '✅ Принять', callback_data: `inv:accept:${invId}` },
+              { text: '❌ Отклонить', callback_data: `inv:decline:${invId}` },
+            ],
+            [
+              { text: 'Возможно 🤔', callback_data: `inv:maybe:${invId}` },
+              { text: 'Другое время 🕐', callback_data: `inv:propose:${invId}` },
+            ],
           ],
-          [
-            { text: 'Возможно 🤔', callback_data: `inv:maybe:${invId}` },
-            { text: 'Другое время 🕐', callback_data: `inv:propose:${invId}` },
-          ],
-        ],
+        },
       ]);
     } finally {
       server.stop(true);
