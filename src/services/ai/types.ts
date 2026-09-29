@@ -219,6 +219,8 @@ export interface AgentContext {
   inputMode?: 'text' | 'voice_message' | 'live_call';
   /** Set to true by end_call tool to hang up after TTS plays. */
   callEndRequested?: boolean;
+  /** Local 'YYYY-MM-DD' start days (ctx.user.timezone) of events created, updated or deleted in this run. */
+  changedDays?: Set<string>;
   supplementMode?: boolean;
   /** The exact auto-response text that was sent by the intent matcher. Passed to supplement AI explicitly. */
   supplementAutoResponse?: string;

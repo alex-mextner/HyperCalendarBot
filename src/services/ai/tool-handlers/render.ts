@@ -1,5 +1,5 @@
 import { TZDate } from '@date-fns/tz';
-import { startOfWeek } from 'date-fns';
+import { format, startOfWeek } from 'date-fns';
 import { t } from '../../../config/constants.ts';
 import { agendaImageErrorMessage, sendAgendaImage } from '../../../utils/agenda-image.ts';
 import { autoPin } from '../../../utils/auto-pin.ts';
@@ -38,6 +38,28 @@ function schedulePinFireAndForget(ctx: AgentContext, messageId: number): void {
   });
 }
 
+/**
+ * The earliest upcoming day this run changed, when the requested day is already past. After a
+ * change the model sometimes renders a past day it also touched, which hides the change that
+ * matters (2026-09-27: deletes on 2026-09-01 and 2026-09-29, then a picture of 2026-09-01).
+ * A past day among the turn's named days (ctx.dayReferences.allowedDates) is kept when the run
+ * left it untouched: the user named it ("cancel English on Tuesday and show me September 1"),
+ * though the set also holds the neighbours of a day given in another zone and the days of a
+ * question a "Да" answers; a clock time alone names only today. A day the run changed yields like
+ * any other, so "move English from September 1 to Tuesday" pictures Tuesday; the trade-off is
+ * that asking to see a day the run also changed is redirected too.
+ */
+function upcomingChangedDayInstead(ctx: AgentContext, requested: string): string | undefined {
+  const today = format(new TZDate(new Date(), ctx.user.timezone), 'yyyy-MM-dd');
+  if (requested >= today || !ctx.changedDays) return undefined;
+  if (ctx.dayReferences?.allowedDates.has(requested) && !ctx.changedDays.has(requested)) return undefined;
+  let nearest: string | undefined;
+  for (const day of ctx.changedDays) {
+    if (day >= today && (nearest === undefined || day < nearest)) nearest = day;
+  }
+  return nearest;
+}
+
 export async function handleRenderDayImage(
   ctx: AgentContext,
   input: { date: string; scope?: Scope; owner_id?: number },
@@ -63,6 +85,9 @@ export async function handleRenderDayImage(
   } catch {
     return { success: false, error: 'Invalid calendar date.' };
   }
+  const instead = upcomingChangedDayInstead(ctx, input.date);
+  if (instead) dateObj = localCalendarDate(instead, ctx.user.timezone);
+  const date = instead ?? input.date;
   const occurrences =
     scope === 'group'
       ? (() => {
@@ -70,7 +95,7 @@ export async function handleRenderDayImage(
           return ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, start, end);
         })()
       : ctx.eventService.getEventsForDay(userId, dateObj, ctx.user.timezone);
-  const holidays = ctx.holidayService?.getHolidaysForDate(userId, input.date) ?? [];
+  const holidays = ctx.holidayService?.getHolidaysForDate(userId, date) ?? [];
   const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
   const sender = ctx.sender;
   const tr = t(lang).aiTools.meta;
@@ -83,7 +108,7 @@ export async function handleRenderDayImage(
         { userId, language: lang, groupId: scope === 'group' ? ctx.groupChatId : undefined },
         ctx.isGroup && scope !== 'group' ? undefined : ctx.eventService.agendaRepository,
       ),
-      input.date,
+      date,
       ctx.user.timezone,
       lang,
       userId,
@@ -100,15 +125,15 @@ export async function handleRenderDayImage(
     schedulePinFireAndForget(ctx, sent.message_id);
     return {
       success: true,
-      output: tr.dayImageSent(input.date),
+      output: instead ? tr.dayImageSentInstead(date, input.date) : tr.dayImageSent(date),
       agentHint:
         'The day image has already been delivered to the chat. Do NOT call render_day_image again for this date in this turn.',
     };
   } catch (err) {
     const imageError = agendaImageErrorMessage(err);
     if (imageError) return { success: false, error: imageError };
-    renderLogger.error({ err, date: input.date }, 'Day image render failed');
-    return { success: false, error: tr.dayImageFailed(input.date) };
+    renderLogger.error({ err, date, requested: input.date }, 'Day image render failed');
+    return { success: false, error: tr.dayImageFailed(date) };
   }
 }
 handleRenderDayImage.meta = { skipActionLog: true, delivers: true } satisfies ToolHandlerMeta;

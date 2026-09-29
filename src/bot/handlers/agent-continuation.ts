@@ -21,17 +21,19 @@ export interface AgentContinuationDeps {
  * saved to chat_history first, like any user turn: the agent reads the current turn from history,
  * so an unsaved message never reaches the model and is missing from later turns too. The explicit
  * chatHistoryId links this turn's tool calls to that row instead of the previous message. A chat
- * other than the user's own private chat is a group.
+ * other than the user's own private chat is a group. `changedDays` hands over the days the bot
+ * already changed for this turn (e.g. deletes from a tapped list), so a day picture can show them.
  */
 export async function continueWithAgent(
   user: User,
   text: string,
   deps: AgentContinuationDeps,
   chatId = user.telegram_id,
+  changedDays?: Set<string>,
 ): Promise<void> {
   const groupInfo = chatId === user.telegram_id ? undefined : { isGroup: true, groupChatId: chatId };
   const ctx = deps.buildContext(user, chatId, text, groupInfo);
   // Private turns are stored without a chat id, like the logging middleware stores them.
   const chatHistoryId = ctx.conversationLogger.logUserMessage(user.telegram_id, text, groupInfo ? chatId : undefined);
-  await deps.agent.run({ ...ctx, chatHistoryId });
+  await deps.agent.run({ ...ctx, chatHistoryId, ...(changedDays && { changedDays }) });
 }

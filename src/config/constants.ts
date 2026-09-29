@@ -633,6 +633,8 @@ export const MSG = {
         weekImageSent: (week: string) => `Calendar for ${week} — the picture is in the chat.`,
         monthImageSent: (month: string) => `Monthly calendar image for ${month} has been sent to the chat.`,
         dayImageFailed: (date: string) => `Failed to render or send the day image for ${date}.`,
+        dayImageSentInstead: (date: string, requested: string) =>
+          `Day calendar image for ${date} has been sent to the chat instead of the past day ${requested}: ${date} is the nearest upcoming day with the changes just made.`,
         weekImageFailed: (weekStart: string) => `Failed to render or send the weekly image starting ${weekStart}.`,
         monthImageFailed: (month: string) => `Failed to render or send the monthly image for ${month}.`,
         callQueued: 'Call queued. You will receive a voice call shortly.',
@@ -1652,6 +1654,8 @@ export const MSG = {
         weekImageSent: (week: string) => `Календарь на ${week} — картинка в чате.`,
         monthImageSent: (month: string) => `Картинка месячного календаря за ${month} отправлена в чат.`,
         dayImageFailed: (date: string) => `Не удалось отрендерить или отправить картинку за ${date}.`,
+        dayImageSentInstead: (date: string, requested: string) =>
+          `Картинка календаря за ${date} отправлена в чат вместо прошедшего дня ${requested}: ${date} — ближайший предстоящий день с только что внесёнными изменениями.`,
         weekImageFailed: (weekStart: string) =>
           `Не удалось отрендерить или отправить недельную картинку с ${weekStart}.`,
         monthImageFailed: (month: string) => `Не удалось отрендерить или отправить месячную картинку за ${month}.`,

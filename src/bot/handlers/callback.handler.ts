@@ -335,6 +335,7 @@ export function createCallbackHandler(
       deleteReportForAgent({ deleted, kept, failed }, user.timezone),
       agentContinuation,
       chatId,
+      agentCtx.changedDays,
     ).catch((err: unknown) => cmdLogger.error({ err }, 'AI continuation after delete confirmation failed'));
   });
 
