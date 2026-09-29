@@ -18,6 +18,16 @@ export interface EventListResult {
   nextPageToken: string | null;
 }
 
+/**
+ * Google's definitive answer that an event does not exist (any more): HTTP 404 or 410. googleapis
+ * puts the HTTP status in a numeric `code`; a timeout or a dropped connection has a string code and
+ * says nothing about the event.
+ */
+export function googleGoneStatus(err: unknown): 404 | 410 | null {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return null;
+  return err.code === 404 || err.code === 410 ? err.code : null;
+}
+
 export class GoogleCalendarApi {
   private api: calendar_v3.Calendar;
 

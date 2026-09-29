@@ -1049,6 +1049,19 @@ const syncQueue = new Queue('google-sync', {
 \* Conflict errors trigger a separate `resolve-conflict` job instead of retrying the original.
 \** Full sync is re-enqueued as a new job, not retried on the same job.
 
+#### Participant copy gone (404/410 on an invitee's copy)
+
+When an organizer's change is pushed to a participant's linked Google copy and `events.update` answers 404 or 410, the push resolves the link the way the pull reads the same copy (`SyncService.resolveGoneParticipantCopy`). Any other status and any timeout fail the job so BullMQ retries it.
+
+| Situation | Result | `sync_log` `details.outcome` |
+| --- | --- | --- |
+| The participant's RSVP is already `declined` | Link row removed; nothing else changes | `unlinked` (`probe: skipped`) |
+| `events.get` returns the copy with `status: cancelled` (the participant deleted it) | `handleParticipantDelete`, exactly as on pull: RSVP and invitation declined, pending edit proposal rejected, link row removed, organizer told | `declined` |
+| `events.get` answers 404/410 too (purged, or another Google account is connected) | A fresh copy is inserted and the link row points at it | `recreated` (with `new_google_event_id`) |
+| `events.get` returns a live copy, or fails otherwise | The job fails and is retried | none |
+
+The row is written with `direction = 'push'`, `action` `delete` or `create`, and `details` JSON `{ reason: 'participant_copy_gone', http_status, probe, outcome, stale_google_event_id, new_google_event_id? }`. A create or update push for a participant who has declined and has no linked copy inserts nothing, so a push queued before the decline cannot put the copy back.
+
 ### 10.3. Rate Limit Handling
 
 Google Calendar API has a per-user limit of ~10 requests/second and a per-project limit.
