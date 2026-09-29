@@ -104,9 +104,20 @@ export async function tryFullFieldAdd(
   // Opportunistic crash recovery: an `executed` session with unresolved durable effects
   // (session-runtime.ts's `EffectLedger`) is the only record of what happened after the event
   // already exists — reconciled here (or found to already be fully reconciled) before this
-  // insert-only write below, so a genuinely stuck ledger from a prior crash does not
-  // permanently block every future `/add` at this key without ever attempting recovery.
-  await reconcileBeforeNewTurn(ctx, user, key, deps);
+  // insert-only write below. A still-`blocked` result means the ledger could not be fully
+  // reconciled just now (e.g. an effect is durably `unknown`/`failed` from a prior crash) —
+  // that is a fully-created event with unresolved follow-up actions, never an "in-progress
+  // draft", so it gets its own accurate message instead of falling into the race_lost branch
+  // below (which would otherwise claim there is an unanswered question).
+  const reconciliation = await reconcileBeforeNewTurn(ctx, user, key, deps);
+  if (reconciliation.blocked) {
+    await ctx.send(
+      ctx.lang === 'ru'
+        ? 'Предыдущее событие уже создано, но не все действия после этого подтверждены (приглашения, синхронизация, квитанция) — подожди подтверждения перед новым запросом.'
+        : 'The previous event was already created, but some follow-up actions (invitations, calendar sync, receipt) are not yet confirmed — please wait before starting a new request.',
+    );
+    return { handled: true };
+  }
   const shell: SessionShell = {
     version: 3,
     sessionId: crypto.randomUUID(),

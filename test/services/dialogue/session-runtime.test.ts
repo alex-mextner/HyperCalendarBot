@@ -493,5 +493,61 @@ describe(
       expect(kinds).toEqual(['executed', 'race_lost']);
       expect(eventsOf(db, user.telegram_id)).toHaveLength(1);
     });
+
+    test('two concurrent resumes of the same stuck session never double-send the still-pending effect, and only the winner deletes the row (blocker: a lost CAS write must abort before any further side effect, and delete must never fire for a stale writer)', async () => {
+      const { db, user, eventService, ctx } = harness();
+      const event = eventService.createEvent({
+        user_id: user.telegram_id,
+        title: 'Stuck invite',
+        start_at: '2026-10-01T10:00:00.000Z',
+        end_at: '2026-10-01T10:30:00.000Z',
+        timezone: 'UTC',
+      });
+      const draft = timedDraft('Stuck invite', [
+        { contactId: 1, telegramId: 501, displayName: 'Lena', confirmed: true },
+      ]);
+      const shell = makeShell(user, 'UTC');
+      let sendInvitationCalls = 0;
+      const deps: SessionRuntimeDeps = {
+        eventService,
+        dialogueSessions: db.dialogueSessions,
+        invitationService: {
+          sendInvitation: () => {
+            sendInvitationCalls++;
+            return { success: false, error: 'invitations not configured for this test' };
+          },
+        } as unknown as InvitationService,
+      };
+      // Post-create hooks and the receipt already settled from an earlier attempt — only
+      // invitations remains pending, simulating a prior crash right before it ran.
+      const executedSession: DialogueV3Session = {
+        ...shell,
+        draft,
+        status: 'executed',
+        revision: 0,
+        executionReceipt: {
+          status: 'applied',
+          eventId: event.id,
+          appliedAtRevision: 0,
+          effects: { invitations: 'pending', postCreateHooks: 'applied', receipt: 'applied' },
+          inviteOutcome: null,
+        },
+      };
+      db.dialogueSessions.set(keyFor(user), executedSession, null);
+      // Both "concurrent turns" read the SAME stale session (same revision) before either writes
+      // — exactly what two overlapping retried/duplicate updates for the same chat would see.
+      const staleRead = db.dialogueSessions.get(keyFor(user))!;
+
+      const [first, second] = await Promise.all([
+        resumeExecutedSession(ctx, user, staleRead, keyFor(user), deps),
+        resumeExecutedSession(ctx, user, staleRead, keyFor(user), deps),
+      ]);
+
+      expect(sendInvitationCalls).toBe(1);
+      const reconciledFlags = [first.reconciled, second.reconciled].sort();
+      expect(reconciledFlags).toEqual([false, true]);
+      // The winner deleted the row; the loser never got far enough to call delete at all.
+      expect(db.dialogueSessions.get(keyFor(user))).toBeNull();
+    });
   },
 );

@@ -308,12 +308,18 @@ const EMPTY_INVITE_OUTCOME: InviteOutcome = { delivered: [], pendingManualForwar
 /**
  * Advances a durable session's effect ledger by exactly the effects still `pending` — never an
  * already-`applied`/`unknown`/`failed` one. Each attempt is bracketed by two CAS writes: `unknown`
- * right before the call runs, then the real completion status right after. A hard crash between
- * those two writes (never observed by THIS process, which is why every caught exception below
- * still resolves to a definite write) leaves the ledger honestly `unknown` for a later
- * `resumeExecutedSession` call to find — never silently retried, since a caught exception from a
- * real side effect (an invitation send, a Google push, a Telegram receipt) cannot prove the
- * remote call never landed.
+ * right before the call runs, then the real completion status right after. Unlike the earlier
+ * draft of this fix, a LOST CAS write now aborts the entire remaining sequence immediately,
+ * before any further side effect runs — a concurrent writer (two overlapping resumes of the same
+ * unreconciled session, e.g. from a duplicate/retried Telegram update) can therefore never both
+ * reach a real network side effect (an invitation send, a Google push, a Telegram receipt) for
+ * the same still-`pending` slot: whichever call's pre-attempt CAS write wins is the only one that
+ * ever calls the effect; the loser aborts with its ledger exactly as it was, matching what is
+ * actually durable, so it can never wrongly believe the ledger is reconciled or delete the row a
+ * winner is still using. A hard crash between a successful pre-attempt write and the completion
+ * write (never observed by THIS process, which is why every caught exception below still
+ * resolves to a definite write) leaves the ledger honestly `unknown` for a later
+ * `resumeExecutedSession` call to find — never silently retried.
  */
 async function runDurableEffects(
   ctx: BotCommandContext,
@@ -332,9 +338,8 @@ async function runDurableEffects(
   let revision = casRevision;
   let inviteOutcome = inviteOutcomeSoFar;
 
-  const persist = (next: EffectLedger, outcome: InviteOutcome | null): void => {
-    current = next;
-    inviteOutcome = outcome;
+  /** Returns `false` on a lost CAS race — the caller MUST stop attempting further effects. */
+  const persist = (next: EffectLedger, outcome: InviteOutcome | null): boolean => {
     const receipt: ExecutionReceipt = {
       status: 'applied',
       eventId: event.id,
@@ -347,14 +352,14 @@ async function runDurableEffects(
       { ...sessionShell, status: 'executed', executionReceipt: receipt, updatedAt: Date.now() },
       revision,
     );
-    // A mismatch means a concurrent writer touched this row after this call already won its
-    // reservation for the whole execution — should not happen; best-effort continue with the
-    // last-known-good revision rather than discarding the already-durable event/ledger work.
-    if (result.ok) revision = result.revision;
+    if (!result.ok) return false;
+    revision = result.revision;
+    current = next;
+    inviteOutcome = outcome;
+    return true;
   };
 
-  if (current.invitations === 'pending') {
-    persist({ ...current, invitations: 'unknown' }, inviteOutcome);
+  if (current.invitations === 'pending' && persist({ ...current, invitations: 'unknown' }, inviteOutcome)) {
     try {
       const outcome = await inviteResolvedPeople(event, user, draft.people, ctx.lang, deps);
       persist({ ...current, invitations: 'applied' }, outcome);
@@ -363,8 +368,7 @@ async function runDurableEffects(
     }
   }
 
-  if (current.postCreateHooks === 'pending') {
-    persist({ ...current, postCreateHooks: 'unknown' }, inviteOutcome);
+  if (current.postCreateHooks === 'pending' && persist({ ...current, postCreateHooks: 'unknown' }, inviteOutcome)) {
     try {
       await runPostCreateHooks(event, user, deps);
       persist({ ...current, postCreateHooks: 'applied' }, inviteOutcome);
@@ -373,8 +377,7 @@ async function runDurableEffects(
     }
   }
 
-  if (current.receipt === 'pending') {
-    persist({ ...current, receipt: 'unknown' }, inviteOutcome);
+  if (current.receipt === 'pending' && persist({ ...current, receipt: 'unknown' }, inviteOutcome)) {
     try {
       // A crash-recovered resume that never re-ran invitations (still `unknown`/`failed`) has no
       // real outcome to disclose — the empty fallback is an honest "nothing more is known here",
@@ -477,7 +480,7 @@ export async function executeDraft(
   const executedWrite = deps.dialogueSessions.set(key, executedSession, reservation.revision);
   const ledgerRevision = executedWrite.ok ? executedWrite.revision : reservation.revision;
 
-  const { ledger } = await runDurableEffects(
+  const { ledger, revision } = await runDurableEffects(
     ctx,
     event,
     user,
@@ -491,7 +494,7 @@ export async function executeDraft(
     deps,
   );
 
-  if (isEffectLedgerReconciled(ledger)) deps.dialogueSessions.delete(key);
+  if (isEffectLedgerReconciled(ledger)) deps.dialogueSessions.deleteIfRevision(key, revision);
 
   return { kind: 'executed', event };
 }
@@ -534,7 +537,7 @@ export async function resumeExecutedSession(
     deps,
   );
   if (!isEffectLedgerReconciled(result.ledger)) return { reconciled: false };
-  deps.dialogueSessions.delete(key);
+  deps.dialogueSessions.deleteIfRevision(key, result.revision);
   return { reconciled: true };
 }
 

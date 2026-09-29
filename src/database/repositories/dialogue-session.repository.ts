@@ -238,6 +238,21 @@ export class DialogueSessionRepository {
       .run(key.chatId, key.userId, key.topicId);
   }
 
+  /**
+   * Compare-and-swap delete — deletes only if the row is still at exactly `expectedRevision`.
+   * Used to finalize a fully-reconciled `executed` session (session-runtime.ts's
+   * `runDurableEffects`/`executeDraft`/`resumeExecutedSession`): a stale writer that lost a CAS
+   * race earlier must never be able to delete the row a concurrent winner is still using, even
+   * if the stale writer's own (never-actually-persisted) in-memory ledger looks fully applied.
+   * Returns whether the delete actually happened.
+   */
+  deleteIfRevision(key: DialogueSessionKey, expectedRevision: number): boolean {
+    const result = this.db
+      .prepare('DELETE FROM dialogue_v3_sessions WHERE chat_id = ? AND user_id = ? AND topic_id = ? AND revision = ?')
+      .run(key.chatId, key.userId, key.topicId, expectedRevision);
+    return result.changes > 0;
+  }
+
   /** See `get()`'s doc comment: an `executed` row with unresolved durable effects survives its normal TTL. */
   cleanup(): void {
     const cutoff = Date.now() - DIALOGUE_V3_SESSION_TTL_MS;
