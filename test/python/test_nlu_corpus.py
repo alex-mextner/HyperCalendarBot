@@ -572,7 +572,7 @@ class NluCorpusTests(unittest.TestCase):
 # quarantine can keep them out of the exports.
 SYNTHETIC_PHONE = '+10005550123'
 SYNTHETIC_CODE = '543-21'
-SYNTHETIC_PASSWORD = 'Zebra-Orchid-42'
+SYNTHETIC_PASSWORD = 'Zebra-Orchid-42'  # gitleaks:allow synthetic test fixture, never a real credential
 SYNTHETIC_SECRETS = (SYNTHETIC_PHONE, SYNTHETIC_CODE, SYNTHETIC_PASSWORD)
 SOURCE_WIZARD_MARKER = '[redacted: connect wizard input]'  # what the #617/#641 chat logging stores
 CALENDAR_REQUEST = 'Создай встречу завтра в 14:00'
