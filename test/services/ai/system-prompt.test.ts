@@ -1,18 +1,22 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
+import { BirthdayMetadataRepository } from '../../../src/database/repositories/birthday-metadata.repository.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
+import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { UserMemoryRepository } from '../../../src/database/repositories/user-memory.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { EventOccurrence } from '../../../src/database/types.ts';
 import { tagSender } from '../../../src/services/ai/agent.ts';
-import { buildSystemPrompt } from '../../../src/services/ai/system-prompt.ts';
+import { buildSystemPrompt, buildUserProfileEvidence } from '../../../src/services/ai/system-prompt.ts';
 import { executeTool } from '../../../src/services/ai/tool-executor.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
+import { BirthdayService } from '../../../src/services/birthday/birthday-service.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import type { AddressCache } from '../../../src/services/location/address-cache.ts';
@@ -763,6 +767,52 @@ describe('buildSystemPrompt', () => {
       const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: places(['Home — Knez Mihailova 1']) });
       expect(prompt).toContain('- Home — Knez Mihailova 1');
       expect(prompt).not.toContain('more not listed');
+    });
+  });
+
+  describe('buildUserProfileEvidence', () => {
+    test('produces a User Info section even when ctx.birthday is undefined', () => {
+      const noBirthday = { ...ctx, birthday: undefined };
+      const profile = buildUserProfileEvidence(noBirthday);
+
+      expect(profile).toContain('Test');
+      expect(profile).toContain('Europe/Kyiv');
+      expect(profile).toContain('en');
+      expect(profile).not.toContain('What I Know About You');
+    });
+
+    test('includes saved memory facts when birthday capability is present', () => {
+      const userMemoryRepo = new UserMemoryRepository(db);
+      userMemoryRepo.append(USER_ID, 'Likes cello');
+      const birthdayService = new BirthdayService(
+        new EventRepository(db),
+        new BirthdayMetadataRepository(db),
+        new EventReminderRepository(db),
+        new NotificationPreferencesRepository(db),
+      );
+      const withMemory = { ...ctx, birthday: { birthdayService, userMemoryRepo } };
+      const profile = buildUserProfileEvidence(withMemory);
+
+      expect(profile).toContain('Likes cello');
+      expect(profile).toContain('What I Know About You');
+    });
+
+    test('caps a long secretaryLine so saved memory facts survive the validator slice', () => {
+      const longSecretary = 'A'.repeat(2_000);
+      const withSecretary = {
+        ...ctx,
+        secretary: {
+          secretaryRepo: undefined as never,
+          secretaryForLine: longSecretary,
+          calendarProposalRepo: undefined as never,
+        },
+      };
+      const profile = buildUserProfileEvidence(withSecretary);
+
+      // The profile must stay within the 3 200-char validator budget
+      expect(profile.length).toBeLessThanOrEqual(3_200);
+      // But still contain the User Info heading
+      expect(profile).toContain('## User Info');
     });
   });
 });

@@ -186,9 +186,18 @@ function buildUserInfoSection(ctx: AgentContext, utcOffset: string, now: TZDate)
   const cityLine = ctx.user.city
     ? `- City: ${ctx.user.city}`
     : '- City: unknown (ask user to share location or type their city)';
-  const secretaryLine = ctx.secretary?.secretaryForLine
-    ? `\n- Calendars you can manage as secretary: ${ctx.secretary.secretaryForLine}`
-    : '';
+  // Cap the secretary list so that the User Info section stays within the
+  // ~1 200-char budget that MAX_USER_PROFILE_CHARS reserves for it. Without
+  // the cap a user granted secretary access to many calendars (15+ owners)
+  // can overflow, and the validator's .slice() would cut the newest saved
+  // memory facts — listed last — instead.
+  const SECRETARY_LINE_MAX_CHARS = 500;
+  const secretaryRaw = ctx.secretary?.secretaryForLine ?? '';
+  const secretaryTrimmed =
+    secretaryRaw.length > SECRETARY_LINE_MAX_CHARS
+      ? `${secretaryRaw.slice(0, SECRETARY_LINE_MAX_CHARS)}…`
+      : secretaryRaw;
+  const secretaryLine = secretaryTrimmed ? `\n- Calendars you can manage as secretary: ${secretaryTrimmed}` : '';
   // The model maps "в понедельник" to a date by itself and gets it wrong (on Friday
   // 2026-09-25 it put Monday on the 27th, a Sunday); the next seven local dates, each with
   // its year and weekday, remove that arithmetic.

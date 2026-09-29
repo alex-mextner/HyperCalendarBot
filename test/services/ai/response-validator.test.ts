@@ -732,3 +732,28 @@ test('asking for a missing English title is not classified as a content refusal'
   );
   expect(result.approved).toBe(true);
 });
+
+// MAX_USER_PROFILE_CHARS = MEMORY_SECTION_MAX_CHARS (2000) + 1200 = 3200
+test('userProfile exceeding 3200 chars is truncated in the validator prompt (#740)', async () => {
+  let capturedUserContent = '';
+  const impl: (opts: StreamRoundOptions) => Promise<StreamRoundResult> = async (opts) => {
+    const userMsg = opts.messages.find((m) => m.role === 'user');
+    capturedUserContent = typeof userMsg?.content === 'string' ? userMsg.content : '';
+    return stubText('APPROVE')(opts);
+  };
+  const longProfile = `## What I Know About You\n- ${'Fact. '.repeat(800)}`;
+  expect(longProfile.length).toBeGreaterThan(3_200);
+  await validateResponse(
+    {
+      userMessage: 'what do you know about me',
+      timezone: 'Europe/Belgrade',
+      userProfile: longProfile,
+      tools: [],
+      response: 'You like facts.',
+    },
+    impl,
+  );
+  const profileBlock = capturedUserContent.match(/<user_profile>\n([\s\S]*?)\n<\/user_profile>/);
+  expect(profileBlock).not.toBeNull();
+  expect(profileBlock?.[1]?.length).toBeLessThanOrEqual(3_200);
+});

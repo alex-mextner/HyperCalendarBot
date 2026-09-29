@@ -657,6 +657,22 @@ describe('answers about the user are checked against the profile the agent saw (
     return shown ? 'APPROVE' : 'REJECT: personal data without calling calendar tools';
   }
 
+  /** Reject when the response mentions a user fact absent from the profile. */
+  function rejectsFabricatedFacts(validatorInput: string): string {
+    const profileMatch = validatorInput.match(/<user_profile>\n([\s\S]*?)\n<\/user_profile>/);
+    const profile = profileMatch?.[1] ?? '';
+    const responseMatch = validatorInput.match(/<assistant_response>\n([\s\S]*?)\n<\/assistant_response>/);
+    const response = responseMatch?.[1] ?? '';
+    // "пианино" / "piano" is a fabricated fact not in FACTS or the profile
+    if (
+      (response.includes('пианино') || response.toLowerCase().includes('piano')) &&
+      !(profile.includes('пианино') || profile.toLowerCase().includes('piano'))
+    ) {
+      return 'REJECT: claimed user plays piano but this is not in <user_profile>';
+    }
+    return approvesShownProfile(validatorInput);
+  }
+
   test.each([
     [
       'ru' as const,
@@ -679,5 +695,20 @@ describe('answers about the user are checked against the profile the agent saw (
     expect(delivered.at(-1)).toBe(answer);
     expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).toContain(answer);
     expect(script.counts).toEqual({ model: 1, validator: 1 });
+  });
+
+  test('a tool-less answer that fabricates a user fact is rejected and the user gets the unverified notice', async () => {
+    const fabricatedAnswer =
+      'Ты играешь на пианино и на виолончели. Твой часовой пояс — Europe/Lisbon, язык — русский.';
+    const ctx = profileContext('ru', 'А что ты знаешь обо мне');
+    const script = scripted(
+      [{ text: fabricatedAnswer }, { text: fabricatedAnswer }],
+      [rejectsFabricatedFacts, rejectsFabricatedFacts],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(result.responseText).toContain(unverifiedResponseNotice('ru', 'Europe/Lisbon', []));
+    expect(script.counts).toEqual({ model: 2, validator: 2 });
   });
 });
