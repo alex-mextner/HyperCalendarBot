@@ -730,11 +730,20 @@ export const MSG = {
         noInvitations: (title: string) => `No invitations for event "${title}".`,
         invitationsFor: (title: string, id: number, lines: string) =>
           `Invitations for "${title}" (id: ${id}):\n${lines}`,
+        rsvpSelf: 'you',
+        rsvpStatuses: {
+          pending: 'pending',
+          accepted: 'accepted',
+          declined: 'declined',
+          maybe: 'maybe',
+          cancelled: 'cancelled',
+          expired: 'expired',
+        },
         rsvpAttending: (count: number) => `attending (going): ${count}`,
-        rsvpOrganizer: (userId: number) => `organizer: ${userId}`,
-        rsvpInviteeLine: (userId: number, status: string, note: string) =>
+        rsvpOrganizer: (userId: number | string) => `organizer: ${userId}`,
+        rsvpInviteeLine: (userId: number | string, status: string, note: string) =>
           `invitee: ${userId}, status: ${status}${note}`,
-        rsvpMemberLine: (userId: number, status: string) => `  member: ${userId}, status: ${status}`,
+        rsvpMemberLine: (userId: number | string, status: string) => `  member: ${userId}, status: ${status}`,
         rsvpPersonalInviteNote: (inviteStatus: string) => ` (personal invite: ${inviteStatus})`,
         groupRsvpHeader: 'group invitation — per-member RSVP:',
         groupRsvpNone: 'group invitation: no member RSVPs yet',
@@ -1732,11 +1741,20 @@ export const MSG = {
         noInvitations: (title: string) => `Для события «${title}» нет приглашений.`,
         invitationsFor: (title: string, id: number, lines: string) =>
           `Приглашения для «${title}» (id: ${id}):\n${lines}`,
+        rsvpSelf: 'вы',
+        rsvpStatuses: {
+          pending: 'ожидается ответ',
+          accepted: 'принято',
+          declined: 'отклонено',
+          maybe: 'возможно',
+          cancelled: 'отменено',
+          expired: 'истекло',
+        },
         rsvpAttending: (count: number) => `идут (подтвердили): ${count}`,
-        rsvpOrganizer: (userId: number) => `организатор: ${userId}`,
-        rsvpInviteeLine: (userId: number, status: string, note: string) =>
+        rsvpOrganizer: (userId: number | string) => `организатор: ${userId}`,
+        rsvpInviteeLine: (userId: number | string, status: string, note: string) =>
           `приглашённый: ${userId}, статус: ${status}${note}`,
-        rsvpMemberLine: (userId: number, status: string) => `  участник: ${userId}, статус: ${status}`,
+        rsvpMemberLine: (userId: number | string, status: string) => `  участник: ${userId}, статус: ${status}`,
         rsvpPersonalInviteNote: (inviteStatus: string) => ` (личное приглашение: ${inviteStatus})`,
         groupRsvpHeader: 'групповое приглашение — ответы участников:',
         groupRsvpNone: 'групповое приглашение: ответов участников пока нет',

@@ -5,7 +5,7 @@
  * owner-only lookup in front of it, or an invitee is denied what the assistant would answer.
  */
 import { Database } from 'bun:sqlite';
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
 import { createIntentMatcherLayer } from '../../src/bot/pipeline/intent-matcher-layer.ts';
 import type { BotCommandContext } from '../../src/bot/types.ts';
 import { migrations } from '../../src/database/migrations.ts';
@@ -100,6 +100,9 @@ function fixture() {
   const invite = (invitee: number) =>
     invitations.create({ event_id: event.id, inviter_id: OWNER, invitee_id: invitee });
   return {
+    users,
+    contacts: new ContactRepository(db),
+    buildCtx,
     event,
     calls,
     send,
@@ -239,5 +242,127 @@ test('in a group chat the intent refuses before reading anything', async () => {
     expect(result.handled).toBe(true);
     expect(f.calls).toHaveLength(0);
     expect(f.reply()).toContain('private chat');
+  }
+});
+
+// GH-581: an already complete roster must be useful without a second AI reply.
+test('a complete roster recognizes self, localizes RSVP and ends the pipeline', async () => {
+  const f = fixture();
+  f.users.update(INVITEE, { language: 'ru', first_name: 'Fixture viewer' });
+  f.users.update(OWNER, { first_name: 'Fixture organizer' });
+  f.accept(INVITEE);
+  const result = await f.say(`кто приглашён на событие #${f.event.id}`, { as: INVITEE });
+  expect(result).toEqual({ handled: true });
+  expect(f.reply()).toContain('Fixture organizer');
+  expect(f.reply()).toContain('вы');
+  expect(f.reply()).toContain('принято');
+  expect(f.reply()).not.toContain('accepted');
+  expect(f.reply()).not.toContain(String(INVITEE));
+  expect(f.send.mock.calls).toHaveLength(1);
+});
+
+test('roster names come only from the viewer contacts, never the organizer aliases', async () => {
+  const f = fixture();
+  f.users.update(STRANGER, { first_name: 'Public fixture profile' });
+  f.contacts.upsert(OWNER, 'Private organizer alias', undefined, STRANGER);
+  f.contacts.upsert(INVITEE, 'Viewer alias', undefined, STRANGER);
+  f.accept(INVITEE);
+  f.accept(STRANGER);
+  await f.say(`who is invited to event #${f.event.id}`, { as: INVITEE });
+  expect(f.reply()).toContain('Viewer alias');
+  expect(f.reply()).not.toContain('Private organizer alias');
+});
+
+test('a group roster does not publish the requester private contact alias', async () => {
+  const f = fixture();
+  f.users.update(INVITEE, { first_name: 'Public fixture guest' });
+  f.contacts.upsert(OWNER, 'Private viewer nickname', undefined, INVITEE);
+  f.accept(INVITEE);
+  const result = await executeTool(f.buildCtx({ as: OWNER, group: true }), 'get_invitation_status', {
+    event_id: f.event.id,
+  });
+  expect(result.success).toBe(true);
+  expect(result.output).toContain('Public fixture guest');
+  expect(result.output).not.toContain('Private viewer nickname');
+});
+
+test('roster escapes display names and keeps unknown numeric identity', async () => {
+  const f = fixture();
+  f.contacts.upsert(OWNER, '<b>Fixture</b>\n@all', undefined, INVITEE);
+  f.accept(INVITEE);
+  f.accept(STRANGER);
+  await f.say(`who is invited to event #${f.event.id}`, { as: OWNER });
+  expect(f.reply()).toContain('&lt;b&gt;Fixture&lt;/b&gt;');
+  expect(f.reply()).not.toContain('<b>Fixture</b>');
+  expect(f.reply()).toContain(String(STRANGER));
+});
+
+test('human names do not remove verified numeric identity from the AI-only evidence', async () => {
+  const f = fixture();
+  f.users.update(INVITEE, { first_name: 'Fixture guest' });
+  f.accept(INVITEE);
+  const result = await executeTool(f.buildCtx({ as: OWNER }), 'get_invitation_status', { event_id: f.event.id });
+  expect(result.agentHint).toContain('Verified roster identity:');
+  expect(result.agentHint).toContain(`"invitee_ids":[${INVITEE}]`);
+  expect(result.agentHint).toContain(`"organizer_id":${OWNER}`);
+  await f.say(`who is invited to event #${f.event.id}`, { as: OWNER });
+  expect(f.reply()).not.toContain('Verified roster identity:');
+});
+
+test('denied roster exposes neither user labels nor agent-only identity evidence', async () => {
+  const f = fixture();
+  f.users.update(OWNER, { first_name: 'Restricted fixture organizer' });
+  f.accept(INVITEE);
+  const result = await executeTool(f.buildCtx({ as: STRANGER }), 'get_invitation_status', { event_id: f.event.id });
+  expect(result.success).toBe(false);
+  expect(result.output).toBeUndefined();
+  expect(result.agentHint).toBeUndefined();
+  expect(result.completeResponse).not.toBe(true);
+});
+
+test('missing group RSVP registry cannot claim a complete roster', async () => {
+  const f = fixture();
+  f.accept(INVITEE);
+  f.invite(GROUP_CHAT);
+  const result = await f.say(`who is invited to event #${f.event.id}`, { as: OWNER });
+  expect(result.handled).toBe(true);
+  expect('needsSupplement' in result && result.needsSupplement).toBe(true);
+  expect(f.reply()).toContain('participant registry unavailable');
+});
+
+test('empty personal roster is also a complete deterministic answer', async () => {
+  const f = fixture();
+  const result = await f.say(`who is invited to event #${f.event.id}`, { as: OWNER });
+  expect(result).toEqual({ handled: true });
+  expect(f.reply()).toContain('No invitations');
+});
+
+test('long emoji names remain valid Unicode after display truncation', async () => {
+  const f = fixture();
+  f.contacts.upsert(OWNER, `${'x'.repeat(119)}😀trailing`, undefined, INVITEE);
+  f.accept(INVITEE);
+  await f.say(`who is invited to event #${f.event.id}`, { as: OWNER });
+  expect(f.reply()).toContain(`${'x'.repeat(119)}😀`);
+  expect(f.reply()).not.toContain('trailing');
+  expect(f.reply()).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u);
+});
+
+test('roster resolution uses bounded batch reads rather than one contact scan per invitee', async () => {
+  const f = fixture();
+  f.users.update(INVITEE, { first_name: 'Batch profile one' });
+  f.users.update(STRANGER, { first_name: 'Batch profile two' });
+  f.accept(INVITEE);
+  f.accept(STRANGER);
+  const ctx = f.buildCtx({ as: OWNER });
+  const profiles = spyOn(f.users, 'findByTelegramId');
+  const contacts = spyOn(ContactRepository.prototype, 'findByTelegramId');
+  try {
+    const result = await executeTool(ctx, 'get_invitation_status', { event_id: f.event.id });
+    expect(result.output).toContain('Batch profile one');
+    expect(result.output).toContain('Batch profile two');
+    expect(profiles.mock.calls.length + contacts.mock.calls.length).toBe(0);
+  } finally {
+    profiles.mockRestore();
+    contacts.mockRestore();
   }
 });

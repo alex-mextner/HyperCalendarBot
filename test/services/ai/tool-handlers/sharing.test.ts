@@ -1325,7 +1325,9 @@ describe('sharing tool handlers', () => {
 
         expect(invitee.success).toBe(true);
         expect(invitee.output).toContain('Team Dinner');
-        expect(rosterLines(invitee.output!)).toEqual(rosterLines(owner.output!));
+        expect(rosterLines(invitee.output!)).toEqual(
+          rosterLines(owner.output!).map((line) => line.replace(`invitee: ${OTHER_USER_ID},`, 'invitee: you,')),
+        );
         expect(invitee.output).toContain(`organizer: ${USER_ID}`);
         expect(invitee.output).not.toContain('owner-only note');
       });
@@ -1341,7 +1343,7 @@ describe('sharing tool handlers', () => {
         invitations.recordGroupAttendance(event.id, STRANGER_ID, 'accepted', GROUP_CHAT_ID);
         const member = handleGetInvitationStatus(ctxFor(STRANGER_ID), { event_id: event.id });
         expect(member.success).toBe(true);
-        expect(member.output).toContain(`member: ${STRANGER_ID}, status: accepted`);
+        expect(member.output).toContain('member: you, status: accepted');
 
         // Leaving the group ends access even though the RSVP row stays behind.
         groupMemberRepo.leave(GROUP_CHAT_ID, STRANGER_ID);
