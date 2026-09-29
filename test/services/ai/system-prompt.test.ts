@@ -130,7 +130,7 @@ describe('buildSystemPrompt', () => {
   });
 
   test('every tool the prompt stopped naming is still offered in the tool catalog', () => {
-    const offered = getToolDefinitions('text')
+    const offered = getToolDefinitions()
       .filter((t) => t.type === 'function')
       .map((t) => t.function.name);
     for (const name of TOOLS_DESCRIBED_ONLY_BY_THE_CATALOG) {
@@ -139,7 +139,7 @@ describe('buildSystemPrompt', () => {
   });
 
   test('prompt does not name update_sharing_settings, which is not a tool', () => {
-    const offered = getToolDefinitions('text')
+    const offered = getToolDefinitions()
       .filter((t) => t.type === 'function')
       .map((t) => t.function.name);
     expect(offered).not.toContain('update_sharing_settings');

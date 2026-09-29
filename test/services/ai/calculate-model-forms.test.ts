@@ -327,7 +327,7 @@ const calculateToolSchema = z.object({
 });
 
 describe('calculate: tool schema examples are executable contracts', () => {
-  const tool = getToolDefinitions('text').find(
+  const tool = getToolDefinitions().find(
     (candidate) => candidate.type === 'function' && candidate.function.name === 'calculate',
   );
   const schema = calculateToolSchema.parse(tool);

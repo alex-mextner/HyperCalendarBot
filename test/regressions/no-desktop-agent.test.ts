@@ -23,18 +23,16 @@ const RETIRED_TOOLS = [
 test('retired desktop commands cannot be parsed as tools', () => {
   for (const name of RETIRED_TOOLS) expect(Object.keys(toolSchemas)).not.toContain(name);
 });
-for (const mode of [undefined, 'text', 'live_call', 'voice_message']) {
-  for (const supplement of [false, true]) {
-    test(`retired tools are absent in ${mode ?? 'default'}, supplement=${supplement}`, () => {
-      const names = getToolDefinitions(mode, supplement)
-        .filter((tool) => tool.type === 'function')
-        .map((tool) => tool.function.name);
-      for (const name of RETIRED_TOOLS) expect(names).not.toContain(name);
-      expect(names).toContain('get_events');
-      if (mode !== 'live_call') expect(names).toContain('render_day_image');
-      if (supplement) expect(names).toContain('supplement_skip');
-    });
-  }
+for (const supplement of [false, true]) {
+  test(`retired tools are absent, supplement=${supplement}`, () => {
+    const names = getToolDefinitions(supplement)
+      .filter((tool) => tool.type === 'function')
+      .map((tool) => tool.function.name);
+    for (const name of RETIRED_TOOLS) expect(names).not.toContain(name);
+    expect(names).toContain('get_events');
+    expect(names).toContain('render_day_image');
+    if (supplement) expect(names).toContain('supplement_skip');
+  });
 }
 
 test('Caddy cannot serve previously published desktop installers', () => {

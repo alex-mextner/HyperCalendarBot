@@ -1,6 +1,5 @@
 import type { Contact } from '../../database/types.ts';
 import { consumeRecipientApproval } from './recipient-confirmation.ts';
-import { cachedRecipientProfile } from './recipient-profile.ts';
 import type { AgentContext } from './types.ts';
 
 export function normalizeRecipientUsername(username: string): string {
@@ -33,7 +32,7 @@ type RecipientResolution =
   | { ok: false; reason: 'contact_row_id'; contact: Contact }
   | {
       ok: false;
-      reason: 'unverified' | 'conflict' | 'not_found' | 'unavailable';
+      reason: 'unverified' | 'conflict' | 'not_found';
       username?: string;
       candidate?: { id: number; firstName?: string; username?: string };
     };
@@ -103,49 +102,25 @@ export async function resolveInvitationRecipient(
   );
   if (input.invitee_username && !pinnedMetadata) {
     const username = normalizeRecipientUsername(input.invitee_username);
-    const known = ctx.userRepo.findByUsername(username);
     if (!canResolveRecipientUsername(ctx, username)) {
       return { ok: false, reason: 'unverified' };
     }
-    if (!known && !ctx.resolveUsername) return { ok: false, reason: 'unavailable' };
-    const resolved = ctx.resolveUsername
-      ? await ctx.resolveUsername(username)
-      : known
-        ? { id: known.telegram_id, firstName: known.first_name ?? undefined, username: known.username ?? username }
-        : null;
-    if (!resolved) return { ok: false, reason: 'not_found', username };
+    // Only people who have started this bot can be resolved; anyone else goes through the picker.
+    const known = ctx.userRepo.findByUsername(username);
+    if (!known) return { ok: false, reason: 'not_found', username };
+    const resolved = {
+      id: known.telegram_id,
+      firstName: known.first_name ?? undefined,
+      username: known.username ?? username,
+    };
     if (!Number.isSafeInteger(resolved.id) || resolved.id <= 0) return { ok: false, reason: 'unverified' };
     if (id !== undefined && id !== resolved.id) return { ok: false, reason: 'conflict', candidate: resolved };
     ctx.verifiedRecipientIds ??= new Set();
     ctx.verifiedRecipientIds.add(resolved.id);
-    return {
-      ok: true,
-      id: resolved.id,
-      username: resolved.username ?? username,
-      firstName: resolved.firstName,
-      isGroup: false,
-    };
+    return { ok: true, ...resolved, isGroup: false };
   }
   if (id === undefined || (id !== establishedInvitationRecipientId && !isKnownRecipient(ctx, id)))
     return { ok: false, reason: 'unverified' };
-  if (ctx.lookupTelegramUser) {
-    const profile = cachedRecipientProfile(ctx, id);
-    if (profile) {
-      if (profile.id !== id || profile.deleted) return { ok: false, reason: 'conflict' };
-      ctx.contactRepo?.refreshProfile(ctx.user.telegram_id, id, {
-        username: profile.username ?? null,
-        firstName: profile.firstName,
-      });
-      return {
-        ok: true,
-        id,
-        username: profile.username,
-        firstName: profile.firstName,
-        isGroup: false,
-      };
-    }
-  }
-  // An unavailable profile lookup cannot invalidate a previously established ID.
   // Do not reuse stale username metadata as an alternative delivery destination.
   return { ok: true, id, isGroup: false };
 }

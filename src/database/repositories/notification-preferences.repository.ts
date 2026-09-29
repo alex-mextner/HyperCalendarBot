@@ -9,8 +9,6 @@ export interface UserContextFlags {
   has_google: number;
   /** 1 if user has country_code set, 0 otherwise */
   has_country: number;
-  /** 1 if user has voice calls enabled, 0 otherwise */
-  has_voice_calls: number;
 }
 
 export class NotificationPreferencesRepository {
@@ -65,8 +63,7 @@ export class NotificationPreferencesRepository {
       .prepare(
         `SELECT np.*, u.timezone, u.language,
                 (u.google_refresh_token_enc IS NOT NULL) AS has_google,
-                (u.country_code IS NOT NULL) AS has_country,
-                COALESCE(u.voice_response_enabled, 0) AS has_voice_calls
+                (u.country_code IS NOT NULL) AS has_country
          FROM notification_preferences np
          JOIN users u ON np.user_id = u.telegram_id
          WHERE np.${column} = 1`,

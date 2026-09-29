@@ -386,20 +386,6 @@ describe('CalendarBotAgent.run()', () => {
     expect(toolNames.includes('create_event')).toBe(!included);
   });
 
-  test('live calls keep their full tool contract during the text-only lazy canary', async () => {
-    ctx.inputMode = 'live_call';
-    const script = makeStreamImpl([{ kind: 'text', text: 'Synthetic spoken reply.' }]);
-    let names: string[] = [];
-    const impl: typeof script.impl = async (opts, cbs) => {
-      if (!isValidatorCall(opts))
-        names = opts.tools?.flatMap((t) => (t.type === 'function' ? [t.function.name] : [])) ?? [];
-      return script.impl(opts, cbs);
-    };
-    await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, { streamImpl: impl }).run(ctx);
-    expect(names).not.toContain('discover_tools');
-    expect(names).toContain('end_call');
-  });
-
   test('lazy schemas keep all names visible but expose only requested parameters', async () => {
     const script = makeStreamImpl([
       { kind: 'tool', callId: 'discover', name: 'discover_tools', input: { groups: [], tools: ['get_events'] } },
@@ -462,7 +448,7 @@ describe('CalendarBotAgent.run()', () => {
       { kind: 'tool', callId: 'discover-groups-only', name: 'discover_tools', input: { groups: ['contacts'] } },
       { kind: 'tool', callId: 'discover-tools-only', name: 'discover_tools', input: { tools: ['find_user'] } },
       { kind: 'tool', callId: 'lookup', name: 'find_user', input: { username: 'ghost_handle' } },
-      { kind: 'text', text: 'Cannot verify that username right now.' },
+      { kind: 'text', text: 'That person has not started the bot yet.' },
     ]);
     const result = await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, {
       streamImpl: script.impl,
@@ -471,10 +457,9 @@ describe('CalendarBotAgent.run()', () => {
     expect(findUserCalls).toHaveLength(2);
     // The first attempt is correctly rejected as unexposed; the second, after
     // single-array discovery succeeds, must reach the real handler and report
-    // truthfully that resolution is unavailable rather than lying about "not found".
+    // truthfully that the person has not started the bot.
     const stored = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
-    expect(stored).toContain('unavailable');
-    expect(stored).not.toContain('User @ghost_handle not found');
+    expect(stored).toContain("hasn't started this bot");
   });
 
   test('validation retry retains revealed schemas without replaying discovery', async () => {
@@ -772,7 +757,6 @@ describe('CalendarBotAgent.run()', () => {
   test('nested invitation picker remains a waiting handoff', async () => {
     const event = setupInvitations();
     ctx.messageText = 'Invite @private_name';
-    ctx.resolveUsername = async () => null;
     sender.sendUserPicker = mock(async () => ({ message_id: 43 }));
     const script = makeStreamImpl([
       { kind: 'tool', callId: 'bad', name: 'delete_event', input: { event_id: 999999 } },
@@ -925,37 +909,6 @@ describe('CalendarBotAgent.run()', () => {
     expect(ctx.participantRepo.findByEventAndUser(event.id, USER_ID)?.status).toBe('declined');
     expect(result.responseText).toContain('Attendance declined');
     expect(result.responseText).not.toContain('Completed: Delete event');
-  });
-
-  test.each([false, true])('live call speaks actual ask_user question, validation retry=%s', async (retry) => {
-    ctx.inputMode = 'live_call';
-    const question = 'Which afternoon works?';
-    const script = makeStreamImpl([
-      ...(retry ? [{ kind: 'text' as const, text: 'Unverified completion' }] : []),
-      {
-        kind: 'tool',
-        callId: 'ask',
-        name: 'ask_user',
-        input: { question, options: ['Monday', 'Tuesday'] },
-        text: 'Provisional prose',
-      },
-    ]);
-    const impl = async (opts: StreamRoundOptions, callbacks?: StreamCallbacks): Promise<StreamRoundResult> => {
-      if (retry && isValidatorCall(opts))
-        return {
-          text: 'REJECT: use tools',
-          toolCalls: [],
-          finishReason: 'stop',
-          assistantMessage: { role: 'assistant', content: 'REJECT: use tools' },
-          providerUsed: 'mock',
-          metrics: fakeMetrics('zai', 100, 20),
-        };
-      return script.impl(opts, callbacks);
-    };
-    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
-    expect(result.responseText).toContain(question);
-    expect(result.responseText).toContain('Monday');
-    expect(result.responseText).not.toContain('Provisional prose');
   });
 
   test('title correction does not clear failed all_day and timezone metadata', async () => {

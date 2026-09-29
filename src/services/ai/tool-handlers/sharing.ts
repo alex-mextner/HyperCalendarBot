@@ -172,12 +172,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
     return {
       success: false,
       mutationState: 'not_applied',
-      error:
-        recipient.reason === 'conflict'
-          ? tr.recipientIdentityConflict
-          : recipient.reason === 'unavailable'
-            ? tr.recipientResolveUnavailable
-            : tr.recipientUnverified,
+      error: recipient.reason === 'conflict' ? tr.recipientIdentityConflict : tr.recipientUnverified,
       agentHint:
         'Use find_contact, an exact user-provided @username, or pick_users. Do not guess or reuse an unverified recipient ID.',
     };
@@ -247,7 +242,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
 
   const connectSuggestion = connectSuggestionAfterDelivery(ctx, delivery, isGroupTarget, invitation.id);
   const deliveryHint = delivery.delivered
-    ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
+    ? "The invitation was delivered to the invitee via bot API or the inviter's own Telegram account. Tell the user it is sent."
     : delivery.viaDeepLink
       ? 'Bot-API delivery failed. A deep-link fallback was sent to the inviter to forward manually. Tell the user to share the link.'
       : 'Invitation delivery failed entirely. Tell the user there was a delivery problem.';
@@ -350,7 +345,7 @@ export async function handleResendInvitation(
   if (ctx.sender) {
     const event = ctx.eventService.getEvent(invitation.event_id, ctx.user.telegram_id);
     // A group invitation stores the (negative) group chat id as invitee_id. Resending it must use
-    // the group delivery mode (per-member RSVP keyboard, no MTProto, no deep-link forward) — exactly
+    // the group delivery mode (per-member RSVP keyboard, no user-session send, no deep-link forward) — exactly
     // what the chat_shared picker does. Without this it would deliver the personal inv: keyboard
     // (authorizes a single invitee, unusable in a group).
     const isGroupTarget = invitation.invitee_id < 0;

@@ -280,14 +280,14 @@ describe('deliverPickerInvitation', () => {
     expect(outcome).toEqual({ kind: 'failed' });
   });
 
-  test('allowMtproto:false → MTProto skipped even when it would have succeeded', async () => {
-    let mtprotoCalled = false;
+  test("allowMtproto:false → the inviter's session is skipped even when it would have succeeded", async () => {
+    let sessionCalled = false;
     const sender: TelegramSender = {
       ...SENDER_BASE,
       sendInvitation: async () => null,
       sendMessage: async () => ({ message_id: 1 }),
-      sendAsUser: async () => {
-        mtprotoCalled = true;
+      sendAsConnectedUser: async () => {
+        sessionCalled = true;
         return true;
       },
     };
@@ -295,8 +295,8 @@ describe('deliverPickerInvitation', () => {
       { eventId, inviter, inviteeId: INVITEE_ID, fallbackChatId: INVITER_ID, allowMtproto: false },
       makeDeps(sender),
     );
-    expect(mtprotoCalled).toBe(false);
-    // Bot API failed, MTProto disabled → deep-link fallback path.
+    expect(sessionCalled).toBe(false);
+    // Bot API failed, the inviter's session disabled → deep-link fallback path.
     expect(outcome).toEqual({ kind: 'deeplink' });
   });
 
@@ -415,9 +415,9 @@ describe('deliverPickerInvitations (batch)', () => {
       },
       makeDeps(sender),
     );
-    // Serial delivery is REQUIRED: each invitee's MTProto fallback spawns send-message.py
-    // against the shared non-WAL voice_caller.session; concurrent spawns corrupt it. So at
-    // most one send may ever be in flight at a time.
+    // Serial delivery is REQUIRED: an invitee who never started the bot is sent the invitation
+    // from the inviter's own Telegram session (one send-as-user.py spawn on that one account),
+    // so at most one send may ever be in flight at a time.
     expect(maxInFlight).toBe(1);
     // Order preserved 1:1 with the input invitee list.
     expect(result.statusLines).toHaveLength(3);

@@ -103,7 +103,7 @@ export interface PickerInvitationParams {
   inviteeName?: string;
   /** Where the deep-link fallback goes — always the inviter's private chat, never a group. */
   fallbackChatId: number;
-  /** When false, MTProto is skipped (Bot API → deep-link only). Used for group targets. */
+  /** When false, the inviter's own Telegram session is skipped (Bot API → deep-link only). Used for group targets. */
   allowMtproto?: boolean;
   /** When true, the target is a group chat: the deep-link fallback is suppressed (a forward
    *  invite link can't be accepted on behalf of a group), so a failed Bot-API delivery reports
@@ -112,9 +112,9 @@ export interface PickerInvitationParams {
 }
 
 /**
- * Create one invitation + attempt real Telegram delivery (Bot API → MTProto → deep-link
- * fallback). Reports by ACTUAL delivery, not just by DB-row creation, so picker handlers
- * never claim "sent" for an invitation that silently vanished.
+ * Create one invitation + attempt real Telegram delivery (Bot API → the inviter's own Telegram
+ * session → deep-link fallback). Reports by ACTUAL delivery, not just by DB-row creation, so
+ * picker handlers never claim "sent" for an invitation that silently vanished.
  */
 export async function deliverPickerInvitation(
   params: PickerInvitationParams,
@@ -243,10 +243,10 @@ async function deliverOneForBatch(
 }
 
 /**
- * Deliver invitations to every picked invitee SERIALLY (one at a time). Serial is REQUIRED:
- * each invitee's MTProto fallback spawns scripts/send-message.py against the shared, non-WAL
- * data/voice_caller.session, and concurrent spawns corrupt that session (see CLAUDE.md
- * "voice_caller.session fragility"). Serial also avoids a 429 burst on the shared 1-CPU host.
+ * Deliver invitations to every picked invitee SERIALLY (one at a time). An invitee who never
+ * started the bot is sent the invitation from the inviter's own Telegram session, and each such
+ * send spawns scripts/send-as-user.py with that one account: serial keeps it from firing a burst of
+ * parallel logins and FLOOD_WAITs on the inviter's account, and avoids a 429 burst on the shared 1-CPU host.
  * Each invitee is isolated — one failure does not abort the others — and the returned lines
  * preserve the input invitee order. (Supersedes the #96 Promise.all parallelization.)
  */

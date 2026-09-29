@@ -2,7 +2,6 @@
 import { InlineKeyboard } from 'gramio';
 import { z } from 'zod';
 import { CB, t } from '../../config/constants.ts';
-import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { TelegramSessionRepository } from '../../database/repositories/telegram-session.repository.ts';
@@ -29,9 +28,7 @@ export function settingsCategoryKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
     .text(s.categoryGeneral, 'stg:general')
     .text(s.categoryNotifications, `${CB.NOTIFY}:menu`)
     .row()
-    .text(s.categoryCalls, 'stg:calls')
     .text(s.categoryPrivacy, 'stg:privacy')
-    .row()
     .text(s.categoryVoice, 'stg:voice')
     .row()
     .text(s.telegramAccount, 'stg:telegram')
@@ -181,25 +178,6 @@ function buildReminderIntervalsView(intervals: number[], lang: 'en' | 'ru'): { t
   return { text, kb: reminderIntervalsKeyboard(intervals, lang) };
 }
 
-// ─── Calls ──────────────────────────────────────────────────────────────────
-
-function buildCallsView(enabled: boolean, lang: 'en' | 'ru'): { text: string; kb: InlineKeyboard } {
-  const s = t(lang).settings;
-  const text = [
-    s.callsTitle,
-    '',
-    enabled ? s.callsEnabled : s.callsDisabled,
-    `  ${s.callsDesc1}`,
-    `  ${s.callsDesc2}`,
-    `  ${s.callsDesc3}`,
-  ].join('\n');
-  const kb = backRow(
-    new InlineKeyboard().text(enabled ? s.toggleCallsDisable : s.toggleCallsEnable, 'stg:toggle_calls'),
-    lang,
-  );
-  return { text, kb };
-}
-
 // ─── Privacy ────────────────────────────────────────────────────────────────
 
 function buildPrivacyView(
@@ -330,7 +308,6 @@ export async function handleSettingsCallback(
   user: User,
   subAction: string,
   prefsService: NotificationPreferencesService,
-  callSettingsRepo?: CallSettingsRepository,
   sharingSettingsRepo?: SharingSettingsRepository,
   userRepo?: UserRepository,
   telegramDeps?: TelegramSettingsDeps,
@@ -428,24 +405,6 @@ export async function handleSettingsCallback(
       intervals,
       lang,
     );
-    await ctx.answer();
-    await ctx.editText(text, { reply_markup: kb });
-    return;
-  }
-
-  // ─── Calls ─────────────────────────────────────────────────────────────────
-
-  if (subAction === 'calls' || subAction === 'toggle_calls') {
-    let enabled = false;
-    if (callSettingsRepo) {
-      callSettingsRepo.ensureDefaults(user.telegram_id);
-      if (subAction === 'toggle_calls') {
-        const cur = callSettingsRepo.get(user.telegram_id);
-        callSettingsRepo.setEnabled(user.telegram_id, !cur?.enabled);
-      }
-      enabled = !!callSettingsRepo.get(user.telegram_id)?.enabled;
-    }
-    const { text, kb } = buildCallsView(enabled, lang);
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
     return;

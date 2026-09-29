@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { DeepLinkRepository } from '../../../../src/database/repositories/deep-link.repository.ts';
@@ -278,21 +278,21 @@ describe('sharing tool handlers', () => {
       expect(inv?.chat_id).toBe(OTHER_USER_ID);
     });
 
-    test('falls back to MTProto when bot delivery fails', async () => {
+    test("falls back to the inviter's connected account when bot delivery fails", async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
-        title: 'MTProto Fallback',
-        start_at: '2026-03-20T18:00:00Z',
+        title: 'Session Fallback',
+        start_at: futureStartAt(),
         timezone: 'UTC',
       });
-      let mtprotoCalledWith: { userId: number; text: string } | undefined;
+      let sessionCalledWith: { inviterId: number; targetId: number; text: string } | undefined;
       const ctx = makeCtx({
         sender: {
           sendMessage: async () => ({ message_id: 1 }),
           editMessageText: async () => {},
           sendInvitation: async () => null,
-          sendAsUser: async (userId, text) => {
-            mtprotoCalledWith = { userId, text };
+          sendAsConnectedUser: async (inviterId, targetId, text) => {
+            sessionCalledWith = { inviterId, targetId, text };
             return true;
           },
         },
@@ -304,12 +304,13 @@ describe('sharing tool handlers', () => {
 
       await flushPromises();
 
-      expect(mtprotoCalledWith).toBeDefined();
-      expect(mtprotoCalledWith!.userId).toBe(OTHER_USER_ID);
-      expect(mtprotoCalledWith!.text).toContain('t.me/TestBot');
+      expect(sessionCalledWith).toBeDefined();
+      expect(sessionCalledWith!.inviterId).toBe(USER_ID);
+      expect(sessionCalledWith!.targetId).toBe(OTHER_USER_ID);
+      expect(sessionCalledWith!.text).toContain('t.me/TestBot');
     });
 
-    test('sends deep link to inviter when bot and MTProto both fail', async () => {
+    test("sends deep link to inviter when bot and the inviter's account both fail", async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Both Failed',
@@ -325,7 +326,7 @@ describe('sharing tool handlers', () => {
           },
           editMessageText: async () => {},
           sendInvitation: async () => null,
-          sendAsUser: async () => false,
+          sendAsConnectedUser: async () => false,
         },
         deepLinkService,
         botUsername: 'TestBot',
@@ -339,10 +340,10 @@ describe('sharing tool handlers', () => {
       expect(followUp).toBeDefined();
     });
 
-    test('sends deep link to inviter when no MTProto available', async () => {
+    test('sends deep link to inviter when no connected account is available', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
-        title: 'No MTProto',
+        title: 'No Session',
         start_at: '2026-03-20T18:00:00Z',
         timezone: 'UTC',
       });
@@ -424,7 +425,6 @@ describe('sharing tool handlers', () => {
           },
           editMessageText: async () => {},
           sendInvitation: async () => null,
-          sendAsUser: async () => false,
         },
         deepLinkService,
         botUsername: 'TestBot',
@@ -456,20 +456,15 @@ describe('sharing tool handlers', () => {
       expect(result.error).toBe('Invitation already sent');
     });
 
-    test('resolves invitee via resolveUsername when only username provided', async () => {
+    test('resolves an explicit @username through the local users table', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Resolve Party',
         start_at: '2026-03-20T18:00:00Z',
         timezone: 'UTC',
       });
-      const ctx = makeCtx({
-        messageText: 'Invite @targetuser',
-        resolveUsername: async (username: string) => {
-          expect(username).toBe('targetuser');
-          return { id: 300, firstName: 'Target', username: 'targetuser' };
-        },
-      });
+      userRepo.create({ telegram_id: 300, timezone: 'UTC', username: 'targetuser', first_name: 'Target' });
+      const ctx = makeCtx({ messageText: 'Invite @targetuser' });
       const result = await handleSendInvitation(ctx, {
         event_id: event.id,
         invitee_username: 'targetuser',
@@ -478,7 +473,7 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('300');
     });
 
-    test('opens pick_users when resolve returns null', async () => {
+    test('unknown @username opens pick_users and spawns nothing', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Picker Party',
@@ -486,9 +481,9 @@ describe('sharing tool handlers', () => {
         timezone: 'UTC',
       });
       let pickerPrompt = '';
+      const spawn = spyOn(Bun, 'spawn');
       const ctx = makeCtx({
         messageText: 'Invite @nobody',
-        resolveUsername: async () => null,
         sender: {
           sendMessage: async () => ({ message_id: 1 }),
           editMessageText: async () => {},
@@ -501,10 +496,11 @@ describe('sharing tool handlers', () => {
       const result = await handleSendInvitation(ctx, {
         event_id: event.id,
         invitee_username: 'nobody',
-      });
+      }).finally(() => spawn.mockRestore());
       expect(result.success).toBe(true);
       expect(result.stopLoop).toBe(true);
       expect(pickerPrompt).toContain('@nobody');
+      expect(spawn).not.toHaveBeenCalled();
     });
 
     test("routes the picker to the inviter's private chat, not a group ctx.chatId", async () => {
@@ -520,7 +516,6 @@ describe('sharing tool handlers', () => {
       const ctx = makeCtx({
         messageText: 'Invite @nobody',
         chatId: GROUP_CHAT_ID,
-        resolveUsername: async () => null,
         sender: {
           sendMessage: async () => ({ message_id: 1 }),
           editMessageText: async () => {},
@@ -545,10 +540,8 @@ describe('sharing tool handlers', () => {
         start_at: futureStartAt(),
         timezone: 'UTC',
       });
-      const ctx = makeCtx({
-        messageText: 'Invite @targetuser',
-        resolveUsername: async () => ({ id: 300, firstName: 'Target', username: 'targetuser' }),
-      });
+      userRepo.create({ telegram_id: 300, timezone: 'UTC', username: 'targetuser', first_name: 'Target' });
+      const ctx = makeCtx({ messageText: 'Invite @targetuser' });
 
       const result = await executeTool(ctx, 'send_invitation', {
         event_id: event.id,
@@ -582,22 +575,6 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('invitee_id');
     });
 
-    test('returns error when resolveUsername unavailable and no invitee_id', async () => {
-      const event = eventService.createEvent({
-        user_id: USER_ID,
-        title: 'No Resolve',
-        start_at: '2026-03-20T18:00:00Z',
-        timezone: 'UTC',
-      });
-      const ctx = makeCtx({ messageText: 'Invite @someone' });
-      const result = await handleSendInvitation(ctx, {
-        event_id: event.id,
-        invitee_username: 'someone',
-      });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('resolution');
-    });
-
     test('auto-adds resolved user as contact', async () => {
       const { ContactRepository } = await import('../../../../src/database/repositories/contact.repository.ts');
       const contactRepo = new ContactRepository(db);
@@ -607,11 +584,8 @@ describe('sharing tool handlers', () => {
         start_at: '2026-03-20T18:00:00Z',
         timezone: 'UTC',
       });
-      const ctx = makeCtx({
-        messageText: 'Invite @resolved_user',
-        resolveUsername: async () => ({ id: 400, firstName: 'Resolved', username: 'resolved_user' }),
-        contactRepo,
-      });
+      userRepo.create({ telegram_id: 400, timezone: 'UTC', username: 'resolved_user', first_name: 'Resolved' });
+      const ctx = makeCtx({ messageText: 'Invite @resolved_user', contactRepo });
       await handleSendInvitation(ctx, {
         event_id: event.id,
         invitee_username: 'resolved_user',
@@ -630,7 +604,6 @@ describe('sharing tool handlers', () => {
       });
       const ctx = makeCtx({
         messageText: 'Invite @nobody',
-        resolveUsername: async () => null,
         sender: {
           sendMessage: async () => ({ message_id: 1 }),
           editMessageText: async () => {},
@@ -644,25 +617,24 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('picker');
     });
 
-    test('handles resolveUsername exception gracefully', async () => {
+    test('reports a failed @username lookup without exposing the internal error', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Error Party',
         start_at: '2026-03-20T18:00:00Z',
         timezone: 'UTC',
       });
-      const ctx = makeCtx({
-        messageText: 'Invite @broken',
-        resolveUsername: async () => {
-          throw new Error('MTProto connection failed');
-        },
+      const lookup = spyOn(userRepo, 'findByUsername').mockImplementation(() => {
+        throw new Error('database is locked');
       });
+      const ctx = makeCtx({ messageText: 'Invite @broken' });
       const result = await handleSendInvitation(ctx, {
         event_id: event.id,
         invitee_username: 'broken',
-      });
+      }).finally(() => lookup.mockRestore());
       expect(result.success).toBe(false);
       expect(result.error).toContain('@broken');
+      expect(result.error).not.toContain('database is locked');
     });
 
     test('returns error when invitee disabled invitations', async () => {
@@ -702,7 +674,6 @@ describe('sharing tool handlers', () => {
           },
           editMessageText: async () => {},
           sendInvitation: async () => null,
-          sendAsUser: async () => false,
         },
         deepLinkService,
         botUsername: 'TestBot',
@@ -732,7 +703,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('delivery');
     });
 
-    test('resending a pending GROUP invitation uses the group RSVP keyboard and skips MTProto', async () => {
+    test("resending a pending GROUP invitation uses the group RSVP keyboard and skips the inviter's account", async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Group Resend',
@@ -743,7 +714,7 @@ describe('sharing tool handlers', () => {
       const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
       let variant: InvitationKeyboardVariant | undefined;
       let groupRecipient: number | undefined;
-      let mtprotoCalled = false;
+      let sessionCalled = false;
       const sentToInviter: number[] = [];
       const ctx = makeCtx({
         isGroup: true,
@@ -760,8 +731,8 @@ describe('sharing tool handlers', () => {
             variant = v;
             return null; // bot API delivery fails so the fallback path is exercised too
           },
-          sendAsUser: async () => {
-            mtprotoCalled = true;
+          sendAsConnectedUser: async () => {
+            sessionCalled = true;
             return true;
           },
         },
@@ -777,9 +748,9 @@ describe('sharing tool handlers', () => {
       // themselves — never the personal inv: keyboard (which authorizes a single invitee).
       expect(groupRecipient).toBe(GROUP_CHAT_ID);
       expect(variant).toEqual({ kind: 'group', eventId: event.id, place: expect.objectContaining({ id: event.id }) });
-      // allowMtproto:false → no MTProto userbot for a group, and the deep-link forward fallback is
-      // suppressed (a forward link can't be accepted on behalf of a group).
-      expect(mtprotoCalled).toBe(false);
+      // allowMtproto:false → the inviter's account never sends for a group, and the deep-link forward
+      // fallback is suppressed (a forward link can't be accepted on behalf of a group).
+      expect(sessionCalled).toBe(false);
       expect(sentToInviter).toHaveLength(0);
     });
 

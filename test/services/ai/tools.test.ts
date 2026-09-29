@@ -22,7 +22,7 @@ function getParamsRequired(t: OpenAI.ChatCompletionFunctionTool): string[] {
   return params?.required ?? [];
 }
 
-const allTools = getToolDefinitions('text');
+const allTools = getToolDefinitions();
 
 describe('toolDefinitions', () => {
   test('includes calculate tool with required expression', () => {
@@ -90,7 +90,7 @@ describe('toolDefinitions', () => {
 
 describe('getToolDefinitions supplement_skip', () => {
   test('supplement_skip is absent when supplementMode is false', () => {
-    const tools = getToolDefinitions(undefined, false);
+    const tools = getToolDefinitions(false);
     expect(findTool(tools, 'supplement_skip')).toBeUndefined();
   });
 
@@ -100,14 +100,9 @@ describe('getToolDefinitions supplement_skip', () => {
   });
 
   test('supplement_skip is present when supplementMode is true', () => {
-    const tools = getToolDefinitions(undefined, true);
+    const tools = getToolDefinitions(true);
     const tool = findTool(tools, 'supplement_skip');
     expect(tool).toBeDefined();
     expect((tool!.function.parameters as { properties?: unknown }).properties).toEqual({});
-  });
-
-  test('supplement_skip does not appear in normal text mode', () => {
-    const tools = getToolDefinitions('text', false);
-    expect(findTool(tools, 'supplement_skip')).toBeUndefined();
   });
 });

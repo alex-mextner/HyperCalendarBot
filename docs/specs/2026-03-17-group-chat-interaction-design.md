@@ -168,6 +168,8 @@ Any member of the group can CRUD group events. Permission check: the user sent a
 
 Group event reminders are sent to **all group members** in private messages (DMs).
 
+> **2026-09-29 update:** the shared MTProto service account (`data/voice_caller.session`) was removed by owner decision; the Pyrogram member listing below went with it; the recipients are the `group_members` rows (members seen in the chat) who started the bot.
+
 **Member list retrieval:** Via Pyrogram subprocess — `scripts/get-chat-members.py` accepts `chat_id`, returns JSON array of user objects. Called via `Bun.spawn()`. Requires `data/voice_caller.session` (same Pyrogram session used for voice calls).
 
 **Graceful fallback:** If Pyrogram session is unavailable, fall back to sending reminders only to users who have been seen sending messages in the group (tracked opportunistically via upsert on each group message into `group_members` table). This ensures reminders work even without MTProto.

@@ -41,7 +41,6 @@ const {
   setupSecretaryExpiryCron,
   setupProposalExpiryCron,
   setupSessionCleanupCron,
-  setupBirthdaySyncCron,
   setupChatHistoryCleanupCron,
   setupSessionKeepaliveCron,
 } = await import('../../src/worker/bot-tasks-queue.ts');
@@ -104,13 +103,6 @@ describe('bot-tasks job processor', () => {
     expect(onSessionCleanup).toHaveBeenCalledTimes(1);
   });
 
-  test('calls onBirthdaySync for cron-birthday-sync', async () => {
-    const onBirthdaySync = mock(async () => {});
-    createBotTasksQueue({ redisUrl: 'redis://localhost:6379', onBirthdaySync });
-    await capturedProcessor({ data: { type: 'cron-birthday-sync' } });
-    expect(onBirthdaySync).toHaveBeenCalledTimes(1);
-  });
-
   test('calls onChatHistoryCleanup for cron-chat-history-cleanup', async () => {
     const onChatHistoryCleanup = mock(() => {});
     createBotTasksQueue({ redisUrl: 'redis://localhost:6379', onChatHistoryCleanup });
@@ -129,7 +121,6 @@ describe('bot-tasks job processor', () => {
     createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
     await expect(capturedProcessor({ data: { type: 'cron-secretary-expiry' } })).resolves.toBeUndefined();
     await expect(capturedProcessor({ data: { type: 'cron-sharing-cleanup' } })).resolves.toBeUndefined();
-    await expect(capturedProcessor({ data: { type: 'cron-birthday-sync' } })).resolves.toBeUndefined();
     await expect(capturedProcessor({ data: { type: 'cron-chat-history-cleanup' } })).resolves.toBeUndefined();
     await expect(capturedProcessor({ data: { type: 'cron-session-keepalive' } })).resolves.toBeUndefined();
   });
@@ -210,22 +201,6 @@ describe('cron setup functions', () => {
     expect(data.type).toBe('cron-session-cleanup');
     expect(opts.repeat.every).toBe(30 * 24 * 60 * 60_000);
     expect(opts.jobId).toBe('session-cleanup-tick');
-  });
-
-  test('setupBirthdaySyncCron adds job with daily interval', async () => {
-    mockQueueAdd.mockClear();
-    const { queue } = createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
-    await setupBirthdaySyncCron(queue);
-    expect(mockQueueAdd).toHaveBeenCalledTimes(1);
-    const [name, data, opts] = mockQueueAdd.mock.calls[0] as unknown as [
-      string,
-      { type: string },
-      { repeat: { every: number }; jobId: string },
-    ];
-    expect(name).toBe('birthday-sync-tick');
-    expect(data.type).toBe('cron-birthday-sync');
-    expect(opts.repeat.every).toBe(24 * 60 * 60_000);
-    expect(opts.jobId).toBe('birthday-sync-tick');
   });
 
   test('setupChatHistoryCleanupCron adds job with daily interval', async () => {

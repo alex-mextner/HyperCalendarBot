@@ -49,6 +49,8 @@ async function deliverMessageAsync(params: DeliverMessageParams): Promise<{ deli
 
 ### Цепочка доставки (универсальная)
 
+> **Обновление 2026-09-29:** общий служебный MTProto-аккаунт удалён по решению владельца; шага 2 больше нет. Предложения доставляются через Bot API, иначе инициатору уходит ссылка.
+
 1. **Bot API** — прямое `sendMessage(target_id, ...)`. Работает если пользователь хотя бы раз писал боту.
 2. **MTProto fallback** — `mtprotoSendAsUser(target_id, text, target_username)`. Работает для
    пользователей с публичным username, даже если они никогда не писали боту.
@@ -249,7 +251,7 @@ UPDATE calendar_proposals SET status = 'declined', updated_at = datetime('now') 
 You are in a group chat. You CANNOT modify other users' calendars directly.
 If the message asks to change, add, or delete something in another user's calendar:
 1. Use find_user to resolve the target to telegram_id.
-2. If find_user fails, tell the proposer what actually happened, in their own language — do not reword an "unavailable/couldn't verify" error as "hasn't started the bot" (that error means resolution could not be checked, not that the person doesn't use Telegram), and never paste the raw English error text verbatim.
+2. If find_user fails, explain its error in the proposer's language and offer pick_users; never paste it raw.
 3. Confirm the proposed change with ask_user if any details are ambiguous.
 4. Call propose_calendar_change. STOP immediately after — do not add more text.
 
@@ -272,7 +274,7 @@ If it's unclear whose calendar is meant — call ask_user: ["Мой", "@alice"].
 | Scenario | Handling |
 |----------|----------|
 | Target не в чате | `PROPOSAL_TARGET_NOT_IN_CHAT`. AI: "Этот пользователь не состоит в данном чате." |
-| Target не писал боту | `deliverMessageAsync` → MTProto fallback → deep link к предлагающему: "Алиса ещё не запускала бота. Перешли ей эту ссылку." |
+| Target не писал боту | `deliverMessage` → deep link к предлагающему: "Алиса ещё не запускала бота. Перешли ей эту ссылку." |
 | `event_id` не существует или удалён до принятия | `PROPOSAL_EVENT_GONE`. Executor уведомляет цель и предлагающего в личке: "Событие больше не существует, предложение аннулировано." |
 | Предложение истекло (принятие после `expires_at`) | `PROPOSAL_EXPIRED`. Бот: "Предложение истекло — событие уже завершилось." Кнопки убрать (edit message). |
 | Несколько открытых предложений к одному пользователю | Нет ограничений. Цель принимает/отклоняет каждое независимо. |
