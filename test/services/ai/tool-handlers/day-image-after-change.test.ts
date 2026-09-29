@@ -8,6 +8,7 @@ import { EventReminderRepository } from '../../../../src/database/repositories/e
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
+import { resolveTurnDayReferences } from '../../../../src/services/ai/day-reference-guard.ts';
 import { approveDeletes } from '../../../../src/services/ai/delete-confirmation.ts';
 import {
   handleCreateEvent,
@@ -38,7 +39,12 @@ afterEach(() => {
   setSystemTime();
 });
 
-function setup(timezone = TIMEZONE) {
+/**
+ * A run for the user's message, with its named days resolved the way agent.run resolves them.
+ * The default names no day, like the run after a delete-list tap: the day guard lets any date
+ * through, so the picture's date is the model's own choice.
+ */
+function setup(timezone = TIMEZONE, messageText = 'cancel all my English lessons') {
   const users = new UserRepository(db);
   users.create({ telegram_id: USER_ID, first_name: 'Learner', timezone, language: 'en' });
   const eventService = new EventService({ eventRepo: new EventRepository(db) });
@@ -46,11 +52,12 @@ function setup(timezone = TIMEZONE) {
     eventService.createEvent({ user_id: USER_ID, title: 'English lesson', start_at: startAt, timezone });
   const renderedDates: string[] = [];
   const chatHistory = new ChatHistoryRepository(db);
+  chatHistory.save(USER_ID, 'user', messageText);
   const ctx: AgentContext = {
     user: users.findByTelegramId(USER_ID)!,
     chatId: USER_ID,
     isGroup: false,
-    messageText: 'cancel all English on Tuesday',
+    messageText,
     eventService,
     userRepo: users,
     holidayService: new HolidayService(new HolidayRepository(db)),
@@ -69,6 +76,7 @@ function setup(timezone = TIMEZONE) {
       },
     },
   };
+  ctx.dayReferences = resolveTurnDayReferences(messageText, chatHistory.getRecent(USER_ID, 30), new Date(), timezone);
   return { ctx, lesson, renderedDates };
 }
 
@@ -160,4 +168,40 @@ test('an all-day change west of UTC counts for the day written, not the day befo
 
   expect(renderedDates).toEqual(['2026-09-29']);
   expect(result.output).toContain('2026-09-29');
+});
+
+test('a past day the user named for the picture is shown as asked, not replaced by the changed day', async () => {
+  // In a real run the day guard would let this picture through: the user named September 1.
+  const { ctx, lesson, renderedDates } = setup(TIMEZONE, 'Cancel English on Tuesday and show me September 1');
+  const nextTuesday = lesson('2026-09-29T16:00:00Z');
+  expect((await deleteApproved(ctx, nextTuesday.id)).success).toBe(true);
+
+  const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+
+  expect(renderedDates).toEqual(['2026-09-01']);
+  expect(result.output).toBe('Day calendar image for 2026-09-01 has been sent to the chat.');
+});
+
+test('a past day the user named as the one to change still yields to the upcoming changed day', async () => {
+  const { ctx, lesson, renderedDates } = setup(TIMEZONE, 'Move English from September 1 to Tuesday');
+  const moved = lesson('2026-09-01T16:00:00Z');
+  expect((await handleUpdateEvent(ctx, { event_id: moved.id, start_at: '2026-09-29T16:00:00Z' })).success).toBe(true);
+
+  const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+
+  expect(renderedDates).toEqual(['2026-09-29']);
+  expect(result.output).toContain('instead of the past day 2026-09-01');
+});
+
+test('a clock time alone names no day for the picture: a past-day picture still shows the change', async () => {
+  // 23:45 is still ahead at 23:12 in Belgrade, so the day guard reads the message as today.
+  const { ctx, renderedDates } = setup(TIMEZONE, '23:45 call mom');
+  expect(ctx.dayReferences?.timeOnly).toBe(true);
+  const created = await handleCreateEvent(ctx, { title: 'Call mom', start_at: '2026-09-27T21:45:00Z' });
+  expect(created.success).toBe(true);
+
+  const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+
+  expect(renderedDates).toEqual(['2026-09-27']);
+  expect(result.output).toContain('instead of the past day 2026-09-01');
 });

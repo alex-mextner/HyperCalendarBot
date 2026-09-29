@@ -42,10 +42,17 @@ function schedulePinFireAndForget(ctx: AgentContext, messageId: number): void {
  * The earliest upcoming day this run changed, when the requested day is already past. After a
  * change the model sometimes renders a past day it also touched, which hides the change that
  * matters (2026-09-27: deletes on 2026-09-01 and 2026-09-29, then a picture of 2026-09-01).
+ * A past day among the turn's named days (ctx.dayReferences.allowedDates) is kept when the run
+ * left it untouched: the user named it ("cancel English on Tuesday and show me September 1"),
+ * though the set also holds the neighbours of a day given in another zone and the days of a
+ * question a "Да" answers; a clock time alone names only today. A day the run changed yields like
+ * any other, so "move English from September 1 to Tuesday" pictures Tuesday; the trade-off is
+ * that asking to see a day the run also changed is redirected too.
  */
 function upcomingChangedDayInstead(ctx: AgentContext, requested: string): string | undefined {
   const today = format(new TZDate(new Date(), ctx.user.timezone), 'yyyy-MM-dd');
   if (requested >= today || !ctx.changedDays) return undefined;
+  if (ctx.dayReferences?.allowedDates.has(requested) && !ctx.changedDays.has(requested)) return undefined;
   let nearest: string | undefined;
   for (const day of ctx.changedDays) {
     if (day >= today && (nearest === undefined || day < nearest)) nearest = day;
