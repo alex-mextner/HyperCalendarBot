@@ -16,18 +16,22 @@ services:
     # instead of starting redis with a different password. The old string
     # command could not carry those characters either. The bot's REDIS_URL embeds
     # the password without percent-encoding, where `/`, `?`, `#` and `%` break or
-    # rewrite it, so those stop the container too. An empty value would mean
-    # `requirepass ""` (no auth at all), so an unset password stops it too.
+    # rewrite it and URL parsing drops tab, CR and LF, so those stop the container
+    # too. An empty value would mean `requirepass ""` (no auth at all), so an unset
+    # password stops it too.
     environment:
       REDISCLI_AUTH: ${REDIS_PASSWORD}
     command:
       - sh
       - -c
       - |
+        # The trailing '.' keeps $$() from stripping the LF; $${ctl%.} removes it again.
+        ctl=$$(printf '\t\r\n.'); ctl=$${ctl%.}
         case "$$REDISCLI_AUTH" in
           '') echo 'REDIS_PASSWORD must be set' >&2; exit 1 ;;
           *[\"\\]*) echo 'REDIS_PASSWORD must not contain a double quote or backslash' >&2; exit 1 ;;
           *[/?#%]*) echo 'REDIS_PASSWORD must not contain / ? # or % (REDIS_URL embeds it unencoded)' >&2; exit 1 ;;
+          *[$$ctl]*) echo 'REDIS_PASSWORD must not contain a tab, CR or LF (REDIS_URL parsing drops them)' >&2; exit 1 ;;
         esac
         exec docker-entrypoint.sh redis-server --appendonly yes --appendfsync everysec --maxmemory 200mb --maxmemory-policy noeviction - <<EOF
         requirepass "$$REDISCLI_AUTH"

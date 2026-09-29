@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { parseRedisUrl } from '../../src/utils/redis.ts';
 
 const COMPOSE_FILE = join(import.meta.dir, '../../docker-compose.yml');
 const PASSWORD = 'Synth-redis-pw-4f2c9';
@@ -200,11 +201,24 @@ describe.skipIf(!COMPOSE)('docker-compose.yml keeps the Redis password out of ar
     ['a question mark', 'Synth?pw-4f2c9'],
     ['a hash', 'Synth#pw-4f2c9'],
     ['a percent sign', 'Synth%41pw-4f2c9'],
+    // WHATWG URL parsing drops tab, CR and LF, so the bot would authenticate without them.
+    ['a tab', 'Synth\tpw-4f2c9'],
+    ['a carriage return', 'Synth\rpw-4f2c9'],
+    ['a line feed', 'Synth\npw-4f2c9'],
   ])('a password containing %s stops redis instead of giving the bot a REDIS_URL it cannot use', (_, password) => {
     const started = startRedis(render(password).redis!);
     expect(started.exitCode).not.toBe(0);
     expect(started.stderr).toContain('REDIS_PASSWORD');
     expect(started.argv).toEqual([]);
+  });
+
+  test('a password with spaces, @ and : starts redis and comes back out of the bot REDIS_URL unchanged', () => {
+    const password = 'Synth pw@4f:2c9';
+    const services = render(password);
+    const started = startRedis(services.redis!);
+    expect({ exitCode: started.exitCode, stderr: started.stderr }).toEqual({ exitCode: 0, stderr: '' });
+    expect(effectiveRequirepass(started)).toBe(password);
+    expect(parseRedisUrl(containerEnv(services.bot!).REDIS_URL!).password).toBe(password);
   });
 
   test.each([
