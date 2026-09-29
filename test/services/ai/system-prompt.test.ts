@@ -2,13 +2,11 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { BirthdayMetadataRepository } from '../../../src/database/repositories/birthday-metadata.repository.ts';
-import { CalendarProposalRepository } from '../../../src/database/repositories/calendar-proposal.repository.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
-import { SecretaryRepository } from '../../../src/database/repositories/secretary.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { UserMemoryRepository } from '../../../src/database/repositories/user-memory.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
@@ -797,24 +795,6 @@ describe('buildSystemPrompt', () => {
 
       expect(profile).toContain('Likes cello');
       expect(profile).toContain('What I Know About You');
-    });
-
-    test('caps a long secretaryLine so saved memory facts survive the validator slice', () => {
-      const longSecretary = 'A'.repeat(2_000);
-      const withSecretary = {
-        ...ctx,
-        secretary: {
-          secretaryRepo: new SecretaryRepository(db),
-          secretaryForLine: longSecretary,
-          calendarProposalRepo: new CalendarProposalRepository(db),
-        },
-      };
-      const profile = buildUserProfileEvidence(withSecretary);
-
-      // The profile must stay within the 3 200-char validator budget
-      expect(profile.length).toBeLessThanOrEqual(3_200);
-      // But still contain the User Info heading
-      expect(profile).toContain('## User Info');
     });
   });
 });

@@ -1507,7 +1507,7 @@ describe('CalendarBotAgent.run()', () => {
   });
 
   test('run() with simple text response streams and saves history', async () => {
-    const { impl } = makeStreamImpl([{ kind: 'text', text: 'No events today.' }]);
+    const { impl } = makeStreamImpl([{ kind: 'text', text: 'Hi! Which day should I look at?' }]);
     const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
 
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
@@ -1523,7 +1523,7 @@ describe('CalendarBotAgent.run()', () => {
     expect(history[1]!.role).toBe('assistant');
     const parsed = JSON.parse(history[1]!.content) as OpenAI.ChatCompletionMessageParam;
     expect(parsed.role).toBe('assistant');
-    expect(parsed.content).toBe('No events today.');
+    expect(parsed.content).toBe('Hi! Which day should I look at?');
   });
 
   test('run() with tool use executes tool and continues loop', async () => {

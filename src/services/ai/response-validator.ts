@@ -17,6 +17,7 @@ import { format } from 'date-fns';
 import { t, toLang } from '../../config/constants.ts';
 import { logger } from '../../utils/logger.ts';
 import { formatEventSummaries } from '../intent/response-formatter.ts';
+import { readDayContent } from './day-references.ts';
 import { MEMORY_SECTION_MAX_CHARS } from './prompt-sections.ts';
 import {
   checkGrounding,
@@ -42,9 +43,9 @@ const MAX_TOOL_RESULT_CHARS = 600;
 /** Cap for all tool results shown to the validator together. */
 const MAX_TOOL_RESULTS_CHARS = 2400;
 /**
- * Cap for the user's profile shown to the validator. Its saved-facts part is
- * already held to MEMORY_SECTION_MAX_CHARS; the rest covers the User Info lines
- * and the headings, so the cap does not cut the newest facts, listed last.
+ * Cap for the user's profile shown to the validator. The profile opens with the
+ * saved facts, whose lines are held to MEMORY_SECTION_MAX_CHARS, so the cap cuts
+ * the end of User Info (a long secretary list), never a saved fact.
  */
 const MAX_USER_PROFILE_CHARS = MEMORY_SECTION_MAX_CHARS + 1_200;
 /** Events listed in the notice that replaces an unverified answer. */
@@ -303,11 +304,9 @@ export async function validateResponse(
     };
   }
 
-  if (
-    input.tools.length > 0 &&
-    !hasSuccessfulScheduleRead(input.tools) &&
-    claimsCompleteOrEmptySchedule(input.response)
-  ) {
+  // Tool-less answers too: a saved fact such as "nothing on Friday" is in the profile the
+  // model is shown, and the fast model took it for a read of the calendar.
+  if (!hasSuccessfulScheduleRead(input.tools) && claimsCompleteOrEmptySchedule(input.response)) {
     return {
       approved: false,
       reason: 'Claimed the complete/empty schedule without a successful schedule read',
@@ -318,6 +317,12 @@ export async function validateResponse(
 
   const toolCallsSummary =
     input.tools.length > 0 ? input.tools.map((tool) => tool.name).join(', ') : '(none — no tools were called)';
+  // The profile tells who the user is, not what the calendar holds. Shown a saved "rehearsal on
+  // Fridays", the fast model approved a tool-less "on Friday you have a rehearsal", so an answer
+  // that names a day, or states a time, title or id no read backs, is judged without it.
+  const speaksOfTheCalendar =
+    hasUnbackedFacts(input) || readDayContent(input.response, new Date(), input.timezone).kind !== 'none';
+  const userProfile = speaksOfTheCalendar ? '' : input.userProfile;
 
   // User-influenced strings are wrapped in clearly-delimited XML-style tags.
   // The system prompt above instructs the validator to treat their contents
@@ -331,7 +336,7 @@ export async function validateResponse(
     '</user_message>',
     '',
     '<user_profile>',
-    neutralizeBlockTags(input.userProfile).slice(0, MAX_USER_PROFILE_CHARS),
+    neutralizeBlockTags(userProfile).slice(0, MAX_USER_PROFILE_CHARS),
     '</user_profile>',
     '',
     '<tool_results>',

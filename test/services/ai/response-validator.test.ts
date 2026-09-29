@@ -211,6 +211,25 @@ describe('tool-run evidence prefilter — deterministic rejection', () => {
     expect(result.approved).toBe(false);
     expect(called).toBe(false);
   });
+
+  test('a tool-less empty-day claim is rejected without a model call, even when a saved fact says so (#740)', async () => {
+    let called = false;
+    const result = await validateResponse(
+      {
+        userMessage: 'Что у меня в пятницу?',
+        timezone: 'Europe/Lisbon',
+        userProfile: '## What I Know About You\n- В пятницу у меня ничего не запланировано',
+        tools: [],
+        response: 'В пятницу у тебя ничего не запланировано.',
+      },
+      async () => {
+        called = true;
+        return stubText('APPROVE')({ messages: [], maxTokens: 1 });
+      },
+    );
+    expect(result.approved).toBe(false);
+    expect(called).toBe(false);
+  });
 });
 
 describe('validateResponse — happy path parsing', () => {

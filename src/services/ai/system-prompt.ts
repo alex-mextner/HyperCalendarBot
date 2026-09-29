@@ -186,18 +186,9 @@ function buildUserInfoSection(ctx: AgentContext, utcOffset: string, now: TZDate)
   const cityLine = ctx.user.city
     ? `- City: ${ctx.user.city}`
     : '- City: unknown (ask user to share location or type their city)';
-  // Cap the secretary list so that the User Info section stays within the
-  // ~1 200-char budget that MAX_USER_PROFILE_CHARS reserves for it. Without
-  // the cap a user granted secretary access to many calendars (15+ owners)
-  // can overflow, and the validator's .slice() would cut the newest saved
-  // memory facts — listed last — instead.
-  const SECRETARY_LINE_MAX_CHARS = 500;
-  const secretaryRaw = ctx.secretary?.secretaryForLine ?? '';
-  const secretaryTrimmed =
-    secretaryRaw.length > SECRETARY_LINE_MAX_CHARS
-      ? `${secretaryRaw.slice(0, SECRETARY_LINE_MAX_CHARS)}…`
-      : secretaryRaw;
-  const secretaryLine = secretaryTrimmed ? `\n- Calendars you can manage as secretary: ${secretaryTrimmed}` : '';
+  const secretaryLine = ctx.secretary?.secretaryForLine
+    ? `\n- Calendars you can manage as secretary: ${ctx.secretary.secretaryForLine}`
+    : '';
   // The model maps "в понедельник" to a date by itself and gets it wrong (on Friday
   // 2026-09-25 it put Monday on the 27th, a Sunday); the next seven local dates, each with
   // its year and weekday, remove that arithmetic.
@@ -567,14 +558,19 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 }
 
 /**
- * What the prompt tells the agent about the user: the User Info and saved-facts
+ * What the prompt tells the agent about the user: the saved-facts and User Info
  * sections, rendered by the same builders as in buildSystemPrompt. An answer
  * about the user themself is drawn from this text, not from a tool, so this is
  * the evidence it has to be checked against.
+ *
+ * The saved facts come first: their section is held to MEMORY_SECTION_MAX_CHARS
+ * of fact lines, while User Info has no bound of its own (a long city name, a
+ * secretary for many calendars), so when the validator's cap cuts this text it
+ * cuts the end of User Info, never the newest facts.
  */
 export function buildUserProfileEvidence(ctx: AgentContext): string {
   const now = new TZDate(Date.now(), ctx.user.timezone);
-  return [buildUserInfoSection(ctx, formatUtcOffset(ctx.user.timezone), now), buildMemorySection(ctx)]
+  return [buildMemorySection(ctx), buildUserInfoSection(ctx, formatUtcOffset(ctx.user.timezone), now)]
     .filter((section) => section.length > 0)
     .join('\n\n');
 }
