@@ -13,6 +13,7 @@ import { CallSettingsRepository } from './repositories/call-settings.repository.
 import { ChatHistoryRepository } from './repositories/chat-history.repository.ts';
 import { ContactRepository } from './repositories/contact.repository.ts';
 import { DeepLinkRepository } from './repositories/deep-link.repository.ts';
+import { DialogueSessionRepository } from './repositories/dialogue-session.repository.ts';
 import { EditProposalRepository } from './repositories/edit-proposal.repository.ts';
 import { EventRepository } from './repositories/event.repository.ts';
 import { EventReminderRepository } from './repositories/event-reminder.repository.ts';
@@ -70,6 +71,7 @@ export class DatabaseService {
   readonly featureUsage: FeatureUsageRepository;
   readonly participantGoogleSync: ParticipantGoogleSyncRepository;
   readonly telegramSessions: TelegramSessionRepository;
+  readonly dialogueSessions: DialogueSessionRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -117,6 +119,7 @@ export class DatabaseService {
     this.featureUsage = new FeatureUsageRepository(this.db);
     this.participantGoogleSync = new ParticipantGoogleSyncRepository(this.db);
     this.telegramSessions = new TelegramSessionRepository(this.db);
+    this.dialogueSessions = new DialogueSessionRepository(this.db);
   }
 
   close(): void {

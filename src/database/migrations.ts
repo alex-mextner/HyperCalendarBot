@@ -1106,4 +1106,55 @@ export const migrations: Migration[] = [
       backfillActiveRevision(db);
     },
   },
+  {
+    name: '066_dialogue_v3_sessions',
+    up(db) {
+      // GH-652's workflow v3 dialogue runtime needs a durable, cross-restart session store for
+      // an in-progress /add or natural-text draft (title/schedule/people/place/description/
+      // recurrence), keyed by actor+chat+topic and carrying an explicit anchor for stale/foreign
+      // callback rejection. Reusing `workflow_sessions` (033_workflow_sessions) was considered and
+      // rejected: its `data` column is validated against WorkflowSessionSchema, which REQUIRES
+      // `intentId`/`workflow`/`stepResults` (see workflow-session.repository.ts) — a v3 draft has
+      // no such fields, so storing it there would mean either corrupting that schema for the
+      // live regex-intent engine or inventing a fake placeholder Workflow just to pass validation.
+      // The two session concepts also share no natural single-row identity: `workflow_sessions` is
+      // keyed by (chat_id, user_id) only, with no topic axis, and a real chat can have BOTH an
+      // active regex-intent workflow suspension and an unrelated /add draft in flight for the same
+      // user at once — sharing one PK would make one silently clobber the other. `gramio_scenes`
+      // (add-event.scene.ts's own storage, scenes/storage.ts) is GramIO-framework-owned and keyed
+      // by `@gramio/scenes:${userId}` with no chat/topic scoping of its own (chat-scoped-storage.ts
+      // exists only to bolt that on) — reusing it would mean either modifying the untouched legacy
+      // wizard's own storage contract or fighting its key format. This new table follows the exact
+      // same idiom as `workflow_sessions` (same Database instance, same TEXT-JSON-payload +
+      // created_at/updated_at + row-level TTL-by-age shape, its own repository class registered on
+      // DatabaseService) rather than a new migration engine or a second database file.
+      db.exec(`
+        CREATE TABLE dialogue_v3_sessions (
+          chat_id    INTEGER NOT NULL,
+          user_id    INTEGER NOT NULL,
+          topic_id   INTEGER NOT NULL DEFAULT 0,
+          data       TEXT    NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (chat_id, user_id, topic_id)
+        )
+      `);
+    },
+  },
+  {
+    name: '067_dialogue_v3_sessions_revision',
+    up(db) {
+      // GH-652 correction pass: a v3 draft (title/schedule/people/place) is mutated by ordinary
+      // chat turns AND can be reached by a late/duplicate delivery (a retried Telegram webhook,
+      // a slow AI handoff that resolves after the user already answered locally). A plain
+      // upsert (066's original `set()`) always wins regardless of write order — a late write
+      // can silently clobber a newer answer, or double-fire event creation for the same draft.
+      // `revision` makes every write a compare-and-swap: the repository only accepts a write
+      // when the caller's `expectedRevision` still matches the stored row, otherwise the caller
+      // must re-read and decide, never blindly overwrite (see DialogueSessionRepository.set).
+      // Pure additive column with a default — every existing row (there are none pre-GA, since
+      // the whole v3 runtime is still `DIALOGUE_V3_ENABLED=false`) reads as revision 1.
+      db.exec('ALTER TABLE dialogue_v3_sessions ADD COLUMN revision INTEGER NOT NULL DEFAULT 1');
+    },
+  },
 ];
