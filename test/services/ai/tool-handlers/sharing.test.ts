@@ -1867,6 +1867,51 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('proposal submitted');
     });
 
+    // A declined invitation survives the event's delete (#505); it must not let the invitee, or the
+    // owner, file a proposal against the deleted event and ping the owner about it.
+    for (const caller of ['declined invitee', 'owner'] as const) {
+      test(`${caller} cannot propose an edit to a deleted event`, async () => {
+        const editProposalRepo = new EditProposalRepository(db);
+        const event = eventService.createEvent({
+          user_id: OTHER_USER_ID,
+          title: 'Deleted Later',
+          start_at: '2026-03-20T10:00:00Z',
+          timezone: 'UTC',
+        });
+        const inv = invitationRepo.create({ event_id: event.id, inviter_id: OTHER_USER_ID, invitee_id: USER_ID });
+        invitationRepo.updateStatus(inv.id, 'declined', 'pending');
+        expect(eventService.deleteEvent(event.id, OTHER_USER_ID)).toBe(true);
+        expect(invitationRepo.findActiveOrRespondedByEventAndInvitee(event.id, USER_ID)?.status).toBe('declined');
+
+        const notified: number[] = [];
+        const ctx = makeCtx({
+          ...(caller === 'owner' ? { user: userRepo.findByTelegramId(OTHER_USER_ID)! } : {}),
+          sharing: {
+            sharedEventRepo,
+            invitationRepo,
+            invitationService,
+            sharingSettingsRepo,
+            sharingService,
+            privacyService,
+            editProposalRepo,
+          },
+          sender: {
+            sendMessage: async () => ({ message_id: 1 }),
+            editMessageText: async () => {},
+            sendEditProposal: async (ownerId) => {
+              notified.push(ownerId);
+              return { message_id: 42 };
+            },
+          },
+        });
+        const result = await handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Revive It' } });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+        expect(editProposalRepo.getPendingForEvent(event.id)).toHaveLength(0);
+        expect(notified).toEqual([]);
+      });
+    }
+
     test('cancelled invitation does not grant propose_edit access', async () => {
       const editProposalRepo = new EditProposalRepository(db);
       const event = eventService.createEvent({

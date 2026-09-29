@@ -757,6 +757,10 @@ export async function handleProposeEdit(ctx: AgentContext, input: ProposeEditInp
 
   const callerId = ctx.user.telegram_id;
   const ownerId = ctx.eventService.getEventOwnerId(input.event_id);
+  // getEventOwnerId also answers for a deleted event, and a declined invitation survives the delete (#505).
+  if (ownerId === null || !ctx.eventService.getEvent(input.event_id, ownerId)) {
+    return { success: false, error: `Event ${input.event_id} not found or you are not invited to it.` };
+  }
   const isOwner = ownerId === callerId;
   const hasPersonalInvitation =
     !isOwner && ctx.sharing.invitationRepo.findActiveOrRespondedByEventAndInvitee(input.event_id, callerId) !== null;
