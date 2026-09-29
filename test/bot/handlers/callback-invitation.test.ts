@@ -824,7 +824,17 @@ describe('RSVP taps on a revoked invitation', () => {
   const INVITER = 100;
   const INVITEE = 200;
 
-  function setupRevokedInvitation(status: 'cancelled' | 'expired') {
+  // An invitation outlives its event's delete (#505) — only open ones become cancelled — and its card
+  // can still carry RSVP buttons: a second copy of the card (deep link, re-send) or a failed rewrite
+  // after an answer. Once the event is gone, even a declined one is refused like a cancelled one.
+  const REVOKED = [
+    ['cancelled', false, 'invitation_cancelled'],
+    ['expired', false, 'invitation_expired'],
+    ['declined', true, 'invitation_cancelled'],
+    ['expired', true, 'invitation_expired'],
+  ] as const;
+
+  function setupRevokedInvitation(status: 'cancelled' | 'expired' | 'declined', eventDeleted: boolean) {
     const db = new Database(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
     runMigrations(db, migrations);
@@ -849,45 +859,45 @@ describe('RSVP taps on a revoked invitation', () => {
     const invitation = invitationService.sendInvitation(event.id, INVITER, INVITEE).invitation!;
     if (status === 'cancelled') {
       invitationService.cancelInvitation(invitation.id, INVITER);
-    } else {
+    } else if (status === 'expired') {
       db.prepare("UPDATE events SET start_at = datetime('now', '-1 hour') WHERE id = ?").run(event.id);
       invRepo.expirePastInvitations();
+    } else {
+      invitationService.declineInvitation(invitation.id, INVITEE);
+    }
+    if (eventDeleted) {
+      expect(eventRepo.remove(event.id, INVITER)).toBe(true);
     }
     expect(invRepo.findById(invitation.id)!.status).toBe(status);
     const handler = makeCallbackHandler({ invitationService, eventRepo, invitationRepo: invRepo });
     return { handler, invRepo, participantRepo, event, invitation };
   }
 
-  test.each([
-    ['cancelled', 'accept'],
-    ['cancelled', 'maybe'],
-    ['cancelled', 'decline'],
-    ['expired', 'accept'],
-    ['expired', 'maybe'],
-    ['expired', 'decline'],
-  ] as const)('%s invitation: %s keeps the status, adds no participant and says it is no longer active', async (status, action) => {
-    const { handler, invRepo, participantRepo, event, invitation } = setupRevokedInvitation(status);
+  test.each(
+    REVOKED.flatMap(([status, eventDeleted, reason]) =>
+      (['accept', 'maybe', 'decline'] as const).map((action) => [status, eventDeleted, reason, action] as const),
+    ),
+  )('%s invitation (event deleted: %p) is refused with %s on %s, keeps the status and adds no participant', async (status, eventDeleted, reason, action) => {
+    const { handler, invRepo, participantRepo, event, invitation } = setupRevokedInvitation(status, eventDeleted);
 
     const tap = makeCallbackTap(`inv:${action}:${invitation.id}`, { telegram_id: INVITEE, language: 'en' });
     await handler(tap.ctx);
 
     expect(invRepo.findById(invitation.id)!.status).toBe(status);
     expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
-    expect(tap.answer).toHaveBeenCalledWith(
-      status === 'cancelled' ? t('en').invitation_cancelled : t('en').invitation_expired,
-    );
+    expect(tap.answer).toHaveBeenCalledWith(t('en')[reason]);
     expect(tap.editText).not.toHaveBeenCalled();
   });
 
-  test.each(['cancelled', 'expired'] as const)('%s invitation: a +30 proposal is refused', async (status) => {
-    const { handler, invRepo, invitation } = setupRevokedInvitation(status);
+  test.each(
+    REVOKED,
+  )('%s invitation (event deleted: %p): a +30 proposal is refused with %s', async (status, eventDeleted, reason) => {
+    const { handler, invRepo, invitation } = setupRevokedInvitation(status, eventDeleted);
 
     const tap = makeCallbackTap(`inv:propose:${invitation.id}:+30`, { telegram_id: INVITEE, language: 'en' });
     await handler(tap.ctx);
 
     expect(invRepo.findById(invitation.id)!.proposed_time).toBeNull();
-    expect(tap.answer).toHaveBeenCalledWith({
-      text: status === 'cancelled' ? t('en').invitation_cancelled : t('en').invitation_expired,
-    });
+    expect(tap.answer).toHaveBeenCalledWith({ text: t('en')[reason] });
   });
 });

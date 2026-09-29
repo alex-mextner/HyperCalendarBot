@@ -15,7 +15,7 @@ export interface InvitationResult {
    * Why an action was refused, as the `t(lang)` key of the message that tells the user: the invitee's
    * time proposal was already settled (they answered, or the inviter acted on it), the invitee proposed a
    * time on an invitation they already answered, or the invitee acted on an invitation the inviter
-   * cancelled or that expired.
+   * cancelled, that expired, or whose event is gone (reported as cancelled).
    */
   reason?: 'invite_proposal_closed' | 'invitation_already_answered' | 'invitation_cancelled' | 'invitation_expired';
   proposedTime?: string;
@@ -30,17 +30,6 @@ const PROPOSAL_CLOSED: InvitationResult = {
 /** A proposal stays open until the invitee answers the invitation or the inviter settles it. */
 function hasOpenProposal(invitation: Invitation): invitation is Invitation & { proposed_time: string } {
   return invitation.status === 'pending' && !!invitation.proposed_time;
-}
-
-/** A cancelled or expired invitation takes no answer or time proposal from its invitee. */
-function revokedInvitationResult(invitation: Invitation): InvitationResult | null {
-  if (invitation.status === 'cancelled') {
-    return { success: false, reason: 'invitation_cancelled', error: 'Invitation was cancelled' };
-  }
-  if (invitation.status === 'expired') {
-    return { success: false, reason: 'invitation_expired', error: 'Invitation has expired' };
-  }
-  return null;
 }
 
 export class InvitationService {
@@ -158,7 +147,7 @@ export class InvitationService {
     if (invitation.invitee_id !== userId) {
       return { success: false, error: 'Not authorized to propose' };
     }
-    const revoked = revokedInvitationResult(invitation);
+    const revoked = this.revokedInvitationResult(invitation);
     if (revoked) {
       return revoked;
     }
@@ -211,6 +200,22 @@ export class InvitationService {
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
 
+  /**
+   * A cancelled or expired invitation takes no answer or time proposal from its invitee. Neither does
+   * one whose event is gone (deleted, or a cancelled occurrence): the invitation outlives a delete
+   * (#505), but only the open ones become cancelled — a declined one keeps its status — so the event
+   * itself is checked too, and refused as cancelled.
+   */
+  private revokedInvitationResult(invitation: Invitation): InvitationResult | null {
+    if (invitation.status === 'expired') {
+      return { success: false, reason: 'invitation_expired', error: 'Invitation has expired' };
+    }
+    if (invitation.status === 'cancelled' || !this.eventRepo.findByIdUnfiltered(invitation.event_id)) {
+      return { success: false, reason: 'invitation_cancelled', error: 'Invitation was cancelled' };
+    }
+    return null;
+  }
+
   private respondToInvitation(invitationId: number, userId: number, newStatus: InvitationStatus): InvitationResult {
     const invitation = this.invRepo.findById(invitationId);
     if (!invitation) {
@@ -219,7 +224,7 @@ export class InvitationService {
     if (invitation.invitee_id !== userId) {
       return { success: false, error: 'Not authorized to respond' };
     }
-    const revoked = revokedInvitationResult(invitation);
+    const revoked = this.revokedInvitationResult(invitation);
     if (revoked) {
       return revoked;
     }
