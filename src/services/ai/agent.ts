@@ -1417,9 +1417,7 @@ export class CalendarBotAgent {
               } else {
                 const reValidation = await validateResponse(
                   {
-                    userMessage: ctx.messageText,
-                    timezone: ctx.user.timezone,
-                    tools: toolEvidence,
+                    ...proseEvidence,
                     response: retryOutcome.lastRoundText,
                     // Rebuilt: the retry may have saved a fact that its answer now mentions.
                     userProfile: buildUserProfileEvidence(ctx),

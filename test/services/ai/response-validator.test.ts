@@ -1,6 +1,7 @@
 // test/services/ai/response-validator.test.ts
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import type OpenAI from 'openai';
+import { MEMORY_SECTION_MAX_CHARS } from '../../../src/services/ai/prompt-sections.ts';
 import type { ToolEvidence } from '../../../src/services/ai/response-grounding.ts';
 import {
   shouldValidateResponse,
@@ -752,8 +753,10 @@ test('asking for a missing English title is not classified as a content refusal'
   expect(result.approved).toBe(true);
 });
 
-// MAX_USER_PROFILE_CHARS = MEMORY_SECTION_MAX_CHARS (2000) + 1200 = 3200
-test('userProfile exceeding 3200 chars is truncated in the validator prompt (#740)', async () => {
+// The validator's cap is MAX_USER_PROFILE_CHARS = MEMORY_SECTION_MAX_CHARS + 1_200.
+const PROFILE_CAP = MEMORY_SECTION_MAX_CHARS + 1_200;
+
+test(`userProfile exceeding ${PROFILE_CAP} chars is truncated in the validator prompt (#740)`, async () => {
   let capturedUserContent = '';
   const impl: (opts: StreamRoundOptions) => Promise<StreamRoundResult> = async (opts) => {
     const userMsg = opts.messages.find((m) => m.role === 'user');
@@ -761,7 +764,7 @@ test('userProfile exceeding 3200 chars is truncated in the validator prompt (#74
     return stubText('APPROVE')(opts);
   };
   const longProfile = `## What I Know About You\n- ${'Fact. '.repeat(800)}`;
-  expect(longProfile.length).toBeGreaterThan(3_200);
+  expect(longProfile.length).toBeGreaterThan(PROFILE_CAP);
   await validateResponse(
     {
       userMessage: 'what do you know about me',
@@ -774,5 +777,5 @@ test('userProfile exceeding 3200 chars is truncated in the validator prompt (#74
   );
   const profileBlock = capturedUserContent.match(/<user_profile>\n([\s\S]*?)\n<\/user_profile>/);
   expect(profileBlock).not.toBeNull();
-  expect(profileBlock?.[1]?.length).toBeLessThanOrEqual(3_200);
+  expect(profileBlock?.[1]?.length).toBeLessThanOrEqual(PROFILE_CAP);
 });

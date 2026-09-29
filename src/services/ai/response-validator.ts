@@ -236,6 +236,28 @@ function hasUnbackedFacts(input: ValidationInput): boolean {
   return report.contextOnlyDays.length > 0 && claimsCompleteOrEmptySchedule(input.response);
 }
 
+/** Words that place a claim in the calendar even when it names no day ("в твоём календаре есть репетиция"). */
+const CALENDAR_NOUN = /календар|расписани|calendar|schedule|agenda/i;
+
+/**
+ * Whether the answer speaks of the calendar, so the profile must not back it. The profile tells
+ * who the user is, not what the calendar holds: shown a saved "rehearsal on Fridays", the fast
+ * model approved a tool-less "on Friday you have a rehearsal".
+ *
+ * With no tools every clock time and date is unbacked, and a saved fact ("встаю в 7:30") or the
+ * zone's offset (UTC+5:30) carries them too, so a tool-less answer is held to the calendar only
+ * by a named day, a quoted title, an event id or a calendar word. A run that read the calendar
+ * can back its times and dates, so there any unbacked fact or day reference counts.
+ */
+function speaksOfTheCalendar(input: ValidationInput): boolean {
+  const days = readDayContent(input.response, new Date(), input.timezone);
+  if (input.tools.length > 0) return days.kind !== 'none' || hasUnbackedFacts(input);
+  if (days.kind === 'named' || CALENDAR_NOUN.test(input.response)) return true;
+  return (
+    checkGrounding(input.response, input.tools, input.timezone, input.userMessage).ungroundedTitlesAndIds.length > 0
+  );
+}
+
 /**
  * Keep the normal fast path after tool-backed writes and after reads whose
  * results back every concrete fact the prose states (clock times, days, quoted
@@ -317,12 +339,7 @@ export async function validateResponse(
 
   const toolCallsSummary =
     input.tools.length > 0 ? input.tools.map((tool) => tool.name).join(', ') : '(none — no tools were called)';
-  // The profile tells who the user is, not what the calendar holds. Shown a saved "rehearsal on
-  // Fridays", the fast model approved a tool-less "on Friday you have a rehearsal", so an answer
-  // that names a day, or states a time, title or id no read backs, is judged without it.
-  const speaksOfTheCalendar =
-    hasUnbackedFacts(input) || readDayContent(input.response, new Date(), input.timezone).kind !== 'none';
-  const userProfile = speaksOfTheCalendar ? '' : input.userProfile;
+  const userProfile = speaksOfTheCalendar(input) ? '' : input.userProfile;
 
   // User-influenced strings are wrapped in clearly-delimited XML-style tags.
   // The system prompt above instructs the validator to treat their contents

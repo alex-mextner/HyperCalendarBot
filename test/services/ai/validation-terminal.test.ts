@@ -779,4 +779,47 @@ describe('answers about the user are checked against the profile the agent saw (
     expect(result.metrics?.termination).toBe('unverified');
     expect(result.responseText).not.toContain(answer);
   });
+
+  /** Approves only when the profile block the validator was shown holds `fact`. */
+  function approvesWhenProfileShows(fact: string): (validatorInput: string) => string {
+    return (validatorInput) => {
+      const profile = validatorInput.match(/<user_profile>\n([\s\S]*?)\n<\/user_profile>/)?.[1] ?? '';
+      return profile.includes(fact) ? 'APPROVE' : 'REJECT: personal data without calling calendar tools';
+    };
+  }
+
+  // A clock time or a date is not the calendar: a saved fact or the zone's offset carries them too.
+  test.each([
+    ['Встаю в 7:30', 'Мира, я помню, что ты встаёшь в 7:30.', 'Встаю в 7:30'],
+    ['Отпуск с 10 августа', 'Я помню, что у тебя отпуск с 10 августа.', 'Отпуск с 10 августа'],
+    ['', 'Твой часовой пояс — Asia/Kolkata (UTC+5:30).', 'UTC+5:30'],
+  ])('a tool-less answer about the user with a time or date is checked against the profile: %s %s', async (savedFact, answer, shownFact) => {
+    const ctx = profileContext('ru', 'А что ты знаешь обо мне');
+    ctx.user.timezone = 'Asia/Kolkata';
+    if (savedFact) new UserMemoryRepository(db).append(USER_ID, savedFact);
+    const approves = approvesWhenProfileShows(shownFact);
+    const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(answer);
+    expect(result.metrics?.termination).not.toBe('unverified');
+    expect(script.counts).toEqual({ model: 1, validator: 1 });
+  });
+
+  // With no day named, the calendar is still spoken of by a quoted title, an event id or the word itself.
+  test.each([
+    ['В твоём календаре есть репетиция оркестра.'],
+    ['У тебя есть событие «Репетиция оркестра».'],
+    ['Репетиция оркестра записана под id 42.'],
+  ])('a saved fact does not stand in for a calendar read without a day: %s', async (answer) => {
+    const savedEvent = 'По пятницам у меня репетиция оркестра';
+    const ctx = profileContext('ru', 'Что у меня в календаре?');
+    new UserMemoryRepository(db).append(USER_ID, savedEvent);
+    const approves = approvesWhenProfileShows(savedEvent);
+    const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(result.responseText).not.toContain(answer);
+  });
 });
