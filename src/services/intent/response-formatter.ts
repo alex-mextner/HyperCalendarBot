@@ -23,7 +23,7 @@ const SettingsCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.numb
  * weeks away, so a lone future event needs its date, and an undated line inside a
  * dated list reads as belonging to the day above it. All-day events carry no time.
  */
-function formatEventSummaries(events: EventSummary[], timezone: string): string {
+export function formatEventSummaries(events: EventSummary[], timezone: string): string {
   const todayKey = format(new TZDate(new Date(), timezone), 'yyyy-MM-dd');
   const dated = events.some((event) => event.date !== todayKey);
   return events

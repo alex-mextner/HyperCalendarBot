@@ -25,6 +25,7 @@ import {
   type AgentTermination,
   elapsedMs,
 } from './request-metrics.ts';
+import type { ToolEvidence } from './response-grounding.ts';
 import { shouldValidateResponse, unverifiedResponseNotice, validateResponse } from './response-validator.ts';
 import {
   AllProvidersFailedError,
@@ -1012,6 +1013,9 @@ export class CalendarBotAgent {
     });
     const allToolCalls: AgentToolCallRecord[] = [];
     const allToolResults: AgentToolResultRecord[] = [];
+    // What each executed call returned, including structured data: the evidence
+    // the validator matches the final prose against and the notice falls back to.
+    const toolEvidence: ToolEvidence[] = [];
     // Keys of tool calls already executed in this run — used to short-circuit
     // duplicate calls with identical arguments and prevent agent-level loops
     // where the model keeps invoking the same tool (e.g. render_day_image,
@@ -1257,6 +1261,13 @@ export class CalendarBotAgent {
           if (tc.name !== DISCOVERY_TOOL) {
             allToolCalls.push({ name: tc.name, input });
             allToolResults.push({ success: toolResult.success, output: toolResult.output });
+            toolEvidence.push({
+              name: tc.name,
+              input,
+              success: toolResult.success,
+              output: toolResult.output,
+              data: toolResult.data,
+            });
           }
 
           const content = toolResultContent(toolResult);
@@ -1314,7 +1325,8 @@ export class CalendarBotAgent {
           const validation = await validateResponse(
             {
               userMessage: ctx.messageText,
-              toolCalls: allToolCalls.map((tc) => tc.name),
+              timezone: ctx.user.timezone,
+              tools: toolEvidence,
               response: responseText,
             },
             validatorStream,
@@ -1336,6 +1348,7 @@ export class CalendarBotAgent {
               dbg,
               allToolCalls,
               allToolResults,
+              toolEvidence,
               startTime,
               seenToolCallKeys,
               writeOutcomes,
@@ -1361,7 +1374,8 @@ export class CalendarBotAgent {
                 const reValidation = await validateResponse(
                   {
                     userMessage: ctx.messageText,
-                    toolCalls: allToolCalls.map((tc) => tc.name),
+                    timezone: ctx.user.timezone,
+                    tools: toolEvidence,
                     response: retryOutcome.lastRoundText,
                   },
                   validatorStream,
@@ -1438,7 +1452,7 @@ export class CalendarBotAgent {
       responseUnverified && !silent && !evidence && termination !== 'waiting'
         ? unresolvedWeekdays.length > 0
           ? weekdayMismatchNotice(ctx.user.language, unresolvedWeekdays)
-          : unverifiedResponseNotice(ctx.user.language)
+          : unverifiedResponseNotice(ctx.user.language, ctx.user.timezone, ctx.isGroup ? [] : toolEvidence)
         : null;
     const guarded = responseUnverified || evidence !== null || termination === 'waiting' || termination === 'error';
     if (guarded) {
@@ -1605,6 +1619,7 @@ export class CalendarBotAgent {
     dbg: AiDebugRunContext | null,
     allToolCalls: AgentToolCallRecord[],
     allToolResults: AgentToolResultRecord[],
+    toolEvidence: ToolEvidence[],
     startTime: number,
     seenToolCallKeys: Set<string>,
     writeOutcomes: WriteOutcomes,
@@ -1759,6 +1774,13 @@ export class CalendarBotAgent {
         if (tc.name !== DISCOVERY_TOOL) {
           allToolCalls.push({ name: tc.name, input });
           allToolResults.push({ success: toolResult.success, output: toolResult.output });
+          toolEvidence.push({
+            name: tc.name,
+            input,
+            success: toolResult.success,
+            output: toolResult.output,
+            data: toolResult.data,
+          });
         }
 
         const content = toolResultContent(toolResult);
