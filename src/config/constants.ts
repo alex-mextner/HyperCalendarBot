@@ -263,6 +263,7 @@ export const MSG = {
       `Found in your calendar:\n${events}\n\nCould not check my own answer against this data, so here it is as is.`,
     unverified_more_events: (count: number) => `… and ${count} more`,
     rate_limited: 'Slow down, too many messages.',
+    stale_update_skipped: '⏳ Missed your message while restarting — send it again if it still matters.',
     addWizard: {
       noEnd: 'No end date',
       untilDate: 'Until date',
@@ -1275,6 +1276,7 @@ export const MSG = {
       `Что нашлось в календаре:\n${events}\n\nСвой ответ по этим данным проверить не удалось, поэтому показываю их как есть.`,
     unverified_more_events: (count: number) => `… и ещё ${count}`,
     rate_limited: 'Слишком много сообщений, подождите.',
+    stale_update_skipped: '⏳ Пропустил твоё сообщение, пока перезапускался — повтори, если ещё актуально.',
     addWizard: {
       noEnd: 'Без конца',
       untilDate: 'До даты',
