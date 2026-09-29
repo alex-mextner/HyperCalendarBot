@@ -1076,7 +1076,7 @@ describe('handleConvertToTimezone', () => {
       const { handleConvertToTimezone } = await import(${JSON.stringify(handlerPath)});
       const instant = handleConvertToTimezone({ datetime: '2026-07-11T09:00:00Z', timezone: 'Europe/Belgrade' });
       const wallClock = handleConvertToTimezone({ datetime: '2026-07-11T11:00:00', timezone: 'Europe/Belgrade' });
-      console.log(JSON.stringify({
+      process.stdout.write(JSON.stringify({
         processHour: new Date('2026-07-11T00:00:00Z').getHours(),
         local: JSON.parse(instant.output).local_datetime,
         wallClockAccepted: wallClock.success,
