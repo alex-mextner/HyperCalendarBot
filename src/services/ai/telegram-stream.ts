@@ -501,6 +501,16 @@ export class TelegramStreamWriter {
   }
 
   /**
+   * Rewrite committed reasoning prose shown in the execution log (tool-result lines stay
+   * exactly as executed). Used by deterministic reply guards on a trusted request.
+   */
+  rewriteReasoning(rewrite: (text: string) => string): void {
+    this.intermediateChunks = this.intermediateChunks.map((chunk) =>
+      chunk.kind === 'reasoning' ? { kind: chunk.kind, text: rewrite(chunk.text) } : chunk,
+    );
+  }
+
+  /**
    * Resets the draft AND strips already-committed reasoning-prose chunks
    * from the execution log, keeping every tool-result line. The pairing is
    * a single method, not caller discipline: use this — never `resetDraft()`

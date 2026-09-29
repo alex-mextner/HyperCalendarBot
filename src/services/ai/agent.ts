@@ -18,6 +18,7 @@ import {
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
 import { waitForAbort } from './provider-deadline.ts';
+import { correctUtcClockTimes, eventClocksForRun } from './reply-time-guard.ts';
 import {
   type AgentRequestMetricSnapshot,
   AgentRequestMetrics,
@@ -1451,6 +1452,7 @@ export class CalendarBotAgent {
         if (termination === 'waiting' && writeOutcomes.speechQuestion) writer.appendText(writeOutcomes.speechQuestion);
       }
     }
+    if (!guarded) this.correctUtcClockTimesInReply(ctx, writer, pendingHistory);
     // A direct private-chat request never ends in silence or a bare "...": weak
     // models answer '[SKIP]' (taught for reactions and group silence) or nothing
     // after real work, and discarding that deleted every trace of the writes.
@@ -1555,6 +1557,34 @@ export class CalendarBotAgent {
       endCall: ctx.callEndRequested === true,
       metrics,
     };
+  }
+
+  /**
+   * Deterministic backstop (#498): a trusted final answer must not show an event's UTC
+   * clock time as local. Corrects both what the user receives and what history keeps,
+   * so the next turn does not copy the wrong times back.
+   */
+  private correctUtcClockTimesInReply(
+    ctx: AgentContext,
+    writer: TelegramStreamWriter,
+    pendingHistory: MessageParam[],
+  ): void {
+    const events = eventClocksForRun(ctx);
+    if (events.length === 0) return;
+    const draft = writer.getText();
+    const corrected = correctUtcClockTimes(draft, events, ctx.user.timezone);
+    if (corrected !== draft) {
+      aiLogger.warn({ userId: ctx.user.telegram_id }, 'Reply showed UTC event times as local — corrected');
+      writer.resetDraft();
+      writer.appendText(corrected);
+    }
+    // Prose narrated in tool rounds is shown in the execution log; it gets the same correction.
+    writer.rewriteReasoning((text) => correctUtcClockTimes(text, events, ctx.user.timezone));
+    pendingHistory.forEach((message, index) => {
+      if (message.role !== 'assistant' || typeof message.content !== 'string') return;
+      const fixed = correctUtcClockTimes(message.content, events, ctx.user.timezone);
+      if (fixed !== message.content) pendingHistory[index] = { ...message, content: fixed };
+    });
   }
 
   /**

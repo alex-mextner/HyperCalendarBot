@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { StepResults } from '../../database/repositories/workflow-session.repository.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import { extractEventSummaries, isEventSummary } from '../ai/event-summaries.ts';
 import { isMutationTool, isReadOnlyCall } from '../ai/tool-executor.ts';
 import type { ToolResult, ToolResultData } from '../ai/types.ts';
 import { evaluate } from './expression-evaluator.ts';
@@ -281,26 +282,6 @@ async function runLevel1(
   };
 }
 
-/**
- * Execute a Level 2 workflow: { steps: [...] }
- */
-/** Type guard: checks if a ToolResultData element has the full EventSummary shape. */
-type ToolResultElement =
-  | import('../ai/types.ts').UserInspection
-  | EventSummary
-  | { telegram_id: number; name: string }
-  | { contact_id: number; deleted: boolean }
-  | { matches: import('../ai/types.ts').ContactMatch[] }
-  | import('../ai/types.ts').FreeSlotsData
-  | import('../scheduled/types.ts').ScheduledAiCall
-  | import('../scheduled/types.ts').Trigger
-  | import('../ai/types.ts').TelegramSessionData;
-
-function isEventSummary(obj: ToolResultElement): obj is EventSummary {
-  // All ToolResultData element types have 'id', but only EventSummary has 'date' and 'all_day'
-  return 'date' in obj && 'all_day' in obj;
-}
-
 function extractEventSummary(data: ToolResultData): EventSummary | null {
   if (Array.isArray(data)) {
     const first = data[0];
@@ -320,21 +301,8 @@ function extractMentionedEvent(result: ToolResult, strict: boolean): EventSummar
 }
 
 /**
- * Every event behind a result: a list of events, or a single event (e.g. get_event's result,
- * which is not array-wrapped). Undefined when the data holds no event at all.
+ * Execute a Level 2 workflow: { steps: [...] }
  */
-function extractEventSummaries(data: ToolResultData | undefined): EventSummary[] | undefined {
-  if (data === undefined) return undefined;
-  if (!Array.isArray(data)) return isEventSummary(data) ? [data] : undefined;
-  if (data.length === 0) return undefined;
-  const events: EventSummary[] = [];
-  for (const item of data) {
-    if (!isEventSummary(item)) return undefined;
-    events.push(item);
-  }
-  return events;
-}
-
 async function runLevel2(
   steps: Level2Step[],
   captures: Record<string, string>,

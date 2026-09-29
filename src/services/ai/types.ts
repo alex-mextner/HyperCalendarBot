@@ -197,6 +197,11 @@ export interface AgentContext {
   resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   /** Events in a ±2-week window around now, preloaded for pattern detection. */
   recentEventsWindow?: EventOccurrence[];
+  /**
+   * Events that tool results showed the model during this run (recorded by executeTool).
+   * The reply-time guard checks the model's text against their real clock times.
+   */
+  surfacedEvents?: EventSummary[];
   /** Contact directory (also used by sharing, but independently configurable). */
   contactRepo?: ContactRepository;
   /** Recipient identities resolved from a requested username during this run. */
