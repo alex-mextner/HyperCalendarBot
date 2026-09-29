@@ -364,6 +364,11 @@ function buildDatetime(
   return formatLocalInstant(start + (binding.plus_minutes ?? 0) * 60_000, timezone);
 }
 
+/**
+ * 'week' ("на неделю", "на этой неделе", "this week") is today and the six following
+ * local days, so a week plan never starts in the past; on a Monday it equals the
+ * calendar week. 'next_week' is the next calendar week, Monday to Sunday.
+ */
 function periodRange(
   key: (typeof PERIOD_KEYS)[number],
   current: CalendarDay,
@@ -371,7 +376,7 @@ function periodRange(
   const monday = addDays(current, -weekdayMondayZero(current));
   switch (key) {
     case 'week':
-      return { start: monday, end: addDays(monday, 6) };
+      return { start: current, end: addDays(current, 6) };
     case 'next_week':
       return { start: addDays(monday, 7), end: addDays(monday, 13) };
     case 'weekend':

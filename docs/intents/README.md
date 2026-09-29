@@ -201,6 +201,8 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 
 ` basis.calendar.period ` · Расписание · Чтение своего календаря · инструменты: ` get_events `
 
+> Пометка из исходника (по-английски): This week is today and the six days after it, so a Sunday-evening plan is not a list of past days; next week is Monday to Sunday.
+
 **Примеры фраз.**
 
 - что у меня на этой неделе
@@ -812,7 +814,7 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 
 ` basis.slots.week ` · Свободное время · Чтение своего календаря · инструменты: ` get_free_slots `
 
-> Пометка из исходника (по-английски): Seven explicit day queries, Monday to Sunday, so every day of the week is answered.
+> Пометка из исходника (по-английски): Seven explicit day queries, so every day is answered: this week is today and the six days after it, next week is Monday to Sunday.
 
 **Примеры фраз.**
 

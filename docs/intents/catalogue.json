@@ -333,7 +333,7 @@
       "bindingTypes": [
         "period"
       ],
-      "notes": null,
+      "notes": "This week is today and the six days after it, so a Sunday-evening plan is not a list of past days; next week is Monday to Sunday.",
       "predecessors": [
         {
           "key": "show_next_month",
@@ -1213,7 +1213,7 @@
       "bindingTypes": [
         "period"
       ],
-      "notes": "Seven explicit day queries, Monday to Sunday, so every day of the week is answered.",
+      "notes": "Seven explicit day queries, so every day is answered: this week is today and the six days after it, next week is Monday to Sunday.",
       "predecessors": [
         {
           "key": "free_slots_next_week",
