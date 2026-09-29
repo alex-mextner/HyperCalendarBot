@@ -65,9 +65,10 @@ export const EVENT_UPDATE_FIELDS = [
 
 /**
  * Resolved-place columns derived from the typed `location`. They describe one specific location
- * text and are stale as soon as that text changes.
+ * text and are stale as soon as that text changes. Only the location-verification service (the
+ * creator's tap or pin) writes them; model tool input never may (#620).
  */
-const RESOLVED_PLACE_COLUMNS = [
+export const RESOLVED_PLACE_COLUMNS = [
   'resolved_address',
   'latitude',
   'longitude',
@@ -76,7 +77,7 @@ const RESOLVED_PLACE_COLUMNS = [
   'location_verified',
 ] as const satisfies readonly (keyof UpdateEventData)[];
 
-/** The value of each resolved-place column that means "not resolved". */
+/** The value of each resolved-place column that means "not resolved"; its keys are exactly those columns. */
 export const UNRESOLVED_PLACE = {
   resolved_address: null,
   latitude: null,

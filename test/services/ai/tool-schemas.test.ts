@@ -482,6 +482,23 @@ describe('a model payload never confirms a place (#620)', () => {
     expect(verifiedEvents).toEqual([]);
   });
 
+  test('update_event removing the location clears the place whatever the model claims', async () => {
+    const eventId = createEvent('Cafe Porto');
+    new EventRepository(db).updateLocationFields(eventId, { ...MODEL_PLACE, location_verified: 1 });
+    const result = await executeTool(ctx, 'update_event', {
+      event_id: eventId,
+      location: null,
+      location_verified: true,
+      ...MODEL_PLACE,
+    });
+
+    expect(result.success).toBe(true);
+    const stored = ctx.eventService.getEvent(eventId, USER_ID);
+    expect(stored?.location).toBeNull();
+    expect(resolvedPlace(stored)).toEqual(UNRESOLVED_PLACE);
+    expect(verifiedEvents).toEqual([]);
+  });
+
   test.each<[string, object]>([
     ['Cafe Oslo', { location_verified: true, ...MODEL_PLACE }],
     ['Cafe Bergen', { location_verified: 1, ...MODEL_PLACE }],

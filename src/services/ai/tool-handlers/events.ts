@@ -2,7 +2,7 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { Lang } from '../../../config/constants.ts';
 import { t, toLang } from '../../../config/constants.ts';
-import { CLEARED_LOCATION, UNRESOLVED_PLACE } from '../../../database/repositories/event.repository.ts';
+import { CLEARED_LOCATION, RESOLVED_PLACE_COLUMNS } from '../../../database/repositories/event.repository.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
 import { allDayDates, formatLocalEventSpan, getDayRangeUtc, localCalendarDate } from '../../../utils/date.ts';
 import { eventTimestampError } from '../../../utils/event-timestamps.ts';
@@ -567,7 +567,7 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
   const { event_id, scope: _, owner_id: _oid, ...fields } = input;
   // A confirmed place comes only from the creator's tap or pin through the verification service,
   // never from the model (#620); a new text is reset and asked about below
-  for (const column of Object.keys(UNRESOLVED_PLACE)) Reflect.deleteProperty(fields, column);
+  for (const column of RESOLVED_PLACE_COLUMNS) Reflect.deleteProperty(fields, column);
   // Removing the location also drops a place a pin set on an event without typed text
   const updates = fields.location === null ? { ...fields, ...CLEARED_LOCATION } : fields;
   if (scope === 'group' && ctx.groupChatId === undefined) {
