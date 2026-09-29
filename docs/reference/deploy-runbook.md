@@ -184,6 +184,10 @@ docker run --rm --entrypoint id ghcr.io/alex-mextner/hypercalendarbot:latest
 chown -R 999:999 /opt/hypercal/data/
 ```
 
+## Database backups
+
+`scripts/backup-db.sh` (root cron `0 3 * * *` and every deploy) and the bot's own daily backup write full calendar-database copies into `/opt/hypercal/data/backups/`. Each copy holds every user's private data, so files are `0600` and the directory `0700`, owned by the container user `999`, which must keep write access. The cron script writes the copy inside the container with umask `077`, then enforces and checks both modes on the host; a copy it cannot restrict is deleted and the script exits non-zero, which also stops a deploy. Each run also restricts older copies left `0644` by earlier versions. A deploy runs the previously installed script, so the backup taken by the deploy that first ships a change to it follows the old rules until the next run. Inspect backups with `stat` only; never open their contents on a shared host.
+
 ## Migration renumbering hazard
 
 If a migration is renumbered (e.g. `042_foo` -> `043_foo`), the existing production DB has the old
