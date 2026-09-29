@@ -17,19 +17,19 @@ const HolidaysCodec = jsonCodec(z.array(z.object({ name: z.string(), date: z.str
 const SettingsCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
 
 /**
- * Render events the user can read: `HH:MM  Title`, prefixed with the date whenever
- * that event does not fall on today (in the user's timezone). A single result from
- * `get_upcoming` or `search_events` can land weeks away, so "does the set span more
- * than one day" is not enough — a lone future event needs its date too. All-day
- * events carry no time.
+ * Render events the user can read: `HH:MM  Title`. When every event falls on today
+ * (in the user's timezone) the date is left out; otherwise every line carries its
+ * date, today's too. A single result from `get_upcoming` or `search_events` can land
+ * weeks away, so a lone future event needs its date, and an undated line inside a
+ * dated list reads as belonging to the day above it. All-day events carry no time.
  */
 function formatEventSummaries(events: EventSummary[], timezone: string): string {
   const todayKey = format(new TZDate(new Date(), timezone), 'yyyy-MM-dd');
+  const dated = events.some((event) => event.date !== todayKey);
   return events
     .map((event) => {
-      const date = event.date === todayKey ? '' : event.date;
-      const time = event.all_day ? '' : (event.time ?? '');
-      return `${date} ${time}  ${event.title}`.trim();
+      const when = [dated ? event.date : '', event.all_day ? '' : (event.time ?? '')].filter(Boolean).join(' ');
+      return `${when}  ${event.title}`.trim();
     })
     .join('\n');
 }

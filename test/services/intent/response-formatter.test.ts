@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, setSystemTime, test } from 'bun:test';
 import { formatResponse } from '../../../src/services/intent/response-formatter.ts';
 
 describe('formatResponse', () => {
@@ -219,6 +219,44 @@ describe('formatResponse', () => {
       expect(result).toContain('2026-12-25');
       expect(result).toContain('09:00');
       expect(result).toContain('Конференция');
+    });
+
+    test('dates today’s events too once the list has an event on another day', () => {
+      // 2026-09-27: a week plan listed Friday's trip with its date and then today's
+      // lesson as a bare "12:30  …", which reads as another Friday event.
+      setSystemTime(new Date('2026-09-27T21:15:00Z'));
+      try {
+        const events = [
+          { id: 21, title: 'Поездка', date: '2026-09-25', time: '19:00', all_day: false },
+          { id: 22, title: 'Урок', date: '2026-09-27', time: '12:30', all_day: false },
+          { id: 23, title: 'Отпуск', date: '2026-09-27', all_day: true },
+        ];
+        const result = formatResponse('text', rawToolOutput, 'Europe/Belgrade', 'ru', events);
+
+        expect(result.split('\n')).toEqual([
+          '2026-09-25 19:00  Поездка',
+          '2026-09-27 12:30  Урок',
+          '2026-09-27  Отпуск',
+        ]);
+      } finally {
+        setSystemTime();
+      }
+    });
+
+    test('keeps undated lines when every event is today in the user’s zone', () => {
+      // 23:15 in Belgrade is still the same local day although UTC is 21:15.
+      setSystemTime(new Date('2026-09-27T21:15:00Z'));
+      try {
+        const events = [
+          { id: 24, title: 'Урок', date: '2026-09-27', time: '12:30', all_day: false },
+          { id: 25, title: 'Ужин', date: '2026-09-27', time: '23:30', all_day: false },
+        ];
+        const result = formatResponse('text', rawToolOutput, 'Europe/Belgrade', 'ru', events);
+
+        expect(result.split('\n')).toEqual(['12:30  Урок', '23:30  Ужин']);
+      } finally {
+        setSystemTime();
+      }
     });
 
     test('falls back to the tool output when there is no event data', () => {
