@@ -28,6 +28,7 @@ import { AddressCache } from '../../../src/services/location/address-cache.ts';
 import type { GeocodedLocation, GeocodingService } from '../../../src/services/location/geocoding-service.ts';
 import { InMemoryLocationCandidateStore } from '../../../src/services/location/location-candidate-store.ts';
 import { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
+import type { SharedLocation } from '../../../src/services/location/pending-geo-store.ts';
 
 const OWNER_ID = 1001;
 const INVITEE_ID = 2002;
@@ -55,6 +56,14 @@ const PIN: GeocodedLocation = {
   placeId: 'place-pin',
   googleMapsUrl: 'https://www.google.com/maps/search/?api=1&query=44.8176,20.4569&query_place_id=place-pin',
   venueName: null,
+};
+/** A plain pin at PIN's coordinates, reverse-geocoded to PIN. */
+const PIN_SHARED: SharedLocation = { latitude: PIN.latitude, longitude: PIN.longitude, venue: null };
+/** A venue picked in Telegram's place search: no geocoder fixture has its name or address. */
+const VENUE_SHARED: SharedLocation = {
+  latitude: 44.8149,
+  longitude: 20.4612,
+  venue: { title: 'Supermarket Café', address: 'Višnjićeva 9, Beograd', googlePlaceId: 'ChIJ-venue' },
 };
 
 /** A Google Calendar update: which copy was written and the location it now shows. */
@@ -195,11 +204,22 @@ describe('the answer to the location question re-pushes the Google copies', () =
   test('a pin shared for the event pushes the pinned place', async () => {
     const s = setup();
 
-    expect(await s.service.resolveFromCoordinates(s.event.id, PIN.latitude, PIN.longitude, OWNER_ID)).toBe(true);
+    expect(await s.service.resolveFromSharedLocation(s.event.id, PIN_SHARED, OWNER_ID)).toBe(true);
 
     expect(await s.runPushJobs()).toEqual([
       { copy: 'g-owner', location: PIN.formattedAddress },
       { copy: 'g-invitee', location: PIN.formattedAddress },
+    ]);
+  });
+
+  test('a venue picked in Telegram pushes the venue as the user picked it', async () => {
+    const s = setup();
+
+    expect(await s.service.resolveFromSharedLocation(s.event.id, VENUE_SHARED, OWNER_ID)).toBe(true);
+
+    expect(await s.runPushJobs()).toEqual([
+      { copy: 'g-owner', location: 'Supermarket Café — Višnjićeva 9, Beograd' },
+      { copy: 'g-invitee', location: 'Supermarket Café — Višnjićeva 9, Beograd' },
     ]);
   });
 
@@ -208,13 +228,13 @@ describe('the answer to the location question re-pushes the Google copies', () =
     expect(await s.service.handleLocationChoice(s.event.id, OWNER_ID, await s.askedWith([CAFE]), 0)).toBe(true);
     await s.runPushJobs();
 
-    expect(await s.service.resolveFromCoordinates(s.event.id, PIN.latitude, PIN.longitude, OWNER_ID)).toBe(true);
+    expect(await s.service.resolveFromSharedLocation(s.event.id, PIN_SHARED, OWNER_ID)).toBe(true);
     expect(await s.runPushJobs()).toEqual([
       { copy: 'g-owner', location: PIN.formattedAddress },
       { copy: 'g-invitee', location: PIN.formattedAddress },
     ]);
 
-    expect(await s.service.resolveFromCoordinates(s.event.id, PIN.latitude, PIN.longitude, OWNER_ID)).toBe(true);
+    expect(await s.service.resolveFromSharedLocation(s.event.id, PIN_SHARED, OWNER_ID)).toBe(true);
     expect(s.jobs).toEqual([]);
   });
 

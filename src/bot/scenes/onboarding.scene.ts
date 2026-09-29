@@ -243,7 +243,7 @@ export function createOnboardingScene(
                 );
                 await context.send(text, {
                   parse_mode: 'HTML',
-                  reply_markup: invitationRsvpKeyboard(invitation.id, l),
+                  reply_markup: invitationRsvpKeyboard(invitation.id, l, event),
                 });
               }
             }

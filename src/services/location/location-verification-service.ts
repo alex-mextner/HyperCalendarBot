@@ -16,8 +16,14 @@ import { guessCountryFromTimezone, resolveTimezone } from '../timezone/timezone-
 import type { WeatherService } from '../weather/weather-service.ts';
 import type { AddressCache } from './address-cache.ts';
 import { formatLocationHtml, formatLocationPlain } from './format-location.ts';
-import type { GeocodedLocation, GeocodingBias, GeocodingService } from './geocoding-service.ts';
+import {
+  buildGoogleMapsUrl,
+  type GeocodedLocation,
+  type GeocodingBias,
+  type GeocodingService,
+} from './geocoding-service.ts';
 import type { LocationCandidateStore, LocationPicker } from './location-candidate-store.ts';
+import type { SharedLocation } from './pending-geo-store.ts';
 
 type ParseMode = 'HTML' | 'MarkdownV2' | 'Markdown';
 type ReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKeyboardMarkup;
@@ -312,20 +318,37 @@ export class LocationVerificationService {
     return { city: result.city };
   }
 
-  /** Resolve location from coordinates (when user sends 📍 for an event) */
-  async resolveFromCoordinates(eventId: number, lat: number, lng: number, userId: number): Promise<boolean> {
+  /**
+   * Resolve the event's place from a location the user shared for it: a Telegram venue is applied as
+   * picked, with its name and address; a plain pin is reverse-geocoded to an address.
+   */
+  async resolveFromSharedLocation(eventId: number, shared: SharedLocation, userId: number): Promise<boolean> {
     // Verify user has access to the event before doing any work
     const event = this.deps.eventRepo.findById(eventId, userId);
     if (!event) return false;
 
-    const geo = await this.deps.geocodingService.reverseGeocode(lat, lng);
+    // A venue is the place as the user picked it; a reverse geocode would replace its name with the
+    // street address at its coordinates
+    const { venue } = shared;
+    const geo: GeocodedLocation | null = venue
+      ? {
+          formattedAddress: venue.address,
+          latitude: shared.latitude,
+          longitude: shared.longitude,
+          city: null,
+          country: null,
+          placeId: venue.googlePlaceId,
+          googleMapsUrl: buildGoogleMapsUrl(shared.latitude, shared.longitude, venue.googlePlaceId),
+          venueName: venue.title,
+        }
+      : await this.deps.geocodingService.reverseGeocode(shared.latitude, shared.longitude);
     if (!geo) return false;
 
     const user = this.deps.userRepo.findByTelegramId(userId);
     if (!user) return false;
 
-    // The pin answers any open picker for this event; closing it before applying means a keep tap
-    // on it either lands before the pin (and the pin wins) or finds it answered.
+    // The shared location answers any open picker for this event; closing it before applying means a
+    // keep tap on it either lands before the location (and the location wins) or finds it answered.
     await this.deps.candidateStore.del(eventId).catch((err) => {
       logger.warn({ err, eventId }, 'Failed to delete location candidates from store');
     });
@@ -546,7 +569,10 @@ export class LocationVerificationService {
         null,
         false,
       );
-      return { text, options: { parse_mode: 'HTML', reply_markup: groupRsvpKeyboard(event.id, groupLang) } };
+      return {
+        text,
+        options: { parse_mode: 'HTML', reply_markup: groupRsvpKeyboard(event.id, groupLang, event) },
+      };
     }
 
     const invitee = this.deps.userRepo.findByTelegramId(inv.invitee_id);
@@ -563,7 +589,10 @@ export class LocationVerificationService {
         invitee?.timezone,
         invitee?.onboarding_completed === 1,
       );
-      return { text, options: { parse_mode: 'HTML', reply_markup: invitationRsvpKeyboard(inv.id, inviteeLang) } };
+      return {
+        text,
+        options: { parse_mode: 'HTML', reply_markup: invitationRsvpKeyboard(inv.id, inviteeLang, event) },
+      };
     }
 
     const text = await formatAnsweredInvitationCard(

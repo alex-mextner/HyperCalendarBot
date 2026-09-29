@@ -23,6 +23,13 @@ describe('buildGoogleMapsUrl', () => {
     const url = buildGoogleMapsUrl(55.7558, 37.6173, null);
     expect(url).not.toContain('query_place_id');
   });
+
+  test('a place id picked in a Telegram client cannot add parameters to the link', () => {
+    // A venue's google_place_id comes from the user's client, not from Google
+    const url = new URL(buildGoogleMapsUrl(44.8176, 20.4569, 'ChIJ-venue&query=0,0'));
+    expect(url.searchParams.get('query_place_id')).toBe('ChIJ-venue&query=0,0');
+    expect(url.searchParams.getAll('query')).toEqual(['44.8176,20.4569']);
+  });
 });
 
 describe('buildGoogleMapsSearchUrl', () => {

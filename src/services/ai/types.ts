@@ -33,6 +33,7 @@ import type { HolidayService } from '../holiday/holiday-service.ts';
 import type { ImageRenderer } from '../image/render-service.ts';
 import type { EventSummary } from '../intent/variable-resolver.ts';
 import type { AddressCache } from '../location/address-cache.ts';
+import type { EventPlace } from '../location/event-venue.ts';
 import type { LocationVerificationService } from '../location/location-verification-service.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import type { ScheduledAiCall, Trigger } from '../scheduled/types.ts';
@@ -394,8 +395,12 @@ export interface AgentConfig {
  *  - `group`: the per-member Going / Not going keyboard (`grsvp:` callbacks) for a group target,
  *    where any member responds for themselves. Keyed by `eventId`, not the invitation id, because
  *    the invitation row stores the group chat id as its invitee — useless for member RSVP.
+ * Both add the Map button when `place` (the event, null when it could not be loaded) has a
+ * confirmed place.
  */
-export type InvitationKeyboardVariant = { kind: 'personal' } | { kind: 'group'; eventId: number };
+export type InvitationKeyboardVariant =
+  | { kind: 'personal'; place: EventPlace | null }
+  | { kind: 'group'; eventId: number; place: EventPlace | null };
 
 export interface TelegramSender {
   sendMessage(chatId: number, text: string, parseMode?: ParseMode): Promise<{ message_id: number }>;
@@ -420,8 +425,8 @@ export interface TelegramSender {
     inviteeId: number,
     text: string,
     invitationId: number,
-    lang?: string,
-    variant?: InvitationKeyboardVariant,
+    lang: string,
+    variant: InvitationKeyboardVariant,
   ): Promise<{ message_id: number } | null>;
   sendEditProposal?(creatorId: number, text: string, proposalId: number): Promise<{ message_id: number } | null>;
   sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;

@@ -100,10 +100,13 @@ export interface GeocodingService {
   locateArea(area: { city: string | null; countryCode: string | null }): Promise<GeocodedArea | null>;
 }
 
-/** Build a Google Maps URL from coordinates */
+/**
+ * Build a Google Maps URL from coordinates. The place id is encoded: a Telegram venue's id comes
+ * from the user's client, not from Google.
+ */
 export function buildGoogleMapsUrl(lat: number, lng: number, placeId?: string | null): string {
   if (placeId) {
-    return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}&query_place_id=${placeId}`;
+    return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}&query_place_id=${encodeURIComponent(placeId)}`;
   }
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 }
