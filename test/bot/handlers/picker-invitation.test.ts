@@ -280,7 +280,7 @@ describe('deliverPickerInvitation', () => {
     expect(outcome).toEqual({ kind: 'failed' });
   });
 
-  test("allowMtproto:false → the inviter's session is skipped even when it would have succeeded", async () => {
+  test("allowInviterSession:false → the inviter's session is skipped even when it would have succeeded", async () => {
     let sessionCalled = false;
     const sender: TelegramSender = {
       ...SENDER_BASE,
@@ -292,7 +292,7 @@ describe('deliverPickerInvitation', () => {
       },
     };
     const outcome = await deliverPickerInvitation(
-      { eventId, inviter, inviteeId: INVITEE_ID, fallbackChatId: INVITER_ID, allowMtproto: false },
+      { eventId, inviter, inviteeId: INVITEE_ID, fallbackChatId: INVITER_ID, allowInviterSession: false },
       makeDeps(sender),
     );
     expect(sessionCalled).toBe(false);
@@ -311,7 +311,14 @@ describe('deliverPickerInvitation', () => {
       },
     };
     const outcome = await deliverPickerInvitation(
-      { eventId, inviter, inviteeId: GROUP_ID, fallbackChatId: INVITER_ID, allowMtproto: false, isGroupTarget: true },
+      {
+        eventId,
+        inviter,
+        inviteeId: GROUP_ID,
+        fallbackChatId: INVITER_ID,
+        allowInviterSession: false,
+        isGroupTarget: true,
+      },
       makeDeps(sender),
     );
     // A forward deep-link cannot be accepted in a group, so the outcome must be an honest
@@ -891,7 +898,7 @@ describe('runChatShareWithAck (reply-fast group invite)', () => {
           inviter,
           inviteeId: GROUP_ID,
           fallbackChatId: INVITER_ID,
-          allowMtproto: false,
+          allowInviterSession: false,
           isGroupTarget: true,
         },
         lang: 'en',
@@ -925,7 +932,7 @@ describe('runChatShareWithAck (reply-fast group invite)', () => {
           inviter,
           inviteeId: GROUP_ID,
           fallbackChatId: INVITER_ID,
-          allowMtproto: false,
+          allowInviterSession: false,
           isGroupTarget: true,
         },
         lang: 'en',
@@ -948,7 +955,7 @@ describe('runChatShareWithAck (reply-fast group invite)', () => {
           inviter,
           inviteeId: GROUP_ID,
           fallbackChatId: INVITER_ID,
-          allowMtproto: false,
+          allowInviterSession: false,
           isGroupTarget: true,
         },
         lang: 'en',
@@ -989,7 +996,7 @@ describe('runChatShareWithAck (reply-fast group invite)', () => {
           inviter,
           inviteeId: GROUP_ID,
           fallbackChatId: INVITER_ID,
-          allowMtproto: false,
+          allowInviterSession: false,
           isGroupTarget: true,
         },
         lang: 'en',

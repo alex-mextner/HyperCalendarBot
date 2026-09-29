@@ -370,6 +370,8 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   search_events: 'events_create',
   set_reminder: 'reminders',
   get_reminders: 'reminders',
+  schedule_ai_call: 'reminders',
+  schedule_ai_call_cancel: 'reminders',
   get_free_slots: 'free_slots',
   share_event: 'sharing',
   send_invitation: 'sharing',

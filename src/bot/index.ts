@@ -942,7 +942,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             inviter: user,
             inviteeId,
             fallbackChatId: user.telegram_id,
-            allowMtproto: false,
+            allowInviterSession: false,
             isGroupTarget: true,
           },
           lang,

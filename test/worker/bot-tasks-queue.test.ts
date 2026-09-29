@@ -11,6 +11,7 @@ let capturedWorkerOpts: Record<string, unknown> = {};
 let capturedFailedHandler: FailedHandler = () => {};
 
 const mockQueueAdd = mock(async () => {});
+const mockQueueRemoveRepeatable = mock(async (_name: string, _repeat: { every: number }, _jobId: string) => true);
 const mockWorkerOn = mock((_event: string, handler: FailedHandler) => {
   capturedFailedHandler = handler;
 });
@@ -24,6 +25,7 @@ mock.module('bullmq', () => ({
       this.name = name;
     }
     add = mockQueueAdd;
+    removeRepeatable = mockQueueRemoveRepeatable;
   },
   Worker: class MockWorker {
     constructor(name: string, processor: JobProcessor, opts: Record<string, unknown>) {
@@ -43,6 +45,7 @@ const {
   setupSessionCleanupCron,
   setupChatHistoryCleanupCron,
   setupSessionKeepaliveCron,
+  unscheduleRetiredCrons,
 } = await import('../../src/worker/bot-tasks-queue.ts');
 
 describe('createBotTasksQueue', () => {
@@ -233,5 +236,16 @@ describe('cron setup functions', () => {
     expect(data.type).toBe('cron-session-keepalive');
     expect(opts.repeat.every).toBe(14 * 24 * 60 * 60_000);
     expect(opts.jobId).toBe('session-keepalive-tick');
+  });
+
+  test('unscheduleRetiredCrons removes birthday-sync-tick with the exact args it was scheduled with', async () => {
+    mockQueueRemoveRepeatable.mockClear();
+    const { queue } = createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
+    await unscheduleRetiredCrons(queue);
+    // BullMQ matches a repeatable by the key derived from (name, repeat opts, jobId); these are the
+    // arguments the removed setupBirthdaySyncCron passed to queue.add, so any drift leaves it firing.
+    expect(mockQueueRemoveRepeatable.mock.calls).toEqual([
+      ['birthday-sync-tick', { every: 24 * 60 * 60_000 }, 'birthday-sync-tick'],
+    ]);
   });
 });

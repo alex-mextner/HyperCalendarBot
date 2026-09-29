@@ -1,6 +1,11 @@
 import { t } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
-import { canResolveRecipientUsername, normalizeRecipientUsername } from '../recipient-identity.ts';
+import {
+  canResolveRecipientUsername,
+  lookupKnownBotUser,
+  markVerifiedRecipient,
+  normalizeRecipientUsername,
+} from '../recipient-identity.ts';
 import { correctAskedQuestion, eventClocksForRun } from '../reply-time-guard.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { handleDeleteConfirmationRequest } from './events.ts';
@@ -48,7 +53,7 @@ export function handleFindUser(ctx: AgentContext, input: FindUserInput): ToolRes
         'Use find_contact for a personal name. Ask for the exact @username or use pick_users if the person is not in the address book; do not guess.',
     };
   }
-  const user = ctx.userRepo.findByUsername(username);
+  const user = lookupKnownBotUser(ctx, username);
   const tr = t(ctx.user.language).aiTools.meta;
   if (!user) {
     return {
@@ -58,13 +63,12 @@ export function handleFindUser(ctx: AgentContext, input: FindUserInput): ToolRes
         'Only people who have started this bot can be found by @username. Offer pick_users so the user can share the contact from Telegram.',
     };
   }
-  ctx.verifiedRecipientIds ??= new Set();
-  ctx.verifiedRecipientIds.add(user.telegram_id);
-  const name = user.first_name ?? user.username ?? tr.unknownName;
+  markVerifiedRecipient(ctx, user.id);
+  const name = user.firstName ?? user.username;
   return {
     success: true,
-    output: tr.foundUser(user.telegram_id, name),
-    data: { telegram_id: user.telegram_id, name },
+    output: tr.foundUser(user.id, name),
+    data: { telegram_id: user.id, name },
   };
 }
 handleFindUser.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;

@@ -1,9 +1,10 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
+import { FeatureUsageRepository } from '../../../src/database/repositories/feature-usage.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { SharedEventRepository } from '../../../src/database/repositories/shared-event.repository.ts';
@@ -15,6 +16,9 @@ import { _resetToolThrottleForTest, executeTool } from '../../../src/services/ai
 import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import { ScheduledAiCallRepository } from '../../../src/services/scheduled/scheduled-ai-call.repository.ts';
+import { ScheduledAiCallService } from '../../../src/services/scheduled/scheduled-ai-call.service.ts';
+import { TriggerRepository } from '../../../src/services/scheduled/trigger.repository.ts';
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 import { PrivacyService } from '../../../src/services/sharing/privacy-service.ts';
 import { SharingService } from '../../../src/services/sharing/sharing-service.ts';
@@ -271,6 +275,35 @@ describe('executeTool', () => {
     });
     const result = await executeTool(ctx, 'get_reminders', { event_id: event.id });
     expect(result.success).toBe(true);
+  });
+
+  test('scheduling and cancelling a deferred AI message both count as reminders usage', async () => {
+    const featureUsageRepo = new FeatureUsageRepository(effectDb);
+    const queue = {
+      addDelayed: mock(async () => 'job-1'),
+      addRepeat: mock(async () => {}),
+      removeDelayed: mock(async () => {}),
+      removeRepeat: mock(async () => {}),
+      removeJobById: mock(async () => {}),
+    };
+    const scheduledCallService = new ScheduledAiCallService(new ScheduledAiCallRepository(effectDb), queue);
+    const scheduledCtx: AgentContext = {
+      ...ctx,
+      featureUsageRepo,
+      scheduled: { scheduledCallService, triggerService: { repo: new TriggerRepository(effectDb) } },
+    };
+
+    const created = await executeTool(scheduledCtx, 'schedule_ai_call', {
+      message: 'Remind me to water the plants',
+      run_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+    });
+    expect(created.success).toBe(true);
+    expect(featureUsageRepo.getOne(USER_ID, 'reminders')?.use_count).toBe(1);
+
+    const [schedule] = scheduledCallService.list(USER_ID);
+    const cancelled = await executeTool(scheduledCtx, 'schedule_ai_call_cancel', { id: schedule?.id ?? '' });
+    expect(cancelled.success).toBe(true);
+    expect(featureUsageRepo.getOne(USER_ID, 'reminders')?.use_count).toBe(2);
   });
 
   test('returns error for unknown tool', async () => {

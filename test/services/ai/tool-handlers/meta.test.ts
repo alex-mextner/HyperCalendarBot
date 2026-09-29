@@ -136,6 +136,14 @@ describe('meta tool handlers', () => {
       expect(ctx.verifiedRecipientIds?.has(456)).toBe(true);
     });
 
+    test('a bot user without a first name is named by the stored @username, not the lowercased input', async () => {
+      ctx.userRepo.create({ telegram_id: 457, timezone: 'UTC', language: 'en', username: 'SamRiver' });
+      ctx.messageText = 'Find @samriver';
+      const result = await handleFindUser(ctx, { username: '@samriver' });
+      expect(result.data).toEqual({ telegram_id: 457, name: 'SamRiver' });
+      expect(ctx.verifiedRecipientIds?.has(457)).toBe(true);
+    });
+
     test('unknown @username: says the person has not started the bot, offers the picker, spawns nothing', async () => {
       const spawn = spyOn(Bun, 'spawn');
       try {

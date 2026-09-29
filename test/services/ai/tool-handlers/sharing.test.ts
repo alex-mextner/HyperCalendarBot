@@ -748,7 +748,7 @@ describe('sharing tool handlers', () => {
       // themselves — never the personal inv: keyboard (which authorizes a single invitee).
       expect(groupRecipient).toBe(GROUP_CHAT_ID);
       expect(variant).toEqual({ kind: 'group', eventId: event.id, place: expect.objectContaining({ id: event.id }) });
-      // allowMtproto:false → the inviter's account never sends for a group, and the deep-link forward
+      // allowInviterSession:false → the inviter's account never sends for a group, and the deep-link forward
       // fallback is suppressed (a forward link can't be accepted on behalf of a group).
       expect(sessionCalled).toBe(false);
       expect(sentToInviter).toHaveLength(0);

@@ -9,7 +9,7 @@ import { formatInvitation } from '../event/formatters.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import { readInvitationRoster } from '../sharing/invitation-roster.ts';
 import { buildUserSessionInvitationText } from '../telegram-session/invitation-text.ts';
-import { deliverMessage, describeDeliveryError } from './deliver-message.ts';
+import { type DeliverMessageParams, deliverMessage, describeDeliveryError } from './deliver-message.ts';
 import type { TelegramSender } from './types.ts';
 
 const deliveryLogger = botLogger.child({ module: 'invitation-delivery' });
@@ -45,7 +45,7 @@ export interface DeliverInvitationParams {
   /** Where to send the deep-link fallback (the inviter's chat). */
   fallbackChatId: number;
   /** When false, the inviter's own Telegram session is skipped (Bot API → deep-link only). Default true. */
-  allowMtproto?: boolean;
+  allowInviterSession?: boolean;
   /** When true, the target is a group chat: the deep-link fallback is suppressed. A forward
    *  invite link resolves only in a USER's private /start and authorizes against the user's
    *  telegram_id, so it can never be accepted on behalf of a group — reporting "link sent" would
@@ -76,7 +76,7 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
     lang,
     inviterLang,
     fallbackChatId,
-    allowMtproto = true,
+    allowInviterSession = true,
     isGroupTarget = false,
     deps,
   } = params;
@@ -153,16 +153,13 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
         : inviterTr.deliveryFallbackNoLink(eventTitle, inviteeLabel);
 
     // The inviter's own connected Telegram account sends a first-person invitation with the link.
-    const userFirstPersonText =
-      event && url && sender.sendAsConnectedUser
-        ? buildUserSessionInvitationText({ event, inviterTimezone, deepLink: url, lang })
-        : null;
-
-    const userSessionSend =
-      userFirstPersonText && sender.sendAsConnectedUser
-        ? async (targetId: number, _text: string, username?: string): Promise<boolean> =>
-            sender.sendAsConnectedUser!(inviterId, targetId, userFirstPersonText, username, { invitationId })
-        : undefined;
+    const sendAsConnected = sender.sendAsConnectedUser;
+    let userSessionSend: DeliverMessageParams['userSessionSend'];
+    if (event && url && sendAsConnected) {
+      const userFirstPersonText = buildUserSessionInvitationText({ event, inviterTimezone, deepLink: url, lang });
+      userSessionSend = async (targetId, _text, username) =>
+        sendAsConnected(inviterId, targetId, userFirstPersonText, username, { invitationId });
+    }
 
     const result = await deliverMessage({
       targetId: inviteeId,
@@ -185,7 +182,7 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
         }
         return sender.sendMessage(recipientId, msgText);
       },
-      userSessionSend: allowMtproto ? userSessionSend : undefined,
+      userSessionSend: allowInviterSession ? userSessionSend : undefined,
       suppressFallback: isGroupTarget,
     });
 

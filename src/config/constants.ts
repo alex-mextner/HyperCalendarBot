@@ -562,7 +562,6 @@ export const MSG = {
       },
       meta: {
         noHolidays: 'No upcoming holidays. You may not have country subscriptions set up.',
-        unknownName: 'unknown',
         holidaysList: (lines: string) => `Upcoming holidays:\n${lines}`,
         foundUser: (id: number, name: string) => `Found user: telegram_id=${id}, name=${name}`,
         addressBookEmpty: 'Address book is empty.',
@@ -1552,7 +1551,6 @@ export const MSG = {
       },
       meta: {
         noHolidays: 'Праздников не найдено. Возможно, у тебя не настроены подписки на страны.',
-        unknownName: 'неизвестно',
         holidaysList: (lines: string) => `Праздники:\n${lines}`,
         foundUser: (id: number, name: string) => `Пользователь найден: telegram_id=${id}, имя=${name}`,
         addressBookEmpty: 'Адресная книга пуста.',

@@ -104,7 +104,7 @@ export interface PickerInvitationParams {
   /** Where the deep-link fallback goes — always the inviter's private chat, never a group. */
   fallbackChatId: number;
   /** When false, the inviter's own Telegram session is skipped (Bot API → deep-link only). Used for group targets. */
-  allowMtproto?: boolean;
+  allowInviterSession?: boolean;
   /** When true, the target is a group chat: the deep-link fallback is suppressed (a forward
    *  invite link can't be accepted on behalf of a group), so a failed Bot-API delivery reports
    *  an honest failure instead of a useless "link sent" status. */
@@ -162,7 +162,7 @@ export async function deliverPickerInvitation(
     lang: inviteeLang,
     inviterLang: (params.inviter.language ?? 'en') as 'en' | 'ru',
     fallbackChatId: params.fallbackChatId,
-    allowMtproto: params.allowMtproto ?? true,
+    allowInviterSession: params.allowInviterSession ?? true,
     isGroupTarget: params.isGroupTarget ?? false,
     deps: {
       sender: deps.sender,

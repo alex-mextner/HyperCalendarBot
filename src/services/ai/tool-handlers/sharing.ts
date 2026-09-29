@@ -227,7 +227,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
       // private chat, never ctx.chatId (which may be a group the bot was invoked from,
       // leaking the invitee's personal invitation to every member).
       fallbackChatId: ctx.user.telegram_id,
-      allowMtproto: !isGroupTarget,
+      allowInviterSession: !isGroupTarget,
       isGroupTarget,
       deps: {
         sender: ctx.sender,
@@ -367,7 +367,7 @@ export async function handleResendInvitation(
       // private chat, never ctx.chatId (which may be a group the bot was invoked from,
       // leaking the invitee's personal invitation to every member).
       fallbackChatId: ctx.user.telegram_id,
-      allowMtproto: !isGroupTarget,
+      allowInviterSession: !isGroupTarget,
       isGroupTarget,
       deps: {
         sender: ctx.sender,

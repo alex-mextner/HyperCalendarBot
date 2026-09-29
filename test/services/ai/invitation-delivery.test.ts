@@ -70,7 +70,7 @@ describe('deliverInvitation', () => {
     invitationId: number;
     deps: InvitationDeliveryDeps;
     event?: CalendarEvent | null;
-    allowMtproto?: boolean;
+    allowInviterSession?: boolean;
     lang?: 'en' | 'ru';
     inviterLang?: 'en' | 'ru';
   }): DeliverInvitationParams {
@@ -86,7 +86,7 @@ describe('deliverInvitation', () => {
       lang: opts.lang ?? 'en',
       inviterLang: opts.inviterLang ?? opts.lang ?? 'en',
       fallbackChatId: INVITER_ID,
-      allowMtproto: opts.allowMtproto,
+      allowInviterSession: opts.allowInviterSession,
       deps: opts.deps,
     };
   }
@@ -221,7 +221,7 @@ describe('deliverInvitation', () => {
     expect(firstPersonTexts[0]).not.toContain('кафе у парка');
   });
 
-  test("allowMtproto:false + bot API fails → the inviter's session is skipped, deep-link fallback", async () => {
+  test("allowInviterSession:false + bot API fails → the inviter's session is skipped, deep-link fallback", async () => {
     const invId = createInvitation();
     let sessionCalled = false;
     const sentMessages: { chatId: number; text: string }[] = [];
@@ -238,7 +238,7 @@ describe('deliverInvitation', () => {
     });
 
     const result = await deliverInvitation(
-      baseParams({ invitationId: invId, deps: makeDeps(sender), allowMtproto: false, event: seedEvent }),
+      baseParams({ invitationId: invId, deps: makeDeps(sender), allowInviterSession: false, event: seedEvent }),
     );
 
     expect(result).toEqual({ delivered: false, viaDeepLink: true, viaBotApi: false });
@@ -259,7 +259,7 @@ describe('deliverInvitation', () => {
     });
 
     const result = await deliverInvitation({
-      ...baseParams({ invitationId: invId, deps: makeDeps(sender), allowMtproto: false }),
+      ...baseParams({ invitationId: invId, deps: makeDeps(sender), allowInviterSession: false }),
       isGroupTarget: true,
     });
 
@@ -283,7 +283,7 @@ describe('deliverInvitation', () => {
     });
 
     const result = await deliverInvitation({
-      ...baseParams({ invitationId: invId, deps: makeDeps(sender), allowMtproto: false, event: seedEvent }),
+      ...baseParams({ invitationId: invId, deps: makeDeps(sender), allowInviterSession: false, event: seedEvent }),
       isGroupTarget: true,
     });
 
