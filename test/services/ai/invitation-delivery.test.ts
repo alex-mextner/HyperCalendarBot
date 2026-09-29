@@ -497,7 +497,7 @@ describe('deliverInvitation', () => {
     expect(result).toEqual({ delivered: false, viaDeepLink: false, viaBotApi: false });
   });
 
-  test('a Russian invitee gets the personal card with all four RSVP buttons in Russian (#727)', async () => {
+  test('the personal card sent to a Russian invitee has all four RSVP buttons in Russian (#727)', async () => {
     const requests: z.infer<typeof BotRequestSchema>[] = [];
     const server = Bun.serve({
       hostname: '127.0.0.1',
