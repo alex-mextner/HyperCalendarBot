@@ -47,7 +47,7 @@ const MAX_TOOL_RESULTS_CHARS = 2400;
  * saved facts, whose lines are held to MEMORY_SECTION_MAX_CHARS, so the cap cuts
  * the end of User Info (a long secretary list), never a saved fact.
  */
-const MAX_USER_PROFILE_CHARS = MEMORY_SECTION_MAX_CHARS + 1_200;
+export const MAX_USER_PROFILE_CHARS = MEMORY_SECTION_MAX_CHARS + 1_200;
 /** Events listed in the notice that replaces an unverified answer. */
 const MAX_NOTICE_EVENTS = 10;
 
