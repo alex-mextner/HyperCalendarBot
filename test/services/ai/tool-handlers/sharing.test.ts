@@ -2175,14 +2175,14 @@ describe('sharing tool handlers', () => {
         });
       }
 
-      test('a proposal of nothing but a claimed place is refused and the owner is not pinged', async () => {
+      test.each<[string, { [field: string]: string | null }]>([
+        ['nothing but a claimed place', { location_verified: 'true', ...MODEL_PLACE }],
+        ['no changes at all', {}],
+      ])('a proposal of %s is refused and the owner is not pinged', async (_name, changes) => {
         const editProposalRepo = new EditProposalRepository(db);
         const notices: string[] = [];
         const eventId = ownerEvent();
-        const result = await handleProposeEdit(proposalCtx(editProposalRepo, notices), {
-          event_id: eventId,
-          changes: { location_verified: 'true', ...MODEL_PLACE },
-        });
+        const result = await handleProposeEdit(proposalCtx(editProposalRepo, notices), { event_id: eventId, changes });
 
         expect(result.success).toBe(false);
         expect(result.mutationState).toBe('not_applied');

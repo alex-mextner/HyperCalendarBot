@@ -784,7 +784,8 @@ export async function handleProposeEdit(ctx: AgentContext, input: ProposeEditInp
     return {
       success: false,
       mutationState: 'not_applied',
-      error: 'A proposal cannot set a verified place; propose a location text and the owner confirms the place.',
+      error:
+        'The proposal has no editable change. Verification-state fields (location_verified, resolved_address, coordinates, map link, venue) are never proposed; the owner confirms a place after a location text change.',
     };
   }
 
