@@ -647,7 +647,8 @@ describe('searches are biased to the creator home area', () => {
 
   test('with no home country, a city outside the user timezone gives no bias', async () => {
     const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { 'Zeedorp|': COASTAL_VILLAGE_NL } });
-    const s = setup({ timezone: 'Asia/Novosibirsk', city: 'Zeedorp' }, geocoder.service);
+    // A zone of no country: the timezone implies no home country either
+    const s = setup({ timezone: 'Etc/GMT-7', city: 'Zeedorp' }, geocoder.service);
 
     await s.service.verifyEventLocation(s.event, s.user());
 

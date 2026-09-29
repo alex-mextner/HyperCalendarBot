@@ -105,9 +105,24 @@ describe('guessCountryFromTimezone', () => {
     expect(guessCountryFromTimezone('Pacific/Auckland')).toBe('NZ');
   });
 
-  test('returns null for unknown timezone', () => {
-    expect(guessCountryFromTimezone('Antarctica/McMurdo')).toBeNull();
+  test('zones of every country come from the tz database, beyond any hand-picked list', () => {
+    expect(guessCountryFromTimezone('Europe/Podgorica')).toBe('ME');
+    expect(guessCountryFromTimezone('Europe/Sarajevo')).toBe('BA');
+    expect(guessCountryFromTimezone('Europe/Lisbon')).toBe('PT');
+    expect(guessCountryFromTimezone('Europe/Vienna')).toBe('AT');
+    expect(guessCountryFromTimezone('Asia/Jerusalem')).toBe('IL');
+    expect(guessCountryFromTimezone('Antarctica/McMurdo')).toBe('AQ');
+  });
+
+  test('a renamed or backward zone name gets the country of the zone it links to', () => {
+    expect(guessCountryFromTimezone('Europe/Kiev')).toBe('UA');
+    expect(guessCountryFromTimezone('Asia/Calcutta')).toBe('IN');
+    expect(guessCountryFromTimezone('US/Eastern')).toBe('US');
+  });
+
+  test('returns null for zones of no country and unknown names', () => {
     expect(guessCountryFromTimezone('UTC')).toBeNull();
+    expect(guessCountryFromTimezone('Etc/UTC')).toBeNull();
     expect(guessCountryFromTimezone('Etc/GMT+5')).toBeNull();
     expect(guessCountryFromTimezone('Invalid/Timezone')).toBeNull();
   });
