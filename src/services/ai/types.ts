@@ -265,7 +265,8 @@ export interface AgentContext {
    *  Stall phrases and retry queue fire only when true. */
   wasExplicitInvocation?: boolean;
   /** Retry attempt index: 0 or absent = original message, 1-3 = subsequent backoff retries.
-   *  Stall phrase is suppressed on attempts > 0. */
+   *  Attempts > 0 stay quiet about failures, except a hard outage the user was not yet told about
+   *  honestly (see CalendarBotAgent.announceFailure and AiFailureNoticeTracker.decide). */
   retryAttempt?: number;
   /** True for a scheduled/trigger run (or its retry) that answers no user message.
    *  Only such runs may end with an empty or [SKIP] final and say nothing in a private chat;

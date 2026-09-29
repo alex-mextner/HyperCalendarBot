@@ -238,6 +238,12 @@ export const MSG = {
     something_wrong: 'Something went wrong. Try again or use /help.',
     agent_error: (exclude?: string) => pickPhrase(EN_AGENT_ERROR_PHRASES, exclude),
     ai_degraded: `🔧 AI unavailable — I can't answer in my own words right now.\n\n${EN_AI_COMMANDS_HINT}`,
+    ai_still_down: (next: 'retry' | 'resend' | 'unsure') =>
+      next === 'retry'
+        ? "🔧 Not done yet: the AI is still unavailable. I'll retry this request myself shortly."
+        : next === 'unsure'
+          ? "🔧 Not done yet: the AI is still unavailable. If I haven't answered in a few minutes, send this again."
+          : '🔧 Not done: the AI is still unavailable. Send this again in a few minutes.',
     agent_give_up: (promised: boolean) =>
       promised
         ? `🔧 Promised to come back — and the AI is still down. Devs are on it.\n\n${EN_AI_COMMANDS_HINT}`
@@ -1251,6 +1257,12 @@ export const MSG = {
     something_wrong: 'Что-то пошло не так. Попробуй ещё раз или /help.',
     agent_error: (exclude?: string) => pickPhrase(RU_AGENT_ERROR_PHRASES, exclude),
     ai_degraded: `🔧 ИИ недоступен — своими словами ответить не смогу.\n\n${RU_AI_COMMANDS_HINT}`,
+    ai_still_down: (next: 'retry' | 'resend' | 'unsure') =>
+      next === 'retry'
+        ? '🔧 Пока не сделал: ИИ всё ещё недоступен. Повторю этот запрос сам чуть позже.'
+        : next === 'unsure'
+          ? '🔧 Пока не сделал: ИИ всё ещё недоступен. Если не отвечу через пару минут — пришли запрос ещё раз.'
+          : '🔧 Не сделал: ИИ всё ещё недоступен. Пришли запрос ещё раз через пару минут.',
     agent_give_up: (promised: boolean) =>
       promised
         ? `🔧 Обещал вернуться — но ИИ так и не поднялся. Разрабы уже смотрят.\n\n${RU_AI_COMMANDS_HINT}`
