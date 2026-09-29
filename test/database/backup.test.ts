@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { runSqliteBackup } from '../../src/database/backup.ts';
@@ -63,5 +63,20 @@ describe('runSqliteBackup', () => {
     const files = (await readdir(BACKUP_DIR)).filter((f) => f.endsWith('.db'));
     // Same-day backup overwrites itself (same filename) — at most 1 file for today
     expect(files.length).toBe(1);
+  });
+
+  test('backup is 0600 in a 0700 directory under the default 022 umask (GH-613)', async () => {
+    const previousUmask = process.umask(0o022);
+    try {
+      await mkdir(BACKUP_DIR, { mode: 0o755 });
+      await chmod(BACKUP_DIR, 0o755);
+      await runSqliteBackup(db, DB_PATH);
+    } finally {
+      process.umask(previousUmask);
+    }
+    const files = (await readdir(BACKUP_DIR)).filter((f) => f.endsWith('.db'));
+    expect(files).toHaveLength(1);
+    expect((await stat(path.join(BACKUP_DIR, files[0]!))).mode & 0o777).toBe(0o600);
+    expect((await stat(BACKUP_DIR)).mode & 0o777).toBe(0o700);
   });
 });
