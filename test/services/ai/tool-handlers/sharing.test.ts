@@ -35,6 +35,7 @@ import { InvitationService } from '../../../../src/services/sharing/invitation-s
 import { PrivacyService } from '../../../../src/services/sharing/privacy-service.ts';
 import { SharingService } from '../../../../src/services/sharing/sharing-service.ts';
 import { flushPromises } from '../../../helpers/mock-context.ts';
+import { addAsPre064Image, ageAnswers, answerAsPre064Image } from '../../../helpers/pre-064-image.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -915,6 +916,53 @@ describe('sharing tool handlers', () => {
       expect(result.output).not.toContain(`invitee: ${GROUP_CHAT_ID}`);
     });
 
+    test("a member's answer in a withdrawn group is not reported next to a group invited later", async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const groupA = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT_ID);
+      invitationRepo.updateStatus(groupA.id, 'cancelled', 'pending');
+      const groupB = -1007777;
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: groupB });
+      participantRepo.add(event.id, 302, 'accepted', 'attendee', groupB);
+
+      for (const ctx of [
+        makeCtx({ participantRepo }),
+        makeCtx({ participantRepo, isGroup: true, groupChatId: groupB, chatId: groupB }),
+      ]) {
+        const output = handleGetInvitationStatus(ctx, { event_id: event.id }).output ?? '';
+        expect(output).toContain('302');
+        expect(output).not.toContain('301');
+      }
+    });
+
+    test('an answer given on an image without origins is not reported in the group recorded before it', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const groupB = -1007777;
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: groupB });
+      participantRepo.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT_ID);
+      ageAnswers(db, event.id);
+      // Rolled back to an image from before migration 064, member 301 answers on group B's card.
+      answerAsPre064Image(db, event.id, 301, 'declined');
+
+      for (const groupChatId of [GROUP_CHAT_ID, groupB]) {
+        const ctx = makeCtx({ participantRepo, isGroup: true, groupChatId, chatId: groupChatId });
+        expect(handleGetInvitationStatus(ctx, { event_id: event.id }).output).not.toContain('301');
+      }
+    });
+
     test('group invitation with no responses yet notes per-member RSVP, not a stale pending line', async () => {
       const participantRepo = new ParticipantRepository(db);
       const event = eventService.createEvent({
@@ -1393,6 +1441,31 @@ describe('sharing tool handlers', () => {
         const declined = handleGetInvitationStatus(ctxFor(THIRD_USER_ID), { event_id: event.id });
         expect(declined.success).toBe(true);
         expect(declined.output).toContain(`organizer: ${USER_ID}`);
+      });
+
+      test('an invitee reads group answers from live groups only, never answers of unknown origin', () => {
+        const { event } = createDinner();
+        const WITHDRAWN_GROUP_CHAT_ID = -1008888;
+        invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+        const withdrawn = invitationRepo.create({
+          event_id: event.id,
+          inviter_id: USER_ID,
+          invitee_id: WITHDRAWN_GROUP_CHAT_ID,
+        });
+        invitationRepo.updateStatus(withdrawn.id, 'cancelled', 'pending');
+        participantRepo.add(event.id, 501, 'accepted', 'attendee', GROUP_CHAT_ID);
+        participantRepo.add(event.id, 502, 'accepted', 'attendee', WITHDRAWN_GROUP_CHAT_ID);
+        // An answer recorded before migration 064: its group is unknown.
+        addAsPre064Image(db, event.id, 503, 'accepted');
+
+        const invitee = handleGetInvitationStatus(ctxFor(THIRD_USER_ID), { event_id: event.id }).output ?? '';
+        // A personal answer (no group origin either) stays in the invitee section.
+        expect(invitee).toContain(`invitee: ${OTHER_USER_ID}, status: accepted`);
+        expect(invitee).toContain('member: 501, status: accepted');
+        expect(invitee).not.toContain('502');
+        expect(invitee).not.toContain('503');
+        // The organizer's own view in a private chat keeps every answer of unknown origin.
+        expect(handleGetInvitationStatus(ctxFor(USER_ID), { event_id: event.id }).output).toContain('member: 503');
       });
     });
   });

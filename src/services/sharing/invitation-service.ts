@@ -2,7 +2,7 @@ import type { EventRepository } from '../../database/repositories/event.reposito
 import type { InvitationRepository } from '../../database/repositories/invitation.repository';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository';
-import type { Invitation, InvitationStatus } from '../../database/types';
+import type { CalendarEvent, Invitation, InvitationStatus } from '../../database/types';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 
 const MAX_DECLINES = 3;
@@ -73,6 +73,7 @@ export class InvitationService {
       invitee_username: inviteeUsername,
     });
 
+    this.domainEvents?.emit('invitationRoster.changed', { userId: inviterId, eventId });
     return { success: true, invitation };
   }
 
@@ -102,13 +103,14 @@ export class InvitationService {
     }
     const existing = this.participantRepo.findByEventAndUser(eventId, userId);
     if (existing) {
-      this.participantRepo.updateStatus(eventId, userId, status);
+      this.participantRepo.updateStatus(eventId, userId, status, groupChatId);
     } else {
-      this.participantRepo.add(eventId, userId, status);
+      this.participantRepo.add(eventId, userId, status, 'attendee', groupChatId);
     }
     // Mirror this member's own answer into their own Google Calendar (gated downstream on their
     // own active sync state): "going" adds the event, "not going" removes it.
     this.domainEvents?.emit('myGroup.rsvp', { userId, eventId, status });
+    this.domainEvents?.emit('invitationRoster.changed', { userId: groupInvitation.inviter_id, eventId });
     return { success: true };
   }
 
@@ -136,6 +138,10 @@ export class InvitationService {
     if (!ok) {
       return { success: false, error: 'Cannot cancel — status already changed' };
     }
+    this.domainEvents?.emit('invitationRoster.changed', {
+      userId: invitation.inviter_id,
+      eventId: invitation.event_id,
+    });
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
 
@@ -160,7 +166,17 @@ export class InvitationService {
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
 
-  rescheduleFromProposal(invitationId: number, userId: number): InvitationResult {
+  /**
+   * Accept the invitee's proposed time. `moveEvent` moves the event to it before the roster change is
+   * announced, so the cards that change refreshes already show the new time. It returns the moved event
+   * (null when it could not move it) rather than void, so an async mover, still moving the event when
+   * the cards re-render, does not type-check.
+   */
+  rescheduleFromProposal(
+    invitationId: number,
+    userId: number,
+    moveEvent: (eventId: number, proposedTime: string) => CalendarEvent | null,
+  ): InvitationResult {
     const invitation = this.invRepo.findById(invitationId);
     if (!invitation) {
       return { success: false, error: 'Invitation not found' };
@@ -178,10 +194,21 @@ export class InvitationService {
     if (this.participantRepo) {
       const existing = this.participantRepo.findByEventAndUser(invitation.event_id, invitation.invitee_id);
       if (existing) {
-        this.participantRepo.updateStatus(invitation.event_id, invitation.invitee_id, 'accepted');
+        this.participantRepo.updateStatus(invitation.event_id, invitation.invitee_id, 'accepted', null);
       } else {
         this.participantRepo.add(invitation.event_id, invitation.invitee_id, 'accepted');
       }
+    }
+    try {
+      moveEvent(invitation.event_id, proposedTime);
+    } finally {
+      // The invitation is accepted even if the move failed, so the roster change is announced anyway.
+      // No answeredInvitationId: the acting user is the inviter, who has no invitation card of theirs to
+      // rewrite, so every delivered card re-renders, the proposer's included.
+      this.domainEvents?.emit('invitationRoster.changed', {
+        userId: invitation.inviter_id,
+        eventId: invitation.event_id,
+      });
     }
     return { success: true, invitation: this.invRepo.findById(invitationId)!, proposedTime };
   }
@@ -237,16 +264,21 @@ export class InvitationService {
       const existing = this.participantRepo.findByEventAndUser(invitation.event_id, userId);
       if (newStatus === 'accepted' || newStatus === 'maybe') {
         if (existing) {
-          this.participantRepo.updateStatus(invitation.event_id, userId, newStatus);
+          this.participantRepo.updateStatus(invitation.event_id, userId, newStatus, null);
         } else {
           this.participantRepo.add(invitation.event_id, userId, newStatus);
         }
       } else if (newStatus === 'declined' && existing) {
-        this.participantRepo.updateStatus(invitation.event_id, userId, 'declined');
+        this.participantRepo.updateStatus(invitation.event_id, userId, 'declined', null);
       }
     }
 
     const result: InvitationResult = { success: true, invitation: this.invRepo.findById(invitationId)! };
+    this.domainEvents?.emit('invitationRoster.changed', {
+      userId: invitation.inviter_id,
+      eventId: invitation.event_id,
+      answeredInvitationId: invitationId,
+    });
 
     if (this.domainEvents && (newStatus === 'accepted' || newStatus === 'declined')) {
       const event = this.eventRepo.findById(invitation.event_id, invitation.inviter_id);

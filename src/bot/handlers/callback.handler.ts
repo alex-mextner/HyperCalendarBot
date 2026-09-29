@@ -56,6 +56,7 @@ import {
   formatAnsweredInvitationCard,
   invitationAnswerLabel,
 } from '../../services/sharing/answered-invitation-card.ts';
+import { readInvitationRoster } from '../../services/sharing/invitation-roster.ts';
 import { invitationRsvpKeyboard } from '../../services/sharing/invitation-rsvp-keyboard.ts';
 import type { InvitationResult, InvitationService } from '../../services/sharing/invitation-service.ts';
 import { guessCountryFromTimezone, resolveTimezone } from '../../services/timezone/timezone-service.ts';
@@ -874,7 +875,18 @@ export function createCallbackHandler(
     }
 
     if (subAction === 'reschedule') {
-      const reschedResult = invitationService.rescheduleFromProposal(invId, user.telegram_id);
+      const moveEventToProposedTime = (eventId: number, proposedTime: string) => {
+        const event = eventRepo?.findById(eventId, user.telegram_id);
+        if (!event || !eventService) return null;
+        const durationMs = event.end_at ? new Date(event.end_at).getTime() - new Date(event.start_at).getTime() : 0;
+        const newEnd =
+          durationMs > 0 ? new Date(new Date(proposedTime).getTime() + durationMs).toISOString() : undefined;
+        return eventService.updateEvent(event.id, user.telegram_id, {
+          start_at: proposedTime,
+          ...(newEnd ? { end_at: newEnd } : {}),
+        });
+      };
+      const reschedResult = invitationService.rescheduleFromProposal(invId, user.telegram_id, moveEventToProposedTime);
       if (reschedResult.reason === 'invite_proposal_closed') {
         await answerProposalClosed(ctx, lang);
         return;
@@ -886,15 +898,6 @@ export function createCallbackHandler(
       const invitation = reschedResult.invitation!;
       const proposedTime = reschedResult.proposedTime!;
       const event = eventRepo?.findById(invitation.event_id, user.telegram_id);
-      if (event && eventService) {
-        const durationMs = event.end_at ? new Date(event.end_at).getTime() - new Date(event.start_at).getTime() : 0;
-        const newEnd =
-          durationMs > 0 ? new Date(new Date(proposedTime).getTime() + durationMs).toISOString() : undefined;
-        eventService.updateEvent(event.id, user.telegram_id, {
-          start_at: proposedTime,
-          ...(newEnd ? { end_at: newEnd } : {}),
-        });
-      }
       const formattedTimeInviter = formatProposedTime(proposedTime, user.timezone, lang);
       await ctx.answer();
       await ctx
@@ -955,6 +958,7 @@ export function createCallbackHandler(
                 inviterUser?.username ?? undefined,
                 inviteeUser?.timezone ?? null,
                 !!inviteeUser?.onboarding_completed,
+                invitationRepo ? readInvitationRoster(invitationRepo, event.id, invitation.chat_id) : null,
               )
             : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
           invitationNotifyDeps
@@ -989,6 +993,8 @@ export function createCallbackHandler(
       await ctx.answer(invitationAnswerLabel(answer, lang));
 
       const event = eventRepo?.findById(result.invitation?.event_id ?? 0, result.invitation?.inviter_id ?? 0);
+      // A group chat must be identified to be checked against the roster's privacy rule; fail closed.
+      const rosterChatId = isGroup(ctx) ? getGroupId(ctx) : user.telegram_id;
       const editText = await formatAnsweredInvitationCard(
         answer,
         event ?? null,
@@ -999,6 +1005,9 @@ export function createCallbackHandler(
           groupId: isGroup(ctx) ? (getGroupId(ctx) ?? undefined) : undefined,
         },
         { agendaRepository: eventService.agendaRepository, weatherService },
+        event && invitationRepo && rosterChatId !== null
+          ? readInvitationRoster(invitationRepo, event.id, rosterChatId)
+          : null,
       );
       await editAgendaText(ctx, editText, { parse_mode: 'HTML' }).catch(() => {});
 
@@ -1387,6 +1396,7 @@ export function createCallbackHandler(
             user.username ?? undefined,
             inviteeUser?.timezone ?? null,
             !!inviteeUser?.onboarding_completed,
+            invitationRepo ? readInvitationRoster(invitationRepo, event.id, inviteeId) : null,
           )
         : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
       await ctx.answer();
@@ -1454,6 +1464,7 @@ export function createCallbackHandler(
             user.username ?? undefined,
             inviteeUser?.timezone ?? null,
             !!inviteeUser?.onboarding_completed,
+            invitationRepo ? readInvitationRoster(invitationRepo, eventForInv.id, inviteeId) : null,
           )
         : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
       forceInviteDeps

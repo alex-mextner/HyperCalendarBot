@@ -10,6 +10,7 @@ import type {
 } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
+import { effectiveRsvpStatus } from '../../sharing/invitation-roster.ts';
 import { deliverInvitation, type InvitationDeliveryResult } from '../invitation-delivery.ts';
 import { issueRecipientApproval } from '../recipient-confirmation.ts';
 import { resolveInvitationRecipient } from '../recipient-identity.ts';
@@ -472,13 +473,7 @@ function buildPersonalRsvpLines(
     const participantStatus = participantByUser.get(userId);
     const inviteIsLive = inv.status === 'pending' || inv.status === 'accepted' || inv.status === 'maybe';
     if (participantStatus === undefined && !inviteIsLive) continue;
-    // A pending re-invite overrides stale negative/neutral participant rows (declined,
-    // pending) but must NOT mask a confirmed RSVP (accepted/maybe) from another
-    // channel such as a group invite — that positive signal is always authoritative.
-    const status =
-      inv.status === 'pending' && participantStatus !== 'accepted' && participantStatus !== 'maybe'
-        ? inv.status
-        : (participantStatus ?? inv.status);
+    const status = effectiveRsvpStatus(inv.status, participantStatus);
     const note =
       participantStatus !== undefined && participantStatus !== inv.status && inv.status !== 'pending'
         ? t(lang).aiTools.sharing.rsvpPersonalInviteNote(t(lang).aiTools.sharing.rsvpStatuses[inv.status])
@@ -502,9 +497,8 @@ interface GroupRsvpResult {
  * stays "pending" forever, so the real responses live in event_participants. Members already shown
  * in the personal-invite section (listedUserIds) are excluded so each (event, user) appears exactly
  * once across the whole output. `participantRows` is null when the participant registry is
- * unavailable (degraded), versus [] when present but empty. When an event is shared to more than one
- * group, event_participants does not record which group a member came from, so the breakdown is
- * reported once for the whole event rather than per group chat.
+ * unavailable (degraded), versus [] when present but empty. The caller passes only the answers the
+ * reader may see (by the group chat each came through); they are reported as one breakdown.
  */
 function describeGroupRsvp(
   lang: Lang,
@@ -539,8 +533,8 @@ function describeGroupRsvp(
  * The prompt answers "who takes part" only from this tool, so besides whoever can see the event,
  * its invitees read the same roster (Telegram ids and statuses, never the owner's event details).
  * Invited means a personal invitation that was not cancelled or expired, or current membership of
- * a group with a live invitation. A leftover participant row alone never grants access: it records
- * no source group and outlives both a cancelled invitation and leaving the group.
+ * a group with a live invitation. A leftover participant row alone never grants access: it outlives
+ * both a cancelled invitation and leaving the group.
  */
 export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitationStatusInput): ToolResult {
   if (!ctx.sharing?.invitationRepo) {
@@ -626,7 +620,18 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
       isGroupDegraded = true;
       botLogger.warn({ eventId: input.event_id }, 'group rsvp: participant repo absent, attending count suppressed');
     }
-    const group = describeGroupRsvp(lang, participantRows, personal.listedUserIds, displayName);
+    // A member's answer counts while the group whose card carried it is still invited; in a group chat
+    // only that chat's own answers are shown. Like the invitation card, an invitee never sees an answer
+    // of unknown origin; only a reader who sees the event itself does, and only outside group chats.
+    // organizerId is set only when the reader got here as an invitee.
+    const readerSeesEvent = organizerId === null;
+    const groupRows =
+      participantRows?.filter((p) =>
+        p.source_group_id === null
+          ? !ctx.isGroup && readerSeesEvent
+          : liveGroupChatIds.includes(p.source_group_id) && (!ctx.isGroup || p.source_group_id === ctx.groupChatId),
+      ) ?? null;
+    const group = describeGroupRsvp(lang, groupRows, personal.listedUserIds, displayName);
     lines.push(...group.lines);
     for (const member of group.members) {
       if (isRsvpAttending(member.status)) attending++;

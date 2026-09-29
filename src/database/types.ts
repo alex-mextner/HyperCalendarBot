@@ -240,6 +240,8 @@ export interface EventParticipant {
   user_id: number;
   status: ParticipantStatus;
   role: ParticipantRole;
+  /** Group chat whose invitation card carried the answer; null when personal or unknown (sourceGroupSql) */
+  source_group_id: number | null;
   created_at: string;
   updated_at: string;
 }
