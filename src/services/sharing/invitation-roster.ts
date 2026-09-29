@@ -68,10 +68,10 @@ function plainName(value: string | null): string | null {
   return chars.length > NAME_MAX_LENGTH ? `${chars.slice(0, NAME_MAX_LENGTH - 1).join('')}…` : cleaned;
 }
 
-/** The person's public Telegram name first; the organizer's own contact name only when nothing public exists. */
+/** The person's public Telegram name, else the @username; null when neither exists. */
 function displayName(row: InvitationRosterRow): string | null {
   const username = plainName(row.username?.replace(/^@/, '') ?? null);
-  return plainName(row.first_name) ?? (username ? `@${username}` : null) ?? plainName(row.contact_name);
+  return plainName(row.first_name) ?? (username ? `@${username}` : null);
 }
 
 function buildRoster(rows: InvitationRosterRow[], chatId: number): InvitationRoster | null {

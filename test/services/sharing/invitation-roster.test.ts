@@ -253,23 +253,45 @@ describe('invitation card roster', () => {
     expect(card(event, invitations, GROUP_CHAT)).not.toContain('Participants:');
   });
 
-  test('names come from the profile, then the username, then the organizer contact, else a neutral label', () => {
-    const { event, invitations, contacts, invite, person } = seed();
+  test('names come from the profile, then the username, else a neutral label', () => {
+    const { event, invitations, invite, person } = seed();
     person(201, 'Boris', 'boris_tg');
     person(202, null, 'vera_tg');
     invite(201);
     invite(202);
     invite(203, 'pending', 'gleb_tg');
-    contacts.add(ORGANIZER, 'Dina Contact', undefined, 204);
-    invite(204);
     invite(205);
 
     const text = card(event, invitations, 201);
     expect(text).toContain('⏳ Boris (you) — no answer yet');
     expect(text).toContain('⏳ @vera_tg — no answer yet');
     expect(text).toContain('⏳ @gleb_tg — no answer yet');
-    expect(text).toContain('⏳ Dina Contact — no answer yet');
     expect(text).toContain('⏳ Guest — no answer yet');
+  });
+
+  test("no card shows the organizer's private contact names, in a group chat or an invitee's chat", () => {
+    const { event, invitations, participants, contacts, invite, person } = seed();
+    person(201, 'Boris');
+    person(301, 'Mila');
+    person(302, null);
+    // The organizer's own address-book names for people without a public name
+    contacts.add(ORGANIZER, 'Dina Private', undefined, 204);
+    contacts.add(ORGANIZER, 'Oleg Private', undefined, 302);
+    invite(201);
+    invite(204);
+    invite(GROUP_CHAT);
+    participants.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT);
+    participants.add(event.id, 302, 'accepted', 'attendee', GROUP_CHAT);
+
+    for (const chatId of [GROUP_CHAT, 201]) {
+      const text = card(event, invitations, chatId);
+      expect(text).not.toContain('Dina');
+      expect(text).not.toContain('Oleg');
+      expect(text).toContain('Boris');
+      expect(text).toContain('✅ Mila — going');
+      expect(text).toContain('⏳ Guest — no answer yet');
+      expect(text).toContain('✅ Guest — going');
+    }
   });
 
   test('names are HTML-escaped, stripped of control characters and shortened', () => {
