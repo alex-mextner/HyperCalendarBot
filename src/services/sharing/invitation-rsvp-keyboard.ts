@@ -8,12 +8,13 @@ import { type EventPlace, withMapButton } from '../location/event-venue.ts';
  * when the event (`place`, null when it could not be loaded) has a confirmed place.
  */
 export function invitationRsvpKeyboard(invitationId: number, lang: Lang, place: EventPlace | null): InlineKeyboard {
+  const msgs = t(lang);
   const keyboard = new InlineKeyboard()
-    .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitationId}`)
-    .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitationId}`)
+    .text(msgs.invite_accept_btn, `${CB.INVITATION_ACTION}:accept:${invitationId}`)
+    .text(msgs.invite_decline_btn, `${CB.INVITATION_ACTION}:decline:${invitationId}`)
     .row()
-    .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitationId}`)
-    .text(t(lang).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitationId}`);
+    .text(msgs.invite_maybe_btn, `${CB.INVITATION_ACTION}:maybe:${invitationId}`)
+    .text(msgs.invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitationId}`);
   return withMapButton(keyboard, place, lang);
 }
 

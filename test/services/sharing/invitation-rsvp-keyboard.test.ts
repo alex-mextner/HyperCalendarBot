@@ -38,15 +38,15 @@ describe('invitationRsvpKeyboard', () => {
     });
   });
 
-  test('localizes only the propose button label (ru)', () => {
+  test('labels all four buttons in Russian for a ru invitee, keeping the callback data (#727)', () => {
     expect(invitationRsvpKeyboard(7, 'ru', UNCONFIRMED_PLACE).toJSON()).toEqual({
       inline_keyboard: [
         [
-          { text: '✅ Accept', callback_data: 'inv:accept:7' },
-          { text: '❌ Decline', callback_data: 'inv:decline:7' },
+          { text: '✅ Принять', callback_data: 'inv:accept:7' },
+          { text: '❌ Отклонить', callback_data: 'inv:decline:7' },
         ],
         [
-          { text: 'Maybe 🤔', callback_data: 'inv:maybe:7' },
+          { text: 'Возможно 🤔', callback_data: 'inv:maybe:7' },
           { text: 'Другое время 🕐', callback_data: 'inv:propose:7' },
         ],
       ],

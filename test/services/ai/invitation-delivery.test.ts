@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { TelegramError } from 'gramio';
+import { Bot, TelegramError } from 'gramio';
+import { z } from 'zod';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ContactRepository } from '../../../src/database/repositories/contact.repository.ts';
 import { DeepLinkRepository } from '../../../src/database/repositories/deep-link.repository.ts';
@@ -16,12 +17,23 @@ import {
   type InvitationDeliveryDeps,
   lookupInviteeUsername,
 } from '../../../src/services/ai/invitation-delivery.ts';
+import { createTelegramSender } from '../../../src/services/ai/telegram-sender.ts';
 import type { InvitationKeyboardVariant, TelegramSender } from '../../../src/services/ai/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { DeepLinkService } from '../../../src/services/sharing/deep-link-service.ts';
+import { jsonCodec } from '../../../src/utils/json-codec.ts';
 
 const INVITER_ID = 100;
 const INVITEE_ID = 200;
+
+const BotRequestSchema = z.object({
+  chat_id: z.number(),
+  reply_markup: z
+    .object({
+      inline_keyboard: z.array(z.array(z.object({ text: z.string(), callback_data: z.string().optional() }))),
+    })
+    .optional(),
+});
 
 const SENDER_BASE: TelegramSender = {
   sendMessage: async () => ({ message_id: 1 }),
@@ -483,6 +495,52 @@ describe('deliverInvitation', () => {
     const invId = createInvitation();
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(SENDER_BASE) }));
     expect(result).toEqual({ delivered: false, viaDeepLink: false, viaBotApi: false });
+  });
+
+  test('the personal card sent to a Russian invitee has all four RSVP buttons in Russian (#727)', async () => {
+    const requests: z.infer<typeof BotRequestSchema>[] = [];
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      async fetch(request) {
+        requests.push(jsonCodec(BotRequestSchema).parse(await request.text()));
+        return Response.json({
+          ok: true,
+          result: { message_id: 77, date: 1, chat: { id: INVITEE_ID, type: 'private' }, text: 'card' },
+        });
+      },
+    });
+    try {
+      const bot = new Bot('1:synthetic-test', {
+        info: { id: 1, is_bot: true, first_name: 'Test', username: 'TestBot' },
+        api: { baseURL: `http://127.0.0.1:${server.port}/bot` },
+      });
+      const invId = createInvitation();
+      const result = await deliverInvitation(
+        baseParams({ invitationId: invId, deps: makeDeps(createTelegramSender(bot)), lang: 'ru' }),
+      );
+
+      expect(result).toEqual({ delivered: true, viaDeepLink: false, viaBotApi: true });
+      expect(
+        requests.map((request) => ({ to: request.chat_id, keyboard: request.reply_markup?.inline_keyboard })),
+      ).toEqual([
+        {
+          to: INVITEE_ID,
+          keyboard: [
+            [
+              { text: '✅ Принять', callback_data: `inv:accept:${invId}` },
+              { text: '❌ Отклонить', callback_data: `inv:decline:${invId}` },
+            ],
+            [
+              { text: 'Возможно 🤔', callback_data: `inv:maybe:${invId}` },
+              { text: 'Другое время 🕐', callback_data: `inv:propose:${invId}` },
+            ],
+          ],
+        },
+      ]);
+    } finally {
+      server.stop(true);
+    }
   });
 });
 
