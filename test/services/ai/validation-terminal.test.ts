@@ -811,6 +811,9 @@ describe('answers about the user are checked against the profile the agent saw (
     ['В твоём календаре есть репетиция оркестра.'],
     ['У тебя есть событие «Репетиция оркестра».'],
     ['Репетиция оркестра записана под id 42.'],
+    ['На этой неделе у тебя репетиция оркестра.'],
+    ['Каждую пятницу у тебя репетиция оркестра.'],
+    ['У тебя есть событие: репетиция оркестра.'],
   ])('a saved fact does not stand in for a calendar read without a day: %s', async (answer) => {
     const savedEvent = 'По пятницам у меня репетиция оркестра';
     const ctx = profileContext('ru', 'Что у меня в календаре?');

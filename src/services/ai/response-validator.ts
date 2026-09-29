@@ -237,22 +237,24 @@ function hasUnbackedFacts(input: ValidationInput): boolean {
 }
 
 /** Words that place a claim in the calendar even when it names no day ("в твоём календаре есть репетиция"). */
-const CALENDAR_NOUN = /календар|расписани|calendar|schedule|agenda/i;
+const CALENDAR_NOUN = /календар|расписани|событи|calendar|schedule|agenda|\bevents?\b/i;
 
 /**
  * Whether the answer speaks of the calendar, so the profile must not back it. The profile tells
  * who the user is, not what the calendar holds: shown a saved "rehearsal on Fridays", the fast
  * model approved a tool-less "on Friday you have a rehearsal".
  *
- * With no tools every clock time and date is unbacked, and a saved fact ("встаю в 7:30") or the
- * zone's offset (UTC+5:30) carries them too, so a tool-less answer is held to the calendar only
- * by a named day, a quoted title, an event id or a calendar word. A run that read the calendar
- * can back its times and dates, so there any unbacked fact or day reference counts.
+ * With no tools every clock time and date is unbacked, and a saved fact ("встаю в 7:30", "отпуск
+ * с 10 августа") or the zone's offset (UTC+5:30) carries them too, so a tool-less answer is held
+ * to the calendar only by a day, period or recurrence word, a quoted title, an event id or a
+ * calendar word. A run that read the calendar can back its times and dates, so there any
+ * unbacked fact or day reference counts.
  */
 function speaksOfTheCalendar(input: ValidationInput): boolean {
   const days = readDayContent(input.response, new Date(), input.timezone);
   if (input.tools.length > 0) return days.kind !== 'none' || hasUnbackedFacts(input);
-  if (days.kind === 'named' || CALENDAR_NOUN.test(input.response)) return true;
+  const namesDays = days.kind === 'named' || (days.kind === 'open' && !days.datesOnly);
+  if (namesDays || CALENDAR_NOUN.test(input.response)) return true;
   return (
     checkGrounding(input.response, input.tools, input.timezone, input.userMessage).ungroundedTitlesAndIds.length > 0
   );
