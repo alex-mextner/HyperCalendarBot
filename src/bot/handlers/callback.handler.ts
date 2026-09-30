@@ -34,6 +34,7 @@ import type { IntentRepository } from '../../database/repositories/intent.reposi
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { PlaceRepository } from '../../database/repositories/place.repository.ts';
 import type { PlaceAliasRepository } from '../../database/repositories/place-alias.repository.ts';
+import type { PlaceRoleRepository } from '../../database/repositories/place-role.repository.ts';
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
@@ -192,6 +193,7 @@ export interface CallbackHandlerOpts {
   contactGroupRepo?: ContactGroupRepository;
   placeRepo?: PlaceRepository;
   placeAliasRepo?: PlaceAliasRepository;
+  placeRoleRepo?: PlaceRoleRepository;
   timezoneScene?: AnyScene;
   connectTelegramScene?: AnyScene;
   telegramDeps?: {
@@ -251,6 +253,7 @@ export function createCallbackHandler(
     contactGroupRepo,
     placeRepo,
     placeAliasRepo,
+    placeRoleRepo,
     timezoneScene,
     connectTelegramScene,
     telegramDeps,
@@ -2040,7 +2043,10 @@ export function createCallbackHandler(
   });
 
   // Places: list/detail/alias/favorite callbacks (#655)
-  const placesDeps: PlacesDeps | undefined = placeRepo && placeAliasRepo ? { placeRepo, placeAliasRepo } : undefined;
+  const placesDeps: PlacesDeps | undefined =
+    placeRepo && placeAliasRepo && placeRoleRepo && contactRepo && contactGroupRepo
+      ? { placeRepo, placeAliasRepo, placeRoleRepo, contactRepo, contactGroupRepo }
+      : undefined;
   dispatch.set(CB.PLACES, async (ctx, payload, _parts, user) => {
     if (!placesDeps) {
       await ctx.answer();

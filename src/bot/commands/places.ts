@@ -1,15 +1,21 @@
 // src/bot/commands/places.ts
 import { InlineKeyboard } from 'gramio';
 import { CB, type Lang, t } from '../../config/constants.ts';
+import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
+import type { ContactGroupRepository } from '../../database/repositories/contact-group.repository.ts';
 import type { PlaceRepository } from '../../database/repositories/place.repository.ts';
 import type { PlaceAliasRepository } from '../../database/repositories/place-alias.repository.ts';
-import type { PlaceAlias, SavedPlace } from '../../database/types.ts';
+import type { PlaceRoleOwner, PlaceRoleRepository } from '../../database/repositories/place-role.repository.ts';
+import type { PlaceAlias, PlaceRoleName, PlaceRoleOwnerType, SavedPlace } from '../../database/types.ts';
 import { isGroup } from '../group-context.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
 export interface PlacesDeps {
   placeRepo: PlaceRepository;
   placeAliasRepo: PlaceAliasRepository;
+  placeRoleRepo: PlaceRoleRepository;
+  contactRepo: ContactRepository;
+  contactGroupRepo: ContactGroupRepository;
 }
 
 const PAGE_SIZE = 8;
@@ -57,7 +63,9 @@ export function buildPlaceDetailKeyboard(
 export function formatPlaceDetailText(place: SavedPlace, aliases: PlaceAlias[], lang: Lang): string {
   const tr = t(lang).places;
   const lines = [tr.detailHeader(place.label), ''];
+  if (place.venue_name) lines.push(`${tr.venueLabel} ${place.venue_name}`);
   if (place.address) lines.push(`${tr.addressLabel} ${place.address}`);
+  if (place.map_url) lines.push(`${tr.mapLabel} ${place.map_url}`);
   if (place.latitude !== null && place.longitude !== null) {
     lines.push(`${tr.coordsLabel} ${place.latitude}, ${place.longitude}`);
   }
@@ -76,6 +84,64 @@ function buildDeletePlaceConfirmKeyboard(placeId: number, offset: number, lang: 
     .text(t(lang).places.btnConfirmDelete, `${CB.PLACES}:delplaceok:${placeId}:${offset}`)
     .row()
     .text(t(lang).places.btnCancel, `${CB.PLACES}:view:${placeId}:${offset}`);
+}
+
+function buildPurgePlaceConfirmKeyboard(placeId: number, lang: Lang): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(t(lang).places.btnConfirmPurge, `${CB.PLACES}:purgeplaceok:${placeId}`)
+    .row()
+    .text(t(lang).places.btnCancel, `${CB.PLACES}:list:0`);
+}
+
+function buildRoleClearConfirmKeyboard(
+  role: PlaceRoleName,
+  ownerType: PlaceRoleOwnerType,
+  ownerRefId: number,
+  placeId: number,
+  lang: Lang,
+): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(t(lang).places.btnConfirmRoleClear, `${CB.PLACES}:roleclearok:${role}:${ownerType}:${ownerRefId}:${placeId}`)
+    .row()
+    .text(t(lang).places.btnCancel, `${CB.PLACES}:list:0`);
+}
+
+function parseId(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function isRole(value: string | undefined): value is PlaceRoleName {
+  return value === 'home' || value === 'work';
+}
+
+function isOwnerType(value: string | undefined): value is PlaceRoleOwnerType {
+  return value === 'self' || value === 'contact' || value === 'group';
+}
+
+function roleOwner(ownerType: PlaceRoleOwnerType, ownerRefId: number | undefined): PlaceRoleOwner | null {
+  if (ownerType === 'self') return { ownerType: 'self' };
+  if (!ownerRefId) return null;
+  return { ownerType, ownerRefId };
+}
+
+function roleOwnerLabel(userId: number, owner: PlaceRoleOwner, deps: PlacesDeps, lang: Lang): string | null {
+  if (owner.ownerType === 'self') return t(lang).places.roleOwnerSelf;
+  if (owner.ownerRefId === undefined) return null;
+  if (owner.ownerType === 'contact') {
+    const contact = deps.contactRepo.findById(userId, owner.ownerRefId);
+    return contact ? (contact.preferred_name ?? contact.name) : null;
+  }
+  return deps.contactGroupRepo.findById(userId, owner.ownerRefId)?.alias ?? null;
+}
+
+function roleNameLabel(role: PlaceRoleName, lang: Lang): string {
+  return role === 'home' ? t(lang).places.roleHome : t(lang).places.roleWork;
+}
+
+function isClearToken(value: string): boolean {
+  return value === '-' || value.toLowerCase() === 'clear';
 }
 
 // ── Command entry ──
@@ -112,6 +178,190 @@ export async function handlePlaces(ctx: BotCommandContext, deps: PlacesDeps): Pr
     return;
   }
 
+  if (head === 'edit' || head === 'rename') {
+    const placeId = parseId(rest[0]);
+    const field = head === 'rename' ? 'label' : rest[1];
+    const valueParts = head === 'rename' ? rest.slice(1) : rest.slice(2);
+    const valueText = valueParts.join(' ').trim();
+    const usage = head === 'rename' ? t(lang).places.renameUsage : t(lang).places.editUsage;
+    if (!placeId || !field || !valueText) {
+      await ctx.send(usage);
+      return;
+    }
+    const place = deps.placeRepo.findById(userId, placeId);
+    if (!place) {
+      await ctx.send(t(lang).places.notFound);
+      return;
+    }
+
+    let updated: SavedPlace | null = null;
+    if (field === 'label') {
+      if (isClearToken(valueText)) {
+        await ctx.send(usage);
+        return;
+      }
+      updated = deps.placeRepo.update(userId, placeId, { label: valueText });
+    } else if (field === 'venue') {
+      updated = deps.placeRepo.update(userId, placeId, { venueName: isClearToken(valueText) ? null : valueText });
+    } else if (field === 'address') {
+      updated = deps.placeRepo.update(userId, placeId, { address: isClearToken(valueText) ? null : valueText });
+    } else if (field === 'map') {
+      updated = deps.placeRepo.update(userId, placeId, { mapUrl: isClearToken(valueText) ? null : valueText });
+    } else if (field === 'notes') {
+      updated = deps.placeRepo.update(userId, placeId, { notes: isClearToken(valueText) ? null : valueText });
+    } else if (field === 'coords') {
+      if (isClearToken(valueText)) {
+        updated = deps.placeRepo.update(userId, placeId, { latitude: null, longitude: null });
+      } else {
+        const normalized = valueText.replace(',', ' ');
+        const parts = normalized.split(/\s+/).filter(Boolean);
+        const latitude = Number(parts[0]);
+        const longitude = Number(parts[1]);
+        if (parts.length !== 2 || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          await ctx.send(t(lang).places.invalidCoords);
+          return;
+        }
+        try {
+          updated = deps.placeRepo.update(userId, placeId, { latitude, longitude });
+        } catch (error) {
+          if (error instanceof Error && error.message.startsWith('PLACE_COORDS_INVALID:')) {
+            await ctx.send(t(lang).places.invalidCoords);
+            return;
+          }
+          throw error;
+        }
+      }
+    } else {
+      await ctx.send(usage);
+      return;
+    }
+
+    await ctx.send(updated ? t(lang).places.updated(updated.label) : t(lang).places.notFound);
+    return;
+  }
+
+  if (head === 'trash') {
+    const trashed = deps.placeRepo.listTrash(userId);
+    if (trashed.length === 0) {
+      await ctx.send(t(lang).places.trashEmpty);
+      return;
+    }
+    await ctx.send(
+      `${t(lang).places.trashTitle}\n${trashed.map((place) => `• ${place.id} — ${place.label}`).join('\n')}`,
+    );
+    return;
+  }
+
+  if (head === 'restore') {
+    const placeId = parseId(rest[0]);
+    if (!placeId) {
+      await ctx.send(t(lang).places.restoreUsage);
+      return;
+    }
+    const place = deps.placeRepo.findById(userId, placeId, { includeDeleted: true });
+    if (!place || place.deleted_at === null) {
+      await ctx.send(t(lang).places.notFound);
+      return;
+    }
+    deps.placeRepo.restore(userId, placeId);
+    await ctx.send(t(lang).places.restoredPlace(place.label));
+    return;
+  }
+
+  if (head === 'purge') {
+    const placeId = parseId(rest[0]);
+    if (!placeId) {
+      await ctx.send(t(lang).places.purgeUsage);
+      return;
+    }
+    const place = deps.placeRepo.findById(userId, placeId, { includeDeleted: true });
+    if (!place) {
+      await ctx.send(t(lang).places.notFound);
+      return;
+    }
+    if (place.deleted_at === null) {
+      await ctx.send(t(lang).places.purgeNeedsTrash);
+      return;
+    }
+    await ctx.send(t(lang).places.confirmPurgePlace(place.label), {
+      reply_markup: buildPurgePlaceConfirmKeyboard(place.id, lang),
+    });
+    return;
+  }
+
+  if (head === 'role') {
+    const [action, roleRaw, ownerTypeRaw, ...tail] = rest;
+    if (
+      (action !== 'get' && action !== 'set' && action !== 'clear') ||
+      !isRole(roleRaw) ||
+      !isOwnerType(ownerTypeRaw)
+    ) {
+      await ctx.send(t(lang).places.roleUsage);
+      return;
+    }
+
+    let ownerRefId: number | undefined;
+    let placeIdRaw: string | undefined;
+    if (ownerTypeRaw === 'self') {
+      placeIdRaw = tail[0];
+    } else {
+      const parsedOwnerRef = parseId(tail[0]);
+      if (!parsedOwnerRef) {
+        await ctx.send(t(lang).places.roleUsage);
+        return;
+      }
+      ownerRefId = parsedOwnerRef;
+      placeIdRaw = tail[1];
+    }
+
+    const owner = roleOwner(ownerTypeRaw, ownerRefId);
+    if (!owner) {
+      await ctx.send(t(lang).places.roleUsage);
+      return;
+    }
+    const ownerLabel = roleOwnerLabel(userId, owner, deps, lang);
+    if (!ownerLabel) {
+      await ctx.send(t(lang).places.roleOwnerNotFound);
+      return;
+    }
+    const roleLabel = roleNameLabel(roleRaw, lang);
+
+    if (action === 'get') {
+      const place = deps.placeRoleRepo.getPlace(userId, roleRaw, owner);
+      await ctx.send(
+        place
+          ? t(lang).places.roleCurrent(roleLabel, ownerLabel, place.label)
+          : t(lang).places.roleUnset(roleLabel, ownerLabel),
+      );
+      return;
+    }
+
+    if (action === 'set') {
+      const placeId = parseId(placeIdRaw);
+      if (!placeId) {
+        await ctx.send(t(lang).places.roleUsage);
+        return;
+      }
+      const place = deps.placeRepo.findById(userId, placeId);
+      if (!place) {
+        await ctx.send(t(lang).places.notFound);
+        return;
+      }
+      deps.placeRoleRepo.set(userId, roleRaw, owner, placeId);
+      await ctx.send(t(lang).places.roleSet(roleLabel, ownerLabel, place.label));
+      return;
+    }
+
+    const current = deps.placeRoleRepo.getPlace(userId, roleRaw, owner);
+    if (!current) {
+      await ctx.send(t(lang).places.roleUnset(roleLabel, ownerLabel));
+      return;
+    }
+    await ctx.send(t(lang).places.confirmRoleClear(roleLabel, ownerLabel, current.label), {
+      reply_markup: buildRoleClearConfirmKeyboard(roleRaw, ownerTypeRaw, ownerRefId ?? 0, current.id, lang),
+    });
+    return;
+  }
   if (head === 'alias') {
     const [placeIdStr, ...aliasParts] = rest;
     const placeId = Number(placeIdStr);
@@ -253,6 +503,54 @@ export async function handlePlacesCallback(
     await ctx.editText(`${tr.deletedPlace(place.label)}\n\n${formatPlacesListText(places, lang)}`, {
       reply_markup: buildPlacesListKeyboard(places, lang, Math.max(0, Math.min(offset, places.length - 1))),
     });
+    return;
+  }
+
+  if (sub === 'roleclearok') {
+    const [roleRaw, ownerTypeRaw, ownerRefRaw, expectedPlaceRaw] = args;
+    if (!isRole(roleRaw) || !isOwnerType(ownerTypeRaw)) {
+      await ctx.editText(tr.roleChanged);
+      return;
+    }
+    const ownerRefId = ownerTypeRaw === 'self' ? undefined : (parseId(ownerRefRaw) ?? undefined);
+    const expectedPlaceId = parseId(expectedPlaceRaw);
+    const owner = roleOwner(ownerTypeRaw, ownerRefId);
+    if (!owner || !expectedPlaceId) {
+      await ctx.editText(tr.roleChanged);
+      return;
+    }
+    const ownerLabel = roleOwnerLabel(userId, owner, deps, lang);
+    if (!ownerLabel) {
+      await ctx.editText(tr.roleOwnerNotFound);
+      return;
+    }
+    const current = deps.placeRoleRepo.getPlace(userId, roleRaw, owner);
+    if (!current || current.id !== expectedPlaceId) {
+      await ctx.editText(tr.roleChanged);
+      return;
+    }
+    deps.placeRoleRepo.clear(userId, roleRaw, owner);
+    await ctx.editText(tr.roleCleared(roleNameLabel(roleRaw, lang), ownerLabel));
+    return;
+  }
+
+  if (sub === 'purgeplaceok') {
+    const placeId = parseId(args[0]);
+    if (!placeId) {
+      await ctx.editText(tr.notFound);
+      return;
+    }
+    const place = deps.placeRepo.findById(userId, placeId, { includeDeleted: true });
+    if (!place) {
+      await ctx.editText(tr.notFound);
+      return;
+    }
+    if (place.deleted_at === null) {
+      await ctx.editText(tr.purgeNeedsTrash);
+      return;
+    }
+    deps.placeRepo.purge(userId, placeId);
+    await ctx.editText(tr.purgedPlace(place.label));
     return;
   }
 }

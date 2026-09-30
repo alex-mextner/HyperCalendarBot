@@ -642,6 +642,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       handlePlaces(ctx, {
         placeRepo: db.places,
         placeAliasRepo: db.placeAliases,
+        placeRoleRepo: db.placeRoles,
+        contactRepo: db.contacts,
+        contactGroupRepo: db.contactGroups,
       }),
     )
     .command('log', (ctx) => handleLog(ctx, db.actionLog, botAdminId))
@@ -870,6 +873,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         contactGroupRepo: db.contactGroups,
         placeRepo: db.places,
         placeAliasRepo: db.placeAliases,
+        placeRoleRepo: db.placeRoles,
         timezoneScene: scenesSetup.scenes.timezoneScene,
         connectTelegramScene: scenesSetup.scenes.connectTelegramScene,
         telegramDeps: telegramMasterKey

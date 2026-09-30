@@ -6,12 +6,14 @@ import {
   formatPlaceDetailText,
   handlePlaces,
   handlePlacesCallback,
-  type PlacesDeps,
 } from '../../../src/bot/commands/places.ts';
 import type { BotCallbackContext, BotCommandContext } from '../../../src/bot/types.ts';
 import { migrations } from '../../../src/database/migrations.ts';
+import { ContactRepository } from '../../../src/database/repositories/contact.repository.ts';
+import { ContactGroupRepository } from '../../../src/database/repositories/contact-group.repository.ts';
 import { PlaceRepository } from '../../../src/database/repositories/place.repository.ts';
 import { PlaceAliasRepository } from '../../../src/database/repositories/place-alias.repository.ts';
+import { PlaceRoleRepository } from '../../../src/database/repositories/place-role.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { PlaceAlias, SavedPlace } from '../../../src/database/types.ts';
@@ -34,12 +36,17 @@ function createTestDb(): Database {
   return db;
 }
 
-function makeDeps(db: Database): PlacesDeps {
+function makeDeps(db: Database) {
   return {
     placeRepo: new PlaceRepository(db),
     placeAliasRepo: new PlaceAliasRepository(db),
+    placeRoleRepo: new PlaceRoleRepository(db),
+    contactRepo: new ContactRepository(db),
+    contactGroupRepo: new ContactGroupRepository(db),
   };
 }
+
+type TestPlacesDeps = ReturnType<typeof makeDeps>;
 
 function makePlace(id: number, label: string, overrides: Partial<SavedPlace> = {}): SavedPlace {
   return {
@@ -129,7 +136,7 @@ describe('buildPlaceDetailKeyboard / formatPlaceDetailText', () => {
 
 describe('handlePlaces command', () => {
   let db: Database;
-  let deps: PlacesDeps;
+  let deps: TestPlacesDeps;
 
   beforeEach(() => {
     db = createTestDb();
@@ -186,6 +193,113 @@ describe('handlePlaces command', () => {
     expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('already an alias'));
   });
 
+  test('edit renames a place and edits address without re-verifying changed geography', async () => {
+    const place = deps.placeRepo.create(USER_ID, {
+      label: 'Old office',
+      address: 'Old street 1',
+      verification: 'confirmed',
+    });
+
+    await handlePlaces(makeCtx(`edit ${place.id} label New office`), deps);
+    await handlePlaces(makeCtx(`edit ${place.id} address New street 2`), deps);
+
+    const updated = deps.placeRepo.findById(USER_ID, place.id)!;
+    expect(updated.label).toBe('New office');
+    expect(updated.address).toBe('New street 2');
+    expect(updated.verification).toBe('unconfirmed');
+  });
+
+  test('edit can set and clear optional fields and coordinates', async () => {
+    const place = deps.placeRepo.create(USER_ID, { label: 'Park' });
+
+    await handlePlaces(makeCtx(`edit ${place.id} venue Ada Ciganlija`), deps);
+    await handlePlaces(makeCtx(`edit ${place.id} map https://maps.example/place`), deps);
+    await handlePlaces(makeCtx(`edit ${place.id} notes lake side`), deps);
+    await handlePlaces(makeCtx(`edit ${place.id} coords 44.7866 20.4489`), deps);
+
+    let updated = deps.placeRepo.findById(USER_ID, place.id)!;
+    expect(updated.venue_name).toBe('Ada Ciganlija');
+    expect(updated.map_url).toBe('https://maps.example/place');
+    expect(updated.notes).toBe('lake side');
+    expect(updated.latitude).toBeCloseTo(44.7866);
+    expect(updated.longitude).toBeCloseTo(20.4489);
+
+    await handlePlaces(makeCtx(`edit ${place.id} notes -`), deps);
+    await handlePlaces(makeCtx(`edit ${place.id} coords -`), deps);
+    updated = deps.placeRepo.findById(USER_ID, place.id)!;
+    expect(updated.notes).toBeNull();
+    expect(updated.latitude).toBeNull();
+    expect(updated.longitude).toBeNull();
+  });
+
+  test('trash lists deleted places and restore revives the same place and its role link', async () => {
+    const place = deps.placeRepo.create(USER_ID, { label: 'Home' });
+    deps.placeRoleRepo.set(USER_ID, 'home', { ownerType: 'self' }, place.id);
+    deps.placeRepo.softDelete(USER_ID, place.id);
+    expect(deps.placeRoleRepo.getPlace(USER_ID, 'home', { ownerType: 'self' })).toBeNull();
+
+    const trashCtx = makeCtx('trash');
+    await handlePlaces(trashCtx, deps);
+    expect(trashCtx.send).toHaveBeenCalledWith(expect.stringContaining('Home'));
+
+    const restoreCtx = makeCtx(`restore ${place.id}`);
+    await handlePlaces(restoreCtx, deps);
+    expect(deps.placeRepo.findById(USER_ID, place.id)?.label).toBe('Home');
+    expect(deps.placeRoleRepo.getPlace(USER_ID, 'home', { ownerType: 'self' })?.id).toBe(place.id);
+    expect(restoreCtx.send).toHaveBeenCalledWith(expect.stringContaining('Home'));
+  });
+
+  test('role set/get supports self, contact and collective group owners', async () => {
+    const home = deps.placeRepo.create(USER_ID, { label: 'Home' });
+    const office = deps.placeRepo.create(USER_ID, { label: 'Office' });
+    const contact = deps.contactRepo.add(USER_ID, 'Lena');
+    const group = deps.contactGroupRepo.create(USER_ID, 'Gryukovs');
+
+    await handlePlaces(makeCtx(`role set home self ${home.id}`), deps);
+    await handlePlaces(makeCtx(`role set work contact ${contact.id} ${office.id}`), deps);
+    await handlePlaces(makeCtx(`role set home group ${group.id} ${home.id}`), deps);
+
+    expect(deps.placeRoleRepo.getPlace(USER_ID, 'home', { ownerType: 'self' })?.id).toBe(home.id);
+    expect(deps.placeRoleRepo.getPlace(USER_ID, 'work', { ownerType: 'contact', ownerRefId: contact.id })?.id).toBe(
+      office.id,
+    );
+    expect(deps.placeRoleRepo.getPlace(USER_ID, 'home', { ownerType: 'group', ownerRefId: group.id })?.id).toBe(
+      home.id,
+    );
+
+    const getCtx = makeCtx(`role get work contact ${contact.id}`);
+    await handlePlaces(getCtx, deps);
+    expect(getCtx.send).toHaveBeenCalledWith(expect.stringContaining('Office'));
+    expect(getCtx.send).toHaveBeenCalledWith(expect.stringContaining('Lena'));
+  });
+
+  test('role clear requires confirmation and names the exact current target', async () => {
+    const place = deps.placeRepo.create(USER_ID, { label: 'Home' });
+    deps.placeRoleRepo.set(USER_ID, 'home', { ownerType: 'self' }, place.id);
+
+    const ctx = makeCtx('role clear home self');
+    await handlePlaces(ctx, deps);
+
+    expect(deps.placeRoleRepo.getPlace(USER_ID, 'home', { ownerType: 'self' })?.id).toBe(place.id);
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('Home'), expect.anything());
+    const sendMock = ctx.send as unknown as ReturnType<typeof mock>;
+    const markup = sendMock.mock.calls[0]?.[1] as
+      | { reply_markup?: { toJSON(): { inline_keyboard: InlineButton[][] } } }
+      | undefined;
+    const callbackData = markup?.reply_markup?.toJSON().inline_keyboard.flat()[0]?.callback_data;
+    expect(callbackData).toContain('roleclearok:home:self:0:');
+  });
+
+  test('purge requires explicit confirmation and does not delete on the command alone', async () => {
+    const place = deps.placeRepo.create(USER_ID, { label: 'Old home' });
+    deps.placeRepo.softDelete(USER_ID, place.id);
+
+    const ctx = makeCtx(`purge ${place.id}`);
+    await handlePlaces(ctx, deps);
+
+    expect(deps.placeRepo.findById(USER_ID, place.id, { includeDeleted: true })).not.toBeNull();
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('Old home'), expect.anything());
+  });
   test('unknown subcommand shows usage', async () => {
     const ctx = makeCtx('bogus');
     await handlePlaces(ctx, deps);
@@ -195,7 +309,7 @@ describe('handlePlaces command', () => {
 
 describe('handlePlacesCallback', () => {
   let db: Database;
-  let deps: PlacesDeps;
+  let deps: TestPlacesDeps;
 
   beforeEach(() => {
     db = createTestDb();
@@ -245,13 +359,37 @@ describe('handlePlacesCallback', () => {
     await handlePlacesCallback(confirmCtx, `delplaceok:${place.id}:0`, user, deps);
     expect(deps.placeRepo.findById(USER_ID, place.id)).toBeNull();
   });
+
+  test('roleclearok clears only the role that was explicitly confirmed', async () => {
+    const first = deps.placeRepo.create(USER_ID, { label: 'First home' });
+    const second = deps.placeRepo.create(USER_ID, { label: 'Second home' });
+    deps.placeRoleRepo.set(USER_ID, 'home', { ownerType: 'self' }, first.id);
+
+    await handlePlacesCallback(makeCtx(), `roleclearok:home:self:0:${first.id}`, user, deps);
+    expect(deps.placeRoleRepo.getPlace(USER_ID, 'home', { ownerType: 'self' })).toBeNull();
+
+    deps.placeRoleRepo.set(USER_ID, 'home', { ownerType: 'self' }, first.id);
+    deps.placeRoleRepo.set(USER_ID, 'home', { ownerType: 'self' }, second.id);
+    const staleCtx = makeCtx();
+    await handlePlacesCallback(staleCtx, `roleclearok:home:self:0:${first.id}`, user, deps);
+    expect(deps.placeRoleRepo.getPlace(USER_ID, 'home', { ownerType: 'self' })?.id).toBe(second.id);
+    expect(staleCtx.editText).toHaveBeenCalledWith(expect.stringContaining('changed'));
+  });
+
+  test('purgeplaceok permanently deletes only an already trashed place', async () => {
+    const place = deps.placeRepo.create(USER_ID, { label: 'Old home' });
+    deps.placeRepo.softDelete(USER_ID, place.id);
+
+    await handlePlacesCallback(makeCtx(), `purgeplaceok:${place.id}`, user, deps);
+    expect(deps.placeRepo.findById(USER_ID, place.id, { includeDeleted: true })).toBeNull();
+  });
 });
 
 // GH-712: CB.PLACES can be delivered in a group independently of the /places command.
 // Every branch must reject before reading or mutating the private place directory.
 describe('handlePlacesCallback refuses group chat scope', () => {
   let db: Database;
-  let deps: PlacesDeps;
+  let deps: TestPlacesDeps;
   let place: SavedPlace;
   let alias: PlaceAlias;
 
@@ -311,5 +449,21 @@ describe('handlePlacesCallback refuses group chat scope', () => {
     await handlePlacesCallback(ctx, `delplaceok:${place.id}:0`, user, deps);
     expect(ctx.editText).not.toHaveBeenCalled();
     expect(deps.placeRepo.findById(USER_ID, place.id)).not.toBeNull();
+  });
+
+  test('role-clear confirmation in a group cannot mutate a private role', async () => {
+    deps.placeRoleRepo.set(USER_ID, 'home', { ownerType: 'self' }, place.id);
+    const ctx = makeGroupCtx();
+    await handlePlacesCallback(ctx, `roleclearok:home:self:0:${place.id}`, user, deps);
+    expect(ctx.editText).not.toHaveBeenCalled();
+    expect(deps.placeRoleRepo.getPlace(USER_ID, 'home', { ownerType: 'self' })?.id).toBe(place.id);
+  });
+
+  test('purge confirmation in a group cannot permanently delete a private place', async () => {
+    deps.placeRepo.softDelete(USER_ID, place.id);
+    const ctx = makeGroupCtx();
+    await handlePlacesCallback(ctx, `purgeplaceok:${place.id}`, user, deps);
+    expect(ctx.editText).not.toHaveBeenCalled();
+    expect(deps.placeRepo.findById(USER_ID, place.id, { includeDeleted: true })).not.toBeNull();
   });
 });
