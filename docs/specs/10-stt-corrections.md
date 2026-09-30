@@ -1,7 +1,5 @@
 # Spec 10: STT Corrections Dictionary
 
-> **2026-09-29 update:** voice calls were removed by owner decision, and with them the Deepgram streaming STT this spec was built on. Incoming voice messages are transcribed by Whisper only; nothing in this spec is implemented.
-
 ## Overview
 
 A per-user and global corrections dictionary for STT post-processing. After Deepgram returns a transcript, the system annotates it with phonetically matched correction candidates and low-confidence word scores before passing it to the main AI agent. The agent has tools to manage the dictionary and can ask the user to clarify uncertain words during conversation.

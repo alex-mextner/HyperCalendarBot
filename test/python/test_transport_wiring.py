@@ -65,7 +65,23 @@ class TransportWiringTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.sent, [])
         self.assertTrue(client.disconnected)
 
-    async def test_personal_sender_recovers_unknown_peer_without_changing_numeric_recipient(self):
+    async def test_shared_sender_never_falls_back_to_a_different_person(self):
+        client = SessionClient(5000000002)
+        script = load_script('send-message.py')
+        with contextlib.redirect_stderr(io.StringIO()):
+            result = await script.send_with_retry(client, 5000000001, 'synthetic', 'other')
+        self.assertFalse(result)
+        self.assertEqual(client.sent, [])
+
+    async def test_shared_sender_uses_verified_numeric_id(self):
+        client = SessionClient()
+        script = load_script('send-message.py')
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = await script.send_with_retry(client, 5000000001, 'synthetic', '@verified')
+        self.assertTrue(result)
+        self.assertEqual(client.sent, [(5000000001, 'synthetic')])
+
+    async def test_both_wrappers_recover_unknown_peer_without_changing_numeric_recipient(self):
         class UnknownPeer(Exception):
             ID = 'PEER_ID_INVALID'
 
@@ -76,33 +92,43 @@ class TransportWiringTests(unittest.IsolatedAsyncioTestCase):
                     raise UnknownPeer()
                 return types.SimpleNamespace(id=self.resolved_id)
 
-        for resolved_id in [5000000001, 5000000002]:
-            with self.subTest(resolved_id=resolved_id):
-                client = RecoveringClient(resolved_id)
-                script = load_script('send-as-user.py', client)
-                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                    if resolved_id != 5000000001:
-                        with self.assertRaises(SystemExit):
-                            await script.send_message('/tmp/synthetic-only.session', 5000000001, 'synthetic', '@hint')
-                    else:
-                        await script.send_message('/tmp/synthetic-only.session', 5000000001, 'synthetic', '@hint')
-                self.assertTrue(client.disconnected)
-                self.assertEqual(client.lookups, [5000000001, 'hint'])
-                self.assertEqual(client.sent, [(5000000001, 'synthetic')] if resolved_id == 5000000001 else [])
+        for filename in ['send-as-user.py', 'send-message.py']:
+            for resolved_id in [5000000001, 5000000002]:
+                with self.subTest(filename=filename, resolved_id=resolved_id):
+                    client = RecoveringClient(resolved_id)
+                    script = load_script(filename, client)
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        if filename == 'send-as-user.py':
+                            if resolved_id != 5000000001:
+                                with self.assertRaises(SystemExit):
+                                    await script.send_message('/tmp/synthetic-only.session', 5000000001, 'synthetic', '@hint')
+                            else:
+                                await script.send_message('/tmp/synthetic-only.session', 5000000001, 'synthetic', '@hint')
+                            self.assertTrue(client.disconnected)
+                        else:
+                            result = await script.send_with_retry(client, 5000000001, 'synthetic', '@hint')
+                            self.assertEqual(result, resolved_id == 5000000001)
+                    self.assertEqual(client.lookups, [5000000001, 'hint'])
+                    self.assertEqual(client.sent, [(5000000001, 'synthetic')] if resolved_id == 5000000001 else [])
 
-    async def test_personal_sender_sends_cached_numeric_peer_despite_reassigned_hint(self):
+    async def test_both_wrappers_send_cached_numeric_peer_despite_reassigned_hint(self):
         class CachedClient(SessionClient):
             async def get_chat(self, peer):
                 self.lookups.append(peer)
                 return types.SimpleNamespace(id=5000000001 if type(peer) is int else 5000000002)
 
-        client = CachedClient()
-        script = load_script('send-as-user.py', client)
-        with contextlib.redirect_stdout(io.StringIO()):
-            await script.send_message('/tmp/synthetic-only.session', 5000000001, 'synthetic', 'reassigned')
-        self.assertTrue(client.disconnected)
-        self.assertEqual(client.lookups, [5000000001])
-        self.assertEqual(client.sent, [(5000000001, 'synthetic')])
+        for filename in ['send-as-user.py', 'send-message.py']:
+            with self.subTest(filename=filename):
+                client = CachedClient()
+                script = load_script(filename, client)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    if filename == 'send-as-user.py':
+                        await script.send_message('/tmp/synthetic-only.session', 5000000001, 'synthetic', 'reassigned')
+                        self.assertTrue(client.disconnected)
+                    else:
+                        self.assertTrue(await script.send_with_retry(client, 5000000001, 'synthetic', 'reassigned'))
+                self.assertEqual(client.lookups, [5000000001])
+                self.assertEqual(client.sent, [(5000000001, 'synthetic')])
 
     async def test_personal_sender_delivers_first_person_text_verbatim(self):
         text = (
@@ -116,3 +142,10 @@ class TransportWiringTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.sent, [(5000000001, text)])
         self.assertEqual(client.parse_modes, [ENUMS.ParseMode.DISABLED])
 
+    async def test_admin_sender_keeps_default_parsing_for_bot_html(self):
+        client = SessionClient()
+        script = load_script('send-message.py')
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(await script.send_with_retry(client, 5000000001, '<b>Synthetic</b> reminder', None))
+        self.assertEqual(client.sent, [(5000000001, '<b>Synthetic</b> reminder')])
+        self.assertEqual(client.parse_modes, [None])

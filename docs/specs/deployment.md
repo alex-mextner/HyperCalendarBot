@@ -78,16 +78,51 @@ Set these in the repo (Settings → Secrets → Actions):
 | `SSH_KEY` | Contents of the deployment SSH private key |
 | `DEPLOY_PATH` | `/var/www/hypercal.invntrm.ru` |
 
-### 6. Personal Telegram connection (optional)
+### 6. Pyrogram session (voice calls)
 
-`/connect_telegram` lets a user send their invitations from their own Telegram account. It needs
-`MTPROTO_API_ID`, `MTPROTO_API_HASH` (from https://my.telegram.org) and `TELEGRAM_SESSION_MASTER_KEY`
-in the env file; the Pyrogram venv is built into the image (see the deploy runbook, "Connect Telegram").
+Only if voice calls are needed:
 
-There is no shared bot-owned Telegram account: the shared MTProto service session
-(`data/voice_caller.session`, `MTPROTO_SERVICE_USER_ID`) and everything that used it — invitation
-fallback, username resolution, profile lookup, birthday auto-sync, group member listing and
-voice-call reminders — were removed on 2026-09-29. Nothing needs to be authorized on the host.
+```bash
+# On the server, inside the bot container:
+docker exec -it hypercal-bot bash
+# Then inside container — not yet supported, auth must happen on host with Python venv
+```
+
+Voice call auth requires an interactive terminal — run on host:
+
+```bash
+cd /var/www/hypercal.invntrm.ru
+# Create Python venv with uv
+uv venv --python 3.12 venv
+uv pip install -r pyproject.toml --python venv/bin/python
+# Build patched ntgcalls (5+ min, needs 5GB RAM)
+./scripts/build-patched-ntgcalls.sh python3.12 venv
+# Interactive auth — enter phone, code from Telegram
+venv/bin/python scripts/pyrogram-auth.py
+```
+
+Session file ends up in `data/voice_caller.session`.
+
+Set `MTPROTO_SERVICE_USER_ID` to the numeric Telegram ID of the explicitly
+chosen service account. An ordinary user's stored Telegram authorization is never
+copied into this session or used to enable shared service capabilities.
+
+Shared-session consumer inventory:
+
+- `send-message.py`, `resolve-username.py`, `fetch-birthdays.py`,
+  `get-chat-members.py`, `get-user-info.py`, `voice-call-bridge.py`, `debug-call.py`, and the embedded
+  Python in `docker-call-test.sh` use `start_service_session`: public Pyrogram
+  `connect` → `get_me` → expected-ID check → `initialize`. Initialized clients use
+  `stop`; identity rejection disconnects before initialization. The Docker helper
+  mounts this guard read-only and forwards `MTPROTO_SERVICE_USER_ID` explicitly.
+- `check-session.py` is a read-only identity probe (`connect`/`get_me`/`disconnect`,
+  without initialization). `src/index.ts` uses `bootstrapServiceSession` to require
+  service configuration, the existing file, and a successful matching probe before
+  enabling shared messaging, username resolution, or voice capabilities.
+- `pyrogram-auth.py` is the intentional operator authorization bootstrap exception:
+  it interactively creates the chosen service account's session. Run it manually
+  as the operator, never from service startup or as recovery from a user's stored
+  credentials. `mtproto_lock.py` only coordinates access; it does not open a client.
 
 
 ## CI/CD Pipeline

@@ -207,7 +207,6 @@ db.close();
 ## Connect Telegram (session-based delivery)
 
 Requires:
-- `MTPROTO_API_ID` / `MTPROTO_API_HASH` env vars — the Telegram app credentials from https://my.telegram.org.
 - `TELEGRAM_SESSION_MASTER_KEY` env var — 32-byte hex key for AES-256-GCM encryption of stored Telegram sessions.
   Generate: `openssl rand -hex 32`. Add to `/opt/hypercal/.env`.
 - `tzdata` package in Docker image — provides `/usr/share/zoneinfo/zone.tab` for timezone detection
@@ -217,13 +216,35 @@ Requires:
 - Key rotation: `OLD_KEY=<hex> NEW_KEY=<hex> bun scripts/rotate-session-master-key.ts` —
   re-encrypts all sessions atomically.
 
-## Removed: shared MTProto service account (2026-09-29)
+## ntgcalls — Build from Source
 
-The shared service Telegram account (`data/voice_caller.session`, checked against
-`MTPROTO_SERVICE_USER_ID`) and the voice-call reminders that ran on it were removed by owner decision.
-Hosts deployed before then may still hold leftovers the bot no longer reads: `data/voice_caller.session`,
-`data/voice_caller.lock` (and any `-journal`), and the env vars `MTPROTO_SERVICE_USER_ID`, `DISABLE_VOICE`,
-`DEEPGRAM_API_KEY`. They are inert; deleting them is an operator action (keep `MTPROTO_API_ID` /
-`MTPROTO_API_HASH`, which `/connect_telegram` still uses). The retired `birthday-sync-tick` repeatable job
-is unscheduled by the bot at startup. The tables `user_call_settings`, `call_log` and `birthday_sync_state`
-stay in the schema, unused: dropping them deletes data, which the migration gate does not activate unattended.
+ntgcalls v2.1.0 has a bug: P2P calls connect but audio is silent.
+Fix: `NativeNetworkInterface::UpdateAggregateStates_n()` never calls `OnNetworkAvailability(true)`.
+Patch: `scripts/ntgcalls-fix-network-state.patch`.
+
+**The compiled `.so` is NOT in git (venv/ is gitignored). Must rebuild on each server.**
+
+On every new Linux server:
+
+```bash
+# 1. Install uv (if not present)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Create Python venv and install deps
+uv venv --python 3.12 venv
+uv pip install -r pyproject.toml --python venv/bin/python
+
+# 3. Build patched ntgcalls from source (~5 min, needs ~5GB RAM, ~2GB disk)
+./scripts/build-patched-ntgcalls.sh python3.12 venv
+
+# 4. Authenticate Pyrogram session (one-time interactive)
+venv/bin/python scripts/pyrogram-auth.py
+```
+
+- macOS arm64 `.dylib` != Linux x86_64 `.so` — binaries are platform-specific
+- `scripts/download-ntgcalls.sh` downloads the UNPATCHED binary — do NOT use it
+- Build deps: CMake 3.20+, git, Python 3.12, 5GB RAM min
+
+## Service identity isolation
+
+Set `MTPROTO_SERVICE_USER_ID` to the explicitly designated service account. Startup checks the authenticated ID; each shared Python consumer checks it again. Missing, revoked or mismatched credentials disable only shared MTProto capabilities. Never restore the shared file from the pool of personal user authorizations. Preserve Bot API and inviter-owned sessions. After configuration changes recreate the bot container; do not rotate or revoke unrelated user sessions.

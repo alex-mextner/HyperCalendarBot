@@ -10,6 +10,7 @@ export type BotTaskJobType =
   | 'cron-proposal-expiry'
   | 'cron-edit-proposal-expiry'
   | 'cron-session-cleanup'
+  | 'cron-birthday-sync'
   | 'cron-chat-history-cleanup'
   | 'cron-sqlite-backup'
   | 'cron-recurring-reminders'
@@ -27,6 +28,7 @@ interface BotTasksQueueDeps {
   onProposalExpiry?: () => Promise<void>;
   onEditProposalExpiry?: () => Promise<void>;
   onSessionCleanup?: () => void;
+  onBirthdaySync?: () => Promise<void>;
   onChatHistoryCleanup?: () => void;
   onSqliteBackup?: () => Promise<void>;
   onRecurringReminders?: () => void;
@@ -68,6 +70,10 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
       }
       if (job.data.type === 'cron-session-cleanup') {
         deps.onSessionCleanup?.();
+        return;
+      }
+      if (job.data.type === 'cron-birthday-sync') {
+        if (deps.onBirthdaySync) await deps.onBirthdaySync();
         return;
       }
       if (job.data.type === 'cron-chat-history-cleanup') {
@@ -148,19 +154,13 @@ export async function setupSessionCleanupCron(queue: Queue<BotTaskJobData>): Pro
   botTasksLogger.info('Session cleanup cron scheduled (monthly)');
 }
 
-/** Repeatable ticks of crons that no longer exist, as they were scheduled: name = jobId, interval. */
-const RETIRED_CRONS = [
-  // MTProto birthday auto-sync, removed with the shared service account on 2026-09-29.
-  { name: 'birthday-sync-tick', every: 24 * 60 * 60_000 },
-];
-
-/** Stop Redis from firing retired crons on deployments that scheduled them before their removal. */
-export async function unscheduleRetiredCrons(queue: Queue<BotTaskJobData>): Promise<void> {
-  for (const cron of RETIRED_CRONS) {
-    if (await queue.removeRepeatable(cron.name, { every: cron.every }, cron.name)) {
-      botTasksLogger.info({ cron: cron.name }, 'Retired cron unscheduled');
-    }
-  }
+export async function setupBirthdaySyncCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'birthday-sync-tick',
+    { type: 'cron-birthday-sync' },
+    { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'birthday-sync-tick' },
+  );
+  botTasksLogger.info('Birthday sync cron scheduled (daily)');
 }
 
 export async function setupChatHistoryCleanupCron(queue: Queue<BotTaskJobData>): Promise<void> {

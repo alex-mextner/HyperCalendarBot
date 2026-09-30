@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > the visual-proof cycle, dead-code investigation, secret-scanning, the green-CI-gated `gh ship`
 > merge gate — are installed machine-wide via the agent skills/hooks layer and the repo's
 > `rig.yaml` (CI gates in `.github/workflows/`). This file holds only **HyperCalendarBot-specific**
-> guidance (the bot pipeline, the strict TS/type rules, bot tone-of-voice, the per-user Telegram
-> connection (Pyrogram), deployment). Don't duplicate universal rules into this file.
+> guidance (the bot pipeline, the strict TS/type rules, bot tone-of-voice, MTProto/Pyrogram,
+> deployment). Don't duplicate universal rules into this file.
 
 ## Shell Commands
 
@@ -96,9 +96,10 @@ If you add a new `FeatureKey`, add it to `FEATURE_KEYS` in `src/database/reposit
 
 For periodic/scheduled tasks always use BullMQ repeating jobs — never `setInterval` or `setTimeout`. Repeating jobs survive restarts and are observable in the queue.
 
-BullMQ on Redis; the main queues:
+BullMQ on Redis, three queues:
 - **image-render** — Playwright renders weekly/monthly calendar images.
-- **bot-tasks** — periodic jobs: secretary expiry (daily), sharing cleanup (10min), proposal expiry (hourly), per-user session keepalive (14 days).
+- **call-reminders** — schedules voice call reminders via the Python bridge.
+- **bot-tasks** — periodic jobs: secretary expiry (daily), sharing cleanup (10min), proposal expiry (hourly).
 
 ### GramIO Scenes (`src/bot/scenes/`)
 
@@ -149,17 +150,18 @@ Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding
   bounded regardless of table size.
 - `findAll()` is acceptable only in admin/debug endpoints and tests, never in per-tick loops.
 
-### Personal Telegram session (`/connect_telegram`)
+### MTProto Bridge
 
-There is **no shared bot-owned MTProto account**. The shared "system profile" (`data/voice_caller.session`,
-`MTPROTO_SERVICE_USER_ID`) was removed on 2026-09-29 by owner decision — Telegram blocks such accounts —
-together with everything that ran on it: username resolution, profile lookup, birthday auto-sync, group
-member listing and voice-call reminders. Do not reintroduce a shared session.
+For users who haven't started the bot (can't receive bot API messages), delivery falls back to Pyrogram (`scripts/send-message.py`). Voice calls use `scripts/voice-call-bridge.py`. Both are spawned via `Bun.spawn(['venv/bin/python', ...])`.
 
-An invitation to someone who never started the bot goes Bot API → the **inviter's own** connected
-session (`scripts/send-as-user.py`, spawned per send with a decrypted temp copy of that user's row in
-`user_telegram_sessions`) → a deep link sent to the inviter to forward. A user's session is only ever
-used for that user's own sends; never for anyone else and never copied into a shared file.
+**`voice_caller.session` fragility**: all MTProto scripts use `data/voice_caller.session`. This is a
+Pyrogram SQLite session file (journal mode DELETE, not WAL). Multiple scripts spawn concurrently
+(resolve-username, send-message, fetch-birthdays, voice-call-bridge) and each does `app.start()` →
+work → `app.stop()` with `save()` → `conn.commit()`. Concurrent writes to the same SQLite file
+without WAL can corrupt session fields (`user_id`, `is_bot` set to NULL), making Pyrogram think the
+session is empty and prompting for phone number. Symptom: `Enter phone number or bot token:` + EOFError.
+Telegram can also revoke auth keys (error 404) for long-inactive sessions.
+The shared service session is bound to `MTPROTO_SERVICE_USER_ID`. A revoked or wrong-owner session disables its capabilities. Never copy a credential from `user_telegram_sessions` to the shared file. Personal invitation delivery uses only the requesting inviter's own session. Reconnect the dedicated service account through the documented operator flow, not an end-user session recovery shortcut.
 
 ### Database file naming
 
@@ -440,19 +442,23 @@ Optional features that depend on an env var must deactivate gracefully when the 
   with a "will fix in next commit" note.
 - **Always restart the bot** after code changes to src/. Kill by exact PID, verify 1 process running.
 
-## Per-user Telegram connection (Pyrogram)
+## MTProto / Pyrogram
 
-`/connect_telegram` (`src/bot/scenes/connect-telegram.scene.ts`) signs the user in with
-`scripts/connect-session.py`; sessions are stored encrypted with `TELEGRAM_SESSION_MASTER_KEY`
-(AES-256-GCM) in `user_telegram_sessions`. `scripts/send-as-user.py` sends as that user. The scripts
-read `MTPROTO_API_ID` / `MTPROTO_API_HASH` from the environment and are spawned from TS via
-`Bun.spawn(['venv/bin/python', ...])` (`src/services/telegram-session/session-bridge.ts`). The
-bot-tasks `session-keepalive` cron keeps connected sessions alive.
+All MTProto userbot functionality uses **one pyrogram session**: `data/voice_caller.session`.
+Auth: `venv/bin/python scripts/pyrogram-auth.py` (one-time, interactive).
+
+- **Voice calls**: `scripts/voice-call-bridge.py <user_id> <session_id> <language>` — spawned per call
+- **Message delivery** (users who haven't started the bot): `scripts/send-message.py <user_id> <text> [username]` — spawned per message
+
+Both scripts are called from TS via `Bun.spawn(['venv/bin/python', ...])`.
+No `@mtcute/bun` — pyrogram handles everything.
 
 ## Python / uv
 
 Python deps in `pyproject.toml`. Use `uv` — never `pip` directly.
 Commands: `uv pip install -r pyproject.toml --python venv/bin/python`, `uv venv --python 3.12 venv`.
+
+ntgcalls must be built from source with a patch — see `docs/reference/deploy-runbook.md`.
 
 ## Backward Compatibility
 

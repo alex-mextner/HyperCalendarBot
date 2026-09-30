@@ -6,6 +6,7 @@ import { groupRsvpKeyboard, invitationRsvpKeyboard } from '../sharing/invitation
 import type { InvitationKeyboardVariant, TelegramSender } from './types.ts';
 
 interface TelegramSenderOptions {
+  sendAsUser?: (userId: number, text: string, username?: string) => Promise<boolean>;
   sendAsConnectedUser?: (
     inviterId: number,
     targetId: number,
@@ -127,6 +128,9 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
       });
       return { message_id: result.message_id };
     },
+    sendAsUser: options?.sendAsUser
+      ? async (userId: number, text: string, username?: string) => options.sendAsUser!(userId, text, username)
+      : undefined,
     sendAsConnectedUser: options?.sendAsConnectedUser,
     async deleteMessage(chatId: number, messageId: number) {
       await bot.api.deleteMessage({ chat_id: chatId, message_id: messageId });

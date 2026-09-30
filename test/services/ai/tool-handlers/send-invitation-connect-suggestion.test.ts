@@ -37,11 +37,12 @@ const MASTER_KEY = Buffer.alloc(32, 7);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SUGGESTION = t('en').botTips.connect_telegram;
 
-/** Telegram refuses a bot DM to someone who never started the bot; the inviter gets the link to forward. */
+/** Telegram refuses a bot DM to someone who never started the bot; the admin session still reaches them. */
 const unreachableByBot: TelegramSender = {
   sendMessage: async () => ({ message_id: 1 }),
   editMessageText: async () => {},
   sendInvitation: async () => null,
+  sendAsUser: async () => true,
 };
 
 const reachableByBot: TelegramSender = {
@@ -145,7 +146,7 @@ describe('send_invitation /connect_telegram suggestion', () => {
     });
     expect(result.success).toBe(true);
     expect(result.mutationState).toBe('confirmed');
-    expect(result.effect).toEqual({ kind: 'invitation', delivery: 'manual_forward' });
+    expect(result.effect).toEqual({ kind: 'invitation', delivery: 'delivered' });
     expect(mentionsSuggestion(result)).toBe(false);
   });
 
@@ -242,9 +243,10 @@ describe('send_invitation /connect_telegram suggestion', () => {
   });
 
   test('the suggestion also follows a delivery that reached nobody', async () => {
-    // Bot API refused and the inviter could not get the forward link.
+    // Bot API refused, the admin session failed and the inviter could not get the forward link.
     const failing: TelegramSender = {
       ...unreachableByBot,
+      sendAsUser: async () => false,
       sendMessage: async () => {
         throw new Error('Forbidden: bot was blocked by the user');
       },

@@ -59,6 +59,7 @@ export function handleCreateBirthdayEvent(ctx: AgentContext, input: CreateBirthd
     year: input.year ?? null,
     lang,
     timezone: ctx.user.timezone,
+    autoCreated: false,
     groupId: input.group_id,
   });
 

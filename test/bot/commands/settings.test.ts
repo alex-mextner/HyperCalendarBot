@@ -144,6 +144,40 @@ describe('handleSettingsCallback', () => {
     expect(text).toContain('❌');
   });
 
+  test('stg:calls without repo shows defaults', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefsService = makePrefsService();
+
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'calls', prefsService as never);
+
+    const text = firstCallArg<string>(ctx.editText, 0);
+    expect(text).toContain('Голосовые звонки');
+    expect(text).toContain('❌');
+  });
+
+  test('stg:calls with repo shows enabled state', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefsService = makePrefsService();
+    const callSettingsRepo = {
+      ensureDefaults: mock(() => {}),
+      get: mock(() => ({ enabled: 1, language: 'ru' })),
+    };
+
+    await handleSettingsCallback(
+      ctx as never,
+      makeUser() as never,
+      'calls',
+      prefsService as never,
+      callSettingsRepo as never,
+    );
+
+    const text = firstCallArg<string>(ctx.editText, 0);
+    expect(text).toContain('✅');
+    expect(text).toContain('Голосовые звонки');
+  });
+
   test('stg:privacy without repo shows defaults', async () => {
     const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
     const ctx = makeCallbackCtx();
@@ -174,6 +208,7 @@ describe('handleSettingsCallback', () => {
       makeUser() as never,
       'privacy',
       prefsService as never,
+      undefined,
       sharingSettingsRepo as never,
     );
 
@@ -231,6 +266,30 @@ describe('handleSettingsCallback', () => {
     expect(text).toContain('Уведомления');
   });
 
+  test('stg:toggle_calls flips enabled and re-renders', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefsService = makePrefsService();
+    const callSettingsRepo = {
+      ensureDefaults: mock(() => {}),
+      get: mock(() => ({ enabled: 0 })),
+      setEnabled: mock(() => {}),
+    };
+
+    await handleSettingsCallback(
+      ctx as never,
+      makeUser() as never,
+      'toggle_calls',
+      prefsService as never,
+      callSettingsRepo as never,
+    );
+
+    expect(callSettingsRepo.ensureDefaults).toHaveBeenCalledTimes(1);
+    expect(callSettingsRepo.setEnabled).toHaveBeenCalledWith(100, true);
+    const text = firstCallArg<string>(ctx.editText, 0);
+    expect(text).toContain('Голосовые звонки');
+  });
+
   test('stg:cycle_visibility advances to next visibility', async () => {
     const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
     const ctx = makeCallbackCtx();
@@ -246,6 +305,7 @@ describe('handleSettingsCallback', () => {
       makeUser() as never,
       'cycle_visibility',
       prefsService as never,
+      undefined,
       sharingSettingsRepo as never,
     );
 
@@ -269,6 +329,7 @@ describe('handleSettingsCallback', () => {
       makeUser() as never,
       'toggle_inline',
       prefsService as never,
+      undefined,
       sharingSettingsRepo as never,
     );
 
@@ -290,6 +351,7 @@ describe('handleSettingsCallback', () => {
       makeUser() as never,
       'toggle_invitations',
       prefsService as never,
+      undefined,
       sharingSettingsRepo as never,
     );
 
@@ -310,6 +372,7 @@ describe('handleSettingsCallback', () => {
       makeUser({ voice_response_enabled: 1 }) as never,
       'toggle_voice',
       prefsService as never,
+      undefined,
       undefined,
       userRepo as never,
     );
@@ -377,6 +440,7 @@ describe('stg:set_lang', () => {
       'set_lang:en',
       prefs as never,
       undefined,
+      undefined,
       userRepo as never,
     );
 
@@ -400,6 +464,7 @@ describe('stg:set_country', () => {
       makeUser() as never,
       'set_country:DE',
       prefs as never,
+      undefined,
       undefined,
       userRepo as never,
     );

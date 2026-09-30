@@ -8,6 +8,7 @@
     "lint:fix": "biome check --fix .",
     "format": "biome format --write .",
     "start": "bun run src/index.ts",
+    "test:call": "bun run scripts/test-call.ts",
     "postinstall": "sh scripts/install-git-hooks.sh",
     "docs:intents": "bun --no-env-file scripts/generate-intent-docs.ts",
     "docs:intents:check": "bun --no-env-file scripts/generate-intent-docs.ts --check"

@@ -178,6 +178,7 @@ export const MSG = {
       write: 'Write',
       field: 'field',
       attempt: (n: number) => `Attempt ${n}`,
+      spokenQuestion: (question: string, options: string) => `${question} Options: ${options}`,
       operations: {
         delete_event: 'Delete event',
         update_event: 'Update event',
@@ -396,7 +397,7 @@ export const MSG = {
       `📨 <b>${titleHtml}</b> — invitation from ${fromHtml}`,
     invite_timezone_note: (inviterName: string, tz: string) => `\n⏰ Time shown in ${inviterName}'s timezone (${tz})`,
     invite_resolve_not_found: (username: string) =>
-      `@${username} hasn't started this bot yet, so I can't find them by username. Select the person from your contacts.`,
+      `@${username} not found on Telegram. Select the person from your contacts.`,
     invite_picker_header: '📨 Invitations:',
     invite_picker_sending: '📨 Sending invitations…',
     invite_group_sending: '📨 Sending invitation…',
@@ -466,6 +467,12 @@ export const MSG = {
     share_sent: '✅ Shared successfully',
     share_cancelled: '❌ Share cancelled',
     no_events_to_share: 'No events to share for this period',
+    call_settings_title: '📞 Voice Call Reminders',
+    call_settings_enabled: 'Voice calls: ✅ Enabled',
+    call_settings_disabled: 'Voice calls: ❌ Disabled',
+    call_post_snooze: '⏰ Snoozed for 10 min',
+    call_post_cancel: '❌ Event cancelled',
+    call_post_ack: '✅ Got it',
     voice_response_enabled: '🎤 Voice responses enabled!',
     voice_response_disabled: '🎤 Ok, text only.',
     voice_demo_failed: '🎤 Voice enabled! Demo playback failed — voice replies will work from the next response.',
@@ -483,7 +490,7 @@ export const MSG = {
     feature_tour: [
       '<b>🤖 AI Assistant</b>\nJust text or voice-message me: "schedule a meeting tomorrow at 3pm", "what do I have next week?", "move my standup to 11:00". All bot features are available through chat — I understand context and execute commands.',
       '<b>📅 Calendar Management</b>\n/add — step-by-step event creation\n/today, /week, /month — different views\n/edit, /delete — modify events\n/free — find available time slots\nRecurring events with flexible rules.',
-      '<b>🔔 Smart Reminders</b>\n/settings — morning agenda, evening review, quiet hours, voice replies, privacy\nMultiple reminders per event (15min, 1h, etc.)\nCustomizable notification intervals.',
+      '<b>🔔 Smart Reminders</b>\n/settings — morning agenda, evening review, quiet hours, voice calls, privacy\nMultiple reminders per event (15min, 1h, etc.)\nCustomizable notification intervals.',
       '<b>🌍 Holidays</b>\n/holidays — browse and subscribe to holidays from 100+ countries\nHolidays appear alongside your events in daily agenda.',
       '<b>📤 Sharing &amp; Invitations</b>\n/share today — share your agenda\n/invite @username — invite someone to an event\nEvent visibility: /settings → Privacy\nInline mode: type @HyperCalendarBot in any chat.',
       '<b>🖼 Visual Schedule</b>\nBeautiful calendar images are sent automatically with /today and /week commands.',
@@ -494,6 +501,7 @@ export const MSG = {
       close: '✖️ Close',
       categoryGeneral: '🌍 General',
       categoryNotifications: '🔔 Notifications',
+      categoryCalls: '📞 Calls',
       categoryPrivacy: '🔒 Privacy',
       categoryVoice: '🎤 Voice',
       notificationsTitle: '🔔 Notifications',
@@ -502,7 +510,7 @@ export const MSG = {
       eveningReview: 'Evening review',
       eveningReviewDesc: "Tomorrow's events — convenient to check before bed.",
       quietHours: 'Quiet hours',
-      quietHoursDesc: 'Reminders are silenced during this time.',
+      quietHoursDesc: 'Reminders and calls are silenced during this time.',
       reminders: 'Reminders',
       remindersDesc: 'How long before an event the bot sends a reminder.',
       toggleMorning: 'Morning agenda',
@@ -514,6 +522,14 @@ export const MSG = {
       reminderIntervalsNone: 'none',
       reminderIntervalsHint: 'Select how far ahead of an event to send a reminder.',
       reminderAtStart: 'at start',
+      callsTitle: '📞 Voice calls',
+      callsEnabled: 'Call reminders: ✅ Enabled',
+      callsDisabled: 'Call reminders: ❌ Disabled',
+      callsDesc1: 'The bot will call you before an event and read out the title.',
+      callsDesc2: 'Works via a Telegram call — no phone number needed.',
+      callsDesc3: 'Quiet hours also apply to calls.',
+      toggleCallsEnable: '✅ Enable calls',
+      toggleCallsDisable: '❌ Disable calls',
       privacyTitle: '🔒 Privacy',
       visibilityLabel: 'Event visibility',
       visibilityPrivate: 'Private',
@@ -562,14 +578,17 @@ export const MSG = {
       },
       meta: {
         noHolidays: 'No upcoming holidays. You may not have country subscriptions set up.',
+        unknownName: 'unknown',
         holidaysList: (lines: string) => `Upcoming holidays:\n${lines}`,
         foundUser: (id: number, name: string) => `Found user: telegram_id=${id}, name=${name}`,
+        foundUserMtproto: (id: number, name: string) =>
+          `Found user via MTProto: telegram_id=${id}, name=${name} (not a bot user yet — can only be reached via MTProto)`,
         addressBookEmpty: 'Address book is empty.',
         invitationLinkUnavailable:
           'This invitation is not available to your Telegram account. Ask the sender to check the recipient.',
         recipientMissing: 'Choose a recipient (invitee_id or invitee_username).',
-        recipientNotStartedBot: (username: string) =>
-          `@${username} hasn't started this bot yet, so I can't look them up by username. Share their contact with the Telegram picker, or ask them to open the bot first.`,
+        recipientResolveUnavailable:
+          'Username resolution is unavailable. Choose a saved contact or use the Telegram picker.',
         recipientLookupFailed: (username: string) =>
           `Could not verify @${username}. Choose a saved contact or use the Telegram picker.`,
         contactDeleteRequiresTool:
@@ -613,6 +632,7 @@ export const MSG = {
         deletePastButton: (count: number) => `🗑 Delete past (${count})`,
         deleteCancelButton: 'Cancel',
         deleteConfirmationSent: 'Delete confirmation sent. Waiting for the user to tap.',
+        deleteConfirmationSentToChat: 'I sent the list to our chat. Tap a button there to delete.',
         deleteNeedsConfirmation: 'Not deleted: the user has not confirmed this event in the bot’s delete list.',
         deleteTargetsNotFound: (ids: string) => `Not found or not yours to delete: ${ids}. Nothing was sent.`,
         deleteConfirmExpired: 'This confirmation is no longer valid. Ask me to delete again.',
@@ -628,6 +648,8 @@ export const MSG = {
           `Day calendar image for ${date} has been sent to the chat instead of the past day ${requested}: ${date} is the nearest upcoming day with the changes just made.`,
         weekImageFailed: (weekStart: string) => `Failed to render or send the weekly image starting ${weekStart}.`,
         monthImageFailed: (month: string) => `Failed to render or send the monthly image for ${month}.`,
+        callQueued: 'Call queued. You will receive a voice call shortly.',
+        callFailed: (text: string) => `📞 Couldn't reach you by call.\n\n${text}`,
         gcalNotConnected: 'Google Calendar is not connected. You can connect it with /connect_google command.',
         gcalConnectedNoData: 'Google Calendar is connected, but calendar data is not available.',
         gcalConnectedHeader: 'Google Calendar is connected.',
@@ -639,6 +661,7 @@ export const MSG = {
         sceneCancelled: 'Wizard cancelled.',
         tableSent: (title: string) => `Table "${title}" has been sent to the chat.`,
         tableFailed: (title: string) => `Failed to render or send the table "${title}".`,
+        tableRenderingVoice: 'Check the chat — the table is there.',
         telegramConnectedStatus: 'Telegram account connected',
         telegramNotConnectedStatus: 'Telegram account not connected. Connect via /connect_telegram',
       },
@@ -648,6 +671,7 @@ export const MSG = {
         freeSlots: (lines: string) => `Free slots:\n${lines}`,
       },
       settings: {
+        callsUpdated: 'Call settings updated.',
         notificationsUpdated: (keys: string) => `Notification settings updated: ${keys}`,
         privacyUpdated: (lines: string) => `Privacy settings updated: ${lines}`,
         voiceUpdated: (value: string) => `Voice settings updated: voice_response_enabled = ${value}`,
@@ -759,6 +783,8 @@ export const MSG = {
           `⚠️ Could not deliver invitation to ${invitee} for "${eventTitle}" directly. Forward this link to the invitee: ${url}`,
         deliveryFallbackNoLink: (eventTitle: string, invitee: string) =>
           `⚠️ Could not deliver invitation to ${invitee} for "${eventTitle}" directly.`,
+        mtprotoInvite: (inviterName: string, eventTitle: string, url: string) =>
+          `📅 ${inviterName} invites you to "${eventTitle}". Tap to respond: ${url}`,
         userSessionInvitation: (args: {
           title: string;
           dateLine: string;
@@ -981,7 +1007,9 @@ export const MSG = {
       complex_recurrence: '💡 "Lunch with Anna every other Thursday at 1pm" — I handle complex recurrences too.',
       ics_import: '💡 Import your existing calendar — just send an .ics file to this chat.',
       // ── Reminders & not forgetting ──
+      call_before_flight: "💡 Don't want to miss a flight? Add your airport arrival time and ask me to call you!",
       multiple_reminders: '💡 Set multiple reminders: "remind me 1 day and 2 hours before the meeting".',
+      voice_calls: '💡 I can call you on the phone before an important event — enable voice calls in /settings.',
       daily_medicine: '💡 "Remind me to take medicine every day at 8am" — I\'ll send a notification daily.',
       birthday_reminder: "💡 Set a reminder for a friend's birthday so you have time to pick a gift.",
       // ── Planning & overview ──
@@ -1116,6 +1144,22 @@ export const MSG = {
       noQuietHours: "💡 Protect your sleep — set up quiet hours so I don't disturb you at night. Check /settings.",
       noGoogleCalendar: '💡 Connect Google Calendar to see all your events in one place — /connect_google.',
       noCountry: '💡 Set your country to get public holidays in your calendar — /holidays.',
+      noVoiceCalls:
+        '💡 I can call you before important events so you never miss them. Enable voice calls in /settings.',
+    },
+    speech: {
+      allDay: 'all day',
+      noEvents: 'no events',
+      at: 'at',
+      morningIntro: (dateLabel: string) => `Good morning. Today, ${dateLabel}.`,
+      morningOutro: 'Have a productive day!',
+      eveningIntro: (dateLabel: string) => `Good evening. Tomorrow, ${dateLabel}.`,
+      eveningOutro: 'Good night!',
+      weeklyDigestIntro: (weekRange: string) => `Weekly digest for the week of ${weekRange}.`,
+      reminderIntro: (cleanTitle: string, timeStr: string) => `Calendar reminder. ${cleanTitle} at ${timeStr}.`,
+      location: (loc: string) => `Location: ${loc}.`,
+      batchIntro: (count: number) => `Calendar reminder. ${count} ${count === 1 ? 'event' : 'events'} starting soon:`,
+      eventAt: (title: string, timeStr: string) => `${title} at ${timeStr}.`,
     },
     sync: {
       eventChanged: (title: string, changes: string) => `📅 "${title}" changed:\n${changes}`,
@@ -1166,6 +1210,7 @@ export const MSG = {
       write: 'Изменение',
       field: 'поле',
       attempt: (n: number) => `Попытка ${n}`,
+      spokenQuestion: (question: string, options: string) => `${question} Варианты: ${options}`,
       operations: {
         delete_event: 'Удаление события',
         update_event: 'Изменение события',
@@ -1383,7 +1428,7 @@ export const MSG = {
     invite_timezone_note: (inviterName: string, tz: string) =>
       `\n⏰ Время в часовом поясе ${inclineFirstname(inviterName, 'genitive')} (${tz})`,
     invite_resolve_not_found: (username: string) =>
-      `@${username} ещё не запускал этого бота, поэтому по нику его не найти. Выбери нужного человека из контактов.`,
+      `@${username} не найден в Telegram. Выбери нужного человека из контактов.`,
     invite_picker_header: '📨 Приглашения:',
     invite_picker_sending: '📨 Отправляю приглашения…',
     invite_group_sending: '📨 Отправляю приглашение…',
@@ -1453,6 +1498,12 @@ export const MSG = {
     share_sent: '✅ Отправлено',
     share_cancelled: '❌ Отправка отменена',
     no_events_to_share: 'Нет событий для этого периода',
+    call_settings_title: '📞 Голосовые напоминания',
+    call_settings_enabled: 'Голосовые звонки: ✅ Включены',
+    call_settings_disabled: 'Голосовые звонки: ❌ Выключены',
+    call_post_snooze: '⏰ Отложено на 10 мин',
+    call_post_cancel: '❌ Событие отменено',
+    call_post_ack: '✅ Понятно',
     voice_response_enabled: '🎤 Голосовые ответы включены!',
     voice_response_disabled: '🎤 Ок, только текстом.',
     voice_demo_failed: '🎤 Голосовые ответы включены! Демо не воспроизвелось — голос появится со следующего ответа.',
@@ -1470,7 +1521,7 @@ export const MSG = {
     feature_tour: [
       '<b>🤖 AI-ассистент</b>\nПросто напишите или отправьте голосовое: "запланируй встречу завтра в 15:00", "что у меня на неделе?", "перенеси стендап на 11:00". Все функции бота доступны через чат — я понимаю контекст и выполняю команды.',
       '<b>📅 Управление календарём</b>\n/add — пошаговое создание\n/today, /week, /month — разные виды\n/edit, /delete — редактирование\n/free — свободные слоты\nПовторяющиеся события с гибкими правилами.',
-      '<b>🔔 Умные напоминания</b>\n/settings — утренняя сводка, вечерний обзор, тихие часы, голосовые ответы, приватность\nНесколько напоминаний на событие (15 мин, 1 ч и т.д.)',
+      '<b>🔔 Умные напоминания</b>\n/settings — утренняя сводка, вечерний обзор, тихие часы, голосовые звонки, приватность\nНесколько напоминаний на событие (15 мин, 1 ч и т.д.)',
       '<b>🌍 Праздники</b>\n/holidays — подписка на праздники 100+ стран\nПраздники отображаются в ежедневной повестке.',
       '<b>📤 Шаринг и приглашения</b>\n/share today — поделиться расписанием\n/invite @username — пригласить на событие\nВидимость событий: /settings → Приватность\nInline-режим: наберите @HyperCalendarBot в любом чате.',
       '<b>🖼 Визуальное расписание</b>\nКрасивые изображения календаря автоматически отправляются с командами /today и /week.',
@@ -1481,6 +1532,7 @@ export const MSG = {
       close: '✖️ Закрыть',
       categoryGeneral: '🌍 Основные',
       categoryNotifications: '🔔 Уведомления',
+      categoryCalls: '📞 Звонки',
       categoryPrivacy: '🔒 Приватность',
       categoryVoice: '🎤 Голос',
       notificationsTitle: '🔔 Уведомления',
@@ -1489,7 +1541,7 @@ export const MSG = {
       eveningReview: 'Вечерний обзор',
       eveningReviewDesc: 'Список событий на завтра — удобно проверить перед сном.',
       quietHours: 'Тихие часы',
-      quietHoursDesc: 'Напоминания не беспокоят в это время.',
+      quietHoursDesc: 'Напоминания и звонки не беспокоят в это время.',
       reminders: 'Напоминания',
       remindersDesc: 'За сколько до события бот присылает напоминание.',
       toggleMorning: 'Утренняя сводка',
@@ -1501,6 +1553,14 @@ export const MSG = {
       reminderIntervalsNone: 'не заданы',
       reminderIntervalsHint: 'Выберите за сколько до события отправлять напоминание.',
       reminderAtStart: 'в начале',
+      callsTitle: '📞 Голосовые звонки',
+      callsEnabled: 'Звонки-напоминания: ✅ Включены',
+      callsDisabled: 'Звонки-напоминания: ❌ Отключены',
+      callsDesc1: 'Бот позвонит вам перед событием и зачитает название.',
+      callsDesc2: 'Работает через Telegram-звонок — не нужен номер телефона.',
+      callsDesc3: 'Тихие часы распространяются и на звонки.',
+      toggleCallsEnable: '✅ Включить звонки',
+      toggleCallsDisable: '❌ Отключить звонки',
       privacyTitle: '🔒 Приватность',
       visibilityLabel: 'Видимость событий',
       visibilityPrivate: 'Приватно',
@@ -1551,14 +1611,17 @@ export const MSG = {
       },
       meta: {
         noHolidays: 'Праздников не найдено. Возможно, у тебя не настроены подписки на страны.',
+        unknownName: 'неизвестно',
         holidaysList: (lines: string) => `Праздники:\n${lines}`,
         foundUser: (id: number, name: string) => `Пользователь найден: telegram_id=${id}, имя=${name}`,
+        foundUserMtproto: (id: number, name: string) =>
+          `Пользователь найден через MTProto: telegram_id=${id}, имя=${name} (бот ещё не запускал — доступен только через MTProto)`,
         addressBookEmpty: 'Адресная книга пуста.',
         invitationLinkUnavailable:
           'Это приглашение недоступно твоему Telegram-аккаунту. Попроси отправителя проверить получателя.',
         recipientMissing: 'Выбери получателя (invitee_id или invitee_username).',
-        recipientNotStartedBot: (username: string) =>
-          `@${username} ещё не запускал этого бота, поэтому найти его по нику не получится. Выбери человека через Telegram или попроси его сначала открыть бота.`,
+        recipientResolveUnavailable:
+          'Проверка username недоступна. Выбери сохранённый контакт или человека через Telegram.',
         recipientLookupFailed: (username: string) =>
           `Не удалось проверить @${username}. Выбери сохранённый контакт или человека через Telegram.`,
         contactDeleteRequiresTool: 'Изменение полей не удаляет контакт. Для удаления нужна отдельная операция.',
@@ -1601,6 +1664,7 @@ export const MSG = {
         deletePastButton: (count: number) => `🗑 Удалить прошедшие (${count})`,
         deleteCancelButton: 'Отмена',
         deleteConfirmationSent: 'Подтверждение удаления отправлено. Жду нажатия кнопки.',
+        deleteConfirmationSentToChat: 'Отправил список в наш чат. Нажми там кнопку, чтобы удалить.',
         deleteNeedsConfirmation: 'Не удалено: пользователь не подтвердил это событие в списке удаления от бота.',
         deleteTargetsNotFound: (ids: string) => `Не найдены или недоступны для удаления: ${ids}. Ничего не отправлено.`,
         deleteConfirmExpired: 'Это подтверждение больше не действует. Попроси удалить ещё раз.',
@@ -1617,6 +1681,8 @@ export const MSG = {
         weekImageFailed: (weekStart: string) =>
           `Не удалось отрендерить или отправить недельную картинку с ${weekStart}.`,
         monthImageFailed: (month: string) => `Не удалось отрендерить или отправить месячную картинку за ${month}.`,
+        callQueued: 'Звонок поставлен в очередь. Ты получишь голосовой звонок в ближайшее время.',
+        callFailed: (text: string) => `📞 Не удалось дозвониться.\n\n${text}`,
         gcalNotConnected: 'Google Calendar не подключён. Ты можешь подключить его командой /connect_google.',
         gcalConnectedNoData: 'Google Calendar подключён, но данные календарей недоступны.',
         gcalConnectedHeader: 'Google Calendar подключён.',
@@ -1629,6 +1695,7 @@ export const MSG = {
         sceneCancelled: 'Заполнение отменено.',
         tableSent: (title: string) => `Таблица «${title}» отправлена в чат.`,
         tableFailed: (title: string) => `Не удалось отрендерить или отправить таблицу «${title}».`,
+        tableRenderingVoice: 'Загляни в чат — там таблица.',
         telegramConnectedStatus: 'Telegram-аккаунт подключён',
         telegramNotConnectedStatus: 'Telegram-аккаунт не подключён. Подключить: /connect_telegram',
       },
@@ -1638,6 +1705,7 @@ export const MSG = {
         freeSlots: (lines: string) => `Свободные слоты:\n${lines}`,
       },
       settings: {
+        callsUpdated: 'Настройки звонков обновлены.',
         notificationsUpdated: (keys: string) => `Настройки уведомлений обновлены: ${keys}`,
         privacyUpdated: (lines: string) => `Настройки приватности обновлены: ${lines}`,
         voiceUpdated: (value: string) => `Настройки голоса обновлены: voice_response_enabled = ${value}`,
@@ -1750,6 +1818,8 @@ export const MSG = {
           `⚠️ Не удалось доставить приглашение для ${invitee} на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`,
         deliveryFallbackNoLink: (eventTitle: string, invitee: string) =>
           `⚠️ Не удалось доставить приглашение для ${invitee} на «${eventTitle}» напрямую.`,
+        mtprotoInvite: (inviterName: string, eventTitle: string, url: string) =>
+          `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`,
         userSessionInvitation: (args: {
           title: string;
           dateLine: string;
@@ -1977,7 +2047,10 @@ export const MSG = {
       complex_recurrence: '💡 «Обед с Аней каждый второй четверг в 13:00» — сложные повторения тоже работают.',
       ics_import: '💡 Импортируй календарь — просто отправь .ics файл в этот чат.',
       // ── Напоминания и не забыть ──
+      call_before_flight:
+        '💡 Чтобы не опоздать на самолёт — добавь время прибытия в аэропорт и попроси меня позвонить!',
       multiple_reminders: '💡 Несколько напоминаний: «напомни за 1 день и за 2 часа до встречи».',
+      voice_calls: '💡 Я могу позвонить тебе перед важным событием — включи звонки в /settings.',
       daily_medicine: '💡 «Напоминай пить таблетки каждый день в 8 утра» — и я буду присылать уведомление.',
       birthday_reminder: '💡 Поставь напоминание о дне рождения друга заранее — успеешь выбрать подарок.',
       // ── Планирование и обзор ──
@@ -2113,6 +2186,23 @@ export const MSG = {
       noQuietHours: '💡 Защити свой сон — настрой тихие часы, чтобы я не беспокоил ночью. Смотри /settings.',
       noGoogleCalendar: '💡 Подключи Google Calendar, чтобы видеть все события в одном месте — /connect_google.',
       noCountry: '💡 Укажи свою страну, чтобы праздники появились в календаре — /holidays.',
+      noVoiceCalls:
+        '💡 Я могу звонить перед важными событиями, чтобы ты ничего не пропустил. Включи звонки в /settings.',
+    },
+    speech: {
+      allDay: 'весь день',
+      noEvents: 'нет событий',
+      at: 'в',
+      morningIntro: (dateLabel: string) => `Доброе утро. Сегодня, ${dateLabel}.`,
+      morningOutro: 'Продуктивного дня!',
+      eveningIntro: (dateLabel: string) => `Добрый вечер. Завтра, ${dateLabel}.`,
+      eveningOutro: 'Спокойной ночи!',
+      weeklyDigestIntro: (weekRange: string) => `Еженедельный дайджест на неделю ${weekRange}.`,
+      reminderIntro: (cleanTitle: string, timeStr: string) => `Календарное напоминание. ${cleanTitle} в ${timeStr}.`,
+      location: (loc: string) => `Место: ${loc}.`,
+      batchIntro: (count: number) =>
+        `Календарное напоминание. ${count} ${ruPlural(count, 'событие', 'события', 'событий')} начинаются скоро:`,
+      eventAt: (title: string, timeStr: string) => `${title} в ${timeStr}.`,
     },
     sync: {
       eventChanged: (title: string, changes: string) => `📅 «${title}» изменён:\n${changes}`,

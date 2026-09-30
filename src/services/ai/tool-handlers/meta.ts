@@ -1,11 +1,6 @@
-import { t } from '../../../config/constants.ts';
+import { t, toLang } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
-import {
-  canResolveRecipientUsername,
-  lookupKnownBotUser,
-  markVerifiedRecipient,
-  normalizeRecipientUsername,
-} from '../recipient-identity.ts';
+import { canResolveRecipientUsername, normalizeRecipientUsername } from '../recipient-identity.ts';
 import { correctAskedQuestion, eventClocksForRun } from '../reply-time-guard.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { handleDeleteConfirmationRequest } from './events.ts';
@@ -43,7 +38,7 @@ export function handleGetHolidays(ctx: AgentContext, input: GetHolidaysInput): T
 }
 handleGetHolidays.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
-export function handleFindUser(ctx: AgentContext, input: FindUserInput): ToolResult {
+export async function handleFindUser(ctx: AgentContext, input: FindUserInput): Promise<ToolResult> {
   const username = normalizeRecipientUsername(input.username);
   if (!canResolveRecipientUsername(ctx, username) && normalizeRecipientUsername(ctx.user.username ?? '') !== username) {
     return {
@@ -53,22 +48,44 @@ export function handleFindUser(ctx: AgentContext, input: FindUserInput): ToolRes
         'Use find_contact for a personal name. Ask for the exact @username or use pick_users if the person is not in the address book; do not guess.',
     };
   }
-  const user = lookupKnownBotUser(ctx, username);
-  const tr = t(ctx.user.language).aiTools.meta;
-  if (!user) {
+  const user = ctx.userRepo.findByUsername(username);
+  const lang = ctx.user.language;
+  const unknownName = t(lang).aiTools.meta.unknownName;
+  if (user && !ctx.resolveUsername) {
+    ctx.verifiedRecipientIds ??= new Set();
+    ctx.verifiedRecipientIds.add(user.telegram_id);
+    const name = user.first_name ?? user.username ?? unknownName;
     return {
-      success: false,
-      error: tr.recipientNotStartedBot(username),
-      agentHint:
-        'Only people who have started this bot can be found by @username. Offer pick_users so the user can share the contact from Telegram.',
+      success: true,
+      output: t(lang).aiTools.meta.foundUser(user.telegram_id, name),
+      data: { telegram_id: user.telegram_id, name },
     };
   }
-  markVerifiedRecipient(ctx, user.id);
-  const name = user.firstName ?? user.username;
+
+  if (ctx.resolveUsername) {
+    const resolved = await ctx.resolveUsername(username);
+    if (resolved) {
+      if (!Number.isSafeInteger(resolved.id) || resolved.id <= 0) {
+        return { success: false, error: t(lang).aiTools.meta.recipientUnverified };
+      }
+      ctx.verifiedRecipientIds ??= new Set();
+      ctx.verifiedRecipientIds.add(resolved.id);
+      const name = resolved.firstName ?? resolved.username ?? unknownName;
+      return {
+        success: true,
+        output: t(lang).aiTools.meta.foundUserMtproto(resolved.id, name),
+        data: { telegram_id: resolved.id, name },
+      };
+    }
+  }
+
+  if (!ctx.resolveUsername) {
+    return { success: false, error: t(lang).aiTools.meta.recipientResolveUnavailable };
+  }
+
   return {
-    success: true,
-    output: tr.foundUser(user.id, name),
-    data: { telegram_id: user.id, name },
+    success: false,
+    error: `User @${username} not found. They may not have used this bot yet.`,
   };
 }
 handleFindUser.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
@@ -91,6 +108,20 @@ export async function handleAskUser(
     : undefined;
   if (agentHint)
     metaLogger.warn({ userId: ctx.user.telegram_id }, 'ask_user question showed UTC times as local — corrected');
+  if (ctx.inputMode === 'live_call') {
+    // During a call, no buttons — speak the question with options as numbered list
+    const optionText = askedOptions.map((o, i) => `${i + 1}. ${o}`).join(', ');
+    return {
+      success: true,
+      output: t(toLang(ctx.user.language)).writeOutcomes.spokenQuestion(question, optionText),
+      awaitingInput: {
+        kind: 'speech',
+        question: t(toLang(ctx.user.language)).writeOutcomes.spokenQuestion(question, optionText),
+      },
+      stopLoop: true,
+      agentHint,
+    };
+  }
   if (!ctx.sender?.sendButtons) {
     return { success: false, error: 'Buttons not supported.' };
   }
@@ -145,6 +176,34 @@ export function handleEndConversation(): ToolResult {
 }
 handleEndConversation.meta = { skipActionLog: true } satisfies ToolHandlerMeta;
 
+export function handleEndCall(ctx: AgentContext): ToolResult {
+  if (ctx.inputMode !== 'live_call') {
+    return { success: false, error: 'end_call is only available during a live phone call.' };
+  }
+  ctx.callEndRequested = true;
+  return { success: true, output: 'Call will end after the current response is spoken.' };
+}
+
+export function handleMakeCall(ctx: AgentContext, input: { text: string }): ToolResult {
+  if (ctx.inputMode === 'live_call') {
+    metaLogger.warn({ userId: ctx.user.telegram_id }, 'make_call: attempted during live call, blocked');
+    return {
+      success: false,
+      error: 'Cannot schedule a call while already on a live call. Just respond to the user directly.',
+    };
+  }
+  if (!ctx.voice?.callQueue) {
+    metaLogger.warn({ userId: ctx.user.telegram_id }, 'make_call: callQueue not available');
+    return {
+      success: false,
+      error: 'Voice calls are temporarily unavailable. This is a server-side issue, not a user setting problem.',
+    };
+  }
+  metaLogger.info({ userId: ctx.user.telegram_id, textLen: input.text.length }, 'make_call: enqueueing call');
+  ctx.voice!.callQueue.enqueue(ctx.user.telegram_id, input.text);
+  return { success: true, output: t(ctx.user.language).aiTools.meta.callQueued };
+}
+
 export function handleGetGoogleCalendarStatus(ctx: AgentContext): ToolResult {
   const connected = !!ctx.user.google_refresh_token_enc;
   const lang = ctx.user.language;
@@ -190,11 +249,11 @@ export function handleListGoogleCalendars(ctx: AgentContext): ToolResult {
 handleListGoogleCalendars.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleLookupStress(ctx: AgentContext, input: { words: string[] }): ToolResult {
-  if (!ctx.voice) {
+  if (!ctx.voice?.stressDictionary) {
     return { success: false, error: 'Stress dictionary not loaded' };
   }
 
-  const results = ctx.voice.stressDictionary.lookupMany(input.words);
+  const results = ctx.voice!.stressDictionary.lookupMany(input.words);
   const lines: string[] = [];
 
   for (const [word, { stressed, similar }] of Object.entries(results)) {

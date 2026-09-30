@@ -1,14 +1,14 @@
 <div align="center">
   <img src="assets/icon.png" alt="HyperCalendarBot" width="160" />
   <h1>HyperCalendarBot</h1>
-  <p>AI-powered Telegram calendar assistant with voice replies, image rendering, and smart intent learning</p>
+  <p>AI-powered Telegram calendar assistant with voice calls, image rendering, and smart intent learning</p>
 </div>
 
 ---
 
 ## What it does
 
-A Telegram bot that manages your personal and group calendars through natural language. Type "Remind me about standup tomorrow at 10am" — the bot parses it, stores it, and reminds you when the time comes. Everything runs through a 3-layer pipeline: pre-approved intent matching (no AI cost, instant response) → Anthropic (Claude) SDK agent → intent learning from successful interactions.
+A Telegram bot that manages your personal and group calendars through natural language. Type "Remind me about standup tomorrow at 10am" — the bot parses it, stores it, and calls you when the time comes. Everything runs through a 3-layer pipeline: pre-approved intent matching (no AI cost, instant response) → Anthropic (Claude) SDK agent → intent learning from successful interactions.
 
 **Languages**: English and Russian.
 
@@ -31,8 +31,9 @@ A Telegram bot that manages your personal and group calendars through natural la
 
 ### Notifications & Reminders
 - Telegram message reminders
-- Voice replies — TTS: Kokoro-82M (HuggingFace) or Silero (local) → Google TTS fallback
-- Voice messages transcribed by Whisper
+- **Voice call reminders** via MTProto P2P calls (Pyrogram + patched ntgcalls)
+- TTS: Kokoro-82M (HuggingFace) or Silero (local) → Google TTS fallback
+- STT: Deepgram Nova/Flux streaming (live calls) + Whisper via HuggingFace (messages)
 - BullMQ job queues (Redis) — reminders survive bot restarts
 
 ### Calendar Views
@@ -82,8 +83,7 @@ Telegram message
 - Queue: BullMQ on Redis
 - Calendar rendering: Playwright
 - Sync: Google Calendar API
-- Voice: Kokoro/Silero/Google TTS, Whisper STT
-- Personal Telegram connection (`/connect_telegram`): Pyrogram
+- Voice: Pyrogram + ntgcalls (patched), Kokoro/Silero/Google TTS, Deepgram STT
 - Linting: Biome
 
 ## Quick Start
@@ -92,7 +92,7 @@ Telegram message
 
 - [Bun](https://bun.sh) >= 1.3
 - Redis
-- Python 3.12 + uv (for `/connect_telegram` and Silero TTS)
+- Python 3.12 + uv (for voice calls)
 
 ### Install
 
@@ -110,14 +110,20 @@ Copy `.env.example` to `.env` and fill in the values. The example file contains 
 bun run src/index.ts
 ```
 
-### Python Setup (optional)
+### Voice Call Setup (optional)
 
-`/connect_telegram` (a user sends invitations from their own Telegram account) and Silero TTS run Python
-scripts from `venv/`. There is no shared bot-owned Telegram account to authenticate.
+Voice calls use Pyrogram + patched ntgcalls. The patch fixes a silent audio bug in ntgcalls v2.1.0.
 
 ```bash
+# Create Python venv
 uv venv --python 3.12 venv
 uv pip install -r pyproject.toml --python venv/bin/python
+
+# Build patched ntgcalls (~5 min, needs ~5 GB RAM)
+./scripts/build-patched-ntgcalls.sh python3.12 venv
+
+# Authenticate MTProto session (one-time interactive)
+venv/bin/python scripts/pyrogram-auth.py
 ```
 
 ## Development
@@ -146,7 +152,7 @@ Migrations run automatically on startup (`src/database/migrations.ts`). All data
 
 For periodic tasks, always use BullMQ repeating jobs — never `setInterval` or `setTimeout`. Repeating jobs survive restarts and are observable in the queue.
 
-Main queues: `image-render`, `bot-tasks`.
+Three queues: `image-render`, `call-reminders`, `bot-tasks`.
 
 ### Patching Library Types
 
@@ -200,12 +206,12 @@ src/
 │   ├── holiday/        # date-holidays, SQLite cache
 │   ├── intent/         # IntentMatcher, IntentLearner
 │   ├── sharing/        # invitations, proposals, secretary
-│   └── voice/          # TTS, speech-to-text for voice messages
+│   └── voice/          # TTS, STT, call scheduling
 ├── utils/              # telegram helpers, date utils, crypto
 └── worker/             # BullMQ job definitions and processors
 scripts/
 ├── *.ts                # development utilities
-├── *.py                # Python scripts (/connect_telegram, Silero TTS, release tooling)
+├── *.py                # Python MTProto scripts
 └── *.sh                # build and deploy scripts
 docs/
 ├── specs/              # feature specifications (00-08 + recent)
@@ -225,6 +231,7 @@ Feature specifications live in `docs/specs/`:
 | `04-notifications.md` | Reminders, push, scheduling |
 | `05-image-generation.md` | Calendar image rendering |
 | `06-sharing-social.md` | Invitations, group calendars |
+| `07-voice-calls.md` | Voice call reminders, MTProto |
 | `08-holidays.md` | Holiday subscriptions |
 
 ## License

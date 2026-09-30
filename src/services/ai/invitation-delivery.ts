@@ -9,7 +9,7 @@ import { formatInvitation } from '../event/formatters.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import { readInvitationRoster } from '../sharing/invitation-roster.ts';
 import { buildUserSessionInvitationText } from '../telegram-session/invitation-text.ts';
-import { type DeliverMessageParams, deliverMessage, describeDeliveryError } from './deliver-message.ts';
+import { deliverMessage, describeDeliveryError } from './deliver-message.ts';
 import type { TelegramSender } from './types.ts';
 
 const deliveryLogger = botLogger.child({ module: 'invitation-delivery' });
@@ -38,14 +38,14 @@ export interface DeliverInvitationParams {
   /** Inviter timezone — used to render first-person user-session invitation text. */
   inviterTimezone: string;
   event?: CalendarEvent | null;
-  /** Invitee-facing language — the invitation text shown to the invitee. */
+  /** Invitee-facing language — the invitation text and the MTProto invite shown to the invitee. */
   lang: 'en' | 'ru';
   /** Inviter-facing language — the deep-link fallback/forwarding message sent to the inviter. */
   inviterLang: 'en' | 'ru';
   /** Where to send the deep-link fallback (the inviter's chat). */
   fallbackChatId: number;
-  /** When false, the inviter's own Telegram session is skipped (Bot API → deep-link only). Default true. */
-  allowInviterSession?: boolean;
+  /** When false, MTProto is skipped entirely (Bot API → deep-link only). Default true. */
+  allowMtproto?: boolean;
   /** When true, the target is a group chat: the deep-link fallback is suppressed. A forward
    *  invite link resolves only in a USER's private /start and authorizes against the user's
    *  telegram_id, so it can never be accepted on behalf of a group — reporting "link sent" would
@@ -76,7 +76,7 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
     lang,
     inviterLang,
     fallbackChatId,
-    allowInviterSession = true,
+    allowMtproto = true,
     isGroupTarget = false,
     deps,
   } = params;
@@ -88,8 +88,8 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
   // The outer try guards every setup step after the invitation row was created, so nothing
   // propagates out of the handler. Two failure modes differ:
   //  - Deep-link creation has its OWN inner try/catch that recovers to url=null: the primary Bot
-  //    API send still runs (a reachable invitee is unaffected) and only the user-session/deep-link
-  //    path degrades — it does NOT reach this outer catch.
+  //    API send still runs (a reachable invitee is unaffected) and only the MTProto/deep-link path
+  //    degrades — it does NOT reach this outer catch.
   //  - Any other setup/formatter throw (e.g. formatInvitation, message build) falls to the outer
   //    catch below and is reported as an honest non-delivery.
   try {
@@ -127,18 +127,18 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
         deepLinkSvc && botUsername ? deepLinkSvc.createInvitationLink(invitationId, eventId, inviterId) : null;
       url = link && deepLinkSvc && botUsername ? deepLinkSvc.generateUrl(link.code, botUsername) : null;
     } catch (err) {
-      // The deep link is only used by the user-session/fallback path. A creation failure must not
-      // block the primary Bot API send to a reachable invitee — degrade to no-link (Bot API still
-      // runs; the inviter fallback becomes the no-link variant; the user session, which needs the
-      // link, is skipped).
+      // The deep link is only used by the MTProto/fallback path. A creation failure must not block
+      // the primary Bot API send to a reachable invitee — degrade to no-link (Bot API still runs;
+      // the inviter fallback becomes the no-link variant; MTProto, which needs the link, is skipped).
       deliveryLogger.warn(
         { invitationId, inviteeId, err: describeDeliveryError(err) },
         'deep-link creation failed; continuing without link',
       );
       url = null;
     }
+    const tr = t(lang).aiTools.sharing;
     // The fallback/forwarding message is sent to the INVITER, so it uses the inviter's language —
-    // not the invitee's (`lang`), which drives the invitee-facing invitation text.
+    // not the invitee's (`lang`), which drives the invitee-facing invitation and MTProto text.
     const inviterTr = t(inviterLang).aiTools.sharing;
     // Identify the invitee in the fallback message: a batch sends one fallback per failed invitee
     // to the same inviter chat, concurrently — without a label the inviter can't tell which
@@ -152,14 +152,38 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
         ? inviterTr.deliveryFallbackWithLink(eventTitle, inviteeLabel, url)
         : inviterTr.deliveryFallbackNoLink(eventTitle, inviteeLabel);
 
-    // The inviter's own connected Telegram account sends a first-person invitation with the link.
-    const sendAsConnected = sender.sendAsConnectedUser;
-    let userSessionSend: DeliverMessageParams['userSessionSend'];
-    if (event && url && sendAsConnected) {
-      const userFirstPersonText = buildUserSessionInvitationText({ event, inviterTimezone, deepLink: url, lang });
-      userSessionSend = async (targetId, _text, username) =>
-        sendAsConnected(inviterId, targetId, userFirstPersonText, username, { invitationId });
-    }
+    // User-session MTProto: first-person text via user's own connected session
+    const userFirstPersonText =
+      event && url && sender.sendAsConnectedUser
+        ? buildUserSessionInvitationText({ event, inviterTimezone, deepLink: url, lang })
+        : null;
+
+    const userMtprotoSend =
+      userFirstPersonText && sender.sendAsConnectedUser
+        ? async (targetId: number, _text: string, username?: string): Promise<boolean> =>
+            sender.sendAsConnectedUser!(inviterId, targetId, userFirstPersonText, username, { invitationId })
+        : undefined;
+
+    // Admin MTProto: third-person text via admin session (existing fallback)
+    const mtprotoSend =
+      sender.sendAsUser && url !== null
+        ? (userId: number, _text: string, username?: string): Promise<boolean> => {
+            const mtprotoText = tr.mtprotoInvite(inviterName, eventTitle, url);
+            return sender.sendAsUser!(userId, mtprotoText, username);
+          }
+        : undefined;
+
+    // Combined: try user session first (first-person), fall back to admin session (third-person)
+    const combinedMtprotoSend =
+      userMtprotoSend || mtprotoSend
+        ? async (targetId: number, text: string, username?: string): Promise<boolean> => {
+            if (userMtprotoSend) {
+              const ok = await userMtprotoSend(targetId, text, username);
+              if (ok) return true;
+            }
+            return mtprotoSend ? mtprotoSend(targetId, text, username) : false;
+          }
+        : undefined;
 
     const result = await deliverMessage({
       targetId: inviteeId,
@@ -182,7 +206,7 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
         }
         return sender.sendMessage(recipientId, msgText);
       },
-      userSessionSend: allowInviterSession ? userSessionSend : undefined,
+      mtprotoSend: allowMtproto ? combinedMtprotoSend : undefined,
       suppressFallback: isGroupTarget,
     });
 
@@ -202,7 +226,7 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
       return { delivered: true, viaDeepLink: false, viaBotApi: true };
     }
     if (result.delivered) {
-      deliveryLogger.info({ invitationId, inviteeId }, "Delivered via the inviter's own Telegram account");
+      deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via MTProto');
       return { delivered: true, viaDeepLink: false, viaBotApi: false };
     }
     // Only claim "link sent to inviter" when a real link existed AND the fallback
@@ -210,7 +234,7 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
     const linkSent = url !== null && result.fallbackSent === true;
     deliveryLogger.info(
       { invitationId, fallbackChatId, linkSent, hadLink: url !== null, fallbackSent: result.fallbackSent === true },
-      'Bot API + inviter session failed — deep-link fallback attempted',
+      'Bot API + MTProto failed — deep-link fallback attempted',
     );
     return { delivered: false, viaDeepLink: linkSent, viaBotApi: false };
   } catch (error) {

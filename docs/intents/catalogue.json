@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "fingerprint": "59da317a721eb933e78b6a2271a6ba1ecfcf997794c3a3516bc7bb972056d24c",
+  "fingerprint": "6d0ed91ddf04de2ca3b9561433dbfa313fe89b7aab2ef16c3758b2fea0fab5cb",
   "runtimeVerification": null,
   "engine": {
     "document": "engine.md",
@@ -68,14 +68,14 @@
     ]
   },
   "counts": {
-    "rules": 51,
+    "rules": 52,
     "categories": {
       "calendar": 7,
       "slots": 3,
       "events": 9,
       "reminders": 4,
       "invitations": 2,
-      "contacts": 6,
+      "contacts": 7,
       "settings": 6,
       "history": 2,
       "memory": 1,
@@ -86,11 +86,11 @@
     },
     "risks": {
       "read": 18,
-      "write": 22,
+      "write": 23,
       "private_read": 10,
       "sensitive_write": 1
     },
-    "tools": 37
+    "tools": 38
   },
   "entries": [
     {
@@ -7616,6 +7616,120 @@
       "invalidInputMatching": []
     },
     {
+      "name": "basis.call.start",
+      "title": "Позвонить на запросившую учётную запись",
+      "sourceTitle": "Start a call to the requesting account",
+      "category": "contacts",
+      "risk": "write",
+      "origin": "canonical",
+      "source": "src/services/intent/seed-catalog.ts",
+      "deployed": null,
+      "examples": [
+        "позвони мне",
+        "набери меня",
+        "call me"
+      ],
+      "negativeExamples": [
+        "позвони Лене",
+        "не звони мне"
+      ],
+      "invalidInputExamples": [],
+      "pattern": "^(?:\\u043F\\u043E\\u0437\\u0432\\u043E\\u043D\\u0438\\s+\\u043C\\u043D\\u0435|\\u043D\\u0430\\u0431\\u0435\\u0440\\u0438\\s+\\u043C\\u0435\\u043D\\u044F|call\\s+me|start\\s+a\\s+call)$",
+      "workflow": {
+        "version": 2,
+        "steps": [
+          {
+            "when": "group.is_group == true",
+            "respond": "{{t.private_only}}"
+          },
+          {
+            "call": "ask_user",
+            "input": {
+              "question": "{{t.question}}",
+              "options": [
+                "{{t.ok}}",
+                "{{t.cancel}}"
+              ]
+            },
+            "as": "confirm|lower"
+          },
+          {
+            "when": "ask.confirm != 'да' && ask.confirm != 'yes'",
+            "respond": "{{t.cancelled}}"
+          },
+          {
+            "call": "make_call",
+            "input": {
+              "text": "{{t.call_text}}"
+            }
+          }
+        ],
+        "i18n": {
+          "ru": {
+            "private_only": "Это личные данные — работаю с ними только в личке с ботом.",
+            "cancelled": "Отменено, ничего не изменилось.",
+            "ok": "Да",
+            "cancel": "Отмена",
+            "question": "Начать звонок в ваш подключённый Telegram-аккаунт?",
+            "call_text": "Здравствуйте! Вы запросили звонок из календаря."
+          },
+          "en": {
+            "private_only": "This is private data — I only handle it in a private chat with the bot.",
+            "cancelled": "Cancelled, nothing was changed.",
+            "ok": "Yes",
+            "cancel": "Cancel",
+            "question": "Start a call to your connected Telegram account?",
+            "call_text": "Hello! You requested a call from your calendar."
+          }
+        }
+      },
+      "tools": [
+        "ask_user",
+        "make_call"
+      ],
+      "bindingTypes": [],
+      "notes": "Replaces stored DB7 with actor-scoped explicit intent and confirmation. Unsupported call capabilities fail without inventing success.",
+      "predecessors": [],
+      "issues": [],
+      "audit": {
+        "schemaValid": true,
+        "contractErrors": 0,
+        "tools": [
+          "ask_user",
+          "make_call"
+        ],
+        "requiredCaptures": [],
+        "exampleCount": 1,
+        "examplesMatched": 1,
+        "examplesMissingCaptures": 0
+      },
+      "matching": [
+        {
+          "example": "позвони мне",
+          "result": "own"
+        },
+        {
+          "example": "набери меня",
+          "result": "own"
+        },
+        {
+          "example": "call me",
+          "result": "own"
+        }
+      ],
+      "negativeMatching": [
+        {
+          "example": "позвони Лене",
+          "result": "fallthrough"
+        },
+        {
+          "example": "не звони мне",
+          "result": "fallthrough"
+        }
+      ],
+      "invalidInputMatching": []
+    },
+    {
       "name": "basis.reminder.after",
       "title": "Напоминание через заданное время",
       "sourceTitle": "Create an explicit reminder after a duration",
@@ -8533,8 +8647,8 @@
       "provided": true,
       "total": 55,
       "merge": 20,
-      "rewrite": 24,
-      "retire": 11,
+      "rewrite": 25,
+      "retire": 10,
       "entries": [
         {
           "id": 2,
@@ -8606,9 +8720,9 @@
           "oldName": "make_calendar_call",
           "oldKey": "make_calendar_call",
           "status": "approved",
-          "disposition": "retire",
-          "target": null,
-          "reason": "Голосовые звонки удалены из бота, поэтому звонить некому и нечем; замены нет.",
+          "disposition": "rewrite",
+          "target": "basis.call.start",
+          "reason": "Звонок только запросившему пользователю, после подтверждения и проверки инструмента.",
           "previousTools": [
             "make_call"
           ]

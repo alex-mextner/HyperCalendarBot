@@ -5,8 +5,6 @@
 
 ---
 
-> **2026-09-29 update:** the shared MTProto service account (`data/voice_caller.session`) was removed by owner decision; the MTProto birthday auto-discovery below (`fetch-birthdays.py`, `birthday_sync_state`, the daily sync cron) went with it. Birthdays are now added by hand (`add_birthday` / `/birthdays`); reminders and display are unchanged.
-
 ## Overview
 
 Automatically discover and create birthday events for Telegram group calendar members.

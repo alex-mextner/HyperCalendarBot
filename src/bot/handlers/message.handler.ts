@@ -28,6 +28,7 @@ import type {
   NotificationPreferencesRow,
   NotificationPreferencesUpdate,
   User,
+  UserCallSettings,
 } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import { aiStreamRound } from '../../services/ai/streaming.ts';
@@ -114,6 +115,13 @@ export interface MessageHandlerDeps {
     update(userId: number, patch: NotificationPreferencesUpdate): void;
     ensureDefaults(userId: number): void;
   };
+  callQueue?: { enqueue(userId: number, text: string): void };
+  callSettingsRepo?: {
+    get(userId: number): UserCallSettings | null;
+    ensureDefaults(userId: number): void;
+    setEnabled(userId: number, enabled: boolean): void;
+    setLanguage(userId: number, lang: string): void;
+  };
   googleCalendarRepo?: GoogleCalendarRepository;
   googleSchedulePush?: (
     userId: number,
@@ -138,6 +146,8 @@ export interface MessageHandlerDeps {
   botToken?: string;
   downloadVoiceBuffer?: (botToken: string, fileId: string) => Promise<Buffer>;
   stressDictionary?: StressDictionary;
+  resolveUsername?: AgentContext['resolveUsername'];
+  lookupTelegramUser?: AgentContext['lookupTelegramUser'];
   sileroTts?: SileroTtsService;
   kokoroTts?: KokoroTtsService;
   fallbackTts?: { synthesize: (text: string, lang: string) => Promise<Buffer> };
@@ -387,6 +397,8 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       renderService: deps.renderService,
       deepLinkService: deps.deepLinkService,
       botUsername: deps.botUsername,
+      resolveUsername: deps.resolveUsername,
+      lookupTelegramUser: deps.lookupTelegramUser,
       sendMessageToChat: deps.sendMessageToChat,
       recentEventsWindow: groupInfo?.isGroup
         ? undefined
@@ -445,7 +457,14 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
               groupMemberService: deps.groupMemberService,
             }
           : undefined,
-      voice: deps.stressDictionary ? { stressDictionary: deps.stressDictionary } : undefined,
+      voice:
+        deps.callQueue && deps.callSettingsRepo
+          ? {
+              callQueue: deps.callQueue,
+              callSettingsRepo: deps.callSettingsRepo,
+              stressDictionary: deps.stressDictionary,
+            }
+          : undefined,
       notifications: deps.notificationPrefs ? { notificationPrefs: deps.notificationPrefs } : undefined,
       google: deps.googleCalendarRepo
         ? {
@@ -997,9 +1016,22 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       const isReplyToBot = deps.botId !== undefined && reply?.from?.id === deps.botId;
       const botMention = deps.botUsername ? `@${deps.botUsername}` : '';
 
-      // Track the member: group reminders go to the members the bot has seen in the chat
+      // Track member for fallback reminders
       if (deps.groupMemberRepo) {
         deps.groupMemberRepo.upsert(Number(chatId), user.telegram_id);
+      }
+
+      if (deps.birthdayService) {
+        deps.birthdayService
+          .runBatchSync([
+            {
+              telegram_id: user.telegram_id,
+              first_name: user.first_name,
+              language: user.language,
+              timezone: user.timezone,
+            },
+          ])
+          .catch((err) => cmdLogger.error({ err, userId: user.telegram_id }, 'Birthday sync failed'));
       }
 
       const hasSession = deps.groupSessions?.hasActiveSession(Number(chatId)) ?? false;

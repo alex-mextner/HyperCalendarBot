@@ -103,10 +103,12 @@ async function deliverProposalDm(
     .text('✅ Принять', `prop:accept:${proposal.id}`)
     .text('❌ Отклонить', `prop:decline:${proposal.id}`);
 
+  const targetUser = ctx.userRepo.findByTelegramId(targetId);
   const sender = ctx.sender;
 
   const result = await deliverMessage({
     targetId,
+    targetUsername: targetUser?.username ?? undefined,
     text,
     keyboard,
     fallbackRecipientId: ctx.user.telegram_id,
@@ -117,6 +119,7 @@ async function deliverProposalDm(
       }
       return sender.sendMessage(id, msg);
     },
+    mtprotoSend: sender.sendAsUser?.bind(sender),
   });
 
   if (result.messageId) {

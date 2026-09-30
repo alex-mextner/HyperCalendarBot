@@ -82,6 +82,16 @@ describe('handleRenderTable', () => {
     expect(result.success).toBe(false);
   });
 
+  test('voice call: output tells user to check chat', async () => {
+    const ctx = makeCtx({ inputMode: 'live_call' });
+    const result = await handleRenderTable(ctx, {
+      title: 'Тест',
+      markdown: '| A |\n|---|\n| 1 |',
+    });
+    expect(result.success).toBe(true);
+    expect(result.output).toMatch(/чат|chat/i);
+  });
+
   test('render failure returns success:false with error message', async () => {
     const ctx = makeCtx({
       renderService: {

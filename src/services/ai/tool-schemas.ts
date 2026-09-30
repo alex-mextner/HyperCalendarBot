@@ -224,12 +224,16 @@ const renderTableSchema = z
   })
   .passthrough();
 
+// ── Call tools ──
+
+const makeCallSchema = z.object({ text: z.string() }).passthrough();
+
 // ── Settings ──
 
 const manageSettingsSchema = z
   .object({
     action: z.enum(['get', 'update']),
-    category: z.enum(['general', 'notifications', 'privacy', 'voice']).optional(),
+    category: z.enum(['general', 'notifications', 'calls', 'privacy', 'voice']).optional(),
     updates: z.record(z.string(), z.unknown()).optional(),
   })
   .passthrough();
@@ -420,6 +424,7 @@ export const toolSchemas: Record<ToolName, z.ZodType> = {
   // No-input tools
   supplement_skip: emptyObject,
   end_conversation: emptyObject,
+  end_call: emptyObject,
   get_google_calendar_status: emptyObject,
   list_google_calendars: emptyObject,
   get_bot_info: emptyObject,
@@ -465,6 +470,9 @@ export const toolSchemas: Record<ToolName, z.ZodType> = {
   render_week_image: renderWeekImageSchema,
   render_month_image: renderMonthImageSchema,
   render_table: renderTableSchema,
+
+  // Call tools
+  make_call: makeCallSchema,
 
   // Settings
   manage_settings: manageSettingsSchema,

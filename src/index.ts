@@ -1,4 +1,5 @@
 import { createNotificationSender } from './services/notification/worker.ts';
+import { bootstrapServiceSession } from './services/telegram-session/service-session-bootstrap.ts';
 import { formatSessionLoss } from './services/telegram-session/session-loss.ts';
 // src/index.ts
 
@@ -21,7 +22,9 @@ import { aiStreamRound } from './services/ai/streaming.ts';
 import { runSyntheticIntent } from './services/intent/synthetic-intent-run.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { InvitationCardRefresher } from './services/sharing/invitation-cards.ts';
+import { createVoiceSender } from './services/voice/voice-sender.ts';
 import { hasChainAnswered, initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
+import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
 import { makeWorkerFailureHandler } from './utils/worker-alert.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
@@ -158,6 +161,12 @@ let googleSyncQueueRef: import('bullmq').Queue | undefined;
 let syncChangeNotifierRef: import('./services/event/event-change-notifier.ts').EventChangeNotifier | undefined;
 let imageQueueCleanup: { close: () => Promise<void> } | undefined;
 let renderService: import('./services/image/render-service.ts').RenderService | undefined;
+let callQueue:
+  | { enqueue(data: Omit<import('./services/voice/types.ts').CallReminderJobData, 'sessionId'>): Promise<void> }
+  | undefined;
+let callQueueCleanup: { close: () => Promise<void> } | undefined;
+/** The live-call agent, drained on shutdown like the chat agent. */
+let voiceAgentRef: { drain: (settleMs: number) => Promise<void> } | undefined;
 let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
 let botTasksQueueCleanup: { close: () => Promise<void> } | undefined;
 let googleRedisClient: Bun.RedisClient | undefined;
@@ -166,6 +175,24 @@ let participantPushSchedulerRef:
   | undefined;
 /** Re-pushes all Google Calendar copies of an event after its place is confirmed or dropped */
 let pushEventCopiesRef: ((event: CalendarEvent) => Promise<void>) | undefined;
+let mtprotoSendAsUser: ((userId: number, text: string, username?: string) => Promise<boolean>) | undefined;
+let mtprotoLookupUser:
+  | ((id: number) => Promise<{ id: number; firstName?: string; username?: string; deleted?: boolean } | null>)
+  | undefined;
+let mtprotoResolveUsername:
+  | ((username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>)
+  | undefined;
+
+const serviceSessionEnabled = await bootstrapServiceSession(config, {
+  dataDirectory: 'data',
+  probe: probeMtprotoSession,
+});
+if (!serviceSessionEnabled && config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
+  botLogger.warn(
+    'Shared MTProto disabled: dedicated service identity/session check failed; user credentials will not be borrowed',
+  );
+}
+
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
   const { createGoogleSyncQueue } = await import('./services/google/sync-queue.ts');
@@ -421,6 +448,147 @@ const { queue: broadcastQueue, enqueuer: broadcastEnqueuer } = createBroadcastQu
 );
 let broadcastQueueCleanup: { close: () => Promise<void> } | undefined;
 
+if (config.REDIS_URL && serviceSessionEnabled && !config.DISABLE_VOICE) {
+  try {
+    const { createCallQueue, createCallWorker } = await import('./worker/call-queue.ts');
+    const { TtsService } = await import('./services/voice/tts-service.ts');
+    const { CallManager } = await import('./services/voice/call-manager.ts');
+    const { CallSessionManager } = await import('./services/voice/call-session-manager.ts');
+    const { CallSession } = await import('./services/voice/call-session.ts');
+    const { NovaStreamingSTT } = await import('./services/voice/nova-streaming-stt.ts');
+    const { FluxStreamingSTT } = await import('./services/voice/flux-streaming-stt.ts');
+    const { ThinkingPhrasePlayer } = await import('./services/voice/thinking-phrase-player.ts');
+    const { CalendarBotAgent } = await import('./services/ai/agent.ts');
+    const { EventService } = await import('./services/event/event-service.ts');
+    const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
+    const { HolidayService } = await import('./services/holiday/holiday-service.ts');
+    const { existsSync } = await import('node:fs');
+
+    const cq = createCallQueue({ url: config.REDIS_URL });
+    callQueue = cq;
+
+    const pyBridgePath = 'scripts/voice-call-bridge.py';
+    const pySessionExists = existsSync('data/voice_caller.session');
+
+    if (!pySessionExists) {
+      botLogger.warn(
+        'Pyrogram session not found (data/voice_caller.session). Run: venv/bin/python scripts/pyrogram-auth.py',
+      );
+    }
+
+    const { TtsTranslationService } = await import('./services/voice/tts-translation.ts');
+    const ttsTranslationService = new TtsTranslationService();
+    const ttsService = new TtsService();
+
+    const DEEPGRAM_API_KEY = config.DEEPGRAM_API_KEY ?? '';
+    if (!DEEPGRAM_API_KEY) {
+      botLogger.warn('DEEPGRAM_API_KEY is not set — STT will not work');
+    }
+
+    // TelegramSender for voice calls — forwards to botRef, which wraps bot.api once the bot exists.
+    const voiceSender = createVoiceSender(botRef);
+    const voiceAgent = new CalendarBotAgent({ debugLogger: aiDebugLogger, summarizer: historySummarizer }, voiceSender);
+    voiceAgentRef = voiceAgent;
+
+    const voiceMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
+    const voiceEventService = new EventService({
+      eventRepo: db.events,
+      materializer: voiceMaterializer,
+    });
+    const voiceHolidayService = new HolidayService(db.holidays);
+
+    const { markStress, numbersToWords } = await import('./services/voice/stress-marker.ts');
+
+    // Language-aware TTS adapter: Silero (RU) → Kokoro (EN) → Google fallback.
+    // All four outer variables (sileroTts, kokoroTts, stressDictionary, fallbackTts) are
+    // module-level lets/consts initialized later; closures resolve them at call time.
+    const voiceCallTts = {
+      synthesize: async (text: string, lang: string): Promise<Buffer> => {
+        const clean = text.replace(/\n/g, ' ');
+        if (lang === 'ru' && sileroTts && stressDictionary) {
+          try {
+            const stressedText = markStress(numbersToWords(clean), stressDictionary);
+            botLogger.info({ engine: 'silero', lang }, 'Voice call TTS');
+            return await sileroTts.synthesize(stressedText);
+          } catch (err) {
+            botLogger.warn({ err }, 'Silero TTS failed, falling back to Google');
+          }
+        } else if (lang === 'en' && kokoroTts) {
+          try {
+            botLogger.info({ engine: 'kokoro', lang }, 'Voice call TTS');
+            return await kokoroTts.synthesize(clean);
+          } catch (err) {
+            botLogger.warn({ err }, 'Kokoro TTS failed, falling back to Google');
+          }
+        } else {
+          botLogger.info({ engine: 'google', lang }, 'Voice call TTS');
+        }
+        return fallbackTts.synthesize(clean, lang);
+      },
+    };
+
+    const callSessionManager = new CallSessionManager({
+      createSession: (sessionId, userId, language, ws) =>
+        CallSession.create({
+          sessionId,
+          userId,
+          language,
+          ws,
+          createNovaStt: () => new NovaStreamingSTT(DEEPGRAM_API_KEY),
+          createFluxStt: () => new FluxStreamingSTT(DEEPGRAM_API_KEY),
+          createThinkingPlayer: () => new ThinkingPhrasePlayer(language),
+          agent: voiceAgent,
+          tts: voiceCallTts,
+          openerText: language === 'ru' ? 'Привет! Чем могу помочь?' : 'Hello! How can I help you?',
+          agentContextBase: {
+            sender: voiceSender,
+            eventService: voiceEventService,
+            chatHistory: db.chatHistory,
+            userRepo: db.users,
+            eventReminderRepo: db.eventReminders,
+            holidayService: voiceHolidayService,
+          },
+        }),
+    });
+
+    callSessionManager.startServer();
+
+    const callManager = new CallManager({
+      fallbackTts: ttsService,
+      callLogRepo: db.callLog,
+      translateText: (text, lang) => ttsTranslationService.translate(text, lang),
+      pyBridgePath,
+      registerSession: (sessionId, userId, language) => callSessionManager.registerSession(sessionId, userId, language),
+      notifyUser: (userId, msg) => {
+        botRef
+          .sendMessage(userId, msg)
+          .catch((err) => botLogger.error({ err, userId }, 'Failed to send call failure notification'));
+      },
+    });
+
+    const worker = createCallWorker({ url: config.REDIS_URL }, callManager);
+    worker.on('failed', onWorkerFailed('call-reminders'));
+    callQueueCleanup = {
+      close: async () => {
+        await worker.close();
+        await cq.queue.close();
+      },
+    };
+
+    botLogger.info('Voice call pipeline initialized (Python bridge + BullMQ)');
+  } catch (error) {
+    botLogger.warn({ err: error }, 'Voice call init failed, queue-only mode');
+    const { createCallQueue } = await import('./worker/call-queue.ts');
+    const cq = createCallQueue({ url: config.REDIS_URL });
+    callQueue = cq;
+    callQueueCleanup = {
+      close: async () => {
+        await cq.queue.close();
+      },
+    };
+  }
+}
+
 // Weather service — optional, requires OPENWEATHER_API_KEY
 let weatherService: import('./services/weather/weather-service.ts').WeatherService | undefined;
 if (config.OPENWEATHER_API_KEY) {
@@ -452,6 +620,14 @@ if (config.REDIS_URL) {
     enqueue: (type, userId, logId, payload) => {
       notifQueue.add(type, { logId, telegramId: userId, type, payload });
     },
+    callSettingsRepo: db.callSettings,
+    callLogRepo: db.callLog,
+    enqueueCall: callQueue
+      ? (data) => {
+          const log = db.callLog.create({ user_id: data.userId, tts_text: data.ttsText });
+          callQueue!.enqueue({ ...data, callLogId: log.id });
+        }
+      : undefined,
     weatherService,
     featureUsageRepo: db.featureUsage,
   });
@@ -483,7 +659,7 @@ if (config.REDIS_URL) {
     setupProposalExpiryCron,
     setupEditProposalExpiryCron,
     setupSessionCleanupCron,
-    unscheduleRetiredCrons,
+    setupBirthdaySyncCron,
     setupChatHistoryCleanupCron,
     setupSqliteBackupCron,
     setupRecurringRemindersCron,
@@ -495,10 +671,20 @@ if (config.REDIS_URL) {
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
   const { processExpiredEditProposals } = await import('./services/google/edit-proposal-expiry.ts');
+  const { BirthdayService, BIRTHDAY_SYNC_THROTTLE_MS } = await import('./services/birthday/birthday-service.ts');
   const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
   const { processSessionKeepalive } = await import('./worker/session-keepalive.ts');
 
   const cronMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
+  const cronBirthdayService = new BirthdayService(
+    db.events,
+    db.birthdayMeta,
+    db.eventReminders,
+    db.notificationPreferences,
+    'scripts/fetch-birthdays.py',
+    () => serviceSessionEnabled,
+  );
+
   const { queue: botTasksQueue, worker: botTasksWorker } = createBotTasksQueue({
     redisUrl: config.REDIS_URL,
     onSecretaryExpiry: () =>
@@ -541,6 +727,13 @@ if (config.REDIS_URL) {
       const deleted = db.actionLog.deleteOlderThan(cutoff);
       if (deleted > 0) botLogger.info({ deleted }, 'Action log cleanup: removed old entries');
     },
+    onBirthdaySync: async () => {
+      const BATCH = 100;
+      const users = db.birthdayMeta.getUsersNeedingSync(BIRTHDAY_SYNC_THROTTLE_MS);
+      for (let i = 0; i < users.length; i += BATCH) {
+        await cronBirthdayService.runBatchSync(users.slice(i, i + BATCH));
+      }
+    },
     onChatHistoryCleanup: () => {
       const deleted = db.chatHistory.deleteOlderThan(90);
       botLogger.info({ deleted }, 'Cleaned up old chat history');
@@ -572,7 +765,7 @@ if (config.REDIS_URL) {
   await setupProposalExpiryCron(botTasksQueue);
   await setupEditProposalExpiryCron(botTasksQueue);
   await setupSessionCleanupCron(botTasksQueue);
-  await unscheduleRetiredCrons(botTasksQueue);
+  await setupBirthdaySyncCron(botTasksQueue);
   await setupChatHistoryCleanupCron(botTasksQueue);
   await setupSqliteBackupCron(botTasksQueue);
   await setupRecurringRemindersCron(botTasksQueue);
@@ -630,6 +823,105 @@ if (config.SILERO_PYTHON_PATH && stressDictionary) {
   const { SileroTtsService } = await import('./services/voice/silero-tts-service.ts');
   sileroTts = new SileroTtsService(config.SILERO_PYTHON_PATH);
   botLogger.info('Silero TTS initialized');
+}
+
+// ─── MTProto session helpers ─────────────────────────────────────────────────
+
+async function probeMtprotoSession(): Promise<{ stdout: string; exitCode: number }> {
+  const proc = Bun.spawn(['venv/bin/python', 'scripts/check-session.py'], {
+    env: { ...process.env },
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const timer = setTimeout(() => proc.kill(), 20_000);
+  try {
+    const [stdout, , exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { stdout, exitCode };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// MTProto userbot for delivering messages to users who haven't started the bot
+// Uses the same pyrogram session as voice-call-bridge.py (data/voice_caller.session)
+if (serviceSessionEnabled) {
+  const { existsSync } = await import('node:fs');
+  if (existsSync('data/voice_caller.session')) {
+    mtprotoSendAsUser = async (userId: number, text: string, username?: string): Promise<boolean> => {
+      const args = ['venv/bin/python', 'scripts/send-message.py', String(userId), text];
+      if (username) args.push(username);
+      const proc = Bun.spawn(args, { env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      if (stderr) botLogger.warn({ userId, stderr: stderr.slice(0, 200) }, 'send-message.py stderr');
+      const ok = exitCode === 0 && stdout.includes('OK');
+      botLogger.info({ userId, ok }, 'MTProto message delivery');
+      return ok;
+    };
+    mtprotoResolveUsername = async (username: string) => {
+      const proc = Bun.spawn(['venv/bin/python', 'scripts/resolve-username.py', username], {
+        env: { ...process.env },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      if (exitCode !== 0) {
+        botLogger.warn({ username, stderr: stderr.slice(0, 200) }, 'resolve-username.py failed');
+        return null;
+      }
+      const parseResult = jsonCodec(
+        z.object({ id: z.number(), firstName: z.string().optional(), username: z.string().optional() }),
+      ).safeParse(stdout.trim());
+      if (!parseResult.success) {
+        botLogger.warn({ username, stdout: stdout.slice(0, 500) }, 'resolve-username.py bad JSON');
+        return null;
+      }
+      return parseResult.data;
+    };
+    mtprotoLookupUser = async (id) => {
+      if (!Number.isSafeInteger(id) || id <= 0) return null;
+      const proc = Bun.spawn(['venv/bin/python', 'scripts/get-user-info.py', String(id)], {
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const timer = setTimeout(() => proc.kill(), 20_000);
+      try {
+        const [stdout, , exit] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+          proc.exited,
+        ]);
+        if (exit !== 0) return null;
+        const result = jsonCodec(
+          z.object({
+            id: z.number().int().positive().safe(),
+            firstName: z.string().optional(),
+            username: z.string().optional(),
+            deleted: z.boolean().optional(),
+          }),
+        ).safeParse(stdout.trim());
+        return result.success && result.data.id === id ? result.data : null;
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    botLogger.info('MTProto messenger initialized (pyrogram)');
+  } else {
+    botLogger.info('Pyrogram session not found, invitation delivery via userbot disabled');
+  }
 }
 
 let aiMessagesQueueCleanup: { close: () => Promise<void> } | undefined;
@@ -794,11 +1086,15 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
     {
       googleDeps,
       renderService,
+      callQueue,
       transcriptionService,
+      mtprotoSendAsUser,
       stressDictionary,
       sileroTts,
       kokoroTts,
       fallbackTts,
+      mtprotoResolveUsername,
+      mtprotoLookupUser,
       eventMentionStore,
       domainEventBus,
       nliClassifier,
@@ -1077,7 +1373,7 @@ bot.onStart(async ({ info }) => {
 const LATE_AGENT_DRAIN_SETTLE_MS = 1_000;
 
 async function drainAgents(settleMs: number): Promise<void> {
-  await agent.drain(settleMs);
+  await Promise.all([agent.drain(settleMs), voiceAgentRef?.drain(settleMs)]);
 }
 
 // Graceful shutdown. Stop taking updates first, then abort the AI turns still
@@ -1093,6 +1389,7 @@ async function shutdown(): Promise<void> {
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
   if (broadcastQueueCleanup) await broadcastQueueCleanup.close();
+  if (callQueueCleanup) await callQueueCleanup.close();
   // Nothing may still be writing when Redis and SQLite close.
   await drainAgents(LATE_AGENT_DRAIN_SETTLE_MS);
   if (googleRedisClient) googleRedisClient.close();

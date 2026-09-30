@@ -120,11 +120,25 @@ export interface GoogleBotDeps {
 export interface CreateBotOpts {
   googleDeps?: GoogleBotDeps;
   renderService?: RenderService;
+  callQueue?: {
+    enqueue(data: {
+      userId: number;
+      eventId: number;
+      callLogId: number;
+      ttsText: string;
+      language: string;
+    }): Promise<void>;
+  };
   transcriptionService?: TranscriptionService;
+  mtprotoSendAsUser?: (userId: number, text: string) => Promise<boolean>;
   stressDictionary?: StressDictionary;
   sileroTts?: SileroTtsService;
   kokoroTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['kokoroTts'];
   fallbackTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['fallbackTts'];
+  mtprotoLookupUser?: (
+    id: number,
+  ) => Promise<{ id: number; firstName?: string; username?: string; deleted?: boolean } | null>;
+  mtprotoResolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   eventMentionStore?: EventMentionStore;
   domainEventBus?: DomainEventBus;
   pushAiMessage?: (data: AiMessageJobData) => Promise<void>;
@@ -145,11 +159,15 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const {
     googleDeps,
     renderService,
+    callQueue,
     transcriptionService,
+    mtprotoSendAsUser,
     stressDictionary,
     sileroTts,
     kokoroTts,
     fallbackTts,
+    mtprotoResolveUsername,
+    mtprotoLookupUser,
     eventMentionStore,
     domainEventBus,
     pushAiMessage,
@@ -292,11 +310,14 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       })
     : undefined;
 
-  const telegramSender = createTelegramSender(bot, { sendAsConnectedUser });
+  const telegramSender = createTelegramSender(bot, {
+    sendAsUser: mtprotoSendAsUser,
+    sendAsConnectedUser,
+  });
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
 
-  // Shared deps for picker-driven invitation delivery (Bot API → inviter's own session → deep-link
-  // fallback), reporting by ACTUAL delivery, not just DB-row creation.
+  // Shared deps for picker-driven invitation delivery (Bot API → MTProto → deep-link fallback),
+  // reporting by ACTUAL delivery, not just DB-row creation.
   const pickerInvitationDeps = {
     sender: telegramSender,
     invitationService,
@@ -355,6 +376,22 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     sharedEventRepo: db.sharedEvents,
     privacyService,
     renderService,
+    callSettingsRepo: db.callSettings,
+    callQueue: callQueue
+      ? {
+          enqueue: (userId: number, text: string) => {
+            const callLog = db.callLog.create({ user_id: userId, tts_text: text });
+            const user = db.users.findByTelegramId(userId);
+            return callQueue.enqueue({
+              userId,
+              eventId: 0,
+              callLogId: callLog.id,
+              ttsText: text,
+              language: user?.language ?? 'en',
+            });
+          },
+        }
+      : undefined,
     notificationPrefs: {
       getPrefs: (userId: number) => prefsService.getOrCreate(userId),
       update: db.notificationPreferences.update.bind(db.notificationPreferences),
@@ -374,6 +411,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     transcriptionService,
     botToken: token,
     stressDictionary,
+    resolveUsername: mtprotoResolveUsername,
+    lookupTelegramUser: mtprotoLookupUser,
     sileroTts,
     kokoroTts,
     fallbackTts,
@@ -717,6 +756,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           },
         },
         onboardingScene: scenesSetup.scenes.onboardingScene,
+        callSettingsRepo: db.callSettings,
         sharingSettingsRepo: db.sharingSettings,
         feedbackDeps: {
           feedbackRepo,
@@ -885,8 +925,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       const fallbackChatId = user.telegram_id;
 
       // Reply-fast: ack immediately with "sending…", then deliver to all selected invitees
-      // SERIALLY (an invitee who never started the bot gets it from the inviter's own Telegram
-      // session, one send-as-user.py spawn per invitee on that single account; serial also
+      // SERIALLY (each invitee's MTProto fallback spawns send-message.py against the shared
+      // non-WAL voice_caller.session, and concurrent spawns corrupt it — CLAUDE.md; serial also
       // avoids a 429 burst on the shared 1-CPU host), then edit the ack in place with the
       // per-invitee status. Per-invitee failures are isolated and the lines preserve input order.
       const pickerIo = createPickerAckIo(
@@ -932,7 +972,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           pickerInvitationDeps.sender.editMessageText(ctx.chatId, messageId, text, parseMode),
         'HTML',
       );
-      // Groups receive the invitation via Bot API only — no send from the inviter's account, and no
+      // Groups receive the invitation via Bot API only — no MTProto userbot delivery, and no
       // deep-link fallback: a forward invite link resolves only in a user's private /start and
       // can't be accepted on behalf of a group, so a failed delivery reports honest failure.
       await runChatShareWithAck(
@@ -942,7 +982,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             inviter: user,
             inviteeId,
             fallbackChatId: user.telegram_id,
-            allowInviterSession: false,
+            allowMtproto: false,
             isGroupTarget: true,
           },
           lang,

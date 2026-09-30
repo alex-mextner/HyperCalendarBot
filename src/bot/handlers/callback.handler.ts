@@ -19,6 +19,7 @@ import { z } from 'zod';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t, toLang } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
+import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
@@ -155,6 +156,7 @@ export interface CallbackHandlerOpts {
     sendMessage: (chatId: number, text: string, options?: { parse_mode: ParseMode }) => Promise<void>;
     enqueueSyncJob?: (job: { type: string; userId: number; eventId: number; action: string }) => Promise<void>;
   };
+  callSettingsRepo?: CallSettingsRepository;
   sharingSettingsRepo?: SharingSettingsRepository;
   feedbackDeps?: {
     feedbackRepo: FeedbackRepository;
@@ -224,6 +226,7 @@ export function createCallbackHandler(
     invitationNotifyDeps,
     onboardingScene,
     editProposalDeps,
+    callSettingsRepo,
     sharingSettingsRepo,
     feedbackDeps,
     userRepo,
@@ -1541,7 +1544,16 @@ export function createCallbackHandler(
             },
           }
         : undefined;
-    return handleSettingsCallback(ctx, user, payload, prefsService, sharingSettingsRepo, userRepo, tgDeps);
+    return handleSettingsCallback(
+      ctx,
+      user,
+      payload,
+      prefsService,
+      callSettingsRepo,
+      sharingSettingsRepo,
+      userRepo,
+      tgDeps,
+    );
   });
 
   // Geo-location timezone: confirm update

@@ -5,7 +5,7 @@ import { createToolExposure, runRoundRevealingRejectedTools } from '../../../src
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 import { initProviderAlerts, isAiChainDown, resetProviderAlertState } from '../../../src/utils/ai-provider-alert.ts';
 
-const allowed = getToolDefinitions();
+const allowed = getToolDefinitions('text');
 test('calculate is available on the first lazy round because the prompt requires it', () => {
   const s = createToolExposure(allowed);
   expect(s.schemas().flatMap((tool) => (tool.type === 'function' ? [tool.function.name] : []))).toEqual([
@@ -63,10 +63,12 @@ test('bounded discovery never evicts already disclosed schemas', () => {
   expect(s.intercept('calculate', {}, s.snapshot())).toBeUndefined();
 });
 test('mode-specific tools are not advertised or activated', () => {
-  const supplement = createToolExposure(getToolDefinitions(true));
+  const voice = createToolExposure(getToolDefinitions('live_call'));
+  expect(voice.prompt).not.toContain('render_day_image:');
+  expect(voice.intercept('render_day_image', {}, voice.snapshot())?.success).toBe(false);
+  const supplement = createToolExposure(getToolDefinitions('text', true));
   expect(supplement.prompt).toContain('supplement_skip:');
   expect(supplement.prompt).not.toContain('end_conversation:');
-  expect(supplement.intercept('end_conversation', {}, supplement.snapshot())?.success).toBe(false);
 });
 test('invalid discovery input does not activate anything', () => {
   const s = createToolExposure(allowed);

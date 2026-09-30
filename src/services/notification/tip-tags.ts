@@ -13,7 +13,9 @@ export const BOT_TIP_FEATURE_MAP: { [tipKey: string]: FeatureKey } = {
   complex_recurrence: K.RECURRENCE,
   ics_import: K.IMPORT,
   // ── Reminders & not forgetting ──
+  call_before_flight: K.VOICE_CALLS,
   multiple_reminders: K.REMINDERS,
+  voice_calls: K.VOICE_CALLS,
   daily_medicine: K.REMINDERS,
   birthday_reminder: K.REMINDERS,
   // ── Planning & overview ──

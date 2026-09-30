@@ -1,13 +1,16 @@
+import { z } from 'zod';
 import type { BirthdayMetadataRepository } from '../../database/repositories/birthday-metadata.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
 import type { BirthEventMetadata, CalendarEvent } from '../../database/types.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { allDayReminderUtc } from '../notification/materializer.ts';
 
 const birthdayLogger = logger.child({ module: 'birthday-service' });
 
+export const BIRTHDAY_SYNC_THROTTLE_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_ALL_DAY_TIME = '09:00';
 
 export interface UpsertBirthdayParams {
@@ -19,6 +22,7 @@ export interface UpsertBirthdayParams {
   year: number | null;
   lang: 'en' | 'ru';
   timezone: string;
+  autoCreated: boolean;
   groupId?: number;
 }
 
@@ -35,12 +39,22 @@ export interface BirthdaysForDisplay {
 }
 
 export class BirthdayService {
+  private sharedMtprotoUnavailableLogged = false;
+
   constructor(
     private eventRepo: EventRepository,
     private metaRepo: BirthdayMetadataRepository,
     private reminderRepo: EventReminderRepository,
     private prefsRepo: NotificationPreferencesRepository,
+    private fetchScriptPath = 'scripts/fetch-birthdays.py',
+    private sharedMtprotoAvailable: () => boolean = () => true,
   ) {}
+
+  shouldSkipSync(userId: number): boolean {
+    const state = this.metaRepo.getSyncState(userId);
+    if (!state) return false;
+    return Date.now() - new Date(state.synced_at).getTime() < BIRTHDAY_SYNC_THROTTLE_MS;
+  }
 
   findExistingBirthday(
     celebrantId: number,
@@ -96,8 +110,7 @@ export class BirthdayService {
       event_id: eventId,
       celebrant_id: params.celebrantId ?? null,
       birth_year: params.year ?? null,
-      // Birthdays are only added by hand since the Telegram-profile auto-sync was removed.
-      auto_created: 0,
+      auto_created: params.autoCreated ? 1 : 0,
     });
 
     if (remindersNeedUpdate) {
@@ -137,6 +150,72 @@ export class BirthdayService {
         interval_label: 'day of',
       });
     }
+  }
+
+  async runBatchSync(
+    users: { telegram_id: number; first_name: string | null; language: string; timezone: string }[],
+  ): Promise<void> {
+    if (!this.sharedMtprotoAvailable()) {
+      if (!this.sharedMtprotoUnavailableLogged) {
+        birthdayLogger.warn('Birthday sync skipped: shared MTProto service identity is unavailable');
+        this.sharedMtprotoUnavailableLogged = true;
+      }
+      return;
+    }
+    if (this.sharedMtprotoUnavailableLogged) {
+      birthdayLogger.info('Birthday sync resumed: shared MTProto service identity is available');
+      this.sharedMtprotoUnavailableLogged = false;
+    }
+
+    const pending = users.filter((u) => !this.shouldSkipSync(u.telegram_id));
+    const ids = pending.map((u) => u.telegram_id);
+    if (ids.length === 0) return;
+
+    let result: Record<string, { day: number; month: number; year?: number } | null>;
+    try {
+      const proc = Bun.spawn(['venv/bin/python', this.fetchScriptPath], {
+        stdin: Buffer.from(JSON.stringify(ids)),
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const exitCode = await proc.exited;
+
+      if (exitCode !== 0) {
+        const err = await new Response(proc.stderr).text();
+        birthdayLogger.warn({ err }, 'Batch fetch-birthdays.py failed');
+        return;
+      }
+      const stdout = await new Response(proc.stdout).text();
+      result = jsonCodec(
+        z.record(z.string(), z.object({ day: z.number(), month: z.number(), year: z.number().optional() }).nullable()),
+      ).parse(stdout);
+    } catch (err) {
+      birthdayLogger.error({ err }, 'Failed to spawn batch fetch-birthdays.py');
+      return;
+    }
+
+    for (const user of pending) {
+      const birthday = result[String(user.telegram_id)];
+      if (!birthday) continue;
+      try {
+        this.upsertBirthdayEvent({
+          ownerId: user.telegram_id,
+          celebrantId: user.telegram_id,
+          celebrantName: user.first_name ?? String(user.telegram_id),
+          day: birthday.day,
+          month: birthday.month,
+          year: birthday.year ?? null,
+          lang: (user.language as 'en' | 'ru') ?? 'en',
+          timezone: user.timezone,
+          autoCreated: true,
+        });
+      } catch (err) {
+        birthdayLogger.error({ err, userId: user.telegram_id }, 'Failed to upsert birthday event');
+      }
+    }
+
+    const now = new Date().toISOString();
+    for (const u of pending) this.metaRepo.upsertSyncState(u.telegram_id, now);
   }
 
   getBirthdaysForDisplay(userId: number, groupCalendars: { groupId: number; title: string }[]): BirthdaysForDisplay {

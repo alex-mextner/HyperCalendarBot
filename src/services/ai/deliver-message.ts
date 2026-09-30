@@ -64,8 +64,7 @@ export interface DeliverMessageParams {
   fallbackRecipientId: number;
   fallbackText: string;
   botSend: (recipientId: number, text: string, keyboard?: InlineKeyboard) => Promise<{ message_id: number }>;
-  /** Send from the initiator's own connected Telegram account (their personal MTProto session). */
-  userSessionSend?: (userId: number, text: string, username?: string) => Promise<boolean>;
+  mtprotoSend?: (userId: number, text: string, username?: string) => Promise<boolean>;
   /** When true, skip the deep-link fallback step (3) entirely. Used for group targets, where a
    *  forward deep-link is meaningless (it resolves only in a user's private /start). */
   suppressFallback?: boolean;
@@ -74,8 +73,7 @@ export interface DeliverMessageParams {
 export async function deliverMessage(
   params: DeliverMessageParams,
 ): Promise<{ delivered: boolean; messageId?: number; fallbackSent?: boolean }> {
-  const { targetId, targetUsername, text, keyboard, fallbackRecipientId, fallbackText, botSend, userSessionSend } =
-    params;
+  const { targetId, targetUsername, text, keyboard, fallbackRecipientId, fallbackText, botSend, mtprotoSend } = params;
   const { suppressFallback } = params;
 
   // 1. Bot API
@@ -83,18 +81,18 @@ export async function deliverMessage(
     const msg = await botSend(targetId, text, keyboard);
     return { delivered: true, messageId: msg.message_id };
   } catch (err) {
-    // Non-fatal: the recipient may simply not have started the bot. Fall through to the user's own
-    // session / deep-link, but log so the failure is visible rather than silently swallowed.
+    // Non-fatal: the recipient may simply not have started the bot. Fall through to MTProto /
+    // deep-link, but log so the failure is visible rather than silently swallowed.
     botLogger.warn({ err: describeDeliveryError(err) }, 'Bot API delivery failed, trying fallback');
   }
 
-  // 2. The initiator's own Telegram account
-  if (userSessionSend) {
+  // 2. MTProto
+  if (mtprotoSend) {
     try {
-      const ok = await userSessionSend(targetId, text, targetUsername);
+      const ok = await mtprotoSend(targetId, text, targetUsername);
       if (ok) return { delivered: true };
     } catch (err) {
-      botLogger.warn({ err: describeDeliveryError(err) }, 'User-session delivery failed, trying fallback');
+      botLogger.warn({ err: describeDeliveryError(err) }, 'MTProto delivery failed, trying fallback');
     }
   }
 

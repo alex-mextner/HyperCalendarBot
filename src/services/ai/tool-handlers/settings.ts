@@ -4,6 +4,7 @@ import type {
   NotificationPreferencesUpdate,
   SharingSettings,
   UpdateUserData,
+  UserCallSettings,
   Visibility,
 } from '../../../database/types.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
@@ -28,6 +29,11 @@ interface NotificationUpdates {
   default_reminder_minutes?: number[];
 }
 
+interface CallUpdates {
+  enabled?: boolean;
+  language?: string;
+}
+
 interface PrivacyUpdates {
   default_visibility?: Visibility;
   inline_mode_enabled?: boolean;
@@ -40,7 +46,7 @@ interface VoiceUpdates {
 
 // ── Get result interfaces ──
 
-type SettingsCategory = 'general' | 'notifications' | 'privacy' | 'voice';
+type SettingsCategory = 'general' | 'notifications' | 'calls' | 'privacy' | 'voice';
 
 interface GeneralSettingsResult {
   timezone: string;
@@ -55,6 +61,7 @@ interface VoiceSettingsResult {
   voice_response_enabled: number | null;
 }
 
+type CallSettingsResult = Omit<UserCallSettings, 'user_id' | 'updated_at'>;
 type PrivacySettingsResult = Omit<SharingSettings, 'user_id' | 'updated_at'>;
 
 type ResultCategory = Exclude<SettingsCategory, 'assistant'>;
@@ -62,6 +69,7 @@ type ResultCategory = Exclude<SettingsCategory, 'assistant'>;
 interface AllSettingsResult {
   general?: GeneralSettingsResult;
   notifications?: NotificationPreferencesRow;
+  calls?: CallSettingsResult;
   privacy?: PrivacySettingsResult;
   voice?: VoiceSettingsResult;
 }
@@ -70,12 +78,13 @@ export type ManageSettingsInput =
   | { action: 'get'; category?: SettingsCategory }
   | { action: 'update'; category: 'general'; updates?: GeneralUpdates }
   | { action: 'update'; category: 'notifications'; updates?: NotificationUpdates }
+  | { action: 'update'; category: 'calls'; updates?: CallUpdates }
   | { action: 'update'; category: 'privacy'; updates?: PrivacyUpdates }
   | { action: 'update'; category: 'voice'; updates?: VoiceUpdates }
   | {
       action: 'update';
       category?: undefined;
-      updates?: GeneralUpdates | NotificationUpdates | PrivacyUpdates | VoiceUpdates;
+      updates?: GeneralUpdates | NotificationUpdates | CallUpdates | PrivacyUpdates | VoiceUpdates;
     };
 
 export function handleManageSettings(ctx: AgentContext, input: ManageSettingsInput): ToolResult {
@@ -105,6 +114,17 @@ function handleGet(ctx: AgentContext, category?: SettingsCategory): ToolResult {
     if (ctx.notifications?.notificationPrefs) {
       ctx.notifications?.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
       result.notifications = ctx.notifications?.notificationPrefs.getPrefs(ctx.user.telegram_id);
+    }
+  }
+
+  if (!category || category === 'calls') {
+    if (ctx.voice?.callSettingsRepo) {
+      ctx.voice?.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
+      const settings = ctx.voice?.callSettingsRepo.get(ctx.user.telegram_id);
+      if (settings) {
+        const { user_id: _uid, updated_at: _uat, ...rest } = settings;
+        result.calls = rest;
+      }
     }
   }
 
@@ -148,6 +168,8 @@ function handleUpdate(ctx: AgentContext, input: UpdateInput): ToolResult {
       return updateGeneral(ctx, input.updates);
     case 'notifications':
       return updateNotifications(ctx, input.updates);
+    case 'calls':
+      return updateCalls(ctx, input.updates);
     case 'privacy':
       return updatePrivacy(ctx, input.updates);
     case 'voice':
@@ -212,6 +234,14 @@ function updateNotifications(ctx: AgentContext, updates: NotificationUpdates): T
     success: true,
     output: t(ctx.user.language).aiTools.settings.notificationsUpdated(Object.keys(patch).join(', ')),
   };
+}
+
+function updateCalls(ctx: AgentContext, updates: CallUpdates): ToolResult {
+  if (!ctx.voice?.callSettingsRepo) return { success: false, error: 'Call settings not available.' };
+  ctx.voice?.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
+  if (updates.enabled !== undefined) ctx.voice?.callSettingsRepo.setEnabled(ctx.user.telegram_id, updates.enabled);
+  if (updates.language !== undefined) ctx.voice?.callSettingsRepo.setLanguage(ctx.user.telegram_id, updates.language);
+  return { success: true, output: t(ctx.user.language).aiTools.settings.callsUpdated };
 }
 
 function updatePrivacy(ctx: AgentContext, updates: PrivacyUpdates): ToolResult {
