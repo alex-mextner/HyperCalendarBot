@@ -788,12 +788,13 @@ describe('answers about the user are checked against the profile the agent saw (
     };
   }
 
-  // A clock time or a date is not the calendar: a saved fact or the zone's offset carries them too.
+  // A clock time, a date or a quote is not the calendar: a saved fact or the zone's offset carries them too.
   test.each([
     ['Встаю в 7:30', 'Мира, я помню, что ты встаёшь в 7:30.', 'Встаю в 7:30'],
     ['Отпуск с 10 августа', 'Я помню, что у тебя отпуск с 10 августа.', 'Отпуск с 10 августа'],
     ['', 'Твой часовой пояс — Asia/Kolkata (UTC+5:30).', 'UTC+5:30'],
-  ])('a tool-less answer about the user with a time or date is checked against the profile: %s %s', async (savedFact, answer, shownFact) => {
+    ['Любимая книга — «Мастер и Маргарита»', 'Твоя любимая книга — «Мастер и Маргарита».', '«Мастер и Маргарита»'],
+  ])('a tool-less answer about the user with a time, date or quote is checked against the profile: %s %s', async (savedFact, answer, shownFact) => {
     const ctx = profileContext('ru', 'А что ты знаешь обо мне');
     ctx.user.timezone = 'Asia/Kolkata';
     if (savedFact) new UserMemoryRepository(db).append(USER_ID, savedFact);
@@ -804,6 +805,19 @@ describe('answers about the user are checked against the profile the agent saw (
     expect(result.responseText).toBe(answer);
     expect(result.metrics?.termination).not.toBe('unverified');
     expect(script.counts).toEqual({ model: 1, validator: 1 });
+  });
+
+  test('a quote found neither in the profile nor in the question is a calendar title', async () => {
+    const savedFact = 'Любимая книга — «Мастер и Маргарита»';
+    const answer = 'Помню твою книгу, а ещё у тебя «Концерт в филармонии».';
+    const ctx = profileContext('ru', 'А что ты знаешь обо мне');
+    new UserMemoryRepository(db).append(USER_ID, savedFact);
+    const approves = approvesWhenProfileShows(savedFact);
+    const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(result.responseText).not.toContain(answer);
   });
 
   // With no day named, the calendar is still spoken of by a quoted title, an event id or the word itself.

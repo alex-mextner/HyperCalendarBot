@@ -113,4 +113,10 @@ describe('what cannot be pinned imposes no constraint', () => {
     expect(readDayContent('Встреча в 15:00', SUNDAY_NIGHT, TZ).kind).toBe('none');
     expect(readDayContent('Да', SUNDAY_NIGHT, TZ).kind).toBe('none');
   });
+
+  test('a date alone opens with datesOnly; a period word beside it drops the flag', () => {
+    expect(readDayContent('с 10 августа отпуск', SUNDAY_NIGHT, TZ)).toEqual({ kind: 'open', datesOnly: true });
+    expect(readDayContent('на следующей неделе созвон', SUNDAY_NIGHT, TZ)).toEqual({ kind: 'open' });
+    expect(readDayContent('10 августа на следующей неделе', SUNDAY_NIGHT, TZ)).toEqual({ kind: 'open' });
+  });
 });

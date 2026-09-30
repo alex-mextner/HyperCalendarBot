@@ -44,8 +44,9 @@ const MAX_TOOL_RESULT_CHARS = 600;
 const MAX_TOOL_RESULTS_CHARS = 2400;
 /**
  * Cap for the user's profile shown to the validator. The profile opens with the
- * saved facts, whose lines are held to MEMORY_SECTION_MAX_CHARS, so the cap cuts
- * the end of User Info (a long secretary list), never a saved fact.
+ * saved-facts section, whose fact lines are held to MEMORY_SECTION_MAX_CHARS and
+ * whose heading and footer are a few hundred chars, so the cap cuts the end of
+ * User Info (a long secretary list), never a saved fact.
  */
 export const MAX_USER_PROFILE_CHARS = MEMORY_SECTION_MAX_CHARS + 1_200;
 /** Events listed in the notice that replaces an unverified answer. */
@@ -230,8 +231,8 @@ function toolResultsBlock(tools: readonly ToolEvidence[]): string {
  * nothing about what the calendar holds, so that claim needs a read of the
  * date. A day named only by a word ("завтра") carries no date to check.
  */
-function hasUnbackedFacts(input: ValidationInput): boolean {
-  const report = checkGrounding(input.response, input.tools, input.timezone, input.userMessage);
+function hasUnbackedFacts(input: ValidationInput, now: Date = new Date()): boolean {
+  const report = checkGrounding(input.response, input.tools, input.timezone, input.userMessage, now);
   if (report.ungrounded.length > 0) return true;
   return report.contextOnlyDays.length > 0 && claimsCompleteOrEmptySchedule(input.response);
 }
@@ -248,21 +249,21 @@ const QUESTION_DAY_WORD = new RegExp(`${RU_DAY_WORDS}|${EN_DAY_WORDS}`, 'i');
  *
  * With no tools every clock time and date is unbacked, and a saved fact ("встаю в 7:30", "отпуск
  * с 10 августа") or the zone's offset (UTC+5:30) carries them too, so a tool-less answer is held
- * to the calendar only by a day, period or recurrence word, a calendar word, a quoted title or an
- * event id. The question it answers counts too, and there any day, date or part of a day does:
- * asked "Что у меня 10 августа?" or "что у меня вечером?", an answer about the user is not what
- * was asked. A run that read the calendar can back its times and dates, so there any unbacked fact
- * or day reference counts.
+ * to the calendar only by a day, period or recurrence word, a calendar word, an event id or a
+ * quote found neither in the question nor in the profile (a saved «Мастер и Маргарита» is a
+ * book, not an event title). The question it answers counts too, and there any day, date or part
+ * of a day does: asked "Что у меня 10 августа?" or "что у меня вечером?", an answer about the
+ * user is not what was asked. A run that read the calendar can back its times and dates, so
+ * there any unbacked fact or day reference counts.
  */
-function speaksOfTheCalendar(input: ValidationInput): boolean {
-  const days = readDayContent(input.response, new Date(), input.timezone);
-  if (input.tools.length > 0) return days.kind !== 'none' || hasUnbackedFacts(input);
+function speaksOfTheCalendar(input: ModelValidationInput, now: Date): boolean {
+  const days = readDayContent(input.response, now, input.timezone);
+  if (input.tools.length > 0) return days.kind !== 'none' || hasUnbackedFacts(input, now);
   if (days.kind === 'named' || (days.kind === 'open' && !days.datesOnly)) return true;
   if (CALENDAR_NOUN.test(input.response) || CALENDAR_NOUN.test(input.userMessage)) return true;
   if (QUESTION_DAY_WORD.test(input.userMessage)) return true;
-  return (
-    checkGrounding(input.response, input.tools, input.timezone, input.userMessage).ungroundedTitlesAndIds.length > 0
-  );
+  const knownWords = `${input.userMessage}\n${input.userProfile}`;
+  return checkGrounding(input.response, input.tools, input.timezone, knownWords, now).ungroundedTitlesAndIds.length > 0;
 }
 
 /**
@@ -346,7 +347,7 @@ export async function validateResponse(
 
   const toolCallsSummary =
     input.tools.length > 0 ? input.tools.map((tool) => tool.name).join(', ') : '(none — no tools were called)';
-  const userProfile = speaksOfTheCalendar(input) ? '' : input.userProfile;
+  const userProfile = speaksOfTheCalendar(input, new Date()) ? '' : input.userProfile;
 
   // User-influenced strings are wrapped in clearly-delimited XML-style tags.
   // The system prompt above instructs the validator to treat their contents
