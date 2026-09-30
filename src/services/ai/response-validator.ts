@@ -246,15 +246,21 @@ const CALENDAR_NOUN = /календар|расписани|событи|calendar
  *
  * With no tools every clock time and date is unbacked, and a saved fact ("встаю в 7:30", "отпуск
  * с 10 августа") or the zone's offset (UTC+5:30) carries them too, so a tool-less answer is held
- * to the calendar only by a day, period or recurrence word, a quoted title, an event id or a
- * calendar word. A run that read the calendar can back its times and dates, so there any
- * unbacked fact or day reference counts.
+ * to the calendar only by a day, period or recurrence word or a calendar word in the answer or in
+ * the question it answers ("Что у меня в пятницу?" → "Репетиция в 19:00."), a quoted title or an
+ * event id. A run that read the calendar can back its times and dates, so there any unbacked fact
+ * or day reference counts.
  */
 function speaksOfTheCalendar(input: ValidationInput): boolean {
-  const days = readDayContent(input.response, new Date(), input.timezone);
-  if (input.tools.length > 0) return days.kind !== 'none' || hasUnbackedFacts(input);
-  const namesDays = days.kind === 'named' || (days.kind === 'open' && !days.datesOnly);
-  if (namesDays || CALENDAR_NOUN.test(input.response)) return true;
+  const now = new Date();
+  if (input.tools.length > 0) {
+    return readDayContent(input.response, now, input.timezone).kind !== 'none' || hasUnbackedFacts(input);
+  }
+  const namesDaysOrCalendar = (text: string) => {
+    const content = readDayContent(text, now, input.timezone);
+    return content.kind === 'named' || (content.kind === 'open' && !content.datesOnly) || CALENDAR_NOUN.test(text);
+  };
+  if (namesDaysOrCalendar(input.response) || namesDaysOrCalendar(input.userMessage)) return true;
   return (
     checkGrounding(input.response, input.tools, input.timezone, input.userMessage).ungroundedTitlesAndIds.length > 0
   );

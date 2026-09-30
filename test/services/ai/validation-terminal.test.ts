@@ -825,4 +825,20 @@ describe('answers about the user are checked against the profile the agent saw (
     expect(result.metrics?.termination).toBe('unverified');
     expect(result.responseText).not.toContain(answer);
   });
+
+  // The question names the day, so an answer that drops it still speaks of the calendar.
+  test.each([
+    ['У тебя репетиция оркестра в 19:00.'],
+    ['Репетиция оркестра в 19:00.'],
+  ])('a saved fact does not answer a question about a day: %s', async (answer) => {
+    const savedEvent = 'По пятницам у меня репетиция оркестра в 19:00';
+    const ctx = profileContext('ru', 'Что у меня в пятницу?');
+    new UserMemoryRepository(db).append(USER_ID, savedEvent);
+    const approves = approvesWhenProfileShows(savedEvent);
+    const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(result.responseText).not.toContain(answer);
+  });
 });
