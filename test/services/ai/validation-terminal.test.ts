@@ -851,7 +851,15 @@ describe('answers about the user are checked against the profile the agent saw (
       'Good evening! What do you know about me?',
       'Good evening, Mira! I remember you play the cello in an orchestra.',
     ],
-  ])('a greeting is not a question about a part of the day: %s', async (language, question, answer) => {
+    [
+      'en' as const,
+      'Morning! What do you know about me?',
+      'Morning, Mira! I remember you play the cello in an orchestra.',
+    ],
+    // The address that calls the bot in a group is not a question about the calendar.
+    ['ru' as const, 'Календарь, что ты знаешь обо мне?', 'Мира, я помню, что ты играешь на виолончели в оркестре.'],
+    ['en' as const, 'Calendar, what do you know about me?', 'Mira, I remember you play the cello in an orchestra.'],
+  ])('a greeting or the bot address is not a question about the calendar: %s %s', async (language, question, answer) => {
     const ctx = profileContext(language, question);
     const approves = approvesWhenProfileShows('Играю на виолончели в оркестре');
     const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
