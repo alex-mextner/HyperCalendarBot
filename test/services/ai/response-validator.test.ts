@@ -232,6 +232,25 @@ describe('tool-run evidence prefilter — deterministic rejection', () => {
     expect(result.approved).toBe(false);
     expect(called).toBe(false);
   });
+
+  test('a tool-less answer that repeats the free day the user named is left to the model', async () => {
+    let called = false;
+    const result = await validateResponse(
+      {
+        userMessage: 'У меня завтра свободный день, что бы поделать?',
+        timezone: 'Europe/Lisbon',
+        userProfile: '',
+        tools: [],
+        response: 'Раз завтра у тебя свободный день — может, прогулка по набережной?',
+      },
+      async () => {
+        called = true;
+        return stubText('APPROVE')({ messages: [], maxTokens: 1 });
+      },
+    );
+    expect(called).toBe(true);
+    expect(result.approved).toBe(true);
+  });
 });
 
 describe('validateResponse — happy path parsing', () => {

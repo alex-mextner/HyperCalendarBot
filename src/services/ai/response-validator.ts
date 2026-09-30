@@ -180,11 +180,11 @@ function claimsCompleteOrEmptySchedule(response: string): boolean {
  * calendar data (not merely today's date or words the user or the model's own
  * tool call supplied), and the prose does not claim a calendar change was made.
  */
-function isGroundedInRun(input: ValidationInput): boolean {
+function isGroundedInRun(input: ValidationInput, now: Date): boolean {
   if (!hasSuccessfulScheduleRead(input.tools)) return false;
   if (input.tools.some((tool) => isMutationTool(tool.name, tool.input))) return false;
   if (claimsCompletedWrite(input.response)) return false;
-  const report = checkGrounding(input.response, input.tools, input.timezone, input.userMessage);
+  const report = checkGrounding(input.response, input.tools, input.timezone, input.userMessage, now);
   aiLogger.info(
     {
       checkedFacts: report.checked,
@@ -341,19 +341,23 @@ export async function validateResponse(
   }
 
   // Tool-less answers too: a saved fact such as "nothing on Friday" is in the profile the
-  // model is shown, and the fast model took it for a read of the calendar.
-  if (!hasSuccessfulScheduleRead(input.tools) && claimsCompleteOrEmptySchedule(input.response)) {
+  // model is shown, and the fast model took it for a read of the calendar. A tool-less answer
+  // that repeats the free day the user named ("у меня завтра свободный день") is left to the model.
+  const echoesTheUser = input.tools.length === 0 && claimsCompleteOrEmptySchedule(input.userMessage);
+  if (!hasSuccessfulScheduleRead(input.tools) && !echoesTheUser && claimsCompleteOrEmptySchedule(input.response)) {
     return {
       approved: false,
       reason: 'Claimed the complete/empty schedule without a successful schedule read',
     };
   }
 
-  if (isGroundedInRun(input)) return { approved: true };
+  // One clock read, so every check reads "today" as the same day.
+  const now = new Date();
+  if (isGroundedInRun(input, now)) return { approved: true };
 
   const toolCallsSummary =
     input.tools.length > 0 ? input.tools.map((tool) => tool.name).join(', ') : '(none — no tools were called)';
-  const userProfile = speaksOfTheCalendar(input, new Date()) ? '' : input.userProfile;
+  const userProfile = speaksOfTheCalendar(input, now) ? '' : input.userProfile;
 
   // User-influenced strings are wrapped in clearly-delimited XML-style tags.
   // The system prompt above instructs the validator to treat their contents
