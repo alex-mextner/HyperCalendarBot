@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ContactRepository } from '../../../../src/database/repositories/contact.repository.ts';
+import { ContactAliasRepository } from '../../../../src/database/repositories/contact-alias.repository.ts';
 import { ContactGroupRepository } from '../../../../src/database/repositories/contact-group.repository.ts';
 import { PlaceRepository } from '../../../../src/database/repositories/place.repository.ts';
 import { PlaceAliasRepository } from '../../../../src/database/repositories/place-alias.repository.ts';
@@ -14,6 +15,7 @@ import {
   handleResolvePlace,
 } from '../../../../src/services/ai/tool-handlers/places.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import { ContactResolver } from '../../../../src/services/contacts/contact-resolver.ts';
 import { PlaceResolver } from '../../../../src/services/places/place-resolver.ts';
 
 const USER_ID = 42;
@@ -22,6 +24,7 @@ function makeCtx(db: Database, isGroup = false): AgentContext {
   const userRepo = new UserRepository(db);
   userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
   const contactRepo = new ContactRepository(db);
+  const contactAliasRepo = new ContactAliasRepository(db);
   const contactGroupRepo = new ContactGroupRepository(db);
   const placeRepo = new PlaceRepository(db);
   const placeAliasRepo = new PlaceAliasRepository(db);
@@ -34,11 +37,15 @@ function makeCtx(db: Database, isGroup = false): AgentContext {
     eventService: {} as AgentContext['eventService'],
     holidayService: {} as AgentContext['holidayService'],
     chatHistory: {} as AgentContext['chatHistory'],
-    conversationLogger: null as never,
+    conversationLogger: null as unknown as AgentContext['conversationLogger'],
     userRepo,
     eventReminderRepo: {} as AgentContext['eventReminderRepo'],
     contactRepo,
-    contactDirectory: { contactAliasRepo: {} as never, contactGroupRepo, contactResolver: {} as never },
+    contactDirectory: {
+      contactAliasRepo,
+      contactGroupRepo,
+      contactResolver: new ContactResolver(contactRepo, contactAliasRepo, contactGroupRepo),
+    },
     placeRepo,
     placeDirectory: {
       placeAliasRepo,

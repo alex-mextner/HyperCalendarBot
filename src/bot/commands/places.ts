@@ -152,6 +152,14 @@ export async function handlePlacesCallback(
   const lang = user.language;
   const userId = user.telegram_id;
   const tr = t(lang).places;
+
+  // GH-712: callback queries can outlive the command message or be delivered in a group.
+  // Reject before parsing the payload or touching the private saved-place directory.
+  if (isGroup(ctx)) {
+    await ctx.answer({ text: tr.groupNotAllowed, show_alert: true });
+    return;
+  }
+
   const [sub, ...args] = payload.split(':');
 
   await ctx.answer();
