@@ -624,6 +624,50 @@ export interface ContactGroupMember {
   added_at: string;
 }
 
+export type PlaceVerification = 'unconfirmed' | 'confirmed';
+
+export interface SavedPlace {
+  id: number;
+  user_id: number;
+  label: string;
+  venue_name: string | null;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  provider: string | null;
+  provider_place_id: string | null;
+  map_url: string | null;
+  notes: string | null;
+  favorite: number;
+  verification: PlaceVerification;
+  provenance: string | null;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface PlaceAlias {
+  id: number;
+  user_id: number;
+  place_id: number;
+  alias: string;
+  created_at: string;
+}
+
+export type PlaceRoleName = 'home' | 'work';
+export type PlaceRoleOwnerType = 'self' | 'contact' | 'group';
+
+export interface PlaceRole {
+  id: number;
+  user_id: number;
+  place_id: number;
+  role: PlaceRoleName;
+  owner_type: PlaceRoleOwnerType;
+  owner_ref_id: number;
+  created_at: string;
+}
+
 export interface EventReminderRow {
   id: number;
   event_id: number;

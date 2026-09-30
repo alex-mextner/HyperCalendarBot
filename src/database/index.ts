@@ -30,6 +30,9 @@ import { NotificationLogRepository } from './repositories/notification-log.repos
 import { NotificationPreferencesRepository } from './repositories/notification-preferences.repository.ts';
 import { ParticipantRepository } from './repositories/participant.repository.ts';
 import { ParticipantGoogleSyncRepository } from './repositories/participant-google-sync.repository.ts';
+import { PlaceRepository } from './repositories/place.repository.ts';
+import { PlaceAliasRepository } from './repositories/place-alias.repository.ts';
+import { PlaceRoleRepository } from './repositories/place-role.repository.ts';
 import { SecretaryRepository } from './repositories/secretary.repository.ts';
 import { SharedEventRepository } from './repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from './repositories/sharing-settings.repository.ts';
@@ -61,6 +64,9 @@ export class DatabaseService {
   readonly contacts: ContactRepository;
   readonly contactAliases: ContactAliasRepository;
   readonly contactGroups: ContactGroupRepository;
+  readonly places: PlaceRepository;
+  readonly placeAliases: PlaceAliasRepository;
+  readonly placeRoles: PlaceRoleRepository;
   readonly participants: ParticipantRepository;
   readonly editProposals: EditProposalRepository;
   readonly secretaries: SecretaryRepository;
@@ -110,6 +116,9 @@ export class DatabaseService {
     this.contacts = new ContactRepository(this.db);
     this.contactAliases = new ContactAliasRepository(this.db);
     this.contactGroups = new ContactGroupRepository(this.db);
+    this.places = new PlaceRepository(this.db);
+    this.placeAliases = new PlaceAliasRepository(this.db);
+    this.placeRoles = new PlaceRoleRepository(this.db);
     this.participants = new ParticipantRepository(this.db);
     this.editProposals = new EditProposalRepository(this.db);
     this.secretaries = new SecretaryRepository(this.db);

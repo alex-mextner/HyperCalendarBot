@@ -32,6 +32,9 @@ import type { GoogleCalendarRepository } from '../../database/repositories/googl
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
+import type { PlaceRepository } from '../../database/repositories/place.repository.ts';
+import type { PlaceAliasRepository } from '../../database/repositories/place-alias.repository.ts';
+import type { PlaceRoleRepository } from '../../database/repositories/place-role.repository.ts';
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
@@ -87,6 +90,7 @@ import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts
 import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
+import { handlePlacesCallback, type PlacesDeps } from '../commands/places.ts';
 import { handleSettingsCallback, pendingGroupTzInput } from '../commands/settings.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
@@ -189,6 +193,9 @@ export interface CallbackHandlerOpts {
   contactRepo?: ContactRepository;
   contactAliasRepo?: ContactAliasRepository;
   contactGroupRepo?: ContactGroupRepository;
+  placeRepo?: PlaceRepository;
+  placeAliasRepo?: PlaceAliasRepository;
+  placeRoleRepo?: PlaceRoleRepository;
   timezoneScene?: AnyScene;
   connectTelegramScene?: AnyScene;
   telegramDeps?: {
@@ -246,6 +253,9 @@ export function createCallbackHandler(
     contactRepo,
     contactAliasRepo,
     contactGroupRepo,
+    placeRepo,
+    placeAliasRepo,
+    placeRoleRepo,
     timezoneScene,
     connectTelegramScene,
     telegramDeps,
@@ -2076,6 +2086,24 @@ export function createCallbackHandler(
       payload,
       { telegram_id: user.telegram_id, language: (user.language ?? 'en') as Lang },
       contactsDeps,
+    );
+  });
+
+  // Places: list/detail/alias/favorite callbacks (#655)
+  const placesDeps: PlacesDeps | undefined =
+    placeRepo && placeAliasRepo && placeRoleRepo && contactRepo && contactGroupRepo
+      ? { placeRepo, placeAliasRepo, placeRoleRepo, contactRepo, contactGroupRepo }
+      : undefined;
+  dispatch.set(CB.PLACES, async (ctx, payload, _parts, user) => {
+    if (!placesDeps) {
+      await ctx.answer();
+      return;
+    }
+    await handlePlacesCallback(
+      ctx,
+      payload,
+      { telegram_id: user.telegram_id, language: (user.language ?? 'en') as Lang },
+      placesDeps,
     );
   });
 

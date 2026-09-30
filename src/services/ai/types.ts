@@ -14,6 +14,9 @@ import type { GroupChatRepository } from '../../database/repositories/group-chat
 import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
+import type { PlaceRepository } from '../../database/repositories/place.repository.ts';
+import type { PlaceAliasRepository } from '../../database/repositories/place-alias.repository.ts';
+import type { PlaceRoleRepository } from '../../database/repositories/place-role.repository.ts';
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
@@ -38,6 +41,7 @@ import type { EventSummary } from '../intent/variable-resolver.ts';
 import type { AddressCache } from '../location/address-cache.ts';
 import type { EventPlace } from '../location/event-venue.ts';
 import type { LocationVerificationService } from '../location/location-verification-service.ts';
+import type { PlaceResolver } from '../places/place-resolver.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import type { ScheduledAiCall, Trigger } from '../scheduled/types.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
@@ -83,6 +87,12 @@ export interface ContactDirectoryCapability {
   contactAliasRepo: ContactAliasRepository;
   contactGroupRepo: ContactGroupRepository;
   contactResolver: ContactResolver;
+}
+
+export interface PlaceDirectoryCapability {
+  placeAliasRepo: PlaceAliasRepository;
+  placeRoleRepo: PlaceRoleRepository;
+  placeResolver: PlaceResolver;
 }
 
 export interface VoiceCapability {
@@ -213,6 +223,8 @@ export interface AgentContext {
   surfacedEvents?: EventSummary[];
   /** Contact directory (also used by sharing, but independently configurable). */
   contactRepo?: ContactRepository;
+  /** Saved place book (also used by location handling, but independently configurable). */
+  placeRepo?: PlaceRepository;
   /** Recipient identities resolved from a requested username during this run. */
   verifiedRecipientIds?: Set<number>;
   /** Events create_event made during this run; undoing them needs no delete confirmation. */
@@ -259,6 +271,7 @@ export interface AgentContext {
   birthday?: BirthdayCapability;
   broadcast?: BroadcastCapability;
   contactDirectory?: ContactDirectoryCapability;
+  placeDirectory?: PlaceDirectoryCapability;
   locationVerification?: LocationVerificationService;
   addressCache?: AddressCache;
   pendingGeoStore?: import('../location/pending-geo-store.ts').PendingGeoStore;
