@@ -8,7 +8,7 @@ import { toolSchemas } from '../../src/services/ai/tool-schemas.ts';
 import { getToolDefinitions } from '../../src/services/ai/tools.ts';
 
 // Keep the retired catalog complete across schema parsing and every offered mode.
-const RETIRED_TOOLS = [
+const RETIRED_DESKTOP_TOOLS = [
   'bash_execute',
   'applescript_run',
   'playwright_action',
@@ -19,8 +19,11 @@ const RETIRED_TOOLS = [
   'claude_list_projects',
   'claude_artifact',
 ];
+// Phone calls went away with the shared MTProto service account (#741).
+const RETIRED_CALL_TOOLS = ['make_call', 'end_call'];
+const RETIRED_TOOLS = [...RETIRED_DESKTOP_TOOLS, ...RETIRED_CALL_TOOLS];
 
-test('retired desktop commands cannot be parsed as tools', () => {
+test('retired desktop and phone-call commands cannot be parsed as tools', () => {
   for (const name of RETIRED_TOOLS) expect(Object.keys(toolSchemas)).not.toContain(name);
 });
 for (const supplement of [false, true]) {

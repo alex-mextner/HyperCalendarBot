@@ -646,6 +646,7 @@ export interface TelegramSession {
   updated_at: string;
 }
 
+/** 'mtproto_user' = delivered via the requesting user's own connected Telegram session; name kept because it is a persisted value. */
 export type NotificationLogChannel = 'telegram_text' | 'mtproto_user';
 
 // --- Notification Log ---

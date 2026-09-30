@@ -312,6 +312,26 @@ describe('executeTool', () => {
     expect(result.error).toContain('Unknown tool');
   });
 
+  test.each(['make_call', 'end_call'])('retired %s is an unknown tool and changes nothing (#741)', async (name) => {
+    const featureUsageRepo = new FeatureUsageRepository(effectDb);
+    const onEventMentioned = mock(() => {});
+    const rowCounts = effectDb.query<{ name: string; count: number }, []>(
+      effectDb
+        .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all()
+        .map(({ name: table }) => `SELECT '${table}' AS name, count(*) AS count FROM "${table}"`)
+        .join(' UNION ALL '),
+    );
+    const before = rowCounts.all();
+
+    const result = await executeTool({ ...ctx, featureUsageRepo, onEventMentioned }, name, { text: 'Call me' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(`Unknown tool: ${name}`);
+    expect(rowCounts.all()).toEqual(before);
+    expect(onEventMentioned).not.toHaveBeenCalled();
+  });
+
   test('supplement_skip returns stopLoop:true', async () => {
     const result = await executeTool(ctx, 'supplement_skip', {});
     expect(result.success).toBe(true);
