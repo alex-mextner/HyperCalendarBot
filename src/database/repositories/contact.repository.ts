@@ -183,22 +183,6 @@ export class ContactRepository {
     })();
   }
 
-  refreshProfile(userId: number, telegramId: number, profile: { username: string | null; firstName?: string }): void {
-    const username = profile.username ? normalizeUsername(profile.username) : null;
-    this.db.transaction(() => {
-      // Telegram can reassign usernames. Remove stale metadata, never move an ID.
-      if (username)
-        this.db
-          .prepare(
-            "UPDATE contacts SET username = NULL WHERE user_id = ? AND LOWER(LTRIM(TRIM(username), '@')) = LOWER(?) AND (telegram_id IS NULL OR telegram_id <> ?)",
-          )
-          .run(userId, username, telegramId);
-      this.db
-        .prepare('UPDATE contacts SET username = ? WHERE user_id = ? AND telegram_id = ?')
-        .run(username, userId, telegramId);
-    })();
-  }
-
   deleteOwned(userId: number, id: number): boolean {
     return this.db.prepare('DELETE FROM contacts WHERE user_id = ? AND id = ?').run(userId, id).changes > 0;
   }

@@ -362,6 +362,8 @@ function getMasterKey(config: EnvConfig): Buffer | null {
 
 ### Modified Delivery Chain
 
+> **2026-09-29 update:** the shared MTProto service account (`data/voice_caller.session`) was removed by owner decision; step 3 below no longer exists. The chain is Bot API → the inviter's own session → deep link to the inviter.
+
 Current: Bot API → Admin MTProto → Deep-link fallback
 
 New:

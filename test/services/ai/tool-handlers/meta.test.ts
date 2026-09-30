@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { ContactRepository } from '../../../../src/database/repositories/contact.repository.ts';
@@ -20,7 +20,6 @@ import {
   handleFindUser,
   handleGetBotInfo,
   handleGetHolidays,
-  handleMakeCall,
   handlePickUsers,
 } from '../../../../src/services/ai/tool-handlers/meta.ts';
 import { handleRenderDayImage } from '../../../../src/services/ai/tool-handlers/render.ts';
@@ -128,38 +127,58 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('telegram_id=123');
     });
 
-    test('returns resolve-unavailable error for unknown username when no MTProto resolver configured', async () => {
-      ctx.messageText = 'Find @nobody';
-      const result = await handleFindUser(ctx, { username: 'nobody' });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('unavailable');
-      expect(result.error).not.toContain('not found');
-    });
-
-    test('falls back to MTProto resolver when not in DB', async () => {
-      const ctxWithResolver = {
-        ...ctx,
-        resolveUsername: async (u: string) =>
-          u === 'ux_consul' ? { id: 999888, firstName: 'Alex', username: 'ux_consul' } : null,
-      };
-      ctxWithResolver.messageText = 'Find @ux_consul';
-      const result = await handleFindUser(ctxWithResolver, { username: '@ux_consul' });
+    test('verifies a local bot user named explicitly by @username', async () => {
+      ctx.userRepo.create({ telegram_id: 456, timezone: 'UTC', language: 'en', username: 'alex', first_name: 'Alex' });
+      ctx.messageText = 'Find @alex';
+      const result = await handleFindUser(ctx, { username: '@alex' });
       expect(result.success).toBe(true);
-      expect(result.output).toContain('telegram_id=999888');
-      expect(result.output).toContain('MTProto');
+      expect(result.data).toEqual({ telegram_id: 456, name: 'Alex' });
+      expect(ctx.verifiedRecipientIds?.has(456)).toBe(true);
     });
 
-    test('returns error when MTProto resolver also fails, with cleaned username', async () => {
-      const ctxWithResolver = {
-        ...ctx,
-        resolveUsername: async (_u: string) => null,
-      };
-      ctxWithResolver.messageText = 'Find @ghost_user';
-      const result = await handleFindUser(ctxWithResolver, { username: '@ghost_user' });
+    test('a bot user without a first name is named by the stored @username, not the lowercased input', async () => {
+      ctx.userRepo.create({ telegram_id: 457, timezone: 'UTC', language: 'en', username: 'SamRiver' });
+      ctx.messageText = 'Find @samriver';
+      const result = await handleFindUser(ctx, { username: '@samriver' });
+      expect(result.data).toEqual({ telegram_id: 457, name: 'SamRiver' });
+      expect(ctx.verifiedRecipientIds?.has(457)).toBe(true);
+    });
+
+    test.each([0, -5])('a users row with invalid telegram_id %d is not found and not verified', async (id) => {
+      ctx.userRepo.create({ telegram_id: id, timezone: 'UTC', language: 'en', username: 'broken' });
+      ctx.messageText = 'Find @broken';
+      const result = await handleFindUser(ctx, { username: '@broken' });
       expect(result.success).toBe(false);
-      expect(result.error).toContain('not found');
-      expect(result.error).toContain('ghost_user');
-      expect(result.error).not.toContain('@@');
+      expect(result.error).toContain("hasn't started this bot");
+      expect(ctx.verifiedRecipientIds?.has(id) ?? false).toBe(false);
+    });
+
+    test('unknown @username: says the person has not started the bot, offers the picker, spawns nothing', async () => {
+      const spawn = spyOn(Bun, 'spawn');
+      try {
+        ctx.messageText = 'Find @ghost_user';
+        const result = await handleFindUser(ctx, { username: '@ghost_user' });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('@ghost_user');
+        expect(result.error).not.toContain('@@');
+        expect(result.error).toContain("hasn't started this bot");
+        expect(result.error).not.toMatch(/unavailable|not found/i);
+        expect(result.agentHint).toContain('pick_users');
+        expect(ctx.verifiedRecipientIds?.size ?? 0).toBe(0);
+        expect(spawn).not.toHaveBeenCalled();
+      } finally {
+        spawn.mockRestore();
+      }
+    });
+
+    test('unknown @username error is localized for Russian users', async () => {
+      ctx.user = { ...ctx.user, language: 'ru' };
+      ctx.messageText = 'Найди @ghost_user';
+      const result = await handleFindUser(ctx, { username: 'ghost_user' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('@ghost_user');
+      expect(result.error).toContain('не запускал');
+      expect(result.agentHint).toContain('pick_users');
     });
   });
 
@@ -810,27 +829,6 @@ describe('handleCalculate', () => {
     const r = handleCalculate({ expression: '2026-04-10 - 2026-03-21' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('20 days');
-  });
-});
-
-describe('handleMakeCall', () => {
-  test('blocks make_call during live_call', async () => {
-    const liveCtx = {
-      user: { telegram_id: 1, language: 'en' },
-      inputMode: 'live_call',
-    } as Partial<AgentContext> as AgentContext;
-    const result = handleMakeCall(liveCtx, { text: 'reminder' });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('live call');
-  });
-
-  test('returns error when callQueue not available', async () => {
-    const noQueueCtx = {
-      user: { telegram_id: 1, language: 'en' },
-      inputMode: undefined,
-    } as Partial<AgentContext> as AgentContext;
-    const result = handleMakeCall(noQueueCtx, { text: 'reminder' });
-    expect(result.success).toBe(false);
   });
 });
 

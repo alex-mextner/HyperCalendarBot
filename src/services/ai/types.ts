@@ -22,7 +22,6 @@ import type {
   NotificationPreferencesRow,
   NotificationPreferencesUpdate,
   User,
-  UserCallSettings,
 } from '../../database/types.ts';
 import type { ParseMode } from '../../utils/telegram.ts';
 import type { BirthdayService } from '../birthday/birthday-service.ts';
@@ -77,15 +76,7 @@ export interface GroupCapability {
 }
 
 export interface VoiceCapability {
-  callQueue: { enqueue(userId: number, text: string): void };
-  callSettingsRepo: {
-    get(userId: number): UserCallSettings | null;
-    ensureDefaults(userId: number): void;
-    setEnabled(userId: number, enabled: boolean): void;
-    setLanguage(userId: number, lang: string): void;
-  };
-  /** May be absent if the dictionary file failed to load (non-fatal). handleLookupStress guards for this. */
-  stressDictionary?: StressDictionary;
+  stressDictionary: StressDictionary;
 }
 
 export interface GoogleCapability {
@@ -191,10 +182,6 @@ export interface AgentContext {
     text: string,
     options?: { reply_markup?: InlineKeyboard | TelegramInlineKeyboardMarkup; message_thread_id?: number },
   ) => Promise<TelegramMessage>;
-  lookupTelegramUser?: (
-    id: number,
-  ) => Promise<{ id: number; firstName?: string; username?: string; deleted?: boolean } | null>;
-  resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   /** Events in a ±2-week window around now, preloaded for pattern detection. */
   recentEventsWindow?: EventOccurrence[];
   /**
@@ -216,9 +203,7 @@ export interface AgentContext {
   /** Event participant registry (used independently by events and sharing). */
   participantRepo?: ParticipantRepository;
   /** Type of the current message being processed. */
-  inputMode?: 'text' | 'voice_message' | 'live_call';
-  /** Set to true by end_call tool to hang up after TTS plays. */
-  callEndRequested?: boolean;
+  inputMode?: 'text' | 'voice_message';
   /** Local 'YYYY-MM-DD' start days (ctx.user.timezone) of events created, updated or deleted in this run. */
   changedDays?: Set<string>;
   supplementMode?: boolean;
@@ -294,16 +279,13 @@ export type ContactMatch = {
   created_at?: string;
 };
 
-/** Public metadata from a numeric profile inspection; never authorization evidence. */
+/** Saved address-book metadata for a numeric Telegram ID; never authorization evidence. */
 export type UserInspection = {
   telegram_id: number;
   display_name: string | null;
   preferred_name: string | null;
   username: string | null;
   contact_created_at: string | null;
-  profile_checked_at: string | null;
-  profile_source: 'telegram' | 'cached';
-  deleted: boolean | null;
 };
 
 /** Structured data from tool handlers for intent executor consumption. */
@@ -343,7 +325,7 @@ export interface ToolResult {
   error?: string;
   stopLoop?: boolean;
   /** A handoff is independent of the outer tool name (handlers may delegate). */
-  awaitingInput?: { kind: 'chat' } | { kind: 'speech'; question: string };
+  awaitingInput?: { kind: 'chat' };
   /** Direct execution evidence; never inferred from output or error prose. */
   mutationState?: 'not_applied' | 'uncertain' | 'confirmed';
   effect?:
@@ -439,7 +421,6 @@ export interface TelegramSender {
     variant: InvitationKeyboardVariant,
   ): Promise<{ message_id: number } | null>;
   sendEditProposal?(creatorId: number, text: string, proposalId: number): Promise<{ message_id: number } | null>;
-  sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;
   sendAsConnectedUser?(
     inviterId: number,
     targetId: number,

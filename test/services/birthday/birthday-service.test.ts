@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, expect, spyOn, test } from 'bun:test';
+import { beforeEach, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { BirthdayMetadataRepository } from '../../../src/database/repositories/birthday-metadata.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -43,7 +43,6 @@ test('upsertBirthdayEvent creates event with correct fields and reminders', () =
     year: 1996,
     lang: 'ru',
     timezone: 'UTC',
-    autoCreated: true,
   });
 
   const events = db.prepare("SELECT * FROM events WHERE event_type = 'birthday'").all() as {
@@ -60,44 +59,6 @@ test('upsertBirthdayEvent creates event with correct fields and reminders', () =
   expect(reminders.length).toBeGreaterThanOrEqual(1);
 });
 
-test('shouldSkipSync returns true when recently synced', () => {
-  const metaRepo = new BirthdayMetadataRepository(db);
-  metaRepo.upsertSyncState(1, new Date().toISOString());
-  expect(service.shouldSkipSync(1)).toBe(true);
-});
-
-test('shouldSkipSync returns false when never synced', () => {
-  expect(service.shouldSkipSync(1)).toBe(false);
-});
-
-test('batch sync does not spawn shared MTProto while service identity is unavailable and resumes later', async () => {
-  let serviceIdentityAvailable = false;
-  const gatedService = new BirthdayService(
-    new EventRepository(db),
-    new BirthdayMetadataRepository(db),
-    new EventReminderRepository(db),
-    new NotificationPreferencesRepository(db),
-    'scripts/fetch-birthdays.py',
-    () => serviceIdentityAvailable,
-  );
-  const spawnMock = spyOn(Bun, 'spawn').mockReturnValue({
-    exited: Promise.resolve(0),
-    stdout: new Blob(['{}']).stream(),
-    stderr: new Blob(['']).stream(),
-  } as never);
-  const users = [{ telegram_id: 1, first_name: 'Alice', language: 'ru', timezone: 'UTC' }];
-
-  await gatedService.runBatchSync(users);
-  expect(spawnMock).not.toHaveBeenCalled();
-  expect(gatedService.shouldSkipSync(1)).toBe(false);
-
-  serviceIdentityAvailable = true;
-  await gatedService.runBatchSync(users);
-  expect(spawnMock).toHaveBeenCalledTimes(1);
-  expect(gatedService.shouldSkipSync(1)).toBe(true);
-  spawnMock.mockRestore();
-});
-
 test('findExistingBirthday returns existing personal calendar entry', () => {
   service.upsertBirthdayEvent({
     ownerId: 1,
@@ -108,7 +69,6 @@ test('findExistingBirthday returns existing personal calendar entry', () => {
     year: null,
     lang: 'ru',
     timezone: 'UTC',
-    autoCreated: false,
   });
   const result = service.findExistingBirthday(42, 1);
   expect(result).not.toBeNull();
@@ -125,7 +85,6 @@ test('upsertBirthdayEvent same-date call does not recreate reminders', () => {
     year: null,
     lang: 'ru',
     timezone: 'UTC',
-    autoCreated: false,
   });
   const remindersAfterFirst = db.prepare('SELECT * FROM event_reminders').all().length;
 
@@ -139,7 +98,6 @@ test('upsertBirthdayEvent same-date call does not recreate reminders', () => {
     year: null,
     lang: 'ru',
     timezone: 'UTC',
-    autoCreated: false,
   });
   const remindersAfterSecond = db.prepare('SELECT * FROM event_reminders').all().length;
 
@@ -170,7 +128,6 @@ test('upsertBirthdayEvent updates start_at and reminders when year rolls over', 
     year: null,
     lang: 'ru',
     timezone: 'UTC',
-    autoCreated: false,
   });
 
   const updated = db.prepare('SELECT start_at FROM events WHERE id = ?').get(staleEvent.id) as { start_at: string };
@@ -187,7 +144,6 @@ test('getBirthdaysForDisplay returns personal entries sorted by next occurrence'
     year: null,
     lang: 'ru',
     timezone: 'UTC',
-    autoCreated: false,
   });
   const { personal } = service.getBirthdaysForDisplay(1, []);
   expect(personal.length).toBe(1);

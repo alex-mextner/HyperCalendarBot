@@ -5,9 +5,7 @@ import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 
 for (const field of ['end_at', 'description', 'location', 'recurrence_rule']) {
   test(`advertised update schema and dedup agree on null clearing ${field}`, () => {
-    const tool = getToolDefinitions('text').find(
-      (item) => item.type === 'function' && item.function.name === 'update_event',
-    );
+    const tool = getToolDefinitions().find((item) => item.type === 'function' && item.function.name === 'update_event');
     if (tool?.type !== 'function') throw new Error('update_event definition is missing');
     const properties = tool.function.parameters?.properties;
     if (typeof properties !== 'object' || properties === null) throw new Error('properties are missing');

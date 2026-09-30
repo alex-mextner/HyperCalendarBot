@@ -44,7 +44,6 @@ export class WriteOutcomes {
   private deliveryMissed = false;
   /** A silent answering tool (a reaction) reached the chat. */
   private reacted = false;
-  speechQuestion = '';
 
   /**
    * The request was answered by a tool, so a silent final is fine: a picture arrived, or the
@@ -57,7 +56,6 @@ export class WriteOutcomes {
   constructor(private readonly writes: ReadonlySet<string> = new Set(Object.keys(targets))) {}
 
   record(operation: string, input: unknown, result: ToolResult & { disposition: ExecutorDisposition }): void {
-    if (result.awaitingInput?.kind === 'speech') this.speechQuestion = result.awaitingInput.question;
     if (result.mutationState === 'confirmed' || result.mutationState === 'uncertain') this.mayHaveMutated = true;
     const sent = result.disposition === 'executed' && result.success;
     if (DELIVERING_TOOLS.has(operation)) {
