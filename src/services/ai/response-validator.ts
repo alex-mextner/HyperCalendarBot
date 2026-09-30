@@ -238,6 +238,8 @@ function hasUnbackedFacts(input: ValidationInput): boolean {
 
 /** Words that place a claim in the calendar even when it names no day ("в твоём календаре есть репетиция"). */
 const CALENDAR_NOUN = /календар|расписани|событи|calendar|schedule|agenda|\bevents?\b/i;
+/** Any day, date or part of one; a question that has one asks about the calendar ("что у меня вечером?"). */
+const QUESTION_DAY_WORD = new RegExp(`${RU_DAY_WORDS}|${EN_DAY_WORDS}`, 'i');
 
 /**
  * Whether the answer speaks of the calendar, so the profile must not back it. The profile tells
@@ -246,21 +248,18 @@ const CALENDAR_NOUN = /календар|расписани|событи|calendar
  *
  * With no tools every clock time and date is unbacked, and a saved fact ("встаю в 7:30", "отпуск
  * с 10 августа") or the zone's offset (UTC+5:30) carries them too, so a tool-less answer is held
- * to the calendar only by a day, period or recurrence word or a calendar word in the answer or in
- * the question it answers ("Что у меня в пятницу?" → "Репетиция в 19:00."), a quoted title or an
- * event id. A run that read the calendar can back its times and dates, so there any unbacked fact
+ * to the calendar only by a day, period or recurrence word, a calendar word, a quoted title or an
+ * event id. The question it answers counts too, and there any day, date or part of a day does:
+ * asked "Что у меня 10 августа?" or "что у меня вечером?", an answer about the user is not what
+ * was asked. A run that read the calendar can back its times and dates, so there any unbacked fact
  * or day reference counts.
  */
 function speaksOfTheCalendar(input: ValidationInput): boolean {
-  const now = new Date();
-  if (input.tools.length > 0) {
-    return readDayContent(input.response, now, input.timezone).kind !== 'none' || hasUnbackedFacts(input);
-  }
-  const namesDaysOrCalendar = (text: string) => {
-    const content = readDayContent(text, now, input.timezone);
-    return content.kind === 'named' || (content.kind === 'open' && !content.datesOnly) || CALENDAR_NOUN.test(text);
-  };
-  if (namesDaysOrCalendar(input.response) || namesDaysOrCalendar(input.userMessage)) return true;
+  const days = readDayContent(input.response, new Date(), input.timezone);
+  if (input.tools.length > 0) return days.kind !== 'none' || hasUnbackedFacts(input);
+  if (days.kind === 'named' || (days.kind === 'open' && !days.datesOnly)) return true;
+  if (CALENDAR_NOUN.test(input.response) || CALENDAR_NOUN.test(input.userMessage)) return true;
+  if (QUESTION_DAY_WORD.test(input.userMessage)) return true;
   return (
     checkGrounding(input.response, input.tools, input.timezone, input.userMessage).ungroundedTitlesAndIds.length > 0
   );

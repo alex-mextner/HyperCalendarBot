@@ -826,13 +826,15 @@ describe('answers about the user are checked against the profile the agent saw (
     expect(result.responseText).not.toContain(answer);
   });
 
-  // The question names the day, so an answer that drops it still speaks of the calendar.
+  // The question names the day, a date or a part of one, so an answer that drops it still speaks
+  // of the calendar.
   test.each([
-    ['У тебя репетиция оркестра в 19:00.'],
-    ['Репетиция оркестра в 19:00.'],
-  ])('a saved fact does not answer a question about a day: %s', async (answer) => {
-    const savedEvent = 'По пятницам у меня репетиция оркестра в 19:00';
-    const ctx = profileContext('ru', 'Что у меня в пятницу?');
+    ['Что у меня в пятницу?', 'По пятницам у меня репетиция оркестра в 19:00', 'У тебя репетиция оркестра в 19:00.'],
+    ['Что у меня в пятницу?', 'По пятницам у меня репетиция оркестра в 19:00', 'Репетиция оркестра в 19:00.'],
+    ['Что у меня вечером?', 'По вечерам у меня репетиция в 19:00', 'В 19:00 у тебя репетиция.'],
+    ['Что у меня 10 августа?', '10 августа у меня репетиция оркестра', '10 августа у тебя репетиция оркестра.'],
+  ])('a saved fact does not answer a question about a day: %s → %s', async (question, savedEvent, answer) => {
+    const ctx = profileContext('ru', question);
     new UserMemoryRepository(db).append(USER_ID, savedEvent);
     const approves = approvesWhenProfileShows(savedEvent);
     const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
