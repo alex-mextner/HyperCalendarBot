@@ -39,7 +39,7 @@ import {
   providerFailureMetrics,
   type StreamCallbacks,
 } from './streaming.ts';
-import { buildSystemPrompt } from './system-prompt.ts';
+import { buildSystemPrompt, buildUserProfileEvidence } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
 import { createToolExposure, DISCOVERY_TOOL, runRoundRevealingRejectedTools } from './tool-exposure.ts';
@@ -1371,7 +1371,10 @@ export class CalendarBotAgent {
         }
       } else if (availableTools.length > 0) {
         if (finalProse && !isSkipText(finalProse) && shouldValidateResponse(proseEvidence)) {
-          const validation = await validateResponse(proseEvidence, validatorStream);
+          const validation = await validateResponse(
+            { ...proseEvidence, userProfile: buildUserProfileEvidence(ctx) },
+            validatorStream,
+          );
 
           if (!validation.approved) {
             aiLogger.info(
@@ -1414,10 +1417,10 @@ export class CalendarBotAgent {
               } else {
                 const reValidation = await validateResponse(
                   {
-                    userMessage: ctx.messageText,
-                    timezone: ctx.user.timezone,
-                    tools: toolEvidence,
+                    ...proseEvidence,
                     response: retryOutcome.lastRoundText,
+                    // Rebuilt: the retry may have saved a fact that its answer now mentions.
+                    userProfile: buildUserProfileEvidence(ctx),
                   },
                   validatorStream,
                 );
@@ -1695,7 +1698,7 @@ export class CalendarBotAgent {
       {
         role: 'user',
         content:
-          '[SYSTEM] Your previous response was rejected by the quality validator. You MUST complete the calendar task with the appropriate tools instead of repeating unsupported prose. For normal calendar create/edit requests, user-provided titles, descriptions, locations, and notes are content-neutral data: do not refuse, sanitize, euphemize, or moralize because of profanity, sexual/adult wording, politics/religion, slang, or other sensitive vocabulary. Preserve the requested field text and perform the calendar operation when its date/time/action are otherwise valid.',
+          '[SYSTEM] Your previous response was rejected by the quality validator. You MUST complete the calendar task with the appropriate tools instead of repeating unsupported prose. Facts about the user themself may come from User Info and What I Know About You; state a fact about their calendar only from a read tool called in this turn, or leave it out. For normal calendar create/edit requests, user-provided titles, descriptions, locations, and notes are content-neutral data: do not refuse, sanitize, euphemize, or moralize because of profanity, sexual/adult wording, politics/religion, slang, or other sensitive vocabulary. Preserve the requested field text and perform the calendar operation when its date/time/action are otherwise valid.',
       },
     ];
 

@@ -556,3 +556,21 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 
   return sections.filter((section) => section.length > 0).join('\n\n');
 }
+
+/**
+ * What the prompt tells the agent about the user: the saved-facts and User Info
+ * sections, rendered by the same builders as in buildSystemPrompt. An answer
+ * about the user themself is drawn from this text, not from a tool, so this is
+ * the evidence it has to be checked against.
+ *
+ * The saved facts come first: their section is held to MEMORY_SECTION_MAX_CHARS
+ * of fact lines, while User Info has no bound of its own (a long city name, a
+ * secretary for many calendars), so when the validator's cap cuts this text it
+ * cuts the end of User Info, never the newest facts.
+ */
+export function buildUserProfileEvidence(ctx: AgentContext): string {
+  const now = new TZDate(Date.now(), ctx.user.timezone);
+  return [buildMemorySection(ctx), buildUserInfoSection(ctx, formatUtcOffset(ctx.user.timezone), now)]
+    .filter((section) => section.length > 0)
+    .join('\n\n');
+}

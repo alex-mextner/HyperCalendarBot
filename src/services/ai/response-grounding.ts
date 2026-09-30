@@ -32,6 +32,8 @@ export interface GroundingReport {
   checked: number;
   /** The prose tokens no same-run tool result supports. */
   ungrounded: string[];
+  /** The ungrounded tokens that quote a title or give an event id, never a bare time or date. */
+  ungroundedTitlesAndIds: string[];
   /**
    * Tokens supported only by context, not by calendar data: today's or tomorrow's date,
    * the user's own words, or the arguments the model chose for its tool calls.
@@ -390,7 +392,13 @@ export function checkGrounding(
 ): GroundingReport {
   const index = indexEvidence(tools, timezone);
   const context = groundingContext(tools, timezone, userMessage, now);
-  const report: GroundingReport = { checked: 0, ungrounded: [], contextOnly: [], contextOnlyDays: [] };
+  const report: GroundingReport = {
+    checked: 0,
+    ungrounded: [],
+    ungroundedTitlesAndIds: [],
+    contextOnly: [],
+    contextOnlyDays: [],
+  };
   for (const fact of extractFacts(response, timezone)) {
     report.checked++;
     // Context only widens what counts, so the evidence-only check comes first.
@@ -401,7 +409,10 @@ export function checkGrounding(
       if (fact.kind === 'day' || fact.kind === 'instant' || fact.kind === 'dayOrTime') {
         report.contextOnlyDays.push(fact.token);
       }
-    } else report.ungrounded.push(fact.token);
+    } else {
+      report.ungrounded.push(fact.token);
+      if (fact.kind === 'quote' || fact.kind === 'id') report.ungroundedTitlesAndIds.push(fact.token);
+    }
   }
   return report;
 }

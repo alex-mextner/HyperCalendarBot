@@ -644,7 +644,7 @@ describe('agent failure notices', () => {
       await new CalendarBotAgent(config, makeSenderProbe().sender, { streamImpl: failingStream(flaky) }).run(ctx);
     }
     await new CalendarBotAgent(config, makeSenderProbe().sender, {
-      streamImpl: answeringStream('Завтра у тебя свободный день.'),
+      streamImpl: answeringStream('Привет! Какой день посмотреть?'),
     }).run(ctx);
 
     expect(aiFailureNotices.takeNotice(USER_ID)).toBeNull();

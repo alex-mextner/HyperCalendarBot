@@ -38,9 +38,13 @@ export interface DayReferenceSet {
 
 /**
  * What a message says about days: nothing at all, something this module does not pin
- * down (no constraint), or named days.
+ * down (no constraint), or named days. `datesOnly` marks open content made of explicit
+ * dates alone ("с 10 августа"), with no period, recurrence or weekday word.
  */
-export type DayContent = { kind: 'none' } | { kind: 'open' } | { kind: 'named'; set: DayReferenceSet };
+export type DayContent =
+  | { kind: 'none' }
+  | { kind: 'open'; datesOnly?: true }
+  | { kind: 'named'; set: DayReferenceSet };
 
 export const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;
 
@@ -333,7 +337,8 @@ export function readDayContent(text: string, now: Date, timezone: string): DayCo
 
   if (open) return { kind: 'open' };
   if (references.length === 0) {
-    return explicit.dates.length > 0 || has(PERIOD_WORD) ? { kind: 'open' } : { kind: 'none' };
+    if (has(PERIOD_WORD)) return { kind: 'open' };
+    return explicit.dates.length > 0 ? { kind: 'open', datesOnly: true } : { kind: 'none' };
   }
   // "сегодня отмени, перенеси на следующую неделю": the period names a day of its own. With a
   // weekday ("в среду на следующей неделе") the period only qualifies that weekday.
