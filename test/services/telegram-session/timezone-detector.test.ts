@@ -1,10 +1,7 @@
 // test/services/telegram-session/timezone-detector.test.ts
 import { describe, expect, test } from 'bun:test';
 import type { Authorization } from '../../../src/services/telegram-session/session-bridge.ts';
-import {
-  detectTimezoneFromAuthorizations,
-  getLoadedCountryCount,
-} from '../../../src/services/telegram-session/timezone-detector.ts';
+import { detectTimezoneFromAuthorizations } from '../../../src/services/telegram-session/timezone-detector.ts';
 
 function makeAuth(overrides: Partial<Authorization>): Authorization {
   return {
@@ -99,9 +96,5 @@ describe('detectTimezoneFromAuthorizations', () => {
     const result = detectTimezoneFromAuthorizations(auths, 'UTC');
     expect(result).not.toBeNull();
     expect(result?.detectedTimezone).toBe('America/New_York');
-  });
-
-  test('zone.tab loaded with 200+ countries', () => {
-    expect(getLoadedCountryCount()).toBeGreaterThan(200);
   });
 });

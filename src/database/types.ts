@@ -240,6 +240,8 @@ export interface EventParticipant {
   user_id: number;
   status: ParticipantStatus;
   role: ParticipantRole;
+  /** Group chat whose invitation card carried the answer; null when personal or unknown (sourceGroupSql) */
+  source_group_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -653,6 +655,7 @@ export interface DueReminderRow extends EventReminderRow {
   event_resolved_address: string | null;
   event_google_maps_url: string | null;
   event_venue_name: string | null;
+  event_location_verified: number; // 0 | 1
 }
 
 // --- Holiday ---

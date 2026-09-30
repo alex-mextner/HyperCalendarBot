@@ -2,9 +2,9 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { Lang } from '../../../config/constants.ts';
 import { t, toLang } from '../../../config/constants.ts';
-import { CLEARED_LOCATION } from '../../../database/repositories/event.repository.ts';
+import { CLEARED_LOCATION, RESOLVED_PLACE_COLUMNS } from '../../../database/repositories/event.repository.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
-import { getDayRangeUtc, localCalendarDate } from '../../../utils/date.ts';
+import { allDayDates, formatLocalEventSpan, getDayRangeUtc, localCalendarDate } from '../../../utils/date.ts';
 import { eventTimestampError } from '../../../utils/event-timestamps.ts';
 import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
@@ -12,6 +12,7 @@ import { formatEventDetail } from '../../event/formatters.ts';
 import type { EventSummary } from '../../intent/variable-resolver.ts';
 import { formatLocationPlain } from '../../location/format-location.ts';
 import { formatEventWeatherLine } from '../../weather/format.ts';
+import { dayOfStart } from '../day-reference-guard.ts';
 import {
   consumeDeleteApproval,
   type DeleteTarget,
@@ -45,11 +46,30 @@ async function weatherSuffix(ctx: AgentContext, startAt: string, allDay: boolean
   }
 }
 
+/** UTC edges of a local calendar day. Throws on an impossible date, so callers validate first. */
 function expandDateOnly(dateStr: string, timezone: string): { start: string; end: string } {
-  // Interpret dateStr as noon in the user's local timezone (not UTC noon) to avoid
-  // the anchor landing on the wrong calendar day for UTC±10–12 offsets.
-  const d = new TZDate(`${dateStr}T12:00:00`, timezone);
-  return getDayRangeUtc(d, timezone);
+  // Built from components in the user's zone: an offset-less string would be parsed in the host
+  // zone and land on the next local day for UTC+13/+14 users.
+  return getDayRangeUtc(localCalendarDate(dateStr, timezone), timezone);
+}
+
+/**
+ * Event time for the assistant: the user's wall clock first, so it is never tempted to present a
+ * UTC clock time as local, then the stored instants explicitly labelled as UTC. All-day values are
+ * floating calendar dates, labelled as dates (with an explicitly exclusive end), not as UTC instants.
+ */
+function timeParts(start: string, end: string | null | undefined, allDay: boolean, timezone: string): string[] {
+  const endIso = end ?? null;
+  const parts = [`local: ${formatLocalEventSpan(start, endIso, allDay, timezone)}`];
+  if (allDay) {
+    const { first, endExclusive } = allDayDates(start, endIso, timezone);
+    parts.push(`start_date: ${first}`);
+    if (endExclusive) parts.push(`end_date_exclusive: ${endExclusive}`);
+    return parts;
+  }
+  parts.push(`start_utc: ${new Date(start).toISOString()}`);
+  if (endIso) parts.push(`end_utc: ${new Date(endIso).toISOString()}`);
+  return parts;
 }
 
 /**
@@ -99,6 +119,18 @@ function eventToSummary(event: CalendarEvent, timezone: string): EventSummary {
   if (event.location) summary.location = event.location;
   if (event.recurrence_rule) summary.recurrence_rule = event.recurrence_rule;
   return summary;
+}
+
+/**
+ * Remember the event's local start day so a later day picture in this run can show it (#506).
+ * A date-only (all-day) start is the day written, not UTC midnight shifted into the user's zone;
+ * an unreadable start records nothing, which leaves a later picture on the requested day.
+ */
+function recordChangedDay(ctx: AgentContext, event: CalendarEvent): void {
+  const day = dayOfStart(event.start_at, ctx.user.timezone);
+  if (!day) return;
+  ctx.changedDays ??= new Set();
+  ctx.changedDays.add(day);
 }
 
 function buildOrganizerLink(user: AgentContext['user']): string {
@@ -307,8 +339,9 @@ function isRealCalendarDate(dateOnly: string): boolean {
 
 /**
  * One get_events bound as an instant. A date-only value is the edge of that local day; a datetime
- * without an offset is UTC, as the tool contract states. Anything else is null, so the formatter
- * and the SQLite query can never read the same string as two different instants.
+ * without an offset is UTC, as the tool contract states (a pair of UTC day edges is first turned
+ * into local days by `localDaysForUtcDayEdges`). Anything else is null, so the formatter and the
+ * SQLite query can never read the same string as two different instants.
  */
 function parseRangeBound(value: string, timezone: string, edge: 'start' | 'end'): Date | null {
   if (!isRealCalendarDate(value.slice(0, 10))) return null;
@@ -322,9 +355,34 @@ function parseRangeBound(value: string, timezone: string, edge: 'start' | 'end')
   return Number.isFinite(instant.getTime()) ? instant : null;
 }
 
+const UTC_DAY_START_RE = /^(\d{4}-\d{2}-\d{2})T00:00:00(?:\.000)?Z$/;
+const UTC_DAY_END_RE = /^(\d{4}-\d{2}-\d{2})T23:59:59(?:\.999)?Z$/;
+
+/**
+ * Models often send a user's day as UTC day edges (`…T00:00:00Z`..`…T23:59:59Z`). Outside UTC that
+ * window is shifted by the offset: it misses the day's early events and takes in the next day's
+ * (#550). Such a pair is read as those local days; any other instant, an explicit offset or half a
+ * pair stays verbatim, and a zone at UTC on those days keeps the exact input. The day-reference
+ * guard judges a get_events call by these same bounds, so it checks the days actually read.
+ */
+export function localDaysForUtcDayEdges(
+  input: { start_date: string; end_date: string },
+  timezone: string,
+): { start_date: string; end_date: string } {
+  const startDay = UTC_DAY_START_RE.exec(input.start_date)?.[1];
+  const endDay = UTC_DAY_END_RE.exec(input.end_date)?.[1];
+  // The date checks also keep an impossible day (2026-02-30) out of expandDateOnly, which throws.
+  if (!startDay || !endDay || !isRealCalendarDate(startDay) || !isRealCalendarDate(endDay)) return input;
+  const utcEquivalent =
+    expandDateOnly(startDay, timezone).start === `${startDay}T00:00:00.000Z` &&
+    expandDateOnly(endDay, timezone).end === `${endDay}T23:59:59.999Z`;
+  return utcEquivalent ? input : { start_date: startDay, end_date: endDay };
+}
+
 function resolveRangeInterval(input: GetEventsInput, timezone: string): AgendaInterval | null {
-  const start = parseRangeBound(input.start_date, timezone, 'start');
-  const end = parseRangeBound(input.end_date, timezone, 'end');
+  const bounds = localDaysForUtcDayEdges(input, timezone);
+  const start = parseRangeBound(bounds.start_date, timezone, 'start');
+  const end = parseRangeBound(bounds.end_date, timezone, 'end');
   if (!start || !end || start.getTime() >= end.getTime()) return null;
   return { start, end };
 }
@@ -372,8 +430,8 @@ export async function handleGetEvents(ctx: AgentContext, input: GetEventsInput):
   );
   const lines = occurrences.map((occ, i) => {
     const e = occ.event;
-    const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${occ.occurrence_start}`];
-    if (occ.occurrence_end) parts.push(`end: ${occ.occurrence_end}`);
+    const parts = [`id: ${e.id}`, `title: ${e.title}`];
+    parts.push(...timeParts(occ.occurrence_start, occ.occurrence_end, e.all_day === 1, tz));
     if (e.description) parts.push(`description: ${e.description}`);
     parts.push(...locationParts(e));
     if (e.recurrence_rule) parts.push(`recurrence: ${e.recurrence_rule}`);
@@ -455,8 +513,8 @@ async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, us
     ctx.createdEventIds ??= new Set();
     ctx.createdEventIds.add(event.id);
 
-    const parts = [`id: ${event.id}`, `title: ${event.title}`, `start: ${event.start_at}`];
-    if (event.end_at) parts.push(`end: ${event.end_at}`);
+    const parts = [`id: ${event.id}`, `title: ${event.title}`];
+    parts.push(...timeParts(event.start_at, event.end_at, event.all_day === 1, ctx.user.timezone));
     if (event.description) parts.push(`description: ${event.description}`);
     parts.push(...locationParts(event));
 
@@ -484,6 +542,7 @@ async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, us
           : 'The group event is saved but no member notifications were queued (no registered members or broadcast queue unavailable). Do NOT call create_event again for this event.'
         : undefined;
 
+    recordChangedDay(ctx, event);
     return {
       success: true,
       output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')),
@@ -506,6 +565,9 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
   const { event_id, scope: _, owner_id: _oid, ...fields } = input;
+  // A confirmed place comes only from the creator's tap or pin through the verification service,
+  // never from the model (#620); a new text is reset and asked about below
+  for (const column of RESOLVED_PLACE_COLUMNS) Reflect.deleteProperty(fields, column);
   // Removing the location also drops a place a pin set on an event without typed text
   const updates = fields.location === null ? { ...fields, ...CLEARED_LOCATION } : fields;
   if (scope === 'group' && ctx.groupChatId === undefined) {
@@ -533,8 +595,8 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
     };
   }
 
-  const parts = [`id: ${updated.id}`, `title: ${updated.title}`, `start: ${updated.start_at}`];
-  if (updated.end_at) parts.push(`end: ${updated.end_at}`);
+  const parts = [`id: ${updated.id}`, `title: ${updated.title}`];
+  parts.push(...timeParts(updated.start_at, updated.end_at, updated.all_day === 1, ctx.user.timezone));
   if (updated.description) parts.push(`description: ${updated.description}`);
   parts.push(...locationParts(updated));
 
@@ -603,6 +665,12 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
     output += t(ctx.user.language).aiTools.events.participantHint(acceptedParticipants.length);
   }
 
+  if (ctx.locationVerification) {
+    // Before the question below: a place the creator confirms from it re-renders the cards again,
+    // and this edit's render must not land after that one
+    await ctx.locationVerification.refreshInvitationCards(beforeUpdate, updated);
+  }
+
   // Trigger background location verification if location was updated with a concrete location
   if (input.location && ctx.locationVerification && !input.location_abstract) {
     ctx.locationVerification
@@ -617,6 +685,8 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
         : 'The group event is updated but no member notifications were queued (no registered members or broadcast queue unavailable). Do NOT call update_event again with identical arguments.'
       : undefined;
 
+  recordChangedDay(ctx, beforeUpdate);
+  recordChangedDay(ctx, updated);
   return { success: true, output, agentHint: groupHint, data: eventToSummary(updated, ctx.user.timezone) };
 }
 
@@ -640,12 +710,7 @@ export async function handleAttachPendingLocationToEvent(
     };
   }
 
-  const success = await ctx.locationVerification.resolveFromCoordinates(
-    input.event_id,
-    geo.latitude,
-    geo.longitude,
-    ctx.user.telegram_id,
-  );
+  const success = await ctx.locationVerification.resolveFromSharedLocation(input.event_id, geo, ctx.user.telegram_id);
 
   if (!success) {
     return { success: false, error: `Could not resolve geo to address for event ${input.event_id}` };
@@ -815,6 +880,7 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
       }
     }
     ctx.eventService.deleteEventForGroup(input.event_id, ctx.groupChatId!);
+    recordChangedDay(ctx, event);
     return {
       success: true,
       effect: { kind: 'event_deleted' },
@@ -891,6 +957,7 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
     }
   }
 
+  recordChangedDay(ctx, event);
   return {
     success: true,
     effect: { kind: 'event_deleted' },
@@ -935,8 +1002,7 @@ export async function handleSearchEvents(ctx: AgentContext, input: SearchEventsI
 
   const weatherSuffixes = await Promise.all(events.map((e) => weatherSuffix(ctx, e.start_at, e.all_day === 1)));
   const lines = events.map((e, i) => {
-    const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${e.start_at}`];
-    if (e.end_at) parts.push(`end: ${e.end_at}`);
+    const parts = [`id: ${e.id}`, `title: ${e.title}`, ...timeParts(e.start_at, e.end_at, e.all_day === 1, tz)];
     parts.push(...locationParts(e));
     return parts.join(', ') + weatherSuffixes[i]!;
   });
@@ -984,8 +1050,8 @@ export async function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInp
   );
   const lines = upcoming.map((occ, i) => {
     const e = occ.event;
-    const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${occ.occurrence_start}`];
-    if (occ.occurrence_end) parts.push(`end: ${occ.occurrence_end}`);
+    const parts = [`id: ${e.id}`, `title: ${e.title}`];
+    parts.push(...timeParts(occ.occurrence_start, occ.occurrence_end, e.all_day === 1, tz));
     parts.push(...locationParts(e));
     return parts.join(', ') + weatherSuffixes[i]!;
   });
@@ -1037,9 +1103,15 @@ export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): T
     return { success: false, error: 'Failed to snooze event.' };
   }
 
+  recordChangedDay(ctx, event);
+  recordChangedDay(ctx, updated);
+
+  // Snoozing shifts the start by minutes, so even an all-day event now has an exact instant.
+  const newStartParts = timeParts(updated.start_at, null, false, ctx.user.timezone);
+
   return {
     success: true,
-    output: t(ctx.user.language).aiTools.events.snoozed(updated.title, minutes, updated.start_at),
+    output: t(ctx.user.language).aiTools.events.snoozed(updated.title, minutes, newStartParts.join(', ')),
   };
 }
 
@@ -1066,8 +1138,8 @@ export async function handleGetEvent(ctx: AgentContext, input: GetEventInput): P
   }
 
   const weather = await weatherSuffix(ctx, event.start_at, event.all_day === 1);
-  const parts = [`id: ${event.id}`, `title: ${event.title}`, `start: ${event.start_at}`];
-  if (event.end_at) parts.push(`end: ${event.end_at}`);
+  const parts = [`id: ${event.id}`, `title: ${event.title}`];
+  parts.push(...timeParts(event.start_at, event.end_at, event.all_day === 1, ctx.user.timezone));
   if (event.description) parts.push(`description: ${event.description}`);
   parts.push(...locationParts(event));
   if (event.recurrence_rule) parts.push(`recurrence: ${event.recurrence_rule}`);

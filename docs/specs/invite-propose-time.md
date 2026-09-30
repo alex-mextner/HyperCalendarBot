@@ -8,10 +8,10 @@ When a user receives a calendar invitation, they can propose an alternative time
 
 ### Invitee side
 
-1. Receives invitation with 4 buttons:
+1. Receives invitation with 4 buttons in the invitee's language (RU shown):
    ```
-   [Accept ✅] [Decline ❌]
-   [Maybe 🤔]  [Другое время 🕐]
+   [✅ Принять]  [❌ Отклонить]
+   [Возможно 🤔] [Другое время 🕐]
    ```
 
 2. Clicks "Другое время 🕐" → `inv:propose:{invitation_id}`
@@ -96,6 +96,9 @@ No new `status` value needed.
 
 ## i18n Strings (EN/RU)
 
+- `invite_accept_btn` — "✅ Принять" / "✅ Accept"
+- `invite_decline_btn` — "❌ Отклонить" / "❌ Decline"
+- `invite_maybe_btn` — "Возможно 🤔" / "Maybe 🤔"
 - `invite_propose_btn` — "Другое время 🕐" / "Other time 🕐"
 - `invite_propose_ask` — "Какое время предлагаешь? Или напиши: «завтра в 15:00»"
 - `invite_propose_sent(time)` — "⏰ Вы предложили: {time}"

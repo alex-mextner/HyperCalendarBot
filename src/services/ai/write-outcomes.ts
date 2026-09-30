@@ -1,6 +1,6 @@
 /** Run-local mutation evidence. Receipts describe attempts, not durable operation intent. */
 import { t, toLang } from '../../config/constants.ts';
-import { EVENT_UPDATE_FIELDS } from '../../database/repositories/event.repository.ts';
+import { EVENT_UPDATE_FIELDS, UNRESOLVED_PLACE } from '../../database/repositories/event.repository.ts';
 import { normalizeNumericId } from './numeric-id.ts';
 import { DELIVERING_TOOLS, type ExecutorDisposition, isMutationTool, SILENT_TOOLS } from './tool-executor.ts';
 import type { ToolResult } from './types.ts';
@@ -10,7 +10,10 @@ const targets = {
   update_event: ['event_id', 'scope', 'owner_id'],
   send_invitation: ['event_id', 'invitee_id', 'invitee_username'],
 } satisfies { [operation: string]: string[] };
-const updateFields = [...EVENT_UPDATE_FIELDS, 'location_abstract'];
+/** Fields update_event can change; the confirmed place is set only by the creator's tap or pin (#620). */
+const updateFields = [...EVENT_UPDATE_FIELDS, 'location_abstract'].filter(
+  (field) => !Object.hasOwn(UNRESOLVED_PLACE, field),
+);
 function isTargetOperation(operation: string): operation is keyof typeof targets {
   return Object.hasOwn(targets, operation);
 }

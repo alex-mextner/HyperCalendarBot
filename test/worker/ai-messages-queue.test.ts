@@ -510,7 +510,7 @@ describe('createAiMessagesWorker', () => {
 
   test('exhausted retry budget closes the loop on the earlier promise', async () => {
     aiFailureNotices.reset();
-    aiFailureNotices.decide(fakeUser.telegram_id, 'en', { hardOutage: false, willRetry: true });
+    aiFailureNotices.decide(fakeUser.telegram_id, 'en', { hardOutage: false, willRetry: true, isRetryAttempt: false });
 
     const sendMessage = mock(async (_userId: number, _text: string) => ({ message_id: 1 }));
     const captured: { ctx?: AgentContext } = {};
@@ -544,7 +544,7 @@ describe('createAiMessagesWorker', () => {
 
   test('exhausted retry budget sends nothing when the outage was already admitted', async () => {
     aiFailureNotices.reset();
-    aiFailureNotices.decide(fakeUser.telegram_id, 'en', { hardOutage: true, willRetry: true });
+    aiFailureNotices.decide(fakeUser.telegram_id, 'en', { hardOutage: true, willRetry: true, isRetryAttempt: false });
 
     const sendMessage = mock(async (_userId: number, _text: string) => ({ message_id: 1 }));
     const captured: { ctx?: AgentContext } = {};

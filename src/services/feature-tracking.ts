@@ -35,6 +35,7 @@ const CALLBACK_FEATURE_MAP: { [prefix: string]: FeatureKey } = {
   ef: 'events_edit', // edit field
   ed: 'events_edit', // delete event
   edc: 'events_edit', // delete confirm
+  ev_map: 'geolocation', // Map button: event place as a Telegram venue
   er: 'recurrence', // recurrence settings
   erd: 'recurrence', // delete recurrence
   erm: 'reminders', // event reminder

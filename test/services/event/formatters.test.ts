@@ -926,6 +926,72 @@ describe('formatEventListItem', () => {
   });
 });
 
+describe('resolved place on event cards, invitation cards and agendas', () => {
+  // A place resolved before 2026-09-27 without asking the user (migration 063 left it unconfirmed).
+  const unconfirmedPlace: Partial<CalendarEvent> = {
+    location: 'sonder',
+    resolved_address: 'Damrak 1, Amsterdam',
+    venue_name: 'Sonder Hotel',
+    google_maps_url: 'https://www.google.com/maps/place/?q=place_id:dutch-hotel',
+    location_verified: 0,
+  };
+  const confirmedPlace: Partial<CalendarEvent> = { ...unconfirmedPlace, location_verified: 1 };
+  const start = '2026-03-11T09:00:00Z';
+  const end = '2026-03-11T10:00:00Z';
+
+  function renderedSurfaces(place: Partial<CalendarEvent>): { [surface: string]: string } {
+    const event = makeEvent({ title: 'Drinks', start_at: start, end_at: end, ...place });
+    return {
+      eventCard: formatEventDetail(event, 'UTC', 'en'),
+      invitationCard: formatInvitation(event, 'UTC', 'en', 'Alice', 1),
+      dayAgenda: formatDayAgenda([makeOccurrence('Drinks', start, end, place)], start, 'UTC', 'en'),
+    };
+  }
+
+  test('an unconfirmed place shows only the typed text, linked to a map search', () => {
+    for (const [surface, text] of Object.entries(renderedSurfaces(unconfirmedPlace))) {
+      expect({ surface, text }).toEqual({ surface, text: expect.stringContaining('📍 <a href="') });
+      expect({ surface, text }).toEqual({ surface, text: expect.stringContaining('>sonder</a>') });
+      expect({ surface, text }).toEqual({ surface, text: expect.stringContaining('google.com/maps/search/') });
+      expect({ surface, text }).toEqual({ surface, text: expect.not.stringContaining('Damrak') });
+      expect({ surface, text }).toEqual({ surface, text: expect.not.stringContaining('Sonder Hotel') });
+      expect({ surface, text }).toEqual({ surface, text: expect.not.stringContaining('dutch-hotel') });
+    }
+  });
+
+  test('a confirmed place shows "Venue — Address" with its map link', () => {
+    for (const [surface, text] of Object.entries(renderedSurfaces(confirmedPlace))) {
+      expect({ surface, text }).toEqual({
+        surface,
+        text: expect.stringContaining(
+          '📍 <a href="https://www.google.com/maps/place/?q=place_id:dutch-hotel">Sonder Hotel — Damrak 1, Amsterdam</a>',
+        ),
+      });
+    }
+  });
+
+  // A 📍 pin resolves the place by reverse geocoding: an address and a map link, no venue name.
+  const pinPlace: Partial<CalendarEvent> = { ...confirmedPlace, location: null, venue_name: null };
+
+  test('a place confirmed with a pin on an event without typed text shows with its map link', () => {
+    for (const [surface, text] of Object.entries(renderedSurfaces(pinPlace))) {
+      expect({ surface, text }).toEqual({
+        surface,
+        text: expect.stringContaining(
+          '📍 <a href="https://www.google.com/maps/place/?q=place_id:dutch-hotel">Damrak 1, Amsterdam</a>',
+        ),
+      });
+    }
+  });
+
+  test('a stale unconfirmed place on an event without typed text shows no place', () => {
+    for (const [surface, text] of Object.entries(renderedSurfaces({ ...pinPlace, location_verified: 0 }))) {
+      expect({ surface, text }).toEqual({ surface, text: expect.not.stringContaining('📍') });
+      expect({ surface, text }).toEqual({ surface, text: expect.not.stringContaining('Damrak') });
+    }
+  });
+});
+
 describe('ruPlural', () => {
   const cases: [number, string][] = [
     // 1 → one

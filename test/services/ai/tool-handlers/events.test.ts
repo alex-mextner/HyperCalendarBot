@@ -181,13 +181,13 @@ describe('event tool handlers', () => {
         );
       });
 
-      test('UTC-midnight bounds are described truthfully in local time, not as a whole local day', async () => {
+      test('UTC-midnight bounds of a day are read and described as that local day', async () => {
         const result = await handleGetEvents(ctx, {
           start_date: '2026-09-20T00:00:00Z',
           end_date: '2026-09-20T23:59:59Z',
         });
         expect(result.output).toBe(
-          'С 20 сентября 02:00 до 21 сентября 01:59:59 в твоём календаре нет событий, которые начинаются в это время.',
+          'На завтра, 20 сентября, в твоём календаре пока нет событий, которые начинаются в этот день.',
         );
       });
 
@@ -260,6 +260,7 @@ describe('event tool handlers', () => {
         ['0', '1'],
         ['2026-09-20T09:00:00Z', 'next week'],
         ['2026-02-30T09:00:00Z', '2026-03-05T09:00:00Z'],
+        ['2026-02-30T00:00:00Z', '2026-02-30T23:59:59Z'],
       ])('a reversed, zero-length or unparseable interval %s .. %s is rejected before any read', async (start, end) => {
         let reads = 0;
         ctx.eventService.getEventsInRange = () => {
@@ -271,6 +272,98 @@ describe('event tool handlers', () => {
         expect(result.mutationState).toBe('not_applied');
         expect(result.error).toContain('INVALID_RANGE');
         expect(reads).toBe(0);
+      });
+    });
+
+    describe('a day sent as UTC-midnight bounds is the user local day (#550)', () => {
+      // Evening of 2026-09-27 in Belgrade (UTC+2): "tomorrow" is 28.09 local.
+      const events = (...titles: string[]) => titles.map((title) => expect.objectContaining({ title }));
+
+      beforeEach(() => {
+        setSystemTime(new Date('2026-09-27T20:59:00Z'));
+        ctx.user.timezone = 'Europe/Belgrade';
+        ctx.user.language = 'en';
+        const event = (title: string, start_at: string, end_at: string) =>
+          ctx.eventService.createEvent({ user_id: USER_ID, title, start_at, end_at, timezone: 'Europe/Belgrade' });
+        event('Synthetic early swim', '2026-09-27T22:30:00Z', '2026-09-27T23:00:00Z'); // 00:30 local on 28.09
+        event('Synthetic night call', '2026-09-28T23:00:00Z', '2026-09-28T23:30:00Z'); // 01:00 local on 29.09
+        event('Synthetic late run', '2026-09-29T22:30:00Z', '2026-09-29T23:00:00Z'); // 00:30 local on 30.09
+      });
+      afterEach(() => {
+        setSystemTime();
+      });
+
+      test('00:00Z..23:59:59.999Z returns the early event of the local day, not the next local day', async () => {
+        const result = await handleGetEvents(ctx, {
+          start_date: '2026-09-28T00:00:00.000Z',
+          end_date: '2026-09-28T23:59:59.999Z',
+        });
+        expect(result.success).toBe(true);
+        expect(result.data).toEqual(events('Synthetic early swim'));
+      });
+
+      test('a multi-day UTC-midnight range covers exactly those local days', async () => {
+        const result = await handleGetEvents(ctx, {
+          start_date: '2026-09-28T00:00:00Z',
+          end_date: '2026-09-29T23:59:59Z',
+        });
+        expect(result.data).toEqual(events('Synthetic early swim', 'Synthetic night call'));
+      });
+
+      test('date-only bounds keep reading the local day', async () => {
+        const result = await handleGetEvents(ctx, { start_date: '2026-09-28', end_date: '2026-09-28' });
+        expect(result.data).toEqual(events('Synthetic early swim'));
+      });
+
+      test('explicit offsets stay verbatim, even a +00:00 offset naming the UTC day', async () => {
+        const local = await handleGetEvents(ctx, {
+          start_date: '2026-09-28T00:00:00+02:00',
+          end_date: '2026-09-28T23:59:59+02:00',
+        });
+        expect(local.data).toEqual(events('Synthetic early swim'));
+        const utc = await handleGetEvents(ctx, {
+          start_date: '2026-09-28T00:00:00+00:00',
+          end_date: '2026-09-28T23:59:59+00:00',
+        });
+        expect(utc.data).toEqual(events('Synthetic night call'));
+      });
+
+      test('non-midnight instants and a half-matching pair stay verbatim', async () => {
+        const hour = await handleGetEvents(ctx, {
+          start_date: '2026-09-27T22:00:00Z',
+          end_date: '2026-09-27T23:00:00Z',
+        });
+        expect(hour.data).toEqual(events('Synthetic early swim'));
+        const halfDay = await handleGetEvents(ctx, {
+          start_date: '2026-09-28T00:00:00Z',
+          end_date: '2026-09-28T23:30:00Z',
+        });
+        expect(halfDay.data).toEqual(events('Synthetic night call'));
+        const dayEnd = await handleGetEvents(ctx, {
+          start_date: '2026-09-28T12:00:00Z',
+          end_date: '2026-09-28T23:59:59Z',
+        });
+        expect(dayEnd.data).toEqual(events('Synthetic night call'));
+      });
+
+      test('a UTC+14 user gets the requested local day, not the following one', async () => {
+        ctx.user.timezone = 'Pacific/Kiritimati'; // 28.09 local is 2026-09-27T10:00Z..2026-09-28T09:59:59.999Z
+        const edges = await handleGetEvents(ctx, {
+          start_date: '2026-09-28T00:00:00Z',
+          end_date: '2026-09-28T23:59:59Z',
+        });
+        expect(edges.data).toEqual(events('Synthetic early swim'));
+        const dateOnly = await handleGetEvents(ctx, { start_date: '2026-09-28', end_date: '2026-09-28' });
+        expect(dateOnly.data).toEqual(events('Synthetic early swim'));
+      });
+
+      test('a UTC user keeps the UTC day', async () => {
+        ctx.user.timezone = 'UTC';
+        const result = await handleGetEvents(ctx, {
+          start_date: '2026-09-28T00:00:00Z',
+          end_date: '2026-09-28T23:59:59Z',
+        });
+        expect(result.data).toEqual(events('Synthetic night call'));
       });
     });
 

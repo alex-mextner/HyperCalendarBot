@@ -1,7 +1,7 @@
 // src/services/event/formatters.ts
 
 import { TZDate } from '@date-fns/tz';
-import { type Lang, t } from '../../config/constants.ts';
+import { type Lang, t, toLang } from '../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import {
   formatDateHeader,
@@ -16,12 +16,19 @@ import {
 import { escapeHtml } from '../../utils/telegram.ts';
 import type { HolidayEntry } from '../holiday/holiday-service.ts';
 import { formatLocationHtml } from '../location/format-location.ts';
+import type { InvitationRoster, RosterPerson } from '../sharing/invitation-roster.ts';
 import { formatDayWeatherLine, formatEventWeatherLine, formatWeekWeatherLine } from '../weather/format.ts';
 import type { DayWeather, EventForecast } from '../weather/types.ts';
 
+/** Telegram's limit for one text message. */
+const TELEGRAM_MESSAGE_LIMIT = 4096;
+/** Invitees an invitation card lists by name; the rest are counted. */
+const ROSTER_MAX_SHOWN = 10;
+
 function formatDisplayDetails(event: CalendarEvent): string {
   const lines: string[] = [];
-  if (event.location?.trim()) lines.push(`📍 ${formatLocationHtml(event)}`);
+  const place = formatLocationHtml(event);
+  if (place) lines.push(`📍 ${place}`);
   if (event.description?.trim()) lines.push(`📝 ${escapeHtml(event.description)}`);
   const status = event.displayMetadata?.invitationStatus;
   if (status?.trim()) lines.push(`✉️ ${escapeHtml(status)}`);
@@ -185,6 +192,34 @@ export function formatEventDetail(
   return lines.join('\n');
 }
 
+function formatRoster(roster: InvitationRoster, lang: Lang, shown: number): string {
+  const msgs = t(lang).invitationRoster;
+  const nameHtml = (person: RosterPerson) => {
+    const name = escapeHtml(person.name ?? msgs.unnamed);
+    return person.userId === roster.readerId ? msgs.reader(name) : name;
+  };
+  const lines = [
+    msgs.header,
+    msgs.organizer(nameHtml(roster.organizer)),
+    ...roster.invitees.slice(0, shown).map((invitee) => msgs.answer[invitee.answer](nameHtml(invitee))),
+  ];
+  if (roster.invitees.length > shown) lines.push(msgs.more(roster.invitees.length - shown));
+  return lines.join('\n');
+}
+
+/**
+ * An invitation card with its roster block after the event details. Invitees that would push the card
+ * past Telegram's message limit are counted instead of named; a card with no room keeps no roster.
+ */
+export function appendInvitationRoster(card: string, roster: InvitationRoster | null, lang: Lang): string {
+  if (!roster) return card;
+  for (let shown = Math.min(ROSTER_MAX_SHOWN, roster.invitees.length); shown >= 0; shown--) {
+    const withRoster = `${card}\n\n${formatRoster(roster, lang, shown)}`;
+    if (withRoster.length <= TELEGRAM_MESSAGE_LIMIT) return withRoster;
+  }
+  return card;
+}
+
 export function formatInvitation(
   event: CalendarEvent,
   timezone: string,
@@ -194,6 +229,7 @@ export function formatInvitation(
   inviterUsername?: string | null,
   recipientTimezone?: string | null,
   recipientOnboarded?: boolean,
+  roster: InvitationRoster | null = null,
 ): string {
   const inviterLink = inviterUsername
     ? `@${escapeHtml(inviterUsername)}`
@@ -224,7 +260,7 @@ export function formatInvitation(
     card += t(lang as Lang).invite_timezone_note(escapeHtml(inviterName), timezone);
   }
 
-  return card;
+  return appendInvitationRoster(card, roster, toLang(lang));
 }
 
 export function formatEventListItem(event: CalendarEvent, timezone: string, index: number, lang = 'en'): string {

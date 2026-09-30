@@ -1,4 +1,4 @@
-import { t } from '../../../config/constants.ts';
+import { t, toLang } from '../../../config/constants.ts';
 import type {
   NotificationPreferencesRow,
   NotificationPreferencesUpdate,
@@ -277,8 +277,61 @@ function updateVoice(ctx: AgentContext, updates: VoiceUpdates): ToolResult {
   return { success: true, output: t(ctx.user.language).aiTools.settings.voiceUpdated(String(raw)) };
 }
 
+const CONNECT_PROMPT_SNOOZE_MS = 30 * 24 * 60 * 60 * 1000;
+/** Tolerated clock drift between requests; a snooze stamped further ahead is treated as invalid. */
+const CONNECT_PROMPT_SKEW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * `users.connect_telegram_dismissed_at` is the start of a 30-day snooze. It is set both by an
+ * explicit dismissal and whenever the suggestion is shown, so the suggestion appears at most once
+ * per 30 days whether or not the user answers it (the intent path cannot relay a "not now").
+ */
+function connectPromptSnoozed(ctx: AgentContext): boolean {
+  const snoozedAt = ctx.user.connect_telegram_dismissed_at;
+  if (!snoozedAt) return false;
+  const elapsed = Date.now() - new Date(snoozedAt).getTime();
+  // A timestamp far in the future is clock skew, not a snooze; malformed text yields NaN. Neither
+  // counts, and the compare-and-swap claim replaces both.
+  return elapsed > -CONNECT_PROMPT_SKEW_MS && elapsed < CONNECT_PROMPT_SNOOZE_MS;
+}
+
+/**
+ * The /connect_telegram suggestion for an invitation that was just sent, or null (#511, spec
+ * §10.1). It is offered only when the bot itself could not reach a person invitee, the feature is
+ * enabled, the user has no active session, is in a private chat (the command refuses to run in
+ * groups), and the suggestion is not snoozed. Showing it claims the snooze with a compare-and-swap
+ * on the value judged here, so concurrent requests of one user cannot both show it.
+ */
+export function takeConnectTelegramSuggestion(
+  ctx: AgentContext,
+  delivery: { viaBotApi: boolean },
+  isGroupTarget: boolean,
+): string | null {
+  const eligible =
+    // Without a Bot API send capability nothing was attempted, so "not reached" means nothing.
+    ctx.sender?.sendInvitation !== undefined &&
+    !delivery.viaBotApi &&
+    !isGroupTarget &&
+    !ctx.isGroup &&
+    ctx.telegramMasterKey !== undefined &&
+    ctx.telegramSessionRepo !== undefined &&
+    !ctx.telegramSessionRepo.getActive(ctx.user.telegram_id) &&
+    !connectPromptSnoozed(ctx);
+  if (!eligible) return null;
+  const at = new Date().toISOString();
+  if (!ctx.userRepo.claimConnectTelegramSnooze(ctx.user.telegram_id, at, ctx.user.connect_telegram_dismissed_at)) {
+    return null;
+  }
+  // Later steps of the same message read the user snapshot, not the row: intent workflows build a
+  // fresh context per step around the same user object, so update that object in place.
+  ctx.user.connect_telegram_dismissed_at = at;
+  return t(toLang(ctx.user.language)).botTips.connect_telegram;
+}
+
 export function handleDismissConnectTelegramPrompt(ctx: AgentContext): ToolResult {
-  ctx.userRepo.setConnectTelegramDismissedAt(ctx.user.telegram_id, new Date().toISOString());
+  const at = new Date().toISOString();
+  ctx.userRepo.setConnectTelegramDismissedAt(ctx.user.telegram_id, at);
+  ctx.user.connect_telegram_dismissed_at = at; // same in-place snapshot update as above
   return { success: true, output: 'Noted. Will not suggest again for 30 days.' };
 }
 handleDismissConnectTelegramPrompt.meta = { skipActionLog: true } satisfies import('../types.ts').ToolHandlerMeta;
@@ -288,15 +341,10 @@ export function handleConnectTelegramStatus(ctx: AgentContext): ToolResult {
   const session = ctx.telegramSessionRepo?.getActive(ctx.user.telegram_id);
 
   if (!session || !ctx.telegramMasterKey) {
-    const dismissedAt = ctx.user.connect_telegram_dismissed_at;
-    const dismissedRecently =
-      dismissedAt !== null && dismissedAt !== undefined
-        ? Date.now() - new Date(dismissedAt).getTime() < 30 * 24 * 60 * 60 * 1000
-        : false;
     return {
       success: true,
       output: t(lang).aiTools.meta.telegramNotConnectedStatus,
-      data: { connected: false, dismissed_recently: dismissedRecently },
+      data: { connected: false, dismissed_recently: connectPromptSnoozed(ctx) },
     };
   }
 

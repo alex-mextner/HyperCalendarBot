@@ -60,7 +60,7 @@ function setup() {
   const chat = new Map<number, ChatMessage>([
     [
       CARD_MESSAGE_ID,
-      { text: 'Fixture meetup at Fixture Cafe', keyboard: invitationRsvpKeyboard(invitation.id, 'en') },
+      { text: 'Fixture meetup at Fixture Cafe', keyboard: invitationRsvpKeyboard(invitation.id, 'en', event) },
     ],
   ]);
   const editMessage = async (_chatId: number, messageId: number, text: string, keyboard?: InlineKeyboard) => {

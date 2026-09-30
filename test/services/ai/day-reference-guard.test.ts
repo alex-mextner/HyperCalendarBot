@@ -200,6 +200,32 @@ describe('reading a day the user did not name', () => {
     expect(week.success).toBe(true);
   });
 
+  test('UTC day edges are judged as the local day get_events reads (#550)', async () => {
+    // 00:30 local Tuesday, which Monday's UTC edges (Belgrade UTC+2) take in as an instant.
+    const earlyTuesday = events.createEvent({
+      user_id: USER,
+      title: 'Ранний созвон',
+      start_at: '2026-09-28T22:30:00Z',
+      timezone: TZ,
+    }).id;
+    say('Планы на вторник');
+    const ctx = context('Планы на вторник');
+
+    const monday = await executeTool(ctx, 'get_events', {
+      start_date: '2026-09-28T00:00:00Z',
+      end_date: '2026-09-28T23:59:59Z',
+    });
+    expect(monday.success).toBe(false);
+    expect(monday.error).toContain('This call reads 2026-09-28..2026-09-28');
+
+    const tuesday = await executeTool(ctx, 'get_events', {
+      start_date: '2026-09-29T00:00:00Z',
+      end_date: '2026-09-29T23:59:59Z',
+    });
+    expect(tuesday.success).toBe(true);
+    expect(tuesday.output).toStartWith(`id: ${earlyTuesday}, title: Ранний созвон`);
+  });
+
   test('a day picture for another day is rejected', async () => {
     say('Во вторник отмени весь английский');
     const ctx = context('Во вторник отмени весь английский');

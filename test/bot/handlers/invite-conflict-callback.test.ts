@@ -81,7 +81,7 @@ describe('inv_force callback', () => {
       string,
       { reply_markup: InlineKeyboard },
     ];
-    expect(options.reply_markup.toJSON()).toEqual(invitationRsvpKeyboard(99, 'en').toJSON());
+    expect(options.reply_markup.toJSON()).toEqual(invitationRsvpKeyboard(99, 'en', null).toJSON());
   });
 
   test('does nothing without forceInviteDeps', async () => {

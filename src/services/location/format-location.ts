@@ -3,33 +3,24 @@ import type { CalendarEvent } from '../../database/types.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import { buildGoogleMapsSearchUrl } from './geocoding-service.ts';
 
-type LocationFields = Pick<CalendarEvent, 'location' | 'google_maps_url' | 'resolved_address'> & {
+type LocationFields = Pick<CalendarEvent, 'location' | 'google_maps_url' | 'resolved_address' | 'location_verified'> & {
   venue_name?: string | null;
 };
 
 /**
  * Format event location as an HTML link to Google Maps.
- * Display text priority:
- *   1. venue_name + resolved_address ("Кофемания — ул. Большая Никитская, 12")
- *   2. venue_name alone
- *   3. resolved_address
- *   4. raw location
+ * A verified location shows the resolved place (see formatLocationPlain) linked to its map URL, also
+ * on an event with no typed text that a pin resolved; an unverified one shows exactly the typed text
+ * linked to a map search for it, so an unconfirmed geocode never reaches the bot's cards, agendas or
+ * reminders. Returns '' when there is nothing to show.
  */
 export function formatLocationHtml(event: LocationFields): string {
-  if (!event.location) return '';
+  const place = formatLocationPlain(event);
+  if (!place.trim()) return '';
 
-  let displayText: string;
-  if (event.venue_name) {
-    displayText = event.resolved_address
-      ? `${escapeHtml(event.venue_name)} — ${escapeHtml(event.resolved_address)}`
-      : escapeHtml(event.venue_name);
-  } else if (event.resolved_address) {
-    displayText = escapeHtml(event.resolved_address);
-  } else {
-    displayText = escapeHtml(event.location);
-  }
-
-  const url = event.google_maps_url ?? buildGoogleMapsSearchUrl(event.location);
+  const displayText = escapeHtml(place);
+  const verifiedUrl = event.location_verified === 1 ? event.google_maps_url : null;
+  const url = verifiedUrl ?? buildGoogleMapsSearchUrl(event.location?.trim() || place);
   // Encoded Unicode queries can exceed the HTML transport's indivisible tag budget.
   if (escapeHtml(url).length > 2000) return displayText;
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "fingerprint": "8e646726da7e4e31ad50a14988c2b40451b804a2ee15e202c46b7d0aebddea41",
+  "fingerprint": "6d0ed91ddf04de2ca3b9561433dbfa313fe89b7aab2ef16c3758b2fea0fab5cb",
   "runtimeVerification": null,
   "engine": {
     "document": "engine.md",
@@ -333,7 +333,7 @@
       "bindingTypes": [
         "period"
       ],
-      "notes": null,
+      "notes": "This week is today and the six days after it, so a Sunday-evening plan is not a list of past days; next week is Monday to Sunday.",
       "predecessors": [
         {
           "key": "show_next_month",
@@ -880,7 +880,7 @@
             "when": "bind.p.kind == 'week'",
             "call": "render_week_image",
             "input": {
-              "week_start": "{{bind.p.start}}",
+              "week_start": "{{bind.p.calendar_week_start}}",
               "scope": "{{env.scope}}"
             }
           },
@@ -906,7 +906,7 @@
       "bindingTypes": [
         "period"
       ],
-      "notes": null,
+      "notes": "A week picture is always a Monday-to-Sunday calendar week; asked on a Saturday or Sunday, this week means the coming one. The reply names the dates shown.",
       "predecessors": [],
       "issues": [],
       "audit": {
@@ -1213,7 +1213,7 @@
       "bindingTypes": [
         "period"
       ],
-      "notes": "Seven explicit day queries, Monday to Sunday, so every day of the week is answered.",
+      "notes": "Seven explicit day queries, so every day is answered: this week is today and the six days after it, next week is Monday to Sunday.",
       "predecessors": [
         {
           "key": "free_slots_next_week",

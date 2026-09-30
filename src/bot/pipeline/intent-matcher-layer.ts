@@ -326,6 +326,7 @@ export function createIntentMatcherLayer(
       // the supplement agent reads the text from supplementAutoResponse, not from history.
       if (workflow.version === 2) await deliverResponse(ctx, formatted);
       else await ctx.send(formatted);
+      if (result.completeResponse) return { handled: true };
       return { handled: true, needsSupplement: true, supplementAutoResponse: formatted };
     }
 

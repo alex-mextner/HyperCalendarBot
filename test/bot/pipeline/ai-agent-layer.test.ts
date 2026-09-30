@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { AgentLayerDeps } from '../../../src/bot/pipeline/ai-agent-layer.ts';
 import { createAiAgentLayer } from '../../../src/bot/pipeline/ai-agent-layer.ts';
 import type { BotCommandContext } from '../../../src/bot/types.ts';
@@ -271,6 +271,10 @@ describe('supplement mode', () => {
 });
 
 describe('retry / backoff', () => {
+  // The notice tracker is module state; a give-up left on file by one test would
+  // silence the next one's give-up.
+  beforeEach(() => aiFailureNotices.reset());
+
   function makeRetrySetup(jobStoreGetImpl: () => Promise<string | null> = async () => null) {
     const captured: { ctx?: AgentContext } = {};
     const addDelayed = mock(async (_data: unknown, _delay: number): Promise<string> => 'job-123');
@@ -383,7 +387,7 @@ describe('retry / backoff', () => {
   test('give-up after a promised comeback acknowledges the promise and lists the commands', async () => {
     aiFailureNotices.reset();
     // The bot told this user "one sec, be right back" on the first failure.
-    aiFailureNotices.decide(1, 'ru', { hardOutage: false, willRetry: true });
+    aiFailureNotices.decide(1, 'ru', { hardOutage: false, willRetry: true, isRetryAttempt: false });
 
     const { deps, captured } = makeRetrySetup();
     const ctx = makeCtx();
@@ -399,7 +403,7 @@ describe('retry / backoff', () => {
   test('give-up stays quiet when the user was already told the AI is unavailable', async () => {
     aiFailureNotices.reset();
     // Hard outage: the bot already sent the honest notice with the command list.
-    aiFailureNotices.decide(1, 'ru', { hardOutage: true, willRetry: true });
+    aiFailureNotices.decide(1, 'ru', { hardOutage: true, willRetry: true, isRetryAttempt: false });
 
     const { deps, jobStoreDel, captured } = makeRetrySetup();
     const ctx = makeCtx();

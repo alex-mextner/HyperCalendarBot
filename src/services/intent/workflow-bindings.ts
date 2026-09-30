@@ -364,6 +364,11 @@ function buildDatetime(
   return formatLocalInstant(start + (binding.plus_minutes ?? 0) * 60_000, timezone);
 }
 
+/**
+ * 'week' ("на неделю", "на этой неделе", "this week") is today and the six following
+ * local days, so a week plan never starts in the past; on a Monday it equals the
+ * calendar week. 'next_week' is the next calendar week, Monday to Sunday.
+ */
 function periodRange(
   key: (typeof PERIOD_KEYS)[number],
   current: CalendarDay,
@@ -371,7 +376,7 @@ function periodRange(
   const monday = addDays(current, -weekdayMondayZero(current));
   switch (key) {
     case 'week':
-      return { start: monday, end: addDays(monday, 6) };
+      return { start: current, end: addDays(current, 6) };
     case 'next_week':
       return { start: addDays(monday, 7), end: addDays(monday, 13) };
     case 'weekend':
@@ -397,10 +402,33 @@ function periodKind(key: (typeof PERIOD_KEYS)[number]): 'day' | 'week' | 'month'
   return key === 'weekend' ? 'weekend' : 'day';
 }
 
+/** Saturday in the Monday-zero weekday index; Saturday and Sunday are the weekend. */
+const SATURDAY = 5;
+
+/**
+ * Monday of the Monday–Sunday calendar week that pictures the period, for tools that can only
+ * draw a whole calendar week; workflows read it only for week periods. 'week' on a Saturday or
+ * Sunday gives the coming week: the current one has at most a day left, and the rolling 'week'
+ * range lies mostly in the next one.
+ */
+function calendarWeekStart(key: (typeof PERIOD_KEYS)[number], start: CalendarDay): CalendarDay {
+  const weekday = weekdayMondayZero(start);
+  const monday = addDays(start, -weekday);
+  return key === 'week' && weekday >= SATURDAY ? addDays(monday, 7) : monday;
+}
+
 function buildPeriod(key: (typeof PERIOD_KEYS)[number], now: Date, timezone: string): WorkflowInputValue {
   const { start, end } = periodRange(key, today(now, timezone));
   const days = Array.from({ length: 7 }, (_, index) => isoDay(addDays(start, index)));
-  return { key, kind: periodKind(key), start: isoDay(start), end: isoDay(end), month: isoDay(start).slice(0, 7), days };
+  return {
+    key,
+    kind: periodKind(key),
+    start: isoDay(start),
+    end: isoDay(end),
+    month: isoDay(start).slice(0, 7),
+    calendar_week_start: isoDay(calendarWeekStart(key, start)),
+    days,
+  };
 }
 
 function parseDuration(raw: string, unitRaw: string, binding: Extract<Binding, { type: 'duration' }>): number {

@@ -100,14 +100,30 @@ describe('period binding', () => {
   } as const;
   const period = (raw: string) => bind({ p: { type: 'period', from: '{{$1}}', values } }, { $1: raw }).p;
 
-  test('calendar week runs Monday to Sunday and lists all seven days', () => {
+  test('this week is the next seven local days from today, never days already gone', () => {
+    // Saturday 2026-09-19: Monday–Friday of the calendar week are already past.
     expect(period('неделе')).toMatchObject({
       kind: 'week',
-      start: '2026-09-14',
-      end: '2026-09-20',
-      days: ['2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19', '2026-09-20'],
+      start: '2026-09-19',
+      end: '2026-09-25',
+      days: ['2026-09-19', '2026-09-20', '2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25'],
     });
     expect(period('на следующей неделе')).toMatchObject({ start: '2026-09-21', end: '2026-09-27' });
+  });
+
+  test('on a Sunday evening the week runs into the coming week', () => {
+    // Sunday 2026-09-27 23:15 in Belgrade: 'План на неделю' listed Monday 21 – Sunday 27.
+    const sunday = new Date('2026-09-27T21:15:00Z');
+    const at = (raw: string) =>
+      bind({ p: { type: 'period', from: '{{$1}}', values } }, { $1: raw }, 'Europe/Belgrade', sunday).p;
+    expect(at('неделе')).toMatchObject({ start: '2026-09-27', end: '2026-10-03' });
+    expect(at('на следующей неделе')).toMatchObject({ start: '2026-09-28', end: '2026-10-04' });
+  });
+
+  test('on a Monday the week is exactly Monday to Sunday', () => {
+    const monday = new Date('2026-09-21T06:00:00Z');
+    const week = bind({ p: { type: 'period', from: '{{$1}}', values } }, { $1: 'неделе' }, 'Europe/Belgrade', monday).p;
+    expect(week).toMatchObject({ start: '2026-09-21', end: '2026-09-27' });
   });
 
   test('months and weekends', () => {

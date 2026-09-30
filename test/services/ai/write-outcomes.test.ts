@@ -106,6 +106,27 @@ test('unrelated update fields cannot erase failed intent', () => {
   expect(ledger.finalNotice('en')).toBeNull();
 });
 
+test('a place the model claims is never reported as written (#620)', () => {
+  const ledger = new WriteOutcomes(WRITE_TOOLS);
+  const claimed = { location_verified: 1, resolved_address: 'Far Away 1', venue_name: 'Far Away Venue' };
+  ledger.record(
+    'update_event',
+    { event_id: 42, location: 'Office', ...claimed },
+    { success: false, disposition: 'failed' },
+  );
+  ledger.record('update_event', { event_id: 42, location: 'Office' }, { success: true, disposition: 'executed' });
+  expect(ledger.finalNotice('en')).toBeNull();
+  ledger.record(
+    'update_event',
+    { event_id: 43, title: 'Lunch', ...claimed },
+    { success: true, disposition: 'executed' },
+  );
+  expect(ledger.summary('en', false)?.split('\n')).toEqual([
+    'Completed: Update event #42 (location)',
+    'Completed: Update event #43 (title)',
+  ]);
+});
+
 test('safe localized targets never derive authoritative reasons from free-form errors', () => {
   const ledger = new WriteOutcomes(WRITE_TOOLS);
   ledger.record('delete_event', { event_id: 42 }, { success: false, disposition: 'failed', error: 'Not owner' });

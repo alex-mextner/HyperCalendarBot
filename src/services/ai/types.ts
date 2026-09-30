@@ -36,6 +36,7 @@ import type { HolidayService } from '../holiday/holiday-service.ts';
 import type { ImageRenderer } from '../image/render-service.ts';
 import type { EventSummary } from '../intent/variable-resolver.ts';
 import type { AddressCache } from '../location/address-cache.ts';
+import type { EventPlace } from '../location/event-venue.ts';
 import type { LocationVerificationService } from '../location/location-verification-service.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import type { ScheduledAiCall, Trigger } from '../scheduled/types.ts';
@@ -205,6 +206,11 @@ export interface AgentContext {
   resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   /** Events in a ±2-week window around now, preloaded for pattern detection. */
   recentEventsWindow?: EventOccurrence[];
+  /**
+   * Events that tool results showed the model during this run (recorded by executeTool).
+   * The reply-time guard checks the model's text against their real clock times.
+   */
+  surfacedEvents?: EventSummary[];
   /** Contact directory (also used by sharing, but independently configurable). */
   contactRepo?: ContactRepository;
   /** Recipient identities resolved from a requested username during this run. */
@@ -222,6 +228,8 @@ export interface AgentContext {
   inputMode?: 'text' | 'voice_message' | 'live_call';
   /** Set to true by end_call tool to hang up after TTS plays. */
   callEndRequested?: boolean;
+  /** Local 'YYYY-MM-DD' start days (ctx.user.timezone) of events created, updated or deleted in this run. */
+  changedDays?: Set<string>;
   supplementMode?: boolean;
   /** The exact auto-response text that was sent by the intent matcher. Passed to supplement AI explicitly. */
   supplementAutoResponse?: string;
@@ -269,7 +277,8 @@ export interface AgentContext {
    *  Stall phrases and retry queue fire only when true. */
   wasExplicitInvocation?: boolean;
   /** Retry attempt index: 0 or absent = original message, 1-3 = subsequent backoff retries.
-   *  Stall phrase is suppressed on attempts > 0. */
+   *  Attempts > 0 stay quiet about failures, except a hard outage the user was not yet told about
+   *  honestly (see CalendarBotAgent.announceFailure and AiFailureNoticeTracker.decide). */
   retryAttempt?: number;
   /** True for a scheduled/trigger run (or its retry) that answers no user message.
    *  Only such runs may end with an empty or [SKIP] final and say nothing in a private chat;
@@ -338,6 +347,8 @@ export type ToolResultData =
  */
 export interface ToolResult {
   success: boolean;
+  /** This direct read-only answer is complete; no speculative AI supplement is needed. */
+  completeResponse?: boolean;
   output?: string;
   error?: string;
   stopLoop?: boolean;
@@ -404,8 +415,12 @@ export interface AgentConfig {
  *  - `group`: the per-member Going / Not going keyboard (`grsvp:` callbacks) for a group target,
  *    where any member responds for themselves. Keyed by `eventId`, not the invitation id, because
  *    the invitation row stores the group chat id as its invitee — useless for member RSVP.
+ * Both add the Map button when `place` (the event, null when it could not be loaded) has a
+ * confirmed place.
  */
-export type InvitationKeyboardVariant = { kind: 'personal' } | { kind: 'group'; eventId: number };
+export type InvitationKeyboardVariant =
+  | { kind: 'personal'; place: EventPlace | null }
+  | { kind: 'group'; eventId: number; place: EventPlace | null };
 
 export interface TelegramSender {
   sendMessage(chatId: number, text: string, parseMode?: ParseMode): Promise<{ message_id: number }>;
@@ -430,8 +445,8 @@ export interface TelegramSender {
     inviteeId: number,
     text: string,
     invitationId: number,
-    lang?: string,
-    variant?: InvitationKeyboardVariant,
+    lang: string,
+    variant: InvitationKeyboardVariant,
   ): Promise<{ message_id: number } | null>;
   sendEditProposal?(creatorId: number, text: string, proposalId: number): Promise<{ message_id: number } | null>;
   sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;

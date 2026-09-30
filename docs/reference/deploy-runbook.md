@@ -6,6 +6,14 @@ Detailed deployment reference for HyperCalendarBot. Summary in CLAUDE.md, full d
 
 Single `.env` file: `/opt/hypercal/.env`. Read by `docker compose`.
 
+It holds every production secret and the host is shared with other services, so `.env` and every backup of it must be mode `0600`, owner `root:root`. Plain `cp` creates a `0644` copy under the default umask; back it up with:
+```bash
+install -m 600 -o root -g root /opt/hypercal/.env "/opt/hypercal/.env.backup-$(date +%Y-%m-%d_%H-%M-%S)"
+```
+Appending with `echo ... >> .env` keeps the existing mode.
+
+`REDIS_PASSWORD` never appears in a process argv: `docker-compose.yml` gives it to the redis container as `REDISCLI_AUTH` (read by the healthcheck's `redis-cli`) and feeds `requirepass` to `redis-server` on stdin. It must not contain `"`, `\`, `/`, `?`, `#`, `%`, a tab, a carriage return or a line feed, and redis refuses to start with an error naming the rule: the first two would be read as redis.conf syntax, and `REDIS_URL` embeds the password without percent-encoding, where `/`, `?`, `#` and `%` make the URL invalid or change the password the bot sends, and URL parsing silently drops tab, CR and LF. Spaces, `@`, `:` and the other printable ASCII characters reach both of the bot's Redis clients unchanged. The bot container receives it only inside `REDIS_URL`; the bare `REDIS_PASSWORD` from `env_file` is blanked. A normal deploy recreates only the bot, so after changing the redis service or its password recreate redis too: `docker compose up -d --force-recreate redis bot`.
+
 Adding a new variable (e.g. via GitHub Actions secrets):
 1. Add secret to the repo
 2. Pass to deploy step via `envs:` and write to `.env` via `echo ... >> .env`, **or**
@@ -175,6 +183,10 @@ docker run --rm --entrypoint id ghcr.io/alex-mextner/hypercalendarbot:latest
 # Fix ownership (replace 999 with actual UID):
 chown -R 999:999 /opt/hypercal/data/
 ```
+
+## Database backups
+
+`scripts/backup-db.sh` (root cron `0 3 * * *` and every deploy) and the bot's own daily backup write full calendar-database copies into `/opt/hypercal/data/backups/`. Each copy holds every user's private data, so files are `0600` and the directory `0700`, owned by the container user `999`, which must keep write access. The cron script writes the copy inside the container with umask `077`, then enforces and checks both modes on the host; a copy it cannot restrict is deleted and the script exits non-zero, which also stops a deploy. Each run also restricts older copies left `0644` by earlier versions. A deploy runs the previously installed script, so the backup taken by the deploy that first ships a change to it follows the old rules until the next run. Inspect backups with `stat` only; never open their contents on a shared host.
 
 ## Migration renumbering hazard
 

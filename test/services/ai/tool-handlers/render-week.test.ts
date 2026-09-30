@@ -36,12 +36,14 @@ describe('handleRenderWeekImage', () => {
     expect(result.output).toBeTruthy();
   });
 
-  test('output contains week start date and past-tense marker', async () => {
+  test('the reply names the dates of the week shown', async () => {
     const ctx = makeCtx();
     // 2026-04-06 is Monday
     const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-06' });
-    expect(result.output).toContain('2026-04-06');
-    expect(result.output).toContain('отправлена');
+    expect(result.output).toBe('Календарь на 6–12 апреля 2026 — картинка в чате.');
+    const english = makeCtx({ user: { telegram_id: 1, language: 'en', timezone: 'Europe/Moscow' } });
+    const inEnglish = await handleRenderWeekImage(english, { week_start: '2026-04-06' });
+    expect(inEnglish.output).toBe('Calendar for April 6–12, 2026 — the picture is in the chat.');
   });
 
   test('sendPhoto is awaited before handler returns', async () => {
@@ -108,8 +110,7 @@ describe('handleRenderWeekImage', () => {
     const ctx = makeCtx();
     const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-28' });
     expect(result.success).toBe(true);
-    expect(result.output).toContain('2026-04-27');
-    expect(result.output).not.toContain('2026-04-28');
+    expect(result.output).toContain('27 апреля – 3 мая 2026');
   });
 
   test('normalizes Sunday week_start in UTC+13 zone to the same week Monday, not next week', async () => {
@@ -120,8 +121,7 @@ describe('handleRenderWeekImage', () => {
     const ctx = makeCtx({ user: { telegram_id: 1, language: 'ru', timezone: 'Pacific/Auckland' } });
     const result = await handleRenderWeekImage(ctx, { week_start: '2026-01-04' });
     expect(result.success).toBe(true);
-    expect(result.output).toContain('2025-12-29');
-    expect(result.output).not.toContain('2026-01-05');
+    expect(result.output).toContain('29 декабря 2025 – 4 января 2026');
   });
 
   test('rejects a malformed week_start with an empty date segment', async () => {

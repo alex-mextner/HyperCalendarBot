@@ -11,6 +11,8 @@ import { SharingSettingsRepository } from '../../../src/database/repositories/sh
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
+import { DomainEventBus } from '../../../src/services/scheduled/domain-event-bus.ts';
+import { InvitationCardRefresher, type InvitationEditOptions } from '../../../src/services/sharing/invitation-cards.ts';
 import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 import { png } from '../../fixtures/png.ts';
@@ -493,7 +495,7 @@ describe('propose-time callbacks', () => {
     expect(notifyDeps.sendMessage).toHaveBeenCalled();
   });
 
-  test('reschedule callback calls rescheduleFromProposal and updates event', async () => {
+  test('reschedule callback accepts the proposal, moving the event with its duration, and notifies the invitee', async () => {
     const proposedTime = '2026-04-01T14:00:00Z';
     const inv = {
       id: 5,
@@ -510,7 +512,12 @@ describe('propose-time callbacks', () => {
     const eventRepoMock = { findById: mock(() => event) };
     const eventServiceMock = { updateEvent: mock(() => event) };
     const invitationService = {
-      rescheduleFromProposal: mock(() => ({ success: true, invitation: inv, proposedTime })),
+      rescheduleFromProposal: mock(
+        (_invId: number, _userId: number, moveEvent: (eventId: number, proposedTime: string) => void) => {
+          moveEvent(inv.event_id, proposedTime);
+          return { success: true, invitation: inv, proposedTime };
+        },
+      ),
     };
     const notifyDeps = {
       userRepo: { findByTelegramId: mock(() => ({ language: 'en', first_name: 'Alice' })) },
@@ -532,8 +539,11 @@ describe('propose-time callbacks', () => {
     });
     await handler(ctx as never);
 
-    expect(invitationService.rescheduleFromProposal).toHaveBeenCalledWith(5, 100);
-    expect(eventServiceMock.updateEvent).toHaveBeenCalled();
+    expect(invitationService.rescheduleFromProposal).toHaveBeenCalledWith(5, 100, expect.any(Function));
+    expect(eventServiceMock.updateEvent).toHaveBeenCalledWith(3, 100, {
+      start_at: proposedTime,
+      end_at: '2026-04-01T15:00:00.000Z',
+    });
     expect(ctx.editText).toHaveBeenCalled();
     await flushPromises();
     expect(notifyDeps.sendMessage).toHaveBeenCalled();
@@ -584,7 +594,7 @@ describe('propose-time callbacks', () => {
     expect(notifyDeps.editMessage).toHaveBeenCalled();
     // The restored invitation card gets the canonical RSVP keyboard back
     const [, , , markup] = notifyDeps.editMessage.mock.calls[0] as unknown as [number, number, string, InlineKeyboard];
-    expect(markup.toJSON()).toEqual(invitationRsvpKeyboard(5, 'en').toJSON());
+    expect(markup.toJSON()).toEqual(invitationRsvpKeyboard(5, 'en', null).toJSON());
   });
 });
 
@@ -824,7 +834,17 @@ describe('RSVP taps on a revoked invitation', () => {
   const INVITER = 100;
   const INVITEE = 200;
 
-  function setupRevokedInvitation(status: 'cancelled' | 'expired') {
+  // An invitation outlives its event's delete (#505) — only open ones become cancelled — and its card
+  // can still carry RSVP buttons: a second copy of the card (deep link, re-send) or a failed rewrite
+  // after an answer. Once the event is gone, even a declined one is refused like a cancelled one.
+  const REVOKED = [
+    ['cancelled', false, 'invitation_cancelled'],
+    ['expired', false, 'invitation_expired'],
+    ['declined', true, 'invitation_cancelled'],
+    ['expired', true, 'invitation_expired'],
+  ] as const;
+
+  function setupRevokedInvitation(status: 'cancelled' | 'expired' | 'declined', eventDeleted: boolean) {
     const db = new Database(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
     runMigrations(db, migrations);
@@ -849,45 +869,131 @@ describe('RSVP taps on a revoked invitation', () => {
     const invitation = invitationService.sendInvitation(event.id, INVITER, INVITEE).invitation!;
     if (status === 'cancelled') {
       invitationService.cancelInvitation(invitation.id, INVITER);
-    } else {
+    } else if (status === 'expired') {
       db.prepare("UPDATE events SET start_at = datetime('now', '-1 hour') WHERE id = ?").run(event.id);
       invRepo.expirePastInvitations();
+    } else {
+      invitationService.declineInvitation(invitation.id, INVITEE);
+    }
+    if (eventDeleted) {
+      expect(eventRepo.remove(event.id, INVITER)).toBe(true);
     }
     expect(invRepo.findById(invitation.id)!.status).toBe(status);
     const handler = makeCallbackHandler({ invitationService, eventRepo, invitationRepo: invRepo });
     return { handler, invRepo, participantRepo, event, invitation };
   }
 
-  test.each([
-    ['cancelled', 'accept'],
-    ['cancelled', 'maybe'],
-    ['cancelled', 'decline'],
-    ['expired', 'accept'],
-    ['expired', 'maybe'],
-    ['expired', 'decline'],
-  ] as const)('%s invitation: %s keeps the status, adds no participant and says it is no longer active', async (status, action) => {
-    const { handler, invRepo, participantRepo, event, invitation } = setupRevokedInvitation(status);
+  test.each(
+    REVOKED.flatMap(([status, eventDeleted, reason]) =>
+      (['accept', 'maybe', 'decline'] as const).map((action) => [status, eventDeleted, reason, action] as const),
+    ),
+  )('%s invitation (event deleted: %p) is refused with %s on %s, keeps the status and adds no participant', async (status, eventDeleted, reason, action) => {
+    const { handler, invRepo, participantRepo, event, invitation } = setupRevokedInvitation(status, eventDeleted);
 
     const tap = makeCallbackTap(`inv:${action}:${invitation.id}`, { telegram_id: INVITEE, language: 'en' });
     await handler(tap.ctx);
 
     expect(invRepo.findById(invitation.id)!.status).toBe(status);
     expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
-    expect(tap.answer).toHaveBeenCalledWith(
-      status === 'cancelled' ? t('en').invitation_cancelled : t('en').invitation_expired,
-    );
+    expect(tap.answer).toHaveBeenCalledWith(t('en')[reason]);
     expect(tap.editText).not.toHaveBeenCalled();
   });
 
-  test.each(['cancelled', 'expired'] as const)('%s invitation: a +30 proposal is refused', async (status) => {
-    const { handler, invRepo, invitation } = setupRevokedInvitation(status);
+  test.each(
+    REVOKED,
+  )('%s invitation (event deleted: %p): a +30 proposal is refused with %s', async (status, eventDeleted, reason) => {
+    const { handler, invRepo, invitation } = setupRevokedInvitation(status, eventDeleted);
 
     const tap = makeCallbackTap(`inv:propose:${invitation.id}:+30`, { telegram_id: INVITEE, language: 'en' });
     await handler(tap.ctx);
 
     expect(invRepo.findById(invitation.id)!.proposed_time).toBeNull();
-    expect(tap.answer).toHaveBeenCalledWith({
-      text: status === 'cancelled' ? t('en').invitation_cancelled : t('en').invitation_expired,
+    expect(tap.answer).toHaveBeenCalledWith({ text: t('en')[reason] });
+  });
+});
+
+describe('delivered cards after the inviter accepts a proposed time', () => {
+  const INVITER = 100;
+  const INVITEE = 200;
+  const OTHER_INVITEE = 201;
+
+  test("the proposer's card shows the answer, the roster and the moved time; other cards move too", async () => {
+    const db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    const userRepo = new UserRepository(db);
+    userRepo.create({ telegram_id: INVITER, first_name: 'Anna', timezone: 'UTC', language: 'en' });
+    userRepo.create({ telegram_id: INVITEE, first_name: 'Boris', timezone: 'UTC', language: 'en' });
+    userRepo.create({ telegram_id: OTHER_INVITEE, first_name: 'Vera', timezone: 'UTC', language: 'en' });
+    const eventRepo = new EventRepository(db);
+    const invRepo = new InvitationRepository(db);
+    const bus = new DomainEventBus();
+    const edits: { chatId: number; messageId: number; text: string; options: InvitationEditOptions }[] = [];
+    const refresher = new InvitationCardRefresher({
+      eventRepo,
+      invitationRepo: invRepo,
+      userRepo,
+      editMessage: async (chatId, messageId, text, options) => {
+        edits.push({ chatId, messageId, text, options });
+      },
     });
+    const passes: Promise<void>[] = [];
+    bus.on('invitationRoster.changed', (change) => {
+      passes.push(refresher.refresh(change));
+    });
+    const settled = async () => {
+      while (passes.length) await passes.shift();
+    };
+    const invitationService = new InvitationService(
+      invRepo,
+      eventRepo,
+      new SharingSettingsRepository(db),
+      new ParticipantRepository(db),
+      bus,
+    );
+    const eventService = new EventService({ eventRepo });
+    const day = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const event = eventService.createEvent({
+      user_id: INVITER,
+      title: 'Dinner',
+      start_at: `${day}T10:00:00Z`,
+      end_at: `${day}T11:00:00Z`,
+      timezone: 'UTC',
+    });
+    const invitation = invitationService.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+    invRepo.setMessageInfo(invitation.id, 77, INVITEE);
+    const other = invitationService.sendInvitation(event.id, INVITER, OTHER_INVITEE).invitation!;
+    invRepo.setMessageInfo(other.id, 78, OTHER_INVITEE);
+    invitationService.proposeTime(invitation.id, INVITEE, `${day}T15:00:00Z`);
+    await settled();
+    edits.length = 0;
+
+    const handler = makeCallbackHandler(
+      {
+        invitationService,
+        eventRepo,
+        invitationRepo: invRepo,
+        invitationNotifyDeps: { userRepo, sendMessage: mock(() => Promise.resolve()) },
+      },
+      eventService,
+    );
+    await handler(makeCallbackTap(`inv:reschedule:${invitation.id}`, { telegram_id: INVITER, language: 'en' }).ctx);
+    await settled();
+
+    const lastEdit = (messageId: number) => {
+      const edit = edits.filter((e) => e.messageId === messageId).at(-1);
+      if (!edit) throw new Error(`card ${messageId} was not re-rendered`);
+      return edit;
+    };
+    const card = lastEdit(77);
+    expect(card.chatId).toBe(INVITEE);
+    expect(card.text).toContain('✅ Boris (you) — going');
+    expect(card.text).toContain('15:00–16:00');
+    expect(card.text).not.toContain('10:00');
+    expect(card.options.reply_markup).toBeUndefined();
+    const otherCard = lastEdit(78);
+    expect(otherCard.text).toContain('✅ Boris — going');
+    expect(otherCard.text).toContain('15:00–16:00');
+    expect(otherCard.text).not.toContain('10:00');
   });
 });
