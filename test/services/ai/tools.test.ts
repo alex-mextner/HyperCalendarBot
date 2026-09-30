@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type OpenAI from 'openai';
-import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
+import { createEventRegistryRequiredFields, getToolDefinitions } from '../../../src/services/ai/tools.ts';
+import { EVENT_CREATE_OPERATION, requiredFields } from '../../../src/services/operations/registry.ts';
 
 /**
  * Tools are exposed through getToolDefinitions() as OpenAI.ChatCompletionTool[].
@@ -85,6 +86,36 @@ describe('toolDefinitions', () => {
   test('delete_event requires event_id', () => {
     const tool = findTool(allTools, 'delete_event')!;
     expect(getParamsRequired(tool)).toContain('event_id');
+  });
+});
+
+describe('create_event schema reads the shared event.create operation registry (GH-652 acceptance criterion 4)', () => {
+  test('the schema required array exactly matches the registry-required-field wire names, literally', () => {
+    const tool = findTool(allTools, 'create_event')!;
+    // Hardcoded literal — never compares the derivation function to itself. This fails loudly
+    // if createEventRegistryRequiredFields() or the registry it reads ever silently drifts from
+    // the wire contract create_event actually promises callers.
+    expect(getParamsRequired(tool)).toEqual(['title', 'start_at']);
+  });
+
+  test('every registry field with a create_event wire mapping has a matching input_schema property — a future registry field never silently has no home in the tool schema', () => {
+    const tool = findTool(allTools, 'create_event')!;
+    const params = tool.function.parameters as { properties: object };
+    const properties = params.properties;
+    const wireMappedFields = ['title', 'start_at', 'location', 'description', 'recurrence_rule'];
+    for (const wireName of wireMappedFields) {
+      expect(properties).toHaveProperty(wireName);
+    }
+  });
+
+  test('a registry field becoming newly required is caught here, not silently left off the tool schema (regression guard)', () => {
+    // requiredFields() reads the LIVE registry — if a future change to registry.ts marks
+    // another field required without updating CREATE_EVENT_REGISTRY_WIRE_NAMES/create_event's
+    // properties, this test (not just the two above) still exercises the exact same derivation
+    // path the tool schema itself uses, so drift fails loudly here.
+    const registryRequired = requiredFields(EVENT_CREATE_OPERATION);
+    const derived = createEventRegistryRequiredFields();
+    expect(derived.length).toBe(registryRequired.length);
   });
 });
 

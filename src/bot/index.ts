@@ -15,6 +15,7 @@ import { createTelegramSender } from '../services/ai/telegram-sender.ts';
 import type { AgentConfig } from '../services/ai/types.ts';
 import { BirthdayService } from '../services/birthday/birthday-service.ts';
 import { ConversationLogger } from '../services/conversation-logger.ts';
+import { createContactPeopleResolver, createManualPlaceResolver } from '../services/dialogue/resolvers.ts';
 import { EventService } from '../services/event/event-service.ts';
 import { findMostRecentEventWithExternalParticipants } from '../services/event/recent-external-events.ts';
 import { callbackPrefix, trackFeatureUsage } from '../services/feature-tracking.ts';
@@ -49,6 +50,7 @@ import type { TranscriptionService } from '../services/voice/transcription-servi
 import { botLogger } from '../utils/logger.ts';
 import type { ParseMode } from '../utils/telegram.ts';
 import { handleAdd } from './commands/add.ts';
+import type { DialogueV3AddDeps } from './commands/add-v3.ts';
 import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
@@ -93,6 +95,7 @@ import { createRateLimitMiddleware, RateLimiter } from './middleware/rate-limite
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
 import { createStaleUpdateGuard, STALE_UPDATE_MAX_AGE_MS } from './middleware/stale-update-guard.ts';
 import { createUserResolver, createUserResolverComposer } from './middleware/user-resolver.ts';
+import type { DialogueV3LayerDeps } from './pipeline/dialogue-v3-layer.ts';
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
 import { createConnectWizardTraces } from './scenes/connect-wizard-trace.ts';
 import { createScenesPlugin, createScopedSceneStorage } from './scenes/index.ts';
@@ -150,7 +153,12 @@ export interface CreateBotOpts {
   pendingGeoStore?: import('../services/location/pending-geo-store.ts').PendingGeoStore;
   envConfig?: Pick<
     EnvConfig,
-    'BOT_ADMIN_ID' | 'INTENT_LEARNER_DAILY_LIMIT' | 'BOT_USERNAME' | 'INLINE_BOT_TOKEN' | 'TELEGRAM_SESSION_MASTER_KEY'
+    | 'BOT_ADMIN_ID'
+    | 'INTENT_LEARNER_DAILY_LIMIT'
+    | 'BOT_USERNAME'
+    | 'INLINE_BOT_TOKEN'
+    | 'TELEGRAM_SESSION_MASTER_KEY'
+    | 'DIALOGUE_V3_ENABLED'
   >;
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
   broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
@@ -335,6 +343,51 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const scheduleRepo = new ScheduledAiCallRepository(db.db);
   const groupMemberService = new GroupMemberService(db.groupMembers, db.users);
 
+  // GH-652: workflow v3 dialogue runtime, off by default (DIALOGUE_V3_ENABLED). When on, both
+  // /add (handleAdd's dialogueV3 param) and plain-text natural-start messages
+  // (msgDeps.dialogueV3, dialogue-v3-layer.ts) share this exact same registry-backed
+  // parser/resolver set — one operation definition, not two. Both also share the exact same
+  // execution engine (session-runtime.ts's `advance`/`executeDraft`): real invitation delivery
+  // (InvitationService.sendInvitation + deliverInvitation — the same plumbing send_invitation's
+  // AI tool handler uses, never a raw participantRepo.add('pending')), the existing
+  // googleSchedulePush post-create hook and place-verification service add-event.scene.ts's
+  // own wizard already reuses, and the v1/v2 workflow-session store for the one-active-owner
+  // precedence check documented in dialogue-v3-layer.ts's header comment.
+  const dialogueV3Enabled = envConfig?.DIALOGUE_V3_ENABLED === true;
+  const dialogueV3PeopleResolver = createContactPeopleResolver(db.contacts);
+  const dialogueV3PlaceResolver = createManualPlaceResolver();
+  const dialogueV3RuntimeDeps = {
+    eventService,
+    dialogueSessions: db.dialogueSessions,
+    invitationService,
+    invitationDelivery: {
+      sender: telegramSender,
+      invitationRepo: db.invitations,
+      userRepo: db.users,
+      deepLinkService,
+      botUsername: envConfig?.BOT_USERNAME,
+      contactRepo: db.contacts,
+    },
+    actionLogRepo: db.actionLog,
+    onEventCreated: googleSchedulePush
+      ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create')
+      : undefined,
+    locationVerification,
+  };
+  const dialogueV3AddDeps: DialogueV3AddDeps = {
+    ...dialogueV3RuntimeDeps,
+    enabled: dialogueV3Enabled,
+    peopleResolver: dialogueV3PeopleResolver,
+    placeResolver: dialogueV3PlaceResolver,
+  };
+  const dialogueV3LayerDeps: DialogueV3LayerDeps = {
+    ...dialogueV3RuntimeDeps,
+    enabled: dialogueV3Enabled,
+    peopleResolver: dialogueV3PeopleResolver,
+    placeResolver: dialogueV3PlaceResolver,
+    workflowSessions: db.workflowSessions,
+  };
+
   const botAdminId = envConfig?.BOT_ADMIN_ID;
   const intentLearnerDailyLimit = envConfig?.INTENT_LEARNER_DAILY_LIMIT ?? 100;
 
@@ -508,6 +561,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     addressCache,
     pendingGeoStore,
     weatherService,
+    dialogueV3: dialogueV3LayerDeps,
   };
 
   // Now that agent and msgDeps are fully built, construct the scene plugin with a real
@@ -632,7 +686,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       handleWeek(ctx, eventService, holidayService, renderService, db.groupChats, weatherService),
     )
     .command('month', (ctx) => handleMonth(ctx, eventService, undefined, renderService, db.groupChats))
-    .command('add', (ctx) => handleAdd(ctx, scenesSetup.scenes.addEventScene, db.groupChats))
+    .command('add', (ctx) =>
+      handleAdd(ctx, scenesSetup.scenes.addEventScene, db.groupChats, { dialogueV3: dialogueV3AddDeps }),
+    )
     .command('edit', (ctx) => handleEdit(ctx, eventService, db.groupChats))
     .command('delete', (ctx) => handleDelete(ctx, eventService, db.groupChats))
     .command('search', (ctx) => handleSearch(ctx, eventService, db.groupChats))

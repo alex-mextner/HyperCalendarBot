@@ -84,6 +84,7 @@ import { cmdLogger } from '../../utils/logger.ts';
 import { escapeHtml, formatUtcOffset } from '../../utils/telegram.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
+import { createDialogueV3Layer, type DialogueV3LayerDeps } from '../pipeline/dialogue-v3-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
 import { createIntentMatcherLayer } from '../pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../pipeline/pipeline.ts';
@@ -212,6 +213,9 @@ export interface MessageHandlerDeps {
   weatherService?: import('../../services/weather/weather-service.ts').WeatherService;
   aiRetryQueue?: import('../../services/scheduled/types.ts').QueueAdapter;
   aiRetryJobStore?: import('../../services/scheduled/types.ts').RetryJobStore;
+  // GH-652: natural-text dialogue v3 entry adapter, entirely inert unless explicitly wired
+  // (feature-flagged in src/config/env.ts's DIALOGUE_V3_ENABLED and bot/index.ts).
+  dialogueV3?: DialogueV3LayerDeps;
 }
 
 const TG_API = 'https://api.telegram.org';
@@ -897,6 +901,9 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
   // Static layers that don't require per-message context
   const staticLayers = [...(deps.feedbackRepo ? [createFeedbackRouterLayer(deps.feedbackRepo)] : []), aiAgentLayer];
 
+  // GH-652: inert unless deps.dialogueV3 is explicitly wired (feature-flagged in bot/index.ts).
+  const dialogueV3Layer = deps.dialogueV3 ? createDialogueV3Layer(deps.dialogueV3) : undefined;
+
   const notifyAdmin =
     deps.botAdminId && deps.sendMessageToUser
       ? (text: string) => deps.sendMessageToUser!(deps.botAdminId!, text)
@@ -1220,7 +1227,11 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           )
         : undefined;
 
-    const layers = [...(intentLayer ? [intentLayer] : []), ...staticLayers];
+    const layers = [
+      ...(intentLayer ? [intentLayer] : []),
+      ...(dialogueV3Layer ? [dialogueV3Layer] : []),
+      ...staticLayers,
+    ];
 
     const groupContext = isGroup
       ? {

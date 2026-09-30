@@ -120,6 +120,9 @@ export interface EnvConfig {
   OPENWEATHER_API_KEY?: string;
   GOOGLE_API_KEY?: string;
   TELEGRAM_SESSION_MASTER_KEY?: string;
+  // GH-652: workflow v3 dialogue runtime (full-field /add + natural-text entry adapter).
+  // Off by default — existing v1/v2 handlers keep serving live traffic unchanged.
+  DIALOGUE_V3_ENABLED?: boolean;
 }
 
 function requireEnv(name: string): string {
@@ -251,5 +254,6 @@ export function loadConfig(): EnvConfig {
     OPENWEATHER_API_KEY: process.env.OPENWEATHER_API_KEY || undefined,
     GOOGLE_API_KEY: process.env.GOOGLE_API_KEY || undefined,
     TELEGRAM_SESSION_MASTER_KEY: telegramSessionMasterKey,
+    DIALOGUE_V3_ENABLED: process.env.DIALOGUE_V3_ENABLED === 'true' || undefined,
   };
 }

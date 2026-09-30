@@ -1,5 +1,34 @@
 import type OpenAI from 'openai';
+import { EVENT_CREATE_OPERATION, requiredFields } from '../operations/registry.ts';
 import { MEMORY_FACT_MAX_CHARS } from './prompt-sections.ts';
+
+// The `event.create` operation registry (src/services/operations/registry.ts, GH-652) is the
+// one declarative field/required contract every entry point that can produce an event.create
+// reads — GH-652's own `/add` fast path and natural-text adapter, and this AI tool. `create_event`
+// cannot derive its ENTIRE JSON schema from the registry (the registry's field model is
+// abstract — one `schedule` field covers start_at/end_at/all_day together, and `people` maps to
+// the separate `send_invitation` tool call, not a create_event property at all) — but its
+// `required` array is derived from the registry via this explicit name mapping, so a future
+// change to which fields are hard-required (registry.ts) is caught here at the type/test level
+// instead of the two silently drifting (see test/services/ai/tools.test.ts's dedicated
+// "create_event required stays in sync with the registry" coverage).
+const CREATE_EVENT_REGISTRY_WIRE_NAMES: Readonly<Partial<Record<string, string>>> = {
+  title: 'title',
+  schedule: 'start_at',
+  place: 'location',
+  description: 'description',
+  recurrence: 'recurrence_rule',
+  // `people` intentionally has no wire-name mapping: inviting people is the separate,
+  // already-registered `send_invitation` tool call (src/services/ai/tool-schemas.ts), never a
+  // create_event property — see registry.ts's own header comment on this boundary.
+};
+
+/** Every registry-hard-required `event.create` field that has a create_event wire name — the derived `required` array for that tool's input_schema. */
+export function createEventRegistryRequiredFields(): string[] {
+  return requiredFields(EVENT_CREATE_OPERATION)
+    .map((field) => CREATE_EVENT_REGISTRY_WIRE_NAMES[field])
+    .filter((name): name is string => name !== undefined);
+}
 
 /**
  * A single JSON-schema property definition, as authored on every tool below.
@@ -118,7 +147,7 @@ const toolDefinitions: ToolDefinition[] = [
         scope: scopeProperty,
         owner_id: ownerIdProperty,
       },
-      required: ['title', 'start_at'],
+      required: createEventRegistryRequiredFields(),
     },
   },
   {

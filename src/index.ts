@@ -721,6 +721,7 @@ if (config.REDIS_URL) {
     onSessionCleanup: () => {
       db.workflowSessions.cleanup();
       db.groupSessions.deleteExpired();
+      db.dialogueSessions.cleanup();
     },
     onActionLogCleanup: () => {
       const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60_000).toISOString().slice(0, 19).replace('T', ' ');
