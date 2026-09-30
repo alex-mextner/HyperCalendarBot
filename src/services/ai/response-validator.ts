@@ -241,27 +241,33 @@ function hasUnbackedFacts(input: ValidationInput, now: Date = new Date()): boole
 const CALENDAR_NOUN = /календар|расписани|событи|calendar|schedule|agenda|\bevents?\b/i;
 /** Any day, date or part of one; a question that has one asks about the calendar ("что у меня вечером?"). */
 const QUESTION_DAY_WORD = new RegExp(`${RU_DAY_WORDS}|${EN_DAY_WORDS}`, 'i');
+/** A greeting names a part of the day without asking about it ("Доброе утро!", "Good evening!"). */
+const GREETING =
+  /(?<![а-яё])(?:(?:с\s+)?добр(?:ое|ого|ым|ый|ой)\s+(?:утр|дн|день|вечер|ноч)[а-яё]*|спокойной\s+ночи)|\bgood\s+(?:morning|afternoon|evening|night|day)\b/gi;
 
 /**
  * Whether the answer speaks of the calendar, so the profile must not back it. The profile tells
  * who the user is, not what the calendar holds: shown a saved "rehearsal on Fridays", the fast
  * model approved a tool-less "on Friday you have a rehearsal".
  *
- * With no tools every clock time and date is unbacked, and a saved fact ("встаю в 7:30", "отпуск
- * с 10 августа") or the zone's offset (UTC+5:30) carries them too, so a tool-less answer is held
- * to the calendar only by a day, period or recurrence word, a calendar word, an event id or a
- * quote found neither in the question nor in the profile (a saved «Мастер и Маргарита» is a
- * book, not an event title). The question it answers counts too, and there any day, date or part
- * of a day does: asked "Что у меня 10 августа?" or "что у меня вечером?", an answer about the
- * user is not what was asked. A run that read the calendar can back its times and dates, so
- * there any unbacked fact or day reference counts.
+ * Without a calendar read every clock time and date is unbacked, and a saved fact ("встаю в
+ * 7:30", "отпуск с 10 августа") or the zone's offset (UTC+5:30) carries them too, so such an
+ * answer is held to the calendar only by a day, period or recurrence word, a calendar word, an
+ * event id or a quote found neither in the question nor in the profile (a saved «Мастер и
+ * Маргарита» is a book, not an event title). The question it answers counts too, and there any
+ * day, date or part of a day does, a greeting aside: asked "Что у меня 10 августа?" or "что у
+ * меня вечером?", an answer about the user is not what was asked. A run that read the calendar,
+ * or tried to, can back its times and dates, so there any unbacked fact or day reference counts.
  */
 function speaksOfTheCalendar(input: ModelValidationInput, now: Date): boolean {
   const days = readDayContent(input.response, now, input.timezone);
-  if (input.tools.length > 0) return days.kind !== 'none' || hasUnbackedFacts(input, now);
+  if (input.tools.some((tool) => SCHEDULE_READ_TOOLS.has(tool.name))) {
+    return days.kind !== 'none' || hasUnbackedFacts(input, now);
+  }
   if (days.kind === 'named' || (days.kind === 'open' && !days.datesOnly)) return true;
   if (CALENDAR_NOUN.test(input.response) || CALENDAR_NOUN.test(input.userMessage)) return true;
-  if (QUESTION_DAY_WORD.test(input.userMessage)) return true;
+  const question = input.userMessage.replace(GREETING, ' ');
+  if (QUESTION_DAY_WORD.test(question) || readDayContent(question, now, input.timezone).kind !== 'none') return true;
   const knownWords = `${input.userMessage}\n${input.userProfile}`;
   return checkGrounding(input.response, input.tools, input.timezone, knownWords, now).ungroundedTitlesAndIds.length > 0;
 }

@@ -820,6 +820,61 @@ describe('answers about the user are checked against the profile the agent saw (
     expect(result.responseText).not.toContain(answer);
   });
 
+  test('the re-validation after a retry that saved a fact with a clock time sees that fact', async () => {
+    const newFact = 'Встаю в 7:30';
+    const ctx = profileContext('ru', 'Запомни, что я встаю в 7:30, и скажи, что ты обо мне знаешь');
+    const answer = 'Запомнил: ты встаёшь в 7:30. Ещё я знаю, что ты играешь на виолончели в оркестре.';
+    const approves = approvesWhenProfileShows(newFact);
+    const script = scripted(
+      [
+        { text: answer },
+        { text: '', tool: { name: 'remember_user_fact', input: { type: 'append', content: newFact } } },
+        { text: answer },
+      ],
+      [approves, approves],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(answer);
+    expect(result.metrics?.termination).not.toBe('unverified');
+    expect(script.counts).toEqual({ model: 3, validator: 2 });
+  });
+
+  test.each([
+    [
+      'ru' as const,
+      'Доброе утро! Что ты знаешь обо мне?',
+      'Доброе утро, Мира! Я помню, что ты играешь на виолончели в оркестре.',
+    ],
+    [
+      'en' as const,
+      'Good evening! What do you know about me?',
+      'Good evening, Mira! I remember you play the cello in an orchestra.',
+    ],
+  ])('a greeting is not a question about a part of the day: %s', async (language, question, answer) => {
+    const ctx = profileContext(language, question);
+    const approves = approvesWhenProfileShows('Играю на виолончели в оркестре');
+    const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(answer);
+    expect(result.metrics?.termination).not.toBe('unverified');
+    expect(script.counts).toEqual({ model: 1, validator: 1 });
+  });
+
+  test('a question with a numeric date asks about the calendar', async () => {
+    const savedEvent = 'Dentist appointment on 10 August';
+    const ctx = profileContext('en', 'What do I have on 2026-08-10?');
+    new UserMemoryRepository(db).append(USER_ID, savedEvent);
+    const answer = 'You have a dentist appointment.';
+    const approves = approvesWhenProfileShows(savedEvent);
+    const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(result.responseText).not.toContain(answer);
+  });
+
   // With no day named, the calendar is still spoken of by a quoted title, an event id or the word itself.
   test.each([
     ['В твоём календаре есть репетиция оркестра.'],
