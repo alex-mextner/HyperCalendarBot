@@ -226,7 +226,7 @@ const renderTableSchema = z
 
 // ── Call tools ──
 
-const makeCallSchema = z.object({ text: z.string() }).passthrough();
+export const makeCallSchema = z.object({ text: z.string() }).passthrough();
 
 // ── Settings ──
 

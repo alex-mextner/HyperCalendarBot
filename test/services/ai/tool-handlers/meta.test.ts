@@ -672,6 +672,21 @@ describe('meta tool handlers', () => {
       // Just verifying it doesn't crash — scope resolved to group
     });
   });
+
+  describe('handleMakeCall', () => {
+    test('blocks make_call during live_call', async () => {
+      const liveCtx: AgentContext = { ...ctx, inputMode: 'live_call' };
+      const result = handleMakeCall(liveCtx, { text: 'reminder' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('live call');
+    });
+
+    test('returns error when callQueue not available', async () => {
+      const noQueueCtx: AgentContext = { ...ctx, inputMode: undefined };
+      const result = handleMakeCall(noQueueCtx, { text: 'reminder' });
+      expect(result.success).toBe(false);
+    });
+  });
 });
 
 describe('handleCalculate', () => {
@@ -891,27 +906,6 @@ describe('handleCalculate', () => {
     const r = handleCalculate({ expression: '2026-04-10 - 2026-03-21' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('20 days');
-  });
-});
-
-describe('handleMakeCall', () => {
-  test('blocks make_call during live_call', async () => {
-    const liveCtx = {
-      user: { telegram_id: 1, language: 'en' },
-      inputMode: 'live_call',
-    } as Partial<AgentContext> as AgentContext;
-    const result = handleMakeCall(liveCtx, { text: 'reminder' });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('live call');
-  });
-
-  test('returns error when callQueue not available', async () => {
-    const noQueueCtx = {
-      user: { telegram_id: 1, language: 'en' },
-      inputMode: undefined,
-    } as Partial<AgentContext> as AgentContext;
-    const result = handleMakeCall(noQueueCtx, { text: 'reminder' });
-    expect(result.success).toBe(false);
   });
 });
 

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { jsonCodec } from '../../utils/json-codec.ts';
+import type { SttSocket } from './types.ts';
 
 const NovaMessageSchema = z.object({
   is_final: z.boolean(),
@@ -19,11 +20,11 @@ export interface NovaStreamingSTTEvents {
 }
 
 export interface NovaStreamingSTTDeps {
-  createWs?: (url: string) => WebSocket;
+  createWs?: (url: string) => SttSocket;
 }
 
 export class NovaStreamingSTT {
-  private ws: WebSocket | null = null;
+  private ws: SttSocket | null = null;
 
   constructor(
     private readonly apiKey: string,
@@ -47,8 +48,10 @@ export class NovaStreamingSTT {
     this.ws = createWs(url);
 
     this.ws.onmessage = (event: MessageEvent) => {
+      // Deepgram sends results as text frames; anything else is not a result.
+      if (typeof event.data !== 'string') return;
       try {
-        const data = NovaMessageCodec.parse(event.data as string);
+        const data = NovaMessageCodec.parse(event.data);
         const transcript = data.channel?.alternatives?.[0]?.transcript ?? '';
         if (!transcript) return;
         if (data.is_final) events.onFinal(transcript);
@@ -66,7 +69,7 @@ export class NovaStreamingSTT {
     };
 
     this.ws.onerror = (event: Event) => {
-      const msg = (event as ErrorEvent).message ?? 'unknown';
+      const msg = event instanceof ErrorEvent ? event.message : 'unknown';
       fireError(new Error(`Nova-3 WebSocket error: ${msg} (readyState=${this.ws?.readyState})`));
     };
 

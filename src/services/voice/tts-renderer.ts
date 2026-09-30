@@ -1,7 +1,7 @@
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { Lang } from '../../config/constants.ts';
-import { t } from '../../config/constants.ts';
+import { t, toLang } from '../../config/constants.ts';
 
 interface ReminderSpeechInput {
   title: string;
@@ -45,7 +45,7 @@ export function renderReminderForSpeech(input: ReminderSpeechInput): string {
   const cleanTitle = stripHtml(title);
   const start = new TZDate(startAt, timezone);
   const timeStr = format(start, 'HH:mm');
-  const s = t(language as Lang).speech;
+  const s = t(toLang(language)).speech;
 
   const parts = [s.reminderIntro(cleanTitle, timeStr)];
   const spoken = pickSpeakableLocation(venueName, location);
@@ -67,7 +67,7 @@ export function renderMorningAgendaForSpeech(input: {
   dateLabel: string;
   events: SpeechEvent[];
 }): string {
-  const lang = input.lang as Lang;
+  const lang = toLang(input.lang);
   const s = t(lang).speech;
   const items = formatEventsSpeech(input.events, lang);
   return `${s.morningIntro(input.dateLabel)} ${items} ${s.morningOutro}`;
@@ -78,7 +78,7 @@ export function renderEveningReviewForSpeech(input: {
   dateLabel: string;
   events: SpeechEvent[];
 }): string {
-  const lang = input.lang as Lang;
+  const lang = toLang(input.lang);
   const s = t(lang).speech;
   const items = formatEventsSpeech(input.events, lang);
   return `${s.eveningIntro(input.dateLabel)} ${items} ${s.eveningOutro}`;
@@ -100,7 +100,7 @@ export function renderWeeklyDigestForSpeech(input: {
   weekRange: string;
   days: Array<{ dayLabel: string; events: DigestEvent[] }>;
 }): string {
-  const lang = input.lang as Lang;
+  const lang = toLang(input.lang);
   const s = t(lang).speech;
   const dayParts = input.days.map((d) => formatDigestDay(d.dayLabel, d.events, lang));
   return `${s.weeklyDigestIntro(input.weekRange)} ${dayParts.join(' ')}`;
@@ -110,7 +110,7 @@ export function renderBatchReminderForSpeech(input: {
   lang: string;
   items: Array<{ event_title: string; event_start_at: string; timezone: string }>;
 }): string {
-  const lang = input.lang as Lang;
+  const lang = toLang(input.lang);
   const s = t(lang).speech;
   const intro = s.batchIntro(input.items.length);
   const lines = input.items.map((item) => {

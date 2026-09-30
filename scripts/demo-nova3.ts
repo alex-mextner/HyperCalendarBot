@@ -5,7 +5,18 @@
  *
  * Generates Russian speech via Edge TTS, transcribes via Nova-3.
  */
+import { z } from 'zod';
 import { TtsService } from '../src/services/voice/tts-service';
+
+const Nova3ResponseSchema = z.object({
+  results: z.object({
+    channels: z.array(
+      z.object({
+        alternatives: z.array(z.object({ transcript: z.string(), confidence: z.number() })),
+      }),
+    ),
+  }),
+});
 
 const API_KEY = process.env.DEEPGRAM_API_KEY;
 if (!API_KEY) {
@@ -46,11 +57,9 @@ async function transcribeNova3(audio: Buffer): Promise<{ transcript: string; con
     throw new Error(`Deepgram error ${res.status}: ${body}`);
   }
 
-  const json = (await res.json()) as {
-    results: { channels: [{ alternatives: [{ transcript: string; confidence: number }] }] };
-  };
-
-  const alt = json.results.channels[0].alternatives[0];
+  const json = Nova3ResponseSchema.parse(await res.json());
+  const alt = json.results.channels[0]?.alternatives[0];
+  if (!alt) throw new Error('Deepgram returned no transcript alternatives');
   return { transcript: alt.transcript, confidence: alt.confidence, elapsed: Date.now() - t0 };
 }
 

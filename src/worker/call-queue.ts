@@ -24,7 +24,7 @@ export function createCallQueue(connection: ConnectionOptions) {
   };
 }
 
-export function createCallWorker(connection: ConnectionOptions, callManager: CallManager) {
+export function createCallWorker(connection: ConnectionOptions, callManager: Pick<CallManager, 'executeCall'>) {
   const worker = new Worker<CallReminderJobData>(
     'call-reminders',
     async (job) => {

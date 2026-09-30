@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { jsonCodec } from '../../utils/json-codec.ts';
+import type { SttSocket } from './types.ts';
 
 const FluxMessageSchema = z.object({
   type: z.string().optional(),
@@ -18,11 +19,11 @@ export interface FluxStreamingSTTEvents {
 }
 
 export interface FluxStreamingSTTDeps {
-  createWs?: (url: string) => WebSocket;
+  createWs?: (url: string) => SttSocket;
 }
 
 export class FluxStreamingSTT {
-  private ws: WebSocket | null = null;
+  private ws: SttSocket | null = null;
 
   constructor(
     private readonly apiKey: string,
@@ -49,10 +50,12 @@ export class FluxStreamingSTT {
     this.ws = createWs(url);
 
     this.ws.onmessage = (event: MessageEvent) => {
+      // Deepgram sends results as text frames; anything else is not a result.
+      if (typeof event.data !== 'string') return;
       try {
         // Flux uses ListenV2TurnInfo with an `event` sub-field; connection
         // confirmation arrives as ListenV2Connected (ignored here).
-        const data = FluxMessageCodec.parse(event.data as string);
+        const data = FluxMessageCodec.parse(event.data);
         if (data.type !== 'TurnInfo') return;
         if (data.event === 'StartOfTurn') {
           events.onStartOfTurn();
@@ -71,7 +74,7 @@ export class FluxStreamingSTT {
     };
 
     this.ws.onerror = (event: Event) => {
-      const msg = (event as ErrorEvent).message ?? 'unknown';
+      const msg = event instanceof ErrorEvent ? event.message : 'unknown';
       fireError(new Error(`Flux WebSocket error: ${msg} (readyState=${this.ws?.readyState})`));
     };
 

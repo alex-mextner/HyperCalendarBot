@@ -32,12 +32,12 @@ describe('TtsTranslationService', () => {
     await service.translate('Good morning', 'ru');
 
     const call = streamImpl.mock.calls[streamImpl.mock.calls.length - 1]!;
-    const opts = call[0] as StreamRoundOptions;
+    const opts = call[0];
     expect(opts.fast).toBe(true);
     const system = opts.messages[0];
     expect(system?.role).toBe('system');
-    expect(system?.content as string).toContain('ru');
-    expect(system?.content as string).toContain('translator');
+    expect(system?.content).toContain('ru');
+    expect(system?.content).toContain('translator');
     const user = opts.messages[1];
     expect(user?.role).toBe('user');
     expect(user?.content).toBe('Good morning');

@@ -445,7 +445,8 @@ if (config.REDIS_URL && serviceTier.enabled && !config.DISABLE_VOICE) {
     const { TtsService } = await import('./services/voice/tts-service.ts');
     const { CallManager } = await import('./services/voice/call-manager.ts');
     const { CallSessionManager } = await import('./services/voice/call-session-manager.ts');
-    const { CallSession } = await import('./services/voice/call-session.ts');
+    const { CallSession, createCallAgent } = await import('./services/voice/call-session.ts');
+    const { ConversationLogger } = await import('./services/conversation-logger.ts');
     const { NovaStreamingSTT } = await import('./services/voice/nova-streaming-stt.ts');
     const { FluxStreamingSTT } = await import('./services/voice/flux-streaming-stt.ts');
     const { ThinkingPhrasePlayer } = await import('./services/voice/thinking-phrase-player.ts');
@@ -507,6 +508,16 @@ if (config.REDIS_URL && serviceTier.enabled && !config.DISABLE_VOICE) {
       },
     };
 
+    const voiceCallAgent = createCallAgent(voiceAgent, {
+      sender: voiceSender,
+      eventService: voiceEventService,
+      chatHistory: db.chatHistory,
+      conversationLogger: new ConversationLogger(db.chatHistory),
+      userRepo: db.users,
+      eventReminderRepo: db.eventReminders,
+      holidayService: voiceHolidayService,
+    });
+
     const callSessionManager = new CallSessionManager({
       createSession: (sessionId, userId, language, ws) =>
         CallSession.create({
@@ -517,17 +528,9 @@ if (config.REDIS_URL && serviceTier.enabled && !config.DISABLE_VOICE) {
           createNovaStt: () => new NovaStreamingSTT(DEEPGRAM_API_KEY),
           createFluxStt: () => new FluxStreamingSTT(DEEPGRAM_API_KEY),
           createThinkingPlayer: () => new ThinkingPhrasePlayer(language),
-          agent: voiceAgent,
+          agent: voiceCallAgent,
           tts: voiceCallTts,
           openerText: language === 'ru' ? 'Привет! Чем могу помочь?' : 'Hello! How can I help you?',
-          agentContextBase: {
-            sender: voiceSender,
-            eventService: voiceEventService,
-            chatHistory: db.chatHistory,
-            userRepo: db.users,
-            eventReminderRepo: db.eventReminders,
-            holidayService: voiceHolidayService,
-          },
         }),
     });
 

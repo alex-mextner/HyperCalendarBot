@@ -19,7 +19,7 @@ export class CallLogRepository {
   }
 
   findById(id: number): CallLog | null {
-    return (this.db.prepare('SELECT * FROM call_log WHERE id = ?').get(id) as CallLog | null) ?? null;
+    return this.db.query<CallLog, [number]>('SELECT * FROM call_log WHERE id = ?').get(id);
   }
 
   updateStatus(id: number, status: CallStatus): void {
@@ -36,14 +36,16 @@ export class CallLogRepository {
 
   countTodayCalls(userId: number): number {
     const row = this.db
-      .prepare("SELECT COUNT(*) as cnt FROM call_log WHERE user_id = ? AND created_at >= date('now')")
-      .get(userId) as { cnt: number };
-    return row.cnt;
+      .query<{ cnt: number }, [number]>(
+        "SELECT COUNT(*) as cnt FROM call_log WHERE user_id = ? AND created_at >= date('now')",
+      )
+      .get(userId);
+    return row?.cnt ?? 0;
   }
 
   getRecent(userId: number, limit: number): CallLog[] {
     return this.db
-      .prepare('SELECT * FROM call_log WHERE user_id = ? ORDER BY created_at DESC LIMIT ?')
-      .all(userId, limit) as CallLog[];
+      .query<CallLog, [number, number]>('SELECT * FROM call_log WHERE user_id = ? ORDER BY created_at DESC LIMIT ?')
+      .all(userId, limit);
   }
 }

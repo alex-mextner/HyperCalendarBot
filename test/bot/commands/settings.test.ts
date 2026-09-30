@@ -1,5 +1,12 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, mock, test } from 'bun:test';
+import { migrations } from '../../../src/database/migrations.ts';
+import { CallSettingsRepository } from '../../../src/database/repositories/call-settings.repository.ts';
+import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
 import type { NotificationPreferencesRow, User } from '../../../src/database/types.ts';
+import { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
+import { makeCallbackTap } from '../../helpers/callback-handler.ts';
 
 /** Extract the first positional argument from a mock's call history. */
 function firstCallArg<T>(fn: ReturnType<typeof mock>, index = 0): T {
@@ -57,6 +64,51 @@ function makeGroupRepo(overrides: Partial<{ findByChatId: ReturnType<typeof mock
     findByChatId: mock(() => null),
     ...overrides,
   };
+}
+
+/** The Russian-speaking user every call-settings tap is made by. */
+const callsUser: User = {
+  telegram_id: 100,
+  username: null,
+  first_name: null,
+  language: 'ru',
+  timezone: 'Europe/Moscow',
+  country_code: 'RU',
+  google_refresh_token_enc: null,
+  google_calendar_id: null,
+  onboarding_completed: 1,
+  timezone_updated_at: null,
+  voice_response_enabled: null,
+  default_event_duration_minutes: 60,
+  city: null,
+  connect_telegram_dismissed_at: null,
+  created_at: '2026-01-01 00:00:00',
+  updated_at: '2026-01-01 00:00:00',
+};
+
+/**
+ * Taps `stg:<subAction>` against a real in-memory database. `callsEnabled` seeds the user's call
+ * settings; `null` leaves the call-settings repository out entirely.
+ */
+async function tapCallSettings(subAction: 'calls' | 'toggle_calls', callsEnabled: boolean | null) {
+  const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+  const db = new Database(':memory:');
+  runMigrations(db, migrations);
+  const prefsService = new NotificationPreferencesService(new NotificationPreferencesRepository(db));
+  const callSettingsRepo = new CallSettingsRepository(db);
+  if (callsEnabled !== null) {
+    callSettingsRepo.ensureDefaults(callsUser.telegram_id);
+    callSettingsRepo.setEnabled(callsUser.telegram_id, callsEnabled);
+  }
+  const { ctx, editText } = makeCallbackTap(`stg:${subAction}`, callsUser);
+  await handleSettingsCallback(
+    ctx,
+    callsUser,
+    subAction,
+    prefsService,
+    callsEnabled === null ? undefined : callSettingsRepo,
+  );
+  return { text: firstCallArg<string>(editText, 0), callSettingsRepo };
 }
 
 describe('handleSettings', () => {
@@ -145,35 +197,13 @@ describe('handleSettingsCallback', () => {
   });
 
   test('stg:calls without repo shows defaults', async () => {
-    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
-    const ctx = makeCallbackCtx();
-    const prefsService = makePrefsService();
-
-    await handleSettingsCallback(ctx as never, makeUser() as never, 'calls', prefsService as never);
-
-    const text = firstCallArg<string>(ctx.editText, 0);
+    const { text } = await tapCallSettings('calls', null);
     expect(text).toContain('Голосовые звонки');
     expect(text).toContain('❌');
   });
 
   test('stg:calls with repo shows enabled state', async () => {
-    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
-    const ctx = makeCallbackCtx();
-    const prefsService = makePrefsService();
-    const callSettingsRepo = {
-      ensureDefaults: mock(() => {}),
-      get: mock(() => ({ enabled: 1, language: 'ru' })),
-    };
-
-    await handleSettingsCallback(
-      ctx as never,
-      makeUser() as never,
-      'calls',
-      prefsService as never,
-      callSettingsRepo as never,
-    );
-
-    const text = firstCallArg<string>(ctx.editText, 0);
+    const { text } = await tapCallSettings('calls', true);
     expect(text).toContain('✅');
     expect(text).toContain('Голосовые звонки');
   });
@@ -267,26 +297,8 @@ describe('handleSettingsCallback', () => {
   });
 
   test('stg:toggle_calls flips enabled and re-renders', async () => {
-    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
-    const ctx = makeCallbackCtx();
-    const prefsService = makePrefsService();
-    const callSettingsRepo = {
-      ensureDefaults: mock(() => {}),
-      get: mock(() => ({ enabled: 0 })),
-      setEnabled: mock(() => {}),
-    };
-
-    await handleSettingsCallback(
-      ctx as never,
-      makeUser() as never,
-      'toggle_calls',
-      prefsService as never,
-      callSettingsRepo as never,
-    );
-
-    expect(callSettingsRepo.ensureDefaults).toHaveBeenCalledTimes(1);
-    expect(callSettingsRepo.setEnabled).toHaveBeenCalledWith(100, true);
-    const text = firstCallArg<string>(ctx.editText, 0);
+    const { text, callSettingsRepo } = await tapCallSettings('toggle_calls', false);
+    expect(callSettingsRepo.isEnabled(callsUser.telegram_id)).toBe(true);
     expect(text).toContain('Голосовые звонки');
   });
 

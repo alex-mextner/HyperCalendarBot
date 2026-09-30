@@ -12,7 +12,7 @@ import { UserRepository } from '../../../src/database/repositories/user.reposito
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { EventOccurrence, NotificationLogRow } from '../../../src/database/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
-import { NotificationScheduler } from '../../../src/services/notification/scheduler.ts';
+import { type EnqueueCallData, NotificationScheduler } from '../../../src/services/notification/scheduler.ts';
 
 function setupDb(): Database {
   const db = new Database(':memory:');
@@ -26,6 +26,29 @@ function makeGetEventsInRange(db: Database): (userId: number, startUtc: string, 
     eventRepo: new EventRepository(db),
   });
   return (userId, startUtc, endUtc) => eventService.getEventsInRange(userId, startUtc, endUtc);
+}
+
+/** A scheduler for user 42 with voice calls enabled and call-specific quiet hours 22:00–08:00. */
+function makeQuietHoursCallScheduler(db: Database) {
+  const callSettingsRepo = new CallSettingsRepository(db);
+  callSettingsRepo.ensureDefaults(42);
+  callSettingsRepo.setEnabled(42, true);
+  callSettingsRepo.setQuietHours(42, '22:00', '08:00');
+  const callEnqueued: EnqueueCallData[] = [];
+  const callScheduler = new NotificationScheduler({
+    prefsRepo: new NotificationPreferencesRepository(db),
+    reminderRepo: new EventReminderRepository(db),
+    logRepo: new NotificationLogRepository(db),
+    userRepo: new UserRepository(db),
+    getEventsInRange: makeGetEventsInRange(db),
+    enqueue: mock(() => {}),
+    callSettingsRepo,
+    callLogRepo: new CallLogRepository(db),
+    enqueueCall: (data) => {
+      callEnqueued.push(data);
+    },
+  });
+  return { callScheduler, callEnqueued };
 }
 
 describe('NotificationScheduler', () => {
@@ -94,34 +117,7 @@ describe('NotificationScheduler', () => {
       "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T23:45:00Z', 15, '15 minutes')",
     );
 
-    const callEnqueued: { userId: number; eventId: number }[] = [];
-    const callScheduler = new NotificationScheduler({
-      prefsRepo: new NotificationPreferencesRepository(db),
-      reminderRepo: new EventReminderRepository(db),
-      logRepo: new NotificationLogRepository(db),
-      userRepo: new UserRepository(db),
-      getEventsInRange: makeGetEventsInRange(db),
-      enqueue: mock(() => {}),
-      callSettingsRepo: {
-        isEnabled: mock(() => true),
-        get: mock(() => ({
-          user_id: 42,
-          enabled: 1,
-          max_daily_calls: 5,
-          language: 'en',
-          quiet_hours_start: '22:00',
-          quiet_hours_end: '08:00',
-          important_only: 0,
-          updated_at: '',
-        })),
-      } as never,
-      callLogRepo: {
-        countTodayCalls: mock(() => 0),
-      } as never,
-      enqueueCall: mock((data: { userId: number; eventId: number }) => {
-        callEnqueued.push(data);
-      }) as never,
-    });
+    const { callScheduler, callEnqueued } = makeQuietHoursCallScheduler(db);
 
     // 23:45 UTC is within quiet hours 22:00-08:00
     await callScheduler.tick(new Date('2026-03-15T23:45:30Z'));
@@ -221,34 +217,7 @@ describe('NotificationScheduler', () => {
       "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T14:45:00Z', 15, '15 minutes')",
     );
 
-    const callEnqueued: { userId: number; eventId: number }[] = [];
-    const callScheduler = new NotificationScheduler({
-      prefsRepo: new NotificationPreferencesRepository(db),
-      reminderRepo: new EventReminderRepository(db),
-      logRepo: new NotificationLogRepository(db),
-      userRepo: new UserRepository(db),
-      getEventsInRange: makeGetEventsInRange(db),
-      enqueue: mock(() => {}),
-      callSettingsRepo: {
-        isEnabled: mock(() => true),
-        get: mock(() => ({
-          user_id: 42,
-          enabled: 1,
-          max_daily_calls: 5,
-          language: 'en',
-          quiet_hours_start: '22:00',
-          quiet_hours_end: '08:00',
-          important_only: 0,
-          updated_at: '',
-        })),
-      } as never,
-      callLogRepo: {
-        countTodayCalls: mock(() => 0),
-      } as never,
-      enqueueCall: mock((data: { userId: number; eventId: number }) => {
-        callEnqueued.push(data);
-      }) as never,
-    });
+    const { callScheduler, callEnqueued } = makeQuietHoursCallScheduler(db);
 
     // 14:45 UTC is outside quiet hours 22:00-08:00
     await callScheduler.tick(new Date('2026-03-15T14:45:30Z'));

@@ -3,6 +3,14 @@
 import type { Database } from 'bun:sqlite';
 import type { BirthdaySyncState, BirthEventMetadata } from '../types.ts';
 
+/** A user whose birthday sync is missing or older than the requested age. */
+interface BirthdaySyncCandidate {
+  telegram_id: number;
+  first_name: string | null;
+  language: string;
+  timezone: string;
+}
+
 export interface UpsertMetadataParams {
   event_id: number;
   celebrant_id: number | null;
@@ -81,20 +89,18 @@ export class BirthdayMetadataRepository {
 
   getSyncState(userId: number): BirthdaySyncState | null {
     return this.db
-      .prepare('SELECT * FROM birthday_sync_state WHERE user_id = ?')
-      .get(userId) as BirthdaySyncState | null;
+      .query<BirthdaySyncState, [number]>('SELECT * FROM birthday_sync_state WHERE user_id = ?')
+      .get(userId);
   }
 
-  getUsersNeedingSync(
-    maxAgeMs: number,
-  ): { telegram_id: number; first_name: string | null; language: string; timezone: string }[] {
+  getUsersNeedingSync(maxAgeMs: number): BirthdaySyncCandidate[] {
     const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
     return this.db
-      .prepare(
+      .query<BirthdaySyncCandidate, [string]>(
         `SELECT u.telegram_id, u.first_name, u.language, u.timezone FROM users u
          LEFT JOIN birthday_sync_state s ON s.user_id = u.telegram_id
          WHERE s.synced_at IS NULL OR s.synced_at < ?`,
       )
-      .all(cutoff) as { telegram_id: number; first_name: string | null; language: string; timezone: string }[];
+      .all(cutoff);
   }
 }

@@ -3,6 +3,16 @@ import { logger } from '../../utils/logger';
 
 export const voiceLogger = logger.child({ module: 'voice' });
 
+/** The part of a WebSocket the streaming STT clients use; a real `WebSocket` satisfies it. */
+export interface SttSocket {
+  readonly readyState: number;
+  send(data: string | Buffer): void;
+  close(): void;
+  onmessage: ((event: MessageEvent) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  onclose: ((event: CloseEvent) => void) | null;
+}
+
 export type VoiceCallState = 'idle' | 'synthesizing' | 'ringing' | 'connected' | 'playing' | 'ended' | 'failed';
 
 export interface VoiceCallConfig {

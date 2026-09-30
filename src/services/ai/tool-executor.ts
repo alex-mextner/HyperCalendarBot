@@ -82,7 +82,7 @@ import {
 } from './tool-handlers/sharing.ts';
 import { handleGetFreeSlots } from './tool-handlers/slots.ts';
 import { handleConvertToTimezone, handleGetTimezoneInfoWithCityFallback } from './tool-handlers/timezone.ts';
-import { toolSchemas } from './tool-schemas.ts';
+import { makeCallSchema, toolSchemas } from './tool-schemas.ts';
 import { withSchemaExcerpt } from './tools.ts';
 import type { AgentContext, ToolResult } from './types.ts';
 
@@ -699,7 +699,7 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
         return handleEndCall(ctx);
 
       case 'make_call':
-        return handleMakeCall(ctx, input as ToolInputMap['make_call']);
+        return handleMakeCall(ctx, makeCallSchema.parse(input));
 
       case 'get_holidays':
         return handleGetHolidays(ctx, input as ToolInputMap['get_holidays']);

@@ -1,8 +1,11 @@
 import { expect, mock, test } from 'bun:test';
 import { CallManager, type CallManagerDeps } from '../../../src/services/voice/call-manager';
 
+type SpawnProcess = NonNullable<CallManagerDeps['spawnProcess']>;
+type CallLogRepo = CallManagerDeps['callLogRepo'];
+
 function makeSpawn(exitCode = 0) {
-  return mock(() => ({
+  return mock((..._args: Parameters<SpawnProcess>) => ({
     stdout: new ReadableStream<Uint8Array>({
       start(c) {
         c.close();
@@ -41,13 +44,17 @@ function makeJob(
   };
 }
 
+function makeCallLogRepo() {
+  return {
+    updateStatus: mock((..._args: Parameters<CallLogRepo['updateStatus']>) => {}),
+    complete: mock((..._args: Parameters<CallLogRepo['complete']>) => {}),
+  };
+}
+
 function makeDeps(overrides: Partial<CallManagerDeps> = {}): CallManagerDeps {
   return {
     fallbackTts: { synthesize: mock(() => Promise.resolve(Buffer.from('fake-audio'))) },
-    callLogRepo: {
-      updateStatus: mock(() => {}),
-      complete: mock(() => {}),
-    },
+    callLogRepo: makeCallLogRepo(),
     pyBridgePath: 'scripts/voice-call-bridge.py',
     spawnProcess: makeSpawn(),
     spawnFfmpeg: makeFfmpegSpawn(),
@@ -79,30 +86,34 @@ test('executeCall uses original text when translateText is not provided', async 
 });
 
 test('executeCall logs failure on TTS error', async () => {
+  const callLogRepo = makeCallLogRepo();
   const deps = makeDeps({
     fallbackTts: { synthesize: mock(() => Promise.reject(new Error('TTS failed'))) },
+    callLogRepo,
   });
   const manager = new CallManager(deps);
   await manager.executeCall(makeJob());
-  expect(deps.callLogRepo.complete).toHaveBeenCalled();
-  const call = (deps.callLogRepo.complete as ReturnType<typeof mock>).mock.calls[0]!;
+  expect(callLogRepo.complete).toHaveBeenCalled();
+  const call = callLogRepo.complete.mock.calls[0]!;
   expect(call[1]).toBe('failed');
 });
 
 test('executeCall completes successfully when bridge exits with 0', async () => {
-  const deps = makeDeps({ spawnProcess: makeSpawn(0) });
+  const callLogRepo = makeCallLogRepo();
+  const deps = makeDeps({ spawnProcess: makeSpawn(0), callLogRepo });
   const manager = new CallManager(deps);
   await manager.executeCall(makeJob());
-  expect(deps.callLogRepo.complete).toHaveBeenCalled();
-  const call = (deps.callLogRepo.complete as ReturnType<typeof mock>).mock.calls[0]!;
+  expect(callLogRepo.complete).toHaveBeenCalled();
+  const call = callLogRepo.complete.mock.calls[0]!;
   expect(call[1]).toBe('completed');
 });
 
 test('executeCall marks failed when bridge exits non-zero', async () => {
-  const deps = makeDeps({ spawnProcess: makeSpawn(1) });
+  const callLogRepo = makeCallLogRepo();
+  const deps = makeDeps({ spawnProcess: makeSpawn(1), callLogRepo });
   const manager = new CallManager(deps);
   await manager.executeCall(makeJob());
-  const call = (deps.callLogRepo.complete as ReturnType<typeof mock>).mock.calls[0]!;
+  const call = callLogRepo.complete.mock.calls[0]!;
   expect(call[1]).toBe('failed');
 });
 
@@ -179,7 +190,7 @@ test('spawns bridge with userId, sessionId, language args', async () => {
   const deps = makeDeps({ spawnProcess });
   const manager = new CallManager(deps);
   await manager.executeCall(makeJob({ userId: 42, sessionId: 'my-session', language: 'ru' }));
-  const args = (spawnProcess as ReturnType<typeof mock>).mock.calls[0]![0] as string[];
+  const args = spawnProcess.mock.calls[0]![0];
   expect(args).toContain('42');
   expect(args).toContain('my-session');
   expect(args).toContain('ru');

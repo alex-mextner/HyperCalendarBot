@@ -6,10 +6,7 @@ export class CallSettingsRepository {
   constructor(private db: Database) {}
 
   get(userId: number): UserCallSettings | null {
-    return (
-      (this.db.prepare('SELECT * FROM user_call_settings WHERE user_id = ?').get(userId) as UserCallSettings | null) ??
-      null
-    );
+    return this.db.query<UserCallSettings, [number]>('SELECT * FROM user_call_settings WHERE user_id = ?').get(userId);
   }
 
   ensureDefaults(userId: number): void {
@@ -37,9 +34,9 @@ export class CallSettingsRepository {
   }
 
   isEnabled(userId: number): boolean {
-    const row = this.db.prepare('SELECT enabled FROM user_call_settings WHERE user_id = ?').get(userId) as {
-      enabled: number;
-    } | null;
+    const row = this.db
+      .query<{ enabled: number }, [number]>('SELECT enabled FROM user_call_settings WHERE user_id = ?')
+      .get(userId);
     return row?.enabled === 1;
   }
 }

@@ -1,6 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { migrations } from '../../src/database/migrations.ts';
 import { ContactRepository } from '../../src/database/repositories/contact.repository.ts';
+import { UserRepository } from '../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../src/database/schema.ts';
 import { resolveInvitationRecipient } from '../../src/services/ai/recipient-identity.ts';
 import { inspectRecipientProfile } from '../../src/services/ai/recipient-profile.ts';
 import type { AgentContext } from '../../src/services/ai/types.ts';
@@ -60,14 +63,18 @@ test('force alone cannot authorize an unresolved or conflicting identity', async
 });
 
 test('a stale username cache cannot override a current explicit Telegram lookup', async () => {
+  const usersDb = new Database(':memory:');
+  runMigrations(usersDb, migrations);
+  const userRepo = new UserRepository(usersDb);
+  userRepo.create({ telegram_id: 5000000001, timezone: 'UTC', language: 'en', username: 'reassigned' });
   const c = context({
     messageText: 'Invite @reassigned',
+    userRepo,
     resolveUsername: async () => ({ id: 5000000002, username: 'reassigned', firstName: 'Current' }),
   });
-  c.userRepo.findByUsername = () =>
-    ({ telegram_id: 5000000001, username: 'reassigned' }) as ReturnType<typeof c.userRepo.findByTelegramId>;
   const result = await resolveInvitationRecipient(c, { invitee_username: 'reassigned' });
   expect(result).toMatchObject({ ok: true, id: 5000000002 });
+  usersDb.close();
 });
 
 test('an inferred saved username alone keeps its established numeric contact identity', async () => {
@@ -79,4 +86,49 @@ test('an inferred saved username alone keeps its established numeric contact ide
   await inspectRecipientProfile(ctx, 5000000001);
   const result = await resolveInvitationRecipient(ctx, { invitee_username: 'recycled' });
   expect(result).toMatchObject({ ok: true, id: 5000000001, username: 'current' });
+});
+
+// Without the service tier (no ctx.resolveUsername / ctx.lookupTelegramUser) only the users table
+// answers, and an unknown @username is "could not look up", never "does not exist" (#753).
+function usersWith(rows: { telegram_id: number; username: string }[]): UserRepository {
+  const usersDb = new Database(':memory:');
+  runMigrations(usersDb, migrations);
+  const userRepo = new UserRepository(usersDb);
+  for (const row of rows) userRepo.create({ ...row, timezone: 'UTC', language: 'en' });
+  return userRepo;
+}
+
+test('tier off: a numeric invitation keeps the established ID and the saved username', async () => {
+  contacts.add(10, 'Alex', 'recycled', 5000000001);
+  const result = await resolveInvitationRecipient(context(), { invitee_id: 5000000001 });
+  expect(result).toEqual({ ok: true, id: 5000000001, isGroup: false });
+  expect(contacts.findByTelegramId(10, 5000000001)?.username).toBe('recycled');
+});
+
+test('tier off: an inferred saved username keeps its numeric contact identity', async () => {
+  contacts.add(10, 'Alex', 'recycled', 5000000001);
+  const userRepo = usersWith([{ telegram_id: 5000000002, username: 'recycled' }]);
+  const result = await resolveInvitationRecipient(context({ userRepo }), { invitee_username: 'recycled' });
+  expect(result).toMatchObject({ ok: true, id: 5000000001 });
+});
+
+test('tier off: an explicit @username the bot has never seen is unavailable, never a guessed ID', async () => {
+  contacts.add(10, 'Alex', 'old', 5000000001);
+  const result = await resolveInvitationRecipient(context({ messageText: 'Invite @stranger' }), {
+    invitee_username: 'stranger',
+  });
+  expect(result).toEqual({ ok: false, reason: 'unavailable', username: 'stranger' });
+});
+
+test('tier off: a users row with an invalid ID is unavailable and never verified', async () => {
+  const ctx = context({ messageText: 'Invite @broken', userRepo: usersWith([{ telegram_id: 0, username: 'broken' }]) });
+  const result = await resolveInvitationRecipient(ctx, { invitee_username: 'broken' });
+  expect(result).toEqual({ ok: false, reason: 'unavailable', username: 'broken' });
+  expect(ctx.verifiedRecipientIds?.has(0) ?? false).toBe(false);
+});
+
+test('tier on: a username Telegram does not know is not_found', async () => {
+  const ctx = context({ messageText: 'Invite @stranger', resolveUsername: async () => null });
+  const result = await resolveInvitationRecipient(ctx, { invitee_username: 'stranger' });
+  expect(result).toEqual({ ok: false, reason: 'not_found', username: 'stranger' });
 });

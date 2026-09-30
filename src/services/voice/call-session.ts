@@ -1,7 +1,6 @@
 // src/services/voice/call-session.ts
 import { unlink as fsUnlink } from 'node:fs/promises';
 import { z } from 'zod';
-import type { User } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import type { AgentContext } from '../ai/types.ts';
 import type { FluxStreamingSTT } from './flux-streaming-stt.ts';
@@ -11,18 +10,66 @@ import { fixLineBreaks, stripMarkdown } from './stress-marker.ts';
 import type { ThinkingPhrasePlayer } from './thinking-phrase-player.ts';
 import { voiceLogger } from './types.ts';
 
+type NovaStt = Pick<NovaStreamingSTT, 'connect' | 'sendAudio' | 'close'>;
+type FluxStt = Pick<FluxStreamingSTT, 'connect' | 'sendAudio' | 'close'>;
+type ThinkingPlayer = Pick<ThinkingPhrasePlayer, 'start' | 'cancel'>;
+
+/** What the caller said in one turn. */
+export interface CallTurn {
+  userId: number;
+  transcript: string;
+}
+
+/** The agent's reply to one call turn; `endCall` hangs up after the reply finishes playing. */
+export interface CallAgentReply {
+  responseText?: string;
+  endCall?: boolean;
+}
+
+/** The session's view of the agent: one caller turn in, one spoken reply out. */
+export interface CallAgent {
+  run: (turn: CallTurn) => Promise<CallAgentReply>;
+}
+
+/** Everything an agent turn needs besides the caller and the transcript, which each turn supplies. */
+export type CallAgentContextBase = Omit<AgentContext, 'user' | 'chatId' | 'messageText' | 'inputMode' | 'isGroup'>;
+
+/** Adapts the full agent to call turns: the caller becomes the private-chat user of a live-call turn. */
+export function createCallAgent(
+  agent: { run: (ctx: AgentContext) => Promise<CallAgentReply> },
+  base: CallAgentContextBase,
+): CallAgent {
+  return {
+    run: async ({ userId, transcript }) => {
+      const user = base.userRepo.findByTelegramId(userId);
+      // The agent needs the caller's stored profile (timezone, calendar); without it there is no reply.
+      if (!user) {
+        voiceLogger.warn({ userId }, 'Call agent turn skipped: caller has no user record');
+        return {};
+      }
+      return agent.run({
+        ...base,
+        user,
+        chatId: userId,
+        messageText: transcript,
+        inputMode: 'live_call',
+        isGroup: false,
+      });
+    },
+  };
+}
+
 export interface CallSessionConfig {
   sessionId: string;
   userId: number;
   language: 'ru' | 'en';
   ws: { send: (data: string | Buffer) => void; close: () => void };
-  createNovaStt: () => NovaStreamingSTT;
-  createFluxStt: () => FluxStreamingSTT;
-  createThinkingPlayer: () => ThinkingPhrasePlayer;
-  agent: { run: (ctx: AgentContext) => Promise<{ responseText?: string; endCall?: boolean }> };
+  createNovaStt: () => NovaStt;
+  createFluxStt: () => FluxStt;
+  createThinkingPlayer: () => ThinkingPlayer;
+  agent: CallAgent;
   tts: { synthesize: (text: string, lang: string) => Promise<Buffer> };
   openerText: string;
-  agentContextBase?: Partial<AgentContext>;
   unlink?: (path: string) => Promise<void>;
   sttErrorTimeoutMs?: number;
 }
@@ -31,9 +78,9 @@ export class CallSession {
   private ended = false;
   private speaking = false;
   private agentRunning = false;
-  private novaStt: NovaStreamingSTT | null = null;
-  private fluxStt: FluxStreamingSTT | null = null;
-  private thinking: ThinkingPhrasePlayer | null = null;
+  private novaStt: NovaStt | null = null;
+  private fluxStt: FluxStt | null = null;
+  private thinking: ThinkingPlayer | null = null;
   private fileSeq = 0;
   lastPlayFile: string | null = null;
   private tmpFiles = new Set<string>();
@@ -194,7 +241,7 @@ export class CallSession {
     this.rollingTranscript = '';
     voiceLogger.info({ sessionId: this.cfg.sessionId, transcript }, 'Running agent');
 
-    // TODO: spec requires a 10s fail-open timer — if agent takes longer, resume listening
+    // TODO(#755): spec requires a 10s fail-open timer — if agent takes longer, resume listening
     this.runAgent(transcript).catch((err) => {
       voiceLogger.error({ err, sessionId: this.cfg.sessionId }, 'Agent error during call');
     });
@@ -202,23 +249,10 @@ export class CallSession {
 
   private async runAgent(transcript: string): Promise<void> {
     try {
-      const userRepo = this.cfg.agentContextBase?.userRepo;
-      const user =
-        userRepo?.findByTelegramId(this.cfg.userId) ??
-        ({ telegram_id: this.cfg.userId, language: this.cfg.language } as User);
-      const ctx = {
-        ...(this.cfg.agentContextBase ?? {}),
-        user,
-        chatId: this.cfg.userId,
-        messageText: transcript,
-        inputMode: 'live_call',
-        isGroup: false,
-      } as AgentContext;
-
       let responseText: string | undefined;
       let endCall = false;
       try {
-        const result = await this.cfg.agent.run(ctx);
+        const result = await this.cfg.agent.run({ userId: this.cfg.userId, transcript });
         responseText = result.responseText;
         endCall = result.endCall === true;
       } catch (err) {

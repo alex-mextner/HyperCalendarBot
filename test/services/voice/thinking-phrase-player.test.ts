@@ -12,8 +12,8 @@ test('sends STOP then PLAY start phrase immediately on start()', () => {
   player.start(sendCmd);
   // STOP + PLAY for the start phrase
   expect(sendCmd).toHaveBeenCalledTimes(2);
-  const stop = (sendCmd.mock.calls[0] as [{ type: string; file?: string }])[0];
-  const play = (sendCmd.mock.calls[1] as [{ type: string; file?: string }])[0];
+  const stop = sendCmd.mock.calls[0]![0];
+  const play = sendCmd.mock.calls[1]![0];
   expect(stop.type).toBe('STOP');
   expect(play.type).toBe('PLAY');
   expect(play.file).toMatch(/data\/call-phrases\/ru\/start_/);
@@ -37,7 +37,7 @@ test('fires STOP+PLAY mid phrase after midDelay1Ms', async () => {
   player.cancel();
   // start: STOP+PLAY, mid: STOP+PLAY
   expect(sendCmd).toHaveBeenCalledTimes(4);
-  const midPlay = (sendCmd.mock.calls[3] as [{ type: string; file?: string }])[0];
+  const midPlay = sendCmd.mock.calls[3]![0];
   expect(midPlay.file).toMatch(/mid_/);
 });
 
@@ -45,7 +45,7 @@ test('uses EN phrases for lang=en', () => {
   const { player, sendCmd } = makePlayer('en');
   player.start(sendCmd);
   // calls[0] = STOP, calls[1] = PLAY
-  const play = (sendCmd.mock.calls[1] as [{ type: string; file?: string }])[0];
+  const play = sendCmd.mock.calls[1]![0];
   expect(play.file).toMatch(/data\/call-phrases\/en\/start_/);
   player.cancel();
 });

@@ -62,9 +62,9 @@ export class CallSessionManager {
     if (!entry) return;
 
     if (isBinary) {
-      entry.session.handleBinaryMessage(Buffer.isBuffer(data) ? data : Buffer.from(data as string));
-    } else {
-      await entry.session.handleMessage(data as string);
+      entry.session.handleBinaryMessage(Buffer.isBuffer(data) ? data : Buffer.from(data));
+    } else if (typeof data === 'string') {
+      await entry.session.handleMessage(data);
     }
   }
 
@@ -106,7 +106,7 @@ export class CallSessionManager {
         message: (ws, message) => {
           const { sessionId } = ws.data;
           const isBinary = typeof message !== 'string';
-          this.onWebSocketMessage(sessionId, message as string | Buffer, isBinary).catch((err) => {
+          this.onWebSocketMessage(sessionId, message, isBinary).catch((err) => {
             voiceLogger.error({ err, sessionId }, 'WebSocket message handler error');
           });
         },
