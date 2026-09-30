@@ -1,5 +1,7 @@
 # Sub-Project #1: Core Bot + Event Model
 
+> **2026-09-30:** voice call reminders (sub-project 07) restored behind `ServiceTier`, no service sends (#753); they are available only while the optional MTProto service tier is enabled.
+
 ## Overview & Goals
 
 Foundation layer for HyperCalendarBot — a personal/multi-user Telegram calendar bot with its own event model, optional Google Calendar bidirectional sync, and AI-powered natural language event creation.

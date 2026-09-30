@@ -1,5 +1,7 @@
 # Sub-Project #4: Notifications
 
+> **2026-09-30:** voice calls (sub-project #7) restored behind `ServiceTier`, no service sends (#753). The `voice_call` channel exists only while the optional MTProto service tier is enabled; otherwise notifications are Telegram text or images.
+
 ## Overview
 
 Fully configurable notification system for HyperCalendarBot. Users get morning agendas, event reminders, and evening reviews — all timezone-aware, all configurable, all delivered through BullMQ workers.

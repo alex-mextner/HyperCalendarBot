@@ -117,14 +117,13 @@ function handleGet(ctx: AgentContext, category?: SettingsCategory): ToolResult {
     }
   }
 
-  if (!category || category === 'calls') {
-    if (ctx.voice?.callSettingsRepo) {
-      ctx.voice?.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
-      const settings = ctx.voice?.callSettingsRepo.get(ctx.user.telegram_id);
-      if (settings) {
-        const { user_id: _uid, updated_at: _uat, ...rest } = settings;
-        result.calls = rest;
-      }
+  if (category === 'calls' && !ctx.calls) return callsUnavailable(ctx);
+  if ((!category || category === 'calls') && ctx.calls) {
+    ctx.calls.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
+    const settings = ctx.calls.callSettingsRepo.get(ctx.user.telegram_id);
+    if (settings) {
+      const { user_id: _uid, updated_at: _uat, ...rest } = settings;
+      result.calls = rest;
     }
   }
 
@@ -237,11 +236,20 @@ function updateNotifications(ctx: AgentContext, updates: NotificationUpdates): T
 }
 
 function updateCalls(ctx: AgentContext, updates: CallUpdates): ToolResult {
-  if (!ctx.voice?.callSettingsRepo) return { success: false, error: 'Call settings not available.' };
-  ctx.voice?.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
-  if (updates.enabled !== undefined) ctx.voice?.callSettingsRepo.setEnabled(ctx.user.telegram_id, updates.enabled);
-  if (updates.language !== undefined) ctx.voice?.callSettingsRepo.setLanguage(ctx.user.telegram_id, updates.language);
+  if (!ctx.calls) return callsUnavailable(ctx);
+  const repo = ctx.calls.callSettingsRepo;
+  repo.ensureDefaults(ctx.user.telegram_id);
+  if (updates.enabled !== undefined) repo.setEnabled(ctx.user.telegram_id, updates.enabled);
+  if (updates.language !== undefined) repo.setLanguage(ctx.user.telegram_id, updates.language);
   return { success: true, output: t(ctx.user.language).aiTools.settings.callsUpdated };
+}
+
+function callsUnavailable(ctx: AgentContext): ToolResult {
+  return {
+    success: false,
+    error: t(ctx.user.language).settings.callsUnavailable,
+    agentHint: 'This bot has no calling account, so voice calls cannot be enabled or configured by any setting.',
+  };
 }
 
 function updatePrivacy(ctx: AgentContext, updates: PrivacyUpdates): ToolResult {

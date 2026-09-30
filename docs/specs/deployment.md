@@ -78,51 +78,45 @@ Set these in the repo (Settings → Secrets → Actions):
 | `SSH_KEY` | Contents of the deployment SSH private key |
 | `DEPLOY_PATH` | `/var/www/hypercal.invntrm.ru` |
 
-### 6. Pyrogram session (voice calls)
+### 6. Telegram MTProto (optional)
 
-Only if voice calls are needed:
+**Personal connection.** `/connect_telegram` lets a user send their invitations from their own Telegram
+account. It needs `MTPROTO_API_ID`, `MTPROTO_API_HASH` (from https://my.telegram.org) and
+`TELEGRAM_SESSION_MASTER_KEY` in the env file; the Pyrogram venv is built into the image (see the deploy
+runbook, "Connect Telegram").
 
-```bash
-# On the server, inside the bot container:
-docker exec -it hypercal-bot bash
-# Then inside container — not yet supported, auth must happen on host with Python venv
-```
-
-Voice call auth requires an interactive terminal — run on host:
+**Service tier** (restored 2026-09-30 behind `ServiceTier`, no service sends — #753). A dedicated service
+account enables @username resolution, profile lookup, group member listing, birthday auto-sync and
+voice-call reminders. It never sends messages; invitations go Bot API → the inviter's own session → a deep
+link to the inviter (proposals and secretary DMs: Bot API → a deep link). It is off unless configured — prod has never set
+`MTPROTO_SERVICE_USER_ID` — and Telegram may block such accounts. To enable it, run on the host
+(interactive terminal):
 
 ```bash
 cd /var/www/hypercal.invntrm.ru
-# Create Python venv with uv
 uv venv --python 3.12 venv
 uv pip install -r pyproject.toml --python venv/bin/python
-# Build patched ntgcalls (5+ min, needs 5GB RAM)
+# Voice calls only: build patched ntgcalls (5+ min, needs 5GB RAM)
 ./scripts/build-patched-ntgcalls.sh python3.12 venv
-# Interactive auth — enter phone, code from Telegram
+# Interactive auth of the designated service account — creates data/voice_caller.session
 venv/bin/python scripts/pyrogram-auth.py
 ```
 
-Session file ends up in `data/voice_caller.session`.
+Then set `MTPROTO_SERVICE_USER_ID` to that account's numeric Telegram ID (plus `DEEPGRAM_API_KEY` for
+live calls; `DISABLE_VOICE=true` opts out of calls). An ordinary user's stored Telegram authorization is
+never copied into this session.
 
-Set `MTPROTO_SERVICE_USER_ID` to the numeric Telegram ID of the explicitly
-chosen service account. An ordinary user's stored Telegram authorization is never
-copied into this session or used to enable shared service capabilities.
-
-Shared-session consumer inventory:
-
-- `send-message.py`, `resolve-username.py`, `fetch-birthdays.py`,
-  `get-chat-members.py`, `get-user-info.py`, `voice-call-bridge.py`, `debug-call.py`, and the embedded
-  Python in `docker-call-test.sh` use `start_service_session`: public Pyrogram
-  `connect` → `get_me` → expected-ID check → `initialize`. Initialized clients use
-  `stop`; identity rejection disconnects before initialization. The Docker helper
-  mounts this guard read-only and forwards `MTPROTO_SERVICE_USER_ID` explicitly.
-- `check-session.py` is a read-only identity probe (`connect`/`get_me`/`disconnect`,
-  without initialization). `src/index.ts` uses `bootstrapServiceSession` to require
-  service configuration, the existing file, and a successful matching probe before
-  enabling shared messaging, username resolution, or voice capabilities.
-- `pyrogram-auth.py` is the intentional operator authorization bootstrap exception:
-  it interactively creates the chosen service account's session. Run it manually
-  as the operator, never from service startup or as recovery from a user's stored
-  credentials. `mtproto_lock.py` only coordinates access; it does not open a client.
+`src/services/telegram-session/service-tier.ts` is the only gate: at startup it requires the API
+credentials, a positive `MTPROTO_SERVICE_USER_ID`, the session file, and a `scripts/check-session.py`
+probe (read-only `connect`/`get_me`/`disconnect`) reporting exactly that ID, and logs
+`MTProto service tier enabled` or `MTProto service tier disabled` with the reason
+(`service_user_id_unset`, `service_user_id_invalid`, `api_credentials_missing`, `session_missing`,
+`probe_failed`, `identity_mismatch`). Only that module names the service scripts (`resolve-username.py`,
+`get-user-info.py`, `get-chat-members.py`, `fetch-birthdays.py`, `voice-call-bridge.py`); each of them
+re-checks the identity via `start_service_session` and serializes on `mtproto_lock.py`. With the tier off,
+`find_user` / `send_invitation` use the local `users` table and otherwise the picker, group members come
+from `group_members`, and birthday sync and voice calls are off. `pyrogram-auth.py` is the operator's
+manual bootstrap — never run from service startup or as recovery from a user's stored credentials.
 
 
 ## CI/CD Pipeline

@@ -188,7 +188,6 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
     def test_shared_consumer_inventory_and_guards(self):
         expected = {
             "check-session.py",
-            "send-message.py",
             "resolve-username.py",
             "fetch-birthdays.py",
             "voice-call-bridge.py",

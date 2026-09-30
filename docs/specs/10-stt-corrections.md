@@ -1,5 +1,7 @@
 # Spec 10: STT Corrections Dictionary
 
+> **2026-09-30:** voice calls — the Deepgram streaming STT this spec builds on — restored behind `ServiceTier`, no service sends (#753); they run only while the optional MTProto service tier is enabled. Voice messages are transcribed by Whisper.
+
 ## Overview
 
 A per-user and global corrections dictionary for STT post-processing. After Deepgram returns a transcript, the system annotates it with phonetically matched correction candidates and low-confidence word scores before passing it to the main AI agent. The agent has tools to manage the dictionary and can ask the user to clarify uncertain words during conversation.

@@ -164,20 +164,18 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
           'Wait for the actual confirmation callback or use pick_users. force=true alone cannot bypass identity confirmation; it never changes the numeric recipient.',
       };
     }
-    if (recipient.reason === 'not_found' && recipient.username) {
-      const prompt = t(ctx.user.language).invite_resolve_not_found(recipient.username);
+    if ((recipient.reason === 'not_found' || recipient.reason === 'unavailable') && recipient.username) {
+      const prompt =
+        recipient.reason === 'not_found'
+          ? t(ctx.user.language).invite_resolve_not_found(recipient.username)
+          : t(ctx.user.language).invite_resolve_unavailable(recipient.username);
       return handlePickUsers({ ...ctx, chatId: ctx.user.telegram_id }, { event_id: input.event_id, prompt });
     }
     const tr = t(ctx.user.language).aiTools.meta;
     return {
       success: false,
       mutationState: 'not_applied',
-      error:
-        recipient.reason === 'conflict'
-          ? tr.recipientIdentityConflict
-          : recipient.reason === 'unavailable'
-            ? tr.recipientResolveUnavailable
-            : tr.recipientUnverified,
+      error: recipient.reason === 'conflict' ? tr.recipientIdentityConflict : tr.recipientUnverified,
       agentHint:
         'Use find_contact, an exact user-provided @username, or pick_users. Do not guess or reuse an unverified recipient ID.',
     };
@@ -232,7 +230,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
       // private chat, never ctx.chatId (which may be a group the bot was invoked from,
       // leaking the invitee's personal invitation to every member).
       fallbackChatId: ctx.user.telegram_id,
-      allowMtproto: !isGroupTarget,
+      allowInviterSession: !isGroupTarget,
       isGroupTarget,
       deps: {
         sender: ctx.sender,
@@ -247,7 +245,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
 
   const connectSuggestion = connectSuggestionAfterDelivery(ctx, delivery, isGroupTarget, invitation.id);
   const deliveryHint = delivery.delivered
-    ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
+    ? "The invitation was delivered to the invitee via bot API or the inviter's own Telegram account. Tell the user it is sent."
     : delivery.viaDeepLink
       ? 'Bot-API delivery failed. A deep-link fallback was sent to the inviter to forward manually. Tell the user to share the link.'
       : 'Invitation delivery failed entirely. Tell the user there was a delivery problem.';
@@ -350,7 +348,7 @@ export async function handleResendInvitation(
   if (ctx.sender) {
     const event = ctx.eventService.getEvent(invitation.event_id, ctx.user.telegram_id);
     // A group invitation stores the (negative) group chat id as invitee_id. Resending it must use
-    // the group delivery mode (per-member RSVP keyboard, no MTProto, no deep-link forward) — exactly
+    // the group delivery mode (per-member RSVP keyboard, no user-session send, no deep-link forward) — exactly
     // what the chat_shared picker does. Without this it would deliver the personal inv: keyboard
     // (authorizes a single invitee, unusable in a group).
     const isGroupTarget = invitation.invitee_id < 0;
@@ -372,7 +370,7 @@ export async function handleResendInvitation(
       // private chat, never ctx.chatId (which may be a group the bot was invoked from,
       // leaking the invitee's personal invitation to every member).
       fallbackChatId: ctx.user.telegram_id,
-      allowMtproto: !isGroupTarget,
+      allowInviterSession: !isGroupTarget,
       isGroupTarget,
       deps: {
         sender: ctx.sender,

@@ -1,5 +1,7 @@
 # Voice Calls — ntgcalls P2P Audio Patch
 
+> **2026-09-30:** voice calls restored behind `ServiceTier`, no service sends (#753); the patched ntgcalls is needed only when the optional MTProto service tier is enabled.
+
 ## Простыми словами
 
 Telegram звонки работают так: бот звонит пользователю через интернет (WebRTC). Внутри WebRTC есть
@@ -138,7 +140,7 @@ The patched `.so` binary is **platform-specific** and **not in git** (venv is gi
 ### What's in the repo
 
 - `scripts/voice-call-bridge.py` — Python bridge for pytgcalls P2P calls
-- `scripts/pyrogram-auth.py` — session authentication
+- `scripts/pyrogram-auth.py` — one-time operator authorization of the service account (creates `data/voice_caller.session`)
 - `src/services/voice/` — Bun-side call management
 - `src/worker/call-queue.ts` — BullMQ async call queue
 

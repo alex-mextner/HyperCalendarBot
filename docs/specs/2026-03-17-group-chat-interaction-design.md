@@ -168,11 +168,13 @@ Any member of the group can CRUD group events. Permission check: the user sent a
 
 Group event reminders are sent to **all group members** in private messages (DMs).
 
-**Member list retrieval:** Via Pyrogram subprocess — `scripts/get-chat-members.py` accepts `chat_id`, returns JSON array of user objects. Called via `Bun.spawn()`. Requires `data/voice_caller.session` (same Pyrogram session used for voice calls).
+> **2026-09-30:** the member listing below is restored behind `ServiceTier`, no service sends (#753).
 
-**Graceful fallback:** If Pyrogram session is unavailable, fall back to sending reminders only to users who have been seen sending messages in the group (tracked opportunistically via upsert on each group message into `group_members` table). This ensures reminders work even without MTProto.
+**Member list retrieval:** `GroupMemberService.getRegisteredMembers(chatId)` (`src/services/group/member-service.ts`) receives the `ServiceTier`. When the optional MTProto service tier is enabled it lists the chat via `serviceTier.getChatMembers(chatId)` (`scripts/get-chat-members.py` on `data/voice_caller.session`; the script path lives only in `service-tier.ts`).
 
-#### Group members tracking (fallback)
+**Graceful fallback:** with the tier disabled, or when the listing fails, the members are the tracked `group_members` rows (active, `left_at IS NULL`) — users the bot has seen in the chat. Members the bot has never seen get nothing.
+
+#### Group members tracking
 
 ```sql
 CREATE TABLE IF NOT EXISTS group_members (
@@ -183,9 +185,9 @@ CREATE TABLE IF NOT EXISTS group_members (
 );
 ```
 
-Populated on every group message: `INSERT OR REPLACE INTO group_members (chat_id, user_id, last_seen_at) VALUES (?, ?, datetime('now'))`. Used as fallback when Pyrogram is unavailable.
+Populated by `GroupMemberRepository.upsert` on every group message the bot receives and on `chat_member` join updates (which require the bot to be an admin); a `chat_member` leave/kick update sets `left_at` via `GroupMemberRepository.leave`. Migration `043_group_members_membership_dates` added the `joined_at` and `left_at` columns to the table above.
 
-**Reminder delivery:** Fetch members via Pyrogram (or fallback) → intersect with `users` table (only users registered with the bot) → send reminder to each via DM.
+**Reminder delivery:** Fetch members via the service tier (or the tracked fallback) → intersect with `users` table (only users registered with the bot) → send reminder to each via DM.
 
 **Note:** The existing `group_chats` table (from sharing sub-project, migration 008) is reused — no need to create a new one. The `GroupChatRepository` already handles upsert/deactivate.
 
@@ -312,7 +314,7 @@ const inlineBot = new Bot(INLINE_BOT_TOKEN); // inline queries only
 
 ### New files
 
-- `scripts/get-chat-members.py` — Pyrogram subprocess for fetching group members
+- `scripts/get-chat-members.py` — Pyrogram subprocess for fetching group members (MTProto service tier only)
 - `src/services/group/group-session.ts` — in-memory GroupSession manager
 
 ### Deleted files

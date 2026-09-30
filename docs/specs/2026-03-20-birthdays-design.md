@@ -5,6 +5,8 @@
 
 ---
 
+> **2026-09-30:** the MTProto birthday auto-sync below is restored behind `ServiceTier`, no service sends (#753). `BirthdayService` fetches through `serviceTier.fetchBirthdays` (`fetch-birthdays.py` on `data/voice_caller.session`), and the daily sync cron runs only while the optional service tier is enabled. With it off, birthdays are added by hand (`add_birthday` / `/birthdays`); reminders and display are unchanged.
+
 ## Overview
 
 Automatically discover and create birthday events for Telegram group calendar members.

@@ -49,10 +49,13 @@ async function deliverMessageAsync(params: DeliverMessageParams): Promise<{ deli
 
 ### Цепочка доставки (универсальная)
 
+> **Обновление 2026-09-30:** служебный MTProto-аккаунт восстановлен за `ServiceTier` без отправок (#753): он только ищет и читает, но никогда не пишет. Шаг 2 — только собственная сессия инициатора (`/connect_telegram`); сейчас его передаёт лишь доставка инвайтов. Предложения и уведомления секретарям идут через Bot API, иначе инициатору уходит ссылка.
+
 1. **Bot API** — прямое `sendMessage(target_id, ...)`. Работает если пользователь хотя бы раз писал боту.
-2. **MTProto fallback** — `mtprotoSendAsUser(target_id, text, target_username)`. Работает для
-   пользователей с публичным username, даже если они никогда не писали боту.
-3. **Deep link fallback** — если оба не сработали: отправить `fallback_text` инициатору
+2. **Сессия инициатора** (`userSessionSend`, только если вызывающий её передал) — `sendAsConnectedUser`
+   (`scripts/send-as-user.py`) от имени самого инициатора, подключившего свой Telegram через
+   `/connect_telegram`. Работает, даже если цель никогда не писала боту.
+3. **Deep link fallback** — если доставить не удалось: отправить `fallback_text` инициатору
    с deeplink-кнопкой `[→ Написать боту]`, чтобы цель могла начать диалог сама.
 
 `deliverInvitationAsync` рефакторится на вызов `deliverMessageAsync`.
@@ -272,7 +275,7 @@ If it's unclear whose calendar is meant — call ask_user: ["Мой", "@alice"].
 | Scenario | Handling |
 |----------|----------|
 | Target не в чате | `PROPOSAL_TARGET_NOT_IN_CHAT`. AI: "Этот пользователь не состоит в данном чате." |
-| Target не писал боту | `deliverMessageAsync` → MTProto fallback → deep link к предлагающему: "Алиса ещё не запускала бота. Перешли ей эту ссылку." |
+| Target не писал боту | `deliverMessage` → deep link к предлагающему: "Алиса ещё не запускала бота. Перешли ей эту ссылку." |
 | `event_id` не существует или удалён до принятия | `PROPOSAL_EVENT_GONE`. Executor уведомляет цель и предлагающего в личке: "Событие больше не существует, предложение аннулировано." |
 | Предложение истекло (принятие после `expires_at`) | `PROPOSAL_EXPIRED`. Бот: "Предложение истекло — событие уже завершилось." Кнопки убрать (edit message). |
 | Несколько открытых предложений к одному пользователю | Нет ограничений. Цель принимает/отклоняет каждое независимо. |

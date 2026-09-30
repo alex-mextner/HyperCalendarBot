@@ -1,6 +1,11 @@
 import { t, toLang } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
-import { canResolveRecipientUsername, normalizeRecipientUsername } from '../recipient-identity.ts';
+import {
+  canResolveRecipientUsername,
+  lookUpUsername,
+  markVerifiedRecipient,
+  normalizeRecipientUsername,
+} from '../recipient-identity.ts';
 import { correctAskedQuestion, eventClocksForRun } from '../reply-time-guard.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { handleDeleteConfirmationRequest } from './events.ts';
@@ -48,44 +53,27 @@ export async function handleFindUser(ctx: AgentContext, input: FindUserInput): P
         'Use find_contact for a personal name. Ask for the exact @username or use pick_users if the person is not in the address book; do not guess.',
     };
   }
-  const user = ctx.userRepo.findByUsername(username);
-  const lang = ctx.user.language;
-  const unknownName = t(lang).aiTools.meta.unknownName;
-  if (user && !ctx.resolveUsername) {
-    ctx.verifiedRecipientIds ??= new Set();
-    ctx.verifiedRecipientIds.add(user.telegram_id);
-    const name = user.first_name ?? user.username ?? unknownName;
+  const tr = t(ctx.user.language).aiTools.meta;
+  const lookup = await lookUpUsername(ctx, username);
+  if (lookup.status === 'found') {
+    const { user } = lookup;
+    markVerifiedRecipient(ctx, user.id);
+    const name = user.firstName ?? user.username;
+    return { success: true, output: tr.foundUser(user.id, name), data: { telegram_id: user.id, name } };
+  }
+  if (lookup.status === 'unverified') return { success: false, error: tr.recipientUnverified };
+  if (lookup.status === 'not_found') {
     return {
-      success: true,
-      output: t(lang).aiTools.meta.foundUser(user.telegram_id, name),
-      data: { telegram_id: user.telegram_id, name },
+      success: false,
+      error: tr.recipientNotFound(username),
+      agentHint: 'Ask the user to check the @username, or offer pick_users.',
     };
   }
-
-  if (ctx.resolveUsername) {
-    const resolved = await ctx.resolveUsername(username);
-    if (resolved) {
-      if (!Number.isSafeInteger(resolved.id) || resolved.id <= 0) {
-        return { success: false, error: t(lang).aiTools.meta.recipientUnverified };
-      }
-      ctx.verifiedRecipientIds ??= new Set();
-      ctx.verifiedRecipientIds.add(resolved.id);
-      const name = resolved.firstName ?? resolved.username ?? unknownName;
-      return {
-        success: true,
-        output: t(lang).aiTools.meta.foundUserMtproto(resolved.id, name),
-        data: { telegram_id: resolved.id, name },
-      };
-    }
-  }
-
-  if (!ctx.resolveUsername) {
-    return { success: false, error: t(lang).aiTools.meta.recipientResolveUnavailable };
-  }
-
   return {
     success: false,
-    error: `User @${username} not found. They may not have used this bot yet.`,
+    error: tr.recipientResolveUnavailable,
+    agentHint:
+      'This does not mean the person does not exist or has not started the bot. Offer pick_users so the user can share the contact from Telegram.',
   };
 }
 handleFindUser.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
@@ -192,15 +180,17 @@ export function handleMakeCall(ctx: AgentContext, input: { text: string }): Tool
       error: 'Cannot schedule a call while already on a live call. Just respond to the user directly.',
     };
   }
-  if (!ctx.voice?.callQueue) {
-    metaLogger.warn({ userId: ctx.user.telegram_id }, 'make_call: callQueue not available');
+  if (!ctx.calls) {
+    metaLogger.warn({ userId: ctx.user.telegram_id }, 'make_call: voice calls are not available');
     return {
       success: false,
-      error: 'Voice calls are temporarily unavailable. This is a server-side issue, not a user setting problem.',
+      error: t(ctx.user.language).settings.callsUnavailable,
+      agentHint:
+        'This bot has no calling account, so it cannot call anyone. It is not a setting the user can change; offer a text reminder instead.',
     };
   }
   metaLogger.info({ userId: ctx.user.telegram_id, textLen: input.text.length }, 'make_call: enqueueing call');
-  ctx.voice!.callQueue.enqueue(ctx.user.telegram_id, input.text);
+  ctx.calls.callQueue.enqueue(ctx.user.telegram_id, input.text);
   return { success: true, output: t(ctx.user.language).aiTools.meta.callQueued };
 }
 
@@ -249,11 +239,11 @@ export function handleListGoogleCalendars(ctx: AgentContext): ToolResult {
 handleListGoogleCalendars.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleLookupStress(ctx: AgentContext, input: { words: string[] }): ToolResult {
-  if (!ctx.voice?.stressDictionary) {
+  if (!ctx.voice) {
     return { success: false, error: 'Stress dictionary not loaded' };
   }
 
-  const results = ctx.voice!.stressDictionary.lookupMany(input.words);
+  const results = ctx.voice.stressDictionary.lookupMany(input.words);
   const lines: string[] = [];
 
   for (const [word, { stressed, similar }] of Object.entries(results)) {

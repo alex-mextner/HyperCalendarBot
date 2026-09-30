@@ -1,9 +1,10 @@
-/** Request-scoped, bounded metadata inspection. Callers must check permission on every use. */
+/** Request-scoped, bounded live-profile inspection through the shared service account
+ *  (ctx.lookupTelegramUser, present only when that account is on). Callers must check permission on
+ *  every use; without the account every inspection is null and callers use saved metadata. */
+import type { TelegramProfile } from '../telegram-session/service-tier.ts';
 import type { AgentContext } from './types.ts';
 
-type Profile = NonNullable<Awaited<ReturnType<NonNullable<AgentContext['lookupTelegramUser']>>>> & {
-  checkedAt: string;
-};
+type Profile = TelegramProfile & { checkedAt: string };
 type Inspection = { expiresAt: number; pending: Promise<Profile | null>; result?: Profile | null };
 const inspections = new WeakMap<AgentContext, Map<string, Inspection>>();
 const TTL = 30_000;

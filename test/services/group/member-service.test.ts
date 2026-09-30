@@ -1,166 +1,80 @@
-import { describe, expect, mock, spyOn, test } from 'bun:test';
-import type { GroupMemberRepository } from '../../../src/database/repositories/group-member.repository.ts';
-import type { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { Database } from 'bun:sqlite';
+import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import { migrations } from '../../../src/database/migrations.ts';
+import { GroupMemberRepository } from '../../../src/database/repositories/group-member.repository.ts';
+import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
 import { GroupMemberService } from '../../../src/services/group/member-service.ts';
+import { disabledServiceTier, enabledServiceTier } from '../../helpers/service-tier.ts';
 
-function makeGroupMemberRepo(
-  members: { chat_id: number; user_id: number; last_seen_at: string }[],
-): GroupMemberRepository {
-  return {
-    upsert: mock(() => {}),
-    getMembers: mock((chatId: number) => members.filter((m) => m.chat_id === chatId)),
-    getActiveMembers: mock((chatId: number) => members.filter((m) => m.chat_id === chatId)),
-  } as unknown as GroupMemberRepository;
+const CHAT_ID = -100123;
+const OTHER_CHAT_ID = -100999;
+
+let groupMembers: GroupMemberRepository;
+let users: UserRepository;
+
+beforeEach(() => {
+  const db = new Database(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  runMigrations(db, migrations);
+  groupMembers = new GroupMemberRepository(db);
+  users = new UserRepository(db);
+});
+
+function registerUsers(...ids: number[]): void {
+  for (const id of ids) users.create({ telegram_id: id, first_name: `User ${id}`, language: 'en', timezone: 'UTC' });
 }
 
-function makeUserRepo(registeredIds: number[]): UserRepository {
-  return {
-    findByTelegramId: mock((id: number) => (registeredIds.includes(id) ? { telegram_id: id } : null)),
-  } as Partial<UserRepository> as UserRepository;
+function track(chatId: number, ...ids: number[]): void {
+  for (const id of ids) groupMembers.upsert(chatId, id);
 }
 
-function mockSpawnSuccess(stdout: string) {
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode(stdout));
-      controller.close();
-    },
+describe('GroupMemberService.getRegisteredMembers', () => {
+  const spawn = spyOn(Bun, 'spawn').mockImplementation(() => {
+    throw new Error('no process may be spawned');
   });
-  return {
-    stdout: stream,
-    stderr: new ReadableStream({
-      start(c) {
-        c.close();
-      },
-    }),
-    exited: Promise.resolve(0),
-    pid: 1,
-    kill: mock(() => {}),
-  } as Partial<ReturnType<typeof Bun.spawn>> as ReturnType<typeof Bun.spawn>;
-}
+  afterEach(() => spawn.mockClear());
+  afterAll(() => spawn.mockRestore());
 
-function mockSpawnFailure(exitCode: number) {
-  return {
-    stdout: new ReadableStream({
-      start(c) {
-        c.close();
-      },
-    }),
-    stderr: new ReadableStream({
-      start(c) {
-        c.close();
-      },
-    }),
-    exited: Promise.resolve(exitCode),
-    pid: 1,
-    kill: mock(() => {}),
-  } as Partial<ReturnType<typeof Bun.spawn>> as ReturnType<typeof Bun.spawn>;
-}
+  test('with the service tier on, lists the members Telegram reports who started the bot', async () => {
+    registerUsers(10, 30, 40);
+    track(CHAT_ID, 40);
+    const getChatMembers = mock(async (_chatId: number): Promise<number[] | null> => [10, 20, 30]);
+    const service = new GroupMemberService(groupMembers, users, enabledServiceTier({ getChatMembers }));
 
-describe('GroupMemberService', () => {
-  const CHAT_ID = -100123;
-
-  describe('getRegisteredMembers — Pyrogram available', () => {
-    test('returns registered members from Pyrogram result', async () => {
-      const pyramMembers = [
-        { id: 1, username: 'alice', first_name: 'Alice' },
-        { id: 2, username: 'bob', first_name: 'Bob' },
-        { id: 3, username: 'carol', first_name: 'Carol' },
-      ];
-
-      const groupRepo = makeGroupMemberRepo([]);
-      const userRepo = makeUserRepo([1, 2]);
-
-      const service = new GroupMemberService(groupRepo, userRepo, 'scripts/get-chat-members.py');
-
-      const spawnMock = spyOn(Bun, 'spawn').mockReturnValue(mockSpawnSuccess(JSON.stringify(pyramMembers)));
-
-      try {
-        const result = await service.getRegisteredMembers(CHAT_ID);
-        expect(result).toEqual([1, 2]);
-        expect(result).not.toContain(3);
-      } finally {
-        spawnMock.mockRestore();
-      }
-    });
-
-    test('passes correct arguments to Bun.spawn', async () => {
-      const groupRepo = makeGroupMemberRepo([]);
-      const userRepo = makeUserRepo([]);
-
-      const service = new GroupMemberService(groupRepo, userRepo, 'scripts/get-chat-members.py');
-
-      const spawnMock = spyOn(Bun, 'spawn').mockReturnValue(mockSpawnSuccess(JSON.stringify([])));
-
-      try {
-        await service.getRegisteredMembers(CHAT_ID);
-        expect(spawnMock).toHaveBeenCalledWith(
-          ['venv/bin/python', 'scripts/get-chat-members.py', String(CHAT_ID)],
-          expect.objectContaining({ stdout: 'pipe', stderr: 'pipe' }),
-        );
-      } finally {
-        spawnMock.mockRestore();
-      }
-    });
+    expect((await service.getRegisteredMembers(CHAT_ID)).sort()).toEqual([10, 30]);
+    expect(getChatMembers.mock.calls).toEqual([[CHAT_ID]]);
+    expect(spawn).not.toHaveBeenCalled();
   });
 
-  describe('getRegisteredMembers — Pyrogram unavailable', () => {
-    test('falls back to group_members table when Pyrogram exits non-zero', async () => {
-      const groupRepo = makeGroupMemberRepo([
-        { chat_id: CHAT_ID, user_id: 10, last_seen_at: '2026-01-01T00:00:00Z' },
-        { chat_id: CHAT_ID, user_id: 20, last_seen_at: '2026-01-01T00:00:00Z' },
-        { chat_id: CHAT_ID, user_id: 30, last_seen_at: '2026-01-01T00:00:00Z' },
-      ]);
-      const userRepo = makeUserRepo([10, 20]);
+  test('with the service tier on but the listing failing, falls back to the tracked members', async () => {
+    registerUsers(10, 20);
+    track(CHAT_ID, 10, 20, 30);
+    const service = new GroupMemberService(
+      groupMembers,
+      users,
+      enabledServiceTier({ getChatMembers: async () => null }),
+    );
 
-      const service = new GroupMemberService(groupRepo, userRepo, 'scripts/get-chat-members.py');
+    expect((await service.getRegisteredMembers(CHAT_ID)).sort()).toEqual([10, 20]);
+  });
 
-      const spawnMock = spyOn(Bun, 'spawn').mockReturnValue(mockSpawnFailure(1));
+  test('with the service tier off, lists the tracked members of the chat who started the bot', async () => {
+    registerUsers(10, 20, 40);
+    track(CHAT_ID, 10, 20, 30);
+    track(OTHER_CHAT_ID, 40);
+    const service = new GroupMemberService(groupMembers, users, disabledServiceTier);
 
-      try {
-        const result = await service.getRegisteredMembers(CHAT_ID);
-        expect(result).toEqual([10, 20]);
-        expect(result).not.toContain(30);
-      } finally {
-        spawnMock.mockRestore();
-      }
-    });
+    expect((await service.getRegisteredMembers(CHAT_ID)).sort()).toEqual([10, 20]);
+    expect(spawn).not.toHaveBeenCalled();
+  });
 
-    test('falls back to group_members table when Bun.spawn throws', async () => {
-      const groupRepo = makeGroupMemberRepo([{ chat_id: CHAT_ID, user_id: 42, last_seen_at: '2026-01-01T00:00:00Z' }]);
-      const userRepo = makeUserRepo([42]);
+  test('a tracked member who left the chat is not listed', async () => {
+    registerUsers(10, 20);
+    track(CHAT_ID, 10, 20);
+    groupMembers.leave(CHAT_ID, 20);
+    const service = new GroupMemberService(groupMembers, users, disabledServiceTier);
 
-      const service = new GroupMemberService(groupRepo, userRepo, 'scripts/get-chat-members.py');
-
-      const spawnMock = spyOn(Bun, 'spawn').mockImplementation(() => {
-        throw new Error('venv not found');
-      });
-
-      try {
-        const result = await service.getRegisteredMembers(CHAT_ID);
-        expect(result).toEqual([42]);
-      } finally {
-        spawnMock.mockRestore();
-      }
-    });
-
-    test('filters unregistered users from fallback list', async () => {
-      const groupRepo = makeGroupMemberRepo([
-        { chat_id: CHAT_ID, user_id: 100, last_seen_at: '2026-01-01T00:00:00Z' },
-        { chat_id: CHAT_ID, user_id: 200, last_seen_at: '2026-01-01T00:00:00Z' },
-      ]);
-      const userRepo = makeUserRepo([]);
-
-      const service = new GroupMemberService(groupRepo, userRepo, 'scripts/get-chat-members.py');
-
-      const spawnMock = spyOn(Bun, 'spawn').mockReturnValue(mockSpawnFailure(1));
-
-      try {
-        const result = await service.getRegisteredMembers(CHAT_ID);
-        expect(result).toEqual([]);
-      } finally {
-        spawnMock.mockRestore();
-      }
-    });
+    expect(await service.getRegisteredMembers(CHAT_ID)).toEqual([10]);
   });
 });

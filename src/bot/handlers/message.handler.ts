@@ -115,6 +115,7 @@ export interface MessageHandlerDeps {
     update(userId: number, patch: NotificationPreferencesUpdate): void;
     ensureDefaults(userId: number): void;
   };
+  /** Voice-call reminders; present only when the call queue runs (the shared MTProto service tier is on). */
   callQueue?: { enqueue(userId: number, text: string): void };
   callSettingsRepo?: {
     get(userId: number): UserCallSettings | null;
@@ -457,13 +458,10 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
               groupMemberService: deps.groupMemberService,
             }
           : undefined,
-      voice:
+      voice: deps.stressDictionary ? { stressDictionary: deps.stressDictionary } : undefined,
+      calls:
         deps.callQueue && deps.callSettingsRepo
-          ? {
-              callQueue: deps.callQueue,
-              callSettingsRepo: deps.callSettingsRepo,
-              stressDictionary: deps.stressDictionary,
-            }
+          ? { callQueue: deps.callQueue, callSettingsRepo: deps.callSettingsRepo }
           : undefined,
       notifications: deps.notificationPrefs ? { notificationPrefs: deps.notificationPrefs } : undefined,
       google: deps.googleCalendarRepo

@@ -303,17 +303,16 @@ const toolDefinitions: ToolDefinition[] = [
     description:
       'Hang up the current live call. Use only when the user says goodbye or asks to end it — speak a short farewell first.',
     input_schema: {
-      type: 'object' as const,
+      type: 'object',
       properties: {},
       required: [],
     },
   },
   {
     name: 'make_call',
-    description:
-      'Call the user and speak a message aloud. Use when they ask to be called. On error, say voice calls are temporarily unavailable — the cause is server-side, not their settings.',
+    description: 'Call the user and speak a message aloud. Use when they ask to be called.',
     input_schema: {
-      type: 'object' as const,
+      type: 'object',
       properties: {
         text: { type: 'string', description: 'Text to speak during the call' },
       },
@@ -453,7 +452,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'get_user_info',
     description:
-      'Privately inspect a saved Telegram ID: reachable profile, saved aliases and contact creation time. Refreshes metadata, never identity; unknown fields stay null.',
+      'Privately inspect a saved Telegram ID: name, aliases, @username, contact creation time. May refresh the live profile, never the ID; unknown fields stay null.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1044,6 +1043,12 @@ const CALL_EXCLUDED_TOOLS = new Set([
 // Tools only available during a live call
 const CALL_ONLY_TOOLS = new Set(['end_call']);
 
+/** Capabilities of the current request that decide whether a tool is offered at all. */
+export interface ToolAvailability {
+  /** Voice calls can be placed (AgentContext.calls, which needs the service tier): offers make_call. */
+  calls?: boolean;
+}
+
 /**
  * The returned schemas are shared, not copied: fifteen tools reference the same
  * `scope` and `owner_id` objects. They are frozen, which stops one tool's copy
@@ -1053,13 +1058,18 @@ const CALL_ONLY_TOOLS = new Set(['end_call']);
  * normalize it in place. Every consumer in this repo passes it straight to a
  * provider client, which serializes it.
  */
-export function getToolDefinitions(inputMode?: string, supplementMode?: boolean): OpenAI.ChatCompletionTool[] {
+export function getToolDefinitions(
+  inputMode?: string,
+  supplementMode?: boolean,
+  available: ToolAvailability = {},
+): OpenAI.ChatCompletionTool[] {
   let tools: ToolDefinition[];
   if (inputMode === 'live_call') {
     tools = toolDefinitions.filter((t) => !CALL_EXCLUDED_TOOLS.has(t.name));
   } else {
     tools = toolDefinitions.filter((t) => !CALL_ONLY_TOOLS.has(t.name));
   }
+  if (!available.calls) tools = tools.filter((t) => t.name !== 'make_call');
 
   if (supplementMode) {
     tools = tools.filter((t) => t.name !== 'end_conversation');

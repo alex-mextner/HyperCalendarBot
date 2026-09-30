@@ -1,5 +1,5 @@
 import { createNotificationSender } from './services/notification/worker.ts';
-import { bootstrapServiceSession } from './services/telegram-session/service-session-bootstrap.ts';
+import { createServiceTier } from './services/telegram-session/service-tier.ts';
 import { formatSessionLoss } from './services/telegram-session/session-loss.ts';
 // src/index.ts
 
@@ -24,7 +24,6 @@ import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { InvitationCardRefresher } from './services/sharing/invitation-cards.ts';
 import { createVoiceSender } from './services/voice/voice-sender.ts';
 import { hasChainAnswered, initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
-import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
 import { makeWorkerFailureHandler } from './utils/worker-alert.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
@@ -175,22 +174,14 @@ let participantPushSchedulerRef:
   | undefined;
 /** Re-pushes all Google Calendar copies of an event after its place is confirmed or dropped */
 let pushEventCopiesRef: ((event: CalendarEvent) => Promise<void>) | undefined;
-let mtprotoSendAsUser: ((userId: number, text: string, username?: string) => Promise<boolean>) | undefined;
-let mtprotoLookupUser:
-  | ((id: number) => Promise<{ id: number; firstName?: string; username?: string; deleted?: boolean } | null>)
-  | undefined;
-let mtprotoResolveUsername:
-  | ((username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>)
-  | undefined;
 
-const serviceSessionEnabled = await bootstrapServiceSession(config, {
-  dataDirectory: 'data',
-  probe: probeMtprotoSession,
-});
-if (!serviceSessionEnabled && config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
-  botLogger.warn(
-    'Shared MTProto disabled: dedicated service identity/session check failed; user credentials will not be borrowed',
-  );
+// The shared MTProto service account: decided once here, fail-closed (#753). Everything that uses
+// it receives `serviceTier`; nothing else reads MTPROTO_SERVICE_USER_ID or spawns a service script.
+const serviceTier = await createServiceTier(config, { dataDirectory: 'data' });
+if (serviceTier.enabled) {
+  botLogger.info({ accountId: serviceTier.accountId }, 'MTProto service tier enabled');
+} else {
+  botLogger.info({ reason: serviceTier.reason }, 'MTProto service tier disabled');
 }
 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
@@ -448,7 +439,7 @@ const { queue: broadcastQueue, enqueuer: broadcastEnqueuer } = createBroadcastQu
 );
 let broadcastQueueCleanup: { close: () => Promise<void> } | undefined;
 
-if (config.REDIS_URL && serviceSessionEnabled && !config.DISABLE_VOICE) {
+if (config.REDIS_URL && serviceTier.enabled && !config.DISABLE_VOICE) {
   try {
     const { createCallQueue, createCallWorker } = await import('./worker/call-queue.ts');
     const { TtsService } = await import('./services/voice/tts-service.ts');
@@ -462,19 +453,8 @@ if (config.REDIS_URL && serviceSessionEnabled && !config.DISABLE_VOICE) {
     const { EventService } = await import('./services/event/event-service.ts');
     const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
     const { HolidayService } = await import('./services/holiday/holiday-service.ts');
-    const { existsSync } = await import('node:fs');
 
-    const cq = createCallQueue({ url: config.REDIS_URL });
-    callQueue = cq;
-
-    const pyBridgePath = 'scripts/voice-call-bridge.py';
-    const pySessionExists = existsSync('data/voice_caller.session');
-
-    if (!pySessionExists) {
-      botLogger.warn(
-        'Pyrogram session not found (data/voice_caller.session). Run: venv/bin/python scripts/pyrogram-auth.py',
-      );
-    }
+    const pyBridgePath = serviceTier.voiceBridgeScript;
 
     const { TtsTranslationService } = await import('./services/voice/tts-translation.ts');
     const ttsTranslationService = new TtsTranslationService();
@@ -566,8 +546,10 @@ if (config.REDIS_URL && serviceSessionEnabled && !config.DISABLE_VOICE) {
       },
     });
 
+    const cq = createCallQueue({ url: config.REDIS_URL });
     const worker = createCallWorker({ url: config.REDIS_URL }, callManager);
     worker.on('failed', onWorkerFailed('call-reminders'));
+    callQueue = cq;
     callQueueCleanup = {
       close: async () => {
         await worker.close();
@@ -577,15 +559,9 @@ if (config.REDIS_URL && serviceSessionEnabled && !config.DISABLE_VOICE) {
 
     botLogger.info('Voice call pipeline initialized (Python bridge + BullMQ)');
   } catch (error) {
-    botLogger.warn({ err: error }, 'Voice call init failed, queue-only mode');
-    const { createCallQueue } = await import('./worker/call-queue.ts');
-    const cq = createCallQueue({ url: config.REDIS_URL });
-    callQueue = cq;
-    callQueueCleanup = {
-      close: async () => {
-        await cq.queue.close();
-      },
-    };
+    // Fail closed: without a working pipeline no call can be placed, so make_call stays hidden
+    // instead of queueing calls nobody will ever make.
+    botLogger.warn({ err: error }, 'Voice call init failed; voice calls disabled');
   }
 }
 
@@ -681,9 +657,18 @@ if (config.REDIS_URL) {
     db.birthdayMeta,
     db.eventReminders,
     db.notificationPreferences,
-    'scripts/fetch-birthdays.py',
-    () => serviceSessionEnabled,
+    serviceTier,
   );
+  // Birthday auto-sync reads birthdays through the service account, so it exists only with it.
+  const onBirthdaySync = serviceTier.enabled
+    ? async () => {
+        const BATCH = 100;
+        const users = db.birthdayMeta.getUsersNeedingSync(BIRTHDAY_SYNC_THROTTLE_MS);
+        for (let i = 0; i < users.length; i += BATCH) {
+          await cronBirthdayService.runBatchSync(users.slice(i, i + BATCH));
+        }
+      }
+    : undefined;
 
   const { queue: botTasksQueue, worker: botTasksWorker } = createBotTasksQueue({
     redisUrl: config.REDIS_URL,
@@ -727,13 +712,7 @@ if (config.REDIS_URL) {
       const deleted = db.actionLog.deleteOlderThan(cutoff);
       if (deleted > 0) botLogger.info({ deleted }, 'Action log cleanup: removed old entries');
     },
-    onBirthdaySync: async () => {
-      const BATCH = 100;
-      const users = db.birthdayMeta.getUsersNeedingSync(BIRTHDAY_SYNC_THROTTLE_MS);
-      for (let i = 0; i < users.length; i += BATCH) {
-        await cronBirthdayService.runBatchSync(users.slice(i, i + BATCH));
-      }
-    },
+    onBirthdaySync,
     onChatHistoryCleanup: () => {
       const deleted = db.chatHistory.deleteOlderThan(90);
       botLogger.info({ deleted }, 'Cleaned up old chat history');
@@ -765,7 +744,7 @@ if (config.REDIS_URL) {
   await setupProposalExpiryCron(botTasksQueue);
   await setupEditProposalExpiryCron(botTasksQueue);
   await setupSessionCleanupCron(botTasksQueue);
-  await setupBirthdaySyncCron(botTasksQueue);
+  await setupBirthdaySyncCron(botTasksQueue, { onBirthdaySync });
   await setupChatHistoryCleanupCron(botTasksQueue);
   await setupSqliteBackupCron(botTasksQueue);
   await setupRecurringRemindersCron(botTasksQueue);
@@ -823,105 +802,6 @@ if (config.SILERO_PYTHON_PATH && stressDictionary) {
   const { SileroTtsService } = await import('./services/voice/silero-tts-service.ts');
   sileroTts = new SileroTtsService(config.SILERO_PYTHON_PATH);
   botLogger.info('Silero TTS initialized');
-}
-
-// ─── MTProto session helpers ─────────────────────────────────────────────────
-
-async function probeMtprotoSession(): Promise<{ stdout: string; exitCode: number }> {
-  const proc = Bun.spawn(['venv/bin/python', 'scripts/check-session.py'], {
-    env: { ...process.env },
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const timer = setTimeout(() => proc.kill(), 20_000);
-  try {
-    const [stdout, , exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    return { stdout, exitCode };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// MTProto userbot for delivering messages to users who haven't started the bot
-// Uses the same pyrogram session as voice-call-bridge.py (data/voice_caller.session)
-if (serviceSessionEnabled) {
-  const { existsSync } = await import('node:fs');
-  if (existsSync('data/voice_caller.session')) {
-    mtprotoSendAsUser = async (userId: number, text: string, username?: string): Promise<boolean> => {
-      const args = ['venv/bin/python', 'scripts/send-message.py', String(userId), text];
-      if (username) args.push(username);
-      const proc = Bun.spawn(args, { env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' });
-      const [stdout, stderr, exitCode] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited,
-      ]);
-      if (stderr) botLogger.warn({ userId, stderr: stderr.slice(0, 200) }, 'send-message.py stderr');
-      const ok = exitCode === 0 && stdout.includes('OK');
-      botLogger.info({ userId, ok }, 'MTProto message delivery');
-      return ok;
-    };
-    mtprotoResolveUsername = async (username: string) => {
-      const proc = Bun.spawn(['venv/bin/python', 'scripts/resolve-username.py', username], {
-        env: { ...process.env },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const [stdout, stderr, exitCode] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited,
-      ]);
-      if (exitCode !== 0) {
-        botLogger.warn({ username, stderr: stderr.slice(0, 200) }, 'resolve-username.py failed');
-        return null;
-      }
-      const parseResult = jsonCodec(
-        z.object({ id: z.number(), firstName: z.string().optional(), username: z.string().optional() }),
-      ).safeParse(stdout.trim());
-      if (!parseResult.success) {
-        botLogger.warn({ username, stdout: stdout.slice(0, 500) }, 'resolve-username.py bad JSON');
-        return null;
-      }
-      return parseResult.data;
-    };
-    mtprotoLookupUser = async (id) => {
-      if (!Number.isSafeInteger(id) || id <= 0) return null;
-      const proc = Bun.spawn(['venv/bin/python', 'scripts/get-user-info.py', String(id)], {
-        stdin: 'ignore',
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const timer = setTimeout(() => proc.kill(), 20_000);
-      try {
-        const [stdout, , exit] = await Promise.all([
-          new Response(proc.stdout).text(),
-          new Response(proc.stderr).text(),
-          proc.exited,
-        ]);
-        if (exit !== 0) return null;
-        const result = jsonCodec(
-          z.object({
-            id: z.number().int().positive().safe(),
-            firstName: z.string().optional(),
-            username: z.string().optional(),
-            deleted: z.boolean().optional(),
-          }),
-        ).safeParse(stdout.trim());
-        return result.success && result.data.id === id ? result.data : null;
-      } finally {
-        clearTimeout(timer);
-      }
-    };
-    botLogger.info('MTProto messenger initialized (pyrogram)');
-  } else {
-    botLogger.info('Pyrogram session not found, invitation delivery via userbot disabled');
-  }
 }
 
 let aiMessagesQueueCleanup: { close: () => Promise<void> } | undefined;
@@ -1088,13 +968,11 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       renderService,
       callQueue,
       transcriptionService,
-      mtprotoSendAsUser,
+      serviceTier,
       stressDictionary,
       sileroTts,
       kokoroTts,
       fallbackTts,
-      mtprotoResolveUsername,
-      mtprotoLookupUser,
       eventMentionStore,
       domainEventBus,
       nliClassifier,

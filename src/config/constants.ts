@@ -398,6 +398,8 @@ export const MSG = {
     invite_timezone_note: (inviterName: string, tz: string) => `\n⏰ Time shown in ${inviterName}'s timezone (${tz})`,
     invite_resolve_not_found: (username: string) =>
       `@${username} not found on Telegram. Select the person from your contacts.`,
+    invite_resolve_unavailable: (username: string) =>
+      `I couldn't look up @${username}. Select the person from your contacts.`,
     invite_picker_header: '📨 Invitations:',
     invite_picker_sending: '📨 Sending invitations…',
     invite_group_sending: '📨 Sending invitation…',
@@ -530,6 +532,7 @@ export const MSG = {
       callsDesc3: 'Quiet hours also apply to calls.',
       toggleCallsEnable: '✅ Enable calls',
       toggleCallsDisable: '❌ Disable calls',
+      callsUnavailable: 'Voice calls are not available on this bot.',
       privacyTitle: '🔒 Privacy',
       visibilityLabel: 'Event visibility',
       visibilityPrivate: 'Private',
@@ -578,15 +581,14 @@ export const MSG = {
       },
       meta: {
         noHolidays: 'No upcoming holidays. You may not have country subscriptions set up.',
-        unknownName: 'unknown',
         holidaysList: (lines: string) => `Upcoming holidays:\n${lines}`,
         foundUser: (id: number, name: string) => `Found user: telegram_id=${id}, name=${name}`,
-        foundUserMtproto: (id: number, name: string) =>
-          `Found user via MTProto: telegram_id=${id}, name=${name} (not a bot user yet — can only be reached via MTProto)`,
         addressBookEmpty: 'Address book is empty.',
         invitationLinkUnavailable:
           'This invitation is not available to your Telegram account. Ask the sender to check the recipient.',
         recipientMissing: 'Choose a recipient (invitee_id or invitee_username).',
+        recipientNotFound: (username: string) =>
+          `@${username} not found on Telegram. Check the username or use the Telegram picker.`,
         recipientResolveUnavailable:
           'Username resolution is unavailable. Choose a saved contact or use the Telegram picker.',
         recipientLookupFailed: (username: string) =>
@@ -783,8 +785,6 @@ export const MSG = {
           `⚠️ Could not deliver invitation to ${invitee} for "${eventTitle}" directly. Forward this link to the invitee: ${url}`,
         deliveryFallbackNoLink: (eventTitle: string, invitee: string) =>
           `⚠️ Could not deliver invitation to ${invitee} for "${eventTitle}" directly.`,
-        mtprotoInvite: (inviterName: string, eventTitle: string, url: string) =>
-          `📅 ${inviterName} invites you to "${eventTitle}". Tap to respond: ${url}`,
         userSessionInvitation: (args: {
           title: string;
           dateLine: string;
@@ -1429,6 +1429,8 @@ export const MSG = {
       `\n⏰ Время в часовом поясе ${inclineFirstname(inviterName, 'genitive')} (${tz})`,
     invite_resolve_not_found: (username: string) =>
       `@${username} не найден в Telegram. Выбери нужного человека из контактов.`,
+    invite_resolve_unavailable: (username: string) =>
+      `Не удалось проверить @${username}. Выбери нужного человека из контактов.`,
     invite_picker_header: '📨 Приглашения:',
     invite_picker_sending: '📨 Отправляю приглашения…',
     invite_group_sending: '📨 Отправляю приглашение…',
@@ -1561,6 +1563,7 @@ export const MSG = {
       callsDesc3: 'Тихие часы распространяются и на звонки.',
       toggleCallsEnable: '✅ Включить звонки',
       toggleCallsDisable: '❌ Отключить звонки',
+      callsUnavailable: 'Голосовые звонки в этом боте недоступны.',
       privacyTitle: '🔒 Приватность',
       visibilityLabel: 'Видимость событий',
       visibilityPrivate: 'Приватно',
@@ -1611,15 +1614,14 @@ export const MSG = {
       },
       meta: {
         noHolidays: 'Праздников не найдено. Возможно, у тебя не настроены подписки на страны.',
-        unknownName: 'неизвестно',
         holidaysList: (lines: string) => `Праздники:\n${lines}`,
         foundUser: (id: number, name: string) => `Пользователь найден: telegram_id=${id}, имя=${name}`,
-        foundUserMtproto: (id: number, name: string) =>
-          `Пользователь найден через MTProto: telegram_id=${id}, имя=${name} (бот ещё не запускал — доступен только через MTProto)`,
         addressBookEmpty: 'Адресная книга пуста.',
         invitationLinkUnavailable:
           'Это приглашение недоступно твоему Telegram-аккаунту. Попроси отправителя проверить получателя.',
         recipientMissing: 'Выбери получателя (invitee_id или invitee_username).',
+        recipientNotFound: (username: string) =>
+          `@${username} не найден в Telegram. Проверь ник или выбери человека через Telegram.`,
         recipientResolveUnavailable:
           'Проверка username недоступна. Выбери сохранённый контакт или человека через Telegram.',
         recipientLookupFailed: (username: string) =>
@@ -1818,8 +1820,6 @@ export const MSG = {
           `⚠️ Не удалось доставить приглашение для ${invitee} на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`,
         deliveryFallbackNoLink: (eventTitle: string, invitee: string) =>
           `⚠️ Не удалось доставить приглашение для ${invitee} на «${eventTitle}» напрямую.`,
-        mtprotoInvite: (inviterName: string, eventTitle: string, url: string) =>
-          `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`,
         userSessionInvitation: (args: {
           title: string;
           dateLine: string;

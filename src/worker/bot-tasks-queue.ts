@@ -21,13 +21,14 @@ export interface BotTaskJobData {
   type: BotTaskJobType;
 }
 
-interface BotTasksQueueDeps {
+export interface BotTasksQueueDeps {
   redisUrl: string;
   onSecretaryExpiry?: () => Promise<void>;
   onSharingCleanup?: () => void;
   onProposalExpiry?: () => Promise<void>;
   onEditProposalExpiry?: () => Promise<void>;
   onSessionCleanup?: () => void;
+  /** Present only when the shared MTProto service tier is on; see setupBirthdaySyncCron. */
   onBirthdaySync?: () => Promise<void>;
   onChatHistoryCleanup?: () => void;
   onSqliteBackup?: () => Promise<void>;
@@ -154,13 +155,30 @@ export async function setupSessionCleanupCron(queue: Queue<BotTaskJobData>): Pro
   botTasksLogger.info('Session cleanup cron scheduled (monthly)');
 }
 
-export async function setupBirthdaySyncCron(queue: Queue<BotTaskJobData>): Promise<void> {
-  await queue.add(
-    'birthday-sync-tick',
-    { type: 'cron-birthday-sync' },
-    { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'birthday-sync-tick' },
-  );
-  botTasksLogger.info('Birthday sync cron scheduled (daily)');
+const BIRTHDAY_SYNC_TICK = 'birthday-sync-tick';
+const BIRTHDAY_SYNC_EVERY_MS = 24 * 60 * 60_000;
+
+/**
+ * Daily birthday auto-sync, scheduled only when the queue runs one (deps.onBirthdaySync, given when
+ * the shared MTProto service tier is on). Otherwise a tick an earlier deployment scheduled is removed
+ * with the exact (name, repeat, jobId) it was added with, so Redis stops firing a job nobody runs.
+ */
+export async function setupBirthdaySyncCron(
+  queue: Queue<BotTaskJobData>,
+  deps: Pick<BotTasksQueueDeps, 'onBirthdaySync'>,
+): Promise<void> {
+  if (deps.onBirthdaySync) {
+    await queue.add(
+      BIRTHDAY_SYNC_TICK,
+      { type: 'cron-birthday-sync' },
+      { repeat: { every: BIRTHDAY_SYNC_EVERY_MS }, removeOnComplete: true, jobId: BIRTHDAY_SYNC_TICK },
+    );
+    botTasksLogger.info('Birthday sync cron scheduled (daily)');
+    return;
+  }
+  if (await queue.removeRepeatable(BIRTHDAY_SYNC_TICK, { every: BIRTHDAY_SYNC_EVERY_MS }, BIRTHDAY_SYNC_TICK)) {
+    botTasksLogger.info('Birthday sync cron unscheduled: the service tier is off');
+  }
 }
 
 export async function setupChatHistoryCleanupCron(queue: Queue<BotTaskJobData>): Promise<void> {

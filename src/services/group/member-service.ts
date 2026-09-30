@@ -1,10 +1,7 @@
-import { z } from 'zod';
 import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
-
-const ChatMembersCodec = jsonCodec(z.array(z.object({ id: z.number() })));
+import type { ServiceTier } from '../telegram-session/service-tier.ts';
 
 const groupLogger = logger.child({ module: 'group-member-service' });
 
@@ -12,29 +9,19 @@ export class GroupMemberService {
   constructor(
     private groupMemberRepo: GroupMemberRepository,
     private userRepo: UserRepository,
-    private pyBridgePath = 'scripts/get-chat-members.py',
+    private serviceTier: ServiceTier,
   ) {}
 
+  /**
+   * Members of the chat who have started the bot. The shared service account lists everyone in the
+   * chat; without it, or when that listing fails, the members the bot has seen there (group_members).
+   */
   async getRegisteredMembers(chatId: number): Promise<number[]> {
-    // Try Pyrogram first
-    try {
-      const proc = Bun.spawn(['venv/bin/python', this.pyBridgePath, String(chatId)], {
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const exitCode = await proc.exited;
-      if (exitCode === 0) {
-        const stdout = await new Response(proc.stdout).text();
-        const members = ChatMembersCodec.parse(stdout);
-        const memberIds = members.map((m) => m.id);
-        return memberIds.filter((id) => this.userRepo.findByTelegramId(id) !== null);
-      }
-    } catch (error) {
-      groupLogger.debug({ chatId, err: error }, 'Pyrogram unavailable, using fallback');
+    const listed = this.serviceTier.enabled ? await this.serviceTier.getChatMembers(chatId) : null;
+    if (this.serviceTier.enabled && listed === null) {
+      groupLogger.debug({ chatId }, 'Service account could not list chat members, using tracked members');
     }
-
-    // Fallback: use tracked members from group_members table
-    const tracked = this.groupMemberRepo.getActiveMembers(chatId);
-    return tracked.map((m) => m.user_id).filter((id) => this.userRepo.findByTelegramId(id) !== null);
+    const memberIds = listed ?? this.groupMemberRepo.getActiveMembers(chatId).map((m) => m.user_id);
+    return memberIds.filter((id) => this.userRepo.findByTelegramId(id) !== null);
   }
 }

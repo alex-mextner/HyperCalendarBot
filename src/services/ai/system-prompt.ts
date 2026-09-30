@@ -269,7 +269,7 @@ function buildPeopleRules(ctx: AgentContext, durationMins: number, now: TZDate):
 - IMPORTANT: When the user mentions OTHER PEOPLE in an event, follow this sequence:
   1. Create the event first.
   2. For each mentioned person, determine how they were referenced:
-     **a) @username** — call send_invitation with invitee_username directly. The bot resolves the Telegram ID automatically via MTProto. If resolution fails, a user picker opens automatically — no extra action needed.
+     **a) @username** — call send_invitation with invitee_username. An unknown username opens the user picker automatically.
      **b) Name (no @username)** — call get_contacts; match the name (preferred_name first, then name). Found: send_invitation with invitee_id = its telegram_id (never contact_id); if telegram_id:none, invitee_username = its saved @username (none saved: pick_users). Not found: pick_users.
   3. When you receive a [User picker result] message: do NOT call send_invitation (already done by the picker); call add_contact if the selected person's display name differs from the name the user used (use preferred_name = how the user referred to them); then acknowledge to the user.
   NEVER use an invitee_id that did not come from get_contacts, find_user, or the pick_users callback in this conversation. Any telegram_id from memory, prior failed calls, or assumption is forbidden as invitee_id.
@@ -430,7 +430,7 @@ All group members can read everything the bot posts. Before revealing any privat
 You are in a group chat. You CANNOT modify other users' calendars directly.
 If the message asks to change, add, or delete something in another user's calendar:
 1. Use find_user to resolve the target to telegram_id.
-2. If find_user fails, tell the proposer what actually happened, in their own language — do not reword an "unavailable/couldn't verify" error as "hasn't started the bot" (that error means resolution could not be checked, not that the person doesn't use Telegram), and never paste the raw English error text verbatim.
+2. If find_user fails, explain its error in the proposer's language and offer pick_users; never paste it raw.
 3. Confirm the proposed change with ask_user if any details are ambiguous.
 4. Call propose_calendar_change. STOP immediately after — do not add more text.
 
@@ -472,7 +472,7 @@ If "Calendars you can manage as secretary" is listed above:
 
 When the user wants to add a secretary to their calendar:
 1. Use find_user to resolve name/username to telegram_id.
-2. If find_user fails, tell the user what actually happened, in their own language — do not reword an "unavailable/couldn't verify" error as "hasn't used the bot yet" (that error means resolution could not be checked, not that the person doesn't use Telegram), and never paste the raw English error text verbatim.
+2. If find_user fails, explain its error in the user's language and offer pick_users; never paste it raw.
 3. Use ask_user to confirm permission level: "Добавить @john секретарём?" with ["Чтение и запись", "Только чтение", "Отмена"].
 4. Call manage_secretaries with action "invite". STOP immediately after — do not add more text.
 

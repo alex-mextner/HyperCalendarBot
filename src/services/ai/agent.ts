@@ -70,6 +70,11 @@ export const AGENT_DRAIN_SETTLE_MS = RETRY_STORE_TIMEOUT_MS + 1_000;
  */
 type RetryOutcome = 'stored' | 'gave_up' | 'not_stored' | 'unknown';
 
+/** The request's tool catalog: its mode's tools, with make_call only when a call can be placed. */
+function toolDefinitionsFor(ctx: AgentContext): OpenAI.ChatCompletionTool[] {
+  return getToolDefinitions(ctx.inputMode, ctx.supplementMode, { calls: ctx.calls !== undefined });
+}
+
 /**
  * One apology covers a user for this long. A user who keeps writing during an
  * outage gets at most one playful "one sec", then one honest "the AI is down,
@@ -1018,7 +1023,7 @@ export class CalendarBotAgent {
       this.toolSchemaMode === 'lazy' &&
       ctx.inputMode !== 'live_call' &&
       (!this.toolSchemaUserIds || this.toolSchemaUserIds.has(ctx.user.telegram_id))
-        ? createToolExposure(getToolDefinitions(ctx.inputMode, ctx.supplementMode))
+        ? createToolExposure(toolDefinitionsFor(ctx))
         : undefined;
 
     const effectiveSender: TelegramSender = ctx.supplementMode
@@ -1031,7 +1036,6 @@ export class CalendarBotAgent {
           sendPhoto: async () => ({ message_id: 0 }),
           sendInvitation: async () => null,
           sendEditProposal: async () => null,
-          sendAsUser: async () => false,
           deleteMessage: async () => {},
           setReaction: async () => {},
         } satisfies TelegramSender)
@@ -1154,7 +1158,7 @@ export class CalendarBotAgent {
         const { result, exposedThisRound } = exposure
           ? await runRoundRevealingRejectedTools(exposure, runAgentRound)
           : {
-              result: await runAgentRound(getToolDefinitions(ctx.inputMode, ctx.supplementMode)),
+              result: await runAgentRound(toolDefinitionsFor(ctx)),
               exposedThisRound: undefined,
             };
 
@@ -1347,7 +1351,7 @@ export class CalendarBotAgent {
       // that the tools used in this run cannot support. The deterministic
       // prefilter keeps ordinary tool-backed writes and answers whose days and
       // times the run's reads contain on the existing fast path.
-      const availableTools = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
+      const availableTools = toolDefinitionsFor(ctx);
       let rejected = false;
       // Use the model's actual emitted text, not the writer buffer — tests
       // with scripted stream impls can produce an assistantMessage without
@@ -1748,7 +1752,7 @@ export class CalendarBotAgent {
       const { result, exposedThisRound } = exposure
         ? await runRoundRevealingRejectedTools(exposure, runRetryRound)
         : {
-            result: await runRetryRound(getToolDefinitions(ctx.inputMode, ctx.supplementMode)),
+            result: await runRetryRound(toolDefinitionsFor(ctx)),
             exposedThisRound: undefined,
           };
 

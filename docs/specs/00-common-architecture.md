@@ -26,7 +26,7 @@ Canonical numbering and implementation order:
 **Phase C — Visuals:** 05 (Image Generation)
 **Phase D — Sync:** 03 (Google Calendar Sync)
 **Phase E — Social:** 06 (Sharing & Social)
-**Phase F — Voice:** 07 (Voice Call Reminders)
+**Phase F — Voice:** 07 (Voice Call Reminders) — 2026-09-30: restored behind `ServiceTier`, no service sends (#753); calls run only while the optional MTProto service tier is enabled.
 
 ### Deferred Commands
 

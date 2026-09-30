@@ -41,6 +41,7 @@ import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import type { InvitationService } from '../sharing/invitation-service.ts';
 import type { PrivacyService } from '../sharing/privacy-service.ts';
 import type { SharingService } from '../sharing/sharing-service.ts';
+import type { TelegramProfile } from '../telegram-session/service-tier.ts';
 import type { StressDictionary } from '../voice/stress-dictionary.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
 import type { DayReferenceSet } from './day-references.ts';
@@ -77,6 +78,15 @@ export interface GroupCapability {
 }
 
 export interface VoiceCapability {
+  stressDictionary: StressDictionary;
+}
+
+/**
+ * Outbound voice-call reminders. Present only when the call queue runs, which needs the shared
+ * MTProto service account (service-tier.ts); make_call and the calls settings answer that voice
+ * calls are unavailable without it.
+ */
+export interface CallsCapability {
   callQueue: { enqueue(userId: number, text: string): void };
   callSettingsRepo: {
     get(userId: number): UserCallSettings | null;
@@ -84,8 +94,6 @@ export interface VoiceCapability {
     setEnabled(userId: number, enabled: boolean): void;
     setLanguage(userId: number, lang: string): void;
   };
-  /** May be absent if the dictionary file failed to load (non-fatal). handleLookupStress guards for this. */
-  stressDictionary?: StressDictionary;
 }
 
 export interface GoogleCapability {
@@ -191,10 +199,12 @@ export interface AgentContext {
     text: string,
     options?: { reply_markup?: InlineKeyboard | TelegramInlineKeyboardMarkup; message_thread_id?: number },
   ) => Promise<TelegramMessage>;
-  lookupTelegramUser?: (
-    id: number,
-  ) => Promise<{ id: number; firstName?: string; username?: string; deleted?: boolean } | null>;
-  resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
+  /** Live public profile by Telegram ID via the shared service account; absent when that account is off.
+   *  Resolves null on any failure: a profile refresh is best-effort. */
+  lookupTelegramUser?: (id: number) => Promise<TelegramProfile | null>;
+  /** Exact @username → profile via the shared service account; absent when that account is off.
+   *  Resolves null only when Telegram has no such username; rejects when the lookup could not run. */
+  resolveUsername?: (username: string) => Promise<TelegramProfile | null>;
   /** Events in a ±2-week window around now, preloaded for pattern detection. */
   recentEventsWindow?: EventOccurrence[];
   /**
@@ -242,6 +252,7 @@ export interface AgentContext {
   secretary?: SecretaryCapability;
   group?: GroupCapability;
   voice?: VoiceCapability;
+  calls?: CallsCapability;
   google?: GoogleCapability;
   notifications?: NotificationsCapability;
   feedback?: FeedbackCapability;
@@ -439,7 +450,6 @@ export interface TelegramSender {
     variant: InvitationKeyboardVariant,
   ): Promise<{ message_id: number } | null>;
   sendEditProposal?(creatorId: number, text: string, proposalId: number): Promise<{ message_id: number } | null>;
-  sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;
   sendAsConnectedUser?(
     inviterId: number,
     targetId: number,

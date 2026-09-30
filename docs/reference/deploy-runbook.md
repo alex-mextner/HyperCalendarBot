@@ -207,6 +207,7 @@ db.close();
 ## Connect Telegram (session-based delivery)
 
 Requires:
+- `MTPROTO_API_ID` / `MTPROTO_API_HASH` env vars — the Telegram app credentials from https://my.telegram.org.
 - `TELEGRAM_SESSION_MASTER_KEY` env var — 32-byte hex key for AES-256-GCM encryption of stored Telegram sessions.
   Generate: `openssl rand -hex 32`. Add to `/opt/hypercal/.env`.
 - `tzdata` package in Docker image — provides `/usr/share/zoneinfo/zone.tab` for timezone detection
@@ -216,7 +217,7 @@ Requires:
 - Key rotation: `OLD_KEY=<hex> NEW_KEY=<hex> bun scripts/rotate-session-master-key.ts` —
   re-encrypts all sessions atomically.
 
-## ntgcalls — Build from Source
+## ntgcalls — Build from Source (voice calls only)
 
 ntgcalls v2.1.0 has a bug: P2P calls connect but audio is silent.
 Fix: `NativeNetworkInterface::UpdateAggregateStates_n()` never calls `OnNetworkAvailability(true)`.
@@ -237,7 +238,7 @@ uv pip install -r pyproject.toml --python venv/bin/python
 # 3. Build patched ntgcalls from source (~5 min, needs ~5GB RAM, ~2GB disk)
 ./scripts/build-patched-ntgcalls.sh python3.12 venv
 
-# 4. Authenticate Pyrogram session (one-time interactive)
+# 4. Authorize the service account (see "MTProto service tier" below)
 venv/bin/python scripts/pyrogram-auth.py
 ```
 
@@ -245,6 +246,27 @@ venv/bin/python scripts/pyrogram-auth.py
 - `scripts/download-ntgcalls.sh` downloads the UNPATCHED binary — do NOT use it
 - Build deps: CMake 3.20+, git, Python 3.12, 5GB RAM min
 
-## Service identity isolation
+## MTProto service tier
 
-Set `MTPROTO_SERVICE_USER_ID` to the explicitly designated service account. Startup checks the authenticated ID; each shared Python consumer checks it again. Missing, revoked or mismatched credentials disable only shared MTProto capabilities. Never restore the shared file from the pool of personal user authorizations. Preserve Bot API and inviter-owned sessions. After configuration changes recreate the bot container; do not rotate or revoke unrelated user sessions.
+> **2026-09-30:** restored behind `ServiceTier`, with no service sends (#753).
+
+`src/services/telegram-session/service-tier.ts` decides once at startup, fail-closed: the tier is on only
+when `MTPROTO_API_ID` / `MTPROTO_API_HASH` are set, `MTPROTO_SERVICE_USER_ID` is a positive integer,
+`data/voice_caller.session` exists, and `scripts/check-session.py` reports exactly that ID. The log shows
+one line: `MTProto service tier enabled` (with `accountId`) or `MTProto service tier disabled` with
+`reason` = `service_user_id_unset` | `service_user_id_invalid` | `api_credentials_missing` |
+`session_missing` | `probe_failed` | `identity_mismatch`.
+
+Enabled, it resolves @usernames, looks profiles up, lists group members, syncs birthdays (daily
+`birthday-sync-tick`) and places voice-call reminders (`call-reminders` queue; `DEEPGRAM_API_KEY` for live
+calls, `DISABLE_VOICE=true` to opt out). It never sends messages: invitations go Bot API → the inviter's own
+`/connect_telegram` session → a deep link to the inviter; proposals and secretary DMs go Bot API → a deep
+link to the initiator. Disabled,
+`find_user` / `send_invitation` use the local `users` table and otherwise the picker, group members come
+from `group_members`, and birthday sync and voice calls are off.
+
+**Prod:** `MTPROTO_SERVICE_USER_ID` was never set, so the tier is off. To turn it on the owner designates a
+service account (Telegram may block such accounts), runs `venv/bin/python scripts/pyrogram-auth.py`
+interactively to create `data/voice_caller.session`, sets `MTPROTO_SERVICE_USER_ID` (+ `DEEPGRAM_API_KEY`)
+in `/opt/hypercal/.env`, and recreates the bot container. Never build the service session from a user's
+stored `/connect_telegram` authorization; do not rotate or revoke unrelated user sessions.

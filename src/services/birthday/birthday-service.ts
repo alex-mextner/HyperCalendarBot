@@ -1,12 +1,12 @@
-import { z } from 'zod';
+import { toLang } from '../../config/constants.ts';
 import type { BirthdayMetadataRepository } from '../../database/repositories/birthday-metadata.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
 import type { BirthEventMetadata, CalendarEvent } from '../../database/types.ts';
-import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { allDayReminderUtc } from '../notification/materializer.ts';
+import type { ServiceTier } from '../telegram-session/service-tier.ts';
 
 const birthdayLogger = logger.child({ module: 'birthday-service' });
 
@@ -38,16 +38,22 @@ export interface BirthdaysForDisplay {
   groups: { groupId: number; title: string; items: BirthdayDisplayItem[] }[];
 }
 
+export interface BirthdaySyncUser {
+  telegram_id: number;
+  first_name: string | null;
+  language: string;
+  timezone: string;
+}
+
 export class BirthdayService {
-  private sharedMtprotoUnavailableLogged = false;
+  private syncOffLogged = false;
 
   constructor(
     private eventRepo: EventRepository,
     private metaRepo: BirthdayMetadataRepository,
     private reminderRepo: EventReminderRepository,
     private prefsRepo: NotificationPreferencesRepository,
-    private fetchScriptPath = 'scripts/fetch-birthdays.py',
-    private sharedMtprotoAvailable: () => boolean = () => true,
+    private serviceTier: ServiceTier,
   ) {}
 
   shouldSkipSync(userId: number): boolean {
@@ -152,50 +158,33 @@ export class BirthdayService {
     }
   }
 
-  async runBatchSync(
-    users: { telegram_id: number; first_name: string | null; language: string; timezone: string }[],
-  ): Promise<void> {
-    if (!this.sharedMtprotoAvailable()) {
-      if (!this.sharedMtprotoUnavailableLogged) {
-        birthdayLogger.warn('Birthday sync skipped: shared MTProto service identity is unavailable');
-        this.sharedMtprotoUnavailableLogged = true;
+  /**
+   * Add the Telegram-profile birthdays of users not synced within BIRTHDAY_SYNC_THROTTLE_MS to their
+   * own calendars. Needs the shared MTProto service account; without it this does nothing.
+   */
+  async runBatchSync(users: BirthdaySyncUser[]): Promise<void> {
+    if (!this.serviceTier.enabled) {
+      if (!this.syncOffLogged) {
+        birthdayLogger.info(
+          { reason: this.serviceTier.reason },
+          'Birthday auto-sync off: the shared MTProto service account is not enabled',
+        );
+        this.syncOffLogged = true;
       }
       return;
     }
-    if (this.sharedMtprotoUnavailableLogged) {
-      birthdayLogger.info('Birthday sync resumed: shared MTProto service identity is available');
-      this.sharedMtprotoUnavailableLogged = false;
-    }
 
     const pending = users.filter((u) => !this.shouldSkipSync(u.telegram_id));
-    const ids = pending.map((u) => u.telegram_id);
-    if (ids.length === 0) return;
+    if (pending.length === 0) return;
 
-    let result: Record<string, { day: number; month: number; year?: number } | null>;
-    try {
-      const proc = Bun.spawn(['venv/bin/python', this.fetchScriptPath], {
-        stdin: Buffer.from(JSON.stringify(ids)),
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const exitCode = await proc.exited;
-
-      if (exitCode !== 0) {
-        const err = await new Response(proc.stderr).text();
-        birthdayLogger.warn({ err }, 'Batch fetch-birthdays.py failed');
-        return;
-      }
-      const stdout = await new Response(proc.stdout).text();
-      result = jsonCodec(
-        z.record(z.string(), z.object({ day: z.number(), month: z.number(), year: z.number().optional() }).nullable()),
-      ).parse(stdout);
-    } catch (err) {
-      birthdayLogger.error({ err }, 'Failed to spawn batch fetch-birthdays.py');
+    const birthdays = await this.serviceTier.fetchBirthdays(pending.map((u) => u.telegram_id));
+    if (birthdays === null) {
+      birthdayLogger.warn({ users: pending.length }, 'Birthday batch fetch failed; users stay due for the next sync');
       return;
     }
 
     for (const user of pending) {
-      const birthday = result[String(user.telegram_id)];
+      const birthday = birthdays.get(user.telegram_id);
       if (!birthday) continue;
       try {
         this.upsertBirthdayEvent({
@@ -205,7 +194,7 @@ export class BirthdayService {
           day: birthday.day,
           month: birthday.month,
           year: birthday.year ?? null,
-          lang: (user.language as 'en' | 'ru') ?? 'en',
+          lang: toLang(user.language),
           timezone: user.timezone,
           autoCreated: true,
         });

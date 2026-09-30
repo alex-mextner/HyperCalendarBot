@@ -33,6 +33,7 @@ import { EventService } from '../../src/services/event/event-service.ts';
 import { GroupMemberService } from '../../src/services/group/member-service.ts';
 import { DeepLinkService } from '../../src/services/sharing/deep-link-service.ts';
 import { InvitationService } from '../../src/services/sharing/invitation-service.ts';
+import { disabledServiceTier } from '../helpers/service-tier.ts';
 
 function makeCtx(db: Database, overrides: Partial<AgentContext> = {}): AgentContext {
   const users = new UserRepository(db);
@@ -63,7 +64,7 @@ function groupCapability(
     checkGroupMembership,
     groupMemberRepo,
     groupChatRepo: new GroupChatRepository(db),
-    groupMemberService: new GroupMemberService(groupMemberRepo, new UserRepository(db)),
+    groupMemberService: new GroupMemberService(groupMemberRepo, new UserRepository(db), disabledServiceTier),
   };
 }
 
@@ -316,7 +317,7 @@ describe('recipient and contact tool boundaries', () => {
         targets.push(id);
         return null;
       },
-      sendAsUser: async (id, _text, hint) => {
+      sendAsConnectedUser: async (_inviterId, id, _text, hint) => {
         targets.push(id);
         hints.push(hint);
         return true;

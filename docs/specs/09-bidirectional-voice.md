@@ -1,5 +1,7 @@
 # Sub-Project #9: Bidirectional Voice Calls
 
+> **2026-09-30:** restored behind `ServiceTier`, no service sends (#753). Live calls run only while the optional MTProto service tier is enabled and need `DEEPGRAM_API_KEY`.
+
 ## Status: Design Spec
 
 ---

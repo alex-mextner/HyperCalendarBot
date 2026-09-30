@@ -3,7 +3,7 @@ Resolve a Telegram @username to user info via Pyrogram userbot.
 Usage: python resolve-username.py <username>
   username may or may not start with @
 Output: JSON {"id": 123456, "firstName": "John", "username": "john"} to stdout
-Exit code: 0 on success, 1 on failure
+Exit code: 0 on success, 2 when Telegram has no such username, 1 when the lookup could not run
 Session: data/voice_caller.session
 """
 from service_session import start_service_session
@@ -21,6 +21,12 @@ if len(sys.argv) < 2:
     sys.exit(1)
 
 USERNAME = sys.argv[1].lstrip("@")
+
+# Telegram's answer for a username nobody holds. Any other failure means "could not check", which
+# the bot must not report as "no such person" (#753).
+NOT_FOUND_ERRORS = {"UsernameNotOccupied", "UsernameInvalid"}
+NOT_FOUND = "not_found"
+EXIT_NOT_FOUND = 2
 
 MAX_RETRIES = 3
 RETRY_DELAY = 0.5
@@ -42,8 +48,8 @@ async def resolve_with_retry(app):
             print(f"ERROR:{e}", file=sys.stderr, flush=True)
             return None
         except Exception as e:
-            print(f"ERROR:{e}", file=sys.stderr, flush=True)
-            return None
+            print(f"ERROR:{type(e).__name__}", file=sys.stderr, flush=True)
+            return NOT_FOUND if type(e).__name__ in NOT_FOUND_ERRORS else None
     return None
 
 
@@ -56,6 +62,8 @@ async def main():
         await start_service_session(app)
         try:
             result = await resolve_with_retry(app)
+            if result == NOT_FOUND:
+                sys.exit(EXIT_NOT_FOUND)
             if result is not None:
                 print(json.dumps(result), flush=True)
                 sys.exit(0)

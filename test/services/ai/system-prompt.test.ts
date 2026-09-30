@@ -21,6 +21,7 @@ import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import type { AddressCache } from '../../../src/services/location/address-cache.ts';
 import { buildAddressContext } from '../../../src/services/location/address-context.ts';
+import { disabledServiceTier } from '../../helpers/service-tier.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -789,6 +790,7 @@ describe('buildSystemPrompt', () => {
         new BirthdayMetadataRepository(db),
         new EventReminderRepository(db),
         new NotificationPreferencesRepository(db),
+        disabledServiceTier,
       );
       const withMemory = { ...ctx, birthday: { birthdayService, userMemoryRepo } };
       const profile = buildUserProfileEvidence(withMemory);

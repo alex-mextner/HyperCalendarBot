@@ -1,4 +1,5 @@
 // src/bot/index.ts
+
 import { Bot, InlineKeyboard } from 'gramio';
 import { CB, RATE_LIMIT, t } from '../config/constants.ts';
 import type { EnvConfig } from '../config/env.ts';
@@ -42,6 +43,7 @@ import { InvitationService } from '../services/sharing/invitation-service.ts';
 import { PrivacyService } from '../services/sharing/privacy-service.ts';
 import { SharingService } from '../services/sharing/sharing-service.ts';
 import { createConnectedUserSender } from '../services/telegram-session/connected-user-sender.ts';
+import type { ServiceTier } from '../services/telegram-session/service-tier.ts';
 import { formatSessionLoss } from '../services/telegram-session/session-loss.ts';
 import type { SileroTtsService } from '../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
@@ -130,15 +132,12 @@ export interface CreateBotOpts {
     }): Promise<void>;
   };
   transcriptionService?: TranscriptionService;
-  mtprotoSendAsUser?: (userId: number, text: string) => Promise<boolean>;
+  /** The shared MTProto service account (lookups, group members, birthdays); never sends. */
+  serviceTier: ServiceTier;
   stressDictionary?: StressDictionary;
   sileroTts?: SileroTtsService;
   kokoroTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['kokoroTts'];
   fallbackTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['fallbackTts'];
-  mtprotoLookupUser?: (
-    id: number,
-  ) => Promise<{ id: number; firstName?: string; username?: string; deleted?: boolean } | null>;
-  mtprotoResolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   eventMentionStore?: EventMentionStore;
   domainEventBus?: DomainEventBus;
   pushAiMessage?: (data: AiMessageJobData) => Promise<void>;
@@ -155,19 +154,17 @@ export interface CreateBotOpts {
   changeNotifier?: import('../services/event/event-change-notifier.ts').EventChangeNotifier;
 }
 
-export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
+export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts) {
   const {
     googleDeps,
     renderService,
     callQueue,
     transcriptionService,
-    mtprotoSendAsUser,
+    serviceTier,
     stressDictionary,
     sileroTts,
     kokoroTts,
     fallbackTts,
-    mtprotoResolveUsername,
-    mtprotoLookupUser,
     eventMentionStore,
     domainEventBus,
     pushAiMessage,
@@ -196,6 +193,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     db.birthdayMeta,
     db.eventReminders,
     db.notificationPreferences,
+    serviceTier,
   );
   const groupSessions = new GroupSessionManager(db.groupSessions);
   const prefsService = new NotificationPreferencesService(db.notificationPreferences);
@@ -310,14 +308,11 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       })
     : undefined;
 
-  const telegramSender = createTelegramSender(bot, {
-    sendAsUser: mtprotoSendAsUser,
-    sendAsConnectedUser,
-  });
+  const telegramSender = createTelegramSender(bot, { sendAsConnectedUser });
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
 
-  // Shared deps for picker-driven invitation delivery (Bot API → MTProto → deep-link fallback),
-  // reporting by ACTUAL delivery, not just DB-row creation.
+  // Shared deps for picker-driven invitation delivery (Bot API → inviter's own session → deep-link
+  // fallback), reporting by ACTUAL delivery, not just DB-row creation.
   const pickerInvitationDeps = {
     sender: telegramSender,
     invitationService,
@@ -331,7 +326,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
 
   const triggerRepo = new TriggerRepository(db.db);
   const scheduleRepo = new ScheduledAiCallRepository(db.db);
-  const groupMemberService = new GroupMemberService(db.groupMembers, db.users);
+  const groupMemberService = new GroupMemberService(db.groupMembers, db.users, serviceTier);
 
   const botAdminId = envConfig?.BOT_ADMIN_ID;
   const intentLearnerDailyLimit = envConfig?.INTENT_LEARNER_DAILY_LIMIT ?? 100;
@@ -411,8 +406,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     transcriptionService,
     botToken: token,
     stressDictionary,
-    resolveUsername: mtprotoResolveUsername,
-    lookupTelegramUser: mtprotoLookupUser,
+    // Set only when the service tier is on: without them find_user uses the users table and says so.
+    resolveUsername: serviceTier.enabled ? serviceTier.resolveUsername : undefined,
+    lookupTelegramUser: serviceTier.enabled ? serviceTier.lookupUser : undefined,
     sileroTts,
     kokoroTts,
     fallbackTts,
@@ -925,8 +921,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       const fallbackChatId = user.telegram_id;
 
       // Reply-fast: ack immediately with "sending…", then deliver to all selected invitees
-      // SERIALLY (each invitee's MTProto fallback spawns send-message.py against the shared
-      // non-WAL voice_caller.session, and concurrent spawns corrupt it — CLAUDE.md; serial also
+      // SERIALLY (an invitee who never started the bot gets it from the inviter's own Telegram
+      // session, one send-as-user.py spawn per invitee on that single account; serial also
       // avoids a 429 burst on the shared 1-CPU host), then edit the ack in place with the
       // per-invitee status. Per-invitee failures are isolated and the lines preserve input order.
       const pickerIo = createPickerAckIo(
@@ -972,7 +968,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           pickerInvitationDeps.sender.editMessageText(ctx.chatId, messageId, text, parseMode),
         'HTML',
       );
-      // Groups receive the invitation via Bot API only — no MTProto userbot delivery, and no
+      // Groups receive the invitation via Bot API only — no send from the inviter's account, and no
       // deep-link fallback: a forward invite link resolves only in a user's private /start and
       // can't be accepted on behalf of a group, so a failed delivery reports honest failure.
       await runChatShareWithAck(
@@ -982,7 +978,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             inviter: user,
             inviteeId,
             fallbackChatId: user.telegram_id,
-            allowMtproto: false,
+            allowInviterSession: false,
             isGroupTarget: true,
           },
           lang,

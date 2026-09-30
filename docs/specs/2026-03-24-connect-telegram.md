@@ -1,15 +1,15 @@
 # /connect_telegram — User MTProto Session Delegation
 
-**Extends:** spec 06-sharing-social, scripts/send-message.py
+**Extends:** spec 06-sharing-social
 **Depends on:** Pyrogram, bun:sqlite, Node.js crypto
 
 ---
 
 ## Problem
 
-When Alice invites Bob (who hasn't started the bot) to a meeting, the invitation is delivered via
-the admin's MTProto session (`voice_caller`). Bob receives a message from a random account he
-doesn't know — confusing and suspicious.
+Before this feature, when Alice invited Bob (who hadn't started the bot) to a meeting, the invitation
+was delivered via the admin's MTProto session (`voice_caller`). Bob received a message from a random
+account he didn't know — confusing and suspicious. (Since #753 the service account never sends.)
 
 **With this feature:** Bob receives a message **from Alice** — natural, trusted, higher response rate.
 
@@ -296,7 +296,7 @@ venv/bin/python scripts/connect-session.py log_out \
 
 ### `scripts/send-as-user.py`
 
-New script (or extend `send-message.py` with `--session` flag):
+New script:
 
 ```bash
 venv/bin/python scripts/send-as-user.py \
@@ -306,7 +306,7 @@ venv/bin/python scripts/send-as-user.py \
   [--username bob_handle]
 ```
 
-Same retry/fallback logic as `send-message.py`, but uses the user's session instead of `voice_caller`.
+Same retry/fallback logic as the former `send-message.py` (removed in #753), but uses the user's session.
 
 ---
 
@@ -362,7 +362,9 @@ function getMasterKey(config: EnvConfig): Buffer | null {
 
 ### Modified Delivery Chain
 
-Current: Bot API → Admin MTProto → Deep-link fallback
+> **2026-09-30:** the shared service account is restored behind `ServiceTier` with no service sends (#753); step 3 below does not exist. The chain is Bot API → the inviter's own session → deep link to the inviter.
+
+Original (pre-feature): Bot API → Admin MTProto → Deep-link fallback
 
 New:
 
@@ -371,8 +373,8 @@ New:
    ↓ fails (user hasn't started bot)
 2. User's own MTProto session (if connected)
    ↓ fails or not connected
-3. Admin MTProto session (voice_caller, existing fallback)
-   ↓ fails
+3. (removed — the service account never sends)
+   ↓
 4. Deep-link fallback (send link to inviter)
 ```
 
@@ -385,7 +387,7 @@ if (userSession && masterKey) {
   const sent = await sendViaUserSession(userSession, inviteeId, text, inviteeUsername);
   if (sent) return; // delivered from user's own account
 }
-// Fall through to admin MTProto...
+// Fall through to the deep-link fallback (no service-account send).
 ```
 
 ---
@@ -505,7 +507,7 @@ delivery attempt, whether to suggest connecting. The suggestion is added when AL
 
 - the bot itself could not reach the invitee (`deliverInvitation` returned `viaBotApi: false` —
   usually the invitee has not started the bot or blocked it; a transient Bot API error looks the
-  same), so the invitation went through the admin MTProto session, a forwarded deep link, or failed;
+  same), so the invitation went through a forwarded deep link or failed;
 - the target is a person, not a group;
 - the conversation is a private chat (`/connect_telegram` refuses to run in groups);
 - the feature is enabled (`TELEGRAM_SESSION_MASTER_KEY` is configured);
@@ -617,13 +619,9 @@ Rules:
 
 ### From Bot Account (existing behavior, unchanged)
 
-When sent via Bot API or admin MTProto session, the current format is used — third person,
-bot-style messaging. No changes needed.
-
-### From Admin MTProto Session (fallback)
-
-Same format as bot account — third person. The message comes from an unknown account,
-so first-person "Приглашаю" would be confusing.
+When sent via Bot API, the current format is used — third person, bot-style messaging. No changes
+needed. (The former third-person send from the admin MTProto session no longer exists: since #753 the
+service account never sends.)
 
 ---
 

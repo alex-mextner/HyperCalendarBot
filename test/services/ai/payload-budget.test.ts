@@ -85,14 +85,17 @@ function makeContext(overrides: Partial<AgentContext> = {}): AgentContext {
   };
 }
 
+// Budgets are measured at the worst case: voice calls available, so make_call is in the catalog.
+const WITH_CALLS = { calls: true };
+
 describe('tool catalog budget', () => {
   test('the default catalog stays within its character budget', () => {
-    const chars = catalogJson(getToolDefinitions('text')).length;
+    const chars = catalogJson(getToolDefinitions('text', false, WITH_CALLS)).length;
     expect(chars).toBeLessThanOrEqual(TOOL_CATALOG_CHAR_BUDGET);
   });
 
   test('the default catalog stays within its token budget', () => {
-    const tokens = estimateTokens(catalogJson(getToolDefinitions('text')));
+    const tokens = estimateTokens(catalogJson(getToolDefinitions('text', false, WITH_CALLS)));
     expect(tokens).toBeLessThanOrEqual(TOOL_CATALOG_TOKEN_BUDGET);
   });
 
@@ -100,11 +103,16 @@ describe('tool catalog budget', () => {
   // each other: text moved out of one can reappear in the other with both
   // per-part budgets still green.
   test.each([
-    ['a direct message', () => makeContext(), () => getToolDefinitions('text'), FULL_REQUEST_TOKEN_BUDGETS.direct],
+    [
+      'a direct message',
+      () => makeContext(),
+      () => getToolDefinitions('text', false, WITH_CALLS),
+      FULL_REQUEST_TOKEN_BUDGETS.direct,
+    ],
     [
       'a group chat',
       () => makeContext({ isGroup: true, groupChatId: -100, groupTitle: 'Family' }),
-      () => getToolDefinitions('text'),
+      () => getToolDefinitions('text', false, WITH_CALLS),
       FULL_REQUEST_TOKEN_BUDGETS.group,
     ],
     [
@@ -116,7 +124,7 @@ describe('tool catalog budget', () => {
           // measurement is of a prompt production never sends.
           supplementAutoResponse: 'Записал встречу на завтра в 12:30.',
         }),
-      () => getToolDefinitions('text', true),
+      () => getToolDefinitions('text', true, WITH_CALLS),
       FULL_REQUEST_TOKEN_BUDGETS.supplement,
     ],
     [
@@ -134,7 +142,7 @@ describe('tool catalog budget', () => {
 
   test('the current full direct request is preflight-rejected for Groq gpt-oss 8K before network dispatch', () => {
     const ctx = makeContext();
-    const tools = getToolDefinitions('text');
+    const tools = getToolDefinitions('text', false, WITH_CALLS);
     const rejection = preflightRequestFit('groq', 'openai/gpt-oss-120b', {
       messages: [
         { role: 'system', content: buildSystemPrompt(ctx) },
@@ -150,8 +158,8 @@ describe('tool catalog budget', () => {
   test('every other mode stays within the same budget', () => {
     const variants = [
       getToolDefinitions('live_call'),
-      getToolDefinitions('text', true),
-      getToolDefinitions('voice_message'),
+      getToolDefinitions('text', true, WITH_CALLS),
+      getToolDefinitions('voice_message', false, WITH_CALLS),
     ];
     for (const tools of variants) {
       expect(catalogJson(tools).length).toBeLessThanOrEqual(TOOL_CATALOG_CHAR_BUDGET);
@@ -159,7 +167,7 @@ describe('tool catalog budget', () => {
   });
 
   test('no single tool is allowed to grow past 2 000 characters', () => {
-    const oversized = getToolDefinitions('text')
+    const oversized = getToolDefinitions('text', false, WITH_CALLS)
       .filter((t) => t.type === 'function')
       .filter((t) => JSON.stringify(t).length > 2_000)
       .map((t) => t.function.name);
@@ -181,11 +189,17 @@ describe('per-mode tool availability', () => {
   });
 
   test('text mode keeps the visual tools and withholds the hang-up tool', () => {
-    const text = names(getToolDefinitions('text'));
+    const text = names(getToolDefinitions('text', false, WITH_CALLS));
     for (const present of ['render_day_image', 'render_week_image', 'render_month_image', 'pick_users', 'make_call']) {
       expect(text).toContain(present);
     }
     expect(text).not.toContain('end_call');
+  });
+
+  test('make_call is offered only when a call can be placed', () => {
+    expect(names(getToolDefinitions('text'))).not.toContain('make_call');
+    expect(names(getToolDefinitions('voice_message'))).not.toContain('make_call');
+    expect(names(getToolDefinitions('voice_message', false, WITH_CALLS))).toContain('make_call');
   });
 
   test('supplement mode swaps end_conversation for supplement_skip', () => {
