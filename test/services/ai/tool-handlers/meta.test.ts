@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { t } from '../../../../src/config/constants.ts';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { ContactRepository } from '../../../../src/database/repositories/contact.repository.ts';
@@ -674,17 +675,57 @@ describe('meta tool handlers', () => {
   });
 
   describe('handleMakeCall', () => {
+    function withCallQueue(enqueue: (userId: number, text: string) => Promise<void>): AgentContext {
+      return {
+        ...ctx,
+        calls: {
+          callQueue: { enqueue },
+          callSettingsRepo: {
+            get: () => null,
+            ensureDefaults: () => {},
+            setEnabled: () => {},
+            setLanguage: () => {},
+          },
+        },
+      };
+    }
+
     test('blocks make_call during live_call', async () => {
       const liveCtx: AgentContext = { ...ctx, inputMode: 'live_call' };
-      const result = handleMakeCall(liveCtx, { text: 'reminder' });
+      const result = await handleMakeCall(liveCtx, { text: 'reminder' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('live call');
     });
 
     test('returns error when callQueue not available', async () => {
       const noQueueCtx: AgentContext = { ...ctx, inputMode: undefined };
-      const result = handleMakeCall(noQueueCtx, { text: 'reminder' });
+      const result = await handleMakeCall(noQueueCtx, { text: 'reminder' });
       expect(result.success).toBe(false);
+    });
+
+    test('reports the call as queued once the queue accepted it', async () => {
+      const queued: [number, string][] = [];
+      const result = await handleMakeCall(
+        withCallQueue(async (userId, text) => {
+          queued.push([userId, text]);
+        }),
+        { text: 'Standup in 10 minutes' },
+      );
+      expect(queued).toEqual([[USER_ID, 'Standup in 10 minutes']]);
+      expect(result).toEqual({ success: true, output: t('en').aiTools.meta.callQueued });
+    });
+
+    test('fails truthfully when the queue write is rejected', async () => {
+      const result = await handleMakeCall(
+        withCallQueue(async () => {
+          throw new Error('Redis connection lost');
+        }),
+        { text: 'Standup in 10 minutes' },
+      );
+      expect(result.success).toBe(false);
+      expect(result.output).toBeUndefined();
+      expect(result.error).toBe(t('en').aiTools.meta.callQueueFailed);
+      expect(result.error).not.toBe(t('en').aiTools.meta.callQueued);
     });
   });
 });

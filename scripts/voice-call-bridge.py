@@ -10,7 +10,6 @@ from service_session import start_service_session
 NTgCalls.enable_glib_loop(True)
 
 import sys, os, asyncio, json, struct
-from pathlib import Path
 
 API_ID = int(os.environ.get("MTPROTO_API_ID", 0))
 API_HASH = os.environ.get("MTPROTO_API_HASH", "")
@@ -66,10 +65,8 @@ async def main():
     calls = PyTgCalls(app)
 
     play_task: asyncio.Task | None = None
-    current_file: str | None = None
     paused = False
     call_ended = asyncio.Event()
-    speaking = False
     seq_num = 0
     play_done_event: asyncio.Event | None = None
     audio_buffer = b""
@@ -81,7 +78,7 @@ async def main():
 
         async def recv_commands():
             """Receive PLAY/PAUSE/RESUME/STOP from Bun."""
-            nonlocal current_file, paused, play_task, play_done_event
+            nonlocal paused, play_task, play_done_event
 
             async for raw in ws:
                 if isinstance(raw, bytes):
@@ -94,7 +91,6 @@ async def main():
                 cmd = msg.get("type")
                 if cmd == "PLAY":
                     file_path = msg.get("file", "")
-                    current_file = file_path
                     if play_task and not play_task.done():
                         play_task.cancel()
                     play_done_event = asyncio.Event()
@@ -138,13 +134,11 @@ async def main():
                         pass  # older pytgcalls may not have skip_stream; cancel of play_task is enough
 
         frames_received = 0
-        record_file = open('data/last-call-user.raw', 'wb')  # 48kHz s16le mono
 
         async def on_audio_frame(chunk: bytes):
-            """Process incoming audio chunk from the call with VAD."""
-            nonlocal audio_buffer, is_speaking, speaking, seq_num, frames_received
-
-            record_file.write(chunk)
+            """Process incoming audio chunk from the call with VAD. Caller audio is only streamed
+            to Bun for live STT — never written to disk."""
+            nonlocal audio_buffer, is_speaking, seq_num, frames_received
 
             frames_received += 1
             if frames_received == 1:
@@ -176,7 +170,6 @@ async def main():
 
                 if detected and not is_speaking:
                     is_speaking = True
-                    speaking = True
                     print('[vad] VAD_START', file=sys.stderr, flush=True)
                     await ws.send(json.dumps({"type": "VAD_START"}))
                     seq_num = 0
@@ -188,7 +181,6 @@ async def main():
 
                 if not detected and is_speaking:
                     is_speaking = False
-                    speaking = False
                     await ws.send(json.dumps({"type": "VAD_END"}))
 
         # ------- Start call (lock session file during start/stop) -------
@@ -230,8 +222,6 @@ async def main():
         for t in [ws_task, call_done_task]:
             t.cancel()
         await asyncio.gather(ws_task, call_done_task, return_exceptions=True)
-        record_file.close()
-        print(f'[vad] recording saved: data/last-call-user.raw ({frames_received} frames)', file=sys.stderr, flush=True)
 
         # Send CALL_ENDED only if WS is still open (user hung up, not Bun-initiated close)
         try:

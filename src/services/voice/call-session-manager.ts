@@ -16,25 +16,27 @@ export interface CallSessionManagerDeps {
     userId: number,
     language: 'ru' | 'en',
     ws: { send: (data: string | Buffer) => void; close: () => void },
+    openerText: string,
   ) => ManagedSession;
   timeoutMs?: number;
 }
 
 export class CallSessionManager {
   private sessions = new Map<string, { session: ManagedSession; timer: ReturnType<typeof setTimeout> }>();
-  private pendingSessions = new Map<string, { userId: number; language: 'ru' | 'en' }>();
+  private pendingSessions = new Map<string, { userId: number; language: 'ru' | 'en'; openerText: string }>();
   private readonly timeoutMs: number;
 
   constructor(private readonly deps: CallSessionManagerDeps) {
     this.timeoutMs = deps.timeoutMs ?? SESSION_TIMEOUT_MS;
   }
 
-  registerSession(sessionId: string, userId: number, language: string): void {
+  /** Prepares the session the bridge will connect to; `openerText` is spoken first once the call connects. */
+  registerSession(sessionId: string, userId: number, language: string, openerText: string): void {
     const lang: 'ru' | 'en' = language === 'en' ? 'en' : language === 'ru' ? 'ru' : 'ru';
     if (language !== 'ru' && language !== 'en') {
       voiceLogger.warn({ sessionId, language }, 'Unexpected language in registerSession, defaulting to ru');
     }
-    this.pendingSessions.set(sessionId, { userId, language: lang });
+    this.pendingSessions.set(sessionId, { userId, language: lang, openerText });
   }
 
   onWebSocketOpen(sessionId: string, ws: { send: (data: string | Buffer) => void; close: () => void }): void {
@@ -45,7 +47,7 @@ export class CallSessionManager {
       return;
     }
     this.pendingSessions.delete(sessionId);
-    const session = this.deps.createSession(sessionId, ctx.userId, ctx.language, ws);
+    const session = this.deps.createSession(sessionId, ctx.userId, ctx.language, ws, ctx.openerText);
     const timer = setTimeout(() => {
       voiceLogger.warn({ sessionId }, 'Session timeout — forcing end');
       session.forceEnd?.();

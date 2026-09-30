@@ -183,28 +183,31 @@ export class BirthdayService {
       return;
     }
 
-    for (const user of pending) {
-      const birthday = birthdays.get(user.telegram_id);
-      if (!birthday) continue;
-      try {
-        this.upsertBirthdayEvent({
-          ownerId: user.telegram_id,
-          celebrantId: user.telegram_id,
-          celebrantName: user.first_name ?? String(user.telegram_id),
-          day: birthday.day,
-          month: birthday.month,
-          year: birthday.year ?? null,
-          lang: toLang(user.language),
-          timezone: user.timezone,
-          autoCreated: true,
-        });
-      } catch (err) {
-        birthdayLogger.error({ err, userId: user.telegram_id }, 'Failed to upsert birthday event');
-      }
-    }
-
     const now = new Date().toISOString();
-    for (const u of pending) this.metaRepo.upsertSyncState(u.telegram_id, now);
+    for (const user of pending) {
+      // Absent = the script could not check this user; leave them due for the next sync.
+      const birthday = birthdays.get(user.telegram_id);
+      if (birthday === undefined) continue;
+      if (birthday) {
+        try {
+          this.upsertBirthdayEvent({
+            ownerId: user.telegram_id,
+            celebrantId: user.telegram_id,
+            celebrantName: user.first_name ?? String(user.telegram_id),
+            day: birthday.day,
+            month: birthday.month,
+            year: birthday.year ?? null,
+            lang: toLang(user.language),
+            timezone: user.timezone,
+            autoCreated: true,
+          });
+        } catch (err) {
+          birthdayLogger.error({ err, userId: user.telegram_id }, 'Failed to upsert birthday event');
+          continue;
+        }
+      }
+      this.metaRepo.upsertSyncState(user.telegram_id, now);
+    }
   }
 
   getBirthdaysForDisplay(userId: number, groupCalendars: { groupId: number; title: string }[]): BirthdaysForDisplay {

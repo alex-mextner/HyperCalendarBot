@@ -172,7 +172,7 @@ export function handleEndCall(ctx: AgentContext): ToolResult {
   return { success: true, output: 'Call will end after the current response is spoken.' };
 }
 
-export function handleMakeCall(ctx: AgentContext, input: { text: string }): ToolResult {
+export async function handleMakeCall(ctx: AgentContext, input: { text: string }): Promise<ToolResult> {
   if (ctx.inputMode === 'live_call') {
     metaLogger.warn({ userId: ctx.user.telegram_id }, 'make_call: attempted during live call, blocked');
     return {
@@ -190,7 +190,12 @@ export function handleMakeCall(ctx: AgentContext, input: { text: string }): Tool
     };
   }
   metaLogger.info({ userId: ctx.user.telegram_id, textLen: input.text.length }, 'make_call: enqueueing call');
-  ctx.calls.callQueue.enqueue(ctx.user.telegram_id, input.text);
+  try {
+    await ctx.calls.callQueue.enqueue(ctx.user.telegram_id, input.text);
+  } catch (error) {
+    metaLogger.error({ err: error, userId: ctx.user.telegram_id }, 'make_call: could not queue the call');
+    return { success: false, error: t(ctx.user.language).aiTools.meta.callQueueFailed };
+  }
   return { success: true, output: t(ctx.user.language).aiTools.meta.callQueued };
 }
 

@@ -69,6 +69,7 @@ export interface CallSessionConfig {
   createThinkingPlayer: () => ThinkingPlayer;
   agent: CallAgent;
   tts: { synthesize: (text: string, lang: string) => Promise<Buffer> };
+  /** First utterance once the call connects: the reminder being called about. Blank → generic greeting. */
   openerText: string;
   unlink?: (path: string) => Promise<void>;
   sttErrorTimeoutMs?: number;
@@ -173,8 +174,11 @@ export class CallSession {
   }
 
   private async playOpener(): Promise<void> {
+    const openerText =
+      this.cfg.openerText.trim() ||
+      (this.cfg.language === 'ru' ? 'Привет! Чем могу помочь?' : 'Hello! How can I help you?');
     try {
-      const audio = await this.cfg.tts.synthesize(this.cfg.openerText, this.cfg.language);
+      const audio = await this.cfg.tts.synthesize(openerText, this.cfg.language);
       const file = this.tempFile();
       await Bun.write(file, audio);
       this.sendPlay(file);

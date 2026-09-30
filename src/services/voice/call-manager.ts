@@ -1,6 +1,5 @@
 // src/services/voice/call-manager.ts
 
-import { unlink } from 'node:fs/promises';
 import { t } from '../../config/constants.ts';
 import type { CallStatus } from '../../database/types';
 import type { CallReminderJobData } from './types';
@@ -13,25 +12,15 @@ type SpawnResult = {
 };
 
 export interface CallManagerDeps {
-  primaryTts?: { synthesize: (text: string, lang: string) => Promise<Buffer> };
-  fallbackTts: { synthesize: (text: string, lang: string) => Promise<Buffer> };
   callLogRepo: {
     updateStatus: (id: number, status: CallStatus) => void;
     complete: (id: number, status: CallStatus, duration: number, error?: string) => void;
   };
   translateText?: (text: string, lang: string) => Promise<string>;
   pyBridgePath: string;
-  registerSession?: (sessionId: string, userId: number, language: string) => void;
+  /** Prepares the live session the bridge connects to; `openerText` is the first thing it speaks. */
+  registerSession: (sessionId: string, userId: number, language: string, openerText: string) => void;
   spawnProcess?: (cmd: string[], opts: { env: NodeJS.ProcessEnv; stdout: 'pipe'; stderr: 'pipe' }) => SpawnResult;
-  /** Optional override for the ffmpeg mp3→ogg fallback-TTS conversion — tests
-   *  stub this out so they don't need a system ffmpeg binary. */
-  spawnFfmpeg?: (
-    cmd: string[],
-    opts: { stderr: 'pipe' },
-  ) => {
-    stderr: ReadableStream<Uint8Array> | null;
-    exited: Promise<number>;
-  };
   notifyUser?: (userId: number, msg: string) => void;
 }
 
@@ -42,56 +31,16 @@ export class CallManager {
     const startTime = Date.now();
 
     try {
-      // Step 1: Translate TTS text if translator available
+      // Step 1: Translate the reminder into the call language if a translator is available
       const textToSpeak = this.deps.translateText
         ? await this.deps.translateText(job.ttsText, job.language)
         : job.ttsText;
 
-      // Step 2: Synthesize TTS audio (primary first, fallback on error)
-      voiceLogger.info({ userId: job.userId, eventId: job.eventId }, 'Synthesizing TTS');
-      let audioBuffer: Buffer;
-      let usedFallback = false;
-      if (this.deps.primaryTts) {
-        try {
-          audioBuffer = await this.deps.primaryTts.synthesize(textToSpeak, job.language);
-        } catch (primaryErr) {
-          voiceLogger.warn({ err: primaryErr }, 'Primary TTS failed, trying fallback');
-          audioBuffer = await this.deps.fallbackTts.synthesize(textToSpeak, job.language);
-          usedFallback = true;
-        }
-      } else {
-        audioBuffer = await this.deps.fallbackTts.synthesize(textToSpeak, job.language);
-        usedFallback = true;
-      }
+      // Step 2: Register the session before spawning the bridge; the session speaks the reminder
+      // as soon as the user answers.
+      this.deps.registerSession(job.sessionId, job.userId, job.language, textToSpeak);
 
-      // Step 3: Write audio file (primary = OGG Opus natively; fallback = MP3, needs ffmpeg)
-      const oggFile = `/tmp/call-${job.callLogId}.ogg`;
-      if (usedFallback) {
-        // TtsService returns MP3 — convert to OGG Opus for pytgcalls
-        const mp3File = `/tmp/call-${job.callLogId}-raw.mp3`;
-        await Bun.write(mp3File, audioBuffer);
-        const spawnFfmpeg = this.deps.spawnFfmpeg ?? ((cmd, opts) => Bun.spawn(cmd, opts));
-        const ffmpeg = spawnFfmpeg(
-          ['ffmpeg', '-y', '-i', mp3File, '-c:a', 'libopus', '-ar', '48000', '-ac', '1', oggFile],
-          { stderr: 'pipe' },
-        );
-        const ffmpegExit = await ffmpeg.exited;
-        if (ffmpegExit !== 0) {
-          const ffmpegErr = ffmpeg.stderr ? await new Response(ffmpeg.stderr).text() : '';
-          voiceLogger.warn({ exitCode: ffmpegExit, stderr: ffmpegErr.slice(0, 200) }, 'ffmpeg conversion failed');
-        }
-        try {
-          await unlink(mp3File);
-        } catch {}
-      } else {
-        // Silero/Kokoro already output OGG Opus
-        await Bun.write(oggFile, audioBuffer);
-      }
-
-      // Step 4: Register session before spawning Python bridge
-      this.deps.registerSession?.(job.sessionId, job.userId, job.language);
-
-      // Step 5: Ring + spawn Python bridge
+      // Step 3: Ring + spawn Python bridge
       this.deps.callLogRepo.updateStatus(job.callLogId, 'ringing');
       voiceLogger.info({ userId: job.userId, sessionId: job.sessionId }, 'Calling via Python bridge');
 
@@ -124,11 +73,6 @@ export class CallManager {
       const exitCode = await proc.exited;
       await stderrTask;
       voiceLogger.info({ exitCode, userId: job.userId }, 'Bridge exited');
-
-      // Cleanup
-      try {
-        await unlink(oggFile);
-      } catch {}
 
       const duration = Math.floor((Date.now() - startTime) / 1000);
       const callStatus = exitCode === 0 ? 'completed' : 'failed';

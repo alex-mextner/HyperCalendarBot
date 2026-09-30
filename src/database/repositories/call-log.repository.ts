@@ -34,12 +34,13 @@ export class CallLogRepository {
       .run(status, durationSec, error ?? null, id);
   }
 
-  countTodayCalls(userId: number): number {
+  /** Calls logged at or after `sinceUtcIso`; `created_at` is stored as SQLite UTC `datetime('now')`. */
+  countCallsSince(userId: number, sinceUtcIso: string): number {
     const row = this.db
-      .query<{ cnt: number }, [number]>(
-        "SELECT COUNT(*) as cnt FROM call_log WHERE user_id = ? AND created_at >= date('now')",
+      .query<{ cnt: number }, [number, string]>(
+        'SELECT COUNT(*) as cnt FROM call_log WHERE user_id = ? AND created_at >= datetime(?)',
       )
-      .get(userId);
+      .get(userId, sinceUtcIso);
     return row?.cnt ?? 0;
   }
 

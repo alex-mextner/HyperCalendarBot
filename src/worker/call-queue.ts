@@ -2,24 +2,39 @@
 
 import { randomUUID } from 'node:crypto';
 import { type ConnectionOptions, Queue, Worker } from 'bullmq';
+import type { CallLogRepository } from '../database/repositories/call-log.repository';
 import type { CallManager } from '../services/voice/call-manager';
 import type { CallReminderJobData } from '../services/voice/types';
 import { voiceLogger } from '../services/voice/types';
 
-export function createCallQueue(connection: ConnectionOptions) {
+/** A call to place; the queue logs it and assigns the log row and session. */
+export type CallRequest = Omit<CallReminderJobData, 'sessionId' | 'callLogId'>;
+
+export function createCallQueue(
+  connection: ConnectionOptions,
+  callLog: Pick<CallLogRepository, 'create' | 'complete'>,
+) {
   const queue = new Queue<CallReminderJobData>('call-reminders', { connection });
   return {
     queue,
-    async enqueue(data: Omit<CallReminderJobData, 'sessionId'>): Promise<void> {
-      await queue.add(
-        'call-reminder',
-        { ...data, sessionId: randomUUID() },
-        {
-          attempts: 1,
-          removeOnComplete: true,
-          removeOnFail: true,
-        },
-      );
+    /** Logs the call, then queues it. Rejects when the queue write fails, after marking the logged call
+     *  failed — otherwise its row would stay 'queued' with no job to ever complete it. */
+    async enqueue(data: CallRequest): Promise<void> {
+      const log = callLog.create({ user_id: data.userId, tts_text: data.ttsText });
+      try {
+        await queue.add(
+          'call-reminder',
+          { ...data, callLogId: log.id, sessionId: randomUUID() },
+          {
+            attempts: 1,
+            removeOnComplete: true,
+            removeOnFail: true,
+          },
+        );
+      } catch (error) {
+        callLog.complete(log.id, 'failed', 0, error instanceof Error ? error.message : String(error));
+        throw error;
+      }
     },
   };
 }

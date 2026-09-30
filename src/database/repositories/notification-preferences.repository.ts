@@ -66,9 +66,10 @@ export class NotificationPreferencesRepository {
         `SELECT np.*, u.timezone, u.language,
                 (u.google_refresh_token_enc IS NOT NULL) AS has_google,
                 (u.country_code IS NOT NULL) AS has_country,
-                COALESCE(u.voice_response_enabled, 0) AS has_voice_calls
+                COALESCE(ucs.enabled, 0) AS has_voice_calls
          FROM notification_preferences np
          JOIN users u ON np.user_id = u.telegram_id
+         LEFT JOIN user_call_settings ucs ON ucs.user_id = np.user_id
          WHERE np.${column} = 1`,
       )
       .all() as Array<NotificationPreferencesRow & UserContextFlags>;

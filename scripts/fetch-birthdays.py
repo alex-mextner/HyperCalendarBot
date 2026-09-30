@@ -2,9 +2,10 @@
 Batch-fetch birthday info for Telegram user IDs via Pyrogram.
 stdin:  JSON array of integer user IDs
 stdout: JSON object { "<user_id>": {"day": N, "month": N, "year": N} | null, ... }
-        null  = birthday not visible or not set
+        null   = checked; birthday not visible or not set
+        absent = could not check (lookup failed); the caller retries it later
         year key absent if user hid birth year
-Exit 0: success (partial results ok — unresolvable users omitted, not set to null)
+Exit 0: success (partial results ok — unchecked users omitted, never set to null)
 Exit 1: hard failure (session error, flood wait exceeded limit)
 """
 from service_session import start_service_session

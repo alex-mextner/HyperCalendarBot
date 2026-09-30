@@ -13,16 +13,6 @@ export interface SttSocket {
   onclose: ((event: CloseEvent) => void) | null;
 }
 
-export type VoiceCallState = 'idle' | 'synthesizing' | 'ringing' | 'connected' | 'playing' | 'ended' | 'failed';
-
-export interface VoiceCallConfig {
-  mtprotoApiId: number;
-  mtprotoApiHash: string;
-  mtprotoSession: string;
-  maxCallDurationSec: number;
-  ttsTimeoutMs: number;
-}
-
 export interface CallReminderJobData {
   userId: number;
   eventId?: number;

@@ -1,14 +1,19 @@
 """
 Auth script for Pyrogram (voice call bridge).
 Run: cd hypercalendarbot && venv/bin/python scripts/pyrogram-auth.py [phone]
+Env: MTPROTO_API_ID, MTPROTO_API_HASH
 """
 import asyncio
 import os
 import sys
+
+if not os.environ.get("MTPROTO_API_ID", "").isdigit() or not os.environ.get("MTPROTO_API_HASH"):
+    sys.exit("MTPROTO_API_ID and MTPROTO_API_HASH must be set")
+
 from pyrogram import Client
 
-API_ID = int(os.environ.get("MTPROTO_API_ID", 31496323))
-API_HASH = os.environ.get("MTPROTO_API_HASH", "e345f63982415e960843085806219f2f")
+API_ID = int(os.environ["MTPROTO_API_ID"])
+API_HASH = os.environ["MTPROTO_API_HASH"]
 
 async def main():
     phone = sys.argv[1] if len(sys.argv) > 1 else None

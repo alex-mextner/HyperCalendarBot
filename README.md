@@ -134,7 +134,8 @@ the session belongs to exactly that account; startup logs `MTProto service tier 
 # Voice calls only: build patched ntgcalls (~5 min, needs ~5 GB RAM); the patch fixes silent audio in v2.1.0
 ./scripts/build-patched-ntgcalls.sh python3.12 venv
 
-# Authorize the service account (one-time interactive; creates data/voice_caller.session)
+# Authorize the service account (one-time interactive; creates data/voice_caller.session;
+# needs MTPROTO_API_ID / MTPROTO_API_HASH exported — the script has no built-in credentials)
 venv/bin/python scripts/pyrogram-auth.py
 # then set MTPROTO_SERVICE_USER_ID (+ DEEPGRAM_API_KEY for live calls) in .env
 ```

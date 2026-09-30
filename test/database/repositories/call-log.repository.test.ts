@@ -52,10 +52,19 @@ describe('CallLogRepository', () => {
     expect(repo.findById(log.id)!.error).toBe('User busy');
   });
 
-  test('countTodayCalls counts calls for today', () => {
+  test('countCallsSince counts only calls at or after the UTC cutoff', () => {
+    const insert = (createdAt: string) =>
+      db.run('INSERT INTO call_log (user_id, created_at) VALUES (?, ?)', [USER_ID, createdAt]);
+    insert('2026-03-15 20:59:59');
+    insert('2026-03-15 21:00:00');
+    insert('2026-03-16 08:00:00');
+    expect(repo.countCallsSince(USER_ID, '2026-03-15T21:00:00.000Z')).toBe(2);
+  });
+
+  test('countCallsSince counts calls just created', () => {
     repo.create({ user_id: USER_ID });
     repo.create({ user_id: USER_ID });
-    expect(repo.countTodayCalls(USER_ID)).toBe(2);
+    expect(repo.countCallsSince(USER_ID, new Date(Date.now() - 60_000).toISOString())).toBe(2);
   });
 
   test('getRecent returns latest calls', () => {
@@ -72,8 +81,8 @@ describe('CallLogRepository', () => {
     expect(repo.findById(999)).toBeNull();
   });
 
-  test('countTodayCalls returns 0 for user with no calls', () => {
-    expect(repo.countTodayCalls(999)).toBe(0);
+  test('countCallsSince returns 0 for user with no calls', () => {
+    expect(repo.countCallsSince(999, '2000-01-01T00:00:00.000Z')).toBe(0);
   });
 
   test('getRecent returns empty for user with no calls', () => {

@@ -116,7 +116,7 @@ export interface MessageHandlerDeps {
     ensureDefaults(userId: number): void;
   };
   /** Voice-call reminders; present only when the call queue runs (the shared MTProto service tier is on). */
-  callQueue?: { enqueue(userId: number, text: string): void };
+  callQueue?: { enqueue(userId: number, text: string): Promise<void> };
   callSettingsRepo?: {
     get(userId: number): UserCallSettings | null;
     ensureDefaults(userId: number): void;

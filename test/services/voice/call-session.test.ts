@@ -111,6 +111,12 @@ test('sends PLAY opener file on CALL_CONNECTED', async () => {
   expect(sentCommands(ws).some((s) => s.type === 'PLAY')).toBe(true);
 });
 
+test('greets generically on CALL_CONNECTED when the call has no opener text', async () => {
+  const { session, tts } = makeSession({ language: 'en', openerText: '  ' });
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  expect(tts.synthesize.mock.calls[0]).toEqual(['Hello! How can I help you?', 'en']);
+});
+
 test('sends PAUSE on VAD_START', async () => {
   const { session, ws } = makeSession();
   await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));

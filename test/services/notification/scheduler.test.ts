@@ -831,3 +831,81 @@ describe('resolved place in reminders and agendas', () => {
     }
   });
 });
+
+describe('voice call gating follows the user local clock', () => {
+  const USER_ID = 5000000001;
+
+  /** A Moscow (UTC+3) user with calls on and a reminder due at `remindAtUtc`. */
+  function setupMoscowCallUser(remindAtUtc: string, quiet: { start: string; end: string } | null, maxDaily = 5) {
+    const db = setupDb();
+    db.run("INSERT INTO users (telegram_id, timezone) VALUES (?, 'Europe/Moscow')", [USER_ID]);
+    db.run("INSERT INTO events (id, user_id, title, start_at, timezone) VALUES (1, ?, 'Call', ?, 'Europe/Moscow')", [
+      USER_ID,
+      new Date(new Date(remindAtUtc).getTime() + 15 * 60_000).toISOString(),
+    ]);
+    db.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, ?, ?, 15, '15 minutes')",
+      [USER_ID, remindAtUtc],
+    );
+    const callSettingsRepo = new CallSettingsRepository(db);
+    callSettingsRepo.ensureDefaults(USER_ID);
+    callSettingsRepo.setEnabled(USER_ID, true);
+    callSettingsRepo.setQuietHours(USER_ID, quiet?.start ?? null, quiet?.end ?? null);
+    db.run('UPDATE user_call_settings SET max_daily_calls = ? WHERE user_id = ?', [maxDaily, USER_ID]);
+    const calls: EnqueueCallData[] = [];
+    const callScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo: new NotificationLogRepository(db),
+      userRepo: new UserRepository(db),
+      getEventsInRange: makeGetEventsInRange(db),
+      enqueue: mock(() => {}),
+      callSettingsRepo,
+      callLogRepo: new CallLogRepository(db),
+      enqueueCall: (data) => {
+        calls.push(data);
+      },
+    });
+    return { db, callScheduler, calls };
+  }
+
+  test('no call at 23:30 local inside a 23:00–07:00 quiet window (20:30 UTC)', async () => {
+    const { callScheduler, calls } = setupMoscowCallUser('2026-03-15T20:30:00Z', { start: '23:00', end: '07:00' });
+    await callScheduler.tick(new Date('2026-03-15T20:30:30Z'));
+    expect(calls).toEqual([]);
+  });
+
+  test('call at 15:00 local outside a 23:00–07:00 quiet window (12:00 UTC)', async () => {
+    const { callScheduler, calls } = setupMoscowCallUser('2026-03-15T12:00:00Z', { start: '23:00', end: '07:00' });
+    await callScheduler.tick(new Date('2026-03-15T12:00:30Z'));
+    expect(calls.map((c) => c.userId)).toEqual([USER_ID]);
+  });
+
+  test('no call at 15:00 local inside a same-day 13:00–17:00 quiet window (12:00 UTC)', async () => {
+    const { callScheduler, calls } = setupMoscowCallUser('2026-03-15T12:00:00Z', { start: '13:00', end: '17:00' });
+    await callScheduler.tick(new Date('2026-03-15T12:00:30Z'));
+    expect(calls).toEqual([]);
+  });
+
+  test('call at 17:00 local, the exclusive end of a 13:00–17:00 quiet window (14:00 UTC)', async () => {
+    const { callScheduler, calls } = setupMoscowCallUser('2026-03-15T14:00:00Z', { start: '13:00', end: '17:00' });
+    await callScheduler.tick(new Date('2026-03-15T14:00:30Z'));
+    expect(calls.map((c) => c.userId)).toEqual([USER_ID]);
+  });
+
+  test('daily cap counts calls since local midnight, not the UTC day', async () => {
+    // 21:10 UTC on Mar 15 is 00:10 on Mar 16 in Moscow: same local day as the 21:30 UTC tick.
+    const { db, callScheduler, calls } = setupMoscowCallUser('2026-03-15T21:30:00Z', null, 1);
+    db.run("INSERT INTO call_log (user_id, created_at) VALUES (?, '2026-03-15 21:10:00')", [USER_ID]);
+    await callScheduler.tick(new Date('2026-03-15T21:30:30Z'));
+    expect(calls).toEqual([]);
+  });
+
+  test('daily cap resets at local midnight', async () => {
+    // 20:50 UTC on Mar 15 is 23:50 on Mar 15 in Moscow: the previous local day for the 21:30 UTC tick.
+    const { db, callScheduler, calls } = setupMoscowCallUser('2026-03-15T21:30:00Z', null, 1);
+    db.run("INSERT INTO call_log (user_id, created_at) VALUES (?, '2026-03-15 20:50:00')", [USER_ID]);
+    await callScheduler.tick(new Date('2026-03-15T21:30:30Z'));
+    expect(calls.map((c) => c.userId)).toEqual([USER_ID]);
+  });
+});

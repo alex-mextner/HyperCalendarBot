@@ -27,6 +27,7 @@ import { hasChainAnswered, initProviderAlerts, isAiChainDown } from './utils/ai-
 import { botLogger } from './utils/logger.ts';
 import { makeWorkerFailureHandler } from './utils/worker-alert.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
+import type { CallRequest } from './worker/call-queue.ts';
 
 // Filled in after db + config are initialized — best-effort, push() is synchronous
 let pushCrashAlert: ((msg: string) => void) | undefined;
@@ -160,9 +161,7 @@ let googleSyncQueueRef: import('bullmq').Queue | undefined;
 let syncChangeNotifierRef: import('./services/event/event-change-notifier.ts').EventChangeNotifier | undefined;
 let imageQueueCleanup: { close: () => Promise<void> } | undefined;
 let renderService: import('./services/image/render-service.ts').RenderService | undefined;
-let callQueue:
-  | { enqueue(data: Omit<import('./services/voice/types.ts').CallReminderJobData, 'sessionId'>): Promise<void> }
-  | undefined;
+let callQueue: { enqueue(data: CallRequest): Promise<void> } | undefined;
 let callQueueCleanup: { close: () => Promise<void> } | undefined;
 /** The live-call agent, drained on shutdown like the chat agent. */
 let voiceAgentRef: { drain: (settleMs: number) => Promise<void> } | undefined;
@@ -442,7 +441,6 @@ let broadcastQueueCleanup: { close: () => Promise<void> } | undefined;
 if (config.REDIS_URL && serviceTier.enabled && !config.DISABLE_VOICE) {
   try {
     const { createCallQueue, createCallWorker } = await import('./worker/call-queue.ts');
-    const { TtsService } = await import('./services/voice/tts-service.ts');
     const { CallManager } = await import('./services/voice/call-manager.ts');
     const { CallSessionManager } = await import('./services/voice/call-session-manager.ts');
     const { CallSession, createCallAgent } = await import('./services/voice/call-session.ts');
@@ -459,7 +457,6 @@ if (config.REDIS_URL && serviceTier.enabled && !config.DISABLE_VOICE) {
 
     const { TtsTranslationService } = await import('./services/voice/tts-translation.ts');
     const ttsTranslationService = new TtsTranslationService();
-    const ttsService = new TtsService();
 
     const DEEPGRAM_API_KEY = config.DEEPGRAM_API_KEY ?? '';
     if (!DEEPGRAM_API_KEY) {
@@ -519,7 +516,7 @@ if (config.REDIS_URL && serviceTier.enabled && !config.DISABLE_VOICE) {
     });
 
     const callSessionManager = new CallSessionManager({
-      createSession: (sessionId, userId, language, ws) =>
+      createSession: (sessionId, userId, language, ws, openerText) =>
         CallSession.create({
           sessionId,
           userId,
@@ -530,18 +527,18 @@ if (config.REDIS_URL && serviceTier.enabled && !config.DISABLE_VOICE) {
           createThinkingPlayer: () => new ThinkingPhrasePlayer(language),
           agent: voiceCallAgent,
           tts: voiceCallTts,
-          openerText: language === 'ru' ? 'Привет! Чем могу помочь?' : 'Hello! How can I help you?',
+          openerText,
         }),
     });
 
     callSessionManager.startServer();
 
     const callManager = new CallManager({
-      fallbackTts: ttsService,
       callLogRepo: db.callLog,
       translateText: (text, lang) => ttsTranslationService.translate(text, lang),
       pyBridgePath,
-      registerSession: (sessionId, userId, language) => callSessionManager.registerSession(sessionId, userId, language),
+      registerSession: (sessionId, userId, language, openerText) =>
+        callSessionManager.registerSession(sessionId, userId, language, openerText),
       notifyUser: (userId, msg) => {
         botRef
           .sendMessage(userId, msg)
@@ -549,7 +546,7 @@ if (config.REDIS_URL && serviceTier.enabled && !config.DISABLE_VOICE) {
       },
     });
 
-    const cq = createCallQueue({ url: config.REDIS_URL });
+    const cq = createCallQueue({ url: config.REDIS_URL }, db.callLog);
     const worker = createCallWorker({ url: config.REDIS_URL }, callManager);
     worker.on('failed', onWorkerFailed('call-reminders'));
     callQueue = cq;
@@ -603,8 +600,9 @@ if (config.REDIS_URL) {
     callLogRepo: db.callLog,
     enqueueCall: callQueue
       ? (data) => {
-          const log = db.callLog.create({ user_id: data.userId, tts_text: data.ttsText });
-          callQueue!.enqueue({ ...data, callLogId: log.id });
+          callQueue
+            ?.enqueue(data)
+            .catch((err) => botLogger.error({ err, userId: data.userId }, 'Failed to queue scheduled voice call'));
         }
       : undefined,
     weatherService,

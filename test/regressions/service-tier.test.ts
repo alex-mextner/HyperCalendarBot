@@ -301,13 +301,21 @@ test('getChatMembers returns member IDs, or null when the listing fails', async 
   expect(await broken.tier.getChatMembers(-1_001_234)).toBeNull();
 });
 
-test('fetchBirthdays sends the valid IDs on stdin and keeps only the birthdays it received', async () => {
+test('fetchBirthdays keeps checked-without-birthday (null) apart from IDs the script could not check (absent)', async () => {
   const { tier, calls } = await enabledTier(() =>
-    ok({ '5000000601': { day: 4, month: 7, year: 1990 }, '5000000602': null }),
+    ok({ '5000000601': { day: 4, month: 7, year: 1990 }, '5000000602': null, '5000000699': null }),
   );
-  const birthdays = await tier.fetchBirthdays([5_000_000_601, 5_000_000_602, -3]);
-  expect(birthdays && [...birthdays]).toEqual([[5_000_000_601, { day: 4, month: 7, year: 1990 }]]);
-  expect(calls.at(-1)).toEqual({ script: SERVICE_SCRIPTS.birthdays, args: [], stdin: '[5000000601,5000000602]' });
+  const birthdays = await tier.fetchBirthdays([5_000_000_601, 5_000_000_602, 5_000_000_603, -3]);
+  expect(birthdays && [...birthdays]).toEqual([
+    [5_000_000_601, { day: 4, month: 7, year: 1990 }],
+    [5_000_000_602, null],
+  ]);
+  expect(birthdays?.has(5_000_000_603)).toBe(false);
+  expect(calls.at(-1)).toEqual({
+    script: SERVICE_SCRIPTS.birthdays,
+    args: [],
+    stdin: '[5000000601,5000000602,5000000603]',
+  });
   const broken = await enabledTier(() => ({ stdout: 'not json', stderr: '', exitCode: 0 }));
   expect(await broken.tier.fetchBirthdays([5_000_000_601])).toBeNull();
 });

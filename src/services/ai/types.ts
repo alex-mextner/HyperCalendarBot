@@ -87,7 +87,8 @@ export interface VoiceCapability {
  * calls are unavailable without it.
  */
 export interface CallsCapability {
-  callQueue: { enqueue(userId: number, text: string): void };
+  /** Resolves once the call is queued; rejects when it could not be. */
+  callQueue: { enqueue(userId: number, text: string): Promise<void> };
   callSettingsRepo: {
     get(userId: number): UserCallSettings | null;
     ensureDefaults(userId: number): void;

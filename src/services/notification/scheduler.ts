@@ -411,7 +411,7 @@ export class NotificationScheduler {
         this.deps.enqueue('event_reminder_batch', firstReminder.user_id, logId, payload);
         notifyLogger.info({ userId: firstReminder.user_id, count: group.length }, 'Batch event reminder enqueued');
 
-        if (this.isCallAllowed(firstReminder.user_id, nowUtc)) {
+        if (this.isCallAllowed(firstReminder.user_id, nowUtc, user.timezone)) {
           const ttsText = renderBatchReminderForSpeech({
             lang: user.language ?? 'en',
             items: batchItems.map((item) => ({
@@ -468,7 +468,7 @@ export class NotificationScheduler {
       this.deps.enqueue('event_reminder', reminder.user_id, logId, payload);
       notifyLogger.info({ userId: reminder.user_id, eventId: reminder.event_id }, 'Event reminder enqueued');
 
-      if (this.isCallAllowed(reminder.user_id, nowUtc)) {
+      if (this.isCallAllowed(reminder.user_id, nowUtc, user.timezone)) {
         const ttsText = renderReminderForSpeech({
           title: reminder.event_title,
           startAt: reminder.event_start_at,
@@ -526,7 +526,7 @@ export class NotificationScheduler {
       this.deps.enqueue('morning_agenda', pref.user_id, logId, payload);
       notifyLogger.info({ userId: pref.user_id }, 'Morning agenda enqueued');
 
-      if (this.isCallAllowed(pref.user_id, nowUtc)) {
+      if (this.isCallAllowed(pref.user_id, nowUtc, pref.timezone)) {
         const ttsText = renderMorningAgendaForSpeech({ lang, dateLabel, events: agendaEvents });
         this.deps.enqueueCall?.({ userId: pref.user_id, ttsText, language: lang });
         notifyLogger.info({ userId: pref.user_id }, 'Morning agenda voice call enqueued');
@@ -652,7 +652,7 @@ export class NotificationScheduler {
       this.deps.enqueue('evening_review', pref.user_id, logId, payload);
       notifyLogger.info({ userId: pref.user_id }, 'Evening review enqueued');
 
-      if (this.isCallAllowed(pref.user_id, nowUtc)) {
+      if (this.isCallAllowed(pref.user_id, nowUtc, pref.timezone)) {
         const ttsText = renderEveningReviewForSpeech({ lang, dateLabel, events: agendaEvents });
         this.deps.enqueueCall?.({ userId: pref.user_id, ttsText, language: lang });
         notifyLogger.info({ userId: pref.user_id }, 'Evening review voice call enqueued');
@@ -738,7 +738,7 @@ export class NotificationScheduler {
         this.deps.enqueue('weekly_digest', pref.user_id, logId, payload);
         notifyLogger.info({ userId: pref.user_id, week: weekStr }, 'Weekly digest enqueued');
 
-        if (this.isCallAllowed(pref.user_id, nowUtc)) {
+        if (this.isCallAllowed(pref.user_id, nowUtc, pref.timezone)) {
           const digestDays = days.map((d) => ({
             dayLabel: d.dayLabel,
             events: d.events.map((e) => ({ title: e.title, startTime: e.startTime })),
@@ -751,15 +751,14 @@ export class NotificationScheduler {
     }
   }
 
-  private isCallAllowed(userId: number, nowUtc: Date): boolean {
+  /** Call quiet hours and the daily cap are user-local: HH:MM on the user's clock, the day from local midnight. */
+  private isCallAllowed(userId: number, nowUtc: Date, timezone: string): boolean {
     if (!this.deps.callSettingsRepo) return false;
     const callSettings = this.deps.callSettingsRepo.get(userId);
     if (!callSettings?.enabled) return false;
 
-    if (callSettings?.quiet_hours_start && callSettings?.quiet_hours_end) {
-      const hours = nowUtc.getUTCHours();
-      const mins = nowUtc.getUTCMinutes();
-      const currentTime = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+    if (callSettings.quiet_hours_start && callSettings.quiet_hours_end) {
+      const currentTime = format(new TZDate(nowUtc, timezone), 'HH:mm');
       const start = callSettings.quiet_hours_start;
       const end = callSettings.quiet_hours_end;
       const inQuietHours =
@@ -770,8 +769,8 @@ export class NotificationScheduler {
       }
     }
 
-    const dailyCount = this.deps.callLogRepo?.countTodayCalls(userId) ?? 0;
-    const maxDaily = callSettings?.max_daily_calls ?? 5;
-    return dailyCount < maxDaily;
+    const localDayStartUtc = getDayRangeUtc(nowUtc, timezone).start;
+    const dailyCount = this.deps.callLogRepo?.countCallsSince(userId, localDayStartUtc) ?? 0;
+    return dailyCount < callSettings.max_daily_calls;
   }
 }

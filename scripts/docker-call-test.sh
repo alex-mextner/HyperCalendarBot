@@ -1,8 +1,18 @@
 #!/bin/bash
 # Test voice call from Docker Linux container
 # Usage: ./scripts/docker-call-test.sh <user_id> [audio_file]
+# Env: MTPROTO_API_ID, MTPROTO_API_HASH, MTPROTO_SERVICE_USER_ID
 
-USER_ID=${1:-5153477378}
+if [[ ! "${MTPROTO_API_ID:-}" =~ ^[0-9]+$ || -z "${MTPROTO_API_HASH:-}" ]]; then
+  echo "MTPROTO_API_ID and MTPROTO_API_HASH must be set" >&2
+  exit 1
+fi
+if [[ ! "${1:-}" =~ ^[0-9]+$ ]]; then
+  echo "Usage: ./scripts/docker-call-test.sh <user_id> [audio_file]" >&2
+  exit 1
+fi
+
+USER_ID=$1
 AUDIO=${2:-/app/test.wav}
 
 # Generate test tone inside container if no file
@@ -13,8 +23,8 @@ docker run --rm \
   -e PYTHONPATH=/app \
   -e MTPROTO_SERVICE_USER_ID \
   -v "/tmp/test-tone.wav:/app/test.wav" \
-  -e MTPROTO_API_ID="${MTPROTO_API_ID:-31496323}" \
-  -e MTPROTO_API_HASH="${MTPROTO_API_HASH:-e345f63982415e960843085806219f2f}" \
+  -e MTPROTO_API_ID \
+  -e MTPROTO_API_HASH \
   python:3.12-slim bash -c "
 pip install -q py-tgcalls pyrofork ntgcalls tgcrypto 2>&1 | tail -1
 apt-get update -qq && apt-get install -qq -y ffmpeg 2>/dev/null | tail -1

@@ -50,6 +50,7 @@ import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import type { ParseMode } from '../utils/telegram.ts';
+import type { CallRequest } from '../worker/call-queue.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
@@ -122,15 +123,8 @@ export interface GoogleBotDeps {
 export interface CreateBotOpts {
   googleDeps?: GoogleBotDeps;
   renderService?: RenderService;
-  callQueue?: {
-    enqueue(data: {
-      userId: number;
-      eventId: number;
-      callLogId: number;
-      ttsText: string;
-      language: string;
-    }): Promise<void>;
-  };
+  /** Logs and queues a call; rejects when the queue write fails (the logged call is then marked failed). */
+  callQueue?: { enqueue(data: CallRequest): Promise<void> };
   transcriptionService?: TranscriptionService;
   /** The shared MTProto service account (lookups, group members, birthdays); never sends. */
   serviceTier: ServiceTier;
@@ -374,17 +368,13 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     callSettingsRepo: db.callSettings,
     callQueue: callQueue
       ? {
-          enqueue: (userId: number, text: string) => {
-            const callLog = db.callLog.create({ user_id: userId, tts_text: text });
-            const user = db.users.findByTelegramId(userId);
-            return callQueue.enqueue({
+          enqueue: (userId: number, text: string) =>
+            callQueue.enqueue({
               userId,
               eventId: 0,
-              callLogId: callLog.id,
               ttsText: text,
-              language: user?.language ?? 'en',
-            });
-          },
+              language: db.users.findByTelegramId(userId)?.language ?? 'en',
+            }),
         }
       : undefined,
     notificationPrefs: {

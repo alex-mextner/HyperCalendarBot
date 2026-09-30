@@ -84,8 +84,9 @@ export interface EnabledServiceTier {
   lookupUser(id: number): Promise<TelegramProfile | null>;
   /** Member IDs the service account can see in the chat, or null when the listing failed. */
   getChatMembers(chatId: number): Promise<number[] | null>;
-  /** Birthdays the service account can see, keyed by user ID; null when the batch failed. */
-  fetchBirthdays(ids: readonly number[]): Promise<ReadonlyMap<number, BirthdayDate> | null>;
+  /** Per user ID: the visible birthday, or null when checked and there is none to see. IDs the script
+   *  could not check are absent, so callers retry them. Null (not a map) when the whole batch failed. */
+  fetchBirthdays(ids: readonly number[]): Promise<ReadonlyMap<number, BirthdayDate | null> | null>;
 }
 
 export type ServiceTier = DisabledServiceTier | EnabledServiceTier;
@@ -276,10 +277,10 @@ function enabledTier(accountId: number, run: ServiceScriptRunner): EnabledServic
       if (stdout === null) return null;
       const parsed = Birthdays.safeParse(stdout);
       if (!parsed.success) return null;
-      const birthdays = new Map<number, BirthdayDate>();
+      const birthdays = new Map<number, BirthdayDate | null>();
       for (const id of valid) {
         const birthday = parsed.data[String(id)];
-        if (birthday) birthdays.set(id, birthday);
+        if (birthday !== undefined) birthdays.set(id, birthday);
       }
       return birthdays;
     },

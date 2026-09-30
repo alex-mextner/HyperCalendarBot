@@ -86,7 +86,7 @@ describe('runBatchSync', () => {
   afterEach(() => spawn.mockClear());
   afterAll(() => spawn.mockRestore());
 
-  function tierAnswering(birthdays: [number, BirthdayDate][] | null) {
+  function tierAnswering(birthdays: [number, BirthdayDate | null][] | null) {
     const fetchBirthdays = mock(async (_ids: readonly number[]) => (birthdays ? new Map(birthdays) : null));
     return { tier: enabledServiceTier({ fetchBirthdays }), fetchBirthdays };
   }
@@ -101,7 +101,10 @@ describe('runBatchSync', () => {
   });
 
   test('with the service tier on, adds each visible birthday to its owner and records the sync', async () => {
-    const { tier, fetchBirthdays } = tierAnswering([[1, { day: 10, month: 5, year: 1996 }]]);
+    const { tier, fetchBirthdays } = tierAnswering([
+      [1, { day: 10, month: 5, year: 1996 }],
+      [42, null],
+    ]);
 
     await serviceWith(tier).runBatchSync([alice, ivan]);
 
@@ -115,6 +118,34 @@ describe('runBatchSync', () => {
     expect(service.shouldSkipSync(1)).toBe(true);
     expect(service.shouldSkipSync(42)).toBe(true);
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('a user the batch could not check stays due while checked users are recorded', async () => {
+    const { tier } = tierAnswering([[1, null]]);
+
+    await serviceWith(tier).runBatchSync([alice, ivan]);
+
+    expect(service.shouldSkipSync(1)).toBe(true);
+    expect(service.shouldSkipSync(42)).toBe(false);
+  });
+
+  test('a birthday that fails to save leaves its user due for the next sync', async () => {
+    const { tier } = tierAnswering([
+      [1, { day: 10, month: 5 }],
+      [42, { day: 3, month: 2 }],
+    ]);
+    const syncing = serviceWith(tier);
+    const save = syncing.upsertBirthdayEvent.bind(syncing);
+    spyOn(syncing, 'upsertBirthdayEvent').mockImplementation((params) => {
+      if (params.ownerId === 42) throw new Error('synthetic write failure');
+      return save(params);
+    });
+
+    await syncing.runBatchSync([alice, ivan]);
+
+    expect(service.findExistingBirthday(1, 1)?.title).toBe('Д/р Alice');
+    expect(service.shouldSkipSync(1)).toBe(true);
+    expect(service.shouldSkipSync(42)).toBe(false);
   });
 
   test('users synced within the throttle window are not asked for again', async () => {

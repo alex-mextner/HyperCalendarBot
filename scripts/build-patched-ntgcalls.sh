@@ -36,10 +36,10 @@ fi
 # Apply the network state fix
 echo "[3/5] Applying P2P audio fix..."
 cd wrtc
-git apply "$PATCH_FILE" || {
-  echo "Patch may already be applied or needs manual merge"
-  cd ..
-}
+if ! git apply "$PATCH_FILE"; then
+  echo "ERROR: P2P audio fix did not apply — refusing to build unpatched ntgcalls" >&2
+  exit 1
+fi
 cd "$BUILD_DIR"
 
 # Build
@@ -61,4 +61,4 @@ echo "=== SUCCESS ==="
 echo "Installed: $SITE_PACKAGES/$(basename $SO_FILE)"
 echo "Size: $(ls -lh "$SITE_PACKAGES/$(basename $SO_FILE)" | awk '{print $5}')"
 echo ""
-echo "You can now test: venv/bin/python scripts/debug-call.py"
+echo "You can now test: venv/bin/python scripts/debug-call.py <user_id>"

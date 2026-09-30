@@ -238,12 +238,12 @@ uv pip install -r pyproject.toml --python venv/bin/python
 # 3. Build patched ntgcalls from source (~5 min, needs ~5GB RAM, ~2GB disk)
 ./scripts/build-patched-ntgcalls.sh python3.12 venv
 
-# 4. Authorize the service account (see "MTProto service tier" below)
+# 4. Authorize the service account (see "MTProto service tier" below); needs MTPROTO_API_ID / MTPROTO_API_HASH exported
 venv/bin/python scripts/pyrogram-auth.py
 ```
 
 - macOS arm64 `.dylib` != Linux x86_64 `.so` — binaries are platform-specific
-- `scripts/download-ntgcalls.sh` downloads the UNPATCHED binary — do NOT use it
+- The build aborts if the P2P audio patch does not apply — it never installs an unpatched binary
 - Build deps: CMake 3.20+, git, Python 3.12, 5GB RAM min
 
 ## MTProto service tier
