@@ -34,10 +34,11 @@ export interface KnownBotUser {
 }
 
 /** Resolves a normalized @username against people who have started this bot (the users table only);
- *  anyone else has to be shared through the picker. */
+ *  anyone else has to be shared through the picker. A row whose telegram_id is not a positive safe
+ *  integer names no real person, so it counts as not found. */
 export function lookupKnownBotUser(ctx: AgentContext, username: string): KnownBotUser | null {
   const user = ctx.userRepo.findByUsername(username);
-  if (!user) return null;
+  if (!user || !Number.isSafeInteger(user.telegram_id) || user.telegram_id <= 0) return null;
   return { id: user.telegram_id, firstName: user.first_name ?? undefined, username: user.username ?? username };
 }
 
@@ -127,7 +128,6 @@ export async function resolveInvitationRecipient(
     }
     const resolved = lookupKnownBotUser(ctx, username);
     if (!resolved) return { ok: false, reason: 'not_found', username };
-    if (!Number.isSafeInteger(resolved.id) || resolved.id <= 0) return { ok: false, reason: 'unverified' };
     if (id !== undefined && id !== resolved.id) return { ok: false, reason: 'conflict', candidate: resolved };
     markVerifiedRecipient(ctx, resolved.id);
     return { ok: true, ...resolved, isGroup: false };

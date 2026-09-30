@@ -14,7 +14,8 @@ beforeEach(() => {
   contacts = new ContactRepository(db);
 });
 afterEach(() => db.close());
-/** The bot's users table now maps @recycled to a different person than the saved contact. */
+/** The bot's users table now maps @recycled to a different person than the saved contact,
+ *  and holds a corrupt @broken row whose telegram_id is 0. */
 function context(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
     user: { telegram_id: 10, language: 'en' },
@@ -23,7 +24,10 @@ function context(overrides: Partial<AgentContext> = {}): AgentContext {
     userRepo: {
       findByTelegramId: () => null,
       findByUsername: (username: string) =>
-        username === 'recycled' ? { telegram_id: 5000000002, username: 'recycled' } : null,
+        ({
+          recycled: { telegram_id: 5000000002, username: 'recycled' },
+          broken: { telegram_id: 0, username: 'broken' },
+        })[username] ?? null,
     },
     ...overrides,
   } as unknown as AgentContext;
@@ -56,4 +60,11 @@ test('an explicit @username that the bot has never seen is not_found, never a gu
     invitee_username: 'stranger',
   });
   expect(result).toEqual({ ok: false, reason: 'not_found', username: 'stranger' });
+});
+
+test('an explicit @username whose users row has an invalid ID is not_found and never verified', async () => {
+  const ctx = context({ messageText: 'Invite @broken' });
+  const result = await resolveInvitationRecipient(ctx, { invitee_username: 'broken' });
+  expect(result).toEqual({ ok: false, reason: 'not_found', username: 'broken' });
+  expect(ctx.verifiedRecipientIds?.has(0) ?? false).toBe(false);
 });

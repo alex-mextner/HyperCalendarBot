@@ -144,6 +144,15 @@ describe('meta tool handlers', () => {
       expect(ctx.verifiedRecipientIds?.has(457)).toBe(true);
     });
 
+    test.each([0, -5])('a users row with invalid telegram_id %d is not found and not verified', async (id) => {
+      ctx.userRepo.create({ telegram_id: id, timezone: 'UTC', language: 'en', username: 'broken' });
+      ctx.messageText = 'Find @broken';
+      const result = await handleFindUser(ctx, { username: '@broken' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("hasn't started this bot");
+      expect(ctx.verifiedRecipientIds?.has(id) ?? false).toBe(false);
+    });
+
     test('unknown @username: says the person has not started the bot, offers the picker, spawns nothing', async () => {
       const spawn = spyOn(Bun, 'spawn');
       try {
