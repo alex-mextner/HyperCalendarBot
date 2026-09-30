@@ -16,6 +16,7 @@ import {
   type WeekdayDateMismatch,
   weekdayOf,
 } from './day-references.ts';
+import { localDaysForUtcDayEdges } from './tool-handlers/events.ts';
 import { checkSecretaryAccess } from './tool-handlers/secretary-access.ts';
 import { resolveScope } from './tool-handlers/shared.ts';
 import type { AgentContext, ToolResult } from './types.ts';
@@ -207,7 +208,7 @@ function daysOfArgument(value: string, timezone: string): string[] {
 }
 
 /** The local day a start falls on: a date-only (all-day) start is the day written. */
-function dayOfStart(startAt: string, timezone: string): string | null {
+export function dayOfStart(startAt: string, timezone: string): string | null {
   return startAt.includes('T') ? localDayOf(startAt, timezone) : (DATE_PREFIX.exec(startAt)?.[1] ?? null);
 }
 
@@ -301,9 +302,11 @@ function targetOf(ctx: AgentContext, toolName: string, input: unknown): Target |
     case 'get_events': {
       const parsed = RangeInput.safeParse(input);
       if (!parsed.success) return null;
+      // The days the handler reads: a UTC day-edge pair is those local days (#550).
+      const bounds = localDaysForUtcDayEdges(parsed.data, timezone);
       const days = [
-        ...daysOfArgument(parsed.data.start_date, timezone),
-        ...daysOfArgument(parsed.data.end_date, timezone),
+        ...daysOfArgument(bounds.start_date, timezone),
+        ...daysOfArgument(bounds.end_date, timezone),
       ].sort();
       if (days.length === 0) return null;
       return rangeTarget(

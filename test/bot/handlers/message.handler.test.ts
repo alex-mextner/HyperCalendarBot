@@ -13,7 +13,7 @@ import type { UserRepository } from '../../../src/database/repositories/user.rep
 import type { EventService } from '../../../src/services/event/event-service.ts';
 import type { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import type { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
-import type { PendingGeoStore } from '../../../src/services/location/pending-geo-store.ts';
+import type { PendingGeoStore, SharedLocation } from '../../../src/services/location/pending-geo-store.ts';
 import type { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
 
 function makeDeps(overrides: { [key: string]: unknown } = {}) {
@@ -556,6 +556,7 @@ describe('createMessageHandler', () => {
       });
       const originalFetch = globalThis.fetch;
       const fetchCalls: { url: string; body: FormData }[] = [];
+      const adminDocumentSent = Promise.withResolvers<void>();
       globalThis.fetch = mock(async (url: string | URL | Request, init?: RequestInit) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
         if (urlStr.includes('/getFile')) {
@@ -563,6 +564,7 @@ describe('createMessageHandler', () => {
         }
         if (urlStr.includes('/sendDocument')) {
           fetchCalls.push({ url: urlStr, body: init?.body as FormData });
+          adminDocumentSent.resolve();
           return new Response(JSON.stringify({ ok: true }));
         }
         return new Response(Buffer.from('fake-audio'));
@@ -572,8 +574,16 @@ describe('createMessageHandler', () => {
         const ctx = makeVoiceCtx();
         const handler = createMessageHandler(deps as never);
         await handler(ctx as never);
-        // Wait for fire-and-forget admin notification (mkdir + file write + fetch)
-        await Bun.sleep(50);
+        // The admin notification is fire-and-forget: wait for its sendDocument request itself (the
+        // log file is written before it). The explicit bound sits below the 5 s test timeout so a
+        // missing notice fails here and `finally` still restores fetch for the following tests.
+        let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          adminDocumentSent.promise,
+          new Promise<never>((_, reject) => {
+            noticeTimer = setTimeout(() => reject(new Error('admin voice-error notice was not sent')), 3_000);
+          }),
+        ]).finally(() => clearTimeout(noticeTimer));
 
         expect(fetchCalls).toHaveLength(1);
         const { url, body } = fetchCalls[0]!;
@@ -738,9 +748,9 @@ describe('createMessageHandler', () => {
       await handler(ctx as never);
 
       expect(setMock).toHaveBeenCalledTimes(1);
-      const call = setMock.mock.calls[0] as unknown as [number, { latitude: number; longitude: number }];
+      const call = setMock.mock.calls[0] as unknown as [number, SharedLocation];
       expect(call[0]).toBe(100);
-      expect(call[1]).toEqual({ latitude: 40.7128, longitude: -74.006 });
+      expect(call[1]).toEqual({ latitude: 40.7128, longitude: -74.006, venue: null });
     });
 
     test('shows event-specific buttons when user has a recent unverified event', async () => {
@@ -862,7 +872,7 @@ describe('createMessageHandler', () => {
     const PIN = { latitude: 48.8566, longitude: 2.3522 };
 
     function makeGeoStore(): PendingGeoStore {
-      const pins = new Map<number, { latitude: number; longitude: number }>();
+      const pins = new Map<number, SharedLocation>();
       return {
         set: async (userId, data) => {
           pins.set(userId, data);
@@ -875,9 +885,9 @@ describe('createMessageHandler', () => {
     }
 
     function makeLocationVerification(
-      resolveFromCoordinates: LocationVerificationService['resolveFromCoordinates'],
+      resolveFromSharedLocation: LocationVerificationService['resolveFromSharedLocation'],
     ): LocationVerificationService {
-      return { resolveFromCoordinates } as unknown as LocationVerificationService;
+      return { resolveFromSharedLocation } as unknown as LocationVerificationService;
     }
 
     async function sendPin(title: string, geoStore: PendingGeoStore, verification: LocationVerificationService) {
@@ -947,10 +957,10 @@ describe('createMessageHandler', () => {
 
     test('shows a plain title unchanged and its confirm button attaches the pin to that event', async () => {
       const geoStore = makeGeoStore();
-      const resolveFromCoordinates = mock<LocationVerificationService['resolveFromCoordinates']>(() =>
+      const resolveFromSharedLocation = mock<LocationVerificationService['resolveFromSharedLocation']>(() =>
         Promise.resolve(false),
       );
-      const verification = makeLocationVerification(resolveFromCoordinates);
+      const verification = makeLocationVerification(resolveFromSharedLocation);
       const { text, opts } = await sendPin('Team lunch', geoStore, verification);
       expect(text).toBe('📍 Got your location! Is this for the event "Team lunch"?');
 
@@ -958,8 +968,8 @@ describe('createMessageHandler', () => {
       if (!confirm) throw new Error('prompt has no confirm button');
       await pressButton(confirm.callback_data, geoStore, verification);
 
-      expect(resolveFromCoordinates).toHaveBeenCalledTimes(1);
-      expect(resolveFromCoordinates.mock.calls[0]).toEqual([42, PIN.latitude, PIN.longitude, 100]);
+      expect(resolveFromSharedLocation).toHaveBeenCalledTimes(1);
+      expect(resolveFromSharedLocation.mock.calls[0]).toEqual([42, { ...PIN, venue: null }, 100]);
     });
   });
 });

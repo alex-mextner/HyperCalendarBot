@@ -13,6 +13,7 @@ import { t } from './config/constants.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
 import { AgendaRepository } from './database/repositories/agenda.repository.ts';
+import type { CalendarEvent } from './database/types.ts';
 import { AGENT_DRAIN_SETTLE_MS } from './services/ai/agent.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { HistorySummarizer } from './services/ai/history-summarizer.ts';
@@ -20,6 +21,7 @@ import { configureProviderCircuit } from './services/ai/provider-circuit.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
 import { runSyntheticIntent } from './services/intent/synthetic-intent-run.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
+import { InvitationCardRefresher } from './services/sharing/invitation-cards.ts';
 import { createVoiceSender } from './services/voice/voice-sender.ts';
 import { hasChainAnswered, initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
 import { jsonCodec } from './utils/json-codec.ts';
@@ -171,6 +173,8 @@ let googleRedisClient: Bun.RedisClient | undefined;
 let participantPushSchedulerRef:
   | ((participantUserId: number, eventId: number, action: 'create' | 'update' | 'delete') => Promise<void>)
   | undefined;
+/** Re-pushes all Google Calendar copies of an event after its place is confirmed or dropped */
+let pushEventCopiesRef: ((event: CalendarEvent) => Promise<void>) | undefined;
 let mtprotoSendAsUser: ((userId: number, text: string, username?: string) => Promise<boolean>) | undefined;
 let mtprotoLookupUser:
   | ((id: number) => Promise<{ id: number; firstName?: string; username?: string; deleted?: boolean } | null>)
@@ -192,7 +196,9 @@ if (!serviceSessionEnabled && config.MTPROTO_API_ID && config.MTPROTO_API_HASH) 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
   const { createGoogleSyncQueue } = await import('./services/google/sync-queue.ts');
-  const { createPushScheduler, createParticipantPushScheduler } = await import('./services/google/push-scheduler.ts');
+  const { createPushScheduler, createParticipantPushScheduler, createEventCopiesPushScheduler } = await import(
+    './services/google/push-scheduler.ts'
+  );
   const { executeSyncCronTick, setupSyncCron } = await import('./services/google/sync-cron.ts');
   const { renewExpiringChannels, setupWatchRenewalCron } = await import('./services/google/watch-renewal-cron.ts');
   const { executeCleanup, setupCleanupCron } = await import('./services/google/cleanup-cron.ts');
@@ -306,6 +312,12 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const pushScheduler = createPushScheduler(db.googleSync, db.events, queue);
   const participantPushScheduler = createParticipantPushScheduler(db.googleSync, db.participantGoogleSync, queue);
   participantPushSchedulerRef = participantPushScheduler;
+  pushEventCopiesRef = createEventCopiesPushScheduler(
+    pushScheduler,
+    participantPushScheduler,
+    db.participantGoogleSync,
+    db.participants,
+  );
 
   const disconnectDeps: DisconnectDeps = {
     config,
@@ -970,6 +982,23 @@ if (participantPushSchedulerRef) {
   });
 }
 
+// Delivered invitation cards list who is invited and each answer; re-render them when that changes.
+// The edit resolves botRef at call time (patched after createBot).
+const invitationCards = new InvitationCardRefresher({
+  eventRepo: db.events,
+  invitationRepo: db.invitations,
+  userRepo: db.users,
+  agendaRepository: new AgendaRepository(db.db),
+  weatherService,
+  editMessage: (chatId, messageId, text, options) =>
+    botRef.editMessage(chatId, messageId, text, options.parse_mode, options.reply_markup),
+});
+domainEventBus.on('invitationRoster.changed', (change) => {
+  invitationCards.refresh(change).catch((err: unknown) => {
+    botLogger.error({ err, eventId: change.eventId }, 'Failed to refresh delivered invitation cards');
+  });
+});
+
 // Location verification — requires GOOGLE_API_KEY + Redis for address cache
 let locationVerification:
   | import('./services/location/location-verification-service.ts').LocationVerificationService
@@ -979,16 +1008,23 @@ let pendingGeoStore: import('./services/location/pending-geo-store.ts').PendingG
 
 if (config.GOOGLE_API_KEY && config.REDIS_URL) {
   const { createGeocodingService } = await import('./services/location/geocoding-service.ts');
-  const { AddressCache } = await import('./services/location/address-cache.ts');
+  const { withCachedAreas } = await import('./services/location/area-cache.ts');
+  const { AddressCache, redisCompareAndSet } = await import('./services/location/address-cache.ts');
   const { LocationVerificationService } = await import('./services/location/location-verification-service.ts');
   const { RedisLocationCandidateStore } = await import('./services/location/location-candidate-store.ts');
   const { RedisPendingGeoStore } = await import('./services/location/pending-geo-store.ts');
 
   const locationRedis = new Bun.RedisClient(config.REDIS_URL);
-  const geocodingService = createGeocodingService(config.GOOGLE_API_KEY);
+  const geocodingService = withCachedAreas(createGeocodingService(config.GOOGLE_API_KEY), {
+    get: (key: string) => locationRedis.get(key),
+    set: (key: string, value: string, opts: { ex: number }) => locationRedis.set(key, value, 'EX', opts.ex),
+  });
   addressCache = new AddressCache({
     get: (key: string) => locationRedis.get(key),
-    set: (key: string, value: string) => locationRedis.set(key, value),
+    compareAndSet: redisCompareAndSet({
+      eval: (script: string, numkeys: number, ...keysAndArgs: string[]) =>
+        locationRedis.eval(script, numkeys, ...keysAndArgs),
+    }),
   });
   const candidateStore = new RedisLocationCandidateStore({
     set: (key: string, value: string, opts?: { ex?: number }) =>
@@ -1022,6 +1058,7 @@ if (config.GOOGLE_API_KEY && config.REDIS_URL) {
           botLogger.error({ err, chatId, messageId }, 'Location verification: failed to edit message');
         });
     },
+    pushGoogleCopies: pushEventCopiesRef,
   });
 
   pendingGeoStore = new RedisPendingGeoStore({
@@ -1362,6 +1399,10 @@ async function shutdown(): Promise<void> {
 }
 
 async function shutdownWithTimeout(): Promise<void> {
+  // Refuse webhook updates from here on: Telegram keeps a refused update and
+  // redelivers it to the next process instead of it dying in the stopped queue.
+  // Updates acknowledged just before this line still depend on the shutdown grace.
+  webServerDeps.telegramUpdatesClosed = true;
   await Promise.race([
     shutdown(),
     new Promise<void>((_, reject) => setTimeout(() => reject(new Error('Shutdown timeout after 8s')), 8000)),
@@ -1392,14 +1433,15 @@ if (config.PUBLIC_DOMAIN) {
     secretToken: webhookSecret,
   }) as (req: Request) => Response;
 
+  // Pending updates are kept, not dropped: a message sent while the bot restarted
+  // is answered now, and createStaleUpdateGuard skips ones that waited too long.
   bot.start({
     webhook: {
       url: webhookUrl,
       secret_token: webhookSecret,
     },
-    dropPendingUpdates: true,
   });
   botLogger.info({ webhookUrl }, 'Bot started (webhook mode)');
 } else {
-  bot.start({ dropPendingUpdates: true });
+  bot.start();
 }

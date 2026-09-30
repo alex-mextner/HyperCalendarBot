@@ -1005,4 +1005,95 @@ describe('handleConvertToTimezone', () => {
     const result = handleConvertToTimezone({ datetime: 'not-a-date', timezone: 'Europe/London' });
     expect(result.success).toBe(false);
   });
+
+  // 2026-07-10 incident (#516): an offset-free wall clock was read in the server's zone (UTC).
+  test.each([
+    ['2026-07-11T11:00:00', 'Africa/Cairo', '2026-07-11 11:00:00'],
+    ['2026-07-11T11:00', 'Europe/Belgrade', '2026-07-11 11:00'],
+    ['2026-07-11 11:00', 'Europe/Belgrade', '2026-07-11 11:00'],
+    ['2026-07-11T11:00:30', 'Europe/Belgrade', '2026-07-11 11:00:30'],
+  ])('refuses the offset-free datetime %s instead of guessing its zone', (datetime, timezone, wallClock) => {
+    const result = handleConvertToTimezone({ datetime, timezone });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('no Z or UTC offset');
+    // The suggested call keeps every given digit and leaves the zone of that wall clock to the
+    // caller; with a zone filled in, it runs.
+    expect(result.error).toContain(`calculate("${wallClock} <IANA zone of that local time> to UTC")`);
+    expect(handleCalculate({ expression: `${wallClock} Africa/Cairo to UTC` }).success).toBe(true);
+  });
+
+  test('never suggests reading an offset-free wall clock in the target zone', () => {
+    // "11:00 my time (Belgrade) in New York": the target zone is not the zone the wall clock is in,
+    // so calculate("… America/New_York to UTC") would silently answer for a different moment.
+    const result = handleConvertToTimezone({ datetime: '2026-07-11T11:00:00', timezone: 'America/New_York' });
+    expect(result.success).toBe(false);
+    expect(result.error).not.toContain('America/New_York');
+  });
+
+  test('refuses a bare date without a copyable call that needs filling in', () => {
+    const result = handleConvertToTimezone({ datetime: '2026-07-11', timezone: 'Europe/Belgrade' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('no time of day');
+    expect(result.error).not.toContain('calculate("');
+  });
+
+  test.each([
+    ['2026-07-11T11:00:00+02', '2026-07-11T05:00:00-04:00'],
+    ['2026-07-11 09:00:00Z', '2026-07-11T05:00:00-04:00'],
+  ])('accepts the offset-bearing instant %s it accepted before', (datetime, local) => {
+    const result = handleConvertToTimezone({ datetime, timezone: 'America/New_York' });
+    expect(result.success).toBe(true);
+    expect(JSON.parse(result.output!).local_datetime).toBe(local);
+  });
+
+  test.each([
+    '2026-13-45T10:00:00Z',
+    '2026-07-11T11:00:00+02:00 tomorrow',
+  ])('rejects the invalid datetime %s', (datetime) => {
+    const result = handleConvertToTimezone({ datetime, timezone: 'Europe/Belgrade' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid datetime');
+  });
+
+  test.each([
+    ['2026-10-25T00:30:00Z', '2026-10-25T02:30:00+02:00'],
+    ['2026-10-25T01:30:00Z', '2026-10-25T02:30:00+01:00'],
+    ['2026-03-29T01:30:00.000Z', '2026-03-29T03:30:00+02:00'],
+    ['2026-09-28T12:30:00+0200', '2026-09-28T12:30:00+02:00'],
+  ])('keeps converting the instant %s across DST in Europe/Belgrade', (datetime, local) => {
+    const result = handleConvertToTimezone({ datetime, timezone: 'Europe/Belgrade' });
+    expect(result.success).toBe(true);
+    expect(JSON.parse(result.output!).local_datetime).toBe(local);
+  });
+
+  test('the answer does not depend on the process timezone', () => {
+    // A child process with its own TZ: several test files replace process.env with a plain
+    // object, after which assigning process.env.TZ in this process no longer reaches Date.
+    const handlerPath = Bun.fileURLToPath(
+      new URL('../../../../src/services/ai/tool-handlers/timezone.ts', import.meta.url),
+    );
+    const script = `
+      const { handleConvertToTimezone } = await import(${JSON.stringify(handlerPath)});
+      const instant = handleConvertToTimezone({ datetime: '2026-07-11T09:00:00Z', timezone: 'Europe/Belgrade' });
+      const wallClock = handleConvertToTimezone({ datetime: '2026-07-11T11:00:00', timezone: 'Europe/Belgrade' });
+      process.stdout.write(JSON.stringify({
+        processHour: new Date('2026-07-11T00:00:00Z').getHours(),
+        local: JSON.parse(instant.output).local_datetime,
+        wallClockAccepted: wallClock.success,
+      }));`;
+    const child = Bun.spawnSync([process.execPath, '--no-env-file', '-e', script], {
+      env: { ...process.env, TZ: 'Asia/Tokyo' },
+      timeout: 30_000,
+    });
+    expect({ exitCode: child.exitCode, stderr: child.exitCode === 0 ? '' : child.stderr.toString() }).toEqual({
+      exitCode: 0,
+      stderr: '',
+    });
+    // processHour 9 proves the child really runs in Asia/Tokyo, so the test exercises its premise.
+    expect(JSON.parse(child.stdout.toString().trim().split('\n').at(-1)!)).toEqual({
+      processHour: 9,
+      local: '2026-07-11T11:00:00+02:00',
+      wallClockAccepted: false,
+    });
+  });
 });

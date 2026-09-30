@@ -20,6 +20,8 @@ import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
 import { createVoiceSender } from '../../../src/services/voice/voice-sender.ts';
+import type { ImageRenderJob } from '../../../src/worker/image-render.queue.ts';
+import { png } from '../../fixtures/png.ts';
 
 // Replay of 2026-09-27 (synthetic ids): on Sunday night the user asked to cancel "all English on
 // Tuesday". The model listed two PAST Tuesdays and the two lessons of the coming Tuesday, printed
@@ -60,6 +62,7 @@ describe('bot-rendered delete confirmation', () => {
   let sent: Sent[];
   let continuations: { text: string; chatId: number }[];
   let ids: { sep1: number; sep8: number; lessonWithAlex: number; lesson: number };
+  let onContinuation: ((ctx: AgentContext) => Promise<void>) | undefined;
 
   function context(overrides: Partial<AgentContext> = {}): AgentContext {
     return {
@@ -98,6 +101,7 @@ describe('bot-rendered delete confirmation', () => {
           agent: {
             run: async (ctx: AgentContext) => {
               continuations.push({ text: ctx.messageText, chatId: ctx.chatId });
+              await onContinuation?.(ctx);
               return { responseText: '', toolCalls: [], toolResults: [] };
             },
           },
@@ -153,6 +157,7 @@ describe('bot-rendered delete confirmation', () => {
     };
     sent = [];
     continuations = [];
+    onContinuation = undefined;
   });
 
   afterEach(() => {
@@ -215,6 +220,35 @@ describe('bot-rendered delete confirmation', () => {
     const message = await askAll();
     await callbackHandler()(tap(message.buttons[1]!.data, message));
     expect(Object.values(ids).map(alive)).toEqual([false, false, false, false]);
+  });
+
+  // #506: the tap deletes in its own context, so the run that follows must still know the changed
+  // days; otherwise a picture of the past 2026-09-01 hides the deleted coming Tuesday.
+  test('a past-day picture in the run after the tap shows the coming Tuesday', async () => {
+    const rendered: string[] = [];
+    let output = '';
+    onContinuation = async (ctx) => {
+      const result = await executeTool(
+        {
+          ...ctx,
+          sender: { ...ctx.sender!, sendPhoto: async () => ({ message_id: 3 }) },
+          renderService: {
+            renderDirect: async (job: ImageRenderJob) => {
+              if (job.type === 'daily-agenda') rendered.push(job.data.date);
+              return png();
+            },
+          },
+        },
+        'render_day_image',
+        { date: '2026-09-01' },
+      );
+      output = String(result.output);
+    };
+    const message = await askAll();
+    await callbackHandler()(tap(message.buttons[1]!.data, message));
+
+    expect(rendered).toEqual(['2026-09-29']);
+    expect(output).toContain('2026-09-29');
   });
 
   test('a delete without a tap on the bot list is refused, also after a typed "Да"', async () => {

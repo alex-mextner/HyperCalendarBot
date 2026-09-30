@@ -35,6 +35,7 @@ import { InvitationService } from '../../../../src/services/sharing/invitation-s
 import { PrivacyService } from '../../../../src/services/sharing/privacy-service.ts';
 import { SharingService } from '../../../../src/services/sharing/sharing-service.ts';
 import { flushPromises } from '../../../helpers/mock-context.ts';
+import { addAsPre064Image, ageAnswers, answerAsPre064Image } from '../../../helpers/pre-064-image.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -775,7 +776,7 @@ describe('sharing tool handlers', () => {
       // The group RSVP keyboard variant is delivered to the group so members can respond for
       // themselves — never the personal inv: keyboard (which authorizes a single invitee).
       expect(groupRecipient).toBe(GROUP_CHAT_ID);
-      expect(variant).toEqual({ kind: 'group', eventId: event.id });
+      expect(variant).toEqual({ kind: 'group', eventId: event.id, place: expect.objectContaining({ id: event.id }) });
       // allowMtproto:false → no MTProto userbot for a group, and the deep-link forward fallback is
       // suppressed (a forward link can't be accepted on behalf of a group).
       expect(mtprotoCalled).toBe(false);
@@ -913,6 +914,53 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('declined');
       // The negative group chat id must NOT be shown as a stale per-invitee line.
       expect(result.output).not.toContain(`invitee: ${GROUP_CHAT_ID}`);
+    });
+
+    test("a member's answer in a withdrawn group is not reported next to a group invited later", async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const groupA = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT_ID);
+      invitationRepo.updateStatus(groupA.id, 'cancelled', 'pending');
+      const groupB = -1007777;
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: groupB });
+      participantRepo.add(event.id, 302, 'accepted', 'attendee', groupB);
+
+      for (const ctx of [
+        makeCtx({ participantRepo }),
+        makeCtx({ participantRepo, isGroup: true, groupChatId: groupB, chatId: groupB }),
+      ]) {
+        const output = handleGetInvitationStatus(ctx, { event_id: event.id }).output ?? '';
+        expect(output).toContain('302');
+        expect(output).not.toContain('301');
+      }
+    });
+
+    test('an answer given on an image without origins is not reported in the group recorded before it', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const groupB = -1007777;
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: groupB });
+      participantRepo.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT_ID);
+      ageAnswers(db, event.id);
+      // Rolled back to an image from before migration 064, member 301 answers on group B's card.
+      answerAsPre064Image(db, event.id, 301, 'declined');
+
+      for (const groupChatId of [GROUP_CHAT_ID, groupB]) {
+        const ctx = makeCtx({ participantRepo, isGroup: true, groupChatId, chatId: groupChatId });
+        expect(handleGetInvitationStatus(ctx, { event_id: event.id }).output).not.toContain('301');
+      }
     });
 
     test('group invitation with no responses yet notes per-member RSVP, not a stale pending line', async () => {
@@ -1325,7 +1373,9 @@ describe('sharing tool handlers', () => {
 
         expect(invitee.success).toBe(true);
         expect(invitee.output).toContain('Team Dinner');
-        expect(rosterLines(invitee.output!)).toEqual(rosterLines(owner.output!));
+        expect(rosterLines(invitee.output!)).toEqual(
+          rosterLines(owner.output!).map((line) => line.replace(`invitee: ${OTHER_USER_ID},`, 'invitee: you,')),
+        );
         expect(invitee.output).toContain(`organizer: ${USER_ID}`);
         expect(invitee.output).not.toContain('owner-only note');
       });
@@ -1341,7 +1391,7 @@ describe('sharing tool handlers', () => {
         invitations.recordGroupAttendance(event.id, STRANGER_ID, 'accepted', GROUP_CHAT_ID);
         const member = handleGetInvitationStatus(ctxFor(STRANGER_ID), { event_id: event.id });
         expect(member.success).toBe(true);
-        expect(member.output).toContain(`member: ${STRANGER_ID}, status: accepted`);
+        expect(member.output).toContain('member: you, status: accepted');
 
         // Leaving the group ends access even though the RSVP row stays behind.
         groupMemberRepo.leave(GROUP_CHAT_ID, STRANGER_ID);
@@ -1391,6 +1441,31 @@ describe('sharing tool handlers', () => {
         const declined = handleGetInvitationStatus(ctxFor(THIRD_USER_ID), { event_id: event.id });
         expect(declined.success).toBe(true);
         expect(declined.output).toContain(`organizer: ${USER_ID}`);
+      });
+
+      test('an invitee reads group answers from live groups only, never answers of unknown origin', () => {
+        const { event } = createDinner();
+        const WITHDRAWN_GROUP_CHAT_ID = -1008888;
+        invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+        const withdrawn = invitationRepo.create({
+          event_id: event.id,
+          inviter_id: USER_ID,
+          invitee_id: WITHDRAWN_GROUP_CHAT_ID,
+        });
+        invitationRepo.updateStatus(withdrawn.id, 'cancelled', 'pending');
+        participantRepo.add(event.id, 501, 'accepted', 'attendee', GROUP_CHAT_ID);
+        participantRepo.add(event.id, 502, 'accepted', 'attendee', WITHDRAWN_GROUP_CHAT_ID);
+        // An answer recorded before migration 064: its group is unknown.
+        addAsPre064Image(db, event.id, 503, 'accepted');
+
+        const invitee = handleGetInvitationStatus(ctxFor(THIRD_USER_ID), { event_id: event.id }).output ?? '';
+        // A personal answer (no group origin either) stays in the invitee section.
+        expect(invitee).toContain(`invitee: ${OTHER_USER_ID}, status: accepted`);
+        expect(invitee).toContain('member: 501, status: accepted');
+        expect(invitee).not.toContain('502');
+        expect(invitee).not.toContain('503');
+        // The organizer's own view in a private chat keeps every answer of unknown origin.
+        expect(handleGetInvitationStatus(ctxFor(USER_ID), { event_id: event.id }).output).toContain('member: 503');
       });
     });
   });
@@ -1865,6 +1940,51 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('proposal submitted');
     });
 
+    // A declined invitation survives the event's delete (#505); it must not let the invitee, or the
+    // owner, file a proposal against the deleted event and ping the owner about it.
+    for (const caller of ['declined invitee', 'owner'] as const) {
+      test(`${caller} cannot propose an edit to a deleted event`, async () => {
+        const editProposalRepo = new EditProposalRepository(db);
+        const event = eventService.createEvent({
+          user_id: OTHER_USER_ID,
+          title: 'Deleted Later',
+          start_at: '2026-03-20T10:00:00Z',
+          timezone: 'UTC',
+        });
+        const inv = invitationRepo.create({ event_id: event.id, inviter_id: OTHER_USER_ID, invitee_id: USER_ID });
+        invitationRepo.updateStatus(inv.id, 'declined', 'pending');
+        expect(eventService.deleteEvent(event.id, OTHER_USER_ID)).toBe(true);
+        expect(invitationRepo.findActiveOrRespondedByEventAndInvitee(event.id, USER_ID)?.status).toBe('declined');
+
+        const notified: number[] = [];
+        const ctx = makeCtx({
+          ...(caller === 'owner' ? { user: userRepo.findByTelegramId(OTHER_USER_ID)! } : {}),
+          sharing: {
+            sharedEventRepo,
+            invitationRepo,
+            invitationService,
+            sharingSettingsRepo,
+            sharingService,
+            privacyService,
+            editProposalRepo,
+          },
+          sender: {
+            sendMessage: async () => ({ message_id: 1 }),
+            editMessageText: async () => {},
+            sendEditProposal: async (ownerId) => {
+              notified.push(ownerId);
+              return { message_id: 42 };
+            },
+          },
+        });
+        const result = await handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Revive It' } });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+        expect(editProposalRepo.getPendingForEvent(event.id)).toHaveLength(0);
+        expect(notified).toEqual([]);
+      });
+    }
+
     test('cancelled invitation does not grant propose_edit access', async () => {
       const editProposalRepo = new EditProposalRepository(db);
       const event = eventService.createEvent({
@@ -1989,6 +2109,86 @@ describe('sharing tool handlers', () => {
 
       handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Better Name' } });
       expect(sentTo).toBe(OTHER_USER_ID);
+    });
+
+    // The owner's Accept applies the stored changes verbatim, so a place the model claims in a
+    // proposal would become a confirmed venue without the owner ever tapping a candidate (#620).
+    describe('a proposal never carries a confirmed place (#620)', () => {
+      const MODEL_PLACE = {
+        resolved_address: 'Far Away 1, Sample City',
+        latitude: '10.5',
+        longitude: '20.5',
+        google_maps_url: 'https://www.google.com/maps/search/?api=1&query=10.5,20.5',
+        venue_name: 'Far Away Venue',
+      };
+
+      function proposalCtx(editProposalRepo: EditProposalRepository, notices: string[]) {
+        return makeCtx({
+          sharing: {
+            sharedEventRepo,
+            invitationRepo,
+            invitationService,
+            sharingSettingsRepo,
+            sharingService,
+            privacyService,
+            editProposalRepo,
+          },
+          sender: {
+            sendMessage: async () => ({ message_id: 1 }),
+            editMessageText: async () => {},
+            sendEditProposal: async (_ownerId, text) => {
+              notices.push(text);
+              return { message_id: 42 };
+            },
+          },
+        });
+      }
+
+      function ownerEvent(): number {
+        const event = eventService.createEvent({
+          user_id: OTHER_USER_ID,
+          title: 'Shared Place',
+          start_at: '2026-03-20T10:00:00Z',
+          timezone: 'UTC',
+        });
+        invitationRepo.create({ event_id: event.id, inviter_id: OTHER_USER_ID, invitee_id: USER_ID });
+        return event.id;
+      }
+
+      for (const verified of ['true', '1']) {
+        test(`location_verified "${verified}" and a made-up place are dropped from the proposal`, async () => {
+          const editProposalRepo = new EditProposalRepository(db);
+          const notices: string[] = [];
+          const eventId = ownerEvent();
+          const result = await handleProposeEdit(proposalCtx(editProposalRepo, notices), {
+            event_id: eventId,
+            changes: { location: 'Cafe Prague', location_verified: verified, ...MODEL_PLACE },
+          });
+
+          expect(result.success).toBe(true);
+          const [pending] = editProposalRepo.getPendingForEvent(eventId);
+          expect(JSON.parse(pending?.changes ?? 'null')).toEqual({ location: 'Cafe Prague' });
+          expect(notices).toHaveLength(1);
+          expect(notices[0]).toContain('location: Cafe Prague');
+          expect(notices[0]).not.toContain('Far Away');
+          expect(notices[0]).not.toContain('location_verified');
+        });
+      }
+
+      test.each<[string, { [field: string]: string | null }]>([
+        ['nothing but a claimed place', { location_verified: 'true', ...MODEL_PLACE }],
+        ['no changes at all', {}],
+      ])('a proposal of %s is refused and the owner is not pinged', async (_name, changes) => {
+        const editProposalRepo = new EditProposalRepository(db);
+        const notices: string[] = [];
+        const eventId = ownerEvent();
+        const result = await handleProposeEdit(proposalCtx(editProposalRepo, notices), { event_id: eventId, changes });
+
+        expect(result.success).toBe(false);
+        expect(result.mutationState).toBe('not_applied');
+        expect(editProposalRepo.getPendingForEvent(eventId)).toEqual([]);
+        expect(notices).toEqual([]);
+      });
     });
   });
 });

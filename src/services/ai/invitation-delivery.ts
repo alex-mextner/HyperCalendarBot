@@ -7,6 +7,7 @@ import { botLogger } from '../../utils/logger.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import { formatInvitation } from '../event/formatters.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
+import { readInvitationRoster } from '../sharing/invitation-roster.ts';
 import { buildUserSessionInvitationText } from '../telegram-session/invitation-text.ts';
 import { deliverMessage, describeDeliveryError } from './deliver-message.ts';
 import type { TelegramSender } from './types.ts';
@@ -53,9 +54,14 @@ export interface DeliverInvitationParams {
   deps: InvitationDeliveryDeps;
 }
 
-export async function deliverInvitation(
-  params: DeliverInvitationParams,
-): Promise<{ delivered: boolean; viaDeepLink: boolean }> {
+export interface InvitationDeliveryResult {
+  delivered: boolean;
+  viaDeepLink: boolean;
+  /** The bot itself reached the invitee — they have started the bot and not blocked it. */
+  viaBotApi: boolean;
+}
+
+export async function deliverInvitation(params: DeliverInvitationParams): Promise<InvitationDeliveryResult> {
   const {
     invitationId,
     eventId,
@@ -76,7 +82,7 @@ export async function deliverInvitation(
   } = params;
   const { sender, invitationRepo, userRepo, deepLinkService: deepLinkSvc, botUsername } = deps;
   if (!sender.sendInvitation) {
-    return { delivered: false, viaDeepLink: false };
+    return { delivered: false, viaDeepLink: false, viaBotApi: false };
   }
 
   // The outer try guards every setup step after the invitation row was created, so nothing
@@ -104,6 +110,7 @@ export async function deliverInvitation(
           inviterUsername,
           invitee?.timezone ?? null,
           !!invitee?.onboarding_completed,
+          readInvitationRoster(invitationRepo, event.id, inviteeId),
         )
       : t(lang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
 
@@ -189,9 +196,11 @@ export async function deliverInvitation(
           if (!sender.sendInvitation) throw new Error('sendInvitation not available');
           // A group target carries the per-member RSVP keyboard (grsvp:<eventId>:going|notgoing)
           // so any member can respond for themselves; a personal target keeps the inv: keyboard.
+          // Both offer the Map button when the event's place is confirmed.
+          const place = event ?? null;
           const sent = isGroupTarget
-            ? await sender.sendInvitation(recipientId, msgText, invitationId, lang, { kind: 'group', eventId })
-            : await sender.sendInvitation(recipientId, msgText, invitationId);
+            ? await sender.sendInvitation(recipientId, msgText, invitationId, lang, { kind: 'group', eventId, place })
+            : await sender.sendInvitation(recipientId, msgText, invitationId, lang, { kind: 'personal', place });
           if (!sent) throw new Error('Bot API delivery failed');
           return sent;
         }
@@ -214,11 +223,11 @@ export async function deliverInvitation(
           'delivered but failed to persist message info',
         );
       }
-      return { delivered: true, viaDeepLink: false };
+      return { delivered: true, viaDeepLink: false, viaBotApi: true };
     }
     if (result.delivered) {
       deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via MTProto');
-      return { delivered: true, viaDeepLink: false };
+      return { delivered: true, viaDeepLink: false, viaBotApi: false };
     }
     // Only claim "link sent to inviter" when a real link existed AND the fallback
     // message actually reached the inviter. Otherwise report honest non-delivery.
@@ -227,12 +236,12 @@ export async function deliverInvitation(
       { invitationId, fallbackChatId, linkSent, hadLink: url !== null, fallbackSent: result.fallbackSent === true },
       'Bot API + MTProto failed — deep-link fallback attempted',
     );
-    return { delivered: false, viaDeepLink: linkSent };
+    return { delivered: false, viaDeepLink: linkSent, viaBotApi: false };
   } catch (error) {
     // Sanitize: a thrown Telegram/API error can attach the full request body (incl. the deep
     // link) as enumerable props; describeDeliveryError reads only safe scalar fields.
     deliveryLogger.error({ invitationId, inviteeId, err: describeDeliveryError(error) }, 'Delivery chain failed');
-    return { delivered: false, viaDeepLink: false };
+    return { delivered: false, viaDeepLink: false, viaBotApi: false };
   }
 }
 

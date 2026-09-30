@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations';
 import { EventRepository } from '../../../src/database/repositories/event.repository';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository';
@@ -222,13 +222,17 @@ describe('InvitationService', () => {
   });
 
   describe('rescheduleFromProposal', () => {
-    test('clears proposed_time and returns proposedTime in result', () => {
+    const moveEventSpy = () => mock((_eventId: number, _proposedTime: string) => null);
+
+    test('accepts, clears proposed_time, moves the event to it and returns proposedTime', () => {
       const { service, invRepo, event } = setup();
       const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
       service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
-      const result = service.rescheduleFromProposal(inv.id, INVITER);
+      const moveEvent = moveEventSpy();
+      const result = service.rescheduleFromProposal(inv.id, INVITER, moveEvent);
       expect(result.success).toBe(true);
       expect(result.proposedTime).toBe('2026-04-01T16:00:00Z');
+      expect(moveEvent).toHaveBeenCalledWith(event.id, '2026-04-01T16:00:00Z');
       const updated = invRepo.findById(inv.id)!;
       expect(updated.proposed_time).toBeNull();
       expect(updated.status).toBe('accepted');
@@ -240,7 +244,7 @@ describe('InvitationService', () => {
       const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo);
       const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
       service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
-      const result = service.rescheduleFromProposal(inv.id, INVITER);
+      const result = service.rescheduleFromProposal(inv.id, INVITER, moveEventSpy());
       expect(result.success).toBe(true);
       const participant = participantRepo.findByEventAndUser(event.id, INVITEE);
       expect(participant).not.toBeNull();
@@ -251,16 +255,52 @@ describe('InvitationService', () => {
       const { service, event } = setup();
       const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
       service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
-      const result = service.rescheduleFromProposal(inv.id, INVITEE);
+      const moveEvent = moveEventSpy();
+      const result = service.rescheduleFromProposal(inv.id, INVITEE, moveEvent);
       expect(result.success).toBe(false);
+      expect(moveEvent).not.toHaveBeenCalled();
     });
 
     test('rescheduleFromProposal rejects if no proposed_time', () => {
       const { service, event } = setup();
       const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
-      const result = service.rescheduleFromProposal(inv.id, INVITER);
+      const moveEvent = moveEventSpy();
+      const result = service.rescheduleFromProposal(inv.id, INVITER, moveEvent);
       expect(result.success).toBe(false);
       expect(result.reason).toBe('invite_proposal_closed');
+      expect(moveEvent).not.toHaveBeenCalled();
+    });
+
+    function setupWithRosterLog() {
+      const { invRepo, eventRepo, settingsRepo, event } = setup();
+      const bus = new DomainEventBus();
+      const log: string[] = [];
+      bus.on('invitationRoster.changed', () => log.push('roster changed'));
+      const service = new InvitationService(invRepo, eventRepo, settingsRepo, undefined, bus);
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+      log.length = 0;
+      return { service, invRepo, inv, log };
+    }
+
+    test('the event is moved before the roster change is announced', () => {
+      const { service, inv, log } = setupWithRosterLog();
+      service.rescheduleFromProposal(inv.id, INVITER, () => {
+        log.push('moved');
+        return null;
+      });
+      expect(log).toEqual(['moved', 'roster changed']);
+    });
+
+    test('a failed move still announces the accepted answer and reports the failure', () => {
+      const { service, invRepo, inv, log } = setupWithRosterLog();
+      expect(() =>
+        service.rescheduleFromProposal(inv.id, INVITER, () => {
+          throw new Error('database is locked');
+        }),
+      ).toThrow('database is locked');
+      expect(invRepo.findById(inv.id)!.status).toBe('accepted');
+      expect(log).toEqual(['roster changed']);
     });
 
     test.each([
@@ -276,7 +316,7 @@ describe('InvitationService', () => {
       service[method](inv.id, INVITEE);
       const participantBefore = participantRepo.findByEventAndUser(event.id, INVITEE)?.status ?? null;
 
-      const result = service.rescheduleFromProposal(inv.id, INVITER);
+      const result = service.rescheduleFromProposal(inv.id, INVITER, moveEventSpy());
 
       expect(result.success).toBe(false);
       expect(result.reason).toBe('invite_proposal_closed');
@@ -297,7 +337,7 @@ describe('InvitationService', () => {
       expect(proposal.reason).toBe('invitation_already_answered');
       expect(invRepo.findById(inv.id)!.proposed_time).toBeNull();
 
-      const result = service.rescheduleFromProposal(inv.id, INVITER);
+      const result = service.rescheduleFromProposal(inv.id, INVITER, moveEventSpy());
 
       expect(result.success).toBe(false);
       expect(result.reason).toBe('invite_proposal_closed');

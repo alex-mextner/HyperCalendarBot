@@ -6,6 +6,7 @@ import {
   mapMonthlyCalendarData,
   mapWeeklyOverviewData,
 } from '../../../src/services/image/data-mapper.ts';
+import { dailyAgendaTemplate } from '../../../src/worker/templates/daily-agenda.ts';
 import { THEME_LIGHT } from '../../../src/worker/templates/themes.ts';
 
 const BIRTHDAY_COLOR = '#EC4899';
@@ -411,5 +412,36 @@ describe('mapEventCardData', () => {
     });
     expect(result.calendarColor).toBe(THEME_LIGHT.eventColors[0]!);
     expect(result.title).toBe('Test Event');
+  });
+});
+
+describe('place on the daily agenda image', () => {
+  // A 📍 pin resolves the place by reverse geocoding: an address and a map link, no typed text.
+  const pinPlace: Partial<CalendarEvent> = {
+    location: null,
+    resolved_address: 'Damrak 1, Amsterdam',
+    google_maps_url: 'https://www.google.com/maps/place/?q=place_id:pin',
+    location_verified: 1,
+  };
+
+  function renderDay(place: Partial<CalendarEvent>): string {
+    const data = mapDailyAgendaData({
+      occurrences: [makeOcc(place)],
+      dateIso: '2026-03-11',
+      timezone: 'Europe/Kyiv',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    return dailyAgendaTemplate.render(data);
+  }
+
+  test('a place confirmed with a pin on an event without typed text shows in the agenda details', () => {
+    expect(renderDay(pinPlace)).toContain('<div>📍 Damrak 1, Amsterdam</div>');
+  });
+
+  test('a stale unconfirmed place on an event without typed text shows no place', () => {
+    const html = renderDay({ ...pinPlace, location_verified: 0 });
+    expect(html).not.toContain('📍');
+    expect(html).not.toContain('Damrak');
   });
 });

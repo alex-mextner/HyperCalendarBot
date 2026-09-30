@@ -194,6 +194,11 @@ function memoryRedis() {
       store.set(key, value);
       return 'OK';
     },
+    compareAndSet: async (key: string, expected: string | null, value: string) => {
+      if ((store.get(key) ?? null) !== expected) return false;
+      store.set(key, value);
+      return true;
+    },
   };
 }
 
@@ -289,6 +294,12 @@ function setup(
       edits.push({ text: params.text.toString(), parseMode: params.parse_mode, replyMarkup: params.reply_markup });
       return true;
     };
+    // A candidate tap also shows the chosen place as a venue (#399, covered in native-venue-map.test.ts)
+    bot.api.sendVenue = async (params) => ({
+      message_id: 11,
+      date: 0,
+      chat: { id: Number(params.chat_id), type: 'private' },
+    });
     const dbUser = user();
     const ctx = Object.assign(
       new CallbackQueryContext({
@@ -452,7 +463,7 @@ describe('no geocode is applied before the creator taps a candidate', () => {
     expect(await s.candidateStore.get(s.event.id)).toBeNull();
   });
 
-  test('a new verification drops a place confirmed for the earlier text, without editing invitations', async () => {
+  test('a new verification drops a place confirmed for the earlier text, also from the invitation card', async () => {
     const geocoder = scriptedGeocoder({ places: [NIS_CAFE], areas: { '|RS': SERBIA } });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
     await s.confirmEarlier(BELGRADE_CAFE);
@@ -465,7 +476,13 @@ describe('no geocode is applied before the creator taps a candidate', () => {
     expect(stored.resolved_address).toBeNull();
     expect(stored.venue_name).toBeNull();
     expect(stored.google_maps_url).toBeNull();
-    expect(s.invitationEdits).toHaveLength(editsAfterConfirmation);
+    // One re-render with the typed text: neither the dropped place nor the newly offered one
+    expect(s.invitationEdits).toHaveLength(editsAfterConfirmation + 1);
+    const card = s.invitationEdits.at(-1);
+    expect(card?.text).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
+    expect(card?.text).not.toContain(escapeHtml(NIS_CAFE.formattedAddress));
+    // The dropped place takes the Map button with it
+    expect(card?.options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(s.invitation.id, 'ru', null).toJSON());
   });
 
   test('a location changed by a user who cannot see the event drops the old place, without searching or asking', async () => {
@@ -552,7 +569,11 @@ describe('no geocode is applied before the creator taps a candidate', () => {
     };
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder);
     const verification = s.service.verifyEventLocation(s.event, s.user());
-    await s.pendingGeoStore.set(USER_ID, { latitude: BELGRADE_CAFE.latitude, longitude: BELGRADE_CAFE.longitude });
+    await s.pendingGeoStore.set(USER_ID, {
+      latitude: BELGRADE_CAFE.latitude,
+      longitude: BELGRADE_CAFE.longitude,
+      venue: null,
+    });
     await s.tap(`loc_geo:geo:${s.event.id}`);
 
     releaseSearch();
@@ -637,7 +658,8 @@ describe('searches are biased to the creator home area', () => {
 
   test('with no home country, a city outside the user timezone gives no bias', async () => {
     const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { 'Zeedorp|': COASTAL_VILLAGE_NL } });
-    const s = setup({ timezone: 'Asia/Novosibirsk', city: 'Zeedorp' }, geocoder.service);
+    // A zone of no country: the timezone implies no home country either
+    const s = setup({ timezone: 'Etc/GMT-7', city: 'Zeedorp' }, geocoder.service);
 
     await s.service.verifyEventLocation(s.event, s.user());
 
@@ -664,8 +686,9 @@ describe('tapping a candidate resolves the event', () => {
     // The invitee's card shows the place and keeps its RSVP buttons: an edit without them deletes them
     expect(s.invitationEdits).toHaveLength(1);
     expect(s.invitationEdits[0]!.text).toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
+    // The confirmed place adds the Map button under them
     expect(s.invitationEdits[0]!.options.reply_markup?.toJSON()).toEqual(
-      invitationRsvpKeyboard(s.invitation.id, 'ru').toJSON(),
+      invitationRsvpKeyboard(s.invitation.id, 'ru', s.storedEvent()).toJSON(),
     );
     expect((await s.addressCache.findMapping(USER_ID, RAW_LOCATION))?.resolvedAddress).toBe(
       BELGRADE_CAFE.formattedAddress,
@@ -824,7 +847,11 @@ describe('tapping a candidate resolves the event', () => {
   test('a pin shared for the event is a confirmation too, and its confirmation is escaped', async () => {
     const geocoder = scriptedGeocoder({ places: [], reverse: TRICKY_CAFE });
     const s = setup({ timezone: 'Europe/Belgrade', title: 'Q&A <встреча>' }, geocoder.service);
-    await s.pendingGeoStore.set(USER_ID, { latitude: TRICKY_CAFE.latitude, longitude: TRICKY_CAFE.longitude });
+    await s.pendingGeoStore.set(USER_ID, {
+      latitude: TRICKY_CAFE.latitude,
+      longitude: TRICKY_CAFE.longitude,
+      venue: null,
+    });
 
     const edits = await s.tap(`loc_geo:geo:${s.event.id}`);
 
@@ -861,7 +888,7 @@ describe('keep as typed', () => {
     expect(s.invitationEdits[0]!.text).toContain(RAW_LOCATION);
     expect(s.invitationEdits[0]!.text).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
     expect(s.invitationEdits[0]!.options.reply_markup?.toJSON()).toEqual(
-      invitationRsvpKeyboard(s.invitation.id, 'ru').toJSON(),
+      invitationRsvpKeyboard(s.invitation.id, 'ru', null).toJSON(),
     );
     expect(s.user().city).toBeNull();
     expect(await s.candidateStore.get(s.event.id)).toBeNull();
@@ -930,7 +957,11 @@ describe('keep as typed', () => {
       timezone: 'Europe/Belgrade',
       location: RAW_LOCATION,
     });
-    await s.pendingGeoStore.set(USER_ID, { latitude: BELGRADE_CAFE.latitude, longitude: BELGRADE_CAFE.longitude });
+    await s.pendingGeoStore.set(USER_ID, {
+      latitude: BELGRADE_CAFE.latitude,
+      longitude: BELGRADE_CAFE.longitude,
+      venue: null,
+    });
     await s.tap(`loc_geo:geo:${other.id}`);
 
     await s.tap(button(s.sent[0], 'keep'));
@@ -977,10 +1008,10 @@ describe('keep as typed', () => {
     expect(stored.location_verified).toBe(0);
     expect(stored.resolved_address).toBeNull();
     expect(stored.google_maps_url).toBeNull();
-    expect(s.invitationEdits).toHaveLength(2);
-    const card = s.invitationEdits[1]!;
+    expect(s.invitationEdits).toHaveLength(3);
+    const card = s.invitationEdits[2]!;
     expect(card.text).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
-    expect(card.options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(s.invitation.id, 'ru').toJSON());
+    expect(card.options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(s.invitation.id, 'ru', null).toJSON());
   });
 
   test('a keep tap refreshes the invitation even when an earlier question already dropped the place', async () => {
@@ -994,10 +1025,11 @@ describe('keep as typed', () => {
     await s.tap(button(s.sent[1], 'keep'));
 
     expect(s.storedEvent().location_verified).toBe(0);
-    expect(s.invitationEdits).toHaveLength(2);
-    const card = s.invitationEdits[1]!;
+    // Confirmation, the first question dropping the place, and the keep tap
+    expect(s.invitationEdits).toHaveLength(3);
+    const card = s.invitationEdits[2]!;
     expect(card.text).not.toContain(escapeHtml(BELGRADE_CAFE.formattedAddress));
-    expect(card.options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(s.invitation.id, 'ru').toJSON());
+    expect(card.options.reply_markup?.toJSON()).toEqual(invitationRsvpKeyboard(s.invitation.id, 'ru', null).toJSON());
   });
 
   test('keeping the text of an event the user cannot see changes nothing', async () => {
@@ -1050,7 +1082,11 @@ describe('keep as typed', () => {
     const geocoder = scriptedGeocoder({ places: [DUTCH_HOTEL], areas: { '|RS': SERBIA }, reverse: BELGRADE_CAFE });
     const s = setup({ timezone: 'Europe/Belgrade' }, geocoder.service);
     await s.service.verifyEventLocation(s.event, s.user());
-    await s.pendingGeoStore.set(USER_ID, { latitude: BELGRADE_CAFE.latitude, longitude: BELGRADE_CAFE.longitude });
+    await s.pendingGeoStore.set(USER_ID, {
+      latitude: BELGRADE_CAFE.latitude,
+      longitude: BELGRADE_CAFE.longitude,
+      venue: null,
+    });
     await s.tap(`loc_geo:geo:${s.event.id}`);
 
     await s.tap(button(s.sent[0], 'keep'));

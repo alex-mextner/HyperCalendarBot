@@ -62,6 +62,7 @@ function toAgendaEvents(occurrences: EventOccurrence[], timezone: string, lang: 
       resolvedAddress: occ.event.resolved_address,
       googleMapsUrl: occ.event.google_maps_url,
       venueName: occ.event.venue_name,
+      locationVerified: occ.event.location_verified === 1,
       duration,
       isAllDay,
     };
@@ -371,6 +372,7 @@ export class NotificationScheduler {
           event_resolved_address: r.event_resolved_address,
           event_google_maps_url: r.event_google_maps_url,
           event_venue_name: r.event_venue_name,
+          event_location_verified: r.event_location_verified,
           interval_label: r.interval_label,
           is_all_day: r.interval_minutes === -1,
         }));
@@ -387,6 +389,7 @@ export class NotificationScheduler {
           resolvedAddress: item.event_resolved_address,
           googleMapsUrl: item.event_google_maps_url,
           venueName: item.event_venue_name,
+          locationVerified: item.event_location_verified === 1,
           intervalLabel: item.interval_label,
           isAllDay: item.is_all_day,
           forecast: batchForecasts[idx] ?? null,
@@ -447,6 +450,7 @@ export class NotificationScheduler {
         resolvedAddress: reminder.event_resolved_address,
         googleMapsUrl: reminder.event_google_maps_url,
         venueName: reminder.event_venue_name,
+        locationVerified: reminder.event_location_verified === 1,
         intervalLabel: reminder.interval_label,
         isAllDay,
         forecast,
@@ -470,7 +474,8 @@ export class NotificationScheduler {
           startAt: reminder.event_start_at,
           timezone: user.timezone,
           location: reminder.event_location,
-          venueName: reminder.event_venue_name,
+          // Only a confirmed venue is spoken; otherwise the typed text.
+          venueName: reminder.event_location_verified === 1 ? reminder.event_venue_name : null,
           language: user.language,
         });
         this.deps.enqueueCall?.({

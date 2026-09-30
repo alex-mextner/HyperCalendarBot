@@ -40,6 +40,7 @@ export const CB = {
   EVENT_VIEW: 'ev',
   EVENT_EDIT: 'ee',
   EVENT_DELETE: 'ed',
+  EVENT_MAP: 'ev_map',
   EVENT_DELETE_CONFIRM: 'edc',
   EVENT_RECURRENCE: 'er',
   EVENT_REMINDER: 'erm',
@@ -199,12 +200,6 @@ export const MSG = {
         recurrence_rule: 'recurrence',
         recurrence_end_at: 'recurrence end',
         reminder_overrides: 'reminders',
-        resolved_address: 'address',
-        latitude: 'latitude',
-        longitude: 'longitude',
-        google_maps_url: 'map link',
-        location_verified: 'location verification',
-        venue_name: 'venue',
       },
     },
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -216,6 +211,7 @@ export const MSG = {
       `📍 Your current timezone is <b>${currentTz}</b>.\nBased on your location, it looks like you're in <b>${newTz}</b> (${offset}).\n\nUpdating the timezone ensures reminders, agenda, and event times are shown correctly.\n\nUpdate timezone?`,
     geo_tz_confirm_btn: 'Yes, update ✓',
     geo_tz_dismiss_btn: 'No, keep current',
+    event_map_btn: '🗺 Map',
     geo_tz_updated: (tz: string, offset: string) => `✅ Timezone updated to ${tz} (${offset}).`,
     geo_tz_dismissed: 'OK, timezone left unchanged.',
     tz_same_from_location: (tz: string, offset: string) =>
@@ -238,6 +234,12 @@ export const MSG = {
     something_wrong: 'Something went wrong. Try again or use /help.',
     agent_error: (exclude?: string) => pickPhrase(EN_AGENT_ERROR_PHRASES, exclude),
     ai_degraded: `🔧 AI unavailable — I can't answer in my own words right now.\n\n${EN_AI_COMMANDS_HINT}`,
+    ai_still_down: (next: 'retry' | 'resend' | 'unsure') =>
+      next === 'retry'
+        ? "🔧 Not done yet: the AI is still unavailable. I'll retry this request myself shortly."
+        : next === 'unsure'
+          ? "🔧 Not done yet: the AI is still unavailable. If I haven't answered in a few minutes, send this again."
+          : '🔧 Not done: the AI is still unavailable. Send this again in a few minutes.',
     agent_give_up: (promised: boolean) =>
       promised
         ? `🔧 Promised to come back — and the AI is still down. Devs are on it.\n\n${EN_AI_COMMANDS_HINT}`
@@ -258,7 +260,12 @@ export const MSG = {
       notice: (facts: readonly string[]) =>
         `⚠️ ${facts.join('\n')}\nThe answer mixed up weekdays and dates, so it was not sent. Tell me which day you mean and I will check again.`,
     },
+    unverified_answer: 'Could not check this answer against your calendar. Open /today or name the date.',
+    unverified_answer_with_events: (events: string) =>
+      `Found in your calendar:\n${events}\n\nCould not check my own answer against this data, so here it is as is.`,
+    unverified_more_events: (count: number) => `… and ${count} more`,
     rate_limited: 'Slow down, too many messages.',
+    stale_update_skipped: '⏳ Missed your message while restarting — send it again if it still matters.',
     addWizard: {
       noEnd: 'No end date',
       untilDate: 'Until date',
@@ -416,12 +423,29 @@ export const MSG = {
       `📨 ${name} declined your invitation to "<b>${title}</b>" ❌`,
     invitation_response_maybe: (name: string, title: string) =>
       `📨 ${name} responded "maybe" to your invitation to "<b>${title}</b>" 🤔`,
+    // SAFETY: every name argument must already be HTML-escaped.
+    invitationRoster: {
+      header: '👥 Participants:',
+      organizer: (nameHtml: string) => `👑 ${nameHtml} — organizer`,
+      answer: {
+        accepted: (nameHtml: string) => `✅ ${nameHtml} — going`,
+        maybe: (nameHtml: string) => `🤔 ${nameHtml} — maybe`,
+        pending: (nameHtml: string) => `⏳ ${nameHtml} — no answer yet`,
+        declined: (nameHtml: string) => `❌ ${nameHtml} — not going`,
+      },
+      reader: (nameHtml: string) => `${nameHtml} (you)`,
+      unnamed: 'Guest',
+      more: (count: number) => `…and ${count} more`,
+    },
     group_rsvp_going_btn: '✅ Going',
     group_rsvp_notgoing_btn: "❌ Can't make it",
     group_rsvp_recorded: "You're going ✅",
     group_rsvp_removed: "You're not going ❌",
     group_rsvp_not_authorized: 'This RSVP is not available here',
     group_rsvp_start_hint: 'Open me in a private chat and press /start to RSVP',
+    invite_accept_btn: '✅ Accept',
+    invite_decline_btn: '❌ Decline',
+    invite_maybe_btn: 'Maybe 🤔',
     invite_propose_btn: 'Other time 🕐',
     invite_propose_ask: 'What time do you suggest?\nOr type: "tomorrow at 3pm"',
     invite_propose_plus30: '+30 min',
@@ -619,9 +643,11 @@ export const MSG = {
         deleteFailed: (titles: string) => `⚠️ Not deleted: ${titles}`,
         deleteCancelled: '❌ Cancelled, nothing was deleted.',
         dayImageSent: (date: string) => `Day calendar image for ${date} has been sent to the chat.`,
-        weekImageSent: (weekStart: string) => `Weekly calendar image starting ${weekStart} has been sent to the chat.`,
+        weekImageSent: (week: string) => `Calendar for ${week} — the picture is in the chat.`,
         monthImageSent: (month: string) => `Monthly calendar image for ${month} has been sent to the chat.`,
         dayImageFailed: (date: string) => `Failed to render or send the day image for ${date}.`,
+        dayImageSentInstead: (date: string, requested: string) =>
+          `Day calendar image for ${date} has been sent to the chat instead of the past day ${requested}: ${date} is the nearest upcoming day with the changes just made.`,
         weekImageFailed: (weekStart: string) => `Failed to render or send the weekly image starting ${weekStart}.`,
         monthImageFailed: (month: string) => `Failed to render or send the monthly image for ${month}.`,
         callQueued: 'Call queued. You will receive a voice call shortly.',
@@ -785,11 +811,20 @@ export const MSG = {
         noInvitations: (title: string) => `No invitations for event "${title}".`,
         invitationsFor: (title: string, id: number, lines: string) =>
           `Invitations for "${title}" (id: ${id}):\n${lines}`,
+        rsvpSelf: 'you',
+        rsvpStatuses: {
+          pending: 'pending',
+          accepted: 'accepted',
+          declined: 'declined',
+          maybe: 'maybe',
+          cancelled: 'cancelled',
+          expired: 'expired',
+        },
         rsvpAttending: (count: number) => `attending (going): ${count}`,
-        rsvpOrganizer: (userId: number) => `organizer: ${userId}`,
-        rsvpInviteeLine: (userId: number, status: string, note: string) =>
+        rsvpOrganizer: (userId: number | string) => `organizer: ${userId}`,
+        rsvpInviteeLine: (userId: number | string, status: string, note: string) =>
           `invitee: ${userId}, status: ${status}${note}`,
-        rsvpMemberLine: (userId: number, status: string) => `  member: ${userId}, status: ${status}`,
+        rsvpMemberLine: (userId: number | string, status: string) => `  member: ${userId}, status: ${status}`,
         rsvpPersonalInviteNote: (inviteStatus: string) => ` (personal invite: ${inviteStatus})`,
         groupRsvpHeader: 'group invitation — per-member RSVP:',
         groupRsvpNone: 'group invitation: no member RSVPs yet',
@@ -1360,12 +1395,6 @@ export const MSG = {
         recurrence_rule: 'повторение',
         recurrence_end_at: 'конец повторения',
         reminder_overrides: 'напоминания',
-        resolved_address: 'адрес',
-        latitude: 'широта',
-        longitude: 'долгота',
-        google_maps_url: 'ссылка на карту',
-        location_verified: 'проверка места',
-        venue_name: 'заведение',
       },
     },
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -1377,6 +1406,7 @@ export const MSG = {
       `📍 Твой текущий часовой пояс — <b>${currentTz}</b>.\nПо геолокации похоже, что ты в <b>${newTz}</b> (${offset}).\n\nОбновление часового пояса нужно, чтобы напоминания, сводка дня и время событий отображались правильно.\n\nОбновить часовой пояс?`,
     geo_tz_confirm_btn: 'Да, обновить ✓',
     geo_tz_dismiss_btn: 'Нет, оставить',
+    event_map_btn: '🗺 На карте',
     geo_tz_updated: (tz: string, offset: string) => `✅ Часовой пояс обновлён: ${tz} (${offset}).`,
     geo_tz_dismissed: 'ОК, часовой пояс не изменён.',
     tz_same_from_location: (tz: string, offset: string) =>
@@ -1399,6 +1429,12 @@ export const MSG = {
     something_wrong: 'Что-то пошло не так. Попробуй ещё раз или /help.',
     agent_error: (exclude?: string) => pickPhrase(RU_AGENT_ERROR_PHRASES, exclude),
     ai_degraded: `🔧 ИИ недоступен — своими словами ответить не смогу.\n\n${RU_AI_COMMANDS_HINT}`,
+    ai_still_down: (next: 'retry' | 'resend' | 'unsure') =>
+      next === 'retry'
+        ? '🔧 Пока не сделал: ИИ всё ещё недоступен. Повторю этот запрос сам чуть позже.'
+        : next === 'unsure'
+          ? '🔧 Пока не сделал: ИИ всё ещё недоступен. Если не отвечу через пару минут — пришли запрос ещё раз.'
+          : '🔧 Не сделал: ИИ всё ещё недоступен. Пришли запрос ещё раз через пару минут.',
     agent_give_up: (promised: boolean) =>
       promised
         ? `🔧 Обещал вернуться — но ИИ так и не поднялся. Разрабы уже смотрят.\n\n${RU_AI_COMMANDS_HINT}`
@@ -1419,7 +1455,12 @@ export const MSG = {
       notice: (facts: readonly string[]) =>
         `⚠️ ${facts.join('\n')}\nВ ответе перепутались дни недели и даты, поэтому он не отправлен. Напиши, какой день нужен, — проверю заново.`,
     },
+    unverified_answer: 'Не удалось проверить ответ по данным календаря. Открой /today или назови нужную дату.',
+    unverified_answer_with_events: (events: string) =>
+      `Что нашлось в календаре:\n${events}\n\nСвой ответ по этим данным проверить не удалось, поэтому показываю их как есть.`,
+    unverified_more_events: (count: number) => `… и ещё ${count}`,
     rate_limited: 'Слишком много сообщений, подождите.',
+    stale_update_skipped: '⏳ Пропустил твоё сообщение, пока перезапускался — повтори, если ещё актуально.',
     addWizard: {
       noEnd: 'Без конца',
       untilDate: 'До даты',
@@ -1576,12 +1617,29 @@ export const MSG = {
       `📨 ${name} отклонил(а) приглашение на "<b>${title}</b>" ❌`,
     invitation_response_maybe: (name: string, title: string) =>
       `📨 ${name} ответил(а) "возможно" на приглашение "<b>${title}</b>" 🤔`,
+    // SAFETY: see en.invitationRoster — every name argument must already be HTML-escaped.
+    invitationRoster: {
+      header: '👥 Участники:',
+      organizer: (nameHtml: string) => `👑 ${nameHtml} — организатор`,
+      answer: {
+        accepted: (nameHtml: string) => `✅ ${nameHtml} — придёт`,
+        maybe: (nameHtml: string) => `🤔 ${nameHtml} — возможно`,
+        pending: (nameHtml: string) => `⏳ ${nameHtml} — ждём ответа`,
+        declined: (nameHtml: string) => `❌ ${nameHtml} — не придёт`,
+      },
+      reader: (nameHtml: string) => `${nameHtml} (ты)`,
+      unnamed: 'Гость',
+      more: (count: number) => `…и ещё ${count} ${ruPlural(count, 'человек', 'человека', 'человек')}`,
+    },
     group_rsvp_going_btn: '✅ Иду',
     group_rsvp_notgoing_btn: '❌ Не иду',
     group_rsvp_recorded: 'Ты идёшь ✅',
     group_rsvp_removed: 'Ты не идёшь ❌',
     group_rsvp_not_authorized: 'Здесь нельзя ответить на это приглашение',
     group_rsvp_start_hint: 'Напиши мне в личку и нажми /start, чтобы ответить',
+    invite_accept_btn: '✅ Принять',
+    invite_decline_btn: '❌ Отклонить',
+    invite_maybe_btn: 'Возможно 🤔',
     invite_propose_btn: 'Другое время 🕐',
     invite_propose_ask: 'Какое время предлагаешь?\nИли напиши: "завтра в 15:00"',
     invite_propose_plus30: '+30 мин',
@@ -1780,9 +1838,11 @@ export const MSG = {
         deleteFailed: (titles: string) => `⚠️ Не удалось удалить: ${titles}`,
         deleteCancelled: '❌ Отменено, ничего не удалено.',
         dayImageSent: (date: string) => `Картинка календаря за ${date} отправлена в чат.`,
-        weekImageSent: (weekStart: string) => `Картинка недельного календаря с ${weekStart} отправлена в чат.`,
+        weekImageSent: (week: string) => `Календарь на ${week} — картинка в чате.`,
         monthImageSent: (month: string) => `Картинка месячного календаря за ${month} отправлена в чат.`,
         dayImageFailed: (date: string) => `Не удалось отрендерить или отправить картинку за ${date}.`,
+        dayImageSentInstead: (date: string, requested: string) =>
+          `Картинка календаря за ${date} отправлена в чат вместо прошедшего дня ${requested}: ${date} — ближайший предстоящий день с только что внесёнными изменениями.`,
         weekImageFailed: (weekStart: string) =>
           `Не удалось отрендерить или отправить недельную картинку с ${weekStart}.`,
         monthImageFailed: (month: string) => `Не удалось отрендерить или отправить месячную картинку за ${month}.`,
@@ -1950,11 +2010,20 @@ export const MSG = {
         noInvitations: (title: string) => `Для события «${title}» нет приглашений.`,
         invitationsFor: (title: string, id: number, lines: string) =>
           `Приглашения для «${title}» (id: ${id}):\n${lines}`,
+        rsvpSelf: 'вы',
+        rsvpStatuses: {
+          pending: 'ожидается ответ',
+          accepted: 'принято',
+          declined: 'отклонено',
+          maybe: 'возможно',
+          cancelled: 'отменено',
+          expired: 'истекло',
+        },
         rsvpAttending: (count: number) => `идут (подтвердили): ${count}`,
-        rsvpOrganizer: (userId: number) => `организатор: ${userId}`,
-        rsvpInviteeLine: (userId: number, status: string, note: string) =>
+        rsvpOrganizer: (userId: number | string) => `организатор: ${userId}`,
+        rsvpInviteeLine: (userId: number | string, status: string, note: string) =>
           `приглашённый: ${userId}, статус: ${status}${note}`,
-        rsvpMemberLine: (userId: number, status: string) => `  участник: ${userId}, статус: ${status}`,
+        rsvpMemberLine: (userId: number | string, status: string) => `  участник: ${userId}, статус: ${status}`,
         rsvpPersonalInviteNote: (inviteStatus: string) => ` (личное приглашение: ${inviteStatus})`,
         groupRsvpHeader: 'групповое приглашение — ответы участников:',
         groupRsvpNone: 'групповое приглашение: ответов участников пока нет',

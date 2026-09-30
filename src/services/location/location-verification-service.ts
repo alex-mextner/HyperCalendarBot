@@ -1,29 +1,30 @@
 // src/services/location/location-verification-service.ts
 
-import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
+import type { TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { CB, t } from '../../config/constants.ts';
 import type { AgendaRepository } from '../../database/repositories/agenda.repository.ts';
-import type { EventRepository } from '../../database/repositories/event.repository.ts';
+import { type EventRepository, UNRESOLVED_PLACE } from '../../database/repositories/event.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { CalendarEvent, Invitation, InvitationStatus, User } from '../../database/types.ts';
+import type { CalendarEvent, User } from '../../database/types.ts';
 import { botLogger } from '../../utils/logger.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
-import { formatInvitation } from '../event/formatters.ts';
-import { formatAnsweredInvitationCard } from '../sharing/answered-invitation-card.ts';
-import { groupRsvpKeyboard, invitationRsvpKeyboard } from '../sharing/invitation-rsvp-keyboard.ts';
+import { type InvitationEditOptions, refreshInvitationCards } from '../sharing/invitation-cards.ts';
 import { guessCountryFromTimezone, resolveTimezone } from '../timezone/timezone-service.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
 import type { AddressCache } from './address-cache.ts';
-import type { GeocodedLocation, GeocodingBias, GeocodingService } from './geocoding-service.ts';
+import { formatLocationHtml, formatLocationPlain } from './format-location.ts';
+import {
+  buildGoogleMapsUrl,
+  type GeocodedLocation,
+  type GeocodingBias,
+  type GeocodingService,
+} from './geocoding-service.ts';
 import type { LocationCandidateStore, LocationPicker } from './location-candidate-store.ts';
+import type { SharedLocation } from './pending-geo-store.ts';
 
 type ParseMode = 'HTML' | 'MarkdownV2' | 'Markdown';
 type ReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKeyboardMarkup;
-type InvitationEditOptions = { parse_mode: ParseMode; reply_markup?: InlineKeyboard };
-type RenderedInvitationCard = { text: string; options: InvitationEditOptions };
-/** Statuses whose card is still on screen as the recipient last saw it */
-type LiveInvitationStatus = Exclude<InvitationStatus, 'cancelled' | 'expired'>;
 
 const logger = botLogger.child({ module: 'location-verification' });
 
@@ -79,6 +80,8 @@ export interface LocationVerificationDeps {
   ) => Promise<void>;
   /** Callback to edit an existing invitation message; the edit replaces its inline keyboard with `reply_markup` */
   editMessage?: (chatId: number, messageId: number, text: string, options: InvitationEditOptions) => Promise<void>;
+  /** Re-pushes the event's Google Calendar copies (owner and participants); absent without Google sync */
+  pushGoogleCopies?: (event: CalendarEvent) => Promise<void>;
 }
 
 export interface LocationVerificationResult {
@@ -100,8 +103,9 @@ export class LocationVerificationService {
    *
    * The bot always asks: nothing is applied before the creator taps a candidate. The event keeps
    * only the typed text, unverified: no venue, address or map link is written (a place confirmed
-   * for an earlier text is dropped), delivered invitations are not edited, and neither the
-   * address cache nor `users.city` is touched. The previous picker of the event is closed.
+   * for an earlier text is dropped, Google copies showing it are re-pushed and delivered invitation
+   * cards showing it are re-rendered with the typed text), and neither the address cache nor
+   * `users.city` is touched. The previous picker of the event is closed.
    *
    * Flow:
    * 1. A place the creator confirmed earlier for this text (address cache) is the candidate; no
@@ -136,10 +140,15 @@ export class LocationVerificationService {
     }
 
     // Until the creator answers, the event holds only the typed text: a place confirmed for an
-    // earlier text must not stay on it, whoever changed the text. Invitation cards are re-rendered
-    // only on the answer.
-    if (event.location_verified !== 0 || event.resolved_address !== null) {
-      this.deps.eventRepo.clearLocationFields(event.id);
+    // earlier text must not stay on it, whoever changed the text, nor on the invitation cards. The
+    // cards are re-rendered from the stored row, so a time or title edited during the awaits here is
+    // not rolled back, and only while it still holds this text unconfirmed: an edit of the text, or a
+    // place confirmed after the drop, re-renders them itself (best effort: renders already in
+    // flight are not ordered, #678).
+    await this.dropResolvedPlace(event);
+    const stored = this.deps.eventRepo.findByIdUnfiltered(event.id);
+    if (stored?.location === typed && stored.location_verified === 0) {
+      await this.refreshInvitationCards(event, { ...event, ...stored, ...UNRESOLVED_PLACE });
     }
 
     // Only a user who can see the event is asked. A secretary updating the owner's event could not
@@ -174,6 +183,20 @@ export class LocationVerificationService {
     return { resolved: false, geocoded: null, cityExtracted: candidates[0]?.city ?? null, candidates };
   }
 
+  /**
+   * The event's location changed from `before` to `after` without a place being confirmed: an edit
+   * (a new text, an abstract place, a removal) or a question that dropped the confirmed place.
+   * Re-render the delivered invitation cards when their location line changes, so no card keeps a
+   * place the event no longer has, whether or not a question follows or finds anything.
+   */
+  async refreshInvitationCards(before: CalendarEvent, after: CalendarEvent): Promise<void> {
+    if (formatLocationHtml(before) === formatLocationHtml(after)) return;
+    // Never rejects: a card that cannot be re-rendered must not fail the edit or stop the question
+    await this.updateInvitationMessages(after).catch((err) => {
+      logger.error({ err, eventId: after.id }, 'Failed to re-render invitation cards after the location change');
+    });
+  }
+
   /** The remembered place for this text, else the places a search biased to the home area finds. */
   private async findCandidates(
     event: CalendarEvent,
@@ -206,7 +229,10 @@ export class LocationVerificationService {
     return { candidates, remembered: false };
   }
 
-  /** Apply the place the creator confirmed (candidate tap or pin) and update delivered invitations. */
+  /**
+   * Apply the place the creator confirmed (candidate tap or pin), then re-push the Google copies
+   * and update delivered invitations.
+   */
   async applyResolvedLocation(event: CalendarEvent, geo: GeocodedLocation): Promise<void> {
     const venueName = geo.venueName ?? null;
     // Update event in DB
@@ -232,6 +258,7 @@ export class LocationVerificationService {
       venue_name: venueName,
     };
 
+    await this.pushGoogleCopiesIfShownPlaceChanged(event, updatedEvent);
     // Update invitation messages
     await this.updateInvitationMessages(updatedEvent);
   }
@@ -285,20 +312,37 @@ export class LocationVerificationService {
     return { city: result.city };
   }
 
-  /** Resolve location from coordinates (when user sends 📍 for an event) */
-  async resolveFromCoordinates(eventId: number, lat: number, lng: number, userId: number): Promise<boolean> {
+  /**
+   * Resolve the event's place from a location the user shared for it: a Telegram venue is applied as
+   * picked, with its name and address; a plain pin is reverse-geocoded to an address.
+   */
+  async resolveFromSharedLocation(eventId: number, shared: SharedLocation, userId: number): Promise<boolean> {
     // Verify user has access to the event before doing any work
     const event = this.deps.eventRepo.findById(eventId, userId);
     if (!event) return false;
 
-    const geo = await this.deps.geocodingService.reverseGeocode(lat, lng);
+    // A venue is the place as the user picked it; a reverse geocode would replace its name with the
+    // street address at its coordinates
+    const { venue } = shared;
+    const geo: GeocodedLocation | null = venue
+      ? {
+          formattedAddress: venue.address,
+          latitude: shared.latitude,
+          longitude: shared.longitude,
+          city: null,
+          country: null,
+          placeId: venue.googlePlaceId,
+          googleMapsUrl: buildGoogleMapsUrl(shared.latitude, shared.longitude, venue.googlePlaceId),
+          venueName: venue.title,
+        }
+      : await this.deps.geocodingService.reverseGeocode(shared.latitude, shared.longitude);
     if (!geo) return false;
 
     const user = this.deps.userRepo.findByTelegramId(userId);
     if (!user) return false;
 
-    // The pin answers any open picker for this event; closing it before applying means a keep tap
-    // on it either lands before the pin (and the pin wins) or finds it answered.
+    // The shared location answers any open picker for this event; closing it before applying means a
+    // keep tap on it either lands before the location (and the location wins) or finds it answered.
     await this.deps.candidateStore.del(eventId).catch((err) => {
       logger.warn({ err, eventId }, 'Failed to delete location candidates from store');
     });
@@ -387,25 +431,42 @@ export class LocationVerificationService {
   }
 
   /**
-   * The creator kept the typed text: drop any resolved place and re-render every delivered
-   * invitation card. A card may still show a place dropped before this answer (when the text
-   * changed or an earlier question was asked), and the answer is rare and idempotent, so the cards
-   * are always refreshed rather than tracking what they last showed.
+   * The creator kept the typed text: drop any resolved place (re-pushing the Google copies if they
+   * showed it) and re-render every delivered invitation card. The edit or question that dropped a
+   * place already re-rendered them, but that render may have failed; the answer is rare and
+   * idempotent, so the cards are always refreshed once more rather than tracking what they last
+   * showed.
    */
   private async keepOnlyTypedText(event: CalendarEvent): Promise<void> {
-    if (event.location_verified !== 0 || event.resolved_address !== null) {
-      this.deps.eventRepo.clearLocationFields(event.id);
-    }
+    const typedOnly = await this.dropResolvedPlace(event);
     logger.info({ eventId: event.id }, 'Event location kept as typed');
 
-    await this.updateInvitationMessages({
-      ...event,
-      resolved_address: null,
-      latitude: null,
-      longitude: null,
-      google_maps_url: null,
-      location_verified: 0,
-      venue_name: null,
+    await this.updateInvitationMessages(typedOnly);
+  }
+
+  /**
+   * Drop the event's resolved place, if it has one, so only the typed text remains, unverified, and
+   * re-push the Google copies that showed it. Returns the event as it now is.
+   */
+  private async dropResolvedPlace(event: CalendarEvent): Promise<CalendarEvent> {
+    const typedOnly: CalendarEvent = { ...event, ...UNRESOLVED_PLACE };
+    if (event.location_verified !== 0 || event.resolved_address !== null) {
+      this.deps.eventRepo.clearLocationFields(event.id);
+      await this.pushGoogleCopiesIfShownPlaceChanged(event, typedOnly);
+    }
+    return typedOnly;
+  }
+
+  /**
+   * Google Calendar copies were pushed when the event was saved, before the creator answered, and
+   * show the location as `formatLocationPlain` renders it (event-mapper). Re-push them when that
+   * text changed; an answer that leaves it as it was queues nothing.
+   */
+  private async pushGoogleCopiesIfShownPlaceChanged(before: CalendarEvent, after: CalendarEvent): Promise<void> {
+    const push = this.deps.pushGoogleCopies;
+    if (!push || formatLocationPlain(before) === formatLocationPlain(after)) return;
+    await push(after).catch((err) => {
+      logger.error({ err, eventId: after.id }, 'Failed to schedule Google Calendar pushes for the event place');
     });
   }
 
@@ -461,73 +522,6 @@ export class LocationVerificationService {
   private async updateInvitationMessages(event: CalendarEvent): Promise<void> {
     const editMessage = this.deps.editMessage;
     if (!editMessage) return;
-
-    for (const inv of this.deps.invitationRepo.getByEvent(event.id)) {
-      if (!inv.message_id || !inv.chat_id || inv.status === 'cancelled' || inv.status === 'expired') continue;
-      if (inv.status === 'pending' && inv.proposed_time) continue;
-
-      try {
-        const card = await this.renderInvitationCard(event, inv, inv.status);
-        // Earlier edits in this loop yield, and an invitee can answer or propose a time meanwhile: that
-        // callback has then already rewritten the card, so a stale render must not overwrite it.
-        const current = this.deps.invitationRepo.findById(inv.id);
-        if (current?.status !== inv.status || current.proposed_time !== inv.proposed_time) continue;
-        await editMessage(inv.chat_id, inv.message_id, card.text, card.options);
-      } catch (err) {
-        logger.warn(
-          { err, invitationId: inv.id, eventId: event.id },
-          'Failed to update invitation message after location resolution',
-        );
-      }
-    }
-  }
-
-  private async renderInvitationCard(
-    event: CalendarEvent,
-    inv: Invitation,
-    status: LiveInvitationStatus,
-  ): Promise<RenderedInvitationCard> {
-    const inviter = this.deps.userRepo.findByTelegramId(inv.inviter_id);
-    const inviterName = inviter?.first_name ?? inviter?.username ?? 'User';
-
-    if (inv.invitee_id < 0) {
-      const groupLang = inviter?.language ?? 'en';
-      const text = formatInvitation(
-        event,
-        event.timezone,
-        groupLang,
-        inviterName,
-        inv.inviter_id,
-        inviter?.username,
-        null,
-        false,
-      );
-      return { text, options: { parse_mode: 'HTML', reply_markup: groupRsvpKeyboard(event.id, groupLang) } };
-    }
-
-    const invitee = this.deps.userRepo.findByTelegramId(inv.invitee_id);
-    const inviteeLang = invitee?.language ?? 'en';
-
-    if (status === 'pending') {
-      const text = formatInvitation(
-        event,
-        event.timezone,
-        inviteeLang,
-        inviterName,
-        inv.inviter_id,
-        inviter?.username,
-        invitee?.timezone,
-        invitee?.onboarding_completed === 1,
-      );
-      return { text, options: { parse_mode: 'HTML', reply_markup: invitationRsvpKeyboard(inv.id, inviteeLang) } };
-    }
-
-    const text = await formatAnsweredInvitationCard(
-      status,
-      event,
-      { userId: inv.invitee_id, language: inviteeLang, timezone: invitee?.timezone ?? event.timezone },
-      { agendaRepository: this.deps.agendaRepository, weatherService: this.deps.weatherService },
-    );
-    return { text, options: { parse_mode: 'HTML' } };
+    await refreshInvitationCards(event, { ...this.deps, editMessage });
   }
 }

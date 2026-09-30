@@ -1,47 +1,11 @@
 // src/services/telegram-session/timezone-detector.ts
-import { readFileSync } from 'node:fs';
-import { logger } from '../../utils/logger.ts';
+import { timezonesOfCountry } from '../timezone/timezone-service.ts';
 import type { Authorization } from './session-bridge.ts';
 
 export interface DetectionResult {
   detectedTimezone: string;
   country: string;
   region: string;
-}
-
-/**
- * Country → IANA timezone(s) parsed from the system's zone.tab (IANA tzdata).
- * Loaded once at module init. Falls back to empty map if the file is missing
- * (e.g. minimal Docker image without tzdata — timezone detection silently disabled).
- */
-const countryTimezones = loadZoneTab();
-
-function loadZoneTab(): Map<string, string[]> {
-  const map = new Map<string, string[]>();
-  const paths = ['/usr/share/zoneinfo/zone.tab', '/usr/share/lib/zoneinfo/tab/zone_sun.tab'];
-  for (const path of paths) {
-    try {
-      const content = readFileSync(path, 'utf8');
-      for (const line of content.split('\n')) {
-        if (line.startsWith('#') || line.trim() === '') continue;
-        const parts = line.split('\t');
-        const cc = parts[0];
-        const tz = parts[2];
-        if (!cc || !tz) continue;
-        const existing = map.get(cc);
-        if (existing) {
-          existing.push(tz);
-        } else {
-          map.set(cc, [tz]);
-        }
-      }
-      return map;
-    } catch {
-      // Try next path
-    }
-  }
-  logger.warn('zone.tab not found — timezone detection disabled. Install tzdata in Docker image.');
-  return map;
 }
 
 /**
@@ -209,11 +173,11 @@ export function detectTimezoneFromAuthorizations(
 
   let detectedTimezone: string | null = null;
 
-  // Single-tz country (from system zone.tab)
-  const tzList = countryTimezones.get(country);
-  if (tzList && tzList.length === 1) {
+  // Single-tz country (from the system tz database)
+  const tzList = timezonesOfCountry(country);
+  if (tzList.length === 1) {
     detectedTimezone = tzList[0] ?? null;
-  } else if (tzList && tzList.length > 1) {
+  } else if (tzList.length > 1) {
     // Multi-tz — try region map
     detectedTimezone = resolveMultiTz(country, region);
   }
@@ -222,9 +186,4 @@ export function detectTimezoneFromAuthorizations(
   if (detectedTimezone === currentTimezone) return null;
 
   return { detectedTimezone, country, region };
-}
-
-/** Exposed for testing — number of countries loaded from zone.tab. */
-export function getLoadedCountryCount(): number {
-  return countryTimezones.size;
 }

@@ -113,6 +113,10 @@ describe('buildSystemPrompt', () => {
     'share_event',
     'share_agenda',
     'cancel_invitation',
+    // send_invitation's own result decides whether to suggest /connect_telegram (#511); a
+    // prompt step telling the model to check first made weak models call it on plain creates.
+    'connect_telegram_status',
+    'dismiss_connect_telegram_prompt',
   ];
 
   test('prompt does not restate what the tool catalog already describes', () => {

@@ -599,7 +599,7 @@ describe('onboarding step 3: morning agenda + completion', () => {
       [string, { reply_markup: InlineKeyboard }],
     ];
     expect(invitationText).toContain('Party');
-    expect(options.reply_markup.toJSON()).toEqual(invitationRsvpKeyboard(77, 'en').toJSON());
+    expect(options.reply_markup.toJSON()).toEqual(invitationRsvpKeyboard(77, 'en', null).toJSON());
   });
 
   test('prefsService absent — morning time pick does not crash', async () => {

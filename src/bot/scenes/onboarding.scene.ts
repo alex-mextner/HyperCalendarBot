@@ -10,6 +10,7 @@ import type { EventService } from '../../services/event/event-service.ts';
 import { formatInvitation } from '../../services/event/formatters.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
+import { readInvitationRoster } from '../../services/sharing/invitation-roster.ts';
 import { invitationRsvpKeyboard } from '../../services/sharing/invitation-rsvp-keyboard.ts';
 import { resolveCity } from '../../services/timezone/city-resolver.ts';
 import {
@@ -240,10 +241,11 @@ export function createOnboardingScene(
                   inviter?.username,
                   userTz,
                   true,
+                  readInvitationRoster(invitationDeps.invitationRepo, event.id, context.from.id),
                 );
                 await context.send(text, {
                   parse_mode: 'HTML',
-                  reply_markup: invitationRsvpKeyboard(invitation.id, l),
+                  reply_markup: invitationRsvpKeyboard(invitation.id, l, event),
                 });
               }
             }

@@ -100,6 +100,7 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
       participantRepo: cnd.participantRepo,
       editProposalRepo: cnd.editProposalRepo,
       participantSyncRepo: cnd.participantSyncRepo,
+      invitationRepo: cnd.invitationRepo,
       materializer: cnd.materializer,
       syncQueue: queue,
       notifyUser: cnd.notifyUser,

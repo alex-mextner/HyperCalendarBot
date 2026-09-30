@@ -491,32 +491,64 @@ Returns: `{ connected: false, dismissed_recently: boolean } | { connected: true 
 yes/no only. The result lands in chat history and every AI debug log, so it carries no part of
 the phone number, not even the masked one.
 
-Used by AI agent to provide contextual help when the user creates an event with
-participants who haven't started the bot. See Section 10.1.
+Answers explicit user questions ("is my Telegram connected?"). It is NOT part of the invitation
+flow: the system prompt does not tell the agent to call it, because weaker models then called it
+on every event creation (#511). The contextual suggestion is decided in code — see Section 10.1.
+
+`dismiss_connect_telegram_prompt` records `users.connect_telegram_dismissed_at = now`. The column
+is the start of a 30-day snooze of the suggestion (Section 10.1); showing the suggestion sets it too.
 
 ### 10.1 Contextual Connect Prompt
 
-When the AI agent creates an event that includes participants who haven't started the bot,
-and the user has NOT connected their Telegram account, the agent should suggest connecting:
+The `send_invitation` and `resend_invitation` handlers decide deterministically, after the
+delivery attempt, whether to suggest connecting. The suggestion is added when ALL of these hold:
+
+- the bot itself could not reach the invitee (`deliverInvitation` returned `viaBotApi: false` —
+  usually the invitee has not started the bot or blocked it; a transient Bot API error looks the
+  same), so the invitation went through the admin MTProto session, a forwarded deep link, or failed;
+- the target is a person, not a group;
+- the conversation is a private chat (`/connect_telegram` refuses to run in groups);
+- the feature is enabled (`TELEGRAM_SESSION_MASTER_KEY` is configured);
+- the user has no `active` row in `user_telegram_sessions`;
+- the suggestion is not snoozed: `users.connect_telegram_dismissed_at` is empty, older than
+  30 days, more than a day in the future (clock skew), or unparsable. The claim below overwrites
+  such values.
+
+Showing the suggestion starts the 30-day snooze. The snooze is claimed with a compare-and-swap
+(`UserRepository.claimConnectTelegramSnooze`: `UPDATE … WHERE connect_telegram_dismissed_at IS
+<value judged above>`), so concurrent requests of the same user cannot both show it; the in-memory
+user snapshot is updated too. Therefore:
+
+- this post-invitation suggestion appears at most once per 30 days, whether or not the user answers
+  it — no "not now" has to be understood. The intent path shows `output` verbatim and cannot relay
+  the agent hint, and the prompt no longer describes the dismissal. (The same text is also one of
+  the scheduler's rotating `botTips`, which this snooze does not govern.);
+- inviting several people in one message yields one suggestion. This includes intent workflows,
+  which build a fresh context per step around the same user object, and a workflow resumed in a
+  later message;
+- an explicit `dismiss_connect_telegram_prompt` restarts the same snooze.
+
+Known limits: the snooze is claimed when the line enters the tool result, so it is spent even if the
+agent drops the line from its reply. A multi-invite intent workflow sends only the last step's
+output, so the line from an earlier step is lost. That is tracked in
+https://github.com/alex-mextner/HyperCalendarBot/issues/626.
+
+The whole decision lives in `takeConnectTelegramSuggestion` (`tool-handlers/settings.ts`). A
+failure inside it is logged and yields no suggestion; it never changes the reported outcome of an
+invitation that was already sent. When it applies, the localized `botTips.connect_telegram` line
+becomes the last line of the tool `output`, and the `agentHint` tells the agent to end its reply
+with that line verbatim. An intent workflow that sends `output` directly shows the line as is.
+Example (ru):
 
 ```
-✅ Встреча создана!
-
-📱 Кстати, ты можешь подключить свой Telegram-аккаунт, чтобы:
-• Приглашения на встречи приходили от тебя, а не от бота — так люди точно ответят
-• При путешествиях часовой пояс обновлялся автоматически — события всегда в правильное время
-
-/connect_telegram
+📱 Подключи свой Telegram-аккаунт — тогда приглашения на встречи будут приходить от тебя лично, а не от бота. Люди отвечают гораздо охотнее. /connect_telegram
 ```
 
-This prompt is triggered by the AI agent via system prompt instruction, not hardcoded.
-The agent checks `connect_telegram_status` after creating an event with external participants,
-and only suggests if `connected: false`.
-
-Do NOT show this prompt if:
-- The user already has a connected account
-- The event has no external participants (all participants use the bot)
-- The user has dismissed this suggestion before (track via user preferences)
+No suggestion is made when creating an event without inviting anyone, when the invitee received
+the invitation from the bot, when the user is connected, or within 30 days of the previous
+suggestion or a dismissal. Invitations sent through the native user picker (`pick_users` →
+`picker-invitation.ts`) do not add the suggestion yet — tracked in
+https://github.com/alex-mextner/HyperCalendarBot/issues/552.
 
 ### 10.2 Post-Connect Invitation Flow
 

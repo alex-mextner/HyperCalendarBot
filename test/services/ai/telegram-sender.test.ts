@@ -31,16 +31,16 @@ function makeSender() {
 }
 
 describe('createTelegramSender.sendInvitation', () => {
-  test('personal variant (default) sends the canonical RSVP keyboard', async () => {
+  test('personal variant sends the canonical RSVP keyboard', async () => {
     const { sender, calls } = makeSender();
-    await sender.sendInvitation!(123, 'You are invited', 7, 'ru');
+    await sender.sendInvitation!(123, 'You are invited', 7, 'ru', { kind: 'personal', place: null });
 
-    expect(calls[0]!.reply_markup!.toJSON()).toEqual(invitationRsvpKeyboard(7, 'ru').toJSON());
+    expect(calls[0]!.reply_markup!.toJSON()).toEqual(invitationRsvpKeyboard(7, 'ru', null).toJSON());
   });
 
   test('group variant builds the grsvp: per-member keyboard keyed by eventId', async () => {
     const { sender, calls } = makeSender();
-    await sender.sendInvitation!(456, 'Group event', 7, 'ru', { kind: 'group', eventId: 42 });
+    await sender.sendInvitation!(456, 'Group event', 7, 'ru', { kind: 'group', eventId: 42, place: null });
 
     const buttons = keyboardButtons(calls[0]!.reply_markup!);
     const data = buttons.map((b) => b.callback_data ?? '');

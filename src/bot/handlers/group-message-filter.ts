@@ -141,6 +141,32 @@ export function mentionsBot(text: string): boolean {
   return BOT_MENTION_RE.test(text);
 }
 
+// --- Meeting place / time words ---
+//
+// Short, highly inflected words ("место", "адрес", "время") share the
+// problem above: fuzzy matching would collapse them with "месть", "тесто",
+// "бремя", and stem matching hits "местоимение", "местный", "заместитель",
+// "адресат", "временно" — the reason the stems were dropped once already.
+// Match an explicit list of word forms as whole words instead. "месте" is
+// dropped only in the idiom "на твоём (же) месте я бы…" ("if I were you"),
+// which needs both a possessive before it and the conditional "(я/ты/…) бы"
+// after it: "давай на нашем месте" and "я уже на месте, я бы вышел" name a
+// real spot. "где" stays generous: "встретимся где-нибудь у метро" arranges a
+// meeting, and a dropped message never reaches the second stage.
+const POSSESSIVE_BEFORE_PLACE = '(?:тво[её]м|мо[её]м|нашем|вашем|сво[её]м|его|е[её]|их)\\s+(?:же\\s+)?';
+const PLACE_OR_TIME_RE = new RegExp(
+  '(?<![\\p{L}\\p{N}])(?:' +
+    'место|места|месту|местом|мест|местам|местами|местах|' +
+    `(?<!(?<![\\p{L}\\p{N}])${POSSESSIVE_BEFORE_PLACE})месте|` +
+    'месте(?![\\s,—–-]+(?:(?:я|ты|мы|вы|он|она|оно|они)\\s+)?бы(?![\\p{L}\\p{N}]))|' +
+    'локация|локации|локацию|локацией|локаций|локациям|локациями|локациях|' +
+    'адрес|адреса|адресу|адресом|адресе|адресов|адресам|адресами|адресах|' +
+    'время|времени|временем|времена|времён|времен|где|' +
+    'location|locations|venue|venues|address|addresses|where' +
+    ')(?![\\p{L}\\p{N}])',
+  'iu',
+);
+
 // --- Date / time hints ---
 //
 // A message that carries a concrete date or time is plausibly a calendar
@@ -214,6 +240,7 @@ export function isGroupRelevant(text: string, botUsername: string): boolean {
   if (startsWithCalendarAddress(text)) return true;
   if (mentionsBot(text)) return true;
   if (matchesKeywordFuzzy(text)) return true;
+  if (PLACE_OR_TIME_RE.test(text)) return true;
   if (containsDateHint(text)) return true;
   return false;
 }

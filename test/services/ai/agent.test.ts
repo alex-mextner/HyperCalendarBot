@@ -266,6 +266,124 @@ describe('CalendarBotAgent', () => {
     ]);
   });
 
+  describe('rows saved between a tool call and its results', () => {
+    const GROUP_CHAT_ID = -1_009_001;
+    const OTHER_MEMBER_ID = 456;
+    const calls = (ids: string[]): OpenAI.ChatCompletionAssistantMessageParam => ({
+      role: 'assistant',
+      content: null,
+      tool_calls: ids.map((id) => ({ id, type: 'function', function: { name: 'get_events', arguments: '{}' } })),
+    });
+    const results = (ids: string[]) => ids.map((id) => ({ role: 'tool', tool_call_id: id, content: `result ${id}` }));
+    const shape = (messages: OpenAI.ChatCompletionMessageParam[]) =>
+      messages.map((m) => {
+        if (m.role === 'tool') return `tool:${m.tool_call_id}`;
+        if (m.role === 'assistant' && m.tool_calls?.length) return `call:${m.tool_calls.map((c) => c.id).join(',')}`;
+        return `${m.role}:${typeof m.content === 'string' ? m.content.replace(/^\[[^\]]+\] /, '') : ''}`;
+      });
+
+    async function buildGroupMessages(): Promise<OpenAI.ChatCompletionMessageParam[]> {
+      ctx.isGroup = true;
+      ctx.groupChatId = GROUP_CHAT_ID;
+      ctx.groupTitle = 'Synthetic group';
+      const agent = new CalendarBotAgent(config, sender);
+      const { messages } = await agent.buildMessages(ctx, []);
+      return messages;
+    }
+
+    beforeEach(() => {
+      ctx.userRepo.create({ telegram_id: OTHER_MEMBER_ID, timezone: 'UTC', language: 'en', first_name: 'Member' });
+    });
+
+    test('keeps the call and its result adjacent and moves the interleaved rows after the result', async () => {
+      ctx.chatHistory.save(USER_ID, 'user', 'What do I have today?', GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(calls(['call_x'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'user', JSON.stringify({ kind: 'button', label: 'Today' }), GROUP_CHAT_ID);
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'user', 'I am in too', GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(results(['call_x'])), GROUP_CHAT_ID);
+
+      const messages = await buildGroupMessages();
+
+      expect(shape(messages)).toEqual([
+        `user:[From: User (id:${USER_ID})] What do I have today?`,
+        'call:call_x',
+        'tool:call_x',
+        `user:[From: User (id:${USER_ID})] [Button: "Today"]`,
+        `user:[From: Member (id:${OTHER_MEMBER_ID})] I am in too`,
+      ]);
+    });
+
+    test('regroups each of two overlapping call blocks with its own results', async () => {
+      ctx.chatHistory.save(USER_ID, 'user', 'first', GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(calls(['call_a'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'assistant', JSON.stringify(calls(['call_b'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(results(['call_a'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'tool', JSON.stringify(results(['call_b'])), GROUP_CHAT_ID);
+
+      const messages = await buildGroupMessages();
+
+      expect(shape(messages).slice(1)).toEqual(['call:call_a', 'tool:call_a', 'call:call_b', 'tool:call_b']);
+    });
+
+    test('still drops a call whose results are incomplete and results that answer no call', async () => {
+      ctx.chatHistory.save(USER_ID, 'user', 'first', GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(calls(['call_b', 'call_c'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'user', 'between', GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(results(['call_b', 'call_unknown'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'user', 'last', GROUP_CHAT_ID);
+
+      const messages = await buildGroupMessages();
+
+      expect(messages.some((m) => m.role === 'tool')).toBe(false);
+      expect(messages.some((m) => m.role === 'assistant')).toBe(false);
+      expect(shape(messages).map((s) => s.replace(/\[From: [^\]]+\] /, ''))).toEqual([
+        'user:first',
+        'user:between',
+        'user:last',
+      ]);
+    });
+
+    test('regroups a multi-call block whose results are split and then the call block it moved', async () => {
+      ctx.chatHistory.save(USER_ID, 'user', 'first', GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(calls(['call_x', 'call_y'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(results(['call_x'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'assistant', JSON.stringify(calls(['call_z'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'user', 'between', GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(results(['call_y'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'tool', JSON.stringify(results(['call_z'])), GROUP_CHAT_ID);
+
+      const messages = await buildGroupMessages();
+
+      expect(shape(messages).slice(1)).toEqual([
+        'call:call_x,call_y',
+        'tool:call_x',
+        'tool:call_y',
+        'call:call_z',
+        'tool:call_z',
+        `user:[From: Member (id:${OTHER_MEMBER_ID})] between`,
+      ]);
+    });
+
+    test('a retry re-asks its question even when a moved row repeats that question', async () => {
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText, GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(calls(['call_x'])), GROUP_CHAT_ID);
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'user', ctx.messageText, GROUP_CHAT_ID);
+      ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(results(['call_x'])), GROUP_CHAT_ID);
+      ctx.retryAttempt = 1;
+
+      const messages = await buildGroupMessages();
+
+      // The newest saved row is the tool result, not the other member's question,
+      // so the retried question still goes last.
+      expect(shape(messages).slice(1)).toEqual([
+        'call:call_x',
+        'tool:call_x',
+        `user:[From: Member (id:${OTHER_MEMBER_ID})] ${ctx.messageText}`,
+        `user:${ctx.messageText}`,
+      ]);
+    });
+  });
+
   test('buildMessages drops legacy Anthropic tool_result rows that cannot be mapped', async () => {
     const legacyAnthropic = JSON.stringify([{ type: 'tool_result', tool_use_id: 'abc', content: 'ok' }]);
     ctx.chatHistory.save(USER_ID, 'user', 'What?');

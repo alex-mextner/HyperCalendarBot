@@ -109,6 +109,19 @@ export class UserRepository {
     this.db.prepare('UPDATE users SET connect_telegram_dismissed_at = ? WHERE telegram_id = ?').run(at, userId);
   }
 
+  /**
+   * Compare-and-swap for the connect-suggestion snooze: sets it to `at` only if the stored value is
+   * still `expected` (the value the caller judged). Returns false when another request changed it.
+   */
+  claimConnectTelegramSnooze(userId: number, at: string, expected: string | null): boolean {
+    const result = this.db
+      .prepare(
+        'UPDATE users SET connect_telegram_dismissed_at = ? WHERE telegram_id = ? AND connect_telegram_dismissed_at IS ?',
+      )
+      .run(at, userId, expected);
+    return result.changes === 1;
+  }
+
   update(telegramId: number, data: UpdateUserData): User | null {
     const existing = this.findByTelegramId(telegramId);
     if (!existing) return null;

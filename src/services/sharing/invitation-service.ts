@@ -2,7 +2,7 @@ import type { EventRepository } from '../../database/repositories/event.reposito
 import type { InvitationRepository } from '../../database/repositories/invitation.repository';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository';
-import type { Invitation, InvitationStatus } from '../../database/types';
+import type { CalendarEvent, Invitation, InvitationStatus } from '../../database/types';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 
 const MAX_DECLINES = 3;
@@ -15,7 +15,7 @@ export interface InvitationResult {
    * Why an action was refused, as the `t(lang)` key of the message that tells the user: the invitee's
    * time proposal was already settled (they answered, or the inviter acted on it), the invitee proposed a
    * time on an invitation they already answered, or the invitee acted on an invitation the inviter
-   * cancelled or that expired.
+   * cancelled, that expired, or whose event is gone (reported as cancelled).
    */
   reason?: 'invite_proposal_closed' | 'invitation_already_answered' | 'invitation_cancelled' | 'invitation_expired';
   proposedTime?: string;
@@ -30,17 +30,6 @@ const PROPOSAL_CLOSED: InvitationResult = {
 /** A proposal stays open until the invitee answers the invitation or the inviter settles it. */
 function hasOpenProposal(invitation: Invitation): invitation is Invitation & { proposed_time: string } {
   return invitation.status === 'pending' && !!invitation.proposed_time;
-}
-
-/** A cancelled or expired invitation takes no answer or time proposal from its invitee. */
-function revokedInvitationResult(invitation: Invitation): InvitationResult | null {
-  if (invitation.status === 'cancelled') {
-    return { success: false, reason: 'invitation_cancelled', error: 'Invitation was cancelled' };
-  }
-  if (invitation.status === 'expired') {
-    return { success: false, reason: 'invitation_expired', error: 'Invitation has expired' };
-  }
-  return null;
 }
 
 export class InvitationService {
@@ -84,6 +73,7 @@ export class InvitationService {
       invitee_username: inviteeUsername,
     });
 
+    this.domainEvents?.emit('invitationRoster.changed', { userId: inviterId, eventId });
     return { success: true, invitation };
   }
 
@@ -113,13 +103,14 @@ export class InvitationService {
     }
     const existing = this.participantRepo.findByEventAndUser(eventId, userId);
     if (existing) {
-      this.participantRepo.updateStatus(eventId, userId, status);
+      this.participantRepo.updateStatus(eventId, userId, status, groupChatId);
     } else {
-      this.participantRepo.add(eventId, userId, status);
+      this.participantRepo.add(eventId, userId, status, 'attendee', groupChatId);
     }
     // Mirror this member's own answer into their own Google Calendar (gated downstream on their
     // own active sync state): "going" adds the event, "not going" removes it.
     this.domainEvents?.emit('myGroup.rsvp', { userId, eventId, status });
+    this.domainEvents?.emit('invitationRoster.changed', { userId: groupInvitation.inviter_id, eventId });
     return { success: true };
   }
 
@@ -147,6 +138,10 @@ export class InvitationService {
     if (!ok) {
       return { success: false, error: 'Cannot cancel — status already changed' };
     }
+    this.domainEvents?.emit('invitationRoster.changed', {
+      userId: invitation.inviter_id,
+      eventId: invitation.event_id,
+    });
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
 
@@ -158,7 +153,7 @@ export class InvitationService {
     if (invitation.invitee_id !== userId) {
       return { success: false, error: 'Not authorized to propose' };
     }
-    const revoked = revokedInvitationResult(invitation);
+    const revoked = this.revokedInvitationResult(invitation);
     if (revoked) {
       return revoked;
     }
@@ -171,7 +166,17 @@ export class InvitationService {
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
 
-  rescheduleFromProposal(invitationId: number, userId: number): InvitationResult {
+  /**
+   * Accept the invitee's proposed time. `moveEvent` moves the event to it before the roster change is
+   * announced, so the cards that change refreshes already show the new time. It returns the moved event
+   * (null when it could not move it) rather than void, so an async mover, still moving the event when
+   * the cards re-render, does not type-check.
+   */
+  rescheduleFromProposal(
+    invitationId: number,
+    userId: number,
+    moveEvent: (eventId: number, proposedTime: string) => CalendarEvent | null,
+  ): InvitationResult {
     const invitation = this.invRepo.findById(invitationId);
     if (!invitation) {
       return { success: false, error: 'Invitation not found' };
@@ -189,10 +194,21 @@ export class InvitationService {
     if (this.participantRepo) {
       const existing = this.participantRepo.findByEventAndUser(invitation.event_id, invitation.invitee_id);
       if (existing) {
-        this.participantRepo.updateStatus(invitation.event_id, invitation.invitee_id, 'accepted');
+        this.participantRepo.updateStatus(invitation.event_id, invitation.invitee_id, 'accepted', null);
       } else {
         this.participantRepo.add(invitation.event_id, invitation.invitee_id, 'accepted');
       }
+    }
+    try {
+      moveEvent(invitation.event_id, proposedTime);
+    } finally {
+      // The invitation is accepted even if the move failed, so the roster change is announced anyway.
+      // No answeredInvitationId: the acting user is the inviter, who has no invitation card of theirs to
+      // rewrite, so every delivered card re-renders, the proposer's included.
+      this.domainEvents?.emit('invitationRoster.changed', {
+        userId: invitation.inviter_id,
+        eventId: invitation.event_id,
+      });
     }
     return { success: true, invitation: this.invRepo.findById(invitationId)!, proposedTime };
   }
@@ -211,6 +227,22 @@ export class InvitationService {
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
 
+  /**
+   * A cancelled or expired invitation takes no answer or time proposal from its invitee. Neither does
+   * one whose event is gone (deleted, or a cancelled occurrence): the invitation outlives a delete
+   * (#505), but only the open ones become cancelled — a declined one keeps its status — so the event
+   * itself is checked too, and refused as cancelled.
+   */
+  private revokedInvitationResult(invitation: Invitation): InvitationResult | null {
+    if (invitation.status === 'expired') {
+      return { success: false, reason: 'invitation_expired', error: 'Invitation has expired' };
+    }
+    if (invitation.status === 'cancelled' || !this.eventRepo.findByIdUnfiltered(invitation.event_id)) {
+      return { success: false, reason: 'invitation_cancelled', error: 'Invitation was cancelled' };
+    }
+    return null;
+  }
+
   private respondToInvitation(invitationId: number, userId: number, newStatus: InvitationStatus): InvitationResult {
     const invitation = this.invRepo.findById(invitationId);
     if (!invitation) {
@@ -219,7 +251,7 @@ export class InvitationService {
     if (invitation.invitee_id !== userId) {
       return { success: false, error: 'Not authorized to respond' };
     }
-    const revoked = revokedInvitationResult(invitation);
+    const revoked = this.revokedInvitationResult(invitation);
     if (revoked) {
       return revoked;
     }
@@ -232,16 +264,21 @@ export class InvitationService {
       const existing = this.participantRepo.findByEventAndUser(invitation.event_id, userId);
       if (newStatus === 'accepted' || newStatus === 'maybe') {
         if (existing) {
-          this.participantRepo.updateStatus(invitation.event_id, userId, newStatus);
+          this.participantRepo.updateStatus(invitation.event_id, userId, newStatus, null);
         } else {
           this.participantRepo.add(invitation.event_id, userId, newStatus);
         }
       } else if (newStatus === 'declined' && existing) {
-        this.participantRepo.updateStatus(invitation.event_id, userId, 'declined');
+        this.participantRepo.updateStatus(invitation.event_id, userId, 'declined', null);
       }
     }
 
     const result: InvitationResult = { success: true, invitation: this.invRepo.findById(invitationId)! };
+    this.domainEvents?.emit('invitationRoster.changed', {
+      userId: invitation.inviter_id,
+      eventId: invitation.event_id,
+      answeredInvitationId: invitationId,
+    });
 
     if (this.domainEvents && (newStatus === 'accepted' || newStatus === 'declined')) {
       const event = this.eventRepo.findById(invitation.event_id, invitation.inviter_id);

@@ -1107,6 +1107,16 @@ export const migrations: Migration[] = [
     },
   },
   {
+    name: '064_event_participant_source_group',
+    up(db) {
+      // Which group chat's card carried an answer, so a group's invitation card lists only its own
+      // members' answers (#468). When the origin counts: sourceGroupSql in participant.repository.ts.
+      // Every existing row has no known origin and is never listed as a group answer.
+      db.exec('ALTER TABLE event_participants ADD COLUMN source_group_id INTEGER');
+      db.exec('ALTER TABLE event_participants ADD COLUMN source_group_recorded_at TEXT');
+    },
+  },
+  {
     name: '066_contact_directory',
     up(db) {
       // GH-654 (#232, #554 design §23). idx_contacts_user_name enforced UNIQUE(user_id, LOWER(name)),

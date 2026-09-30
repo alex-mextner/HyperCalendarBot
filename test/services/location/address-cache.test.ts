@@ -2,18 +2,105 @@
 import { describe, expect, test } from 'bun:test';
 import { AddressCache } from '../../../src/services/location/address-cache.ts';
 
-function makeInMemoryRedis(): {
-  get(key: string): Promise<string | null>;
-  set(key: string, value: string): Promise<unknown>;
-} {
-  const store = new Map<string, string>();
+/** The store the cache needs, over a map; `compareAndSet` is atomic because nothing awaits inside it. */
+function makeInMemoryRedis(store = new Map<string, string>()) {
   return {
     get: async (key: string) => store.get(key) ?? null,
     set: async (key: string, value: string) => {
       store.set(key, value);
     },
+    compareAndSet: async (key: string, expected: string | null, value: string) => {
+      if ((store.get(key) ?? null) !== expected) return false;
+      store.set(key, value);
+      return true;
+    },
   };
 }
+
+/**
+ * The in-memory store, except that the first two reads of each of `racedKeys` are released
+ * together: two concurrent read-modify-writes of the key both read before either writes, the
+ * interleaving that lost one of them. Later reads go through at once.
+ */
+function makeRacingRedis(store: Map<string, string>, racedKeys: string[]) {
+  const base = makeInMemoryRedis(store);
+  const firstReader = new Map<string, () => void>();
+  const raced = new Set(racedKeys);
+  return {
+    ...base,
+    get: async (key: string) => {
+      if (raced.has(key)) {
+        const release = firstReader.get(key);
+        if (release) {
+          raced.delete(key);
+          release();
+        } else {
+          await new Promise<void>((resolve) => firstReader.set(key, resolve));
+        }
+      }
+      return base.get(key);
+    },
+  };
+}
+
+const MAPPINGS = 'addr:1:confirmed_mappings';
+const FREQUENCIES = 'addr:1:confirmed_freq';
+const PLACE = { googleMapsUrl: 'https://maps.google.com/?q=1,2', latitude: 1, longitude: 2, placeId: null };
+
+describe('AddressCache: concurrent writes of one user all take effect', () => {
+  test('forgetting one input while recording another keeps both changes', async () => {
+    const store = new Map<string, string>();
+    await new AddressCache(makeInMemoryRedis(store)).recordMapping(1, 'Kafana Sunce', {
+      ...PLACE,
+      resolvedAddress: 'Rejected place',
+    });
+    const cache = new AddressCache(makeRacingRedis(store, [MAPPINGS]));
+
+    await Promise.all([
+      cache.forgetMapping(1, 'Kafana Sunce', {
+        resolvedAddress: 'Rejected place',
+        placeId: null,
+        latitude: 1,
+        longitude: 2,
+      }),
+      cache.recordMapping(1, 'Office', { ...PLACE, resolvedAddress: 'Office address' }),
+    ]);
+
+    expect(await cache.findMapping(1, 'Kafana Sunce')).toBeNull();
+    expect((await cache.findMapping(1, 'Office'))?.resolvedAddress).toBe('Office address');
+  });
+
+  test('recording two inputs at once keeps both mappings and both frequency counts', async () => {
+    const cache = new AddressCache(makeRacingRedis(new Map(), [MAPPINGS, FREQUENCIES]));
+
+    await Promise.all([
+      cache.recordMapping(1, 'Office', { ...PLACE, resolvedAddress: 'Office address' }),
+      cache.recordMapping(1, 'Gym', { ...PLACE, resolvedAddress: 'Gym address' }),
+    ]);
+
+    expect((await cache.findMapping(1, 'Office'))?.resolvedAddress).toBe('Office address');
+    expect((await cache.findMapping(1, 'Gym'))?.resolvedAddress).toBe('Gym address');
+    const counts = (await cache.getFrequent(1)).map((f) => [f.resolvedAddress, f.count]);
+    expect(counts).toEqual(
+      expect.arrayContaining([
+        ['Office address', 1],
+        ['Gym address', 1],
+      ]),
+    );
+    expect(counts).toHaveLength(2);
+  });
+
+  test('two inputs confirmed for the same place at once count it twice', async () => {
+    const cache = new AddressCache(makeRacingRedis(new Map(), [MAPPINGS, FREQUENCIES]));
+
+    await Promise.all([
+      cache.recordMapping(1, 'Office', { ...PLACE, resolvedAddress: 'Office address' }),
+      cache.recordMapping(1, 'Work', { ...PLACE, resolvedAddress: 'Office address' }),
+    ]);
+
+    expect(await cache.getFrequent(1)).toMatchObject([{ resolvedAddress: 'Office address', count: 2 }]);
+  });
+});
 
 describe('AddressCache', () => {
   test('recordMapping and findMapping — exact match', async () => {

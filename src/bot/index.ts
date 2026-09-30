@@ -91,6 +91,7 @@ import { createChatLogging } from './middleware/chat-logging.ts';
 import { createConnectWizardGuard } from './middleware/connect-wizard-guard.ts';
 import { createRateLimitMiddleware, RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
+import { createStaleUpdateGuard, STALE_UPDATE_MAX_AGE_MS } from './middleware/stale-update-guard.ts';
 import { createUserResolver, createUserResolverComposer } from './middleware/user-resolver.ts';
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
 import { createConnectWizardTraces } from './scenes/connect-wizard-trace.ts';
@@ -559,6 +560,15 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     // Before the rate limiter: wizard input it drops must still be taken off the chat, and before chat
     // logging and the command escape, which close the wizard on a typed "/…" and must not log a password.
     .use(connectWizardGuard.middleware)
+    // After the wizard guard, so a late credential is still taken off the chat. Before rate limiting
+    // and history: a skipped stale message is neither counted nor saved.
+    .use(
+      createStaleUpdateGuard({
+        maxAgeMs: STALE_UPDATE_MAX_AGE_MS,
+        now: Date.now,
+        sendNote: (chatId, text) => bot.api.sendMessage({ chat_id: chatId, text }),
+      }),
+    )
     .use(createRateLimitMiddleware(rateLimiter))
     .use(
       createChatLogging({
