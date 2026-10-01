@@ -2,10 +2,10 @@
 import type { Database } from 'bun:sqlite';
 import type { CallLog, CallStatus } from '../types';
 
+/** What a call log row records. The reminder's words are never stored: event content stays out of the database. */
 interface CreateCallLogData {
   user_id: number;
   event_id?: number;
-  tts_text?: string;
 }
 
 export class CallLogRepository {
@@ -13,8 +13,8 @@ export class CallLogRepository {
 
   create(data: CreateCallLogData): CallLog {
     const result = this.db
-      .prepare('INSERT INTO call_log (user_id, event_id, tts_text) VALUES (?, ?, ?)')
-      .run(data.user_id, data.event_id ?? null, data.tts_text ?? null);
+      .prepare('INSERT INTO call_log (user_id, event_id) VALUES (?, ?)')
+      .run(data.user_id, data.event_id ?? null);
     return this.findById(Number(result.lastInsertRowid))!;
   }
 

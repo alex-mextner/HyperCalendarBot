@@ -2,7 +2,6 @@ import type { Lang } from '../../config/constants.ts';
 import { t } from '../../config/constants.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import { formatLocationHtml } from '../location/format-location.ts';
-import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
 import { formatDayWeatherLine, formatEventWeatherLine } from '../weather/format.ts';
 import type { DayWeather, EventForecast } from '../weather/types.ts';
 import { weatherEmoji } from '../weather/weather-service.ts';
@@ -27,17 +26,8 @@ function locationLink(place: EventPlace): string {
   });
 }
 
-export interface VoiceRenderInput {
-  title: string;
-  startAt: string;
-  timezone: string;
-  location?: string | null;
-  venueName?: string | null;
-  language: string;
-}
-
 export interface RenderedNotification {
-  channel: 'telegram_text' | 'telegram_voice_call';
+  channel: 'telegram_text';
   text: string;
 }
 
@@ -257,18 +247,6 @@ export class NotificationRenderer {
       lines.push('', sharedWeather);
     }
     return { channel: 'telegram_text', text: lines.join('\n') };
-  }
-
-  renderForVoice(input: VoiceRenderInput): RenderedNotification {
-    const text = renderReminderForSpeech({
-      title: input.title,
-      startAt: input.startAt,
-      timezone: input.timezone,
-      location: input.location,
-      venueName: input.venueName,
-      language: input.language,
-    });
-    return { channel: 'telegram_voice_call', text };
   }
 
   renderWeeklyDigest(

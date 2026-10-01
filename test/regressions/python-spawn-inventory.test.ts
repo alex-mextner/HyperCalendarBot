@@ -42,19 +42,30 @@ function inventory(): Map<string, Set<string>> {
   return namedBy;
 }
 
-test('the bot can launch only the per-user session scripts, the service-tier scripts and the Silero TTS helper', () => {
-  const serviceScripts = Object.values(SERVICE_SCRIPTS);
-  const named = [...inventory().keys()].sort();
-  expect(named).toEqual([...USER_SESSION_SCRIPTS, ...TTS_SCRIPTS, ...serviceScripts].sort());
-  for (const script of named) expect(existsSync(join(ROOT, script))).toBe(true);
-});
+// Parsing every src file with the TypeScript compiler takes seconds on a loaded machine.
+const INVENTORY_TIMEOUT_MS = 30_000;
 
-test('only the service-tier module names a service script, so every spawn passes its gate', () => {
-  const namedBy = inventory();
-  for (const script of Object.values(SERVICE_SCRIPTS)) {
-    expect({ script, files: [...(namedBy.get(script) ?? [])] }).toEqual({ script, files: [SERVICE_TIER_MODULE] });
-  }
-});
+test(
+  'the bot can launch only the per-user session scripts, the service-tier scripts and the Silero TTS helper',
+  () => {
+    const serviceScripts = Object.values(SERVICE_SCRIPTS);
+    const named = [...inventory().keys()].sort();
+    expect(named).toEqual([...USER_SESSION_SCRIPTS, ...TTS_SCRIPTS, ...serviceScripts].sort());
+    for (const script of named) expect(existsSync(join(ROOT, script))).toBe(true);
+  },
+  INVENTORY_TIMEOUT_MS,
+);
+
+test(
+  'only the service-tier module names a service script, so every spawn passes its gate',
+  () => {
+    const namedBy = inventory();
+    for (const script of Object.values(SERVICE_SCRIPTS)) {
+      expect({ script, files: [...(namedBy.get(script) ?? [])] }).toEqual({ script, files: [SERVICE_TIER_MODULE] });
+    }
+  },
+  INVENTORY_TIMEOUT_MS,
+);
 
 test('the service account has no script that sends a message', () => {
   expect(existsSync(join(ROOT, 'scripts/send-message.py'))).toBe(false);

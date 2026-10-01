@@ -893,6 +893,12 @@ describe('voice call gating follows the user local clock', () => {
     expect(calls.map((c) => c.userId)).toEqual([USER_ID]);
   });
 
+  test('equal quiet-hour bounds (13:00–13:00) are an empty window, as for text quiet hours', async () => {
+    const { callScheduler, calls } = setupMoscowCallUser('2026-03-15T10:00:00Z', { start: '13:00', end: '13:00' });
+    await callScheduler.tick(new Date('2026-03-15T10:00:30Z'));
+    expect(calls.map((c) => c.userId)).toEqual([USER_ID]);
+  });
+
   test('daily cap counts calls since local midnight, not the UTC day', async () => {
     // 21:10 UTC on Mar 15 is 00:10 on Mar 16 in Moscow: same local day as the 21:30 UTC tick.
     const { db, callScheduler, calls } = setupMoscowCallUser('2026-03-15T21:30:00Z', null, 1);

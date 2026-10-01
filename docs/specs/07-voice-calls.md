@@ -739,6 +739,8 @@ Call reminders are **off by default**. User must explicitly opt in:
   -> Which events: All / Important only
 ```
 
+The Call Reminders category appears only when the bot can place calls (the call queue is running: service tier on, Redis configured, voice not disabled). Otherwise `/settings` hides it, and a leftover Call Reminders button answers that voice calls are unavailable without changing any setting.
+
 For WebRTC calls, user must also:
 
 - Be contactable by the virtual user (for voice message tier)

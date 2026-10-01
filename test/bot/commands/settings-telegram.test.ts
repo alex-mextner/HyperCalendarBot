@@ -100,14 +100,14 @@ describe('buildTelegramView', () => {
 describe('settingsCategoryKeyboard', () => {
   test('includes telegram account button', async () => {
     const { settingsCategoryKeyboard } = await import('../../../src/bot/commands/settings.ts');
-    const kb = settingsCategoryKeyboard('ru');
+    const kb = settingsCategoryKeyboard('ru', false);
     const kbJson = JSON.stringify(kb);
     expect(kbJson).toContain('stg:telegram');
   });
 
   test('includes telegram account button in EN', async () => {
     const { settingsCategoryKeyboard } = await import('../../../src/bot/commands/settings.ts');
-    const kb = settingsCategoryKeyboard('en');
+    const kb = settingsCategoryKeyboard('en', false);
     const kbJson = JSON.stringify(kb);
     expect(kbJson).toContain('stg:telegram');
   });

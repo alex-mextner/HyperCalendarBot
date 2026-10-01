@@ -69,16 +69,42 @@ describe('createCallQueue', () => {
     const [name, data, opts] = mockQueueAdd.mock.calls[0]!;
     expect(name).toBe('call-reminder');
     expect(data.userId).toBe(5000000001);
-    expect(callLog.findById(data.callLogId)).toMatchObject({
-      user_id: 5000000001,
-      tts_text: 'Hello',
-      status: 'queued',
-    });
+    expect(callLog.findById(data.callLogId)).toMatchObject({ user_id: 5000000001, status: 'queued' });
     expect(typeof data.sessionId).toBe('string');
     expect(data.sessionId.length).toBeGreaterThan(0);
     expect(opts.attempts).toBe(1);
     expect(opts.removeOnComplete).toBe(true);
     expect(opts.removeOnFail).toBe(true);
+  });
+
+  test('the call log keeps no trace of what the reminder says; only the queued job carries it', async () => {
+    mockQueueAdd.mockClear();
+    const callLog = makeCallLog();
+    const { enqueue } = createCallQueue({ host: 'localhost', port: 6379 }, callLog);
+    await enqueue({ userId: 5000000001, eventId: 5000000002, ttsText: 'Therapy at 12 Baker St', language: 'en' });
+    const [, data] = mockQueueAdd.mock.calls[0]!;
+    expect(data.ttsText).toBe('Therapy at 12 Baker St');
+    const row = callLog.findById(data.callLogId);
+    expect(row?.tts_text).toBeNull();
+    expect(JSON.stringify(row)).not.toContain('Baker');
+  });
+
+  test('enqueue records the event the call is about', async () => {
+    mockQueueAdd.mockClear();
+    const callLog = makeCallLog();
+    const { enqueue } = createCallQueue({ host: 'localhost', port: 6379 }, callLog);
+    await enqueue({ userId: 5000000001, eventId: 5000000002, ttsText: 'x', language: 'en' });
+    const [, data] = mockQueueAdd.mock.calls[0]!;
+    expect(callLog.findById(data.callLogId)?.event_id).toBe(5000000002);
+  });
+
+  test('enqueue without an event stores a NULL event_id', async () => {
+    mockQueueAdd.mockClear();
+    const callLog = makeCallLog();
+    const { enqueue } = createCallQueue({ host: 'localhost', port: 6379 }, callLog);
+    await enqueue({ userId: 5000000001, ttsText: 'x', language: 'en' });
+    const [, data] = mockQueueAdd.mock.calls[0]!;
+    expect(callLog.findById(data.callLogId)?.event_id).toBeNull();
   });
 
   test('a failed queue write rejects and marks the logged call failed', async () => {

@@ -1,7 +1,7 @@
 """
 File-level lock for voice_caller.session access.
 
-All MTProto scripts (resolve-username, send-message, fetch-birthdays, voice-call-bridge)
+All MTProto scripts (resolve-username, fetch-birthdays, voice-call-bridge, ...)
 MUST acquire this lock before calling app.start(). Without it, concurrent Pyrogram processes
 can corrupt the session SQLite file — if any field (user_id, is_bot) reads as NULL during a
 race, Pyrogram overwrites the auth_key with a new one, permanently destroying the session.
@@ -26,7 +26,7 @@ LOCK_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "voice_caller.
 
 
 @contextmanager
-def session_lock(timeout: float = 30):
+def session_lock():
     """Acquire an exclusive file lock around voice_caller.session access.
 
     Uses LOCK_EX (blocking). If another script holds the lock, this blocks

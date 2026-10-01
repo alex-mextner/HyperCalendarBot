@@ -23,13 +23,15 @@ const NumberArrayCodec = jsonCodec(z.array(z.number()));
 export const pendingDurationInput = new Map<number, number>(); // userId → timestamp
 export const pendingGroupTzInput = new Map<number, { chatId: number; ts: number; lang: 'en' | 'ru' }>(); // userId → { chatId, ts, lang }
 
-export function settingsCategoryKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
+/** `callsAvailable`: the bot can place calls (the call queue is running), so call reminders are configurable. */
+export function settingsCategoryKeyboard(lang: 'en' | 'ru', callsAvailable: boolean): InlineKeyboard {
   const s = t(lang).settings;
-  return new InlineKeyboard()
+  const kb = new InlineKeyboard()
     .text(s.categoryGeneral, 'stg:general')
     .text(s.categoryNotifications, `${CB.NOTIFY}:menu`)
-    .row()
-    .text(s.categoryCalls, 'stg:calls')
+    .row();
+  if (callsAvailable) kb.text(s.categoryCalls, 'stg:calls');
+  return kb
     .text(s.categoryPrivacy, 'stg:privacy')
     .row()
     .text(s.categoryVoice, 'stg:voice')
@@ -305,7 +307,11 @@ async function handleGroupSettings(ctx: BotCommandContext, groupRepo: GroupChatR
 
 // ─── Command entry point ─────────────────────────────────────────────────────
 
-export async function handleSettings(ctx: BotCommandContext, groupRepo: GroupChatRepository): Promise<void> {
+export async function handleSettings(
+  ctx: BotCommandContext,
+  groupRepo: GroupChatRepository,
+  callsAvailable: boolean,
+): Promise<void> {
   if (isGroup(ctx)) {
     await handleGroupSettings(ctx, groupRepo);
     return;
@@ -313,7 +319,7 @@ export async function handleSettings(ctx: BotCommandContext, groupRepo: GroupCha
   const user = ctx.dbUser as User;
   const lang = (user.language ?? 'en') as 'en' | 'ru';
   await ctx.send(t(lang).settings.title, {
-    reply_markup: settingsCategoryKeyboard(lang),
+    reply_markup: settingsCategoryKeyboard(lang, callsAvailable),
   });
 }
 
@@ -325,6 +331,7 @@ interface TelegramSettingsDeps {
   enterScene: () => Promise<void>;
 }
 
+/** `callSettingsRepo` is passed only when the bot can place calls; without it the calls category is hidden. */
 export async function handleSettingsCallback(
   ctx: BotCallbackContext,
   user: User,
@@ -345,7 +352,7 @@ export async function handleSettingsCallback(
 
   if (subAction === 'back') {
     await ctx.answer();
-    await ctx.editText(t(lang).settings.title, { reply_markup: settingsCategoryKeyboard(lang) });
+    await ctx.editText(t(lang).settings.title, { reply_markup: settingsCategoryKeyboard(lang, !!callSettingsRepo) });
     return;
   }
 
@@ -436,16 +443,18 @@ export async function handleSettingsCallback(
   // ─── Calls ─────────────────────────────────────────────────────────────────
 
   if (subAction === 'calls' || subAction === 'toggle_calls') {
-    let enabled = false;
-    if (callSettingsRepo) {
-      callSettingsRepo.ensureDefaults(user.telegram_id);
-      if (subAction === 'toggle_calls') {
-        const cur = callSettingsRepo.get(user.telegram_id);
-        callSettingsRepo.setEnabled(user.telegram_id, !cur?.enabled);
-      }
-      enabled = !!callSettingsRepo.get(user.telegram_id)?.enabled;
+    if (!callSettingsRepo) {
+      // A button left over from when calls were available: say so and show the current categories.
+      await ctx.answer({ text: t(lang).settings.callsUnavailable });
+      await ctx.editText(t(lang).settings.title, { reply_markup: settingsCategoryKeyboard(lang, false) });
+      return;
     }
-    const { text, kb } = buildCallsView(enabled, lang);
+    callSettingsRepo.ensureDefaults(user.telegram_id);
+    if (subAction === 'toggle_calls') {
+      const cur = callSettingsRepo.get(user.telegram_id);
+      callSettingsRepo.setEnabled(user.telegram_id, !cur?.enabled);
+    }
+    const { text, kb } = buildCallsView(!!callSettingsRepo.get(user.telegram_id)?.enabled, lang);
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
     return;

@@ -1,7 +1,14 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, mock, test } from 'bun:test';
+import { Bot, MessageContext } from 'gramio';
+import {
+  handleSettings,
+  handleSettingsCallback,
+  settingsCategoryKeyboard,
+} from '../../../src/bot/commands/settings.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { CallSettingsRepository } from '../../../src/database/repositories/call-settings.repository.ts';
+import { GroupChatRepository } from '../../../src/database/repositories/group-chat.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { NotificationPreferencesRow, User } from '../../../src/database/types.ts';
@@ -20,13 +27,6 @@ function makeUser(overrides: Partial<User> = {}): Partial<User> {
     timezone: 'Europe/Moscow',
     country_code: 'RU',
     ...overrides,
-  };
-}
-
-function makeCommandCtx(user = makeUser()) {
-  return {
-    dbUser: user,
-    send: mock(() => Promise.resolve()),
   };
 }
 
@@ -59,13 +59,6 @@ function makePrefsService(overrides: Partial<NotificationPreferencesRow> = {}) {
   };
 }
 
-function makeGroupRepo(overrides: Partial<{ findByChatId: ReturnType<typeof mock> }> = {}) {
-  return {
-    findByChatId: mock(() => null),
-    ...overrides,
-  };
-}
-
 /** The Russian-speaking user every call-settings tap is made by. */
 const callsUser: User = {
   telegram_id: 100,
@@ -88,10 +81,9 @@ const callsUser: User = {
 
 /**
  * Taps `stg:<subAction>` against a real in-memory database. `callsEnabled` seeds the user's call
- * settings; `null` leaves the call-settings repository out entirely.
+ * settings; `null` leaves the call-settings repository out entirely, as when the bot cannot place calls.
  */
-async function tapCallSettings(subAction: 'calls' | 'toggle_calls', callsEnabled: boolean | null) {
-  const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+async function tapCallSettings(subAction: 'calls' | 'toggle_calls' | 'back', callsEnabled: boolean | null) {
   const db = new Database(':memory:');
   runMigrations(db, migrations);
   const prefsService = new NotificationPreferencesService(new NotificationPreferencesRepository(db));
@@ -100,7 +92,7 @@ async function tapCallSettings(subAction: 'calls' | 'toggle_calls', callsEnabled
     callSettingsRepo.ensureDefaults(callsUser.telegram_id);
     callSettingsRepo.setEnabled(callsUser.telegram_id, callsEnabled);
   }
-  const { ctx, editText } = makeCallbackTap(`stg:${subAction}`, callsUser);
+  const { ctx, answer, editText } = makeCallbackTap(`stg:${subAction}`, callsUser);
   await handleSettingsCallback(
     ctx,
     callsUser,
@@ -108,28 +100,66 @@ async function tapCallSettings(subAction: 'calls' | 'toggle_calls', callsEnabled
     prefsService,
     callsEnabled === null ? undefined : callSettingsRepo,
   );
-  return { text: firstCallArg<string>(editText, 0), callSettingsRepo };
+  return {
+    text: firstCallArg<string>(editText, 0),
+    buttons: callbackData(editText.mock.calls[0]?.[1]),
+    answer,
+    callSettingsRepo,
+  };
+}
+
+/** The callback data of every button in a reply markup, whatever shape it serialises to. */
+function callbackData(markup: unknown): string[] {
+  return [...JSON.stringify(markup).matchAll(/"callback_data":"([^"]+)"/g)].map((m) => m[1]!);
+}
+
+/** Runs /settings as `callsUser` in `chat`; `groupTimezone` registers the group chat -100 first. */
+async function runSettingsCommand(
+  chat: { id: number; type: 'private' } | { id: number; type: 'group'; title: string },
+  callsAvailable: boolean,
+  groupTimezone?: string,
+) {
+  const db = new Database(':memory:');
+  runMigrations(db, migrations);
+  const groupRepo = new GroupChatRepository(db);
+  if (groupTimezone) {
+    groupRepo.upsertGroup({ chat_id: -100, title: 'Group', added_by: callsUser.telegram_id });
+    groupRepo.setTimezone(-100, groupTimezone);
+  }
+  const sent: { text: string; buttons: string[] }[] = [];
+  const message = new MessageContext({ bot: new Bot('123:test'), payload: { message_id: 1, date: 0, chat } });
+  const ctx = Object.assign(message, {
+    dbUser: callsUser,
+    userTimezone: 'UTC',
+    lang: 'ru' as const,
+    scene: { enter: async () => {} },
+    send: async (text: string, params?: { reply_markup?: unknown }) => {
+      sent.push({ text, buttons: callbackData(params?.reply_markup) });
+      return message;
+    },
+  });
+  await handleSettings(ctx, groupRepo, callsAvailable);
+  return sent;
 }
 
 describe('handleSettings', () => {
-  test('sends category picker keyboard', async () => {
-    const { handleSettings } = await import('../../../src/bot/commands/settings.ts');
-    const ctx = makeCommandCtx();
+  test('sends the category picker with call reminders when the bot can place calls', async () => {
+    const sent = await runSettingsCommand({ id: callsUser.telegram_id, type: 'private' }, true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain('Настройки');
+    expect(sent[0]!.buttons).toContain('stg:calls');
+  });
 
-    await handleSettings(ctx as never, makeGroupRepo() as never);
-
-    expect(ctx.send).toHaveBeenCalledTimes(1);
-    const text = firstCallArg<string>(ctx.send, 0);
-    const opts = firstCallArg<{ reply_markup: unknown }>(ctx.send, 1);
-    expect(text).toContain('Настройки');
-    expect(opts?.reply_markup).toBeDefined();
+  test('offers no call settings when the bot cannot place calls', async () => {
+    const sent = await runSettingsCommand({ id: callsUser.telegram_id, type: 'private' }, false);
+    expect(sent[0]!.buttons).not.toContain('stg:calls');
+    expect(sent[0]!.buttons).toContain('stg:privacy');
   });
 });
 
 describe('settingsCategoryKeyboard', () => {
   test('returns InlineKeyboard instance', async () => {
-    const { settingsCategoryKeyboard } = await import('../../../src/bot/commands/settings.ts');
-    const kb = settingsCategoryKeyboard('ru');
+    const kb = settingsCategoryKeyboard('ru', true);
     expect(kb).toBeDefined();
     // InlineKeyboard serialises to { inline_keyboard: [...] }
     const serialized = kb.toJSON?.() ?? kb;
@@ -137,11 +167,15 @@ describe('settingsCategoryKeyboard', () => {
   });
 
   test('Notifications button routes to nf:menu not stg:notifications', async () => {
-    const { settingsCategoryKeyboard } = await import('../../../src/bot/commands/settings.ts');
-    const kb = settingsCategoryKeyboard('ru');
+    const kb = settingsCategoryKeyboard('ru', true);
     const json = JSON.stringify(kb.toJSON?.() ?? kb);
     expect(json).toContain('nf:menu');
     expect(json).not.toContain('stg:notifications');
+  });
+
+  test('lists the calls category only when calls are available', async () => {
+    expect(callbackData(settingsCategoryKeyboard('en', true))).toContain('stg:calls');
+    expect(callbackData(settingsCategoryKeyboard('en', false))).not.toContain('stg:calls');
   });
 });
 
@@ -196,11 +230,20 @@ describe('handleSettingsCallback', () => {
     expect(text).toContain('❌');
   });
 
-  test('stg:calls without repo shows defaults', async () => {
-    const { text } = await tapCallSettings('calls', null);
-    expect(text).toContain('Голосовые звонки');
-    expect(text).toContain('❌');
+  test('stg:back lists the calls category only when calls are available', async () => {
+    expect((await tapCallSettings('back', null)).buttons).not.toContain('stg:calls');
+    expect((await tapCallSettings('back', false)).buttons).toContain('stg:calls');
   });
+
+  for (const subAction of ['calls', 'toggle_calls'] as const) {
+    test(`a stale stg:${subAction} tap without calls says calls are unavailable and stores nothing`, async () => {
+      const { text, buttons, answer, callSettingsRepo } = await tapCallSettings(subAction, null);
+      expect(answer).toHaveBeenCalledWith({ text: 'Голосовые звонки в этом боте недоступны.' });
+      expect(callSettingsRepo.get(callsUser.telegram_id)).toBeNull();
+      expect(text).toContain('Настройки');
+      expect(buttons).not.toContain('stg:calls');
+    });
+  }
 
   test('stg:calls with repo shows enabled state', async () => {
     const { text } = await tapCallSettings('calls', true);
@@ -562,58 +605,16 @@ describe('stg:toggle_reminder', () => {
 });
 
 describe('handleSettings in group context', () => {
+  const group = { id: -100, type: 'group', title: 'Group' } as const;
+
   test('shows group settings with timezone', async () => {
-    const { handleSettings } = await import('../../../src/bot/commands/settings.ts');
-    const groupRepo = {
-      findByChatId: mock(() => ({
-        chat_id: -100,
-        timezone: 'Europe/Moscow',
-        country: 'RU',
-        title: null,
-        added_by: 1,
-        added_at: '',
-        is_active: 1,
-        pin_hint_shown: 0,
-      })),
-    };
-    let sentText = '';
-    const ctx = {
-      chat: { type: 'group', id: -100 },
-      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
-      send: mock((text: string) => {
-        sentText = text;
-        return Promise.resolve();
-      }),
-    };
-    await handleSettings(ctx as never, groupRepo as never);
-    expect(sentText).toContain('Настройки группы');
-    expect(sentText).toContain('Europe/Moscow');
+    const [reply] = await runSettingsCommand(group, false, 'Europe/Moscow');
+    expect(reply!.text).toContain('Настройки группы');
+    expect(reply!.text).toContain('Europe/Moscow');
   });
 
   test('shows not-set when no timezone', async () => {
-    const { handleSettings } = await import('../../../src/bot/commands/settings.ts');
-    const groupRepo = {
-      findByChatId: mock(() => ({
-        chat_id: -100,
-        timezone: null,
-        country: null,
-        title: null,
-        added_by: 1,
-        added_at: '',
-        is_active: 1,
-        pin_hint_shown: 0,
-      })),
-    };
-    let sentText = '';
-    const ctx = {
-      chat: { type: 'group', id: -100 },
-      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
-      send: mock((text: string) => {
-        sentText = text;
-        return Promise.resolve();
-      }),
-    };
-    await handleSettings(ctx as never, groupRepo as never);
-    expect(sentText).toContain('не задана');
+    const [reply] = await runSettingsCommand(group, false);
+    expect(reply!.text).toContain('не задана');
   });
 });

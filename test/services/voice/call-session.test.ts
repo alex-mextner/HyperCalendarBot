@@ -325,3 +325,97 @@ test('agent runs only once when VAD_END follows classify respond', async () => {
   // Agent should have been called exactly once
   expect(agent.run).toHaveBeenCalledTimes(1);
 });
+
+/** Resolves once the session sends `ws` a command matching `expected`. */
+function commandSent(ws: WsMock, expected: { type: string; file?: string }): Promise<void> {
+  const sent = Promise.withResolvers<void>();
+  ws.send.mockImplementation((data) => {
+    const cmd = SentCommandCodec.parse(data.toString());
+    if (cmd.type === expected.type && (expected.file === undefined || cmd.file === expected.file)) sent.resolve();
+  });
+  return sent.promise;
+}
+
+/** Plays the opener to completion, then has the RU caller say `transcript`, which starts one agent turn. */
+async function sayAfterOpener(session: CallSession, nova: NovaMock, transcript: string): Promise<void> {
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  await session.handleMessage(JSON.stringify({ type: 'VAD_START' }));
+  novaEvents(nova).onFinal(transcript);
+  await session.handleMessage(JSON.stringify({ type: 'VAD_END' }));
+}
+
+test('a silent caller hears a spoken check-in and the agent never answers it', async () => {
+  const agent = makeAgentMock();
+  const { session, ws, tts } = makeSession({ agent, inactivityMs: 1 });
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  const checkInPlayed = commandSent(ws, { type: 'PLAY' });
+  ws.send.mockClear();
+  // The opener finishes: the idle timer starts and fires with nobody speaking.
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  await checkInPlayed;
+
+  expect(tts.synthesize.mock.calls.at(-1)).toEqual(['Ты ещё здесь? Могу ещё чем-то помочь?', 'ru']);
+  expect(sentCommands(ws)).toContainEqual({ type: 'PLAY', file: '/tmp/call-test-session-2.ogg' });
+  expect(agent.run).not.toHaveBeenCalled();
+  await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+});
+
+test('the session resumes listening after its check-in finishes playing', async () => {
+  const { session, ws } = makeSession({ inactivityMs: 1 });
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  const checkInPlayed = commandSent(ws, { type: 'PLAY', file: '/tmp/call-test-session-2.ogg' });
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  await checkInPlayed;
+
+  ws.send.mockClear();
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  expect(sentCommands(ws)).toContainEqual({ type: 'RESUME' });
+  await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+});
+
+test('end_call with nothing to say hangs up without waiting for a PLAY_DONE', async () => {
+  const nova = makeNovaMock();
+  const agent = { run: mock(async (_turn: CallTurn) => ({ endCall: true })) };
+  const { session, ws } = makeSession({ agent, createNovaStt: () => nova });
+
+  await sayAfterOpener(session, nova, 'всё, спасибо, пока');
+  await flushPromises();
+
+  expect(agent.run).toHaveBeenCalledTimes(1);
+  expect(ws.close).toHaveBeenCalledTimes(1);
+  expect(session.isEnded()).toBe(true);
+});
+
+test('end_call whose goodbye fails to synthesize hangs up at once', async () => {
+  const nova = makeNovaMock();
+  const agent = { run: mock(async (_turn: CallTurn) => ({ responseText: 'Пока!', endCall: true })) };
+  const tts = {
+    synthesize: mock(async (text: string, _lang: string) => {
+      if (text === 'Пока!') throw new Error('TTS down');
+      return Buffer.from('audio');
+    }),
+  };
+  const { session, ws } = makeSession({ agent, tts, createNovaStt: () => nova });
+
+  await sayAfterOpener(session, nova, 'всё, спасибо, пока');
+  await flushPromises();
+
+  expect(tts.synthesize).toHaveBeenCalledWith('Пока!', 'ru');
+  expect(ws.close).toHaveBeenCalledTimes(1);
+  expect(session.isEnded()).toBe(true);
+});
+
+test('end_call with a spoken goodbye hangs up only after the goodbye finishes playing', async () => {
+  const nova = makeNovaMock();
+  const agent = { run: mock(async (_turn: CallTurn) => ({ responseText: 'Пока!', endCall: true })) };
+  const { session, ws } = makeSession({ agent, createNovaStt: () => nova });
+  const goodbyePlayed = commandSent(ws, { type: 'PLAY', file: '/tmp/call-test-session-2.ogg' });
+
+  await sayAfterOpener(session, nova, 'всё, спасибо, пока');
+  await goodbyePlayed;
+  expect(ws.close).not.toHaveBeenCalled();
+
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  expect(ws.close).toHaveBeenCalledTimes(1);
+});

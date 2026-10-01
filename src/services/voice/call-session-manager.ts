@@ -1,5 +1,5 @@
 // src/services/voice/call-session-manager.ts
-import { voiceLogger } from './types.ts';
+import { type CallLanguage, voiceLogger } from './types.ts';
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -14,7 +14,7 @@ export interface CallSessionManagerDeps {
   createSession: (
     sessionId: string,
     userId: number,
-    language: 'ru' | 'en',
+    language: CallLanguage,
     ws: { send: (data: string | Buffer) => void; close: () => void },
     openerText: string,
   ) => ManagedSession;
@@ -23,7 +23,7 @@ export interface CallSessionManagerDeps {
 
 export class CallSessionManager {
   private sessions = new Map<string, { session: ManagedSession; timer: ReturnType<typeof setTimeout> }>();
-  private pendingSessions = new Map<string, { userId: number; language: 'ru' | 'en'; openerText: string }>();
+  private pendingSessions = new Map<string, { userId: number; language: CallLanguage; openerText: string }>();
   private readonly timeoutMs: number;
 
   constructor(private readonly deps: CallSessionManagerDeps) {
@@ -31,12 +31,13 @@ export class CallSessionManager {
   }
 
   /** Prepares the session the bridge will connect to; `openerText` is spoken first once the call connects. */
-  registerSession(sessionId: string, userId: number, language: string, openerText: string): void {
-    const lang: 'ru' | 'en' = language === 'en' ? 'en' : language === 'ru' ? 'ru' : 'ru';
-    if (language !== 'ru' && language !== 'en') {
-      voiceLogger.warn({ sessionId, language }, 'Unexpected language in registerSession, defaulting to ru');
-    }
-    this.pendingSessions.set(sessionId, { userId, language: lang, openerText });
+  registerSession(sessionId: string, userId: number, language: CallLanguage, openerText: string): void {
+    this.pendingSessions.set(sessionId, { userId, language, openerText });
+  }
+
+  /** Forgets a registered session whose bridge never connected; a session that already opened is left alone. */
+  unregisterSession(sessionId: string): void {
+    this.pendingSessions.delete(sessionId);
   }
 
   onWebSocketOpen(sessionId: string, ws: { send: (data: string | Buffer) => void; close: () => void }): void {

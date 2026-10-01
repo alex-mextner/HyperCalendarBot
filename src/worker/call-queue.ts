@@ -18,9 +18,10 @@ export function createCallQueue(
   return {
     queue,
     /** Logs the call, then queues it. Rejects when the queue write fails, after marking the logged call
-     *  failed — otherwise its row would stay 'queued' with no job to ever complete it. */
+     *  failed — otherwise its row would stay 'queued' with no job to ever complete it. The reminder text
+     *  (event titles, places) travels only in the job, which BullMQ drops on completion or failure. */
     async enqueue(data: CallRequest): Promise<void> {
-      const log = callLog.create({ user_id: data.userId, tts_text: data.ttsText });
+      const log = callLog.create({ user_id: data.userId, event_id: data.eventId });
       try {
         await queue.add(
           'call-reminder',

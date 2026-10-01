@@ -73,7 +73,12 @@ export interface CallSessionConfig {
   openerText: string;
   unlink?: (path: string) => Promise<void>;
   sttErrorTimeoutMs?: number;
+  /** Silence after which the session speaks a check-in; defaults to 4 minutes. */
+  inactivityMs?: number;
 }
+
+/** Why the session hangs up once the phrase it is playing finishes. */
+type HangUpReason = 'stt-error' | 'agent-end-call';
 
 export class CallSession {
   private ended = false;
@@ -83,11 +88,11 @@ export class CallSession {
   private fluxStt: FluxStt | null = null;
   private thinking: ThinkingPlayer | null = null;
   private fileSeq = 0;
-  lastPlayFile: string | null = null;
+  private lastPlayFile: string | null = null;
   private tmpFiles = new Set<string>();
   private rollingTranscript = '';
   private pendingErrorPhrase: string | null = null;
-  private endCallAfterCurrentPlay = false;
+  private hangUpAfterPlay: HangUpReason | null = null;
   private sttErrorTimeout: ReturnType<typeof setTimeout> | null = null;
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly INACTIVITY_MS = 4 * 60 * 1000; // 4 minutes
@@ -177,13 +182,20 @@ export class CallSession {
     const openerText =
       this.cfg.openerText.trim() ||
       (this.cfg.language === 'ru' ? 'Привет! Чем могу помочь?' : 'Hello! How can I help you?');
+    await this.speak(openerText, 'opener');
+  }
+
+  /** Synthesizes `text` and plays it; false when nothing was sent to play. */
+  private async speak(text: string, what: string): Promise<boolean> {
     try {
-      const audio = await this.cfg.tts.synthesize(openerText, this.cfg.language);
+      const audio = await this.cfg.tts.synthesize(text, this.cfg.language);
       const file = this.tempFile();
       await Bun.write(file, audio);
       this.sendPlay(file);
+      return true;
     } catch (err) {
-      voiceLogger.error({ err, sessionId: this.cfg.sessionId }, 'Failed to synthesize opener');
+      voiceLogger.error({ err, sessionId: this.cfg.sessionId, what }, 'Failed to synthesize call speech');
+      return false;
     }
   }
 
@@ -268,22 +280,17 @@ export class CallSession {
       }
 
       if (endCall) {
-        this.endCallAfterCurrentPlay = true;
+        this.hangUpAfterPlay ??= 'agent-end-call';
       }
 
-      if (!responseText) return;
+      const spokenText = responseText ? fixLineBreaks(stripMarkdown(responseText)) : '';
+      if (spokenText) voiceLogger.info({ sessionId: this.cfg.sessionId, responseText: spokenText }, 'TTS response');
+      const played = spokenText !== '' && (await this.speak(spokenText, 'agent reply'));
 
-      const spokenText = fixLineBreaks(stripMarkdown(responseText));
-
-      voiceLogger.info({ sessionId: this.cfg.sessionId, responseText: spokenText }, 'TTS response');
-
-      try {
-        const audio = await this.cfg.tts.synthesize(spokenText, this.cfg.language);
-        const file = this.tempFile();
-        await Bun.write(file, audio);
-        this.sendPlay(file);
-      } catch (err) {
-        voiceLogger.error({ err, sessionId: this.cfg.sessionId }, 'TTS synthesis failed during call');
+      // Nothing will play, so no PLAY_DONE will come to hang up on. An STT error phrase already in flight
+      // ends the call itself (on its PLAY_DONE or its force-end timeout).
+      if (endCall && !played && this.sttErrorTimeout === null) {
+        this.hangUp('agent-end-call');
       }
     } finally {
       this.agentRunning = false;
@@ -291,8 +298,8 @@ export class CallSession {
   }
 
   private async onPlayDone(): Promise<void> {
-    const shouldEndCall = this.endCallAfterCurrentPlay;
-    this.endCallAfterCurrentPlay = false;
+    const hangUpReason = this.hangUpAfterPlay;
+    this.hangUpAfterPlay = null;
 
     if (this.lastPlayFile) {
       const del = this.cfg.unlink ?? fsUnlink;
@@ -304,16 +311,14 @@ export class CallSession {
     if (this.pendingErrorPhrase) {
       const file = this.pendingErrorPhrase;
       this.pendingErrorPhrase = null;
-      this.endCallAfterCurrentPlay = true;
+      this.hangUpAfterPlay = 'stt-error';
       this.send(JSON.stringify({ type: 'STOP' }));
       this.send(JSON.stringify({ type: 'PLAY', file }));
       return;
     }
 
-    if (shouldEndCall && !this.ended) {
-      voiceLogger.info({ sessionId: this.cfg.sessionId }, 'Ending call after STT error phrase');
-      this.onCallEnded();
-      this.cfg.ws.close();
+    if (hangUpReason) {
+      this.hangUp(hangUpReason);
       return;
     }
 
@@ -340,13 +345,14 @@ export class CallSession {
     this.inactivityTimer = setTimeout(() => {
       if (this.ended || this.agentRunning || this.speaking) return;
       voiceLogger.info({ sessionId: this.cfg.sessionId }, 'Inactivity check-in triggered');
+      // Spoken straight to the caller, never to the agent: the caller did not say it. Its PLAY_DONE
+      // resumes listening and re-arms this timer.
       const checkIn =
         this.cfg.language === 'ru'
           ? 'Ты ещё здесь? Могу ещё чем-то помочь?'
           : 'Are you still there? Is there anything else I can help you with?';
-      this.rollingTranscript = checkIn;
-      this.onEnoughToRespond();
-    }, CallSession.INACTIVITY_MS);
+      this.speak(checkIn, 'inactivity check-in');
+    }, this.cfg.inactivityMs ?? CallSession.INACTIVITY_MS);
   }
 
   private onCallEnded(): void {
@@ -359,7 +365,7 @@ export class CallSession {
     }
     this.speaking = false;
     this.pendingErrorPhrase = null;
-    this.endCallAfterCurrentPlay = false;
+    this.hangUpAfterPlay = null;
     this.thinking?.cancel();
     this.novaStt?.close();
     this.fluxStt?.close();
@@ -387,10 +393,17 @@ export class CallSession {
     if (this.lastPlayFile !== null) {
       this.pendingErrorPhrase = file;
     } else {
-      this.endCallAfterCurrentPlay = true;
+      this.hangUpAfterPlay = 'stt-error';
       this.send(JSON.stringify({ type: 'STOP' }));
       this.send(JSON.stringify({ type: 'PLAY', file }));
     }
+  }
+
+  private hangUp(reason: HangUpReason): void {
+    if (this.ended) return;
+    voiceLogger.info({ sessionId: this.cfg.sessionId, reason }, 'Hanging up');
+    this.onCallEnded();
+    this.cfg.ws.close();
   }
 
   private closeSttEpisode(): void {

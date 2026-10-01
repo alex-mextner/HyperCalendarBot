@@ -26,7 +26,7 @@ describe('CallLogRepository', () => {
   });
 
   test('create stores call log entry', () => {
-    const log = repo.create({ user_id: USER_ID, event_id: 1, tts_text: 'Meeting in 10 minutes' });
+    const log = repo.create({ user_id: USER_ID, event_id: 1 });
     expect(log.id).toBeGreaterThan(0);
     expect(log.status).toBe('queued');
   });
@@ -68,11 +68,11 @@ describe('CallLogRepository', () => {
   });
 
   test('getRecent returns latest calls', () => {
-    repo.create({ user_id: USER_ID, tts_text: 'First' });
-    repo.create({ user_id: USER_ID, tts_text: 'Second' });
+    repo.create({ user_id: USER_ID, event_id: 1 });
+    repo.create({ user_id: USER_ID, event_id: 2 });
     const recent = repo.getRecent(USER_ID, 5);
     expect(recent).toHaveLength(2);
-    expect(recent[0]!.tts_text).toBe('Second');
+    expect(recent[0]!.event_id).toBe(2);
   });
 
   // --- Red tests ---

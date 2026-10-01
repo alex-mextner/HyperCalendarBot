@@ -539,6 +539,7 @@ if (config.REDIS_URL && serviceTier.enabled && !config.DISABLE_VOICE) {
       pyBridgePath,
       registerSession: (sessionId, userId, language, openerText) =>
         callSessionManager.registerSession(sessionId, userId, language, openerText),
+      unregisterSession: (sessionId) => callSessionManager.unregisterSession(sessionId),
       notifyUser: (userId, msg) => {
         botRef
           .sendMessage(userId, msg)

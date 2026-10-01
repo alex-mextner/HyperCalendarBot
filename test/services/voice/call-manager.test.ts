@@ -47,6 +47,7 @@ function makeDeps(overrides: Partial<CallManagerDeps> = {}): CallManagerDeps {
     callLogRepo: makeCallLogRepo(),
     pyBridgePath: 'scripts/voice-call-bridge.py',
     registerSession: mock((..._args: Parameters<CallManagerDeps['registerSession']>) => {}),
+    unregisterSession: mock((..._args: Parameters<CallManagerDeps['unregisterSession']>) => {}),
     spawnProcess: makeSpawn(),
     ...overrides,
   };
@@ -185,4 +186,48 @@ test('spawns bridge with userId, sessionId, language args', async () => {
   expect(args).toContain('42');
   expect(args).toContain('my-session');
   expect(args).toContain('ru');
+});
+
+test('an unknown job language places the whole call in Russian', async () => {
+  const spawnProcess = makeSpawn(1);
+  const notifyUser = mock((_userId: number, _msg: string) => {});
+  const deps = makeDeps({ spawnProcess, notifyUser });
+  const manager = new CallManager(deps);
+  await manager.executeCall(makeJob({ userId: 5000000001, language: 'de', ttsText: 'Standup', sessionId: 'sess-de' }));
+  expect(deps.registerSession).toHaveBeenCalledWith('sess-de', 5000000001, 'ru', 'Standup');
+  expect(spawnProcess.mock.calls[0]![0].at(-1)).toBe('ru');
+  expect(notifyUser).toHaveBeenCalledWith(5000000001, expect.stringContaining('Не удалось дозвониться'));
+});
+
+const spawnThatFails: SpawnProcess = () => {
+  throw new Error('venv/bin/python: not found');
+};
+
+test.each<[string, SpawnProcess]>([
+  ['fails to start', spawnThatFails],
+  ['exits without ever connecting', makeSpawn(1)],
+])('a bridge that %s leaves no session waiting: a late WebSocket for it is refused', async (_label, spawnProcess) => {
+  const SESSION_ID = 'unconnected-session-5000000001';
+  const created: string[] = [];
+  const sessions = new CallSessionManager({
+    createSession: (sessionId) => {
+      created.push(sessionId);
+      return { handleMessage: async () => {}, handleBinaryMessage: () => {}, isEnded: () => false };
+    },
+  });
+  const manager = new CallManager(
+    makeDeps({
+      registerSession: (sessionId, userId, language, openerText) =>
+        sessions.registerSession(sessionId, userId, language, openerText),
+      unregisterSession: (sessionId) => sessions.unregisterSession(sessionId),
+      spawnProcess,
+    }),
+  );
+
+  await manager.executeCall(makeJob({ userId: 5000000001, sessionId: SESSION_ID }));
+
+  const ws = { send: mock((_data: string | Buffer) => {}), close: mock(() => {}) };
+  sessions.onWebSocketOpen(SESSION_ID, ws);
+  expect(ws.close).toHaveBeenCalledTimes(1);
+  expect(created).toEqual([]);
 });

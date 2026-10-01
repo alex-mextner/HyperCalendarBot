@@ -371,7 +371,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           enqueue: (userId: number, text: string) =>
             callQueue.enqueue({
               userId,
-              eventId: 0,
               ttsText: text,
               language: db.users.findByTelegramId(userId)?.language ?? 'en',
             }),
@@ -616,7 +615,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .command('delete', (ctx) => handleDelete(ctx, eventService, db.groupChats))
     .command('search', (ctx) => handleSearch(ctx, eventService, db.groupChats))
     .command('free', (ctx) => handleFree(ctx, eventService, holidayService, db.groupChats))
-    .command('settings', (ctx) => handleSettings(ctx, db.groupChats))
+    .command('settings', (ctx) => handleSettings(ctx, db.groupChats, callQueue !== undefined))
     .command('import', (ctx) => handleImport(ctx, scenesSetup.scenes.importScene, db.groupChats))
     .command('holidays', (ctx) => handleHolidays(ctx, holidayService, db.groupChats))
     .command('birthdays', (ctx) => handleBirthdays(ctx, birthdayService, db.groupChats, db.groupMembers))
@@ -742,7 +741,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           },
         },
         onboardingScene: scenesSetup.scenes.onboardingScene,
-        callSettingsRepo: db.callSettings,
+        // Call settings exist only while the bot can place calls; otherwise /settings hides them.
+        callSettingsRepo: callQueue ? db.callSettings : undefined,
         sharingSettingsRepo: db.sharingSettings,
         feedbackDeps: {
           feedbackRepo,

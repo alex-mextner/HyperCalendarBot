@@ -24,9 +24,14 @@ echo "[1/5] Cloning ntgcalls..."
 git clone --depth 1 https://github.com/pytgcalls/ntgcalls.git "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-# Patch setup.py for Debug build
+# Patch setup.py for Debug build: upstream picks the build type in one line,
+# `return 'RelWithDebInfo' if sys.platform.startswith('linux') else 'Release'`.
 echo "[2/5] Patching for Debug build..."
-sed -i.bak "s/return 'Release'/return 'Debug'/" setup.py
+sed -i.bak "s/^\([[:space:]]*\)return .*else 'Release'\$/\1return 'Debug'/" setup.py
+if ! grep -q "^[[:space:]]*return 'Debug'\$" setup.py; then
+  echo "ERROR: setup.py build-type line not found — upstream changed; refusing to build Release" >&2
+  exit 1
+fi
 
 # Patch macOS.cmake to add DEBUG define
 if [ "$(uname)" = "Darwin" ]; then

@@ -757,16 +757,10 @@ export class NotificationScheduler {
     const callSettings = this.deps.callSettingsRepo.get(userId);
     if (!callSettings?.enabled) return false;
 
-    if (callSettings.quiet_hours_start && callSettings.quiet_hours_end) {
-      const currentTime = format(new TZDate(nowUtc, timezone), 'HH:mm');
-      const start = callSettings.quiet_hours_start;
-      const end = callSettings.quiet_hours_end;
-      const inQuietHours =
-        start <= end ? currentTime >= start && currentTime < end : currentTime >= start || currentTime < end;
-      if (inQuietHours) {
-        notifyLogger.info({ userId }, 'Voice call skipped (quiet hours)');
-        return false;
-      }
+    const quiet = { enabled: true, start: callSettings.quiet_hours_start, end: callSettings.quiet_hours_end };
+    if (isQuietHours(quiet, nowUtc, timezone)) {
+      notifyLogger.info({ userId }, 'Voice call skipped (quiet hours)');
+      return false;
     }
 
     const localDayStartUtc = getDayRangeUtc(nowUtc, timezone).start;

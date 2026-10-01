@@ -156,6 +156,7 @@ export interface CallbackHandlerOpts {
     sendMessage: (chatId: number, text: string, options?: { parse_mode: ParseMode }) => Promise<void>;
     enqueueSyncJob?: (job: { type: string; userId: number; eventId: number; action: string }) => Promise<void>;
   };
+  /** Set only when the bot can place calls; without it /settings hides call reminders. */
   callSettingsRepo?: CallSettingsRepository;
   sharingSettingsRepo?: SharingSettingsRepository;
   feedbackDeps?: {
