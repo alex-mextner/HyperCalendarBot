@@ -1,7 +1,7 @@
 // src/database/repositories/birthday-metadata.repository.ts
 
 import type { Database } from 'bun:sqlite';
-import type { BirthdaySyncState, BirthEventMetadata } from '../types.ts';
+import type { BirthEventMetadata } from '../types.ts';
 
 export interface UpsertMetadataParams {
   event_id: number;
@@ -68,33 +68,5 @@ export class BirthdayMetadataRepository {
 
   deleteByEventId(eventId: number): void {
     this.db.prepare('DELETE FROM birth_event_metadata WHERE event_id = ?').run(eventId);
-  }
-
-  upsertSyncState(userId: number, syncedAt: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO birthday_sync_state (user_id, synced_at) VALUES (?, ?)
-         ON CONFLICT (user_id) DO UPDATE SET synced_at = excluded.synced_at`,
-      )
-      .run(userId, syncedAt);
-  }
-
-  getSyncState(userId: number): BirthdaySyncState | null {
-    return this.db
-      .prepare('SELECT * FROM birthday_sync_state WHERE user_id = ?')
-      .get(userId) as BirthdaySyncState | null;
-  }
-
-  getUsersNeedingSync(
-    maxAgeMs: number,
-  ): { telegram_id: number; first_name: string | null; language: string; timezone: string }[] {
-    const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
-    return this.db
-      .prepare(
-        `SELECT u.telegram_id, u.first_name, u.language, u.timezone FROM users u
-         LEFT JOIN birthday_sync_state s ON s.user_id = u.telegram_id
-         WHERE s.synced_at IS NULL OR s.synced_at < ?`,
-      )
-      .all(cutoff) as { telegram_id: number; first_name: string | null; language: string; timezone: string }[];
   }
 }

@@ -424,8 +424,6 @@ export interface CreateFeedbackMessageData {
   telegram_message_id?: number;
 }
 
-// --- Voice Call Reminders (sub-project 07) ---
-
 // --- Edit Proposals ---
 
 export type EditProposalStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
@@ -514,41 +512,6 @@ export interface CreateProposalData {
   expires_at: string;
 }
 
-// --- Voice Call Reminders (sub-project 07) ---
-
-export type CallStatus =
-  | 'queued'
-  | 'ringing'
-  | 'connected'
-  | 'completed'
-  | 'failed'
-  | 'no_answer'
-  | 'busy'
-  | 'cancelled';
-
-export interface UserCallSettings {
-  user_id: number;
-  enabled: number;
-  quiet_hours_start: string | null;
-  quiet_hours_end: string | null;
-  max_daily_calls: number;
-  language: string;
-  important_only: number;
-  updated_at: string;
-}
-
-export interface CallLog {
-  id: number;
-  user_id: number;
-  event_id: number | null;
-  status: CallStatus;
-  duration_sec: number | null;
-  tts_text: string | null;
-  error: string | null;
-  created_at: string;
-  completed_at: string | null;
-}
-
 // --- Birthday Events ---
 
 export interface BirthEventMetadata {
@@ -556,11 +519,6 @@ export interface BirthEventMetadata {
   celebrant_id: number | null;
   birth_year: number | null;
   auto_created: number; // 0 | 1
-}
-
-export interface BirthdaySyncState {
-  user_id: number;
-  synced_at: string;
 }
 
 export interface WorkflowSession {
@@ -713,7 +671,8 @@ export interface TelegramSession {
   updated_at: string;
 }
 
-export type NotificationLogChannel = 'telegram_text' | 'voice_call' | 'mtproto_admin' | 'mtproto_user';
+/** 'mtproto_user' = delivered via the requesting user's own connected Telegram session; name kept because it is a persisted value. */
+export type NotificationLogChannel = 'telegram_text' | 'mtproto_user';
 
 // --- Notification Log ---
 

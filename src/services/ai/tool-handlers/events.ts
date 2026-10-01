@@ -781,9 +781,6 @@ export async function handleDeleteConfirmationRequest(ctx: AgentContext, eventId
     return { success: false, mutationState: 'not_applied', error: tr.deleteTargetsNotFound(missing.join(', ')) };
   }
   const text = renderDeleteConfirmation(targets, ctx.user.timezone, lang, now);
-  // A call has no buttons, and a spoken answer is only the model's reading of it. So the call
-  // gets the same list in the private chat, and only a tap there deletes (ctx.chatId is the
-  // caller's private chat during a call).
   if (!ctx.sender?.sendMessageWithKeyboard) {
     return { success: false, mutationState: 'not_applied', error: 'Buttons not supported.' };
   }
@@ -801,17 +798,6 @@ export async function handleDeleteConfirmationRequest(ctx: AgentContext, eventId
       success: false,
       mutationState: 'not_applied',
       error: 'ASK_USER_DELIVERY_FAILED: failed to send the delete confirmation.',
-    };
-  }
-  if (ctx.inputMode === 'live_call') {
-    const spoken = tr.deleteConfirmationSentToChat;
-    return {
-      success: true,
-      mutationState: 'not_applied',
-      output: spoken,
-      awaitingInput: { kind: 'speech', question: spoken },
-      stopLoop: true,
-      agentHint: 'Nothing is deleted on the call: the user taps the list in the chat. Do not call delete_event.',
     };
   }
   return {

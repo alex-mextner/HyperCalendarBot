@@ -2,8 +2,6 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { z } from 'zod';
 import { migrations } from '../../../src/database/migrations.ts';
-import { CallLogRepository } from '../../../src/database/repositories/call-log.repository.ts';
-import { CallSettingsRepository } from '../../../src/database/repositories/call-settings.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
@@ -83,49 +81,6 @@ describe('NotificationScheduler', () => {
     );
     await scheduler.tick(new Date('2026-03-15T08:00:30Z'));
     expect(enqueued.some((e) => e.type === 'morning_agenda')).toBe(true);
-  });
-
-  test('skips voice call during call-specific quiet hours', async () => {
-    db.run('INSERT INTO users (telegram_id) VALUES (42)');
-    db.run(
-      "INSERT INTO events (id, user_id, title, start_at, timezone) VALUES (1, 42, 'Call', '2026-03-15T10:00:00Z', 'UTC')",
-    );
-    db.run(
-      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T23:45:00Z', 15, '15 minutes')",
-    );
-
-    const callEnqueued: { userId: number; eventId: number }[] = [];
-    const callScheduler = new NotificationScheduler({
-      prefsRepo: new NotificationPreferencesRepository(db),
-      reminderRepo: new EventReminderRepository(db),
-      logRepo: new NotificationLogRepository(db),
-      userRepo: new UserRepository(db),
-      getEventsInRange: makeGetEventsInRange(db),
-      enqueue: mock(() => {}),
-      callSettingsRepo: {
-        isEnabled: mock(() => true),
-        get: mock(() => ({
-          user_id: 42,
-          enabled: 1,
-          max_daily_calls: 5,
-          language: 'en',
-          quiet_hours_start: '22:00',
-          quiet_hours_end: '08:00',
-          important_only: 0,
-          updated_at: '',
-        })),
-      } as never,
-      callLogRepo: {
-        countTodayCalls: mock(() => 0),
-      } as never,
-      enqueueCall: mock((data: { userId: number; eventId: number }) => {
-        callEnqueued.push(data);
-      }) as never,
-    });
-
-    // 23:45 UTC is within quiet hours 22:00-08:00
-    await callScheduler.tick(new Date('2026-03-15T23:45:30Z'));
-    expect(callEnqueued.length).toBe(0);
   });
 
   test('batches multiple reminders at same time for same user into one job', async () => {
@@ -210,49 +165,6 @@ describe('NotificationScheduler', () => {
     // Monday 2026-03-16 at 03:00 UTC (day=1 not Sunday=0)
     await cleanupScheduler.tick(new Date('2026-03-16T03:00:30Z'));
     expect(cleanupSpy.called).toBe(false);
-  });
-
-  test('enqueues voice call outside call-specific quiet hours', async () => {
-    db.run('INSERT INTO users (telegram_id) VALUES (42)');
-    db.run(
-      "INSERT INTO events (id, user_id, title, start_at, timezone) VALUES (1, 42, 'Call', '2026-03-15T15:00:00Z', 'UTC')",
-    );
-    db.run(
-      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T14:45:00Z', 15, '15 minutes')",
-    );
-
-    const callEnqueued: { userId: number; eventId: number }[] = [];
-    const callScheduler = new NotificationScheduler({
-      prefsRepo: new NotificationPreferencesRepository(db),
-      reminderRepo: new EventReminderRepository(db),
-      logRepo: new NotificationLogRepository(db),
-      userRepo: new UserRepository(db),
-      getEventsInRange: makeGetEventsInRange(db),
-      enqueue: mock(() => {}),
-      callSettingsRepo: {
-        isEnabled: mock(() => true),
-        get: mock(() => ({
-          user_id: 42,
-          enabled: 1,
-          max_daily_calls: 5,
-          language: 'en',
-          quiet_hours_start: '22:00',
-          quiet_hours_end: '08:00',
-          important_only: 0,
-          updated_at: '',
-        })),
-      } as never,
-      callLogRepo: {
-        countTodayCalls: mock(() => 0),
-      } as never,
-      enqueueCall: mock((data: { userId: number; eventId: number }) => {
-        callEnqueued.push(data);
-      }) as never,
-    });
-
-    // 14:45 UTC is outside quiet hours 22:00-08:00
-    await callScheduler.tick(new Date('2026-03-15T14:45:30Z'));
-    expect(callEnqueued.length).toBe(1);
   });
 
   test('event_reminder payload is formatted text, not raw event JSON', async () => {
@@ -760,10 +672,7 @@ describe('resolved place in reminders and agendas', () => {
    * events whose typed text has a resolved place with the given verification state. Without typed
    * text the place is one a pin set: reverse geocoding gives an address and a map link, no venue.
    */
-  async function deliver(
-    verified: 0 | 1,
-    typed: string | null = 'sonder',
-  ): Promise<{ texts: { [type: string]: string }; spoken: string[] }> {
+  async function deliver(verified: 0 | 1, typed: string | null = 'sonder'): Promise<{ [type: string]: string }> {
     const placeDb = setupDb();
     placeDb.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
     placeDb.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");
@@ -784,14 +693,8 @@ describe('resolved place in reminders and agendas', () => {
     insertReminder.run(2, '2026-03-15T11:45:00Z');
     insertReminder.run(3, '2026-03-15T11:45:00Z');
 
-    const callSettingsRepo = new CallSettingsRepository(placeDb);
-    callSettingsRepo.ensureDefaults(42);
-    callSettingsRepo.setEnabled(42, true);
-    callSettingsRepo.setQuietHours(42, null, null);
-
     const logRepo = new NotificationLogRepository(placeDb);
     const texts: { [type: string]: string } = {};
-    const spoken: string[] = [];
     const placeScheduler = new NotificationScheduler({
       prefsRepo: new NotificationPreferencesRepository(placeDb),
       reminderRepo: new EventReminderRepository(placeDb),
@@ -803,20 +706,15 @@ describe('resolved place in reminders and agendas', () => {
         // Reminder payloads carry the rendered text in JSON; the agenda payload is the text itself.
         texts[type] = type.startsWith('event_reminder') ? ReminderPayload.parse(JSON.parse(payload)).text : payload;
       },
-      callSettingsRepo,
-      callLogRepo: new CallLogRepository(placeDb),
-      enqueueCall: (data) => {
-        if (data.eventId === 1) spoken.push(data.ttsText);
-      },
     });
     await placeScheduler.tick(new Date('2026-03-15T08:00:30Z'));
     await placeScheduler.tick(new Date('2026-03-15T09:45:30Z'));
     await placeScheduler.tick(new Date('2026-03-15T11:45:30Z'));
-    return { texts, spoken };
+    return texts;
   }
 
-  test('an unconfirmed place shows only the typed text in reminders, the agenda and the reminder call', async () => {
-    const { texts, spoken } = await deliver(0);
+  test('an unconfirmed place shows only the typed text in reminders and the agenda', async () => {
+    const texts = await deliver(0);
     expect(Object.keys(texts).sort()).toEqual(['event_reminder', 'event_reminder_batch', 'morning_agenda']);
     for (const [type, text] of Object.entries(texts)) {
       expect({ type, text }).toEqual({ type, text: expect.stringContaining('>sonder</a>') });
@@ -825,23 +723,18 @@ describe('resolved place in reminders and agendas', () => {
       expect({ type, text }).toEqual({ type, text: expect.not.stringContaining('Sonder Hotel') });
       expect({ type, text }).toEqual({ type, text: expect.not.stringContaining('dutch-hotel') });
     }
-    expect(spoken).toHaveLength(1);
-    expect(spoken[0]).toContain('sonder');
-    expect(spoken[0]).not.toContain('Sonder Hotel');
   });
 
-  test('a confirmed place shows "Venue — Address" with its map link and the call speaks the venue', async () => {
-    const { texts, spoken } = await deliver(1);
+  test('a confirmed place shows "Venue — Address" with its map link', async () => {
+    const texts = await deliver(1);
     expect(Object.keys(texts).sort()).toEqual(['event_reminder', 'event_reminder_batch', 'morning_agenda']);
     for (const [type, text] of Object.entries(texts)) {
       expect({ type, text }).toEqual({ type, text: expect.stringContaining(`📍 ${confirmedLink}`) });
     }
-    expect(spoken).toHaveLength(1);
-    expect(spoken[0]).toContain('Sonder Hotel');
   });
 
   test('a place confirmed with a pin on an event without typed text shows in reminders and the agenda', async () => {
-    const { texts } = await deliver(1, null);
+    const texts = await deliver(1, null);
     expect(Object.keys(texts).sort()).toEqual(['event_reminder', 'event_reminder_batch', 'morning_agenda']);
     for (const [type, text] of Object.entries(texts)) {
       expect({ type, text }).toEqual({
@@ -854,7 +747,7 @@ describe('resolved place in reminders and agendas', () => {
   });
 
   test('a stale unconfirmed place on an event without typed text shows no place', async () => {
-    const { texts } = await deliver(0, null);
+    const texts = await deliver(0, null);
     expect(Object.keys(texts).sort()).toEqual(['event_reminder', 'event_reminder_batch', 'morning_agenda']);
     for (const [type, text] of Object.entries(texts)) {
       expect({ type, text }).toEqual({ type, text: expect.not.stringContaining('📍') });

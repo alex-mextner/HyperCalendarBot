@@ -1,18 +1,22 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
+import { BirthdayMetadataRepository } from '../../../src/database/repositories/birthday-metadata.repository.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
+import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { UserMemoryRepository } from '../../../src/database/repositories/user-memory.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { EventOccurrence } from '../../../src/database/types.ts';
 import { tagSender } from '../../../src/services/ai/agent.ts';
-import { buildSystemPrompt } from '../../../src/services/ai/system-prompt.ts';
+import { buildSystemPrompt, buildUserProfileEvidence } from '../../../src/services/ai/system-prompt.ts';
 import { executeTool } from '../../../src/services/ai/tool-executor.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
+import { BirthdayService } from '../../../src/services/birthday/birthday-service.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import type { AddressCache } from '../../../src/services/location/address-cache.ts';
@@ -126,7 +130,7 @@ describe('buildSystemPrompt', () => {
   });
 
   test('every tool the prompt stopped naming is still offered in the tool catalog', () => {
-    const offered = getToolDefinitions('text')
+    const offered = getToolDefinitions()
       .filter((t) => t.type === 'function')
       .map((t) => t.function.name);
     for (const name of TOOLS_DESCRIBED_ONLY_BY_THE_CATALOG) {
@@ -135,7 +139,7 @@ describe('buildSystemPrompt', () => {
   });
 
   test('prompt does not name update_sharing_settings, which is not a tool', () => {
-    const offered = getToolDefinitions('text')
+    const offered = getToolDefinitions()
       .filter((t) => t.type === 'function')
       .map((t) => t.function.name);
     expect(offered).not.toContain('update_sharing_settings');
@@ -763,6 +767,34 @@ describe('buildSystemPrompt', () => {
       const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: places(['Home — Knez Mihailova 1']) });
       expect(prompt).toContain('- Home — Knez Mihailova 1');
       expect(prompt).not.toContain('more not listed');
+    });
+  });
+
+  describe('buildUserProfileEvidence', () => {
+    test('produces a User Info section even when ctx.birthday is undefined', () => {
+      const noBirthday = { ...ctx, birthday: undefined };
+      const profile = buildUserProfileEvidence(noBirthday);
+
+      expect(profile).toContain('Test');
+      expect(profile).toContain('Europe/Kyiv');
+      expect(profile).toContain('en');
+      expect(profile).not.toContain('What I Know About You');
+    });
+
+    test('includes saved memory facts when birthday capability is present', () => {
+      const userMemoryRepo = new UserMemoryRepository(db);
+      userMemoryRepo.append(USER_ID, 'Likes cello');
+      const birthdayService = new BirthdayService(
+        new EventRepository(db),
+        new BirthdayMetadataRepository(db),
+        new EventReminderRepository(db),
+        new NotificationPreferencesRepository(db),
+      );
+      const withMemory = { ...ctx, birthday: { birthdayService, userMemoryRepo } };
+      const profile = buildUserProfileEvidence(withMemory);
+
+      expect(profile).toContain('Likes cello');
+      expect(profile).toContain('What I Know About You');
     });
   });
 });

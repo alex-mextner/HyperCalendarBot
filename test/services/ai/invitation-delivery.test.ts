@@ -70,7 +70,7 @@ describe('deliverInvitation', () => {
     invitationId: number;
     deps: InvitationDeliveryDeps;
     event?: CalendarEvent | null;
-    allowMtproto?: boolean;
+    allowInviterSession?: boolean;
     lang?: 'en' | 'ru';
     inviterLang?: 'en' | 'ru';
   }): DeliverInvitationParams {
@@ -86,7 +86,7 @@ describe('deliverInvitation', () => {
       lang: opts.lang ?? 'en',
       inviterLang: opts.inviterLang ?? opts.lang ?? 'en',
       fallbackChatId: INVITER_ID,
-      allowMtproto: opts.allowMtproto,
+      allowInviterSession: opts.allowInviterSession,
       deps: opts.deps,
     };
   }
@@ -134,20 +134,45 @@ describe('deliverInvitation', () => {
     expect(stored?.chat_id).toBe(INVITEE_ID);
   });
 
-  test('bot API fails, connected-user MTProto succeeds → delivered, no deep link', async () => {
+  test('invitee who never started the bot: Bot API, then the inviter own session, then a deep link to the inviter', async () => {
+    const invId = createInvitation();
+    const attempts: string[] = [];
+    const sender = makeSender({
+      sendInvitation: async (chatId) => {
+        attempts.push(`bot-api:${chatId}`);
+        return null;
+      },
+      sendAsConnectedUser: async (inviterId, targetId) => {
+        attempts.push(`inviter-session:${inviterId}->${targetId}`);
+        return false;
+      },
+      sendMessage: async (chatId, text) => {
+        attempts.push(`to-inviter:${chatId}:${text.includes('t.me/TestBot?start=') ? 'link' : 'no-link'}`);
+        return { message_id: 1 };
+      },
+    });
+
+    const result = await deliverInvitation(
+      baseParams({ invitationId: invId, deps: makeDeps(sender), event: seedEvent }),
+    );
+
+    expect(attempts).toEqual([
+      `bot-api:${INVITEE_ID}`,
+      `inviter-session:${INVITER_ID}->${INVITEE_ID}`,
+      `to-inviter:${INVITER_ID}:link`,
+    ]);
+    expect(result).toEqual({ delivered: false, viaDeepLink: true, viaBotApi: false });
+  });
+
+  test("bot API fails, the inviter's own session succeeds → delivered, no deep link", async () => {
     const invId = createInvitation();
     const event = seedEvent;
     let connectedCalled = false;
-    let adminCalled = false;
     const sender = makeSender({
       sendInvitation: async () => null,
       sendAsConnectedUser: async () => {
         connectedCalled = true;
         return true;
-      },
-      sendAsUser: async () => {
-        adminCalled = true;
-        return false;
       },
     });
 
@@ -155,7 +180,6 @@ describe('deliverInvitation', () => {
 
     expect(result).toEqual({ delivered: true, viaDeepLink: false, viaBotApi: false });
     expect(connectedCalled).toBe(true);
-    expect(adminCalled).toBe(false);
   });
 
   test('first-person text from the inviter account names the verified place with a map link', async () => {
@@ -197,9 +221,9 @@ describe('deliverInvitation', () => {
     expect(firstPersonTexts[0]).not.toContain('кафе у парка');
   });
 
-  test('bot API fails, MTProto returns false → deep-link fallback sent to inviter', async () => {
+  test("allowInviterSession:false + bot API fails → the inviter's session is skipped, deep-link fallback", async () => {
     const invId = createInvitation();
-    let mtprotoCalled = false;
+    let sessionCalled = false;
     const sentMessages: { chatId: number; text: string }[] = [];
     const sender = makeSender({
       sendMessage: async (chatId, text) => {
@@ -207,43 +231,18 @@ describe('deliverInvitation', () => {
         return { message_id: 1 };
       },
       sendInvitation: async () => null,
-      sendAsUser: async () => {
-        mtprotoCalled = true;
-        return false;
-      },
-    });
-
-    const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
-
-    expect(result).toEqual({ delivered: false, viaDeepLink: true, viaBotApi: false });
-    expect(mtprotoCalled).toBe(true);
-    const fallback = sentMessages.find((m) => m.chatId === INVITER_ID);
-    expect(fallback).toBeDefined();
-    expect(fallback!.text).toContain('t.me/TestBot');
-  });
-
-  test('allowMtproto:false + bot API fails → MTProto skipped, deep-link fallback', async () => {
-    const invId = createInvitation();
-    let mtprotoCalled = false;
-    const sentMessages: { chatId: number; text: string }[] = [];
-    const sender = makeSender({
-      sendMessage: async (chatId, text) => {
-        sentMessages.push({ chatId, text });
-        return { message_id: 1 };
-      },
-      sendInvitation: async () => null,
-      sendAsUser: async () => {
-        mtprotoCalled = true;
+      sendAsConnectedUser: async () => {
+        sessionCalled = true;
         return true;
       },
     });
 
     const result = await deliverInvitation(
-      baseParams({ invitationId: invId, deps: makeDeps(sender), allowMtproto: false }),
+      baseParams({ invitationId: invId, deps: makeDeps(sender), allowInviterSession: false, event: seedEvent }),
     );
 
     expect(result).toEqual({ delivered: false, viaDeepLink: true, viaBotApi: false });
-    expect(mtprotoCalled).toBe(false);
+    expect(sessionCalled).toBe(false);
     const fallback = sentMessages.find((m) => m.chatId === INVITER_ID);
     expect(fallback!.text).toContain('t.me/TestBot');
   });
@@ -260,7 +259,7 @@ describe('deliverInvitation', () => {
     });
 
     const result = await deliverInvitation({
-      ...baseParams({ invitationId: invId, deps: makeDeps(sender), allowMtproto: false }),
+      ...baseParams({ invitationId: invId, deps: makeDeps(sender), allowInviterSession: false }),
       isGroupTarget: true,
     });
 
@@ -284,7 +283,7 @@ describe('deliverInvitation', () => {
     });
 
     const result = await deliverInvitation({
-      ...baseParams({ invitationId: invId, deps: makeDeps(sender), allowMtproto: false, event: seedEvent }),
+      ...baseParams({ invitationId: invId, deps: makeDeps(sender), allowInviterSession: false, event: seedEvent }),
       isGroupTarget: true,
     });
 
@@ -347,26 +346,28 @@ describe('deliverInvitation', () => {
     expect(fallback!.text).not.toContain('t.me');
   });
 
-  test('bot API + MTProto fail and deep-link fallback throws → not delivered, viaDeepLink false', async () => {
+  test("bot API + the inviter's session fail and deep-link fallback throws → not delivered, viaDeepLink false", async () => {
     const invId = createInvitation();
-    let mtprotoCalled = false;
+    let sessionCalled = false;
     const sender = makeSender({
       sendMessage: async () => {
         throw new Error('inviter blocked the bot');
       },
       sendInvitation: async () => null,
-      sendAsUser: async () => {
-        mtprotoCalled = true;
+      sendAsConnectedUser: async () => {
+        sessionCalled = true;
         return false;
       },
     });
 
-    const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
+    const result = await deliverInvitation(
+      baseParams({ invitationId: invId, deps: makeDeps(sender), event: seedEvent }),
+    );
 
     // The link existed but the fallback message never reached the inviter → no honest
     // claim of "link sent" can be made.
     expect(result).toEqual({ delivered: false, viaDeepLink: false, viaBotApi: false });
-    expect(mtprotoCalled).toBe(true);
+    expect(sessionCalled).toBe(true);
   });
 
   test('fallback to inviter uses inviter language; invitee message uses invitee language', async () => {
@@ -382,7 +383,6 @@ describe('deliverInvitation', () => {
         if (chatId === INVITER_ID) sentToInviter.push(text);
         return { message_id: 1 };
       },
-      sendAsUser: async () => false,
     });
 
     // Invitee speaks English, inviter speaks Russian. event:null → invitation_received text.
@@ -442,7 +442,6 @@ describe('deliverInvitation', () => {
         return { message_id: 1 };
       },
       sendInvitation: async () => null,
-      sendAsUser: async () => false,
     });
     spyOn(deepLinkService, 'createInvitationLink').mockImplementation(() => {
       throw new Error('deep-link creation failed');
@@ -484,7 +483,6 @@ describe('deliverInvitation', () => {
     const invId = createInvitation();
     const sender = makeSender({
       sendInvitation: async () => null,
-      sendAsUser: async () => false,
       sendMessage: async () => blocked403(),
     });
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));

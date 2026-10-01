@@ -8,7 +8,6 @@
     "lint:fix": "biome check --fix .",
     "format": "biome format --write .",
     "start": "bun run src/index.ts",
-    "test:call": "bun run scripts/test-call.ts",
     "postinstall": "sh scripts/install-git-hooks.sh",
     "docs:intents": "bun --no-env-file scripts/generate-intent-docs.ts",
     "docs:intents:check": "bun --no-env-file scripts/generate-intent-docs.ts --check"
@@ -32,7 +31,8 @@
     "ws": "^8.21.0",
     "form-data": "^4.0.6",
     "@xmldom/xmldom": "^0.8.13",
-    "js-yaml": "^4.3.0"
+    "js-yaml": "^4.3.0",
+    "brace-expansion": "^2.1.6"
   },
   "dependencies": {
     "@date-fns/tz": "^1.4.1",

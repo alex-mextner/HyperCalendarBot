@@ -8,7 +8,6 @@ export const FEATURE_KEYS = {
   REMINDERS: 'reminders',
   SHARING: 'sharing',
   GOOGLE_CALENDAR: 'google_calendar',
-  VOICE_CALLS: 'voice_calls',
   CONTACTS: 'contacts',
   HOLIDAYS: 'holidays',
   IMPORT: 'import',

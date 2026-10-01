@@ -13,7 +13,7 @@ const GROUPS: Readonly<Record<string, readonly string[]>> = {
     'set_event_visibility',
     'snooze_event',
   ],
-  reminders: ['set_reminder', 'get_reminders', 'make_call'],
+  reminders: ['set_reminder', 'get_reminders'],
   contacts: [
     'find_user',
     'get_contacts',
@@ -65,7 +65,6 @@ const GROUPS: Readonly<Record<string, readonly string[]>> = {
     'cancel_scene',
     'set_reaction',
     'end_conversation',
-    'end_call',
     'supplement_skip',
     'get_bot_info',
     'send_feedback',
@@ -115,7 +114,7 @@ function rawRequestIsBounded(input: unknown): boolean {
 }
 
 /**
- * Construct from getToolDefinitions(inputMode, supplementMode), NOT
+ * Construct from getToolDefinitions(supplementMode), NOT
  * a global catalog. This is a per-request discovery view, not an execution grant.
  * index() carries summaries; describe() returns the unchanged full JSON schemas.
  * Neither method reads user data, invokes tools or changes production routing.

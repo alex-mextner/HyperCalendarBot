@@ -27,8 +27,8 @@ RUN apt-get update && \
 
 RUN ln -s /usr/local/bin/bun /usr/local/bin/node
 
-# Python venv — pyrogram-only deps for birthday/username/message scripts.
-# Heavy deps (torch, ntgcalls, silero) run on host, not in container.
+# Python venv — Pyrogram deps for the /connect_telegram scripts (connect-session.py, send-as-user.py).
+# Heavy deps (torch, silero) run on host, not in container.
 COPY requirements.docker.txt ./
 RUN python3 -m venv venv && \
     uv pip install --no-cache-dir -r requirements.docker.txt --python venv/bin/python

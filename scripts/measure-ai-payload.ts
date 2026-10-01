@@ -58,7 +58,6 @@ function buildVariants(base: AgentContext): Variant[] {
   return [
     { label: 'DM (default)', ctx: { ...base, inputMode: 'text' } },
     { label: 'group', ctx: { ...base, inputMode: 'text', isGroup: true, groupTitle: 'Team', groupChatId: -100 } },
-    { label: 'live_call', ctx: { ...base, inputMode: 'live_call' } },
     {
       label: 'supplement',
       ctx: { ...base, inputMode: 'text', supplementMode: true, supplementAutoResponse: 'Событие создано.' },
@@ -77,7 +76,7 @@ interface Row {
 }
 
 function measure({ label, ctx }: Variant, schemas: 'full' | 'lazy_initial' | 'lazy_read' = 'full'): Row {
-  const allTools = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
+  const allTools = getToolDefinitions(ctx.supplementMode);
   const exposure = schemas === 'full' ? undefined : createToolExposure(allTools);
   if (exposure && schemas === 'lazy_read') {
     const result = exposure.intercept(

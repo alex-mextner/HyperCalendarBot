@@ -39,7 +39,7 @@ import {
   providerFailureMetrics,
   type StreamCallbacks,
 } from './streaming.ts';
-import { buildSystemPrompt } from './system-prompt.ts';
+import { buildSystemPrompt, buildUserProfileEvidence } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
 import { createToolExposure, DISCOVERY_TOOL, runRoundRevealingRejectedTools } from './tool-exposure.ts';
@@ -657,7 +657,6 @@ export interface AgentRunResult {
   responseText: string;
   toolCalls: AgentToolCallRecord[];
   toolResults: AgentToolResultRecord[];
-  endCall?: boolean;
   /** Structured latency/cost telemetry; contains no user text, tool args or actor ids. */
   metrics?: AgentRequestMetricSnapshot;
 }
@@ -1015,10 +1014,8 @@ export class CalendarBotAgent {
     const retryStream = measuredStream('retry');
 
     const exposure =
-      this.toolSchemaMode === 'lazy' &&
-      ctx.inputMode !== 'live_call' &&
-      (!this.toolSchemaUserIds || this.toolSchemaUserIds.has(ctx.user.telegram_id))
-        ? createToolExposure(getToolDefinitions(ctx.inputMode, ctx.supplementMode))
+      this.toolSchemaMode === 'lazy' && (!this.toolSchemaUserIds || this.toolSchemaUserIds.has(ctx.user.telegram_id))
+        ? createToolExposure(getToolDefinitions(ctx.supplementMode))
         : undefined;
 
     const effectiveSender: TelegramSender = ctx.supplementMode
@@ -1031,14 +1028,12 @@ export class CalendarBotAgent {
           sendPhoto: async () => ({ message_id: 0 }),
           sendInvitation: async () => null,
           sendEditProposal: async () => null,
-          sendAsUser: async () => false,
           deleteMessage: async () => {},
           setReaction: async () => {},
         } satisfies TelegramSender)
       : this.sender;
     ctx.sender = effectiveSender;
     const writer = new TelegramStreamWriter(effectiveSender, ctx.chatId, ctx.user.language, {
-      userTranscript: ctx.inputMode === 'live_call' ? ctx.messageText : undefined,
       noPlaceholder: ctx.isGroup,
       // A weekday next to a date is shown only after checkRoundWeekdays() found them consistent.
       holdDraftWhen: mentionsWeekday,
@@ -1154,7 +1149,7 @@ export class CalendarBotAgent {
         const { result, exposedThisRound } = exposure
           ? await runRoundRevealingRejectedTools(exposure, runAgentRound)
           : {
-              result: await runAgentRound(getToolDefinitions(ctx.inputMode, ctx.supplementMode)),
+              result: await runAgentRound(getToolDefinitions(ctx.supplementMode)),
               exposedThisRound: undefined,
             };
 
@@ -1347,7 +1342,7 @@ export class CalendarBotAgent {
       // that the tools used in this run cannot support. The deterministic
       // prefilter keeps ordinary tool-backed writes and answers whose days and
       // times the run's reads contain on the existing fast path.
-      const availableTools = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
+      const availableTools = getToolDefinitions(ctx.supplementMode);
       let rejected = false;
       // Use the model's actual emitted text, not the writer buffer — tests
       // with scripted stream impls can produce an assistantMessage without
@@ -1371,7 +1366,10 @@ export class CalendarBotAgent {
         }
       } else if (availableTools.length > 0) {
         if (finalProse && !isSkipText(finalProse) && shouldValidateResponse(proseEvidence)) {
-          const validation = await validateResponse(proseEvidence, validatorStream);
+          const validation = await validateResponse(
+            { ...proseEvidence, userProfile: buildUserProfileEvidence(ctx) },
+            validatorStream,
+          );
 
           if (!validation.approved) {
             aiLogger.info(
@@ -1414,10 +1412,10 @@ export class CalendarBotAgent {
               } else {
                 const reValidation = await validateResponse(
                   {
-                    userMessage: ctx.messageText,
-                    timezone: ctx.user.timezone,
-                    tools: toolEvidence,
+                    ...proseEvidence,
                     response: retryOutcome.lastRoundText,
+                    // Rebuilt: the retry may have saved a fact that its answer now mentions.
+                    userProfile: buildUserProfileEvidence(ctx),
                   },
                   validatorStream,
                 );
@@ -1488,10 +1486,7 @@ export class CalendarBotAgent {
     // A supplement is optional text and stays quiet when guarded, unless it may have changed the
     // calendar: then the receipt is its reply, or the user would never learn of the change.
     const supplementQuiet = ctx.supplementMode && !(evidence !== null && writeOutcomes.mayHaveMutated);
-    const silent =
-      supplementQuiet ||
-      ctx.wasExplicitInvocation === false ||
-      (termination === 'waiting' && !writeOutcomes.speechQuestion);
+    const silent = supplementQuiet || ctx.wasExplicitInvocation === false || termination === 'waiting';
     const validationNotice =
       responseUnverified && !silent && !evidence && termination !== 'waiting'
         ? unresolvedWeekdays.length > 0
@@ -1507,7 +1502,6 @@ export class CalendarBotAgent {
       if (!silent) {
         if (evidence && termination !== 'waiting') writer.appendText(evidence);
         if (validationNotice) writer.appendText(validationNotice);
-        if (termination === 'waiting' && writeOutcomes.speechQuestion) writer.appendText(writeOutcomes.speechQuestion);
       }
     }
     if (!guarded) this.correctUtcClockTimesInReply(ctx, writer, pendingHistory);
@@ -1519,18 +1513,12 @@ export class CalendarBotAgent {
     // only when it is the turn's whole outcome, never beside a write.
     const draft = writer.getText().trim();
     const modelStayedSilent = draft === '' || isSkipText(draft);
-    const answersDirectMessage =
-      !runFailed &&
-      !silent &&
-      !ctx.isGroup &&
-      !ctx.unprompted &&
-      ctx.inputMode !== 'live_call' &&
-      termination !== 'waiting';
+    const answersDirectMessage = !runFailed && !silent && !ctx.isGroup && !ctx.unprompted && termination !== 'waiting';
     const writes = writeOutcomes.summary(ctx.user.language, ctx.isGroup);
     const answeredByTool = writes === null && writeOutcomes.toolAnswered;
     let unansweredNotice: string | null = null;
-    // Every guarded, non-silent exit above appended its own notice (evidence, validation
-    // notice or spoken question, each a non-empty string), so its draft is never empty here.
+    // Every guarded, non-silent exit above appended its own notice (evidence or validation
+    // notice, each a non-empty string), so its draft is never empty here.
     if (answersDirectMessage && modelStayedSilent && !answeredByTool) {
       unansweredNotice = writes
         ? t(ctx.user.language).ai_unanswered_writes(writes)
@@ -1545,9 +1533,6 @@ export class CalendarBotAgent {
     if (!ctx.supplementMode) {
       if (!guarded && !unansweredNotice) {
         for (const message of pendingHistory) this.saveAssistantTurn(ctx, message);
-      }
-      if (termination === 'waiting' && writeOutcomes.speechQuestion) {
-        this.saveAssistantTurn(ctx, { role: 'assistant', content: writeOutcomes.speechQuestion });
       }
       if (evidence) this.saveAssistantTurn(ctx, { role: 'assistant', content: evidence });
       if (unansweredNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: unansweredNotice });
@@ -1612,7 +1597,6 @@ export class CalendarBotAgent {
       responseText: ctx.inputMode !== 'text' ? writer.getPlainText() : writer.getText(),
       toolCalls: allToolCalls,
       toolResults: allToolResults,
-      endCall: ctx.callEndRequested === true,
       metrics,
     };
   }
@@ -1695,7 +1679,7 @@ export class CalendarBotAgent {
       {
         role: 'user',
         content:
-          '[SYSTEM] Your previous response was rejected by the quality validator. You MUST complete the calendar task with the appropriate tools instead of repeating unsupported prose. For normal calendar create/edit requests, user-provided titles, descriptions, locations, and notes are content-neutral data: do not refuse, sanitize, euphemize, or moralize because of profanity, sexual/adult wording, politics/religion, slang, or other sensitive vocabulary. Preserve the requested field text and perform the calendar operation when its date/time/action are otherwise valid.',
+          '[SYSTEM] Your previous response was rejected by the quality validator. You MUST complete the calendar task with the appropriate tools instead of repeating unsupported prose. Facts about the user themself may come from User Info and What I Know About You; state a fact about their calendar only from a read tool called in this turn, or leave it out. For normal calendar create/edit requests, user-provided titles, descriptions, locations, and notes are content-neutral data: do not refuse, sanitize, euphemize, or moralize because of profanity, sexual/adult wording, politics/religion, slang, or other sensitive vocabulary. Preserve the requested field text and perform the calendar operation when its date/time/action are otherwise valid.',
       },
     ];
 
@@ -1745,7 +1729,7 @@ export class CalendarBotAgent {
       const { result, exposedThisRound } = exposure
         ? await runRoundRevealingRejectedTools(exposure, runRetryRound)
         : {
-            result: await runRetryRound(getToolDefinitions(ctx.inputMode, ctx.supplementMode)),
+            result: await runRetryRound(getToolDefinitions(ctx.supplementMode)),
             exposedThisRound: undefined,
           };
 

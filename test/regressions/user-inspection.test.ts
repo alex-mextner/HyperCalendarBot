@@ -21,18 +21,19 @@ function setup(): { db: Database; ctx: AgentContext } {
       isGroup: false,
       messageText: 'Who is Alex?',
       contactRepo: contacts,
-      lookupTelegramUser: async () => ({ id: 5000000001, username: 'new', firstName: 'Alexander' }),
     } as unknown as AgentContext,
   };
 }
-test('user inspection refreshes username by ID while preserving identity and alias', async () => {
+test('user inspection reports the saved contact by ID without rewriting it', async () => {
   const { db, ctx } = setup();
   try {
     const result = await executeTool(ctx, 'get_user_info', { telegram_id: 5000000001 });
     expect(result.success).toBe(true);
-    expect(result.output).toContain('5000000001');
-    expect(result.output).toContain('new');
-    expect(ctx.contactRepo!.findByTelegramId(10, 5000000001)?.preferred_name).toBe('Sasha');
+    expect(result.data).toMatchObject({ telegram_id: 5000000001, username: 'old', preferred_name: 'Sasha' });
+    expect(ctx.contactRepo!.findByTelegramId(10, 5000000001)).toMatchObject({
+      username: 'old',
+      preferred_name: 'Sasha',
+    });
   } finally {
     db.close();
   }

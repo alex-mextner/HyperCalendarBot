@@ -110,7 +110,6 @@ export class TelegramStreamWriter {
   private pendingIndicators: string[] = [];
   private intermediateChunks: { kind: 'reasoning' | 'tools'; text: string }[] = [];
   private plainResponseText = '';
-  private userTranscript: string | undefined;
   private noPlaceholder: boolean;
   private typingInterval: ReturnType<typeof setInterval> | null = null;
   /** Promise for the in-flight lazy placeholder creation (prevents races between flush/finalize) */
@@ -138,7 +137,6 @@ export class TelegramStreamWriter {
     private chatId: number,
     private lang: string = 'en',
     opts?: {
-      userTranscript?: string;
       existingMessageId?: number;
       noPlaceholder?: boolean;
       /** Draft text that must be checked before anyone sees it; held from the chunk that matched. */
@@ -150,7 +148,6 @@ export class TelegramStreamWriter {
       hideToolDetailsWhen?: (input: { [key: string]: unknown }) => boolean;
     },
   ) {
-    this.userTranscript = opts?.userTranscript;
     this.messageId = opts?.existingMessageId ?? null;
     this.noPlaceholder = opts?.noPlaceholder ?? false;
     this.holdDraftWhen = opts?.holdDraftWhen;
@@ -175,13 +172,6 @@ export class TelegramStreamWriter {
   async init(): Promise<void> {
     if (this.messageId !== null) {
       // Reuse existing listening indicator message — already visible in chat
-      return;
-    }
-    if (this.userTranscript !== undefined) {
-      // Live call without pre-created message: send transcript header
-      const header = escapeHtml(this.userTranscript || '…');
-      const result = await this.sender.sendMessage(this.chatId, `📞 👤 ${header}`, 'HTML');
-      this.messageId = result.message_id;
       return;
     }
     if (this.noPlaceholder) {
@@ -371,35 +361,27 @@ export class TelegramStreamWriter {
     const finalResponse = this.plainResponseText ? markdownToHtml(this.text) : '...';
     const joinedIntermediate = this.intermediateChunks.map((c) => c.text).join('\n');
 
-    let finalText: string;
-    if (this.userTranscript !== undefined) {
-      // Live call: everything in one collapsed blockquote (transcript + tools + bot reply)
-      const toolsBlock = this.intermediateChunks.length > 0 ? `\n${joinedIntermediate}` : '';
-      const botReply = finalResponse && finalResponse !== '...' ? `\n🤖 ${finalResponse}` : '';
-      finalText = `<blockquote>📞\n👤 ${escapeHtml(this.userTranscript || '…')}${toolsBlock}${botReply}</blockquote>`;
-    } else {
-      // Build expandable blockquote with ALL intermediate reasoning + tools.
-      // Cap execution log so the total message fits in one Telegram message —
-      // splitting into multiple messages confuses users and can break HTML tags.
-      finalText = finalResponse;
-      if (this.intermediateChunks.length > 0) {
-        const header = this.lang === 'ru' ? '⚙️ <b>Ход выполнения</b>' : '⚙️ <b>Execution log</b>';
-        let body = joinedIntermediate;
-        // blockquote wrapper + header + separators ≈ 60 chars overhead
-        const overhead = `<blockquote expandable>${header}\n</blockquote>\n\n`.length;
-        const maxBodyLen = MAX_MESSAGE_LENGTH - finalResponse.length - overhead;
-        if (maxBodyLen > 0 && body.length > maxBodyLen) {
-          // Truncate at a line boundary to avoid breaking HTML tags (<i>...</i>).
-          // A naive body.slice() can cut inside a tag, making Telegram reject the message.
-          const truncSlice = body.slice(0, maxBodyLen);
-          const lastNewline = truncSlice.lastIndexOf('\n');
-          body = lastNewline > 0 ? `${body.slice(0, lastNewline)}\n…` : `${truncSlice.slice(0, maxBodyLen - 1)}…`;
-        }
-        if (maxBodyLen > 0) {
-          finalText = `<blockquote expandable>${header}\n${body}</blockquote>\n\n${finalResponse}`;
-        }
-        // If maxBodyLen <= 0, response alone fills the message — skip blockquote entirely
+    // Build expandable blockquote with ALL intermediate reasoning + tools.
+    // Cap execution log so the total message fits in one Telegram message —
+    // splitting into multiple messages confuses users and can break HTML tags.
+    let finalText = finalResponse;
+    if (this.intermediateChunks.length > 0) {
+      const header = this.lang === 'ru' ? '⚙️ <b>Ход выполнения</b>' : '⚙️ <b>Execution log</b>';
+      let body = joinedIntermediate;
+      // blockquote wrapper + header + separators ≈ 60 chars overhead
+      const overhead = `<blockquote expandable>${header}\n</blockquote>\n\n`.length;
+      const maxBodyLen = MAX_MESSAGE_LENGTH - finalResponse.length - overhead;
+      if (maxBodyLen > 0 && body.length > maxBodyLen) {
+        // Truncate at a line boundary to avoid breaking HTML tags (<i>...</i>).
+        // A naive body.slice() can cut inside a tag, making Telegram reject the message.
+        const truncSlice = body.slice(0, maxBodyLen);
+        const lastNewline = truncSlice.lastIndexOf('\n');
+        body = lastNewline > 0 ? `${body.slice(0, lastNewline)}\n…` : `${truncSlice.slice(0, maxBodyLen - 1)}…`;
       }
+      if (maxBodyLen > 0) {
+        finalText = `<blockquote expandable>${header}\n${body}</blockquote>\n\n${finalResponse}`;
+      }
+      // If maxBodyLen <= 0, response alone fills the message — skip blockquote entirely
     }
 
     const chunks = splitMessage(finalText, MAX_MESSAGE_LENGTH);

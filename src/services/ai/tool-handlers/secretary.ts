@@ -36,7 +36,6 @@ async function sendSecretaryInvite(
 
   const result = await deliverMessage({
     targetId: secretaryUser.telegram_id,
-    targetUsername: secretaryUser.username ?? undefined,
     text,
     keyboard,
     fallbackRecipientId: ctx.user.telegram_id,
@@ -47,7 +46,6 @@ async function sendSecretaryInvite(
       }
       return sender.sendMessage(recipientId, msg);
     },
-    mtprotoSend: sender.sendAsUser?.bind(sender),
   });
 
   if (result.messageId) {
@@ -55,16 +53,10 @@ async function sendSecretaryInvite(
   }
 }
 
-async function sendSecretaryNotification(
-  ctx: AgentContext,
-  targetId: number,
-  targetUsername: string | null | undefined,
-  text: string,
-): Promise<void> {
+async function sendSecretaryNotification(ctx: AgentContext, targetId: number, text: string): Promise<void> {
   if (!ctx.sender) return;
   await deliverMessage({
     targetId,
-    targetUsername: targetUsername ?? undefined,
     text,
     fallbackRecipientId: ctx.user.telegram_id,
     fallbackText: text,
@@ -72,7 +64,6 @@ async function sendSecretaryNotification(
       const sent = await ctx.sender!.sendMessage(id, msg);
       return { message_id: sent.message_id };
     },
-    mtprotoSend: ctx.sender.sendAsUser?.bind(ctx.sender),
   });
 }
 
@@ -129,7 +120,6 @@ export async function handleManageSecretaries(ctx: AgentContext, input: ManageSe
         await sendSecretaryNotification(
           ctx,
           record.secretary_id,
-          secUser.username,
           `Твой доступ к календарю ${ownerName}${ownerHandle} был отозван.`,
         );
       } catch (err) {
@@ -156,7 +146,6 @@ export async function handleManageSecretaries(ctx: AgentContext, input: ManageSe
         await sendSecretaryNotification(
           ctx,
           record.owner_id,
-          ownerUser.username,
           `${secName}${secHandle} добровольно покинул роль секретаря твоего календаря.`,
         );
       } catch (err) {

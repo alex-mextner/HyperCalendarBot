@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, type Mock, mock, setSystemTime, test } from 'bun:test';
 import { Scene } from '@gramio/scenes';
-import type { InlineKeyboard, TelegramInlineKeyboardMarkup } from 'gramio';
+import type { InlineKeyboard } from 'gramio';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler.ts';
 import type { BotCallbackContext } from '../../../src/bot/types.ts';
 import { migrations } from '../../../src/database/migrations.ts';
@@ -19,7 +19,6 @@ import { ConversationLogger } from '../../../src/services/conversation-logger.ts
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
-import { createVoiceSender } from '../../../src/services/voice/voice-sender.ts';
 import type { ImageRenderJob } from '../../../src/worker/image-render.queue.ts';
 import { png } from '../../fixtures/png.ts';
 
@@ -343,60 +342,5 @@ describe('bot-rendered delete confirmation', () => {
     });
     expect(result.success).toBe(true);
     expect(alive(ids.lesson)).toBe(false);
-  });
-
-  // Ticket 608: speaking the list used to approve its upcoming events at once, so a caller who
-  // said no could still lose them. A call now gets the same bot list in the chat, and only a tap
-  // there deletes.
-  test('on a call the list goes to the chat, and a delete after the caller says no is refused', async () => {
-    const spoken = await executeTool(
-      context({ inputMode: 'live_call', messageText: 'удали урок во вторник' }),
-      'ask_user',
-      {
-        question: 'Удалить?',
-        options: ['Да', 'Нет'],
-        event_ids: [ids.sep1, ids.lesson],
-      },
-    );
-    expect(spoken.success).toBe(true);
-    expect(spoken.awaitingInput).toEqual(expect.objectContaining({ kind: 'speech' }));
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!.chatId).toBe(ACTOR);
-    expect(sent[0]!.text).toContain('вт, 29 сентября, 13:30–14:30');
-
-    for (const answer of ['нет', 'да']) {
-      const later = await executeTool(context({ inputMode: 'live_call', messageText: answer }), 'delete_event', {
-        event_id: ids.lesson,
-      });
-      expect(later.success).toBe(false);
-      expect(later.mutationState).toBe('not_applied');
-    }
-    expect(alive(ids.lesson)).toBe(true);
-
-    await callbackHandler()(tap(sent[0]!.buttons[0]!.data, sent[0]!));
-    expect(alive(ids.lesson)).toBe(false);
-    expect(alive(ids.sep1)).toBe(true);
-  });
-
-  test("the call's own sender delivers the list with its buttons to the caller's chat", async () => {
-    // The production live-call sender (index.ts) — not a test double with every capability.
-    const markups: { chatId: number; text: string; markup?: TelegramInlineKeyboardMarkup }[] = [];
-    const sender = createVoiceSender({
-      sendMessage: async (chatId, text, _parseMode, markup) => {
-        markups.push({ chatId, text, markup });
-        return { message_id: 60 };
-      },
-      editMessage: async () => {},
-    });
-    const spoken = await executeTool(
-      context({ inputMode: 'live_call', messageText: 'удали урок во вторник', sender }),
-      'ask_user',
-      { question: 'Удалить?', options: ['Да', 'Нет'], event_ids: [ids.lesson] },
-    );
-
-    expect(spoken.success).toBe(true);
-    expect(markups).toHaveLength(1);
-    expect(markups[0]!.chatId).toBe(ACTOR);
-    expect(markups[0]!.markup?.inline_keyboard.flat().length).toBeGreaterThan(0);
   });
 });

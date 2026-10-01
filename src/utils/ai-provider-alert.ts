@@ -337,9 +337,9 @@ let heldBackCount = 0;
 
 /**
  * The bot runs two provider chains. The smart one answers people; the fast one
- * does auxiliary work — resolving a city, translating for speech, summarising
- * history, validating a response. They are configured with different models and
- * fail independently, so they get separate outage records: a dead fast chain
+ * does auxiliary work — resolving a city, summarising history, validating a
+ * response. They are configured with different models and fail independently,
+ * so they get separate outage records: a dead fast chain
  * must not report the bot unable to serve anyone, and a fast answer must not
  * clear an outage on the chain that actually talks to people.
  */

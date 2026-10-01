@@ -1,6 +1,5 @@
 import type { Contact } from '../../database/types.ts';
 import { consumeRecipientApproval } from './recipient-confirmation.ts';
-import { cachedRecipientProfile } from './recipient-profile.ts';
 import type { AgentContext } from './types.ts';
 
 export function normalizeRecipientUsername(username: string): string {
@@ -28,12 +27,33 @@ export function isKnownRecipient(ctx: AgentContext, id: number): boolean {
   return (ctx.messageText.match(/\b\d+\b/g) ?? []).some((value) => value === String(id));
 }
 
+export interface KnownBotUser {
+  id: number;
+  firstName?: string;
+  username: string;
+}
+
+/** Resolves a normalized @username against people who have started this bot (the users table only);
+ *  anyone else has to be shared through the picker. A row whose telegram_id is not a positive safe
+ *  integer names no real person, so it counts as not found. */
+export function lookupKnownBotUser(ctx: AgentContext, username: string): KnownBotUser | null {
+  const user = ctx.userRepo.findByUsername(username);
+  if (!user || !Number.isSafeInteger(user.telegram_id) || user.telegram_id <= 0) return null;
+  return { id: user.telegram_id, firstName: user.first_name ?? undefined, username: user.username ?? username };
+}
+
+/** Records that this run established `id` as a real recipient, so later tool calls may address it. */
+export function markVerifiedRecipient(ctx: AgentContext, id: number): void {
+  ctx.verifiedRecipientIds ??= new Set();
+  ctx.verifiedRecipientIds.add(id);
+}
+
 type RecipientResolution =
   | { ok: true; id: number; username?: string; firstName?: string; isGroup: boolean }
   | { ok: false; reason: 'contact_row_id'; contact: Contact }
   | {
       ok: false;
-      reason: 'unverified' | 'conflict' | 'not_found' | 'unavailable';
+      reason: 'unverified' | 'conflict' | 'not_found';
       username?: string;
       candidate?: { id: number; firstName?: string; username?: string };
     };
@@ -103,49 +123,17 @@ export async function resolveInvitationRecipient(
   );
   if (input.invitee_username && !pinnedMetadata) {
     const username = normalizeRecipientUsername(input.invitee_username);
-    const known = ctx.userRepo.findByUsername(username);
     if (!canResolveRecipientUsername(ctx, username)) {
       return { ok: false, reason: 'unverified' };
     }
-    if (!known && !ctx.resolveUsername) return { ok: false, reason: 'unavailable' };
-    const resolved = ctx.resolveUsername
-      ? await ctx.resolveUsername(username)
-      : known
-        ? { id: known.telegram_id, firstName: known.first_name ?? undefined, username: known.username ?? username }
-        : null;
+    const resolved = lookupKnownBotUser(ctx, username);
     if (!resolved) return { ok: false, reason: 'not_found', username };
-    if (!Number.isSafeInteger(resolved.id) || resolved.id <= 0) return { ok: false, reason: 'unverified' };
     if (id !== undefined && id !== resolved.id) return { ok: false, reason: 'conflict', candidate: resolved };
-    ctx.verifiedRecipientIds ??= new Set();
-    ctx.verifiedRecipientIds.add(resolved.id);
-    return {
-      ok: true,
-      id: resolved.id,
-      username: resolved.username ?? username,
-      firstName: resolved.firstName,
-      isGroup: false,
-    };
+    markVerifiedRecipient(ctx, resolved.id);
+    return { ok: true, ...resolved, isGroup: false };
   }
   if (id === undefined || (id !== establishedInvitationRecipientId && !isKnownRecipient(ctx, id)))
     return { ok: false, reason: 'unverified' };
-  if (ctx.lookupTelegramUser) {
-    const profile = cachedRecipientProfile(ctx, id);
-    if (profile) {
-      if (profile.id !== id || profile.deleted) return { ok: false, reason: 'conflict' };
-      ctx.contactRepo?.refreshProfile(ctx.user.telegram_id, id, {
-        username: profile.username ?? null,
-        firstName: profile.firstName,
-      });
-      return {
-        ok: true,
-        id,
-        username: profile.username,
-        firstName: profile.firstName,
-        isGroup: false,
-      };
-    }
-  }
-  // An unavailable profile lookup cannot invalidate a previously established ID.
   // Do not reuse stale username metadata as an alternative delivery destination.
   return { ok: true, id, isGroup: false };
 }

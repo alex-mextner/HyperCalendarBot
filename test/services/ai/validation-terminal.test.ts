@@ -1,11 +1,16 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
+import { BirthdayMetadataRepository } from '../../../src/database/repositories/birthday-metadata.repository.ts';
+import { CalendarProposalRepository } from '../../../src/database/repositories/calendar-proposal.repository.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
+import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
+import { SecretaryRepository } from '../../../src/database/repositories/secretary.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { UserMemoryRepository } from '../../../src/database/repositories/user-memory.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { CreateUserData } from '../../../src/database/types.ts';
 import { aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
@@ -13,6 +18,7 @@ import { unverifiedResponseNotice } from '../../../src/services/ai/response-vali
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
 import { _resetToolThrottleForTest } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
+import { BirthdayService } from '../../../src/services/birthday/birthday-service.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
@@ -45,7 +51,10 @@ type Round = { text: string; tool?: { name: string; input: { [key: string]: unkn
 const UNSUPPORTED = 'Nothing else scheduled today.';
 const INITIAL = 'There are two invented events today.';
 
-function scripted(rounds: Round[], verdicts: (string | Error)[]) {
+/** A scripted verdict, or one computed from what the validator was shown. */
+type Verdict = string | Error | ((validatorInput: string) => string);
+
+function scripted(rounds: Round[], verdicts: Verdict[]) {
   let roundIndex = 0;
   let verdictIndex = 0;
   const counts = { model: 0, validator: 0 };
@@ -53,9 +62,14 @@ function scripted(rounds: Round[], verdicts: (string | Error)[]) {
     const system = options.messages[0];
     if (typeof system?.content === 'string' && system.content.includes('strict QA validator')) {
       counts.validator++;
-      const verdict = verdicts[verdictIndex++];
-      if (verdict instanceof Error) throw verdict;
-      if (verdict === undefined) throw new Error('Missing scripted verdict');
+      const scriptedVerdict = verdicts[verdictIndex++];
+      if (scriptedVerdict instanceof Error) throw scriptedVerdict;
+      if (scriptedVerdict === undefined) throw new Error('Missing scripted verdict');
+      const shown = options.messages[1]?.content;
+      const verdict =
+        typeof scriptedVerdict === 'function'
+          ? scriptedVerdict(typeof shown === 'string' ? shown : '')
+          : scriptedVerdict;
       return {
         text: verdict,
         toolCalls: [],
@@ -581,5 +595,329 @@ describe('re-validation accepts answers grounded in the same run (#492)', () => 
     expect(script.counts.validator).toBe(1);
     expect(result.responseText).toBe(grounded);
     expect(history()).not.toContain('ничего не запланировано');
+  });
+});
+
+// Anonymized from the production turn of 2026-09-29: asked what the bot knows
+// about them, the user got a true answer built from the prompt's profile and
+// saved facts. The validator was never shown those, rejected the answer and its
+// retry as unsupported personal data, and the user got a calendar dead end.
+describe('answers about the user are checked against the profile the agent saw (#740)', () => {
+  const USER_ID = 789;
+  const FACTS = ['Играю на виолончели в оркестре', 'Аллергия на орехи'];
+  let db: Database;
+  let delivered: string[];
+  let sender: TelegramSender;
+
+  beforeEach(() => {
+    _resetToolThrottleForTest();
+    aiFailureNotices.reset();
+    setSystemTime(new Date('2026-09-29T15:41:18Z'));
+    db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    delivered = [];
+    sender = {
+      sendMessage: async (_chatId, text) => {
+        delivered.push(text);
+        return { message_id: 42 };
+      },
+      editMessageText: async (_chatId, _messageId, text) => {
+        delivered.push(text);
+      },
+    };
+  });
+
+  afterEach(() => {
+    setSystemTime();
+    db.close();
+  });
+
+  function profileContext(language: 'en' | 'ru', messageText: string): AgentContext {
+    const user = { telegram_id: USER_ID, first_name: 'Мира', timezone: 'Europe/Lisbon', language };
+    const ctx = buildContext(
+      db,
+      user,
+      messageText,
+      mock(async () => true),
+    );
+    const userMemoryRepo = new UserMemoryRepository(db);
+    for (const fact of FACTS) userMemoryRepo.append(USER_ID, fact);
+    const birthdayService = new BirthdayService(
+      new EventRepository(db),
+      new BirthdayMetadataRepository(db),
+      new EventReminderRepository(db),
+      new NotificationPreferencesRepository(db),
+    );
+    ctx.birthday = { birthdayService, userMemoryRepo };
+    return ctx;
+  }
+
+  /** A validator can confirm a fact about the user only when its input shows that fact. */
+  function approvesShownProfile(validatorInput: string): string {
+    const shown = ['Мира', 'Europe/Lisbon', ...FACTS].every((fact) => validatorInput.includes(fact));
+    return shown ? 'APPROVE' : 'REJECT: personal data without calling calendar tools';
+  }
+
+  /** Reject when the response mentions a user fact absent from the profile. */
+  function rejectsFabricatedFacts(validatorInput: string): string {
+    const profileMatch = validatorInput.match(/<user_profile>\n([\s\S]*?)\n<\/user_profile>/);
+    const profile = profileMatch?.[1] ?? '';
+    const responseMatch = validatorInput.match(/<assistant_response>\n([\s\S]*?)\n<\/assistant_response>/);
+    const response = responseMatch?.[1] ?? '';
+    // "пианино" / "piano" is a fabricated fact not in FACTS or the profile
+    if (
+      (response.includes('пианино') || response.toLowerCase().includes('piano')) &&
+      !(profile.includes('пианино') || profile.toLowerCase().includes('piano'))
+    ) {
+      return 'REJECT: claimed user plays piano but this is not in <user_profile>';
+    }
+    return approvesShownProfile(validatorInput);
+  }
+
+  test.each([
+    [
+      'ru' as const,
+      'А что ты знаешь обо мне',
+      'Вот что я о тебе знаю, Мира: твой часовой пояс — Europe/Lisbon, язык — русский. Ещё я помню, что ты играешь на виолончели в оркестре и что у тебя аллергия на орехи.',
+    ],
+    [
+      'en' as const,
+      'what do you know about me',
+      "Here's what I know about you, Mira: your timezone is Europe/Lisbon and you speak English. I also remember that you play the cello in an orchestra and that you're allergic to nuts.",
+    ],
+  ])('a tool-less %s answer drawn from the profile and saved facts reaches the user', async (language, question, answer) => {
+    const ctx = profileContext(language, question);
+    const script = scripted([{ text: answer }, { text: answer }], [approvesShownProfile, approvesShownProfile]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(answer);
+    expect(result.responseText).not.toContain(unverifiedResponseNotice(language, 'Europe/Lisbon', []));
+    expect(result.metrics?.termination).not.toBe('unverified');
+    expect(delivered.at(-1)).toBe(answer);
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).toContain(answer);
+    expect(script.counts).toEqual({ model: 1, validator: 1 });
+  });
+
+  test('a tool-less answer that fabricates a user fact is rejected and the user gets the unverified notice', async () => {
+    const fabricatedAnswer =
+      'Ты играешь на пианино и на виолончели. Твой часовой пояс — Europe/Lisbon, язык — русский.';
+    const ctx = profileContext('ru', 'А что ты знаешь обо мне');
+    const script = scripted(
+      [{ text: fabricatedAnswer }, { text: fabricatedAnswer }],
+      [rejectsFabricatedFacts, rejectsFabricatedFacts],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(result.responseText).toContain(unverifiedResponseNotice('ru', 'Europe/Lisbon', []));
+    expect(script.counts).toEqual({ model: 2, validator: 2 });
+  });
+
+  test('a long User Info does not hide the newest saved fact from the validator', async () => {
+    const ctx = profileContext('ru', 'А что ты знаешь обо мне');
+    // Saved facts that fill the prompt's memory budget, the newest one last.
+    const userMemoryRepo = new UserMemoryRepository(db);
+    for (let index = 0; index < 7; index++) userMemoryRepo.append(USER_ID, `Старый факт ${index}: ${'о'.repeat(230)}`);
+    const newest = 'Учу португальский';
+    userMemoryRepo.append(USER_ID, newest);
+    // A secretary for many calendars and a long place name make User Info long.
+    ctx.secretary = {
+      secretaryRepo: new SecretaryRepository(db),
+      secretaryForLine: Array.from({ length: 60 }, (_, index) => `Календарь ${index} (@owner${index})`).join(', '),
+      calendarProposalRepo: new CalendarProposalRepository(db),
+    };
+    ctx.user.city = `Лиссабон, ${'район '.repeat(150)}`;
+    const answer = 'Мира, я помню, что ты учишь португальский.';
+    const approvesNewestFact = (validatorInput: string) =>
+      validatorInput.includes(newest) ? 'APPROVE' : 'REJECT: personal data without calling calendar tools';
+    const script = scripted([{ text: answer }, { text: answer }], [approvesNewestFact, approvesNewestFact]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(answer);
+    expect(result.metrics?.termination).not.toBe('unverified');
+    expect(script.counts).toEqual({ model: 1, validator: 1 });
+  });
+
+  test('the re-validation after a retry sees a fact the retry just saved', async () => {
+    const newFact = 'Учу португальский';
+    const ctx = profileContext('ru', 'Запомни, что я учу португальский, и скажи, что ты обо мне знаешь');
+    const answer = 'Запомнил: ты учишь португальский. Ещё я знаю, что ты играешь на виолончели в оркестре.';
+    const approvesSavedFact = (validatorInput: string) =>
+      validatorInput.includes(newFact) ? 'APPROVE' : 'REJECT: claims a fact about the user that is not saved';
+    const script = scripted(
+      [
+        { text: answer },
+        { text: '', tool: { name: 'remember_user_fact', input: { type: 'append', content: newFact } } },
+        { text: answer },
+      ],
+      [approvesSavedFact, approvesSavedFact],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(answer);
+    expect(result.metrics?.termination).not.toBe('unverified');
+    expect(script.counts).toEqual({ model: 3, validator: 2 });
+  });
+
+  // The real fast validator, shown a saved fact that names the event, approved these tool-less
+  // answers in 8 runs of 8 each; without the profile it rejected them 8 of 8.
+  test.each([
+    ['По пятницам у меня репетиция оркестра в 19:00', 'В пятницу в 19:00 у тебя репетиция оркестра.'],
+    ['По пятницам у меня репетиция оркестра', 'В пятницу у тебя репетиция оркестра.'],
+  ])('a saved fact does not stand in for a calendar read: %s', async (savedEvent, answer) => {
+    const ctx = profileContext('ru', 'Что у меня в пятницу?');
+    new UserMemoryRepository(db).append(USER_ID, savedEvent);
+    const approvesWhatTheProfileSays = (validatorInput: string) =>
+      validatorInput.includes(savedEvent) ? 'APPROVE' : 'REJECT: calendar data without a read';
+    const script = scripted(
+      [{ text: answer }, { text: answer }],
+      [approvesWhatTheProfileSays, approvesWhatTheProfileSays],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(result.responseText).not.toContain(answer);
+  });
+
+  /** Approves only when the profile block the validator was shown holds `fact`. */
+  function approvesWhenProfileShows(fact: string): (validatorInput: string) => string {
+    return (validatorInput) => {
+      const profile = validatorInput.match(/<user_profile>\n([\s\S]*?)\n<\/user_profile>/)?.[1] ?? '';
+      return profile.includes(fact) ? 'APPROVE' : 'REJECT: personal data without calling calendar tools';
+    };
+  }
+
+  // A clock time, a date or a quote is not the calendar: a saved fact or the zone's offset carries them too.
+  test.each([
+    ['Встаю в 7:30', 'Мира, я помню, что ты встаёшь в 7:30.', 'Встаю в 7:30'],
+    ['Отпуск с 10 августа', 'Я помню, что у тебя отпуск с 10 августа.', 'Отпуск с 10 августа'],
+    ['', 'Твой часовой пояс — Asia/Kolkata (UTC+5:30).', 'UTC+5:30'],
+    ['Любимая книга — «Мастер и Маргарита»', 'Твоя любимая книга — «Мастер и Маргарита».', '«Мастер и Маргарита»'],
+  ])('a tool-less answer about the user with a time, date or quote is checked against the profile: %s %s', async (savedFact, answer, shownFact) => {
+    const ctx = profileContext('ru', 'А что ты знаешь обо мне');
+    ctx.user.timezone = 'Asia/Kolkata';
+    if (savedFact) new UserMemoryRepository(db).append(USER_ID, savedFact);
+    const approves = approvesWhenProfileShows(shownFact);
+    const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(answer);
+    expect(result.metrics?.termination).not.toBe('unverified');
+    expect(script.counts).toEqual({ model: 1, validator: 1 });
+  });
+
+  test('a quote found neither in the profile nor in the question is a calendar title', async () => {
+    const savedFact = 'Любимая книга — «Мастер и Маргарита»';
+    const answer = 'Помню твою книгу, а ещё у тебя «Концерт в филармонии».';
+    const ctx = profileContext('ru', 'А что ты знаешь обо мне');
+    new UserMemoryRepository(db).append(USER_ID, savedFact);
+    const approves = approvesWhenProfileShows(savedFact);
+    const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(result.responseText).not.toContain(answer);
+  });
+
+  test('the re-validation after a retry that saved a fact with a clock time sees that fact', async () => {
+    const newFact = 'Встаю в 7:30';
+    const ctx = profileContext('ru', 'Запомни, что я встаю в 7:30, и скажи, что ты обо мне знаешь');
+    const answer = 'Запомнил: ты встаёшь в 7:30. Ещё я знаю, что ты играешь на виолончели в оркестре.';
+    const approves = approvesWhenProfileShows(newFact);
+    const script = scripted(
+      [
+        { text: answer },
+        { text: '', tool: { name: 'remember_user_fact', input: { type: 'append', content: newFact } } },
+        { text: answer },
+      ],
+      [approves, approves],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(answer);
+    expect(result.metrics?.termination).not.toBe('unverified');
+    expect(script.counts).toEqual({ model: 3, validator: 2 });
+  });
+
+  test.each([
+    [
+      'ru' as const,
+      'Доброе утро! Что ты знаешь обо мне?',
+      'Доброе утро, Мира! Я помню, что ты играешь на виолончели в оркестре.',
+    ],
+    [
+      'en' as const,
+      'Good evening! What do you know about me?',
+      'Good evening, Mira! I remember you play the cello in an orchestra.',
+    ],
+    [
+      'en' as const,
+      'Morning! What do you know about me?',
+      'Morning, Mira! I remember you play the cello in an orchestra.',
+    ],
+    // The address that calls the bot in a group is not a question about the calendar.
+    ['ru' as const, 'Календарь, что ты знаешь обо мне?', 'Мира, я помню, что ты играешь на виолончели в оркестре.'],
+    ['en' as const, 'Calendar, what do you know about me?', 'Mira, I remember you play the cello in an orchestra.'],
+  ])('a greeting or the bot address is not a question about the calendar: %s %s', async (language, question, answer) => {
+    const ctx = profileContext(language, question);
+    const approves = approvesWhenProfileShows('Играю на виолончели в оркестре');
+    const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.responseText).toBe(answer);
+    expect(result.metrics?.termination).not.toBe('unverified');
+    expect(script.counts).toEqual({ model: 1, validator: 1 });
+  });
+
+  test('a question with a numeric date asks about the calendar', async () => {
+    const savedEvent = 'Dentist appointment on 10 August';
+    const ctx = profileContext('en', 'What do I have on 2026-08-10?');
+    new UserMemoryRepository(db).append(USER_ID, savedEvent);
+    const answer = 'You have a dentist appointment.';
+    const approves = approvesWhenProfileShows(savedEvent);
+    const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(result.responseText).not.toContain(answer);
+  });
+
+  // With no day named, the calendar is still spoken of by a quoted title, an event id or the word itself.
+  test.each([
+    ['В твоём календаре есть репетиция оркестра.'],
+    ['У тебя есть событие «Репетиция оркестра».'],
+    ['Репетиция оркестра записана под id 42.'],
+    ['На этой неделе у тебя репетиция оркестра.'],
+    ['Каждую пятницу у тебя репетиция оркестра.'],
+    ['У тебя есть событие: репетиция оркестра.'],
+  ])('a saved fact does not stand in for a calendar read without a day: %s', async (answer) => {
+    const savedEvent = 'По пятницам у меня репетиция оркестра';
+    const ctx = profileContext('ru', 'Что у меня в календаре?');
+    new UserMemoryRepository(db).append(USER_ID, savedEvent);
+    const approves = approvesWhenProfileShows(savedEvent);
+    const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(result.responseText).not.toContain(answer);
+  });
+
+  // The question names the day, a date or a part of one, so an answer that drops it still speaks
+  // of the calendar.
+  test.each([
+    ['Что у меня в пятницу?', 'По пятницам у меня репетиция оркестра в 19:00', 'У тебя репетиция оркестра в 19:00.'],
+    ['Что у меня в пятницу?', 'По пятницам у меня репетиция оркестра в 19:00', 'Репетиция оркестра в 19:00.'],
+    ['Что у меня вечером?', 'По вечерам у меня репетиция в 19:00', 'В 19:00 у тебя репетиция.'],
+    ['Что у меня 10 августа?', '10 августа у меня репетиция оркестра', '10 августа у тебя репетиция оркестра.'],
+  ])('a saved fact does not answer a question about a day: %s → %s', async (question, savedEvent, answer) => {
+    const ctx = profileContext('ru', question);
+    new UserMemoryRepository(db).append(USER_ID, savedEvent);
+    const approves = approvesWhenProfileShows(savedEvent);
+    const script = scripted([{ text: answer }, { text: answer }], [approves, approves]);
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(result.responseText).not.toContain(answer);
   });
 });

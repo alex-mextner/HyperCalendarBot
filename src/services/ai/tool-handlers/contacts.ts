@@ -2,7 +2,6 @@ import { t } from '../../../config/constants.ts';
 import type { ContactRepository } from '../../../database/repositories/contact.repository.ts';
 import type { Contact, ContactAlias, ContactGroup } from '../../../database/types.ts';
 import { canResolveRecipientUsername } from '../recipient-identity.ts';
-import { inspectRecipientProfile } from '../recipient-profile.ts';
 import type { AgentContext, ContactMatch, ToolHandlerMeta, ToolResult, UserInspection } from '../types.ts';
 
 const MAX_CONTACT_MATCHES = 5;
@@ -242,29 +241,19 @@ export function handleDeleteContact(ctx: AgentContext, input: { contact_id: numb
   };
 }
 
-export async function handleGetUserInfo(ctx: AgentContext, input: { telegram_id: number }): Promise<ToolResult> {
+export function handleGetUserInfo(ctx: AgentContext, input: { telegram_id: number }): ToolResult {
   const tr = t(ctx.user.language).aiTools.meta;
   if (ctx.isGroup || !ctx.contactRepo) return { success: false, error: tr.contactsPrivateOnly };
   const contact = ctx.contactRepo.findByTelegramId(ctx.user.telegram_id, input.telegram_id);
   const explicit = (ctx.messageText.match(/\b\d+\b/g) ?? []).some((value) => value === String(input.telegram_id));
   if (!contact && input.telegram_id !== ctx.user.telegram_id && !explicit)
     return { success: false, error: tr.recipientUnverified };
-  const profile = await inspectRecipientProfile(ctx, input.telegram_id);
-  if (profile && profile.id !== input.telegram_id) return { success: false, error: tr.recipientIdentityConflict };
-  if (profile && !profile.deleted)
-    ctx.contactRepo.refreshProfile(ctx.user.telegram_id, input.telegram_id, {
-      username: profile.username ?? null,
-      firstName: profile.firstName,
-    });
   const info: UserInspection = {
     telegram_id: input.telegram_id,
-    display_name: profile?.firstName ?? contact?.name ?? null,
+    display_name: contact?.name ?? null,
     preferred_name: contact?.preferred_name ?? null,
-    username: profile ? (profile.username ?? null) : (contact?.username ?? null),
+    username: contact?.username ?? null,
     contact_created_at: contact?.created_at ?? null,
-    profile_checked_at: profile?.checkedAt ?? null,
-    profile_source: profile ? 'telegram' : 'cached',
-    deleted: profile?.deleted ?? null,
   };
   return {
     success: true,
