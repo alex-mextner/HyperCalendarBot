@@ -54,7 +54,7 @@ const FULL_REQUEST_TOKEN_BUDGETS = {
   direct: 15_600,
   group: 17_900,
   supplement: 15_900,
-  liveCall: 14_500,
+  liveCall: 15_200,
 } as const;
 
 function names(tools: OpenAI.ChatCompletionTool[]): string[] {
