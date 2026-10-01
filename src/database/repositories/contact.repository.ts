@@ -167,19 +167,29 @@ export class ContactRepository {
    * instead of writing a duplicate — contact_aliases stays unique per (contact_id, LOWER(alias)).
    * A no-op pre-066 defensive guard: every contact created via add()/upsert() has a primary row.
    */
-  private syncPrimaryAliasOnRename(contactId: number, newName: string): void {
+  private syncPrimaryAliasOnRename(contactId: number, userId: number, newName: string): void {
     const trimmed = newName.trim();
     if (!trimmed) return;
-    const primary = this.db
-      .prepare('SELECT id, alias FROM contact_aliases WHERE contact_id = ? AND is_primary = 1')
-      .get(contactId) as { id: number; alias: string } | undefined;
+    const rows = this.db
+      .prepare('SELECT id, alias, is_primary FROM contact_aliases WHERE contact_id = ?')
+      .all(contactId) as { id: number; alias: string; is_primary: number }[];
+    const primary = rows.find((row) => row.is_primary === 1);
     if (!primary || primary.alias.trim().toLowerCase() === trimmed.toLowerCase()) return;
-    const existingAlias = this.db
-      .prepare('SELECT id FROM contact_aliases WHERE contact_id = ? AND LOWER(alias) = LOWER(?) AND id != ?')
-      .get(contactId, trimmed, primary.id) as { id: number } | undefined;
+
+    const lower = trimmed.toLowerCase();
+    const groups = this.db.prepare('SELECT alias FROM contact_groups WHERE user_id = ?').all(userId) as {
+      alias: string;
+    }[];
+    if (groups.some((row) => row.alias.trim().toLowerCase() === lower)) {
+      throw new Error('CONTACT_ALIAS_CONFLICT: that primary label already names a group in your contacts');
+    }
+
+    const existingAlias = rows.find((row) => row.id !== primary.id && row.alias.trim().toLowerCase() === lower);
     if (existingAlias) {
       this.db.prepare('UPDATE contact_aliases SET is_primary = 0 WHERE id = ?').run(primary.id);
-      this.db.prepare('UPDATE contact_aliases SET is_primary = 1 WHERE id = ?').run(existingAlias.id);
+      this.db
+        .prepare('UPDATE contact_aliases SET alias = ?, is_primary = 1 WHERE id = ?')
+        .run(trimmed, existingAlias.id);
     } else {
       this.db.prepare('UPDATE contact_aliases SET alias = ? WHERE id = ?').run(trimmed, primary.id);
     }
@@ -219,11 +229,37 @@ export class ContactRepository {
       if (patch.preferred_name !== undefined) {
         fields.push('preferred_name = ?');
         values.push(patch.preferred_name);
+      } else if (
+        patch.name !== undefined &&
+        patch.name.trim() !== current.name.trim() &&
+        current.preferred_name?.trim()
+      ) {
+        const stalePreferred = current.preferred_name.trim();
+        const staleLower = stalePreferred.toLowerCase();
+        const newLower = patch.name.trim().toLowerCase();
+        if (staleLower !== newLower) {
+          const aliases = this.db.prepare('SELECT alias FROM contact_aliases WHERE contact_id = ?').all(id) as {
+            alias: string;
+          }[];
+          const groups = this.db.prepare('SELECT alias FROM contact_groups WHERE user_id = ?').all(current.user_id) as {
+            alias: string;
+          }[];
+          const alreadyAliased = aliases.some((row) => row.alias.trim().toLowerCase() === staleLower);
+          const shadowedByGroup = groups.some((row) => row.alias.trim().toLowerCase() === staleLower);
+          if (!alreadyAliased && !shadowedByGroup) {
+            this.db
+              .prepare(
+                "INSERT INTO contact_aliases (user_id, contact_id, alias, is_primary, source) VALUES (?, ?, ?, 0, 'manual')",
+              )
+              .run(current.user_id, id, stalePreferred);
+          }
+        }
+        fields.push('preferred_name = NULL');
       }
       if (fields.length === 0) return;
       values.push(id);
       this.db.prepare(`UPDATE contacts SET ${fields.join(', ')} WHERE id = ?`).run(...values);
-      if (patch.name !== undefined) this.syncPrimaryAliasOnRename(id, patch.name);
+      if (patch.name !== undefined) this.syncPrimaryAliasOnRename(id, current.user_id, patch.name);
     })();
   }
 

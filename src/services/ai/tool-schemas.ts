@@ -199,6 +199,7 @@ const manageContactDirectorySchema = z
       'confirm_alias',
       'list_aliases',
       'promote_alias',
+      'rename_alias',
       'delete_alias',
       'create_group',
       'rename_group',

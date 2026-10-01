@@ -220,6 +220,13 @@ export function handleUpdateContact(
         error: t(ctx.user.language).aiTools.meta.recipientIdentityConflict,
       };
     }
+    if (error instanceof Error && error.message.startsWith('CONTACT_ALIAS_CONFLICT:')) {
+      return {
+        success: false,
+        mutationState: 'not_applied',
+        error: t(ctx.user.language).aiTools.meta.contactGroupAliasConflict(patch.name ?? ''),
+      };
+    }
     throw error;
   }
   const updatedName = patch.name ?? top.contact.name;
@@ -329,6 +336,35 @@ export function handlePromoteContactAlias(
     .listForContact(userId, input.contact_id)
     .find((alias) => alias.is_primary === 1);
   return { success: true, output: tr.contactAliasPromoted(primary?.alias ?? '') };
+}
+
+export function handleRenameContactAlias(
+  ctx: AgentContext,
+  input: { contact_id: number; alias_id: number; alias: string },
+): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactRepo || !ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  const existing = ctx.contactDirectory.contactAliasRepo
+    .listForContact(userId, input.contact_id)
+    .find((row) => row.id === input.alias_id);
+  if (!existing) return { success: false, error: tr.contactAliasNotFound };
+  try {
+    const renamed = ctx.contactDirectory.contactAliasRepo.rename(userId, input.contact_id, input.alias_id, input.alias);
+    return { success: true, output: tr.contactAliasRenamed(existing.alias, renamed.alias) };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('CONTACT_ALIAS_PRIMARY:'))
+      return { success: false, error: tr.contactAliasPrimaryUnrenamable };
+    if (error instanceof Error && error.message.startsWith('CONTACT_ALIAS_CONFLICT:')) {
+      const groupCollision = error.message.toLowerCase().includes('group');
+      return {
+        success: false,
+        error: groupCollision ? tr.contactGroupAliasConflict(input.alias) : tr.contactAliasConflict(input.alias),
+      };
+    }
+    throw error;
+  }
 }
 
 export function handleDeleteContactAlias(
@@ -547,6 +583,7 @@ export function handleManageContactDirectory(
       | 'confirm_alias'
       | 'list_aliases'
       | 'promote_alias'
+      | 'rename_alias'
       | 'delete_alias'
       | 'create_group'
       | 'rename_group'
@@ -582,6 +619,15 @@ export function handleManageContactDirectory(
       if (input.contact_id === undefined) return missing('contact_id', 'promote_alias');
       if (input.alias_id === undefined) return missing('alias_id', 'promote_alias');
       return handlePromoteContactAlias(ctx, { contact_id: input.contact_id, alias_id: input.alias_id });
+    case 'rename_alias':
+      if (input.contact_id === undefined) return missing('contact_id', 'rename_alias');
+      if (input.alias_id === undefined) return missing('alias_id', 'rename_alias');
+      if (input.alias === undefined) return missing('alias', 'rename_alias');
+      return handleRenameContactAlias(ctx, {
+        contact_id: input.contact_id,
+        alias_id: input.alias_id,
+        alias: input.alias,
+      });
     case 'delete_alias':
       if (input.contact_id === undefined) return missing('contact_id', 'delete_alias');
       if (input.alias_id === undefined) return missing('alias_id', 'delete_alias');

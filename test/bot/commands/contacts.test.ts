@@ -209,6 +209,70 @@ describe('handleContacts command', () => {
     expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('already an alias'));
   });
 
+  test('rename changes the owner contact primary label and clears a stale preferred display label', async () => {
+    const contact = deps.contactRepo.add(USER_ID, 'Elena', undefined, undefined, 'Lenka');
+    const ctx = makeCtx(`rename ${contact.id} Elena Ivanova`);
+    await handleContacts(ctx, deps);
+    expect(deps.contactRepo.findById(USER_ID, contact.id)).toMatchObject({
+      name: 'Elena Ivanova',
+      preferred_name: null,
+    });
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('Elena Ivanova'));
+  });
+
+  test('rename reports an explicit group-label collision without mutating the contact', async () => {
+    const contact = deps.contactRepo.add(USER_ID, 'Elena');
+    deps.contactGroupRepo.create(USER_ID, 'семья');
+    const ctx = makeCtx(`rename ${contact.id} СЕМЬЯ`);
+    await handleContacts(ctx, deps);
+    expect(deps.contactRepo.findById(USER_ID, contact.id)?.name).toBe('Elena');
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('group'));
+  });
+
+  test('alias rename changes a non-primary alias', async () => {
+    const contact = deps.contactRepo.add(USER_ID, 'Elena');
+    const alias = deps.contactAliasRepo.add(USER_ID, contact.id, 'Lenka', 'manual');
+    const ctx = makeCtx(`alias rename ${contact.id} ${alias.id} Леночка`);
+    await handleContacts(ctx, deps);
+    expect(deps.contactAliasRepo.listForContact(USER_ID, contact.id).map((row) => row.alias)).toContain('Леночка');
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('Леночка'));
+  });
+
+  test('alias rename reports a stale alias id as not found instead of a collision', async () => {
+    const contact = deps.contactRepo.add(USER_ID, 'Elena');
+    const alias = deps.contactAliasRepo.add(USER_ID, contact.id, 'Lenka', 'manual');
+    const ctx = makeCtx(`alias rename ${contact.id} ${alias.id + 9999} Леночка`);
+    await handleContacts(ctx, deps);
+    expect(deps.contactAliasRepo.listForContact(USER_ID, contact.id).map((row) => row.alias)).toContain('Lenka');
+    expect(ctx.send).toHaveBeenCalledWith(expect.stringContaining('not found'));
+  });
+
+  test('contact list proactively surfaces duplicate primary labels with identity ids and repair guidance', async () => {
+    const first = deps.contactRepo.add(USER_ID, 'Lena');
+    const second = deps.contactRepo.add(USER_ID, 'Lena');
+    const ctx = makeCtx(null);
+    await handleContacts(ctx, deps);
+    const text = String((ctx.send as ReturnType<typeof mock>).mock.calls[0]?.[0] ?? '');
+    expect(text).toContain('Duplicate contact labels');
+    expect(text).toContain(`Lena (#${first.id})`);
+    expect(text).toContain(`Lena (#${second.id})`);
+    expect(text).toContain('/contacts rename');
+    expect(text).toContain('/contacts group create');
+  });
+
+  test('contact list proactively surfaces an alias collision even when primary names differ', async () => {
+    const first = deps.contactRepo.add(USER_ID, 'Elena Ivanova');
+    const second = deps.contactRepo.add(USER_ID, 'Elena Petrova');
+    deps.contactAliasRepo.add(USER_ID, first.id, 'Лена', 'manual');
+    deps.contactAliasRepo.add(USER_ID, second.id, 'Лена', 'manual');
+    const ctx = makeCtx(null);
+    await handleContacts(ctx, deps);
+    const text = String((ctx.send as ReturnType<typeof mock>).mock.calls[0]?.[0] ?? '');
+    expect(text).toContain('Лена');
+    expect(text).toContain(`Elena Ivanova (#${first.id})`);
+    expect(text).toContain(`Elena Petrova (#${second.id})`);
+  });
+
   test('group create then group add wires a member', async () => {
     const contact = deps.contactRepo.add(USER_ID, 'Anna');
     await handleContacts(makeCtx('group create грюковы'), deps);
@@ -280,6 +344,14 @@ describe('handleContactsCallback', () => {
     const ctx = makeCtx();
     await handleContactsCallback(ctx, `view:${contact.id}:0`, user, deps);
     expect(ctx.editText).toHaveBeenCalledWith(expect.stringContaining('Elena'), expect.anything());
+  });
+
+  test('list callback keeps the proactive collision warning visible', async () => {
+    deps.contactRepo.add(USER_ID, 'Lena');
+    deps.contactRepo.add(USER_ID, 'Lena');
+    const ctx = makeCtx();
+    await handleContactsCallback(ctx, 'list:0', user, deps);
+    expect(ctx.editText).toHaveBeenCalledWith(expect.stringContaining('Duplicate contact labels'), expect.anything());
   });
 
   test('promote makes a non-primary alias primary', async () => {
