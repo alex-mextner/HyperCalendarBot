@@ -8,6 +8,8 @@ import { ActionLogRepository } from './repositories/action-log.repository.ts';
 import { AlertRepository } from './repositories/alert.repository.ts';
 import { BirthdayMetadataRepository } from './repositories/birthday-metadata.repository.ts';
 import { CalendarProposalRepository } from './repositories/calendar-proposal.repository.ts';
+import { CallLogRepository } from './repositories/call-log.repository.ts';
+import { CallSettingsRepository } from './repositories/call-settings.repository.ts';
 import { ChatHistoryRepository } from './repositories/chat-history.repository.ts';
 import { ContactRepository } from './repositories/contact.repository.ts';
 import { ContactAliasRepository } from './repositories/contact-alias.repository.ts';
@@ -39,6 +41,8 @@ import { runMigrations } from './schema.ts';
 
 export class DatabaseService {
   readonly db: Database;
+  readonly callSettings: CallSettingsRepository;
+  readonly callLog: CallLogRepository;
   readonly users: UserRepository;
   readonly events: EventRepository;
   readonly holidays: HolidayRepository;
@@ -86,6 +90,8 @@ export class DatabaseService {
 
     runMigrations(this.db, migrations);
 
+    this.callSettings = new CallSettingsRepository(this.db);
+    this.callLog = new CallLogRepository(this.db);
     this.users = new UserRepository(this.db);
     this.events = new EventRepository(this.db);
     this.holidays = new HolidayRepository(this.db);

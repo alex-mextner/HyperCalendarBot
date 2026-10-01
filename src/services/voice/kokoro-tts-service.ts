@@ -33,7 +33,7 @@ export class KokoroTtsService {
     });
     const wavBuffer = Buffer.from(await audio.arrayBuffer());
 
-    // HF API returns WAV — convert to OGG Opus, the format Telegram voice messages use
+    // HF API returns WAV — convert to OGG Opus for pytgcalls compatibility
     const tmpWav = `/tmp/kokoro-${Date.now()}.wav`;
     const tmpOgg = `/tmp/kokoro-${Date.now()}.ogg`;
     await Bun.write(tmpWav, wavBuffer);

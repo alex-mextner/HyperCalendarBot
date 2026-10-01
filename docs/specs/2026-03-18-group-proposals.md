@@ -49,12 +49,13 @@ async function deliverMessageAsync(params: DeliverMessageParams): Promise<{ deli
 
 ### Цепочка доставки (универсальная)
 
-> **Обновление 2026-09-29:** общий служебный MTProto-аккаунт удалён по решению владельца; шага 2 больше нет. Предложения доставляются через Bot API, иначе инициатору уходит ссылка.
+> **Обновление 2026-09-30:** служебный MTProto-аккаунт восстановлен за `ServiceTier` без отправок (#753): он только ищет и читает, но никогда не пишет. Шаг 2 — только собственная сессия инициатора (`/connect_telegram`); сейчас его передаёт лишь доставка инвайтов. Предложения и уведомления секретарям идут через Bot API, иначе инициатору уходит ссылка.
 
 1. **Bot API** — прямое `sendMessage(target_id, ...)`. Работает если пользователь хотя бы раз писал боту.
-2. **MTProto fallback** — `mtprotoSendAsUser(target_id, text, target_username)`. Работает для
-   пользователей с публичным username, даже если они никогда не писали боту.
-3. **Deep link fallback** — если оба не сработали: отправить `fallback_text` инициатору
+2. **Сессия инициатора** (`userSessionSend`, только если вызывающий её передал) — `sendAsConnectedUser`
+   (`scripts/send-as-user.py`) от имени самого инициатора, подключившего свой Telegram через
+   `/connect_telegram`. Работает, даже если цель никогда не писала боту.
+3. **Deep link fallback** — если доставить не удалось: отправить `fallback_text` инициатору
    с deeplink-кнопкой `[→ Написать боту]`, чтобы цель могла начать диалог сама.
 
 `deliverInvitationAsync` рефакторится на вызов `deliverMessageAsync`.
@@ -251,7 +252,7 @@ UPDATE calendar_proposals SET status = 'declined', updated_at = datetime('now') 
 You are in a group chat. You CANNOT modify other users' calendars directly.
 If the message asks to change, add, or delete something in another user's calendar:
 1. Use find_user to resolve the target to telegram_id.
-2. If find_user fails, explain its error in the proposer's language and offer pick_users; never paste it raw.
+2. If find_user fails, tell the proposer what actually happened, in their own language — do not reword an "unavailable/couldn't verify" error as "hasn't started the bot" (that error means resolution could not be checked, not that the person doesn't use Telegram), and never paste the raw English error text verbatim.
 3. Confirm the proposed change with ask_user if any details are ambiguous.
 4. Call propose_calendar_change. STOP immediately after — do not add more text.
 

@@ -22,6 +22,7 @@ import { BirthdayService } from '../../../src/services/birthday/birthday-service
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import { disabledServiceTier } from '../../helpers/service-tier.ts';
 
 function buildContext(
   db: Database,
@@ -648,6 +649,7 @@ describe('answers about the user are checked against the profile the agent saw (
       new BirthdayMetadataRepository(db),
       new EventReminderRepository(db),
       new NotificationPreferencesRepository(db),
+      disabledServiceTier,
     );
     ctx.birthday = { birthdayService, userMemoryRepo };
     return ctx;

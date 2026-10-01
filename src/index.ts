@@ -1,4 +1,5 @@
 import { createNotificationSender } from './services/notification/worker.ts';
+import { createServiceTier } from './services/telegram-session/service-tier.ts';
 import { formatSessionLoss } from './services/telegram-session/session-loss.ts';
 // src/index.ts
 
@@ -21,10 +22,12 @@ import { aiStreamRound } from './services/ai/streaming.ts';
 import { runSyntheticIntent } from './services/intent/synthetic-intent-run.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { InvitationCardRefresher } from './services/sharing/invitation-cards.ts';
+import { createVoiceSender } from './services/voice/voice-sender.ts';
 import { hasChainAnswered, initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
 import { botLogger } from './utils/logger.ts';
 import { makeWorkerFailureHandler } from './utils/worker-alert.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
+import type { CallRequest } from './worker/call-queue.ts';
 
 // Filled in after db + config are initialized — best-effort, push() is synchronous
 let pushCrashAlert: ((msg: string) => void) | undefined;
@@ -158,6 +161,10 @@ let googleSyncQueueRef: import('bullmq').Queue | undefined;
 let syncChangeNotifierRef: import('./services/event/event-change-notifier.ts').EventChangeNotifier | undefined;
 let imageQueueCleanup: { close: () => Promise<void> } | undefined;
 let renderService: import('./services/image/render-service.ts').RenderService | undefined;
+let callQueue: { enqueue(data: CallRequest): Promise<void> } | undefined;
+let callQueueCleanup: { close: () => Promise<void> } | undefined;
+/** The live-call agent, drained on shutdown like the chat agent. */
+let voiceAgentRef: { drain: (settleMs: number) => Promise<void> } | undefined;
 let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
 let botTasksQueueCleanup: { close: () => Promise<void> } | undefined;
 let googleRedisClient: Bun.RedisClient | undefined;
@@ -166,6 +173,16 @@ let participantPushSchedulerRef:
   | undefined;
 /** Re-pushes all Google Calendar copies of an event after its place is confirmed or dropped */
 let pushEventCopiesRef: ((event: CalendarEvent) => Promise<void>) | undefined;
+
+// The shared MTProto service account: decided once here, fail-closed (#753). Everything that uses
+// it receives `serviceTier`; nothing else reads MTPROTO_SERVICE_USER_ID or spawns a service script.
+const serviceTier = await createServiceTier(config, { dataDirectory: 'data' });
+if (serviceTier.enabled) {
+  botLogger.info({ accountId: serviceTier.accountId }, 'MTProto service tier enabled');
+} else {
+  botLogger.info({ reason: serviceTier.reason }, 'MTProto service tier disabled');
+}
+
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
   const { createGoogleSyncQueue } = await import('./services/google/sync-queue.ts');
@@ -421,6 +438,134 @@ const { queue: broadcastQueue, enqueuer: broadcastEnqueuer } = createBroadcastQu
 );
 let broadcastQueueCleanup: { close: () => Promise<void> } | undefined;
 
+if (config.REDIS_URL && serviceTier.enabled && !config.DISABLE_VOICE) {
+  try {
+    const { createCallQueue, createCallWorker } = await import('./worker/call-queue.ts');
+    const { CallManager } = await import('./services/voice/call-manager.ts');
+    const { CallSessionManager } = await import('./services/voice/call-session-manager.ts');
+    const { CallSession, createCallAgent } = await import('./services/voice/call-session.ts');
+    const { ConversationLogger } = await import('./services/conversation-logger.ts');
+    const { NovaStreamingSTT } = await import('./services/voice/nova-streaming-stt.ts');
+    const { FluxStreamingSTT } = await import('./services/voice/flux-streaming-stt.ts');
+    const { ThinkingPhrasePlayer } = await import('./services/voice/thinking-phrase-player.ts');
+    const { CalendarBotAgent } = await import('./services/ai/agent.ts');
+    const { EventService } = await import('./services/event/event-service.ts');
+    const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
+    const { HolidayService } = await import('./services/holiday/holiday-service.ts');
+
+    const pyBridgePath = serviceTier.voiceBridgeScript;
+
+    const { TtsTranslationService } = await import('./services/voice/tts-translation.ts');
+    const ttsTranslationService = new TtsTranslationService();
+
+    const DEEPGRAM_API_KEY = config.DEEPGRAM_API_KEY ?? '';
+    if (!DEEPGRAM_API_KEY) {
+      botLogger.warn('DEEPGRAM_API_KEY is not set — STT will not work');
+    }
+
+    // TelegramSender for voice calls — forwards to botRef, which wraps bot.api once the bot exists.
+    const voiceSender = createVoiceSender(botRef);
+    const voiceAgent = new CalendarBotAgent({ debugLogger: aiDebugLogger, summarizer: historySummarizer }, voiceSender);
+    voiceAgentRef = voiceAgent;
+
+    const voiceMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
+    const voiceEventService = new EventService({
+      eventRepo: db.events,
+      materializer: voiceMaterializer,
+    });
+    const voiceHolidayService = new HolidayService(db.holidays);
+
+    const { markStress, numbersToWords } = await import('./services/voice/stress-marker.ts');
+
+    // Language-aware TTS adapter: Silero (RU) → Kokoro (EN) → Google fallback.
+    // All four outer variables (sileroTts, kokoroTts, stressDictionary, fallbackTts) are
+    // module-level lets/consts initialized later; closures resolve them at call time.
+    const voiceCallTts = {
+      synthesize: async (text: string, lang: string): Promise<Buffer> => {
+        const clean = text.replace(/\n/g, ' ');
+        if (lang === 'ru' && sileroTts && stressDictionary) {
+          try {
+            const stressedText = markStress(numbersToWords(clean), stressDictionary);
+            botLogger.info({ engine: 'silero', lang }, 'Voice call TTS');
+            return await sileroTts.synthesize(stressedText);
+          } catch (err) {
+            botLogger.warn({ err }, 'Silero TTS failed, falling back to Google');
+          }
+        } else if (lang === 'en' && kokoroTts) {
+          try {
+            botLogger.info({ engine: 'kokoro', lang }, 'Voice call TTS');
+            return await kokoroTts.synthesize(clean);
+          } catch (err) {
+            botLogger.warn({ err }, 'Kokoro TTS failed, falling back to Google');
+          }
+        } else {
+          botLogger.info({ engine: 'google', lang }, 'Voice call TTS');
+        }
+        return fallbackTts.synthesize(clean, lang);
+      },
+    };
+
+    const voiceCallAgent = createCallAgent(voiceAgent, {
+      sender: voiceSender,
+      eventService: voiceEventService,
+      chatHistory: db.chatHistory,
+      conversationLogger: new ConversationLogger(db.chatHistory),
+      userRepo: db.users,
+      eventReminderRepo: db.eventReminders,
+      holidayService: voiceHolidayService,
+    });
+
+    const callSessionManager = new CallSessionManager({
+      createSession: (sessionId, userId, language, ws, openerText) =>
+        CallSession.create({
+          sessionId,
+          userId,
+          language,
+          ws,
+          createNovaStt: () => new NovaStreamingSTT(DEEPGRAM_API_KEY),
+          createFluxStt: () => new FluxStreamingSTT(DEEPGRAM_API_KEY),
+          createThinkingPlayer: () => new ThinkingPhrasePlayer(language),
+          agent: voiceCallAgent,
+          tts: voiceCallTts,
+          openerText,
+        }),
+    });
+
+    callSessionManager.startServer();
+
+    const callManager = new CallManager({
+      callLogRepo: db.callLog,
+      translateText: (text, lang) => ttsTranslationService.translate(text, lang),
+      pyBridgePath,
+      registerSession: (sessionId, userId, language, openerText) =>
+        callSessionManager.registerSession(sessionId, userId, language, openerText),
+      unregisterSession: (sessionId) => callSessionManager.unregisterSession(sessionId),
+      notifyUser: (userId, msg) => {
+        botRef
+          .sendMessage(userId, msg)
+          .catch((err) => botLogger.error({ err, userId }, 'Failed to send call failure notification'));
+      },
+    });
+
+    const cq = createCallQueue({ url: config.REDIS_URL }, db.callLog);
+    const worker = createCallWorker({ url: config.REDIS_URL }, callManager);
+    worker.on('failed', onWorkerFailed('call-reminders'));
+    callQueue = cq;
+    callQueueCleanup = {
+      close: async () => {
+        await worker.close();
+        await cq.queue.close();
+      },
+    };
+
+    botLogger.info('Voice call pipeline initialized (Python bridge + BullMQ)');
+  } catch (error) {
+    // Fail closed: without a working pipeline no call can be placed, so make_call stays hidden
+    // instead of queueing calls nobody will ever make.
+    botLogger.warn({ err: error }, 'Voice call init failed; voice calls disabled');
+  }
+}
+
 // Weather service — optional, requires OPENWEATHER_API_KEY
 let weatherService: import('./services/weather/weather-service.ts').WeatherService | undefined;
 if (config.OPENWEATHER_API_KEY) {
@@ -452,6 +597,15 @@ if (config.REDIS_URL) {
     enqueue: (type, userId, logId, payload) => {
       notifQueue.add(type, { logId, telegramId: userId, type, payload });
     },
+    callSettingsRepo: db.callSettings,
+    callLogRepo: db.callLog,
+    enqueueCall: callQueue
+      ? (data) => {
+          callQueue
+            ?.enqueue(data)
+            .catch((err) => botLogger.error({ err, userId: data.userId }, 'Failed to queue scheduled voice call'));
+        }
+      : undefined,
     weatherService,
     featureUsageRepo: db.featureUsage,
   });
@@ -483,7 +637,7 @@ if (config.REDIS_URL) {
     setupProposalExpiryCron,
     setupEditProposalExpiryCron,
     setupSessionCleanupCron,
-    unscheduleRetiredCrons,
+    setupBirthdaySyncCron,
     setupChatHistoryCleanupCron,
     setupSqliteBackupCron,
     setupRecurringRemindersCron,
@@ -495,10 +649,29 @@ if (config.REDIS_URL) {
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
   const { processExpiredEditProposals } = await import('./services/google/edit-proposal-expiry.ts');
+  const { BirthdayService, BIRTHDAY_SYNC_THROTTLE_MS } = await import('./services/birthday/birthday-service.ts');
   const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
   const { processSessionKeepalive } = await import('./worker/session-keepalive.ts');
 
   const cronMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
+  const cronBirthdayService = new BirthdayService(
+    db.events,
+    db.birthdayMeta,
+    db.eventReminders,
+    db.notificationPreferences,
+    serviceTier,
+  );
+  // Birthday auto-sync reads birthdays through the service account, so it exists only with it.
+  const onBirthdaySync = serviceTier.enabled
+    ? async () => {
+        const BATCH = 100;
+        const users = db.birthdayMeta.getUsersNeedingSync(BIRTHDAY_SYNC_THROTTLE_MS);
+        for (let i = 0; i < users.length; i += BATCH) {
+          await cronBirthdayService.runBatchSync(users.slice(i, i + BATCH));
+        }
+      }
+    : undefined;
+
   const { queue: botTasksQueue, worker: botTasksWorker } = createBotTasksQueue({
     redisUrl: config.REDIS_URL,
     onSecretaryExpiry: () =>
@@ -541,6 +714,7 @@ if (config.REDIS_URL) {
       const deleted = db.actionLog.deleteOlderThan(cutoff);
       if (deleted > 0) botLogger.info({ deleted }, 'Action log cleanup: removed old entries');
     },
+    onBirthdaySync,
     onChatHistoryCleanup: () => {
       const deleted = db.chatHistory.deleteOlderThan(90);
       botLogger.info({ deleted }, 'Cleaned up old chat history');
@@ -572,7 +746,7 @@ if (config.REDIS_URL) {
   await setupProposalExpiryCron(botTasksQueue);
   await setupEditProposalExpiryCron(botTasksQueue);
   await setupSessionCleanupCron(botTasksQueue);
-  await unscheduleRetiredCrons(botTasksQueue);
+  await setupBirthdaySyncCron(botTasksQueue, { onBirthdaySync });
   await setupChatHistoryCleanupCron(botTasksQueue);
   await setupSqliteBackupCron(botTasksQueue);
   await setupRecurringRemindersCron(botTasksQueue);
@@ -794,7 +968,9 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
     {
       googleDeps,
       renderService,
+      callQueue,
       transcriptionService,
+      serviceTier,
       stressDictionary,
       sileroTts,
       kokoroTts,
@@ -1077,7 +1253,7 @@ bot.onStart(async ({ info }) => {
 const LATE_AGENT_DRAIN_SETTLE_MS = 1_000;
 
 async function drainAgents(settleMs: number): Promise<void> {
-  await agent.drain(settleMs);
+  await Promise.all([agent.drain(settleMs), voiceAgentRef?.drain(settleMs)]);
 }
 
 // Graceful shutdown. Stop taking updates first, then abort the AI turns still
@@ -1093,6 +1269,7 @@ async function shutdown(): Promise<void> {
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
   if (broadcastQueueCleanup) await broadcastQueueCleanup.close();
+  if (callQueueCleanup) await callQueueCleanup.close();
   // Nothing may still be writing when Redis and SQLite close.
   await drainAgents(LATE_AGENT_DRAIN_SETTLE_MS);
   if (googleRedisClient) googleRedisClient.close();

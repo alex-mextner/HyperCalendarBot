@@ -16,7 +16,7 @@ Canonical numbering and implementation order:
 | 04 | `04-notifications.md` | Notifications & Reminders | 01 | Design |
 | 05 | `05-image-generation.md` | Image Generation (Playwright) | 01, 04 | Design |
 | 06 | `06-sharing-social.md` | Sharing, Invitations & Social | 01, 05 | Design |
-| 07 | — (spec deleted) | Voice Call Reminders | 01, 04 | Removed 2026-09-29 |
+| 07 | `07-voice-calls.md` | Voice Call Reminders | 01, 04 | Design |
 | 08 | `08-holidays.md` | Holiday Subscriptions | 01 | Design |
 
 ### Implementation Phases
@@ -26,7 +26,7 @@ Canonical numbering and implementation order:
 **Phase C — Visuals:** 05 (Image Generation)
 **Phase D — Sync:** 03 (Google Calendar Sync)
 **Phase E — Social:** 06 (Sharing & Social)
-**Phase F — Voice:** 07 (Voice Call Reminders) — removed 2026-09-29 by owner decision together with the shared MTProto service account. The `user_call_settings` and `call_log` tables stay in the schema unused; the voice-call sections below are historical.
+**Phase F — Voice:** 07 (Voice Call Reminders) — 2026-09-30: restored behind `ServiceTier`, no service sends (#753); calls run only while the optional MTProto service tier is enabled.
 
 ### Deferred Commands
 

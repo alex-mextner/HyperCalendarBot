@@ -6,8 +6,8 @@
 //   FAST_CHAIN: configured order, otherwise Groq ${GROQ_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL} → z.ai ${ZAI_FAST_MODEL}
 //
 // Callers that need live updates (agent.ts) pass `onTextDelta`/`onToolCallStart` callbacks.
-// Callers that just want the final text (validator, intent-learner, city-resolver)
-// omit callbacks — the full result is still returned either way.
+// Callers that just want the final text (validator, intent-learner, city-resolver,
+// tts-translation) omit callbacks — the full result is still returned either way.
 
 import OpenAI from 'openai';
 import type { CompletionUsage } from 'openai/resources/completions';
@@ -890,7 +890,7 @@ function describeFailure(slot: ProviderSlot, error: unknown): ProviderFailure {
  * (used by the main agent loop for live Telegram updates).
  *
  * Without callbacks: collects the full result and returns it at the end
- * (used by validator, intent-learner, city-resolver).
+ * (used by validator, intent-learner, city-resolver, tts-translation).
  *
  * Chains:
  *   fast=false → configured AI_SMART_CHAIN, otherwise the responsive DEFAULT_SMART_CHAIN

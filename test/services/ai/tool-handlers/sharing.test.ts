@@ -26,7 +26,7 @@ import {
   handleShareAgenda,
   handleShareEvent,
 } from '../../../../src/services/ai/tool-handlers/sharing.ts';
-import type { AgentContext, InvitationKeyboardVariant } from '../../../../src/services/ai/types.ts';
+import type { AgentContext, InvitationKeyboardVariant, TelegramSender } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { GroupMemberService } from '../../../../src/services/group/member-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
@@ -36,6 +36,7 @@ import { PrivacyService } from '../../../../src/services/sharing/privacy-service
 import { SharingService } from '../../../../src/services/sharing/sharing-service.ts';
 import { flushPromises } from '../../../helpers/mock-context.ts';
 import { addAsPre064Image, ageAnswers, answerAsPre064Image } from '../../../helpers/pre-064-image.ts';
+import { disabledServiceTier } from '../../../helpers/service-tier.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -473,7 +474,7 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('300');
     });
 
-    test('unknown @username opens pick_users and spawns nothing', async () => {
+    test('without the service account, an unknown @username opens pick_users without claiming the person is missing, and spawns nothing', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Picker Party',
@@ -500,7 +501,88 @@ describe('sharing tool handlers', () => {
       expect(result.success).toBe(true);
       expect(result.stopLoop).toBe(true);
       expect(pickerPrompt).toContain('@nobody');
+      expect(pickerPrompt).not.toMatch(/not found|started/i);
       expect(spawn).not.toHaveBeenCalled();
+    });
+
+    describe('with the service account', () => {
+      function pickerCapture(): { prompts: string[]; sender: TelegramSender } {
+        const prompts: string[] = [];
+        return {
+          prompts,
+          sender: {
+            sendMessage: async () => ({ message_id: 1 }),
+            editMessageText: async () => {},
+            sendUserPicker: async (_chatId: number, prompt: string) => {
+              prompts.push(prompt);
+              return { message_id: 1 };
+            },
+          },
+        };
+      }
+
+      test('an @username unknown to the bot resolves through it, is verified and invited', async () => {
+        const event = eventService.createEvent({
+          user_id: USER_ID,
+          title: 'Resolve Party',
+          start_at: futureStartAt(),
+          timezone: 'UTC',
+        });
+        const asked: string[] = [];
+        const ctx = makeCtx({
+          messageText: 'Invite @TargetUser',
+          resolveUsername: async (username) => {
+            asked.push(username);
+            return { id: 5000000030, firstName: 'Target', username: 'targetuser' };
+          },
+        });
+        const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_username: '@TargetUser' });
+        expect(result.success).toBe(true);
+        expect(asked).toEqual(['targetuser']);
+        expect(ctx.verifiedRecipientIds?.has(5000000030)).toBe(true);
+        expect(invitationRepo.findActiveByEventAndInvitee(event.id, 5000000030)).not.toBeNull();
+      });
+
+      test('a username Telegram does not know opens the picker saying it is not on Telegram', async () => {
+        const event = eventService.createEvent({
+          user_id: USER_ID,
+          title: 'Picker Party',
+          start_at: futureStartAt(),
+          timezone: 'UTC',
+        });
+        const picker = pickerCapture();
+        const ctx = makeCtx({
+          messageText: 'Invite @nobody',
+          resolveUsername: async () => null,
+          sender: picker.sender,
+        });
+        const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_username: 'nobody' });
+        expect(result).toMatchObject({ success: true, stopLoop: true });
+        expect(picker.prompts).toEqual([expect.stringContaining('@nobody not found on Telegram')]);
+        expect(invitationRepo.getByEvent(event.id)).toHaveLength(0);
+      });
+
+      test('a lookup that could not run opens the picker without claiming the person is missing', async () => {
+        const event = eventService.createEvent({
+          user_id: USER_ID,
+          title: 'Picker Party',
+          start_at: futureStartAt(),
+          timezone: 'UTC',
+        });
+        const picker = pickerCapture();
+        const ctx = makeCtx({
+          messageText: 'Invite @nobody',
+          resolveUsername: async () => {
+            throw new Error('synthetic resolve timeout');
+          },
+          sender: picker.sender,
+        });
+        const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_username: 'nobody' });
+        expect(result).toMatchObject({ success: true, stopLoop: true });
+        expect(picker.prompts).toEqual([expect.stringContaining("couldn't look up @nobody")]);
+        expect(picker.prompts[0]).not.toMatch(/not found|started|timeout/i);
+        expect(invitationRepo.getByEvent(event.id)).toHaveLength(0);
+      });
     });
 
     test("routes the picker to the inviter's private chat, not a group ctx.chatId", async () => {
@@ -1298,7 +1380,7 @@ describe('sharing tool handlers', () => {
             groupMemberRepo,
             checkGroupMembership: () => Promise.resolve(false),
             groupChatRepo: new GroupChatRepository(db),
-            groupMemberService: new GroupMemberService(groupMemberRepo, userRepo),
+            groupMemberService: new GroupMemberService(groupMemberRepo, userRepo, disabledServiceTier),
           },
         });
       }

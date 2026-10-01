@@ -56,6 +56,8 @@ describe('toolSchemas', () => {
       'render_week_image',
       'render_month_image',
       'render_table',
+      'end_call',
+      'make_call',
       'get_holidays',
       'manage_settings',
       'share_event',
@@ -613,7 +615,7 @@ describe('boolean tool field boundary', () => {
   test('every advertised boolean tool field accepts only the exact string literals', () => {
     const schemasByName = new Map<string, z.ZodType>(Object.entries(toolSchemas));
     const checked = new Set<string>();
-    for (const tool of getToolDefinitions()) {
+    for (const tool of [...getToolDefinitions(), ...getToolDefinitions('live_call')]) {
       if (tool.type !== 'function') continue;
       const properties = tool.function.parameters?.properties;
       if (!properties || typeof properties !== 'object') continue;

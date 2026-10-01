@@ -1,6 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { migrations } from '../../../src/database/migrations.ts';
+import { CallSettingsRepository } from '../../../src/database/repositories/call-settings.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
 
 describe('NotificationPreferencesRepository', () => {
   let db: Database;
@@ -9,34 +12,7 @@ describe('NotificationPreferencesRepository', () => {
   beforeEach(() => {
     db = new Database(':memory:');
     db.run('PRAGMA foreign_keys = ON');
-    db.run(`CREATE TABLE users (
-      telegram_id INTEGER PRIMARY KEY,
-      username TEXT,
-      first_name TEXT,
-      language TEXT NOT NULL DEFAULT 'en',
-      timezone TEXT NOT NULL DEFAULT 'UTC',
-      country_code TEXT,
-      google_refresh_token_enc TEXT,
-      voice_response_enabled INTEGER DEFAULT NULL,
-      onboarding_completed INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    )`);
-    db.run(`CREATE TABLE notification_preferences (
-      user_id INTEGER PRIMARY KEY,
-      morning_agenda_enabled INTEGER NOT NULL DEFAULT 1,
-      morning_agenda_time TEXT NOT NULL DEFAULT '08:00',
-      morning_agenda_format TEXT NOT NULL DEFAULT 'text',
-      default_reminder_intervals TEXT NOT NULL DEFAULT '[15]',
-      evening_review_enabled INTEGER NOT NULL DEFAULT 0,
-      evening_review_time TEXT NOT NULL DEFAULT '21:00',
-      evening_review_format TEXT NOT NULL DEFAULT 'text',
-      quiet_hours_enabled INTEGER NOT NULL DEFAULT 0,
-      quiet_hours_start TEXT,
-      quiet_hours_end TEXT,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
-    )`);
+    runMigrations(db, migrations);
     db.run("INSERT INTO users (telegram_id, username) VALUES (42, 'alice')");
     repo = new NotificationPreferencesRepository(db);
   });
@@ -47,7 +23,7 @@ describe('NotificationPreferencesRepository', () => {
     expect(prefs).not.toBeNull();
     expect(prefs!.morning_agenda_enabled).toBe(1);
     expect(prefs!.morning_agenda_time).toBe('08:00');
-    expect(prefs!.default_reminder_intervals).toBe('[15]');
+    expect(prefs!.default_reminder_intervals).toBe('[30, 0]');
     expect(prefs!.evening_review_enabled).toBe(0);
     expect(prefs!.quiet_hours_enabled).toBe(0);
   });
@@ -80,6 +56,24 @@ describe('NotificationPreferencesRepository', () => {
     const users = repo.getAllEveningEnabled();
     expect(users.length).toBe(1);
     expect(users[0]!.user_id).toBe(42);
+  });
+
+  test('has_voice_calls reflects voice CALLS, not the voice-reply toggle', () => {
+    repo.ensureDefaults(42);
+    db.run('UPDATE users SET voice_response_enabled = 1 WHERE telegram_id = 42');
+    const callSettings = new CallSettingsRepository(db);
+    callSettings.ensureDefaults(42);
+    callSettings.setEnabled(42, false);
+    expect(repo.getAllMorningEnabled().map((r) => r.has_voice_calls)).toEqual([0]);
+
+    callSettings.setEnabled(42, true);
+    expect(repo.getAllMorningEnabled().map((r) => r.has_voice_calls)).toEqual([1]);
+  });
+
+  test('has_voice_calls is 0 for a user with no call settings row', () => {
+    repo.ensureDefaults(42);
+    db.run('UPDATE users SET voice_response_enabled = 1 WHERE telegram_id = 42');
+    expect(repo.getAllMorningEnabled().map((r) => r.has_voice_calls)).toEqual([0]);
   });
 
   test('update throws on unknown field', () => {

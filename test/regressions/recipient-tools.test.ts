@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { createCallbackHandler } from '../../src/bot/handlers/callback.handler.ts';
 import { migrations } from '../../src/database/migrations.ts';
 import { ActionLogRepository } from '../../src/database/repositories/action-log.repository.ts';
@@ -33,6 +33,7 @@ import { EventService } from '../../src/services/event/event-service.ts';
 import { GroupMemberService } from '../../src/services/group/member-service.ts';
 import { DeepLinkService } from '../../src/services/sharing/deep-link-service.ts';
 import { InvitationService } from '../../src/services/sharing/invitation-service.ts';
+import { disabledServiceTier } from '../helpers/service-tier.ts';
 
 function makeCtx(db: Database, overrides: Partial<AgentContext> = {}): AgentContext {
   const users = new UserRepository(db);
@@ -63,7 +64,7 @@ function groupCapability(
     checkGroupMembership,
     groupMemberRepo,
     groupChatRepo: new GroupChatRepository(db),
-    groupMemberService: new GroupMemberService(groupMemberRepo, new UserRepository(db)),
+    groupMemberService: new GroupMemberService(groupMemberRepo, new UserRepository(db), disabledServiceTier),
   };
 }
 
@@ -125,42 +126,63 @@ describe('recipient and contact tool boundaries', () => {
     ctx.contactRepo!.deleteOwned(10, ctx.contactRepo!.list(10)[0]!.id);
     const send = mock(async (_id: number) => ({ message_id: 1 }));
     ctx.sender = { sendMessage: send, editMessageText: async () => {}, sendInvitation: send };
+    ctx.resolveUsername = mock(async () => ({ id: 5000000002, username: 'knownalex' }));
     expect((await handleResendInvitation(ctx, { invitation_id: invitation.id })).success).toBe(true);
     expect(send.mock.calls[0]?.[0]).toBe(5000000001);
+    expect(ctx.resolveUsername).not.toHaveBeenCalled();
   });
 
-  test('get_user_info reports only the saved contact and rechecks owner scope', async () => {
-    const result = await handleGetUserInfo(ctx, { telegram_id: 5000000001 });
-    expect(result.data).toEqual({
-      telegram_id: 5000000001,
-      display_name: 'Alex',
-      preferred_name: null,
-      username: 'knownalex',
-      contact_created_at: expect.any(String),
+  test('unresolved optional profile does not block established numeric Bot API delivery', async () => {
+    ctx.lookupTelegramUser = mock(() => new Promise<null>(() => {}));
+    const event = ctx.eventService.createEvent({
+      user_id: 10,
+      title: 'Latency',
+      start_at: new Date(Date.now() + 86400000).toISOString(),
+      timezone: 'UTC',
     });
+    const sent: number[] = [];
+    ctx.sender = {
+      sendMessage: async () => ({ message_id: 1 }),
+      editMessageText: async () => {},
+      sendInvitation: async (id) => {
+        sent.push(id);
+        return { message_id: 1 };
+      },
+    };
+    const pending = handleSendInvitation(ctx, { event_id: event.id, invitee_id: 5000000001 });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(sent).toEqual([5000000001]);
+    expect((await pending).success).toBe(true);
+    expect(ctx.lookupTelegramUser).not.toHaveBeenCalled();
+  });
+
+  test('inspection returns structured metadata and caches only the scoped numeric profile', async () => {
+    const lookup = mock(async (id: number) => ({ id, firstName: 'Current' }));
+    ctx.lookupTelegramUser = lookup;
+    const result = await handleGetUserInfo(ctx, { telegram_id: 5000000001 });
+    expect(result.data).toMatchObject({ telegram_id: 5000000001, username: null, profile_source: 'telegram' });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect((await handleGetUserInfo(ctx, { telegram_id: 5000000001 })).data).toEqual(result.data);
+    expect(lookup).toHaveBeenCalledTimes(1);
     ctx.contactRepo!.deleteOwned(10, ctx.contactRepo!.list(10)[0]!.id);
     expect((await handleGetUserInfo(ctx, { telegram_id: 5000000001 })).success).toBe(false);
     ctx.messageText = 'Inspect 5000000002';
-    expect((await handleGetUserInfo(ctx, { telegram_id: 5000000002 })).data).toEqual({
-      telegram_id: 5000000002,
-      display_name: null,
-      preferred_name: null,
-      username: null,
-      contact_created_at: null,
-    });
+    await handleGetUserInfo(ctx, { telegram_id: 5000000002 });
+    expect(lookup).toHaveBeenCalledTimes(2);
   });
 
-  test('inspection is audited, never rewrites contacts, and checks privacy again on repeated execution', async () => {
+  test('profile mutation is audited, structured, and checks privacy again on repeated execution', async () => {
     ctx.actionLogRepo = new ActionLogRepository(db);
     const old = ctx.contactRepo!.list(10)[0]!;
     ctx.contactRepo!.update(old.id, { preferred_name: 'Sasha' });
     const other = ctx.contactRepo!.add(10, 'Other', 'reassigned', 5000000002, 'Friend');
+    ctx.lookupTelegramUser = async (id) => ({ id, username: 'reassigned', firstName: 'Current' });
     const result = await executeTool(ctx, 'get_user_info', { telegram_id: 5000000001 });
-    expect(result.data).toMatchObject({ telegram_id: 5000000001, username: 'knownalex', preferred_name: 'Sasha' });
-    expect(ctx.contactRepo!.findById(10, old.id)).toMatchObject({ telegram_id: 5000000001, username: 'knownalex' });
+    expect(result.data).toMatchObject({ telegram_id: 5000000001, username: 'reassigned' });
+    expect(ctx.contactRepo!.findById(10, old.id)).toMatchObject({ telegram_id: 5000000001, preferred_name: 'Sasha' });
     expect(ctx.contactRepo!.findById(10, other.id)).toMatchObject({
       telegram_id: 5000000002,
-      username: 'reassigned',
+      username: null,
       preferred_name: 'Friend',
     });
     expect(ctx.actionLogRepo.query({ action_name: 'get_user_info' })).toHaveLength(1);
@@ -253,9 +275,31 @@ describe('recipient and contact tool boundaries', () => {
     });
   }
 
+  test('inspection metadata is reused for resend without refreshing the same scoped ID', async () => {
+    const event = ctx.eventService.createEvent({
+      user_id: 10,
+      title: 'Cached resend',
+      start_at: new Date(Date.now() + 86400000).toISOString(),
+      timezone: 'UTC',
+    });
+    const invitation = ctx.sharing!.invitationService.sendInvitation(event.id, 10, 5000000001, 'knownalex').invitation!;
+    const lookup = mock(async (id: number) => ({ id, firstName: 'Current' }));
+    ctx.lookupTelegramUser = lookup;
+    await handleGetUserInfo(ctx, { telegram_id: 5000000001 });
+    ctx.sender = {
+      sendMessage: async () => ({ message_id: 1 }),
+      editMessageText: async () => {},
+      sendInvitation: async () => ({ message_id: 1 }),
+    };
+    expect((await handleResendInvitation(ctx, { invitation_id: invitation.id })).success).toBe(true);
+    expect(lookup).toHaveBeenCalledTimes(1);
+  });
+
   test('fresh null username survives the automatic insertion branch and both transport arguments', async () => {
     ctx.contactRepo!.deleteOwned(10, ctx.contactRepo!.list(10)[0]!.id);
     ctx.messageText = 'Invite 5000000001';
+    ctx.lookupTelegramUser = async (id) => ({ id, firstName: 'Current' });
+    await handleGetUserInfo(ctx, { telegram_id: 5000000001 });
     const event = ctx.eventService.createEvent({
       user_id: 10,
       title: 'Insert',
@@ -280,9 +324,33 @@ describe('recipient and contact tool boundaries', () => {
       },
     };
     expect((await handleSendInvitation(ctx, { event_id: event.id, invitee_id: 5000000001 })).success).toBe(true);
-    expect(ctx.contactRepo!.findByTelegramId(10, 5000000001)).toMatchObject({ username: null });
+    expect(ctx.contactRepo!.findByTelegramId(10, 5000000001)).toMatchObject({ username: null, name: 'Current' });
     expect(targets).toEqual([5000000001, 5000000001]);
     expect(hints).toEqual([undefined]);
+  });
+
+  test('concurrent inspections coalesce by ID and cannot reuse another ID or caller context', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const lookup = mock(async (id: number) => {
+      await gate;
+      return { id, username: `person_${id}` };
+    });
+    ctx.lookupTelegramUser = lookup;
+    ctx.messageText = 'Inspect 5000000001 and 5000000002';
+    const first = handleGetUserInfo(ctx, { telegram_id: 5000000001 });
+    const duplicate = handleGetUserInfo(ctx, { telegram_id: 5000000001 });
+    const second = handleGetUserInfo(ctx, { telegram_id: 5000000002 });
+    await Promise.resolve();
+    expect(lookup).toHaveBeenCalledTimes(2);
+    release();
+    expect((await first).data).toMatchObject({ telegram_id: 5000000001, username: 'person_5000000001' });
+    expect((await duplicate).data).toEqual((await first).data);
+    expect((await second).data).toMatchObject({ telegram_id: 5000000002, username: 'person_5000000002' });
+    await handleGetUserInfo(makeCtx(db, { lookupTelegramUser: lookup }), { telegram_id: 5000000001 });
+    expect(lookup).toHaveBeenCalledTimes(3);
   });
 
   test('accepted invitation cannot be sent again or resent', async () => {
@@ -302,10 +370,11 @@ describe('recipient and contact tool boundaries', () => {
     expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(1);
   });
 
-  test('an explicit username is re-checked against the users table, not the saved contact', async () => {
-    db.run('UPDATE users SET username = NULL WHERE telegram_id = 5000000001');
-    new UserRepository(db).create({ telegram_id: 5000000002, timezone: 'UTC', username: 'knownalex' });
+  test('cached inspection never substitutes for a fresh explicit username conflict check', async () => {
+    ctx.lookupTelegramUser = async (id) => ({ id, username: 'knownalex' });
+    await handleGetUserInfo(ctx, { telegram_id: 5000000001 });
     ctx.messageText = 'Invite @knownalex';
+    ctx.resolveUsername = mock(async () => ({ id: 5000000002, username: 'knownalex' }));
     const event = ctx.eventService.createEvent({
       user_id: 10,
       title: 'Fresh conflict',
@@ -316,7 +385,25 @@ describe('recipient and contact tool boundaries', () => {
       (await handleSendInvitation(ctx, { event_id: event.id, invitee_id: 5000000001, invitee_username: 'knownalex' }))
         .success,
     ).toBe(false);
+    expect(ctx.resolveUsername).toHaveBeenCalledTimes(1);
     expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
+  });
+
+  test('inspection cache expires and bounds distinct optional lookups in a request', async () => {
+    const lookup = mock(async (id: number) => ({ id }));
+    ctx.lookupTelegramUser = lookup;
+    const ids = Array.from({ length: 33 }, (_, i) => 5000000001 + i);
+    ctx.messageText = ids.join(' ');
+    for (const telegram_id of ids) await handleGetUserInfo(ctx, { telegram_id });
+    expect(lookup).toHaveBeenCalledTimes(8);
+    const now = Date.now();
+    const clock = spyOn(Date, 'now').mockReturnValue(now + 30_001);
+    try {
+      await handleGetUserInfo(ctx, { telegram_id: 5000000001 });
+      expect(lookup).toHaveBeenCalledTimes(9);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   test('contact lookup exposes stable row ID and actual creation time', () => {
@@ -341,26 +428,19 @@ describe('recipient and contact tool boundaries', () => {
     expect(lookedUp.success).toBe(false);
   });
 
-  test('plain name is not silently resolved as an unrelated bot user', async () => {
-    new UserRepository(db).create({
-      telegram_id: 5000000002,
-      timezone: 'UTC',
-      username: 'alex',
-      first_name: 'Stranger',
-    });
-    const result = await handleFindUser(makeCtx(db), { username: 'alex' });
+  test('plain name is not silently resolved as an unrelated public username', async () => {
+    const resolve = mock(async () => ({ id: 5000000002, firstName: 'Stranger', username: 'alex' }));
+    const result = await handleFindUser(makeCtx(db, { resolveUsername: resolve }), { username: 'alex' });
     expect(result.success).toBe(false);
+    expect(resolve).not.toHaveBeenCalled();
     expect(result.agentHint).toContain('find_contact');
   });
 
   test('an explicit @handle can intentionally identify a different person', async () => {
-    new UserRepository(db).create({
-      telegram_id: 5000000002,
-      timezone: 'UTC',
+    const resolve = mock(async () => ({ id: 5000000002, firstName: 'Stranger', username: 'alex' }));
+    const result = await handleFindUser(makeCtx(db, { messageText: 'Invite @alex', resolveUsername: resolve }), {
       username: 'alex',
-      first_name: 'Stranger',
     });
-    const result = await handleFindUser(makeCtx(db, { messageText: 'Invite @alex' }), { username: 'alex' });
     expect(result.success).toBe(true);
     expect(result.data).toEqual({ telegram_id: 5000000002, name: 'Stranger' });
   });
@@ -430,6 +510,20 @@ describe('recipient and contact tool boundaries', () => {
     expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
   });
 
+  test('fresh absence of username survives automatic contact persistence', async () => {
+    ctx.lookupTelegramUser = async (id) => ({ id, firstName: 'Current', username: undefined });
+    await handleGetUserInfo(ctx, { telegram_id: 5000000001 });
+    const event = ctx.eventService.createEvent({
+      user_id: 10,
+      title: 'Synthetic',
+      start_at: new Date(Date.now() + 86400000).toISOString(),
+      timezone: 'UTC',
+    });
+    const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: 5000000001 });
+    expect(result.success).toBe(true);
+    expect(ctx.contactRepo!.findByTelegramId(10, 5000000001)?.username).toBeNull();
+  });
+
   test('global bot registration alone is not evidence of intended recipient', async () => {
     ctx.contactRepo!.deleteOwned(10, ctx.contactRepo!.list(10)[0]!.id);
     const event = ctx.eventService.createEvent({
@@ -445,12 +539,7 @@ describe('recipient and contact tool boundaries', () => {
 
   test('conflict confirmation displays both numeric identities and escaped profile text', async () => {
     ctx.messageText = 'Invite @different';
-    new UserRepository(db).create({
-      telegram_id: 5000000002,
-      timezone: 'UTC',
-      username: 'different',
-      first_name: '<b>Different</b>',
-    });
+    ctx.resolveUsername = async () => ({ id: 5000000002, firstName: '<b>Different</b>', username: 'different' });
     let shown = '';
     ctx.sender = {
       sendMessage: async () => ({ message_id: 1 }),
@@ -537,7 +626,7 @@ describe('recipient and contact tool boundaries', () => {
     const send = mock(async (_id: number) => ({ message_id: 1 }));
     ctx.sender = { sendMessage: send, editMessageText: async () => {}, sendInvitation: send };
     ctx.messageText = 'Resend to @different';
-    new UserRepository(db).create({ telegram_id: 5000000002, timezone: 'UTC', username: 'different' });
+    ctx.resolveUsername = async () => ({ id: 5000000002, username: 'different' });
     const result = await handleResendInvitation(ctx, { invitation_id: invitation.id, invitee_username: 'different' });
     expect(result.success).toBe(false);
     expect(send).not.toHaveBeenCalled();
@@ -550,7 +639,7 @@ describe('recipient and contact tool boundaries', () => {
       timezone: 'UTC',
     });
     ctx.messageText = 'Invite @different_person';
-    new UserRepository(db).create({ telegram_id: 5000000002, timezone: 'UTC', username: 'different_person' });
+    ctx.resolveUsername = async () => ({ id: 5000000002, username: 'different_person' });
     ctx.sender = {
       sendMessage: async () => ({ message_id: 1 }),
       editMessageText: async () => {},
@@ -668,7 +757,8 @@ describe('recipient and contact tool boundaries', () => {
     test('a contact with only a saved @username is invited by that username after a row-id attempt', async () => {
       const { event, approvals, sendInvitationCalls } = inviteContext();
       ctx.messageText = 'Invite Bora Example from my contacts';
-      new UserRepository(db).create({ telegram_id: 5000000003, timezone: 'UTC', username: 'boraex' });
+      const resolveUsername = mock(async (_username: string) => ({ id: 5000000003, username: 'boraex' }));
+      ctx.resolveUsername = resolveUsername;
       const row = ctx.contactRepo!.add(10, 'Bora Example', 'boraex');
 
       const byRow = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_id: row.id });
@@ -680,6 +770,7 @@ describe('recipient and contact tool boundaries', () => {
 
       const invited = await executeTool(ctx, 'send_invitation', { event_id: event.id, invitee_username: 'boraex' });
       expect(invited.success).toBe(true);
+      expect(resolveUsername.mock.calls).toEqual([['boraex']]);
       expect(ctx.sharing!.invitationRepo.getByEvent(event.id).map((i) => i.invitee_id)).toEqual([5000000003]);
       expect(sendInvitationCalls.mock.calls.map(([id]) => id)).toEqual([5000000003]);
     });

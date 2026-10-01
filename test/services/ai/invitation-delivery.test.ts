@@ -164,6 +164,37 @@ describe('deliverInvitation', () => {
     expect(result).toEqual({ delivered: false, viaDeepLink: true, viaBotApi: false });
   });
 
+  test('inviter without a connected session: Bot API, then a deep link to the inviter — nothing else sends', async () => {
+    const invId = createInvitation();
+    const attempts: string[] = [];
+    // A sender object still carrying a shared service-account send (#753): the chain must never call it.
+    const sender = Object.assign(
+      makeSender({
+        sendInvitation: async (chatId) => {
+          attempts.push(`bot-api:${chatId}`);
+          return null;
+        },
+        sendMessage: async (chatId, text) => {
+          attempts.push(`to-inviter:${chatId}:${text.includes('t.me/TestBot?start=') ? 'link' : 'no-link'}`);
+          return { message_id: 1 };
+        },
+      }),
+      {
+        sendAsUser: async (userId: number) => {
+          attempts.push(`service-account:${userId}`);
+          return true;
+        },
+      },
+    );
+
+    const result = await deliverInvitation(
+      baseParams({ invitationId: invId, deps: makeDeps(sender), event: seedEvent }),
+    );
+
+    expect(attempts).toEqual([`bot-api:${INVITEE_ID}`, `to-inviter:${INVITER_ID}:link`]);
+    expect(result).toEqual({ delivered: false, viaDeepLink: true, viaBotApi: false });
+  });
+
   test("bot API fails, the inviter's own session succeeds → delivered, no deep link", async () => {
     const invId = createInvitation();
     const event = seedEvent;

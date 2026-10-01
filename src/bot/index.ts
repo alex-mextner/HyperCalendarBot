@@ -1,4 +1,5 @@
 // src/bot/index.ts
+
 import { Bot, InlineKeyboard } from 'gramio';
 import { CB, RATE_LIMIT, t } from '../config/constants.ts';
 import type { EnvConfig } from '../config/env.ts';
@@ -42,12 +43,14 @@ import { InvitationService } from '../services/sharing/invitation-service.ts';
 import { PrivacyService } from '../services/sharing/privacy-service.ts';
 import { SharingService } from '../services/sharing/sharing-service.ts';
 import { createConnectedUserSender } from '../services/telegram-session/connected-user-sender.ts';
+import type { ServiceTier } from '../services/telegram-session/service-tier.ts';
 import { formatSessionLoss } from '../services/telegram-session/session-loss.ts';
 import type { SileroTtsService } from '../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import type { ParseMode } from '../utils/telegram.ts';
+import type { CallRequest } from '../worker/call-queue.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
@@ -121,7 +124,11 @@ export interface GoogleBotDeps {
 export interface CreateBotOpts {
   googleDeps?: GoogleBotDeps;
   renderService?: RenderService;
+  /** Logs and queues a call; rejects when the queue write fails (the logged call is then marked failed). */
+  callQueue?: { enqueue(data: CallRequest): Promise<void> };
   transcriptionService?: TranscriptionService;
+  /** The shared MTProto service account (lookups, group members, birthdays); never sends. */
+  serviceTier: ServiceTier;
   stressDictionary?: StressDictionary;
   sileroTts?: SileroTtsService;
   kokoroTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['kokoroTts'];
@@ -142,11 +149,13 @@ export interface CreateBotOpts {
   changeNotifier?: import('../services/event/event-change-notifier.ts').EventChangeNotifier;
 }
 
-export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
+export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts) {
   const {
     googleDeps,
     renderService,
+    callQueue,
     transcriptionService,
+    serviceTier,
     stressDictionary,
     sileroTts,
     kokoroTts,
@@ -179,6 +188,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     db.birthdayMeta,
     db.eventReminders,
     db.notificationPreferences,
+    serviceTier,
   );
   const groupSessions = new GroupSessionManager(db.groupSessions);
   const prefsService = new NotificationPreferencesService(db.notificationPreferences);
@@ -311,7 +321,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
 
   const triggerRepo = new TriggerRepository(db.db);
   const scheduleRepo = new ScheduledAiCallRepository(db.db);
-  const groupMemberService = new GroupMemberService(db.groupMembers, db.users);
+  const groupMemberService = new GroupMemberService(db.groupMembers, db.users, serviceTier);
 
   const botAdminId = envConfig?.BOT_ADMIN_ID;
   const intentLearnerDailyLimit = envConfig?.INTENT_LEARNER_DAILY_LIMIT ?? 100;
@@ -358,6 +368,17 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     sharedEventRepo: db.sharedEvents,
     privacyService,
     renderService,
+    callSettingsRepo: db.callSettings,
+    callQueue: callQueue
+      ? {
+          enqueue: (userId: number, text: string) =>
+            callQueue.enqueue({
+              userId,
+              ttsText: text,
+              language: db.users.findByTelegramId(userId)?.language ?? 'en',
+            }),
+        }
+      : undefined,
     notificationPrefs: {
       getPrefs: (userId: number) => prefsService.getOrCreate(userId),
       update: db.notificationPreferences.update.bind(db.notificationPreferences),
@@ -377,6 +398,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     transcriptionService,
     botToken: token,
     stressDictionary,
+    // Set only when the service tier is on: without them find_user uses the users table and says so.
+    resolveUsername: serviceTier.enabled ? serviceTier.resolveUsername : undefined,
+    lookupTelegramUser: serviceTier.enabled ? serviceTier.lookupUser : undefined,
     sileroTts,
     kokoroTts,
     fallbackTts,
@@ -594,7 +618,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .command('delete', (ctx) => handleDelete(ctx, eventService, db.groupChats))
     .command('search', (ctx) => handleSearch(ctx, eventService, db.groupChats))
     .command('free', (ctx) => handleFree(ctx, eventService, holidayService, db.groupChats))
-    .command('settings', (ctx) => handleSettings(ctx, db.groupChats))
+    .command('settings', (ctx) => handleSettings(ctx, db.groupChats, callQueue !== undefined))
     .command('import', (ctx) => handleImport(ctx, scenesSetup.scenes.importScene, db.groupChats))
     .command('holidays', (ctx) => handleHolidays(ctx, holidayService, db.groupChats))
     .command('birthdays', (ctx) => handleBirthdays(ctx, birthdayService, db.groupChats, db.groupMembers))
@@ -727,6 +751,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           },
         },
         onboardingScene: scenesSetup.scenes.onboardingScene,
+        // Call settings exist only while the bot can place calls; otherwise /settings hides them.
+        callSettingsRepo: callQueue ? db.callSettings : undefined,
         sharingSettingsRepo: db.sharingSettings,
         feedbackDeps: {
           feedbackRepo,
