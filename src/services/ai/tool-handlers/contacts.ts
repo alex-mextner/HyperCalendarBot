@@ -1,6 +1,6 @@
 import { t } from '../../../config/constants.ts';
 import type { ContactRepository } from '../../../database/repositories/contact.repository.ts';
-import type { Contact } from '../../../database/types.ts';
+import type { Contact, ContactAlias, ContactGroup } from '../../../database/types.ts';
 import { canResolveRecipientUsername } from '../recipient-identity.ts';
 import type { AgentContext, ContactMatch, ToolHandlerMeta, ToolResult, UserInspection } from '../types.ts';
 
@@ -264,3 +264,350 @@ export function handleGetUserInfo(ctx: AgentContext, input: { telegram_id: numbe
   };
 }
 handleGetUserInfo.meta = { readonly: false, skipActionLog: false, throttleExempt: true } satisfies ToolHandlerMeta;
+
+// ── Aliases & collective groups (#654 — see ../../contacts/contact-resolver.ts for the shared
+// resolution contract these tools expose to the AI) ────────────────────────────────────────
+
+function formatAliasLine(alias: ContactAlias): string {
+  return `- ${alias.alias}${alias.is_primary === 1 ? ' (primary)' : ''} [alias_id: ${alias.id}]`;
+}
+
+function formatGroupLine(group: ContactGroup): string {
+  return `- ${group.alias} [group_id: ${group.id}]`;
+}
+
+export function handleAddContactAlias(ctx: AgentContext, input: { contact_id: number; alias: string }): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactRepo || !ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  const contact = ctx.contactRepo.findById(userId, input.contact_id);
+  if (!contact) return { success: false, error: 'Contact not found in your address book.' };
+  try {
+    const alias = ctx.contactDirectory.contactAliasRepo.add(userId, contact.id, input.alias, 'manual');
+    return { success: true, output: tr.contactAliasAdded(alias.alias, contact.preferred_name ?? contact.name) };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('CONTACT_ALIAS_CONFLICT:')) {
+      return { success: false, error: tr.contactAliasConflict(input.alias) };
+    }
+    throw error;
+  }
+}
+
+export function handleListContactAliases(ctx: AgentContext, input: { contact_id: number }): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactRepo || !ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  const contact = ctx.contactRepo.findById(userId, input.contact_id);
+  if (!contact) return { success: false, error: 'Contact not found in your address book.' };
+  const aliases = ctx.contactDirectory.contactAliasRepo.listForContact(userId, contact.id);
+  return {
+    success: true,
+    output: tr.contactAliasesList(contact.preferred_name ?? contact.name, aliases.map(formatAliasLine).join('\n')),
+  };
+}
+handleListContactAliases.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
+
+export function handlePromoteContactAlias(
+  ctx: AgentContext,
+  input: { contact_id: number; alias_id: number },
+): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactRepo || !ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  try {
+    ctx.contactDirectory.contactAliasRepo.promote(userId, input.contact_id, input.alias_id);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('CONTACT_ALIAS_NOT_FOUND:')) {
+      return { success: false, error: tr.contactAliasNotFound };
+    }
+    throw error;
+  }
+  const primary = ctx.contactDirectory.contactAliasRepo
+    .listForContact(userId, input.contact_id)
+    .find((alias) => alias.is_primary === 1);
+  return { success: true, output: tr.contactAliasPromoted(primary?.alias ?? '') };
+}
+
+export function handleDeleteContactAlias(
+  ctx: AgentContext,
+  input: { contact_id: number; alias_id: number },
+): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactRepo || !ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  const existing = ctx.contactDirectory.contactAliasRepo
+    .listForContact(userId, input.contact_id)
+    .find((alias) => alias.id === input.alias_id);
+  if (!existing) return { success: false, error: tr.contactAliasNotFound };
+  try {
+    ctx.contactDirectory.contactAliasRepo.delete(userId, input.contact_id, input.alias_id);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('CONTACT_ALIAS_PRIMARY:')) {
+      return { success: false, error: tr.contactAliasPrimaryUndeletable };
+    }
+    throw error;
+  }
+  return { success: true, output: tr.contactAliasDeleted(existing.alias) };
+}
+
+/** Records a user-confirmed fuzzy match as a learned alias — see ContactResolver.confirmFuzzyMatch. */
+export function handleConfirmContactAlias(ctx: AgentContext, input: { contact_id: number; alias: string }): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactRepo || !ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  const contact = ctx.contactRepo.findById(userId, input.contact_id);
+  if (!contact) return { success: false, error: 'Contact not found in your address book.' };
+  ctx.contactDirectory.contactResolver.confirmFuzzyMatch(userId, contact.id, input.alias);
+  return { success: true, output: tr.contactAliasAdded(input.alias, contact.preferred_name ?? contact.name) };
+}
+
+export function handleCreateContactGroup(ctx: AgentContext, input: { alias: string }): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  try {
+    const group = ctx.contactDirectory.contactGroupRepo.create(ctx.user.telegram_id, input.alias);
+    return { success: true, output: tr.contactGroupCreated(group.alias) };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('CONTACT_GROUP_ALIAS_CONFLICT:')) {
+      return { success: false, error: tr.contactGroupAliasConflict(input.alias) };
+    }
+    throw error;
+  }
+}
+
+export function handleRenameContactGroup(ctx: AgentContext, input: { group_id: number; alias: string }): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  const group = ctx.contactDirectory.contactGroupRepo.findById(userId, input.group_id);
+  if (!group) return { success: false, error: tr.contactGroupNotFound };
+  const oldAlias = group.alias;
+  try {
+    ctx.contactDirectory.contactGroupRepo.rename(userId, input.group_id, input.alias);
+    return { success: true, output: tr.contactGroupRenamed(oldAlias, input.alias) };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('CONTACT_GROUP_ALIAS_CONFLICT:')) {
+      return { success: false, error: tr.contactGroupAliasConflict(input.alias) };
+    }
+    throw error;
+  }
+}
+
+export function handleListContactGroups(ctx: AgentContext): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const groups = ctx.contactDirectory.contactGroupRepo.listGroups(ctx.user.telegram_id);
+  if (groups.length === 0) return { success: true, output: tr.contactGroupsEmpty };
+  return { success: true, output: tr.contactGroupsList(groups.map(formatGroupLine).join('\n')) };
+}
+handleListContactGroups.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
+
+export function handleListContactGroupMembers(ctx: AgentContext, input: { group_id: number }): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  const group = ctx.contactDirectory.contactGroupRepo.findById(userId, input.group_id);
+  if (!group) return { success: false, error: tr.contactGroupNotFound };
+  const members = ctx.contactDirectory.contactGroupRepo.listMembers(userId, input.group_id);
+  if (members.length === 0) return { success: true, output: tr.contactGroupMembersEmpty(group.alias) };
+  const lines = members.map((member) => formatContactMatchLine(toContactMatch(member, 1))).join('\n');
+  return { success: true, output: tr.contactGroupMembersList(group.alias, lines) };
+}
+handleListContactGroupMembers.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
+
+export function handleAddContactGroupMember(
+  ctx: AgentContext,
+  input: { group_id: number; contact_id: number },
+): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactRepo || !ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  const group = ctx.contactDirectory.contactGroupRepo.findById(userId, input.group_id);
+  if (!group) return { success: false, error: tr.contactGroupNotFound };
+  try {
+    ctx.contactDirectory.contactGroupRepo.addMember(userId, input.group_id, input.contact_id);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('CONTACT_GROUP_MEMBER_NOT_OWNED:')) {
+      return { success: false, error: tr.contactGroupMemberNotOwned };
+    }
+    throw error;
+  }
+  const contact = ctx.contactRepo.findById(userId, input.contact_id);
+  const label = contact?.preferred_name ?? contact?.name ?? String(input.contact_id);
+  return { success: true, output: tr.contactGroupMemberAdded(label, group.alias) };
+}
+
+export function handleRemoveContactGroupMember(
+  ctx: AgentContext,
+  input: { group_id: number; contact_id: number },
+): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactRepo || !ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  const group = ctx.contactDirectory.contactGroupRepo.findById(userId, input.group_id);
+  if (!group) return { success: false, error: tr.contactGroupNotFound };
+  const contact = ctx.contactRepo.findById(userId, input.contact_id);
+  const removed = ctx.contactDirectory.contactGroupRepo.removeMember(userId, input.group_id, input.contact_id);
+  if (!removed) return { success: false, error: 'That contact is not a member of this group.' };
+  const label = contact?.preferred_name ?? contact?.name ?? String(input.contact_id);
+  return { success: true, output: tr.contactGroupMemberRemoved(label, group.alias) };
+}
+
+export function handleDeleteContactGroup(ctx: AgentContext, input: { group_id: number }): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  const group = ctx.contactDirectory.contactGroupRepo.findById(userId, input.group_id);
+  if (!group) return { success: false, error: tr.contactGroupNotFound };
+  ctx.contactDirectory.contactGroupRepo.delete(userId, input.group_id);
+  return { success: true, output: tr.contactGroupDeleted(group.alias) };
+}
+
+/**
+ * Single resolution entry point for the AI — same precedence rules the `/contacts` command and
+ * (once wired) HcbRuntime652's natural-language commit flow use. See ContactResolver for the
+ * exact_unique / exact_ambiguous / exact_group / fuzzy_confirm contract.
+ */
+export function handleResolveContact(ctx: AgentContext, input: { query: string }): ToolResult {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (!ctx.contactDirectory) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup) return { success: false, error: tr.contactsPrivateOnly };
+  const userId = ctx.user.telegram_id;
+  const result = ctx.contactDirectory.contactResolver.resolve(userId, input.query);
+
+  if (result.kind === 'none') return { success: true, output: tr.resolveContactNone };
+
+  if (result.kind === 'exact_unique') {
+    return {
+      success: true,
+      output: tr.resolveContactUnique(result.contact.preferred_name ?? result.contact.name, result.matchedAlias),
+      data: { matches: [toContactMatch(result.contact, 1)] },
+    };
+  }
+
+  if (result.kind === 'exact_ambiguous') {
+    const matches = result.candidates.map((candidate) => toContactMatch(candidate.contact, 1));
+    return {
+      success: true,
+      output: tr.resolveContactAmbiguous(matches.map(formatContactMatchLine).join('\n')),
+      agentHint: 'Multiple contacts share this exact name/alias — ask the user to pick one; never guess.',
+      data: { matches },
+    };
+  }
+
+  if (result.kind === 'exact_group') {
+    const matches = result.members.map((member) => toContactMatch(member, 1));
+    return {
+      success: true,
+      output: tr.resolveContactGroup(
+        result.group.alias,
+        matches.map(formatContactMatchLine).join('\n') || '(no members yet)',
+      ),
+      agentHint: 'Explicit collective alias — invite every listed member, no per-member confirmation needed.',
+      data: { matches },
+    };
+  }
+
+  const matches = result.candidates.map(({ contact, confidence }) => toContactMatch(contact, confidence));
+  return {
+    success: true,
+    output: tr.resolveContactFuzzy(matches.map(formatContactMatchLine).join('\n')),
+    agentHint:
+      'Fuzzy match only — confirm with the user before proceeding, even with a single candidate. ' +
+      'After the user confirms, call manage_contact_directory action=confirm_alias so the same phrasing resolves exactly next time.',
+    data: { matches },
+  };
+}
+handleResolveContact.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
+
+/**
+ * AI-facing router for the consolidated `manage_contact_directory` tool (#654) — one action-based
+ * schema in place of eleven separate ones, to fit the tool catalog's character/token budget
+ * (see test/services/ai/payload-budget.test.ts). Each action delegates to the same granular
+ * handler used elsewhere (the `/contacts` command, and this file's own unit tests), so the
+ * behavior is identical regardless of caller.
+ */
+export function handleManageContactDirectory(
+  ctx: AgentContext,
+  input: {
+    action:
+      | 'add_alias'
+      | 'confirm_alias'
+      | 'list_aliases'
+      | 'promote_alias'
+      | 'delete_alias'
+      | 'create_group'
+      | 'rename_group'
+      | 'list_groups'
+      | 'list_group_members'
+      | 'add_group_member'
+      | 'remove_group_member'
+      | 'delete_group';
+    contact_id?: number;
+    alias?: string;
+    alias_id?: number;
+    group_id?: number;
+  },
+): ToolResult {
+  const missing = (field: string, action: string): ToolResult => ({
+    success: false,
+    error: `${field} is required for action=${action}.`,
+  });
+
+  switch (input.action) {
+    case 'add_alias':
+      if (input.contact_id === undefined) return missing('contact_id', 'add_alias');
+      if (input.alias === undefined) return missing('alias', 'add_alias');
+      return handleAddContactAlias(ctx, { contact_id: input.contact_id, alias: input.alias });
+    case 'confirm_alias':
+      if (input.contact_id === undefined) return missing('contact_id', 'confirm_alias');
+      if (input.alias === undefined) return missing('alias', 'confirm_alias');
+      return handleConfirmContactAlias(ctx, { contact_id: input.contact_id, alias: input.alias });
+    case 'list_aliases':
+      if (input.contact_id === undefined) return missing('contact_id', 'list_aliases');
+      return handleListContactAliases(ctx, { contact_id: input.contact_id });
+    case 'promote_alias':
+      if (input.contact_id === undefined) return missing('contact_id', 'promote_alias');
+      if (input.alias_id === undefined) return missing('alias_id', 'promote_alias');
+      return handlePromoteContactAlias(ctx, { contact_id: input.contact_id, alias_id: input.alias_id });
+    case 'delete_alias':
+      if (input.contact_id === undefined) return missing('contact_id', 'delete_alias');
+      if (input.alias_id === undefined) return missing('alias_id', 'delete_alias');
+      return handleDeleteContactAlias(ctx, { contact_id: input.contact_id, alias_id: input.alias_id });
+    case 'create_group':
+      if (input.alias === undefined) return missing('alias', 'create_group');
+      return handleCreateContactGroup(ctx, { alias: input.alias });
+    case 'rename_group':
+      if (input.group_id === undefined) return missing('group_id', 'rename_group');
+      if (input.alias === undefined) return missing('alias', 'rename_group');
+      return handleRenameContactGroup(ctx, { group_id: input.group_id, alias: input.alias });
+    case 'list_groups':
+      return handleListContactGroups(ctx);
+    case 'list_group_members':
+      if (input.group_id === undefined) return missing('group_id', 'list_group_members');
+      return handleListContactGroupMembers(ctx, { group_id: input.group_id });
+    case 'add_group_member':
+      if (input.group_id === undefined) return missing('group_id', 'add_group_member');
+      if (input.contact_id === undefined) return missing('contact_id', 'add_group_member');
+      return handleAddContactGroupMember(ctx, { group_id: input.group_id, contact_id: input.contact_id });
+    case 'remove_group_member':
+      if (input.group_id === undefined) return missing('group_id', 'remove_group_member');
+      if (input.contact_id === undefined) return missing('contact_id', 'remove_group_member');
+      return handleRemoveContactGroupMember(ctx, { group_id: input.group_id, contact_id: input.contact_id });
+    case 'delete_group':
+      if (input.group_id === undefined) return missing('group_id', 'delete_group');
+      return handleDeleteContactGroup(ctx, { group_id: input.group_id });
+  }
+}

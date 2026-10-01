@@ -3,6 +3,8 @@ import type { ActionLogRepository } from '../../database/repositories/action-log
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
+import type { ContactAliasRepository } from '../../database/repositories/contact-alias.repository.ts';
+import type { ContactGroupRepository } from '../../database/repositories/contact-group.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { FeatureUsageRepository } from '../../database/repositories/feature-usage.repository.ts';
@@ -25,6 +27,7 @@ import type {
 } from '../../database/types.ts';
 import type { ParseMode } from '../../utils/telegram.ts';
 import type { BirthdayService } from '../birthday/birthday-service.ts';
+import type { ContactResolver } from '../contacts/contact-resolver.ts';
 import type { ConversationLogger } from '../conversation-logger.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
@@ -73,6 +76,12 @@ export interface GroupCapability {
   groupChatRepo: GroupChatRepository;
   groupMemberRepo: GroupMemberRepository;
   groupMemberService: GroupMemberService;
+}
+
+export interface ContactDirectoryCapability {
+  contactAliasRepo: ContactAliasRepository;
+  contactGroupRepo: ContactGroupRepository;
+  contactResolver: ContactResolver;
 }
 
 export interface VoiceCapability {
@@ -234,6 +243,7 @@ export interface AgentContext {
   scene?: SceneCapability;
   birthday?: BirthdayCapability;
   broadcast?: BroadcastCapability;
+  contactDirectory?: ContactDirectoryCapability;
   locationVerification?: LocationVerificationService;
   addressCache?: AddressCache;
   pendingGeoStore?: import('../location/pending-geo-store.ts').PendingGeoStore;

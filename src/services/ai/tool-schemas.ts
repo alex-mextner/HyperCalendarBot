@@ -190,6 +190,31 @@ const updateContactSchema = z
   })
   .passthrough();
 
+const resolveContactSchema = z.object({ query: z.string() }).passthrough();
+
+const manageContactDirectorySchema = z
+  .object({
+    action: z.enum([
+      'add_alias',
+      'confirm_alias',
+      'list_aliases',
+      'promote_alias',
+      'delete_alias',
+      'create_group',
+      'rename_group',
+      'list_groups',
+      'list_group_members',
+      'add_group_member',
+      'remove_group_member',
+      'delete_group',
+    ]),
+    contact_id: numericId.optional(),
+    alias: z.string().optional(),
+    alias_id: numericId.optional(),
+    group_id: numericId.optional(),
+  })
+  .passthrough();
+
 // ── Render tools ──
 
 const renderDayImageSchema = z
@@ -459,6 +484,8 @@ export const toolSchemas: Record<ToolName, z.ZodType> = {
   find_contact: findContactSchema,
   update_contact: updateContactSchema,
   delete_contact: deleteContactSchema,
+  resolve_contact: resolveContactSchema,
+  manage_contact_directory: manageContactDirectorySchema,
 
   // Render tools
   render_day_image: renderDayImageSchema,

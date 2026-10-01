@@ -10,6 +10,8 @@ import { BirthdayMetadataRepository } from './repositories/birthday-metadata.rep
 import { CalendarProposalRepository } from './repositories/calendar-proposal.repository.ts';
 import { ChatHistoryRepository } from './repositories/chat-history.repository.ts';
 import { ContactRepository } from './repositories/contact.repository.ts';
+import { ContactAliasRepository } from './repositories/contact-alias.repository.ts';
+import { ContactGroupRepository } from './repositories/contact-group.repository.ts';
 import { DeepLinkRepository } from './repositories/deep-link.repository.ts';
 import { EditProposalRepository } from './repositories/edit-proposal.repository.ts';
 import { EventRepository } from './repositories/event.repository.ts';
@@ -53,6 +55,8 @@ export class DatabaseService {
   readonly groupChats: GroupChatRepository;
   readonly groupMembers: GroupMemberRepository;
   readonly contacts: ContactRepository;
+  readonly contactAliases: ContactAliasRepository;
+  readonly contactGroups: ContactGroupRepository;
   readonly participants: ParticipantRepository;
   readonly editProposals: EditProposalRepository;
   readonly secretaries: SecretaryRepository;
@@ -98,6 +102,8 @@ export class DatabaseService {
     this.groupChats = new GroupChatRepository(this.db);
     this.groupMembers = new GroupMemberRepository(this.db);
     this.contacts = new ContactRepository(this.db);
+    this.contactAliases = new ContactAliasRepository(this.db);
+    this.contactGroups = new ContactGroupRepository(this.db);
     this.participants = new ParticipantRepository(this.db);
     this.editProposals = new EditProposalRepository(this.db);
     this.secretaries = new SecretaryRepository(this.db);

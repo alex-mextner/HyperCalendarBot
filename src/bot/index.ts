@@ -52,6 +52,7 @@ import { handleAdd } from './commands/add.ts';
 import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
+import { handleContacts } from './commands/contacts.ts';
 import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
 import { handleEdit } from './commands/edit.ts';
@@ -343,6 +344,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     userRepo: db.users,
     eventReminderRepo: db.eventReminders,
     contactRepo: db.contacts,
+    contactAliasRepo: db.contactAliases,
+    contactGroupRepo: db.contactGroups,
     participantRepo: db.participants,
     editProposalRepo: db.editProposals,
     secretaryRepo: db.secretaries,
@@ -595,6 +598,13 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .command('import', (ctx) => handleImport(ctx, scenesSetup.scenes.importScene, db.groupChats))
     .command('holidays', (ctx) => handleHolidays(ctx, holidayService, db.groupChats))
     .command('birthdays', (ctx) => handleBirthdays(ctx, birthdayService, db.groupChats, db.groupMembers))
+    .command('contacts', (ctx) =>
+      handleContacts(ctx, {
+        contactRepo: db.contacts,
+        contactAliasRepo: db.contactAliases,
+        contactGroupRepo: db.contactGroups,
+      }),
+    )
     .command('log', (ctx) => handleLog(ctx, db.actionLog, botAdminId))
     .command('admin_tg_sessions', (ctx) =>
       handleAdminTgSessions(ctx, db.telegramSessions, db.notificationLog, botAdminId),
@@ -816,6 +826,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
               }
             : undefined,
         contactRepo: db.contacts,
+        contactAliasRepo: db.contactAliases,
+        contactGroupRepo: db.contactGroups,
         timezoneScene: scenesSetup.scenes.timezoneScene,
         connectTelegramScene: scenesSetup.scenes.connectTelegramScene,
         telegramDeps: telegramMasterKey

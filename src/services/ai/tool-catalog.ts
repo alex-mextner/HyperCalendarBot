@@ -22,6 +22,8 @@ const GROUPS: Readonly<Record<string, readonly string[]>> = {
     'update_contact',
     'get_user_info',
     'delete_contact',
+    'resolve_contact',
+    'manage_contact_directory',
   ],
   sharing: [
     'notify_participants',
