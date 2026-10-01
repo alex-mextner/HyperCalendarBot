@@ -2,6 +2,8 @@
 
 Design spec for the conversational AI interface of HyperCalendarBot.
 
+> Status note — 2026-09-28: this document records the original agent design; its Anthropic/GLM-only loop is not a description of today's entire runtime. The proposed unified model/effort presets, Laya calibration, context and evidence/repair policy are specified in [AI quality and context policy](2026-09-28-ai-quality-context-policy.md). That new specification is a design/review artifact, not a claim that these components have been deployed. Existing dialogue and contextual-intent ownership stays with issues #554/#559.
+
 ## 1. Architecture Overview
 
 ### Agent Loop
