@@ -155,9 +155,11 @@ export class CallSession {
       this.fluxStt.connect({
         onStartOfTurn: () => {
           this.resetInactivityTimer();
+          this.speaking = true;
           this.send(JSON.stringify({ type: 'PAUSE' }));
         },
         onEndOfTurn: (confidence: number, finalTranscript: string) => {
+          this.speaking = false;
           if (finalTranscript) this.rollingTranscript = finalTranscript;
           voiceLogger.info(
             { sessionId: this.cfg.sessionId, transcript: this.rollingTranscript, confidence },
@@ -182,15 +184,25 @@ export class CallSession {
     const openerText =
       this.cfg.openerText.trim() ||
       (this.cfg.language === 'ru' ? 'Привет! Чем могу помочь?' : 'Hello! How can I help you?');
-    await this.speak(openerText, 'opener');
+    await this.speak(openerText, 'opener', () => !this.ended);
   }
 
-  /** Synthesizes `text` and plays it; false when nothing was sent to play. */
-  private async speak(text: string, what: string): Promise<boolean> {
+  /**
+   * Synthesizes `text` and plays it; false when nothing was sent to play. `stillWanted` is asked after
+   * synthesis and again after the file is written, and the speech is dropped as soon as it says no.
+   */
+  private async speak(text: string, what: string, stillWanted: () => boolean): Promise<boolean> {
     try {
       const audio = await this.cfg.tts.synthesize(text, this.cfg.language);
+      if (!stillWanted()) return false;
       const file = this.tempFile();
       await Bun.write(file, audio);
+      if (!stillWanted()) {
+        const del = this.cfg.unlink ?? fsUnlink;
+        await del(file).catch(() => {});
+        this.tmpFiles.delete(file);
+        return false;
+      }
       this.sendPlay(file);
       return true;
     } catch (err) {
@@ -285,7 +297,7 @@ export class CallSession {
 
       const spokenText = responseText ? fixLineBreaks(stripMarkdown(responseText)) : '';
       if (spokenText) voiceLogger.info({ sessionId: this.cfg.sessionId, responseText: spokenText }, 'TTS response');
-      const played = spokenText !== '' && (await this.speak(spokenText, 'agent reply'));
+      const played = spokenText !== '' && (await this.speak(spokenText, 'agent reply', () => !this.ended));
 
       // Nothing will play, so no PLAY_DONE will come to hang up on. An STT error phrase already in flight
       // ends the call itself (on its PLAY_DONE or its force-end timeout).
@@ -329,6 +341,18 @@ export class CallSession {
     }
   }
 
+  /** True while nothing else owns the line: no call end, STT error phrase or hang-up is pending. */
+  private canResumeListening(): boolean {
+    return (
+      !this.ended && this.sttErrorTimeout === null && this.pendingErrorPhrase === null && this.hangUpAfterPlay === null
+    );
+  }
+
+  /** True when nobody is talking or about to: a check-in may take the line. */
+  private lineIsIdle(): boolean {
+    return this.canResumeListening() && !this.speaking && !this.agentRunning && this.lastPlayFile === null;
+  }
+
   private clearSttErrorTimeout(): void {
     if (this.sttErrorTimeout) {
       clearTimeout(this.sttErrorTimeout);
@@ -351,7 +375,10 @@ export class CallSession {
         this.cfg.language === 'ru'
           ? 'Ты ещё здесь? Могу ещё чем-то помочь?'
           : 'Are you still there? Is there anything else I can help you with?';
-      this.speak(checkIn, 'inactivity check-in');
+      void this.speak(checkIn, 'inactivity check-in', () => this.lineIsIdle()).then((played) => {
+        // Nothing is playing, so no PLAY_DONE will re-arm the timer: try again at the next idle timeout.
+        if (!played) this.resetInactivityTimer();
+      });
     }, this.cfg.inactivityMs ?? CallSession.INACTIVITY_MS);
   }
 

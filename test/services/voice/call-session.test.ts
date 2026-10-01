@@ -1,4 +1,4 @@
-import { expect, type Mock, mock, test } from 'bun:test';
+import { expect, type Mock, mock, spyOn, test } from 'bun:test';
 import { z } from 'zod';
 import { CallSession, type CallSessionConfig, type CallTurn } from '../../../src/services/voice/call-session.ts';
 import type { FluxStreamingSTTEvents } from '../../../src/services/voice/flux-streaming-stt.ts';
@@ -418,4 +418,160 @@ test('end_call with a spoken goodbye hangs up only after the goodbye finishes pl
 
   await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
   expect(ws.close).toHaveBeenCalledTimes(1);
+});
+
+const CHECK_IN_TEXT = 'Ты ещё здесь? Могу ещё чем-то помочь?';
+
+test('a check-in that fails to synthesize is tried again at the next idle timeout', async () => {
+  const tts = {
+    synthesize: mock(async (text: string, _lang: string) => {
+      if (text === CHECK_IN_TEXT) throw new Error('TTS down');
+      return Buffer.from('audio');
+    }),
+  };
+  const { session } = makeSession({ tts, inactivityMs: 1 });
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+
+  await Bun.sleep(40);
+
+  expect(tts.synthesize.mock.calls.filter(([text]) => text === CHECK_IN_TEXT).length).toBeGreaterThanOrEqual(2);
+  await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+});
+
+test('a check-in whose synthesis finishes after the caller started speaking is not played over them', async () => {
+  let finishCheckIn: (audio: Buffer) => void = () => {};
+  const checkInAudio = new Promise<Buffer>((resolve) => {
+    finishCheckIn = resolve;
+  });
+  const tts = {
+    synthesize: mock(async (text: string, _lang: string) => (text === CHECK_IN_TEXT ? checkInAudio : Buffer.from('a'))),
+  };
+  const { session, ws } = makeSession({ tts, inactivityMs: 1 });
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  await Bun.sleep(20);
+  expect(tts.synthesize).toHaveBeenCalledWith(CHECK_IN_TEXT, 'ru');
+
+  await session.handleMessage(JSON.stringify({ type: 'VAD_START' }));
+  finishCheckIn(Buffer.from('check-in'));
+  await flushPromises();
+
+  expect(sentCommands(ws).filter((cmd) => cmd.type === 'PLAY')).toEqual([
+    { type: 'PLAY', file: '/tmp/call-test-session-1.ogg' },
+  ]);
+  await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+});
+
+test('an English check-in is not played over a caller whose Flux turn has started', async () => {
+  const flux = makeFluxMock();
+  let finishCheckIn: (audio: Buffer) => void = () => {};
+  const checkInAudio = new Promise<Buffer>((resolve) => {
+    finishCheckIn = resolve;
+  });
+  const tts = {
+    synthesize: mock(async (text: string, _lang: string) =>
+      text.startsWith('Are you still there') ? checkInAudio : Buffer.from('a'),
+    ),
+  };
+  const { session, ws } = makeSession({ language: 'en', tts, createFluxStt: () => flux, inactivityMs: 1 });
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  await Bun.sleep(20);
+  expect(tts.synthesize.mock.calls.some(([text]) => text.startsWith('Are you still there'))).toBe(true);
+
+  const events = flux.connect.mock.calls.at(-1)?.[0];
+  if (!events) throw new Error('Flux STT was never connected');
+  events.onStartOfTurn();
+  finishCheckIn(Buffer.from('check-in'));
+  await flushPromises();
+
+  expect(sentCommands(ws).filter((cmd) => cmd.type === 'PLAY')).toEqual([
+    { type: 'PLAY', file: '/tmp/call-test-session-1.ogg' },
+  ]);
+  await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+});
+
+test('a check-in whose synthesis finishes while the agent reply is playing is dropped', async () => {
+  const nova = makeNovaMock();
+  let finishCheckIn: (audio: Buffer) => void = () => {};
+  const checkInAudio = new Promise<Buffer>((resolve) => {
+    finishCheckIn = resolve;
+  });
+  const tts = {
+    synthesize: mock(async (text: string, _lang: string) => (text === CHECK_IN_TEXT ? checkInAudio : Buffer.from('a'))),
+  };
+  const { session, ws } = makeSession({ tts, createNovaStt: () => nova, inactivityMs: 1 });
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  await Bun.sleep(20);
+  expect(tts.synthesize).toHaveBeenCalledWith(CHECK_IN_TEXT, 'ru');
+
+  // The caller takes a whole turn and the agent's reply starts playing; its PLAY_DONE has not come yet.
+  await session.handleMessage(JSON.stringify({ type: 'VAD_START' }));
+  novaEvents(nova).onFinal('расскажи что-нибудь');
+  await session.handleMessage(JSON.stringify({ type: 'VAD_END' }));
+  await flushPromises();
+  finishCheckIn(Buffer.from('check-in'));
+  await flushPromises();
+
+  expect(sentCommands(ws).filter((cmd) => cmd.type === 'PLAY')).toEqual([
+    { type: 'PLAY', file: '/tmp/call-test-session-1.ogg' },
+    { type: 'PLAY', file: '/tmp/call-test-session-2.ogg' },
+  ]);
+  await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+});
+
+test('a reply whose synthesis finishes after the call ended is not played', async () => {
+  const nova = makeNovaMock();
+  let finishReply: (audio: Buffer) => void = () => {};
+  const replyAudio = new Promise<Buffer>((resolve) => {
+    finishReply = resolve;
+  });
+  const tts = {
+    synthesize: mock(async (text: string, _lang: string) => (text === 'Ответ бота' ? replyAudio : Buffer.from('a'))),
+  };
+  const { session, ws } = makeSession({ tts, createNovaStt: () => nova });
+
+  await sayAfterOpener(session, nova, 'расскажи что-нибудь');
+  await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+  ws.send.mockClear();
+  finishReply(Buffer.from('late'));
+  await flushPromises();
+
+  expect(sentCommands(ws)).toEqual([]);
+});
+
+test('a check-in is dropped and its file removed when the caller starts speaking while it is being written', async () => {
+  const nova = makeNovaMock();
+  const unlink = mock(async (_path: string) => {});
+  const { session, ws } = makeSession({ createNovaStt: () => nova, unlink, inactivityMs: 1 });
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  // The opener's file is gone; only the check-in's file is written from here on.
+  unlink.mockClear();
+
+  let finishWrite: () => void = () => {};
+  const written = new Promise<void>((resolve) => {
+    finishWrite = resolve;
+  });
+  const write = spyOn(Bun, 'write').mockImplementation(async () => {
+    await written;
+    return 0;
+  });
+  try {
+    await Bun.sleep(20);
+    expect(write).toHaveBeenCalledTimes(1);
+    await session.handleMessage(JSON.stringify({ type: 'VAD_START' }));
+    finishWrite();
+    await flushPromises();
+
+    expect(sentCommands(ws).filter((cmd) => cmd.type === 'PLAY')).toEqual([
+      { type: 'PLAY', file: '/tmp/call-test-session-1.ogg' },
+    ]);
+    expect(unlink).toHaveBeenCalledWith('/tmp/call-test-session-2.ogg');
+  } finally {
+    write.mockRestore();
+    await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+  }
 });

@@ -755,6 +755,7 @@ For WebRTC calls, user must also:
 | STT transcription | Briefly in memory | Cleared after AI processing | Not stored in call_log after action is taken |
 | Call metadata (time, duration, action) | Yes | Indefinitely | For analytics and debugging |
 | Event content in calls | No | RAM only during call | Not logged or stored |
+| `call_log.tts_text` | No | Never written by the restored stack | Rows logged before #745 may still hold wording until a reviewed clean-up (#758) |
 
 **call_log.user_response** field: written temporarily during processing, then nullified:
 
