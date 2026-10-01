@@ -824,10 +824,39 @@ describe('formatInvitation — time range keeps the end time', () => {
   });
 
   test('DST-end night renders wall-clock times on each side of the shift', () => {
-    // 2026-10-25 01:00Z Europe/Belgrade falls back CEST→CET; New York is still on EDT.
+    // 2026-10-25 01:00Z Europe/Belgrade falls back CEST→CET; New York is still on EDT, and still on Saturday.
     const dst = makeEvent({ ...meeting, start_at: '2026-10-25T00:30:00Z', end_at: '2026-10-25T02:30:00Z' });
     const result = formatInvitation(dst, 'Europe/Belgrade', 'en', 'Alice', 1, 'alice_tg', 'America/New_York', true);
-    expect(result).toContain('02:30–03:30 (Europe/Belgrade) / 20:30–22:30 (America/New_York) (2h)');
+    expect(result).toContain('Sun 25, 02:30–03:30 (Europe/Belgrade) / Sat 24, 20:30–22:30 (America/New_York) (2h)');
+  });
+
+  // The date prefix ("вс 27") is the inviter's day; a recipient whose own start falls on another
+  // local day reads that day next to their range instead of assuming the prefix.
+  test('a New York recipient of an early Belgrade event reads their own start day', () => {
+    const early = makeEvent({ ...meeting, start_at: '2026-09-27T03:00:00Z', end_at: '2026-09-27T05:00:00Z' });
+    const ru = formatInvitation(early, 'Europe/Belgrade', 'ru', 'Алиса', 1, 'alice_tg', 'America/New_York', true);
+    expect(ru).toContain(
+      '🕐 вс 27, 05:00–07:00 (Europe/Belgrade) / сб 26, 23:00 – вс 27, 01:00 (America/New_York) (2ч)',
+    );
+    const en = formatInvitation(early, 'Europe/Belgrade', 'en', 'Alice', 1, 'alice_tg', 'America/New_York', true);
+    expect(en).toContain('🕐 Sun 27, 05:00–07:00 (Europe/Belgrade) / Sat 26, 23:00 – Sun 27, 01:00 (America/New_York)');
+  });
+
+  test('a Tokyo recipient of a late Belgrade event reads the next day, also without an end time', () => {
+    const late = makeEvent({ ...meeting, start_at: '2026-09-27T20:00:00Z', end_at: '2026-09-27T22:00:00Z' });
+    const ranged = formatInvitation(late, 'Europe/Belgrade', 'ru', 'Алиса', 1, 'alice_tg', 'Asia/Tokyo', true);
+    expect(ranged).toContain('🕐 вс 27, 22:00 – пн 28, 00:00 (Europe/Belgrade) / пн 28, 05:00–07:00 (Asia/Tokyo) (2ч)');
+    const open = formatInvitation(
+      { ...late, end_at: null },
+      'Europe/Belgrade',
+      'en',
+      'Alice',
+      1,
+      null,
+      'Asia/Tokyo',
+      true,
+    );
+    expect(open).toContain('🕐 Sun 27, 22:00 (Europe/Belgrade) / Mon 28, 05:00 (Asia/Tokyo)');
   });
 
   test('all-day event has no time range or timezone annotation', () => {
