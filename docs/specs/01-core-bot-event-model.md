@@ -1,6 +1,6 @@
 # Sub-Project #1: Core Bot + Event Model
 
-> **2026-09-29 update:** voice call reminders (sub-project 07) were removed by owner decision together with the shared MTProto service account (#741); they are no longer planned.
+> **2026-09-30:** voice call reminders (sub-project 07) restored behind `ServiceTier`, no service sends (#753); they are available only while the optional MTProto service tier is enabled.
 
 ## Overview & Goals
 
@@ -21,7 +21,7 @@ Foundation layer for HyperCalendarBot — a personal/multi-user Telegram calenda
 - Google Calendar sync (sub-project 03)
 - Notification dispatch via BullMQ (sub-project 04)
 - Playwright image rendering (sub-project 05 — worker process)
-- Voice call reminders (sub-project 07 — removed 2026-09-29, #741)
+- Voice call reminders (sub-project 07)
 - Holiday subscriptions data source (external API integration — sub-project 08)
 
 ---

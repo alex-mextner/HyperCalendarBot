@@ -52,6 +52,7 @@ export const canonicalTitles: { [name: string]: string } = {
   'basis.bot.info': 'Что умеет бот и как связаться с разработчиком',
   'basis.event.create_range': 'Создать событие с явным началом и концом',
   'basis.telegram.status': 'Статус подключённого личного Telegram',
+  'basis.call.start': 'Позвонить на запросившую учётную запись',
   'basis.reminder.after': 'Напоминание через заданное время',
 };
 

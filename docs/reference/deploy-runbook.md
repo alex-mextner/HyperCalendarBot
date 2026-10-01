@@ -217,13 +217,56 @@ Requires:
 - Key rotation: `OLD_KEY=<hex> NEW_KEY=<hex> bun scripts/rotate-session-master-key.ts` —
   re-encrypts all sessions atomically.
 
-## Removed: shared MTProto service account (2026-09-29)
+## ntgcalls — Build from Source (voice calls only)
 
-The shared service Telegram account (`data/voice_caller.session`, checked against
-`MTPROTO_SERVICE_USER_ID`) and the voice-call reminders that ran on it were removed by owner decision.
-Hosts deployed before then may still hold leftovers the bot no longer reads: `data/voice_caller.session`,
-`data/voice_caller.lock` (and any `-journal`), and the env vars `MTPROTO_SERVICE_USER_ID`, `DISABLE_VOICE`,
-`DEEPGRAM_API_KEY`. They are inert; deleting them is an operator action (keep `MTPROTO_API_ID` /
-`MTPROTO_API_HASH`, which `/connect_telegram` still uses). The retired `birthday-sync-tick` repeatable job
-is unscheduled by the bot at startup. The tables `user_call_settings`, `call_log` and `birthday_sync_state`
-stay in the schema, unused: dropping them deletes data, which the migration gate does not activate unattended.
+ntgcalls v2.1.0 has a bug: P2P calls connect but audio is silent.
+Fix: `NativeNetworkInterface::UpdateAggregateStates_n()` never calls `OnNetworkAvailability(true)`.
+Patch: `scripts/ntgcalls-fix-network-state.patch`.
+
+**The compiled `.so` is NOT in git (venv/ is gitignored). Must rebuild on each server.**
+
+On every new Linux server:
+
+```bash
+# 1. Install uv (if not present)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Create Python venv and install deps
+uv venv --python 3.12 venv
+uv pip install -r pyproject.toml --python venv/bin/python
+
+# 3. Build patched ntgcalls from source (~5 min, needs ~5GB RAM, ~2GB disk)
+./scripts/build-patched-ntgcalls.sh python3.12 venv
+
+# 4. Authorize the service account (see "MTProto service tier" below); needs MTPROTO_API_ID / MTPROTO_API_HASH exported
+venv/bin/python scripts/pyrogram-auth.py
+```
+
+- macOS arm64 `.dylib` != Linux x86_64 `.so` — binaries are platform-specific
+- The build aborts if the P2P audio patch does not apply — it never installs an unpatched binary
+- Build deps: CMake 3.20+, git, Python 3.12, 5GB RAM min
+
+## MTProto service tier
+
+> **2026-09-30:** restored behind `ServiceTier`, with no service sends (#753).
+
+`src/services/telegram-session/service-tier.ts` decides once at startup, fail-closed: the tier is on only
+when `MTPROTO_API_ID` / `MTPROTO_API_HASH` are set, `MTPROTO_SERVICE_USER_ID` is a positive integer,
+`data/voice_caller.session` exists, and `scripts/check-session.py` reports exactly that ID. The log shows
+one line: `MTProto service tier enabled` (with `accountId`) or `MTProto service tier disabled` with
+`reason` = `service_user_id_unset` | `service_user_id_invalid` | `api_credentials_missing` |
+`session_missing` | `probe_failed` | `identity_mismatch`.
+
+Enabled, it resolves @usernames, looks profiles up, lists group members, syncs birthdays (daily
+`birthday-sync-tick`) and places voice-call reminders (`call-reminders` queue; `DEEPGRAM_API_KEY` for live
+calls, `DISABLE_VOICE=true` to opt out). It never sends messages: invitations go Bot API → the inviter's own
+`/connect_telegram` session → a deep link to the inviter; proposals and secretary DMs go Bot API → a deep
+link to the initiator. Disabled,
+`find_user` / `send_invitation` use the local `users` table and otherwise the picker, group members come
+from `group_members`, and birthday sync and voice calls are off.
+
+**Prod:** `MTPROTO_SERVICE_USER_ID` was never set, so the tier is off. To turn it on the owner designates a
+service account (Telegram may block such accounts), runs `venv/bin/python scripts/pyrogram-auth.py`
+interactively to create `data/voice_caller.session`, sets `MTPROTO_SERVICE_USER_ID` (+ `DEEPGRAM_API_KEY`)
+in `/opt/hypercal/.env`, and recreates the bot container. Never build the service session from a user's
+stored `/connect_telegram` authorization; do not rotate or revoke unrelated user sessions.

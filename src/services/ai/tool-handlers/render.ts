@@ -171,9 +171,10 @@ export async function handleRenderTable(
     });
     schedulePinFireAndForget(ctx, sent.message_id);
 
+    const voiceNote = ctx.inputMode === 'live_call' ? ` ${tr.tableRenderingVoice}` : '';
     return {
       success: true,
-      output: tr.tableSent(input.title),
+      output: `${tr.tableSent(input.title)}${voiceNote}`,
       agentHint:
         'The table has already been delivered to the chat. Do NOT call render_table again with identical arguments in this turn.',
     };

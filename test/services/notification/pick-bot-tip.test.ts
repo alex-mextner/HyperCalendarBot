@@ -60,6 +60,7 @@ describe('pickBotTip', () => {
       hasQuietHours: false,
       hasGoogle: false,
       hasCountry: false,
+      hasVoiceCalls: false,
     };
 
     // With many missing features and enough iterations, should see a contextual tip
@@ -70,7 +71,8 @@ describe('pickBotTip', () => {
         result?.includes('Enable the evening review') ||
         result?.includes('quiet hours') ||
         result?.includes('Google Calendar') ||
-        result?.includes('country')
+        result?.includes('country') ||
+        result?.includes('voice calls')
       ) {
         foundContextual = true;
         break;
@@ -86,6 +88,7 @@ describe('pickBotTip', () => {
       hasQuietHours: true,
       hasGoogle: true,
       hasCountry: true,
+      hasVoiceCalls: true,
     };
 
     // Even with many iterations, contextual tips (the specific settings prompts) should not appear
@@ -113,6 +116,7 @@ describe('pickBotTip', () => {
       hasQuietHours: true,
       hasGoogle: true,
       hasCountry: true,
+      hasVoiceCalls: true,
       featureUsage: [
         // events_create used 10 times recently — should filter out events_create tips
         { user_id: 1, feature_key: 'events_create', use_count: 10, last_used_at: now },
@@ -120,6 +124,7 @@ describe('pickBotTip', () => {
         { user_id: 1, feature_key: 'recurrence', use_count: 10, last_used_at: now },
         { user_id: 1, feature_key: 'sharing', use_count: 10, last_used_at: now },
         { user_id: 1, feature_key: 'google_calendar', use_count: 10, last_used_at: now },
+        { user_id: 1, feature_key: 'voice_calls', use_count: 10, last_used_at: now },
         { user_id: 1, feature_key: 'contacts', use_count: 10, last_used_at: now },
         { user_id: 1, feature_key: 'holidays', use_count: 10, last_used_at: now },
         { user_id: 1, feature_key: 'settings', use_count: 10, last_used_at: now },
@@ -157,6 +162,7 @@ describe('pickBotTip', () => {
       hasQuietHours: true,
       hasGoogle: true,
       hasCountry: true,
+      hasVoiceCalls: true,
       featureUsage: [
         // Only sharing is stale — all other features have no usage (discovery)
         { user_id: 1, feature_key: 'sharing', use_count: 20, last_used_at: sixtyDaysAgo },

@@ -62,7 +62,7 @@ describe('makeWorkerFailureHandler', () => {
   });
 
   test('does not call pushAlert when it is not provided', () => {
-    const handler = makeWorkerFailureHandler('ai-messages', deps);
+    const handler = makeWorkerFailureHandler('call-queue', deps);
     // Should not throw
     expect(() => handler({ id: 'j1' }, new Error('x'))).not.toThrow();
   });

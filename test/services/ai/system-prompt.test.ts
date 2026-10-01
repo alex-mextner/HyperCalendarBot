@@ -21,6 +21,7 @@ import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import type { AddressCache } from '../../../src/services/location/address-cache.ts';
 import { buildAddressContext } from '../../../src/services/location/address-context.ts';
+import { disabledServiceTier } from '../../helpers/service-tier.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -130,7 +131,7 @@ describe('buildSystemPrompt', () => {
   });
 
   test('every tool the prompt stopped naming is still offered in the tool catalog', () => {
-    const offered = getToolDefinitions()
+    const offered = getToolDefinitions('text')
       .filter((t) => t.type === 'function')
       .map((t) => t.function.name);
     for (const name of TOOLS_DESCRIBED_ONLY_BY_THE_CATALOG) {
@@ -139,7 +140,7 @@ describe('buildSystemPrompt', () => {
   });
 
   test('prompt does not name update_sharing_settings, which is not a tool', () => {
-    const offered = getToolDefinitions()
+    const offered = getToolDefinitions('text')
       .filter((t) => t.type === 'function')
       .map((t) => t.function.name);
     expect(offered).not.toContain('update_sharing_settings');
@@ -789,6 +790,7 @@ describe('buildSystemPrompt', () => {
         new BirthdayMetadataRepository(db),
         new EventReminderRepository(db),
         new NotificationPreferencesRepository(db),
+        disabledServiceTier,
       );
       const withMemory = { ...ctx, birthday: { birthdayService, userMemoryRepo } };
       const profile = buildUserProfileEvidence(withMemory);

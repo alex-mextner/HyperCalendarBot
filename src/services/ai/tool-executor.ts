@@ -31,6 +31,7 @@ import { handleGetHistory } from './tool-handlers/history.ts';
 import { handleRememberUserFact, handleSetReaction } from './tool-handlers/memory.ts';
 import {
   handleAskUser,
+  handleEndCall,
   handleEndConversation,
   handleFindUser,
   handleGetBotInfo,
@@ -38,6 +39,7 @@ import {
   handleGetHolidays,
   handleListGoogleCalendars,
   handleLookupStress,
+  handleMakeCall,
   handlePickUsers,
 } from './tool-handlers/meta.ts';
 import type { ProposeInput } from './tool-handlers/proposals.ts';
@@ -80,7 +82,7 @@ import {
 } from './tool-handlers/sharing.ts';
 import { handleGetFreeSlots } from './tool-handlers/slots.ts';
 import { handleConvertToTimezone, handleGetTimezoneInfoWithCityFallback } from './tool-handlers/timezone.ts';
-import { toolSchemas } from './tool-schemas.ts';
+import { makeCallSchema, toolSchemas } from './tool-schemas.ts';
 import { withSchemaExcerpt } from './tools.ts';
 import type { AgentContext, ToolResult } from './types.ts';
 
@@ -150,6 +152,8 @@ export interface ToolInputMap {
   render_week_image: { week_start: string; scope?: 'personal' | 'group'; owner_id?: number };
   render_month_image: { month: string; scope?: 'personal' | 'group'; owner_id?: number };
   render_table: { title: string; markdown: string; caption?: string };
+  end_call: Record<never, never>;
+  make_call: { text: string };
   get_holidays: { limit?: number };
   manage_settings: ManageSettingsInput;
   share_event: { event_id: number; target_type: 'user' | 'group'; target_id: number };
@@ -370,8 +374,6 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   search_events: 'events_create',
   set_reminder: 'reminders',
   get_reminders: 'reminders',
-  schedule_ai_call: 'reminders',
-  schedule_ai_call_cancel: 'reminders',
   get_free_slots: 'free_slots',
   share_event: 'sharing',
   send_invitation: 'sharing',
@@ -391,6 +393,10 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   get_holidays: 'holidays',
   get_google_calendar_status: 'google_calendar',
   list_google_calendars: 'google_calendar',
+  make_call: 'voice_calls',
+  end_call: 'voice_calls',
+  schedule_ai_call: 'voice_calls',
+  schedule_ai_call_cancel: 'voice_calls',
   manage_settings: 'settings',
   get_history: 'history',
   get_action_log: 'history',
@@ -688,6 +694,12 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
 
       case 'render_table':
         return handleRenderTable(ctx, input as ToolInputMap['render_table']);
+
+      case 'end_call':
+        return handleEndCall(ctx);
+
+      case 'make_call':
+        return handleMakeCall(ctx, makeCallSchema.parse(input));
 
       case 'get_holidays':
         return handleGetHolidays(ctx, input as ToolInputMap['get_holidays']);

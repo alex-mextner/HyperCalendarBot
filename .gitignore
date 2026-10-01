@@ -45,6 +45,9 @@ data/thinking-phrases/
 *.db-shm
 *.db-wal
 
+# ntgcalls prebuilt binaries
+lib/
+mtproto-session*
 .claude/worktrees/
 .claude/projects/
 .claude/scheduled_tasks.lock

@@ -1,6 +1,6 @@
 # Spec 10: STT Corrections Dictionary
 
-> **2026-09-29 update:** voice calls were removed by owner decision, and with them the Deepgram streaming STT this spec was built on. Incoming voice messages are transcribed by Whisper only; nothing in this spec is implemented.
+> **2026-09-30:** voice calls — the Deepgram streaming STT this spec builds on — restored behind `ServiceTier`, no service sends (#753); they run only while the optional MTProto service tier is enabled. Voice messages are transcribed by Whisper.
 
 ## Overview
 

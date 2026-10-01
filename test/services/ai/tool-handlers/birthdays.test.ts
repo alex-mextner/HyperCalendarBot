@@ -14,6 +14,7 @@ import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { BirthdayService } from '../../../../src/services/birthday/birthday-service.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
+import { disabledServiceTier } from '../../../helpers/service-tier.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -42,7 +43,7 @@ describe('handleCreateBirthdayEvent', () => {
     userRepo.create({ telegram_id: OWNER_ID, first_name: 'Alice', timezone: 'UTC' });
     userRepo.create({ telegram_id: CELEBRANT_ID, first_name: 'Ivan', username: 'ivan_t', timezone: 'UTC' });
 
-    birthdayService = new BirthdayService(eventRepo, metaRepo, eventReminderRepo, prefsRepo);
+    birthdayService = new BirthdayService(eventRepo, metaRepo, eventReminderRepo, prefsRepo, disabledServiceTier);
     const eventService = new EventService({ eventRepo });
     const holidayService = new HolidayService(holidayRepo);
 

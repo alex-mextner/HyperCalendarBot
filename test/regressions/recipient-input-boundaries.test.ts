@@ -69,3 +69,12 @@ test('partial null metadata cannot overwrite a real name', () => {
   expect(handleUpdateContact(ctx, { search: '5000000001', name: 'null', username: 'real' }).success).toBe(false);
   expect(contacts.findById(10, row.id)?.name).toBe('Real Name');
 });
+test('profile refresh clears a legacy at-prefixed reassigned username but never the other ID', () => {
+  const contacts = repo();
+  const old = contacts.add(10, 'Old', 'reassigned', 5000000001);
+  contacts.add(10, 'New', undefined, 5000000002);
+  db!.run('UPDATE contacts SET username = ? WHERE id = ?', [' @Reassigned ', old.id]);
+  contacts.refreshProfile(10, 5000000002, { username: 'reassigned' });
+  expect(contacts.findById(10, old.id)?.username).toBeNull();
+  expect(contacts.findById(10, old.id)?.telegram_id).toBe(5000000001);
+});

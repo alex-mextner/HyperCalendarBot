@@ -278,7 +278,7 @@ const toolDefinitions: ToolDefinition[] = [
       'Get or update user settings. To change the interface language you MUST call this with ' +
       'action=update, category=general, updates={language:"en"|"ru"} — announcing the switch without ' +
       'persisting it is wrong. Categories: general (timezone, language, country, default duration), ' +
-      'notifications (morning agenda, evening review, quiet hours, reminders), privacy, voice. ' +
+      'notifications (morning agenda, evening review, quiet hours, reminders), calls, privacy, voice. ' +
       'action "get" without a category returns every setting.',
     input_schema: {
       type: 'object' as const,
@@ -286,16 +286,37 @@ const toolDefinitions: ToolDefinition[] = [
         action: { type: 'string', enum: ['get', 'update'], description: 'Action to perform' },
         category: {
           type: 'string',
-          enum: ['general', 'notifications', 'privacy', 'voice'],
+          enum: ['general', 'notifications', 'calls', 'privacy', 'voice'],
           description: 'Required for update; for get, omit to return all.',
         },
         updates: {
           type: 'object',
           description:
-            'Fields per category. general: timezone (IANA), language (en/ru), country_code (ISO 3166-1 alpha-2), default_event_duration_minutes (1–1440). notifications: morning_agenda_enabled (bool), morning_agenda_time (HH:MM), evening_review_enabled (bool), evening_review_time (HH:MM), quiet_hours_enabled (bool), quiet_hours_start (HH:MM), quiet_hours_end (HH:MM), default_reminder_minutes (number[]). privacy: default_visibility (private/free_busy/full), inline_mode_enabled (bool), allow_invitations (bool). voice: voice_response_enabled (bool).',
+            'Fields per category. general: timezone (IANA), language (en/ru), country_code (ISO 3166-1 alpha-2), default_event_duration_minutes (1–1440). notifications: morning_agenda_enabled (bool), morning_agenda_time (HH:MM), evening_review_enabled (bool), evening_review_time (HH:MM), quiet_hours_enabled (bool), quiet_hours_start (HH:MM), quiet_hours_end (HH:MM), default_reminder_minutes (number[]). calls: enabled (bool), language (string). privacy: default_visibility (private/free_busy/full), inline_mode_enabled (bool), allow_invitations (bool). voice: voice_response_enabled (bool).',
         },
       },
       required: ['action'],
+    },
+  },
+  {
+    name: 'end_call',
+    description:
+      'Hang up the current live call. Use only when the user says goodbye or asks to end it — speak a short farewell first.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'make_call',
+    description: 'Call the user and speak a message aloud. Use when they ask to be called.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Text to speak during the call' },
+      },
+      required: ['text'],
     },
   },
   {
@@ -419,7 +440,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'find_user',
     description:
-      'Resolve an exact @username supplied by the user or saved in their contacts; finds only people who started this bot. Never guess a username from a personal name: use find_contact for names.',
+      'Resolve an exact Telegram @username supplied by the user or saved in their contacts. Never guess a username from a personal name: use find_contact for names.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -431,7 +452,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'get_user_info',
     description:
-      'Privately show the saved contact for a Telegram ID: name, aliases, @username, contact creation time. Unknown fields stay null.',
+      'Privately inspect a saved Telegram ID: name, aliases, @username, contact creation time. May refresh the live profile, never the ID; unknown fields stay null.',
     input_schema: {
       type: 'object',
       properties: {
@@ -595,7 +616,7 @@ const toolDefinitions: ToolDefinition[] = [
     description:
       'Render a Markdown table as an image and send it to the chat. Call it whenever you have tabular data, ' +
       'in parallel with your text reply — and in that reply present the same data as a bullet list, never as raw ' +
-      'Markdown table syntax.',
+      'Markdown table syntax. During a voice call the image still goes to the chat, so mention it out loud.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -1011,6 +1032,23 @@ const toolDefinitions: ToolDefinition[] = [
   },
 ];
 
+// Tools not available during a live call (no visual output, no Telegram UI)
+const CALL_EXCLUDED_TOOLS = new Set([
+  'make_call',
+  'render_day_image',
+  'render_week_image',
+  'render_month_image',
+  'pick_users',
+]);
+// Tools only available during a live call
+const CALL_ONLY_TOOLS = new Set(['end_call']);
+
+/** Capabilities of the current request that decide whether a tool is offered at all. */
+export interface ToolAvailability {
+  /** Voice calls can be placed (AgentContext.calls, which needs the service tier): offers make_call. */
+  calls?: boolean;
+}
+
 /**
  * The returned schemas are shared, not copied: fifteen tools reference the same
  * `scope` and `owner_id` objects. They are frozen, which stops one tool's copy
@@ -1020,8 +1058,18 @@ const toolDefinitions: ToolDefinition[] = [
  * normalize it in place. Every consumer in this repo passes it straight to a
  * provider client, which serializes it.
  */
-export function getToolDefinitions(supplementMode?: boolean): OpenAI.ChatCompletionTool[] {
-  let tools = toolDefinitions;
+export function getToolDefinitions(
+  inputMode?: string,
+  supplementMode?: boolean,
+  available: ToolAvailability = {},
+): OpenAI.ChatCompletionTool[] {
+  let tools: ToolDefinition[];
+  if (inputMode === 'live_call') {
+    tools = toolDefinitions.filter((t) => !CALL_EXCLUDED_TOOLS.has(t.name));
+  } else {
+    tools = toolDefinitions.filter((t) => !CALL_ONLY_TOOLS.has(t.name));
+  }
+  if (!available.calls) tools = tools.filter((t) => t.name !== 'make_call');
 
   if (supplementMode) {
     tools = tools.filter((t) => t.name !== 'end_conversation');

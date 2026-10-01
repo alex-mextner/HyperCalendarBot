@@ -92,7 +92,7 @@ describe('IntentLearner', () => {
     // Simulate a fresh analyze() call so resetDailyIfNeeded() initializes lastResetDate,
     // then push the counter to the cap. Without this, the first analyze() call would
     // reset the counter to 0.
-    await learner.analyze('что завтра', [{ name: 'get_events', input: {} }], [{ success: true }]).catch(() => {});
+    await learner.analyze('примем звонок', [{ name: 'make_call', input: {} }], [{ success: true }]).catch(() => {});
     for (let i = 0; i < 100; i++) {
       learner.incrementCounter();
     }

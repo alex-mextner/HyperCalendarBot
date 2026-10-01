@@ -90,6 +90,9 @@ export interface EnvConfig {
   ENCRYPTION_KEY?: string;
   PUBLIC_DOMAIN?: string;
   BOT_USERNAME?: string;
+  MTPROTO_API_ID?: number;
+  MTPROTO_API_HASH?: string;
+  MTPROTO_SERVICE_USER_ID?: number;
   GROQ_API_KEY?: string;
   GROQ_TPM_LIMITS?: GroqTokenLimits;
   GROQ_MODEL?: string;
@@ -110,6 +113,8 @@ export interface EnvConfig {
   INLINE_BOT_TOKEN?: string;
   INLINE_BOT_USERNAME?: string;
   SILERO_PYTHON_PATH?: string;
+  DEEPGRAM_API_KEY?: string;
+  DISABLE_VOICE?: boolean;
   AI_DEBUG_LOGS?: boolean;
   ADMIN_ALERT_TOKEN?: string;
   OPENWEATHER_API_KEY?: string;
@@ -220,6 +225,11 @@ export function loadConfig(): EnvConfig {
     ENCRYPTION_KEY,
     PUBLIC_DOMAIN,
     BOT_USERNAME: process.env.BOT_USERNAME || undefined,
+    MTPROTO_API_ID: process.env.MTPROTO_API_ID ? Number(process.env.MTPROTO_API_ID) : undefined,
+    MTPROTO_API_HASH: process.env.MTPROTO_API_HASH || undefined,
+    MTPROTO_SERVICE_USER_ID: process.env.MTPROTO_SERVICE_USER_ID
+      ? Number(process.env.MTPROTO_SERVICE_USER_ID)
+      : undefined,
     GROQ_API_KEY: process.env.GROQ_API_KEY || undefined,
     GROQ_TPM_LIMITS: parseGroqTokenLimits(process.env.GROQ_TPM_LIMITS),
     GROQ_MODEL: process.env.GROQ_MODEL || undefined,
@@ -234,6 +244,8 @@ export function loadConfig(): EnvConfig {
     INLINE_BOT_TOKEN: process.env.INLINE_BOT_TOKEN || undefined,
     INLINE_BOT_USERNAME: process.env.INLINE_BOT_USERNAME || undefined,
     SILERO_PYTHON_PATH: process.env.SILERO_PYTHON_PATH || undefined,
+    DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY || undefined,
+    DISABLE_VOICE: process.env.DISABLE_VOICE === 'true' || undefined,
     AI_DEBUG_LOGS: process.env.AI_DEBUG_LOGS === 'true' || undefined,
     ADMIN_ALERT_TOKEN: process.env.ADMIN_ALERT_TOKEN || undefined,
     OPENWEATHER_API_KEY: process.env.OPENWEATHER_API_KEY || undefined,

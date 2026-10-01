@@ -2,6 +2,8 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { z } from 'zod';
 import { migrations } from '../../../src/database/migrations.ts';
+import { CallLogRepository } from '../../../src/database/repositories/call-log.repository.ts';
+import { CallSettingsRepository } from '../../../src/database/repositories/call-settings.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
@@ -10,7 +12,7 @@ import { UserRepository } from '../../../src/database/repositories/user.reposito
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { EventOccurrence, NotificationLogRow } from '../../../src/database/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
-import { NotificationScheduler } from '../../../src/services/notification/scheduler.ts';
+import { type EnqueueCallData, NotificationScheduler } from '../../../src/services/notification/scheduler.ts';
 
 function setupDb(): Database {
   const db = new Database(':memory:');
@@ -24,6 +26,29 @@ function makeGetEventsInRange(db: Database): (userId: number, startUtc: string, 
     eventRepo: new EventRepository(db),
   });
   return (userId, startUtc, endUtc) => eventService.getEventsInRange(userId, startUtc, endUtc);
+}
+
+/** A scheduler for user 42 with voice calls enabled and call-specific quiet hours 22:00–08:00. */
+function makeQuietHoursCallScheduler(db: Database) {
+  const callSettingsRepo = new CallSettingsRepository(db);
+  callSettingsRepo.ensureDefaults(42);
+  callSettingsRepo.setEnabled(42, true);
+  callSettingsRepo.setQuietHours(42, '22:00', '08:00');
+  const callEnqueued: EnqueueCallData[] = [];
+  const callScheduler = new NotificationScheduler({
+    prefsRepo: new NotificationPreferencesRepository(db),
+    reminderRepo: new EventReminderRepository(db),
+    logRepo: new NotificationLogRepository(db),
+    userRepo: new UserRepository(db),
+    getEventsInRange: makeGetEventsInRange(db),
+    enqueue: mock(() => {}),
+    callSettingsRepo,
+    callLogRepo: new CallLogRepository(db),
+    enqueueCall: (data) => {
+      callEnqueued.push(data);
+    },
+  });
+  return { callScheduler, callEnqueued };
 }
 
 describe('NotificationScheduler', () => {
@@ -81,6 +106,22 @@ describe('NotificationScheduler', () => {
     );
     await scheduler.tick(new Date('2026-03-15T08:00:30Z'));
     expect(enqueued.some((e) => e.type === 'morning_agenda')).toBe(true);
+  });
+
+  test('skips voice call during call-specific quiet hours', async () => {
+    db.run('INSERT INTO users (telegram_id) VALUES (42)');
+    db.run(
+      "INSERT INTO events (id, user_id, title, start_at, timezone) VALUES (1, 42, 'Call', '2026-03-15T10:00:00Z', 'UTC')",
+    );
+    db.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T23:45:00Z', 15, '15 minutes')",
+    );
+
+    const { callScheduler, callEnqueued } = makeQuietHoursCallScheduler(db);
+
+    // 23:45 UTC is within quiet hours 22:00-08:00
+    await callScheduler.tick(new Date('2026-03-15T23:45:30Z'));
+    expect(callEnqueued.length).toBe(0);
   });
 
   test('batches multiple reminders at same time for same user into one job', async () => {
@@ -165,6 +206,22 @@ describe('NotificationScheduler', () => {
     // Monday 2026-03-16 at 03:00 UTC (day=1 not Sunday=0)
     await cleanupScheduler.tick(new Date('2026-03-16T03:00:30Z'));
     expect(cleanupSpy.called).toBe(false);
+  });
+
+  test('enqueues voice call outside call-specific quiet hours', async () => {
+    db.run('INSERT INTO users (telegram_id) VALUES (42)');
+    db.run(
+      "INSERT INTO events (id, user_id, title, start_at, timezone) VALUES (1, 42, 'Call', '2026-03-15T15:00:00Z', 'UTC')",
+    );
+    db.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T14:45:00Z', 15, '15 minutes')",
+    );
+
+    const { callScheduler, callEnqueued } = makeQuietHoursCallScheduler(db);
+
+    // 14:45 UTC is outside quiet hours 22:00-08:00
+    await callScheduler.tick(new Date('2026-03-15T14:45:30Z'));
+    expect(callEnqueued.length).toBe(1);
   });
 
   test('event_reminder payload is formatted text, not raw event JSON', async () => {
@@ -672,7 +729,10 @@ describe('resolved place in reminders and agendas', () => {
    * events whose typed text has a resolved place with the given verification state. Without typed
    * text the place is one a pin set: reverse geocoding gives an address and a map link, no venue.
    */
-  async function deliver(verified: 0 | 1, typed: string | null = 'sonder'): Promise<{ [type: string]: string }> {
+  async function deliver(
+    verified: 0 | 1,
+    typed: string | null = 'sonder',
+  ): Promise<{ texts: { [type: string]: string }; spoken: string[] }> {
     const placeDb = setupDb();
     placeDb.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
     placeDb.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");
@@ -693,8 +753,14 @@ describe('resolved place in reminders and agendas', () => {
     insertReminder.run(2, '2026-03-15T11:45:00Z');
     insertReminder.run(3, '2026-03-15T11:45:00Z');
 
+    const callSettingsRepo = new CallSettingsRepository(placeDb);
+    callSettingsRepo.ensureDefaults(42);
+    callSettingsRepo.setEnabled(42, true);
+    callSettingsRepo.setQuietHours(42, null, null);
+
     const logRepo = new NotificationLogRepository(placeDb);
     const texts: { [type: string]: string } = {};
+    const spoken: string[] = [];
     const placeScheduler = new NotificationScheduler({
       prefsRepo: new NotificationPreferencesRepository(placeDb),
       reminderRepo: new EventReminderRepository(placeDb),
@@ -706,15 +772,20 @@ describe('resolved place in reminders and agendas', () => {
         // Reminder payloads carry the rendered text in JSON; the agenda payload is the text itself.
         texts[type] = type.startsWith('event_reminder') ? ReminderPayload.parse(JSON.parse(payload)).text : payload;
       },
+      callSettingsRepo,
+      callLogRepo: new CallLogRepository(placeDb),
+      enqueueCall: (data) => {
+        if (data.eventId === 1) spoken.push(data.ttsText);
+      },
     });
     await placeScheduler.tick(new Date('2026-03-15T08:00:30Z'));
     await placeScheduler.tick(new Date('2026-03-15T09:45:30Z'));
     await placeScheduler.tick(new Date('2026-03-15T11:45:30Z'));
-    return texts;
+    return { texts, spoken };
   }
 
-  test('an unconfirmed place shows only the typed text in reminders and the agenda', async () => {
-    const texts = await deliver(0);
+  test('an unconfirmed place shows only the typed text in reminders, the agenda and the reminder call', async () => {
+    const { texts, spoken } = await deliver(0);
     expect(Object.keys(texts).sort()).toEqual(['event_reminder', 'event_reminder_batch', 'morning_agenda']);
     for (const [type, text] of Object.entries(texts)) {
       expect({ type, text }).toEqual({ type, text: expect.stringContaining('>sonder</a>') });
@@ -723,18 +794,23 @@ describe('resolved place in reminders and agendas', () => {
       expect({ type, text }).toEqual({ type, text: expect.not.stringContaining('Sonder Hotel') });
       expect({ type, text }).toEqual({ type, text: expect.not.stringContaining('dutch-hotel') });
     }
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0]).toContain('sonder');
+    expect(spoken[0]).not.toContain('Sonder Hotel');
   });
 
-  test('a confirmed place shows "Venue — Address" with its map link', async () => {
-    const texts = await deliver(1);
+  test('a confirmed place shows "Venue — Address" with its map link and the call speaks the venue', async () => {
+    const { texts, spoken } = await deliver(1);
     expect(Object.keys(texts).sort()).toEqual(['event_reminder', 'event_reminder_batch', 'morning_agenda']);
     for (const [type, text] of Object.entries(texts)) {
       expect({ type, text }).toEqual({ type, text: expect.stringContaining(`📍 ${confirmedLink}`) });
     }
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0]).toContain('Sonder Hotel');
   });
 
   test('a place confirmed with a pin on an event without typed text shows in reminders and the agenda', async () => {
-    const texts = await deliver(1, null);
+    const { texts } = await deliver(1, null);
     expect(Object.keys(texts).sort()).toEqual(['event_reminder', 'event_reminder_batch', 'morning_agenda']);
     for (const [type, text] of Object.entries(texts)) {
       expect({ type, text }).toEqual({
@@ -747,11 +823,95 @@ describe('resolved place in reminders and agendas', () => {
   });
 
   test('a stale unconfirmed place on an event without typed text shows no place', async () => {
-    const texts = await deliver(0, null);
+    const { texts } = await deliver(0, null);
     expect(Object.keys(texts).sort()).toEqual(['event_reminder', 'event_reminder_batch', 'morning_agenda']);
     for (const [type, text] of Object.entries(texts)) {
       expect({ type, text }).toEqual({ type, text: expect.not.stringContaining('📍') });
       expect({ type, text }).toEqual({ type, text: expect.not.stringContaining('Damrak') });
     }
+  });
+});
+
+describe('voice call gating follows the user local clock', () => {
+  const USER_ID = 5000000001;
+
+  /** A Moscow (UTC+3) user with calls on and a reminder due at `remindAtUtc`. */
+  function setupMoscowCallUser(remindAtUtc: string, quiet: { start: string; end: string } | null, maxDaily = 5) {
+    const db = setupDb();
+    db.run("INSERT INTO users (telegram_id, timezone) VALUES (?, 'Europe/Moscow')", [USER_ID]);
+    db.run("INSERT INTO events (id, user_id, title, start_at, timezone) VALUES (1, ?, 'Call', ?, 'Europe/Moscow')", [
+      USER_ID,
+      new Date(new Date(remindAtUtc).getTime() + 15 * 60_000).toISOString(),
+    ]);
+    db.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, ?, ?, 15, '15 minutes')",
+      [USER_ID, remindAtUtc],
+    );
+    const callSettingsRepo = new CallSettingsRepository(db);
+    callSettingsRepo.ensureDefaults(USER_ID);
+    callSettingsRepo.setEnabled(USER_ID, true);
+    callSettingsRepo.setQuietHours(USER_ID, quiet?.start ?? null, quiet?.end ?? null);
+    db.run('UPDATE user_call_settings SET max_daily_calls = ? WHERE user_id = ?', [maxDaily, USER_ID]);
+    const calls: EnqueueCallData[] = [];
+    const callScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo: new NotificationLogRepository(db),
+      userRepo: new UserRepository(db),
+      getEventsInRange: makeGetEventsInRange(db),
+      enqueue: mock(() => {}),
+      callSettingsRepo,
+      callLogRepo: new CallLogRepository(db),
+      enqueueCall: (data) => {
+        calls.push(data);
+      },
+    });
+    return { db, callScheduler, calls };
+  }
+
+  test('no call at 23:30 local inside a 23:00–07:00 quiet window (20:30 UTC)', async () => {
+    const { callScheduler, calls } = setupMoscowCallUser('2026-03-15T20:30:00Z', { start: '23:00', end: '07:00' });
+    await callScheduler.tick(new Date('2026-03-15T20:30:30Z'));
+    expect(calls).toEqual([]);
+  });
+
+  test('call at 15:00 local outside a 23:00–07:00 quiet window (12:00 UTC)', async () => {
+    const { callScheduler, calls } = setupMoscowCallUser('2026-03-15T12:00:00Z', { start: '23:00', end: '07:00' });
+    await callScheduler.tick(new Date('2026-03-15T12:00:30Z'));
+    expect(calls.map((c) => c.userId)).toEqual([USER_ID]);
+  });
+
+  test('no call at 15:00 local inside a same-day 13:00–17:00 quiet window (12:00 UTC)', async () => {
+    const { callScheduler, calls } = setupMoscowCallUser('2026-03-15T12:00:00Z', { start: '13:00', end: '17:00' });
+    await callScheduler.tick(new Date('2026-03-15T12:00:30Z'));
+    expect(calls).toEqual([]);
+  });
+
+  test('call at 17:00 local, the exclusive end of a 13:00–17:00 quiet window (14:00 UTC)', async () => {
+    const { callScheduler, calls } = setupMoscowCallUser('2026-03-15T14:00:00Z', { start: '13:00', end: '17:00' });
+    await callScheduler.tick(new Date('2026-03-15T14:00:30Z'));
+    expect(calls.map((c) => c.userId)).toEqual([USER_ID]);
+  });
+
+  test('equal quiet-hour bounds (13:00–13:00) are an empty window, as for text quiet hours', async () => {
+    const { callScheduler, calls } = setupMoscowCallUser('2026-03-15T10:00:00Z', { start: '13:00', end: '13:00' });
+    await callScheduler.tick(new Date('2026-03-15T10:00:30Z'));
+    expect(calls.map((c) => c.userId)).toEqual([USER_ID]);
+  });
+
+  test('daily cap counts calls since local midnight, not the UTC day', async () => {
+    // 21:10 UTC on Mar 15 is 00:10 on Mar 16 in Moscow: same local day as the 21:30 UTC tick.
+    const { db, callScheduler, calls } = setupMoscowCallUser('2026-03-15T21:30:00Z', null, 1);
+    db.run("INSERT INTO call_log (user_id, created_at) VALUES (?, '2026-03-15 21:10:00')", [USER_ID]);
+    await callScheduler.tick(new Date('2026-03-15T21:30:30Z'));
+    expect(calls).toEqual([]);
+  });
+
+  test('daily cap resets at local midnight', async () => {
+    // 20:50 UTC on Mar 15 is 23:50 on Mar 15 in Moscow: the previous local day for the 21:30 UTC tick.
+    const { db, callScheduler, calls } = setupMoscowCallUser('2026-03-15T21:30:00Z', null, 1);
+    db.run("INSERT INTO call_log (user_id, created_at) VALUES (?, '2026-03-15 20:50:00')", [USER_ID]);
+    await callScheduler.tick(new Date('2026-03-15T21:30:30Z'));
+    expect(calls.map((c) => c.userId)).toEqual([USER_ID]);
   });
 });

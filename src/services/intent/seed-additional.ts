@@ -85,6 +85,29 @@ const telegramStatus: FamilyDefinition = {
     'Replaces approved DB39 with an owner-scoped status query. No QR, credentials or connection changes are performed by the intent.',
 };
 
+const callStart: FamilyDefinition = {
+  name: 'basis.call.start',
+  title: 'Start a call to the requesting account',
+  category: 'contacts',
+  risk: 'write',
+  pattern: String.raw`^(?:позвони\s+мне|набери\s+меня|call\s+me|start\s+a\s+call)$`,
+  triggers: ['позвони', 'набери', 'call', 'start'],
+  steps: [guardPrivate(), ...confirmStep('question'), { call: 'make_call', input: { text: '{{t.call_text}}' } }],
+  strings: {
+    ru: {
+      question: 'Начать звонок в ваш подключённый Telegram-аккаунт?',
+      call_text: 'Здравствуйте! Вы запросили звонок из календаря.',
+    },
+    en: {
+      question: 'Start a call to your connected Telegram account?',
+      call_text: 'Hello! You requested a call from your calendar.',
+    },
+  },
+  examples: ['позвони мне', 'набери меня', 'call me'],
+  negatives: ['позвони Лене', 'не звони мне'],
+  notes:
+    'Replaces stored DB7 with actor-scoped explicit intent and confirmation. Unsupported call capabilities fail without inventing success.',
+};
 const remindAfter: FamilyDefinition = {
   name: 'basis.reminder.after',
   title: 'Create an explicit reminder after a duration',
@@ -143,4 +166,4 @@ const remindAfter: FamilyDefinition = {
   notes:
     'A standalone requested reminder is explicitly stored as one calendar reminder event; changing reminders of an existing event instead uses basis.reminder.set and never duplicates that event.',
 };
-export const additionalFamilies: FamilyDefinition[] = [createRange, telegramStatus, remindAfter];
+export const additionalFamilies: FamilyDefinition[] = [createRange, telegramStatus, callStart, remindAfter];

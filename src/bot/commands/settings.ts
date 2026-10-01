@@ -2,6 +2,7 @@
 import { InlineKeyboard } from 'gramio';
 import { z } from 'zod';
 import { CB, t } from '../../config/constants.ts';
+import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { TelegramSessionRepository } from '../../database/repositories/telegram-session.repository.ts';
@@ -22,13 +23,17 @@ const NumberArrayCodec = jsonCodec(z.array(z.number()));
 export const pendingDurationInput = new Map<number, number>(); // userId → timestamp
 export const pendingGroupTzInput = new Map<number, { chatId: number; ts: number; lang: 'en' | 'ru' }>(); // userId → { chatId, ts, lang }
 
-export function settingsCategoryKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
+/** `callsAvailable`: the bot can place calls (the call queue is running), so call reminders are configurable. */
+export function settingsCategoryKeyboard(lang: 'en' | 'ru', callsAvailable: boolean): InlineKeyboard {
   const s = t(lang).settings;
-  return new InlineKeyboard()
+  const kb = new InlineKeyboard()
     .text(s.categoryGeneral, 'stg:general')
     .text(s.categoryNotifications, `${CB.NOTIFY}:menu`)
-    .row()
+    .row();
+  if (callsAvailable) kb.text(s.categoryCalls, 'stg:calls');
+  return kb
     .text(s.categoryPrivacy, 'stg:privacy')
+    .row()
     .text(s.categoryVoice, 'stg:voice')
     .row()
     .text(s.telegramAccount, 'stg:telegram')
@@ -178,6 +183,25 @@ function buildReminderIntervalsView(intervals: number[], lang: 'en' | 'ru'): { t
   return { text, kb: reminderIntervalsKeyboard(intervals, lang) };
 }
 
+// ─── Calls ──────────────────────────────────────────────────────────────────
+
+function buildCallsView(enabled: boolean, lang: 'en' | 'ru'): { text: string; kb: InlineKeyboard } {
+  const s = t(lang).settings;
+  const text = [
+    s.callsTitle,
+    '',
+    enabled ? s.callsEnabled : s.callsDisabled,
+    `  ${s.callsDesc1}`,
+    `  ${s.callsDesc2}`,
+    `  ${s.callsDesc3}`,
+  ].join('\n');
+  const kb = backRow(
+    new InlineKeyboard().text(enabled ? s.toggleCallsDisable : s.toggleCallsEnable, 'stg:toggle_calls'),
+    lang,
+  );
+  return { text, kb };
+}
+
 // ─── Privacy ────────────────────────────────────────────────────────────────
 
 function buildPrivacyView(
@@ -283,7 +307,11 @@ async function handleGroupSettings(ctx: BotCommandContext, groupRepo: GroupChatR
 
 // ─── Command entry point ─────────────────────────────────────────────────────
 
-export async function handleSettings(ctx: BotCommandContext, groupRepo: GroupChatRepository): Promise<void> {
+export async function handleSettings(
+  ctx: BotCommandContext,
+  groupRepo: GroupChatRepository,
+  callsAvailable: boolean,
+): Promise<void> {
   if (isGroup(ctx)) {
     await handleGroupSettings(ctx, groupRepo);
     return;
@@ -291,7 +319,7 @@ export async function handleSettings(ctx: BotCommandContext, groupRepo: GroupCha
   const user = ctx.dbUser as User;
   const lang = (user.language ?? 'en') as 'en' | 'ru';
   await ctx.send(t(lang).settings.title, {
-    reply_markup: settingsCategoryKeyboard(lang),
+    reply_markup: settingsCategoryKeyboard(lang, callsAvailable),
   });
 }
 
@@ -303,11 +331,13 @@ interface TelegramSettingsDeps {
   enterScene: () => Promise<void>;
 }
 
+/** `callSettingsRepo` is passed only when the bot can place calls; without it the calls category is hidden. */
 export async function handleSettingsCallback(
   ctx: BotCallbackContext,
   user: User,
   subAction: string,
   prefsService: NotificationPreferencesService,
+  callSettingsRepo?: CallSettingsRepository,
   sharingSettingsRepo?: SharingSettingsRepository,
   userRepo?: UserRepository,
   telegramDeps?: TelegramSettingsDeps,
@@ -322,7 +352,7 @@ export async function handleSettingsCallback(
 
   if (subAction === 'back') {
     await ctx.answer();
-    await ctx.editText(t(lang).settings.title, { reply_markup: settingsCategoryKeyboard(lang) });
+    await ctx.editText(t(lang).settings.title, { reply_markup: settingsCategoryKeyboard(lang, !!callSettingsRepo) });
     return;
   }
 
@@ -405,6 +435,26 @@ export async function handleSettingsCallback(
       intervals,
       lang,
     );
+    await ctx.answer();
+    await ctx.editText(text, { reply_markup: kb });
+    return;
+  }
+
+  // ─── Calls ─────────────────────────────────────────────────────────────────
+
+  if (subAction === 'calls' || subAction === 'toggle_calls') {
+    if (!callSettingsRepo) {
+      // A button left over from when calls were available: say so and show the current categories.
+      await ctx.answer({ text: t(lang).settings.callsUnavailable });
+      await ctx.editText(t(lang).settings.title, { reply_markup: settingsCategoryKeyboard(lang, false) });
+      return;
+    }
+    callSettingsRepo.ensureDefaults(user.telegram_id);
+    if (subAction === 'toggle_calls') {
+      const cur = callSettingsRepo.get(user.telegram_id);
+      callSettingsRepo.setEnabled(user.telegram_id, !cur?.enabled);
+    }
+    const { text, kb } = buildCallsView(!!callSettingsRepo.get(user.telegram_id)?.enabled, lang);
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
     return;

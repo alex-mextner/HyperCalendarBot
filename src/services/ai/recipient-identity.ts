@@ -1,5 +1,7 @@
 import type { Contact } from '../../database/types.ts';
+import type { TelegramProfile } from '../telegram-session/service-tier.ts';
 import { consumeRecipientApproval } from './recipient-confirmation.ts';
+import { cachedRecipientProfile } from './recipient-profile.ts';
 import type { AgentContext } from './types.ts';
 
 export function normalizeRecipientUsername(username: string): string {
@@ -27,19 +29,50 @@ export function isKnownRecipient(ctx: AgentContext, id: number): boolean {
   return (ctx.messageText.match(/\b\d+\b/g) ?? []).some((value) => value === String(id));
 }
 
-export interface KnownBotUser {
+export interface FoundUser {
   id: number;
   firstName?: string;
   username: string;
 }
 
-/** Resolves a normalized @username against people who have started this bot (the users table only);
- *  anyone else has to be shared through the picker. A row whose telegram_id is not a positive safe
- *  integer names no real person, so it counts as not found. */
-export function lookupKnownBotUser(ctx: AgentContext, username: string): KnownBotUser | null {
+/** Resolves a normalized @username against people who have started this bot (the users table only).
+ *  A row whose telegram_id is not a positive safe integer names no real person, so it counts as not found. */
+function lookupKnownBotUser(ctx: AgentContext, username: string): FoundUser | null {
   const user = ctx.userRepo.findByUsername(username);
   if (!user || !Number.isSafeInteger(user.telegram_id) || user.telegram_id <= 0) return null;
   return { id: user.telegram_id, firstName: user.first_name ?? undefined, username: user.username ?? username };
+}
+
+export type UsernameLookup =
+  | { status: 'found'; user: FoundUser }
+  /** Telegram answered that no account has this username. */
+  | { status: 'not_found' }
+  /** The username could not be looked up: without the service account only people who started this
+   *  bot can be, and a service lookup can fail. Says nothing about whether the person exists. */
+  | { status: 'unavailable' }
+  /** The service account answered with an ID that names no real person. */
+  | { status: 'unverified' };
+
+/** Looks up an exact normalized @username. With the service account (ctx.resolveUsername) Telegram's
+ *  answer wins over the users table, which may hold a stale username; without it only the users table
+ *  is consulted. */
+export async function lookUpUsername(ctx: AgentContext, username: string): Promise<UsernameLookup> {
+  if (!ctx.resolveUsername) {
+    const known = lookupKnownBotUser(ctx, username);
+    return known ? { status: 'found', user: known } : { status: 'unavailable' };
+  }
+  let profile: TelegramProfile | null;
+  try {
+    profile = await ctx.resolveUsername(username);
+  } catch {
+    return { status: 'unavailable' };
+  }
+  if (!profile) return { status: 'not_found' };
+  if (!Number.isSafeInteger(profile.id) || profile.id <= 0) return { status: 'unverified' };
+  return {
+    status: 'found',
+    user: { id: profile.id, firstName: profile.firstName, username: profile.username ?? username },
+  };
 }
 
 /** Records that this run established `id` as a real recipient, so later tool calls may address it. */
@@ -53,7 +86,7 @@ type RecipientResolution =
   | { ok: false; reason: 'contact_row_id'; contact: Contact }
   | {
       ok: false;
-      reason: 'unverified' | 'conflict' | 'not_found';
+      reason: 'unverified' | 'conflict' | 'not_found' | 'unavailable';
       username?: string;
       candidate?: { id: number; firstName?: string; username?: string };
     };
@@ -126,14 +159,35 @@ export async function resolveInvitationRecipient(
     if (!canResolveRecipientUsername(ctx, username)) {
       return { ok: false, reason: 'unverified' };
     }
-    const resolved = lookupKnownBotUser(ctx, username);
-    if (!resolved) return { ok: false, reason: 'not_found', username };
+    const lookup = await lookUpUsername(ctx, username);
+    if (lookup.status === 'not_found' || lookup.status === 'unavailable')
+      return { ok: false, reason: lookup.status, username };
+    if (lookup.status === 'unverified') return { ok: false, reason: 'unverified' };
+    const resolved = lookup.user;
     if (id !== undefined && id !== resolved.id) return { ok: false, reason: 'conflict', candidate: resolved };
     markVerifiedRecipient(ctx, resolved.id);
     return { ok: true, ...resolved, isGroup: false };
   }
   if (id === undefined || (id !== establishedInvitationRecipientId && !isKnownRecipient(ctx, id)))
     return { ok: false, reason: 'unverified' };
+  if (ctx.lookupTelegramUser) {
+    const profile = cachedRecipientProfile(ctx, id);
+    if (profile) {
+      if (profile.id !== id || profile.deleted) return { ok: false, reason: 'conflict' };
+      ctx.contactRepo?.refreshProfile(ctx.user.telegram_id, id, {
+        username: profile.username ?? null,
+        firstName: profile.firstName,
+      });
+      return {
+        ok: true,
+        id,
+        username: profile.username,
+        firstName: profile.firstName,
+        isGroup: false,
+      };
+    }
+  }
+  // An unavailable profile lookup cannot invalidate a previously established ID.
   // Do not reuse stale username metadata as an alternative delivery destination.
   return { ok: true, id, isGroup: false };
 }

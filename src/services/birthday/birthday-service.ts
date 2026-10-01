@@ -1,3 +1,4 @@
+import { toLang } from '../../config/constants.ts';
 import type { BirthdayMetadataRepository } from '../../database/repositories/birthday-metadata.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
@@ -5,9 +6,11 @@ import type { NotificationPreferencesRepository } from '../../database/repositor
 import type { BirthEventMetadata, CalendarEvent } from '../../database/types.ts';
 import { logger } from '../../utils/logger.ts';
 import { allDayReminderUtc } from '../notification/materializer.ts';
+import type { ServiceTier } from '../telegram-session/service-tier.ts';
 
 const birthdayLogger = logger.child({ module: 'birthday-service' });
 
+export const BIRTHDAY_SYNC_THROTTLE_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_ALL_DAY_TIME = '09:00';
 
 export interface UpsertBirthdayParams {
@@ -19,6 +22,7 @@ export interface UpsertBirthdayParams {
   year: number | null;
   lang: 'en' | 'ru';
   timezone: string;
+  autoCreated: boolean;
   groupId?: number;
 }
 
@@ -34,13 +38,29 @@ export interface BirthdaysForDisplay {
   groups: { groupId: number; title: string; items: BirthdayDisplayItem[] }[];
 }
 
+export interface BirthdaySyncUser {
+  telegram_id: number;
+  first_name: string | null;
+  language: string;
+  timezone: string;
+}
+
 export class BirthdayService {
+  private syncOffLogged = false;
+
   constructor(
     private eventRepo: EventRepository,
     private metaRepo: BirthdayMetadataRepository,
     private reminderRepo: EventReminderRepository,
     private prefsRepo: NotificationPreferencesRepository,
+    private serviceTier: ServiceTier,
   ) {}
+
+  shouldSkipSync(userId: number): boolean {
+    const state = this.metaRepo.getSyncState(userId);
+    if (!state) return false;
+    return Date.now() - new Date(state.synced_at).getTime() < BIRTHDAY_SYNC_THROTTLE_MS;
+  }
 
   findExistingBirthday(
     celebrantId: number,
@@ -96,8 +116,7 @@ export class BirthdayService {
       event_id: eventId,
       celebrant_id: params.celebrantId ?? null,
       birth_year: params.year ?? null,
-      // Birthdays are only added by hand since the Telegram-profile auto-sync was removed.
-      auto_created: 0,
+      auto_created: params.autoCreated ? 1 : 0,
     });
 
     if (remindersNeedUpdate) {
@@ -136,6 +155,58 @@ export class BirthdayService {
         interval_minutes: 0,
         interval_label: 'day of',
       });
+    }
+  }
+
+  /**
+   * Add the Telegram-profile birthdays of users not synced within BIRTHDAY_SYNC_THROTTLE_MS to their
+   * own calendars. Needs the shared MTProto service account; without it this does nothing.
+   */
+  async runBatchSync(users: BirthdaySyncUser[]): Promise<void> {
+    if (!this.serviceTier.enabled) {
+      if (!this.syncOffLogged) {
+        birthdayLogger.info(
+          { reason: this.serviceTier.reason },
+          'Birthday auto-sync off: the shared MTProto service account is not enabled',
+        );
+        this.syncOffLogged = true;
+      }
+      return;
+    }
+
+    const pending = users.filter((u) => !this.shouldSkipSync(u.telegram_id));
+    if (pending.length === 0) return;
+
+    const birthdays = await this.serviceTier.fetchBirthdays(pending.map((u) => u.telegram_id));
+    if (birthdays === null) {
+      birthdayLogger.warn({ users: pending.length }, 'Birthday batch fetch failed; users stay due for the next sync');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    for (const user of pending) {
+      // Absent = the script could not check this user; leave them due for the next sync.
+      const birthday = birthdays.get(user.telegram_id);
+      if (birthday === undefined) continue;
+      if (birthday) {
+        try {
+          this.upsertBirthdayEvent({
+            ownerId: user.telegram_id,
+            celebrantId: user.telegram_id,
+            celebrantName: user.first_name ?? String(user.telegram_id),
+            day: birthday.day,
+            month: birthday.month,
+            year: birthday.year ?? null,
+            lang: toLang(user.language),
+            timezone: user.timezone,
+            autoCreated: true,
+          });
+        } catch (err) {
+          birthdayLogger.error({ err, userId: user.telegram_id }, 'Failed to upsert birthday event');
+          continue;
+        }
+      }
+      this.metaRepo.upsertSyncState(user.telegram_id, now);
     }
   }
 

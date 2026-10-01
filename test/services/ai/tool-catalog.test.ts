@@ -7,7 +7,7 @@ const names = (tools: ReturnType<typeof getToolDefinitions>) =>
 
 describe('capability-scoped batched tool discovery', () => {
   test('calculate is exposed under explicit calculator group, not interaction', () => {
-    const index = createToolCatalog(getToolDefinitions()).index();
+    const index = createToolCatalog(getToolDefinitions('text')).index();
     const calculator = index.split('[calculator]\n')[1]?.split('\n[')[0] ?? '';
     const interaction = index.split('[interaction]\n')[1]?.split('\n[')[0] ?? '';
     expect(calculator).toContain('calculate:');
@@ -15,7 +15,7 @@ describe('capability-scoped batched tool discovery', () => {
   });
 
   test('compact index contains names and short descriptions, not parameter schemas', () => {
-    const catalog = createToolCatalog(getToolDefinitions());
+    const catalog = createToolCatalog(getToolDefinitions('text'));
     const index = catalog.index();
     expect(index).toContain('calendar.read');
     expect(index).toContain('get_events');
@@ -24,7 +24,7 @@ describe('capability-scoped batched tool discovery', () => {
     expect(index.length).toBeLessThan(9000);
   });
   test('loads a union of multiple groups and explicit names without duplicates', () => {
-    const catalog = createToolCatalog(getToolDefinitions());
+    const catalog = createToolCatalog(getToolDefinitions('text'));
     const result = catalog.describe({
       groups: ['calendar.read', 'contacts'],
       tools: ['get_events', 'calculate', 'calculate'],
@@ -39,19 +39,19 @@ describe('capability-scoped batched tool discovery', () => {
     expect(result.deferred).toEqual([]);
   });
   test('returns the canonical full schema without losing required arguments', () => {
-    const tools = getToolDefinitions();
+    const tools = getToolDefinitions('text');
     const result = createToolCatalog(tools).describe({ tools: ['get_events'] });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.tools[0]).toEqual(tools.find((t) => t.type === 'function' && t.function.name === 'get_events'));
   });
-  test('does not expose unavailable assistant or mode-excluded capabilities', () => {
-    const catalog = createToolCatalog(getToolDefinitions(true));
+  test('does not expose unavailable assistant or live-call capabilities', () => {
+    const catalog = createToolCatalog(getToolDefinitions('live_call'));
     expect(catalog.index()).not.toContain('bash_execute');
-    expect(catalog.index()).not.toContain('end_conversation:');
+    expect(catalog.index()).not.toContain('render_day_image');
     const result = catalog.describe({
       groups: ['assistant'],
-      tools: ['bash_execute', 'end_conversation', 'made_up_tool'],
+      tools: ['bash_execute', 'render_day_image', 'made_up_tool'],
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -59,7 +59,7 @@ describe('capability-scoped batched tool discovery', () => {
     expect(result.unavailable).toHaveLength(4);
   });
   test('preserves supplement exclusions and newly added allowed tools', () => {
-    const catalog = createToolCatalog(getToolDefinitions(true));
+    const catalog = createToolCatalog(getToolDefinitions('text', true));
     expect(catalog.index()).toContain('supplement_skip');
     expect(catalog.index()).not.toContain('end_conversation');
   });
@@ -129,21 +129,22 @@ describe('capability-scoped batched tool discovery', () => {
     );
   });
   test('round-trips every canonical schema across mode variants', () => {
-    for (const supplement of [false, true]) {
-      const tools = getToolDefinitions(supplement);
-      const catalog = createToolCatalog(tools);
-      expect(catalog.index()).not.toContain('[other]');
-      for (const tool of tools) {
-        if (tool.type !== 'function') throw new Error('fixture');
-        const result = catalog.describe({ tools: [tool.function.name] });
-        expect(result.ok && result.tools).toEqual([tool]);
+    for (const mode of ['text', 'live_call'] as const)
+      for (const supplement of [false, true]) {
+        const tools = getToolDefinitions(mode, supplement);
+        const catalog = createToolCatalog(tools);
+        expect(catalog.index()).not.toContain('[other]');
+        for (const tool of tools) {
+          if (tool.type !== 'function') throw new Error('fixture');
+          const result = catalog.describe({ tools: [tool.function.name] });
+          expect(result.ok && result.tools).toEqual([tool]);
+        }
       }
-    }
   });
   test('interleaved catalogs never share mutable nested input', () => {
-    const tools = getToolDefinitions();
+    const tools = getToolDefinitions('text');
     const firstCatalog = createToolCatalog(tools);
-    const secondCatalog = createToolCatalog(getToolDefinitions(true));
+    const secondCatalog = createToolCatalog(getToolDefinitions('live_call'));
     const before = firstCatalog.describe({ tools: ['get_events'] });
     const first = tools[0]!;
     if (first.type !== 'function') throw new Error('fixture');
@@ -152,8 +153,8 @@ describe('capability-scoped batched tool discovery', () => {
     if (!returned.ok || returned.tools[0]?.type !== 'function') throw new Error('fixture');
     returned.tools[0].function.parameters!.required = ['injected'];
     expect(firstCatalog.describe({ tools: ['get_events'] })).toEqual(before);
-    expect(secondCatalog.index()).not.toContain('end_conversation:');
-    const denied = secondCatalog.describe({ tools: ['end_conversation'] });
+    expect(secondCatalog.index()).not.toContain('render_day_image');
+    const denied = secondCatalog.describe({ tools: ['render_day_image'] });
     expect(denied.ok && denied.tools).toEqual([]);
   });
   test('a newly authorized unknown tool is discoverable under other without granting anything else', () => {

@@ -70,6 +70,11 @@ export const AGENT_DRAIN_SETTLE_MS = RETRY_STORE_TIMEOUT_MS + 1_000;
  */
 type RetryOutcome = 'stored' | 'gave_up' | 'not_stored' | 'unknown';
 
+/** The request's tool catalog: its mode's tools, with make_call only when a call can be placed. */
+function toolDefinitionsFor(ctx: AgentContext): OpenAI.ChatCompletionTool[] {
+  return getToolDefinitions(ctx.inputMode, ctx.supplementMode, { calls: ctx.calls !== undefined });
+}
+
 /**
  * One apology covers a user for this long. A user who keeps writing during an
  * outage gets at most one playful "one sec", then one honest "the AI is down,
@@ -657,6 +662,7 @@ export interface AgentRunResult {
   responseText: string;
   toolCalls: AgentToolCallRecord[];
   toolResults: AgentToolResultRecord[];
+  endCall?: boolean;
   /** Structured latency/cost telemetry; contains no user text, tool args or actor ids. */
   metrics?: AgentRequestMetricSnapshot;
 }
@@ -1014,8 +1020,10 @@ export class CalendarBotAgent {
     const retryStream = measuredStream('retry');
 
     const exposure =
-      this.toolSchemaMode === 'lazy' && (!this.toolSchemaUserIds || this.toolSchemaUserIds.has(ctx.user.telegram_id))
-        ? createToolExposure(getToolDefinitions(ctx.supplementMode))
+      this.toolSchemaMode === 'lazy' &&
+      ctx.inputMode !== 'live_call' &&
+      (!this.toolSchemaUserIds || this.toolSchemaUserIds.has(ctx.user.telegram_id))
+        ? createToolExposure(toolDefinitionsFor(ctx))
         : undefined;
 
     const effectiveSender: TelegramSender = ctx.supplementMode
@@ -1034,6 +1042,7 @@ export class CalendarBotAgent {
       : this.sender;
     ctx.sender = effectiveSender;
     const writer = new TelegramStreamWriter(effectiveSender, ctx.chatId, ctx.user.language, {
+      userTranscript: ctx.inputMode === 'live_call' ? ctx.messageText : undefined,
       noPlaceholder: ctx.isGroup,
       // A weekday next to a date is shown only after checkRoundWeekdays() found them consistent.
       holdDraftWhen: mentionsWeekday,
@@ -1149,7 +1158,7 @@ export class CalendarBotAgent {
         const { result, exposedThisRound } = exposure
           ? await runRoundRevealingRejectedTools(exposure, runAgentRound)
           : {
-              result: await runAgentRound(getToolDefinitions(ctx.supplementMode)),
+              result: await runAgentRound(toolDefinitionsFor(ctx)),
               exposedThisRound: undefined,
             };
 
@@ -1342,7 +1351,7 @@ export class CalendarBotAgent {
       // that the tools used in this run cannot support. The deterministic
       // prefilter keeps ordinary tool-backed writes and answers whose days and
       // times the run's reads contain on the existing fast path.
-      const availableTools = getToolDefinitions(ctx.supplementMode);
+      const availableTools = toolDefinitionsFor(ctx);
       let rejected = false;
       // Use the model's actual emitted text, not the writer buffer — tests
       // with scripted stream impls can produce an assistantMessage without
@@ -1486,7 +1495,10 @@ export class CalendarBotAgent {
     // A supplement is optional text and stays quiet when guarded, unless it may have changed the
     // calendar: then the receipt is its reply, or the user would never learn of the change.
     const supplementQuiet = ctx.supplementMode && !(evidence !== null && writeOutcomes.mayHaveMutated);
-    const silent = supplementQuiet || ctx.wasExplicitInvocation === false || termination === 'waiting';
+    const silent =
+      supplementQuiet ||
+      ctx.wasExplicitInvocation === false ||
+      (termination === 'waiting' && !writeOutcomes.speechQuestion);
     const validationNotice =
       responseUnverified && !silent && !evidence && termination !== 'waiting'
         ? unresolvedWeekdays.length > 0
@@ -1502,6 +1514,7 @@ export class CalendarBotAgent {
       if (!silent) {
         if (evidence && termination !== 'waiting') writer.appendText(evidence);
         if (validationNotice) writer.appendText(validationNotice);
+        if (termination === 'waiting' && writeOutcomes.speechQuestion) writer.appendText(writeOutcomes.speechQuestion);
       }
     }
     if (!guarded) this.correctUtcClockTimesInReply(ctx, writer, pendingHistory);
@@ -1513,12 +1526,18 @@ export class CalendarBotAgent {
     // only when it is the turn's whole outcome, never beside a write.
     const draft = writer.getText().trim();
     const modelStayedSilent = draft === '' || isSkipText(draft);
-    const answersDirectMessage = !runFailed && !silent && !ctx.isGroup && !ctx.unprompted && termination !== 'waiting';
+    const answersDirectMessage =
+      !runFailed &&
+      !silent &&
+      !ctx.isGroup &&
+      !ctx.unprompted &&
+      ctx.inputMode !== 'live_call' &&
+      termination !== 'waiting';
     const writes = writeOutcomes.summary(ctx.user.language, ctx.isGroup);
     const answeredByTool = writes === null && writeOutcomes.toolAnswered;
     let unansweredNotice: string | null = null;
-    // Every guarded, non-silent exit above appended its own notice (evidence or validation
-    // notice, each a non-empty string), so its draft is never empty here.
+    // Every guarded, non-silent exit above appended its own notice (evidence, validation
+    // notice or spoken question, each a non-empty string), so its draft is never empty here.
     if (answersDirectMessage && modelStayedSilent && !answeredByTool) {
       unansweredNotice = writes
         ? t(ctx.user.language).ai_unanswered_writes(writes)
@@ -1533,6 +1552,9 @@ export class CalendarBotAgent {
     if (!ctx.supplementMode) {
       if (!guarded && !unansweredNotice) {
         for (const message of pendingHistory) this.saveAssistantTurn(ctx, message);
+      }
+      if (termination === 'waiting' && writeOutcomes.speechQuestion) {
+        this.saveAssistantTurn(ctx, { role: 'assistant', content: writeOutcomes.speechQuestion });
       }
       if (evidence) this.saveAssistantTurn(ctx, { role: 'assistant', content: evidence });
       if (unansweredNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: unansweredNotice });
@@ -1597,6 +1619,7 @@ export class CalendarBotAgent {
       responseText: ctx.inputMode !== 'text' ? writer.getPlainText() : writer.getText(),
       toolCalls: allToolCalls,
       toolResults: allToolResults,
+      endCall: ctx.callEndRequested === true,
       metrics,
     };
   }
@@ -1729,7 +1752,7 @@ export class CalendarBotAgent {
       const { result, exposedThisRound } = exposure
         ? await runRoundRevealingRejectedTools(exposure, runRetryRound)
         : {
-            result: await runRetryRound(getToolDefinitions(ctx.supplementMode)),
+            result: await runRetryRound(toolDefinitionsFor(ctx)),
             exposedThisRound: undefined,
           };
 

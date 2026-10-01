@@ -8,7 +8,7 @@ import { toolSchemas } from '../../src/services/ai/tool-schemas.ts';
 import { getToolDefinitions } from '../../src/services/ai/tools.ts';
 
 // Keep the retired catalog complete across schema parsing and every offered mode.
-const RETIRED_DESKTOP_TOOLS = [
+const RETIRED_TOOLS = [
   'bash_execute',
   'applescript_run',
   'playwright_action',
@@ -19,23 +19,22 @@ const RETIRED_DESKTOP_TOOLS = [
   'claude_list_projects',
   'claude_artifact',
 ];
-// Phone calls went away with the shared MTProto service account (#741).
-const RETIRED_CALL_TOOLS = ['make_call', 'end_call'];
-const RETIRED_TOOLS = [...RETIRED_DESKTOP_TOOLS, ...RETIRED_CALL_TOOLS];
 
-test('retired desktop and phone-call commands cannot be parsed as tools', () => {
+test('retired desktop commands cannot be parsed as tools', () => {
   for (const name of RETIRED_TOOLS) expect(Object.keys(toolSchemas)).not.toContain(name);
 });
-for (const supplement of [false, true]) {
-  test(`retired tools are absent, supplement=${supplement}`, () => {
-    const names = getToolDefinitions(supplement)
-      .filter((tool) => tool.type === 'function')
-      .map((tool) => tool.function.name);
-    for (const name of RETIRED_TOOLS) expect(names).not.toContain(name);
-    expect(names).toContain('get_events');
-    expect(names).toContain('render_day_image');
-    if (supplement) expect(names).toContain('supplement_skip');
-  });
+for (const mode of [undefined, 'text', 'live_call', 'voice_message']) {
+  for (const supplement of [false, true]) {
+    test(`retired tools are absent in ${mode ?? 'default'}, supplement=${supplement}`, () => {
+      const names = getToolDefinitions(mode, supplement)
+        .filter((tool) => tool.type === 'function')
+        .map((tool) => tool.function.name);
+      for (const name of RETIRED_TOOLS) expect(names).not.toContain(name);
+      expect(names).toContain('get_events');
+      if (mode !== 'live_call') expect(names).toContain('render_day_image');
+      if (supplement) expect(names).toContain('supplement_skip');
+    });
+  }
 }
 
 test('Caddy cannot serve previously published desktop installers', () => {

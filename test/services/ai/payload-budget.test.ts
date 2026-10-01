@@ -45,6 +45,7 @@ const FULL_REQUEST_TOKEN_BUDGETS = {
   direct: 15_000,
   group: 17_300,
   supplement: 15_200,
+  liveCall: 14_500,
 } as const;
 
 function names(tools: OpenAI.ChatCompletionTool[]): string[] {
@@ -84,14 +85,17 @@ function makeContext(overrides: Partial<AgentContext> = {}): AgentContext {
   };
 }
 
+// Budgets are measured at the worst case: voice calls available, so make_call is in the catalog.
+const WITH_CALLS = { calls: true };
+
 describe('tool catalog budget', () => {
   test('the default catalog stays within its character budget', () => {
-    const chars = catalogJson(getToolDefinitions()).length;
+    const chars = catalogJson(getToolDefinitions('text', false, WITH_CALLS)).length;
     expect(chars).toBeLessThanOrEqual(TOOL_CATALOG_CHAR_BUDGET);
   });
 
   test('the default catalog stays within its token budget', () => {
-    const tokens = estimateTokens(catalogJson(getToolDefinitions()));
+    const tokens = estimateTokens(catalogJson(getToolDefinitions('text', false, WITH_CALLS)));
     expect(tokens).toBeLessThanOrEqual(TOOL_CATALOG_TOKEN_BUDGET);
   });
 
@@ -99,11 +103,16 @@ describe('tool catalog budget', () => {
   // each other: text moved out of one can reappear in the other with both
   // per-part budgets still green.
   test.each([
-    ['a direct message', () => makeContext(), () => getToolDefinitions(), FULL_REQUEST_TOKEN_BUDGETS.direct],
+    [
+      'a direct message',
+      () => makeContext(),
+      () => getToolDefinitions('text', false, WITH_CALLS),
+      FULL_REQUEST_TOKEN_BUDGETS.direct,
+    ],
     [
       'a group chat',
       () => makeContext({ isGroup: true, groupChatId: -100, groupTitle: 'Family' }),
-      () => getToolDefinitions(),
+      () => getToolDefinitions('text', false, WITH_CALLS),
       FULL_REQUEST_TOKEN_BUDGETS.group,
     ],
     [
@@ -115,8 +124,14 @@ describe('tool catalog budget', () => {
           // measurement is of a prompt production never sends.
           supplementAutoResponse: 'Записал встречу на завтра в 12:30.',
         }),
-      () => getToolDefinitions(true),
+      () => getToolDefinitions('text', true, WITH_CALLS),
       FULL_REQUEST_TOKEN_BUDGETS.supplement,
+    ],
+    [
+      'a live call',
+      () => makeContext({ inputMode: 'live_call' }),
+      () => getToolDefinitions('live_call'),
+      FULL_REQUEST_TOKEN_BUDGETS.liveCall,
     ],
   ])('a whole request stays within its token budget: %s', (_name, context, catalog, budget) => {
     const ctx = context();
@@ -127,7 +142,7 @@ describe('tool catalog budget', () => {
 
   test('the current full direct request is preflight-rejected for Groq gpt-oss 8K before network dispatch', () => {
     const ctx = makeContext();
-    const tools = getToolDefinitions();
+    const tools = getToolDefinitions('text', false, WITH_CALLS);
     const rejection = preflightRequestFit('groq', 'openai/gpt-oss-120b', {
       messages: [
         { role: 'system', content: buildSystemPrompt(ctx) },
@@ -140,12 +155,19 @@ describe('tool catalog budget', () => {
     expect(rejection?.conservativeRequestedTokens).toBeGreaterThan(8_000);
   });
 
-  test('the supplement catalog stays within the same budget', () => {
-    expect(catalogJson(getToolDefinitions(true)).length).toBeLessThanOrEqual(TOOL_CATALOG_CHAR_BUDGET);
+  test('every other mode stays within the same budget', () => {
+    const variants = [
+      getToolDefinitions('live_call'),
+      getToolDefinitions('text', true, WITH_CALLS),
+      getToolDefinitions('voice_message', false, WITH_CALLS),
+    ];
+    for (const tools of variants) {
+      expect(catalogJson(tools).length).toBeLessThanOrEqual(TOOL_CATALOG_CHAR_BUDGET);
+    }
   });
 
   test('no single tool is allowed to grow past 2 000 characters', () => {
-    const oversized = getToolDefinitions()
+    const oversized = getToolDefinitions('text', false, WITH_CALLS)
       .filter((t) => t.type === 'function')
       .filter((t) => JSON.stringify(t).length > 2_000)
       .map((t) => t.function.name);
@@ -154,15 +176,34 @@ describe('tool catalog budget', () => {
 });
 
 describe('per-mode tool availability', () => {
-  test('text mode keeps the visual tools', () => {
-    const text = names(getToolDefinitions());
-    for (const present of ['render_day_image', 'render_week_image', 'render_month_image', 'pick_users']) {
-      expect(text).toContain(present);
+  test('a live call drops what it cannot show and gains the hang-up tool', () => {
+    const call = names(getToolDefinitions('live_call'));
+    for (const absent of ['render_day_image', 'render_week_image', 'render_month_image', 'pick_users', 'make_call']) {
+      expect(call).not.toContain(absent);
+    }
+    expect(call).toContain('end_call');
+    // Everything a caller still needs to actually manage the calendar.
+    for (const present of ['create_event', 'get_events', 'update_event', 'delete_event', 'ask_user', 'calculate']) {
+      expect(call).toContain(present);
     }
   });
 
+  test('text mode keeps the visual tools and withholds the hang-up tool', () => {
+    const text = names(getToolDefinitions('text', false, WITH_CALLS));
+    for (const present of ['render_day_image', 'render_week_image', 'render_month_image', 'pick_users', 'make_call']) {
+      expect(text).toContain(present);
+    }
+    expect(text).not.toContain('end_call');
+  });
+
+  test('make_call is offered only when a call can be placed', () => {
+    expect(names(getToolDefinitions('text'))).not.toContain('make_call');
+    expect(names(getToolDefinitions('voice_message'))).not.toContain('make_call');
+    expect(names(getToolDefinitions('voice_message', false, WITH_CALLS))).toContain('make_call');
+  });
+
   test('supplement mode swaps end_conversation for supplement_skip', () => {
-    const supplement = names(getToolDefinitions(true));
+    const supplement = names(getToolDefinitions('text', true));
     expect(supplement).toContain('supplement_skip');
     expect(supplement).not.toContain('end_conversation');
   });
@@ -191,7 +232,7 @@ describe('shared schema fragments', () => {
   ];
 
   test('every calendar-scoped tool still accepts scope and owner_id', () => {
-    const tools = getToolDefinitions().filter((t) => t.type === 'function');
+    const tools = getToolDefinitions('text').filter((t) => t.type === 'function');
     for (const name of CALENDAR_SCOPED_TOOLS) {
       const tool = tools.find((t) => t.function.name === name);
       expect(tool).toBeDefined();
@@ -202,7 +243,7 @@ describe('shared schema fragments', () => {
   });
 
   test('scope and owner_id are described identically everywhere they appear', () => {
-    const tools = getToolDefinitions().filter((t) => t.type === 'function');
+    const tools = getToolDefinitions('text').filter((t) => t.type === 'function');
     const scopeDescriptions = new Set<string>();
     const ownerDescriptions = new Set<string>();
     for (const tool of tools) {

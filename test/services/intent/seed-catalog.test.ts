@@ -206,6 +206,7 @@ describe('metadata', () => {
     for (const meta of canonicalMetadata) {
       const writes = meta.tools.filter((tool) =>
         [
+          'make_call',
           'create_event',
           'update_event',
           'delete_event',

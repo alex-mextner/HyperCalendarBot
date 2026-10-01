@@ -1,6 +1,6 @@
 # Sub-Project #4: Notifications
 
-> **2026-09-29 update:** voice calls (sub-project #7) were removed by owner decision together with the shared MTProto service account (#741). Notifications are delivered as Telegram text or images only; there is no `voice_call` channel.
+> **2026-09-30:** voice calls (sub-project #7) restored behind `ServiceTier`, no service sends (#753). The `voice_call` channel exists only while the optional MTProto service tier is enabled; otherwise notifications are Telegram text or images.
 
 ## Overview
 
@@ -30,7 +30,7 @@ The system runs a per-minute BullMQ repeatable job. Each tick queries SQLite for
 | **Defaults** | User-configurable default intervals, e.g. `[15min, 1hr]` |
 | **Per-event override** | Individual events can specify their own reminder intervals, replacing defaults |
 | **Content** | Event title, time, location (if any), how long until start |
-| **Format** | Text message |
+| **Format** | Text message. Voice call trigger interface for sub-project #7 |
 
 ### 1.3 Evening Review
 
@@ -49,8 +49,8 @@ Each notification resolves to one of these delivery types:
 ```typescript
 type NotificationChannel =
   | "telegram_text"     // plain text via GramIO
-  | "telegram_image";   // generated image via Playwright (sub-project #5)
-// "voice_call" (sub-project #7) was removed on 2026-09-29 (#741).
+  | "telegram_image"    // generated image via Playwright (sub-project #5)
+  | "voice_call";       // trigger interface only (sub-project #7)
 ```
 
 ---
@@ -954,6 +954,6 @@ No new heavy dependencies. `bun:sqlite` and `Bun.redis` cover storage. BullMQ re
 2. **Snooze** — "Remind me again in 5 minutes" button on reminders. Easy to add: callback creates a delayed BullMQ job.
 3. **Weekly digest** — Sunday evening summary of the upcoming week. Natural extension of evening review.
 4. **Image generation** (sub-project #5) — the `telegram_image` channel needs Playwright rendering. This spec defines the interface; implementation is in sub-project #5.
-5. **Voice call trigger** — dropped: voice calls (sub-project #7) were removed on 2026-09-29 (#741), so there is no `voice_call` channel to trigger.
+5. **Voice call trigger** (sub-project #7) — the `voice_call` channel needs a VoIP integration. This spec defines when to trigger; implementation is in sub-project #7.
 6. **Notification_log cleanup** — implement a weekly job to delete entries older than 30 days.
 7. **Quiet hours + event reminders** — should critical reminders (5min before) bypass quiet hours? Probably yes. Needs a `critical` flag on intervals.

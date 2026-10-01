@@ -22,6 +22,7 @@ import type {
   NotificationPreferencesRow,
   NotificationPreferencesUpdate,
   User,
+  UserCallSettings,
 } from '../../database/types.ts';
 import type { ParseMode } from '../../utils/telegram.ts';
 import type { BirthdayService } from '../birthday/birthday-service.ts';
@@ -40,6 +41,7 @@ import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import type { InvitationService } from '../sharing/invitation-service.ts';
 import type { PrivacyService } from '../sharing/privacy-service.ts';
 import type { SharingService } from '../sharing/sharing-service.ts';
+import type { TelegramProfile } from '../telegram-session/service-tier.ts';
 import type { StressDictionary } from '../voice/stress-dictionary.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
 import type { DayReferenceSet } from './day-references.ts';
@@ -77,6 +79,22 @@ export interface GroupCapability {
 
 export interface VoiceCapability {
   stressDictionary: StressDictionary;
+}
+
+/**
+ * Outbound voice-call reminders. Present only when the call queue runs, which needs the shared
+ * MTProto service account (service-tier.ts); make_call and the calls settings answer that voice
+ * calls are unavailable without it.
+ */
+export interface CallsCapability {
+  /** Resolves once the call is queued; rejects when it could not be. */
+  callQueue: { enqueue(userId: number, text: string): Promise<void> };
+  callSettingsRepo: {
+    get(userId: number): UserCallSettings | null;
+    ensureDefaults(userId: number): void;
+    setEnabled(userId: number, enabled: boolean): void;
+    setLanguage(userId: number, lang: string): void;
+  };
 }
 
 export interface GoogleCapability {
@@ -182,6 +200,12 @@ export interface AgentContext {
     text: string,
     options?: { reply_markup?: InlineKeyboard | TelegramInlineKeyboardMarkup; message_thread_id?: number },
   ) => Promise<TelegramMessage>;
+  /** Live public profile by Telegram ID via the shared service account; absent when that account is off.
+   *  Resolves null on any failure: a profile refresh is best-effort. */
+  lookupTelegramUser?: (id: number) => Promise<TelegramProfile | null>;
+  /** Exact @username → profile via the shared service account; absent when that account is off.
+   *  Resolves null only when Telegram has no such username; rejects when the lookup could not run. */
+  resolveUsername?: (username: string) => Promise<TelegramProfile | null>;
   /** Events in a ±2-week window around now, preloaded for pattern detection. */
   recentEventsWindow?: EventOccurrence[];
   /**
@@ -203,7 +227,9 @@ export interface AgentContext {
   /** Event participant registry (used independently by events and sharing). */
   participantRepo?: ParticipantRepository;
   /** Type of the current message being processed. */
-  inputMode?: 'text' | 'voice_message';
+  inputMode?: 'text' | 'voice_message' | 'live_call';
+  /** Set to true by end_call tool to hang up after TTS plays. */
+  callEndRequested?: boolean;
   /** Local 'YYYY-MM-DD' start days (ctx.user.timezone) of events created, updated or deleted in this run. */
   changedDays?: Set<string>;
   supplementMode?: boolean;
@@ -227,6 +253,7 @@ export interface AgentContext {
   secretary?: SecretaryCapability;
   group?: GroupCapability;
   voice?: VoiceCapability;
+  calls?: CallsCapability;
   google?: GoogleCapability;
   notifications?: NotificationsCapability;
   feedback?: FeedbackCapability;
@@ -279,13 +306,16 @@ export type ContactMatch = {
   created_at?: string;
 };
 
-/** Saved address-book metadata for a numeric Telegram ID; never authorization evidence. */
+/** Public metadata from a numeric profile inspection; never authorization evidence. */
 export type UserInspection = {
   telegram_id: number;
   display_name: string | null;
   preferred_name: string | null;
   username: string | null;
   contact_created_at: string | null;
+  profile_checked_at: string | null;
+  profile_source: 'telegram' | 'cached';
+  deleted: boolean | null;
 };
 
 /** Structured data from tool handlers for intent executor consumption. */
@@ -325,7 +355,7 @@ export interface ToolResult {
   error?: string;
   stopLoop?: boolean;
   /** A handoff is independent of the outer tool name (handlers may delegate). */
-  awaitingInput?: { kind: 'chat' };
+  awaitingInput?: { kind: 'chat' } | { kind: 'speech'; question: string };
   /** Direct execution evidence; never inferred from output or error prose. */
   mutationState?: 'not_applied' | 'uncertain' | 'confirmed';
   effect?:

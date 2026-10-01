@@ -61,3 +61,20 @@ test('findByCelebrantAndOwner returns null for wrong owner', () => {
   const result = repo.findByCelebrantAndOwner(42, 999);
   expect(result).toBeNull();
 });
+
+test('upsertSyncState and getSyncState round-trip', () => {
+  repo.upsertSyncState(1, '2026-03-20T10:00:00Z');
+  const state = repo.getSyncState(1);
+  expect(state?.synced_at).toBe('2026-03-20T10:00:00Z');
+});
+
+test('getUsersNeedingSync includes users with no sync state', () => {
+  const users = repo.getUsersNeedingSync(7 * 24 * 60 * 60 * 1000);
+  expect(users.some((u) => u.telegram_id === 1)).toBe(true);
+});
+
+test('getUsersNeedingSync excludes recently synced users', () => {
+  repo.upsertSyncState(1, new Date().toISOString());
+  const users = repo.getUsersNeedingSync(7 * 24 * 60 * 60 * 1000);
+  expect(users.some((u) => u.telegram_id === 1)).toBe(false);
+});
