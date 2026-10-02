@@ -317,6 +317,38 @@ describe('LocationVerificationService', () => {
       );
     }
 
+    for (const [field, change, visible] of [
+      ['title', { title: 'Updated meeting' }, 'Updated meeting'],
+      ['date', { start_at: '2026-10-09T13:00:00Z', end_at: '2026-10-09T14:00:00Z' }, '9'],
+      ['time', { start_at: '2026-10-08T15:00:00Z', end_at: '2026-10-08T16:00:00Z' }, '17:00'],
+      ['duration', { end_at: '2026-10-08T15:00:00Z' }, '17:00'],
+    ] satisfies [string, Partial<CalendarEvent>, string][]) {
+      test(`refreshes ${field} on every live card without changing RSVP`, async () => {
+        const { event, invitationRepo, deliver, deps } = seedDeliveredInvitations();
+        const before = { ...event, start_at: '2026-10-08T13:00:00Z', end_at: '2026-10-08T14:00:00Z' };
+        const pendingId = deliver(201, 111, 'pending');
+        deliver(202, 222, 'maybe');
+        deliver(203, 333, 'accepted');
+        deliver(204, 444, 'declined');
+        deliver(205, 555, 'cancelled');
+        deliver(-600, 666, 'pending');
+        const stored = invitationRepo.getByEvent(event.id);
+        const after = { ...before, ...change };
+
+        await makeService(deps).refreshInvitationCards(before, after);
+
+        const edits = editsByMessageId(deps.editMessage);
+        expect([...edits.keys()].sort()).toEqual([111, 222, 333, 444, 666]);
+        for (const [, , text] of edits.values()) expect(text).toContain(visible);
+        expect(edits.get(111)?.[3].reply_markup?.toJSON()).toEqual(
+          invitationRsvpKeyboard(pendingId, 'en', after).toJSON(),
+        );
+        expect(edits.get(666)?.[3].reply_markup?.toJSON()).toEqual(groupRsvpKeyboard(event.id, 'en', after).toJSON());
+        for (const id of [222, 333, 444]) expect(edits.get(id)?.[3].reply_markup).toBeUndefined();
+        expect(invitationRepo.getByEvent(event.id)).toEqual(stored);
+      });
+    }
+
     const RESOLVED_ADDRESS = 'Кофемания, ул. Большая Никитская, 12';
 
     test('answered cards keep their answer and show the resolved location, without buttons', async () => {
