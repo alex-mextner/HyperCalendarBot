@@ -156,6 +156,23 @@ describe('aiStreamRound — provider chain fallback', () => {
     // Each fake is recreated per test
   });
 
+  test('Groq lazy requests disable upstream tool validation so local exposure can handle blind calls', async () => {
+    process.env.GROQ_API_KEY='groq-key'; process.env.GROQ_MODEL='openai/gpt-oss-120b'; process.env.AI_SMART_CHAIN='groq';
+    fakeGroq=buildFakeClient([{kind:'text',text:'ok'},{kind:'finish',reason:'stop'}]);
+    await aiStreamRound({messages:[{role:'user',content:'hi'}],tools:[{type:'function',function:{name:'discover_tools',parameters:{type:'object'}}}],maxTokens:100,allowUnlistedToolCalls:true});
+    expect(fakeGroq.chat.completions.create.mock.calls[0]?.[0]?.disable_tool_validation).toBe(true);
+  });
+
+  test('Groq full-mode and non-Groq requests keep provider tool validation enabled', async () => {
+    process.env.GROQ_API_KEY='groq-key'; process.env.GROQ_MODEL='openai/gpt-oss-120b'; process.env.AI_SMART_CHAIN='groq';
+    fakeGroq=buildFakeClient([{kind:'text',text:'full'},{kind:'finish',reason:'stop'}]);
+    await aiStreamRound({messages:[{role:'user',content:'hi'}],maxTokens:100});
+    expect(fakeGroq.chat.completions.create.mock.calls[0]?.[0]?.disable_tool_validation).toBeUndefined();
+    process.env.AI_SMART_CHAIN='gemini'; fakeGemini=buildFakeClient([{kind:'text',text:'gemini'},{kind:'finish',reason:'stop'}]);
+    await aiStreamRound({messages:[{role:'user',content:'hi'}],maxTokens:100,allowUnlistedToolCalls:true});
+    expect(fakeGemini.chat.completions.create.mock.calls[0]?.[0]?.disable_tool_validation).toBeUndefined();
+  });
+
   test('returns z.ai result on first success', async () => {
     fakeZai = buildFakeClient([
       { kind: 'text', text: 'hello from z.ai' },

@@ -239,6 +239,13 @@ describe('CalendarBotAgent.run()', () => {
     expect(names).toContain('end_call');
   });
 
+  test.each([true,false])('provider unlisted-tool mode follows local lazy exposure only: %s',async(lazy)=>{
+    const script=makeStreamImpl([{kind:'text',text:'Synthetic reply.'}]); let flag:boolean|undefined;
+    const impl:typeof script.impl=async(opts,cbs)=>{if(!isValidatorCall(opts))flag=opts.allowUnlistedToolCalls;return script.impl(opts,cbs);};
+    await new CalendarBotAgent({...config,toolSchemaMode:lazy?'lazy':'full'},sender,{streamImpl:impl}).run(ctx);
+    expect(flag).toBe(lazy?true:undefined);
+  });
+
   test('lazy schemas keep all names visible but expose only requested parameters', async () => {
     const script = makeStreamImpl([
       { kind: 'tool', callId: 'discover', name: 'discover_tools', input: { groups: [], tools: ['get_events'] } },
