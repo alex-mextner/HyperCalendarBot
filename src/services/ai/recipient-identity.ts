@@ -1,4 +1,5 @@
 import { consumeRecipientApproval } from './recipient-confirmation.ts';
+import { inspectRecipientProfile } from './recipient-profile.ts';
 import type { AgentContext } from './types.ts';
 
 export function normalizeRecipientUsername(username: string): string {
@@ -27,7 +28,7 @@ export function isKnownRecipient(ctx: AgentContext, id: number): boolean {
 }
 
 type RecipientResolution =
-  | { ok: true; id: number; username?: string; firstName?: string; isGroup: boolean; profileFresh?: boolean }
+  | { ok: true; id: number; username?: string; firstName?: string; isGroup: boolean }
   | {
       ok: false;
       reason: 'unverified' | 'conflict' | 'not_found' | 'unavailable';
@@ -38,6 +39,7 @@ type RecipientResolution =
 export async function resolveInvitationRecipient(
   ctx: AgentContext,
   input: { invitee_id?: number; invitee_username?: string; force?: boolean; event_id?: number },
+  establishedInvitationRecipientId?: number,
 ): Promise<RecipientResolution> {
   const savedByHint =
     input.invitee_username && !hasExplicitUsername(ctx.messageText, input.invitee_username)
@@ -66,7 +68,7 @@ export async function resolveInvitationRecipient(
   if (input.invitee_username && !pinnedMetadata) {
     const username = normalizeRecipientUsername(input.invitee_username);
     const known = ctx.userRepo.findByUsername(username);
-    if (!canResolveRecipientUsername(ctx, username) && !(known && known.telegram_id === id)) {
+    if (!canResolveRecipientUsername(ctx, username)) {
       return { ok: false, reason: 'unverified' };
     }
     if (!known && !ctx.resolveUsername) return { ok: false, reason: 'unavailable' };
@@ -86,12 +88,15 @@ export async function resolveInvitationRecipient(
       username: resolved.username ?? username,
       firstName: resolved.firstName,
       isGroup: false,
-      profileFresh: !!ctx.resolveUsername,
     };
   }
-  if (id === undefined || !isKnownRecipient(ctx, id)) return { ok: false, reason: 'unverified' };
+  if (id === undefined || (id !== establishedInvitationRecipientId && !isKnownRecipient(ctx, id)))
+    return { ok: false, reason: 'unverified' };
   if (ctx.lookupTelegramUser) {
-    const profile = await ctx.lookupTelegramUser(id);
+    const profile = await Promise.race([
+      inspectRecipientProfile(ctx, id),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 0)),
+    ]);
     if (profile) {
       if (profile.id !== id || profile.deleted) return { ok: false, reason: 'conflict' };
       ctx.contactRepo?.refreshProfile(ctx.user.telegram_id, id, {
@@ -104,7 +109,6 @@ export async function resolveInvitationRecipient(
         username: profile.username,
         firstName: profile.firstName,
         isGroup: false,
-        profileFresh: true,
       };
     }
   }

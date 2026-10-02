@@ -2,7 +2,8 @@ import { t } from '../../../config/constants.ts';
 import type { ContactRepository } from '../../../database/repositories/contact.repository.ts';
 import type { Contact } from '../../../database/types.ts';
 import { canResolveRecipientUsername } from '../recipient-identity.ts';
-import type { AgentContext, ContactMatch, ToolHandlerMeta, ToolResult } from '../types.ts';
+import { inspectRecipientProfile } from '../recipient-profile.ts';
+import type { AgentContext, ContactMatch, ToolHandlerMeta, ToolResult, UserInspection } from '../types.ts';
 
 const MAX_CONTACT_MATCHES = 5;
 
@@ -179,16 +180,20 @@ export function handleUpdateContact(
     };
   }
 
+  if (input.username && !canResolveRecipientUsername(ctx, input.username)) {
+    return { success: false, error: t(ctx.user.language).aiTools.meta.recipientUsernameUnconfirmed };
+  }
+
   const patch: { name?: string; preferred_name?: string; username?: string; telegram_id?: number } = {};
   if (input.name !== undefined) patch.name = input.name;
   if (input.preferred_name !== undefined) patch.preferred_name = input.preferred_name;
   if (input.username !== undefined) {
     patch.username = input.username.trim().replace(/^@/, '');
-    const verified = ctx.userRepo.findByUsername(patch.username);
-    if (verified && top.contact.telegram_id !== null && verified.telegram_id !== top.contact.telegram_id) {
+    const cachedUser = ctx.userRepo.findByUsername(patch.username);
+    if (cachedUser && top.contact.telegram_id !== null && cachedUser.telegram_id !== top.contact.telegram_id) {
       return { success: false, error: t(ctx.user.language).aiTools.meta.recipientIdentityConflict };
     }
-    if (verified && top.contact.telegram_id === null) patch.telegram_id = verified.telegram_id;
+    if (cachedUser && top.contact.telegram_id === null) patch.telegram_id = cachedUser.telegram_id;
   }
   if (Object.keys(patch).length === 0) return { success: false, error: 'No fields to update provided.' };
   ctx.contactRepo.update(top.contact.id, patch);
@@ -218,28 +223,29 @@ export async function handleGetUserInfo(ctx: AgentContext, input: { telegram_id:
   const explicit = (ctx.messageText.match(/\b\d+\b/g) ?? []).some((value) => value === String(input.telegram_id));
   if (!contact && input.telegram_id !== ctx.user.telegram_id && !explicit)
     return { success: false, error: tr.recipientUnverified };
-  const profile = ctx.lookupTelegramUser ? await ctx.lookupTelegramUser(input.telegram_id) : null;
+  const profile = await inspectRecipientProfile(ctx, input.telegram_id);
   if (profile && profile.id !== input.telegram_id) return { success: false, error: tr.recipientIdentityConflict };
   if (profile && !profile.deleted)
     ctx.contactRepo.refreshProfile(ctx.user.telegram_id, input.telegram_id, {
       username: profile.username ?? null,
       firstName: profile.firstName,
     });
-  const info = {
+  const info: UserInspection = {
     telegram_id: input.telegram_id,
     display_name: profile?.firstName ?? contact?.name ?? null,
     preferred_name: contact?.preferred_name ?? null,
     username: profile ? (profile.username ?? null) : (contact?.username ?? null),
     contact_created_at: contact?.created_at ?? null,
-    profile_checked_at: profile ? new Date().toISOString() : null,
+    profile_checked_at: profile?.checkedAt ?? null,
     profile_source: profile ? 'telegram' : 'cached',
     deleted: profile?.deleted ?? null,
   };
   return {
     success: true,
+    data: info,
     output: tr.userInfo(JSON.stringify(info, null, 2)),
     agentHint:
       'ID is authoritative. contact_created_at is when this address-book row was created, not the Telegram account registration date. Null means not recorded; never infer account age, revocation time or identity from an old username. Use find_contact for names, get_history/get_action_log for provenance.',
   };
 }
-handleGetUserInfo.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
+handleGetUserInfo.meta = { readonly: false, skipActionLog: false, throttleExempt: true } satisfies ToolHandlerMeta;

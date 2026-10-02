@@ -110,7 +110,7 @@ copied into this session or used to enable shared service capabilities.
 Shared-session consumer inventory:
 
 - `send-message.py`, `resolve-username.py`, `fetch-birthdays.py`,
-  `get-chat-members.py`, `voice-call-bridge.py`, `debug-call.py`, and the embedded
+  `get-chat-members.py`, `get-user-info.py`, `voice-call-bridge.py`, `debug-call.py`, and the embedded
   Python in `docker-call-test.sh` use `start_service_session`: public Pyrogram
   `connect` → `get_me` → expected-ID check → `initialize`. Initialized clients use
   `stop`; identity rejection disconnects before initialization. The Docker helper

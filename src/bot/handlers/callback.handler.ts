@@ -1,4 +1,4 @@
-import { confirmRecipientApproval } from '../../services/ai/recipient-confirmation.ts';
+import { confirmRecipientApproval, finishRecipientApproval } from '../../services/ai/recipient-confirmation.ts';
 // src/bot/handlers/callback.handler.ts
 
 import { TZDate } from '@date-fns/tz';
@@ -211,18 +211,30 @@ export function createCallbackHandler(
   } = opts;
   const dispatch = new Map<string, HandlerFn>();
   dispatch.set('ric', async (ctx, payload, _parts, user) => {
-    const approved = confirmRecipientApproval(payload, ctx.from.id, Number(ctx.chatId));
-    if (!approved) {
-      await ctx.answer({ text: t(user.language).aiTools.meta.recipientUnverified });
+    const answer = async (text?: string) => {
+      await ctx.answer(text ? { text } : undefined).catch(() => {});
+    };
+    if (!onAiButtonClick || ctx.from.id !== user.telegram_id) {
+      await answer(t(user.language).aiTools.meta.recipientUnverified);
       return;
     }
-    await ctx.answer();
-    if (!onAiButtonClick) return;
-    await onAiButtonClick(
-      user.telegram_id,
-      user.telegram_id,
-      `Confirmed recipient Telegram ID ${approved.recipientId} for event ${approved.eventId}. Send that invitation with force=true; do not change the ID or use a conflicting username.`,
-    );
+    const approved = confirmRecipientApproval(payload, ctx.from.id, Number(ctx.chatId));
+    if (!approved) {
+      await answer(t(user.language).aiTools.meta.recipientUnverified);
+      return;
+    }
+    await answer();
+    try {
+      await onAiButtonClick(
+        user.telegram_id,
+        user.telegram_id,
+        `Confirmed recipient Telegram ID ${approved.recipientId} for event ${approved.eventId}. Send that invitation with force=true; do not change the ID or use a conflicting username.`,
+      );
+      finishRecipientApproval(payload, false);
+    } catch (error) {
+      finishRecipientApproval(payload, true);
+      throw error;
+    }
   });
 
   // Scene help — user asked AI for help during wizard

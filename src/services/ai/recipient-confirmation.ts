@@ -52,3 +52,11 @@ export function consumeRecipientApproval(
   }
   return false;
 }
+
+/** A consumed approval is absent and can never be restored by continuation recovery. */
+export function finishRecipientApproval(token: string, retry: boolean): void {
+  const item = approvals.get(token);
+  if (!item) return;
+  if (retry && item.expiresAt > Date.now()) item.confirmed = false;
+  else approvals.delete(token);
+}
