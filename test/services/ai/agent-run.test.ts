@@ -1384,6 +1384,55 @@ describe('CalendarBotAgent.run()', () => {
     expect(realCallCount).toBe(2);
   });
 
+  test('a call that explicitly clears a field is NOT deduped against an earlier call that omitted it', async () => {
+    // Regression: update_event's nullable fields (location, end_at, description,
+    // recurrence_rule) use `null` to mean "clear this field" — distinct from
+    // omitting the key entirely. The dedup key must not collapse
+    // {title:"New Title"} and {title:"New Title", location:null} into the same
+    // key, or the second (clearing) call is silently swallowed as a duplicate
+    // and the model is falsely told the clear already happened.
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Original title',
+      location: 'Somewhere',
+      start_at: new Date(Date.now() + 86400000).toISOString(),
+      timezone: 'UTC',
+    });
+    const { impl } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'call-1',
+        name: 'update_event',
+        input: { event_id: event.id, title: 'New Title' },
+      },
+      {
+        kind: 'tool',
+        callId: 'call-2',
+        name: 'update_event',
+        // Same title, but explicitly clears location — must execute for real.
+        input: { event_id: event.id, title: 'New Title', location: null },
+      },
+      { kind: 'text', text: 'ok' },
+    ]);
+
+    let realCallCount = 0;
+    const originalUpdateEvent = ctx.eventService.updateEvent.bind(ctx.eventService);
+    ctx.eventService.updateEvent = ((id: number, userId: number, data: Parameters<typeof originalUpdateEvent>[2]) => {
+      realCallCount++;
+      return originalUpdateEvent(id, userId, data);
+    }) as typeof ctx.eventService.updateEvent;
+
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    const result = await agent.run(ctx);
+
+    expect(realCallCount).toBe(2);
+    const duplicateResults = result.toolResults.filter((r) => (r.output ?? '').includes('DUPLICATE'));
+    expect(duplicateResults.length).toBe(0);
+    const stored = db.query('SELECT location FROM events WHERE id=?').get(event.id) as { location: string | null };
+    expect(stored.location).toBeNull();
+  });
+
   test('duplicate tool result is passed back to the model in the next round', async () => {
     // Model sees the DUPLICATE marker in the tool result and should use it to
     // understand the call was skipped. Verify the model input on round 3
