@@ -107,12 +107,17 @@ describe('buildSystemPrompt', () => {
     'snooze_event',
     'get_reminders',
     'get_free_slots',
-    'get_action_log',
-    'get_history',
     'share_event',
     'share_agenda',
     'cancel_invitation',
   ];
+
+  test('diagnostic routing explicitly requires evidence instead of inferred explanations', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('get_history and get_action_log');
+    expect(prompt).toContain('target_user_id');
+    expect(prompt).toContain('An old assistant claim is not an actual successful action');
+  });
 
   test('prompt does not restate what the tool catalog already describes', () => {
     const prompt = buildSystemPrompt(ctx);

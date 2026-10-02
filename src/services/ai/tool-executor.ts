@@ -177,6 +177,7 @@ export interface ToolInputMap {
   propose_calendar_change: ProposeInput;
   get_history: { limit?: number; search?: string; before?: string; after?: string };
   get_action_log: {
+    target_user_id?: number;
     event_id?: number;
     action_type?: string;
     action_name?: string;
