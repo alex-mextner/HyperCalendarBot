@@ -1,11 +1,15 @@
 // src/services/google/sync-cron.ts
-import type { Queue } from 'bullmq';
+import type { JobsOptions } from 'bullmq';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
 import { syncLogger } from '../../utils/logger.ts';
 import type { GoogleSyncJobData } from './sync-queue.ts';
 
-export async function setupSyncCron(queue: Queue<GoogleSyncJobData>): Promise<void> {
+export interface GoogleCronQueue {
+  add(name: string, data: GoogleSyncJobData, options?: JobsOptions): Promise<unknown>;
+}
+
+export async function setupSyncCron(queue: GoogleCronQueue): Promise<void> {
   await queue.add(
     'sync-cron-tick',
     {
@@ -23,9 +27,9 @@ export async function setupSyncCron(queue: Queue<GoogleSyncJobData>): Promise<vo
 }
 
 export async function executeSyncCronTick(
-  queue: Queue<GoogleSyncJobData>,
-  syncRepo: GoogleSyncRepository,
-  calendarRepo: GoogleCalendarRepository,
+  queue: GoogleCronQueue,
+  syncRepo: Pick<GoogleSyncRepository, 'getActiveUsers'>,
+  calendarRepo: Pick<GoogleCalendarRepository, 'getEnabledCalendars'>,
 ): Promise<void> {
   const activeUsers = syncRepo.getActiveUsers();
 
