@@ -17,6 +17,15 @@ import { formatLocationHtml } from '../location/format-location.ts';
 import { formatDayWeatherLine, formatEventWeatherLine, formatWeekWeatherLine } from '../weather/format.ts';
 import type { DayWeather, EventForecast } from '../weather/types.ts';
 
+function formatDisplayDetails(event: CalendarEvent): string {
+  const lines: string[] = [];
+  if (event.location?.trim()) lines.push(`📍 ${formatLocationHtml(event)}`);
+  if (event.description?.trim()) lines.push(`📝 ${escapeHtml(event.description)}`);
+  const status = event.displayMetadata?.invitationStatus;
+  if (status?.trim()) lines.push(`✉️ ${escapeHtml(status)}`);
+  return lines.length ? `\n${lines.join('\n')}` : '';
+}
+
 function birthdayAge(birthYear: number | null | undefined, occurrenceStart: string): number | null {
   if (birthYear == null) return null;
   return new Date(occurrenceStart).getUTCFullYear() - birthYear;
@@ -55,7 +64,7 @@ export function formatDayAgenda(
     const colorDot =
       calendarColors && occ.event.google_calendar_id ? (calendarColors.get(occ.event.google_calendar_id) ?? '') : '';
     const dotPrefix = colorDot ? `${colorDot} ` : '';
-    return `  ${time}  ${dotPrefix}${title}${isRecurring ? ' 🔁' : ''}`;
+    return `  ${time}  ${dotPrefix}${title}${isRecurring ? ' 🔁' : ''}${formatDisplayDetails(occ.event)}`;
   });
 
   const allLines = [...holidayLines, ...eventLines];
@@ -84,7 +93,9 @@ export function formatWeekAgenda(
   const lines: string[] = [];
 
   for (const dayKey of days) {
-    const dayLabel = formatDateShort(`${dayKey}T12:00:00Z`, timezone, lang);
+    const [year, month, day] = dayKey.split('-').map(Number);
+    const localNoon = new TZDate(year!, month! - 1, day!, 12, 0, 0, 0, timezone).toISOString();
+    const dayLabel = formatDateShort(localNoon, timezone, lang);
     const dayEvents = byDay.get(dayKey) ?? [];
     const dayHolidays = holidaysByDate?.get(dayKey) ?? [];
     const dayW = weatherByDate?.[dayKey];
@@ -113,7 +124,7 @@ export function formatWeekAgenda(
           const suffix = age !== null ? l.birthdayAgeSuffix(age) : '';
           title = `🎁 ${title}${escapeHtml(suffix)}`;
         }
-        lines.push(`  ${time} ${title}${isRecurring ? ' 🔁' : ''}`);
+        lines.push(`  ${time} ${title}${isRecurring ? ' 🔁' : ''}${formatDisplayDetails(occ.event)}`);
       }
     }
     lines.push('');
@@ -159,13 +170,8 @@ export function formatEventDetail(
     }
   }
 
-  if (event.description) {
-    lines.push(`📝 ${escapeHtml(event.description)}`);
-  }
-  if (event.location) {
-    const locationLink = formatLocationHtml(event);
-    lines.push(`📍 ${locationLink}`);
-  }
+  const details = formatDisplayDetails(event);
+  if (details) lines.push(details.slice(1));
   if (event.category) {
     lines.push(`🏷 ${escapeHtml(event.category)}`);
   }
@@ -234,7 +240,7 @@ export function formatEventListItem(event: CalendarEvent, timezone: string, inde
     const suffix = age !== null ? l.birthdayAgeSuffix(age) : '';
     title = `🎁 ${title}${escapeHtml(suffix)}`;
   }
-  return `${index + 1}. ${timePart} — ${title}${isRecurring ? ' 🔁' : ''}`;
+  return `${index + 1}. ${timePart} — ${title}${isRecurring ? ' 🔁' : ''}${formatDisplayDetails(event)}`;
 }
 
 export function formatRecurrenceHuman(rrule: string, lang: string): string {

@@ -5,6 +5,7 @@ import { autoPin } from '../../../utils/auto-pin.ts';
 import { getDayRangeUtc, getWeekRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { getTheme } from '../../../worker/templates/themes.ts';
+import { enrichAgenda } from '../../event/agenda-enrichment.ts';
 import { renderDayImage } from '../../image/render-day.ts';
 import { renderMonthImage } from '../../image/render-month.ts';
 import { renderWeekImage } from '../../image/render-week.ts';
@@ -70,7 +71,11 @@ export async function handleRenderDayImage(
   try {
     const buffer = await renderDayImage(
       ctx.renderService,
-      occurrences,
+      enrichAgenda(
+        occurrences,
+        { userId, language: lang, groupId: scope === 'group' ? ctx.groupChatId : undefined },
+        ctx.isGroup && scope !== 'group' ? undefined : ctx.eventService.agendaRepository,
+      ),
       input.date,
       ctx.user.timezone,
       lang,
@@ -193,7 +198,18 @@ export async function handleRenderWeekImage(
   const sender = ctx.sender;
 
   try {
-    const buffer = await renderWeekImage(ctx.renderService, occurrences, weekStartIso, ctx.user.timezone, lang, userId);
+    const buffer = await renderWeekImage(
+      ctx.renderService,
+      enrichAgenda(
+        occurrences,
+        { userId, language: lang, groupId: scope === 'group' ? ctx.groupChatId : undefined },
+        ctx.isGroup && scope !== 'group' ? undefined : ctx.eventService.agendaRepository,
+      ),
+      weekStartIso,
+      ctx.user.timezone,
+      lang,
+      userId,
+    );
     const file = new File([buffer], 'week.png', { type: 'image/png' });
     const sent = await sender.sendPhoto!(ctx.chatId, file);
     schedulePinFireAndForget(ctx, sent.message_id);
@@ -248,7 +264,19 @@ export async function handleRenderMonthImage(
   const tr = t(lang).aiTools.meta;
 
   try {
-    const buffer = await renderMonthImage(ctx.renderService, occurrences, year, month, ctx.user.timezone, lang, userId);
+    const buffer = await renderMonthImage(
+      ctx.renderService,
+      enrichAgenda(
+        occurrences,
+        { userId, language: lang, groupId: scope === 'group' ? ctx.groupChatId : undefined },
+        ctx.isGroup && scope !== 'group' ? undefined : ctx.eventService.agendaRepository,
+      ),
+      year,
+      month,
+      ctx.user.timezone,
+      lang,
+      userId,
+    );
     const file = new File([buffer], 'month.png', { type: 'image/png' });
     const sent = await sender.sendPhoto!(ctx.chatId, file);
     schedulePinFireAndForget(ctx, sent.message_id);

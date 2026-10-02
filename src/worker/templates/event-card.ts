@@ -55,16 +55,8 @@ function css(data: EventCardData): string {
       width: 28px;
       flex-shrink: 0;
     }
-    .card__description {
-      font-size: 16px;
-      color: ${theme.textSecondary};
-      line-height: 1.6;
-      margin: 16px 0;
-      display: -webkit-box;
-      -webkit-line-clamp: 3;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-    }
+    .card__title, .card__row { overflow-wrap: anywhere; }
+    .card__row > span:last-child { min-width: 0; white-space: pre-wrap; }
     .card__attendees {
       display: flex;
       gap: 8px;
@@ -121,7 +113,7 @@ function render(data: EventCardData): string {
     timeFormatted,
     duration,
     location,
-    description,
+    displayMetadata,
     attendees,
     attendeeOverflow,
     conferenceLink,
@@ -129,13 +121,14 @@ function render(data: EventCardData): string {
     calendarColor,
   } = data;
 
-  const locationRow =
-    location !== undefined
-      ? `<div class="card__row"><span class="card__icon">📍</span><span>${escapeHtml(location)}</span></div>`
-      : '';
+  const locationRow = location?.trim()
+    ? `<div class="card__row card__location"><span class="card__icon">📍</span><span>${escapeHtml(location)}</span></div>`
+    : '';
 
-  const descriptionBlock =
-    description !== undefined ? `<div class="card__description">${escapeHtml(description)}</div>` : '';
+  const status = displayMetadata?.invitationStatus;
+  const statusRow = status?.trim()
+    ? `<div class="card__row card__status"><span class="card__icon">✉️</span><span>${escapeHtml(status)}</span></div>`
+    : '';
 
   const attendeesBlock =
     attendees !== undefined && attendees.length > 0 ? renderAttendees(attendees, attendeeOverflow ?? 0) : '';
@@ -158,7 +151,7 @@ function render(data: EventCardData): string {
     <div class="card__row"><span class="card__icon">📅</span><span>${escapeHtml(dateFormatted)}</span></div>
     <div class="card__row"><span class="card__icon">🕐</span><span>${escapeHtml(timeFormatted)} · ${escapeHtml(duration)}</span></div>
     ${locationRow}
-    ${descriptionBlock}
+    ${statusRow}
     ${attendeesBlock}
     ${conferenceRow}
     <div class="card__calendar">

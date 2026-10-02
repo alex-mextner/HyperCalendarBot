@@ -1,5 +1,6 @@
 // src/services/event/event-service.ts
 
+import type { AgendaRepository } from '../../database/repositories/agenda.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
@@ -19,6 +20,7 @@ export interface FreeSlot {
 }
 
 export interface EventServiceDeps {
+  agendaRepository?: AgendaRepository;
   eventRepo: EventRepository;
   materializer?: ReminderMaterializer;
   participantRepo?: ParticipantRepository;
@@ -28,6 +30,7 @@ export interface EventServiceDeps {
 }
 
 export class EventService {
+  readonly agendaRepository?: AgendaRepository;
   private eventRepo: EventRepository;
   private materializer?: ReminderMaterializer;
   private participantRepo?: ParticipantRepository;
@@ -36,6 +39,7 @@ export class EventService {
   private domainEvents?: DomainEventBus;
 
   constructor(deps: EventServiceDeps) {
+    this.agendaRepository = deps.agendaRepository;
     this.eventRepo = deps.eventRepo;
     this.materializer = deps.materializer;
     this.participantRepo = deps.participantRepo;
