@@ -1,7 +1,16 @@
 import { TZDate } from '@date-fns/tz';
 import { z } from 'zod';
+import { REFERENCE_LIMITS, type ReferenceContext, type ResolvedReference } from './event-reference-store.ts';
+import {
+  type ClockText,
+  type DayText,
+  recognizeCancelTarget,
+  recognizeEventEntry,
+  weekdayIndex,
+} from './natural-entry.ts';
 import { normalize } from './normalizer.ts';
-import { resolveVariables, type UserContext } from './variable-resolver.ts';
+import { type EventSummary, resolveVariables, type UserContext } from './variable-resolver.ts';
+import { type CalendarDay, formatLocalInstant, pad2, uniqueInstant } from './wall-clock.ts';
 import { WorkflowInputError, type WorkflowInputValue } from './workflow-input.ts';
 import type { I18nMap } from './workflow-schema.ts';
 
@@ -34,6 +43,8 @@ const DAY_WORDS = ['today', 'tomorrow', 'day_after_tomorrow', 'yesterday'] as co
 const PeriodKey = z.enum(PERIOD_KEYS);
 const DayWord = z.enum(DAY_WORDS);
 const HourMinute = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+/** `it` = the event just discussed, `created` = the one this actor just created, a number = a list position. */
+const ContextSelector = z.union([z.enum(['it', 'created']), z.number().int().min(1).max(REFERENCE_LIMITS.idsPerRow)]);
 
 export const BindingSchema = z.discriminatedUnion('type', [
   z
@@ -79,7 +90,8 @@ export const BindingSchema = z.discriminatedUnion('type', [
       type: z.literal('time'),
       from: Template,
       optional: z.boolean().optional(),
-      default: HourMinute.optional(),
+      /** An empty default means "no time given", for steps that keep the event's own time. */
+      default: z.union([HourMinute, z.literal('')]).optional(),
     })
     .strict(),
   z
@@ -106,6 +118,11 @@ export const BindingSchema = z.discriminatedUnion('type', [
       from: Template,
       unit: Template,
       units: z.record(z.string().min(1).max(64), z.number().int().positive().max(10080)),
+      /** Number words accepted in place of digits, e.g. {"два": 2}. */
+      amounts: z
+        .record(z.string().min(1).max(64), z.number().int().positive().max(1000))
+        .refine((values) => Object.keys(values).length <= MAX_ENTRIES, 'Invalid map size')
+        .optional(),
       min: z.number().int().positive().optional(),
       max: z.number().int().positive().optional(),
       default_amount: z.number().int().positive().optional(),
@@ -114,10 +131,30 @@ export const BindingSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('relative_instant'), duration: z.string().regex(BINDING_NAME) }).strict(),
   z.object({ type: z.literal('timezone'), from: Template }).strict(),
   z
-    .object({ type: z.literal('eventref'), from: Template, reject: z.array(z.string().max(32)).max(24).optional() })
+    .object({
+      type: z.literal('eventref'),
+      from: Template,
+      reject: z.array(z.string().max(32)).max(24).optional(),
+      /** Phrases that select from the conversation instead of naming an event. */
+      context: z.record(z.string().min(1).max(64), ContextSelector).optional(),
+      /** Selector used when the reference is left out entirely ("delete" right after a mention). */
+      blank: ContextSelector.optional(),
+      /** When false, free text that is not a context phrase is rejected instead of searched as a title. */
+      names: z.boolean().optional(),
+    })
     .strict(),
   z.object({ type: z.literal('recipient'), from: Template }).strict(),
+  /** One terse event entry (title, day, start, optional end and zone); see natural-entry.ts. */
+  z.object({ type: z.literal('event_request'), from: Template }).strict(),
+  /** One event named by title in a terse cancel request; yields an eventref-shaped value. */
+  z.object({ type: z.literal('cancel_target'), from: Template }).strict(),
 ]);
+/** Binding types whose parser is also a structural recognizer the matcher may use as a guard. */
+export const RECOGNIZER_BINDINGS = {
+  event_request: (text: string) => recognizeEventEntry(text).kind === 'entry',
+  cancel_target: (text: string) => recognizeCancelTarget(text).kind === 'target',
+} as const;
+export type RecognizerBinding = keyof typeof RECOGNIZER_BINDINGS;
 export type Binding = z.infer<typeof BindingSchema>;
 export const BindingsSchema = z
   .record(z.string().regex(BINDING_NAME), BindingSchema)
@@ -128,14 +165,6 @@ export type BindValues = { [name: string]: WorkflowInputValue };
 const fail = (): never => {
   throw new WorkflowInputError('INVALID_INPUT');
 };
-const pad2 = (n: number): string => String(n).padStart(2, '0');
-
-interface CalendarDay {
-  y: number;
-  m: number;
-  d: number;
-}
-
 function isoDay({ y, m, d }: CalendarDay): string {
   return `${String(y).padStart(4, '0')}-${pad2(m)}-${pad2(d)}`;
 }
@@ -254,6 +283,8 @@ function parseDate(raw: string, binding: Extract<Binding, { type: 'date' }>, now
   const current = today(now, timezone);
   const word = binding.words && Object.hasOwn(binding.words, key) ? binding.words[key] : undefined;
   if (word) return isoDay(addDays(current, DAY_WORD_OFFSETS[word]));
+  const weekday = weekdayIndex(key);
+  if (weekday !== null) return isoDay(upcomingWeekday(current, weekday));
   const parsed = parseAbsoluteDay(key);
   if (!parsed) return fail();
   const withYear = (year: number): CalendarDay => ({ y: year, m: parsed.day.m, d: parsed.day.d });
@@ -261,6 +292,11 @@ function parseDate(raw: string, binding: Extract<Binding, { type: 'date' }>, now
   if (!validDay(day)) return fail();
   if (parsed.day.y === undefined && binding.future && isoDay(day) < isoDay(current)) day = withYear(current.y + 1);
   return validDay(day) ? isoDay(day) : fail();
+}
+
+/** A weekday name means the nearest such day from today on, today included. */
+function upcomingWeekday(current: CalendarDay, index: number): CalendarDay {
+  return addDays(current, (index - weekdayMondayZero(current) + 7) % 7);
 }
 
 function hourFromSuffix(hour: number, suffix: string): number {
@@ -292,38 +328,6 @@ function parseTime(raw: string): string {
   return `${pad2(resolved)}:${pad2(minute)}`;
 }
 
-function offsetMinutesAt(utcMs: number, timezone: string): number {
-  return -new TZDate(utcMs, timezone).getTimezoneOffset();
-}
-
-function formatOffset(minutes: number): string {
-  const abs = Math.abs(minutes);
-  return `${minutes < 0 ? '-' : '+'}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
-}
-
-function formatLocalInstant(utcMs: number, timezone: string): string {
-  const local = new TZDate(utcMs, timezone);
-  const stamp =
-    `${String(local.getFullYear()).padStart(4, '0')}-${pad2(local.getMonth() + 1)}-${pad2(local.getDate())}` +
-    `T${pad2(local.getHours())}:${pad2(local.getMinutes())}:00`;
-  return `${stamp}${formatOffset(offsetMinutesAt(utcMs, timezone))}`;
-}
-
-/**
- * Resolve a wall-clock time in an IANA zone to exactly one instant. A time skipped by a
- * clock change or repeated by one has zero or two instants and is rejected, never guessed.
- */
-function uniqueInstant(day: CalendarDay, hour: number, minute: number, timezone: string): number {
-  const wall = Date.UTC(day.y, day.m - 1, day.d, hour, minute);
-  const candidates = new Set<number>();
-  for (const probe of [wall - 86_400_000, wall, wall + 86_400_000]) {
-    const offset = offsetMinutesAt(probe, timezone);
-    const instant = wall - offset * 60_000;
-    if (offsetMinutesAt(instant, timezone) === offset) candidates.add(instant);
-  }
-  return candidates.size === 1 ? [...candidates][0]! : fail();
-}
-
 function parseDayPart(value: WorkflowInputValue | undefined): CalendarDay {
   const match = typeof value === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
   return match ? { y: Number(match[1]), m: Number(match[2]), d: Number(match[3]) } : fail();
@@ -339,7 +343,7 @@ function buildDatetime(
   const clock = bound[binding.time];
   const parts = typeof clock === 'string' ? /^(\d{2}):(\d{2})$/.exec(clock) : null;
   if (!parts) return fail();
-  const start = uniqueInstant(day, Number(parts[1]), Number(parts[2]), timezone);
+  const start = uniqueInstant(day, Number(parts[1]), Number(parts[2]), timezone) ?? fail();
   if (binding.future && start <= now.getTime()) return fail();
   return formatLocalInstant(start + (binding.plus_minutes ?? 0) * 60_000, timezone);
 }
@@ -384,14 +388,122 @@ function buildPeriod(key: (typeof PERIOD_KEYS)[number], now: Date, timezone: str
 }
 
 function parseDuration(raw: string, unitRaw: string, binding: Extract<Binding, { type: 'duration' }>): number {
-  const amountText = raw.trim();
+  const amountText = normalize(raw);
+  const words = binding.amounts ?? {};
   const amount =
-    amountText === '' ? binding.default_amount : /^\d{1,5}$/.test(amountText) ? Number(amountText) : undefined;
+    amountText === ''
+      ? binding.default_amount
+      : /^\d{1,5}$/.test(amountText)
+        ? Number(amountText)
+        : Object.hasOwn(words, amountText)
+          ? words[amountText]
+          : undefined;
   const unit = normalize(unitRaw);
   if (amount === undefined || !Object.hasOwn(binding.units, unit)) return fail();
   const minutes = amount * binding.units[unit]!;
   if (minutes < (binding.min ?? 1) || minutes > (binding.max ?? 1440)) return fail();
   return minutes;
+}
+
+// ─── natural event entries ──────────────────────────────────────────────────
+
+interface WallClock {
+  hour: number;
+  minute: number;
+}
+type ClockReading = { mode: 'exact' | 'noon'; clock: WallClock } | { mode: 'choose'; options: WallClock[] };
+
+const hhmm = ({ hour, minute }: WallClock): string => `${pad2(hour)}:${pad2(minute)}`;
+
+/**
+ * Written minutes, a day-part suffix, 0 or an hour from 13 are unambiguous. A bare 12 is
+ * read as noon and the question says so; a bare 1..11 is never guessed and offers both.
+ */
+function readClock(text: ClockText): ClockReading {
+  const minute = text.minute ?? 0;
+  if (minute > 59) return fail();
+  if (text.suffix) return { mode: 'exact', clock: { hour: hourFromSuffix(text.hour, text.suffix), minute } };
+  if (text.hour > 23) return fail();
+  if (text.minute !== null || text.hour === 0 || text.hour > 12)
+    return { mode: 'exact', clock: { hour: text.hour, minute } };
+  if (text.hour === 12) return { mode: 'noon', clock: { hour: 12, minute: 0 } };
+  return {
+    mode: 'choose',
+    options: [
+      { hour: text.hour, minute: 0 },
+      { hour: text.hour + 12, minute: 0 },
+    ],
+  };
+}
+
+/** A day without a year that already passed this year means next year; weekdays count from today. */
+function entryDay(day: DayText, now: Date, timezone: string): CalendarDay {
+  const current = today(now, timezone);
+  if (day.kind === 'offset') return addDays(current, day.days);
+  if (day.kind === 'weekday') return upcomingWeekday(current, day.index);
+  let resolved: CalendarDay = { y: day.y ?? current.y, m: day.m, d: day.d };
+  if (!validDay(resolved)) return fail();
+  if (day.y === null && isoDay(resolved) < isoDay(current)) resolved = { ...resolved, y: current.y + 1 };
+  return validDay(resolved) ? resolved : fail();
+}
+
+/** An end must be unambiguous, later than the start and within one day of it. */
+function entryEnd(text: ClockText, day: CalendarDay, startAt: number, timezone: string): number {
+  const reading = readClock(text);
+  if (reading.mode === 'choose') return fail();
+  const endAt = uniqueInstant(day, reading.clock.hour, reading.clock.minute, timezone) ?? fail();
+  return endAt > startAt && endAt - startAt <= 86_400_000 ? endAt : fail();
+}
+
+/**
+ * The structured entry the workflow asks about. `mode` is `exact`, `noon` (12 read as
+ * midday) or `choose` (both readings of a bare hour that are still in the future).
+ * Nothing is written from here; the workflow confirms every mode before creating.
+ */
+function buildEventRequest(raw: string, now: Date, userTimezone: string): WorkflowInputValue {
+  const scan = recognizeEventEntry(raw);
+  if (scan.kind !== 'entry') return fail();
+  const { title, day: dayText, start, end, zone } = scan.parts;
+  const timezone = zone ?? userTimezone;
+  const day = entryDay(dayText, now, timezone);
+  const reading = readClock(start);
+  const common = { title, date: isoDay(day), timezone, zone_explicit: zone !== null };
+  if (reading.mode === 'choose') {
+    if (end) return fail();
+    const future = reading.options.flatMap((clock) => {
+      const at = uniqueInstant(day, clock.hour, clock.minute, timezone);
+      return at !== null && at > now.getTime() ? [{ clock, at }] : [];
+    });
+    if (!future.length) return fail();
+    return {
+      ...common,
+      mode: 'choose',
+      time: null,
+      start: null,
+      until: null,
+      end: null,
+      time_options: future.map((option) => hhmm(option.clock)),
+      start_options: future.map((option) => formatLocalInstant(option.at, timezone)),
+    };
+  }
+  const at = uniqueInstant(day, reading.clock.hour, reading.clock.minute, timezone) ?? fail();
+  if (at <= now.getTime()) return fail();
+  const endAt = end ? entryEnd(end, day, at, timezone) : null;
+  return {
+    ...common,
+    mode: reading.mode,
+    time: hhmm(reading.clock),
+    start: formatLocalInstant(at, timezone),
+    until: formatLocalInstant(endAt ?? at + 3_600_000, timezone),
+    end: endAt === null ? null : formatLocalInstant(endAt, timezone),
+    time_options: [],
+    start_options: [],
+  };
+}
+
+function parseCancelTarget(raw: string): WorkflowInputValue {
+  const scan = recognizeCancelTarget(raw);
+  return scan.kind === 'target' ? { kind: 'name', query: scan.query } : fail();
 }
 
 function parseTimezone(raw: string): string {
@@ -423,11 +535,54 @@ function parseText(raw: string, max: number): string {
   return text;
 }
 
-function parseEventRef(raw: string, reject: string[] | undefined): WorkflowInputValue {
+type ContextSelectorValue = z.infer<typeof ContextSelector>;
+
+function choiceLine(event: EventSummary, index: number): string {
+  return `${index + 1}. «${event.title}» — ${event.date}${event.time ? ` ${event.time}` : ''} (#${event.id})`;
+}
+
+function fromResolved(resolved: ResolvedReference | undefined): WorkflowInputValue {
+  if (resolved === undefined) return { kind: 'missing', reason: 'none' };
+  if (resolved.status === 'gone') return { kind: 'missing', reason: 'gone' };
+  if (resolved.status === 'one') return { kind: 'id', id: resolved.event.id, via: 'context' };
+  return {
+    kind: 'choices',
+    text: resolved.events.map(choiceLine).join('\n'),
+    ids: resolved.events.map((event) => event.id),
+  };
+}
+
+/**
+ * A context selector yields exactly one candidate ID, a list to choose from, or a stated
+ * reason why there is none. It never picks the first of several; the ID is only a candidate
+ * that the workflow re-reads with get_event before anything is shown or written.
+ */
+function resolveContextRef(selector: ContextSelectorValue, refs: ReferenceContext | undefined): WorkflowInputValue {
+  if (typeof selector === 'number') {
+    const list = refs?.list;
+    if (!list) return { kind: 'missing', reason: 'none' };
+    if (selector > list.length) return { kind: 'missing', reason: 'range' };
+    const event = list[selector - 1];
+    return event ? { kind: 'id', id: event.id, via: 'context' } : { kind: 'missing', reason: 'gone' };
+  }
+  if (selector === 'created') return fromResolved(refs?.created);
+  if (refs?.replyUnmapped) return { kind: 'missing', reason: 'reply' };
+  return fromResolved(refs?.it);
+}
+
+function parseEventRef(
+  raw: string,
+  binding: Extract<Binding, { type: 'eventref' }>,
+  refs: ReferenceContext | undefined,
+): WorkflowInputValue {
+  if (isBlank(raw) && binding.blank !== undefined) return resolveContextRef(binding.blank, refs);
+  const key = normalize(raw);
+  if (binding.context && Object.hasOwn(binding.context, key)) return resolveContextRef(binding.context[key]!, refs);
   const idMatch = /^(?:#|№|id\s*:?\s*)?(\d{1,9})$/i.exec(raw.trim());
   if (idMatch) return Number(idMatch[1]) > 0 ? { kind: 'id', id: Number(idMatch[1]) } : fail();
+  if (binding.names === false) return fail();
   const query = parseText(raw, 120);
-  const blocked = new Set((reject ?? []).map(normalize));
+  const blocked = new Set((binding.reject ?? []).map(normalize));
   if (
     normalize(query)
       .split(' ')
@@ -508,9 +663,13 @@ function evaluateOne(binding: Binding, bound: BindValues, evaluation: Evaluation
     case 'timezone':
       return parseTimezone(raw);
     case 'eventref':
-      return parseEventRef(raw, binding.reject);
+      return parseEventRef(raw, binding, userCtx.references);
     case 'recipient':
       return parseRecipient(raw);
+    case 'event_request':
+      return buildEventRequest(raw, now, userCtx.timezone);
+    case 'cancel_target':
+      return parseCancelTarget(raw);
   }
 }
 

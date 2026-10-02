@@ -1,3 +1,4 @@
+import type {IntentLearningService} from '../../services/intent-learning/service.ts';
 import { confirmRecipientApproval, finishRecipientApproval } from '../../services/ai/recipient-confirmation.ts';
 import { enrichAgenda, enrichAgendaEvents } from '../../services/event/agenda-enrichment.ts';
 import { agendaImageErrorMessage, sendAgendaImage } from '../../utils/agenda-image.ts';
@@ -146,6 +147,7 @@ export interface CallbackHandlerOpts {
   };
   userRepo?: UserRepository;
   intentDeps?: {
+    intentLearning?:IntentLearningService;
     intentRepo: IntentRepository;
     intentMatcher?: { reload: () => void };
     adminEditSessions?: Map<number, AdminEditSession>;

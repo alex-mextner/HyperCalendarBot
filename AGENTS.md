@@ -40,3 +40,7 @@ Explain what a change does before citing its issue number. Use concrete dates fo
 - Preserve every prior raw measurement and derived score as timestamped, append-only evidence with a source SHA/tree, fixture/prompt/schema version, model settings, scope and checksum. Never overwrite a baseline to make progress look better.
 - Separate synthetic payload estimates, small provider probes, controlled live requests and natural traffic distributions. Report sample size, failures, retries, missing usage and delivery boundaries; one sample is not a production percentile target.
 - Keep personal conversation/calendar data and credentials out of committed reports. Store private raw records under restricted local logs; checked-in summaries must carry enough methodology to reproduce comparisons safely.
+
+## Intent answer review
+
+Review user-facing answers for friendliness, informativeness, directness and truthful scope, not only schemas or tool success. Compare historical AI, actual intent execution and an ideal answer. Reject generic internal wording such as “events in this range not found”; identify the checked day and calendar, show the exact target before writes, and never equate a failed read with an empty calendar. Emoji is optional, not a passing criterion. See docs/intents/response-quality.md.

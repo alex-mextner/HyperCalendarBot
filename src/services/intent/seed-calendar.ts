@@ -1,7 +1,17 @@
 import { ANY_DAY_RX, DAY_WORDS, type FamilyDefinition, periodVocabulary, SCOPE, TIME_RX } from './seed-fragments.ts';
 
-const CALENDAR_LEAD = String.raw`(?:что\s+у\s+(?:меня|нас)|что\s+будет|что|(?:мои\s+)?события|(?:мои\s+)?планы?|покажи(?:\s+мне)?(?:\s+события)?|расписание|what(?:['’]s|\s+is|\s+s)(?:\s+on)?|show(?:\s+me)?(?:\s+my)?(?:\s+events|\s+schedule|\s+agenda)?(?:\s+for|\s+on)?|events(?:\s+for|\s+on)?|agenda(?:\s+for)?|schedule(?:\s+for)?)`;
+const CALENDAR_LEAD = String.raw`(?:что\s+у\s+(?:меня|нас)|что\s+будет|что|у\s+меня|какие\s+у\s+(?:меня|нас)\s+(?:планы|дела|события)|(?:мои\s+)?события|(?:мой\s+|мои\s+)?планы?|(?:мои\s+)?дела|покажи(?:\s+мне)?(?:\s+(?:мой|мои|мо[её]))?(?:\s+(?:события|планы?|дела|расписание))?|(?:мо[её]\s+)?расписание|what(?:['’]s|\s+is|\s+s)(?:\s+on)?|show(?:\s+me)?(?:\s+my)?(?:\s+events|\s+schedule|\s+agenda)?(?:\s+for|\s+on)?|events(?:\s+for|\s+on)?|agenda(?:\s+for)?|schedule(?:\s+for)?)`;
+/** "по календарю" / "в календаре" around the day adds nothing to the request. */
+const IN_CALENDAR = String.raw`(?:\s+(?:по\s+календарю|в\s+календаре))?`;
+const WEEKDAY_RX = String.raw`(?:понедельник|вторник|сред[ау]|четверг|пятниц[ау]|суббот[ау]|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday)`;
 const CALENDAR_TRIGGERS = [
+  'у',
+  'какие',
+  'мой',
+  'мое',
+  'моё',
+  'дела',
+  'план',
   'что',
   'события',
   'мои',
@@ -29,12 +39,13 @@ const calendarDay: FamilyDefinition = {
   title: 'Events on one day',
   category: 'calendar',
   risk: 'read',
-  pattern: String.raw`^${CALENDAR_LEAD}\s+(?:на\s+)?(${ANY_DAY_RX})$`,
+  pattern: String.raw`^${CALENDAR_LEAD}${IN_CALENDAR}\s+(?:(?:на|в|во|on|for)\s+)?(${ANY_DAY_RX}|${WEEKDAY_RX}|день)${IN_CALENDAR}$`,
   triggers: CALENDAR_TRIGGERS,
-  bindings: { day: { type: 'date', from: '{{$1}}', words: DAY_WORDS } },
+  bindings: { day: { type: 'date', from: '{{$1}}', words: { ...DAY_WORDS, день: 'today' } } },
   steps: [{ call: 'get_events', input: { start_date: '{{bind.day}}', end_date: '{{bind.day}}', scope: SCOPE } }],
   strings: { ru: {}, en: {} },
   examples: [
+    'План на день',
     'что у меня сегодня',
     'что у нас завтра',
     'покажи послезавтра',
@@ -42,6 +53,11 @@ const calendarDay: FamilyDefinition = {
     'show events on 2026-10-05',
     'события на 5 октября',
     'agenda for 05.10.2026',
+    'что у меня в пятницу',
+    'Что у меня сегодня по календарю',
+    'Какие у меня планы на завтра',
+    'Планы на среду',
+    'У меня послезавтра в календаре',
   ],
   negatives: ['что делать завтра', 'что у меня в кошельке', 'покажи завтра погоду', 'не показывай что у меня сегодня'],
   invalidInputs: ['что у меня 31 февраля'],
@@ -65,6 +81,9 @@ const calendarPeriod: FamilyDefinition = {
     'что у меня на выходных',
     'show this week',
     'events next month',
+    'Мое расписание на неделю',
+    'покажи мне мои дела на неделю',
+    'Покажи мой план на эти выходные',
   ],
   negatives: ['что у меня на прошлой неделе', 'что у меня на неделе после отпуска', 'что у меня в этом году'],
 };

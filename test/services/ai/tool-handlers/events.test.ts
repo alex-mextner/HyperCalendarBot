@@ -89,6 +89,30 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('No events');
     });
 
+    test('an empty result identifies the day instead of leaking database wording', async () => {
+      ctx.user.language = 'ru';
+      ctx.user.timezone = 'Europe/Belgrade';
+      const result = await handleGetEvents(ctx, { start_date: '2026-09-20', end_date: '2026-09-20' });
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual([]);
+      expect(result.output).toContain('20 сентября');
+      expect(result.output).toContain('в твоём календаре');
+      expect(result.output).not.toMatch(/диапазон|не найдено/i);
+    });
+    test('a failed read never becomes a friendly empty-calendar claim', async () => {
+      const original = ctx.eventService.getEventsInRange;
+      ctx.eventService.getEventsInRange = () => {
+        throw new Error('Synthetic storage failure');
+      };
+      try {
+        await expect(handleGetEvents(ctx, { start_date: '2026-09-20', end_date: '2026-09-20' })).rejects.toThrow(
+          'Synthetic storage failure',
+        );
+      } finally {
+        ctx.eventService.getEventsInRange = original;
+      }
+    });
+
     test('accepts date-only format (YYYY-MM-DD) and finds events on that day', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,

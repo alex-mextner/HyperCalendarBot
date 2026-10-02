@@ -138,10 +138,21 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
         return { handled: true };
       }
 
-      if (deps.intentLearner && result.toolCalls.length > 0) {
-        deps.intentLearner.analyze(messageText, result.toolCalls, result.toolResults).catch((err: unknown) => {
-          cmdLogger.error({ err: err }, 'IntentLearner error');
-        });
+      if (deps.intentLearner) {
+        const recentMessages = (agentContext.chatHistory?.getRecentByChat?.(Number(chatId), 12) ?? [])
+          .filter((row) => row.user_id === user.telegram_id && (row.role === 'user' || row.role === 'assistant'))
+          .map((row) => ({ role: row.role as 'user' | 'assistant', text: row.content }));
+        deps.intentLearner
+          .analyze(messageText, result.toolCalls, result.toolResults, {
+            actorId: user.telegram_id,
+            chatId: Number(chatId),
+            messageId: extra?.incomingMessageId,
+            previousAiResponse: result.responseText ?? '',
+            recentMessages,
+          })
+          .catch((err: unknown) =>
+            cmdLogger.warn({ err, userId: user.telegram_id }, 'Learning sample persistence failed'),
+          );
       }
     } catch (error) {
       if (extra?.supplementMode) {

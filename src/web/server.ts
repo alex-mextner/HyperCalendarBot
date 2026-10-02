@@ -1,3 +1,4 @@
+import {handleIntentLearningRequest,type IntentLearningRouteOptions} from './intent-learning.ts';
 // src/web/server.ts
 
 import { timingSafeEqual } from 'node:crypto';
@@ -17,6 +18,7 @@ interface OAuthStateLookup {
 }
 
 export interface WebServerDeps {
+  intentLearning?:IntentLearningRouteOptions;
   config: EnvConfig;
   userRepo: UserRepository;
   // Google Calendar — only populated when GOOGLE_CLIENT_ID is configured
@@ -143,6 +145,11 @@ async function handleRequest(
   deps: WebServerDeps,
   oauthRateLimiter: IpRateLimiter,
 ): Promise<Response> {
+  if(deps.intentLearning && url.pathname.startsWith('/admin/intent-learning/v1')) {
+    const response=await handleIntentLearningRequest(req,deps.intentLearning);
+    if(response)return response;
+  }
+
   if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/ready')) {
     const notLive = await livenessFailure(deps);
     if (notLive) return notLive;

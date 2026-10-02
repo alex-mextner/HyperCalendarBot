@@ -6,6 +6,7 @@ import type { CreateIntentData } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { aiStreamRound } from '../ai/streaming.ts';
+import { type EnqueueInput, type JsonObject, JsonObjectSchema } from '../intent-learning/schemas.ts';
 import { LEARNER_SYSTEM_PROMPT } from './learner-prompt.ts';
 import { normalize } from './normalizer.ts';
 import { WorkflowSchema } from './workflow-schema.ts';
@@ -22,7 +23,7 @@ const LearnerResponseSchema = z.object({
 });
 
 const LearnerResponseCodec = jsonCodec(LearnerResponseSchema);
-const StringArrayCodec = jsonCodec(z.array(z.string()));
+const ToolInputCodec = jsonCodec(JsonObjectSchema);
 
 interface ToolCallRecord {
   name: string;
@@ -47,6 +48,32 @@ interface LearnerConfig {
    * scripted impl here so analysis runs offline. Defaults to aiStreamRound.
    */
   streamImpl?: typeof aiStreamRound;
+  /**
+   * Durable learning queue. When set, every interaction is handed to it and the learner never
+   * calls a model or writes intents itself; proposals reach active intents only by admin approval.
+   */
+  enqueue?: (input: EnqueueInput) => unknown;
+}
+
+/** Conversation context the durable queue needs to scope and compare a sample. */
+export interface LearnerInteractionContext {
+  actorId: number;
+  chatId: number;
+  messageId?: number;
+  previousAiResponse?: string;
+  recentMessages?: { role: 'user' | 'assistant'; text: string }[];
+}
+
+/** Tool inputs are JSON by contract; anything that does not survive a JSON round trip is dropped. */
+function toJsonObject(input: { [key: string]: unknown }): JsonObject {
+  let text: string;
+  try {
+    text = JSON.stringify(input);
+  } catch {
+    // Cyclic or BigInt inputs cannot be stored as evidence; the call name is still kept.
+    return {};
+  }
+  return ToolInputCodec.safeParse(text).data ?? {};
 }
 
 export class IntentLearner {
@@ -64,9 +91,15 @@ export class IntentLearner {
     message: string,
     toolCalls: ToolCallRecord[],
     toolResults: ToolResultRecord[],
+    context?: LearnerInteractionContext,
   ): Promise<CreateIntentData | null> {
+    if (this.config.enqueue) {
+      await this.enqueueInteraction(this.config.enqueue, message, toolCalls, toolResults, context);
+      return null;
+    }
+
     // 1. Skip conditions
-    if (!this.shouldAnalyze(message, toolCalls)) return null;
+    if (!this.shouldAnalyze(toolCalls)) return null;
 
     // 2. Check daily budget
     this.resetDailyIfNeeded();
@@ -86,24 +119,9 @@ export class IntentLearner {
       const intentData = await this.callLearnerAI(message, toolCalls, toolResults);
       if (!intentData) return null;
 
-      // 6. Check if similar intent already exists
-      const existing = this.intentRepo.findByCanonicalName(intentData.canonical_name);
-      if (existing) {
-        // Append phrases to existing intent if it's approved
-        if (existing.status === 'approved') {
-          let existingPhrases: string[];
-          try {
-            existingPhrases = StringArrayCodec.parse(existing.phrases);
-          } catch {
-            existingPhrases = [];
-          }
-          const newPhrases = intentData.phrases.filter((p: string) => !existingPhrases.includes(p));
-          if (newPhrases.length > 0) {
-            this.intentRepo.appendPhrases(existing.id, newPhrases);
-          }
-        }
-        return null;
-      }
+      // 6. An existing name is never extended in place: approved intents change only through
+      // an admin-approved proposal of the durable learning queue.
+      if (this.intentRepo.findByCanonicalName(intentData.canonical_name)) return null;
 
       // 7. Save as pending
       const id = this.intentRepo.create(intentData);
@@ -118,20 +136,44 @@ export class IntentLearner {
     }
   }
 
-  private shouldAnalyze(message: string, toolCalls: ToolCallRecord[]): boolean {
-    // No tool calls = chat/conversation, not automatable
-    if (toolCalls.length === 0) return false;
+  /**
+   * Only chat without tool calls is skipped. Clarifying questions and context-dependent wording
+   * are analyzed: the user may explicitly want such cases automated.
+   */
+  private shouldAnalyze(toolCalls: ToolCallRecord[]): boolean {
+    return toolCalls.length > 0;
+  }
 
-    // ask_user = needs dialogue
-    if (toolCalls.some((tc) => tc.name === 'ask_user')) return false;
-
-    // Context-dependent phrases (pronouns, references)
-    // \b doesn't work with Cyrillic (\w is ASCII-only in JS), so use lookarounds
-    const contextual =
-      /(?<![а-яёА-ЯЁa-zA-Z])(это|этот|эту|его|её|их|тот|то|that|this|it|them|the same)(?![а-яёА-ЯЁa-zA-Z])/i;
-    if (contextual.test(message)) return false;
-
-    return true;
+  /** Chat without tool calls is stored as evidence only; the queue decides what to generate. */
+  private async enqueueInteraction(
+    enqueue: (input: EnqueueInput) => unknown,
+    message: string,
+    toolCalls: ToolCallRecord[],
+    toolResults: ToolResultRecord[],
+    context: LearnerInteractionContext | undefined,
+  ): Promise<void> {
+    if (!context) {
+      cmdLogger.warn('IntentLearner enqueue skipped: interaction has no actor/chat context');
+      return;
+    }
+    try {
+      await enqueue({
+        actorId: context.actorId,
+        chatId: context.chatId,
+        ...(context.messageId === undefined ? {} : { messageId: context.messageId }),
+        request: message,
+        previousAiResponse: context.previousAiResponse ?? '',
+        toolCalls: toolCalls.map((call) => ({ name: call.name, input: toJsonObject(call.input) })),
+        toolResults: toolResults.map((result) => ({
+          success: result.success,
+          ...(result.output === undefined ? {} : { output: result.output }),
+        })),
+        recentMessages: context.recentMessages ?? [],
+        evidenceOnly: toolCalls.length === 0,
+      });
+    } catch (err) {
+      cmdLogger.error({ err }, 'IntentLearner failed to enqueue interaction');
+    }
   }
 
   private resetDailyIfNeeded(): void {

@@ -34,7 +34,7 @@ const TypedTool = z
     name: z
       .string()
       .min(1)
-      .refine((name) => !['ask_user', 'respond'].includes(name), 'Use steps for workflow control'),
+      .refine((name) => !['ask_user', 'respond', 'event_time'].includes(name), 'Use steps for workflow control'),
     input: TypedInput,
   })
   .strict();

@@ -4,6 +4,8 @@ import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { parseFilterChain } from './filter-parser.ts';
 import { normalize, normalizeWithOffsets, tokenize } from './normalizer.ts';
+import { RECOGNIZER_BINDINGS, type RecognizerBinding } from './workflow-bindings.ts';
+import { readWorkflowVersion } from './workflow-input.ts';
 
 const StringArrayCodec = jsonCodec(z.array(z.string()));
 export interface MatchResult {
@@ -19,7 +21,16 @@ interface IntentEntry {
   required: string[];
   parameterized: boolean;
   strictStructure: boolean;
+  /**
+   * Structural recognizers the whole message must pass. A rule with any is a fallback:
+   * it is tried only when no ordinary rule accepts the message, so it never competes
+   * with an explicit command.
+   */
+  recognizers: RecognizerBinding[];
 }
+
+const isRecognizer = (value: unknown): value is RecognizerBinding =>
+  typeof value === 'string' && Object.hasOwn(RECOGNIZER_BINDINGS, value);
 
 const MAX_INPUT_CHARS = 16000;
 const MAX_WORKFLOW_NODES = 4096;
@@ -29,9 +40,12 @@ interface MatchInput {
   normalized: () => ReturnType<typeof normalizeWithOffsets>;
 }
 
-function captureRequirements(workflow: string): { required: string[]; parameterized: boolean } | null {
+function captureRequirements(
+  workflow: string,
+): { required: string[]; parameterized: boolean; recognizers: RecognizerBinding[] } | null {
   if (workflow.length > MAX_WORKFLOW_CHARS) return null;
   const required = new Set<string>();
+  const recognizers = new Set<RecognizerBinding>();
   let parameterized = false;
   let root: unknown;
   try {
@@ -57,15 +71,21 @@ function captureRequirements(workflow: string): { required: string[]; parameteri
         }
         if (!hasDefault) required.add(match[1]!);
       }
-    } else if (value && typeof value === 'object') pending.push(...Object.values(value));
+    } else if (value && typeof value === 'object') {
+      const kind = Array.isArray(value) ? undefined : Object.getOwnPropertyDescriptor(value, 'type')?.value;
+      if (isRecognizer(kind)) recognizers.add(kind);
+      pending.push(...Object.values(value));
+    }
   }
-  return pending.length ? null : { required: [...required], parameterized };
+  return pending.length ? null : { required: [...required], parameterized, recognizers: [...recognizers] };
 }
 
 function extract(entry: IntentEntry, input: MatchInput): MatchResult | null {
   if (!entry.pattern) return entry.parameterized ? null : { intentId: entry.intentId, captures: {} };
   const raw = input.raw;
-  const structured = entry.strictStructure ? raw.replace(/[?!]+$/, '').trimEnd() : raw;
+  // Recognizers read the message as written: they decide themselves what trailing "?" means.
+  if (entry.recognizers.some((kind) => !RECOGNIZER_BINDINGS[kind](raw))) return null;
+  const structured = entry.strictStructure ? raw.replace(/[?!.…]+$/, '').trimEnd() : raw;
   let match = entry.pattern.exec(structured);
   let offsets: ReturnType<typeof normalizeWithOffsets> | undefined;
   if (!match || match.index !== 0 || match[0].length !== structured.length) {
@@ -94,11 +114,13 @@ export class IntentMatcher {
   constructor(private readonly mapInput: typeof normalizeWithOffsets = normalizeWithOffsets) {}
   private phraseMap = new Map<string, IntentEntry[]>();
   private triggerIndex = new Map<string, IntentEntry[]>();
+  private fallbacks: IntentEntry[] = [];
 
   /** Index only approved rules. Oversized or uninspectable slot requirements fail closed. */
   load(intents: Intent[]): void {
     this.phraseMap.clear();
     this.triggerIndex.clear();
+    this.fallbacks = [];
     for (const intent of intents) {
       if (intent.status !== 'approved') continue;
       const requirements = captureRequirements(intent.workflow);
@@ -109,7 +131,8 @@ export class IntentMatcher {
       const entry: IntentEntry = {
         intentId: intent.id,
         ...requirements,
-        strictStructure: intent.canonical_name.startsWith('basis.'),
+        strictStructure:
+          readWorkflowVersion(JSON.parse(intent.workflow)) === 2 || intent.canonical_name.startsWith('basis.'),
       };
       if (intent.pattern) {
         try {
@@ -127,6 +150,10 @@ export class IntentMatcher {
           rows.push(entry);
           this.phraseMap.set(key, rows);
         }
+      if (entry.recognizers.length) {
+        if (entry.pattern) this.fallbacks.push(entry);
+        continue;
+      }
       const triggers = StringArrayCodec.safeParse(intent.trigger_words);
       if (!triggers.success) {
         cmdLogger.error({ intentId: intent.id }, 'Intent has invalid trigger_words JSON');
@@ -175,6 +202,11 @@ export class IntentMatcher {
       const result = extract(entry, input);
       if (result) results.push(result);
     }
+    if (!results.length)
+      for (const entry of this.fallbacks) {
+        const result = extract(entry, input);
+        if (result) results.push(result);
+      }
     if (results.length === 1) return { kind: 'matched', strategy: 'pattern', result: results[0]! };
     return {
       kind: 'abstain',

@@ -2,6 +2,7 @@
 import { normalize } from './normalizer.ts';
 import { additionalFamilies } from './seed-additional.ts';
 import { calendarFamilies } from './seed-calendar.ts';
+import { contextualFamilies } from './seed-contextual.ts';
 import { eventFamilies } from './seed-events.ts';
 import {
   COMMON_STRINGS,
@@ -11,6 +12,7 @@ import {
   type LanguageStrings,
 } from './seed-fragments.ts';
 import { legacyDisposition } from './seed-lineage.ts';
+import { naturalFamilies } from './seed-natural.ts';
 import { personalFamilies } from './seed-personal.ts';
 
 export type { LegacyDispositionEntry } from './seed-lineage.ts';
@@ -22,8 +24,10 @@ export const CANONICAL_NAMESPACE = 'basis.';
 const families: FamilyDefinition[] = [
   ...calendarFamilies,
   ...eventFamilies,
+  ...contextualFamilies,
   ...personalFamilies,
   ...additionalFamilies,
+  ...naturalFamilies,
 ];
 
 export interface CanonicalMetadata {

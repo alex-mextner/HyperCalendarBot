@@ -12,6 +12,7 @@ import {
 } from 'date-fns';
 import type { StepResults } from '../../database/repositories/workflow-session.repository.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import type { ReferenceContext } from './event-reference-store.ts';
 import { applyFilters, type FilterCall, parseFilterChain } from './filter-parser.ts';
 import { FORBIDDEN_WORKFLOW_KEYS, WORKFLOW_LIMITS, WorkflowInputError } from './workflow-input.ts';
 import type { I18nMap } from './workflow-schema.ts';
@@ -64,6 +65,10 @@ export interface UserContext {
   lastAddedEvent?: EventSummary;
   /** Most recently referenced event in this conversation. Available as {{last_mentioned_event.id}}, .title, .date, .time */
   lastMentionedEvent?: EventSummary;
+  /** Access-checked conversational references (reply target, last mention, last created, last list). */
+  references?: ReferenceContext;
+  /** The user's default event length, used to measure an event that has no end. */
+  defaultEventMinutes?: number;
   /** True when the message was sent from a group/supergroup chat. */
   groupIsGroup?: boolean;
   /** Telegram chat ID of the group, if applicable. Available as {{group.chat_id}}. */

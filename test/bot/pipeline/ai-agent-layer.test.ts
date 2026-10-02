@@ -114,7 +114,7 @@ describe('createAiAgentLayer', () => {
     expect(callArgs[2][0]).toMatchObject({ success: true });
   });
 
-  test('IntentLearner.analyze does not fire when there are no tool calls', async () => {
+  test('zero-tool replies are retained as scoped learning evidence', async () => {
     const analyzeFn = makeAnalyzeMock();
 
     const layer = createAiAgentLayer(makeDeps({ agent: makeAgent([]), intentLearner: makeIntentLearner(analyzeFn) }));
@@ -122,7 +122,7 @@ describe('createAiAgentLayer', () => {
     await layer(makeCtx(), 'hello');
     await Bun.sleep(10);
 
-    expect(analyzeFn).toHaveBeenCalledTimes(0);
+    expect(analyzeFn).toHaveBeenCalledTimes(1);
   });
 
   test('IntentLearner does not block AI response', async () => {

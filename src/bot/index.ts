@@ -1,3 +1,6 @@
+import type {IntentLearningService} from '../services/intent-learning/service.ts';
+import {learningCommand} from '../services/intent-learning/runtime.ts';
+import {EventReferenceStore} from '../services/intent/event-reference-store.ts';
 // src/bot/index.ts
 import { Bot, InlineKeyboard } from 'gramio';
 import { CB, RATE_LIMIT, t } from '../config/constants.ts';
@@ -106,6 +109,7 @@ export interface GoogleBotDeps {
 }
 
 export interface CreateBotOpts {
+  intentLearning?:IntentLearningService;
   googleDeps?: GoogleBotDeps;
   renderService?: RenderService;
   callQueue?: {
@@ -145,6 +149,7 @@ export interface CreateBotOpts {
 
 export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
   const {
+    intentLearning,
     googleDeps,
     renderService,
     callQueue,
@@ -216,6 +221,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const scopedStorage = createScopedSceneStorage(db);
 
   const intentRepo = new IntentRepository(db.db);
+  const eventReferenceStore=new EventReferenceStore(db.db);
   const feedbackRepo = new FeedbackRepository(db.db);
   const calendarProposalRepo = new CalendarProposalRepository(db.db);
   const conversationLogger = new ConversationLogger(db.chatHistory);
@@ -318,9 +324,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const intentLearnerDailyLimit = envConfig?.INTENT_LEARNER_DAILY_LIMIT ?? 100;
 
   const intentLearner =
-    botAdminId && !Number.isNaN(botAdminId) && !intentRepo.isManagedBasis()
+    botAdminId && !Number.isNaN(botAdminId) && (intentLearning || !intentRepo.isManagedBasis())
       ? new IntentLearner(intentRepo, {
           dailyLimit: intentLearnerDailyLimit,
+          ...(intentLearning ? {enqueue:(input)=>intentLearning.enqueue(input)} : {}),
           adminId: botAdminId,
           sendToAdmin: async (text, replyMarkup) => {
             await bot.api.sendMessage({
@@ -408,6 +415,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     intentRepo,
     intentExecutor,
     eventMentionStore: eventMentionStore,
+    eventReferenceStore,
+    intentLearning,
     feedbackRepo,
     workflowSessions: db.workflowSessions,
     adminEditSessions,
@@ -677,6 +686,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         userRepo: db.users,
       }),
     )
+    .command('intents',ctx=>intentLearning ? learningCommand(intentLearning,botAdminId)(ctx) : ctx.send('Обучение пока выключено.'))
+    .command('intent_review',ctx=>intentLearning ? learningCommand(intentLearning,botAdminId)(ctx) : undefined)
+    .command('intent_approve',ctx=>intentLearning ? learningCommand(intentLearning,botAdminId)(ctx) : undefined)
+    .command('intent_reject',ctx=>intentLearning ? learningCommand(intentLearning,botAdminId)(ctx) : undefined)
     .command('ping', (ctx) => handlePing(ctx))
     .command('help', (ctx) => handleHelp(ctx))
     .command('today', (ctx) =>
@@ -866,6 +879,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         },
         userRepo: db.users,
         intentDeps: {
+          intentLearning,
           intentRepo,
           intentMatcher: {
             reload: () => intentMatcher.load(intentRepo.getApproved()),

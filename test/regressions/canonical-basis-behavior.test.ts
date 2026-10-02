@@ -20,6 +20,8 @@ import type { AgentContext, ToolResult } from '../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../src/services/conversation-logger.ts';
 import { EventService } from '../../src/services/event/event-service.ts';
 import { HolidayService } from '../../src/services/holiday/holiday-service.ts';
+import type { ReferenceContext } from '../../src/services/intent/event-reference-store.ts';
+import { EVENT_TIME_STEP } from '../../src/services/intent/event-time.ts';
 import { IntentExecutor } from '../../src/services/intent/intent-executor.ts';
 import { IntentMatcher } from '../../src/services/intent/intent-matcher.ts';
 import { canonicalMetadata, seedIntents } from '../../src/services/intent/seed-catalog.ts';
@@ -110,12 +112,21 @@ function stubTools(overrides: { [tool: string]: (input: unknown) => ToolResult }
   return { calls, run };
 }
 
+/** A conversation where one event was just discussed, created and listed, so contextual rules have a target. */
+const REFERENCES: ReferenceContext = {
+  it: { status: 'one', event: STANDUP },
+  created: { status: 'one', event: STANDUP },
+  list: [STANDUP, STANDUP, STANDUP],
+};
+
 const userCtx = (extra: { group?: boolean; tz?: string } = {}) => ({
   timezone: extra.tz ?? 'Europe/Belgrade',
   language: 'en',
   userId: USER,
   groupIsGroup: extra.group ?? false,
   groupChatId: extra.group ? GROUP_CHAT : undefined,
+  defaultEventMinutes: 60,
+  references: REFERENCES,
 });
 
 const decide = (matcher: IntentMatcher, text: string) => matcher.explain(text);
@@ -151,7 +162,9 @@ async function answer(
 ) {
   const { result, tools } = first;
   const options = result.responseOptions ?? [];
-  const userAnswer = choice === 'yes' ? options[0]! : options[1]!;
+  // "No" is the explicit cancel option when one is offered (a bare-hour question offers two times first).
+  const cancel = options.find((option) => option === 'Cancel' || option === 'Отмена');
+  const userAnswer = choice === 'yes' ? options[0]! : (cancel ?? options[1]!);
   return new IntentExecutor().run(workflowFor(name), captures, userCtx(), tools.run, {
     stepIndex: result.suspendedAt!,
     stepResults: result.stepResults!,
@@ -184,7 +197,7 @@ describe('static contract of all rules', () => {
       expect(validateWorkflow(parsed.data, seed.pattern), seed.canonical_name).toEqual([]);
       const steps = 'steps' in parsed.data ? parsed.data.steps : [];
       for (const step of steps)
-        if (step.call && step.call !== 'ask_user')
+        if (step.call && step.call !== 'ask_user' && step.call !== EVENT_TIME_STEP)
           expect(Object.hasOwn(toolSchemas, step.call), `${seed.canonical_name}: ${step.call}`).toBe(true);
     }
   });

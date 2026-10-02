@@ -454,7 +454,7 @@ const timeNow: FamilyDefinition = {
   title: 'Current time here or in a city',
   category: 'utility',
   risk: 'read',
-  pattern: String.raw`^(?:время|который\s+час|сколько\s+(?:сейчас\s+)?времени|what\s+time\s+is\s+it|current\s+time)(?:\s+(?:в|in)\s+([A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё\s.'-]{1,40}))?$`,
+  pattern: String.raw`^(?:время\s+сейчас|который\s+час|сколько\s+(?:сейчас\s+)?времени|what\s+time\s+is\s+it|current\s+time)(?:\s+(?:в|in)\s+([A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё\s.'-]{1,40}))?$`,
   triggers: ['час', 'времени', 'время', 'time'],
   bindings: { city: { type: 'text', from: '{{$1|default("")}}', max: 40, optional: true, default: '' } },
   steps: [

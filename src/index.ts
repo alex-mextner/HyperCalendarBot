@@ -1,3 +1,6 @@
+import {startLearningNotifier} from './services/intent-learning/notifier.ts';
+import { IntentRepository } from './database/repositories/intent.repository.ts';
+import { IntentLearningService } from './services/intent-learning/service.ts';
 import { createNotificationSender } from './services/notification/worker.ts';
 import { bootstrapServiceSession } from './services/telegram-session/service-session-bootstrap.ts';
 import { formatSessionLoss } from './services/telegram-session/session-loss.ts';
@@ -49,6 +52,13 @@ process.on('unhandledRejection', (reason: unknown) => {
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_PATH);
+let reloadLearnedIntents=()=>{};
+const intentLearning=config.INTENT_LEARNING_ENABLED ? IntentLearningService.open({
+  mainDb:db.db,adminId:config.BOT_ADMIN_ID,
+  limits:{startsPerHour:config.INTENT_LEARNING_STARTS_PER_HOUR ?? 12,startsPerDay:config.INTENT_LEARNING_STARTS_PER_DAY ?? 48},
+  onRegistryChanged:()=>reloadLearnedIntents(),
+}) : undefined;
+
 
 if (config.ADMIN_ALERT_TOKEN) {
   pushCrashAlert = (msg) => db.alerts.push(msg, 'bot-crash');
@@ -139,6 +149,7 @@ const webServerDeps: WebServerDeps = {
   botStarted: false,
   alertRepo: db.alerts,
   adminAlertToken: config.ADMIN_ALERT_TOKEN,
+  intentLearning:intentLearning ? {service:intentLearning,workerToken:config.INTENT_WORKER_TOKEN,adminToken:config.INTENT_ADMIN_TOKEN,alertToken:config.ADMIN_ALERT_TOKEN} : undefined,
   // The cron watchdog polls /ready every two minutes, and this is what lets it
   // see a total provider outage. Process liveness alone never showed one.
   aiChainDown: isAiChainDown,
@@ -1032,6 +1043,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       toolSchemaUserIds: config.AI_TOOL_SCHEMA_USER_IDS,
     },
     {
+      intentLearning,
       googleDeps,
       renderService,
       callQueue,
@@ -1062,6 +1074,8 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
     },
   );
 
+reloadLearnedIntents=()=>intentMatcher.load(new IntentRepository(db.db).getApproved());
+
 // Patch bot ref to use real bot API
 botRef.sendMessage = async (telegramId, text, parseMode, replyMarkup) => {
   const msg = await bot.api.sendMessage({
@@ -1075,6 +1089,10 @@ botRef.sendMessage = async (telegramId, text, parseMode, replyMarkup) => {
   }
   return { message_id: msg.message_id };
 };
+const learningNotifier=intentLearning && config.BOT_ADMIN_ID ? startLearningNotifier(
+  intentLearning,text=>botRef.sendMessage(config.BOT_ADMIN_ID!,text),()=>webServerDeps.botStarted===true,
+  ()=>botLogger.warn('Intent-learning notification delivery deferred'),
+) : undefined;
 botRef.editMessage = async (chatId, messageId, text, parseMode) => {
   await bot.api.editMessageText({
     chat_id: chatId,
@@ -1334,6 +1352,7 @@ bot.onStart(async ({ info }) => {
 
 // Graceful shutdown
 async function shutdown(): Promise<void> {
+  await learningNotifier?.close();
   await bot.stop();
   if (aiMessagesQueueCleanup) await aiMessagesQueueCleanup.close();
   if (eventCheckerQueueCleanup) await eventCheckerQueueCleanup.close();
@@ -1346,6 +1365,7 @@ async function shutdown(): Promise<void> {
   if (googleRedisClient) googleRedisClient.close();
   summarizerRedis.close();
   if (webServerHandle) webServerHandle.stop();
+  intentLearning?.close();
   db.close();
 }
 

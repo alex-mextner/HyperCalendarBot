@@ -20,6 +20,12 @@ export const canonicalTitles: { [name: string]: string } = {
   'basis.event.delete': 'Удалить одно событие после подтверждения',
   'basis.event.snooze': 'Сдвинуть событие позже на минуты или часы',
   'basis.event.hide': 'Сделать событие приватным',
+  'basis.event.delete_context': 'Удалить обсуждаемое, только что созданное или выбранное из списка событие',
+  'basis.event.show_context': 'Показать обсуждаемое или выбранное из списка событие',
+  'basis.event.move_context': 'Перенести событие на другой день, сохранив время и длительность',
+  'basis.event.move_context_hour': 'Перенести событие на час без утра/вечера — с уточнением',
+  'basis.event.shift_context': 'Сдвинуть событие раньше или позже на минуты или часы',
+  'basis.event.resize_context': 'Сделать событие длиннее или короче',
   'basis.reminder.set': 'Напомнить до события',
   'basis.reminder.list': 'Показать напоминания события',
   'basis.reminder.clear': 'Убрать напоминания одного события',
@@ -54,6 +60,9 @@ export const canonicalTitles: { [name: string]: string } = {
   'basis.telegram.status': 'Статус подключённого личного Telegram',
   'basis.call.start': 'Позвонить на запросившую учётную запись',
   'basis.reminder.after': 'Напоминание через заданное время',
+  'basis.event.create_natural': 'Создать событие из краткой записи: название, день и время в любом порядке',
+  'basis.event.cancel_by_title': 'Удалить одно событие по короткому названию',
+  'basis.settings.timezone_show': 'Какой часовой пояс установлен',
 };
 
 /** Category headings in display order; a category present in the seed but missing here fails the build. */
@@ -101,6 +110,9 @@ export const bindingTypeTitles: { [type: string]: string } = {
   timezone: 'название часового пояса IANA',
   eventref: 'ссылка на одно событие: номер или точное название',
   recipient: 'один адресат: числовой ID или проверяемый username',
+  event_request:
+    'одна краткая запись события: название, день, время, необязательные конец и явный часовой пояс; неоднозначный час уточняется',
+  cancel_target: 'одно событие по короткому названию из просьбы об отмене',
 };
 
 /** Public title each earlier rule carried. Every key in the lineage table has exactly one entry. */

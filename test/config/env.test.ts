@@ -38,6 +38,22 @@ describe('loadConfig', () => {
     setAiVars();
   });
 
+  test('CC learning is explicitly enabled with separated worker/admin secrets and bounded rates', () => {
+    delete process.env.INTENT_LEARNING_ENABLED;
+    expect(loadConfig().INTENT_LEARNING_ENABLED).toBe(false);
+    process.env.INTENT_LEARNING_ENABLED = 'true';
+    delete process.env.INTENT_WORKER_TOKEN;
+    delete process.env.INTENT_ADMIN_TOKEN;
+    expect(() => loadConfig()).toThrow('INTENT_WORKER_TOKEN');
+    process.env.INTENT_WORKER_TOKEN = `synthetic-worker-${'w'.repeat(32)}`;
+    process.env.INTENT_ADMIN_TOKEN = process.env.INTENT_WORKER_TOKEN;
+    expect(() => loadConfig()).toThrow('distinct');
+    process.env.INTENT_ADMIN_TOKEN = `synthetic-admin-${'a'.repeat(32)}`;
+    expect(loadConfig().INTENT_LEARNING_STARTS_PER_HOUR).toBe(12);
+    process.env.INTENT_LEARNING_STARTS_PER_HOUR = '0';
+    expect(() => loadConfig()).toThrow('INTENT_LEARNING_STARTS_PER_HOUR');
+  });
+
   test('tool schemas remain full unless lazy rollout is explicitly selected', () => {
     delete process.env.AI_TOOL_SCHEMA_MODE;
     expect(loadConfig().AI_TOOL_SCHEMA_MODE).toBe('full');

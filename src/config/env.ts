@@ -107,6 +107,12 @@ export interface EnvConfig {
   AI_FAST_CHAIN: ChainOrder;
   BOT_ADMIN_ID?: number;
   INTENT_LEARNER_DAILY_LIMIT: number;
+  INTENT_LEARNING_ENABLED?: boolean;
+  INTENT_WORKER_TOKEN?: string;
+  INTENT_ADMIN_TOKEN?: string;
+  INTENT_LEARNING_STARTS_PER_HOUR?: number;
+  INTENT_LEARNING_STARTS_PER_DAY?: number;
+
   INLINE_BOT_TOKEN?: string;
   INLINE_BOT_USERNAME?: string;
   SILERO_PYTHON_PATH?: string;
@@ -125,8 +131,36 @@ function requireEnv(name: string): string {
   return value;
 }
 
+function learningRate(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const value = Number(raw);
+  if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(value) || value < 1 || value > 1000)
+    throw new Error(`${name} must be an integer from 1 to 1000`);
+  return value;
+}
+
 export function loadConfig(): EnvConfig {
   const BOT_TOKEN = requireEnv('BOT_TOKEN');
+  const rawLearning = process.env.INTENT_LEARNING_ENABLED ?? 'false';
+  if (!['true', 'false', '1', '0'].includes(rawLearning))
+    throw new Error('INTENT_LEARNING_ENABLED must be true or false');
+  const learningEnabled = rawLearning === 'true' || rawLearning === '1';
+  const workerToken = process.env.INTENT_WORKER_TOKEN;
+  const intentAdminToken = process.env.INTENT_ADMIN_TOKEN;
+  if (learningEnabled) {
+    if (!workerToken || workerToken.length < 32)
+      throw new Error('INTENT_WORKER_TOKEN must contain at least 32 characters');
+    if (!intentAdminToken || intentAdminToken.length < 32)
+      throw new Error('INTENT_ADMIN_TOKEN must contain at least 32 characters');
+    if (
+      workerToken === intentAdminToken ||
+      workerToken === process.env.ADMIN_ALERT_TOKEN ||
+      intentAdminToken === process.env.ADMIN_ALERT_TOKEN
+    )
+      throw new Error('Intent worker, approval and alert credentials must be distinct');
+  }
+
   const toolSchemaMode = process.env.AI_TOOL_SCHEMA_MODE ?? 'full';
   if (toolSchemaMode !== 'full' && toolSchemaMode !== 'lazy')
     throw new Error('AI_TOOL_SCHEMA_MODE must be full or lazy');
@@ -193,6 +227,11 @@ export function loadConfig(): EnvConfig {
 
   return {
     BOT_TOKEN,
+    INTENT_LEARNING_ENABLED: learningEnabled,
+    INTENT_WORKER_TOKEN: workerToken,
+    INTENT_ADMIN_TOKEN: intentAdminToken,
+    INTENT_LEARNING_STARTS_PER_HOUR: learningRate('INTENT_LEARNING_STARTS_PER_HOUR', 12),
+    INTENT_LEARNING_STARTS_PER_DAY: learningRate('INTENT_LEARNING_STARTS_PER_DAY', 48),
     DATABASE_PATH: process.env.DATABASE_PATH || './data/calendar.db',
     NODE_ENV: (process.env.NODE_ENV as EnvConfig['NODE_ENV']) || 'development',
 

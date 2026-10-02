@@ -28,8 +28,10 @@ const retire = (oldKey: string, reason: string): LegacyDispositionEntry => ({
 });
 
 const SAME_FAMILY = 'Same request, now one parameterized rule with typed day/period parsing.';
-const NO_LAST_MENTIONED =
-  'Resolved its target from the last mentioned event, which can select the wrong event; a title or number is now required.';
+const CONTEXT_REFERENCE =
+  'The conversational reference is kept per actor, chat and topic from tool evidence, re-read with an access check, named in a confirmation and read again before the write; several candidates are listed, never guessed.';
+const TIME_ARITHMETIC =
+  'New times are computed from the re-read event with bounded, clock-change-safe arithmetic, shown in a confirmation and written with update_event.';
 const NO_FAKE_REMINDER =
   'There is no free-standing reminder tool; the old recipe faked one with an extra event. Left to the assistant to clarify.';
 const NO_SHARING =
@@ -83,8 +85,8 @@ export const legacyDisposition: LegacyDispositionEntry[] = [
   retire('clear_today_events', 'Bulk deletion; no rule may delete more than one event per confirmed request.'),
   retire('cancel_event_by_time_today', 'A time can match several events; selection by clock time is ambiguous.'),
   retire('cancel_event_by_time_tomorrow', 'A time can match several events; selection by clock time is ambiguous.'),
-  retire('delete_last_created_event', NO_LAST_MENTIONED),
-  retire('cancel_referenced_event', NO_LAST_MENTIONED),
+  rewrite('delete_last_created_event', 'basis.event.delete_context', CONTEXT_REFERENCE),
+  rewrite('cancel_referenced_event', 'basis.event.delete_context', CONTEXT_REFERENCE),
   retire(
     'decline_event_invitation',
     'The delete tool turns deletion of a non-owned event into declining attendance, so the recipe misnamed one action as the other.',
@@ -98,18 +100,9 @@ export const legacyDisposition: LegacyDispositionEntry[] = [
     'Adding a participant is an invitation; it now needs an exact @username or numeric ID, a chosen event and confirmation, and the tool verifies the recipient.',
   ),
   retire('remove_own_participation', 'Same misnamed decline-as-delete action as decline_event_invitation.'),
-  retire(
-    'extend_event_duration_minutes',
-    'Needs read-modify-write arithmetic on the end time; no tool changes duration relatively.',
-  ),
-  retire(
-    'extend_event_duration_hours',
-    'Needs read-modify-write arithmetic on the end time; no tool changes duration relatively.',
-  ),
-  retire(
-    'shorten_event_duration_minutes',
-    'Needs read-modify-write arithmetic on the end time; no tool changes duration relatively.',
-  ),
+  rewrite('extend_event_duration_minutes', 'basis.event.resize_context', TIME_ARITHMETIC),
+  rewrite('extend_event_duration_hours', 'basis.event.resize_context', TIME_ARITHMETIC),
+  rewrite('shorten_event_duration_minutes', 'basis.event.resize_context', TIME_ARITHMETIC),
 
   // ─── reading the calendar ─────────────────────────────────────────────────
   merge('get_upcoming_next', 'basis.calendar.upcoming', 'Same request with an optional count.'),
@@ -238,20 +231,11 @@ export const legacyDisposition: LegacyDispositionEntry[] = [
   // ─── shifting events ──────────────────────────────────────────────────────
   rewrite('snooze_event_minutes', 'basis.event.snooze', 'Units are now one rule; the event is named and confirmed.'),
   rewrite('snooze_event_hours', 'basis.event.snooze', 'Units are now one rule; the event is named and confirmed.'),
-  retire('snooze_event_default', NO_LAST_MENTIONED),
-  retire(
-    'move_event_earlier_minutes',
-    'The snooze tool only moves later and does not check the past; an explicit new time is the safe way.',
-  ),
-  retire(
-    'move_event_earlier_hours',
-    'The snooze tool only moves later and does not check the past; an explicit new time is the safe way.',
-  ),
-  retire('move_event_earlier_default', NO_LAST_MENTIONED),
-  retire(
-    'move_event_to_tomorrow',
-    'Keeping the old time of day needs read-modify-write arithmetic; give the new day and time instead.',
-  ),
+  rewrite('snooze_event_default', 'basis.event.shift_context', CONTEXT_REFERENCE),
+  rewrite('move_event_earlier_minutes', 'basis.event.shift_context', TIME_ARITHMETIC),
+  rewrite('move_event_earlier_hours', 'basis.event.shift_context', TIME_ARITHMETIC),
+  rewrite('move_event_earlier_default', 'basis.event.shift_context', CONTEXT_REFERENCE),
+  rewrite('move_event_to_tomorrow', 'basis.event.move_context', TIME_ARITHMETIC),
   retire(
     'move_event_to_next_week',
     'Keeping the old day and time needs read-modify-write arithmetic; give the new day and time instead.',
