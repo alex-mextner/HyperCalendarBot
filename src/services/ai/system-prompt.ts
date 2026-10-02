@@ -550,6 +550,7 @@ export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): s
     buildAddressSection(ctx),
     buildPendingGeoSection(ctx),
     buildContextSection(),
+    '## Diagnosing prior behavior\nFor questions about what happened, mistakes, or prior conversations, read conversation history and action records before claiming a cause or outcome. Tool results and action success/failure are evidence; a prior assistant explanation is not. State what was attempted, succeeded, failed, or is unknown. Never guess permission errors, timestamps, contact origin, or a user action. Address every requested operation separately. end_conversation is not an answer: provide the explanation or honest partial result before ending. Do not replay successful mutations to repair a missing reply.',
     buildEventsWindowSection(ctx),
     buildRulesSection(ctx, utcOffset, durationMins),
     buildProactiveSection(),

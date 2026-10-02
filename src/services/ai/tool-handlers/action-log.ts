@@ -26,12 +26,15 @@ export function handleGetActionLog(ctx: AgentContext, input: GetActionLogInput):
     return { success: false, error: 'Action log not available' };
   }
 
-  const limit = input.limit ?? 30;
+  if (ctx.isGroup && (!Number.isSafeInteger(ctx.groupChatId) || (ctx.groupChatId ?? 0) >= 0))
+    return { success: false, error: 'Group context unavailable' };
+  const limit = Number.isSafeInteger(input.limit) ? Math.max(1, Math.min(input.limit ?? 30, 100)) : 30;
   const after = input.after ? toSqliteDateTime(input.after) : undefined;
   const before = input.before ? toSqliteDateTime(input.before) : undefined;
 
   const entries = ctx.actionLogRepo.query({
     user_id: ctx.user.telegram_id,
+    chat_id: ctx.isGroup ? ctx.groupChatId : undefined,
     target_event_id: input.event_id,
     action_type: input.action_type,
     action_name: input.action_name,
@@ -65,4 +68,4 @@ export function handleGetActionLog(ctx: AgentContext, input: GetActionLogInput):
 
   return { success: true, output: lines.join('\n\n') };
 }
-handleGetActionLog.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
+handleGetActionLog.meta = { readonly: true, skipActionLog: true, skipPersist: true } satisfies ToolHandlerMeta;

@@ -50,6 +50,38 @@ describe('handleGetActionLog', () => {
     };
   });
 
+  test('group diagnostics never expose private action summaries', () => {
+    actionLogRepo.insert({
+      user_id: USER_ID,
+      chat_id: USER_ID,
+      action_type: 'ai_tool',
+      action_name: 'send_invitation',
+      input_summary: 'PRIVATE-CANARY',
+    });
+    actionLogRepo.insert({
+      user_id: USER_ID,
+      chat_id: -10042,
+      action_type: 'ai_tool',
+      action_name: 'create_event',
+      input_summary: 'GROUP-ONLY',
+    });
+    ctx.isGroup = true;
+    ctx.groupChatId = -10042;
+    const result = handleGetActionLog(ctx, {});
+    expect(result.output).not.toContain('PRIVATE-CANARY');
+    expect(result.output).toContain('GROUP-ONLY');
+  });
+  test('positive private-chat ID cannot masquerade as a group diagnostic scope', () => {
+    ctx.isGroup = true;
+    ctx.groupChatId = USER_ID;
+    expect(handleGetActionLog(ctx, {}).success).toBe(false);
+  });
+  test('group diagnostics without a verified chat fail closed', () => {
+    ctx.isGroup = true;
+    ctx.groupChatId = undefined;
+    expect(handleGetActionLog(ctx, {}).success).toBe(false);
+  });
+
   test('returns not-found message when log is empty', () => {
     const result = handleGetActionLog(ctx, {});
     expect(result.success).toBe(true);

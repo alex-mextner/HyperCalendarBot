@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type OpenAI from 'openai';
 import { EN_AGENT_ERROR_PHRASES, RU_AGENT_ERROR_PHRASES } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
@@ -497,6 +497,488 @@ describe('CalendarBotAgent.run()', () => {
     expect(parsed.content).toBe('Group response');
   });
 
+  test.each([
+    false,
+    true,
+  ])('waiting for user closes deferred tool messages without executing them (retry=%s)', async (retry) => {
+    sender.sendButtons = mock(async () => ({ message_id: 44 }));
+    sender.deleteMessage = mock(async () => {});
+    let rounds = 0;
+    const start = new Date(Date.now() + 86400000).toISOString();
+    const impl = async (opts: StreamRoundOptions, cbs: StreamCallbacks = {}): Promise<StreamRoundResult> => {
+      if (isValidatorCall(opts))
+        return {
+          providerUsed: 'mock',
+          text: 'REJECT: unsupported answer',
+          toolCalls: [],
+          finishReason: 'stop',
+          assistantMessage: { role: 'assistant', content: 'REJECT: unsupported answer' },
+        };
+      if (retry && rounds++ === 0) {
+        cbs.onTextDelta?.('A wrong unsupported answer.');
+        return {
+          providerUsed: 'mock',
+          text: 'A wrong unsupported answer.',
+          toolCalls: [],
+          finishReason: 'stop',
+          assistantMessage: { role: 'assistant', content: 'A wrong unsupported answer.' },
+        };
+      }
+      const toolCalls = [
+        {
+          id: 'handoff',
+          name: 'ask_user',
+          arguments: JSON.stringify({ question: 'Confirm?', options: ['Yes', 'No'] }),
+        },
+        {
+          id: 'deferred',
+          name: 'create_event',
+          arguments: JSON.stringify({ title: 'Must not exist', start_at: start }),
+        },
+      ];
+      return {
+        providerUsed: 'mock',
+        text: '',
+        toolCalls,
+        finishReason: 'tool_calls',
+        assistantMessage: {
+          role: 'assistant',
+          content: null,
+          tool_calls: toolCalls.map((x) => ({
+            id: x.id,
+            type: 'function',
+            function: { name: x.name, arguments: x.arguments },
+          })),
+        },
+      };
+    };
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    const result = await agent.run(ctx);
+    expect(
+      ctx.eventService.getEventsInRange(
+        USER_ID,
+        new Date(Date.now()).toISOString(),
+        new Date(Date.now() + 172800000).toISOString(),
+      ),
+    ).toHaveLength(0);
+    expect(result.toolCalls.map((x) => x.name)).not.toContain('create_event');
+    const { messages } = await agent.buildMessages(ctx, ctx.chatHistory.getRecent(USER_ID, 30));
+    const deferred = messages.find((x) => x.role === 'tool' && x.tool_call_id === 'deferred');
+    expect(deferred?.content).toContain('NOT_EXECUTED');
+    expect(result.responseText).not.toContain('...');
+    expect(sender.sendButtons).toHaveBeenCalledTimes(1);
+  });
+
+  test('validator retry preserves batched completion text and later mutation', async () => {
+    let rounds = 0;
+    const start = new Date(Date.now() + 86400000).toISOString();
+    const impl = async (opts: StreamRoundOptions, cbs: StreamCallbacks = {}): Promise<StreamRoundResult> => {
+      if (isValidatorCall(opts))
+        return {
+          providerUsed: 'mock',
+          text: 'REJECT: unsupported answer',
+          toolCalls: [],
+          finishReason: 'stop',
+          assistantMessage: { role: 'assistant', content: 'REJECT: unsupported answer' },
+        };
+      if (rounds++ === 0) {
+        cbs.onTextDelta?.('Unsupported answer.');
+        return {
+          providerUsed: 'mock',
+          text: 'Unsupported answer.',
+          toolCalls: [],
+          finishReason: 'stop',
+          assistantMessage: { role: 'assistant', content: 'Unsupported answer.' },
+        };
+      }
+      cbs.onTextDelta?.('Created the requested event.');
+      const toolCalls = [
+        { id: 'end', name: 'end_conversation', arguments: '{}' },
+        { id: 'create', name: 'create_event', arguments: JSON.stringify({ title: 'Retry-created', start_at: start }) },
+      ];
+      return {
+        providerUsed: 'mock',
+        text: 'Created the requested event.',
+        toolCalls,
+        finishReason: 'tool_calls',
+        assistantMessage: {
+          role: 'assistant',
+          content: 'Created the requested event.',
+          tool_calls: toolCalls.map((x) => ({
+            id: x.id,
+            type: 'function',
+            function: { name: x.name, arguments: x.arguments },
+          })),
+        },
+      };
+    };
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    const result = await agent.run(ctx);
+    expect(
+      ctx.eventService.getEventsInRange(
+        USER_ID,
+        new Date(Date.now()).toISOString(),
+        new Date(Date.now() + 172800000).toISOString(),
+      ),
+    ).toHaveLength(1);
+    expect(result.responseText).toContain('Created the requested event.');
+  });
+
+  test('end_conversation does not discard a final answer or a later action in the same batch', async () => {
+    const start = new Date(Date.now() + 86400000).toISOString();
+    const impl = async (opts: StreamRoundOptions, cbs: StreamCallbacks = {}): Promise<StreamRoundResult> => {
+      expect(opts.messages.length).toBeGreaterThan(0);
+      cbs.onTextDelta?.('Created the requested event.');
+      const toolCalls = [
+        { id: 'end-first', name: 'end_conversation', arguments: '{}' },
+        {
+          id: 'create-second',
+          name: 'create_event',
+          arguments: JSON.stringify({ title: 'Batched synthetic event', start_at: start }),
+        },
+      ];
+      return {
+        text: 'Created the requested event.',
+        toolCalls,
+        finishReason: 'tool_calls',
+        providerUsed: 'scripted',
+        assistantMessage: {
+          role: 'assistant',
+          content: 'Created the requested event.',
+          tool_calls: toolCalls.map((call) => ({
+            id: call.id,
+            type: 'function',
+            function: { name: call.name, arguments: call.arguments },
+          })),
+        },
+      };
+    };
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    const result = await agent.run(ctx);
+    expect(result.toolCalls.map((call) => call.name)).toEqual(['end_conversation', 'create_event']);
+    expect(result.toolResults).toHaveLength(2);
+    expect(result.toolResults.every((r) => r.success)).toBe(true);
+    expect(
+      ctx.eventService.getEventsInRange(
+        USER_ID,
+        new Date().toISOString(),
+        new Date(Date.now() + 2 * 86400000).toISOString(),
+      ),
+    ).toHaveLength(1);
+    expect(result.responseText).toContain('Created the requested event.');
+    expect(result.responseText).not.toContain('...');
+  });
+
+  test('a delivered ask_user question is not followed by a success-looking ellipsis', async () => {
+    const { impl } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'ask-before-end',
+        name: 'ask_user',
+        input: { question: 'Which event?', options: ['A', 'B'] },
+      },
+    ]);
+    sender.sendButtons = mock(async () => ({ message_id: 99 }));
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    const result = await agent.run(ctx);
+    expect(sender.sendButtons).toHaveBeenCalledTimes(1);
+    expect(result.responseText).not.toContain('...');
+    expect(result.toolCalls.map((call) => call.name)).toEqual(['ask_user']);
+  });
+
+  for (const retry of [false, true]) {
+    test(`empty end recovery retains paired batch outcomes without repeated writes (retry=${retry})`, async () => {
+      const start = new Date(Date.now() + 86400000).toISOString();
+      const recoveryCalls: StreamRoundOptions[] = [];
+      let rounds = 0;
+      ctx.messageText = 'Create Recovery meeting and tell me its time';
+      ctx.userRepo.create({ telegram_id: 999, timezone: 'UTC', language: 'en' });
+      ctx.chatHistory.save(999, 'user', 'OTHER_USER_PRIVATE_SENTINEL');
+      const scripted = makeStreamImpl([
+        ...(retry ? [{ kind: 'text' as const, text: 'Unsupported answer.' }] : []),
+        { kind: 'tool', callId: 'end', name: 'end_conversation', input: {} },
+        { kind: 'text', text: 'Recovery meeting was created for tomorrow.' },
+      ]);
+      const impl = async (opts: StreamRoundOptions, cbs: StreamCallbacks = {}): Promise<StreamRoundResult> => {
+        if (isValidatorCall(opts))
+          return {
+            text: 'REJECT: unsupported',
+            toolCalls: [],
+            finishReason: 'stop',
+            providerUsed: 'mock',
+            assistantMessage: { role: 'assistant', content: 'REJECT: unsupported' },
+          };
+        const round = rounds++;
+        if (round > (retry ? 1 : 0)) recoveryCalls.push(opts);
+        const result = await scripted.impl(opts, cbs);
+        if (result.toolCalls.length) {
+          const call = {
+            id: 'write',
+            name: 'create_event',
+            arguments: JSON.stringify({ title: 'Recovery meeting', start_at: start }),
+          };
+          result.toolCalls.push(call);
+          if (result.assistantMessage.role === 'assistant')
+            result.assistantMessage.tool_calls?.push({
+              id: call.id,
+              type: 'function',
+              function: { name: call.name, arguments: call.arguments },
+            });
+        }
+        return result;
+      };
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+      expect(result.responseText).toBe('Recovery meeting was created for tomorrow.');
+      expect(recoveryCalls).toHaveLength(1);
+      const recovery = recoveryCalls[0]!;
+      expect(recovery.fast).toBe(false);
+      expect(recovery.tools ?? []).toHaveLength(0);
+      expect(recovery.maxTokens).toBeLessThanOrEqual(1024);
+      expect(recovery.signal).toBeDefined();
+      expect(recovery.userId).toBe(USER_ID);
+      expect(JSON.stringify(recovery.messages)).toContain(ctx.messageText);
+      expect(JSON.stringify(recovery.messages)).not.toContain('OTHER_USER_PRIVATE_SENTINEL');
+      const paired = recovery.messages.filter((m) => m.role === 'tool');
+      expect(paired.map((m) => m.role === 'tool' && m.tool_call_id)).toEqual(['end', 'write']);
+      expect(JSON.stringify(paired)).toContain('Recovery meeting');
+      expect(result.toolCalls.map((c) => c.name)).toEqual(['end_conversation', 'create_event']);
+      expect(
+        ctx.eventService.getEventsInRange(
+          USER_ID,
+          new Date().toISOString(),
+          new Date(Date.now() + 172800000).toISOString(),
+        ),
+      ).toHaveLength(1);
+      expect(
+        ctx.chatHistory
+          .getRecent(USER_ID)
+          .some((m) => m.role === 'assistant' && m.content.includes('Recovery meeting was created')),
+      ).toBe(true);
+    });
+  }
+
+  for (const invalid of ['', '...', '…', '. . .', '[SKIP]', 'Done [SKIP]']) {
+    test(`completion recovery rejects ${JSON.stringify(invalid)} and exhausts two attempts`, async () => {
+      const { impl, calls } = makeStreamImpl([
+        { kind: 'tool', callId: 'end', name: 'end_conversation', input: {} },
+        { kind: 'text', text: invalid },
+        { kind: 'text', text: invalid },
+      ]);
+      ctx.retryEnqueue = mock(async () => {});
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+      expect(result.responseText).toContain('I did not complete the explanation');
+      expect(calls).toHaveLength(3);
+      expect(ctx.retryEnqueue).not.toHaveBeenCalled();
+    });
+  }
+
+  test('completion recovery rejects unsolicited writes and retries text without executing them', async () => {
+    const { impl, calls } = makeStreamImpl([
+      { kind: 'tool', callId: 'end', name: 'end_conversation', input: {} },
+      {
+        kind: 'tool',
+        callId: 'forbidden',
+        name: 'create_event',
+        input: { title: 'Forbidden recovery write', start_at: new Date(Date.now() + 86400000).toISOString() },
+      },
+      { kind: 'text', text: 'No event was created.' },
+    ]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(result.responseText).toBe('No event was created.');
+    expect(calls).toHaveLength(3);
+    expect(result.toolCalls.map((c) => c.name)).toEqual(['end_conversation']);
+    expect(
+      ctx.eventService.getEventsInRange(
+        USER_ID,
+        new Date().toISOString(),
+        new Date(Date.now() + 172800000).toISOString(),
+      ),
+    ).toHaveLength(0);
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('Forbidden recovery write');
+  });
+
+  for (const abort of [false, true]) {
+    test(`completion recovery handles failed calls (abort=${abort})`, async () => {
+      const { impl, calls } = makeStreamImpl([
+        { kind: 'tool', callId: 'end', name: 'end_conversation', input: {} },
+        {
+          kind: 'error',
+          error: abort ? new DOMException('Cancelled', 'AbortError') : new Error('Synthetic provider failure'),
+        },
+        { kind: 'text', text: 'Recovered explanation.' },
+      ]);
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+      expect(calls).toHaveLength(abort ? 2 : 3);
+      expect(result.responseText).toContain(abort ? 'I did not complete' : 'Recovered explanation.');
+    });
+  }
+
+  for (const mode of ['implicit-group', 'supplement']) {
+    test(`empty end preserves silence without recovery in ${mode}`, async () => {
+      ctx.isGroup = mode === 'implicit-group';
+      ctx.wasExplicitInvocation = false;
+      ctx.supplementMode = mode === 'supplement';
+      const { impl, calls } = makeStreamImpl([{ kind: 'tool', callId: 'end', name: 'end_conversation', input: {} }]);
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+      expect(result.responseText).toBe('');
+      expect(calls).toHaveLength(1);
+    });
+  }
+
+  test('completion recovery rejects truncated output and assistant-embedded tool calls', async () => {
+    const scripted = makeStreamImpl([
+      { kind: 'tool', callId: 'end', name: 'end_conversation', input: {} },
+      { kind: 'text', text: 'Truncated answer' },
+      { kind: 'text', text: 'Pretended completion' },
+    ]);
+    let rounds = 0;
+    const impl = async (opts: StreamRoundOptions, cbs?: StreamCallbacks) => {
+      const result = await scripted.impl(opts, cbs);
+      if (++rounds === 2) result.finishReason = 'length';
+      if (rounds === 3)
+        result.assistantMessage = {
+          role: 'assistant',
+          content: result.text,
+          tool_calls: [{ id: 'hidden', type: 'function', function: { name: 'create_event', arguments: '{}' } }],
+        };
+      return result;
+    };
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(result.responseText).toContain('I did not complete');
+    expect(result.toolCalls).toHaveLength(1);
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('Pretended completion');
+  });
+
+  test('completion recovery caps context without dropping paired outcomes', async () => {
+    ctx.messageText = 'x'.repeat(64001);
+    const { impl, calls } = makeStreamImpl([{ kind: 'tool', callId: 'end', name: 'end_conversation', input: {} }]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(calls).toHaveLength(1);
+    expect(result.responseText).toContain('I did not complete');
+  });
+
+  for (const retry of [false, true]) {
+    for (const waitTool of ['ask_user', 'pick_users']) {
+      test(`end before ${waitTool} preserves real wait and deferred pairing (retry=${retry})`, async () => {
+        sender.sendButtons = mock(async () => ({ message_id: 99 }));
+        sender.sendUserPicker = mock(async () => ({ message_id: 99 }));
+        const scripted = makeStreamImpl([
+          ...(retry ? [{ kind: 'text' as const, text: 'Unsupported answer.' }] : []),
+          { kind: 'tool', callId: 'end', name: 'end_conversation', input: {} },
+        ]);
+        const impl = async (opts: StreamRoundOptions, cbs?: StreamCallbacks) => {
+          if (isValidatorCall(opts))
+            return {
+              text: 'REJECT: unsupported',
+              toolCalls: [],
+              finishReason: 'stop',
+              providerUsed: 'mock',
+              assistantMessage: { role: 'assistant' as const, content: 'REJECT: unsupported' },
+            };
+          const result = await scripted.impl(opts, cbs);
+          if (result.toolCalls.length) {
+            const calls = [
+              {
+                id: 'wait',
+                name: waitTool,
+                arguments: JSON.stringify(
+                  waitTool === 'ask_user'
+                    ? { question: 'Which?', options: ['A', 'B'] }
+                    : { event_id: 1, prompt: 'Who?' },
+                ),
+              },
+              { id: 'deferred', name: 'create_event', arguments: '{}' },
+            ];
+            result.toolCalls.push(...calls);
+            if (result.assistantMessage.role === 'assistant')
+              result.assistantMessage.tool_calls?.push(
+                ...calls.map((c) => ({
+                  id: c.id,
+                  type: 'function' as const,
+                  function: { name: c.name, arguments: c.arguments },
+                })),
+              );
+          }
+          return result;
+        };
+        const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+        const result = await agent.run(ctx);
+        expect(scripted.calls).toHaveLength(retry ? 2 : 1);
+        expect(result.responseText).toBe('');
+        expect(result.toolCalls.map((c) => c.name)).toEqual(['end_conversation', waitTool]);
+        expect(waitTool === 'ask_user' ? sender.sendButtons : sender.sendUserPicker).toHaveBeenCalledTimes(1);
+        const { messages } = await agent.buildMessages(ctx, ctx.chatHistory.getRecent(USER_ID));
+        expect(messages.find((m) => m.role === 'tool' && m.tool_call_id === 'deferred')?.content).toContain(
+          'NOT_EXECUTED',
+        );
+      });
+    }
+  }
+
+  test('completion recovery retains earlier rounds and actual failed tool outcomes', async () => {
+    const scripted = makeStreamImpl([
+      { kind: 'tool', callId: 'read', name: 'get_events', input: { start_date: '2026-03-15', end_date: '2026-03-15' } },
+      { kind: 'tool', callId: 'failed-delete', name: 'delete_event', input: { event_id: 9876 } },
+      { kind: 'tool', callId: 'end', name: 'end_conversation', input: {} },
+      { kind: 'text', text: 'No events found. The requested deletion failed.' },
+    ]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: scripted.impl }).run(ctx);
+    expect(result.responseText).toContain('deletion failed');
+    const results = scripted.calls[3]!.messages.filter((m) => m.role === 'tool');
+    expect(results.map((m) => m.tool_call_id)).toEqual(['read', 'failed-delete', 'end']);
+    expect(results[1]!.content).toContain('Error:');
+    expect(result.toolResults[1]!.success).toBe(false);
+  });
+
+  test('completion recovery respects the remaining overall run budget', async () => {
+    const clock = spyOn(Date, 'now');
+    const originalNow = Date.now();
+    clock.mockReturnValue(originalNow);
+    try {
+      const scripted = makeStreamImpl([{ kind: 'tool', callId: 'end', name: 'end_conversation', input: {} }]);
+      const impl = async (opts: StreamRoundOptions, cbs?: StreamCallbacks) => {
+        const result = await scripted.impl(opts, cbs);
+        clock.mockReturnValue(originalNow + 300001);
+        return result;
+      };
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+      expect(scripted.calls).toHaveLength(1);
+      expect(result.responseText).toContain('I did not complete');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  test('completion deadline aborts even a stream that ignores its signal', async () => {
+    const scripted = makeStreamImpl([{ kind: 'tool', callId: 'end', name: 'end_conversation', input: {} }]);
+    let recoverySignal: AbortSignal | undefined;
+    let calls = 0;
+    let resolveLate: ((result: StreamRoundResult) => void) | undefined;
+    const impl = async (opts: StreamRoundOptions, cbs?: StreamCallbacks): Promise<StreamRoundResult> => {
+      if (++calls === 1) return scripted.impl(opts, cbs);
+      recoverySignal = opts.signal;
+      return new Promise((resolve) => {
+        resolveLate = resolve;
+      });
+    };
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(calls).toBe(2);
+    expect(recoverySignal?.aborted).toBe(true);
+    expect(recoverySignal?.reason.name).toBe('AbortError');
+    expect(result.responseText).toContain('I did not complete');
+    resolveLate?.({
+      text: 'Late completion',
+      toolCalls: [],
+      finishReason: 'stop',
+      providerUsed: 'mock',
+      assistantMessage: { role: 'assistant', content: 'Late completion' },
+    });
+    await Promise.resolve();
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('Late completion');
+  }, 25000);
+
   test('end_conversation tool stops loop and calls debugLogger.endSession', async () => {
     const { impl, calls } = makeStreamImpl([{ kind: 'tool', callId: 'call-end', name: 'end_conversation', input: {} }]);
     const endSession = mock(() => {});
@@ -510,10 +992,12 @@ describe('CalendarBotAgent.run()', () => {
 
     const result = await agent.run(ctx);
 
-    // Only one stream round — end_conversation has stopLoop=true via the tool handler
-    expect(calls.length).toBe(1);
+    // Completion recovery is bounded even when every scripted completion fails.
+    expect(calls.length).toBe(3);
     expect(result.toolCalls.some((tc) => tc.name === 'end_conversation')).toBe(true);
     expect(endSession).toHaveBeenCalledWith(USER_ID);
+    expect(result.responseText).not.toMatch(/(?:^|\n)\.\.\.$/);
+    expect(result.responseText).toContain('complete');
   });
 
   // ── Regression: removing flush from onToolCallStart must not break normal tools ──

@@ -49,7 +49,9 @@ function toSqliteDateTime(ts: string): string {
 }
 
 export function handleGetHistory(ctx: AgentContext, input: GetHistoryInput): ToolResult {
-  const limit = input.limit ?? 50;
+  if (ctx.isGroup && (!Number.isSafeInteger(ctx.groupChatId) || (ctx.groupChatId ?? 0) >= 0))
+    return { success: false, error: 'Group context unavailable' };
+  const limit = Number.isSafeInteger(input.limit) ? Math.max(1, Math.min(input.limit ?? 50, 100)) : 50;
   const before = input.before ? toSqliteDateTime(input.before) : undefined;
   const after = input.after ? toSqliteDateTime(input.after) : undefined;
 
