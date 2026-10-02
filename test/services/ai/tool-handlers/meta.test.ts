@@ -661,18 +661,74 @@ describe('handleCalculate', () => {
     expect(r.error).toContain('2026-09-17T10:49:00+02:00 + 2hours');
   });
 
+  test('converts local IANA datetime to UTC with DST-aware offset', () => {
+    expect(handleCalculate({ expression: '2026-07-15 12:30 Europe/Belgrade to UTC' })).toMatchObject({
+      success: true,
+      output: '2026-07-15T10:30:00.000Z',
+    });
+    expect(handleCalculate({ expression: '2026-01-15 12:30 Europe/Belgrade to UTC' })).toMatchObject({
+      success: true,
+      output: '2026-01-15T11:30:00.000Z',
+    });
+  });
+
+  test('accepts the historical explicit UTC-offset conversion syntax', () => {
+    expect(handleCalculate({ expression: '2026-09-23 12:30 UTC+2 to UTC' })).toMatchObject({
+      success: true,
+      output: '2026-09-23T10:30:00.000Z',
+    });
+    expect(handleCalculate({ expression: '12:30 UTC+2 to UTC' })).toMatchObject({ success: true, output: '10:30' });
+    expect(handleCalculate({ expression: '12:30 UTC-5 to UTC' })).toMatchObject({ success: true, output: '17:30' });
+  });
+
+  test('accepts slash-less zones and rejects ambiguous overlaps with candidate offsets', () => {
+    expect(handleCalculate({ expression: '2026-09-23 12:30 UTC to UTC' })).toMatchObject({
+      success: true,
+      output: '2026-09-23T12:30:00.000Z',
+    });
+    expect(handleCalculate({ expression: '2026-09-23 12:30 GMT0 to UTC' })).toMatchObject({
+      success: true,
+      output: '2026-09-23T12:30:00.000Z',
+    });
+    const ambiguous = handleCalculate({ expression: '2026-10-25 02:30 Europe/Belgrade to UTC' });
+    expect(ambiguous.success).toBe(false);
+    expect(ambiguous.error).toContain('ambiguous');
+    expect(ambiguous.error).toContain('explicit UTC offset');
+    expect(ambiguous.error).toContain('+02:00');
+    expect(ambiguous.error).toContain('+01:00');
+  });
+
+  test('invalid IANA calendar dates are reported as invalid dates, not clock changes', () => {
+    const result = handleCalculate({ expression: '2026-02-31 12:30 Europe/Belgrade to UTC' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid local datetime');
+    expect(result.error).not.toContain('clock change');
+  });
+
+  test('date-less fixed offsets report midnight day rollover explicitly', () => {
+    expect(handleCalculate({ expression: '00:30 UTC+2 to UTC' })).toMatchObject({
+      success: true,
+      output: '22:30 (previous day)',
+    });
+    expect(handleCalculate({ expression: '23:30 UTC-2 to UTC' })).toMatchObject({
+      success: true,
+      output: '01:30 (next day)',
+    });
+  });
+
+  test('rejects nonexistent DST wall times and impossible fixed offsets/dates', () => {
+    expect(handleCalculate({ expression: '2026-03-29 02:30 Europe/Belgrade to UTC' }).success).toBe(false);
+    expect(handleCalculate({ expression: '2026-09-23 12:30 UTC+14:30 to UTC' }).success).toBe(false);
+    expect(handleCalculate({ expression: '2026-02-31 12:30 UTC+2 to UTC' }).success).toBe(false);
+  });
+
   test('production-invalid datetime forms return a self-correcting ISO example', () => {
-    const invalid = [
-      '2026-09-16 17:40 - 2 hours',
-      '2026-09-17 18:30 - 2 hours',
-      '2026-09-16 14:00 UTC+2 to UTC',
-      '2026-09-17 10:49 + 2 hours to UTC',
-    ];
+    const invalid = ['2026-09-16 17:40 - 2 hours', '2026-09-17 18:30 - 2 hours', '2026-09-17 10:49 + 2 hours to UTC'];
     for (const expression of invalid) {
       const r = handleCalculate({ expression });
       expect(r.success).toBe(false);
       expect(r.error).toContain('explicit Z/offset');
-      expect(r.error).toContain('do not append "to UTC"');
+      expect(r.error).toContain('Local-to-UTC conversion accepts');
     }
   });
 

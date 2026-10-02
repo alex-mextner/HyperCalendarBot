@@ -45,8 +45,13 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
       },
     },
   };
-  const active = new Map<string, OpenAI.ChatCompletionTool>([[DISCOVERY_TOOL, discovery]]);
-  let activeSchemaChars = JSON.stringify([discovery]).length;
+  const initialTools: OpenAI.ChatCompletionTool[] = [discovery];
+  const calculator = allowed.find((tool) => tool.type === 'function' && tool.function.name === 'calculate');
+  if (calculator) initialTools.push(structuredClone(calculator));
+  const active = new Map<string, OpenAI.ChatCompletionTool>(
+    initialTools.flatMap((tool) => (tool.type === 'function' ? [[tool.function.name, tool] as const] : [])),
+  );
+  let activeSchemaChars = JSON.stringify(initialTools).length;
   let discoveryCalls = 0;
   const index = catalog.index();
   const rejected = (error: string): Execution => ({

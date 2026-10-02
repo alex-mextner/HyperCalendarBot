@@ -4,6 +4,23 @@ import { createToolExposure } from '../../../src/services/ai/tool-exposure.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 
 const allowed = getToolDefinitions('text');
+test('calculate is available on the first lazy round because the system prompt requires it', () => {
+  const s = createToolExposure(allowed);
+  expect(s.schemas().flatMap((t) => (t.type === 'function' ? [t.function.name] : []))).toEqual([
+    'discover_tools',
+    'calculate',
+  ]);
+  expect(s.intercept('calculate', { expression: '2+2' }, s.snapshot())).toBeUndefined();
+});
+
+test('rediscovering pre-exposed calculate does not duplicate its schema', () => {
+  const s = createToolExposure(allowed);
+  const before = s.schemas().map((tool) => (tool.type === 'function' ? tool.function.name : ''));
+  const result = s.intercept('discover_tools', { tools: ['calculate'] }, s.snapshot());
+  expect(result?.success).toBe(true);
+  expect(s.schemas().map((tool) => (tool.type === 'function' ? tool.function.name : ''))).toEqual(before);
+});
+
 test('new schemas do not authorize another call in the same model batch', () => {
   const s = createToolExposure(allowed);
   const original = s.snapshot();
@@ -69,7 +86,7 @@ test('invalid discovery input does not activate anything', () => {
     { tools: Array(25).fill('get_event') },
   ])
     expect(s.intercept('discover_tools', input, s.snapshot())?.success).toBe(false);
-  expect(s.schemas()).toHaveLength(1);
+  expect(s.schemas()).toHaveLength(2);
 });
 
 test('discovery accepts groups alone, defaulting tools to empty (reproduces GH-285 incident payload)', () => {
@@ -91,7 +108,7 @@ test('discovery with neither array present is still rejected (at least one selec
   const s = createToolExposure(allowed);
   const result = s.intercept('discover_tools', {}, s.snapshot());
   expect(result?.success).toBe(false);
-  expect(s.schemas()).toHaveLength(1);
+  expect(s.schemas()).toHaveLength(2);
 });
 
 test('published discover_tools schema agrees with runtime validation on the empty-request case', () => {

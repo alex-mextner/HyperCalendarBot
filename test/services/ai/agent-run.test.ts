@@ -239,6 +239,29 @@ describe('CalendarBotAgent.run()', () => {
     expect(names).toContain('end_call');
   });
 
+  test('lazy first round can convert local time without a schema-discovery failure', async () => {
+    const script = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'convert',
+        name: 'calculate',
+        input: { expression: '2026-09-23 12:30 Europe/Belgrade to UTC' },
+      },
+      { kind: 'text', text: 'Converted.' },
+    ]);
+    const captured: StreamRoundOptions[] = [];
+    const impl: typeof script.impl = async (opts, cbs) => {
+      if (!isValidatorCall(opts)) captured.push({ ...opts, tools: structuredClone(opts.tools) });
+      return script.impl(opts, cbs);
+    };
+    const result = await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, { streamImpl: impl }).run(
+      ctx,
+    );
+    expect(captured[0]?.tools?.some((t) => t.type === 'function' && t.function.name === 'calculate')).toBe(true);
+    expect(result.toolCalls.map((call) => call.name)).toContain('calculate');
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).toContain('2026-09-23T10:30:00.000Z');
+  });
+
   test('lazy schemas keep all names visible but expose only requested parameters', async () => {
     const script = makeStreamImpl([
       { kind: 'tool', callId: 'discover', name: 'discover_tools', input: { groups: [], tools: ['get_events'] } },
@@ -261,10 +284,12 @@ describe('CalendarBotAgent.run()', () => {
     );
     expect(captured[0]?.tools?.map((tool) => (tool.type === 'function' ? tool.function.name : ''))).toEqual([
       'discover_tools',
+      'calculate',
     ]);
     expect(captured[0]?.messages[0]?.content).toContain('delete_event:');
     expect(captured[1]?.tools?.map((tool) => (tool.type === 'function' ? tool.function.name : ''))).toEqual([
       'discover_tools',
+      'calculate',
       'get_events',
     ]);
     expect(result.toolCalls.some((call) => call.name === 'get_events')).toBe(true);

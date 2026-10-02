@@ -542,9 +542,15 @@ describe('buildSystemPrompt', () => {
   test('instructs AI that user times are local and must be converted to UTC', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('CRITICAL');
-    expect(prompt).toContain('local timezone');
+    expect(prompt).toContain('local to Europe/Kyiv');
+    expect(prompt).toContain('calculate("2026-03-15 12:30 Europe/Kyiv to UTC")');
+    expect(prompt).toContain('offset NOW');
+    expect(prompt).toContain('convert_to_timezone');
+    expect(prompt).toContain('Never add the offset shown for NOW');
     expect(prompt).toContain('NEVER append "Z" to a local time');
     expect(prompt).toContain('calculate');
+    expect(prompt).toContain('UTC+2 to UTC');
+    expect(prompt).not.toContain('calculate("12:30 UTC+');
   });
 
   test('does not tell AI to pass LITERAL times to tools', () => {

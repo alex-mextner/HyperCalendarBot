@@ -1,11 +1,17 @@
+import { TZDate } from '@date-fns/tz';
 import { addMonths, addYears, subMonths, subYears } from 'date-fns';
 import type { ToolHandlerMeta, ToolResult } from '../types.ts';
+import { validateAndGetOffset } from './timezone.ts';
 
 const ISO_DT_RE = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})';
 const DATETIME_LIKE_RE = /^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}/;
 const DURATION_UNITS = 'min|minutes?|h|hr|hours?|d|days?|w|weeks?|mo|months?|y|years?';
+const IANA_LOCAL_TO_UTC_RE =
+  /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s+([A-Za-z_][A-Za-z0-9_]*(?:\/[A-Za-z0-9_+.-]+)*)\s+to\s+UTC$/i;
+const FIXED_LOCAL_TO_UTC_RE =
+  /^(?:(\d{4})-(\d{2})-(\d{2})\s+)?(\d{1,2}):(\d{2})(?::(\d{2}))?\s+UTC([+-])(\d{1,2})(?::?(\d{2}))?\s+to\s+UTC$/i;
 const DATETIME_SYNTAX_HINT =
-  'Datetime arithmetic requires ISO 8601 with T and an explicit Z/offset, e.g. "2026-09-17T10:49:00+02:00 + 2hours". The result is returned in UTC; do not append "to UTC" or use an offset-free local datetime.';
+  'Datetime arithmetic requires ISO 8601 with T and an explicit Z/offset, e.g. "2026-09-17T10:49:00+02:00 + 2hours". Local-to-UTC conversion accepts an explicit IANA zone/date (e.g. "2026-09-23 12:30 Europe/Belgrade to UTC") or a fixed UTC offset.';
 
 function evalArithmetic(expr: string): number {
   let pos = 0;
@@ -69,6 +75,61 @@ function evalArithmetic(expr: string): number {
   return result;
 }
 
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  return dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1 && dt.getUTCDate() === day;
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function sameWallClock(
+  instantMs: number,
+  timezone: string,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+): boolean {
+  const zoned = new TZDate(instantMs, timezone);
+  return (
+    zoned.getFullYear() === year &&
+    zoned.getMonth() === month - 1 &&
+    zoned.getDate() === day &&
+    zoned.getHours() === hour &&
+    zoned.getMinutes() === minute &&
+    zoned.getSeconds() === second
+  );
+}
+
+function resolveLocalWallClock(
+  timezone: string,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+): number[] {
+  const naiveMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  const offsets = new Set<number>();
+  for (const deltaHours of [-36, -6, 0, 6, 36]) {
+    offsets.add(validateAndGetOffset(timezone, new Date(naiveMs + deltaHours * 3_600_000)).offsetMinutes);
+  }
+  const matches: number[] = [];
+  for (const offsetMinutes of offsets) {
+    const instantMs = naiveMs - offsetMinutes * 60_000;
+    const actualOffset = validateAndGetOffset(timezone, new Date(instantMs)).offsetMinutes;
+    if (actualOffset !== offsetMinutes) continue;
+    if (sameWallClock(instantMs, timezone, year, month, day, hour, minute, second)) matches.push(instantMs);
+  }
+  return [...new Set(matches)].sort((a, b) => a - b);
+}
+
 function formatDiffMs(absMs: number): string {
   const totalMin = Math.round(absMs / 60_000);
   if (totalMin < 60) return `${totalMin} min`;
@@ -83,6 +144,75 @@ function formatDiffMs(absMs: number): string {
 
 export function handleCalculate(input: { expression: string }): ToolResult {
   const expr = input.expression.trim();
+
+  // Local wall clock + IANA timezone → UTC. TZDate applies the offset for the
+  // requested calendar date, so future DST changes never reuse today's offset.
+  const ianaMatch = expr.match(IANA_LOCAL_TO_UTC_RE);
+  if (ianaMatch) {
+    const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, timezone] = ianaMatch;
+    const year = Number(yearRaw);
+    const month = Number(monthRaw);
+    const day = Number(dayRaw);
+    const hour = Number(hourRaw);
+    const minute = Number(minuteRaw);
+    const second = Number(secondRaw ?? '0');
+    if (!isValidCalendarDate(year, month, day) || hour > 23 || minute > 59 || second > 59)
+      return { success: false, error: `Invalid local datetime: ${expr}` };
+    try {
+      const matches = resolveLocalWallClock(timezone!, year, month, day, hour, minute, second);
+      if (matches.length === 0)
+        return { success: false, error: `Local time does not exist in ${timezone} because of a clock change.` };
+      if (matches.length > 1) {
+        const offsets = matches.map((instantMs) => validateAndGetOffset(timezone!, new Date(instantMs)).offsetStr);
+        return {
+          success: false,
+          error: `Local time is ambiguous in ${timezone} because of a clock change; specify an explicit UTC offset (${offsets.join(' or ')}).`,
+        };
+      }
+      return { success: true, output: new Date(matches[0]!).toISOString() };
+    } catch {
+      return { success: false, error: `Invalid timezone: ${timezone}` };
+    }
+  }
+
+  // Fixed offsets remain accepted for old prompt/model behavior and explicit
+  // user offsets. Date-less input returns UTC HH:MM; dated input returns ISO UTC.
+  const fixedMatch = expr.match(FIXED_LOCAL_TO_UTC_RE);
+  if (fixedMatch) {
+    const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, signRaw, offsetHourRaw, offsetMinuteRaw] =
+      fixedMatch;
+    const hour = Number(hourRaw);
+    const minute = Number(minuteRaw);
+    const second = Number(secondRaw ?? '0');
+    const offsetHours = Number(offsetHourRaw);
+    const offsetMinutesPart = Number(offsetMinuteRaw ?? '0');
+    if (
+      hour > 23 ||
+      minute > 59 ||
+      second > 59 ||
+      offsetHours > 14 ||
+      (offsetHours === 14 && offsetMinutesPart !== 0) ||
+      (offsetMinuteRaw !== undefined && offsetMinutesPart > 59)
+    )
+      return { success: false, error: `Invalid fixed-offset datetime: ${expr}` };
+    const offsetMinutes = (signRaw === '+' ? 1 : -1) * (offsetHours * 60 + offsetMinutesPart);
+    if (!yearRaw) {
+      const rawUtcMinutes = hour * 60 + minute - offsetMinutes;
+      const dayDelta = Math.floor(rawUtcMinutes / 1440);
+      const utcMinutes = ((rawUtcMinutes % 1440) + 1440) % 1440;
+      const daySuffix = dayDelta < 0 ? ' (previous day)' : dayDelta > 0 ? ' (next day)' : '';
+      return {
+        success: true,
+        output: `${pad2(Math.floor(utcMinutes / 60))}:${pad2(utcMinutes % 60)}${daySuffix}`,
+      };
+    }
+    const month = Number(monthRaw);
+    const day = Number(dayRaw);
+    const year = Number(yearRaw);
+    if (!isValidCalendarDate(year, month, day)) return { success: false, error: `Invalid date: ${expr}` };
+    const localUtc = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    return { success: true, output: new Date(localUtc.getTime() - offsetMinutes * 60_000).toISOString() };
+  }
 
   // ISO datetime difference: "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z"
   const isoDatetimeDiffMatch = expr.match(new RegExp(`^(${ISO_DT_RE})\\s*-\\s*(${ISO_DT_RE})$`));
