@@ -72,3 +72,65 @@ test('the three providers are independent singletons', () => {
   expect(h).not.toBe(g);
   expect(z).not.toBe(g);
 });
+
+test('Gemini array error envelopes survive the actual SDK instead of becoming a bodiless transient', async () => {
+  const client = geminiClient().withOptions({
+    fetch: async () =>
+      new Response(
+        JSON.stringify([
+          {
+            error: {
+              code: 400,
+              status: 'INVALID_ARGUMENT',
+              message: 'Invalid synthetic tool schema',
+            },
+          },
+        ]),
+        { status: 400, headers: { 'content-type': 'application/json', 'x-request-id': 'synthetic-request' } },
+      ),
+  });
+  await expect(
+    Promise.resolve(client.chat.completions.create({ model: 'synthetic', messages: [] })),
+  ).rejects.toMatchObject({
+    status: 400,
+    error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Invalid synthetic tool schema' },
+    requestID: 'synthetic-request',
+  });
+});
+
+test('Gemini rate-limit array retains reset metadata for the existing circuit', async () => {
+  const client = geminiClient().withOptions({
+    fetch: async () =>
+      new Response(
+        JSON.stringify([
+          {
+            error: {
+              code: 429,
+              status: 'RESOURCE_EXHAUSTED',
+              message: 'Synthetic requests per day quota exceeded',
+              details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '60s' }],
+            },
+          },
+        ]),
+        { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '60' } },
+      ),
+  });
+  await expect(
+    Promise.resolve(client.chat.completions.create({ model: 'synthetic', messages: [] })),
+  ).rejects.toMatchObject({
+    status: 429,
+    error: { status: 'RESOURCE_EXHAUSTED', details: [{ retryDelay: '60s' }] },
+    headers: expect.any(Headers),
+  });
+});
+
+test('Gemini genuine bodiless response stays distinct from a nonempty error', async () => {
+  const client = geminiClient().withOptions({ fetch: async () => new Response('', { status: 400 }) });
+  await expect(
+    Promise.resolve(client.chat.completions.create({ model: 'synthetic', messages: [] })),
+  ).rejects.toMatchObject({
+    status: 400,
+    message: '400 status code (no body)',
+    error: undefined,
+  });
+});

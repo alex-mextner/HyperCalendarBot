@@ -1,5 +1,6 @@
 import { TZDate } from '@date-fns/tz';
 import { addMonths, addYears, subMonths, subYears } from 'date-fns';
+import { eventTimestampSchema } from '../../../utils/event-timestamps.ts';
 import type { ToolHandlerMeta, ToolResult } from '../types.ts';
 
 const ISO_DT_RE = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})';
@@ -133,6 +134,14 @@ function formatDiffMs(absMs: number): string {
 export function handleCalculate(input: { expression: string }): ToolResult {
   if (input.expression.length > 500) return { success: false, error: 'Expression exceeds the 500 character limit' };
   const expr = input.expression.trim();
+
+  // A timestamp with an explicit offset already denotes an instant; normalize it
+  // directly instead of making the model invent a "+0hours" arithmetic operation.
+  if (new RegExp(`^${ISO_DT_RE}$`).test(expr)) {
+    if (!eventTimestampSchema.safeParse(expr).success)
+      return { success: false, error: 'Invalid explicit-offset timestamp' };
+    return { success: true, output: new Date(expr).toISOString() };
+  }
 
   // Local wall clock + IANA timezone → UTC. TZDate resolves the offset for
   // the requested calendar date, so future DST changes never reuse today's offset.

@@ -23,3 +23,21 @@ describe('calculator operand contract', () => {
     expect(handleCalculate({ expression }).success).toBe(true);
   });
 });
+
+describe('standalone explicit-offset timestamp normalization', () => {
+  test.each([
+    ['2026-09-28T12:30:00+02:00', '2026-09-28T10:30:00.000Z'],
+    ['2026-09-28T12:30:45.123+05:30', '2026-09-28T07:00:45.123Z'],
+    ['2026-01-01T00:10:00+14:00', '2025-12-31T10:10:00.000Z'],
+  ])('normalizes the real rejected expression without a fake +0hours: %s', (expression, output) => {
+    expect(handleCalculate({ expression })).toMatchObject({ success: true, output });
+  });
+  test.each([
+    '2026-02-30T12:30:00+02:00',
+    '2026-09-28T25:30:00+02:00',
+    '2026-09-28T12:30:00',
+    '2026-09-28T12:30:00+25:00',
+  ])('does not normalize nonexistent dates, bad offsets or unspecified zones: %s', (expression) => {
+    expect(handleCalculate({ expression }).success).toBe(false);
+  });
+});

@@ -358,6 +358,158 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(fakeGemini.chat.completions.create.mock.calls[1][0].reasoning_effort).toBeUndefined();
   });
 
+  test.each([
+    'gemini-2.5-flash',
+    'models/gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+  ])('main tool calls avoid the reproduced empty-stop thinking interaction: %s', async (model) => {
+    process.env.AI_SMART_CHAIN = 'gemini';
+    process.env.GEMINI_MODEL = model;
+    fakeGemini = {
+      chat: {
+        completions: {
+          create: mock(async (params: { reasoning_effort?: string }) => {
+            return (async function* () {
+              if (params.reasoning_effort === 'none')
+                yield {
+                  choices: [
+                    {
+                      delta: {
+                        tool_calls: [{ index: 0, id: 'read-one', function: { name: 'get_events', arguments: '{}' } }],
+                      },
+                      finish_reason: 'tool_calls',
+                    },
+                  ],
+                };
+              else
+                yield {
+                  choices: [{ delta: {}, finish_reason: 'stop' }],
+                  usage: { prompt_tokens: 8396, completion_tokens: 0, total_tokens: 8396 },
+                };
+            })();
+          }),
+        },
+      },
+    };
+    const tools = (await import('../../../src/services/ai/tools.ts')).getToolDefinitions();
+    const result = await aiStreamRound({
+      messages: [{ role: 'user', content: 'Synthetic agenda' }],
+      tools,
+      maxTokens: 4096,
+    });
+    expect(result.toolCalls).toEqual([{ id: 'read-one', name: 'get_events', arguments: '{}' }]);
+    expect(result.metrics?.attemptCount).toBe(1);
+  });
+
+  test.each([
+    'gemini-2.5-pro',
+    'gemini-3.1-pro',
+    'gemini-3.8-flash',
+  ])('does not send unsupported thinking:none to %s', async (model) => {
+    process.env.AI_SMART_CHAIN = 'gemini';
+    process.env.GEMINI_MODEL = model;
+    fakeGemini = buildFakeClient([{ kind: 'text', text: 'Synthetic response' }]);
+    await aiStreamRound({
+      messages: [],
+      tools: [{ type: 'function', function: { name: 'read', parameters: { type: 'object' } } }],
+      maxTokens: 4096,
+    });
+    expect(fakeGemini.chat.completions.create.mock.calls[0][0].reasoning_effort).toBeUndefined();
+  });
+
+  test('Google array rejection falls through once instead of wasting a bodiless retry', async () => {
+    const { geminiClient, resetClients } = await import('../../../src/services/ai/clients.ts');
+    resetClients();
+    process.env.AI_SMART_CHAIN = 'gemini,hf';
+    const http = mock(
+      async () =>
+        new Response(
+          JSON.stringify([
+            {
+              error: {
+                code: 400,
+                status: 'INVALID_ARGUMENT',
+                message: 'Synthetic invalid tool schema',
+              },
+            },
+          ]),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    fakeGemini = geminiClient().withOptions({ fetch: http });
+    fakeHf = buildFakeClient([{ kind: 'text', text: 'Working alternate' }]);
+    try {
+      const result = await aiStreamRound({ messages: [], maxTokens: 128 });
+      expect(http).toHaveBeenCalledTimes(1);
+      expect(result.text).toBe('Working alternate');
+      expect(result.metrics?.attemptCount).toBe(2);
+    } finally {
+      resetClients();
+    }
+  });
+
+  test('streamed Google signatures survive terminal metadata and the next assistant message', async () => {
+    process.env.AI_SMART_CHAIN = 'gemini';
+    const signature = 'synthetic-opaque-signature';
+    fakeGemini = {
+      chat: {
+        completions: {
+          create: mock(async () =>
+            (async function* () {
+              yield {
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [{ index: 0, id: 'signed-read', function: { name: 'get_events', arguments: '{}' } }],
+                    },
+                  },
+                ],
+              };
+              yield {
+                choices: [
+                  {
+                    delta: { tool_calls: [{ index: 0, extra_content: { google: { thought_signature: signature } } }] },
+                    finish_reason: 'tool_calls',
+                  },
+                ],
+              };
+            })(),
+          ),
+        },
+      },
+    };
+    const result = await aiStreamRound({ messages: [], maxTokens: 256 });
+    expect(result.assistantMessage).toMatchObject({
+      tool_calls: [{ id: 'signed-read', extra_content: { google: { thought_signature: signature } } }],
+    });
+    expect(result.toolCalls).toHaveLength(1);
+  });
+
+  test('opaque Google tool metadata is not sent to another provider or removed from shared history', async () => {
+    process.env.AI_SMART_CHAIN = 'hf';
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: null,
+        tool_calls: [
+          {
+            id: 'signed-read',
+            type: 'function' as const,
+            function: { name: 'get_events', arguments: '{}' },
+            extra_content: { google: { thought_signature: 'synthetic-opaque-signature' } },
+          },
+        ],
+      },
+    ];
+    const before = JSON.stringify(messages);
+    fakeHf = buildFakeClient([{ kind: 'text', text: 'Synthetic response' }]);
+    await aiStreamRound({ messages, maxTokens: 256 });
+    expect(fakeHf.chat.completions.create.mock.calls[0][0].messages[0].tool_calls[0]).not.toHaveProperty(
+      'extra_content',
+    );
+    expect(JSON.stringify(messages)).toBe(before);
+  });
+
   test('Gemini local budget skips network rather than waiting when exhausted', async () => {
     const { mkdtempSync, rmSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');

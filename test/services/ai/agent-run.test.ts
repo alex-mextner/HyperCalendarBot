@@ -272,6 +272,54 @@ describe('CalendarBotAgent.run()', () => {
     }
   });
 
+  test('follow-up validator sees actual prior read evidence instead of forcing a redundant tool loop', async () => {
+    ctx.messageText = 'What was the description of that event?';
+    ctx.conversationLogger.logAiTurn(USER_ID, {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: 'history-read',
+          type: 'function',
+          function: { name: 'get_events', arguments: '{}' },
+        },
+      ],
+    });
+    ctx.conversationLogger.logToolResults(USER_ID, [
+      { role: 'tool', tool_call_id: 'history-read', content: 'id:101, description:SYNTHETIC_DESCRIPTION' },
+    ]);
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    let mainCalls = 0;
+    let validatorCalls = 0;
+    const script = makeStreamImpl([{ kind: 'text', text: 'The description is SYNTHETIC_DESCRIPTION.' }]);
+    const impl: typeof script.impl = async (options, callbacks) => {
+      if (isValidatorCall(options)) {
+        validatorCalls++;
+        const payload = options.messages.find((m) => m.role === 'user')?.content;
+        const backed =
+          typeof payload === 'string' &&
+          payload.includes('<tool_evidence>') &&
+          payload.includes('"source":"history"') &&
+          payload.includes('id:101');
+        const text = backed ? 'APPROVE' : 'REJECT: no event evidence provided';
+        return {
+          text,
+          toolCalls: [],
+          finishReason: 'stop',
+          assistantMessage: { role: 'assistant', content: text },
+          providerUsed: 'synthetic',
+        };
+      }
+      mainCalls++;
+      return script.impl(options, callbacks);
+    };
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(result.responseText).toContain('SYNTHETIC_DESCRIPTION');
+    expect(result.toolCalls).toHaveLength(0);
+    expect(mainCalls).toBe(1);
+    expect(validatorCalls).toBe(1);
+  });
+
   test('one request budget includes validation and does not poison the next request', async () => {
     let slow = true;
     let validationSignal: AbortSignal | undefined;

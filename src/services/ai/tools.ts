@@ -796,14 +796,14 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'calculate',
     description:
-      'Deterministic calculator and local-time converter. ALWAYS use this tool for math/time conversion — never compute in your head. Supports numbers, durations, ISO datetime arithmetic/differences, and local → UTC conversion as "YYYY-MM-DD HH:MM Europe/Belgrade to UTC" or an explicit fixed offset such as "2026-09-23 12:30 UTC+2 to UTC". IANA conversion applies the offset for that event date, including DST.',
+      'Deterministic calculator and local-time converter. ALWAYS use this tool for math/time conversion — never compute in your head. Supports numbers, durations, standalone explicit-offset ISO timestamps normalized to UTC, ISO datetime arithmetic/differences, and local → UTC conversion as "YYYY-MM-DD HH:MM Europe/Belgrade to UTC" or an explicit fixed offset such as "2026-09-23 12:30 UTC+2 to UTC". IANA conversion applies the offset for that event date, including DST.',
     input_schema: {
       type: 'object' as const,
       properties: {
         expression: {
           type: 'string',
           description:
-            'Expression to evaluate, e.g. "2 + 31", "22:34 + 31min", "2026-03-18T22:34:00Z + 2weeks", "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z", "2026-09-23 12:30 Europe/Belgrade to UTC"',
+            'Expression to evaluate, e.g. "2 + 31", "22:34 + 31min", "2026-09-28T12:30:00+02:00", "2026-03-18T22:34:00Z + 2weeks", "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z", "2026-09-23 12:30 Europe/Belgrade to UTC"',
         },
       },
       required: ['expression'],

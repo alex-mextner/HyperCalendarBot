@@ -37,6 +37,7 @@ import {
 import { waitForAbort, withinProviderDeadline } from './provider-deadline.ts';
 import { clearBlock, isBlocked, noteFailureForEligibility } from './provider-eligibility.ts';
 import type { ProviderId } from './provider-ids.ts';
+import { type GoogleToolMetadata, googleToolMetadataSchema, withoutGoogleMetadata } from './provider-metadata.ts';
 import { estimateTokens } from './token-estimate.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
@@ -74,6 +75,7 @@ export interface StreamCallbacks {
 }
 
 export interface StreamToolCall {
+  extra_content?: GoogleToolMetadata;
   id: string;
   name: string;
   arguments: string;
@@ -329,12 +331,14 @@ interface ProviderSlot {
 }
 
 interface ToolCallDelta {
+  extra_content?: unknown;
   index?: number;
   id?: string;
   function?: { name?: string; arguments?: string };
 }
 
 interface PendingToolCall {
+  extra_content?: GoogleToolMetadata;
   id: string;
   name: string;
   args: string;
@@ -359,8 +363,10 @@ function applyToolCallDelta(tc: ToolCallDelta, toolCalls: Map<number, PendingToo
   const key = resolveToolCallKey(tc, toolCalls);
   if (key === null) return;
 
+  const metadata = googleToolMetadataSchema.safeParse(tc.extra_content);
   const existing = toolCalls.get(key);
   if (existing) {
+    if (metadata.success) existing.extra_content = metadata.data;
     existing.args += tc.function?.arguments ?? '';
     if (tc.id && !existing.id) existing.id = tc.id;
     if (tc.function?.name && !existing.name) existing.name = tc.function.name;
@@ -369,7 +375,12 @@ function applyToolCallDelta(tc: ToolCallDelta, toolCalls: Map<number, PendingToo
 
   const name = tc.function?.name ?? '';
   if (name) cbs.onToolCallStart?.(name);
-  toolCalls.set(key, { id: tc.id ?? '', name, args: tc.function?.arguments ?? '' });
+  toolCalls.set(key, {
+    id: tc.id ?? '',
+    name,
+    args: tc.function?.arguments ?? '',
+    ...(metadata.success ? { extra_content: metadata.data } : {}),
+  });
 }
 
 interface ConsumedStream {
@@ -462,7 +473,12 @@ async function consumeStream(
     finishReasonSeen,
     firstUsableMs,
     usage,
-    toolCalls: [...toolCalls.values()].map((tc) => ({ id: tc.id, name: tc.name, arguments: tc.args })),
+    toolCalls: [...toolCalls.values()].map((tc) => ({
+      id: tc.id,
+      name: tc.name,
+      arguments: tc.args,
+      ...(tc.extra_content ? { extra_content: tc.extra_content } : {}),
+    })),
   };
 }
 
@@ -490,6 +506,7 @@ function buildAssistantMessage(text: string, toolCalls: StreamToolCall[]): OpenA
       id: tc.id,
       type: 'function' as const,
       function: { name: tc.name, arguments: tc.arguments },
+      ...(tc.extra_content ? { extra_content: tc.extra_content } : {}),
     })),
   };
 }
@@ -525,14 +542,19 @@ function streamingSlot(
       let attemptStartedAt = performance.now();
       const params: OpenAI.ChatCompletionCreateParamsStreaming = {
         model,
-        messages: opts.messages,
+        messages: provider === 'gemini' ? opts.messages : withoutGoogleMetadata(opts.messages),
         max_tokens: opts.maxTokens,
         temperature: opts.temperature ?? 0.3,
         stream: true,
         ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
       };
-      // Only the supported 2.5 Flash text routes: never send none to Pro/3.x.
-      if (provider === 'gemini' && opts.fast && /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, '')))
+      // Dynamic thinking with the full tool catalog can terminate empty (STOP, zero output).
+      // Supported 2.5 Flash routes avoid that interaction; Pro/3.x retain their own policy.
+      if (
+        provider === 'gemini' &&
+        (opts.fast || (opts.tools?.length ?? 0) > 0) &&
+        /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, ''))
+      )
         params.reasoning_effort = 'none';
       if (opts.tools && opts.tools.length > 0) {
         params.tools = opts.tools;

@@ -62,6 +62,127 @@ describe('CalendarBotAgent', () => {
     expect(agent).toBeDefined();
   });
 
+  test('stored signed tool calls retain opaque provider metadata without new execution', async () => {
+    ctx.chatHistory.save(USER_ID, 'user', 'Synthetic past request');
+    ctx.chatHistory.save(
+      USER_ID,
+      'assistant',
+      JSON.stringify({
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'signed-past-read',
+            type: 'function',
+            function: { name: 'get_events', arguments: '{}' },
+            extra_content: { google: { thought_signature: 'synthetic-opaque-signature' } },
+          },
+        ],
+      }),
+    );
+    ctx.chatHistory.save(
+      USER_ID,
+      'tool',
+      JSON.stringify([{ role: 'tool', tool_call_id: 'signed-past-read', content: '[]' }]),
+    );
+    ctx.chatHistory.save(USER_ID, 'user', 'Explain the result');
+    const { messages } = await new CalendarBotAgent(config, sender).buildMessages(
+      ctx,
+      ctx.chatHistory.getRecent(USER_ID),
+    );
+    const signed = messages.find((m) => m.role === 'assistant' && 'tool_calls' in m);
+    expect(signed).toMatchObject({
+      tool_calls: [{ extra_content: { google: { thought_signature: 'synthetic-opaque-signature' } } }],
+    });
+  });
+
+  test('a partial historical batch preserves completed and unknown outcomes without invalid tool roles', async () => {
+    ctx.chatHistory.save(USER_ID, 'user', 'Synthetic historical work');
+    ctx.chatHistory.save(
+      USER_ID,
+      'assistant',
+      JSON.stringify({
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'done', type: 'function', function: { name: 'create_event', arguments: '{"title":"Synthetic"}' } },
+          { id: 'unknown', type: 'function', function: { name: 'send_invitation', arguments: '{"event_id":101}' } },
+        ],
+      }),
+    );
+    ctx.chatHistory.save(
+      USER_ID,
+      'tool',
+      JSON.stringify([{ role: 'tool', tool_call_id: 'done', content: '{"success":true,"event_id":101}' }]),
+    );
+    ctx.chatHistory.save(USER_ID, 'user', 'What happened?');
+    const before = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
+    const { messages } = await new CalendarBotAgent(config, sender).buildMessages(
+      ctx,
+      ctx.chatHistory.getRecent(USER_ID),
+    );
+    expect(messages.some((m) => m.role === 'tool')).toBe(false);
+    const serialized = JSON.stringify(messages);
+    expect(serialized).toContain('event_id');
+    expect(serialized).toContain('101');
+    expect(serialized).toContain('outcome unknown');
+    expect(serialized).toContain('Do not replay');
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).toBe(before);
+  });
+
+  test.each([
+    '',
+    'same-id',
+  ])('malformed stored call identity cannot be presented as a valid tool batch: %s', async (name) => {
+    const calls =
+      name === ''
+        ? [{ id: 'one', type: 'function', function: { name: '', arguments: '{}' } }]
+        : [
+            { id: 'same-id', type: 'function', function: { name: 'get_events', arguments: '{}' } },
+            { id: 'same-id', type: 'function', function: { name: 'get_contacts', arguments: '{}' } },
+          ];
+    ctx.chatHistory.save(USER_ID, 'user', 'Synthetic');
+    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify({ role: 'assistant', content: null, tool_calls: calls }));
+    ctx.chatHistory.save(
+      USER_ID,
+      'tool',
+      JSON.stringify([{ role: 'tool', tool_call_id: name || 'one', content: 'historical observation' }]),
+    );
+    const { messages } = await new CalendarBotAgent(config, sender).buildMessages(
+      ctx,
+      ctx.chatHistory.getRecent(USER_ID),
+    );
+    expect(messages.some((m) => m.role === 'tool')).toBe(false);
+    expect(messages.some((m) => m.role === 'assistant' && 'tool_calls' in m)).toBe(false);
+    expect(JSON.stringify(messages)).toContain('historical observation');
+  });
+
+  test('duplicate results are not sent twice in a valid historical batch', async () => {
+    ctx.chatHistory.save(USER_ID, 'user', 'Synthetic');
+    ctx.chatHistory.save(
+      USER_ID,
+      'assistant',
+      JSON.stringify({
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 'one', type: 'function', function: { name: 'get_events', arguments: '{}' } }],
+      }),
+    );
+    ctx.chatHistory.save(
+      USER_ID,
+      'tool',
+      JSON.stringify([
+        { role: 'tool', tool_call_id: 'one', content: '[]' },
+        { role: 'tool', tool_call_id: 'one', content: '[]' },
+      ]),
+    );
+    const { messages } = await new CalendarBotAgent(config, sender).buildMessages(
+      ctx,
+      ctx.chatHistory.getRecent(USER_ID),
+    );
+    expect(messages.filter((m) => m.role === 'tool')).toHaveLength(1);
+  });
+
   test('buildMessages includes system prompt and user message', async () => {
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText); // middleware saves before pipeline
     const history = ctx.chatHistory.getRecent(USER_ID);
@@ -186,10 +307,11 @@ describe('CalendarBotAgent', () => {
     expect(assistantMsg).toBeDefined();
     // Text content is preserved, tool_calls field is gone
     expect((assistantMsg as OpenAI.ChatCompletionAssistantMessageParam).tool_calls).toBeUndefined();
-    expect(assistantMsg!.content).toBe('I checked your calendar');
+    expect(assistantMsg!.content).toContain('I checked your calendar');
+    expect(assistantMsg!.content).toContain('outcome unknown');
   });
 
-  test('sanitizeMessages drops orphan assistant entirely when content is empty', async () => {
+  test('sanitizeMessages preserves unknown execution state without replayable orphan calls', async () => {
     const orphanedEmpty: OpenAI.ChatCompletionMessageParam = {
       role: 'assistant',
       content: null,
@@ -209,11 +331,12 @@ describe('CalendarBotAgent', () => {
     const { messages } = await agent.buildMessages(ctx, history);
     // No assistant message in the sanitized output — the orphan was dropped,
     // and the two user messages remain.
-    expect(messages.filter((m) => m.role === 'assistant')).toHaveLength(0);
+    expect(messages.filter((m) => m.role === 'assistant')).toHaveLength(1);
+    expect(JSON.stringify(messages)).toContain('outcome unknown');
     expect(messages.filter((m) => m.role === 'user')).toHaveLength(2);
   });
 
-  test('buildMessages expands a stored tool-role row into individual tool messages', async () => {
+  test('buildMessages preserves unpaired tool observations without inventing call bindings', async () => {
     const toolResults: OpenAI.ChatCompletionMessageParam[] = [
       { role: 'tool', tool_call_id: 'call_a', content: 'result a' },
       { role: 'tool', tool_call_id: 'call_b', content: 'result b' },
@@ -224,9 +347,9 @@ describe('CalendarBotAgent', () => {
     const history = ctx.chatHistory.getRecent(USER_ID);
     const { messages } = await agent.buildMessages(ctx, history);
     const toolMessages = messages.filter((m) => m.role === 'tool');
-    expect(toolMessages).toHaveLength(2);
-    expect((toolMessages[0] as OpenAI.ChatCompletionToolMessageParam).tool_call_id).toBe('call_a');
-    expect((toolMessages[1] as OpenAI.ChatCompletionToolMessageParam).tool_call_id).toBe('call_b');
+    expect(toolMessages).toHaveLength(0);
+    expect(JSON.stringify(messages)).toContain('result a');
+    expect(JSON.stringify(messages)).toContain('result b');
   });
 
   test('buildMessages drops legacy Anthropic tool_result rows that cannot be mapped', async () => {

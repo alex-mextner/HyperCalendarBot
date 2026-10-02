@@ -4,7 +4,30 @@
 // Base URLs and API keys are loaded from env via loadConfig() — no hardcoded values.
 
 import OpenAI from 'openai';
+import { z } from 'zod';
 import { loadConfig } from '../../config/env.ts';
+
+const geminiErrorEnvelope = z.object({
+  error: z.object({
+    code: z.number().int(),
+    message: z.string(),
+    status: z.string(),
+    details: z.array(z.json()).optional(),
+  }),
+});
+const geminiErrorArray = z.array(geminiErrorEnvelope).length(1);
+
+/** Google may wrap an error in a JSON array; the SDK only reads object.error. */
+class GeminiClient extends OpenAI {
+  protected override makeStatusError(status: number, error: unknown, message: string | undefined, headers: Headers) {
+    const wrapped = geminiErrorArray.safeParse(error);
+    if (wrapped.success) {
+      return super.makeStatusError(status, wrapped.data[0]!, message, headers);
+    }
+    if (error !== null && typeof error === 'object') return super.makeStatusError(status, error, message, headers);
+    return super.makeStatusError(status, {}, message, headers);
+  }
+}
 
 const ZAI_TIMEOUT_MS = 15_000;
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -56,7 +79,7 @@ export function hfClient(): OpenAI {
 export function geminiClient(): OpenAI {
   if (!gemini) {
     const cfg = loadConfig();
-    gemini = new OpenAI({
+    gemini = new GeminiClient({
       apiKey: cfg.GEMINI_API_KEY,
       baseURL: cfg.GEMINI_BASE_URL,
       timeout: DEFAULT_TIMEOUT_MS,
