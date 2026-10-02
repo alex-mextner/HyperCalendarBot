@@ -1,3 +1,4 @@
+import { enrichAgenda, enrichAgendaEvents } from '../../services/event/agenda-enrichment.ts';
 // src/bot/handlers/callback.handler.ts
 
 import { TZDate } from '@date-fns/tz';
@@ -28,7 +29,7 @@ import type { GoogleOAuthService } from '../../services/google/oauth.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { mapDailyAgendaData, mapWeeklyOverviewData } from '../../services/image/data-mapper.ts';
 import { renderConflictImage } from '../../services/image/render-conflict.ts';
-import type { RenderService } from '../../services/image/render-service.ts';
+import type { ImageRenderer } from '../../services/image/render-service.ts';
 import type { AdminEditSession } from '../../services/intent/admin-edit-session.ts';
 import { ConflictService } from '../../services/invite/conflict-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
@@ -91,7 +92,7 @@ export interface CallbackHandlerOpts {
   calendarRepo?: GoogleCalendarRepository;
   disconnectDeps?: DisconnectDeps;
   onCalendarsDone?: (userId: number) => Promise<void>;
-  renderService?: RenderService;
+  renderService?: ImageRenderer;
   invitationService?: InvitationService;
   eventRepo?: EventRepository;
   chatHistoryRepo?: ChatHistoryRepository;
@@ -248,7 +249,19 @@ export function createCallbackHandler(
     const event = eventService.getEvent(eventId, user.telegram_id);
     const lang = (user.language ?? 'en') as Lang;
     if (!event) return ctx.answer({ text: t(lang).callbackErrors.notFound });
-    const detail = formatEventDetail(event, user.timezone, user.language);
+    const detail = formatEventDetail(
+      enrichAgendaEvents(
+        [event],
+        {
+          userId: user.telegram_id,
+          language: user.language as 'en' | 'ru',
+          groupId: isGroup(ctx) ? (getGroupId(ctx) ?? undefined) : undefined,
+        },
+        eventService.agendaRepository,
+      )[0]!,
+      user.timezone,
+      user.language,
+    );
     await ctx.answer();
     return ctx.editText(detail, {
       parse_mode: 'HTML',
@@ -313,7 +326,7 @@ export function createCallbackHandler(
       const exception = eventService.editOccurrence(eventId, occurrenceDate, user.telegram_id);
       if (!exception) return ctx.answer({ text: t(lang).callbackErrors.error });
       await ctx.answer();
-      return ctx.editText(formatEventDetail(exception, user.timezone, lang), {
+      return ctx.editText(formatEventDetail(enrichAgendaEvents([exception], { userId: user.telegram_id, language: lang, groupId: isGroup(ctx) ? getGroupId(ctx) ?? undefined : undefined }, eventService.agendaRepository)[0]!, user.timezone, lang), {
         parse_mode: 'HTML',
         reply_markup: editFieldKeyboard(exception.id, lang),
       });
@@ -323,7 +336,7 @@ export function createCallbackHandler(
       const newTemplate = eventService.splitRecurrence(eventId, occurrenceDate, user.telegram_id);
       if (!newTemplate) return ctx.answer({ text: t(lang).callbackErrors.error });
       await ctx.answer();
-      return ctx.editText(formatEventDetail(newTemplate, user.timezone, lang), {
+      return ctx.editText(formatEventDetail(enrichAgendaEvents([newTemplate], { userId: user.telegram_id, language: lang, groupId: isGroup(ctx) ? getGroupId(ctx) ?? undefined : undefined }, eventService.agendaRepository)[0]!, user.timezone, lang), {
         parse_mode: 'HTML',
         reply_markup: editFieldKeyboard(newTemplate.id, lang),
       });
@@ -442,7 +455,11 @@ export function createCallbackHandler(
     await ctx.answer();
 
     const now = new Date();
-    const occurrences = eventService.getEventsForDay(user.telegram_id, new Date(`${dateIso}T12:00:00Z`), user.timezone);
+    const occurrences = enrichAgenda(
+      eventService.getEventsForDay(user.telegram_id, new Date(`${dateIso}T12:00:00Z`), user.timezone),
+      { userId: user.telegram_id, language: lang, groupId: isGroup(ctx) ? (getGroupId(ctx) ?? undefined) : undefined },
+      eventService.agendaRepository,
+    );
 
     const userNow = new TZDate(now, user.timezone);
     const todayIso = userNow.toISOString().slice(0, 10);
@@ -512,7 +529,11 @@ export function createCallbackHandler(
     const now = new Date();
     const weekStartDate = new Date(`${weekStartIso}T12:00:00Z`);
     const { start, end } = getWeekRangeUtc(weekStartDate, user.timezone);
-    const occurrences = eventService.getEventsInRange(user.telegram_id, start, end);
+    const occurrences = enrichAgenda(
+      eventService.getEventsInRange(user.telegram_id, start, end),
+      { userId: user.telegram_id, language: lang, groupId: isGroup(ctx) ? (getGroupId(ctx) ?? undefined) : undefined },
+      eventService.agendaRepository,
+    );
 
     const occurrencesByDay = new Map<string, typeof occurrences>();
     for (const dayKey of localCalendarWeekDays(start, user.timezone)) {
@@ -757,7 +778,7 @@ export function createCallbackHandler(
               })
               .catch(() => null)
           : null;
-      const eventCard = event ? formatEventDetail(event, event.timezone, lang, { forecast }) : '';
+      const eventCard = event ? formatEventDetail(enrichAgendaEvents([event], { userId: user.telegram_id, language: lang, groupId: isGroup(ctx) ? getGroupId(ctx) ?? undefined : undefined }, eventService.agendaRepository)[0]!, event.timezone, lang, { forecast }) : '';
 
       const editText = eventCard ? `${statusLabel}\n\n${eventCard}` : statusLabel;
       await ctx.editText(editText, { parse_mode: 'HTML' }).catch(() => {});
@@ -993,7 +1014,19 @@ export function createCallbackHandler(
       const eventId = Number(subParts[1]);
       const event = eventService.getEvent(eventId, user.telegram_id);
       if (!event) return ctx.answer({ text: t(lang).callbackErrors.notFound });
-      const detail = formatEventDetail(event, user.timezone, lang);
+      const detail = formatEventDetail(
+        enrichAgendaEvents(
+          [event],
+          {
+            userId: user.telegram_id,
+            language: lang,
+            groupId: isGroup(ctx) ? (getGroupId(ctx) ?? undefined) : undefined,
+          },
+          eventService.agendaRepository,
+        )[0]!,
+        user.timezone,
+        lang,
+      );
       const hint = t(lang).callbackErrors.forwardHint;
       await ctx.answer();
       await ctx.editText(t(lang).callbackErrors.sentBelow);
@@ -2026,7 +2059,7 @@ async function notifyInviter(
     sendPhoto?: (chatId: number, photo: File) => Promise<void>;
   },
   eventRepo?: EventRepository,
-  renderService?: RenderService,
+  renderService?: ImageRenderer,
 ): Promise<void> {
   const inviter = deps.userRepo.findByTelegramId(invitation.inviter_id);
   if (!inviter) return;

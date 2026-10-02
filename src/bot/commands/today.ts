@@ -1,3 +1,4 @@
+import { enrichAgenda } from '../../services/event/agenda-enrichment.ts';
 // src/bot/commands/today.ts
 
 import { TZDate } from '@date-fns/tz';
@@ -8,18 +9,19 @@ import { formatDayAgenda } from '../../services/event/formatters.ts';
 import { googleCalendarColorEmoji } from '../../services/google/calendar-colors.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { renderDayImage } from '../../services/image/render-day.ts';
-import type { RenderService } from '../../services/image/render-service.ts';
+import type { ImageRenderer } from '../../services/image/render-service.ts';
 import type { WeatherService } from '../../services/weather/weather-service.ts';
 import { autoPin } from '../../utils/auto-pin.ts';
 import { imageLogger } from '../../utils/logger.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
+import { sendAgendaText } from './agenda-text.ts';
 
 export async function handleToday(
   ctx: BotCommandContext,
   eventService: EventService,
   holidayService?: HolidayService,
-  renderService?: RenderService,
+  renderService?: ImageRenderer,
   groupRepo?: GroupChatRepository,
   googleCalendarRepo?: GoogleCalendarRepository,
   weatherService?: WeatherService,
@@ -47,18 +49,26 @@ export async function handleToday(
       new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate(), 23, 59, 59, 999),
       timezone,
     );
-    const occurrences = eventService.getEventsInRangeForGroup(groupId, dayStart.toISOString(), dayEnd.toISOString());
+    const occurrences = enrichAgenda(
+      eventService.getEventsInRangeForGroup(groupId, dayStart.toISOString(), dayEnd.toISOString()),
+      { userId: user.telegram_id, language: lang, groupId },
+      eventService.agendaRepository,
+    );
     const holidays = holidayService?.getHolidaysForDate(user.telegram_id, tzNow.toISOString().slice(0, 10)) ?? [];
     const dayWeather = weatherService
       ? await weatherService.getDayWeather(timezone, lang === 'ru' ? 'ru' : 'en')
       : null;
     const text = formatDayAgenda(occurrences, now.toISOString(), timezone, lang, holidays, undefined, dayWeather);
-    await ctx.send(text, { parse_mode: 'HTML' });
+    await sendAgendaText(ctx, text);
     return;
   }
 
   const now = new Date();
-  const occurrences = eventService.getEventsForDay(user.telegram_id, now, user.timezone);
+  const occurrences = enrichAgenda(
+    eventService.getEventsForDay(user.telegram_id, now, user.timezone),
+    { userId: user.telegram_id, language: lang },
+    eventService.agendaRepository,
+  );
   const dateIso = new TZDate(now, user.timezone).toISOString().slice(0, 10);
   const holidays = holidayService?.getHolidaysForDate(user.telegram_id, dateIso) ?? [];
   const calendarColors = buildCalendarColorMap(googleCalendarRepo, user.telegram_id);
@@ -75,7 +85,7 @@ export async function handleToday(
     dayWeather,
   );
 
-  await ctx.send(text, { parse_mode: 'HTML' });
+  await sendAgendaText(ctx, text);
 
   if (renderService) {
     try {

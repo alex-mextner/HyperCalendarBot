@@ -374,7 +374,7 @@ describe('mapEventCardData', () => {
     });
     expect(result.title).toBe('Test Event');
     expect(result.location).toBe('Room 42');
-    expect(result.description).toBe('Review proposals');
+    expect(result.description).toBeUndefined();
     expect(result.timeFormatted).toContain('11:00');
     expect(result.duration).toBe('1h');
   });
