@@ -4,7 +4,8 @@
 
 set -euo pipefail
 
-DATA_DIR="/opt/hypercal/data"
+DEPLOY_DIR="${DEPLOY_DIR:-/opt/hypercal}"
+DATA_DIR="${DEPLOY_DIR}/data"
 BACKUP_DIR="${DATA_DIR}/backups"
 KEEP_DAYS=14
 
@@ -13,7 +14,8 @@ mkdir -p "${BACKUP_DIR}"
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 
 # Safe WAL-mode backup via VACUUM INTO
-docker compose --project-directory /opt/hypercal -f /opt/hypercal/docker-compose.yml exec -T bot \
+cd "$DEPLOY_DIR"
+docker compose exec -T bot \
   bun -e "const d = new (await import(\"bun:sqlite\")).Database(\"/app/data/calendar.db\",{readonly:true}); d.exec(\"VACUUM INTO '/app/data/backups/calendar_${TIMESTAMP}.db'\"); d.close();"
 
 BACKUP_FILE="${BACKUP_DIR}/calendar_${TIMESTAMP}.db"
@@ -26,6 +28,7 @@ fi
 gzip "${BACKUP_FILE}"
 SIZE=$(du -h "${BACKUP_DIR}/calendar_${TIMESTAMP}.db.gz" | cut -f1)
 echo "Backup OK: calendar_${TIMESTAMP}.db.gz (${SIZE})"
+echo "BACKUP_PATH=${BACKUP_DIR}/calendar_${TIMESTAMP}.db.gz"
 
 # Cleanup old backups
 find "${BACKUP_DIR}" -name "calendar_*.db.gz" -mtime +${KEEP_DAYS} -delete
