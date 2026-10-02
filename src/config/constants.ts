@@ -421,6 +421,7 @@ export const MSG = {
           `That fact is too long to keep — length ${length}, limit ${limit}. Say the essence in one short sentence, or split it into several facts.`,
       },
       history: {
+        scopeUnavailable: 'I cannot verify this group context. Ask me in a private chat.',
         notFound: 'No history found.',
       },
       actionLog: {
@@ -429,6 +430,9 @@ export const MSG = {
       meta: {
         noHolidays: 'No upcoming holidays. You may not have country subscriptions set up.',
         unknownName: 'unknown',
+        answerUnfinished: 'I could not finish the answer. This is not confirmation that the request was completed.',
+        answerBeforeEnding:
+          'Answer the outstanding request in final text before ending. Do not replay completed actions.',
         holidaysList: (lines: string) => `Upcoming holidays:\n${lines}`,
         foundUser: (id: number, name: string) => `Found user: telegram_id=${id}, name=${name}`,
         foundUserMtproto: (id: number, name: string) =>
@@ -1226,6 +1230,7 @@ export const MSG = {
           `Этот факт слишком длинный, чтобы его хранить — длина ${length}, лимит ${limit}. Скажи суть одним коротким предложением или раздели на несколько фактов.`,
       },
       history: {
+        scopeUnavailable: 'Не могу проверить контекст этой группы. Напиши мне в личку.',
         notFound: 'История не найдена.',
       },
       actionLog: {
@@ -1234,6 +1239,9 @@ export const MSG = {
       meta: {
         noHolidays: 'Праздников не найдено. Возможно, у тебя не настроены подписки на страны.',
         unknownName: 'неизвестно',
+        answerUnfinished: 'Не смог закончить ответ. Это не подтверждение выполнения запроса.',
+        answerBeforeEnding:
+          'Сначала ответь на незавершённый запрос итоговым текстом. Не повторяй выполненные действия.',
         holidaysList: (lines: string) => `Праздники:\n${lines}`,
         foundUser: (id: number, name: string) => `Пользователь найден: telegram_id=${id}, имя=${name}`,
         foundUserMtproto: (id: number, name: string) =>

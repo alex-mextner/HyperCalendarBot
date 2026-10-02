@@ -6,6 +6,7 @@ import { telegramMessageLink } from '../../../database/repositories/action-log.r
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 
 interface GetActionLogInput {
+  target_user_id?: number;
   event_id?: number;
   action_type?: string;
   action_name?: string;
@@ -26,13 +27,22 @@ export function handleGetActionLog(ctx: AgentContext, input: GetActionLogInput):
     return { success: false, error: 'Action log not available' };
   }
 
-  const limit = input.limit ?? 30;
+  if (ctx.isGroup && (!ctx.groupChatId || ctx.groupChatId >= 0 || ctx.groupChatId !== ctx.chatId)) {
+    return { success: false, error: t(ctx.user.language).aiTools.history.scopeUnavailable };
+  }
+  const requestedLimit = input.limit;
+  const limit =
+    requestedLimit === undefined || !Number.isFinite(requestedLimit)
+      ? 30
+      : Math.max(1, Math.min(100, Math.trunc(requestedLimit)));
   const after = input.after ? toSqliteDateTime(input.after) : undefined;
   const before = input.before ? toSqliteDateTime(input.before) : undefined;
 
   const entries = ctx.actionLogRepo.query({
     user_id: ctx.user.telegram_id,
+    chat_id: ctx.isGroup ? ctx.groupChatId : undefined,
     target_event_id: input.event_id,
+    target_user_id: input.target_user_id,
     action_type: input.action_type,
     action_name: input.action_name,
     after,
@@ -65,4 +75,4 @@ export function handleGetActionLog(ctx: AgentContext, input: GetActionLogInput):
 
   return { success: true, output: lines.join('\n\n') };
 }
-handleGetActionLog.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
+handleGetActionLog.meta = { readonly: true, skipActionLog: true, skipPersist: true } satisfies ToolHandlerMeta;

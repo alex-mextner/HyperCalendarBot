@@ -8,6 +8,7 @@ import { isBalanceExhausted } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
+import { canEndConversation } from './completion-guard.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
 import { validateResponse } from './response-validator.ts';
@@ -839,7 +840,16 @@ export class CalendarBotAgent {
             await writer.flush(true);
           }
 
-          const toolResult = await executeTool(ctx, tc.name, input);
+          const invalidEnd =
+            tc.name === 'end_conversation' &&
+            !canEndConversation(result.text, {
+              explicit: !ctx.isGroup || ctx.wasExplicitInvocation === true,
+              lastTool: tc === result.toolCalls.at(-1),
+              supplement: ctx.supplementMode === true,
+            });
+          const toolResult = invalidEnd
+            ? { success: false, error: t(ctx.user.language).aiTools.meta.answerBeforeEnding }
+            : await executeTool(ctx, tc.name, input);
 
           // Record dedup key only after a successful execution — failed calls
           // must not block retries with a synthetic DUPLICATE result.
@@ -868,11 +878,15 @@ export class CalendarBotAgent {
             if (!ctx.supplementMode && toolResultMessages.length > 0) {
               this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
             }
-            writer.commitIntermediate();
+            if (tc.name === 'end_conversation') {
+              if (!writer.getText().trim() && result.text.trim()) writer.appendText(result.text);
+            } else {
+              writer.commitIntermediate();
+            }
             await writer.finalize();
             dbg?.logFinal(writer.getText().trim(), allToolCalls.length);
             dbg?.flush();
-            if (allToolCalls.some((call) => call.name === 'end_conversation')) {
+            if (tc.name === 'end_conversation') {
               this.debugLogger?.endSession(ctx.chatId);
             }
             return {
@@ -983,6 +997,17 @@ export class CalendarBotAgent {
       }
     }
 
+    if (
+      !runFailed &&
+      !ctx.supplementMode &&
+      (!ctx.isGroup || ctx.wasExplicitInvocation === true) &&
+      !writer.getText().trim()
+    ) {
+      const unresolved = t(ctx.user.language).aiTools.meta.answerUnfinished;
+      writer.appendText(unresolved);
+      this.saveAssistantTurn(ctx, { role: 'assistant', content: unresolved });
+    }
+
     if (!runFailed && !ctx.supplementMode) {
       // The bot answered — any comeback it promised earlier is now settled.
       aiFailureNotices.clear(ctx.user.telegram_id);
@@ -992,7 +1017,7 @@ export class CalendarBotAgent {
     dbg?.logFinal(finalText, allToolCalls.length);
     dbg?.flush();
 
-    if (allToolCalls.some((tc) => tc.name === 'end_conversation')) {
+    if (allToolCalls.some((tc, index) => tc.name === 'end_conversation' && allToolResults[index]?.success)) {
       this.debugLogger?.endSession(ctx.chatId);
     }
 
@@ -1130,6 +1155,7 @@ export class CalendarBotAgent {
 
       const toolResultMessages: MessageParam[] = [];
       let stopLoopTriggered = false;
+      let completedConversation = false;
       for (const tc of result.toolCalls) {
         let input: { [key: string]: unknown };
         try {
@@ -1156,7 +1182,16 @@ export class CalendarBotAgent {
         writer.setToolLabel(tc.name, input);
         await writer.flush(true);
 
-        const toolResult = await executeTool(ctx, tc.name, input);
+        const invalidEnd =
+          tc.name === 'end_conversation' &&
+          !canEndConversation(result.text, {
+            explicit: !ctx.isGroup || ctx.wasExplicitInvocation === true,
+            lastTool: tc === result.toolCalls.at(-1),
+            supplement: ctx.supplementMode === true,
+          });
+        const toolResult = invalidEnd
+          ? { success: false, error: t(ctx.user.language).aiTools.meta.answerBeforeEnding }
+          : await executeTool(ctx, tc.name, input);
 
         // Record dedup key only on success — failed calls must not block retries.
         if (toolResult.success) {
@@ -1177,6 +1212,7 @@ export class CalendarBotAgent {
 
         if (toolResult.stopLoop) {
           stopLoopTriggered = true;
+          completedConversation = tc.name === 'end_conversation';
           break;
         }
       }
@@ -1185,7 +1221,11 @@ export class CalendarBotAgent {
         this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
       }
       writer.clearToolLabel();
-      writer.commitIntermediate();
+      if (completedConversation) {
+        if (!writer.getText().trim() && result.text.trim()) writer.appendText(result.text);
+      } else {
+        writer.commitIntermediate();
+      }
 
       if (stopLoopTriggered) {
         // A tool like ask_user / end_conversation already sent its own UI —

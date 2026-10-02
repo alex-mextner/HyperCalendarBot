@@ -49,16 +49,24 @@ function toSqliteDateTime(ts: string): string {
 }
 
 export function handleGetHistory(ctx: AgentContext, input: GetHistoryInput): ToolResult {
-  const limit = input.limit ?? 50;
+  if (ctx.isGroup && (!ctx.groupChatId || ctx.groupChatId >= 0 || ctx.groupChatId !== ctx.chatId)) {
+    return { success: false, error: t(ctx.user.language).aiTools.history.scopeUnavailable };
+  }
+  const requestedLimit = input.limit;
+  const limit =
+    requestedLimit === undefined || !Number.isFinite(requestedLimit)
+      ? 50
+      : Math.max(1, Math.min(100, Math.trunc(requestedLimit)));
   const before = input.before ? toSqliteDateTime(input.before) : undefined;
   const after = input.after ? toSqliteDateTime(input.after) : undefined;
 
   // In group context, scope to the group chat history to avoid leaking private DM messages.
-  // before/after filters are not supported for group history (group timestamps are shared context).
   if (ctx.isGroup && ctx.groupChatId) {
     const messages = ctx.chatHistory.searchByChat(ctx.groupChatId, {
       limit,
       search: input.search,
+      before,
+      after,
     });
     if (messages.length === 0)
       return {

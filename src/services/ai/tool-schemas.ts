@@ -346,6 +346,7 @@ const getHistorySchema = z
 
 const getActionLogSchema = z
   .object({
+    target_user_id: z.number().int().positive().safe().optional(),
     event_id: z.number().optional(),
     action_type: z.string().optional(),
     action_name: z.string().optional(),

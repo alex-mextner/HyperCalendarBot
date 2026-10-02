@@ -34,14 +34,14 @@ function createTestDb() {
 
 type ScriptedRound =
   | { kind: 'text'; text: string }
-  | { kind: 'tool'; callId: string; name: string; input: { [key: string]: unknown } }
+  | { kind: 'tool'; callId: string; name: string; input: { [key: string]: unknown }; text?: string }
   | { kind: 'error'; error: Error };
 
 function asAssistantMessage(round: ScriptedRound): OpenAI.ChatCompletionMessageParam {
   if (round.kind === 'tool') {
     return {
       role: 'assistant',
-      content: null,
+      content: round.text ?? null,
       tool_calls: [
         {
           id: round.callId,
@@ -105,10 +105,11 @@ function makeStreamImpl(script: ScriptedRound[]): {
     }
 
     // tool round
+    if (current.text) cbs.onTextDelta?.(current.text);
     cbs.onToolCallStart?.(current.name);
     const msg = asAssistantMessage(current);
     return {
-      text: '',
+      text: current.text ?? '',
       toolCalls: [
         {
           id: current.callId,
@@ -498,7 +499,15 @@ describe('CalendarBotAgent.run()', () => {
   });
 
   test('end_conversation tool stops loop and calls debugLogger.endSession', async () => {
-    const { impl, calls } = makeStreamImpl([{ kind: 'tool', callId: 'call-end', name: 'end_conversation', input: {} }]);
+    const { impl, calls } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'call-end',
+        name: 'end_conversation',
+        input: {},
+        text: 'The requested work is complete.',
+      },
+    ]);
     const endSession = mock(() => {});
     const debugLogger = {
       createRunContext: mock(() => null),
@@ -514,6 +523,46 @@ describe('CalendarBotAgent.run()', () => {
     expect(calls.length).toBe(1);
     expect(result.toolCalls.some((tc) => tc.name === 'end_conversation')).toBe(true);
     expect(endSession).toHaveBeenCalledWith(USER_ID);
+  });
+
+  test('unanswered private end_conversation is rejected and a final explanation is delivered', async () => {
+    const { impl, calls } = makeStreamImpl([
+      { kind: 'tool', callId: 'silent-end', name: 'end_conversation', input: {} },
+      { kind: 'text', text: 'The contact was not deleted. No deletion tool completed.' },
+    ]);
+    ctx.messageText = 'Did you remove the contact?';
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    const result = await agent.run(ctx);
+    expect(calls.length).toBe(2);
+    expect(result.toolResults[0]?.success).toBe(false);
+    expect(result.responseText).toContain('contact was not deleted');
+  });
+
+  test('text emitted with end_conversation is retained as the final answer, outside execution details', async () => {
+    const finalText = 'No record confirms why that contact was added.';
+    const { impl } = makeStreamImpl([
+      { kind: 'tool', callId: 'final-end', name: 'end_conversation', input: {}, text: finalText },
+    ]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    const result = await agent.run(ctx);
+    expect(result.responseText.trim().endsWith(finalText)).toBe(true);
+    expect(result.responseText.trim().endsWith('...')).toBe(false);
+  });
+
+  test('exhausting rounds on rejected end calls returns an honest status, never ellipsis', async () => {
+    const script: ScriptedRound[] = Array.from({ length: 15 }, (_, i) => ({
+      kind: 'tool',
+      callId: `empty-end-${i}`,
+      name: 'end_conversation',
+      input: {},
+    }));
+    const { impl, calls } = makeStreamImpl(script);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    const result = await agent.run(ctx);
+    expect(calls.length).toBe(15);
+    expect(result.toolResults.every((item) => item.success === false)).toBe(true);
+    expect(result.responseText).toContain('not confirmation');
+    expect(result.responseText.trim().endsWith('...')).toBe(false);
   });
 
   // ── Regression: removing flush from onToolCallStart must not break normal tools ──

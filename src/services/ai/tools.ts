@@ -825,6 +825,7 @@ const toolDefinitions: ToolDefinition[] = [
     input_schema: {
       type: 'object' as const,
       properties: {
+        target_user_id: { type: 'number', description: 'Filter actions by the affected Telegram user ID.' },
         event_id: { type: 'number', description: 'Show only actions that affected this event' },
         action_type: {
           type: 'string',
