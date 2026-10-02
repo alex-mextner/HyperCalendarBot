@@ -340,9 +340,11 @@ function buildInputModeSection(ctx: AgentContext): string {
   if (ctx.inputMode === 'voice_message') {
     return `## Voice Message
 This message was transcribed from a voice message using speech recognition.
-The transcription may contain errors — words can be replaced with similar-sounding ones (homophones, wrong word boundaries, misheard names).
-Use conversation context and common sense to infer what the user actually meant.
-Do NOT ask the user to repeat themselves unless the message is completely unintelligible.`;
+The transcription may contain errors — words can be replaced with similar-sounding ones (homophones, wrong word boundaries, misheard names, digits, dates, or times).
+Use conversation context and available tools to infer likely meaning, but do not silently guess any consequential detail that would materially change an action.
+If a consequential detail is uncertain, investigate context first, then ask a short confirmation question and offer 2–4 likely interpretations when possible.
+Ask only about the ambiguous detail — do not make the user repeat the whole voice message.
+Read-only requests may proceed when the interpretation is clear. Before any mutating or destructive action, resolve uncertain transcribed details first.`;
   }
   if (ctx.inputMode === 'live_call') {
     return `## Live Phone Call
