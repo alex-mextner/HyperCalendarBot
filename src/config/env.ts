@@ -15,6 +15,10 @@ export const DEFAULT_SMART_CHAIN: ProviderId[] = ['groq', 'gemini', 'hf', 'zai']
  * exhausted quotas and oversized Groq payloads retain the normal guarded fallback.
  */
 export const DEFAULT_FAST_CHAIN: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
+/** Repair/smart-tier requests never silently fall back to the fast chain — when
+ * unconfigured they reuse the smart chain's own default order.
+ */
+export const DEFAULT_REPAIR_CHAIN: ProviderId[] = DEFAULT_SMART_CHAIN;
 
 /**
  * A chain order together with where it came from. The source is carried rather
@@ -108,6 +112,7 @@ export interface EnvConfig {
   AI_TOOL_SCHEMA_USER_IDS?: number[];
   AI_SMART_CHAIN: ChainOrder;
   AI_FAST_CHAIN: ChainOrder;
+  AI_REPAIR_CHAIN: ChainOrder;
   BOT_ADMIN_ID?: number;
   INTENT_LEARNER_DAILY_LIMIT: number;
   INLINE_BOT_TOKEN?: string;
@@ -238,6 +243,7 @@ export function loadConfig(): EnvConfig {
     AI_TOOL_SCHEMA_USER_IDS: toolSchemaUserIds,
     AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),
     AI_FAST_CHAIN: parseChain('AI_FAST_CHAIN', DEFAULT_FAST_CHAIN),
+    AI_REPAIR_CHAIN: parseChain('AI_REPAIR_CHAIN', DEFAULT_REPAIR_CHAIN),
     BOT_ADMIN_ID,
     GEMINI_RATE_LIMITS: parseGeminiRateLimits(process.env.GEMINI_RATE_LIMITS),
     INTENT_LEARNER_DAILY_LIMIT,
