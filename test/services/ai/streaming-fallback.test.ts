@@ -156,6 +156,79 @@ describe('aiStreamRound — provider chain fallback', () => {
     // Each fake is recreated per test
   });
 
+  test.each([
+    ['openai/gpt-oss-20b', true],
+    ['openai/gpt-oss-120b', false],
+  ] as const)('Groq %s uses low reasoning on its production chain', async (model, fast) => {
+    process.env.GROQ_API_KEY = 'groq-key';
+    process.env.GROQ_MODEL = model;
+    process.env.GROQ_FAST_MODEL = model;
+    process.env.AI_SMART_CHAIN = 'groq';
+    process.env.AI_FAST_CHAIN = 'groq';
+    fakeGroq = buildFakeClient([
+      { kind: 'text', text: 'ok' },
+      { kind: 'finish', reason: 'stop' },
+    ]);
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, fast });
+    expect(result.text).toBe('ok');
+    expect(fakeGroq.chat.completions.create.mock.calls[0]?.[0]?.reasoning_effort).toBe('low');
+  });
+
+  test('non-Groq providers do not receive Groq reasoning settings', async () => {
+    process.env.AI_SMART_CHAIN = 'gemini';
+    fakeGemini = buildFakeClient([
+      { kind: 'text', text: 'gemini' },
+      { kind: 'finish', reason: 'stop' },
+    ]);
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
+    expect(result.text).toBe('gemini');
+    expect(fakeGemini.chat.completions.create.mock.calls[0]?.[0]?.reasoning_effort).toBeUndefined();
+  });
+
+  test('Groq usage-compatibility retry preserves low reasoning effort', async () => {
+    process.env.GROQ_API_KEY = 'groq-key';
+    process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
+    process.env.AI_SMART_CHAIN = 'groq';
+    const paramsSeen: { stream_options?: unknown; reasoning_effort?: unknown }[] = [];
+    fakeGroq = {
+      chat: {
+        completions: {
+          create: mock(async (params: { stream_options?: unknown; reasoning_effort?: unknown }) => {
+            paramsSeen.push(params);
+            if (params.stream_options)
+              throw new OpenAI.APIError(
+                400,
+                { error: { message: 'Unknown parameter: stream_options' } },
+                'Unknown parameter: stream_options',
+                new Headers(),
+              );
+            return buildFakeClient([
+              { kind: 'text', text: 'compat' },
+              { kind: 'finish', reason: 'stop' },
+            ]).chat.completions.create();
+          }),
+        },
+      },
+    };
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
+    expect(result.text).toBe('compat');
+    expect(paramsSeen).toHaveLength(2);
+    expect(paramsSeen.map((p) => p.reasoning_effort)).toEqual(['low', 'low']);
+  });
+
+  test('Groq Qwen does not inherit GPT-OSS reasoning policy', async () => {
+    process.env.GROQ_API_KEY = 'groq-key';
+    process.env.GROQ_MODEL = 'qwen/qwen3.8-27b';
+    process.env.AI_SMART_CHAIN = 'groq';
+    fakeGroq = buildFakeClient([
+      { kind: 'text', text: 'qwen' },
+      { kind: 'finish', reason: 'stop' },
+    ]);
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
+    expect(result.text).toBe('qwen');
+    expect(fakeGroq.chat.completions.create.mock.calls[0]?.[0]?.reasoning_effort).toBeUndefined();
+  });
+
   test('returns z.ai result on first success', async () => {
     fakeZai = buildFakeClient([
       { kind: 'text', text: 'hello from z.ai' },

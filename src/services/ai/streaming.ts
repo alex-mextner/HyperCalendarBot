@@ -415,6 +415,14 @@ function rejectsUsageStreamOption(error: unknown): boolean {
 }
 
 /** Standard OpenAI streaming adapter (works for all four providers). */
+const LOW_REASONING_GROQ_MODELS = new Set(['openai/gpt-oss-20b', 'openai/gpt-oss-120b']);
+function groqReasoningEffort(
+  provider: ProviderId,
+  model: string,
+): OpenAI.ChatCompletionCreateParamsStreaming['reasoning_effort'] | undefined {
+  return provider === 'groq' && LOW_REASONING_GROQ_MODELS.has(model) ? 'low' : undefined;
+}
+
 function streamingSlot(
   label: string,
   provider: ProviderId,
@@ -436,6 +444,7 @@ function streamingSlot(
         max_tokens: opts.maxTokens,
         temperature: opts.temperature ?? 0.3,
         stream: true,
+        ...(groqReasoningEffort(provider, model) ? { reasoning_effort: groqReasoningEffort(provider, model) } : {}),
         ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
       };
       if (opts.tools && opts.tools.length > 0) {
