@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { FeatureKey } from '../../database/repositories/feature-usage.repository.ts';
 import { logger } from '../../utils/logger.ts';
+import { referenceEvidenceFrom } from '../intent/event-reference-store.ts';
 import { handleGetActionLog } from './tool-handlers/action-log.ts';
 import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
 import { handleCalculate } from './tool-handlers/calculate.ts';
@@ -450,6 +451,8 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
     if (result.success) {
       const eventId = extractEventId(input as ToolInputMap[ToolName], result);
       if (eventId !== undefined) ctx.onEventMentioned?.(eventId);
+      const reference = ctx.onEventReference ? referenceEvidenceFrom(toolName, result) : null;
+      if (reference) ctx.onEventReference?.(reference);
     }
 
     // Track feature usage for tip personalization

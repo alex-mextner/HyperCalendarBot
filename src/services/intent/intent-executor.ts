@@ -5,6 +5,7 @@ import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { isMutationTool } from '../ai/tool-executor.ts';
 import type { ToolResult, ToolResultData } from '../ai/types.ts';
+import { computeEventTime, EVENT_TIME_STEP, EventTimeInputSchema } from './event-time.ts';
 import { evaluate } from './expression-evaluator.ts';
 import { applyFilters, parseFilterChain } from './filter-parser.ts';
 import { type EventSummary, type UserContext as ExecutorUserContext, resolveVariables } from './variable-resolver.ts';
@@ -26,7 +27,20 @@ type RuntimeStepResults = StepResults & {
   count?: (list: unknown) => number;
   has?: (value: unknown) => boolean;
   fits?: (value: unknown, start: unknown, end: unknown) => boolean;
+  same?: (a: unknown, b: unknown) => boolean;
 };
+
+const SAME_EVENT_FIELDS = ['id', 'title', 'date', 'time', 'all_day', 'end_at', 'recurrence_rule'] as const;
+
+/**
+ * True when two event reads describe the same event with the same identity and times, so a
+ * confirmation given for the first may be applied to the second. Any difference, or a
+ * missing read, is false.
+ */
+function sameEvent(a: unknown, b: unknown): boolean {
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+  return SAME_EVENT_FIELDS.every((field) => Reflect.get(a, field) === Reflect.get(b, field));
+}
 
 /**
  * Parse "varName|filter" from an `as` field.
@@ -110,6 +124,7 @@ function buildEventStepResults(userCtx: ExecutorUserContext): RuntimeStepResults
         Date.parse(slot.end) >= to,
     );
   };
+  pre.same = sameEvent;
   pre.count = (list: unknown) => (Array.isArray(list) ? list.length : 0);
   pre.has = (value: unknown) => value !== undefined && value !== null && value !== '';
   pre.isPastHourPM = (h: unknown) => {
@@ -137,6 +152,8 @@ interface ExecutorResult {
   stepResults?: StepResults;
   /** ID of the last event touched in this workflow — for cross-request last_mentioned_event persistence. */
   mentionedEventId?: number;
+  /** Candidates the response listed for the user to choose from, in the order shown. */
+  presentedEventIds?: number[];
   /**
    * Whether any step may have changed data. Set on every outcome, failures included, so a
    * caller can tell a retryable failure ('none') from one whose request must never be replayed.
@@ -325,6 +342,36 @@ function extractEventSummaries(data: ToolResultData | undefined): EventSummary[]
   return events;
 }
 
+function runEventTime(
+  step: Level2Step,
+  captures: Record<string, string>,
+  userCtx: ExecutorUserContext,
+  stepResults: RuntimeStepResults,
+  i18n: I18nMap | undefined,
+  strict: boolean,
+): void {
+  if (!strict || step.as === undefined) throw new WorkflowInputError('INVALID_WORKFLOW');
+  const resolved = resolveInput(EVENT_TIME_STEP, step.input ?? {}, captures, userCtx, stepResults, i18n, true);
+  const parsed = EventTimeInputSchema.safeParse(resolved);
+  if (!parsed.success) throw new WorkflowInputError('INVALID_INPUT');
+  const input =
+    parsed.data.default_minutes === undefined && userCtx.defaultEventMinutes !== undefined
+      ? { ...parsed.data, default_minutes: userCtx.defaultEventMinutes }
+      : parsed.data;
+  const value = computeEventTime(input, userCtx.timezone);
+  stepResults[step.as] = value;
+  if (stepResults.tool_outputs) stepResults.tool_outputs[step.as] = value;
+}
+
+/** The IDs a context binding offered as choices; the response lists exactly these, in this order. */
+function presentedChoices(stepResults: RuntimeStepResults): number[] | undefined {
+  const ref: unknown =
+    stepResults.bind && typeof stepResults.bind === 'object' ? Reflect.get(stepResults.bind, 'ref') : null;
+  if (!ref || typeof ref !== 'object' || Reflect.get(ref, 'kind') !== 'choices') return undefined;
+  const ids: unknown = Reflect.get(ref, 'ids');
+  return Array.isArray(ids) && ids.every((id) => typeof id === 'number') ? ids : undefined;
+}
+
 async function runLevel2(
   steps: Level2Step[],
   captures: Record<string, string>,
@@ -431,11 +478,21 @@ async function runLevel2(
     if (step.respond !== undefined) {
       const text = resolveVariables(step.respond, captures, userCtx, stepResults, i18n, { strict });
       if (strict && typeof text !== 'string') throw new WorkflowInputError('INVALID_INPUT');
-      return { success: true, response: text as string, mentionedEventId };
+      return {
+        success: true,
+        response: text as string,
+        mentionedEventId,
+        presentedEventIds: presentedChoices(stepResults),
+      };
     }
 
     // No call — nothing to execute in this step
     if (step.call === undefined) continue;
+
+    if (step.call === EVENT_TIME_STEP) {
+      runEventTime(step, captures, userCtx, stepResults, i18n, strict);
+      continue;
+    }
 
     // Respond with text from input.message and stop — same as respond: field but explicit call form
     if (step.call === 'respond') {

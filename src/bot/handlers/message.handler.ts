@@ -1,5 +1,6 @@
 // src/bot/handlers/message.handler.ts
 
+import { Database } from 'bun:sqlite';
 import { mkdir } from 'node:fs/promises';
 import { TZDate } from '@date-fns/tz';
 import type { AnyScene } from '@gramio/scenes';
@@ -44,6 +45,7 @@ import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import { type AdminEditSession, isSessionExpired } from '../../services/intent/admin-edit-session.ts';
 import { type EventMentionStore, InMemoryEventMentionStore } from '../../services/intent/event-mention-store.ts';
+import { captureReferences, EventReferenceStore } from '../../services/intent/event-reference-store.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
@@ -78,7 +80,7 @@ import { escapeHtml, formatUtcOffset } from '../../utils/telegram.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
-import { createIntentMatcherLayer } from '../pipeline/intent-matcher-layer.ts';
+import { createEventContextResolver, createIntentMatcherLayer } from '../pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../pipeline/pipeline.ts';
 import type { WorkflowSession, WorkflowSessionStore } from '../pipeline/types.ts';
 import { CALLBACK_ONLY_STEP_INDICES } from '../scenes/add-event.scene.ts';
@@ -156,6 +158,8 @@ export interface MessageHandlerDeps {
   sendVoice?: (chatId: number, audio: Buffer) => Promise<void>;
   // Persistent store for last-mentioned event context (Redis-backed or in-memory)
   eventMentionStore?: EventMentionStore;
+  // Conversational event references per actor, chat and topic ("delete it", "the second one")
+  eventReferenceStore?: EventReferenceStore;
   // Pipeline: intent matching
   intentMatcher?: IntentMatcher;
   intentRepo?: IntentRepository;
@@ -861,6 +865,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       };
     })();
   const eventMentionStore: EventMentionStore = deps.eventMentionStore ?? new InMemoryEventMentionStore();
+  // Without an injected store, references live in a process-local database and end with the process.
+  const eventReferenceStore = deps.eventReferenceStore ?? new EventReferenceStore(new Database(':memory:'));
 
   const aiAgentLayer = createAiAgentLayer({
     agent: deps.agent,
@@ -870,6 +876,24 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         Promise.resolve(eventMentionStore.set(user.telegram_id, eventId)).catch((err: unknown) => {
           cmdLogger.error({ err: err, userId: user.telegram_id }, 'Failed to persist last mentioned event');
         });
+      };
+      const scope = { actorId: user.telegram_id, chatId, threadId: groupInfo?.topicThreadId };
+      const startedAt = Date.now();
+      captureReferences(
+        ctx,
+        eventReferenceStore,
+        scope,
+        { source: 'ai_tool', sourceMessageId: incomingMessageId },
+        (err) => cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to record event reference'),
+      );
+      const previousOnBotResponse = ctx.onBotResponse;
+      ctx.onBotResponse = (messageId) => {
+        previousOnBotResponse?.(messageId);
+        try {
+          eventReferenceStore.tagBotMessage(scope, messageId, startedAt);
+        } catch (err) {
+          cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to map bot response to event references');
+        }
       };
       return ctx;
     },
@@ -887,15 +911,11 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       ? (text: string) => deps.sendMessageToUser!(deps.botAdminId!, text)
       : undefined;
 
-  const getEventContext = async (userId: number, timezone: string) => {
-    const lastAdded = deps.eventService.getLatestCreated(userId);
-    const mentionedId = await eventMentionStore.get(userId);
-    const lastMentioned = mentionedId ? deps.eventService.getEvent(mentionedId, userId) : null;
-    return {
-      lastAddedEvent: lastAdded ? toEventSummary(lastAdded, timezone) : undefined,
-      lastMentionedEvent: lastMentioned ? toEventSummary(lastMentioned, timezone) : undefined,
-    };
-  };
+  const getEventContext = createEventContextResolver({
+    eventService: deps.eventService,
+    store: eventReferenceStore,
+    toSummary: toEventSummary,
+  });
 
   return async (ctx: BotCommandContext) => {
     const user = ctx.dbUser;
@@ -1222,6 +1242,13 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
                   cmdLogger.error({ err: err, userId: user.telegram_id }, 'Failed to persist last mentioned event');
                 });
               };
+              captureReferences(
+                agentCtx,
+                eventReferenceStore,
+                { actorId: user.telegram_id, chatId: Number(ctx.chatId!), threadId: ctx.threadId },
+                { source: 'intent', sourceMessageId: incomingMsgId },
+                (err) => cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to record event reference'),
+              );
               return executeTool(agentCtx, toolName, input);
             },
             workflowSessions,
@@ -1233,6 +1260,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
               });
             },
             deps.actionLogRepo,
+            eventReferenceStore,
           )
         : undefined;
 

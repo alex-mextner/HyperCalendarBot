@@ -2,12 +2,19 @@
 
 import { t, toLang } from '../../config/constants.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
+import type { CalendarEvent } from '../../database/types.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
+import type { EventService } from '../../services/event/event-service.ts';
+import type {
+  EventReferenceStore,
+  ReferenceContext,
+  ReferenceScope,
+} from '../../services/intent/event-reference-store.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import { formatResponse } from '../../services/intent/response-formatter.ts';
-import type { EventSummary } from '../../services/intent/variable-resolver.ts';
+import type { EventSummary, UserContext } from '../../services/intent/variable-resolver.ts';
 import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
@@ -23,6 +30,55 @@ import type {
 
 const WorkflowCodec = jsonCodec(WorkflowSchema);
 
+/** Where a message was said: the reference scope plus the bot message it replies to, if any. */
+interface ReferenceWhere extends ReferenceScope {
+  replyToBotMessageId?: number;
+}
+
+type IntentEventContext = {
+  lastAddedEvent?: EventSummary;
+  lastMentionedEvent?: EventSummary;
+  references?: ReferenceContext;
+};
+
+/**
+ * Event context for one message. The last mentioned event and every other reference come from
+ * this actor's evidence in this chat and topic, re-read with the access rule get_event applies
+ * (own calendar in a private chat, the group calendar in a group); nothing crosses chats.
+ */
+export function createEventContextResolver(deps: {
+  eventService: Pick<EventService, 'getEvent' | 'getEventForGroup' | 'getLatestCreated'>;
+  store: EventReferenceStore;
+  toSummary: (event: CalendarEvent, timezone: string) => EventSummary;
+}): (userId: number, timezone: string, where: ReferenceWhere) => Promise<IntentEventContext> {
+  return async (userId, timezone, where) => {
+    const lastAdded = deps.eventService.getLatestCreated(userId);
+    const verify = (eventId: number): EventSummary | null => {
+      const event =
+        where.chatId === userId
+          ? deps.eventService.getEvent(eventId, userId)
+          : deps.eventService.getEventForGroup(eventId, where.chatId);
+      return event ? deps.toSummary(event, timezone) : null;
+    };
+    const references = deps.store.resolve(where, verify, { replyToMessageId: where.replyToBotMessageId });
+    return {
+      lastAddedEvent: lastAdded ? deps.toSummary(lastAdded, timezone) : undefined,
+      lastMentionedEvent: references.it?.status === 'one' ? references.it.event : undefined,
+      references,
+    };
+  };
+}
+
+function referenceWhere(ctx: BotCommandContext, userId: number, chatId: number): ReferenceWhere {
+  const reply = ctx.replyMessage;
+  return {
+    actorId: userId,
+    chatId,
+    ...(ctx.threadId !== undefined ? { threadId: ctx.threadId } : {}),
+    ...(reply?.from?.isBot() ? { replyToBotMessageId: reply.id } : {}),
+  };
+}
+
 export function createIntentMatcherLayer(
   matcher: IntentMatcher,
   intentRepo: IntentRepository,
@@ -34,24 +90,49 @@ export function createIntentMatcherLayer(
   ) => ToolResult | Promise<ToolResult>,
   workflowSessions: WorkflowSessionStore,
   notifyAdmin?: (text: string) => Promise<void>,
-  getEventContext?: (
-    userId: number,
-    timezone: string,
-  ) => Promise<{ lastAddedEvent?: EventSummary; lastMentionedEvent?: EventSummary }>,
+  getEventContext?: (userId: number, timezone: string, where: ReferenceWhere) => Promise<IntentEventContext>,
   onEventMentioned?: (userId: number, eventId: number) => void,
   actionLogRepo?: ActionLogRepository,
+  referenceStore?: EventReferenceStore,
 ) {
   type Result = Awaited<ReturnType<IntentExecutor['run']>>;
-  async function deliverResponse(ctx: BotCommandContext, plainText: string, removeKeyboard = false): Promise<void> {
+  /** Returns the ID of the last message sent, so a later reply to it can name the events it showed. */
+  async function deliverResponse(
+    ctx: BotCommandContext,
+    plainText: string,
+    removeKeyboard = false,
+  ): Promise<number | undefined> {
     // formatResponse returns display text, not a trusted Telegram HTML document.
     const chunks = splitMessage(escapeHtml(plainText), 4000, 'HTML');
-    for (const [index, chunk] of chunks.entries())
-      await ctx.send(chunk, {
+    let sentId: number | undefined;
+    for (const [index, chunk] of chunks.entries()) {
+      const sent = await ctx.send(chunk, {
         parse_mode: 'HTML',
         ...(removeKeyboard && index === chunks.length - 1
           ? { reply_markup: { remove_keyboard: true, selective: true } }
           : {}),
       });
+      sentId = sent?.id;
+    }
+    return sentId;
+  }
+  /**
+   * Choices the response offered become the presented list, and the sent message is mapped to
+   * every event evidenced during this run. Recording failures never affect the delivered answer.
+   */
+  function recordDelivery(where: ReferenceWhere, result: Result, sentId: number | undefined, since: number): void {
+    if (!referenceStore) return;
+    try {
+      if (result.presentedEventIds?.length)
+        referenceStore.record(
+          where,
+          { kind: 'list', tool: 'intent_choices', eventIds: result.presentedEventIds },
+          { source: 'intent' },
+        );
+      if (sentId !== undefined) referenceStore.tagBotMessage(where, sentId, since);
+    } catch (err) {
+      cmdLogger.warn({ err, userId: where.actorId }, 'Failed to record intent event references');
+    }
   }
   async function deliverPrompt(
     ctx: BotCommandContext,
@@ -86,6 +167,24 @@ export function createIntentMatcherLayer(
     const messages = t(toLang(language)).intentWorkflow;
     await ctx.send(result.mutationEvidence === 'applied' ? messages.appliedIncomplete : messages.outcomeUnknown);
   }
+  async function userContextFor(
+    user: NonNullable<BotCommandContext['dbUser']>,
+    groupCtx: GroupContext | undefined,
+    where: ReferenceWhere,
+  ): Promise<UserContext> {
+    const eventCtx = getEventContext ? await getEventContext(user.telegram_id, user.timezone, where) : {};
+    return {
+      timezone: user.timezone,
+      language: user.language,
+      username: user.username ?? undefined,
+      firstName: user.first_name ?? undefined,
+      userId: user.telegram_id,
+      groupIsGroup: groupCtx?.isGroup ?? false,
+      groupChatId: groupCtx?.groupChatId,
+      defaultEventMinutes: user.default_event_duration_minutes,
+      ...eventCtx,
+    };
+  }
   async function saveSuspension(
     ctx: BotCommandContext,
     chatId: number,
@@ -119,6 +218,7 @@ export function createIntentMatcherLayer(
     const userId = user.telegram_id;
     const chatId = Number(ctx.chatId ?? userId);
     const groupCtx = extra?.groupContext;
+    const where = referenceWhere(ctx, userId, chatId);
 
     // 1. Check for active workflow session (resuming from ask_user).
     // TTL is enforced inside workflowSessions.get() — a non-null result is always fresh.
@@ -129,20 +229,11 @@ export function createIntentMatcherLayer(
         return { handled: true };
       }
       workflowSessions.delete(chatId, userId);
-      const eventCtx = getEventContext ? await getEventContext(user.telegram_id, user.timezone) : {};
+      const startedAt = Date.now();
       const result = await executor.run(
         session.workflow,
         session.captures,
-        {
-          timezone: user.timezone,
-          language: user.language,
-          username: user.username ?? undefined,
-          firstName: user.first_name ?? undefined,
-          userId: user.telegram_id,
-          groupIsGroup: groupCtx?.isGroup ?? false,
-          groupChatId: groupCtx?.groupChatId,
-          ...eventCtx,
-        },
+        await userContextFor(user, groupCtx, where),
         session.sourceMessage === undefined
           ? toolExecutor
           : (name, input) => toolExecutor(name, input, { text: session.sourceMessage!, actorId: userId, chatId }),
@@ -171,9 +262,9 @@ export function createIntentMatcherLayer(
         // whose text output is written for the AI agent, not for the user.
         const format = intentRepo.getById(session.intentId)?.format ?? 'text';
         const text = formatResponse(format, result.response, user.timezone, user.language, result.responseEvents);
-        if (session.workflow.version === 2) {
-          await deliverResponse(ctx, text, true);
-        } else await ctx.send(text);
+        const sentId =
+          session.workflow.version === 2 ? await deliverResponse(ctx, text, true) : (await ctx.send(text))?.id;
+        recordDelivery(where, result, sentId, startedAt);
       }
       return { handled: true };
     }
@@ -206,20 +297,11 @@ export function createIntentMatcherLayer(
     }
 
     // 4. Execute
-    const eventCtx = getEventContext ? await getEventContext(user.telegram_id, user.timezone) : {};
+    const startedAt = Date.now();
     const result = await executor.run(
       workflow,
       match.captures,
-      {
-        timezone: user.timezone,
-        language: user.language,
-        username: user.username ?? undefined,
-        firstName: user.first_name ?? undefined,
-        userId: user.telegram_id,
-        groupIsGroup: groupCtx?.isGroup ?? false,
-        groupChatId: groupCtx?.groupChatId,
-        ...eventCtx,
-      },
+      await userContextFor(user, groupCtx, where),
       toolExecutor,
     );
 
@@ -279,8 +361,8 @@ export function createIntentMatcherLayer(
       );
       // ctx.send is wrapped in bot/index.ts and already writes this to chat history;
       // the supplement agent reads the text from supplementAutoResponse, not from history.
-      if (workflow.version === 2) await deliverResponse(ctx, formatted);
-      else await ctx.send(formatted);
+      const sentId = workflow.version === 2 ? await deliverResponse(ctx, formatted) : (await ctx.send(formatted))?.id;
+      recordDelivery(where, result, sentId, startedAt);
       return { handled: true, needsSupplement: true, supplementAutoResponse: formatted };
     }
 

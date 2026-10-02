@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { toolSchemas } from '../ai/tool-schemas.ts';
+import { EVENT_TIME_STEP, EventTimeInputSchema } from './event-time.ts';
 import { type FilterCall, KNOWN_FILTERS, parseFilterChain } from './filter-parser.ts';
 import { normalize } from './normalizer.ts';
 import type { Workflow } from './workflow-schema.ts';
@@ -16,6 +17,7 @@ const WORKFLOW_ONLY_SCHEMAS: Record<string, z.ZodType> = {
     .object({ question: z.string().min(1), options: z.array(z.string().min(1).max(128)).min(1).max(12).optional() })
     .passthrough(),
   respond: z.object({ message: z.string().min(1) }).passthrough(),
+  [EVENT_TIME_STEP]: EventTimeInputSchema,
 };
 
 /** Every step type a workflow may call, tool or workflow-only, keyed by name. */

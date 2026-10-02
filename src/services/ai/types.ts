@@ -31,6 +31,7 @@ import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
 import type { ImageRenderer } from '../image/render-service.ts';
+import type { EventReferenceEvidence } from '../intent/event-reference-store.ts';
 import type { EventSummary } from '../intent/variable-resolver.ts';
 import type { AddressCache } from '../location/address-cache.ts';
 import type { LocationVerificationService } from '../location/location-verification-service.ts';
@@ -179,6 +180,8 @@ export interface AgentContext {
   sender?: TelegramSender;
   /** Called after any successful tool call that references an event (by ID or creation). */
   onEventMentioned?: (eventId: number) => void;
+  /** Called with structured event evidence from each successful tool result (never from tool input). */
+  onEventReference?: (evidence: EventReferenceEvidence) => void;
   renderService?: ImageRenderer;
   deepLinkService?: DeepLinkService;
   botUsername?: string;

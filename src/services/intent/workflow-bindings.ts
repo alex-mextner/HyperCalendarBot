@@ -1,7 +1,9 @@
 import { TZDate } from '@date-fns/tz';
 import { z } from 'zod';
+import { REFERENCE_LIMITS, type ReferenceContext, type ResolvedReference } from './event-reference-store.ts';
 import { normalize } from './normalizer.ts';
-import { resolveVariables, type UserContext } from './variable-resolver.ts';
+import { type EventSummary, resolveVariables, type UserContext } from './variable-resolver.ts';
+import { type CalendarDay, formatLocalInstant, pad2, uniqueInstant } from './wall-clock.ts';
 import { WorkflowInputError, type WorkflowInputValue } from './workflow-input.ts';
 import type { I18nMap } from './workflow-schema.ts';
 
@@ -34,6 +36,8 @@ const DAY_WORDS = ['today', 'tomorrow', 'day_after_tomorrow', 'yesterday'] as co
 const PeriodKey = z.enum(PERIOD_KEYS);
 const DayWord = z.enum(DAY_WORDS);
 const HourMinute = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+/** `it` = the event just discussed, `created` = the one this actor just created, a number = a list position. */
+const ContextSelector = z.union([z.enum(['it', 'created']), z.number().int().min(1).max(REFERENCE_LIMITS.idsPerRow)]);
 
 export const BindingSchema = z.discriminatedUnion('type', [
   z
@@ -79,7 +83,8 @@ export const BindingSchema = z.discriminatedUnion('type', [
       type: z.literal('time'),
       from: Template,
       optional: z.boolean().optional(),
-      default: HourMinute.optional(),
+      /** An empty default means "no time given", for steps that keep the event's own time. */
+      default: z.union([HourMinute, z.literal('')]).optional(),
     })
     .strict(),
   z
@@ -114,7 +119,17 @@ export const BindingSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('relative_instant'), duration: z.string().regex(BINDING_NAME) }).strict(),
   z.object({ type: z.literal('timezone'), from: Template }).strict(),
   z
-    .object({ type: z.literal('eventref'), from: Template, reject: z.array(z.string().max(32)).max(24).optional() })
+    .object({
+      type: z.literal('eventref'),
+      from: Template,
+      reject: z.array(z.string().max(32)).max(24).optional(),
+      /** Phrases that select from the conversation instead of naming an event. */
+      context: z.record(z.string().min(1).max(64), ContextSelector).optional(),
+      /** Selector used when the reference is left out entirely ("delete" right after a mention). */
+      blank: ContextSelector.optional(),
+      /** When false, free text that is not a context phrase is rejected instead of searched as a title. */
+      names: z.boolean().optional(),
+    })
     .strict(),
   z.object({ type: z.literal('recipient'), from: Template }).strict(),
 ]);
@@ -128,14 +143,6 @@ export type BindValues = { [name: string]: WorkflowInputValue };
 const fail = (): never => {
   throw new WorkflowInputError('INVALID_INPUT');
 };
-const pad2 = (n: number): string => String(n).padStart(2, '0');
-
-interface CalendarDay {
-  y: number;
-  m: number;
-  d: number;
-}
-
 function isoDay({ y, m, d }: CalendarDay): string {
   return `${String(y).padStart(4, '0')}-${pad2(m)}-${pad2(d)}`;
 }
@@ -292,38 +299,6 @@ function parseTime(raw: string): string {
   return `${pad2(resolved)}:${pad2(minute)}`;
 }
 
-function offsetMinutesAt(utcMs: number, timezone: string): number {
-  return -new TZDate(utcMs, timezone).getTimezoneOffset();
-}
-
-function formatOffset(minutes: number): string {
-  const abs = Math.abs(minutes);
-  return `${minutes < 0 ? '-' : '+'}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
-}
-
-function formatLocalInstant(utcMs: number, timezone: string): string {
-  const local = new TZDate(utcMs, timezone);
-  const stamp =
-    `${String(local.getFullYear()).padStart(4, '0')}-${pad2(local.getMonth() + 1)}-${pad2(local.getDate())}` +
-    `T${pad2(local.getHours())}:${pad2(local.getMinutes())}:00`;
-  return `${stamp}${formatOffset(offsetMinutesAt(utcMs, timezone))}`;
-}
-
-/**
- * Resolve a wall-clock time in an IANA zone to exactly one instant. A time skipped by a
- * clock change or repeated by one has zero or two instants and is rejected, never guessed.
- */
-function uniqueInstant(day: CalendarDay, hour: number, minute: number, timezone: string): number {
-  const wall = Date.UTC(day.y, day.m - 1, day.d, hour, minute);
-  const candidates = new Set<number>();
-  for (const probe of [wall - 86_400_000, wall, wall + 86_400_000]) {
-    const offset = offsetMinutesAt(probe, timezone);
-    const instant = wall - offset * 60_000;
-    if (offsetMinutesAt(instant, timezone) === offset) candidates.add(instant);
-  }
-  return candidates.size === 1 ? [...candidates][0]! : fail();
-}
-
 function parseDayPart(value: WorkflowInputValue | undefined): CalendarDay {
   const match = typeof value === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
   return match ? { y: Number(match[1]), m: Number(match[2]), d: Number(match[3]) } : fail();
@@ -339,7 +314,7 @@ function buildDatetime(
   const clock = bound[binding.time];
   const parts = typeof clock === 'string' ? /^(\d{2}):(\d{2})$/.exec(clock) : null;
   if (!parts) return fail();
-  const start = uniqueInstant(day, Number(parts[1]), Number(parts[2]), timezone);
+  const start = uniqueInstant(day, Number(parts[1]), Number(parts[2]), timezone) ?? fail();
   if (binding.future && start <= now.getTime()) return fail();
   return formatLocalInstant(start + (binding.plus_minutes ?? 0) * 60_000, timezone);
 }
@@ -423,11 +398,54 @@ function parseText(raw: string, max: number): string {
   return text;
 }
 
-function parseEventRef(raw: string, reject: string[] | undefined): WorkflowInputValue {
+type ContextSelectorValue = z.infer<typeof ContextSelector>;
+
+function choiceLine(event: EventSummary, index: number): string {
+  return `${index + 1}. «${event.title}» — ${event.date}${event.time ? ` ${event.time}` : ''} (#${event.id})`;
+}
+
+function fromResolved(resolved: ResolvedReference | undefined): WorkflowInputValue {
+  if (resolved === undefined) return { kind: 'missing', reason: 'none' };
+  if (resolved.status === 'gone') return { kind: 'missing', reason: 'gone' };
+  if (resolved.status === 'one') return { kind: 'id', id: resolved.event.id, via: 'context' };
+  return {
+    kind: 'choices',
+    text: resolved.events.map(choiceLine).join('\n'),
+    ids: resolved.events.map((event) => event.id),
+  };
+}
+
+/**
+ * A context selector yields exactly one candidate ID, a list to choose from, or a stated
+ * reason why there is none. It never picks the first of several; the ID is only a candidate
+ * that the workflow re-reads with get_event before anything is shown or written.
+ */
+function resolveContextRef(selector: ContextSelectorValue, refs: ReferenceContext | undefined): WorkflowInputValue {
+  if (typeof selector === 'number') {
+    const list = refs?.list;
+    if (!list) return { kind: 'missing', reason: 'none' };
+    if (selector > list.length) return { kind: 'missing', reason: 'range' };
+    const event = list[selector - 1];
+    return event ? { kind: 'id', id: event.id, via: 'context' } : { kind: 'missing', reason: 'gone' };
+  }
+  if (selector === 'created') return fromResolved(refs?.created);
+  if (refs?.replyUnmapped) return { kind: 'missing', reason: 'reply' };
+  return fromResolved(refs?.it);
+}
+
+function parseEventRef(
+  raw: string,
+  binding: Extract<Binding, { type: 'eventref' }>,
+  refs: ReferenceContext | undefined,
+): WorkflowInputValue {
+  if (isBlank(raw) && binding.blank !== undefined) return resolveContextRef(binding.blank, refs);
+  const key = normalize(raw);
+  if (binding.context && Object.hasOwn(binding.context, key)) return resolveContextRef(binding.context[key]!, refs);
   const idMatch = /^(?:#|№|id\s*:?\s*)?(\d{1,9})$/i.exec(raw.trim());
   if (idMatch) return Number(idMatch[1]) > 0 ? { kind: 'id', id: Number(idMatch[1]) } : fail();
+  if (binding.names === false) return fail();
   const query = parseText(raw, 120);
-  const blocked = new Set((reject ?? []).map(normalize));
+  const blocked = new Set((binding.reject ?? []).map(normalize));
   if (
     normalize(query)
       .split(' ')
@@ -508,7 +526,7 @@ function evaluateOne(binding: Binding, bound: BindValues, evaluation: Evaluation
     case 'timezone':
       return parseTimezone(raw);
     case 'eventref':
-      return parseEventRef(raw, binding.reject);
+      return parseEventRef(raw, binding, userCtx.references);
     case 'recipient':
       return parseRecipient(raw);
   }

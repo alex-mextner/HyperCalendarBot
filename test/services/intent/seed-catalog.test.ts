@@ -286,8 +286,9 @@ describe('lineage of every earlier recipe', () => {
     );
     for (const key of [
       'clear_today_events',
-      'delete_last_created_event',
+      'delete_next_event',
       'decline_event_invitation',
+      'remove_own_participation',
       'reset_settings_to_default',
       'share_agenda_today',
       'show_event_full_details',
@@ -300,5 +301,18 @@ describe('lineage of every earlier recipe', () => {
       target: 'basis.google.connect_help',
     });
     expect(merged.get('free_slots_week')).toMatchObject({ disposition: 'rewrite', target: 'basis.slots.week' });
+    // Conversational references and relative time changes are carried over as confirmed, rechecked rules.
+    expect(merged.get('delete_last_created_event')).toMatchObject({
+      disposition: 'rewrite',
+      target: 'basis.event.delete_context',
+    });
+    expect(merged.get('extend_event_duration_minutes')).toMatchObject({
+      disposition: 'rewrite',
+      target: 'basis.event.resize_context',
+    });
+    expect(merged.get('move_event_to_tomorrow')).toMatchObject({
+      disposition: 'rewrite',
+      target: 'basis.event.move_context',
+    });
   });
 });
