@@ -1049,4 +1049,13 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    name: '063_reflection_recipient_index',
+    up: (db) => {
+      db.exec(`CREATE INDEX idx_action_log_recipient
+        ON user_action_log (user_id, target_user_id, created_at DESC, id DESC)`);
+      db.exec(`CREATE INDEX idx_action_log_owner_chat
+        ON user_action_log (user_id, chat_id, created_at DESC, id DESC)`);
+    },
+  },
 ];

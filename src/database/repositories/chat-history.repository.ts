@@ -25,10 +25,21 @@ export class ChatHistoryRepository {
       .all(chatId, limit) as ChatHistoryMessage[];
   }
 
-  searchByChat(chatId: number, params: { limit?: number; search?: string }): ChatHistoryMessage[] {
-    const { limit = 50, search } = params;
+  searchByChat(
+    chatId: number,
+    params: { limit?: number; search?: string; before?: string; after?: string },
+  ): ChatHistoryMessage[] {
+    const { limit = 50, search, before, after } = params;
     const conditions: string[] = ['chat_id = ?'];
     const args: (number | string)[] = [chatId];
+    if (before) {
+      conditions.push('created_at < ?');
+      args.push(before);
+    }
+    if (after) {
+      conditions.push('created_at > ?');
+      args.push(after);
+    }
 
     if (search) {
       conditions.push('content LIKE ?');

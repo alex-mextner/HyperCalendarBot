@@ -293,6 +293,8 @@ export type ToolResultData =
  *   - Keep them bilingual: use ctx.user.language to pick ru/en.
  */
 export interface ToolResult {
+  /** Trusted handler-resolved audit identity; never derived from output prose or caller metadata. */
+  audit?: { targetUserId: number };
   success: boolean;
   output?: string;
   error?: string;

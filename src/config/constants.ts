@@ -421,6 +421,7 @@ export const MSG = {
           `That fact is too long to keep — length ${length}, limit ${limit}. Say the essence in one short sentence, or split it into several facts.`,
       },
       history: {
+        scopeUnavailable: 'Cannot verify the current group. Open this request in the correct chat.',
         notFound: 'No history found.',
       },
       actionLog: {
@@ -1226,6 +1227,7 @@ export const MSG = {
           `Этот факт слишком длинный, чтобы его хранить — длина ${length}, лимит ${limit}. Скажи суть одним коротким предложением или раздели на несколько фактов.`,
       },
       history: {
+        scopeUnavailable: 'Не могу подтвердить текущую группу. Открой запрос в нужном чате.',
         notFound: 'История не найдена.',
       },
       actionLog: {

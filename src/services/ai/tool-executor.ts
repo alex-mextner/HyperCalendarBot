@@ -177,6 +177,7 @@ export interface ToolInputMap {
   propose_calendar_change: ProposeInput;
   get_history: { limit?: number; search?: string; before?: string; after?: string };
   get_action_log: {
+    target_user_id?: number;
     event_id?: number;
     action_type?: string;
     action_name?: string;
@@ -442,7 +443,7 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
       try {
         const inputObj = input as ToolInputMap[ToolName];
         const eventId = extractEventId(inputObj, result);
-        const targetUserId = extractTargetUserId(inputObj);
+        const targetUserId = (result.success ? result.audit?.targetUserId : undefined) ?? extractTargetUserId(inputObj);
         ctx.actionLogRepo.insert({
           user_id: ctx.user.telegram_id,
           chat_id: ctx.chatId,

@@ -175,6 +175,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
 
   return {
     success: true,
+    audit: { targetUserId: inviteeId },
     output: t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, inviteeId),
     agentHint: delivery.delivered
       ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
