@@ -59,28 +59,99 @@ describe('IntentLearner', () => {
     expect(result).toBeNull();
   });
 
-  test('skips when ask_user was called', async () => {
-    const learner = buildLearner();
-    const result = await learner.analyze('delete it', [{ name: 'ask_user', input: {} }], []);
-    expect(result).toBeNull();
+  const showToday = JSON.stringify({
+    canonical_name: 'move_referenced_event',
+    phrases: ['перенеси это на завтра'],
+    workflow: {
+      tools: [{ name: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } }],
+    },
+    format: 'text',
   });
 
-  test('skips contextual messages with pronouns', async () => {
-    const learner = buildLearner();
+  test('analyzes interactions that used ask_user: clarification can be part of an intent', async () => {
+    let calls = 0;
+    const learner = buildLearner(async (opts) => {
+      calls++;
+      return makeStreamStub([showToday])(opts);
+    });
+    await learner.analyze('delete it', [{ name: 'ask_user', input: {} }], []);
+    expect(calls).toBe(1);
+  });
+
+  test('analyzes context-dependent wording instead of discarding it', async () => {
+    const learner = buildLearner(makeStreamStub([showToday]));
     const result = await learner.analyze(
       'перенеси это на завтра',
       [{ name: 'update_event', input: {} }],
       [{ success: true }],
     );
-    expect(result).toBeNull();
+    expect(result?.canonical_name).toBe('move_referenced_event');
   });
 
-  test('skips Cyrillic pronouns without word boundary false negatives', async () => {
-    const learner = buildLearner();
-    for (const msg of ['удали это', 'его отмени', 'её перенеси', 'их удали']) {
-      const result = await learner.analyze(msg, [{ name: 'delete_event', input: {} }], [{ success: true }]);
+  test('never extends an approved intent in place when the learner proposes its name again', async () => {
+    const id = intentRepo.create({
+      canonical_name: 'move_referenced_event',
+      phrases: ['old phrase'],
+      workflow: { tools: [{ name: 'get_events', input: {} }] },
+      format: 'text',
+    });
+    intentRepo.updateStatus(id, 'approved');
+    const learner = buildLearner(makeStreamStub([showToday]));
+    expect(await learner.analyze('перенеси это на завтра', [{ name: 'update_event', input: {} }], [])).toBeNull();
+    expect(intentRepo.getById(id)?.phrases).toBe('["old phrase"]');
+  });
+
+  describe('durable queue mode', () => {
+    test('hands the interaction to enqueue and never calls the model', async () => {
+      const enqueued: unknown[] = [];
+      const learner = new IntentLearner(intentRepo, {
+        dailyLimit: 100,
+        streamImpl: async () => {
+          throw new Error('the model must not run when the durable queue is configured');
+        },
+        enqueue: (input) => enqueued.push(input),
+      });
+      const result = await learner.analyze(
+        'удали это',
+        [{ name: 'delete_event', input: { event_id: 42 } }],
+        [{ success: true, output: 'ok' }],
+        { actorId: 7, chatId: 7, messageId: 3, previousAiResponse: 'Удалил', recentMessages: [] },
+      );
       expect(result).toBeNull();
-    }
+      expect(enqueued).toEqual([
+        {
+          actorId: 7,
+          chatId: 7,
+          messageId: 3,
+          request: 'удали это',
+          previousAiResponse: 'Удалил',
+          toolCalls: [{ name: 'delete_event', input: { event_id: 42 } }],
+          toolResults: [{ success: true, output: 'ok' }],
+          recentMessages: [],
+          evidenceOnly: false,
+        },
+      ]);
+    });
+
+    test('stores chat without tool calls as evidence only', async () => {
+      const enqueued: { evidenceOnly?: boolean }[] = [];
+      const learner = new IntentLearner(intentRepo, { dailyLimit: 100, enqueue: (input) => enqueued.push(input) });
+      await learner.analyze('привет', [], [], { actorId: 1, chatId: 1 });
+      expect(enqueued.map((input) => input.evidenceOnly)).toEqual([true]);
+    });
+
+    test('an enqueue failure is logged, not thrown into the reply path', async () => {
+      const errorSpy = spyOn(cmdLogger, 'error').mockImplementation(() => {});
+      const learner = new IntentLearner(intentRepo, {
+        dailyLimit: 100,
+        enqueue: () => Promise.reject(new Error('sidecar busy')),
+      });
+      await expect(
+        learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [], { actorId: 1, chatId: 1 }),
+      ).resolves.toBeNull();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      errorSpy.mockRestore();
+    });
   });
 
   test('respects daily budget cap', async () => {
