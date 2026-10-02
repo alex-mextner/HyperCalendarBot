@@ -316,6 +316,9 @@ const SKIP_ACTION_LOG = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.skipActionLog),
 );
 
+/** Known writes use the same metadata classification as the action log. */
+export const WRITE_TOOLS = new Set(Object.keys(toolSchemas).filter((name) => !SKIP_ACTION_LOG.has(name)));
+
 /** Derived: tools that always result in [SKIP] — no status message or tool label. */
 export const SILENT_TOOLS = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.silent),
@@ -373,7 +376,10 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   dismiss_connect_telegram_prompt: 'telegram_connect',
 };
 
-export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
+export type ExecutorDisposition = 'executed' | 'failed' | 'skipped' | 'waiting';
+export type ExecutedToolResult = ToolResult & { disposition: ExecutorDisposition };
+
+export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ExecutedToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
   let validationError: ToolResult | undefined;
@@ -404,7 +410,7 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
         { tool: toolName, chatId: ctx.chatId, sinceMs: now - lastCalledAt },
         'Tool call throttled (identical within 5s)',
       );
-      return { success: true, output: THROTTLE_MARKER };
+      return { success: true, output: THROTTLE_MARKER, disposition: 'skipped' };
     }
   }
 
@@ -466,10 +472,17 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
       }
     }
 
-    return result;
+    return {
+      ...result,
+      disposition: !result.success
+        ? 'failed'
+        : result.stopLoop && (toolName === 'ask_user' || toolName === 'pick_users')
+          ? 'waiting'
+          : 'executed',
+    };
   } catch (outerError) {
     aiLogger.error({ tool: toolName, err: outerError }, 'Tool execution error');
-    return { success: false, error: `Tool execution failed: ${String(outerError)}` };
+    return { success: false, error: `Tool execution failed: ${String(outerError)}`, disposition: 'failed' };
   }
 }
 
