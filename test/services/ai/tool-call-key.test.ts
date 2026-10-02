@@ -41,3 +41,10 @@ describe('toolCallKey', () => {
     expect(key1).toBe(key2);
   });
 });
+
+test('canonical numeric ID strings share the numeric dedup key', () => {
+  expect(toolCallKey('delete_event', { event_id: '123' })).toBe(toolCallKey('delete_event', { event_id: 123 }));
+  expect(toolCallKey('send_invitation', { event_id: '123', invitee_id: '456' })).toBe(
+    toolCallKey('send_invitation', { event_id: 123, invitee_id: 456 }),
+  );
+});
