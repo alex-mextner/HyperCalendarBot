@@ -19,7 +19,13 @@ import { UserRepository } from '../../../src/database/repositories/user.reposito
 import { runMigrations } from '../../../src/database/schema.ts';
 import { AssistantMessageCodec, aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
-import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
+import {
+  AllProvidersFailedError,
+  type ProviderFailure,
+  type StreamCallbacks,
+  type StreamRoundOptions,
+  type StreamRoundResult,
+} from '../../../src/services/ai/streaming.ts';
 import { TelegramStreamWriter } from '../../../src/services/ai/telegram-stream.ts';
 import { _resetToolThrottleForTest, executeTool } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
@@ -427,6 +433,36 @@ describe('CalendarBotAgent.run()', () => {
     // is actually shown rather than a substring that happens to also match "Saved.".
     expect(result.responseText).toContain('Attempt 2: Completed');
     expect(result.responseText).not.toContain('Saved.');
+  });
+
+  test('a provider rejecting a call to an unexposed tool reveals it and retries the round instead of failing the chain', async () => {
+    ctx.messageText = '@someuser Name\nAdd to contacts';
+    const contactRepo = new ContactRepository(db);
+    ctx.contactRepo = contactRepo;
+    const upsert = spyOn(contactRepo, 'upsert');
+    const rejection: ProviderFailure = {
+      provider: 'Groq (openai/gpt-oss-120b)',
+      providerId: 'groq',
+      model: 'openai/gpt-oss-120b',
+      message:
+        "Tool call validation failed: tool call validation failed: attempted to call tool 'add_contact' which was not in request.tools",
+      transient: true,
+    };
+    const script = makeStreamImpl([
+      { kind: 'error', error: new AllProvidersFailedError([rejection]) },
+      { kind: 'tool', callId: 'ok', name: 'add_contact', input: { name: 'Name', username: 'someuser' } },
+      { kind: 'text', text: 'Saved.' },
+    ]);
+    const captured: StreamRoundOptions[] = [];
+    const impl: typeof script.impl = async (opts, cbs) => {
+      if (!isValidatorCall(opts)) captured.push({ ...opts, tools: structuredClone(opts.tools) });
+      return script.impl(opts, cbs);
+    };
+    await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, { streamImpl: impl }).run(ctx);
+    const retryNames = captured[1]?.tools?.flatMap((t) => (t.type === 'function' ? [t.function.name] : []));
+    expect(retryNames).toContain('add_contact');
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(contactRepo.list(USER_ID)).toHaveLength(1);
   });
 
   function setupInvitations() {

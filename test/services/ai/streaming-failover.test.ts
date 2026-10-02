@@ -991,6 +991,22 @@ describe('the chain a round runs on reaches the alert layer', () => {
     expect(isAiChainDown()).toBe(false);
   });
 
+  test('a smart round rejected only for an unexposed tool call leaves the bot ready for the caller to recover', async () => {
+    const rejection = apiError(
+      400,
+      "Tool call validation failed: tool call validation failed: attempted to call tool 'create_event' which was not in request.tools",
+    );
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
+    groq = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
+    hf = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
+    const error = await askOn('smart').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AllProvidersFailedError);
+    if (!(error instanceof AllProvidersFailedError)) throw new Error('unreachable');
+    expect(error.unexposedToolNames()).toEqual(['create_event']);
+    expect(isAiChainDown()).toBe(false);
+  });
+
   test('a smart round failing everywhere makes the bot unready', async () => {
     allProvidersDead();
     await expect(askOn('smart')).rejects.toThrow(AllProvidersFailedError);
