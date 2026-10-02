@@ -125,6 +125,8 @@ export interface CreateBotOpts {
   fallbackTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['fallbackTts'];
   mtprotoResolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   eventMentionStore?: EventMentionStore;
+  routingRepairStore?: import('../services/ai/routing-repair-store.ts').RoutingRepairStore;
+  lightRouterRequest?: import('./handlers/message.handler.ts').MessageHandlerDeps['lightRouterRequest'];
   domainEventBus?: DomainEventBus;
   pushAiMessage?: (data: AiMessageJobData) => Promise<void>;
   nliClassifier?: import('../services/nli/nli-classifier.ts').NliClassifier;
@@ -133,7 +135,12 @@ export interface CreateBotOpts {
   pendingGeoStore?: import('../services/location/pending-geo-store.ts').PendingGeoStore;
   envConfig?: Pick<
     EnvConfig,
-    'BOT_ADMIN_ID' | 'INTENT_LEARNER_DAILY_LIMIT' | 'BOT_USERNAME' | 'INLINE_BOT_TOKEN' | 'TELEGRAM_SESSION_MASTER_KEY'
+    | 'BOT_ADMIN_ID'
+    | 'INTENT_LEARNER_DAILY_LIMIT'
+    | 'BOT_USERNAME'
+    | 'INLINE_BOT_TOKEN'
+    | 'TELEGRAM_SESSION_MASTER_KEY'
+    | 'AI_ROUTER_MODE'
   >;
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
   broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
@@ -153,6 +160,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     fallbackTts,
     mtprotoResolveUsername,
     eventMentionStore,
+    routingRepairStore,
+    lightRouterRequest,
     domainEventBus,
     pushAiMessage,
     envConfig,
@@ -403,6 +412,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     intentRepo,
     intentExecutor,
     eventMentionStore: eventMentionStore,
+    routingMode: envConfig?.AI_ROUTER_MODE,
+    routingRepairStore,
+    lightRouterRequest,
     feedbackRepo,
     workflowSessions: db.workflowSessions,
     adminEditSessions,

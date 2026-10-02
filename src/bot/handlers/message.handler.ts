@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import { InlineKeyboard } from 'gramio';
 import { z } from 'zod';
 import { CB, t } from '../../config/constants.ts';
+import type { AiRouterMode } from '../../config/env.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
@@ -31,8 +32,13 @@ import type {
   UserCallSettings,
 } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
+import { classifyConversationTurn } from '../../services/ai/conversation-router.ts';
+import type { RoutingRepairStore } from '../../services/ai/routing-repair-store.ts';
 import { aiStreamRound } from '../../services/ai/streaming.ts';
+import { createToolCatalog } from '../../services/ai/tool-catalog.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
+import { getToolDefinitions } from '../../services/ai/tools.ts';
+import type { RoutingPacketRequest } from '../../services/ai/turn-routing.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
 import type { BirthdayService } from '../../services/birthday/birthday-service.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
@@ -201,6 +207,9 @@ export interface MessageHandlerDeps {
   weatherService?: import('../../services/weather/weather-service.ts').WeatherService;
   aiRetryQueue?: import('../../services/scheduled/types.ts').QueueAdapter;
   aiRetryJobStore?: import('../../services/scheduled/types.ts').RetryJobStore;
+  routingMode?: AiRouterMode;
+  lightRouterRequest?: (packet: RoutingPacketRequest, signal: AbortSignal) => Promise<string>;
+  routingRepairStore?: RoutingRepairStore;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
@@ -833,6 +842,7 @@ export async function tryHandleGroupTzInput(
 
 export function createMessageHandler(deps: MessageHandlerDeps) {
   const agentContextBuilder = buildAgentContextFactory(deps);
+  const routingCatalog = deps.lightRouterRequest ? createToolCatalog(getToolDefinitions('text')) : null;
   const workflowSessions: WorkflowSessionStore =
     deps.workflowSessions ??
     (() => {
@@ -1189,8 +1199,59 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       }
     }
 
+    let routingTier: 'light' | 'medium' | 'smart' | undefined;
+    let allowDeterministic = true;
+    if (
+      deps.routingMode &&
+      deps.routingMode !== 'off' &&
+      deps.lightRouterRequest &&
+      deps.routingRepairStore &&
+      routingCatalog
+    ) {
+      const currentHistoryId = deps.chatHistoryIds?.get(user.telegram_id);
+      const rows =
+        isGroup && Number.isFinite(Number(chatId))
+          ? deps.chatHistory.getRecentByChat(Number(chatId), 8)
+          : deps.chatHistory.getRecent(user.telegram_id, 8);
+      const recent = rows
+        .filter((row) => row.id !== currentHistoryId && (row.role === 'user' || row.role === 'assistant'))
+        .slice(-6)
+        .map((row) => ({
+          id: `h:${row.id}`,
+          kind: 'message' as const,
+          role: row.role as 'user' | 'assistant',
+          text: row.content,
+        }));
+      const route = await classifyConversationTurn({
+        catalog: routingCatalog,
+        classify: deps.lightRouterRequest,
+        repairStore: deps.routingRepairStore,
+        chatId: Number(chatId),
+        userId: user.telegram_id,
+        timezone: user.timezone,
+        scope: isGroup ? 'group' : 'private',
+        turn: {
+          id: `tg:${incomingMsgId ?? ctx.id ?? 0}`,
+          kind: 'message',
+          role: 'user',
+          text: messageText,
+        },
+        recent,
+      });
+      if (route.kind === 'plan') {
+        cmdLogger.info(
+          { tier: route.plan.tier, fallback: route.fallback, shadow: deps.routingMode === 'shadow' },
+          'Conversational routing plan',
+        );
+        if (deps.routingMode === 'active') {
+          routingTier = route.plan.tier;
+          allowDeterministic = route.allowDeterministic;
+        }
+      }
+    }
+
     const intentLayer =
-      deps.intentMatcher && deps.intentRepo && deps.intentExecutor
+      allowDeterministic && deps.intentMatcher && deps.intentRepo && deps.intentExecutor
         ? createIntentMatcherLayer(
             deps.intentMatcher,
             deps.intentRepo,
@@ -1270,12 +1331,30 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       sendTyping();
       const typingInterval = setInterval(sendTyping, 6000);
       try {
-        await runPipeline(ctx, messageText, layers, groupContext, incomingMsgId, wasExplicitInvocation);
+        await runPipeline(
+          ctx,
+          messageText,
+          layers,
+          groupContext,
+          incomingMsgId,
+          wasExplicitInvocation,
+          undefined,
+          routingTier,
+        );
       } finally {
         clearInterval(typingInterval);
       }
     } else {
-      await runPipeline(ctx, messageText, layers, groupContext, incomingMsgId, wasExplicitInvocation);
+      await runPipeline(
+        ctx,
+        messageText,
+        layers,
+        groupContext,
+        incomingMsgId,
+        wasExplicitInvocation,
+        undefined,
+        routingTier,
+      );
     }
   };
 }

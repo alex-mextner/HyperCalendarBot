@@ -55,5 +55,6 @@ export type PipelineLayer = (
     wasExplicitInvocation?: boolean;
     /** Retry attempt index passed from the queue job. Absent on original user messages. */
     retryAttempt?: number;
+    routingTier?: 'light' | 'medium' | 'smart';
   },
 ) => Promise<PipelineResult>;

@@ -873,6 +873,7 @@ let aiMessagesQueueCleanup: { close: () => Promise<void> } | undefined;
 let eventCheckerQueueCleanup: { close: () => Promise<void> } | undefined;
 
 let eventMentionStore: import('./services/intent/event-mention-store.ts').EventMentionStore | undefined;
+let routingRepairStore: import('./services/ai/routing-repair-store.ts').RoutingRepairStore;
 if (config.REDIS_URL) {
   const { RedisEventMentionStore } = await import('./services/intent/event-mention-store.ts');
   const bunRedis = new Bun.RedisClient(config.REDIS_URL);
@@ -882,6 +883,15 @@ if (config.REDIS_URL) {
     get: (key: string) => bunRedis.get(key),
   };
   eventMentionStore = new RedisEventMentionStore(redisClient);
+  const { RedisRoutingRepairStore } = await import('./services/ai/routing-repair-store.ts');
+  routingRepairStore = new RedisRoutingRepairStore({
+    get: (key) => bunRedis.get(key),
+    set: (key, value, ...args) =>
+      args[0] === 'EX' && typeof args[1] === 'number'
+        ? bunRedis.set(key, value, 'EX', args[1])
+        : bunRedis.set(key, value),
+    del: (key) => bunRedis.del(key),
+  });
   // City resolver cache — persistent timezone lookups
   const { initCityResolverCache } = await import('./services/timezone/city-resolver.ts');
   initCityResolverCache({ get: (k) => bunRedis.get(k), set: (k, v) => bunRedis.set(k, v) });
@@ -890,8 +900,10 @@ if (config.REDIS_URL) {
   botLogger.info('Event mention store: Redis (7-day TTL)');
 } else {
   const { InMemoryEventMentionStore } = await import('./services/intent/event-mention-store.ts');
+  const { InMemoryRoutingRepairStore } = await import('./services/ai/routing-repair-store.ts');
   eventMentionStore = new InMemoryEventMentionStore();
-  botLogger.info('Event mention store: in-memory (no REDIS_URL)');
+  routingRepairStore = new InMemoryRoutingRepairStore();
+  botLogger.info('Event mention store + routing repair state: in-memory (no REDIS_URL)');
 }
 
 const domainEventBus = new DomainEventBus();
@@ -986,6 +998,14 @@ if (config.GOOGLE_API_KEY && config.REDIS_URL) {
   botLogger.info('Location verification disabled: REDIS_URL not set (address cache requires Redis)');
 }
 
+let lightRouterRequest: import('./bot/handlers/message.handler.ts').MessageHandlerDeps['lightRouterRequest'];
+if (config.AI_ROUTER_MODE !== 'off') {
+  if (!config.GROQ_API_KEY) throw new Error('GROQ_API_KEY is required when AI_ROUTER_MODE is enabled');
+  const { createLightRouterRequest } = await import('./services/ai/light-router-client.ts');
+  lightRouterRequest = createLightRouterRequest();
+  botLogger.info({ mode: config.AI_ROUTER_MODE }, 'Conversational Light router initialized');
+}
+
 const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, scheduleRepo, triggerRepo, msgDeps } =
   createBot(
     config.BOT_TOKEN,
@@ -1003,6 +1023,8 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       fallbackTts,
       mtprotoResolveUsername,
       eventMentionStore,
+      routingRepairStore,
+      lightRouterRequest,
       domainEventBus,
       nliClassifier,
       locationVerification,
@@ -1014,6 +1036,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
         BOT_USERNAME: config.BOT_USERNAME,
         INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
         TELEGRAM_SESSION_MASTER_KEY: config.TELEGRAM_SESSION_MASTER_KEY,
+        AI_ROUTER_MODE: config.AI_ROUTER_MODE,
       },
       weatherService,
       broadcastEnqueuer,

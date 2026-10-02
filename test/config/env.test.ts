@@ -39,10 +39,10 @@ describe('loadConfig', () => {
   });
 
   describe('provider chain order', () => {
-    const SMART_DEFAULT: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
-    const FAST_DEFAULT: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
+    const SMART_DEFAULT: ProviderId[] = ['groq', 'gemini', 'zai', 'hf'];
+    const FAST_DEFAULT: ProviderId[] = ['groq', 'gemini', 'zai', 'hf'];
 
-    test('puts the paid provider first by default, and keeps the small tiers behind it', () => {
+    test('puts low-latency Groq first by default with independent fallbacks behind it', () => {
       const config = loadConfig();
       expect(config.AI_SMART_CHAIN).toEqual({ order: SMART_DEFAULT, fromEnv: false, fallback: SMART_DEFAULT });
       expect(config.AI_FAST_CHAIN).toEqual({ order: FAST_DEFAULT, fromEnv: false, fallback: FAST_DEFAULT });
@@ -86,6 +86,20 @@ describe('loadConfig', () => {
     });
   });
 
+  describe('AI router mode', () => {
+    test('defaults off for safe rollout', () => {
+      delete process.env.AI_ROUTER_MODE;
+      expect(loadConfig().AI_ROUTER_MODE).toBe('off');
+    });
+    test.each(['shadow', 'active'] as const)('accepts %s', (mode) => {
+      process.env.AI_ROUTER_MODE = mode;
+      expect(loadConfig().AI_ROUTER_MODE).toBe(mode);
+    });
+    test('rejects unknown mode', () => {
+      process.env.AI_ROUTER_MODE = 'maybe';
+      expect(() => loadConfig()).toThrow('AI_ROUTER_MODE');
+    });
+  });
   test('throws if BOT_TOKEN is missing', () => {
     delete process.env.BOT_TOKEN;
     expect(() => loadConfig()).toThrow('BOT_TOKEN');

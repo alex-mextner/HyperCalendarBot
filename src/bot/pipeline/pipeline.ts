@@ -12,6 +12,7 @@ export async function runPipeline(
   incomingMessageId?: number,
   wasExplicitInvocation?: boolean,
   retryAttempt?: number,
+  routingTier?: 'light' | 'medium' | 'smart',
 ): Promise<void> {
   let feedbackContext: FeedbackThreadContext | undefined;
   let supplementMode = false;
@@ -27,6 +28,7 @@ export async function runPipeline(
         supplementAutoResponse,
         wasExplicitInvocation,
         retryAttempt,
+        routingTier,
       });
       if (result.handled) {
         if ('needsSupplement' in result) {

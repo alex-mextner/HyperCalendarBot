@@ -38,6 +38,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
       supplementAutoResponse?: string;
       wasExplicitInvocation?: boolean;
       retryAttempt?: number;
+      routingTier?: 'light' | 'medium' | 'smart';
     },
   ): Promise<PipelineResult> => {
     const user = ctx.dbUser;
@@ -81,6 +82,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
     }
 
     agentContext.retryAttempt = currentAttempt;
+    agentContext.inferenceTier = extra?.routingTier;
 
     if (deps.retryQueue) {
       const queue = deps.retryQueue;

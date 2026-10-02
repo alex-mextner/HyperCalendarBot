@@ -79,9 +79,9 @@ function isValidatorCall(opts: StreamRoundOptions): boolean {
 
 function makeStreamImpl(script: ScriptedRound[]): {
   impl: (opts: StreamRoundOptions, cbs?: StreamCallbacks) => Promise<StreamRoundResult>;
-  calls: { messages: OpenAI.ChatCompletionMessageParam[] }[];
+  calls: { messages: OpenAI.ChatCompletionMessageParam[]; fast?: boolean }[];
 } {
-  const calls: { messages: OpenAI.ChatCompletionMessageParam[] }[] = [];
+  const calls: { messages: OpenAI.ChatCompletionMessageParam[]; fast?: boolean }[] = [];
   let round = 0;
   const impl = async (opts: StreamRoundOptions, cbs: StreamCallbacks = {}) => {
     // Auto-approve validator calls so tests don't have to pre-script them.
@@ -98,7 +98,7 @@ function makeStreamImpl(script: ScriptedRound[]): {
       };
     }
 
-    calls.push({ messages: opts.messages });
+    calls.push({ messages: opts.messages, fast: opts.fast });
     const current = script[round++];
     if (!current) throw new Error(`Scripted stream ran out of rounds (call ${round})`);
     if (current.kind === 'error') {
@@ -140,6 +140,37 @@ function makeStreamImpl(script: ScriptedRound[]): {
 }
 
 describe('CalendarBotAgent.run()', () => {
+  test('light inference tier uses fast provider chain', async () => {
+    const db = createTestDb();
+    const userRepo = new UserRepository(db);
+    const eventRepo = new EventRepository(db);
+    const history = new ChatHistoryRepository(db);
+    const reminders = new EventReminderRepository(db);
+    const holidays = new HolidayRepository(db);
+    userRepo.create({ telegram_id: 9001, timezone: 'UTC', language: 'en' });
+    const scripted = makeStreamImpl([{ kind: 'text', text: 'hello' }]);
+    const sender = {
+      sendMessage: mock(async () => ({ message_id: 1 })),
+      editMessageText: mock(async () => {}),
+    } as unknown as TelegramSender;
+    const agent = new CalendarBotAgent({}, sender, { streamImpl: scripted.impl });
+    history.save(9001, 'user', 'hello');
+    await agent.run({
+      user: userRepo.findByTelegramId(9001)!,
+      chatId: 9001,
+      messageText: 'hello',
+      isGroup: false,
+      eventService: new EventService({ eventRepo }),
+      holidayService: new HolidayService(holidays),
+      chatHistory: history,
+      conversationLogger: new ConversationLogger(history),
+      userRepo,
+      eventReminderRepo: reminders,
+      inferenceTier: 'light',
+    });
+    expect(scripted.calls[0]?.fast).toBe(true);
+  });
+
   let db: Database;
   let ctx: AgentContext;
   let config: AgentConfig;

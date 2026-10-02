@@ -53,6 +53,71 @@ describe('createMessageHandler', () => {
     expect(deps.agent.run).toHaveBeenCalledTimes(1);
   });
 
+  describe('always-first conversational routing', () => {
+    const plan = (tier: 'light' | 'medium' | 'smart') =>
+      JSON.stringify({
+        tier,
+        groups: [],
+        tools: [],
+        calendar: 'none',
+        signals: { misunderstanding: tier === 'smart', repeated_request: false, frustration_at_bot: false },
+        evidence_turn_ids: ['tg:0'],
+      });
+    const repairStore = () => ({
+      isOpen: mock(async () => false),
+      open: mock(async () => {}),
+      clear: mock(async () => {}),
+    });
+    const routedDeps = (mode: 'shadow' | 'active', tier: 'light' | 'medium' | 'smart') => {
+      const matcher = { match: mock(() => null) };
+      const classify = mock(async () => plan(tier));
+      const deps = makeDeps({
+        routingMode: mode,
+        lightRouterRequest: classify,
+        routingRepairStore: repairStore(),
+        chatHistory: { getRecent: mock(() => []), getRecentByChat: mock(() => []) },
+        intentMatcher: matcher,
+        intentRepo: {},
+        intentExecutor: {},
+      });
+      return { deps, matcher, classify };
+    };
+
+    test('shadow classifies but preserves deterministic-first behavior', async () => {
+      const { deps, matcher, classify } = routedDeps('shadow', 'smart');
+      await createMessageHandler(deps as never)(makeCtx() as never);
+      expect(classify).toHaveBeenCalledTimes(1);
+      expect(matcher.match).toHaveBeenCalledTimes(1);
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('active light classifies before matcher and passes light tier to agent', async () => {
+      const order: string[] = [];
+      const { deps, matcher } = routedDeps('active', 'light');
+      deps.lightRouterRequest = mock(async () => {
+        order.push('router');
+        return plan('light');
+      });
+      matcher.match = mock(() => {
+        order.push('intent');
+        return null;
+      });
+      await createMessageHandler(deps as never)(makeCtx() as never);
+      expect(order).toEqual(['router', 'intent']);
+      const agentCtx = deps.agent.run.mock.calls[0]?.[0] as { inferenceTier?: string };
+      expect(agentCtx.inferenceTier).toBe('light');
+    });
+
+    test('active smart repair bypasses deterministic matcher', async () => {
+      const { deps, matcher, classify } = routedDeps('active', 'smart');
+      await createMessageHandler(deps as never)(makeCtx() as never);
+      expect(classify).toHaveBeenCalledTimes(1);
+      expect(matcher.match).not.toHaveBeenCalled();
+      const agentCtx = deps.agent.run.mock.calls[0]?.[0] as { inferenceTier?: string };
+      expect(agentCtx.inferenceTier).toBe('smart');
+    });
+  });
+
   test('ignores messages without text', async () => {
     const deps = makeDeps();
     const handler = createMessageHandler(deps as never);

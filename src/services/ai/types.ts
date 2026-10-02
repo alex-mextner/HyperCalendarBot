@@ -239,6 +239,8 @@ export interface AgentContext {
   /** Retry attempt index: 0 or absent = original message, 1-3 = subsequent backoff retries.
    *  Stall phrase is suppressed on attempts > 0. */
   retryAttempt?: number;
+  /** Tier selected by the always-first conversational router. */
+  inferenceTier?: 'light' | 'medium' | 'smart';
 }
 
 export type TelegramSessionData =

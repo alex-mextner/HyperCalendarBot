@@ -770,6 +770,7 @@ export class CalendarBotAgent {
             temperature: 0.3,
             signal: AbortSignal.timeout(remainingMs),
             userId: ctx.user.telegram_id,
+            fast: ctx.inferenceTier === 'light',
           },
           callbacks,
         );
@@ -1142,6 +1143,7 @@ export class CalendarBotAgent {
           maxTokens: 4096,
           temperature: 0.3,
           signal: AbortSignal.timeout(remainingMs),
+          fast: ctx.inferenceTier === 'light',
         },
         callbacks,
       );

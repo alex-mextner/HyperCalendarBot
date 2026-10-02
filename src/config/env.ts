@@ -3,20 +3,14 @@ import { PROVIDER_IDS, type ProviderId } from '../services/ai/provider-ids.ts';
 import { logger, logOnce } from '../utils/logger.ts';
 
 /**
- * Hugging Face first: it is the paid seat here, and the free tiers underneath it
- * fail in ways retrying cannot fix — a weekly quota that is simply spent, or a
- * per-minute token cap smaller than one request with the tool catalog in it.
+ * Groq first for interactive latency. The streaming layer preflights known TPM
+ * limits before network dispatch, so a guaranteed oversized request is skipped
+ * rather than paying a doomed round trip. Gemini is the independent fallback;
+ * z.ai/HF remain later because current production evidence shows slow/unfunded paths.
  */
-export const DEFAULT_SMART_CHAIN: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
-/**
- * The fast chain carries short requests (summaries, validation), which do fit in
- * the small free tiers, so the cheap and quick providers come first there. Groq
- * is last despite being the quickest: its small model answers 200 with no text
- * and no tool calls often enough to be a liability on a path whose failures are
- * invisible to the user but degrade the next answer — a summary that never
- * arrives means the history reaches the model bluntly truncated instead.
- */
-export const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
+export const DEFAULT_SMART_CHAIN: ProviderId[] = ['groq', 'gemini', 'zai', 'hf'];
+export const DEFAULT_FAST_CHAIN: ProviderId[] = ['groq', 'gemini', 'zai', 'hf'];
+export type AiRouterMode = 'off' | 'shadow' | 'active';
 
 /**
  * A chain order together with where it came from. The source is carried rather
@@ -106,6 +100,7 @@ export interface EnvConfig {
    */
   AI_SMART_CHAIN: ChainOrder;
   AI_FAST_CHAIN: ChainOrder;
+  AI_ROUTER_MODE: AiRouterMode;
   BOT_ADMIN_ID?: number;
   INTENT_LEARNER_DAILY_LIMIT: number;
   INLINE_BOT_TOKEN?: string;
@@ -217,6 +212,11 @@ export function loadConfig(): EnvConfig {
     GROQ_FAST_MODEL: process.env.GROQ_FAST_MODEL || undefined,
     AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),
     AI_FAST_CHAIN: parseChain('AI_FAST_CHAIN', DEFAULT_FAST_CHAIN),
+    AI_ROUTER_MODE: (() => {
+      const value = process.env.AI_ROUTER_MODE?.trim() || 'off';
+      if (value === 'off' || value === 'shadow' || value === 'active') return value;
+      throw new Error('AI_ROUTER_MODE must be off, shadow, or active');
+    })(),
     BOT_ADMIN_ID,
     INTENT_LEARNER_DAILY_LIMIT,
     INLINE_BOT_TOKEN: process.env.INLINE_BOT_TOKEN || undefined,
