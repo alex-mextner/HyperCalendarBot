@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SUPPORTED_CURRENCY_CODES } from '../currency/codes.ts';
 import type { ToolName } from './tool-executor.ts';
 
 // ── Shared fragments ──
@@ -317,7 +318,12 @@ const sendFeedbackSchema = z
   })
   .passthrough();
 
-const calculateSchema = z.object({ expression: z.string() }).passthrough();
+const calculateSchema = z
+  .object({
+    expression: z.string().min(1).max(500),
+    target_currency: z.enum(SUPPORTED_CURRENCY_CODES).optional(),
+  })
+  .passthrough();
 
 const getTimezoneInfoSchema = z
   .object({

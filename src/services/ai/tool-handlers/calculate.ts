@@ -64,10 +64,7 @@ function evalArithmetic(expr: string): Big {
 }
 
 function formatBig(value: Big): string {
-  return value
-    .toFixed(12)
-    .replace(/(?:\.0+|(?<=\.[0-9]*?)0+)$/, '')
-    .replace(/\.$/, '');
+  return value.toFixed();
 }
 
 function formatDiffMs(absMs: number): string {
@@ -83,6 +80,7 @@ function formatDiffMs(absMs: number): string {
 }
 
 export function handleCalculate(input: { expression: string }): ToolResult {
+  if (input.expression.length > 500) return { success: false, error: 'Expression too long (max 500 chars)' };
   const expr = input.expression.trim();
 
   // ISO datetime difference: "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z"
@@ -179,7 +177,6 @@ export function handleCalculate(input: { expression: string }): ToolResult {
   }
 
   // Numeric arithmetic and percentages. Big.js keeps decimal arithmetic exact.
-  if (expr.length > 500) return { success: false, error: 'Expression too long (max 500 chars)' };
   const pctMatch = expr.match(/^(.+?)\s*([+-])\s*(\d+(?:[.,]\d+)?)%\s*$/);
   if (pctMatch) {
     try {

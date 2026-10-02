@@ -5,13 +5,13 @@ import { logger } from '../../utils/logger.ts';
 import { handleGetActionLog } from './tool-handlers/action-log.ts';
 import { handleAssistantTool } from './tool-handlers/assistant.ts';
 import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
-import { handleCalculate } from './tool-handlers/calculate.ts';
 import {
   handleAddContact,
   handleFindContact,
   handleGetContacts,
   handleUpdateContact,
 } from './tool-handlers/contacts.ts';
+import { handleCalculateWithCurrency } from './tool-handlers/currency-calculate.ts';
 import {
   handleAttachPendingLocationToEvent,
   handleCreateEvent,
@@ -164,7 +164,7 @@ export interface ToolInputMap {
   lookup_stress: { words: string[] };
   send_feedback: { type: 'bug' | 'feature' | 'question' | 'other'; message: string };
   get_bot_info: Record<never, never>;
-  calculate: { expression: string };
+  calculate: { expression: string; target_currency?: string };
   get_timezone_info: { timezone: string | string[]; at?: string };
   convert_to_timezone: { datetime: string; timezone: string };
   list_calendar_access: Record<never, never>;
@@ -290,7 +290,7 @@ const HANDLER_MAP: { [tool: string]: { meta?: import('./types.ts').ToolHandlerMe
   get_timezone_info: handleGetTimezoneInfoWithCityFallback,
   convert_to_timezone: handleConvertToTimezone,
   get_bot_info: handleGetBotInfo,
-  calculate: handleCalculate,
+  calculate: handleCalculateWithCurrency,
   lookup_stress: handleLookupStress,
   schedule_ai_calls_list: handleScheduleAiCallsList,
   list_triggers: handleListTriggers,
@@ -671,7 +671,7 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
         return handleGetBotInfo();
 
       case 'calculate':
-        return handleCalculate(input as ToolInputMap['calculate']);
+        return handleCalculateWithCurrency(input as ToolInputMap['calculate']);
 
       case 'get_timezone_info':
         return handleGetTimezoneInfoWithCityFallback(input as ToolInputMap['get_timezone_info']);
