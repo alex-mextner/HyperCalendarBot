@@ -1,5 +1,12 @@
 import { TZDate } from '@date-fns/tz';
 import { z } from 'zod';
+import {
+  type ClockText,
+  type DayText,
+  recognizeCancelTarget,
+  recognizeEventEntry,
+  weekdayIndex,
+} from './natural-entry.ts';
 import { normalize } from './normalizer.ts';
 import { resolveVariables, type UserContext } from './variable-resolver.ts';
 import { WorkflowInputError, type WorkflowInputValue } from './workflow-input.ts';
@@ -106,6 +113,11 @@ export const BindingSchema = z.discriminatedUnion('type', [
       from: Template,
       unit: Template,
       units: z.record(z.string().min(1).max(64), z.number().int().positive().max(10080)),
+      /** Number words accepted in place of digits, e.g. {"два": 2}. */
+      amounts: z
+        .record(z.string().min(1).max(64), z.number().int().positive().max(1000))
+        .refine((values) => Object.keys(values).length <= MAX_ENTRIES, 'Invalid map size')
+        .optional(),
       min: z.number().int().positive().optional(),
       max: z.number().int().positive().optional(),
       default_amount: z.number().int().positive().optional(),
@@ -117,7 +129,17 @@ export const BindingSchema = z.discriminatedUnion('type', [
     .object({ type: z.literal('eventref'), from: Template, reject: z.array(z.string().max(32)).max(24).optional() })
     .strict(),
   z.object({ type: z.literal('recipient'), from: Template }).strict(),
+  /** One terse event entry (title, day, start, optional end and zone); see natural-entry.ts. */
+  z.object({ type: z.literal('event_request'), from: Template }).strict(),
+  /** One event named by title in a terse cancel request; yields an eventref-shaped value. */
+  z.object({ type: z.literal('cancel_target'), from: Template }).strict(),
 ]);
+/** Binding types whose parser is also a structural recognizer the matcher may use as a guard. */
+export const RECOGNIZER_BINDINGS = {
+  event_request: (text: string) => recognizeEventEntry(text).kind === 'entry',
+  cancel_target: (text: string) => recognizeCancelTarget(text).kind === 'target',
+} as const;
+export type RecognizerBinding = keyof typeof RECOGNIZER_BINDINGS;
 export type Binding = z.infer<typeof BindingSchema>;
 export const BindingsSchema = z
   .record(z.string().regex(BINDING_NAME), BindingSchema)
@@ -254,6 +276,8 @@ function parseDate(raw: string, binding: Extract<Binding, { type: 'date' }>, now
   const current = today(now, timezone);
   const word = binding.words && Object.hasOwn(binding.words, key) ? binding.words[key] : undefined;
   if (word) return isoDay(addDays(current, DAY_WORD_OFFSETS[word]));
+  const weekday = weekdayIndex(key);
+  if (weekday !== null) return isoDay(upcomingWeekday(current, weekday));
   const parsed = parseAbsoluteDay(key);
   if (!parsed) return fail();
   const withYear = (year: number): CalendarDay => ({ y: year, m: parsed.day.m, d: parsed.day.d });
@@ -261,6 +285,11 @@ function parseDate(raw: string, binding: Extract<Binding, { type: 'date' }>, now
   if (!validDay(day)) return fail();
   if (parsed.day.y === undefined && binding.future && isoDay(day) < isoDay(current)) day = withYear(current.y + 1);
   return validDay(day) ? isoDay(day) : fail();
+}
+
+/** A weekday name means the nearest such day from today on, today included. */
+function upcomingWeekday(current: CalendarDay, index: number): CalendarDay {
+  return addDays(current, (index - weekdayMondayZero(current) + 7) % 7);
 }
 
 function hourFromSuffix(hour: number, suffix: string): number {
@@ -384,14 +413,122 @@ function buildPeriod(key: (typeof PERIOD_KEYS)[number], now: Date, timezone: str
 }
 
 function parseDuration(raw: string, unitRaw: string, binding: Extract<Binding, { type: 'duration' }>): number {
-  const amountText = raw.trim();
+  const amountText = normalize(raw);
+  const words = binding.amounts ?? {};
   const amount =
-    amountText === '' ? binding.default_amount : /^\d{1,5}$/.test(amountText) ? Number(amountText) : undefined;
+    amountText === ''
+      ? binding.default_amount
+      : /^\d{1,5}$/.test(amountText)
+        ? Number(amountText)
+        : Object.hasOwn(words, amountText)
+          ? words[amountText]
+          : undefined;
   const unit = normalize(unitRaw);
   if (amount === undefined || !Object.hasOwn(binding.units, unit)) return fail();
   const minutes = amount * binding.units[unit]!;
   if (minutes < (binding.min ?? 1) || minutes > (binding.max ?? 1440)) return fail();
   return minutes;
+}
+
+// ─── natural event entries ──────────────────────────────────────────────────
+
+interface WallClock {
+  hour: number;
+  minute: number;
+}
+type ClockReading = { mode: 'exact' | 'noon'; clock: WallClock } | { mode: 'choose'; options: WallClock[] };
+
+const hhmm = ({ hour, minute }: WallClock): string => `${pad2(hour)}:${pad2(minute)}`;
+
+/**
+ * Written minutes, a day-part suffix, 0 or an hour from 13 are unambiguous. A bare 12 is
+ * read as noon and the question says so; a bare 1..11 is never guessed and offers both.
+ */
+function readClock(text: ClockText): ClockReading {
+  const minute = text.minute ?? 0;
+  if (minute > 59) return fail();
+  if (text.suffix) return { mode: 'exact', clock: { hour: hourFromSuffix(text.hour, text.suffix), minute } };
+  if (text.hour > 23) return fail();
+  if (text.minute !== null || text.hour === 0 || text.hour > 12)
+    return { mode: 'exact', clock: { hour: text.hour, minute } };
+  if (text.hour === 12) return { mode: 'noon', clock: { hour: 12, minute: 0 } };
+  return {
+    mode: 'choose',
+    options: [
+      { hour: text.hour, minute: 0 },
+      { hour: text.hour + 12, minute: 0 },
+    ],
+  };
+}
+
+/** A day without a year that already passed this year means next year; weekdays count from today. */
+function entryDay(day: DayText, now: Date, timezone: string): CalendarDay {
+  const current = today(now, timezone);
+  if (day.kind === 'offset') return addDays(current, day.days);
+  if (day.kind === 'weekday') return upcomingWeekday(current, day.index);
+  let resolved: CalendarDay = { y: day.y ?? current.y, m: day.m, d: day.d };
+  if (!validDay(resolved)) return fail();
+  if (day.y === null && isoDay(resolved) < isoDay(current)) resolved = { ...resolved, y: current.y + 1 };
+  return validDay(resolved) ? resolved : fail();
+}
+
+/** An end must be unambiguous, later than the start and within one day of it. */
+function entryEnd(text: ClockText, day: CalendarDay, startAt: number, timezone: string): number {
+  const reading = readClock(text);
+  if (reading.mode === 'choose') return fail();
+  const endAt = uniqueInstant(day, reading.clock.hour, reading.clock.minute, timezone);
+  return endAt > startAt && endAt - startAt <= 86_400_000 ? endAt : fail();
+}
+
+/**
+ * The structured entry the workflow asks about. `mode` is `exact`, `noon` (12 read as
+ * midday) or `choose` (both readings of a bare hour that are still in the future).
+ * Nothing is written from here; the workflow confirms every mode before creating.
+ */
+function buildEventRequest(raw: string, now: Date, userTimezone: string): WorkflowInputValue {
+  const scan = recognizeEventEntry(raw);
+  if (scan.kind !== 'entry') return fail();
+  const { title, day: dayText, start, end, zone } = scan.parts;
+  const timezone = zone ?? userTimezone;
+  const day = entryDay(dayText, now, timezone);
+  const reading = readClock(start);
+  const common = { title, date: isoDay(day), timezone, zone_explicit: zone !== null };
+  if (reading.mode === 'choose') {
+    if (end) return fail();
+    const future = reading.options.flatMap((clock) => {
+      const at = uniqueInstant(day, clock.hour, clock.minute, timezone);
+      return at > now.getTime() ? [{ clock, at }] : [];
+    });
+    if (!future.length) return fail();
+    return {
+      ...common,
+      mode: 'choose',
+      time: null,
+      start: null,
+      until: null,
+      end: null,
+      time_options: future.map((option) => hhmm(option.clock)),
+      start_options: future.map((option) => formatLocalInstant(option.at, timezone)),
+    };
+  }
+  const at = uniqueInstant(day, reading.clock.hour, reading.clock.minute, timezone);
+  if (at <= now.getTime()) return fail();
+  const endAt = end ? entryEnd(end, day, at, timezone) : null;
+  return {
+    ...common,
+    mode: reading.mode,
+    time: hhmm(reading.clock),
+    start: formatLocalInstant(at, timezone),
+    until: formatLocalInstant(endAt ?? at + 3_600_000, timezone),
+    end: endAt === null ? null : formatLocalInstant(endAt, timezone),
+    time_options: [],
+    start_options: [],
+  };
+}
+
+function parseCancelTarget(raw: string): WorkflowInputValue {
+  const scan = recognizeCancelTarget(raw);
+  return scan.kind === 'target' ? { kind: 'name', query: scan.query } : fail();
 }
 
 function parseTimezone(raw: string): string {
@@ -511,6 +648,10 @@ function evaluateOne(binding: Binding, bound: BindValues, evaluation: Evaluation
       return parseEventRef(raw, binding.reject);
     case 'recipient':
       return parseRecipient(raw);
+    case 'event_request':
+      return buildEventRequest(raw, now, userCtx.timezone);
+    case 'cancel_target':
+      return parseCancelTarget(raw);
   }
 }
 

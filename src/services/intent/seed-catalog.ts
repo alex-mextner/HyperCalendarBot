@@ -11,6 +11,7 @@ import {
   type LanguageStrings,
 } from './seed-fragments.ts';
 import { legacyDisposition } from './seed-lineage.ts';
+import { naturalFamilies } from './seed-natural.ts';
 import { personalFamilies } from './seed-personal.ts';
 
 export type { LegacyDispositionEntry } from './seed-lineage.ts';
@@ -24,6 +25,7 @@ const families: FamilyDefinition[] = [
   ...eventFamilies,
   ...personalFamilies,
   ...additionalFamilies,
+  ...naturalFamilies,
 ];
 
 export interface CanonicalMetadata {

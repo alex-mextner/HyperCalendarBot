@@ -54,6 +54,9 @@ export const canonicalTitles: { [name: string]: string } = {
   'basis.telegram.status': 'Статус подключённого личного Telegram',
   'basis.call.start': 'Позвонить на запросившую учётную запись',
   'basis.reminder.after': 'Напоминание через заданное время',
+  'basis.event.create_natural': 'Создать событие из краткой записи: название, день и время в любом порядке',
+  'basis.event.cancel_by_title': 'Удалить одно событие по короткому названию',
+  'basis.settings.timezone_show': 'Какой часовой пояс установлен',
 };
 
 /** Category headings in display order; a category present in the seed but missing here fails the build. */
@@ -101,6 +104,9 @@ export const bindingTypeTitles: { [type: string]: string } = {
   timezone: 'название часового пояса IANA',
   eventref: 'ссылка на одно событие: номер или точное название',
   recipient: 'один адресат: числовой ID или проверяемый username',
+  event_request:
+    'одна краткая запись события: название, день, время, необязательные конец и явный часовой пояс; неоднозначный час уточняется',
+  cancel_target: 'одно событие по короткому названию из просьбы об отмене',
 };
 
 /** Public title each earlier rule carried. Every key in the lineage table has exactly one entry. */

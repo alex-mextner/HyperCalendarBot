@@ -108,19 +108,56 @@ const callStart: FamilyDefinition = {
   notes:
     'Replaces stored DB7 with actor-scoped explicit intent and confirmation. Unsupported call capabilities fail without inventing success.',
 };
+const REMIND_AMOUNTS = {
+  один: 1,
+  одну: 1,
+  два: 2,
+  две: 2,
+  три: 3,
+  четыре: 4,
+  пять: 5,
+  шесть: 6,
+  семь: 7,
+  восемь: 8,
+  девять: 9,
+  десять: 10,
+  пятнадцать: 15,
+  двадцать: 20,
+  тридцать: 30,
+  сорок: 40,
+  пятьдесят: 50,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  ten: 10,
+  fifteen: 15,
+  twenty: 20,
+  thirty: 30,
+};
+const REMIND_AMOUNT_RX = String.raw`(?:\d{1,4}|${Object.keys(REMIND_AMOUNTS).join('|')})`;
+const REMIND_UNIT_RX = String.raw`(?:минут[уы]?|мин|час(?:а|ов)?|полчаса|полтора\s+часа|minutes?|hours?|half\s+an\s+hour)`;
+const ABOUT_RX = String.raw`(?:(?:про|о|об|about)\s+)?`;
+
 const remindAfter: FamilyDefinition = {
   name: 'basis.reminder.after',
   title: 'Create an explicit reminder after a duration',
   category: 'reminders',
   risk: 'write',
-  pattern: String.raw`^(?:напомни(?:\s+мне)?\s+через|remind\s+me\s+in)\s+(\d{1,4})\s+(минут(?:у|ы)?|мин|час(?:а|ов)?|minutes?|hours?)\s+(.{1,120})$`,
-  triggers: ['напомни', 'remind'],
+  pattern: String.raw`^(?:напомни(?:\s+мне)?\s+через|remind\s+me\s+in)\s+(?:(${REMIND_AMOUNT_RX})\s+)?(${REMIND_UNIT_RX})\s+${ABOUT_RX}(.{1,120})$|^(?:через|in)\s+(?:(${REMIND_AMOUNT_RX})\s+)?(${REMIND_UNIT_RX})\s+(?:напомни(?:\s+мне)?|remind\s+me)\s+${ABOUT_RX}(.{1,120})$`,
+  triggers: ['напомни', 'remind', 'через', 'in'],
   bindings: {
     delay: {
       type: 'duration',
-      from: '{{$1}}',
-      unit: '{{$2}}',
+      from: '{{$1|default("")}}{{$4|default("")}}',
+      unit: '{{$2|default("")}}{{$5|default("")}}',
+      amounts: REMIND_AMOUNTS,
+      default_amount: 1,
       units: {
+        полчаса: 30,
+        'полтора часа': 90,
+        'half an hour': 30,
         минута: 1,
         минуту: 1,
         минуты: 1,
@@ -137,7 +174,7 @@ const remindAfter: FamilyDefinition = {
       min: 1,
       max: 10080,
     },
-    title: { type: 'text', from: '{{$3}}', max: 120 },
+    title: { type: 'text', from: '{{$3|default("")}}{{$6|default("")}}', max: 120 },
     at: { type: 'relative_instant', duration: 'delay' },
   },
   steps: [
@@ -160,9 +197,13 @@ const remindAfter: FamilyDefinition = {
     'напомни через 15 минут выключить духовку',
     'напомни мне через 2 часа отправить отчёт',
     'remind me in 10 minutes take a break',
+    'через полтора часа напомни про звонок в банк',
+    'напомни через два часа полить цветы',
+    'напомни через полчаса проверить духовку',
+    'in 20 minutes remind me about the laundry',
   ],
-  negatives: ['напомни завтра', 'напомни через 15 минут'],
-  invalidInputs: ['напомни через 0 минут тест'],
+  negatives: ['напомни завтра', 'напомни через 15 минут', 'через два часа', 'через час напомни'],
+  invalidInputs: ['напомни через 0 минут тест', 'напомни через 9999 часов тест'],
   notes:
     'A standalone requested reminder is explicitly stored as one calendar reminder event; changing reminders of an existing event instead uses basis.reminder.set and never duplicates that event.',
 };

@@ -329,6 +329,7 @@ export function validateWorkflowBindings(workflow: Workflow): string[] {
       'values' in binding ? binding.values : undefined,
       'words' in binding ? binding.words : undefined,
       'units' in binding ? binding.units : undefined,
+      'amounts' in binding ? binding.amounts : undefined,
     ]) {
       for (const key of Object.keys(table ?? {})) {
         if (normalize(key) !== key) errors.push(`binding "${name}": key "${key}" is not in normalized form`);
