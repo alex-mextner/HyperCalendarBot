@@ -905,7 +905,7 @@ if (config.GOOGLE_API_KEY && config.REDIS_URL) {
     get: (key: string) => locationRedis.get(key),
     compareAndSet: redisCompareAndSet({
       eval: (script: string, numkeys: number, ...keysAndArgs: string[]) =>
-        locationRedis.eval(script, numkeys, ...keysAndArgs),
+        locationRedis.send('EVAL', [script, String(numkeys), ...keysAndArgs]),
     }),
   });
   const candidateStore = new RedisLocationCandidateStore({
@@ -913,7 +913,7 @@ if (config.GOOGLE_API_KEY && config.REDIS_URL) {
       opts?.ex ? locationRedis.set(key, value, 'EX', opts.ex) : locationRedis.set(key, value),
     del: (key: string) => locationRedis.del(key),
     eval: (script: string, numkeys: number, ...keysAndArgs: string[]) =>
-      locationRedis.eval(script, numkeys, ...keysAndArgs),
+      locationRedis.send('EVAL', [script, String(numkeys), ...keysAndArgs]),
   });
 
   // sendMessage / editMessage closures resolve botRef at call time (patched after createBot)
