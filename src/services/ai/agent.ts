@@ -14,10 +14,11 @@ import { validateResponse } from './response-validator.ts';
 import { AllProvidersFailedError, aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
-import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS } from './tool-executor.ts';
+import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import { getToolDefinitions } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
+import { WriteOutcomes } from './write-outcomes.ts';
 
 const aiLogger = logger.child({ module: 'ai-agent' });
 
@@ -707,6 +708,7 @@ export class CalendarBotAgent {
     // where the model keeps invoking the same tool (e.g. render_day_image,
     // which has user-visible side effects).
     const seenToolCallKeys = new Set<string>();
+    const writeOutcomes = new WriteOutcomes(WRITE_TOOLS);
     // Last text-only assistant turn — buffered so we don't persist a tool-less
     // hallucination to chat_history before the validator has a chance to reject it.
     let pendingAssistantTurn: MessageParam | null = null;
@@ -716,9 +718,24 @@ export class CalendarBotAgent {
     const systemMessage: MessageParam = { role: 'system', content: systemPrompt };
     let currentMessages: MessageParam[] = [systemMessage, ...historyMessages];
     let runFailed = false;
+    let runError: unknown;
+    let termination: 'normal' | 'waiting' | 'stop' | 'limit' | 'error' | 'silent' = 'limit';
+    const pendingProse: MessageParam[] = [];
+    const saveAssistant = (message: MessageParam, skipIds?: Set<string>) => {
+      if ('tool_calls' in message && message.tool_calls?.length) {
+        // The checkpoint must succeed before dispatch; model prose is not execution evidence.
+        this.saveAssistantTurn(ctx, { ...message, content: null }, skipIds);
+        if (message.content) pendingProse.push({ role: 'assistant', content: message.content });
+      } else {
+        pendingProse.push(message);
+      }
+    };
+    const saveResults = (messages: MessageParam[], skipIds?: Set<string>) => {
+      this.saveToolResults(ctx, messages, skipIds);
+    };
 
     try {
-      for (let round = 0; round < MAX_ROUNDS; round++) {
+      rounds: for (let round = 0; round < MAX_ROUNDS; round++) {
         dbg?.logRound(round);
 
         if (Date.now() - startTime > TIMEOUT_MS) {
@@ -775,6 +792,7 @@ export class CalendarBotAgent {
         // reject+retry, in which case we don't want the rejected answer in
         // chat_history. Final persistence happens after validation below.
         if (result.toolCalls.length === 0) {
+          termination = 'normal';
           pendingAssistantTurn = result.assistantMessage;
           pendingResponseText = result.text;
           break;
@@ -787,9 +805,9 @@ export class CalendarBotAgent {
           result.toolCalls.filter((tc) => SKIP_PERSIST_TOOLS.has(tc.name)).map((tc) => tc.id),
         );
 
-        // Persist the assistant turn (text + tool_calls) before executing tools
+        // Hold assistant prose until the final guard can reconcile it with execution evidence.
         if (!ctx.supplementMode) {
-          this.saveAssistantTurn(ctx, result.assistantMessage, skipPersistIds);
+          saveAssistant(result.assistantMessage, skipPersistIds);
         }
 
         const toolResultMessages: MessageParam[] = [];
@@ -828,11 +846,12 @@ export class CalendarBotAgent {
             await writer.flush(true);
           }
 
-          const toolResult = await executeTool(ctx, tc.name, input);
+          const toolResult = await executeTool(ctx, tc.name, input, () => writeOutcomes.markMutationAttempt());
+          writeOutcomes.record(tc.name, input, toolResult);
 
           // Record dedup key only after a successful execution — failed calls
           // must not block retries with a synthetic DUPLICATE result.
-          if (toolResult.success) {
+          if (toolResult.disposition === 'executed') {
             seenToolCallKeys.add(dedupKey);
           }
 
@@ -855,34 +874,22 @@ export class CalendarBotAgent {
           if (toolResult.stopLoop) {
             writer.clearToolLabel();
             if (!ctx.supplementMode && toolResultMessages.length > 0) {
-              this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
+              saveResults(toolResultMessages, skipPersistIds);
             }
-            writer.commitIntermediate();
-            await writer.finalize();
-            dbg?.logFinal(writer.getText().trim(), allToolCalls.length);
-            dbg?.flush();
-            if (allToolCalls.some((call) => call.name === 'end_conversation')) {
-              this.debugLogger?.endSession(ctx.chatId);
-            }
-            return {
-              responseText: ctx.inputMode !== 'text' ? writer.getPlainText() : writer.getText(),
-              toolCalls: allToolCalls,
-              toolResults: allToolResults,
-              endCall: ctx.callEndRequested === true,
-            };
+            termination = toolResult.disposition === 'waiting' ? 'waiting' : 'stop';
+            break rounds;
           }
         }
 
         if (isSkipText(writer.getText())) {
-          await writer.discard();
-          dbg?.logFinal('[SKIP] (mid-loop discard)', allToolCalls.length);
-          dbg?.flush();
-          return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
+          if (!ctx.supplementMode) saveResults(toolResultMessages, skipPersistIds);
+          termination = 'silent';
+          break;
         }
 
         writer.clearToolLabel();
         if (!ctx.supplementMode) {
-          this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
+          saveResults(toolResultMessages, skipPersistIds);
         }
         writer.commitIntermediate();
 
@@ -927,7 +934,12 @@ export class CalendarBotAgent {
               allToolResults,
               startTime,
               seenToolCallKeys,
+              writeOutcomes,
+              saveAssistant,
+              saveResults,
             );
+
+            if (retryOutcome.hitStopLoop) termination = retryOutcome.waiting ? 'waiting' : 'stop';
 
             // If the retry ALSO produced a tool-less answer, validate it once
             // more. If the second pass also rejects, we log and ship anyway —
@@ -953,22 +965,48 @@ export class CalendarBotAgent {
         }
       }
 
-      // Persist the final tool-less assistant turn only if validation didn't
-      // reject it. Tool-bearing rounds persist as they happen, inside the loop.
       if (pendingAssistantTurn && !rejected && !ctx.supplementMode) {
-        this.saveAssistantTurn(ctx, pendingAssistantTurn);
+        saveAssistant(pendingAssistantTurn);
       }
     } catch (error) {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
       runFailed = true;
-      this.announceFailure(ctx, error, writer);
+      termination = 'error';
+      runError = error;
 
       // Enqueue next retry (or trigger graceful fail after max attempts)
-      if (ctx.retryEnqueue && !ctx.supplementMode && ctx.wasExplicitInvocation !== false) {
+      if (
+        !writeOutcomes.mutationMayHaveOccurred &&
+        ctx.retryEnqueue &&
+        !ctx.supplementMode &&
+        ctx.wasExplicitInvocation !== false
+      ) {
         ctx.retryEnqueue(ctx.messageText).catch((err) => {
           aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to handle retry enqueue');
         });
       }
+    }
+
+    // One evidence guard for every exit, including validation retries and partial streams.
+    // Clarification UI is already delivered by the handler; it is never a completed write.
+    const evidence = writeOutcomes.finalNotice(ctx.user.language, runFailed);
+    const silent = ctx.supplementMode || ctx.wasExplicitInvocation === false || termination === 'waiting';
+    const guarded = evidence !== null || termination === 'waiting' || termination === 'error';
+    if (guarded) {
+      writer.resetBuffers();
+      if (!silent && evidence) writer.appendText(evidence);
+    }
+    try {
+      if (!ctx.supplementMode) {
+        if (!guarded) {
+          for (const message of pendingProse) this.saveAssistantTurn(ctx, message);
+        }
+        if (evidence) this.saveAssistantTurn(ctx, { role: 'assistant', content: evidence });
+      }
+      if (runFailed && !evidence) this.announceFailure(ctx, runError, writer);
+    } catch (historyError) {
+      // A history fault must not prevent delivery of the outcome already known in this run.
+      aiLogger.error({ err: historyError, userId: ctx.user.telegram_id }, 'Final history save failed');
     }
 
     if (!runFailed && !ctx.supplementMode) {
@@ -996,7 +1034,7 @@ export class CalendarBotAgent {
 
     // A failed run with nothing to show must not leave the ⏳ placeholder edited
     // into a bare "..." — that is the silence the user reads as being ignored.
-    if (isSkipText(finalText) || (runFailed && finalText.length === 0)) {
+    if ((silent && guarded) || isSkipText(finalText) || (runFailed && finalText.length === 0)) {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }
@@ -1041,8 +1079,12 @@ export class CalendarBotAgent {
     allToolResults: AgentToolResultRecord[],
     startTime: number,
     seenToolCallKeys: Set<string>,
+    writeOutcomes: WriteOutcomes,
+    saveAssistant: (message: MessageParam, skipIds?: Set<string>) => void,
+    saveResults: (messages: MessageParam[], skipIds?: Set<string>) => void,
   ): Promise<{
     hitStopLoop: boolean;
+    waiting?: boolean;
     /** Text produced by the most recent round of the retry loop (for re-validation). */
     lastRoundText: string;
     /** Whether the last round called any tools. Used to decide if re-validation is needed. */
@@ -1101,9 +1143,7 @@ export class CalendarBotAgent {
       dbg?.logAiText(result.text);
 
       if (result.toolCalls.length === 0) {
-        if (!ctx.supplementMode) {
-          this.saveAssistantTurn(ctx, result.assistantMessage);
-        }
+        if (!ctx.supplementMode) saveAssistant(result.assistantMessage);
         return { hitStopLoop: false, lastRoundText: result.text, lastRoundHadToolCalls: false };
       }
 
@@ -1112,11 +1152,12 @@ export class CalendarBotAgent {
       );
 
       if (!ctx.supplementMode) {
-        this.saveAssistantTurn(ctx, result.assistantMessage, skipPersistIds);
+        saveAssistant(result.assistantMessage, skipPersistIds);
       }
 
       const toolResultMessages: MessageParam[] = [];
       let stopLoopTriggered = false;
+      let waiting = false;
       for (const tc of result.toolCalls) {
         let input: { [key: string]: unknown };
         try {
@@ -1143,10 +1184,11 @@ export class CalendarBotAgent {
         writer.setToolLabel(tc.name, input);
         await writer.flush(true);
 
-        const toolResult = await executeTool(ctx, tc.name, input);
+        const toolResult = await executeTool(ctx, tc.name, input, () => writeOutcomes.markMutationAttempt());
+        writeOutcomes.record(tc.name, input, toolResult);
 
         // Record dedup key only on success — failed calls must not block retries.
-        if (toolResult.success) {
+        if (toolResult.disposition === 'executed') {
           seenToolCallKeys.add(dedupKey);
         }
 
@@ -1164,20 +1206,20 @@ export class CalendarBotAgent {
 
         if (toolResult.stopLoop) {
           stopLoopTriggered = true;
+          waiting = toolResult.disposition === 'waiting';
           break;
         }
       }
 
       if (!ctx.supplementMode && toolResultMessages.length > 0) {
-        this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
+        saveResults(toolResultMessages, skipPersistIds);
       }
       writer.clearToolLabel();
       writer.commitIntermediate();
 
       if (stopLoopTriggered) {
-        // A tool like ask_user / end_conversation already sent its own UI —
-        // do not produce additional assistant text after it.
-        return { hitStopLoop: true, lastRoundText: '', lastRoundHadToolCalls: true };
+        // The caller applies the shared evidence guard; only genuine clarification has its own UI.
+        return { hitStopLoop: true, waiting, lastRoundText: '', lastRoundHadToolCalls: true };
       }
 
       currentMessages = [...currentMessages, result.assistantMessage, ...toolResultMessages];

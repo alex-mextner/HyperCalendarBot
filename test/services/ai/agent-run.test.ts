@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type OpenAI from 'openai';
 import { EN_AGENT_ERROR_PHRASES, RU_AGENT_ERROR_PHRASES } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
@@ -12,7 +12,7 @@ import { runMigrations } from '../../../src/database/schema.ts';
 import { AssistantMessageCodec, aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
-import { _resetToolThrottleForTest } from '../../../src/services/ai/tool-executor.ts';
+import { _resetToolThrottleForTest, executeTool } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
@@ -34,14 +34,14 @@ function createTestDb() {
 
 type ScriptedRound =
   | { kind: 'text'; text: string }
-  | { kind: 'tool'; callId: string; name: string; input: { [key: string]: unknown } }
-  | { kind: 'error'; error: Error };
+  | { kind: 'tool'; callId: string; name: string; input: { [key: string]: unknown }; text?: string }
+  | { kind: 'error'; error: Error; text?: string };
 
 function asAssistantMessage(round: ScriptedRound): OpenAI.ChatCompletionMessageParam {
   if (round.kind === 'tool') {
     return {
       role: 'assistant',
-      content: null,
+      content: round.text ?? null,
       tool_calls: [
         {
           id: round.callId,
@@ -90,7 +90,10 @@ function makeStreamImpl(script: ScriptedRound[]): {
     calls.push({ messages: opts.messages });
     const current = script[round++];
     if (!current) throw new Error(`Scripted stream ran out of rounds (call ${round})`);
-    if (current.kind === 'error') throw current.error;
+    if (current.kind === 'error') {
+      cbs.onTextDelta?.(current.text ?? '');
+      throw current.error;
+    }
 
     if (current.kind === 'text') {
       cbs.onTextDelta?.(current.text);
@@ -105,10 +108,11 @@ function makeStreamImpl(script: ScriptedRound[]): {
     }
 
     // tool round
+    cbs.onTextDelta?.(current.text ?? '');
     cbs.onToolCallStart?.(current.name);
     const msg = asAssistantMessage(current);
     return {
-      text: '',
+      text: current.text ?? '',
       toolCalls: [
         {
           id: current.callId,
@@ -166,6 +170,506 @@ describe('CalendarBotAgent.run()', () => {
       sendMessage: mock(() => Promise.resolve({ message_id: 42 })),
       editMessageText: mock(() => Promise.resolve()),
     };
+  });
+
+  test('execution history is persisted before the next provider round with prose removed', async () => {
+    const script = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'create',
+        name: 'create_event',
+        input: { title: 'Checkpoint', start_at: '2030-01-01T10:00:00Z' },
+        text: 'Untrusted success claim',
+      },
+      { kind: 'text', text: 'Created.' },
+    ]);
+    const impl = async (opts: StreamRoundOptions, cbs?: StreamCallbacks) => {
+      if (script.calls.length === 1) {
+        const rows = ctx.chatHistory.getRecent(USER_ID);
+        expect(rows).toHaveLength(2);
+        expect(JSON.stringify(rows)).toContain('create');
+        expect(JSON.stringify(rows)).not.toContain('Untrusted success claim');
+        expect(rows.filter((row) => row.role === 'tool')).toHaveLength(1);
+      }
+      return script.impl(opts, cbs);
+    };
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(result.responseText).toContain('Created.');
+  });
+
+  test.each([
+    'before-assistant',
+    'after-assistant',
+    'before-results',
+    'after-results',
+  ])('one-shot history fault %s contains writes and reconciles delivery', async (fault) => {
+    const method = fault.endsWith('assistant') ? 'logAiTurn' : 'logToolResults';
+    const original = ctx.conversationLogger[method].bind(ctx.conversationLogger);
+    const logger = spyOn(ctx.conversationLogger, method).mockImplementationOnce(
+      (...args: Parameters<ConversationLogger['logAiTurn']> | Parameters<ConversationLogger['logToolResults']>) => {
+        if (fault.startsWith('after')) Reflect.apply(original, ctx.conversationLogger, args);
+        throw new Error('synthetic history failure');
+      },
+    );
+    let delivered = '';
+    sender.editMessageText = async (_chat, _id, text) => {
+      delivered = text;
+    };
+    const create = spyOn(ctx.eventService, 'createEvent');
+    const script = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'create',
+        name: 'create_event',
+        input: { title: 'Checkpoint', start_at: '2030-01-01T10:00:00Z' },
+      },
+      { kind: 'text', text: 'Created.' },
+    ]);
+    try {
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
+      expect(create).toHaveBeenCalledTimes(fault.endsWith('assistant') ? 0 : 1);
+      expect(delivered).not.toBe('');
+      expect(delivered).not.toContain('⏳');
+      if (fault.endsWith('results')) {
+        expect(result.responseText).toContain('Completed: Create event');
+        expect(delivered).toContain('Completed: Create event');
+        expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).toContain('Completed: Create event');
+      }
+    } finally {
+      logger.mockRestore();
+    }
+  });
+
+  test('provider failure after create records outcome without enqueueing original request', async () => {
+    const enqueue = mock(async () => {});
+    ctx.retryEnqueue = enqueue;
+    const create = spyOn(ctx.eventService, 'createEvent');
+    let delivered = '';
+    sender.editMessageText = async (_chat, _id, text) => {
+      delivered = text;
+    };
+    const script = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'create',
+        name: 'create_event',
+        input: { title: 'Once', start_at: '2030-01-01T10:00:00Z' },
+      },
+      { kind: 'error', error: new Error('private provider payload') },
+    ]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(result.responseText).toContain('Completed: Create event');
+    expect(delivered).toContain('Completed: Create event');
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).toContain('Completed: Create event');
+    expect(delivered).not.toContain('private provider payload');
+  });
+
+  test.each([
+    'all_day',
+    'category',
+    'timezone',
+    'venue_name',
+  ])('title correction retains failed persisted field %s', async (field) => {
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Before',
+      start_at: '2030-01-01T10:00:00Z',
+      timezone: 'UTC',
+    });
+    let delivered = '';
+    sender.editMessageText = async (_chat, _id, text) => {
+      delivered = text;
+    };
+    const script = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'bad',
+        name: 'update_event',
+        input: { event_id: event.id, title: 123, [field]: field === 'all_day' ? true : 'Unapplied' },
+      },
+      { kind: 'tool', callId: 'good', name: 'update_event', input: { event_id: event.id, title: 'After' } },
+      { kind: 'text', text: 'All requested fields updated successfully.' },
+    ]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
+    expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe('After');
+    expect(ctx.eventService.getEvent(event.id, USER_ID)?.all_day).toBe(0);
+    expect(result.responseText).toContain('Not completed:');
+    expect(result.responseText).toContain('Completed: Update event');
+    expect(delivered).not.toContain('All requested fields updated successfully.');
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain(
+      'All requested fields updated successfully.',
+    );
+  });
+
+  test('control-only update does not certify a persisted change', async () => {
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Before',
+      start_at: '2030-01-01T10:00:00Z',
+      timezone: 'UTC',
+    });
+    const result = await executeTool(ctx, 'update_event', { event_id: event.id, location_abstract: true });
+    expect(result.success).toBe(false);
+    expect(result.disposition).toBe('failed');
+    expect(result.error).toContain('No supported fields');
+    expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe('Before');
+  });
+
+  test('end_call in text chat preserves its explanation', async () => {
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'end', name: 'end_call', input: {} },
+      { kind: 'text', text: 'This is a text chat.' },
+    ]);
+    let delivered = '';
+    sender.editMessageText = async (_chat, _id, text) => {
+      delivered = text;
+    };
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
+    expect(result.responseText).toBe('This is a text chat.');
+    expect(delivered).toContain('This is a text chat.');
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).toContain('This is a text chat.');
+  });
+
+  test('settings read after failed delete cannot be certified as a write', async () => {
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'delete', name: 'delete_event', input: { event_id: 999999 } },
+      { kind: 'tool', callId: 'settings', name: 'manage_settings', input: { action: 'get', category: 'general' } },
+      { kind: 'text', text: 'Done.' },
+    ]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
+    expect(result.responseText).toContain('Not completed: Delete event');
+    expect(result.responseText).not.toContain('Completed: Write');
+  });
+
+  test('round results stay batched and a new run reconstructs actual execution history', async () => {
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'one', name: 'create_event', input: { title: 'One', start_at: '2030-01-01T10:00:00Z' } },
+      { kind: 'tool', callId: 'two', name: 'create_event', input: { title: 'Two', start_at: '2030-01-02T10:00:00Z' } },
+      { kind: 'text', text: 'Created both.' },
+    ]);
+    let batchSeen = false;
+    const impl = async (opts: StreamRoundOptions, cbs?: StreamCallbacks) => {
+      if (!batchSeen) {
+        batchSeen = true;
+        const first = await script.impl(opts, cbs);
+        const second = await script.impl(opts);
+        const toolCalls = [...first.toolCalls, ...second.toolCalls];
+        return {
+          ...first,
+          toolCalls,
+          assistantMessage: {
+            role: 'assistant' as const,
+            content: null,
+            tool_calls: toolCalls.map((call) => ({
+              id: call.id,
+              type: 'function' as const,
+              function: { name: call.name, arguments: call.arguments },
+            })),
+          },
+        };
+      }
+      const rows = ctx.chatHistory.getRecent(USER_ID);
+      const results = rows.filter((row) => row.role === 'tool');
+      expect(results).toHaveLength(1);
+      expect(JSON.parse(results[0]!.content)).toHaveLength(2);
+      return script.impl(opts, cbs);
+    };
+    await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    const resumed = makeStreamImpl([{ kind: 'text', text: 'I see both events.' }]);
+    await new CalendarBotAgent(config, sender, { streamImpl: resumed.impl }).run(ctx);
+    const messages = resumed.calls[0]!.messages;
+    expect(messages.filter((message) => message.role === 'tool')).toHaveLength(2);
+    expect(JSON.stringify(messages)).toContain('One');
+    expect(JSON.stringify(messages)).toContain('Two');
+  });
+
+  test('a normal conversation stop retains safe explanation in sender and history', async () => {
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'stop', name: 'end_conversation', input: {}, text: 'No changes were needed.' },
+    ]);
+    let delivered = '';
+    sender.editMessageText = async (_chat, _id, text) => {
+      delivered = text;
+    };
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
+    expect(result.responseText).toContain('No changes were needed.');
+    expect(delivered).toContain('No changes were needed.');
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).toContain('No changes were needed.');
+  });
+
+  test('failed write cannot be narrated as success', async () => {
+    const { impl } = makeStreamImpl([
+      { kind: 'tool', callId: 'failed-delete', name: 'delete_event', input: { event_id: '999999' } },
+      { kind: 'text', text: 'Successfully deleted everything.' },
+    ]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(result.responseText).toContain('Not completed: Delete event');
+    expect(result.responseText).not.toContain('Successfully deleted everything.');
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    expect(JSON.stringify(history)).not.toContain('Successfully deleted everything.');
+  });
+
+  test('later success for the same operation and target clears the failure', async () => {
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Synthetic',
+      start_at: '2030-01-01T10:00:00Z',
+      timezone: 'UTC',
+    });
+    const { impl } = makeStreamImpl([
+      { kind: 'tool', callId: 'bad-update', name: 'update_event', input: { event_id: String(event.id), title: 123 } },
+      { kind: 'tool', callId: 'good-update', name: 'update_event', input: { event_id: event.id, title: 'Corrected' } },
+      { kind: 'text', text: 'Updated.' },
+    ]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(result.responseText).not.toContain('Not completed:');
+    expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe('Corrected');
+  });
+
+  test('retry loop guards failed writes without replaying a successful write', async () => {
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Synthetic',
+      start_at: '2030-01-01T10:00:00Z',
+      timezone: 'UTC',
+    });
+    const script = makeStreamImpl([
+      { kind: 'text', text: 'Unverified answer' },
+      { kind: 'tool', callId: 'retry-delete', name: 'delete_event', input: { event_id: String(event.id) } },
+      { kind: 'tool', callId: 'retry-duplicate', name: 'delete_event', input: { event_id: String(event.id) } },
+      { kind: 'tool', callId: 'retry-failed', name: 'delete_event', input: { event_id: '999999' } },
+      { kind: 'text', text: 'Everything succeeded.' },
+    ]);
+    const impl = async (opts: StreamRoundOptions, callbacks?: StreamCallbacks): Promise<StreamRoundResult> => {
+      if (isValidatorCall(opts))
+        return {
+          text: 'REJECT: missing evidence',
+          toolCalls: [],
+          finishReason: 'stop',
+          assistantMessage: { role: 'assistant', content: 'REJECT: missing evidence' },
+          providerUsed: 'synthetic',
+        };
+      return script.impl(opts, callbacks);
+    };
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(script.calls).toHaveLength(5);
+    expect(result.toolResults.map((entry) => entry.success)).toEqual([true, true, false]);
+    expect(result.responseText).toContain('Completed: Delete event');
+    expect(result.responseText).toContain('Not completed: Delete event');
+    expect(result.responseText).not.toContain('Everything succeeded.');
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('Everything succeeded.');
+    expect(ctx.eventService.getEvent(event.id, USER_ID)).toBeNull();
+  });
+
+  test.each(['ask_user', 'pick_users', 'supplement_skip'])('failed write preserves %s stop behavior', async (name) => {
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'failure', name: 'delete_event', input: { event_id: '999999' } },
+      {
+        kind: 'tool',
+        callId: 'stop',
+        name,
+        input: { question: 'Which event?', options: ['A', 'B'], event_id: 999999, prompt: 'Who?' },
+      },
+    ]);
+    if (name === 'pick_users') sender.sendUserPicker = mock(() => Promise.resolve({ message_id: 43 }));
+    if (name === 'ask_user') sender.sendButtons = mock(() => Promise.resolve({ message_id: 43 }));
+    if (name === 'supplement_skip') ctx.supplementMode = true;
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
+    expect(script.calls).toHaveLength(2);
+    expect(result.responseText).not.toContain('Not completed:');
+    if (name === 'ask_user') expect(sender.sendButtons).toHaveBeenCalledTimes(1);
+    if (name === 'pick_users') expect(sender.sendUserPicker).toHaveBeenCalledTimes(1);
+    if (name === 'supplement_skip') expect(sender.editMessageText).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    'end',
+    'rounds',
+    'throw',
+    'quiet-retry',
+    'timeout',
+  ])('final evidence survives %s termination', async (ending) => {
+    const failure: ScriptedRound = {
+      kind: 'tool',
+      callId: 'failure',
+      name: 'delete_event',
+      input: { event_id: 999999 },
+    };
+    const tail: ScriptedRound[] =
+      ending === 'end'
+        ? [
+            {
+              kind: 'tool',
+              callId: 'stop',
+              name: 'end_conversation',
+              input: {},
+              text: 'Successfully deleted everything.',
+            },
+          ]
+        : ending === 'rounds'
+          ? Array.from({ length: 14 }, (_, i) => ({ ...failure, callId: `failure-${i}` }))
+          : [{ kind: 'error', text: 'Successfully deleted everything.', error: new Error('provider secret') }];
+    if (ending === 'quiet-retry') ctx.retryAttempt = 1;
+    const enqueue = mock(async () => {});
+    ctx.retryEnqueue = enqueue;
+    let delivered = '';
+    sender.editMessageText = async (_chatId, _messageId, text) => {
+      delivered = text;
+    };
+    const script = makeStreamImpl([failure, ...tail]);
+    const now = Date.now();
+    const date = spyOn(Date, 'now').mockImplementation(() =>
+      ending === 'timeout' && script.calls.length >= 1 ? now + 300001 : now,
+    );
+    let result: Awaited<ReturnType<CalendarBotAgent['run']>>;
+    try {
+      result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
+    } finally {
+      date.mockRestore();
+    }
+    if (ending === 'quiet-retry') expect(enqueue).not.toHaveBeenCalled();
+    expect(result.responseText).toContain('Not completed:');
+    expect(result.responseText).not.toContain('Successfully deleted');
+    const history = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
+    expect(history).toContain('Not completed:');
+    expect(history).not.toContain('Successfully deleted');
+    expect(delivered).toContain('Not completed:');
+    expect(delivered).not.toContain('Successfully deleted');
+  });
+
+  test('a cross-run throttle cannot invent a new completed write', async () => {
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Before',
+      start_at: '2030-01-01T10:00:00Z',
+      timezone: 'UTC',
+    });
+    const input = { event_id: event.id, title: 'After' };
+    expect((await executeTool(ctx, 'update_event', input)).success).toBe(true);
+    const update = spyOn(ctx.eventService, 'updateEvent');
+    let delivered = '';
+    sender.editMessageText = async (_chatId, _messageId, text) => {
+      delivered = text;
+    };
+    const { impl } = makeStreamImpl([
+      { kind: 'tool', callId: 'skipped', name: 'update_event', input },
+      { kind: 'text', text: 'Updated successfully again.' },
+    ]);
+    try {
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+      expect(update).not.toHaveBeenCalled();
+      expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe('After');
+      expect(result.responseText).toContain('skipped');
+      expect(result.responseText).not.toContain('Updated successfully');
+      expect(delivered).not.toContain('Updated successfully');
+      expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('Updated successfully');
+    } finally {
+      update.mockRestore();
+    }
+  });
+
+  test.each(['end', 'rounds', 'throw', 'timeout'])('validation retry shares final guard on %s', async (ending) => {
+    const failure: ScriptedRound = {
+      kind: 'tool',
+      callId: 'failure',
+      name: 'delete_event',
+      input: { event_id: 999999 },
+    };
+    const tail: ScriptedRound[] =
+      ending === 'end'
+        ? [{ kind: 'tool', callId: 'stop', name: 'end_conversation', input: {}, text: 'Deleted successfully.' }]
+        : ending === 'rounds'
+          ? Array.from({ length: 14 }, (_, i) => ({ ...failure, callId: `f-${i}` }))
+          : [{ kind: 'error', text: 'Deleted successfully.', error: new Error('provider secret') }];
+    const script = makeStreamImpl([{ kind: 'text', text: 'Unverified answer' }, failure, ...tail]);
+    const now = Date.now();
+    const date = spyOn(Date, 'now').mockImplementation(() =>
+      ending === 'timeout' && script.calls.length >= 2 ? now + 300001 : now,
+    );
+    let delivered = '';
+    sender.editMessageText = async (_chatId, _messageId, text) => {
+      delivered = text;
+    };
+    const impl = async (opts: StreamRoundOptions, callbacks?: StreamCallbacks): Promise<StreamRoundResult> => {
+      if (isValidatorCall(opts))
+        return {
+          text: 'REJECT',
+          toolCalls: [],
+          finishReason: 'stop',
+          assistantMessage: { role: 'assistant', content: 'REJECT' },
+          providerUsed: 'synthetic',
+        };
+      return script.impl(opts, callbacks);
+    };
+    try {
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+      expect(result.responseText).toContain('Not completed:');
+      expect(delivered).toContain('Not completed:');
+      expect(delivered).not.toContain('Deleted successfully');
+      const history = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
+      expect(history).toContain('Not completed:');
+      expect(history).not.toContain('Deleted successfully');
+      expect(history).not.toContain('Unverified answer');
+    } finally {
+      date.mockRestore();
+    }
+  });
+
+  test('successful location update retains failed title and time intent in real SQLite', async () => {
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Before',
+      start_at: '2030-01-01T10:00:00Z',
+      timezone: 'UTC',
+    });
+    const { impl } = makeStreamImpl([
+      { kind: 'tool', callId: 'bad', name: 'update_event', input: { event_id: event.id, title: 123, start_at: 123 } },
+      { kind: 'tool', callId: 'good', name: 'update_event', input: { event_id: event.id, location: 'Office' } },
+      { kind: 'text', text: 'Everything updated.' },
+    ]);
+    let delivered = '';
+    sender.editMessageText = async (_chatId, _messageId, text) => {
+      delivered = text;
+    };
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(result.responseText).toContain('title');
+    expect(result.responseText).toContain('start time');
+    expect(delivered).toContain('Not completed:');
+    const saved = ctx.eventService.getEvent(event.id, USER_ID);
+    expect(saved?.title).toBe('Before');
+    expect(saved?.location).toBe('Office');
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('Everything updated.');
+  });
+
+  test('implicit failure stays silent and persists authoritative evidence', async () => {
+    ctx.wasExplicitInvocation = false;
+    sender.deleteMessage = mock(async () => {});
+    const enqueue = mock(async () => {});
+    ctx.retryEnqueue = enqueue;
+    const { impl } = makeStreamImpl([
+      { kind: 'tool', callId: 'failed', name: 'delete_event', input: { event_id: 999999 } },
+      { kind: 'error', text: 'Deleted successfully.', error: new Error('provider secret') },
+    ]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(result.responseText).toBe('');
+    expect(sender.deleteMessage).toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    const history = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
+    expect(history).toContain('Not completed:');
+    expect(history).not.toContain('Deleted successfully');
+  });
+
+  test('failed create is also guarded by structured write evidence', async () => {
+    const { impl } = makeStreamImpl([
+      { kind: 'tool', callId: 'bad-create', name: 'create_event', input: { title: 'Synthetic' } },
+      { kind: 'text', text: 'Created successfully.' },
+    ]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+    expect(result.responseText).toContain('Not completed: Create event');
+    expect(result.responseText).not.toContain('Created successfully.');
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('Created successfully.');
   });
 
   test('run() with simple text response streams and saves history', async () => {

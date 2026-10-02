@@ -58,6 +58,30 @@ describe('executeTool', () => {
     };
   });
 
+  test('mutation attempt boundary excludes validation, throttle, query and conversation controls', async () => {
+    let attempts = 0;
+    const attempted = () => {
+      attempts++;
+    };
+    const invalid = await executeTool(ctx, 'update_event', { event_id: 1, title: 123 }, attempted);
+    expect(invalid.disposition).toBe('failed');
+    expect(attempts).toBe(0);
+    const read = await executeTool(ctx, 'get_event', { event_id: 999999 }, attempted);
+    expect(read.disposition).toBe('failed');
+    const control = await executeTool(ctx, 'end_call', {}, attempted);
+    expect(control.disposition).toBe('failed');
+    const settings = await executeTool(ctx, 'manage_settings', { action: 'get', category: 'general' }, attempted);
+    expect(settings.disposition).toBe('executed');
+    expect(attempts).toBe(0);
+    const input = { title: 'Once', start_at: '2030-01-01T10:00:00Z' };
+    const created = await executeTool(ctx, 'create_event', input, attempted);
+    expect(created.disposition).toBe('executed');
+    expect(attempts).toBe(1);
+    const throttled = await executeTool(ctx, 'create_event', input, attempted);
+    expect(throttled.disposition).toBe('skipped');
+    expect(attempts).toBe(1);
+  });
+
   test.each([
     'delete_event',
     'update_event',
@@ -624,6 +648,14 @@ describe('executeTool', () => {
       expect(logs[0]?.success).toBe(0);
     });
 
+    test('invalid IDs are rejected and retained in the failed action log', async () => {
+      const result = await executeTool(actionCtx, 'delete_event', { event_id: null });
+      expect(result.success).toBe(false);
+      const logs = actionLogRepo.query({ user_id: USER_ID, action_name: 'delete_event' });
+      expect(logs).toHaveLength(1);
+      expect(logs[0]?.success).toBe(0);
+    });
+
     test('tool call without actionLogRepo does not throw', async () => {
       const ctxWithoutLog = { ...actionCtx, actionLogRepo: undefined };
       const result = await executeTool(ctxWithoutLog, 'create_event', {
@@ -686,10 +718,12 @@ describe('executeTool', () => {
       const r1 = await executeTool(ctx, 'update_event', { event_id: event.id, title: 'A' });
       expect(r1.success).toBe(true);
       expect(r1.output ?? '').not.toContain('THROTTLED');
+      expect(r1.disposition).toBe('executed');
 
       const r2 = await executeTool(ctx, 'update_event', { event_id: event.id, title: 'A' });
       expect(r2.success).toBe(true);
       expect(r2.output ?? '').toContain('THROTTLED');
+      expect(r2.disposition).toBe('skipped');
     });
 
     test('throttle key normalizes argument order (side-effect tool)', async () => {

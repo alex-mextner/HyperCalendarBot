@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { EVENT_UPDATE_FIELDS } from '../../database/event-update-fields.ts';
 import { normalizeNumericId } from './numeric-id.ts';
 import type { ToolName } from './tool-executor.ts';
 
@@ -38,20 +39,38 @@ const createEventSchema = z
   })
   .passthrough();
 
+const eventUpdateShape = {
+  title: z.string().optional(),
+  description: z.string().nullable().optional(),
+  category: z.string().nullable().optional(),
+  start_at: z.string().optional(),
+  end_at: z.string().nullable().optional(),
+  all_day: z.boolean().optional(),
+  timezone: z.string().optional(),
+  location: z.string().nullable().optional(),
+  recurrence_rule: z.string().nullable().optional(),
+  recurrence_end_at: z.string().nullable().optional(),
+  reminder_overrides: z.string().nullable().optional(),
+  resolved_address: z.string().nullable().optional(),
+  latitude: z.number().nullable().optional(),
+  longitude: z.number().nullable().optional(),
+  google_maps_url: z.string().nullable().optional(),
+  location_verified: z.number().optional(),
+  venue_name: z.string().nullable().optional(),
+} satisfies { [Field in (typeof EVENT_UPDATE_FIELDS)[number]]: z.ZodType };
+
 const updateEventSchema = z
   .object({
+    ...eventUpdateShape,
     event_id: numericId,
-    title: z.string().optional(),
-    start_at: z.string().optional(),
-    end_at: z.string().nullable().optional(),
-    description: z.string().nullable().optional(),
-    location: z.string().nullable().optional(),
     location_abstract: z.boolean().optional(),
-    recurrence_rule: z.string().nullable().optional(),
     scope: scopeField,
     owner_id: numericId.optional(),
   })
-  .passthrough();
+  .passthrough()
+  .refine((input) => EVENT_UPDATE_FIELDS.some((field) => input[field] !== undefined), {
+    message: 'No supported fields to update',
+  });
 
 const deleteEventSchema = z
   .object({

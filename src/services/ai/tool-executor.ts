@@ -316,6 +316,51 @@ const SKIP_ACTION_LOG = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.skipActionLog),
 );
 
+/** Mutations and externally visible actions, independent of audit-log inclusion. */
+export const WRITE_TOOLS: ReadonlySet<string> = new Set([
+  'create_event',
+  'update_event',
+  'attach_pending_location_to_event',
+  'delete_event',
+  'create_birthday_event',
+  'snooze_event',
+  'notify_participants',
+  'set_reminder',
+  'add_contact',
+  'update_contact',
+  'render_day_image',
+  'render_week_image',
+  'render_month_image',
+  'render_table',
+  'make_call',
+  'manage_settings',
+  'share_event',
+  'send_invitation',
+  'share_agenda',
+  'set_event_visibility',
+  'propose_edit',
+  'cancel_invitation',
+  'resend_invitation',
+  'manage_secretaries',
+  'propose_calendar_change',
+  'send_feedback',
+  'schedule_ai_call',
+  'schedule_ai_call_cancel',
+  'add_trigger',
+  'remove_trigger',
+  'set_reaction',
+  'remember_user_fact',
+  'dismiss_connect_telegram_prompt',
+] satisfies ToolName[]);
+
+export function isMutationTool(toolName: string, input: unknown): boolean {
+  if (!WRITE_TOOLS.has(toolName)) return false;
+  if (toolName === 'manage_settings') {
+    return typeof input === 'object' && input !== null && Reflect.get(input, 'action') === 'update';
+  }
+  return true;
+}
+
 /** Derived: tools that always result in [SKIP] — no status message or tool label. */
 export const SILENT_TOOLS = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.silent),
@@ -373,7 +418,15 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   dismiss_connect_telegram_prompt: 'telegram_connect',
 };
 
-export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
+export type ExecutorDisposition = 'executed' | 'failed' | 'skipped' | 'waiting';
+export type ExecutedToolResult = ToolResult & { disposition: ExecutorDisposition };
+
+export async function executeTool(
+  ctx: AgentContext,
+  toolName: string,
+  input: unknown,
+  onMutationAttempt?: () => void,
+): Promise<ExecutedToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
   let validationError: ToolResult | undefined;
@@ -404,11 +457,12 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
         { tool: toolName, chatId: ctx.chatId, sinceMs: now - lastCalledAt },
         'Tool call throttled (identical within 5s)',
       );
-      return { success: true, output: THROTTLE_MARKER };
+      return { success: true, output: THROTTLE_MARKER, disposition: 'skipped' };
     }
   }
 
   try {
+    if (!validationError && isMutationTool(toolName, input)) onMutationAttempt?.();
     const result = validationError ?? (await dispatchTool(ctx, toolName as ToolName, input as ToolInputMap[ToolName]));
 
     // Record throttle entry only after a successful execution — failed calls
@@ -466,10 +520,17 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
       }
     }
 
-    return result;
+    return {
+      ...result,
+      disposition: !result.success
+        ? 'failed'
+        : result.stopLoop && (toolName === 'ask_user' || toolName === 'pick_users')
+          ? 'waiting'
+          : 'executed',
+    };
   } catch (outerError) {
     aiLogger.error({ tool: toolName, err: outerError }, 'Tool execution error');
-    return { success: false, error: `Tool execution failed: ${String(outerError)}` };
+    return { success: false, error: `Tool execution failed: ${String(outerError)}`, disposition: 'failed' };
   }
 }
 

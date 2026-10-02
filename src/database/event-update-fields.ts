@@ -1,0 +1,20 @@
+/** Fields persisted by event updates, shared by SQL, tool validation and outcome evidence. */
+export const EVENT_UPDATE_FIELDS = [
+  'title',
+  'description',
+  'category',
+  'start_at',
+  'end_at',
+  'all_day',
+  'timezone',
+  'location',
+  'recurrence_rule',
+  'recurrence_end_at',
+  'reminder_overrides',
+  'resolved_address',
+  'latitude',
+  'longitude',
+  'google_maps_url',
+  'location_verified',
+  'venue_name',
+] as const;
