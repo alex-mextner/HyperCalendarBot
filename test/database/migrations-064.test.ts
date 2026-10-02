@@ -10,10 +10,9 @@ import { runMigrations } from '../../src/database/schema.ts';
 import { addAsPre064Image, answerAsPre064Image } from '../helpers/pre-064-image.ts';
 
 const MIGRATION = '064_event_participant_source_group';
-const before = migrations.slice(
-  0,
-  migrations.findIndex((migration) => migration.name === MIGRATION),
-);
+const migrationIndex = migrations.findIndex((migration) => migration.name === MIGRATION);
+const before = migrations.slice(0, migrationIndex);
+const throughMigration = migrations.slice(0, migrationIndex + 1);
 
 function answers(db: Database) {
   return db
@@ -40,8 +39,8 @@ test('runs once after the already applied 065 and leaves every existing answer w
   const ledgerBefore = ledger(db);
   expect(ledgerBefore.at(-1)).toEqual({ name: '065_intent_revisions' });
 
-  runMigrations(db, migrations);
-  runMigrations(db, migrations);
+  runMigrations(db, throughMigration);
+  runMigrations(db, throughMigration);
 
   expect(ledger(db)).toEqual([...ledgerBefore, { name: MIGRATION }]);
   expect(answers(db)).toEqual(answersBefore);

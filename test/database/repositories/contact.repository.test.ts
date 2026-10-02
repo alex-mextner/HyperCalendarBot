@@ -2,6 +2,8 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ContactRepository } from '../../../src/database/repositories/contact.repository.ts';
+import { ContactAliasRepository } from '../../../src/database/repositories/contact-alias.repository.ts';
+import { ContactGroupRepository } from '../../../src/database/repositories/contact-group.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 
@@ -65,6 +67,42 @@ describe('ContactRepository', () => {
     expect(updated!.telegram_id).toBe(999);
   });
 
+  test('renaming the primary name clears a stale preferred label and preserves it as an alias', () => {
+    const contact = repo.add(USER_ID, 'Elena', undefined, undefined, 'Lenka');
+    repo.update(contact.id, { name: 'Elena Ivanova' });
+
+    const updated = repo.findById(USER_ID, contact.id);
+    expect(updated?.name).toBe('Elena Ivanova');
+    expect(updated?.preferred_name).toBeNull();
+    expect(new ContactAliasRepository(db).listForContact(USER_ID, contact.id).map((alias) => alias.alias)).toContain(
+      'Lenka',
+    );
+  });
+
+  test('a no-op name update does not clear the preferred display label', () => {
+    const contact = repo.add(USER_ID, 'Elena', undefined, undefined, 'Lenka');
+    repo.update(contact.id, { name: 'Elena' });
+    expect(repo.findById(USER_ID, contact.id)?.preferred_name).toBe('Lenka');
+  });
+
+  test('primary rename promotes a case-insensitive Cyrillic alias instead of duplicating it', () => {
+    const contact = repo.add(USER_ID, 'Elena');
+    const aliases = new ContactAliasRepository(db);
+    aliases.add(USER_ID, contact.id, 'ленка', 'manual');
+    repo.update(contact.id, { name: 'ЛЕНКА' });
+    const rows = aliases.listForContact(USER_ID, contact.id);
+    expect(rows.filter((row) => row.alias.toLowerCase() === 'ленка')).toHaveLength(1);
+    expect(rows.find((row) => row.is_primary === 1)?.alias).toBe('ЛЕНКА');
+    expect(repo.findById(USER_ID, contact.id)?.name).toBe('ЛЕНКА');
+  });
+
+  test('primary rename cannot shadow an explicit group alias and rolls the contact back', () => {
+    const contact = repo.add(USER_ID, 'Elena');
+    new ContactGroupRepository(db).create(USER_ID, 'семья');
+    expect(() => repo.update(contact.id, { name: 'СЕМЬЯ' })).toThrow(/CONTACT_ALIAS_CONFLICT/);
+    expect(repo.findById(USER_ID, contact.id)?.name).toBe('Elena');
+  });
+
   test('delete removes contact', () => {
     const contact = repo.add(USER_ID, 'Вова');
     repo.delete(contact.id);
@@ -124,6 +162,27 @@ describe('ContactRepository', () => {
     const contacts = repo.list(USER_ID);
     expect(contacts.length).toBe(1);
     expect(contacts[0]!.preferred_name).toBe('Ленок');
+  });
+
+  // #654 acceptance criterion: after two different identities share the same name, exact-name
+  // lookup must report ambiguity, never silently pick the first row. Two contacts with the exact
+  // same name are possible since migration 066 dropped the per-user unique name index — a third
+  // upsert() by that bare name must not guess which of the two existing rows to patch.
+  test('upsert creates a new contact instead of guessing which of two same-named contacts to patch', () => {
+    const first = repo.add(USER_ID, 'Лена');
+    const second = repo.add(USER_ID, 'Лена');
+    const third = repo.upsert(USER_ID, 'Лена', undefined, undefined, 'Coworker Lena');
+    expect(third.id).not.toBe(first.id);
+    expect(third.id).not.toBe(second.id);
+    expect(repo.list(USER_ID).filter((c) => c.name === 'Лена')).toHaveLength(3);
+    expect(repo.findById(USER_ID, first.id)?.preferred_name).toBeNull();
+    expect(repo.findById(USER_ID, second.id)?.preferred_name).toBeNull();
+  });
+
+  test('findByNameStrict returns null, not an arbitrary row, when two contacts share the exact name', () => {
+    repo.add(USER_ID, 'Лена');
+    repo.add(USER_ID, 'Лена');
+    expect(repo.findByNameStrict(USER_ID, 'Лена')).toBeNull();
   });
 
   test('findByTelegramId returns correct contact', () => {
