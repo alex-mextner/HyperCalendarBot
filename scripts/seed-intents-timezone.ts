@@ -31,12 +31,8 @@ export const timezoneIntents: SeedIntent[] = [
         { respond: '{{t.msg}}' },
       ],
       i18n: {
-        ru: {
-          msg: '🕐 {{tool_outputs.tz_info.local_time|date("HH:mm")}} в {{$1}} (UTC{{tool_outputs.tz_info.utc_offset}})',
-        },
-        en: {
-          msg: '🕐 {{tool_outputs.tz_info.local_time|date("h:mm a")}} in {{$1}} (UTC{{tool_outputs.tz_info.utc_offset}})',
-        },
+        ru: { msg: '🕐 {{tool_outputs.tz_info.local_time|date("HH:mm")}} в {{$1}} (UTC{{tool_outputs.tz_info.utc_offset}})' },
+        en: { msg: '🕐 {{tool_outputs.tz_info.local_time|date("h:mm a")}} in {{$1}} (UTC{{tool_outputs.tz_info.utc_offset}})' },
       },
     },
     // Parameterized intent — phrases MUST be empty (per learner-prompt.ts's own rule):

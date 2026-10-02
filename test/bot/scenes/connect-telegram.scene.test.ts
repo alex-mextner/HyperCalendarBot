@@ -168,6 +168,34 @@ describe('isOtpLikeText', () => {
     expect(isOtpLikeText('1a2b3')).toBe(true);
     expect(isOtpLikeText('123 abc')).toBe(true);
   });
+
+  test('blocks fullwidth Unicode digits forming a code', () => {
+    expect(isOtpLikeText('１２３４５')).toBe(true);
+  });
+
+  test('blocks fullwidth Unicode digits embedded in prose', () => {
+    expect(isOtpLikeText('Код: １２３４５')).toBe(true);
+  });
+
+  test('blocks a spelled-out English digit code', () => {
+    expect(isOtpLikeText('Code: one two three four five')).toBe(true);
+  });
+
+  test('blocks a spelled-out Russian digit code', () => {
+    expect(isOtpLikeText('код: один два три четыре пять')).toBe(true);
+  });
+
+  test('does not block a single spelled-out digit word in ordinary English prose', () => {
+    expect(isOtpLikeText('I want one apple')).toBe(false);
+  });
+
+  test('does not block a single spelled-out digit word in ordinary Russian prose', () => {
+    expect(isOtpLikeText('позвони мне в два часа')).toBe(false);
+  });
+
+  test('does not falsely match "один" as a substring inside "одиннадцать"', () => {
+    expect(isOtpLikeText('одиннадцать')).toBe(false);
+  });
 });
 
 describe('isPhoneLikeText', () => {

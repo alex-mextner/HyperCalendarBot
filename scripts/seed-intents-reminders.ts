@@ -90,7 +90,8 @@ export const remindersIntents: SeedIntent[] = [
           when: 'tool_outputs.found.length > 0 && tool_outputs.found[0].all_day == false',
           call: 'calculate',
           input: {
-            expression: '{{tool_outputs.found.0.date}}T{{tool_outputs.found.0.time}}:00{{user.utc_offset}} - {{$1}}min',
+            expression:
+              '{{tool_outputs.found.0.date}}T{{tool_outputs.found.0.time}}:00{{user.utc_offset}} - {{$1}}min',
           },
           as: 'remind_at',
         },

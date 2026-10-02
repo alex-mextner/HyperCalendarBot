@@ -1,9 +1,19 @@
 pre-commit:
   parallel: false
   commands:
+    global-git-hooks-dispatcher:
+      run: '"${XDG_CONFIG_HOME:-$HOME/.config}/git/run-global-hooks" pre-commit'
     biome:
       run: node_modules/.bin/biome check .
       fail_text: "Biome lint/format failed — run: bun run lint:fix"
     tsc:
       run: node_modules/.bin/tsc --noEmit
       fail_text: "TypeScript errors found — fix before committing"
+commit-msg:
+  commands:
+    global-git-hooks-dispatcher:
+      run: '"${XDG_CONFIG_HOME:-$HOME/.config}/git/run-global-hooks" commit-msg {1}'
+pre-push:
+  commands:
+    global-git-hooks-dispatcher:
+      run: '"${XDG_CONFIG_HOME:-$HOME/.config}/git/run-global-hooks" pre-push'

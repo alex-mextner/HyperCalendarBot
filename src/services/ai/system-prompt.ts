@@ -150,9 +150,8 @@ function buildAddressSection(ctx: AgentContext): string {
   // and the blank line between the blocks are not places the user could ask for.
   // A heading is dropped rather than trusted: the builder writes its own, and a
   // line that opens one here would have come from something a user typed — an
-  // event location is free text, and it would reach this list through the
-  // address cache. Would, because nothing in production fills this field yet:
-  // the preload was dropped in the migration off the Anthropic SDK (#160).
+  // event location is free text, and it reaches this list verbatim through the
+  // address cache, populated by CalendarBotAgent.run() before every prompt build.
   const lines = ctx.preloadedAddressContext.split('\n').filter((line) => !line.startsWith('#'));
   const shown = linesWithinBudget(lines, ADDRESS_MAX_CHARS);
   const isPlace = (line: string) => line.startsWith('- ');

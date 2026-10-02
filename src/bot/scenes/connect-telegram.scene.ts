@@ -32,17 +32,27 @@ export const CODE_REGEX = /^\d{5}$/;
 // of OTP_LIKE_REGEX (adds '+', '(', ')'). If either invariant changes, update both.
 const OTP_LIKE_REGEX = /^[\d\s-]+$/;
 const PHONE_LIKE_REGEX = /^[+\d\s\-()]+$/;
+// Spelled-out digit words (English + Russian), matched with Unicode-aware boundaries
+// (lookaround, not ASCII \b) so Cyrillic words are handled correctly and "один" never
+// matches as a substring inside "одиннадцать" (nor "два" inside "двадцать").
+const SPELLED_DIGIT_REGEX =
+  /(?<![\p{L}\p{N}])(?:zero|one|two|three|four|five|six|seven|eight|nine|ноль|один|одна|два|две|три|четыре|пять|шесть|семь|восемь|девять)(?![\p{L}\p{N}])/giu;
 
 /**
- * True if the text is OTP-shaped (digits/spaces/dashes only) OR embeds 3+ digit
- * characters anywhere. The OTP prompt's whole purpose is collecting a 5-digit code,
- * so any text with that many digits — "Code: 12345", "код 12345" — may itself BE
- * (or contain) the real authentication code and must never be forwarded to the AI.
+ * True if the text is OTP-shaped (digits/spaces/dashes only) OR embeds 3+ digit-like
+ * tokens anywhere. The OTP prompt's whole purpose is collecting a 5-digit code,
+ * so any text with that many digit-like tokens — "Code: 12345", "код 12345",
+ * fullwidth "１２３４５", or spelled-out "one two three four five" / "один два три
+ * четыре пять" — may itself BE (or contain) the real authentication code and must
+ * never be forwarded to the AI. A digit-like token is either a Unicode decimal digit
+ * (\p{Nd}, covers ASCII 0-9, fullwidth forms, and other-script digit systems) or a
+ * spelled-out digit word in English/Russian.
  */
 export function isOtpLikeText(text: string): boolean {
   if (OTP_LIKE_REGEX.test(text)) return true;
-  const digitCount = (text.match(/\d/g) ?? []).length;
-  return digitCount >= 3;
+  const digitCount = (text.match(/\p{Nd}/gu) ?? []).length;
+  const spelledDigitCount = (text.match(SPELLED_DIGIT_REGEX) ?? []).length;
+  return digitCount + spelledDigitCount >= 3;
 }
 
 /** True if the text looks like a phone attempt (digits, '+', spaces, dashes, parens only). */

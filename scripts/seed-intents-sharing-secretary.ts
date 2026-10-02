@@ -88,17 +88,7 @@ export const sharingSecretaryIntents: SeedIntent[] = [
       },
     },
     phrases: ['поделись расписанием на завтра с @ivan_petrov', 'share tomorrow agenda with @ivan_petrov'],
-    trigger_words: [
-      'поделись',
-      'отправь',
-      'перешли',
-      'расписанием',
-      'завтра',
-      'share',
-      'agenda',
-      'tomorrow',
-      'schedule',
-    ],
+    trigger_words: ['поделись', 'отправь', 'перешли', 'расписанием', 'завтра', 'share', 'agenda', 'tomorrow', 'schedule'],
     source_message: 'поделись расписанием на завтра с @ivan_petrov',
   },
 
@@ -180,7 +170,7 @@ export const sharingSecretaryIntents: SeedIntent[] = [
             'как только примет.',
         },
         en: {
-          done: 'Invitation sent — {{tool_outputs.target.name}} will be able to view your calendar once they accept.',
+          done: "Invitation sent — {{tool_outputs.target.name}} will be able to view your calendar once they accept.",
         },
       },
     },
@@ -203,11 +193,7 @@ export const sharingSecretaryIntents: SeedIntent[] = [
         { call: 'find_user', input: { username: '{{$1}}' }, as: 'target' },
         {
           call: 'manage_secretaries',
-          input: {
-            action: 'invite',
-            secretary_telegram_id: '{{tool_outputs.target.telegram_id}}',
-            permission: 'write',
-          },
+          input: { action: 'invite', secretary_telegram_id: '{{tool_outputs.target.telegram_id}}', permission: 'write' },
         },
         { respond: '{{t.done}}' },
       ],

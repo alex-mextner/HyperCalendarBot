@@ -1,5 +1,6 @@
 {
   "name": "hypercalendarbot",
+  "version": "0.1.1",
   "module": "src/index.ts",
   "type": "module",
   "private": true,

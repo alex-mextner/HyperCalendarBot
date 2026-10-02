@@ -42,113 +42,142 @@ export interface SeedIntent {
 
 export const contactsIntents: SeedIntent[] = [
   {
-    canonical_name: 'list_contacts',
-    pattern:
-      '^(?:покажи\\s+(?:мои\\s+)?контакты|мои\\s+контакты|список\\s+контактов|show\\s+(?:my\\s+)?contacts|list\\s+(?:my\\s+)?contacts|my\\s+contacts|address\\s+book)\\??$',
-    workflow: {
-      steps: [
+    "canonical_name": "list_contacts",
+    "pattern": "^(?:покажи\\s+(?:мои\\s+)?контакты|мои\\s+контакты|список\\s+контактов|show\\s+(?:my\\s+)?contacts|list\\s+(?:my\\s+)?contacts|my\\s+contacts|address\\s+book)\\??$",
+    "workflow": {
+      "steps": [
         {
-          when: 'group.is_group == true',
-          respond: '{{t.group_blocked}}',
+          "when": "group.is_group == true",
+          "respond": "{{t.group_blocked}}"
         },
         {
-          call: 'get_contacts',
-          input: {},
-        },
+          "call": "get_contacts",
+          "input": {}
+        }
       ],
-      i18n: {
-        ru: {
-          group_blocked: 'Личные контакты покажу только в личке — напиши мне туда.',
+      "i18n": {
+        "ru": {
+          "group_blocked": "Личные контакты покажу только в личке — напиши мне туда."
         },
-        en: {
-          group_blocked: "I'll only show your personal contacts in a private chat — message me there.",
-        },
-      },
+        "en": {
+          "group_blocked": "I'll only show your personal contacts in a private chat — message me there."
+        }
+      }
     },
-    phrases: [
-      'покажи мои контакты',
-      'мои контакты',
-      'список контактов',
-      'show my contacts',
-      'list my contacts',
-      'my contacts',
+    "phrases": [
+      "покажи мои контакты",
+      "мои контакты",
+      "список контактов",
+      "show my contacts",
+      "list my contacts",
+      "my contacts"
     ],
-    trigger_words: ['контакты', 'контакт', 'contacts', 'contact'],
-    source_message: 'покажи мои контакты',
-    format: 'text',
+    "trigger_words": [
+      "контакты",
+      "контакт",
+      "contacts",
+      "contact"
+    ],
+    "source_message": "покажи мои контакты",
+    "format": "text"
   },
   {
-    canonical_name: 'find_contact_by_name',
-    pattern: '^(?:(?:найди|найти|поищи)\\s+контакт[а-я]*|find\\s+contact|search\\s+(?:for\\s+)?contact)\\s+(.+)$',
-    workflow: {
-      tools: [
+    "canonical_name": "find_contact_by_name",
+    "pattern": "^(?:(?:найди|найти|поищи)\\s+контакт[а-я]*|find\\s+contact|search\\s+(?:for\\s+)?contact)\\s+(.+)$",
+    "workflow": {
+      "tools": [
         {
-          name: 'find_contact',
-          input: {
-            name: '{{$1}}',
-          },
-        },
-      ],
+          "name": "find_contact",
+          "input": {
+            "name": "{{$1}}"
+          }
+        }
+      ]
     },
-    phrases: [],
-    trigger_words: ['найди', 'найти', 'поищи', 'контакт', 'find', 'search', 'contact'],
-    source_message: 'найди контакт Иван',
-    format: 'text',
+    "phrases": [],
+    "trigger_words": [
+      "найди",
+      "найти",
+      "поищи",
+      "контакт",
+      "find",
+      "search",
+      "contact"
+    ],
+    "source_message": "найди контакт Иван",
+    "format": "text"
   },
   {
-    canonical_name: 'who_is_contact',
-    pattern: '^(?:кто\\s+так(?:ой|ая)|кто\\s+это|who\\s+is)\\s+(.+)$',
-    workflow: {
-      tools: [
+    "canonical_name": "who_is_contact",
+    "pattern": "^(?:кто\\s+так(?:ой|ая)|кто\\s+это|who\\s+is)\\s+(.+)$",
+    "workflow": {
+      "tools": [
         {
-          name: 'find_contact',
-          input: {
-            name: '{{$1}}',
-          },
-        },
-      ],
+          "name": "find_contact",
+          "input": {
+            "name": "{{$1}}"
+          }
+        }
+      ]
     },
-    phrases: [],
-    trigger_words: ['кто', 'who'],
-    source_message: 'кто такой Иван',
-    format: 'text',
+    "phrases": [],
+    "trigger_words": [
+      "кто",
+      "who"
+    ],
+    "source_message": "кто такой Иван",
+    "format": "text"
   },
   {
-    canonical_name: 'add_contact_to_book',
-    pattern: '^(?:(?:добавь|добавить|сохрани|сохранить)\\s+контакт[а-я]*|(?:add|save)\\s+contact)\\s+(.+)$',
-    workflow: {
-      tools: [
+    "canonical_name": "add_contact_to_book",
+    "pattern": "^(?:(?:добавь|добавить|сохрани|сохранить)\\s+контакт[а-я]*|(?:add|save)\\s+contact)\\s+(.+)$",
+    "workflow": {
+      "tools": [
         {
-          name: 'add_contact',
-          input: {
-            name: '{{$1}}',
-            preferred_name: '{{$1}}',
-          },
-        },
-      ],
+          "name": "add_contact",
+          "input": {
+            "name": "{{$1}}",
+            "preferred_name": "{{$1}}"
+          }
+        }
+      ]
     },
-    phrases: [],
-    trigger_words: ['добавь', 'добавить', 'сохрани', 'сохранить', 'add', 'save', 'контакт', 'contact'],
-    source_message: 'добавь контакт Иван',
-    format: 'text',
+    "phrases": [],
+    "trigger_words": [
+      "добавь",
+      "добавить",
+      "сохрани",
+      "сохранить",
+      "add",
+      "save",
+      "контакт",
+      "contact"
+    ],
+    "source_message": "добавь контакт Иван",
+    "format": "text"
   },
   {
-    canonical_name: 'rename_contact',
-    pattern: '^(?:переименуй\\s+контакт|rename\\s+contact)\\s+(.+?)\\s+(?:в|to)\\s+(.+)$',
-    workflow: {
-      tools: [
+    "canonical_name": "rename_contact",
+    "pattern": "^(?:переименуй\\s+контакт|rename\\s+contact)\\s+(.+?)\\s+(?:в|to)\\s+(.+)$",
+    "workflow": {
+      "tools": [
         {
-          name: 'update_contact',
-          input: {
-            search: '{{$1}}',
-            preferred_name: '{{$2}}',
-          },
-        },
-      ],
+          "name": "update_contact",
+          "input": {
+            "search": "{{$1}}",
+            "preferred_name": "{{$2}}"
+          }
+        }
+      ]
     },
-    phrases: [],
-    trigger_words: ['переименуй', 'rename', 'контакт', 'contact'],
-    source_message: 'переименуй контакт Иван в Ваня',
-    format: 'text',
-  },
+    "phrases": [],
+    "trigger_words": [
+      "переименуй",
+      "rename",
+      "контакт",
+      "contact"
+    ],
+    "source_message": "переименуй контакт Иван в Ваня",
+    "format": "text"
+  }
 ];

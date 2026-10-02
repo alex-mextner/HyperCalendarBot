@@ -12,11 +12,13 @@ import { runMigrations } from '../../../src/database/schema.ts';
 import { AssistantMessageCodec, aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
+import { buildSystemPrompt } from '../../../src/services/ai/system-prompt.ts';
 import { _resetToolThrottleForTest } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import type { AddressCache } from '../../../src/services/location/address-cache.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -891,5 +893,46 @@ describe('CalendarBotAgent.run()', () => {
       RU_AGENT_ERROR_PHRASES.some((phrase) => resultRu.responseText.includes(phrase)),
       `RU responseText "${resultRu.responseText}" must contain a Russian stall phrase`,
     ).toBe(true);
+  });
+  describe('known-location preload (#160)', () => {
+    function makeAddressCache(frequent: { resolvedAddress: string; count: number }[]): AddressCache {
+      return {
+        getAddressContext: async () => ({
+          recent: [],
+          frequent: frequent.map((f) => ({ ...f, googleMapsUrl: '', lastUsed: Date.now() })),
+        }),
+      } as unknown as AddressCache;
+    }
+
+    test('run() preloads known locations from the address cache into the system prompt', async () => {
+      const { impl } = makeStreamImpl([{ kind: 'text', text: 'Sure.' }]);
+      const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+      ctx.addressCache = makeAddressCache([{ resolvedAddress: 'Gym, Bulevar 5', count: 3 }]);
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
+      await agent.run(ctx);
+
+      expect(ctx.preloadedAddressContext).toContain('Gym, Bulevar 5');
+      const prompt = buildSystemPrompt(ctx);
+      expect(prompt).toContain('## Known Locations');
+      expect(prompt).toContain('Gym, Bulevar 5');
+    });
+
+    test('a failing address cache is logged and swallowed, never breaking the run', async () => {
+      const { impl } = makeStreamImpl([{ kind: 'text', text: 'Sure.' }]);
+      const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+      ctx.addressCache = {
+        getAddressContext: async () => {
+          throw new Error('Maps outage');
+        },
+      } as unknown as AddressCache;
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
+      await agent.run(ctx);
+
+      expect(ctx.preloadedAddressContext).toBeUndefined();
+      expect(sender.sendMessage).toHaveBeenCalledTimes(1);
+      expect(sender.editMessageText).toHaveBeenCalled();
+    });
   });
 });

@@ -127,8 +127,7 @@ const intents: Array<{
   // ─── add_participant_to_event ───────────────────────────────────────────────
   {
     canonical_name: 'add_participant_to_event',
-    pattern:
-      '^(?:добавь|пригласи|позови)\\s+@(\\w+)(?:\\s+(?:в|на)\\s+(?:событие|встречу))?$|^(?:add|invite)\\s+@(\\w+)(?:\\s+to\\s+the\\s+(?:event|meeting))?$',
+    pattern: '^(?:добавь|пригласи|позови)\\s+@(\\w+)(?:\\s+(?:в|на)\\s+(?:событие|встречу))?$|^(?:add|invite)\\s+@(\\w+)(?:\\s+to\\s+the\\s+(?:event|meeting))?$',
     workflow: {
       tools: [
         {

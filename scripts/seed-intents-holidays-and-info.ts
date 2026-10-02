@@ -182,7 +182,7 @@ export const holidaysAndInfoIntents: SeedIntent[] = [
         },
         en: {
           overview: [
-            '📅 I show and create events, find free time, set reminders, and can call you with a spoken reminder.',
+            "📅 I show and create events, find free time, set reminders, and can call you with a spoken reminder.",
             '🎉 I track holidays for your country.',
             '👥 In a group I keep a shared calendar and invite members to meetings.',
             '🎤 I understand voice messages and can reply with voice.',

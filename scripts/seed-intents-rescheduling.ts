@@ -77,11 +77,7 @@ const intents: Array<{
         },
         {
           call: 'update_event',
-          input: {
-            event_id: '{{last_mentioned_event.id}}',
-            start_at: '{{tool_outputs.new_start}}',
-            scope: '{{env.scope}}',
-          },
+          input: { event_id: '{{last_mentioned_event.id}}', start_at: '{{tool_outputs.new_start}}', scope: '{{env.scope}}' },
         },
       ],
     },
@@ -107,51 +103,25 @@ const intents: Array<{
         },
         {
           call: 'update_event',
-          input: {
-            event_id: '{{last_mentioned_event.id}}',
-            start_at: '{{tool_outputs.new_start}}',
-            scope: '{{env.scope}}',
-          },
+          input: { event_id: '{{last_mentioned_event.id}}', start_at: '{{tool_outputs.new_start}}', scope: '{{env.scope}}' },
         },
       ],
     },
     phrases: [],
-    trigger_words: [
-      'перенеси',
-      'отложи',
-      'сдвинь',
-      'push',
-      'postpone',
-      'snooze',
-      'delay',
-      'час',
-      'часа',
-      'часов',
-      'hour',
-      'hours',
-    ],
+    trigger_words: ['перенеси', 'отложи', 'сдвинь', 'push', 'postpone', 'snooze', 'delay', 'час', 'часа', 'часов', 'hour', 'hours'],
     source_message: 'перенеси на 2 часа',
   },
 
   // ─── snooze_event_default (bare — no amount, native tool preserves duration) ─
   {
     canonical_name: 'snooze_event_default',
-    pattern:
-      '^(?:перенеси(?:\\s+его)?|отложи(?:\\s+его)?|push\\s+it\\s+back|postpone\\s+it|delay\\s+it|snooze\\s+it|snooze)$',
+    pattern: '^(?:перенеси(?:\\s+его)?|отложи(?:\\s+его)?|push\\s+it\\s+back|postpone\\s+it|delay\\s+it|snooze\\s+it|snooze)$',
     workflow: {
-      tools: [{ name: 'snooze_event', input: { event_id: '{{last_mentioned_event.id}}', scope: '{{env.scope}}' } }],
+      tools: [
+        { name: 'snooze_event', input: { event_id: '{{last_mentioned_event.id}}', scope: '{{env.scope}}' } },
+      ],
     },
-    phrases: [
-      'перенеси',
-      'отложи',
-      'перенеси его',
-      'отложи его',
-      'push it back',
-      'postpone it',
-      'delay it',
-      'snooze it',
-      'snooze',
-    ],
+    phrases: ['перенеси', 'отложи', 'перенеси его', 'отложи его', 'push it back', 'postpone it', 'delay it', 'snooze it', 'snooze'],
     trigger_words: ['перенеси', 'отложи', 'push', 'postpone', 'delay', 'snooze'],
     source_message: 'перенеси',
   },
@@ -173,11 +143,7 @@ const intents: Array<{
         },
         {
           call: 'update_event',
-          input: {
-            event_id: '{{last_mentioned_event.id}}',
-            start_at: '{{tool_outputs.new_start}}',
-            scope: '{{env.scope}}',
-          },
+          input: { event_id: '{{last_mentioned_event.id}}', start_at: '{{tool_outputs.new_start}}', scope: '{{env.scope}}' },
         },
       ],
     },
@@ -203,11 +169,7 @@ const intents: Array<{
         },
         {
           call: 'update_event',
-          input: {
-            event_id: '{{last_mentioned_event.id}}',
-            start_at: '{{tool_outputs.new_start}}',
-            scope: '{{env.scope}}',
-          },
+          input: { event_id: '{{last_mentioned_event.id}}', start_at: '{{tool_outputs.new_start}}', scope: '{{env.scope}}' },
         },
       ],
     },
@@ -242,29 +204,17 @@ const intents: Array<{
         {
           call: 'calculate',
           input: {
-            expression:
-              '{{last_mentioned_event.date}}T{{last_mentioned_event.time|default("00:00")}}:00{{user.utc_offset}} - 15min',
+            expression: '{{last_mentioned_event.date}}T{{last_mentioned_event.time|default("00:00")}}:00{{user.utc_offset}} - 15min',
           },
           as: 'new_start',
         },
         {
           call: 'update_event',
-          input: {
-            event_id: '{{last_mentioned_event.id}}',
-            start_at: '{{tool_outputs.new_start}}',
-            scope: '{{env.scope}}',
-          },
+          input: { event_id: '{{last_mentioned_event.id}}', start_at: '{{tool_outputs.new_start}}', scope: '{{env.scope}}' },
         },
       ],
     },
-    phrases: [
-      'подвинь пораньше',
-      'сдвинь пораньше',
-      'перенеси пораньше',
-      'move it up',
-      'move earlier',
-      'bring it forward',
-    ],
+    phrases: ['подвинь пораньше', 'сдвинь пораньше', 'перенеси пораньше', 'move it up', 'move earlier', 'bring it forward'],
     trigger_words: ['подвинь', 'перенеси', 'сделай', 'сдвинь', 'пораньше', 'move', 'bring', 'earlier', 'forward', 'up'],
     source_message: 'подвинь пораньше',
   },
@@ -272,35 +222,23 @@ const intents: Array<{
   // ─── move_event_to_tomorrow (shifts by exactly +1 day — same time, preserves duration) ─
   {
     canonical_name: 'move_event_to_tomorrow',
-    pattern:
-      '^(?:(?:перенеси|передвинь)\\s+(?:событие\\s+)?на\\s+завтра|(?:move|reschedule)\\s+(?:it\\s+)?to\\s+tomorrow)$',
+    pattern: '^(?:(?:перенеси|передвинь)\\s+(?:событие\\s+)?на\\s+завтра|(?:move|reschedule)\\s+(?:it\\s+)?to\\s+tomorrow)$',
     workflow: {
       steps: [
         {
           call: 'calculate',
           input: {
-            expression:
-              '{{last_mentioned_event.date}}T{{last_mentioned_event.time|default("00:00")}}:00{{user.utc_offset}} + 1days',
+            expression: '{{last_mentioned_event.date}}T{{last_mentioned_event.time|default("00:00")}}:00{{user.utc_offset}} + 1days',
           },
           as: 'new_start',
         },
         {
           call: 'update_event',
-          input: {
-            event_id: '{{last_mentioned_event.id}}',
-            start_at: '{{tool_outputs.new_start}}',
-            scope: '{{env.scope}}',
-          },
+          input: { event_id: '{{last_mentioned_event.id}}', start_at: '{{tool_outputs.new_start}}', scope: '{{env.scope}}' },
         },
       ],
     },
-    phrases: [
-      'перенеси на завтра',
-      'перенеси событие на завтра',
-      'передвинь на завтра',
-      'move it to tomorrow',
-      'reschedule to tomorrow',
-    ],
+    phrases: ['перенеси на завтра', 'перенеси событие на завтра', 'передвинь на завтра', 'move it to tomorrow', 'reschedule to tomorrow'],
     trigger_words: ['перенеси', 'передвинь', 'move', 'reschedule', 'tomorrow', 'завтра'],
     source_message: 'перенеси на завтра',
   },
@@ -315,27 +253,17 @@ const intents: Array<{
         {
           call: 'calculate',
           input: {
-            expression:
-              '{{last_mentioned_event.date}}T{{last_mentioned_event.time|default("00:00")}}:00{{user.utc_offset}} + 7days',
+            expression: '{{last_mentioned_event.date}}T{{last_mentioned_event.time|default("00:00")}}:00{{user.utc_offset}} + 7days',
           },
           as: 'new_start',
         },
         {
           call: 'update_event',
-          input: {
-            event_id: '{{last_mentioned_event.id}}',
-            start_at: '{{tool_outputs.new_start}}',
-            scope: '{{env.scope}}',
-          },
+          input: { event_id: '{{last_mentioned_event.id}}', start_at: '{{tool_outputs.new_start}}', scope: '{{env.scope}}' },
         },
       ],
     },
-    phrases: [
-      'перенеси на следующую неделю',
-      'передвинь на следующую неделю',
-      'move it to next week',
-      'reschedule to next week',
-    ],
+    phrases: ['перенеси на следующую неделю', 'передвинь на следующую неделю', 'move it to next week', 'reschedule to next week'],
     trigger_words: ['перенеси', 'передвинь', 'move', 'reschedule', 'неделю', 'week'],
     source_message: 'перенеси на следующую неделю',
   },
