@@ -10,6 +10,7 @@ Read `CLAUDE.md` and the deployment runbook before changing runtime behavior.
 - Never rerun completed writes merely to repair an explanation. Preserve durable execution evidence across provider changes and retries. Unknown completion is not failure and must not trigger blind replay.
 - Validate the exact pull-request head with `bun test`, typecheck and `bun run lint`. Preserve disclosed skips. Use normal local CI fallback when hosted CI is unavailable; do not bypass real failures or manufacture successful checks.
 - Verify version/review requirements and the selected worktree before `gh ship`. Distinguish implemented, reviewed, merged, deployed and live-tested in reports.
+- `gh ship` is also the deployment entry point for this repo: healthy GitHub Actions deploys the immutable merge SHA; only a proven Actions billing/spend-limit suspension may trigger the repo-owned local fallback. A generic CI/test failure must never trigger deployment.
 - Currency/FX functionality belongs in ExpenseSyncBot. This bot retains a general calculator and date/time arithmetic, not exchange-rate services.
 
 ## Branch and worktree cleanup

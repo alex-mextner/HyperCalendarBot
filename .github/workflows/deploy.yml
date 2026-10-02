@@ -6,7 +6,7 @@ on:
 
 concurrency:
   group: deploy-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 # Least-privilege default for jobs that don't declare their own block (test,
 # notify-failure). Jobs needing more (build: packages:write) override per-job.
@@ -52,6 +52,8 @@ jobs:
   build:
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.build-image.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -65,15 +67,15 @@ jobs:
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
           driver: docker
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - id: build-image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          cache-to: type=inline
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
   deploy:
     needs: build
@@ -88,71 +90,30 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: docker-compose.yml,Caddyfile,scripts/backup-db.sh,scripts/healthcheck-alert.sh,scripts/prepare-runtime-dirs.sh
-          target: ${{ secrets.DEPLOY_PATH }}
+          source: docker-compose.yml,Caddyfile,scripts/backup-db.sh,scripts/healthcheck-alert.sh,scripts/prepare-runtime-dirs.sh,scripts/deploy-bot.sh,scripts/stage-release.sh
+          target: ${{ secrets.DEPLOY_PATH }}/releases/incoming-${{ github.sha }}
       - uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           command_timeout: 10m
-          envs: GH_TOKEN
+          envs: GH_TOKEN,GH_ACTOR,IMAGE_DIGEST
           script: |
-            set -e
-            cd ${{ secrets.DEPLOY_PATH }}
-            chmod +x scripts/backup-db.sh scripts/healthcheck-alert.sh scripts/prepare-runtime-dirs.sh
-            echo "$GH_TOKEN" | docker login ghcr.io -u github --password-stdin
-            # Clean up old images to prevent "no space left on device"
-            docker image prune -f
-            docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest
-            # Generate stress dictionary if missing (one-time, ~15MB)
-            if [ ! -f data/dictionaries/stress-dict.json ]; then
-              mkdir -p data/dictionaries
-              rm -rf /tmp/russian-dictionary
-              git clone --depth 1 https://github.com/Badestrand/russian-dictionary /tmp/russian-dictionary
-              docker run --rm \
-                -v "$(pwd)/data":/app/data \
-                -v /tmp/russian-dictionary:/tmp/russian-dictionary \
-                ghcr.io/${{ env.IMAGE_NAME }}:latest bun scripts/generate-stress-dict.ts
-              rm -rf /tmp/russian-dictionary
-            fi
-            # Bind mounts override image ownership. Prepare both writable runtime
-            # directories for botuser (uid/gid 999) before restarting the container.
-            ./scripts/prepare-runtime-dirs.sh .
+            set -euo pipefail
+            DEPLOY="${{ secrets.DEPLOY_PATH }}"
+            STAGE="$DEPLOY/releases/incoming-${{ github.sha }}"
+            trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+            echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+            chmod +x "$STAGE/scripts/stage-release.sh"
+            STAGE="$STAGE" DEPLOY_DIR="$DEPLOY" IMAGE_REPO="ghcr.io/${{ env.IMAGE_NAME }}" \
+              DEPLOY_SHA="${{ github.sha }}" DEPLOY_IMAGE_DIGEST="$IMAGE_DIGEST" \
+              "$STAGE/scripts/stage-release.sh"
 
-            echo "📜 Rotating logs before restart..."
-            STAMP=$(date +%Y-%m-%d_%H-%M-%S)
-            for f in healthcheck.log backup.log; do
-              if [ -s "logs/$f" ]; then
-                mv "logs/$f" "logs/${f%.log}_${STAMP}.log"
-                gzip "logs/${f%.log}_${STAMP}.log"
-              fi
-            done
-
-            docker compose up -d --no-deps bot
-            caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
-
-            # The reload above cannot fail the deploy: this server is shared, and
-            # another project's broken config would take our deploy down with it.
-            # So check the outcome instead. An unrouted path does not 404 here —
-            # the proxy answers it with the static page, 200, which is what kept
-            # the watchdog blind while every check was green.
-            echo "🔎 Verifying the readiness path is routed to the bot..."
-            ROUTED=""
-            for _ in $(seq 1 10); do
-              BODY=$(curl -s --max-time 20 https://hypercal.invntrm.ru/ready || true)
-              case "$BODY" in
-                ok|"ok (unverified)"|"ai chain down") ROUTED="$BODY"; break ;;
-              esac
-              sleep 6
-            done
-            if [ -z "$ROUTED" ]; then
-              echo "❌ /ready is not reaching the bot — the watchdog would see this as healthy. Last body: ${BODY:-<empty>}"
-              exit 1
-            fi
-            echo "✅ /ready routed to the bot: $ROUTED"
       - name: Notify deploy success
         if: success()
         env:

@@ -25,7 +25,7 @@ services:
         max-file: "5"
 
   bot:
-    image: ghcr.io/alex-mextner/hypercalendarbot:latest
+    image: ${HYPERCAL_IMAGE:-ghcr.io/alex-mextner/hypercalendarbot:latest}
     container_name: hypercal-bot
     restart: unless-stopped
     depends_on:

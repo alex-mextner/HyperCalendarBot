@@ -61,27 +61,14 @@ The server runs multiple PM2 services alongside our Docker containers:
 **Never run `pm2 delete all`, `docker system prune`, or kill PIDs without checking ownership.**
 Port 3001 belongs to HyperCalendarBot Docker. Do not reassign it.
 
-## Local deploy fallback
-
-Use only when GitHub-hosted Actions cannot obtain a runner and the exact commit has been locally verified. The fallback builds on the production x86_64 host from a clean `git archive`; it never copies the working tree.
-
-```bash
-# Default: fetch and deploy the exact commit at origin/main, with local tests first.
-scripts/deploy-local-fallback.sh
-
-# If that exact commit already passed the full local gate in this incident/session:
-scripts/deploy-local-fallback.sh --ref origin/main --skip-tests
-```
-
-The script keeps the previous image under a timestamped rollback tag, takes a WAL-safe DB backup before restart, installs the same host helper/config files as CI, reapplies runtime directory ownership, force-recreates only the bot service, and requires `/health` plus a recognized `/ready` body before reporting success. This is an emergency delivery path, not a replacement for fixing CI/CD.
-
 ## Docker
 
 - Bot + Redis via `docker-compose.yml`, Docker Compose v2 plugin.
-- GHCR private registry — deploy step must `docker login ghcr.io` before pull.
+- GHCR private registry — CI deploy logs in with its ephemeral `GITHUB_TOKEN`; do not persist a developer PAT on the server. The server is not expected to support ad-hoc unauthenticated `docker compose pull`.
+- Deploy immutable `${GITHUB_SHA}` tags through `scripts/deploy-bot.sh`; `latest` is only a compatibility alias after the immutable image is verified.
 - `docker compose` requires root (www-data not in docker group).
 - Resource limits: bot 1G/0.9cpu, redis 256M/0.5cpu (server is 1 CPU — never exceed 1.0).
-- GitHub Actions secrets: `SSH_HOST`, `SSH_USER`, `SSH_KEY`, `DEPLOY_PATH`.
+- GitHub Actions secrets: `SSH_HOST`, `SSH_USER`, `SSH_KEY`, `DEPLOY_PATH`. Package auth uses the job-scoped `GITHUB_TOKEN` (`packages:read`/`packages:write` as declared), not a stored server token.
 
 ## Dockerfile
 
@@ -184,3 +171,14 @@ venv/bin/python scripts/pyrogram-auth.py
 ## Service identity isolation
 
 Set `MTPROTO_SERVICE_USER_ID` to the explicitly designated service account. Startup checks the authenticated ID; each shared Python consumer checks it again. Missing, revoked or mismatched credentials disable only shared MTProto capabilities. Never restore the shared file from the pool of personal user authorizations. Preserve Bot API and inviter-owned sessions. After configuration changes recreate the bot container; do not rotate or revoke unrelated user sessions.
+
+
+## `gh ship` deployment ownership
+
+`gh ship <PR>` is the normal merge-and-deploy entry point. The repo-specific `.claude/scripts/pr-ship.sh` first delegates every merge/review/CI/acceptance gate to the shared ship implementation. After a successful merge it waits for the `CI/CD` run for the exact merge SHA. A successful run owns deployment.
+
+If and only if GitHub annotates the run with the account-payment/spend-limit suspension message, the wrapper invokes `scripts/deploy-local-fallback.sh <merge-sha>`. The fallback re-fetches `origin/main`, refuses anything except the current full merge SHA, builds a labeled `linux/amd64` image on the authorized local Mac, runs an offline smoke test, saves it to a checksum-verified archive, and transfers that image plus the exact deploy assets over SSH. **Production never builds the application image.** The remote side only verifies the checksum/revision, `docker load`s it, and invokes the same `scripts/deploy-bot.sh` used by CI. Ordinary test, build, security, review or deployment failures never fall back locally.
+
+CI authenticates to GHCR with the job-scoped `GITHUB_TOKEN`, deploys `${github.sha}`, then logs out. The server therefore needs no persistent developer PAT. Both paths require the image's `org.opencontainers.image.revision` label to equal the full merge SHA and require `amd64`; the immutable SHA tag is the Compose selector during replacement. `latest` becomes only a compatibility alias after the exact image, DB integrity, restart count and startup log have passed verification.
+
+`deploy-bot.sh` takes a consistent SQLite backup before stopping the bot, runs migrations with the new image while the Telegram process is stopped, and records a redacted release receipt under `/opt/hypercal/releases/<sha>.json`. If migration, health/readiness, DB integrity, restart-count or fatal-startup-log checks fail after the DB may have changed, the script restores both the pre-deploy DB backup and the previous image. Only the `bot` Compose service is recreated; Redis and unrelated PM2/Docker workloads are not touched. Keep at most three HyperCalendar rollback tags; never use global Docker pruning on this shared server.

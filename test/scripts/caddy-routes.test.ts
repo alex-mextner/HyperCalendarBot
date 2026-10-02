@@ -17,7 +17,7 @@ import { READINESS_BODY, startWebServer } from '../../src/web/server.ts';
 const ROOT = join(import.meta.dir, '../..');
 const caddyfile = readFileSync(join(ROOT, 'Caddyfile'), 'utf8');
 const watchdog = readFileSync(join(ROOT, 'scripts/healthcheck-alert.sh'), 'utf8');
-const deployWorkflow = readFileSync(join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
+const deployScript = readFileSync(join(ROOT, 'scripts/deploy-bot.sh'), 'utf8');
 
 /** The paths the @bot matcher forwards to the bot. */
 function proxiedPaths(): string[] {
@@ -59,15 +59,9 @@ function proxyRetryWindowSeconds(): number {
 
 /** How long the deploy's own readiness probe waits, in seconds. */
 function deployProbeTimeoutSeconds(): number {
-  const value = deployWorkflow.match(/curl -s --max-time (\d+) https:\/\/\S*\/ready/)?.[1];
-  if (!value) throw new Error('deploy.yml has no readiness probe');
+  const value = deployScript.match(/PROBE_TIMEOUT="\$\{DEPLOY_PROBE_TIMEOUT:-(\d+)\}"/)?.[1];
+  if (!value) throw new Error('deploy-bot.sh has no readiness probe default');
   return Number(value);
-}
-
-function deployCopiedFiles(): Set<string> {
-  const source = deployWorkflow.match(/^\s*source:\s*(.+)$/m)?.[1];
-  if (!source) throw new Error('deploy.yml has no scp source list');
-  return new Set(source.split(',').map((entry) => entry.trim()));
 }
 
 /** How long the watchdog waits for a readiness answer, in seconds. */
@@ -126,27 +120,18 @@ describe('Caddy routing', () => {
     expect(deployProbeTimeoutSeconds()).toBeGreaterThan(proxyRetryWindowSeconds());
   });
 
-  test('the deploy copies every host-side shell script it references', () => {
-    const copied = deployCopiedFiles();
-    const referencedScripts = new Set(
-      [...deployWorkflow.matchAll(/scripts\/[A-Za-z0-9._-]+\.sh/g)].map((match) => match[0]),
-    );
-    for (const script of referencedScripts) expect(copied.has(script)).toBe(true);
-  });
-
   // Routing is applied by a reload the deploy cannot fail on (shared server), so
   // the deploy checks the outcome against the very URL the watchdog will poll.
   test('the deploy verifies the URL the watchdog polls', () => {
-    expect(deployWorkflow).toContain(watchdogUrl());
+    expect(deployScript).toContain(`READY_URL:-${watchdogUrl()}`);
   });
 
   // The deploy decides "routed" by recognising the bodies the bot answers with.
   // That list is a copy of the server's, and a copy that drifts fails every
   // deploy for a routing problem that does not exist.
-  test('the deploy accepts exactly the bodies the server answers with', () => {
-    const branch = deployWorkflow.match(/^\s*(.+)\)\s*ROUTED="\$BODY"/m)?.[1];
-    if (!branch) throw new Error('deploy.yml has no readiness case branch');
-    expect(acceptedBodies(branch)).toEqual([...Object.values(READINESS_BODY)].sort());
+  test('the deploy requires a healthy/verified-or-unverified bot, not merely a routed error', () => {
+    expect(deployScript).toContain('[[ "$health" == ok && "$ready" =~ ^ok ]]');
+    expect(deployScript).not.toContain('ai chain down');
   });
 
   // The watchdog holds the same list, for the same reason: a 200 from anything
