@@ -3,9 +3,11 @@
 export interface AddEventState {
   title?: string;
   startAt?: string;
+  pendingDate?: string;
   endAt?: string;
   recurrenceRule?: string | null;
   recEndMode?: 'until' | 'count';
+  recurrenceInputMode?: 'custom';
   description?: string;
   location?: string;
 }

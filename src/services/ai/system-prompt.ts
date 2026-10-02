@@ -180,7 +180,7 @@ function buildUserInfoSection(ctx: AgentContext, utcOffset: string, nowLocal: st
   const tzUpdatedAt = ctx.user.timezone_updated_at;
   const tzFreshness = tzUpdatedAt
     ? `Last timezone update: ${tzUpdatedAt}`
-    : 'Timezone was never set by the user (default UTC). Ask them to share location for accurate times.';
+    : `Timezone not explicitly confirmed; using stored ${ctx.user.timezone}. Ask city/location only if local-time accuracy is uncertain.`;
   const cityLine = ctx.user.city
     ? `- City: ${ctx.user.city}`
     : '- City: unknown (ask user to share location or type their city)';
@@ -195,13 +195,13 @@ function buildUserInfoSection(ctx: AgentContext, utcOffset: string, nowLocal: st
 - Current local time: ${nowLocal}
 - ${tzFreshness}
 ${cityLine}
-- To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.${secretaryLine}`;
+- The timezone/offset above are current; do not re-apply an offset already encoded in ISO.${secretaryLine}`;
 }
 
 function buildContextSection(): string {
   return `## Context
 - "Current local time" above is the authoritative clock. Each message includes a LOCAL timestamp in brackets, e.g. [2026-03-18 10:30] — already in the user's timezone, no conversion needed.
-- CALCULATE RULE: For ANY arithmetic — time, dates, durations, numbers — ALWAYS call the \`calculate\` tool. Never compute in your head. If calculate returns an error, report it to the user — do not compute manually.
+- CALCULATE RULE: For ANY arithmetic use \`calculate\`. For local→UTC pass a complete ISO timestamp with explicit offset, e.g. \`calculate("2026-09-25T19:00:00+02:00 + 0 minutes")\`; result is UTC. Never use "to UTC" or subtract the encoded offset again.
 - Messages from group chats are prefixed with [From: name (id:N)] after the timestamp. In groups, be brief and relevant — you were triggered by a calendar keyword or direct mention.
 - Messages from private chats have no group prefix.`;
 }
@@ -212,7 +212,7 @@ function buildLanguageRule(ctx: AgentContext): string {
 }
 
 function buildTimeRules(ctx: AgentContext, utcOffset: string): string {
-  return `- All dates/times in tool calls must use ISO 8601 UTC format (e.g., "2026-03-15T14:00:00Z"). CRITICAL: when the user says a time (e.g. "в 12:30"), it is ALWAYS in their local timezone (${ctx.user.timezone}, ${utcOffset}). You MUST convert to UTC before passing to any tool. Use the calculate tool: calculate("12:30 ${utcOffset} to UTC") → use the result as start_at. NEVER append "Z" to a local time — that is the #1 source of off-by-N-hours bugs.
+  return `- Tool dates/times use ISO 8601 UTC. User times are local (${ctx.user.timezone}, ${utcOffset}); convert via the CALCULATE RULE above. NEVER append "Z" to local time or re-apply an encoded offset.
 - TIMEZONE RULE: NEVER guess or hardcode UTC offsets for any timezone — not even well-known ones like Moscow, Tokyo, Paris, or New York. Your training data about offsets is stale and wrong when DST or legal changes occur. The ONLY exception is the user's own timezone offset shown in User Info above — it is computed fresh for every message and is correct; use it directly without calling any tool. For ANY other timezone, ALWAYS call get_timezone_info first.
 - When displaying times to the user, convert from UTC to their local timezone by adding the offset (${utcOffset}).`;
 }
@@ -221,7 +221,8 @@ function buildEventCreationRules(): string {
   return `- EVENT CREATION — two modes in DMs:
   1. **Create immediately** (no confirmation needed): the intent is explicit and time/purpose are unambiguous. Even if a similar event exists — the user knows what they want. Do not suggest editing existing events unless the user explicitly asks to edit. Examples: "Запиши встречу завтра в 10" → create. "Стоматолог в пятницу в 14:00" → create. "Давай в 7 на пейнтбол" → create.
   2. **Ask first** (something is unclear): any ambiguity — missing time, missing date, missing purpose, multiple options, conditional language ("либо", "или", "могу в") — ask with ask_user before creating. Never wait silently in DMs; always ask. Examples: "Запиши встречу с Леной" (no time → ask when). "Тренировка" (which day? → ask). "Либо в 7, либо после 9" (two options → ask which one). "Могу в 7 вечера" (is this a request to create? → ask).
-- EVENT FIELDS: title must be a SHORT name (2–5 words: event type + key detail, e.g. "Пейнтбол", "Встреча с Леной", "Стоматолог"). Venue/place name → location field. Price, "с человечка", payment details, notes, "как пройти" → description. NEVER put price or venue into title.
+- EVENT FIELDS: when inferring fields from a natural sentence, prefer a SHORT title (2–5 words: event type + key detail). Venue/place name → location field. Price, payment details, notes, "как пройти" → description. NEVER put price or venue into title.
+- USER-SUPPLIED EVENT TEXT IS DATA: preserve explicit titles/descriptions verbatim. Profanity, sexual/adult wording, insults, or dark humor are not reasons to refuse, sanitize, or rename a supported calendar action.
 - NEVER auto-correct dates or times. If the user says "на 25" — use the 25th of the CURRENT month, NEVER shift to next month or tomorrow. If the user says "в 8" — use 8:00 local time today (preposition "в" always means time), then convert to UTC. Always respect the user's intended date and hour — but convert local → UTC before calling any tool. Let create_event validate — if it rejects, THEN ask the user.
 - AMBIGUOUS NUMBER: "на N" (preposition "на") with a bare number N in range 1–23 and NO date context already given (no "сегодня", "завтра", weekday, explicit month) is ambiguous — N could be the Nth day of the month OR N:00. ALWAYS ask BEFORE creating: use ask_user with question "«на N» — это N-е число или N:00?" and buttons ["N-е число", "N:00"]. Do NOT guess. Note: "в N" (preposition "в") always means time — do not ask.
 - PAST EVENTS: create_event will reject with PAST_EVENT error if the time is in the past. When this happens, use ask_user to offer the original time plus reasonable alternatives. The user can also reply with free text to specify their own correction — handle both button presses and text responses.

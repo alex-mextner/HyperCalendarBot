@@ -73,9 +73,9 @@ test('handleAdd in group with timezone creates event with group fields', async (
       return fakeEvent;
     }),
   } as unknown as EventService;
-  const ctx = makeGroupCtx('Встреча завтра', {});
+  const ctx = makeGroupCtx('Встреча завтра 10:00', {});
   await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], eventService, stubScene, groupRepo);
-  // Parsing "Встреча завтра" succeeds -> createEvent is called
+  // Explicit time makes this a true quick-add.
   expect(createdData).not.toBeNull();
   expect(createdData!.owner_type).toBe('group');
   expect(createdData!.group_id).toBe(-100);
@@ -99,7 +99,7 @@ test('handleAdd in group quick-add uses group timezone not user timezone', async
       return fakeEvent;
     }),
   } as unknown as EventService;
-  const ctx = makeGroupCtx('Митинг завтра', {});
+  const ctx = makeGroupCtx('Митинг завтра 10:00', {});
   await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], eventService, stubScene, groupRepo);
   expect(createdData).not.toBeNull();
   expect(createdData!.timezone).toBe('Asia/Tokyo');
@@ -121,7 +121,7 @@ test('handleAdd in private chat does not set group fields', async () => {
       return fakeEvent;
     }),
   } as unknown as EventService;
-  const ctx = makePrivateCtx('Task завтра');
+  const ctx = makePrivateCtx('Task завтра 10:00');
   await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], eventService, stubScene);
   expect(createdData).not.toBeNull();
   expect(createdData!.owner_type).not.toBe('group');
@@ -132,4 +132,23 @@ test('handleAdd in private chat with no args enters scene', async () => {
   const ctx = makePrivateCtx('');
   await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], {} as unknown as EventService, stubScene);
   expect(ctx.scene.enter).toHaveBeenCalled();
+});
+
+test('quick-add with date but no time preserves title/date and asks wizard for time', async () => {
+  const createEvent = mock(() => {
+    throw new Error('must not create a midnight event');
+  });
+  const eventService = { createEvent } as unknown as EventService;
+  const ctx = makePrivateCtx('Task завтра');
+
+  await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], eventService, stubScene);
+
+  expect(createEvent).not.toHaveBeenCalled();
+  expect(ctx.scene.enter).toHaveBeenCalledTimes(1);
+  const [, params] = ctx.scene.enter.mock.calls[0] as unknown as [
+    unknown,
+    { initialTitle: string; pendingDate: string },
+  ];
+  expect(params.initialTitle).toBe('Task');
+  expect(params.pendingDate).toBeString();
 });

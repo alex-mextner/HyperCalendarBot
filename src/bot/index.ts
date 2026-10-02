@@ -1036,8 +1036,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       const contextMsg = `[User picker result] Delivery was attempted for the selected people. Do NOT re-send for anyone already delivered or link-sent; for anyone whose result is an error (invitation not created) you MAY retry send_invitation. Selected: ${selectedDetails}. Delivery results:\n${aiResultLines.join('\n')}\nIf the selected person's display name differs from how the user originally referred to them, call add_contact with preferred_name = the name the user used.`;
       // Trigger AI to acknowledge/continue
       if (chatId) {
+        const continuationCtx = buildAgentContextFactory(msgDeps)(user, chatId, contextMsg);
         agent
-          .run(buildAgentContextFactory(msgDeps)(user, chatId, contextMsg))
+          .run({ ...continuationCtx, wasExplicitInvocation: false })
           .catch((e) => botLogger.error({ err: e }, 'AI continuation after users_shared failed'));
       }
     })

@@ -65,6 +65,79 @@ export function localCalendarWeekDays(utcStartIso: string, timezone: string): st
   });
 }
 
+export interface SimpleTimeOfDay {
+  hour: number;
+  minute: number;
+}
+
+export function parseSimpleTime(input: string): SimpleTimeOfDay | null {
+  const trimmed = input.trim().toLowerCase();
+  const match = trimmed.match(/^(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|утра|дня|вечера|ночи)?$/);
+  if (!match) return null;
+
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? 0);
+  const period = match[3];
+
+  if (minute < 0 || minute > 59) return null;
+
+  if (period === 'am' || period === 'pm') {
+    if (hour < 1 || hour > 12) return null;
+    if (period === 'am' && hour === 12) hour = 0;
+    if (period === 'pm' && hour < 12) hour += 12;
+  } else if (period === 'утра') {
+    if (hour < 1 || hour > 12) return null;
+    if (hour === 12) hour = 0;
+  } else if (period === 'дня' || period === 'вечера') {
+    if (hour < 1 || hour > 12) return null;
+    if (hour < 12) hour += 12;
+  } else if (period === 'ночи') {
+    if (hour < 1 || hour > 12) return null;
+    if (hour === 12) hour = 0;
+  } else if (hour < 0 || hour > 23) {
+    return null;
+  }
+
+  return { hour, minute };
+}
+
+export function hasExplicitTime(input: string): boolean {
+  const trimmed = input.trim().toLowerCase();
+  if (parseSimpleTime(trimmed)) return true;
+  if (/\b(?:[01]?\d|2[0-3]):[0-5]\d\b/.test(trimmed)) return true;
+
+  return /^(?:(?:today|сегодня|tomorrow|завтра|послезавтра|day after tomorrow)|(?:next\s+)?(?:mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|пн|вт|ср|чт|пт|сб|вс|понедельник|вторник|среда|четверг|пятница|суббота|воскресенье))\s+(?:(?:at|в)\s+)?(?:[01]?\d|2[0-3])$/i.test(
+    trimmed,
+  );
+}
+
+export function combineLocalDateAndTime(dateIso: string, timeInput: string, timezone: string): Date | null {
+  const time = parseSimpleTime(timeInput);
+  if (!time) return null;
+
+  const localDate = new TZDate(dateIso, timezone);
+  const combined = new TZDate(
+    localDate.getFullYear(),
+    localDate.getMonth(),
+    localDate.getDate(),
+    time.hour,
+    time.minute,
+    0,
+    0,
+    timezone,
+  );
+  return new Date(combined.toISOString());
+}
+
+export function formatInclusiveRruleUntil(date: Date, timezone: string): string {
+  const local = new TZDate(date.getTime(), timezone);
+  const inclusive = endOfDay(local);
+  return new Date(inclusive.getTime())
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}Z$/, 'Z');
+}
+
 export function parseSimpleDate(input: string, timezone: string, refDate?: Date): Date | null {
   const ref = refDate ? new TZDate(refDate.getTime(), timezone) : TZDate.tz(timezone);
   const trimmed = input.trim().toLowerCase();

@@ -137,6 +137,28 @@ describe('buildSystemPrompt', () => {
     expect(buildSystemPrompt(ctx)).not.toContain('update_sharing_settings');
   });
 
+  test('treats user-authored calendar text as data rather than censoring wording', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('USER-SUPPLIED EVENT TEXT IS DATA');
+    expect(prompt).toMatch(/profanity/i);
+    expect(prompt).toContain('sexual');
+  });
+
+  test('uses calculator syntax that does not double-apply the UTC offset', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('+ 0 minutes');
+    expect(prompt).not.toContain('UTC+2 to UTC');
+    expect(prompt).not.toContain('To convert local → UTC: subtract the offset');
+  });
+
+  test('does not claim default UTC when the stored timezone is non-UTC but unconfirmed', () => {
+    ctx.user.timezone_updated_at = null;
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).not.toContain('default UTC');
+    expect(prompt).toContain('Timezone not explicitly confirmed');
+    expect(prompt).toContain(ctx.user.timezone);
+  });
+
   test('includes UTC offset for timezone conversion', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toMatch(/UTC\+\d/);
@@ -331,8 +353,8 @@ describe('buildSystemPrompt', () => {
   test('requires AI to use calculate tool for any arithmetic', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('CALCULATE RULE');
+    expect(prompt).toContain('For ANY arithmetic use');
     expect(prompt).toContain('calculate');
-    expect(prompt).toContain('Never compute in your head');
   });
 
   test('language instruction uses interface language framing, not user-speaks framing', () => {
@@ -541,9 +563,9 @@ describe('buildSystemPrompt', () => {
 
   test('instructs AI that user times are local and must be converted to UTC', () => {
     const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('CRITICAL');
-    expect(prompt).toContain('local timezone');
-    expect(prompt).toContain('NEVER append "Z" to a local time');
+    expect(prompt).toContain('User times are local');
+    expect(prompt).toContain('convert via the CALCULATE RULE');
+    expect(prompt).toContain('NEVER append "Z" to local time');
     expect(prompt).toContain('calculate');
   });
 

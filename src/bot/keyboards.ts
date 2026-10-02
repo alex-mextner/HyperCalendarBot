@@ -108,6 +108,14 @@ export function eventActionsKeyboard(eventId: number, lang: 'en' | 'ru'): Inline
     .text(lang === 'ru' ? '🗑 Удалить' : '🗑 Delete', `${CB.EVENT_DELETE}:${eventId}`);
 }
 
+export function eventCreatedActionsKeyboard(eventId: number, lang: 'en' | 'ru'): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(lang === 'ru' ? '👥 Пригласить' : '👥 Invite', `${CB.INVITE_PICK}:${eventId}`)
+    .row()
+    .text(lang === 'ru' ? '✏️ Редактировать' : '✏️ Edit', `${CB.EVENT_EDIT}:${eventId}`)
+    .text(lang === 'ru' ? '🗑 Удалить' : '🗑 Delete', `${CB.EVENT_DELETE}:${eventId}`);
+}
+
 export function deleteConfirmKeyboard(eventId: number, lang: 'en' | 'ru'): InlineKeyboard {
   return new InlineKeyboard()
     .text(lang === 'ru' ? 'Да, удалить' : 'Yes, delete', `${CB.EVENT_DELETE_CONFIRM}:${eventId}`)

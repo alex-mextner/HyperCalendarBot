@@ -16,9 +16,11 @@ export type SceneName = ScenePauseState['sceneName'];
 const AddEventStateSchema = z.object({
   title: z.string().optional(),
   startAt: z.string().optional(),
+  pendingDate: z.string().optional(),
   endAt: z.string().optional(),
   recurrenceRule: z.string().nullable().optional(),
   recEndMode: z.enum(['until', 'count']).optional(),
+  recurrenceInputMode: z.literal('custom').optional(),
   description: z.string().optional(),
   location: z.string().optional(),
 });

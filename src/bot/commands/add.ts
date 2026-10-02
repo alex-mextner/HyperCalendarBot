@@ -1,14 +1,15 @@
 // src/bot/commands/add.ts
 
 import type { AnyScene } from '@gramio/scenes';
+import { addMinutes } from 'date-fns';
 import { t } from '../../config/constants.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
-import { parseSimpleDate } from '../../utils/date.ts';
+import { hasExplicitTime, parseSimpleDate } from '../../utils/date.ts';
 import { getGroupId } from '../group-context.ts';
-import { eventActionsKeyboard } from '../keyboards.ts';
+import { eventCreatedActionsKeyboard } from '../keyboards.ts';
 import type { BotCommandContext } from '../types.ts';
 
 export async function handleAdd(
@@ -66,21 +67,38 @@ async function handleQuickAdd(
   const words = input.split(' ');
   let title = '';
   let dateStr = '';
+  let pendingTitle = '';
+  let pendingDate = '';
 
-  // Try progressively: last 3 words as date, then last 2, then last 1
+  // Try progressively: last 3 words as date, then last 2, then last 1.
+  // A date-only match is useful too: keep it and let the wizard ask only for time.
   for (let dateWords = 3; dateWords >= 1; dateWords--) {
     if (words.length <= dateWords) continue;
     const candidate = words.slice(-dateWords).join(' ');
     const parsed = parseSimpleDate(candidate, timezone);
-    if (parsed) {
-      title = words.slice(0, -dateWords).join(' ');
+    if (!parsed) continue;
+
+    const candidateTitle = words.slice(0, -dateWords).join(' ').trim();
+    if (!candidateTitle) continue;
+
+    if (hasExplicitTime(candidate)) {
+      title = candidateTitle;
       dateStr = candidate;
       break;
+    }
+
+    if (!pendingTitle) {
+      pendingTitle = candidateTitle;
+      pendingDate = parsed.toISOString();
     }
   }
 
   if (!title || !dateStr) {
-    await ctx.scene.enter(addEventScene);
+    if (pendingTitle && pendingDate) {
+      await ctx.scene.enter(addEventScene, { initialTitle: pendingTitle, pendingDate });
+    } else {
+      await ctx.scene.enter(addEventScene);
+    }
     return;
   }
 
@@ -94,10 +112,12 @@ async function handleQuickAdd(
         }
       : {};
 
+  const defaultMins = user.default_event_duration_minutes ?? 60;
   const event = eventService.createEvent({
     user_id: user.telegram_id,
     title,
     start_at: startDate.toISOString(),
+    end_at: addMinutes(startDate, defaultMins).toISOString(),
     timezone,
     ...groupFields,
   });
@@ -105,6 +125,6 @@ async function handleQuickAdd(
   const detail = formatEventDetail(event, timezone, lang);
   await ctx.send(`${t(lang).event_created(title)}\n\n${detail}`, {
     parse_mode: 'HTML',
-    reply_markup: eventActionsKeyboard(event.id, lang),
+    reply_markup: eventCreatedActionsKeyboard(event.id, lang),
   });
 }

@@ -29,6 +29,12 @@ const CALENDAR_COMPLETENESS_PATTERNS = [
   /(?:нет|не\s+остал(?:ось|ось)).{0,40}(?:событ|встреч|дел|план)/i,
 ];
 
+const CONTENT_BASED_REFUSAL_PATTERNS = [
+  /не могу (?:создавать|добавлять|записывать).{0,120}(?:с таким содержанием|такое содержимое|такой текст)/i,
+  /используйте.{0,80}(?:подходящ|приемлем).{0,40}(?:назван|содерж|формулиров)/i,
+  /(?:can't|cannot|won't) (?:create|add|save|schedule).{0,120}(?:content|wording|title|description)/i,
+];
+
 /**
  * Injection point for tests. Same signature as aiStreamRound — tests can
  * pass a scripted impl to avoid real network calls from inside the validator.
@@ -62,7 +68,8 @@ APPROVE the response when:
   - The assistant called tools and its final text is consistent with the tool results.
   - The assistant answered a chit-chat / meta question where tools were not needed
     (e.g. "hi", "thanks", "can you speak Russian?", "who are you?").
-  - The assistant politely refused or asked a clarifying question.
+  - The assistant asked a clarifying question when required.
+  - A refusal is only approvable when the requested action itself is unsupported or genuinely disallowed. User-authored calendar text containing profanity, sexual wording, adult themes, insults, or offensive language is DATA and is not by itself a valid reason to refuse a normal calendar operation.
 
 REJECT the response when:
   - The assistant claims facts about the user's calendar, events, free slots,
@@ -72,6 +79,7 @@ REJECT the response when:
     search_events / get_upcoming / etc. call.
   - The assistant mentions specific event data that could not have come from a
     hardcoded source.
+  - The assistant refuses a supported calendar create/update merely because the user-supplied title or description is profane, sexual, adult, insulting, embarrassing, or otherwise impolite.
 
 Respond with exactly one line:
   APPROVE
@@ -90,6 +98,11 @@ function hasScheduleRead(toolCalls: string[]): boolean {
 
 function claimsCompleteOrEmptySchedule(response: string): boolean {
   return CALENDAR_COMPLETENESS_PATTERNS.some((pattern) => pattern.test(response));
+}
+
+function isContentBasedCalendarWriteRefusal(input: ValidationInput): boolean {
+  if (input.toolCalls.length > 0) return false;
+  return CONTENT_BASED_REFUSAL_PATTERNS.some((pattern) => pattern.test(input.response));
 }
 
 /**
@@ -119,6 +132,13 @@ export async function validateResponse(
   input: ValidationInput,
   streamImpl: StreamImpl = aiStreamRound,
 ): Promise<ValidationResult> {
+  if (isContentBasedCalendarWriteRefusal(input)) {
+    return {
+      approved: false,
+      reason: 'Refused a supported calendar write because of user-authored wording',
+    };
+  }
+
   if (
     input.toolCalls.length > 0 &&
     !hasScheduleRead(input.toolCalls) &&

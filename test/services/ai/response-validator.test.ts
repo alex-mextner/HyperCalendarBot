@@ -39,6 +39,23 @@ describe('tool-run evidence prefilter', () => {
     );
   });
 
+  test('content-based refusal of a supported calendar write is rejected deterministically', async () => {
+    let called = false;
+    const result = await validateResponse(
+      {
+        userMessage: 'Создай событие завтра в 10 с грубым пользовательским описанием',
+        toolCalls: [],
+        response: 'Я не могу создавать события с таким содержанием. Используйте подходящее название.',
+      },
+      async () => {
+        called = true;
+        return stubText('APPROVE')({ messages: [], maxTokens: 1 });
+      },
+    );
+    expect(result.approved).toBe(false);
+    expect(called).toBe(false);
+  });
+
   test('unsupported completeness claim is rejected deterministically without another model call', async () => {
     let called = false;
     const result = await validateResponse(

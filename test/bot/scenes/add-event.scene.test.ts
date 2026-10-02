@@ -166,13 +166,13 @@ describe('applyDefaultDuration', () => {
 // ---------------------------------------------------------------------------
 
 describe('CALLBACK_ONLY_STEP_INDICES', () => {
-  test('steps 3 and 4 are callback-only', () => {
-    expect(CALLBACK_ONLY_STEP_INDICES.has(3)).toBe(true);
-    expect(CALLBACK_ONLY_STEP_INDICES.has(4)).toBe(true);
+  test('recurrence steps accept both buttons and typed answers', () => {
+    expect(CALLBACK_ONLY_STEP_INDICES.has(3)).toBe(false);
+    expect(CALLBACK_ONLY_STEP_INDICES.has(4)).toBe(false);
   });
 
-  test('text-input steps are NOT callback-only', () => {
-    for (const s of [0, 1, 2, 5, 6]) {
+  test('all add-event steps accept text where text is meaningful', () => {
+    for (const s of [0, 1, 2, 3, 4, 5, 6]) {
       expect(CALLBACK_ONLY_STEP_INDICES.has(s)).toBe(false);
     }
   });
@@ -183,17 +183,15 @@ describe('CALLBACK_ONLY_STEP_INDICES', () => {
 // ---------------------------------------------------------------------------
 
 describe('CALLBACK_ONLY_STEPS — add_event', () => {
-  test('step 3 (recurrence) is registered', () => {
-    expect(CALLBACK_ONLY_STEPS.get('add_event')?.has(3)).toBe(true);
-  });
-
-  test('step 4 (recurrence end) is registered', () => {
-    expect(CALLBACK_ONLY_STEPS.get('add_event')?.has(4)).toBe(true);
+  test('recurrence steps are not routed away from the wizard when the user types', () => {
+    const steps = CALLBACK_ONLY_STEPS.get('add_event');
+    expect(steps?.has(3)).toBe(false);
+    expect(steps?.has(4)).toBe(false);
   });
 
   test('text-input steps are NOT registered', () => {
     const steps = CALLBACK_ONLY_STEPS.get('add_event');
-    for (const s of [0, 1, 2, 5, 6]) {
+    for (const s of [0, 1, 2, 3, 4, 5, 6]) {
       expect(steps?.has(s)).toBe(false);
     }
   });
@@ -312,6 +310,32 @@ describe('add_event step handlers', () => {
       const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/разобрать/);
     });
+
+    test('date without time stays on the date/time step and asks for a clock time', async () => {
+      const ctx = makeCtx({ stepId: 1, text: '25 сен', lang: 'ru' });
+      await fns[1]!(ctx, NOOP_NEXT);
+      const [patch, options] = ctx.scene.update.mock.calls[0] as unknown as [
+        { pendingDate?: string },
+        { step?: number },
+      ];
+      expect(patch.pendingDate).toBeString();
+      expect(options?.step).toBeUndefined();
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      expect((ctx.send.mock.calls[0] as unknown[])[0]).toMatch(/время|сколько|во сколько/i);
+    });
+
+    test('time after a date-only answer is combined with that chosen date', async () => {
+      const ctx = makeCtx({
+        stepId: 1,
+        text: '19:00',
+        lang: 'ru',
+        state: { pendingDate: '2026-09-24T21:00:00.000Z' },
+      });
+      await fns[1]!(ctx, NOOP_NEXT);
+      const [patch] = ctx.scene.update.mock.calls[0] as unknown as [{ startAt?: string; pendingDate?: string }];
+      expect(patch.startAt).toBe('2026-09-25T16:00:00.000Z');
+      expect(patch.pendingDate).toBeUndefined();
+    });
   });
 
   // --- Step 2: Duration ---
@@ -401,8 +425,10 @@ describe('add_event step handlers', () => {
     test('"none" — sets null rule and skips to step 5', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 3, data: `${CB.ADD_RECURRENCE}:none` });
       await fns[3]!(ctx, NOOP_NEXT);
-      expect(ctx.scene.update).toHaveBeenCalledWith({ recurrenceRule: null });
-      expect(ctx.scene.step.go).toHaveBeenCalledWith(5, true);
+      expect(ctx.scene.update).toHaveBeenCalledWith(
+        { recurrenceRule: null, recurrenceInputMode: undefined },
+        { step: 5 },
+      );
     });
 
     test('"WEEKLY" — stores FREQ=WEEKLY', async () => {
@@ -428,6 +454,12 @@ describe('add_event step handlers', () => {
       await fns[3]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
       expect(ctx.scene.step.go).not.toHaveBeenCalled();
+    });
+
+    test('typed custom recurrence is parsed by the wizard instead of being diverted to AI', async () => {
+      const ctx = makeCtx({ stepId: 3, text: 'каждые 2 недели', lang: 'ru' });
+      await fns[3]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update).toHaveBeenCalledWith({ recurrenceRule: 'FREQ=WEEKLY;INTERVAL=2' });
     });
   });
 
@@ -462,6 +494,29 @@ describe('add_event step handlers', () => {
       const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/times|раз/i);
     });
+
+    test('typed recurrence end date produces an inclusive UNTIL rule', async () => {
+      const ctx = makeCtx({
+        stepId: 4,
+        text: '26 сентября',
+        lang: 'ru',
+        state: { recurrenceRule: 'FREQ=DAILY', recEndMode: 'until' },
+      });
+      await fns[4]!(ctx, NOOP_NEXT);
+      const [patch] = ctx.scene.update.mock.calls[0] as unknown as [{ recurrenceRule?: string }];
+      expect(patch.recurrenceRule).toMatch(/^FREQ=DAILY;UNTIL=20260926T205959Z$/);
+    });
+
+    test('typed recurrence count produces COUNT rule', async () => {
+      const ctx = makeCtx({
+        stepId: 4,
+        text: '3',
+        lang: 'ru',
+        state: { recurrenceRule: 'FREQ=WEEKLY', recEndMode: 'count' },
+      });
+      await fns[4]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update).toHaveBeenCalledWith({ recurrenceRule: 'FREQ=WEEKLY;COUNT=3', recEndMode: undefined });
+    });
   });
 
   // --- Step 5: Description ---
@@ -483,6 +538,12 @@ describe('add_event step handlers', () => {
       const ctx = makeCtx({ stepId: 5, text: 'Weekly team sync notes' });
       await fns[5]!(ctx, NOOP_NEXT);
       expect(ctx.scene.update).toHaveBeenCalledWith({ description: 'Weekly team sync notes' });
+    });
+
+    test('typed "пропустить" really skips description', async () => {
+      const ctx = makeCtx({ stepId: 5, text: 'пропустить', lang: 'ru' });
+      await fns[5]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update).toHaveBeenCalledWith({});
     });
 
     test('no text — does nothing', async () => {
@@ -531,6 +592,18 @@ describe('add_event step handlers', () => {
       expect(data.location).toBe('Room 101');
       expect(data.start_at).toBe('2026-03-20T10:00:00.000Z');
       expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+    });
+
+    test('typed "пропустить" creates event without a literal skip location', async () => {
+      const ctx = makeCtx({
+        stepId: 6,
+        text: 'пропустить',
+        lang: 'ru',
+        state: { title: 'Standup', startAt: '2026-03-20T10:00:00.000Z', endAt: '2026-03-20T10:30:00.000Z' },
+      });
+      await fns[6]!(ctx, NOOP_NEXT);
+      const [data] = createEventMock.mock.calls[0] as unknown as [{ location?: string }];
+      expect(data.location).toBeUndefined();
     });
 
     test('skip location callback — creates event without location', async () => {

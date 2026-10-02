@@ -79,7 +79,7 @@ describe('createMessageHandler', () => {
   describe('Trigger 2: callback-only step auto-pause', () => {
     const callbackOnlyScene = JSON.stringify({ name: 'add_event', step: 3, state: { title: 'Test' } });
 
-    test('routes to AI and saves pause when user types on a callback-only step', async () => {
+    test('keeps typed recurrence inside /add instead of auto-pausing to AI', async () => {
       const saveScene = mock(() => Promise.resolve());
       const deps = makeDeps({
         sceneStorage: { get: mock(() => Promise.resolve(callbackOnlyScene)) },
@@ -91,12 +91,8 @@ describe('createMessageHandler', () => {
       const handler = createMessageHandler(deps as never);
       await handler(makeCtx({ text: 'каждую неделю' }) as never);
 
-      expect(saveScene).toHaveBeenCalledWith(100, {
-        sceneName: 'add_event',
-        step: 3,
-        sceneState: { title: 'Test' },
-      });
-      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+      expect(saveScene).not.toHaveBeenCalled();
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
     });
 
     test('does not auto-pause for non-callback-only steps (step 1)', async () => {

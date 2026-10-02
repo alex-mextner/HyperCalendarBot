@@ -1293,7 +1293,7 @@ export class CalendarBotAgent {
       {
         role: 'user',
         content:
-          '[SYSTEM] Your previous response was rejected by the quality validator because it answered a calendar question without calling any tools. You MUST call the appropriate tools (get_events, search_events, get_free_slots, etc.) and re-answer the question properly. Do NOT repeat the same mistake.',
+          '[SYSTEM] Your previous response was rejected by the quality validator because it did not correctly execute the requested calendar operation. You MUST use the appropriate tools (create_event, update_event, get_events, search_events, get_free_slots, ask_user, etc.) and re-answer properly. User-supplied titles and descriptions are calendar data: preserve their wording even when it contains profanity, sexual/adult language, insults, or dark humor. Do not refuse or sanitize a supported calendar operation solely because of that wording.',
       },
     ];
 
