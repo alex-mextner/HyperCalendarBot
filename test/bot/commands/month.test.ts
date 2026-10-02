@@ -1,5 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleMonth } from '../../../src/bot/commands/month.ts';
+import { agendaEvent } from '../../fixtures/agenda269.ts';
+import { png } from '../../fixtures/png.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
@@ -15,7 +17,18 @@ function makeCtx(overrides = {}) {
 
 function makeEventService(occurrences: Array<{ occurrence_start: string; occurrence_end: string | null }> = []) {
   return {
-    getEventsInRange: mock(() => occurrences),
+    getEventsInRange: mock(() =>
+      occurrences.map((occurrence, index) => ({
+        ...occurrence,
+        is_exception: false,
+        event: agendaEvent({
+          id: index + 1,
+          title: `Monthly item ${index + 1}`,
+          start_at: occurrence.occurrence_start,
+          end_at: occurrence.occurrence_end,
+        }),
+      })),
+    ),
   };
 }
 
@@ -112,7 +125,7 @@ describe('handleMonth', () => {
       bot: { api: { pinChatMessage, sendMessage: mock(() => Promise.resolve()) } },
     };
     const svc = makeEventService();
-    const renderService = { renderDirect: mock(() => Promise.resolve(Buffer.from(''))) };
+    const renderService = { renderDirect: mock(() => Promise.resolve(png())) };
 
     // yearMonth undefined -> triggers image render (only on initial /month command)
     await handleMonth(ctx as never, svc as never, undefined, renderService as never);

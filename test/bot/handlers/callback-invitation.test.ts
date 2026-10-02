@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
 import { t } from '../../../src/config/constants.ts';
+import { png } from '../../fixtures/png.ts';
 import { flushPromises } from '../../helpers/mock-context.ts';
 
 function makeCtx(data: string, language: 'en' | 'ru' = 'en') {
@@ -596,7 +597,7 @@ describe('conflict image on accept', () => {
 
   test('sends conflict image to inviter on accept when renderService provided', async () => {
     const sendPhoto = mock(() => Promise.resolve());
-    const renderDirect = mock(() => Promise.resolve(Buffer.from('png')));
+    const renderDirect = mock(() => Promise.resolve(png()));
     const sendMessage = mock(() => Promise.resolve());
     const inv = { id: 1, status: 'accepted', event_id: 5, inviter_id: 100, invitee_id: 200 };
     const event = { id: 5, title: 'Party', start_at: '2026-03-20T10:00:00Z', end_at: '2026-03-20T11:00:00Z' };
@@ -634,7 +635,7 @@ describe('conflict image on accept', () => {
 
   test('invitee event titles are null for non-shared events in conflict image', async () => {
     const sendPhoto = mock(() => Promise.resolve());
-    const renderDirect = mock(() => Promise.resolve(Buffer.from('png')));
+    const renderDirect = mock(() => Promise.resolve(png()));
     const sendMessage = mock(() => Promise.resolve());
     const inv = { id: 1, status: 'accepted', event_id: 5, inviter_id: 100, invitee_id: 200 };
     const event = { id: 5, title: 'Party', start_at: '2026-03-20T10:00:00Z', end_at: '2026-03-20T11:00:00Z' };

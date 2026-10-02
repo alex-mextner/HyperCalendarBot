@@ -62,7 +62,8 @@ describe('handleTomorrow', () => {
     const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
 
     await handleTomorrow(ctx as never, svc as never, undefined, renderService as never);
-    expect(ctx.send).toHaveBeenCalledTimes(1);
+    expect(ctx.send).toHaveBeenCalledTimes(2);
+    expect(ctx.send).toHaveBeenLastCalledWith('Agenda image could not be generated. Choose a shorter date range.');
   });
 
   test('shows holiday entries when holidayService returns them', async () => {

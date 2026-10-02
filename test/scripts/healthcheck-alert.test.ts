@@ -27,6 +27,7 @@ function stagedScript(): string {
     .replace('ENV_FILE="/opt/hypercal/.env"', `ENV_FILE="${join(work, 'env')}"`)
     .replace('STATE_FILE="/tmp/hypercal-down"', `STATE_FILE="${join(work, 'down')}"`)
     .replace('UNVERIFIED_FILE="/tmp/hypercal-unverified-since"', `UNVERIFIED_FILE="${join(work, 'unverified')}"`)
+    .replace('BODY_FILE=$(mktemp)', `BODY_FILE=$(mktemp "${join(work, 'body.XXXXXX')}")`)
     .replace('RETRY_DELAY=15', 'RETRY_DELAY=0');
   const path = join(work, 'healthcheck.sh');
   writeFileSync(path, source);
@@ -66,7 +67,8 @@ async function poll(status: string, body: string): Promise<string> {
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  await proc.exited;
+  const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+  expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: expect.any(String) });
   return readFileSync(join(work, 'sent.log'), 'utf8');
 }
 

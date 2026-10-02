@@ -1,3 +1,4 @@
+import { agendaDetailsCSS, renderAgendaDetails } from './agenda-details.ts';
 import {
   COMPACT_PX,
   computeEventColumns,
@@ -442,7 +443,7 @@ function render(data: DailyAgendaData): string {
 <html>
 <head>
 <meta charset="utf-8">
-<style>${css(data)}</style>
+<style>${css(data)}${agendaDetailsCSS}</style>
 </head>
 <body>
 <div id="__root">
@@ -451,6 +452,7 @@ function render(data: DailyAgendaData): string {
     ${metaHtml}
   </div>
   ${bodyHtml}
+  ${renderAgendaDetails([...allDayEvents, ...timedEvents], data.locale)}
   <div class="footer">HyperCalendar</div>
 </div>
 </body>

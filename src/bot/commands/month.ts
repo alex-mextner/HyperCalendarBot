@@ -1,3 +1,7 @@
+import { enrichAgenda } from '../../services/event/agenda-enrichment.ts';
+import { formatEventDetail } from '../../services/event/formatters.ts';
+import { agendaImageErrorMessage, sendAgendaImage } from '../../utils/agenda-image.ts';
+import { editAgendaText, sendAgendaText } from './agenda-text.ts';
 // src/bot/commands/month.ts
 
 import { TZDate } from '@date-fns/tz';
@@ -6,7 +10,7 @@ import type { GroupChatRepository } from '../../database/repositories/group-chat
 import type { EventOccurrence } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { mapMonthlyCalendarData } from '../../services/image/data-mapper.ts';
-import type { RenderService } from '../../services/image/render-service.ts';
+import type { ImageRenderer } from '../../services/image/render-service.ts';
 import { autoPin } from '../../utils/auto-pin.ts';
 import { imageLogger } from '../../utils/logger.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
@@ -19,7 +23,7 @@ export async function handleMonth(
   ctx: BotCommandContext | BotCallbackContext,
   eventService: EventService,
   yearMonth?: string,
-  renderService?: RenderService,
+  renderService?: ImageRenderer,
   groupRepo?: GroupChatRepository,
 ): Promise<void> {
   const user = ctx.dbUser;
@@ -73,7 +77,11 @@ export async function handleMonth(
       timezone,
     ).toISOString();
 
-    const allOccurrences = eventService.getEventsInRangeForGroup(groupId, monthStartUtc, monthEndUtc);
+    const allOccurrences = enrichAgenda(
+      eventService.getEventsInRangeForGroup(groupId, monthStartUtc, monthEndUtc),
+      { userId: user.telegram_id, language: lang, groupId },
+      eventService.agendaRepository,
+    );
 
     const eventCounts: Record<number, number> = {};
     for (const occ of allOccurrences) {
@@ -96,15 +104,15 @@ export async function handleMonth(
       .map(([d, c]) => `${d}·${c}`)
       .join('  ');
     const ym = format(monthStart, 'yyyy-MM');
-    const text = `📅 ${monthLabel}\n\n<code>${header}\n${grid.trimEnd()}</code>\n\n${countLines ? `Events: ${countLines}` : 'No events this month.'}`;
+    const text = monthAgendaText(monthLabel, header, grid, countLines, allOccurrences, timezone, lang);
 
     if (yearMonth && isCallbackContext(ctx)) {
-      await ctx.editText(text, {
+      await editAgendaText(ctx, text, {
         parse_mode: 'HTML',
         reply_markup: monthNavKeyboard(ym),
       });
     } else {
-      await ctx.send(text, {
+      await sendAgendaText(ctx, text, {
         parse_mode: 'HTML',
         reply_markup: monthNavKeyboard(ym),
       });
@@ -146,7 +154,11 @@ export async function handleMonth(
     999,
     user.timezone,
   ).toISOString();
-  const allOccurrences = eventService.getEventsInRange(user.telegram_id, monthStartUtc, monthEndUtc);
+  const allOccurrences = enrichAgenda(
+    eventService.getEventsInRange(user.telegram_id, monthStartUtc, monthEndUtc),
+    { userId: user.telegram_id, language: lang },
+    eventService.agendaRepository,
+  );
 
   const eventCounts: Record<number, number> = {};
   for (const occ of allOccurrences) {
@@ -175,15 +187,15 @@ export async function handleMonth(
     .join('  ');
 
   const ym = format(monthStart, 'yyyy-MM');
-  const text = `📅 ${monthLabel}\n\n<code>${header}\n${grid.trimEnd()}</code>\n\n${countLines ? `Events: ${countLines}` : 'No events this month.'}`;
+  const text = monthAgendaText(monthLabel, header, grid, countLines, allOccurrences, user.timezone, lang);
 
   if (yearMonth && isCallbackContext(ctx)) {
-    await ctx.editText(text, {
+    await editAgendaText(ctx, text, {
       parse_mode: 'HTML',
       reply_markup: monthNavKeyboard(ym),
     });
   } else {
-    await ctx.send(text, {
+    await sendAgendaText(ctx, text, {
       parse_mode: 'HTML',
       reply_markup: monthNavKeyboard(ym),
     });
@@ -219,7 +231,11 @@ export async function handleMonth(
         userId: user.telegram_id,
       });
       const file = new File([buffer], 'month.png', { type: 'image/png' });
-      const sent = await ctx.sendPhoto(file);
+      const sent = await sendAgendaImage(file, {
+        language: user.language,
+        sendPhoto: (photo) => ctx.sendPhoto(photo),
+        sendDocument: (document, options) => ctx.sendDocument(document, options),
+      });
       autoPin(user.telegram_id, sent.id, {
         pinChatMessage: (chatId, messageId, options) =>
           ctx.bot.api.pinChatMessage({
@@ -237,6 +253,30 @@ export async function handleMonth(
       });
     } catch (err) {
       imageLogger.error({ err }, 'Month render failed');
+      await ctx.send(
+        agendaImageErrorMessage(err) ?? 'Agenda image could not be generated. Choose a shorter date range.',
+      );
     }
   }
+}
+
+function monthAgendaText(
+  monthLabel: string,
+  header: string,
+  grid: string,
+  countLines: string,
+  occurrences: EventOccurrence[],
+  timezone: string,
+  lang: 'en' | 'ru',
+): string {
+  const base = `📅 ${monthLabel}\n\n<code>${header}\n${grid.trimEnd()}</code>\n\n${countLines ? `Events: ${countLines}` : 'No events this month.'}`;
+  if (!occurrences.length) return base;
+  const details = occurrences.map((occurrence) =>
+    formatEventDetail(
+      { ...occurrence.event, start_at: occurrence.occurrence_start, end_at: occurrence.occurrence_end },
+      timezone,
+      lang,
+    ),
+  );
+  return `${base}\n\n${lang === 'ru' ? '<b>События</b>' : '<b>Events</b>'}\n\n${details.join('\n\n')}`;
 }

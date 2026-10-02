@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleRenderWeekImage } from '../../../../src/services/ai/tool-handlers/render.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import { png } from '../../../fixtures/png.ts';
 
 function makeCtx(
   overrides: Omit<Partial<AgentContext>, 'user'> & { user?: Partial<AgentContext['user']> } = {},
@@ -15,7 +16,7 @@ function makeCtx(
       sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
     },
     renderService: {
-      renderDirect: mock(() => Promise.resolve(Buffer.from('png'))),
+      renderDirect: mock(() => Promise.resolve(png())),
     },
     eventService: {
       getEventsInRange: mock(() => []),

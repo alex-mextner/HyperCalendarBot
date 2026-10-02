@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
+import { png } from '../../fixtures/png.ts';
 
 function makeCtx(data: string, language = 'en', extras: { chat?: unknown; message?: unknown } = {}) {
   return {
@@ -351,10 +352,10 @@ describe('IMG_DAILY callback', () => {
       getHolidaysForDate: mock(() => []),
     };
     const renderService = {
-      renderDirect: mock(() => Promise.resolve(new Uint8Array([137, 80, 78, 71]))),
+      renderDirect: mock(() => Promise.resolve(png())),
     };
     const ctx = makeCtx('imd:2026-03-15', 'en', {
-      message: { sendPhoto, send: mock(() => Promise.resolve()) },
+      message: { chat: { id: 100, type: 'private' }, sendPhoto, send: mock(() => Promise.resolve()) },
     });
     const handler = makeHandler({ eventService, holidayService, renderService });
     await handler(ctx as never);
@@ -375,7 +376,7 @@ describe('IMG_DAILY callback', () => {
       renderDirect: mock(() => Promise.reject(new Error('render boom'))),
     };
     const ctx = makeCtx('imd:2026-03-15', 'en', {
-      message: { sendPhoto: mock(() => Promise.resolve()), send: sendFn },
+      message: { chat: { id: 100, type: 'private' }, sendPhoto: mock(() => Promise.resolve()), send: sendFn },
     });
     const handler = makeHandler({ eventService, holidayService, renderService });
     await handler(ctx as never);
@@ -384,7 +385,7 @@ describe('IMG_DAILY callback', () => {
     expect(msg).toContain('failed');
   });
 
-  test('no message context on render failure answers with error', async () => {
+  test('missing message context fails closed before event selection or rendering', async () => {
     const eventService = makeEventService({
       getEventsForDay: mock(() => []),
     });
@@ -397,7 +398,10 @@ describe('IMG_DAILY callback', () => {
     const ctx = makeCtx('imd:2026-03-15', 'en');
     const handler = makeHandler({ eventService, holidayService, renderService });
     await handler(ctx as never);
-    expect(ctx.answer).toHaveBeenCalledTimes(2);
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(eventService.getEventsForDay).not.toHaveBeenCalled();
+    expect(eventService.getEventsInRange).not.toHaveBeenCalled();
+    expect(renderService.renderDirect).not.toHaveBeenCalled();
   });
 
   test('no renderService skips IMG_DAILY', async () => {
@@ -418,10 +422,10 @@ describe('IMG_WEEKLY callback', () => {
       getEventsInRange: mock(() => []),
     });
     const renderService = {
-      renderDirect: mock(() => Promise.resolve(new Uint8Array([137, 80, 78, 71]))),
+      renderDirect: mock(() => Promise.resolve(png())),
     };
     const ctx = makeCtx('imw:2026-03-09', 'en', {
-      message: { sendPhoto, send: mock(() => Promise.resolve()) },
+      message: { chat: { id: 100, type: 'private' }, sendPhoto, send: mock(() => Promise.resolve()) },
     });
     const handler = makeHandler({ eventService, renderService });
     await handler(ctx as never);
@@ -439,7 +443,7 @@ describe('IMG_WEEKLY callback', () => {
       renderDirect: mock(() => Promise.reject(new Error('render boom'))),
     };
     const ctx = makeCtx('imw:2026-03-09', 'en', {
-      message: { sendPhoto: mock(() => Promise.resolve()), send: sendFn },
+      message: { chat: { id: 100, type: 'private' }, sendPhoto: mock(() => Promise.resolve()), send: sendFn },
     });
     const handler = makeHandler({ eventService, renderService });
     await handler(ctx as never);
@@ -448,7 +452,7 @@ describe('IMG_WEEKLY callback', () => {
     expect(msg).toContain('failed');
   });
 
-  test('no message context on render failure answers with error', async () => {
+  test('missing message context fails closed before event selection or rendering', async () => {
     const eventService = makeEventService({
       getEventsInRange: mock(() => []),
     });
@@ -458,7 +462,10 @@ describe('IMG_WEEKLY callback', () => {
     const ctx = makeCtx('imw:2026-03-09', 'en');
     const handler = makeHandler({ eventService, renderService });
     await handler(ctx as never);
-    expect(ctx.answer).toHaveBeenCalledTimes(2);
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(eventService.getEventsForDay).not.toHaveBeenCalled();
+    expect(eventService.getEventsInRange).not.toHaveBeenCalled();
+    expect(renderService.renderDirect).not.toHaveBeenCalled();
   });
 
   test('no renderService skips IMG_WEEKLY', async () => {

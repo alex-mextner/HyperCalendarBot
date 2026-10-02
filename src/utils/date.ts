@@ -354,3 +354,16 @@ export function parseRecurrence(input: string): RecurrenceParsed | null {
 
   return null;
 }
+
+/** Construct a calendar date in its own zone, without shifting it through UTC. */
+export function localCalendarDate(dateIso: string, timezone: string): TZDate {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateIso);
+  if (!match) throw new Error('Invalid calendar date');
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const date = new TZDate(year, month, day, 12, timezone);
+  if (date.getFullYear() !== year || date.getMonth() !== month || date.getDate() !== day)
+    throw new Error('Invalid calendar date');
+  return date;
+}
