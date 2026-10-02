@@ -38,9 +38,45 @@ export function buildContactsListKeyboard(contacts: Contact[], lang: Lang, offse
   return kb;
 }
 
-function formatContactsListText(contacts: Contact[], lang: Lang): string {
+interface ContactLabelCollision {
+  label: string;
+  contacts: Contact[];
+}
+
+function findContactLabelCollisions(
+  contacts: Contact[],
+  userId: number,
+  contactAliasRepo: ContactAliasRepository,
+): ContactLabelCollision[] {
+  const byLabel = new Map<string, { label: string; contacts: Map<number, Contact> }>();
+  for (const contact of contacts) {
+    for (const alias of contactAliasRepo.listForContact(userId, contact.id)) {
+      const normalized = alias.alias.trim().toLowerCase();
+      if (!normalized) continue;
+      const entry = byLabel.get(normalized) ?? { label: alias.alias.trim(), contacts: new Map<number, Contact>() };
+      entry.contacts.set(contact.id, contact);
+      byLabel.set(normalized, entry);
+    }
+  }
+  return [...byLabel.values()]
+    .filter((entry) => entry.contacts.size > 1)
+    .map((entry) => ({ label: entry.label, contacts: [...entry.contacts.values()] }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function formatContactsListText(contacts: Contact[], lang: Lang, collisions: ContactLabelCollision[] = []): string {
   if (contacts.length === 0) return t(lang).contacts.empty;
-  return t(lang).contacts.listTitle;
+  const tr = t(lang).contacts;
+  const lines: string[] = [tr.listTitle];
+  if (collisions.length > 0) {
+    lines.push('', tr.collisionsTitle);
+    for (const collision of collisions) {
+      const holders = collision.contacts.map((contact) => `${displayName(contact)} (#${contact.id})`).join(', ');
+      lines.push(tr.collisionLine(collision.label, holders));
+    }
+    lines.push('', tr.collisionsHelp);
+  }
+  return lines.join('\n');
 }
 
 // ── Contact detail ──
@@ -146,7 +182,8 @@ export async function handleContacts(ctx: BotCommandContext, deps: ContactsDeps)
 
   if (!rawArgs) {
     const contacts = deps.contactRepo.list(userId);
-    await ctx.send(formatContactsListText(contacts, lang), {
+    const collisions = findContactLabelCollisions(contacts, userId, deps.contactAliasRepo);
+    await ctx.send(formatContactsListText(contacts, lang, collisions), {
       reply_markup: buildContactsListKeyboard(contacts, lang, 0),
     });
     return;
@@ -165,7 +202,69 @@ export async function handleContacts(ctx: BotCommandContext, deps: ContactsDeps)
     return;
   }
 
+  if (head === 'rename') {
+    const [contactIdStr, ...nameParts] = rest;
+    const contactId = Number(contactIdStr);
+    const newName = nameParts.join(' ').trim();
+    if (!contactIdStr || !Number.isFinite(contactId) || !newName) {
+      await ctx.send(t(lang).contacts.renameUsage);
+      return;
+    }
+    const contact = deps.contactRepo.findById(userId, contactId);
+    if (!contact) {
+      await ctx.send(t(lang).contacts.notFound);
+      return;
+    }
+    const oldName = displayName(contact);
+    try {
+      deps.contactRepo.update(contact.id, { name: newName });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('CONTACT_ALIAS_CONFLICT:')) {
+        await ctx.send(t(lang).contacts.renameConflict(newName));
+        return;
+      }
+      throw error;
+    }
+    const updated = deps.contactRepo.findById(userId, contact.id);
+    await ctx.send(t(lang).contacts.renamed(oldName, updated ? displayName(updated) : newName));
+    return;
+  }
+
   if (head === 'alias') {
+    if (rest[0] === 'rename') {
+      const [, contactIdStr, aliasIdStr, ...aliasParts] = rest;
+      const contactId = Number(contactIdStr);
+      const aliasId = Number(aliasIdStr);
+      const aliasText = aliasParts.join(' ').trim();
+      if (!contactIdStr || !aliasIdStr || !Number.isFinite(contactId) || !Number.isFinite(aliasId) || !aliasText) {
+        await ctx.send(t(lang).contacts.aliasRenameUsage);
+        return;
+      }
+      const contact = deps.contactRepo.findById(userId, contactId);
+      if (!contact) {
+        await ctx.send(t(lang).contacts.notFound);
+        return;
+      }
+      try {
+        const renamed = deps.contactAliasRepo.rename(userId, contact.id, aliasId, aliasText);
+        await ctx.send(t(lang).contacts.aliasRenamed(renamed.alias, displayName(contact)));
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('CONTACT_ALIAS_NOT_FOUND:')) {
+          await ctx.send(t(lang).contacts.aliasNotFound);
+          return;
+        }
+        if (error instanceof Error && error.message.startsWith('CONTACT_ALIAS_PRIMARY:')) {
+          await ctx.send(t(lang).contacts.aliasPrimaryRename);
+          return;
+        }
+        if (error instanceof Error && error.message.startsWith('CONTACT_ALIAS_CONFLICT:')) {
+          await ctx.send(t(lang).contacts.aliasRenameConflict(aliasText));
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
     const [contactIdStr, ...aliasParts] = rest;
     const contactId = Number(contactIdStr);
     const aliasText = aliasParts.join(' ');
@@ -342,7 +441,8 @@ export async function handleContactsCallback(
   if (sub === 'list') {
     const offset = Number(args[0] ?? '0') || 0;
     const contacts = deps.contactRepo.list(userId);
-    await ctx.editText(formatContactsListText(contacts, lang), {
+    const collisions = findContactLabelCollisions(contacts, userId, deps.contactAliasRepo);
+    await ctx.editText(formatContactsListText(contacts, lang, collisions), {
       reply_markup: buildContactsListKeyboard(contacts, lang, offset),
     });
     return;

@@ -156,6 +156,36 @@ describe('ContactAliasRepository', () => {
     expect(() => repo.promote(USER_ID, contact.id, otherAlias.id)).toThrow(/CONTACT_ALIAS_NOT_FOUND/);
   });
 
+  test('rename changes a non-primary alias without changing its provenance', () => {
+    const contact = contacts.add(USER_ID, 'Lena');
+    const nickname = repo.add(USER_ID, contact.id, 'Lenka', 'confirmed_correction');
+    const renamed = repo.rename(USER_ID, contact.id, nickname.id, 'Леночка');
+    expect(renamed.alias).toBe('Леночка');
+    expect(renamed.source).toBe('confirmed_correction');
+    expect(contacts.findById(USER_ID, contact.id)?.name).toBe('Lena');
+  });
+
+  test('rename refuses the primary alias and a group-owned label', () => {
+    const contact = contacts.add(USER_ID, 'Lena');
+    const primary = repo.listForContact(USER_ID, contact.id)[0]!;
+    expect(() => repo.rename(USER_ID, contact.id, primary.id, 'Elena')).toThrow(/CONTACT_ALIAS_PRIMARY/);
+
+    const nickname = repo.add(USER_ID, contact.id, 'Lenka', 'manual');
+    groups.create(USER_ID, 'семья');
+    expect(() => repo.rename(USER_ID, contact.id, nickname.id, 'Семья')).toThrow(/CONTACT_ALIAS_CONFLICT/);
+  });
+
+  test('rename refuses a duplicate on the same contact but allows the same alias on another contact', () => {
+    const first = contacts.add(USER_ID, 'Lena');
+    const second = contacts.add(USER_ID, 'Elena');
+    const firstAlias = repo.add(USER_ID, first.id, 'Lenka', 'manual');
+    repo.add(USER_ID, first.id, 'Lena friend', 'manual');
+    expect(() => repo.rename(USER_ID, first.id, firstAlias.id, 'lena friend')).toThrow(/CONTACT_ALIAS_CONFLICT/);
+
+    const secondAlias = repo.add(USER_ID, second.id, 'Elena friend', 'manual');
+    expect(repo.rename(USER_ID, second.id, secondAlias.id, 'Lenka').alias).toBe('Lenka');
+  });
+
   test('delete removes a non-primary alias', () => {
     const contact = contacts.add(USER_ID, 'Lena');
     const nickname = repo.add(USER_ID, contact.id, 'Lenka', 'manual');

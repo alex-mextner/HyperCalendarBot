@@ -114,6 +114,38 @@ export class ContactAliasRepository {
     })();
   }
 
+  /** Rename a non-primary alias without changing its identity/provenance. */
+  rename(userId: number, contactId: number, aliasId: number, alias: string): ContactAlias {
+    const trimmed = alias.trim();
+    if (!trimmed) throw new Error('CONTACT_ALIAS_EMPTY: alias must not be blank');
+    const trimmedLower = trimmed.toLowerCase();
+    return this.db.transaction(() => {
+      const target = this.db
+        .prepare('SELECT * FROM contact_aliases WHERE id = ? AND user_id = ? AND contact_id = ?')
+        .get(aliasId, userId, contactId) as ContactAlias | null;
+      if (!target) throw new Error('CONTACT_ALIAS_NOT_FOUND: alias does not belong to this contact');
+      if (target.is_primary === 1) throw new Error('CONTACT_ALIAS_PRIMARY: rename the contact primary name instead');
+      const siblings = this.db
+        .prepare('SELECT alias FROM contact_aliases WHERE contact_id = ? AND id != ?')
+        .all(contactId, aliasId) as { alias: string }[];
+      if (siblings.some((row) => row.alias.trim().toLowerCase() === trimmedLower))
+        throw new Error('CONTACT_ALIAS_CONFLICT: this contact already has that alias');
+      const groups = this.db.prepare('SELECT alias FROM contact_groups WHERE user_id = ?').all(userId) as {
+        alias: string;
+      }[];
+      if (groups.some((row) => row.alias.trim().toLowerCase() === trimmedLower))
+        throw new Error('CONTACT_ALIAS_CONFLICT: that alias already names a group in your contacts');
+      const updated = this.db
+        .query<ContactAlias, [string, number, number, number]>(
+          `UPDATE contact_aliases SET alias = ? WHERE id = ? AND user_id = ? AND contact_id = ?
+           RETURNING id, user_id, contact_id, alias, is_primary, source, created_at`,
+        )
+        .get(trimmed, aliasId, userId, contactId);
+      if (!updated) throw new Error('CONTACT_ALIAS_NOT_FOUND: alias does not belong to this contact');
+      return updated;
+    })();
+  }
+
   /** Never removes the primary alias — promote a different one first. Returns false if not found/owned. */
   delete(userId: number, contactId: number, aliasId: number): boolean {
     return this.db.transaction(() => {

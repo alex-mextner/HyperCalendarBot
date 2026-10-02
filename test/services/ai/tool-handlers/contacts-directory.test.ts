@@ -19,6 +19,7 @@ import {
   handleManageContactDirectory,
   handlePromoteContactAlias,
   handleRemoveContactGroupMember,
+  handleRenameContactAlias,
   handleRenameContactGroup,
   handleResolveContact,
 } from '../../../../src/services/ai/tool-handlers/contacts.ts';
@@ -111,6 +112,28 @@ describe('contact alias/group AI tool handlers', () => {
     expect(ctx.contactRepo!.findById(USER_ID, contact.id)?.name).toBe('Ленка');
   });
 
+  test('rename_contact_alias changes a non-primary alias', () => {
+    const contact = ctx.contactRepo!.add(USER_ID, 'Elena');
+    const alias = ctx.contactDirectory!.contactAliasRepo.add(USER_ID, contact.id, 'Ленка', 'manual');
+    const result = handleRenameContactAlias(ctx, { contact_id: contact.id, alias_id: alias.id, alias: 'Леночка' });
+    expect(result.success).toBe(true);
+    expect(
+      ctx.contactDirectory!.contactAliasRepo.listForContact(USER_ID, contact.id).map((row) => row.alias),
+    ).toContain('Леночка');
+  });
+
+  test('rename_contact_alias reports an explicit group collision as a group collision', () => {
+    const contact = ctx.contactRepo!.add(USER_ID, 'Elena');
+    const alias = ctx.contactDirectory!.contactAliasRepo.add(USER_ID, contact.id, 'Ленка', 'manual');
+    ctx.contactDirectory!.contactGroupRepo.create(USER_ID, 'семья');
+    const result = handleRenameContactAlias(ctx, { contact_id: contact.id, alias_id: alias.id, alias: 'СЕМЬЯ' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('group');
+    expect(
+      ctx.contactDirectory!.contactAliasRepo.listForContact(USER_ID, contact.id).map((row) => row.alias),
+    ).toContain('Ленка');
+  });
+
   test('delete_contact_alias refuses to remove the primary alias', () => {
     const contact = ctx.contactRepo!.add(USER_ID, 'Elena');
     const primaryId = ctx.contactDirectory!.contactAliasRepo.listForContact(USER_ID, contact.id)[0]!.id;
@@ -190,9 +213,21 @@ describe('contact alias/group AI tool handlers', () => {
       .contactDirectory!.contactAliasRepo.listForContact(USER_ID, contact.id)
       .find((a) => a.alias === 'Ленка')!.id;
     expect(
-      handleManageContactDirectory(ctx, { action: 'promote_alias', contact_id: contact.id, alias_id: aliasId }).success,
+      handleManageContactDirectory(ctx, {
+        action: 'rename_alias',
+        contact_id: contact.id,
+        alias_id: aliasId,
+        alias: 'Леночка',
+      }).success,
     ).toBe(true);
-    expect(ctx.contactRepo!.findById(USER_ID, contact.id)?.name).toBe('Ленка');
+    const renamedAliasId = ctx
+      .contactDirectory!.contactAliasRepo.listForContact(USER_ID, contact.id)
+      .find((a) => a.alias === 'Леночка')!.id;
+    expect(
+      handleManageContactDirectory(ctx, { action: 'promote_alias', contact_id: contact.id, alias_id: renamedAliasId })
+        .success,
+    ).toBe(true);
+    expect(ctx.contactRepo!.findById(USER_ID, contact.id)?.name).toBe('Леночка');
 
     expect(handleManageContactDirectory(ctx, { action: 'create_group', alias: 'грюковы' }).success).toBe(true);
     const group = ctx.contactDirectory!.contactGroupRepo.findByAlias(USER_ID, 'грюковы')!;
@@ -204,7 +239,7 @@ describe('contact alias/group AI tool handlers', () => {
         .success,
     ).toBe(true);
     expect(handleManageContactDirectory(ctx, { action: 'list_group_members', group_id: group.id }).output).toContain(
-      'Ленка',
+      'Леночка',
     );
     expect(
       handleManageContactDirectory(ctx, { action: 'remove_group_member', group_id: group.id, contact_id: contact.id })
