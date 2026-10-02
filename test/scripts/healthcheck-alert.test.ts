@@ -27,6 +27,7 @@ function stagedScript(): string {
     .replace('ENV_FILE="/opt/hypercal/.env"', `ENV_FILE="${join(work, 'env')}"`)
     .replace('STATE_FILE="/tmp/hypercal-down"', `STATE_FILE="${join(work, 'down')}"`)
     .replace('UNVERIFIED_FILE="/tmp/hypercal-unverified-since"', `UNVERIFIED_FILE="${join(work, 'unverified')}"`)
+    .replace('BODY_FILE=$(mktemp)', `BODY_FILE=$(mktemp "${join(work, 'probe-XXXXXX')}")`)
     .replace('RETRY_DELAY=15', 'RETRY_DELAY=0');
   const path = join(work, 'healthcheck.sh');
   writeFileSync(path, source);

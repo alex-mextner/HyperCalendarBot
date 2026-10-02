@@ -1,5 +1,5 @@
 // src/services/notification/queue.ts
-import { DelayedError, Queue, Worker } from 'bullmq';
+import { DelayedError, type Job, Queue, type QueueOptions, Worker, type WorkerOptions } from 'bullmq';
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 import { parseRedisUrl } from '../../utils/redis.ts';
@@ -7,10 +7,13 @@ import type { NotificationScheduler } from './scheduler.ts';
 import type { NotificationJobData } from './worker.ts';
 import { parseTelegramError, processNotification } from './worker.ts';
 
-export function createNotificationQueue(redisUrl: string) {
+export function createNotificationQueue(
+  redisUrl: string,
+  createQueue = (name: string, options: QueueOptions) => new Queue(name, options),
+) {
   const connection = parseRedisUrl(redisUrl);
 
-  const queue = new Queue('notifications', {
+  const queue = createQueue('notifications', {
     connection,
     defaultJobOptions: {
       attempts: 3,
@@ -28,10 +31,15 @@ export function createNotificationWorker(
   logRepo: NotificationLogRepository,
   sendMessage: (telegramId: number, text: string) => Promise<void>,
   scheduler?: NotificationScheduler,
+  createWorker = (
+    name: string,
+    processor: (job: Job<NotificationJobData>, token?: string) => Promise<void>,
+    options: WorkerOptions,
+  ) => new Worker<NotificationJobData>(name, processor, options),
 ) {
   const connection = parseRedisUrl(redisUrl);
 
-  const worker = new Worker<NotificationJobData>(
+  const worker = createWorker(
     'notifications',
     async (job, token) => {
       if (job.name === 'tick') {
