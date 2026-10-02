@@ -289,6 +289,8 @@ export class TelegramStreamWriter {
       if (!this.messageId || this.discarded) return;
     }
 
+    // Queued flushes can resume after the stream has appended its control marker.
+    if (this.text.includes('[SKIP]')) return;
     const flushedLength = this.text.length;
     let displayText = markdownToHtml(this.text) || '⏳';
     // Append "..." while still generating — removed on finalize

@@ -4,7 +4,7 @@
 // healthy Gemini. Also covers the model auto-detection path that keeps the bot
 // alive when a provider deletes the model named in .env.
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import OpenAI from 'openai';
 import { resetModelRegistry } from '../../../src/services/ai/model-registry.ts';
 import { resetEligibility } from '../../../src/services/ai/provider-eligibility.ts';
@@ -22,12 +22,17 @@ type Behavior = { kind: 'text'; text: string } | { kind: 'throw'; error: Error }
 
 interface FakeProvider {
   client: {
-    chat: { completions: { create: (params: { model: string }) => Promise<AsyncIterable<StreamChunk>> } };
+    chat: {
+      completions: {
+        create: (params: { model: string }, options?: { maxRetries?: number }) => Promise<AsyncIterable<StreamChunk>>;
+      };
+    };
     models: { list: () => Promise<{ data: { id: string }[] }> };
   };
   /** Model id sent with each chat completion request, in order. */
   requestedModels: string[];
   modelsListCalls: number;
+  requestOptions: ({ maxRetries?: number } | undefined)[];
 }
 
 interface StreamToolCallDelta {
@@ -63,10 +68,12 @@ function makeProvider(options: FakeProviderOptions): FakeProvider {
   const provider: FakeProvider = {
     requestedModels: [],
     modelsListCalls: 0,
+    requestOptions: [],
     client: {
       chat: {
         completions: {
-          create: async (params: { model: string }) => {
+          create: async (params: { model: string }, requestOptions?: { maxRetries?: number }) => {
+            provider.requestOptions.push(requestOptions);
             provider.requestedModels.push(params.model);
             const index = Math.min(provider.requestedModels.length - 1, options.behaviors.length - 1);
             const behavior = options.behaviors[index];
@@ -654,4 +661,132 @@ describe('the chain a round runs on reaches the alert layer', () => {
     await askOn('smart');
     expect(isAiChainDown()).toBe(false);
   });
+});
+
+describe('bounded completion provider requests', () => {
+  beforeEach(() => {
+    resetModelRegistry();
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: GROQ_MODEL_GONE }], liveModels: ['replacement'] });
+    groq = makeProvider({ behaviors: [{ kind: 'throw', error: GROQ_MODEL_GONE }], liveModels: ['replacement'] });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'third request forbidden' }] });
+    hf = unusedProvider();
+  });
+
+  test('shares two actual requests across fallback and repeated rounds without discovery', async () => {
+    const requestBudget = { remaining: 2, deadline: Date.now() + 20000 };
+    const options = { messages: [{ role: 'user' as const, content: 'hi' }], maxTokens: 100, requestBudget };
+    await aiStreamRound(options).catch(() => null);
+    await aiStreamRound(options).catch(() => null);
+    expect(zai.requestedModels.length + groq.requestedModels.length + gemini.requestedModels.length).toBe(2);
+    expect(zai.modelsListCalls + groq.modelsListCalls + gemini.modelsListCalls).toBe(0);
+    expect(requestBudget.remaining).toBe(0);
+    expect(zai.requestOptions[0]?.maxRetries).toBe(0);
+    expect(groq.requestOptions[0]?.maxRetries).toBe(0);
+  });
+
+  for (const remaining of [0, -1, NaN, Infinity, 1.5]) {
+    test(`rejects unusable budget ${remaining} before adapter calls`, async () => {
+      await aiStreamRound({
+        messages: [],
+        maxTokens: 100,
+        requestBudget: { remaining, deadline: Date.now() + 20000 },
+      }).catch(() => null);
+      expect(zai.requestedModels.length + groq.requestedModels.length + gemini.requestedModels.length).toBe(0);
+    });
+  }
+
+  test('expired and aborted budgets make zero requests', async () => {
+    for (const signal of [undefined, AbortSignal.abort()]) {
+      await aiStreamRound({
+        messages: [],
+        maxTokens: 100,
+        signal,
+        requestBudget: { remaining: 2, deadline: signal ? Date.now() + 20000 : Date.now() - 1 },
+      }).catch(() => null);
+    }
+    expect(zai.requestedModels.length + groq.requestedModels.length + gemini.requestedModels.length).toBe(0);
+  });
+
+  test('prefers another configured smart provider without changing normal order', async () => {
+    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'same' }] });
+    groq = makeProvider({ behaviors: [{ kind: 'text', text: 'different' }] });
+    const result = await aiStreamRound({
+      messages: [],
+      maxTokens: 100,
+      fast: false,
+      requestBudget: { remaining: 2, deadline: Date.now() + 20000, avoidProvider: 'z.ai (glm-5.1)' },
+    });
+    expect(result.text).toBe('different');
+    expect((await ask()).text).toBe('same');
+  });
+});
+
+describe('bounded adapter result boundaries', () => {
+  beforeEach(() => {
+    resetModelRegistry();
+    process.env.AI_SMART_CHAIN = 'zai';
+    zai = makeProvider({ behaviors: [{ kind: 'text', text: '[SKIP]' }] });
+    groq = unusedProvider();
+    gemini = unusedProvider();
+    hf = unusedProvider();
+  });
+
+  test('single configured provider keeps its honest identity and shares budget across malformed rounds', async () => {
+    const requestBudget = { remaining: 2, deadline: Date.now() + 20000, avoidProvider: 'z.ai (glm-5.1)' };
+    const options = { messages: [], maxTokens: 100, requestBudget };
+    expect((await aiStreamRound(options)).providerUsed).toBe('z.ai (glm-5.1)');
+    expect((await aiStreamRound(options)).text).toBe('[SKIP]');
+    await expect(aiStreamRound(options)).rejects.toThrow();
+    expect(zai.requestedModels).toHaveLength(2);
+    expect(groq.requestedModels).toHaveLength(0);
+  });
+
+  for (const abort of [false, true]) {
+    test(`late adapter result is rejected (abort=${abort})`, async () => {
+      const controller = new AbortController();
+      const clock = spyOn(Date, 'now').mockReturnValue(1000);
+      const originalCreate = zai.client.chat.completions.create;
+      zai.client.chat.completions.create = async (params, options) => {
+        const stream = await originalCreate(params, options);
+        if (abort) controller.abort();
+        else clock.mockReturnValue(2000);
+        return stream;
+      };
+      try {
+        await expect(
+          aiStreamRound({
+            messages: [],
+            maxTokens: 100,
+            signal: controller.signal,
+            requestBudget: { remaining: 2, deadline: 2000 },
+          }),
+        ).rejects.toThrow();
+        expect(zai.requestedModels).toHaveLength(1);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+  }
+
+  test('missing stream finish reason cannot masquerade as a completed bounded answer', async () => {
+    zai.client.chat.completions.create = async () =>
+      (async function* () {
+        yield { choices: [{ delta: { content: 'unfinished' }, finish_reason: null }] };
+      })();
+    const result = await aiStreamRound({
+      messages: [],
+      maxTokens: 100,
+      requestBudget: { remaining: 2, deadline: Date.now() + 20000 },
+    });
+    expect(result.finishReason).not.toBe('stop');
+  });
+
+  for (const deadline of [NaN, Infinity]) {
+    test(`invalid deadline ${deadline} makes zero requests`, async () => {
+      await expect(
+        aiStreamRound({ messages: [], maxTokens: 100, requestBudget: { remaining: 2, deadline } }),
+      ).rejects.toThrow();
+      expect(zai.requestedModels).toHaveLength(0);
+    });
+  }
 });

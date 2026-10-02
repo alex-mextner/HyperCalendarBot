@@ -190,6 +190,8 @@ export const MSG = {
     delete_pick: 'Which event to delete?',
     free_header: (date: string) => `📋 Free slots ${date}:`,
     pong: (ms: number) => `pong (${ms}ms)`,
+    incomplete_reply:
+      'I did not complete the explanation. Any actions already performed will not be repeated automatically. Ask me to check the action log to see their actual outcomes.',
     welcome_back: 'Welcome back! Send me a message or use /help.',
     recurrence_prompt: 'Repeat this event?',
     recurrence_end_prompt: 'When should it stop repeating?',
@@ -995,6 +997,8 @@ export const MSG = {
     delete_pick: 'Какое событие удалить?',
     free_header: (date: string) => `📋 Свободные слоты ${date}:`,
     pong: (ms: number) => `понг (${ms}мс)`,
+    incomplete_reply:
+      'Не удалось завершить объяснение. Уже выполненные действия не повторяю. По запросу проверю журнал действий и покажу, что действительно получилось.',
     welcome_back: 'С возвращением! Напишите мне или /help.',
     recurrence_prompt: 'Повторять событие?',
     recurrence_end_prompt: 'Когда прекратить повторение?',

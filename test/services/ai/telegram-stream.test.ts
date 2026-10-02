@@ -38,6 +38,27 @@ describe('TelegramStreamWriter', () => {
     expect(editMock).toHaveBeenCalledTimes(1);
   });
 
+  test('queued flush never publishes a SKIP marker appended while an edit is in flight', async () => {
+    let release: (() => void) | undefined;
+    editMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const writer = new TelegramStreamWriter(sender, 123);
+    await writer.init();
+    writer.appendText('Earlier available evidence.');
+    const first = writer.flush(true);
+    writer.appendText(' Pending streamed continuation');
+    const queued = writer.flush(true);
+    writer.appendText('[SKIP]');
+    release?.();
+    await Promise.all([first, queued]);
+    expect(JSON.stringify(editMock.mock.calls)).not.toContain('[SKIP]');
+    await writer.discard();
+  });
+
   test('flush skips edit when delta is too small and not forced', async () => {
     const writer = new TelegramStreamWriter(sender, 123);
     await writer.init();

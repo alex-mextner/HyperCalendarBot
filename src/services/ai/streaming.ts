@@ -27,6 +27,29 @@ const aiLogger = logger.child({ module: 'ai-stream' });
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
+export interface ProviderRequestBudget {
+  /** Shared across rounds; consumed immediately before each completion request. */
+  remaining: number;
+  deadline: number;
+  /** Result provider label to defer when another configured provider is available. */
+  avoidProvider?: string;
+}
+
+class ProviderRequestBudgetError extends Error {}
+
+function checkRequestBudget(opts: StreamRoundOptions, requireRequest = true): void {
+  const budget = opts.requestBudget;
+  if (!budget) return;
+  if (opts.signal?.aborted) throw opts.signal.reason;
+  if (
+    !Number.isInteger(budget.remaining) ||
+    budget.remaining < (requireRequest ? 1 : 0) ||
+    !Number.isFinite(budget.deadline) ||
+    Date.now() >= budget.deadline
+  )
+    throw new ProviderRequestBudgetError('Completion request budget exhausted or invalid');
+}
+
 export interface StreamRoundOptions {
   messages: OpenAI.ChatCompletionMessageParam[];
   tools?: OpenAI.ChatCompletionTool[];
@@ -35,6 +58,7 @@ export interface StreamRoundOptions {
   /** Use the fast chain (cheap/fast models) instead of the smart chain. Default: false. */
   fast?: boolean;
   signal?: AbortSignal;
+  requestBudget?: ProviderRequestBudget;
   /** User ID for log context only. */
   userId?: number;
 }
@@ -229,12 +253,14 @@ interface ConsumedStream {
 async function consumeStream(
   stream: AsyncIterable<OpenAI.ChatCompletionChunk>,
   cbs: StreamCallbacks,
+  opts: StreamRoundOptions,
 ): Promise<ConsumedStream> {
   let text = '';
-  let finishReason = 'stop';
+  let finishReason = opts.requestBudget ? '' : 'stop';
   const toolCalls = new Map<number, PendingToolCall>();
 
   for await (const chunk of stream) {
+    checkRequestBudget(opts, false);
     const choice = chunk.choices[0];
     const delta = choice?.delta;
     if (!delta) continue;
@@ -295,8 +321,15 @@ function streamingSlot(
         params.tools = opts.tools;
       }
 
-      const stream = await getClient().chat.completions.create(params, { signal: opts.signal });
-      const { text, toolCalls, finishReason } = await consumeStream(stream, cbs);
+      const client = getClient();
+      checkRequestBudget(opts);
+      if (opts.requestBudget) opts.requestBudget.remaining--;
+      const stream = await client.chat.completions.create(params, {
+        signal: opts.signal,
+        ...(opts.requestBudget ? { maxRetries: 0 } : {}),
+      });
+      const { text, toolCalls, finishReason } = await consumeStream(stream, cbs, opts);
+      checkRequestBudget(opts, false);
 
       // z.ai coding endpoint returns content='' and only reasoning_content for
       // pure text responses (no tools). If we got 200 OK but nothing usable,
@@ -465,7 +498,7 @@ async function runSlot(slot: ProviderSlot, opts: StreamRoundOptions, cbs: Stream
   try {
     return await slot.stream(model, opts, cbs);
   } catch (error) {
-    if (!isModelNotFoundError(error)) throw error;
+    if (opts.requestBudget || !isModelNotFoundError(error)) throw error;
 
     const replacement = await resolveModelOverride({
       provider: slot.provider,
@@ -528,6 +561,7 @@ export async function aiStreamRound(
   options: StreamRoundOptions,
   callbacks: StreamCallbacks = {},
 ): Promise<StreamRoundResult> {
+  checkRequestBudget(options);
   const chainKind: ProviderChainKind = options.fast ? 'fast' : 'smart';
   const chain = options.fast ? buildFastChain() : buildSmartChain();
   const failures: ProviderFailure[] = [];
@@ -554,21 +588,33 @@ export async function aiStreamRound(
   const hasTools = (options.tools?.length ?? 0) > 0;
   const eligible = chain.filter((slot) => !isBlocked(slot.provider, chainKind, hasTools));
   const attempts = eligible.length > 0 ? eligible : chain;
+  const avoidProvider = options.requestBudget?.avoidProvider;
+  if (avoidProvider) {
+    attempts.sort(
+      (a, b) => Number(avoidProvider.startsWith(`${a.label} (`)) - Number(avoidProvider.startsWith(`${b.label} (`)),
+    );
+  }
   if (eligible.length === 0 && chain.length > 0) {
     aiLogger.warn({ chain: chainKind }, 'Every provider is benched — trying them anyway rather than answering nobody');
   }
 
   for (const slot of attempts) {
+    checkRequestBudget(options);
     try {
       aiLogger.info({ provider: slot.label, model: slot.configuredModel, userId: options.userId }, 'Trying provider');
       const result = await runSlot(slot, options, wrappedCallbacks);
       // A slot that answers settles any outstanding outage for it and for its own
       // chain. The alert layer decides whether that is worth telling the admin
       // about.
+      if (options.requestBudget) return result;
       reportProviderAnswered(slot.label, chainKind);
       clearBlock(slot.provider, chainKind, hasTools);
       return result;
     } catch (error) {
+      if (options.requestBudget) {
+        if (error instanceof ProviderRequestBudgetError || options.signal?.aborted) throw error;
+        continue;
+      }
       const failure = describeFailure(slot, error);
       failures.push(failure);
       reportSlotFailure(failure, error, options.userId, chainKind);
@@ -596,6 +642,7 @@ export async function aiStreamRound(
     }
   }
 
+  if (options.requestBudget) throw new ProviderRequestBudgetError('Bounded completion providers failed');
   const aggregate = new AllProvidersFailedError(failures);
   aiLogger.error({ failures, userId: options.userId }, 'Every AI provider in the chain failed');
   // The loudest alert there is: nobody answered, so the user got nothing.
