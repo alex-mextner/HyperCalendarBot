@@ -22,9 +22,14 @@ import {
 } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger, logOnce } from '../../utils/logger.ts';
-import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
+import { cerebrasClient, geminiClient, groqClient, hfClient, togetherClient, zaiClient } from './clients.ts';
 import { isGeminiLocalSkip, reserveGeminiBudget } from './gemini-quota.ts';
-import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
+import {
+  getModelOverride,
+  isModelNotFoundError,
+  resolveModelOverride,
+  togetherModelListing,
+} from './model-registry.ts';
 import {
   type Admission,
   admitProvider,
@@ -507,6 +512,25 @@ function rejectsUsageStreamOption(error: unknown): boolean {
   );
 }
 
+/**
+ * Together rejects a tool-only assistant turn — `content: null`/`undefined`
+ * alongside `tool_calls` — with HTTP 400 "prompt: prompt cannot be empty"
+ * (verified via prior account testing). Every other provider accepts that shape,
+ * so this normalization runs only on the Together request, and only on a cloned
+ * array: the caller's `messages` array and its message objects are never mutated,
+ * since agent.ts reuses the same array/objects across chain fallback attempts.
+ */
+function normalizeTogetherMessages(
+  messages: readonly OpenAI.ChatCompletionMessageParam[],
+): OpenAI.ChatCompletionMessageParam[] {
+  return messages.map((message) => {
+    if (message.role !== 'assistant') return message;
+    if (message.content !== null && message.content !== undefined) return message;
+    if (!message.tool_calls || message.tool_calls.length === 0) return message;
+    return { ...message, content: '' };
+  });
+}
+
 /** Standard OpenAI streaming adapter (works for all four providers). */
 function streamingSlot(
   label: string,
@@ -534,6 +558,10 @@ function streamingSlot(
       // Only the supported 2.5 Flash text routes: never send none to Pro/3.x.
       if (provider === 'gemini' && opts.fast && /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, '')))
         params.reasoning_effort = 'none';
+      // Together 400s a tool-only assistant turn whose content is null/undefined
+      // ("prompt: prompt cannot be empty"). Normalize on a clone — opts.messages
+      // itself must stay untouched for other chain attempts and callers.
+      if (provider === 'together') params.messages = normalizeTogetherMessages(opts.messages);
       if (opts.tools && opts.tools.length > 0) {
         params.tools = opts.tools;
       }
@@ -659,6 +687,8 @@ export const providerClients = {
   groq: groqClient,
   gemini: geminiClient,
   hf: hfClient,
+  cerebras: cerebrasClient,
+  together: togetherClient,
 };
 
 const PROVIDER_LABELS: Record<ProviderId, string> = {
@@ -666,6 +696,8 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   groq: 'Groq',
   gemini: 'Gemini',
   hf: 'HF',
+  cerebras: 'Cerebras',
+  together: 'Together',
 };
 
 /**
@@ -765,6 +797,8 @@ function buildSmartChain(cfg: EnvConfig): ProviderSlot[] {
     groq: { model: cfg.GROQ_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_MODEL, apiKey: cfg.GEMINI_API_KEY, baseUrl: cfg.GEMINI_BASE_URL },
     hf: { model: cfg.HF_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
+    cerebras: { model: cfg.CEREBRAS_MODEL, apiKey: cfg.CEREBRAS_KEY, baseUrl: cfg.CEREBRAS_BASE_URL },
+    together: { model: cfg.TOGETHER_MODEL, apiKey: cfg.TOGETHER_KEY, baseUrl: cfg.TOGETHER_BASE_URL },
   });
 }
 
@@ -774,6 +808,8 @@ function buildFastChain(cfg: EnvConfig): ProviderSlot[] {
     groq: { model: cfg.GROQ_FAST_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_FAST_MODEL, apiKey: cfg.GEMINI_API_KEY, baseUrl: cfg.GEMINI_BASE_URL },
     hf: { model: cfg.HF_FAST_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
+    cerebras: { model: cfg.CEREBRAS_FAST_MODEL, apiKey: cfg.CEREBRAS_KEY, baseUrl: cfg.CEREBRAS_BASE_URL },
+    together: { model: cfg.TOGETHER_FAST_MODEL, apiKey: cfg.TOGETHER_KEY, baseUrl: cfg.TOGETHER_BASE_URL },
   });
 }
 
@@ -838,7 +874,9 @@ async function runSlot(
 
     const replacement = await resolveModelOverride({
       provider: slot.provider,
-      client: slot.getClient(),
+      // Together's /models endpoint returns a bare array, not the { data: [] }
+      // envelope the OpenAI SDK client expects — adapt only for this provider.
+      client: slot.provider === 'together' ? togetherModelListing(slot.getClient()) : slot.getClient(),
       configuredModel: slot.configuredModel,
       fast: opts.fast === true,
       // The cached replacement is dead too — probe again instead of reusing it.

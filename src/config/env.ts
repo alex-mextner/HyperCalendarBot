@@ -98,6 +98,18 @@ export interface EnvConfig {
   GROQ_MODEL?: string;
   GROQ_FAST_MODEL?: string;
 
+  // Cerebras (optional, reachable only via an explicit chain order)
+  CEREBRAS_KEY?: string;
+  CEREBRAS_BASE_URL: string;
+  CEREBRAS_MODEL?: string;
+  CEREBRAS_FAST_MODEL?: string;
+
+  // Together (optional, reachable only via an explicit chain order)
+  TOGETHER_KEY?: string;
+  TOGETHER_BASE_URL: string;
+  TOGETHER_MODEL?: string;
+  TOGETHER_FAST_MODEL?: string;
+
   /**
    * The order providers are tried in, first to last, for the chain that answers
    * users (SMART) and the one behind summarizing and validation (FAST). A
@@ -184,6 +196,14 @@ export function loadConfig(): EnvConfig {
       })()
     : 100;
 
+  const CEREBRAS_KEY = process.env.CEREBRAS_KEY || undefined;
+  const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || (CEREBRAS_KEY ? 'gpt-oss-120b' : undefined);
+  const CEREBRAS_FAST_MODEL = process.env.CEREBRAS_FAST_MODEL || (CEREBRAS_KEY ? 'gpt-oss-120b' : undefined);
+
+  const TOGETHER_KEY = process.env.TOGETHER_KEY || undefined;
+  const TOGETHER_MODEL = process.env.TOGETHER_MODEL || (TOGETHER_KEY ? 'openai/gpt-oss-120b' : undefined);
+  const TOGETHER_FAST_MODEL = process.env.TOGETHER_FAST_MODEL || (TOGETHER_KEY ? 'openai/gpt-oss-20b' : undefined);
+
   const rawMasterKey = process.env.TELEGRAM_SESSION_MASTER_KEY?.trim();
   let telegramSessionMasterKey: string | undefined;
   if (rawMasterKey) {
@@ -234,6 +254,14 @@ export function loadConfig(): EnvConfig {
     GROQ_TPM_LIMITS: parseGroqTokenLimits(process.env.GROQ_TPM_LIMITS),
     GROQ_MODEL: process.env.GROQ_MODEL || undefined,
     GROQ_FAST_MODEL: process.env.GROQ_FAST_MODEL || undefined,
+    CEREBRAS_KEY,
+    CEREBRAS_BASE_URL: process.env.CEREBRAS_BASE_URL || 'https://api.cerebras.ai/v1',
+    CEREBRAS_MODEL,
+    CEREBRAS_FAST_MODEL,
+    TOGETHER_KEY,
+    TOGETHER_BASE_URL: process.env.TOGETHER_BASE_URL || 'https://api.together.ai/v1',
+    TOGETHER_MODEL,
+    TOGETHER_FAST_MODEL,
     AI_TOOL_SCHEMA_MODE: toolSchemaMode,
     AI_TOOL_SCHEMA_USER_IDS: toolSchemaUserIds,
     AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),

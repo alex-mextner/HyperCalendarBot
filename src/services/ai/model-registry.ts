@@ -10,6 +10,8 @@
 // here ever throws into the request path.
 
 import OpenAI from 'openai';
+import { z } from 'zod';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import type { ProviderId } from './provider-ids.ts';
 
@@ -29,6 +31,42 @@ const PROBE_TIMEOUT_MS = 10_000;
 export interface ModelListingClient {
   models: {
     list(options?: { timeout?: number }): Promise<{ data: { id: string }[] }>;
+  };
+}
+
+const togetherModelsCodec = jsonCodec(z.array(z.object({ id: z.string() })));
+
+/**
+ * Together's `/models` endpoint returns a bare JSON array (`[{ id, ... }, ...]`),
+ * not the `{ data: [] }` envelope every other provider's OpenAI-compatible
+ * endpoint returns and that the OpenAI SDK's own `.models.list()` expects —
+ * confirmed via prior account testing (GH-379: an unadapted call there silently
+ * gets zero or malformed model ids). This adapts the raw response into the shape
+ * `listLiveModels` already expects, so it needs no Together-specific branch; it
+ * is wired in only for the together provider slot, never for any other provider.
+ */
+export function togetherModelListing(client: Pick<OpenAI, 'baseURL' | 'apiKey'>): ModelListingClient {
+  return {
+    models: {
+      async list(options) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), options?.timeout ?? PROBE_TIMEOUT_MS);
+        try {
+          const response = await fetch(`${client.baseURL.replace(/\/$/, '')}/models`, {
+            headers: { Authorization: `Bearer ${client.apiKey}` },
+            signal: controller.signal,
+          });
+          const raw = await response.text();
+          const parsed = togetherModelsCodec.safeParse(raw);
+          if (!parsed.success) {
+            throw new Error('Together /models response was not the expected JSON array of model ids');
+          }
+          return { data: parsed.data };
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+    },
   };
 }
 
@@ -53,15 +91,19 @@ interface ModelPreferenceTable {
   groq: ProviderPreferences;
   gemini: ProviderPreferences;
   hf: ProviderPreferences;
+  cerebras: ProviderPreferences;
+  together: ProviderPreferences;
 }
 
 /**
- * Known-good chat model ids per provider, best first. Only Groq is populated:
- * these ids were verified live on 2026-09-01. The `qwen3.x-27b` ids are live on
- * the same account but capped at 8000 tokens per minute, which rejects the bot's
- * ~11.5k-token tool payload with 413 — so they are deliberately not listed.
- * Providers with an empty list fall back to the heuristic in
- * `selectReplacementModel`.
+ * Known-good chat model ids per provider, best first. Only Groq and Together are
+ * populated: Groq's ids were verified live on 2026-09-01, Together's are the two
+ * ids proven by account testing for GH-379. The `qwen3.x-27b` ids are live on
+ * the same Groq account but capped at 8000 tokens per minute, which rejects the
+ * bot's ~11.5k-token tool payload with 413 — so they are deliberately not listed.
+ * Cerebras has only the one proven model and no live-discovery scenario yet, so
+ * it stays empty like Gemini and z.ai. Providers with an empty list fall back to
+ * the heuristic in `selectReplacementModel`.
  */
 const PREFERRED_MODELS: ModelPreferenceTable = {
   zai: { smart: [], fast: [] },
@@ -71,6 +113,11 @@ const PREFERRED_MODELS: ModelPreferenceTable = {
   },
   gemini: { smart: [], fast: [] },
   hf: { smart: [], fast: [] },
+  cerebras: { smart: [], fast: [] },
+  together: {
+    smart: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+    fast: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b'],
+  },
 };
 
 /** Model ids that cannot serve a chat completion, matched case-insensitively. */

@@ -1,7 +1,14 @@
 // test/services/ai/clients.test.ts
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import OpenAI from 'openai';
-import { geminiClient, hfClient, resetClients, zaiClient } from '../../../src/services/ai/clients.ts';
+import {
+  cerebrasClient,
+  geminiClient,
+  hfClient,
+  resetClients,
+  togetherClient,
+  zaiClient,
+} from '../../../src/services/ai/clients.ts';
 
 const originalEnv = { ...process.env };
 
@@ -22,6 +29,10 @@ beforeEach(() => {
   process.env.GEMINI_BASE_URL = 'https://gemini.example/v1/';
   process.env.GEMINI_MODEL = 'gemini-main';
   process.env.GEMINI_FAST_MODEL = 'gemini-fast';
+  process.env.CEREBRAS_KEY = 'cerebras-key';
+  process.env.CEREBRAS_BASE_URL = 'https://cerebras.example/v1';
+  process.env.TOGETHER_KEY = 'together-key';
+  process.env.TOGETHER_BASE_URL = 'https://together.example/v1';
 });
 
 afterEach(() => {
@@ -71,4 +82,35 @@ test('the three providers are independent singletons', () => {
   expect(z).not.toBe(h);
   expect(h).not.toBe(g);
   expect(z).not.toBe(g);
+});
+
+test('cerebrasClient returns an OpenAI instance wired to CEREBRAS env vars', () => {
+  const client = cerebrasClient();
+  expect(client).toBeInstanceOf(OpenAI);
+  expect(client.apiKey).toBe('cerebras-key');
+  expect(client.baseURL).toBe('https://cerebras.example/v1');
+  expect(client.maxRetries).toBe(0);
+});
+
+test('togetherClient returns an OpenAI instance wired to TOGETHER env vars', () => {
+  const client = togetherClient();
+  expect(client).toBeInstanceOf(OpenAI);
+  expect(client.apiKey).toBe('together-key');
+  expect(client.baseURL).toBe('https://together.example/v1');
+  expect(client.maxRetries).toBe(0);
+});
+
+test('cerebrasClient and togetherClient are singletons independent of the other providers', () => {
+  expect(cerebrasClient()).toBe(cerebrasClient());
+  expect(togetherClient()).toBe(togetherClient());
+  expect(cerebrasClient()).not.toBe(togetherClient());
+  expect(cerebrasClient()).not.toBe(zaiClient());
+});
+
+test('resetClients clears the Cerebras and Together singletons too', () => {
+  const firstCerebras = cerebrasClient();
+  const firstTogether = togetherClient();
+  resetClients();
+  expect(cerebrasClient()).not.toBe(firstCerebras);
+  expect(togetherClient()).not.toBe(firstTogether);
 });
