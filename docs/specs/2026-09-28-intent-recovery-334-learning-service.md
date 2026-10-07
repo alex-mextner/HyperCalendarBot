@@ -139,8 +139,9 @@ route answers 503, no samples recorded, one startup error log; enabled and valid
 
 - `ai-agent-layer.ts`: after the agent completes, `learning.recordInteraction(...)` fire-and-forget
   with `.catch` logging; the existing `toolCalls.length > 0` and no-`ask_user` guards are kept.
-- `src/index.ts` / `src/bot/index.ts`: construct the service when enabled; call
-  `revisionService.ensureSourceBaselineDraft(seedIntents)` at startup; register routes.
+- `src/index.ts` / `src/bot/index.ts`: construct the service when enabled and register routes. The
+  startup `ensureSourceBaselineDraft(seedIntents)` call already shipped in PR-1 (`src/bot/index.ts`);
+  PR-4 adds only its admin notice and the missing startup test (#577 item 8).
 - Telegram admin commands (only when `BOT_ADMIN_ID` is configured; guard with an early return, no
   non-null assertion, no role cast): `/intents` (active revision, drafts awaiting approval, queue
   state), `/intent_review <id>` (summary, operations, three-way comparison excerpt, full body hash),

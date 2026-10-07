@@ -228,7 +228,7 @@ revision id; the hash comparison covers them.
 
 ## Source baseline flow
 
-- Startup (wired in PR-4) calls `ensureSourceBaselineDraft(seedIntents)`. When the build's seed
+- Startup (shipped in PR-1, `src/bot/index.ts`) calls `ensureSourceBaselineDraft(seedIntents)`. When the build's seed
   fingerprint differs from `A`, it inserts one validated `source_baseline` draft per body hash
   (idempotent) and queues one admin notice. It never approves or activates. Active approved rules
   keep running unchanged.
@@ -236,7 +236,8 @@ revision id; the hash comparison covers them.
 - `scripts/replace-intent-basis.ts`: first install (unmanaged to managed) keeps its backup and
   fingerprint procedure and records the backfilled active revision in the same transaction; on a
   managed database it approves the drafted baseline with an operator principal (still requires
-  `--expect <body hash>` and a new `--backup`), subject to the same integrity checks.
+  `--expect <body hash>` and a new `--backup`), subject to the same integrity checks. Not yet so in
+  PR-1: the script supersedes the active revision directly (#577 item 4).
 
 ## Draft editing and future web editor
 

@@ -59,9 +59,9 @@ PR ids are stable slice names from the specs (PR-0 was drafted first as the meas
 | Order | PR | Title | Files owned | Depends on | Acceptance (spec section) |
 | --- | --- | --- | --- | --- | --- |
 | 1 | PR-1 | Revision ledger and exact admin approval | see "PR-1 files" below | none | Scope 2, acceptance 1-17 |
-| 2 | PR-0 | Simulator, coverage harness, methodology, synthetic fixtures | `src/services/intent/simulation/*` (new), `scripts/intent-simulate.ts` (new child-process runner), `scripts/intent-coverage.ts` (new), `test/fixtures/intent-corpus/synthetic-cases.json`, `docs/intents/coverage-methodology.md` | PR-1 (merge order only; no code dependency) | Scope 5, PR-0 1-5 |
-| 3 | PR-5 | Event reference store, migration 066, time primitives, bounded title lookup | `src/database/migrations.ts` (append 066), `docs/reference/migrations/066_event_references.md`, `src/services/intent/{event-reference-store,event-time,wall-clock}.ts` (new), `src/database/repositories/event.repository.ts` (`findByTitleFolded` only) | PR-1 (migration order) | Scope 1, PR-5 1-10 |
-| 4 | PR-2 | Learning service, sidecar store, HTTP API, admin CLI | `src/services/intent-learning/*` (new), `src/web/intent-learning.ts` (new), `src/web/server.ts` (route registration hunk), `src/config/env.ts` (4 vars), `scripts/intent-learning-admin.ts` (new), `docs/intents/learning-service.md` (new) | PR-1, PR-0 | Scope 3, PR-2 1-10 |
+| 2 | PR-0 | Simulator, coverage harness, methodology, synthetic fixtures | `src/services/intent/simulation/*` (new), `scripts/intent-simulate.ts` (new child-process runner), `scripts/intent-coverage.ts` (new), `test/fixtures/intent-corpus/synthetic-cases.json`, `docs/intents/coverage-methodology.md` | PR-1 (merge order only; no code dependency) | Scope 5, PR-0 1-6 |
+| 3 | PR-5 | Event reference store, migration 066, time primitives, bounded title lookup | `src/database/migrations.ts` (append 066), `docs/reference/migrations/066_event_references.md`, `src/services/intent/{event-reference-store,event-time,wall-clock}.ts` (new), `src/database/repositories/event.repository.ts` (`findByTitleFolded` only) | PR-1 (migration order) | Scope 1, PR-5 1-11 and 5a |
+| 4 | PR-2 | Learning service, sidecar store, HTTP API, admin CLI | `src/services/intent-learning/*` (new), `src/web/intent-learning.ts` (new), `src/web/server.ts` (route registration hunk), `src/config/env.ts` (4 vars), `scripts/intent-learning-admin.ts` (new), `docs/intents/learning-service.md` (new) | PR-1, PR-0 | Scope 3, PR-2 1-11 |
 | 5 | PR-3 | Mac worker, evidence MCP, LaunchAgent installer | `scripts/intent-worker.py`, `scripts/intent-worker-evidence.py`, `scripts/install-intent-worker.py`, `test/python/test_intent_worker*.py`, `test/web/intent-worker-contract.test.ts`, `docs/intent-worker.md` | PR-2 | Scope 4, 1-6 + contract test |
 | 6 | PR-4 | Live wiring and Telegram admin commands | `src/bot/pipeline/ai-agent-layer.ts`, `src/index.ts`, `src/bot/index.ts`, `src/config/constants.ts` (admin strings), `src/services/feature-tracking.ts`, `src/bot/commands/intent-admin.ts` (new) | PR-1, PR-2; rebase after #508/#509 (`constants.ts`) | Scope 3, PR-4 1-4 |
 | 7 | PR-7 | Natural entry recognizers and seeds | `src/services/intent/{natural-entry,seed-natural}.ts` (new), `seed-catalog.ts`, `workflow-bindings.ts`/`workflow-validator.ts` (natural hunks), `docs/intents/*` regenerated | PR-1, PR-0; rebase coordination with #548 | Scope 5, PR-7 1-2 |
@@ -115,7 +115,14 @@ shipped differs from the PR table row above in these known ways:
   executor slice (#498) and is tracked with the other deferred review findings in #577.
 - The startup wiring that records the source-baseline draft (`ensureSourceBaselineDraft` in
   `src/bot/index.ts`, a file the table assigns to PR-4) shipped in PR-1. It only drafts; it never
-  approves or activates.
+  approves or activates. Its startup test is still missing (#577 item 8, with PR-4).
+- `scripts/replace-intent-basis.ts` on a managed database calls `recordOperatorBaseline`
+  (`src/services/intent/revision-ledger.ts`): it moves the manifest and supersedes the active
+  revision directly instead of approving the drafted source baseline with an operator principal as
+  the revisions spec's "Source baseline flow" describes (#577 item 4, source-baseline slice).
+- PR-1 also changed two files the table assigns to later slices: `src/index.ts` (PR-4; it now only
+  wires the intent module) and `src/bot/pipeline/intent-matcher-layer.ts` (PR-6; run-guard wiring
+  `guardRuleTools`). PR-4 and PR-6 keep that code.
 
 ### PR-0 simulator and coverage harness
 
@@ -134,14 +141,14 @@ shipped differs from the PR table row above in these known ways:
 
 ### PR-5 reference store and primitives
 
-- [ ] RED: acceptance 1-10 in the scope 1 spec, one test each; migration 066 plus doc.
+- [ ] RED: acceptance 1-11 and 5a in the scope 1 spec, one test each; migration 066 plus doc.
 - [ ] Port and fix the store (snapshots, statuses `stale`/`none`, reply mapping, bounded retention);
   `event-time.ts`/`wall-clock.ts` with DST cases; cursor-bounded `findByTitleFolded`.
 - [ ] Gates; review; commit; ship.
 
 ### PR-2 learning service
 
-- [ ] RED: acceptance 1-10 of the learning-service spec (auth separation on production routes first).
+- [ ] RED: acceptance 1-11 of the learning-service spec (auth separation on production routes first).
 - [ ] Port queue, leases, stages (`assess`, `generate`, `simulate`, `verify`), rate bucket, backoff,
   fairness, minimisation, retention, outbox; activation only via PR-1 `propose`.
 - [ ] Route registration in `server.ts`; env vars in `env.ts` with graceful disable; admin CLI; doc.
