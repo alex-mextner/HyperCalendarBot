@@ -1,5 +1,5 @@
 // src/database/repositories/event.repository.ts
-import type { Database, SQLQueryBindings } from 'bun:sqlite';
+import type { Database, SQLQueryBindings, Statement } from 'bun:sqlite';
 import { assertValidEventTimestamps } from '../../utils/event-timestamps.ts';
 import type { CalendarEvent, CreateEventData, UpdateEventData } from '../types.ts';
 
@@ -47,21 +47,28 @@ function overlapCandidateSql(alias: string): string {
  * Title substring search over rows the caller's SQL already restricted to what the user may see.
  * SQLite LIKE folds case only for ASCII, so "встреча" never found "Встреча"; the match runs here
  * with Unicode case folding while the rows stream, and reading stops at `limit` matches.
+ * The statement is finalized afterwards: bun:sqlite leaves a statement abandoned mid-iteration
+ * running, which blocks VACUUM (backups) and WAL checkpoints on the shared connection.
  */
-function takeTitleMatches(
-  rows: IterableIterator<CalendarEvent>,
+function takeTitleMatches<Params extends SQLQueryBindings[]>(
+  statement: Statement<CalendarEvent, Params>,
+  params: Params,
   query: string,
   limit = Number.POSITIVE_INFINITY,
 ): CalendarEvent[] {
   const matches: CalendarEvent[] = [];
-  if (limit <= 0) return matches;
   const needle = query.normalize('NFKC').toLowerCase();
-  for (const row of rows) {
-    if (!row.title.normalize('NFKC').toLowerCase().includes(needle)) continue;
-    matches.push(row);
-    if (matches.length >= limit) break;
+  try {
+    if (limit <= 0) return matches;
+    for (const row of statement.iterate(...params)) {
+      if (!row.title.normalize('NFKC').toLowerCase().includes(needle)) continue;
+      matches.push(row);
+      if (matches.length >= limit) break;
+    }
+    return matches;
+  } finally {
+    statement.finalize();
   }
-  return matches;
 }
 
 export const EVENT_UPDATE_FIELDS = [
@@ -560,8 +567,7 @@ export class EventRepository {
   }
 
   search(userId: number, query: string, limit = 20): CalendarEvent[] {
-    const rows = this.db
-      .prepare<CalendarEvent, [number, number, number]>(`
+    const statement = this.db.prepare<CalendarEvent, [number, number, number]>(`
       SELECT * FROM events
       WHERE is_cancelled = 0 AND is_deleted = 0
         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
@@ -571,9 +577,8 @@ export class EventRepository {
             WHERE user_id = ? AND status = 'accepted'
           ))
       ORDER BY julianday(start_at), id
-    `)
-      .iterate(userId, userId, userId);
-    return takeTitleMatches(rows, query, limit);
+    `);
+    return takeTitleMatches(statement, [userId, userId, userId], query, limit);
   }
 
   getUpcoming(userId: number, limit = 10, now?: Date): CalendarEvent[] {
@@ -851,14 +856,12 @@ export class EventRepository {
   }
 
   searchForGroup(groupId: number, query: string, limit = 20): CalendarEvent[] {
-    const rows = this.db
-      .prepare<CalendarEvent, [number]>(`
+    const statement = this.db.prepare<CalendarEvent, [number]>(`
       SELECT * FROM events
       WHERE owner_type = 'group' AND group_id = ? AND is_cancelled = 0 AND is_deleted = 0
       ORDER BY julianday(start_at), id
-    `)
-      .iterate(groupId);
-    return takeTitleMatches(rows, query, limit);
+    `);
+    return takeTitleMatches(statement, [groupId], query, limit);
   }
 
   getUpcomingForGroup(groupId: number, limit = 10, now?: Date): CalendarEvent[] {
@@ -956,7 +959,7 @@ export class EventRepository {
          LEFT JOIN birth_event_metadata m ON m.event_id = e.id
          WHERE ${conditions.join(' AND ')} ORDER BY julianday(e.start_at), e.id`,
     );
-    return query ? takeTitleMatches(statement.iterate(...params), query) : statement.all(...params);
+    return query ? takeTitleMatches(statement, params, query) : statement.all(...params);
   }
 
   getAllRecurringTemplates(): CalendarEvent[] {

@@ -248,6 +248,29 @@ describe('EventRepository', () => {
       expect(events.search(USER_ID, 'врач', 2).map((e) => e.title)).toEqual(['Врач 1', 'Врач 2']);
     });
 
+    test('a search that stops at its limit leaves no statement running on the connection', () => {
+      // An unfinished statement blocks VACUUM (backups) and WAL checkpoints on the shared connection.
+      for (const day of [11, 12, 13]) {
+        events.create({ user_id: USER_ID, title: 'Врач', start_at: `2026-03-${day}T10:00:00Z`, timezone: 'UTC' });
+      }
+      for (const day of [12, 13]) {
+        events.create({
+          user_id: USER_ID,
+          title: 'Планёрка',
+          start_at: `2026-03-${day}T10:00:00Z`,
+          timezone: 'UTC',
+          owner_type: 'group',
+          group_id: 999,
+          created_by: USER_ID,
+        });
+      }
+
+      expect(events.search(USER_ID, 'врач', 1)).toHaveLength(1);
+      expect(() => db.exec('VACUUM')).not.toThrow();
+      expect(events.searchForGroup(999, 'планёрка', 1)).toHaveLength(1);
+      expect(() => db.exec('VACUUM')).not.toThrow();
+    });
+
     test('search does not return another user’s matching event', () => {
       new UserRepository(db).create({ telegram_id: 456 });
       events.create({ user_id: 456, title: 'Встреча', start_at: '2026-03-12T10:00:00Z', timezone: 'UTC' });
