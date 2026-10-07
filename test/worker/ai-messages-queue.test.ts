@@ -69,6 +69,9 @@ const fakeUser: User = {
   updated_at: '2026-01-01T00:00:00Z',
 } as User;
 
+/** Agent context factory: the runner only reads `user` (and writes retry fields) here. */
+const userCtx = () => ({ user: fakeUser }) as unknown as AgentContext;
+
 // ─── SyntheticPipelineRunner ───────────────────────────────────────────────────
 
 describe('SyntheticPipelineRunner', () => {
@@ -225,35 +228,34 @@ describe('SyntheticPipelineRunner', () => {
     expect(await captured.ctx!.retryEnqueue!('check calendar')).toBe(true);
   });
 
-  test('a spent budget still reports "gave up" when clearing the pointer fails', async () => {
-    const captured: { ctx?: AgentContext } = {};
+  test('a spent budget still reports "gave up" and the job still succeeds when clearing the pointer fails', async () => {
+    const answers: boolean[] = [];
     const sendMessage = mock(async (_userId: number, _text: string) => ({ message_id: 1 }));
     const agentCtx = { user: fakeUser, sender: { sendMessage } } as unknown as AgentContext;
     const runner = new SyntheticPipelineRunner({
       contextBuilder: mock(() => agentCtx),
-      intentRun: mock(async (ctx: AgentContext) => {
-        captured.ctx = ctx;
-        return { handled: false };
-      }),
-      agentRun: mock(async () => {}),
+      intentRun: mock(async () => ({ handled: false })),
+      agentRun: async (ctx: AgentContext) => {
+        answers.push((await ctx.retryEnqueue?.('что у меня завтра?')) ?? true);
+      },
       retryQueue: { addDelayed: mock(async () => 'job-1') },
       retryJobStore: {
         set: mock(async () => {}),
         get: mock(async () => null),
-        del: mock(async () => {
+        del: mock(async () => {}),
+        delIfMatch: mock(async () => {
           throw new Error('READONLY You can not write against a read only replica');
         }),
-        delIfMatch: mock(async () => {}),
       },
     });
-    await runner.run(fakeUser, {
-      userId: fakeUser.telegram_id,
-      message: 'что у меня завтра?',
-      source: 'trigger',
-      retryAttempt: 3,
-    });
+    const run = runner.run(
+      fakeUser,
+      { userId: fakeUser.telegram_id, message: 'что у меня завтра?', source: 'trigger', retryAttempt: 3 },
+      'job-3',
+    );
+    await expect(run).resolves.toBeUndefined();
     // The give-up line decision is made; a rejection here would make the agent add a contradicting notice.
-    expect(await captured.ctx!.retryEnqueue!('что у меня завтра?')).toBe(false);
+    expect(answers).toEqual([false]);
   });
 
   test('scheduled call at attempt=0: retryEnqueue queues with 30s delay', async () => {
@@ -341,7 +343,7 @@ describe('SyntheticPipelineRunner retry pointer cleanup', () => {
 
   function runnerWith(store: RetryJobStore, agentRun: (ctx: AgentContext) => Promise<void>) {
     return new SyntheticPipelineRunner({
-      contextBuilder: () => ({ user: fakeUser }) as unknown as AgentContext,
+      contextBuilder: userCtx,
       intentRun: async () => ({ handled: false }),
       agentRun,
       retryQueue: { addDelayed: async () => 'job-2' },
@@ -379,6 +381,30 @@ describe('SyntheticPipelineRunner retry pointer cleanup', () => {
       await ctx.retryEnqueue?.('what is on tomorrow?');
     }).run(fakeUser, retryJob, 'job-1');
     expect(await store.get(fakeUser.telegram_id)).toBe('job-2');
+  });
+
+  test('an unawaited retryEnqueue still leaves the pointer on the next attempt', async () => {
+    const { store, pointers } = memoryJobStore();
+    pointers.set(fakeUser.telegram_id, 'job-1');
+    const scheduled = Promise.withResolvers<boolean | undefined>();
+    await runnerWith(store, async (ctx) => {
+      // The agent fires the retry without awaiting it, so run() may finish first.
+      void ctx.retryEnqueue?.('what is on tomorrow?').then(scheduled.resolve);
+    }).run(fakeUser, retryJob, 'job-1');
+    // retryEnqueue starts the pointer write before it resolves; the in-memory write is synchronous.
+    await scheduled.promise;
+    expect(await store.get(fakeUser.telegram_id)).toBe('job-2');
+  });
+
+  test("a last attempt that gives up keeps a newer retry's pointer", async () => {
+    const { store, pointers } = memoryJobStore();
+    pointers.set(fakeUser.telegram_id, 'job-9');
+    const answers: (boolean | undefined)[] = [];
+    await runnerWith(store, async (ctx) => {
+      answers.push(await ctx.retryEnqueue?.('what is on tomorrow?'));
+    }).run(fakeUser, { ...retryJob, retryAttempt: 3 }, 'job-3');
+    expect(answers).toEqual([false]);
+    expect(await store.get(fakeUser.telegram_id)).toBe('job-9');
   });
 
   test("a first run (not a retry) leaves another job's pointer alone", async () => {
@@ -558,7 +584,7 @@ describe('createAiMessagesWorker', () => {
   test("processor hands the job's own id to the run, so a finished retry clears its pointer", async () => {
     const pointers = new Map<number, string>([[fakeUser.telegram_id, 'j-retry']]);
     const runner = new SyntheticPipelineRunner({
-      contextBuilder: () => ({ user: fakeUser }) as unknown as AgentContext,
+      contextBuilder: userCtx,
       intentRun: async () => ({ handled: true }),
       agentRun: async () => {},
       retryQueue: { addDelayed: async () => 'unused' },
@@ -635,38 +661,41 @@ describe('createAiMessagesWorker', () => {
     aiFailureNotices.decide(fakeUser.telegram_id, 'en', { hardOutage: false, willRetry: true, isRetryAttempt: false });
 
     const sendMessage = mock(async (_userId: number, _text: string) => ({ message_id: 1 }));
-    const captured: { ctx?: AgentContext } = {};
     const agentCtx = { user: fakeUser, sender: { sendMessage } } as unknown as AgentContext;
-    const jobStoreDel = mock(async () => {});
+    const pointers = new Map<number, string>([[fakeUser.telegram_id, 'job-3']]);
 
     const runner = new SyntheticPipelineRunner({
       contextBuilder: mock(() => agentCtx),
-      intentRun: mock(async (ctx: AgentContext) => {
-        captured.ctx = ctx;
-        return { handled: false };
-      }),
-      agentRun: mock(async () => {}),
+      intentRun: mock(async () => ({ handled: false })),
+      agentRun: async (ctx: AgentContext) => {
+        await ctx.retryEnqueue?.('что у меня завтра?');
+      },
       retryQueue: { addDelayed: mock(async () => 'job-1') },
       retryJobStore: {
-        set: mock(async () => {}),
-        get: mock(async () => null),
-        del: jobStoreDel,
-        delIfMatch: mock(async () => {}),
+        set: async (userId, jobId) => {
+          pointers.set(userId, jobId);
+        },
+        get: async (userId) => pointers.get(userId) ?? null,
+        del: async (userId) => {
+          pointers.delete(userId);
+        },
+        delIfMatch: async (userId, jobId) => {
+          if (pointers.get(userId) === jobId) pointers.delete(userId);
+        },
       },
     });
-    await runner.run(fakeUser, {
-      userId: fakeUser.telegram_id,
-      message: 'что у меня завтра?',
-      source: 'trigger',
-      retryAttempt: 3,
-    });
-    await captured.ctx!.retryEnqueue!('что у меня завтра?');
+    await runner.run(
+      fakeUser,
+      { userId: fakeUser.telegram_id, message: 'что у меня завтра?', source: 'trigger', retryAttempt: 3 },
+      'job-3',
+    );
 
     const [, text] = sendMessage.mock.calls[0] as unknown as [number, string];
     // fakeUser.language is English, so the English give-up must render.
     expect(text).toContain('Promised to come back');
     expect(text).toContain('/today');
-    expect(jobStoreDel).toHaveBeenCalledWith(fakeUser.telegram_id);
+    // The finished last attempt cleared the pointer to itself.
+    expect(pointers.has(fakeUser.telegram_id)).toBe(false);
   });
 
   test('exhausted retry budget sends nothing when the outage was already admitted', async () => {

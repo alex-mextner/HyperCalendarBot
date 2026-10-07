@@ -30,7 +30,7 @@ export class SyntheticPipelineRunner {
   /** `jobId` is the BullMQ id of the job being processed; a retry job's id is what its retry pointer holds. */
   async run(user: User, jobData: AiMessageJobData, jobId?: string): Promise<void> {
     const currentAttempt = jobData.retryAttempt ?? 0;
-    let retryRequested = false;
+    let nextAttemptScheduled = false;
     try {
       const agentCtx = this.deps.contextBuilder(user, user.telegram_id, jobData.message);
       agentCtx.retryAttempt = currentAttempt;
@@ -45,7 +45,6 @@ export class SyntheticPipelineRunner {
         const lang = toLang(user.language);
 
         agentCtx.retryEnqueue = async (msg: string) => {
-          retryRequested = true;
           if (currentAttempt >= MAX_RETRY_ATTEMPTS) {
             const giveUp = agentGiveUpMessage(user.telegram_id, lang);
             if (giveUp) {
@@ -58,14 +57,10 @@ export class SyntheticPipelineRunner {
                 );
               }
             }
-            // Best effort: the give-up decision is made, so the answer stays "gave up" whatever Redis says.
-            await jobStore?.del(user.telegram_id).catch((err: unknown) => {
-              queueLogger.warn({ err, userId: user.telegram_id }, 'Failed to clear retry job store');
-            });
             return false;
           }
           const delay = BACKOFF_DELAYS_MS[currentAttempt]!;
-          const jobId = await queue.addDelayed(
+          const nextJobId = await queue.addDelayed(
             {
               userId: user.telegram_id,
               message: msg,
@@ -75,11 +70,12 @@ export class SyntheticPipelineRunner {
             },
             delay,
           );
+          nextAttemptScheduled = true;
           // The job is stored and will run: the cancellation pointer is written in the background, so a
           // slow or lost pointer write can neither hold back nor turn this into "not scheduled".
-          void jobStore?.set(user.telegram_id, jobId).catch((err: unknown) => {
+          void jobStore?.set(user.telegram_id, nextJobId).catch((err: unknown) => {
             queueLogger.warn(
-              { err, userId: user.telegram_id, jobId },
+              { err, userId: user.telegram_id, jobId: nextJobId },
               'Retry scheduled but its cancellation pointer was not saved',
             );
           });
@@ -95,11 +91,12 @@ export class SyntheticPipelineRunner {
       queueLogger.error({ err, userId: user.telegram_id, message: jobData.message }, 'SyntheticPipelineRunner error');
     }
 
-    // A retry job that asked for no further retry leaves the user's pointer naming itself, a
-    // finished job, until the TTL lapses. Clear it, but only while it still names this job: a
-    // newer retry may already own the pointer. Never throw here — a failed BullMQ job is re-run.
+    // A retry job that scheduled no further attempt (it answered, failed, or gave up) leaves the
+    // user's pointer naming itself, a finished job, until the TTL lapses. Clear it, but only while
+    // it still names this job: a newer retry may already own the pointer. Never throw here — a
+    // failed BullMQ job is re-run.
     const jobStore = this.deps.retryJobStore;
-    if (currentAttempt > 0 && !retryRequested && jobId && jobStore) {
+    if (currentAttempt > 0 && !nextAttemptScheduled && jobId && jobStore) {
       await jobStore.delIfMatch(user.telegram_id, jobId).catch((err: unknown) => {
         queueLogger.warn({ err, userId: user.telegram_id, jobId }, 'Failed to clear a finished retry job pointer');
       });
