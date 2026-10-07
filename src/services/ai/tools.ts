@@ -586,6 +586,82 @@ const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'resolve_place',
+    description:
+      'Resolve a place name/alias against the saved place book: a unique match resolves directly, no ' +
+      'geocoding needed; several places sharing that label/alias need a user pick; no exact match falls back ' +
+      'to fuzzy candidates needing confirmation. Prefer this over asking the user to retype an address they ' +
+      'already saved.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { query: { type: 'string', description: 'Label, alias, or place phrase to resolve.' } },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'manage_place',
+    description:
+      'Manage the saved place book. add/update (label/venue_name/address/latitude/longitude/map_url/notes; ' +
+      'update needs place_id, changed fields only; changing address/coordinates resets verification unless ' +
+      'confirmed=true too). list/get (place_id). set_favorite (place_id, favorite). delete/restore/purge ' +
+      '(place_id) — delete reverses via restore, purge is permanent. add_alias/list_aliases/delete_alias ' +
+      '(place_id; add/delete also need alias/alias_id).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        action: {
+          type: 'string',
+          enum: [
+            'add',
+            'update',
+            'list',
+            'get',
+            'set_favorite',
+            'delete',
+            'restore',
+            'purge',
+            'add_alias',
+            'list_aliases',
+            'delete_alias',
+          ],
+        },
+        place_id: { type: 'integer', description: 'Required for every action but add/list.' },
+        label: { type: 'string', description: 'The place\'s own name, e.g. "дом". Required for add.' },
+        venue_name: { type: 'string' },
+        address: { type: 'string' },
+        latitude: { type: 'number' },
+        longitude: { type: 'number' },
+        map_url: { type: 'string' },
+        notes: { type: 'string' },
+        confirmed: { type: 'boolean', description: 'Re-asserts verification when updating address/coordinates.' },
+        favorite: { type: 'boolean', description: 'Required for set_favorite.' },
+        alias: { type: 'string', description: 'Required for add_alias.' },
+        alias_id: { type: 'integer', description: 'From a prior list_aliases. Required for delete_alias.' },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'manage_place_role',
+    description:
+      "Link/unlink a saved place as someone's home or work — the owner's own (owner_type=self), a private " +
+      "note about a contact's place (owner_type=contact, needs owner_ref_id=contact_id; never published, " +
+      "never needs their consent), or a household's agreed shared home (owner_type=group, needs " +
+      'owner_ref_id=group_id from manage_contact_directory). set needs place_id; get/clear return/remove the ' +
+      'current link. A conflicting or missing link is never guessed — ask the user.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        action: { type: 'string', enum: ['set', 'get', 'clear'] },
+        role: { type: 'string', enum: ['home', 'work'] },
+        owner_type: { type: 'string', enum: ['self', 'contact', 'group'] },
+        owner_ref_id: { type: 'integer', description: 'contact_id or group_id. Required unless owner_type=self.' },
+        place_id: { type: 'integer', description: 'Required for set.' },
+      },
+      required: ['action', 'role', 'owner_type'],
+    },
+  },
+  {
     name: 'ask_user',
     description:
       'Send a question to the user with clickable button options. Use when you need a yes/no or choice answer. After calling, STOP and wait for the user to respond.',

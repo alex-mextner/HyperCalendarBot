@@ -216,6 +216,50 @@ const manageContactDirectorySchema = z
   })
   .passthrough();
 
+// ── Place tools ──
+
+const resolvePlaceSchema = z.object({ query: z.string() }).passthrough();
+
+const managePlaceSchema = z
+  .object({
+    action: z.enum([
+      'add',
+      'update',
+      'list',
+      'get',
+      'set_favorite',
+      'delete',
+      'restore',
+      'purge',
+      'add_alias',
+      'list_aliases',
+      'delete_alias',
+    ]),
+    place_id: numericId.optional(),
+    label: z.string().optional(),
+    venue_name: z.string().optional(),
+    address: z.string().optional(),
+    latitude: z.number().optional(),
+    longitude: z.number().optional(),
+    map_url: z.string().optional(),
+    notes: z.string().optional(),
+    confirmed: toolBoolean.optional(),
+    favorite: toolBoolean.optional(),
+    alias: z.string().optional(),
+    alias_id: numericId.optional(),
+  })
+  .passthrough();
+
+const managePlaceRoleSchema = z
+  .object({
+    action: z.enum(['set', 'get', 'clear']),
+    role: z.enum(['home', 'work']),
+    owner_type: z.enum(['self', 'contact', 'group']),
+    owner_ref_id: numericId.optional(),
+    place_id: numericId.optional(),
+  })
+  .passthrough();
+
 // ── Render tools ──
 
 const renderDayImageSchema = z
@@ -492,6 +536,11 @@ export const toolSchemas: Record<ToolName, z.ZodType> = {
   delete_contact: deleteContactSchema,
   resolve_contact: resolveContactSchema,
   manage_contact_directory: manageContactDirectorySchema,
+
+  // Place tools
+  resolve_place: resolvePlaceSchema,
+  manage_place: managePlaceSchema,
+  manage_place_role: managePlaceRoleSchema,
 
   // Render tools
   render_day_image: renderDayImageSchema,

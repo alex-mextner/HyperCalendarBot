@@ -69,6 +69,7 @@ import { handleInvite } from './commands/invite.ts';
 import { handleLog } from './commands/log.ts';
 import { handleMonth } from './commands/month.ts';
 import { handlePing } from './commands/ping.ts';
+import { handlePlaces } from './commands/places.ts';
 import { handleSearch } from './commands/search.ts';
 import { handleSettings } from './commands/settings.ts';
 import { handleShare } from './commands/share.ts';
@@ -356,6 +357,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     contactRepo: db.contacts,
     contactAliasRepo: db.contactAliases,
     contactGroupRepo: db.contactGroups,
+    placeRepo: db.places,
+    placeAliasRepo: db.placeAliases,
+    placeRoleRepo: db.placeRoles,
     participantRepo: db.participants,
     editProposalRepo: db.editProposals,
     secretaryRepo: db.secretaries,
@@ -629,6 +633,15 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         contactGroupRepo: db.contactGroups,
       }),
     )
+    .command('places', (ctx) =>
+      handlePlaces(ctx, {
+        placeRepo: db.places,
+        placeAliasRepo: db.placeAliases,
+        placeRoleRepo: db.placeRoles,
+        contactRepo: db.contacts,
+        contactGroupRepo: db.contactGroups,
+      }),
+    )
     .command('log', (ctx) => handleLog(ctx, db.actionLog, botAdminId))
     .command('admin_tg_sessions', (ctx) =>
       handleAdminTgSessions(ctx, db.telegramSessions, db.notificationLog, botAdminId),
@@ -854,6 +867,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         contactRepo: db.contacts,
         contactAliasRepo: db.contactAliases,
         contactGroupRepo: db.contactGroups,
+        placeRepo: db.places,
+        placeAliasRepo: db.placeAliases,
+        placeRoleRepo: db.placeRoles,
         timezoneScene: scenesSetup.scenes.timezoneScene,
         connectTelegramScene: scenesSetup.scenes.connectTelegramScene,
         telegramDeps: telegramMasterKey
