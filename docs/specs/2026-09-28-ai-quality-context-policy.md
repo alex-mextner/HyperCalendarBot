@@ -18,7 +18,7 @@
 | Компонент | Подтверждённое состояние | Что переиспользуем |
 |---|---|---|
 | Пресеты model/provider/effort | В PR429 есть `scripts/model-quality/models.ts` и профили запросов; это пресеты эксперимента | Их идентификаторы, параметры и evidence, а не новый несвязанный список моделей |
-| Light/Medium/Smart и repair | Старый PR267/коммит9b1a0c05 и незавершённый speed-integrated worktree | Контракты маршрута, защищённый repair floor, bounded discovery; не перезаписывать незакоммиченную работу |
+| Light/Medium/Smart и repair | Старый PR267/коммит9b1a0c05 и WIP-снимок speed-integrated `d4aeb27b` (оба закрыты 2026-10-07 и сохранены в recovery bundle, см. план) | Контракты маршрута, защищённый repair floor, bounded discovery — восстанавливать из сохранённых SHA, не из живой ветки |
 | Laya | Реально установлена в task-cli; fixed English checkpoint. AISIS spec040 предусматривает multilingual | Отдельный адаптер RouteDecisionProvider с явным checkpoint и калибровкой; не менять task-cli из этой задачи |
 | NLI в текущем main | Внешний XLM-RoBERTa фильтр «календарь/разговор», не Laya | Отдельная задача уместности ответа в группе; не считать его общим верификатором |
 | Интенты и /add | Существующие схемы, expression evaluator, workflow state; #554/#559 ведут общую диалоговую спецификацию | Единые ссылки на выбранное событие, подтверждение и результат; не вводить второй диалоговый движок |

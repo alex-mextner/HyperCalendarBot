@@ -11,6 +11,16 @@ Status: source audit and local diagnostics completed; runtime implementation is 
 - Measured current synthetic prompt/schema cost and inventoried retained production history read-only. Credentials and real messages were not sent to an external model.
 - Defined shared presets,context/verification contracts,score dimensions,corpus architecture and bounded repair; created #565/#566 and linked existing work.
 
+## Close-out of the older routing branches (2026-10-07)
+
+The routing/tier prototypes cited above were closed on 2026-10-07 instead of being merged. `b702a424` and `9b1a0c05` stay fetchable from GitHub as `refs/pull/260/head` and `refs/pull/267/head`; the other SHAs exist only in the local recovery bundle `~/hypercal-recovery/2026-10-07-all-remote-branches.bundle` on the owner's workstation, so their reusable content is also described in the #257 comment of 2026-10-07.
+
+- PR #260 (`feat/ai-context-226-20260912`, `b702a424`): capability-scoped catalog and batched discovery. Superseded by #332 (`34eabe7d`, `src/services/ai/tool-catalog.ts`, `src/services/ai/tool-exposure.ts`).
+- PR #267 (`feat/inference-three-tiers-integrated-20260913`, `9b1a0c05`): light/medium/smart classifier packet, repair floor and routed-turn orchestration (`turn-routing.ts`, `routed-turn.ts`, `routing-context.ts`). Never wired to ingress; its Groq Qwen/GPT-OSS light router conflicts with the preset decisions in this spec (Laya for `route_semantics`, small Qwen/GPT-OSS out of the target set). Reuse its contracts, not its model choice, when #257 reaches the router step.
+- `wip/speed-integrated-257-20260915` (`d4aeb27b`, bundle only): uncommitted ingress wiring of that router (`AI_ROUTER_MODE` off/shadow/active, Redis repair-state store, Groq light-router client). Not buildable on its own (imports `turn-routing.ts` from #267).
+- `feat/routing-257-20260927` (`72954f8d`, bundle only): an unused `DEFAULT_REPAIR_CHAIN` constant.
+- `perf/reasoning-356-20260923` (`f32c9e61`, bundle only): Groq GPT-OSS `reasoning_effort=low`. Redone on top of current main as PR #768 for #356 (not merged when this note was written), because GPT-OSS is still the production Groq route until a qualified replacement exists.
+
 ## Execution order and ownership
 
 | Workstream | Owner task | Deliverable / gate | Dependency |
@@ -28,7 +38,7 @@ Status: source audit and local diagnostics completed; runtime implementation is 
 
 Before new broad paid benchmarking, turn known incidents into replayable episodes with genuine handler responses and final-state assertions. Start with day-range coverage,confirmed event shift preserving duration,verified invitee,queued delivery,callback confirmation and missing context. Fix the evaluator's alternative-action and response-format rules before selecting a winning preset. Label the remaining history,not only the easy cases.
 
-Then integrate the recovered router incrementally behind a feature flag: local classification/heuristics in shadow, deterministic mandatory checks enforced, context-manifest logging without private content. A classifier cannot lower authorization or repair floors. A separate read-only explanation-repair path has no write tools. Keep one deadline and bounded repair count.
+Then build the #257 router from the preserved #267 contracts behind a feature flag — with the Laya `route_semantics` adapter, not the old Groq light router: local classification in shadow, deterministic mandatory checks enforced, context-manifest logging without private content. A classifier cannot lower authorization or repair floors. A separate read-only explanation-repair path has no write tools. Keep one deadline and bounded repair count.
 
 Presets to retire from the recommended target paths: GPT-OSS executor/verifier/repair and small Qwen executor. Keep their archived benchmark definitions for comparison. Do not delete a working production fallback until a tested eligible replacement exists. A new profile must not be promoted solely because a small synthetic score is high.
 
