@@ -35,6 +35,7 @@ import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/ser
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import { AddressCache } from '../../../src/services/location/address-cache.ts';
 import { DeepLinkService } from '../../../src/services/sharing/deep-link-service.ts';
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 import { PrivacyService } from '../../../src/services/sharing/privacy-service.ts';
@@ -2561,5 +2562,64 @@ describe('CalendarBotAgent.run()', () => {
     } finally {
       setSystemTime();
     }
+  });
+
+  describe('Known Locations (#160)', () => {
+    /** The address cache's store over a map; `get` never settles while `stalled` is true. */
+    function makeAddressStore(stalled = false) {
+      const store = new Map<string, string>();
+      return {
+        get: (key: string) =>
+          stalled ? new Promise<string | null>(() => {}) : Promise.resolve(store.get(key) ?? null),
+        compareAndSet: async (key: string, expected: string | null, value: string) => {
+          if ((store.get(key) ?? null) !== expected) return false;
+          store.set(key, value);
+          return true;
+        },
+      };
+    }
+
+    function systemPromptOf(call: { messages: OpenAI.ChatCompletionMessageParam[] } | undefined): string {
+      const system = call?.messages[0];
+      if (!system || system.role !== 'system' || typeof system.content !== 'string') {
+        throw new Error('the model call carries no system prompt');
+      }
+      return system.content;
+    }
+
+    test("the model sees the user's confirmed places in the system prompt", async () => {
+      const addressCache = new AddressCache(makeAddressStore());
+      await addressCache.recordMapping(USER_ID, 'the gym', {
+        resolvedAddress: 'Synthetic Fitness, 1 Example Street, Testville',
+        googleMapsUrl: 'https://maps.google.com/?q=synthetic-fitness',
+        latitude: 44.8,
+        longitude: 20.4,
+        placeId: null,
+      });
+      ctx.addressCache = addressCache;
+      ctx.messageText = 'Book the gym for Friday';
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+      const { impl, calls } = makeStreamImpl([{ kind: 'text', text: 'Which time on Friday?' }]);
+
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+      const prompt = systemPromptOf(calls[0]);
+      expect(prompt).toContain('## Known Locations');
+      expect(prompt).toContain('Synthetic Fitness, 1 Example Street, Testville');
+      expect(result.responseText).toBe('Which time on Friday?');
+    });
+
+    test('a stalled address store costs a bounded wait and the turn answers without the section', async () => {
+      ctx.addressCache = new AddressCache(makeAddressStore(true));
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+      const { impl, calls } = makeStreamImpl([{ kind: 'text', text: 'Which day should I check?' }]);
+
+      const startedAt = performance.now();
+      const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+      expect(performance.now() - startedAt).toBeLessThan(5_000);
+      expect(systemPromptOf(calls[0])).not.toContain('## Known Locations');
+      expect(result.responseText).toBe('Which day should I check?');
+    });
   });
 });
