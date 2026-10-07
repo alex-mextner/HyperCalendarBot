@@ -48,6 +48,8 @@ interface ExecutorResult {
   suspendedAt?: number;
   stepResults?: { [key: string]: unknown };
   mentionedEventId?: number;
+  errorCode?: string;
+  mutationEvidence?: 'none' | 'applied' | 'unknown';
 }
 
 /** Match result shape from IntentMatcher.match() */
@@ -123,6 +125,7 @@ function callLayer(
   toolExecutor: ReturnType<typeof makeToolExecutor>,
   sessions: ReturnType<typeof makeWorkflowStore>,
   notifyAdmin?: (text: string) => Promise<void>,
+  onEventMentioned?: (userId: number, eventId: number) => void,
 ) {
   return createIntentMatcherLayer(
     matcher as unknown as Parameters<typeof createIntentMatcherLayer>[0],
@@ -131,6 +134,8 @@ function callLayer(
     toolExecutor,
     sessions,
     notifyAdmin,
+    undefined,
+    onEventMentioned,
   );
 }
 
@@ -326,6 +331,82 @@ describe('createIntentMatcherLayer', () => {
     await layer(ctx, 'да');
 
     expect(ctx.send).toHaveBeenCalledWith('2026-06-01 12:30  Английский');
+  });
+
+  describe('a resumed workflow', () => {
+    const userId = 72;
+    const intent: Partial<Intent> = { id: 3, format: 'text', canonical_name: 'manual.save_fact' };
+    function seed() {
+      workflowSessions.set(userId, userId, {
+        intentId: 3,
+        ruleFingerprint: RULE,
+        stepIndex: 0,
+        stepResults: {},
+        workflow: { steps: [{ call: 'ask_user', as: 'answer' }, { call: 'remember_user_fact' }] },
+        captures: {},
+        createdAt: Date.now(),
+      });
+    }
+
+    test('that fails never shows the tool error to the user and tells the admin', async () => {
+      seed();
+      const ctx = makeCtx(makeUser({ telegram_id: userId }));
+      const notifyAdmin = mock((_text: string) => Promise.resolve());
+      const layer = callLayer(
+        makeMatcher(null),
+        makeIntentRepo(intent),
+        makeExecutor({
+          success: false,
+          response: 'Fact too long (612 characters, limit 500)',
+          mutationEvidence: 'none',
+        }),
+        makeToolExecutor(),
+        workflowSessions,
+        notifyAdmin,
+      );
+
+      expect(await layer(ctx, 'a very long fact')).toEqual({ handled: true });
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      expect(ctx.send).toHaveBeenCalledWith(t('ru').intentWorkflow.failedUnchanged);
+      expect(notifyAdmin).toHaveBeenCalledTimes(1);
+      expect(notifyAdmin.mock.calls[0]![0]).toContain('manual.save_fact');
+      expect(workflowSessions.has(userId, userId)).toBe(false);
+    });
+
+    test('that fails after a write reports the write', async () => {
+      seed();
+      const ctx = makeCtx(makeUser({ telegram_id: userId }));
+      const layer = callLayer(
+        makeMatcher(null),
+        makeIntentRepo(intent),
+        makeExecutor({ success: false, response: 'raw tool error', mutationEvidence: 'applied' }),
+        makeToolExecutor(),
+        workflowSessions,
+      );
+
+      expect(await layer(ctx, 'yes')).toEqual({ handled: true });
+      expect(ctx.send).toHaveBeenCalledWith(t('ru').intentWorkflow.appliedIncomplete);
+      expect(ctx.send).not.toHaveBeenCalledWith('raw tool error');
+    });
+
+    test('that succeeds records the event it mentioned', async () => {
+      seed();
+      const ctx = makeCtx(makeUser({ telegram_id: userId }));
+      const mentioned: [number, number][] = [];
+      const layer = callLayer(
+        makeMatcher(null),
+        makeIntentRepo(intent),
+        makeExecutor({ success: true, response: 'Saved', mentionedEventId: 239 }),
+        makeToolExecutor(),
+        workflowSessions,
+        undefined,
+        (user, eventId) => mentioned.push([user, eventId]),
+      );
+
+      expect(await layer(ctx, 'yes')).toEqual({ handled: true });
+      expect(mentioned).toEqual([[userId, 239]]);
+      expect(ctx.send).toHaveBeenCalledWith('Saved');
+    });
   });
 
   test('ignores expired workflow session and falls through to matcher', async () => {
