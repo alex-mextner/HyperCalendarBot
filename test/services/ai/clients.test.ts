@@ -72,3 +72,75 @@ test('the three providers are independent singletons', () => {
   expect(h).not.toBe(g);
   expect(z).not.toBe(g);
 });
+
+// Google's OpenAI-compatible endpoint can wrap one error in a JSON array. The
+// SDK reads only `body.error`, so without unwrapping it reports a bodiless 400
+// that the chain retries as a transient drop.
+function geminiReplying(status: number, body: string, headers: { [name: string]: string } = {}): OpenAI {
+  return geminiClient().withOptions({ fetch: async () => new Response(body, { status, headers }) });
+}
+
+test('a Gemini array error envelope keeps its status, message and request id', async () => {
+  const client = geminiReplying(
+    400,
+    JSON.stringify([{ error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Invalid synthetic tool schema' } }]),
+    { 'content-type': 'application/json', 'x-request-id': 'synthetic-request' },
+  );
+  const error = await client.chat.completions.create({ model: 'synthetic', messages: [] }).catch((err) => err);
+  expect(error).toBeInstanceOf(OpenAI.BadRequestError);
+  expect(error).toMatchObject({
+    status: 400,
+    message: '400 Invalid synthetic tool schema',
+    error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Invalid synthetic tool schema' },
+    requestID: 'synthetic-request',
+  });
+});
+
+test('a Gemini array rate-limit error keeps its quota details and retry-after header', async () => {
+  const client = geminiReplying(
+    429,
+    JSON.stringify([
+      {
+        error: {
+          code: 429,
+          status: 'RESOURCE_EXHAUSTED',
+          message: 'Synthetic requests per day quota exceeded',
+          details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '60s' }],
+        },
+      },
+    ]),
+    { 'content-type': 'application/json', 'retry-after': '60' },
+  );
+  const error = await client.chat.completions.create({ model: 'synthetic', messages: [] }).catch((err) => err);
+  expect(error).toBeInstanceOf(OpenAI.RateLimitError);
+  expect(error).toMatchObject({
+    status: 429,
+    message: '429 Synthetic requests per day quota exceeded',
+    error: { status: 'RESOURCE_EXHAUSTED', details: [{ retryDelay: '60s' }] },
+  });
+  expect(error.headers.get('retry-after')).toBe('60');
+});
+
+test('a genuinely empty Gemini error body stays a bodiless error', async () => {
+  const error = await geminiReplying(400, '')
+    .chat.completions.create({ model: 'synthetic', messages: [] })
+    .catch((err) => err);
+  expect(error).toMatchObject({ status: 400, message: '400 status code (no body)', error: undefined });
+});
+
+test('an array that is not a single Google error envelope is left to the SDK', async () => {
+  const body = [{ unexpected: true }, { unexpected: false }];
+  const error = await geminiReplying(400, JSON.stringify(body), { 'content-type': 'application/json' })
+    .chat.completions.create({ model: 'synthetic', messages: [] })
+    .catch((err) => err);
+  expect(error).toMatchObject({ status: 400, message: '400 status code (no body)', error: undefined });
+});
+
+test('other providers keep the SDK error semantics for an array body', async () => {
+  const body = JSON.stringify([{ error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Synthetic' } }]);
+  const error = await hfClient()
+    .withOptions({ fetch: async () => new Response(body, { status: 400 }) })
+    .chat.completions.create({ model: 'synthetic', messages: [] })
+    .catch((err) => err);
+  expect(error).toMatchObject({ status: 400, message: '400 status code (no body)', error: undefined });
+});
