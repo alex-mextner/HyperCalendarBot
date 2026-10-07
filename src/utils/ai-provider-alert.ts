@@ -702,6 +702,8 @@ function envNames(provider: string): ProviderEnvNames {
   if (family.startsWith('groq')) return { apiKey: 'GROQ_API_KEY', model: 'GROQ_MODEL / GROQ_FAST_MODEL' };
   if (family.startsWith('gemini')) return { apiKey: 'GEMINI_API_KEY', model: 'GEMINI_MODEL / GEMINI_FAST_MODEL' };
   if (family.startsWith('hf')) return { apiKey: 'HF_TOKEN', model: 'HF_MODEL / HF_FAST_MODEL' };
+  if (family.startsWith('cerebras')) return { apiKey: 'CEREBRAS_KEY', model: 'CEREBRAS_MODEL / CEREBRAS_FAST_MODEL' };
+  if (family.startsWith('together')) return { apiKey: 'TOGETHER_KEY', model: 'TOGETHER_MODEL / TOGETHER_FAST_MODEL' };
   return { apiKey: 'the provider API key', model: 'the configured model id' };
 }
 

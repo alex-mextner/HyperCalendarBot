@@ -98,6 +98,20 @@ export interface EnvConfig {
   GROQ_MODEL?: string;
   GROQ_FAST_MODEL?: string;
 
+  // Cerebras and Together (#379): optional and outside both default chain
+  // orders. A provider is tried only when an operator names it in
+  // AI_SMART_CHAIN / AI_FAST_CHAIN AND sets its key AND the model for that
+  // chain. No model id is defaulted: which model may serve which role is an
+  // operator decision after a probe on that account, not a code constant.
+  CEREBRAS_KEY?: string;
+  CEREBRAS_BASE_URL: string;
+  CEREBRAS_MODEL?: string;
+  CEREBRAS_FAST_MODEL?: string;
+  TOGETHER_KEY?: string;
+  TOGETHER_BASE_URL: string;
+  TOGETHER_MODEL?: string;
+  TOGETHER_FAST_MODEL?: string;
+
   /**
    * The order providers are tried in, first to last, for the chain that answers
    * users (SMART) and the one behind summarizing and validation (FAST). A
@@ -234,6 +248,14 @@ export function loadConfig(): EnvConfig {
     GROQ_TPM_LIMITS: parseGroqTokenLimits(process.env.GROQ_TPM_LIMITS),
     GROQ_MODEL: process.env.GROQ_MODEL || undefined,
     GROQ_FAST_MODEL: process.env.GROQ_FAST_MODEL || undefined,
+    CEREBRAS_KEY: process.env.CEREBRAS_KEY || undefined,
+    CEREBRAS_BASE_URL: process.env.CEREBRAS_BASE_URL || 'https://api.cerebras.ai/v1',
+    CEREBRAS_MODEL: process.env.CEREBRAS_MODEL || undefined,
+    CEREBRAS_FAST_MODEL: process.env.CEREBRAS_FAST_MODEL || undefined,
+    TOGETHER_KEY: process.env.TOGETHER_KEY || undefined,
+    TOGETHER_BASE_URL: process.env.TOGETHER_BASE_URL || 'https://api.together.ai/v1',
+    TOGETHER_MODEL: process.env.TOGETHER_MODEL || undefined,
+    TOGETHER_FAST_MODEL: process.env.TOGETHER_FAST_MODEL || undefined,
     AI_TOOL_SCHEMA_MODE: toolSchemaMode,
     AI_TOOL_SCHEMA_USER_IDS: toolSchemaUserIds,
     AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),

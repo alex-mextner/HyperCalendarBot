@@ -234,12 +234,18 @@ provider ids in the order they are tried. The ids come from `PROVIDER_IDS` in
 layer and the AI layer can derive from it without a cycle. Add a provider there and it is
 nameable at once.
 A provider whose model or key is missing is skipped and the skip is logged — in practice
-that means Groq, since `loadConfig()` requires the z.ai, Hugging Face and Gemini credentials
-and refuses to start without them. An unknown name is ignored with a warning, an order
-naming nothing known falls back to the default order, and an order whose providers are all
-unconfigured falls back to the default order over whatever IS configured (logged as an
-error). Reordering during an incident is an `.env` edit and a restart — do not hardcode
-a new order in `streaming.ts`.
+that means the optional ones (Groq, Cerebras, Together), since `loadConfig()` requires the
+z.ai, Hugging Face and Gemini credentials and refuses to start without them. Cerebras and
+Together (#379) are in neither default order: they run only when named in a chain, with
+their key and an explicit per-chain model (`CEREBRAS_MODEL`/`CEREBRAS_FAST_MODEL`,
+`TOGETHER_MODEL`/`TOGETHER_FAST_MODEL`; no model id is defaulted). Together needs two
+adapters kept in `streaming.ts`/`model-registry.ts`: a tool-only assistant turn is sent with
+`content: ''` instead of `null` (it 400s "prompt cannot be empty"), on a clone, and its
+`/models` bare-array listing is read by `togetherModelListing`. An unknown name is ignored
+with a warning, an order naming nothing known falls back to the default order, and an order
+whose providers are all unconfigured falls back to the default order over whatever IS
+configured (logged as an error). Reordering during an incident is an `.env` edit and a
+restart — do not hardcode a new order in `streaming.ts`.
 
 **A depleted or rejected provider account is skipped, not retried**: `src/services/ai/provider-circuit.ts`
 keeps one durable circuit per provider account for every provider in the chain (key = fingerprint
