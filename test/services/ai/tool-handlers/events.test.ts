@@ -1230,6 +1230,10 @@ describe('event tool handlers', () => {
       return overrides as unknown as GroupCapability;
     }
 
+    function makeSecretaryCapability(overrides: Partial<SecretaryCapability>): SecretaryCapability {
+      return overrides as unknown as SecretaryCapability;
+    }
+
     test('handleUpdateEvent (group) skips declined members in Google fanout, pushes undecided members', async () => {
       const DECLINED_MEMBER = 501;
       const PENDING_MEMBER = 502;
@@ -1387,7 +1391,7 @@ describe('event tool handlers', () => {
       const gCtx: AgentContext = {
         ...makeGroupCtx(),
         participantRepo,
-        secretary: { secretaryRepo } as unknown as SecretaryCapability,
+        secretary: makeSecretaryCapability({ secretaryRepo }),
         group: makeGroupCapability({ groupMemberRepo }),
         google: { googleCalendarRepo: new GoogleCalendarRepository(db), scheduleParticipantPush },
       };
