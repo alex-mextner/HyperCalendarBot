@@ -28,6 +28,11 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
   } as AgentContext;
 }
 
+/** For regressions that only wire the repo methods a path touches. */
+function looseCtx(overrides: { [key: string]: unknown }): AgentContext {
+  return makeCtx(overrides as unknown as Partial<AgentContext>);
+}
+
 test('list_calendar_access: returns error when no secretary repo', async () => {
   const ctx = makeCtx();
   const result = handleListCalendarAccess(ctx);
@@ -131,17 +136,17 @@ test('manage_secretaries invite: sender not configured → success but agentHint
   // Regression: sendSecretaryInvite used to return void, so a missing ctx.sender
   // silently produced success:true with no signal that nothing was delivered.
   const setDmMessageId = mock(() => undefined);
-  const ctx = makeCtx({
+  const ctx = looseCtx({
     secretary: {
       secretaryRepo: {
         countActive: () => 0,
         upsert: () => ({ id: 8, owner_id: 1, secretary_id: 999, permission: 'read', status: 'pending' }),
         setDmMessageId,
-      } as never,
+      },
       secretaryForLine: undefined,
-      calendarProposalRepo: undefined as never,
+      calendarProposalRepo: undefined,
     },
-    userRepo: { findByTelegramId: () => ({ telegram_id: 999, username: 'bob', first_name: 'Bob' }) } as never,
+    userRepo: { findByTelegramId: () => ({ telegram_id: 999, username: 'bob', first_name: 'Bob' }) },
     sender: undefined,
   });
   const result = await handleManageSecretaries(ctx, {
@@ -180,16 +185,16 @@ test('manage_secretaries revoke: sender not configured → status still revoked,
   // Regression (issue #51): sendSecretaryNotification silently skipped the secretary's
   // revoke notification when ctx.sender was missing — the caller had no way to know.
   const mockUpdate = mock(() => true);
-  const ctx = makeCtx({
+  const ctx = looseCtx({
     secretary: {
       secretaryRepo: {
         findById: () => ({ id: 5, owner_id: 1, secretary_id: 99, status: 'active', permission: 'write' }),
         updateStatus: mockUpdate,
-      } as never,
+      },
       secretaryForLine: undefined,
-      calendarProposalRepo: undefined as never,
+      calendarProposalRepo: undefined,
     },
-    userRepo: { findByTelegramId: () => ({ telegram_id: 99, username: 'bob', first_name: 'Bob' }) } as never,
+    userRepo: { findByTelegramId: () => ({ telegram_id: 99, username: 'bob', first_name: 'Bob' }) },
     sender: undefined,
   });
   const result = await handleManageSecretaries(ctx, { action: 'revoke', secretary_access_id: 5 });
@@ -237,16 +242,16 @@ test('manage_secretaries self_remove: sender not configured → status still rev
   // Regression (issue #51): sendSecretaryNotification silently skipped the owner's
   // self-remove notification when ctx.sender was missing — the caller had no way to know.
   const mockUpdate = mock(() => true);
-  const ctx = makeCtx({
+  const ctx = looseCtx({
     secretary: {
       secretaryRepo: {
         findById: () => ({ id: 5, owner_id: 10, secretary_id: 1, status: 'active' }), // secretary_id == ctx.user.telegram_id (1)
         updateStatus: mockUpdate,
-      } as never,
+      },
       secretaryForLine: undefined,
-      calendarProposalRepo: undefined as never,
+      calendarProposalRepo: undefined,
     },
-    userRepo: { findByTelegramId: () => ({ telegram_id: 10, username: 'alice', first_name: 'Alice' }) } as never,
+    userRepo: { findByTelegramId: () => ({ telegram_id: 10, username: 'alice', first_name: 'Alice' }) },
     sender: undefined,
   });
   const result = await handleManageSecretaries(ctx, { action: 'self_remove', secretary_access_id: 5 });
