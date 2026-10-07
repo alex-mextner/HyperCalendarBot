@@ -698,6 +698,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         triggerSync: googleDeps?.triggerSync,
         renderService,
         invitationService,
+        groupMembership: { repo: db.groupMembers, isLiveMember: checkGroupMembership },
         eventRepo: db.events,
         chatHistoryRepo: db.chatHistory,
         onAiButtonClick: async (userId: number, chatId: number, text: string) => {

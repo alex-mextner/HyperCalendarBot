@@ -28,6 +28,7 @@ import type { EventReminderRepository } from '../../database/repositories/event-
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
+import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
@@ -200,6 +201,16 @@ export interface CallbackHandlerOpts {
   locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
   pendingGeoStore?: import('../../services/location/pending-geo-store.ts').PendingGeoStore;
   weatherService?: WeatherService;
+  /**
+   * Group-RSVP membership reconciliation. `group_members` is only populated opportunistically
+   * (group text messages, `chat_member` updates), so a real member who never posted may have no
+   * row. Before the RSVP is authorized we fall back to a live Telegram membership check and record
+   * the answer, so `recordGroupAttendance`'s table check reflects Telegram's view.
+   */
+  groupMembership?: {
+    repo: GroupMemberRepository;
+    isLiveMember: (chatId: number, userId: number) => Promise<boolean>;
+  };
 }
 
 /**
@@ -249,6 +260,7 @@ export function createCallbackHandler(
     locationVerification,
     pendingGeoStore,
     weatherService,
+    groupMembership,
   } = opts;
   const dispatch = new Map<string, HandlerFn>();
   dispatch.set('ric', async (ctx, payload, _parts, user) => {
@@ -1056,6 +1068,13 @@ export function createCallbackHandler(
       cmdLogger.warn({ userId: user.telegram_id, eventId }, 'Group RSVP tap outside a group chat');
       await ctx.answer({ text: t(lang).group_rsvp_not_authorized });
       return;
+    }
+    // No cached active membership row (never posted, or a stale "left" row): ask Telegram and
+    // record the answer so the service's fail-closed table check sees the real membership.
+    if (groupMembership && !groupMembership.repo.isActiveMember(groupChatId, user.telegram_id)) {
+      if (await groupMembership.isLiveMember(groupChatId, user.telegram_id)) {
+        groupMembership.repo.upsert(groupChatId, user.telegram_id);
+      }
     }
     const status = action === 'going' ? 'accepted' : 'declined';
     const result = invitationService.recordGroupAttendance(eventId, user.telegram_id, status, groupChatId);

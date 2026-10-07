@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test';
 import { CB, t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { GroupMemberRepository } from '../../../src/database/repositories/group-member.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
@@ -33,12 +34,14 @@ function setup() {
   const eventRepo = new EventRepository(db);
   const invitationRepo = new InvitationRepository(db);
   const bus = new DomainEventBus();
+  const groupMembers = new GroupMemberRepository(db);
   const service = new InvitationService(
     invitationRepo,
     eventRepo,
     new SharingSettingsRepository(db),
     new ParticipantRepository(db),
     bus,
+    groupMembers,
   );
   users.create({ telegram_id: ORGANIZER, first_name: 'Anna' });
   for (const [id, name] of [
@@ -48,6 +51,7 @@ function setup() {
     [301, 'Mila'],
   ] as const) {
     users.create({ telegram_id: id, first_name: name });
+    groupMembers.upsert(GROUP_CHAT, id);
   }
   const event = eventRepo.create({
     user_id: ORGANIZER,
