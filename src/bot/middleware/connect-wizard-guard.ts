@@ -111,6 +111,8 @@ interface HeldMessage extends InputRef {
   reason: HoldReason;
   /** The run of the wizard the message may have been typed into, as the trace named it when held. */
   wizardId?: string;
+  /** When the guard took it into memory. */
+  heldAt: number;
   expiresAt: number;
   /** Takes the message out of memory at its expiry. */
   timer: NodeJS.Timeout;
@@ -146,8 +148,11 @@ export interface ConnectWizardGuard {
   recordRateLimited(context: { update?: TelegramUpdate }): void;
   /** Whether the guard already stored this update's text or edit (as the marker) — chat logging stores nothing. */
   isConnectWizardInput(context: { update?: TelegramUpdate }): boolean;
-  /** Whether this update is a held message its owner released, on its way through the bot again. */
-  isOwnerReleased(context: { update?: TelegramUpdate }): boolean;
+  /**
+   * When a held message its owner released (on its way through the bot again) was taken into memory;
+   * undefined for every other update. Its age at that moment is what counts for staleness.
+   */
+  releasedHeldAt(context: { update?: TelegramUpdate }): number | undefined;
   /** How many messages are held in memory for their owner's decision (bounded; for health checks and tests). */
   heldMessageCount(): number;
   /**
@@ -168,10 +173,11 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
   /** Nonce → held message. Memory only: a restart forgets every held message. Insertion order is age. */
   const heldMessages = new Map<string, HeldMessage>();
   /**
-   * Held messages their owner released, on their way through the bot a second time. Weak: an entry
-   * lives as long as that replayed update, so later middleware can still recognise it.
+   * Held messages their owner released, on their way through the bot a second time, with the time
+   * each was held. Weak: an entry lives as long as that replayed update, so later middleware can
+   * still recognise it.
    */
-  const released = new WeakSet<TelegramUpdate>();
+  const released = new WeakMap<TelegramUpdate, number>();
 
   function readSceneRow(userId: number, chatId: number): ConnectWizardRow | undefined {
     return connectWizardRow(runWithChatId(chatId, () => assertSync(sceneStorage.get(`@gramio/scenes:${userId}`))));
@@ -324,7 +330,8 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
     // A one-shot timer, not a queued job: the held text must never leave this process's memory.
     const timer = setTimeout(() => forget(nonce), HELD_TTL_MS);
     timer.unref();
-    heldMessages.set(nonce, { ...ref, update, reason, wizardId, expiresAt: Date.now() + HELD_TTL_MS, timer });
+    const heldAt = Date.now();
+    heldMessages.set(nonce, { ...ref, update, reason, wizardId, heldAt, expiresAt: heldAt + HELD_TTL_MS, timer });
     return nonce;
   }
 
@@ -571,7 +578,7 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
         context.send?.(ct.authCancelled, { reply_markup: { remove_keyboard: true } }),
       );
     }
-    released.add(held.update);
+    released.set(held.update, held.heldAt);
     try {
       await replay(held.update);
     } catch (err) {
@@ -642,7 +649,7 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
       if (entry?.kind === 'typed') audit(entry, 'rate_limited', { outcome: 'dropped' });
     },
     isConnectWizardInput: (context) => recorded.has(context),
-    isOwnerReleased: (context) => context.update !== undefined && released.has(context.update),
+    releasedHeldAt: (context) => (context.update === undefined ? undefined : released.get(context.update)),
     heldMessageCount: () => heldMessages.size,
     async callbacks(context, next) {
       const callback = context.update?.callback_query;

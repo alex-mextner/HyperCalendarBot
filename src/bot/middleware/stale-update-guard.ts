@@ -6,8 +6,9 @@
 // "delete everything" hours later would be worse than asking again. Edits are
 // checked the same way. Button presses carry no click time and pass through: a
 // pressed button is still the user's decision, just delivered late. For the same
-// reason a message its owner released with a button (one the connect-wizard guard
-// held after the wizard expired) runs however long it was held.
+// reason the time a message its owner released with a button spent on hold (the
+// connect-wizard guard holds one typed after the wizard expired) does not count:
+// it is aged up to when it was held, so one already stale on arrival stays skipped.
 
 import type { Next } from 'gramio';
 import { t, toLang } from '../../config/constants.ts';
@@ -38,8 +39,8 @@ interface StaleUpdateGuardDeps<C extends StaleUpdateContext> {
   maxAgeMs: number;
   now: () => number;
   sendNote: (chatId: number, text: string) => Promise<unknown>;
-  /** Whether this update is a held message its owner just released with a button press. */
-  isOwnerReleased: (context: C) => boolean;
+  /** When this update, a held message its owner released, was held; undefined for any other update. */
+  releasedHeldAt: (context: C) => number | undefined;
 }
 
 export function createStaleUpdateGuard<C extends StaleUpdateContext>(deps: StaleUpdateGuardDeps<C>) {
@@ -48,9 +49,9 @@ export function createStaleUpdateGuard<C extends StaleUpdateContext>(deps: Stale
   const notedAt = new Map<number, number>();
   return async (context: C, next: Next): Promise<unknown> => {
     const message = context.update?.message ?? context.update?.edited_message;
-    if (!message || deps.isOwnerReleased(context)) return next();
+    if (!message) return next();
     const now = deps.now();
-    const ageMs = now - (message.edit_date ?? message.date) * 1000;
+    const ageMs = (deps.releasedHeldAt(context) ?? now) - (message.edit_date ?? message.date) * 1000;
     if (ageMs <= deps.maxAgeMs) return next();
 
     const chatId = message.chat.id;

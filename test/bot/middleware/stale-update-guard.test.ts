@@ -18,15 +18,15 @@ function messageUpdate(chatId: number, sentAt: string, type = 'private'): StaleU
 
 function makeGuard(clock = { now: NOW_MS }) {
   const notes: { chatId: number; text: string }[] = [];
-  /** Updates the connect-wizard guard reports as released by their owner. */
-  const released = new Set<StaleUpdateContext>();
+  /** Updates the connect-wizard guard reports as released by their owner, with when each was held. */
+  const released = new Map<StaleUpdateContext, number>();
   const guard = createStaleUpdateGuard({
     maxAgeMs: STALE_UPDATE_MAX_AGE_MS,
     now: () => clock.now,
     sendNote: async (chatId, text) => {
       notes.push({ chatId, text });
     },
-    isOwnerReleased: (context: StaleUpdateContext) => released.has(context),
+    releasedHeldAt: (context: StaleUpdateContext) => released.get(context),
   });
   return { guard, notes, released };
 }
@@ -100,7 +100,7 @@ describe('stale update guard', () => {
       sendNote: async () => {
         throw new Error('Forbidden: bot was blocked by the user');
       },
-      isOwnerReleased: () => false,
+      releasedHeldAt: () => undefined,
     });
     expect(await passes(guard, messageUpdate(501, '2026-09-27T14:00:00Z'))).toBe(false);
   });
@@ -119,11 +119,21 @@ describe('stale update guard', () => {
 
   test('a held message its owner released runs however long it was held, without a note', async () => {
     const { guard, notes, released } = makeGuard();
+    // Sent 14 minutes ago, held a minute later.
     const held = messageUpdate(501, '2026-09-27T17:00:00Z');
-    released.add(held);
+    released.set(held, Date.parse('2026-09-27T17:01:00Z'));
     expect(await passes(guard, held)).toBe(true);
     expect(notes).toEqual([]);
     // The same old message, not released, is still skipped.
     expect(await passes(guard, messageUpdate(501, '2026-09-27T17:00:00Z'))).toBe(false);
+  });
+
+  test('a released message that was already stale when it was held is still skipped', async () => {
+    const { guard, notes, released } = makeGuard();
+    // Sent during an outage, held 11 minutes later when the bot came back.
+    const held = messageUpdate(501, '2026-09-27T17:00:00Z');
+    released.set(held, Date.parse('2026-09-27T17:11:00Z'));
+    expect(await passes(guard, held)).toBe(false);
+    expect(notes).toEqual([{ chatId: 501, text: t('ru').stale_update_skipped }]);
   });
 });

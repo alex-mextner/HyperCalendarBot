@@ -307,7 +307,8 @@ removed first (by a throwaway message, as the scene installs it):
   run is open or the state still cannot be read, the message is not processed. Otherwise it goes
   through the whole bot again as an ordinary update — commands, intents and the AI alike, logged
   verbatim and counted in feature usage like any other message. The stale-update guard, which skips
-  messages older than 10 minutes, lets it through: the press is the owner's decision, made now.
+  messages older than 10 minutes, ages it up to when it was held, not to the press: the time on hold
+  is the owner's to spend, but a message already stale on arrival (an outage) is still skipped.
 - **"Удалить"** (`ctw:d:<nonce>`) forgets it at once.
 
 A press that finds nothing — after "Удалить", expiry, a restart or a release — answers "Этого

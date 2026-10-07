@@ -271,7 +271,7 @@ function makeRuntime(options: { messagesPerMinute?: number; sendCodeFailure?: st
           maxAgeMs: STALE_UPDATE_MAX_AGE_MS,
           now: Date.now,
           sendNote: (chatId, text): Promise<unknown> => started.api.sendMessage({ chat_id: chatId, text }),
-          isOwnerReleased: guard.isOwnerReleased,
+          releasedHeldAt: guard.releasedHeldAt,
         }),
       )
       .use(createRateLimitMiddleware(rateLimiter, guard.recordRateLimited))
@@ -836,6 +836,21 @@ describe('a request typed after the wizard expired is held until the owner relea
     await late.deliver();
 
     expect(r.aiTurns).toEqual([]);
+    expect(r.botReplies().at(-1)).toBe(t('en').stale_update_skipped);
+  });
+
+  test('a held message that was already stale when it arrived is not run on release', async () => {
+    const r = makeRuntime();
+    await expireAtPasswordStep(r);
+    // Sent during an outage, delivered after the bot came back: the wizard guard still holds it.
+    const late = r.typed(QUESTION);
+    advanceClock(STALE_UPDATE_MAX_AGE_MS + 60_000);
+    await late.deliver();
+    expect(r.deletedMessageIds).toContain(late.id);
+    await r.clickButton(PROCESS_LABEL);
+
+    expect(r.aiTurns).toEqual([]);
+    expect(r.reachedHandlers).not.toContain(QUESTION);
     expect(r.botReplies().at(-1)).toBe(t('en').stale_update_skipped);
   });
 
