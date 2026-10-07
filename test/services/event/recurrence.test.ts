@@ -580,5 +580,24 @@ describe('expandRecurrence', () => {
         '2026-02-10',
       ]);
     });
+
+    test('flag off keeps the template local wall-clock across DST (same as main)', () => {
+      // 12:30 Belgrade: 11:30Z in CET, 10:30Z in CEST — the legacy engine must not anchor on
+      // the UTC hour (which would shift every occurrence by the zone offset).
+      const template = makeTemplate({
+        start_at: '2026-03-16T11:30:00Z',
+        timezone: 'Europe/Belgrade',
+        recurrence_rule: 'RRULE:FREQ=WEEKLY;COUNT=4',
+      });
+      const { occurrences } = expandRecurrence(template, [], '2026-03-01T00:00:00Z', '2026-05-01T00:00:00Z', {
+        legacyEngine: true,
+      });
+      expect(occurrences.map((o) => o.occurrence_start)).toEqual([
+        '2026-03-16T11:30:00.000Z',
+        '2026-03-23T11:30:00.000Z',
+        '2026-03-30T10:30:00.000Z',
+        '2026-04-06T10:30:00.000Z',
+      ]);
+    });
   });
 });

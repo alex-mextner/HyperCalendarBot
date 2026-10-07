@@ -333,6 +333,32 @@ describe('EventReminderRepository.existsForOccurrence', () => {
     expect(repo.existsForOccurrence(event.id, 43, '2099-06-01T10:00:00Z', 30, '30 minutes')).toBe(false);
   });
 
+  test('a base row written by materialize() (occurrence_start NULL) matches the base occurrence', () => {
+    const db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    new UserRepository(db).create({ telegram_id: 42 });
+    const event = new EventRepository(db).create({
+      user_id: 42,
+      title: 'Weekly',
+      start_at: '2099-06-01T10:00:00Z',
+      timezone: 'UTC',
+      recurrence_rule: 'RRULE:FREQ=WEEKLY',
+    });
+    const repo = new EventReminderRepository(db);
+    repo.insert({
+      event_id: event.id,
+      user_id: 42,
+      remind_at_utc: '2099-06-01T09:30:00.000Z',
+      interval_minutes: 30,
+      interval_label: '30 minutes',
+    });
+
+    // The cron sees the base occurrence in canonical toISOString() form.
+    expect(repo.existsForOccurrence(event.id, 42, '2099-06-01T10:00:00.000Z', 30, '30 minutes')).toBe(true);
+    expect(repo.existsForOccurrence(event.id, 42, '2099-06-08T10:00:00.000Z', 30, '30 minutes')).toBe(false);
+  });
+
   test('two occurrences whose computed remind_at_utc coincide stay distinct (BYHOUR reconciliation)', () => {
     // recurrence-reminder-reconciliation-005: occurrence at 14:00 with a 240min-before
     // reminder and occurrence at 10:00 with an at-start reminder both compute remind_at_utc

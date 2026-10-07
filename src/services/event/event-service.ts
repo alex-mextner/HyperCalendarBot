@@ -11,7 +11,12 @@ import { computeEventDiff, snapshotFromCalendarEvent } from '../google/change-de
 import type { ReminderMaterializer } from '../notification/materializer.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import type { ChangeNotifierOptions, EventChangeNotifier } from './event-change-notifier.ts';
-import { computeFreeSpans, isWithinMembership, recurrenceExpansionRange } from './free-slots.ts';
+import {
+  computeFreeSpans,
+  isWithinMembership,
+  movedExceptionOccurrences,
+  recurrenceExpansionRange,
+} from './free-slots.ts';
 import { expandRecurrence, RecurrenceUnsupportedError } from './recurrence.ts';
 
 export interface FreeSlot {
@@ -316,7 +321,8 @@ export class EventService {
   private expandTemplateForOverlap(template: CalendarEvent, startUtc: string, endUtc: string): EventOccurrence[] {
     const exceptions = this.eventRepo.getExceptions(template.id);
     const { fromUtc, toUtc } = recurrenceExpansionRange(template, startUtc, endUtc);
-    return this.expandTemplate(template, exceptions, fromUtc, toUtc);
+    const expanded = this.expandTemplate(template, exceptions, fromUtc, toUtc);
+    return [...expanded, ...movedExceptionOccurrences(template, exceptions, expanded)];
   }
 
   getFreeSlots(userId: number, date: Date, timezone: string): FreeSlot[] {

@@ -52,12 +52,13 @@ export function backfillExceptionIdentity(db: Database): void {
       continue;
     }
 
-    const localKey = parent.all_day
-      ? exception.original_start_at!.slice(0, 10)
-      : toLocalDateKey(new Date(originalMs), parent.timezone);
-
     let candidates: string[] | null;
     try {
+      // Inside the try: Intl throws RangeError on an invalid stored timezone; such a row is
+      // left untouched like any other unvalidatable parent, not allowed to abort the migration.
+      const localKey = parent.all_day
+        ? exception.original_start_at!.slice(0, 10)
+        : toLocalDateKey(new Date(originalMs), parent.timezone);
       const windowStart = new Date(originalMs - WINDOW_PAD_MS).toISOString();
       const windowEnd = new Date(originalMs + WINDOW_PAD_MS).toISOString();
       const result = expandRecurrence(parent, [], windowStart, windowEnd);

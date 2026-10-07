@@ -63,10 +63,6 @@ export interface LocalEventFromGoogle {
   google_event_id: string;
   google_etag: string | null;
   is_cancelled: boolean;
-  /** Set instead of a populated `recurrence_rule` when Google sent recurrence lines this
-   * engine explicitly does not support (multiple RRULE, EXRULE — see spec §9); the event still
-   * syncs as a one-off rather than silently applying the wrong semantics. */
-  recurrenceUnsupportedReason?: string;
 }
 
 export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
@@ -148,16 +144,18 @@ export function googleToLocal(gEvent: GoogleEvent, userId: number, googleCalenda
   const isAllDay = !!gEvent.start?.date;
 
   let recurrenceRule: string | null = null;
-  let recurrenceUnsupportedReason: string | undefined;
   if (gEvent.recurrence && gEvent.recurrence.length > 0) {
     try {
       const parsed = parseRecurrenceBlock(gEvent.recurrence.join('\n'), isAllDay ? 'date' : 'date-time');
       recurrenceRule = parsed.lines.join('\n');
     } catch (err) {
-      recurrenceUnsupportedReason = err instanceof RecurrenceUnsupportedError ? err.reason : 'invalid_rrule_syntax';
+      // Store Google's lines verbatim (pre-583 behavior) instead of null: sync writes this value
+      // over an existing local series, and null would silently turn it into a one-off and clear
+      // the Google series on the next push. Expansion rejects/isolates the series explicitly.
+      recurrenceRule = gEvent.recurrence.join('\n');
       syncLogger.warn(
-        { err, googleEventId: gEvent.id, reason: recurrenceUnsupportedReason },
-        'Skipping unsupported recurrence lines from Google sync',
+        { err, googleEventId: gEvent.id, reason: err instanceof RecurrenceUnsupportedError ? err.reason : undefined },
+        'Google recurrence failed validation; stored verbatim',
       );
     }
   }
@@ -176,6 +174,5 @@ export function googleToLocal(gEvent: GoogleEvent, userId: number, googleCalenda
     google_event_id: gEvent.id ?? '',
     google_etag: gEvent.etag ?? null,
     is_cancelled: gEvent.status === 'cancelled',
-    ...(recurrenceUnsupportedReason ? { recurrenceUnsupportedReason } : {}),
   };
 }

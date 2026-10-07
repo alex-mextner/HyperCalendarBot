@@ -1,3 +1,4 @@
+import { TZDate } from '@date-fns/tz';
 import type { RRule, RRuleSet } from 'rrule';
 import { rrulestr } from 'rrule';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
@@ -328,10 +329,10 @@ function expandLegacy(
   let localM = 0;
   let localS = 0;
   if (adjustDst) {
-    const wall = wallClockFromFakeUtc(dtstart);
-    localH = wall.h;
-    localM = wall.mi;
-    localS = wall.s;
+    const tz = new TZDate(dtstart, template.timezone);
+    localH = tz.getHours();
+    localM = tz.getMinutes();
+    localS = tz.getSeconds();
   }
 
   const durationMs = template.end_at ? new Date(template.end_at).getTime() - dtstart.getTime() : 0;
@@ -405,15 +406,11 @@ function stripCount(rruleLine: string): string {
   );
 }
 
-/** Legacy fixed-time DST adjustment (pre-583) — see `expandLegacy`. */
+/** Legacy fixed-time DST adjustment (pre-583, verbatim from main's `adjustOccurrenceForDst`) —
+ * see `expandLegacy`. */
 function legacyAdjustForDst(date: Date, timezone: string, h: number, m: number, s: number): Date {
-  const localKey = toLocalDateKey(date, timezone);
-  const [y, mo, d] = localKey.split('-').map(Number) as [number, number, number];
-  const resolution = resolveWallClock({ y, mo, d, h, mi: m, s }, timezone);
-  if (resolution.kind === 'unique') return resolution.instant;
-  if (resolution.kind === 'ambiguous') return resolution.first;
-  // Gap: no historically-correct answer existed either (the old TZDate.setHours() code just
-  // produced whatever the underlying Intl engine picked); keep the naive UTC-labeled instant
-  // rather than invent a new guess.
-  return date;
+  const occTz = new TZDate(date, timezone);
+  const local = new TZDate(new Date(Date.UTC(occTz.getFullYear(), occTz.getMonth(), occTz.getDate())), timezone);
+  local.setHours(h, m, s, 0);
+  return new Date(local.getTime());
 }

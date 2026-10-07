@@ -50,6 +50,25 @@ export function recurrenceExpansionRange(
   };
 }
 
+/** Exceptions that were moved away from their original date, so range expansion never emits them. */
+export function movedExceptionOccurrences(
+  template: CalendarEvent,
+  exceptions: CalendarEvent[],
+  alreadyEmitted: EventOccurrence[],
+): EventOccurrence[] {
+  const emittedIds = new Set(alreadyEmitted.filter((o) => o.is_exception).map((o) => o.event.id));
+  const durationMs = templateDurationMs(template);
+  return exceptions
+    .filter((exception) => !exception.is_cancelled && !emittedIds.has(exception.id))
+    .map((exception) => ({
+      event: exception,
+      occurrence_start: exception.start_at,
+      occurrence_end:
+        exception.end_at ?? (durationMs ? new Date(Date.parse(exception.start_at) + durationMs).toISOString() : null),
+      is_exception: true,
+    }));
+}
+
 function nextCalendarDate(dateIso: string): string {
   const next = new Date(`${dateIso}T12:00:00Z`);
   next.setUTCDate(next.getUTCDate() + 1);

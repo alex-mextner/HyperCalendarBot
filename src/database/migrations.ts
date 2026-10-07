@@ -1130,40 +1130,4 @@ export const migrations: Migration[] = [
       backfillExceptionIdentity(db);
     },
   },
-  {
-    name: '067_event_reminders_identity_index',
-    up: (db) => {
-      // No backfill of legacy NULL occurrence_start rows here — a real one was tried and
-      // reverted during review. A recurring template can have MULTIPLE already-sent legacy
-      // rows sharing (event_id, user_id, interval_minutes, interval_label) with
-      // occurrence_start = NULL — one per historical occurrence that already fired, from
-      // before migration 046 added the column (046 only deleted UNSENT rows). Setting every
-      // such NULL to the template's own current start_at (the only value available without
-      // re-deriving each row's original occurrence, which is not reconstructible from the
-      // row alone) would collapse genuinely distinct historical rows onto one identical key —
-      // manufacturing a duplicate this very migration is about to forbid, aborting the whole
-      // migration transaction. SQLite treats every NULL as distinct from every other NULL in a
-      // UNIQUE index, so leaving them NULL is both correct and safe: these rows (already sent,
-      // never re-queried by occurrence) need no backfill for anything to keep working.
-      //
-      // Reminder identity is (event, recipient, occurrence, interval, label) — NOT
-      // (event_id, remind_at_utc). Two different recipients of the same event/occurrence
-      // legitimately share remind_at_utc, and so do two different occurrences of a
-      // multi-time-of-day series (e.g. BYHOUR=10,14) whose independently configured intervals
-      // happen to compute the same remind_at_utc; interval_label additionally distinguishes
-      // the two same-interval_minutes(-1) all-day reminders ("day before" / "day of"). See
-      // spec §7 — corrected after #554 review, which had wrongly proposed
-      // UNIQUE(event_id, remind_at_utc); that index was never implemented and is not created
-      // here. No *new* row can violate this index: every insert path either deletes and
-      // recreates an event's reminders in one call (`materialize`) or checks-then-inserts by
-      // this exact tuple (`materializeForOccurrence`/`existsForOccurrence`) — verified by
-      // code-path review, not by querying production, since this migration cannot see
-      // production data. Deploy should still run the pre-flight query in this migration's
-      // reviewed deploy document before rollout if that has not already been done.
-      db.exec(`
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_event_reminders_identity
-          ON event_reminders(event_id, user_id, occurrence_start, interval_minutes, interval_label);
-      `);
-    },
-  },
 ];

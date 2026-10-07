@@ -339,7 +339,7 @@ describe('event-mapper', () => {
       expect(result.recurrence_rule).toBe('RRULE:FREQ=WEEKLY\nEXDATE;TZID=Europe/Moscow:20260401T090000');
     });
 
-    test('rejects a multiple-RRULE recurring event instead of silently taking the first line', () => {
+    test('a multiple-RRULE series is stored verbatim, not cleared to a one-off', () => {
       const result = googleToLocal(
         {
           id: 'g-multi',
@@ -352,13 +352,13 @@ describe('event-mapper', () => {
         42,
         'primary',
       );
-      expect(result.recurrence_rule).toBeNull();
-      expect(result.recurrenceUnsupportedReason).toBe('multi_rrule_unsupported');
-      // The event itself still syncs as a one-off, not dropped entirely.
+      // Sync writes this over an existing local series; null would destroy it (and the Google
+      // series on the next push). Expansion isolates the unsupported rule explicitly instead.
+      expect(result.recurrence_rule).toBe('RRULE:FREQ=WEEKLY;COUNT=6\nRRULE:FREQ=DAILY;COUNT=3');
       expect(result.title).toBe('Bad series');
     });
 
-    test('rejects EXRULE instead of silently dropping or applying it', () => {
+    test('an EXRULE series is stored verbatim, not cleared to a one-off', () => {
       // recurrence-exrule-reject-002
       const result = googleToLocal(
         {
@@ -372,8 +372,7 @@ describe('event-mapper', () => {
         42,
         'primary',
       );
-      expect(result.recurrence_rule).toBeNull();
-      expect(result.recurrenceUnsupportedReason).toBe('exrule_unsupported');
+      expect(result.recurrence_rule).toBe('RRULE:FREQ=WEEKLY;COUNT=6\nEXRULE:FREQ=WEEKLY;COUNT=2');
     });
 
     test('EXDATE/RDATE round-trip: export then re-import preserves the full recurrence set', () => {
@@ -411,7 +410,6 @@ describe('event-mapper', () => {
       expect(reimported.recurrence_rule).toBe(
         'RRULE:FREQ=WEEKLY;INTERVAL=1;COUNT=6\nEXDATE:20260113T100000Z\nRDATE:20260301T100000Z',
       );
-      expect(reimported.recurrenceUnsupportedReason).toBeUndefined();
     });
   });
 });

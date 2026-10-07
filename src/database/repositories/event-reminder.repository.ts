@@ -67,6 +67,10 @@ export class EventReminderRepository {
    * docs/superpowers/specs/2026-09-28-recurrence-semantics-583.md (corrected after #554
    * review — an earlier draft proposed UNIQUE(event_id, remind_at_utc), which collides on
    * both of the cases above and was never implemented).
+   *
+   * `materialize()` writes the base occurrence's rows with `occurrence_start = NULL`; such a
+   * row counts as this occurrence when the event's own start_at is the same instant, so the
+   * rolling cron never re-inserts the base occurrence's reminders.
    */
   existsForOccurrence(
     eventId: number,
@@ -77,9 +81,14 @@ export class EventReminderRepository {
   ): boolean {
     const row = this.db
       .prepare(
-        'SELECT 1 FROM event_reminders WHERE event_id = ? AND user_id = ? AND occurrence_start = ? AND interval_minutes = ? AND interval_label = ?',
+        `SELECT 1 FROM event_reminders er
+         JOIN events e ON e.id = er.event_id
+         WHERE er.event_id = ? AND er.user_id = ? AND er.interval_minutes = ? AND er.interval_label = ?
+           AND (er.occurrence_start = ?
+                OR (er.occurrence_start IS NULL AND julianday(e.start_at) = julianday(?)))
+         LIMIT 1`,
       )
-      .get(eventId, userId, occurrenceStart, intervalMinutes, intervalLabel);
+      .get(eventId, userId, intervalMinutes, intervalLabel, occurrenceStart, occurrenceStart);
     return row != null;
   }
 
