@@ -1,14 +1,14 @@
 // test/services/ai/optional-providers.test.ts
 // Cerebras and Together (#379) through the real chain builder: they run only
-// when named, keyed and given a model; they fall back like any other slot; and
-// Together alone gets its transcript and /models adapters. Fakes go through the
-// `providerClients` seam, so no network is touched.
+// when named, keyed and given a model; they fall back like any other slot;
+// Together alone gets its transcript adapter; and neither ever swaps in a model
+// the operator did not choose. Fakes go through the `providerClients` seam, so
+// no network is touched.
 
 import { afterEach, beforeEach, describe, expect, type Mock, mock, test } from 'bun:test';
-import type { Server } from 'bun';
-import type OpenAI from 'openai';
+import OpenAI from 'openai';
 import { closeGeminiQuotaStores } from '../../../src/services/ai/gemini-quota.ts';
-import { togetherModelListing } from '../../../src/services/ai/model-registry.ts';
+import { resetModelRegistry } from '../../../src/services/ai/model-registry.ts';
 import { PROVIDER_IDS, type ProviderId } from '../../../src/services/ai/provider-ids.ts';
 import {
   _resetStreamingUsageCompatibilityForTest,
@@ -18,13 +18,14 @@ import {
 
 type Chunk = { [key: string]: unknown };
 
-/** The one SDK call a slot makes, recorded so a test can read what each provider was sent. */
+/** The two SDK calls a slot can make, recorded so a test can read what each provider was sent. */
 interface FakeClient {
   chat: {
     completions: {
       create: Mock<(params: OpenAI.ChatCompletionCreateParamsStreaming) => Promise<AsyncIterable<Chunk>>>;
     };
   };
+  models: { list: Mock<() => Promise<{ data: { id: string }[] }>> };
 }
 
 function fakeClient(chunks: Chunk[] | Error): FakeClient {
@@ -41,10 +42,11 @@ function fakeClient(chunks: Chunk[] | Error): FakeClient {
         }),
       },
     },
+    models: { list: mock(async () => ({ data: [{ id: 'vendor/unprobed-chat-model' }] })) },
   };
 }
 
-/** A slot only touches chat.completions.create; the partial fake is presented as a client here only. */
+/** A slot only touches these two calls; the partial fake is presented as a client here only. */
 function asOpenAIClient(fake: FakeClient): OpenAI {
   return fake as unknown as OpenAI;
 }
@@ -60,6 +62,7 @@ const savedEnv = { ...process.env };
 
 beforeEach(() => {
   _resetStreamingUsageCompatibilityForTest();
+  resetModelRegistry();
   Object.assign(process.env, {
     BOT_TOKEN: 'test-token',
     REDIS_URL: 'redis://localhost:6379',
@@ -188,6 +191,25 @@ describe('optional Cerebras and Together slots', () => {
     expect(messages[1]).toBe(assistant);
   });
 
+  test('a dead configured model falls through instead of being swapped for an unprobed one', async () => {
+    Object.assign(process.env, {
+      CEREBRAS_KEY: 'cerebras-key',
+      CEREBRAS_MODEL: 'cerebras-retired',
+      TOGETHER_KEY: 'together-key',
+      TOGETHER_MODEL: 'together-retired',
+    });
+    const gone = (model: string) =>
+      new OpenAI.NotFoundError(404, { message: `model ${model} not found` }, `model ${model} not found`, new Headers());
+    fakes.cerebras = fakeClient(gone('cerebras-retired'));
+    fakes.together = fakeClient(gone('together-retired'));
+    const result = await aiStreamRound({ messages: user, maxTokens: 64 });
+    expect(result.text).toBe('from zai');
+    expect(fakes.cerebras.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakes.together.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakes.cerebras.models.list).not.toHaveBeenCalled();
+    expect(fakes.together.models.list).not.toHaveBeenCalled();
+  });
+
   test('the default orders never reach an optional provider, even when fully configured', async () => {
     Object.assign(process.env, {
       CEREBRAS_KEY: 'cerebras-key',
@@ -203,49 +225,5 @@ describe('optional Cerebras and Together slots', () => {
     await expect(aiStreamRound({ messages: user, maxTokens: 64 })).rejects.toThrow();
     expect(fakes.cerebras.chat.completions.create).not.toHaveBeenCalled();
     expect(fakes.together.chat.completions.create).not.toHaveBeenCalled();
-  });
-});
-
-describe('togetherModelListing', () => {
-  let server: Server<undefined> | undefined;
-  afterEach(() => {
-    server?.stop(true);
-    server = undefined;
-  });
-
-  function serve(status: number, body: string, seen: { auth?: string | null; path?: string } = {}) {
-    server = Bun.serve({
-      port: 0,
-      fetch(request) {
-        seen.auth = request.headers.get('authorization');
-        seen.path = new URL(request.url).pathname;
-        return new Response(body, { status, headers: { 'content-type': 'application/json' } });
-      },
-    });
-    return { baseURL: `http://127.0.0.1:${server.port}/v1/`, apiKey: 'together-key' };
-  }
-
-  test('reads the bare array and keeps only chat models', async () => {
-    const seen: { auth?: string | null; path?: string } = {};
-    const client = serve(
-      200,
-      JSON.stringify([
-        { id: 'vendor/chat-model', type: 'chat' },
-        { id: 'vendor/image-model', type: 'image' },
-        { id: 'vendor/embedding-model', type: 'embedding' },
-        { id: 'vendor/untyped-model' },
-      ]),
-      seen,
-    );
-    const listed = await togetherModelListing(client).models.list({ timeout: 2_000 });
-    expect(listed.data).toEqual([{ id: 'vendor/chat-model' }, { id: 'vendor/untyped-model' }]);
-    expect(seen.path).toBe('/v1/models');
-    expect(seen.auth).toBe('Bearer together-key');
-  });
-
-  test('an error status or an OpenAI-style envelope is a failed listing, not zero models', async () => {
-    await expect(togetherModelListing(serve(401, '{"error":"bad key"}')).models.list()).rejects.toThrow('HTTP 401');
-    server?.stop(true);
-    await expect(togetherModelListing(serve(200, '{"data":[]}')).models.list()).rejects.toThrow('JSON array');
   });
 });

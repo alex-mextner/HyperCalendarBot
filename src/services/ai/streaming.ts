@@ -24,12 +24,7 @@ import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger, logOnce } from '../../utils/logger.ts';
 import { cerebrasClient, geminiClient, groqClient, hfClient, togetherClient, zaiClient } from './clients.ts';
 import { isGeminiLocalSkip, reserveGeminiBudget } from './gemini-quota.ts';
-import {
-  getModelOverride,
-  isModelNotFoundError,
-  resolveModelOverride,
-  togetherModelListing,
-} from './model-registry.ts';
+import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
 import {
   type Admission,
   admitProvider,
@@ -701,6 +696,23 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
 };
 
 /**
+ * Whether a provider's dead model may be replaced by one found in its live
+ * catalog. Cerebras and Together say no on purpose: each model there is an
+ * operator choice made after a probe (#379), and a large catalog with no curated
+ * preferences would let a 404 silently swap in an unprobed model. Their 404
+ * falls through to the next provider instead. Exhaustive, so a new provider has
+ * to decide.
+ */
+const REDISCOVERS_DEAD_MODEL: Record<ProviderId, boolean> = {
+  zai: true,
+  groq: true,
+  gemini: true,
+  hf: true,
+  cerebras: false,
+  together: false,
+};
+
+/**
  * What a provider needs before it can be put in a chain. Both are optional
  * because Groq's are: loadConfig requires the z.ai, Hugging Face and Gemini
  * credentials and models at startup, so for those three the check always
@@ -870,13 +882,11 @@ async function runSlot(
   try {
     return await streamRetryingBodilessRejection(slot, model, opts, cbs, onAttempt);
   } catch (error) {
-    if (!isModelNotFoundError(error)) throw error;
+    if (!isModelNotFoundError(error) || !REDISCOVERS_DEAD_MODEL[slot.provider]) throw error;
 
     const replacement = await resolveModelOverride({
       provider: slot.provider,
-      // Together's /models endpoint returns a bare array, not the { data: [] }
-      // envelope the OpenAI SDK client expects — adapt only for this provider.
-      client: slot.provider === 'together' ? togetherModelListing(slot.getClient()) : slot.getClient(),
+      client: slot.getClient(),
       configuredModel: slot.configuredModel,
       fast: opts.fast === true,
       // The cached replacement is dead too — probe again instead of reusing it.

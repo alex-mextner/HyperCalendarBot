@@ -238,10 +238,11 @@ that means the optional ones (Groq, Cerebras, Together), since `loadConfig()` re
 z.ai, Hugging Face and Gemini credentials and refuses to start without them. Cerebras and
 Together (#379) are in neither default order: they run only when named in a chain, with
 their key and an explicit per-chain model (`CEREBRAS_MODEL`/`CEREBRAS_FAST_MODEL`,
-`TOGETHER_MODEL`/`TOGETHER_FAST_MODEL`; no model id is defaulted). Together needs two
-adapters kept in `streaming.ts`/`model-registry.ts`: a tool-only assistant turn is sent with
-`content: ''` instead of `null` (it 400s "prompt cannot be empty"), on a clone, and its
-`/models` bare-array listing is read by `togetherModelListing`. An unknown name is ignored
+`TOGETHER_MODEL`/`TOGETHER_FAST_MODEL`; no model id is defaulted). A dead model on either
+is never replaced from the live catalog (`REDISCOVERS_DEAD_MODEL` in `streaming.ts`): the
+404 falls through to the next provider, so an unprobed model never serves a user. Together
+gets a tool-only assistant turn with `content: ''` instead of `null` (it 400s "prompt cannot
+be empty"), on a copy, in its slot only. An unknown name is ignored
 with a warning, an order naming nothing known falls back to the default order, and an order
 whose providers are all unconfigured falls back to the default order over whatever IS
 configured (logged as an error). Reordering during an incident is an `.env` edit and a

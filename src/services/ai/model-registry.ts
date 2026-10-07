@@ -10,8 +10,6 @@
 // here ever throws into the request path.
 
 import OpenAI from 'openai';
-import { z } from 'zod';
-import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import type { ProviderId } from './provider-ids.ts';
 
@@ -31,46 +29,6 @@ const PROBE_TIMEOUT_MS = 10_000;
 export interface ModelListingClient {
   models: {
     list(options?: { timeout?: number }): Promise<{ data: { id: string }[] }>;
-  };
-}
-
-const togetherModelsCodec = jsonCodec(z.array(z.object({ id: z.string(), type: z.string().optional() })));
-
-/**
- * Together's `/models` endpoint returns a bare JSON array (`[{ id, type, ... }]`),
- * not the `{ data: [] }` envelope the OpenAI SDK's `.models.list()` expects, so
- * the SDK reports zero models there (seen on a real account for #379). This reads
- * the array and hands `listLiveModels` the shape it already expects. Together
- * also lists image, audio and embedding models; an entry that declares a type
- * other than `chat` is dropped so a dead chat model is never replaced by one.
- * Wired in only for the together slot.
- */
-export function togetherModelListing(client: Pick<OpenAI, 'baseURL' | 'apiKey'>): ModelListingClient {
-  return {
-    models: {
-      async list(options) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), options?.timeout ?? PROBE_TIMEOUT_MS);
-        try {
-          const response = await fetch(`${client.baseURL.replace(/\/$/, '')}/models`, {
-            headers: { Authorization: `Bearer ${client.apiKey}` },
-            signal: controller.signal,
-          });
-          if (!response.ok) throw new Error(`Together /models answered HTTP ${response.status}`);
-          const parsed = togetherModelsCodec.safeParse(await response.text());
-          if (!parsed.success) {
-            throw new Error('Together /models response was not the expected JSON array of model ids');
-          }
-          return {
-            data: parsed.data
-              .filter((model) => model.type === undefined || model.type === 'chat')
-              .map((model) => ({ id: model.id })),
-          };
-        } finally {
-          clearTimeout(timer);
-        }
-      },
-    },
   };
 }
 
@@ -115,6 +73,7 @@ const PREFERRED_MODELS: ModelPreferenceTable = {
   },
   gemini: { smart: [], fast: [] },
   hf: { smart: [], fast: [] },
+  // Never consulted: streaming.ts does not rediscover models for these two.
   cerebras: { smart: [], fast: [] },
   together: { smart: [], fast: [] },
 };
