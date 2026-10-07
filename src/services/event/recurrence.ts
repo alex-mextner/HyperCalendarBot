@@ -21,12 +21,12 @@ const DST_FETCH_PAD_MS = 2 * 24 * 60 * 60_000;
 
 export interface ExpandRecurrenceOptions {
   /**
-   * Capability-gated rollback (spec §10). When true, expansion uses the pre-583 engine that
-   * reads only the single `RRULE:` line and matches exceptions by local calendar date. A
-   * series whose `recurrence_rule` carries EXDATE/RDATE is never fed into that truncating
-   * reader — doing so would silently reintroduce the §1.2 bug the multiline engine fixes, only
-   * via the rollback path instead of a missing feature. Such a series throws
-   * `RecurrenceUnsupportedError('recurrence_display_unsupported_disabled', …)` instead.
+   * Capability-gated rollout (spec §10). When true, expansion uses the pre-583 engine that
+   * reads only the single `RRULE:` line, ignores EXDATE/RDATE and matches exceptions by local
+   * calendar date — exactly today's production behavior. A series whose `recurrence_rule`
+   * already carries EXDATE/RDATE (every Google-synced series with a deleted instance) keeps
+   * displaying as it does today; hiding it would drop whole series from agenda, free/busy and
+   * reminders while the new engine is off.
    */
   legacyEngine?: boolean;
 }
@@ -71,23 +71,7 @@ export function expandRecurrence(
     return { occurrences: [], ambiguousLocalDates: [], nonexistentLocalDates: [], unresolvedExceptionIds: [] };
   }
 
-  const normalizedLines = template.recurrence_rule
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-  const hasExceptionLines = normalizedLines.some((l) => {
-    const head = l.split(':')[0] ?? '';
-    const prop = (head.split(';')[0] ?? '').trim().toUpperCase();
-    return prop === 'EXDATE' || prop === 'RDATE';
-  });
-
   if (options.legacyEngine) {
-    if (hasExceptionLines) {
-      throw new RecurrenceUnsupportedError(
-        'recurrence_display_unsupported_disabled',
-        'The legacy single-RRULE-line engine cannot serve a series whose recurrence_rule carries EXDATE/RDATE lines. Enable the multiline engine, or repair this series, before it can be displayed.',
-      );
-    }
     return {
       occurrences: expandLegacy(template, exceptions, rangeStartUtc, rangeEndUtc),
       ambiguousLocalDates: [],
@@ -325,8 +309,7 @@ export function expandRecurrence(
  * Pre-583 engine, preserved verbatim for the capability-gated rollback (spec §10). Reads only
  * the first `RRULE:` line, ignores EXDATE/RDATE, and matches exceptions by local calendar date
  * — every limitation this file's docstring and the spec describe as the bug being fixed.
- * Callers only reach this path with `options.legacyEngine: true`, and never for a series whose
- * `recurrence_rule` carries EXDATE/RDATE (see the check in `expandRecurrence`).
+ * Callers only reach this path with `options.legacyEngine: true`.
  */
 function expandLegacy(
   template: CalendarEvent,

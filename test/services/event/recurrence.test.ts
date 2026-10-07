@@ -331,6 +331,36 @@ describe('expandRecurrence', () => {
       expect(dates).not.toContain('2026-03-01');
       expect(dates.length).toBe(5);
     });
+
+    test('EXDATE;TZID on a summer occurrence removes it across the DST switch (RFC 5545 §3.8.5.1)', () => {
+      // Template 12:30 Belgrade in winter (CET); EXDATE given as local 12:30 on a CEST Monday.
+      const template = makeTemplate({
+        start_at: '2026-03-23T11:30:00Z',
+        timezone: 'Europe/Belgrade',
+        recurrence_rule: 'RRULE:FREQ=WEEKLY;COUNT=4\nEXDATE;TZID=Europe/Belgrade:20260406T123000',
+      });
+      const { occurrences } = expandRecurrence(template, [], '2026-03-01T00:00:00Z', '2026-05-01T00:00:00Z');
+      expect(occurrences.map((o) => o.occurrence_start)).toEqual([
+        '2026-03-23T11:30:00.000Z',
+        '2026-03-30T10:30:00.000Z',
+        '2026-04-13T10:30:00.000Z',
+      ]);
+    });
+
+    test('all-day series across DST keeps calendar dates; EXDATE/RDATE;VALUE=DATE apply by date', () => {
+      const template = makeTemplate({
+        start_at: '2026-03-23T00:00:00Z',
+        all_day: 1,
+        timezone: 'Europe/Belgrade',
+        recurrence_rule: 'RRULE:FREQ=WEEKLY;COUNT=3\nEXDATE;VALUE=DATE:20260330\nRDATE;VALUE=DATE:20260402',
+      });
+      const { occurrences } = expandRecurrence(template, [], '2026-03-01T00:00:00Z', '2026-05-01T00:00:00Z');
+      expect(occurrences.map((o) => o.occurrence_start.slice(0, 10))).toEqual([
+        '2026-03-23',
+        '2026-04-02',
+        '2026-04-06',
+      ]);
+    });
   });
 
   describe('RDATE (spec §1.2/§2 — honored, not silently dropped)', () => {
@@ -531,19 +561,24 @@ describe('expandRecurrence', () => {
       ]);
     });
 
-    test('flag off + EXDATE/RDATE-bearing series reports explicit unsupported, never re-truncates silently', () => {
-      // recurrence-rollback-002
+    test('flag off + EXDATE/RDATE-bearing series keeps production behavior instead of vanishing', () => {
+      // recurrence-rollback-002: Google-synced series already store EXDATE lines; with the new
+      // engine off they must still display (EXDATE/RDATE ignored, as on main), not be dropped.
       const template = makeTemplate({
         start_at: '2026-01-06T10:00:00Z',
         recurrence_rule: 'RRULE:FREQ=WEEKLY;INTERVAL=1;COUNT=6\nEXDATE:20260113T100000Z\nRDATE:20260301T100000Z',
       });
-      try {
-        expandRecurrence(template, [], '2026-01-01T00:00:00Z', '2026-03-05T00:00:00Z', { legacyEngine: true });
-        throw new Error('expected throw');
-      } catch (err) {
-        expect(err).toBeInstanceOf(RecurrenceUnsupportedError);
-        expect((err as RecurrenceUnsupportedError).reason).toBe('recurrence_display_unsupported_disabled');
-      }
+      const { occurrences } = expandRecurrence(template, [], '2026-01-01T00:00:00Z', '2026-03-05T00:00:00Z', {
+        legacyEngine: true,
+      });
+      expect(occurrences.map((o) => o.occurrence_start.slice(0, 10))).toEqual([
+        '2026-01-06',
+        '2026-01-13',
+        '2026-01-20',
+        '2026-01-27',
+        '2026-02-03',
+        '2026-02-10',
+      ]);
     });
   });
 });

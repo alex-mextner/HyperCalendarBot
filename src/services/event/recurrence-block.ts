@@ -23,8 +23,7 @@ export type RecurrenceRejectReason =
   | 'value_type_mismatch'
   | 'count_and_until_conflict'
   | 'count_out_of_range'
-  | 'invalid_rrule_syntax'
-  | 'recurrence_display_unsupported_disabled';
+  | 'invalid_rrule_syntax';
 
 /** Same cap the /add wizard already enforces on a typed COUNT (`add-event.scene.ts`) —
  * applied here too so ICS import, Google sync and the AI tool (none of which go through the
