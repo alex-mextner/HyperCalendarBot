@@ -121,16 +121,6 @@ export class InvitationRepository {
     return result.changes;
   }
 
-  cancelForEvent(eventId: number): number {
-    const result = this.db
-      .prepare(
-        `UPDATE invitations SET status = 'cancelled', updated_at = datetime('now')
-         WHERE event_id = ? AND status IN ('pending', 'maybe')`,
-      )
-      .run(eventId);
-    return result.changes;
-  }
-
   getByEvent(eventId: number): Invitation[] {
     return this.db.prepare('SELECT * FROM invitations WHERE event_id = ? ORDER BY id').all(eventId) as Invitation[];
   }
