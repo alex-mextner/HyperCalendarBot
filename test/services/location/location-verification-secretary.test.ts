@@ -102,6 +102,11 @@ function memoryRedis() {
       store.set(key, value);
       return 'OK';
     },
+    compareAndSet: async (key: string, expected: string | null, value: string) => {
+      if ((store.get(key) ?? null) !== expected) return false;
+      store.set(key, value);
+      return true;
+    },
   };
 }
 
@@ -468,7 +473,11 @@ describe("a write secretary completes the place picker for the owner's personal 
       location: RAW_LOCATION,
     });
 
-    const resolving = s.service.resolveFromCoordinates(created.id, place().latitude, place().longitude, SECRETARY_ID);
+    const resolving = s.service.resolveFromSharedLocation(
+      created.id,
+      { latitude: place().latitude, longitude: place().longitude, venue: null },
+      SECRETARY_ID,
+    );
     s.revokeSecretary();
     release();
     const success = await resolving;
@@ -600,8 +609,8 @@ describe('a group event is never treated as secretary-delegated', () => {
     const s = setup({ geocoder: geocoder.service });
     const GROUP_MEMBER_ID = 5004;
     const GROUP_CHAT_ID = -1009999;
-    // No city/country and a timezone with no known country mapping, so a bias leaking from the
-    // creator's Belgrade profile would be immediately visible as a defined bias here.
+    // No city/country of their own: the member's bias comes from their Novosibirsk timezone (RU,
+    // #488), so a bias leaking from the creator's Belgrade profile (RS) would be visible here.
     s.userRepo.create({ telegram_id: GROUP_MEMBER_ID, language: 'ru', timezone: 'Asia/Novosibirsk' });
     const groupMemberRepo = new GroupMemberRepository(db);
     groupMemberRepo.upsert(GROUP_CHAT_ID, OWNER_ID);
@@ -621,7 +630,7 @@ describe('a group event is never treated as secretary-delegated', () => {
 
     await s.service.verifyEventLocation(created, memberUser);
 
-    expect(geocoder.calls[0]?.bias).toBeUndefined();
+    expect(geocoder.calls[0]?.bias).toEqual({ countryCode: 'RU', bounds: null });
     expect(s.sent[0]?.userId).toBe(GROUP_MEMBER_ID);
 
     await s.tap(button(s.sent[0], '0'), GROUP_MEMBER_ID);
