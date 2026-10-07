@@ -6,7 +6,8 @@ admin commands). Consumes PR-0 (simulator) and PR-1 (revision service). The Mac 
 `docs/specs/2026-09-28-intent-recovery-334-mac-worker.md`.
 
 Prior design: `intent-evolution-release-20260919/docs/intents/learning-service.md` and
-`src/services/intent-learning/*` (unmerged, never tested by its authors). This spec keeps its queue,
+`src/services/intent-learning/*` (unmerged, never tested by its authors; preserved in the recovery
+bundle 2026-10-07 at `d3e9275a`, see the plan's global constraints). This spec keeps its queue,
 lease, rate, backoff and validation ideas and changes what is listed under "Deviations".
 
 ## Goal

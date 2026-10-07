@@ -27,8 +27,11 @@ here and in the specs.
 ## Global constraints
 
 - Priority order: data integrity and security, then reliability, then coverage and features.
-- Port source is the dirty, never-tested `.worktrees/intent-evolution-release-20260919` (read-only);
+- Port source is the dirty, never-tested `intent-evolution-release-20260919` snapshot (read-only);
   every port applies the fixes named in the specs. The 2026-09-19 code is not copied wholesale.
+  The 2026-09-19 branches named in these specs were deleted on 2026-10-07 and are preserved in the
+  recovery bundle 2026-10-07: `intent-evolution-release-20260919` at `d3e9275a`,
+  `cc-intent-worker-20260919` at `80c604bb`, `intent-learning-service-20260919` at `2a99f86c`.
 - Migrations: 064 is PR #464. Ours are `065_intent_revisions` (PR-1) and `066_event_references`
   (PR-5); recheck numbering against origin/main and open PRs at merge time; each needs
   `docs/reference/migrations/<name>.md` in the same PR (deploy schema gate).
