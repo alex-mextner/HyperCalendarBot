@@ -599,6 +599,31 @@ export interface Contact {
   created_at: string;
 }
 
+export type ContactAliasSource = 'primary_name' | 'confirmed_correction' | 'manual';
+
+export interface ContactAlias {
+  id: number;
+  user_id: number;
+  contact_id: number;
+  alias: string;
+  is_primary: number;
+  source: ContactAliasSource;
+  created_at: string;
+}
+
+export interface ContactGroup {
+  id: number;
+  user_id: number;
+  alias: string;
+  created_at: string;
+}
+
+export interface ContactGroupMember {
+  group_id: number;
+  contact_id: number;
+  added_at: string;
+}
+
 export interface EventReminderRow {
   id: number;
   event_id: number;
