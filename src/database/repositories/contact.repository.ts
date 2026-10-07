@@ -36,12 +36,18 @@ export class ContactRepository {
    *
    * Done in JS (not SQL) because SQLite's built-in LOWER() is ASCII-only —
    * "Лена" stays "Лена", breaking Cyrillic case-insensitive comparison.
+   *
+   * More than one exact match is ambiguous and returns null (never "first row"), so `upsert()`
+   * cannot attach a Telegram ID/username to an arbitrary one of two same-named contacts. The
+   * current schema forbids duplicate names, but #654 drops that index; this image must already
+   * be safe when it is the rollback target of that migration.
    */
   findByNameStrict(userId: number, name: string): Contact | null {
     const lower = name.trim().toLowerCase();
     if (lower.length === 0) return null;
     const contacts = this.db.prepare('SELECT * FROM contacts WHERE user_id = ?').all(userId) as Contact[];
-    return contacts.find((c) => c.name.trim().toLowerCase() === lower) ?? null;
+    const matches = contacts.filter((c) => c.name.trim().toLowerCase() === lower);
+    return matches.length === 1 ? (matches[0] ?? null) : null;
   }
 
   /**

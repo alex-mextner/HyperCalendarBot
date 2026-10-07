@@ -28,6 +28,20 @@ describe('ContactRepository', () => {
     expect(repo.list(USER_ID)).toEqual([]);
   });
 
+  test('upsert never patches an arbitrary one of two same-named contacts (#654 rollback safety)', () => {
+    // #654 drops idx_contacts_user_name; this image must stay correct when rolled back onto it.
+    db.exec('DROP INDEX idx_contacts_user_name');
+    const first = repo.add(USER_ID, 'Лена', undefined, 111);
+    const second = repo.add(USER_ID, 'лена ', undefined, 222);
+    expect(repo.findByNameStrict(USER_ID, 'Лена')).toBeNull();
+
+    const created = repo.upsert(USER_ID, 'Лена', 'new_lena');
+    expect(created.id).not.toBe(first.id);
+    expect(created.id).not.toBe(second.id);
+    expect(repo.findById(USER_ID, first.id)?.username).toBeNull();
+    expect(repo.findById(USER_ID, second.id)?.username).toBeNull();
+  });
+
   test('add creates a contact and findByName retrieves it', () => {
     const contact = repo.add(USER_ID, 'Лена', 'larichkina_b', 716928723);
     expect(contact.name).toBe('Лена');
