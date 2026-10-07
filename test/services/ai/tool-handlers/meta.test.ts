@@ -441,6 +441,18 @@ describe('meta tool handlers', () => {
       expect(result.success).toBe(true);
       expect(result.output).toContain('Вова');
     });
+
+    test('ambiguous same-named contacts return an identity conflict, not a raw DB error', () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Лена', undefined, 111);
+      contactRepo.add(USER_ID, 'лена', undefined, 222);
+      ctx.contactRepo = contactRepo;
+      const result = handleAddContact(ctx, { name: 'Лена' });
+      expect(result.success).toBe(false);
+      expect(result.mutationState).toBe('not_applied');
+      expect(result.error).toBe(t(ctx.user.language).aiTools.meta.recipientIdentityConflict);
+      expect(contactRepo.list(USER_ID)).toHaveLength(2);
+    });
   });
 
   describe('handleUpdateContact', () => {

@@ -28,16 +28,21 @@ describe('ContactRepository', () => {
     expect(repo.list(USER_ID)).toEqual([]);
   });
 
-  test('upsert never patches an arbitrary one of two same-named contacts (#654 rollback safety)', () => {
-    // #654 drops idx_contacts_user_name; this image must stay correct when rolled back onto it.
+  test('upsert refuses to patch either of two same-named contacts (Cyrillic case variants)', () => {
+    // The unique index folds only ASCII case, so these coexist on the current schema.
+    const first = repo.add(USER_ID, 'Лена', undefined, 111);
+    const second = repo.add(USER_ID, 'лена', undefined, 222);
+    expect(() => repo.upsert(USER_ID, 'Лена', 'new_lena')).toThrow('CONTACT_IDENTITY_CONFLICT');
+    expect(repo.findById(USER_ID, first.id)?.username).toBeNull();
+    expect(repo.findById(USER_ID, second.id)?.username).toBeNull();
+    expect(repo.list(USER_ID)).toHaveLength(2);
+  });
+
+  test('upsert refuses ambiguous exact duplicates once the name index is gone (#654 rollback)', () => {
     db.exec('DROP INDEX idx_contacts_user_name');
     const first = repo.add(USER_ID, 'Лена', undefined, 111);
-    const second = repo.add(USER_ID, 'лена ', undefined, 222);
-    expect(repo.findByNameStrict(USER_ID, 'Лена')).toBeNull();
-
-    const created = repo.upsert(USER_ID, 'Лена', 'new_lena');
-    expect(created.id).not.toBe(first.id);
-    expect(created.id).not.toBe(second.id);
+    const second = repo.add(USER_ID, 'Лена', undefined, 222);
+    expect(() => repo.upsert(USER_ID, 'Лена', 'new_lena')).toThrow('CONTACT_IDENTITY_CONFLICT');
     expect(repo.findById(USER_ID, first.id)?.username).toBeNull();
     expect(repo.findById(USER_ID, second.id)?.username).toBeNull();
   });
