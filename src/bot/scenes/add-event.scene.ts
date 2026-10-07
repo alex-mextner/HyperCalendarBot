@@ -67,7 +67,6 @@ function calendarDayFromIso(dateIso: string): CalendarDay {
   const [y, m, d] = dateIso.split('-').map(Number) as [number, number, number];
   return { y, m, d };
 }
-
 function parseWizardDate(input: string, timezone: string, refDate = new Date(), bareDay = false): Date | null {
   const ref = new TZDate(refDate.getTime(), timezone);
   const text = input
@@ -185,16 +184,23 @@ function formatTimeCandidate(candidate: string): string {
  * candidates the parser itself would (re-)offer for that HH:MM on this same pendingDate — never
  * an arbitrary attacker-supplied date/offset smuggled through a crafted "add:time:<iso>" click.
  */
-function resolveChosenCandidate(candidate: string, pendingDate: string, timezone: string): string | null {
+function resolveChosenCandidate(
+  candidate: string,
+  pendingDate: string,
+  timezone: string,
+): { startAt: string } | { foldCandidates: readonly [string, string] } | null {
   if (/^\d{2}:\d{2}$/.test(candidate)) {
     const resolution = resolveWizardWallTime(candidate, { selectedDate: pendingDate, timezone });
-    return resolution.kind === 'complete' && resolution.schedule.kind === 'timed' ? resolution.schedule.startAt : null;
+    if (resolution.kind === 'complete' && resolution.schedule.kind === 'timed')
+      return { startAt: resolution.schedule.startAt };
+    // The chosen bare-hour reading can itself fall in a DST fold: ask which of the two instants.
+    return resolution.kind === 'ambiguous_instant' ? { foldCandidates: resolution.candidates } : null;
   }
   const offsetInstant = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):\d{2}[+-]\d{2}:\d{2}$/.exec(candidate);
   if (!offsetInstant || offsetInstant[1] !== pendingDate) return null;
   const resolution = resolveWizardWallTime(offsetInstant[2]!, { selectedDate: pendingDate, timezone });
   if (resolution.kind !== 'ambiguous_instant' || !resolution.candidates.includes(candidate)) return null;
-  return new Date(candidate).toISOString();
+  return { startAt: new Date(candidate).toISOString() };
 }
 
 function recurrenceUntilDate(input: string, timezone: string, startAt?: string): Date | null {
@@ -410,12 +416,21 @@ export function createAddEventScene(
           ? callback.slice(CB.ADD_TIME_CHOICE.length + 1)
           : undefined;
         if (chosenCandidate !== undefined) {
-          const startAt = resolveChosenCandidate(chosenCandidate, pendingDate, timezone);
-          if (!startAt) {
+          const chosen = resolveChosenCandidate(chosenCandidate, pendingDate, timezone);
+          if (!chosen) {
             await show(wizardText.invalidDate);
             return;
           }
-          await context.scene.update({ startAt, endAt: undefined, pendingDate: undefined, allDay: false });
+          if ('foldCandidates' in chosen) {
+            await show(wizardText.ambiguousTime, undefined, false, chosen.foldCandidates);
+            return;
+          }
+          await context.scene.update({
+            startAt: chosen.startAt,
+            endAt: undefined,
+            pendingDate: undefined,
+            allDay: false,
+          });
           return;
         }
         if (!text) {

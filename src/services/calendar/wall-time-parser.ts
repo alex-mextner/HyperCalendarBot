@@ -112,9 +112,10 @@ const RUSSIAN_HOUR_WORDS: Readonly<Record<string, number>> = {
   двенадцать: 12,
 };
 
-const PREFIX_SHAPE = /^(?:в|at)\s+/;
+// "в19:00"/"at7pm": the prefix may touch the digits, matching the wizard's legacy clock grammar.
+const PREFIX_SHAPE = /^(?:в|at)(?:\s+|(?=\d))/;
 
-const CLOCK_SHAPE = /^(?:(?:в|at)\s+)?(\d{1,2})(?::(\d{2}))?(?:\s*(am|pm|утра|дня|вечера|ночи))?$/;
+const CLOCK_SHAPE = /^(?:(?:в|at)(?:\s+|(?=\d)))?(\d{1,2})(?::(\d{2}))?(?:\s*(am|pm|утра|дня|вечера|ночи))?$/;
 
 type ClockShape =
   | { kind: 'literal'; hour: number; minute: number }

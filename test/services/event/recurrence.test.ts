@@ -233,5 +233,74 @@ describe('expandRecurrence', () => {
       expect(occs[1]!.occurrence_start).toContain('2026-03-29T00:00');
       expect(occs[2]!.occurrence_start).toContain('2026-03-30T00:00');
     });
+
+    test('a zone-anchored all-day series keeps each local calendar day across spring-forward (Belgrade)', () => {
+      // /add stores all-day boundaries as the zone's local midnight with its offset (GH-652).
+      const template = makeTemplate({
+        start_at: '2027-03-25T00:00:00.000+01:00',
+        end_at: '2027-03-26T00:00:00.000+01:00',
+        all_day: 1,
+        timezone: 'Europe/Belgrade',
+        recurrence_rule: 'FREQ=DAILY',
+      });
+      const occs = expandRecurrence(template, [], '2027-03-26T23:00:00Z', '2027-03-29T21:59:00Z');
+      expect(occs.map((o) => [o.occurrence_start, o.occurrence_end])).toEqual([
+        ['2027-03-27T00:00:00.000+01:00', '2027-03-28T00:00:00.000+01:00'],
+        ['2027-03-28T00:00:00.000+01:00', '2027-03-29T00:00:00.000+02:00'],
+        ['2027-03-29T00:00:00.000+02:00', '2027-03-30T00:00:00.000+02:00'],
+      ]);
+    });
+
+    test('a summer-anchored weekly all-day series in a negative zone stays on its weekday after fall-back (New York)', () => {
+      const template = makeTemplate({
+        start_at: '2027-10-27T00:00:00.000-04:00', // Wednesday
+        end_at: '2027-10-28T00:00:00.000-04:00',
+        all_day: 1,
+        timezone: 'America/New_York',
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+      const occs = expandRecurrence(template, [], '2027-11-08T00:00:00Z', '2027-11-20T00:00:00Z');
+      expect(occs.map((o) => o.occurrence_start)).toEqual([
+        '2027-11-10T00:00:00.000-05:00',
+        '2027-11-17T00:00:00.000-05:00',
+      ]);
+    });
+
+    test('an all-day local midnight stored as UTC (AI create_event shape) recurs on local days too', () => {
+      // Belgrade Mon 2027-03-29 00:00 (+02:00) stored as 2027-03-28T22:00:00Z.
+      const template = makeTemplate({
+        start_at: '2027-03-28T22:00:00.000Z',
+        all_day: 1,
+        timezone: 'Europe/Belgrade',
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+      const occs = expandRecurrence(template, [], '2027-10-30T00:00:00Z', '2027-11-06T00:00:00Z');
+      expect(occs.map((o) => o.occurrence_start)).toEqual(['2027-11-01T00:00:00.000+01:00']);
+    });
+
+    test('a cancelled occurrence of a zone-anchored all-day series is matched by local date', () => {
+      const template = makeTemplate({
+        id: 1,
+        start_at: '2027-03-25T00:00:00.000+01:00',
+        all_day: 1,
+        timezone: 'Europe/Belgrade',
+        recurrence_rule: 'FREQ=DAILY',
+      });
+      const exceptions = [
+        makeTemplate({
+          id: 2,
+          parent_event_id: 1,
+          original_start_at: '2027-03-29T00:00:00.000+02:00',
+          start_at: '2027-03-29T00:00:00.000+02:00',
+          is_cancelled: 1,
+          recurrence_rule: null,
+        }),
+      ];
+      const occs = expandRecurrence(template, exceptions, '2027-03-27T23:00:00Z', '2027-03-30T12:00:00Z');
+      expect(occs.map((o) => o.occurrence_start)).toEqual([
+        '2027-03-28T00:00:00.000+01:00',
+        '2027-03-30T00:00:00.000+02:00',
+      ]);
+    });
   });
 });

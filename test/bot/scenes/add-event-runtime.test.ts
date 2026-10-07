@@ -468,6 +468,35 @@ test('English locale: the time question keyboard and ambiguous-time prompt are i
   expect(event.start_at).toBe('2027-01-15T13:00:00.000Z');
 });
 
+test('a clock with its prefix glued to the digits ("в19:00") keeps the pending date, not today', async () => {
+  const r = makeRuntime();
+  await r.send('/add Ужин 2027-05-20');
+  await r.send('в19:00');
+  await r.click('add:duration:30');
+  await r.click('ar:none');
+  const event = await finishDraft(r);
+  expect(event.start_at).toBe('2027-05-20T17:00:00.000Z');
+});
+
+test('picking a bare-hour reading that falls in a DST fold asks which of the two instants', async () => {
+  // Europe/Belgrade falls back on 2026-10-25: 02:00 local happens at +02:00 and again at +01:00.
+  const r = makeRuntime();
+  await r.send('/add Смена 2026-10-25');
+  await r.send('2');
+  await r.click('add:time:02:00');
+  const foldButtons = r.messages
+    .at(-1)!
+    .keyboard?.inline_keyboard.flat()
+    .map((b) => b.callback_data)
+    .filter((data) => data?.startsWith('add:time:'));
+  expect(foldButtons).toEqual(['add:time:2026-10-25T02:00:00+02:00', 'add:time:2026-10-25T02:00:00+01:00']);
+  await r.click('add:time:2026-10-25T02:00:00+01:00');
+  await r.click('add:duration:30');
+  await r.click('ar:none');
+  const event = await finishDraft(r);
+  expect(event.start_at).toBe('2026-10-25T01:00:00.000Z');
+});
+
 // ---------------------------------------------------------------------------
 // All-day calendar-date semantics across timezones (GH-652 parent review,
 // issuecomment-5878910926 / PR682 review comment 5345159046): all-day is a DATE range, not a

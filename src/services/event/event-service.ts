@@ -499,8 +499,9 @@ export class EventService {
 
     for (const occ of occurrences) {
       if (occ.is_exception && occ.event.is_cancelled) continue;
-      // Skip the base occurrence — already materialized by the caller
-      if (occ.occurrence_start === event.start_at) continue;
+      // Skip the base occurrence — already materialized by the caller. Compare instants: an
+      // all-day series may render the base in another ISO form (offset vs Z) than stored.
+      if (storedInstantMs(occ.occurrence_start) === storedInstantMs(event.start_at)) continue;
 
       this.materializer.materializeForOccurrence(
         event.id,
