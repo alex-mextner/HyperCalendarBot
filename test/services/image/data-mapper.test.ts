@@ -435,8 +435,10 @@ describe('place on the daily agenda image', () => {
     return dailyAgendaTemplate.render(data);
   }
 
-  test('a place confirmed with a pin on an event without typed text shows in the agenda details', () => {
-    expect(renderDay(pinPlace)).toContain('<div>📍 Damrak 1, Amsterdam</div>');
+  test('a place confirmed with a pin on an event without typed text shows in the event cell', () => {
+    expect(renderDay(pinPlace)).toContain(
+      '<span class="compact-icon">📍</span><span class="compact-text">Damrak 1, Amsterdam</span>',
+    );
   });
 
   test('a stale unconfirmed place on an event without typed text shows no place', () => {
