@@ -10,6 +10,7 @@ export const FEATURE_KEYS = {
   GOOGLE_CALENDAR: 'google_calendar',
   VOICE_CALLS: 'voice_calls',
   CONTACTS: 'contacts',
+  PLACES: 'places',
   HOLIDAYS: 'holidays',
   IMPORT: 'import',
   FREE_SLOTS: 'free_slots',
