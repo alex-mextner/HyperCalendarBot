@@ -405,8 +405,11 @@ test('view resolves a moved recurring exception by its own stable identity, not 
   // 14:00 UTC is 07:00 in the viewer's own America/Los_Angeles zone (personal chat, no group) —
   // the moved time, not the original 12:00 UTC / 05:00 local slot.
   expect(edits.join('')).toContain('07:00');
-  // Stable identity: the buttons reference the exception's own row, not the template's.
-  expect(JSON.stringify(controls.at(-1))).toContain(`${moved.id}:2099-06-15T14:00:00Z`);
+  // Stable identity: the buttons reference the exception's own row, not the template's. The
+  // exception is a concrete event of its own, so it gets the plain id payload like any one-off.
+  const buttons = JSON.stringify(controls.at(-1));
+  expect(buttons).toContain(`"${CB.EVENT_EDIT}:${moved.id}"`);
+  expect(buttons).not.toContain(`"${CB.EVENT_EDIT}:${template.id}`);
   // A stale claim of the exception's pre-move slot is rejected, not silently re-rendered.
   Object.defineProperty(ctx, 'data', {
     value: `${CB.EVENT_VIEW}:${moved.id}:2099-06-15T12:00:00Z`,

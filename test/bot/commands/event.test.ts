@@ -149,12 +149,20 @@ describe('handleEvent', () => {
       expect(args[0] as string).toContain("Today's meeting");
     });
 
-    test('no events today sends the day-empty message, not a search-empty message', async () => {
+    test('no events today names the day and the calendar checked, not a search-empty message', async () => {
       const svc = makeSvc({ getEventsInRange: mock(() => []) });
       const ctx = makeCtx({ args: '' });
       await handleEvent(ctx, svc);
       const args = (ctx.send as ReturnType<typeof mock>).mock.calls[0] as unknown[];
-      expect(args[0] as string).not.toBe('No events found.');
+      expect(args[0] as string).toMatch(/^No events in your calendar start today, [A-Z][a-z]+ \d{1,2}\.$/);
+    });
+
+    test('no events today in a group names the group calendar', async () => {
+      const svc = makeSvc({ getEventsInRangeForGroup: mock(() => []) });
+      const ctx = makeCtx({ args: '', chat: { type: 'supergroup', id: -500 } });
+      await handleEvent(ctx, svc);
+      const args = (ctx.send as ReturnType<typeof mock>).mock.calls[0] as unknown[];
+      expect(args[0] as string).toMatch(/^No events in this group's calendar start today, /);
     });
 
     test('in a group queries the group calendar for today', async () => {

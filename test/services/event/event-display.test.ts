@@ -128,12 +128,62 @@ describe('buildCanonicalEventCard', () => {
     expect(payloads).not.toContain(':2026');
   });
 
-  test('occurrenceDate set → occurrence-scoped keyboard payload', () => {
-    const event = makeEvent({ id: 42 });
+  test('occurrenceDate on a recurring series → occurrence-scoped keyboard payload', () => {
+    const event = makeEvent({ id: 42, recurrence_rule: 'FREQ=WEEKLY' });
     const card = buildCanonicalEventCard(event, 'UTC', 'en', '2026-03-18T09:00:00Z');
     const payloads = JSON.stringify(card.keyboard);
     expect(payloads).toContain('ee:42:2026-03-18T09:00:00Z');
     expect(payloads).toContain('ed:42:2026-03-18T09:00:00Z');
+  });
+
+  test('occurrenceDate on a one-off event → the same id-only payload as /event <id>', () => {
+    const event = makeEvent({ id: 42 });
+    const card = buildCanonicalEventCard(event, 'UTC', 'en', event.start_at);
+    expect(JSON.stringify(card.keyboard)).toBe(JSON.stringify(buildCanonicalEventCard(event, 'UTC', 'en').keyboard));
+  });
+
+  test('a confirmed place adds the Map button after Edit/Delete', () => {
+    const event = makeEvent({ id: 42, location: 'Cafe', latitude: 44.8, longitude: 20.4, location_verified: 1 });
+    const payloads = JSON.stringify(buildCanonicalEventCard(event, 'UTC', 'en').keyboard);
+    expect(payloads).toContain('"ev_map:42"');
+  });
+
+  test('an unconfirmed place gets no Map button', () => {
+    const event = makeEvent({ id: 42, location: 'Cafe', latitude: 44.8, longitude: 20.4, location_verified: 0 });
+    expect(JSON.stringify(buildCanonicalEventCard(event, 'UTC', 'en').keyboard)).not.toContain('"ev_map:42"');
+  });
+});
+
+describe('buildEventPicker day labels', () => {
+  test('matches on one local day show only the time', () => {
+    const occs = [
+      makeOccurrence({ id: 1, title: 'Standup' }, '2026-03-18T09:00:00Z'),
+      makeOccurrence({ id: 2, title: 'Retro' }, '2026-03-18T15:00:00Z'),
+    ];
+    const labels = JSON.stringify(buildEventPicker(occs, 'UTC', 'ev', 'en'));
+    expect(labels).toContain('"1. 09:00 Standup"');
+    expect(labels).toContain('"2. 15:00 Retro"');
+  });
+
+  test('matches on different local days name the day of each', () => {
+    const occs = [
+      makeOccurrence({ id: 7, title: 'Standup' }, '2026-03-18T09:00:00Z'),
+      makeOccurrence({ id: 7, title: 'Standup' }, '2026-03-25T09:00:00Z'),
+    ];
+    const labels = JSON.stringify(buildEventPicker(occs, 'UTC', 'ev', 'en'));
+    expect(labels).toContain('"1. Wed 18 09:00 Standup"');
+    expect(labels).toContain('"2. Wed 25 09:00 Standup"');
+  });
+
+  test("days are the viewer's local days, not UTC days", () => {
+    // 23:30 UTC on the 18th is already the 19th in Tokyo; 01:00 UTC on the 19th is the 19th too.
+    const occs = [
+      makeOccurrence({ id: 1, title: 'Late' }, '2026-03-18T23:30:00Z'),
+      makeOccurrence({ id: 2, title: 'Early' }, '2026-03-19T01:00:00Z'),
+    ];
+    const labels = JSON.stringify(buildEventPicker(occs, 'Asia/Tokyo', 'ev', 'en'));
+    expect(labels).toContain('"1. 08:30 Late"');
+    expect(labels).toContain('"2. 10:00 Early"');
   });
 });
 

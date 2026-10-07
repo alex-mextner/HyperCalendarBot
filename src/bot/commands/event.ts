@@ -7,6 +7,7 @@
 import { CB, t } from '../../config/constants.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { EventOccurrence } from '../../database/types.ts';
+import { formatEmptyAgenda } from '../../services/ai/empty-agenda.ts';
 import { enrichAgenda, enrichAgendaEvents } from '../../services/event/agenda-enrichment.ts';
 import { buildCanonicalEventCard, buildEventPicker, decideEventDisplay } from '../../services/event/event-display.ts';
 import type { EventService } from '../../services/event/event-service.ts';
@@ -96,5 +97,12 @@ export async function handleEvent(
       ? eventService.getEventsInRangeForGroup(groupId, start, end)
       : eventService.getEventsInRange(user.telegram_id, start, end);
   const enriched = enrichAgenda(occurrences, viewer, eventService.agendaRepository);
-  await sendOccurrenceResult(ctx, enriched, timezone, lang, t(lang).eventCard.dayAgendaEmpty);
+  // Same wording as an empty show_event/get_events read: names the day and the calendar checked.
+  const emptyText = formatEmptyAgenda({
+    interval: { start: new Date(start), end: new Date(end) },
+    timezone,
+    language: lang,
+    scope: groupId !== null ? 'group' : 'personal',
+  });
+  await sendOccurrenceResult(ctx, enriched, timezone, lang, emptyText);
 }

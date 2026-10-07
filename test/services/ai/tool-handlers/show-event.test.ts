@@ -5,6 +5,7 @@ import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../../src/database/repositories/event-reminder.repository.ts';
+import { GroupChatRepository } from '../../../../src/database/repositories/group-chat.repository.ts';
 import { SecretaryRepository } from '../../../../src/database/repositories/secretary.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
@@ -192,6 +193,36 @@ describe('handleShowEvent', () => {
       const [chatId, text] = sendMessageWithKeyboard.mock.calls[0] as unknown[];
       expect(chatId).toBe(GROUP_ID);
       expect(text as string).toContain('Team sync');
+    });
+
+    test("a group card shows the group's clock, not the asking member's", async () => {
+      const GROUP_ID = -100998;
+      const groupChatRepo = new GroupChatRepository(db);
+      groupChatRepo.upsertGroup({ chat_id: GROUP_ID, added_by: USER_ID });
+      groupChatRepo.setTimezone(GROUP_ID, 'Asia/Tokyo');
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Team sync',
+        start_at: '2026-03-15T10:00:00Z',
+        end_at: '2026-03-15T10:30:00Z',
+        timezone: 'Asia/Tokyo',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: USER_ID,
+      });
+      const groupCtx = makeAgentContext({
+        ...ctx,
+        isGroup: true,
+        groupChatId: GROUP_ID,
+        chatId: GROUP_ID,
+        group: { groupChatRepo },
+      });
+      const result = await handleShowEvent(groupCtx, { event_id: event.id, scope: 'group' });
+      expect(result.success).toBe(true);
+      const [, text] = sendMessageWithKeyboard.mock.calls[0] as unknown[];
+      // 10:00 UTC is 19:00 in Tokyo; the member's own zone here is UTC.
+      expect(text as string).toContain('19:00');
+      expect(text as string).not.toContain('10:00');
     });
 
     test('group scope without a group chat id is refused before any read', async () => {

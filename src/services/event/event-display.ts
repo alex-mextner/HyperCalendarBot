@@ -13,10 +13,13 @@
 // projection (`eventForOccurrence`, `eventAtOccurrenceStart`) is an in-memory reshaping of
 // already-fetched data, never a write. Do NOT call `EventService.editOccurrence` from a display
 // path: it persists a new exception row (see its docstring) — a pure read must never mutate.
+import { TZDate } from '@date-fns/tz';
+import { format } from 'date-fns';
 import { InlineKeyboard } from 'gramio';
 import { eventActionsKeyboard, eventActionsKeyboardOcc } from '../../bot/keyboards.ts';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
-import { formatTime } from '../../utils/date.ts';
+import { formatDateShort, formatTime } from '../../utils/date.ts';
+import { withMapButton } from '../location/event-venue.ts';
 import { formatEventDetail } from './formatters.ts';
 
 export type DisplayLang = 'en' | 'ru';
@@ -54,9 +57,11 @@ export function eventAtOccurrenceStart(event: CalendarEvent, occurrenceStart: st
 
 /**
  * The canonical single-event card: `formatEventDetail`'s text plus the same view-action
- * keyboard `CB.EVENT_VIEW` already uses (Edit/Delete). `occurrenceDate` is the exact occurrence
- * instant this card is showing — pass it for a recurring series so the buttons carry the
- * `id:occurrenceDate` payload (occurrence-scoped edit/delete) instead of editing the template.
+ * keyboard `CB.EVENT_VIEW` already uses (Edit/Delete, then Map when the event has a confirmed
+ * place). `occurrenceDate` is the exact occurrence instant this card is showing; for a recurring
+ * series the buttons carry the `id:occurrenceDate` payload (occurrence-scoped edit/delete)
+ * instead of editing the template. A one-off event gets the plain `id` payload whatever the
+ * caller passed, so every surface shows the same buttons for the same event.
  * `event` must already be occurrence-projected by the caller when `occurrenceDate` is set.
  */
 export function buildCanonicalEventCard(
@@ -65,11 +70,13 @@ export function buildCanonicalEventCard(
   lang: DisplayLang,
   occurrenceDate?: string,
 ): CanonicalEventCard {
+  const actions =
+    occurrenceDate && event.recurrence_rule
+      ? eventActionsKeyboardOcc(event.id, occurrenceDate, lang)
+      : eventActionsKeyboard(event.id, lang);
   return {
     text: formatEventDetail(event, timezone, lang),
-    keyboard: occurrenceDate
-      ? eventActionsKeyboardOcc(event.id, occurrenceDate, lang)
-      : eventActionsKeyboard(event.id, lang),
+    keyboard: withMapButton(actions, event, lang),
   };
 }
 
@@ -77,7 +84,8 @@ export function buildCanonicalEventCard(
  * A picker over occurrences, one row per match, each carrying `id:occurrenceStart` — the same
  * `CB.EVENT_EDIT`/`CB.EVENT_DELETE` payload convention `CB.EVENT_VIEW` already understands — so
  * a tap re-opens exactly the tapped occurrence's card, not the series' template date, even when
- * two instances of one recurring series both match the same query.
+ * two instances of one recurring series both match the same query. When the matches fall on
+ * different local days each label also names its day, so "10:00" alone never stands for two dates.
  */
 export function buildEventPicker(
   occurrences: EventOccurrence[],
@@ -85,11 +93,15 @@ export function buildEventPicker(
   prefix: string,
   lang: DisplayLang,
 ): InlineKeyboard {
+  const shown = occurrences.slice(0, 10);
+  const multiDay =
+    new Set(shown.map((occ) => format(new TZDate(new Date(occ.occurrence_start), timezone), 'yyyy-MM-dd'))).size > 1;
   const kb = new InlineKeyboard();
-  for (let i = 0; i < occurrences.length && i < 10; i++) {
-    const occ = occurrences[i]!;
+  for (let i = 0; i < shown.length; i++) {
+    const occ = shown[i]!;
     const time = formatTime(occ.occurrence_start, timezone);
-    const label = `${i + 1}. ${time} ${occ.event.title.slice(0, 20)}`;
+    const when = multiDay ? `${formatDateShort(occ.occurrence_start, timezone, lang)} ${time}` : time;
+    const label = `${i + 1}. ${when} ${occ.event.title.slice(0, 20)}`;
     kb.text(label, `${prefix}:${occ.event.id}:${occ.occurrence_start}`).row();
   }
   kb.text(lang === 'ru' ? 'Отмена' : 'Cancel', `${prefix}:cancel`);

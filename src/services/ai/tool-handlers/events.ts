@@ -1247,7 +1247,6 @@ export async function handleShowEvent(ctx: AgentContext, input: ShowEventInput):
     language: ctx.user.language as 'en' | 'ru',
     groupId: scope === 'group' ? ctx.groupChatId : undefined,
   };
-
   type PendingSend =
     | { kind: 'card'; card: CanonicalEventCard }
     | { kind: 'empty'; text: string }
@@ -1257,7 +1256,13 @@ export async function handleShowEvent(ctx: AgentContext, input: ShowEventInput):
   // error (see the docstring above); a failure sending the already-decided result is a different
   // problem and must not be relabeled as "could not read your calendar".
   let pending: PendingSend;
+  // A group card shows the group's own clock, the same as /event and CB.EVENT_VIEW in that chat;
+  // the requested period is still read in the user's zone, like get_events.
+  let displayTimezone = ctx.user.timezone;
   try {
+    if (scope === 'group') {
+      displayTimezone = ctx.group?.groupChatRepo.getTimezone(ctx.groupChatId!) ?? ctx.user.timezone;
+    }
     if (input.event_id !== undefined) {
       const event =
         scope === 'group'
@@ -1267,7 +1272,7 @@ export async function handleShowEvent(ctx: AgentContext, input: ShowEventInput):
         return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
       }
       const displayEvent = enrichAgendaEvents([event], viewer, ctx.eventService.agendaRepository)[0]!;
-      pending = { kind: 'card', card: buildCanonicalEventCard(displayEvent, ctx.user.timezone, lang, undefined) };
+      pending = { kind: 'card', card: buildCanonicalEventCard(displayEvent, displayTimezone, lang) };
     } else {
       if (input.start_date === undefined || input.end_date === undefined) {
         return {
@@ -1309,7 +1314,7 @@ export async function handleShowEvent(ctx: AgentContext, input: ShowEventInput):
       } else {
         pending = {
           kind: 'card',
-          card: buildCanonicalEventCard(decision.event, ctx.user.timezone, lang, decision.occurrenceDate),
+          card: buildCanonicalEventCard(decision.event, displayTimezone, lang, decision.occurrenceDate),
         };
       }
     }
@@ -1337,7 +1342,7 @@ export async function handleShowEvent(ctx: AgentContext, input: ShowEventInput):
     };
   }
   if (pending.kind === 'picker') {
-    const keyboard = buildEventPicker(pending.occurrences, ctx.user.timezone, CB.EVENT_VIEW, lang);
+    const keyboard = buildEventPicker(pending.occurrences, displayTimezone, CB.EVENT_VIEW, lang);
     await sender.sendMessageWithKeyboard!(ctx.chatId, t(lang).aiTools.meta.showEventPickPrompt, keyboard);
     return {
       success: true,

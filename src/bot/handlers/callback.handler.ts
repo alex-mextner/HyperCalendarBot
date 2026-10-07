@@ -49,7 +49,7 @@ import { renderConflictImage } from '../../services/image/render-conflict.ts';
 import type { ImageRenderer } from '../../services/image/render-service.ts';
 import type { AdminEditSession } from '../../services/intent/admin-edit-session.ts';
 import { ConflictService } from '../../services/invite/conflict-service.ts';
-import { eventVenue, withMapButton } from '../../services/location/event-venue.ts';
+import { eventVenue } from '../../services/location/event-venue.ts';
 import { formatLocationHtml } from '../../services/location/format-location.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { SceneName, ScenePauseService } from '../../services/scene-pause.ts';
