@@ -134,7 +134,9 @@ describe('IntentLearner', () => {
     const intentPayload = {
       canonical_name: 'show_today_unverified',
       phrases: ['что сегодня без админа'],
-      workflow: { tools: [{ name: 'get_events', input: { date: '{{dates.today}}' } }] },
+      workflow: {
+        tools: [{ name: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } }],
+      },
       format: 'events_list',
     };
     const learner = buildLearner(makeStreamStub([JSON.stringify(intentPayload)]));
