@@ -227,6 +227,67 @@ describe('EventRepository', () => {
     expect(results[0]!.title).toBe('Dentist appointment');
   });
 
+  describe('title search folds case beyond ASCII', () => {
+    // SQLite LIKE folds only ASCII letters, so a lowercase Cyrillic query missed a capitalised title.
+    test('search matches Cyrillic and accented titles regardless of case', () => {
+      events.create({ user_id: USER_ID, title: 'Встреча с Леной', start_at: '2026-03-12T10:00:00Z', timezone: 'UTC' });
+      events.create({ user_id: USER_ID, title: 'Déjà vu', start_at: '2026-03-12T11:00:00Z', timezone: 'UTC' });
+      events.create({ user_id: USER_ID, title: 'Обед', start_at: '2026-03-12T12:00:00Z', timezone: 'UTC' });
+
+      expect(events.search(USER_ID, 'встреча').map((e) => e.title)).toEqual(['Встреча с Леной']);
+      expect(events.search(USER_ID, 'ЛЕНОЙ').map((e) => e.title)).toEqual(['Встреча с Леной']);
+      expect(events.search(USER_ID, 'DÉJÀ').map((e) => e.title)).toEqual(['Déjà vu']);
+    });
+
+    test('search returns at most limit matches in start order', () => {
+      events.create({ user_id: USER_ID, title: 'Врач 3', start_at: '2026-03-14T10:00:00Z', timezone: 'UTC' });
+      events.create({ user_id: USER_ID, title: 'Врач 1', start_at: '2026-03-12T10:00:00Z', timezone: 'UTC' });
+      events.create({ user_id: USER_ID, title: 'Обед', start_at: '2026-03-11T10:00:00Z', timezone: 'UTC' });
+      events.create({ user_id: USER_ID, title: 'Врач 2', start_at: '2026-03-13T10:00:00Z', timezone: 'UTC' });
+
+      expect(events.search(USER_ID, 'врач', 2).map((e) => e.title)).toEqual(['Врач 1', 'Врач 2']);
+    });
+
+    test('search does not return another user’s matching event', () => {
+      new UserRepository(db).create({ telegram_id: 456 });
+      events.create({ user_id: 456, title: 'Встреча', start_at: '2026-03-12T10:00:00Z', timezone: 'UTC' });
+
+      expect(events.search(USER_ID, 'встреча')).toEqual([]);
+    });
+
+    test('searchForGroup matches a Cyrillic group title regardless of case', () => {
+      events.create({
+        user_id: USER_ID,
+        title: 'Планёрка',
+        start_at: '2026-03-12T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: 999,
+        created_by: USER_ID,
+      });
+
+      expect(events.searchForGroup(999, 'планёрка').map((e) => e.title)).toEqual(['Планёрка']);
+    });
+
+    test('searchWithEventType matches a Cyrillic title regardless of case', () => {
+      events.create({
+        user_id: USER_ID,
+        title: 'Д/р Иван',
+        start_at: '2026-05-10T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+      });
+      events.create({ user_id: USER_ID, title: 'Иванов день', start_at: '2026-05-11T10:00:00Z', timezone: 'UTC' });
+
+      expect(events.searchWithEventType(USER_ID, 'иван', 'birthday').map((e) => e.title)).toEqual(['Д/р Иван']);
+      expect(events.searchWithEventType(USER_ID, 'иван', null).map((e) => e.title)).toEqual([
+        'Д/р Иван',
+        'Иванов день',
+      ]);
+    });
+  });
+
   test('getUpcoming returns future events sorted by start_at', () => {
     events.create({ user_id: USER_ID, title: 'Past', start_at: '2020-01-01T10:00:00Z', timezone: 'UTC' });
     events.create({ user_id: USER_ID, title: 'Future2', start_at: '2099-03-12T10:00:00Z', timezone: 'UTC' });
