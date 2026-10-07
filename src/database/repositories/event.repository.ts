@@ -43,6 +43,27 @@ function overlapCandidateSql(alias: string): string {
       > julianday(?) - (CASE WHEN ${col}all_day = 1 THEN 1.0 ELSE 0.0 END)`;
 }
 
+/**
+ * Title substring search over rows the caller's SQL already restricted to what the user may see.
+ * SQLite LIKE folds case only for ASCII, so "встреча" never found "Встреча"; the match runs here
+ * with Unicode case folding while the rows stream, and reading stops at `limit` matches.
+ */
+function takeTitleMatches(
+  rows: IterableIterator<CalendarEvent>,
+  query: string,
+  limit = Number.POSITIVE_INFINITY,
+): CalendarEvent[] {
+  const matches: CalendarEvent[] = [];
+  if (limit <= 0) return matches;
+  const needle = query.normalize('NFKC').toLowerCase();
+  for (const row of rows) {
+    if (!row.title.normalize('NFKC').toLowerCase().includes(needle)) continue;
+    matches.push(row);
+    if (matches.length >= limit) break;
+  }
+  return matches;
+}
+
 export const EVENT_UPDATE_FIELDS = [
   'title',
   'description',
@@ -538,15 +559,11 @@ export class EventRepository {
     return row != null;
   }
 
-  private escapeLike(query: string): string {
-    return query.replace(/[%_\\]/g, '\\$&');
-  }
-
   search(userId: number, query: string, limit = 20): CalendarEvent[] {
-    return this.db
-      .prepare(`
+    const rows = this.db
+      .prepare<CalendarEvent, [number, number, number]>(`
       SELECT * FROM events
-      WHERE title LIKE ? ESCAPE '\\' AND is_cancelled = 0 AND is_deleted = 0
+      WHERE is_cancelled = 0 AND is_deleted = 0
         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
           OR ${groupVisibleSql('')}
           OR id IN (
@@ -554,9 +571,9 @@ export class EventRepository {
             WHERE user_id = ? AND status = 'accepted'
           ))
       ORDER BY julianday(start_at), id
-      LIMIT ?
     `)
-      .all(`%${this.escapeLike(query)}%`, userId, userId, userId, limit) as CalendarEvent[];
+      .iterate(userId, userId, userId);
+    return takeTitleMatches(rows, query, limit);
   }
 
   getUpcoming(userId: number, limit = 10, now?: Date): CalendarEvent[] {
@@ -834,14 +851,14 @@ export class EventRepository {
   }
 
   searchForGroup(groupId: number, query: string, limit = 20): CalendarEvent[] {
-    return this.db
-      .prepare(`
+    const rows = this.db
+      .prepare<CalendarEvent, [number]>(`
       SELECT * FROM events
-      WHERE owner_type = 'group' AND group_id = ? AND title LIKE ? ESCAPE '\\' AND is_cancelled = 0 AND is_deleted = 0
+      WHERE owner_type = 'group' AND group_id = ? AND is_cancelled = 0 AND is_deleted = 0
       ORDER BY julianday(start_at), id
-      LIMIT ?
     `)
-      .all(groupId, `%${this.escapeLike(query)}%`, limit) as CalendarEvent[];
+      .iterate(groupId);
+    return takeTitleMatches(rows, query, limit);
   }
 
   getUpcomingForGroup(groupId: number, limit = 10, now?: Date): CalendarEvent[] {
@@ -925,10 +942,6 @@ export class EventRepository {
     ];
     const params: (string | number | null)[] = [userId, userId, userId];
 
-    if (query) {
-      conditions.push('e.title LIKE ?');
-      params.push(`%${this.escapeLike(query)}%`);
-    }
     if (eventType) {
       if (eventType === 'regular') {
         conditions.push('e.event_type IS NULL');
@@ -938,13 +951,12 @@ export class EventRepository {
       }
     }
 
-    return this.db
-      .prepare(
-        `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
+    const statement = this.db.prepare<CalendarEvent, SQLQueryBindings[]>(
+      `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
          LEFT JOIN birth_event_metadata m ON m.event_id = e.id
          WHERE ${conditions.join(' AND ')} ORDER BY julianday(e.start_at), e.id`,
-      )
-      .all(...params) as CalendarEvent[];
+    );
+    return query ? takeTitleMatches(statement.iterate(...params), query) : statement.all(...params);
   }
 
   getAllRecurringTemplates(): CalendarEvent[] {
