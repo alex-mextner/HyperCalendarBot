@@ -253,6 +253,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
   return {
     success: true,
     mutationState: 'confirmed',
+    audit: { targetUserId: inviteeId },
     effect: {
       kind: 'invitation',
       delivery: delivery.delivered ? 'delivered' : delivery.viaDeepLink ? 'manual_forward' : 'failed',

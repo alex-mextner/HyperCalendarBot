@@ -1,11 +1,11 @@
 // src/services/ai/tool-handlers/history.ts
 
-import { isValid, parseISO } from 'date-fns';
 import { z } from 'zod';
 import { t } from '../../../config/constants.ts';
 import { jsonCodec } from '../../../utils/json-codec.ts';
 import { type ActivityEvent, formatActivityEvent } from '../activity-event.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
+import { hasInvalidReflectionScope, normalizeReflectionLimit, reflectionBoundary } from './reflection.ts';
 
 interface GetHistoryInput {
   limit?: number;
@@ -32,33 +32,30 @@ function formatContent(content: string): string {
   return content;
 }
 
-// Normalize a datetime string to SQLite format "YYYY-MM-DD HH:MM:SS" (UTC).
-// Accepts ISO 8601 ("2026-03-18T10:30:00Z", "2026-03-18T10:30:00+05:00", "2026-03-18"),
-// SQLite format ("2026-03-18 10:30:00"), or partial datetime ("2026-03-18 10:30").
-function toSqliteDateTime(ts: string): string {
-  // Already SQLite format (space separator) — return as-is, trimmed to 19 chars
-  if (/^\d{4}-\d{2}-\d{2} /.test(ts)) {
-    return ts.slice(0, 19);
+export function handleGetHistory(
+  ctx: Pick<AgentContext, 'user' | 'chatId' | 'isGroup' | 'groupChatId' | 'chatHistory'>,
+  input: GetHistoryInput,
+): ToolResult {
+  if (hasInvalidReflectionScope(ctx)) {
+    return { success: false, error: t(ctx.user.language).aiTools.history.scopeUnavailable };
   }
-  // ISO 8601 — parseISO handles Z, offsets, date-only, milliseconds
-  const date = parseISO(ts);
-  if (isValid(date)) {
-    return date.toISOString().slice(0, 19).replace('T', ' ');
+  const limit = normalizeReflectionLimit(input.limit, 50);
+  let before: string | undefined;
+  let after: string | undefined;
+  try {
+    before = reflectionBoundary(input.before);
+    after = reflectionBoundary(input.after);
+  } catch {
+    return { success: false, error: t(ctx.user.language).aiTools.history.invalidBoundary };
   }
-  return ts.slice(0, 19);
-}
-
-export function handleGetHistory(ctx: AgentContext, input: GetHistoryInput): ToolResult {
-  const limit = input.limit ?? 50;
-  const before = input.before ? toSqliteDateTime(input.before) : undefined;
-  const after = input.after ? toSqliteDateTime(input.after) : undefined;
 
   // In group context, scope to the group chat history to avoid leaking private DM messages.
-  // before/after filters are not supported for group history (group timestamps are shared context).
   if (ctx.isGroup && ctx.groupChatId) {
     const messages = ctx.chatHistory.searchByChat(ctx.groupChatId, {
       limit,
       search: input.search,
+      before,
+      after,
     });
     if (messages.length === 0)
       return {
