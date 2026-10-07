@@ -27,10 +27,12 @@ export interface SyntheticPipelineRunnerDeps {
 export class SyntheticPipelineRunner {
   constructor(private deps: SyntheticPipelineRunnerDeps) {}
 
-  async run(user: User, jobData: AiMessageJobData): Promise<void> {
+  /** `jobId` is the BullMQ id of the job being processed; a retry job's id is what its retry pointer holds. */
+  async run(user: User, jobData: AiMessageJobData, jobId?: string): Promise<void> {
+    const currentAttempt = jobData.retryAttempt ?? 0;
+    let retryRequested = false;
     try {
       const agentCtx = this.deps.contextBuilder(user, user.telegram_id, jobData.message);
-      const currentAttempt = jobData.retryAttempt ?? 0;
       agentCtx.retryAttempt = currentAttempt;
       // The schedule/trigger itself and its own retries answer no user message; only
       // retries of a user's message (enqueued by the chat pipeline) do.
@@ -43,6 +45,7 @@ export class SyntheticPipelineRunner {
         const lang = toLang(user.language);
 
         agentCtx.retryEnqueue = async (msg: string) => {
+          retryRequested = true;
           if (currentAttempt >= MAX_RETRY_ATTEMPTS) {
             const giveUp = agentGiveUpMessage(user.telegram_id, lang);
             if (giveUp) {
@@ -90,6 +93,16 @@ export class SyntheticPipelineRunner {
       }
     } catch (err: unknown) {
       queueLogger.error({ err, userId: user.telegram_id, message: jobData.message }, 'SyntheticPipelineRunner error');
+    }
+
+    // A retry job that asked for no further retry leaves the user's pointer naming itself, a
+    // finished job, until the TTL lapses. Clear it, but only while it still names this job: a
+    // newer retry may already own the pointer. Never throw here — a failed BullMQ job is re-run.
+    const jobStore = this.deps.retryJobStore;
+    if (currentAttempt > 0 && !retryRequested && jobId && jobStore) {
+      await jobStore.delIfMatch(user.telegram_id, jobId).catch((err: unknown) => {
+        queueLogger.warn({ err, userId: user.telegram_id, jobId }, 'Failed to clear a finished retry job pointer');
+      });
     }
   }
 }
@@ -164,7 +177,7 @@ export function createAiMessagesWorker(
         return;
       }
 
-      await runner.run(user, job.data);
+      await runner.run(user, job.data, job.id);
 
       if (scheduleId && onRunComplete) {
         onRunComplete(scheduleId);

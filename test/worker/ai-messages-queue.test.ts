@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'bun:test';
 import type { User } from '../../src/database/types.ts';
 import { aiFailureNotices } from '../../src/services/ai/agent.ts';
 import type { AgentContext } from '../../src/services/ai/types.ts';
-import type { AiMessageJobData } from '../../src/services/scheduled/types.ts';
+import type { AiMessageJobData, RetryJobStore } from '../../src/services/scheduled/types.ts';
 import { SyntheticPipelineRunner } from '../../src/worker/ai-messages-queue.ts';
 
 // ─── BullMQ mock setup (must come before dynamic import) ──────────────────────
@@ -214,7 +214,12 @@ describe('SyntheticPipelineRunner', () => {
       intentRun,
       agentRun: mock(async () => {}),
       retryQueue: { addDelayed: mock(async () => 'job-1') },
-      retryJobStore: { set: mock(pointerWrite), get: mock(async () => null), del: mock(async () => {}) },
+      retryJobStore: {
+        set: mock(pointerWrite),
+        get: mock(async () => null),
+        del: mock(async () => {}),
+        delIfMatch: mock(async () => {}),
+      },
     });
     await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'check calendar', source: 'scheduled' });
     expect(await captured.ctx!.retryEnqueue!('check calendar')).toBe(true);
@@ -238,6 +243,7 @@ describe('SyntheticPipelineRunner', () => {
         del: mock(async () => {
           throw new Error('READONLY You can not write against a read only replica');
         }),
+        delIfMatch: mock(async () => {}),
       },
     });
     await runner.run(fakeUser, {
@@ -300,6 +306,94 @@ describe('SyntheticPipelineRunner', () => {
     await runner.run(fakeUser, retryJob);
 
     expect(seen).toEqual([unprompted, unprompted]);
+  });
+});
+
+// ─── SyntheticPipelineRunner: finished retry job clears its own pointer (#126) ──
+
+describe('SyntheticPipelineRunner retry pointer cleanup', () => {
+  /** In-memory RetryJobStore honouring the interface contract (delIfMatch deletes only on an exact match). */
+  function memoryJobStore() {
+    const pointers = new Map<number, string>();
+    const store: RetryJobStore = {
+      async set(userId, jobId) {
+        pointers.set(userId, jobId);
+      },
+      async get(userId) {
+        return pointers.get(userId) ?? null;
+      },
+      async del(userId) {
+        pointers.delete(userId);
+      },
+      async delIfMatch(userId, jobId) {
+        if (pointers.get(userId) === jobId) pointers.delete(userId);
+      },
+    };
+    return { store, pointers };
+  }
+
+  const retryJob: AiMessageJobData = {
+    userId: fakeUser.telegram_id,
+    message: 'what is on tomorrow?',
+    source: 'trigger',
+    retryAttempt: 1,
+  };
+
+  function runnerWith(store: RetryJobStore, agentRun: (ctx: AgentContext) => Promise<void>) {
+    return new SyntheticPipelineRunner({
+      contextBuilder: () => ({ user: fakeUser }) as unknown as AgentContext,
+      intentRun: async () => ({ handled: false }),
+      agentRun,
+      retryQueue: { addDelayed: async () => 'job-2' },
+      retryJobStore: store,
+    });
+  }
+
+  test('a retry that answered without asking for another clears the pointer to itself', async () => {
+    const { store, pointers } = memoryJobStore();
+    pointers.set(fakeUser.telegram_id, 'job-1');
+    await runnerWith(store, async () => {}).run(fakeUser, retryJob, 'job-1');
+    expect(await store.get(fakeUser.telegram_id)).toBeNull();
+  });
+
+  test('a retry whose agent run failed outright still clears the pointer to itself', async () => {
+    const { store, pointers } = memoryJobStore();
+    pointers.set(fakeUser.telegram_id, 'job-1');
+    await runnerWith(store, async () => {
+      throw new Error('boom');
+    }).run(fakeUser, retryJob, 'job-1');
+    expect(await store.get(fakeUser.telegram_id)).toBeNull();
+  });
+
+  test("a newer retry's pointer survives the finished job's cleanup", async () => {
+    const { store, pointers } = memoryJobStore();
+    pointers.set(fakeUser.telegram_id, 'job-9');
+    await runnerWith(store, async () => {}).run(fakeUser, retryJob, 'job-1');
+    expect(await store.get(fakeUser.telegram_id)).toBe('job-9');
+  });
+
+  test('a retry that schedules the next attempt leaves the pointer on that attempt', async () => {
+    const { store, pointers } = memoryJobStore();
+    pointers.set(fakeUser.telegram_id, 'job-1');
+    await runnerWith(store, async (ctx) => {
+      await ctx.retryEnqueue?.('what is on tomorrow?');
+    }).run(fakeUser, retryJob, 'job-1');
+    expect(await store.get(fakeUser.telegram_id)).toBe('job-2');
+  });
+
+  test("a first run (not a retry) leaves another job's pointer alone", async () => {
+    const { store, pointers } = memoryJobStore();
+    pointers.set(fakeUser.telegram_id, 'job-0');
+    await runnerWith(store, async () => {}).run(fakeUser, { ...retryJob, retryAttempt: undefined }, 'job-0');
+    expect(await store.get(fakeUser.telegram_id)).toBe('job-0');
+  });
+
+  test('a Redis failure while clearing the pointer does not fail the job', async () => {
+    const { store } = memoryJobStore();
+    store.delIfMatch = async () => {
+      throw new Error('READONLY You can not write against a read only replica');
+    };
+    await expect(runnerWith(store, async () => {}).run(fakeUser, retryJob, 'job-1')).resolves.toBeUndefined();
   });
 });
 
@@ -461,6 +555,34 @@ describe('createAiMessagesWorker', () => {
     expect(intentRun).toHaveBeenCalledTimes(1);
   });
 
+  test("processor hands the job's own id to the run, so a finished retry clears its pointer", async () => {
+    const pointers = new Map<number, string>([[fakeUser.telegram_id, 'j-retry']]);
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: () => ({ user: fakeUser }) as unknown as AgentContext,
+      intentRun: async () => ({ handled: true }),
+      agentRun: async () => {},
+      retryQueue: { addDelayed: async () => 'unused' },
+      retryJobStore: {
+        set: async () => {},
+        get: async (userId) => pointers.get(userId) ?? null,
+        del: async () => {},
+        delIfMatch: async (userId, jobId) => {
+          if (pointers.get(userId) === jobId) pointers.delete(userId);
+        },
+      },
+    });
+
+    createAiMessagesWorker({ host: 'localhost', port: 6379 }, runner, (id) =>
+      id === fakeUser.telegram_id ? fakeUser : null,
+    );
+
+    await capturedProcessor({
+      id: 'j-retry',
+      data: { userId: fakeUser.telegram_id, message: 'remind me', source: 'trigger', retryAttempt: 1 },
+    });
+    expect(pointers.has(fakeUser.telegram_id)).toBe(false);
+  });
+
   test('processor calls onRunComplete with scheduleId when provided', async () => {
     const agentCtx = { user: fakeUser } as unknown as AgentContext;
     const contextBuilder = mock(() => agentCtx);
@@ -525,7 +647,12 @@ describe('createAiMessagesWorker', () => {
       }),
       agentRun: mock(async () => {}),
       retryQueue: { addDelayed: mock(async () => 'job-1') },
-      retryJobStore: { set: mock(async () => {}), get: mock(async () => null), del: jobStoreDel },
+      retryJobStore: {
+        set: mock(async () => {}),
+        get: mock(async () => null),
+        del: jobStoreDel,
+        delIfMatch: mock(async () => {}),
+      },
     });
     await runner.run(fakeUser, {
       userId: fakeUser.telegram_id,
