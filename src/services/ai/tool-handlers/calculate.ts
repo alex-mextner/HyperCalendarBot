@@ -72,13 +72,24 @@ function parseDecimal(token: string): Rational {
   return rational(BigInt(`${whole}${fraction}`), 10n ** BigInt(fraction.length));
 }
 
+/** Fraction digits of d's exact decimal expansion, or null when it does not terminate (d has a prime other than 2 or 5). */
+function terminatingDigits(d: bigint): number | null {
+  let rest = d;
+  let twos = 0;
+  let fives = 0;
+  while (rest % 2n === 0n) [rest, twos] = [rest / 2n, twos + 1];
+  while (rest % 5n === 0n) [rest, fives] = [rest / 5n, fives + 1];
+  return rest === 1n ? Math.max(twos, fives) : null;
+}
+
 /** Exact decimal; only a non-terminating quotient is rounded, to MAX_FRACTION_DIGITS, and only here. */
 function formatRational({ n, d }: Rational): string {
   const negative = n < 0n;
-  const scale = 10n ** BigInt(MAX_FRACTION_DIGITS);
+  const digits = terminatingDigits(d) ?? MAX_FRACTION_DIGITS;
+  const scale = 10n ** BigInt(digits);
   const scaled = ((negative ? -n : n) * scale * 2n + d) / (2n * d);
   const whole = (scaled / scale).toString();
-  const fraction = (scaled % scale).toString().padStart(MAX_FRACTION_DIGITS, '0').replace(/0+$/, '');
+  const fraction = digits === 0 ? '' : (scaled % scale).toString().padStart(digits, '0').replace(/0+$/, '');
   const text = fraction ? `${whole}.${fraction}` : whole;
   return negative && scaled !== 0n ? `-${text}` : text;
 }
