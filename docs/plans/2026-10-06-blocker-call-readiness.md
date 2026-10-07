@@ -23,9 +23,11 @@ This command reads package metadata, checks executable and session-file presence
 and reports only environment variable names/presence. It never loads `.env`, reads
 session contents, imports the transport, starts a process, contacts a provider or
 dials. Missing keys may mean the command is outside the service environment; never
-copy credentials to make this report green. Empty/invalid values count as present
-but remain explicitly unvalidated. Exit 1 means missing prerequisites; exit 2 means
-inventory complete but live readiness unproven. It never returns readiness success.
+copy credentials to make this report green. Empty values count as missing (`empty`),
+matching the fail-closed ServiceTier/env parsing; non-empty values remain explicitly
+unvalidated. Exit 3 means missing prerequisites; exit 4 means inventory complete but
+live readiness unproven (codes chosen so argparse usage errors (2) and crashes (1)
+are never mistaken for a result). It never returns readiness success.
 
 ## Priority 2: operational proof and voice adapter
 

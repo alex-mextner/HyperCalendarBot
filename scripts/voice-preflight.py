@@ -31,9 +31,14 @@ def package_present(name):
 
 
 def collect(root, environment, has_package=package_present, which=shutil.which):
-    """Presence is an inventory fact, never configuration or authorization proof."""
+    """Presence is an inventory fact, never configuration or authorization proof.
+
+    Empty values are reported as missing: src/config/env.ts maps "" to unset, so
+    ServiceTier fails closed on them. Non-empty values are never examined."""
     env_status = {
-        name: "present_unvalidated" if name in environment else "absent"
+        name: "absent" if name not in environment
+        else "empty" if environment[name] == ""
+        else "present_unvalidated"
         for name in REQUIRED_ENV
     }
     packages = {name: bool(has_package(name)) for name in PACKAGES}
@@ -42,7 +47,7 @@ def collect(root, environment, has_package=package_present, which=shutil.which):
         session_file = (root / "data/voice_caller.session").is_file()
     except OSError:
         session_file = False
-    missing = [name for name, status in env_status.items() if status == "absent"]
+    missing = [name for name, status in env_status.items() if status != "present_unvalidated"]
     missing.extend(name for name, present in packages.items() if not present)
     missing.extend(name for name, present in executables.items() if not present)
     if not session_file:
@@ -67,8 +72,9 @@ def main():
     args = parser.parse_args()
     report = collect(args.root, os.environ)
     print(json.dumps(report, indent=2))
-    # 1 = missing prerequisites; 2 = inventory complete, live readiness unproven.
-    return 1 if report["missing_prerequisites"] else 2
+    # Exit codes avoid argparse usage errors (2) and uncaught exceptions (1):
+    # 3 = missing prerequisites; 4 = inventory complete, live readiness unproven.
+    return 3 if report["missing_prerequisites"] else 4
 
 
 if __name__ == "__main__":

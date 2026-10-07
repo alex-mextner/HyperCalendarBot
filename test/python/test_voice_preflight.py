@@ -52,11 +52,26 @@ class VoicePreflightTests(unittest.TestCase):
         self.assertNotIn("private-credential", json.dumps(report))
         self.assertNotIn("private-session", json.dumps(report))
 
-    def test_empty_environment_values_are_not_examined_or_called_configured(self):
+    def test_empty_environment_values_count_as_missing_like_service_tier(self):
+        # src/config/env.ts maps "" to unset, so ServiceTier is disabled for blank keys.
         report = module.collect(Path("/nonexistent"), dict.fromkeys(module.REQUIRED_ENV, ""),
                                 lambda name: False, lambda name: None)
-        self.assertEqual(report["environment"]["MTPROTO_API_HASH"], "present_unvalidated")
+        self.assertEqual(report["environment"]["MTPROTO_API_HASH"], "empty")
+        self.assertIn("MTPROTO_API_HASH", report["missing_prerequisites"])
         self.assertIn("configuration_values", report["unverified"])
+
+    def run_main(self, argv, report):
+        with (patch("sys.argv", ["voice-preflight.py", *argv]),
+              patch.object(module, "collect", return_value=report),
+              patch("builtins.print")):
+            return module.main()
+
+    def test_result_exit_codes_never_collide_with_usage_errors_or_crashes(self):
+        self.assertEqual(self.run_main([], {"missing_prerequisites": ["session_file"]}), 3)
+        self.assertEqual(self.run_main([], {"missing_prerequisites": []}), 4)
+        with self.assertRaises(SystemExit) as usage, patch("sys.stderr"):
+            self.run_main(["--unknown"], {"missing_prerequisites": []})
+        self.assertEqual(usage.exception.code, 2)
 
 
 if __name__ == "__main__":
