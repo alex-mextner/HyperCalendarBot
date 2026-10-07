@@ -558,10 +558,15 @@ async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, us
   }
 }
 
-/** Columns the model may change; a confirmed place is set only by the verification flow (#620). */
-const MODEL_UPDATE_FIELDS = EVENT_UPDATE_FIELDS.filter(
-  (field) => !RESOLVED_PLACE_COLUMNS.some((column) => column === field),
-);
+/** Columns the update_event tool schema declares; a confirmed place is set only by the verification flow (#620). */
+const MODEL_UPDATE_FIELDS = [
+  'title',
+  'start_at',
+  'end_at',
+  'description',
+  'location',
+  'recurrence_rule',
+] as const satisfies readonly (typeof EVENT_UPDATE_FIELDS)[number][];
 
 export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(

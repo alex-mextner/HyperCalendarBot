@@ -195,6 +195,9 @@ describe('executeTool', () => {
     expect(result.mutationState).toBe('not_applied');
     expect(result.disposition).toBe('failed');
     expect(result.error).toContain('start_at');
+    // Columns the tool schema does not declare (and so does not validate) are never offered
+    expect(result.error).not.toContain('all_day');
+    expect(result.error).not.toContain('reminder_overrides');
     expect(ctx.eventService.getEvent(event.id, USER_ID)).toEqual(before);
   });
 
