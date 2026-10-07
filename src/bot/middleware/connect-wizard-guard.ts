@@ -146,6 +146,8 @@ export interface ConnectWizardGuard {
   recordRateLimited(context: { update?: TelegramUpdate }): void;
   /** Whether the guard already stored this update's text or edit (as the marker) — chat logging stores nothing. */
   isConnectWizardInput(context: { update?: TelegramUpdate }): boolean;
+  /** Whether this update is a held message its owner released, on its way through the bot again. */
+  isOwnerReleased(context: { update?: TelegramUpdate }): boolean;
   /** How many messages are held in memory for their owner's decision (bounded; for health checks and tests). */
   heldMessageCount(): number;
   /**
@@ -165,7 +167,10 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
   const recorded = new WeakMap<{ update?: TelegramUpdate }, Recorded>();
   /** Nonce → held message. Memory only: a restart forgets every held message. Insertion order is age. */
   const heldMessages = new Map<string, HeldMessage>();
-  /** Held messages their owner released, on their way through the bot a second time. */
+  /**
+   * Held messages their owner released, on their way through the bot a second time. Weak: an entry
+   * lives as long as that replayed update, so later middleware can still recognise it.
+   */
   const released = new WeakSet<TelegramUpdate>();
 
   function readSceneRow(userId: number, chatId: number): ConnectWizardRow | undefined {
@@ -434,7 +439,7 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
     if (update === undefined || chatId === undefined || userId === undefined) return next();
     const updateMessageId = message?.message_id ?? callback?.message?.message_id;
     // Released by its owner: an ordinary request from here on.
-    if (released.delete(update)) {
+    if (released.has(update)) {
       return passOn(next, { userId, chatId, messageId: updateMessageId }, openRunNow(userId, chatId));
     }
 
@@ -637,6 +642,7 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
       if (entry?.kind === 'typed') audit(entry, 'rate_limited', { outcome: 'dropped' });
     },
     isConnectWizardInput: (context) => recorded.has(context),
+    isOwnerReleased: (context) => context.update !== undefined && released.has(context.update),
     heldMessageCount: () => heldMessages.size,
     async callbacks(context, next) {
       const callback = context.update?.callback_query;

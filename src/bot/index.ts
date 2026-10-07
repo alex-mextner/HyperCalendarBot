@@ -549,6 +549,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         maxAgeMs: STALE_UPDATE_MAX_AGE_MS,
         now: Date.now,
         sendNote: (chatId, text) => bot.api.sendMessage({ chat_id: chatId, text }),
+        // A held message its owner released runs however long it waited for the press.
+        isOwnerReleased: connectWizardGuard.isOwnerReleased,
       }),
     )
     .use(createRateLimitMiddleware(rateLimiter, connectWizardGuard.recordRateLimited))

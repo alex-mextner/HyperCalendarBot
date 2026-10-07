@@ -18,14 +18,17 @@ function messageUpdate(chatId: number, sentAt: string, type = 'private'): StaleU
 
 function makeGuard(clock = { now: NOW_MS }) {
   const notes: { chatId: number; text: string }[] = [];
+  /** Updates the connect-wizard guard reports as released by their owner. */
+  const released = new Set<StaleUpdateContext>();
   const guard = createStaleUpdateGuard({
     maxAgeMs: STALE_UPDATE_MAX_AGE_MS,
     now: () => clock.now,
     sendNote: async (chatId, text) => {
       notes.push({ chatId, text });
     },
+    isOwnerReleased: (context: StaleUpdateContext) => released.has(context),
   });
-  return { guard, notes };
+  return { guard, notes, released };
 }
 
 async function passes(
@@ -97,6 +100,7 @@ describe('stale update guard', () => {
       sendNote: async () => {
         throw new Error('Forbidden: bot was blocked by the user');
       },
+      isOwnerReleased: () => false,
     });
     expect(await passes(guard, messageUpdate(501, '2026-09-27T14:00:00Z'))).toBe(false);
   });
@@ -111,5 +115,15 @@ describe('stale update guard', () => {
     const { guard, notes } = makeGuard();
     expect(await passes(guard, { update: {} })).toBe(true);
     expect(notes).toEqual([]);
+  });
+
+  test('a held message its owner released runs however long it was held, without a note', async () => {
+    const { guard, notes, released } = makeGuard();
+    const held = messageUpdate(501, '2026-09-27T17:00:00Z');
+    released.add(held);
+    expect(await passes(guard, held)).toBe(true);
+    expect(notes).toEqual([]);
+    // The same old message, not released, is still skipped.
+    expect(await passes(guard, messageUpdate(501, '2026-09-27T17:00:00Z'))).toBe(false);
   });
 });

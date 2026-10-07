@@ -1,7 +1,7 @@
 /**
  * The connect-telegram wizard collects a phone number, a login code and a 2FA password.
- * Drives the real GramIO chain in production order (connect-wizard guard → rate limiter → chat
- * logging → command escape → scenes) against a real in-memory database, then checks every place
+ * Drives the real GramIO chain in production order (connect-wizard guard → stale-update guard → rate
+ * limiter → chat logging → command escape → scenes) against a real in-memory database, then checks every place
  * the bot keeps or forwards conversation text: chat_history, action_log, the next AI turn and its
  * debug log.
  * All credentials here are synthetic.
@@ -19,6 +19,7 @@ import { createChatLogging } from '../../../src/bot/middleware/chat-logging.ts';
 import { createConnectWizardGuard } from '../../../src/bot/middleware/connect-wizard-guard.ts';
 import { createRateLimitMiddleware, RateLimiter } from '../../../src/bot/middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from '../../../src/bot/middleware/scene-command-escape.ts';
+import { createStaleUpdateGuard, STALE_UPDATE_MAX_AGE_MS } from '../../../src/bot/middleware/stale-update-guard.ts';
 import { createUserResolver, createUserResolverComposer } from '../../../src/bot/middleware/user-resolver.ts';
 import { runWithChatId } from '../../../src/bot/scenes/chat-scoped-storage.ts';
 import {
@@ -265,6 +266,14 @@ function makeRuntime(options: { messagesPerMinute?: number; sendCodeFailure?: st
         ),
       )
       .use(guard.middleware)
+      .use(
+        createStaleUpdateGuard({
+          maxAgeMs: STALE_UPDATE_MAX_AGE_MS,
+          now: Date.now,
+          sendNote: (chatId, text): Promise<unknown> => started.api.sendMessage({ chat_id: chatId, text }),
+          isOwnerReleased: guard.isOwnerReleased,
+        }),
+      )
       .use(createRateLimitMiddleware(rateLimiter, guard.recordRateLimited))
       .use(
         createChatLogging({
@@ -332,6 +341,7 @@ function makeRuntime(options: { messagesPerMinute?: number; sendCodeFailure?: st
    */
   function typed(text: string) {
     const id = incoming++;
+    const sentAt = Math.floor(Date.now() / 1000);
     return {
       id,
       async deliver() {
@@ -339,7 +349,7 @@ function makeRuntime(options: { messagesPerMinute?: number; sendCodeFailure?: st
           update_id: id,
           message: {
             message_id: id,
-            date: 1,
+            date: sentAt,
             chat,
             from,
             text,
@@ -358,9 +368,11 @@ function makeRuntime(options: { messagesPerMinute?: number; sendCodeFailure?: st
     return message.id;
   }
   async function edit(messageId: number, text: string) {
+    // Telegram's message dates are Unix seconds; an edit keeps `date` and stamps `edit_date`.
+    const editedAt = Math.floor(Date.now() / 1000);
     await bot.updates.handleUpdate({
       update_id: incoming++,
-      edited_message: { message_id: messageId, date: 1, edit_date: 2, chat, from, text },
+      edited_message: { message_id: messageId, date: editedAt, edit_date: editedAt, chat, from, text },
     });
     expect(errors).toEqual([]);
   }
@@ -801,6 +813,30 @@ describe('a request typed after the wizard expired is held until the owner relea
     expect(tail[2]).toContain(PROCESS_LABEL);
     expect(tail.filter((content) => content === QUESTION)).toHaveLength(1);
     expect(tail.indexOf(QUESTION)).toBeGreaterThan(2);
+  });
+
+  test('a release pressed after the stale-update window still processes the held request', async () => {
+    const r = makeRuntime();
+    await expireAtPasswordStep(r);
+    await r.send(QUESTION);
+    // Still within the 15-minute hold, past the 10 minutes after which a delivery counts as stale.
+    advanceClock(STALE_UPDATE_MAX_AGE_MS + 60_000);
+    await r.clickButton(PROCESS_LABEL);
+
+    expect(r.aiTurns).toHaveLength(1);
+    expect(r.aiTurns[0]).toContain(QUESTION);
+    // The note follows the Telegram client language, which the synthetic sender does not state.
+    expect(r.botReplies()).not.toContain(t('en').stale_update_skipped);
+  });
+
+  test('a message that waited past the stale-update window and is not wizard input is still skipped', async () => {
+    const r = makeRuntime();
+    const late = r.typed(QUESTION);
+    advanceClock(STALE_UPDATE_MAX_AGE_MS + 60_000);
+    await late.deliver();
+
+    expect(r.aiTurns).toEqual([]);
+    expect(r.botReplies().at(-1)).toBe(t('en').stale_update_skipped);
   });
 
   test('a held command runs through the ordinary command routing once released, not the AI', async () => {

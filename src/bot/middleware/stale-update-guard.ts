@@ -5,7 +5,9 @@
 // (an outage, not a deploy) is not run as a fresh request: replaying an old
 // "delete everything" hours later would be worse than asking again. Edits are
 // checked the same way. Button presses carry no click time and pass through: a
-// pressed button is still the user's decision, just delivered late.
+// pressed button is still the user's decision, just delivered late. For the same
+// reason a message its owner released with a button (one the connect-wizard guard
+// held after the wizard expired) runs however long it was held.
 
 import type { Next } from 'gramio';
 import { t, toLang } from '../../config/constants.ts';
@@ -32,19 +34,21 @@ export interface StaleUpdateContext {
   update?: { message?: StaleUpdateMessage; edited_message?: StaleUpdateMessage };
 }
 
-interface StaleUpdateGuardDeps {
+interface StaleUpdateGuardDeps<C extends StaleUpdateContext> {
   maxAgeMs: number;
   now: () => number;
   sendNote: (chatId: number, text: string) => Promise<unknown>;
+  /** Whether this update is a held message its owner just released with a button press. */
+  isOwnerReleased: (context: C) => boolean;
 }
 
-export function createStaleUpdateGuard(deps: StaleUpdateGuardDeps) {
+export function createStaleUpdateGuard<C extends StaleUpdateContext>(deps: StaleUpdateGuardDeps<C>) {
   // When each private chat was last told. Webhook deliveries run concurrently and out of order,
   // so a backlog is bounded by time, not by the first fresh update that happens to arrive.
   const notedAt = new Map<number, number>();
-  return async (context: StaleUpdateContext, next: Next): Promise<unknown> => {
+  return async (context: C, next: Next): Promise<unknown> => {
     const message = context.update?.message ?? context.update?.edited_message;
-    if (!message) return next();
+    if (!message || deps.isOwnerReleased(context)) return next();
     const now = deps.now();
     const ageMs = now - (message.edit_date ?? message.date) * 1000;
     if (ageMs <= deps.maxAgeMs) return next();

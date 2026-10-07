@@ -306,7 +306,8 @@ removed first (by a throwaway message, as the scene installs it):
   (its scene row deleted, its trace closed, its login stopped, "Авторизация отменена."); if a newer
   run is open or the state still cannot be read, the message is not processed. Otherwise it goes
   through the whole bot again as an ordinary update — commands, intents and the AI alike, logged
-  verbatim and counted in feature usage like any other message.
+  verbatim and counted in feature usage like any other message. The stale-update guard, which skips
+  messages older than 10 minutes, lets it through: the press is the owner's decision, made now.
 - **"Удалить"** (`ctw:d:<nonce>`) forgets it at once.
 
 A press that finds nothing — after "Удалить", expiry, a restart or a release — answers "Этого
