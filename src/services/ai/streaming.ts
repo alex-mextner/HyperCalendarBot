@@ -534,6 +534,11 @@ function streamingSlot(
       // Only the supported 2.5 Flash text routes: never send none to Pro/3.x.
       if (provider === 'gemini' && opts.fast && /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, '')))
         params.reasoning_effort = 'none';
+      // Groq defaults GPT-OSS to medium reasoning; low keeps calendar turns fast (#356). Qwen and
+      // compound models do not take this setting. Keyed on the model actually requested, so a
+      // rediscovered replacement gets it too.
+      if (provider === 'groq' && (model === 'openai/gpt-oss-20b' || model === 'openai/gpt-oss-120b'))
+        params.reasoning_effort = 'low';
       if (opts.tools && opts.tools.length > 0) {
         params.tools = opts.tools;
       }
