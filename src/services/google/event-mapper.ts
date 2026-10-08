@@ -2,6 +2,35 @@ import type { CalendarEvent } from '../../database/types.ts';
 import { syncLogger } from '../../utils/logger.ts';
 import { formatLocationPlain } from '../location/format-location.ts';
 
+/** Google Calendar's per-event palette: event `colorId` → the hex Google shows for it. */
+export const GCAL_EVENT_COLORS: Readonly<Record<string, string>> = {
+  '1': '#D50000', // Tomato
+  '2': '#E67C73', // Flamingo
+  '3': '#F4511E', // Tangerine
+  '4': '#F6BF26', // Banana
+  '5': '#33B679', // Sage
+  '6': '#0B8043', // Basil
+  '7': '#039BE5', // Peacock
+  '8': '#3F51B5', // Blueberry
+  '9': '#7986CB', // Lavender
+  '10': '#8E24AA', // Grape
+  '11': '#616161', // Graphite
+};
+
+/** The hex for a Google event `colorId`; null when the event has none or an unknown one. */
+export function gcalEventColor(colorId: string | null | undefined): string | null {
+  return colorId && Object.hasOwn(GCAL_EVENT_COLORS, colorId) ? GCAL_EVENT_COLORS[colorId]! : null;
+}
+
+/**
+ * The Google `colorId` for a stored event color, so a push of an event imported from Google keeps
+ * the color the user picked there: the push replaces the whole Google event, and an omitted
+ * `colorId` resets it to the calendar's color. Undefined for no color or one outside the palette.
+ */
+export function gcalColorId(color: string | null): string | undefined {
+  return Object.entries(GCAL_EVENT_COLORS).find(([, hex]) => hex === color)?.[0];
+}
+
 interface LocalEventForGoogle
   extends Pick<CalendarEvent, 'location' | 'resolved_address' | 'venue_name' | 'location_verified'> {
   id: number;
@@ -34,6 +63,7 @@ export interface GoogleEvent {
   start?: GoogleEventTime;
   end?: GoogleEventTime;
   recurrence?: string[];
+  colorId?: string | null;
   reminders?: {
     useDefault: boolean;
     overrides?: GoogleEventReminder[];
@@ -62,6 +92,7 @@ export interface LocalEventFromGoogle {
   google_event_id: string;
   google_etag: string | null;
   is_cancelled: boolean;
+  color: string | null;
 }
 
 export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
@@ -136,5 +167,6 @@ export function googleToLocal(gEvent: GoogleEvent, userId: number, googleCalenda
     google_event_id: gEvent.id ?? '',
     google_etag: gEvent.etag ?? null,
     is_cancelled: gEvent.status === 'cancelled',
+    color: gcalEventColor(gEvent.colorId),
   };
 }
