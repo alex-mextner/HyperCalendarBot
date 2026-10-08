@@ -531,8 +531,14 @@ function streamingSlot(
         stream: true,
         ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
       };
-      // Only the supported 2.5 Flash text routes: never send none to Pro/3.x.
-      if (provider === 'gemini' && opts.fast && /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, '')))
+      // Supported 2.5 Flash routes only, never Pro/3.x: fast calls, and tool-calling
+      // calls, which with dynamic thinking and the full tool catalog end empty (stop,
+      // zero output) even with a large output budget.
+      if (
+        provider === 'gemini' &&
+        (opts.fast || (opts.tools?.length ?? 0) > 0) &&
+        /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, ''))
+      )
         params.reasoning_effort = 'none';
       if (opts.tools && opts.tools.length > 0) {
         params.tools = opts.tools;

@@ -4,7 +4,30 @@
 // Base URLs and API keys are loaded from env via loadConfig() — no hardcoded values.
 
 import OpenAI from 'openai';
+import { z } from 'zod';
 import { loadConfig } from '../../config/env.ts';
+
+/**
+ * Google's OpenAI-compatible endpoint can send its error as a one-element JSON
+ * array, `[{ error: { code, message, status, details } }]`. The SDK reads only
+ * `body.error`, so it would report `400 status code (no body)` and the chain
+ * would retry a deterministic rejection as a dropped request. Extra fields
+ * (quota `details`) are kept for the error consumer.
+ */
+const GeminiErrorArraySchema = z.tuple([
+  z.looseObject({
+    error: z.looseObject({ code: z.number().int(), message: z.string(), status: z.string() }),
+  }),
+]);
+
+class GeminiClient extends OpenAI {
+  protected override makeStatusError(status: number, error: unknown, message: string | undefined, headers: Headers) {
+    const wrapped = GeminiErrorArraySchema.safeParse(error);
+    if (wrapped.success) return super.makeStatusError(status, wrapped.data[0], message, headers);
+    // An empty body arrives as undefined; `{}` likewise carries no `error` member.
+    return super.makeStatusError(status, typeof error === 'object' && error !== null ? error : {}, message, headers);
+  }
+}
 
 const ZAI_TIMEOUT_MS = 15_000;
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -56,7 +79,7 @@ export function hfClient(): OpenAI {
 export function geminiClient(): OpenAI {
   if (!gemini) {
     const cfg = loadConfig();
-    gemini = new OpenAI({
+    gemini = new GeminiClient({
       apiKey: cfg.GEMINI_API_KEY,
       baseURL: cfg.GEMINI_BASE_URL,
       timeout: DEFAULT_TIMEOUT_MS,
