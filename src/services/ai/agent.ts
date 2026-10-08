@@ -1152,6 +1152,8 @@ export class CalendarBotAgent {
               signal: requestSignal,
               userId: ctx.user.telegram_id,
               deferOutageAlert,
+              // The exposure gate below rejects and reveals any unlisted call, so Groq may return it (GH-357).
+              ...(exposure ? { allowUnlistedToolCalls: true } : {}),
             },
             callbacks,
           );
@@ -1746,6 +1748,7 @@ export class CalendarBotAgent {
             temperature: 0.3,
             signal: AbortSignal.timeout(Math.max(1, this.requestTimeoutMs - (Date.now() - startTime))),
             deferOutageAlert,
+            ...(exposure ? { allowUnlistedToolCalls: true } : {}),
           },
           callbacks,
         );

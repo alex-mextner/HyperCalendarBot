@@ -63,6 +63,12 @@ export interface StreamRoundOptions {
    * and reports the outage itself if that recovery gives up. Only such a caller sets this.
    */
   deferOutageAlert?: boolean;
+  /**
+   * Set only by a caller whose local tool-exposure gate rejects and reveals any call to a
+   * tool missing from `tools` (GH-357). Groq then returns such a call instead of failing the
+   * round with `tool_use_failed`; every other provider keeps its own validation.
+   */
+  allowUnlistedToolCalls?: boolean;
 }
 
 export interface StreamCallbacks {
@@ -523,13 +529,15 @@ function streamingSlot(
     getClient,
     stream: async (model, opts, cbs, onHttpAttempt) => {
       let attemptStartedAt = performance.now();
-      const params: OpenAI.ChatCompletionCreateParamsStreaming = {
+      // `disable_tool_validation` is a Groq extension the OpenAI SDK types do not declare.
+      const params: OpenAI.ChatCompletionCreateParamsStreaming & { disable_tool_validation?: true } = {
         model,
         messages: opts.messages,
         max_tokens: opts.maxTokens,
         temperature: opts.temperature ?? 0.3,
         stream: true,
         ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
+        ...(provider === 'groq' && opts.allowUnlistedToolCalls ? { disable_tool_validation: true } : {}),
       };
       // Only the supported 2.5 Flash text routes: never send none to Pro/3.x.
       if (provider === 'gemini' && opts.fast && /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, '')))
