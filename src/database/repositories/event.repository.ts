@@ -286,15 +286,32 @@ export class EventRepository {
       );
   }
 
-  /** Drop the resolved place so only the typed location remains, unverified. */
-  clearLocationFields(eventId: number): void {
-    this.db
+  /**
+   * Drop the resolved place so only the typed location remains, unverified, but only while the row
+   * still holds `seen`, the place the caller read: a place confirmed after that read (a pin or a
+   * candidate tap) is kept (#681). Returns whether the place was dropped.
+   */
+  clearLocationFieldsIfUnchanged(
+    eventId: number,
+    seen: Pick<CalendarEvent, (typeof RESOLVED_PLACE_COLUMNS)[number]>,
+  ): boolean {
+    const result = this.db
       .prepare(
         `UPDATE events SET resolved_address = NULL, latitude = NULL, longitude = NULL,
          google_maps_url = NULL, location_verified = 0, venue_name = NULL, updated_at = datetime('now')
-         WHERE id = ?`,
+         WHERE id = ? AND resolved_address IS ? AND latitude IS ? AND longitude IS ?
+           AND google_maps_url IS ? AND venue_name IS ? AND location_verified IS ?`,
       )
-      .run(eventId);
+      .run(
+        eventId,
+        seen.resolved_address,
+        seen.latitude,
+        seen.longitude,
+        seen.google_maps_url,
+        seen.venue_name,
+        seen.location_verified,
+      );
+    return result.changes > 0;
   }
 
   findLatestCreatedByUser(userId: number): CalendarEvent | null {

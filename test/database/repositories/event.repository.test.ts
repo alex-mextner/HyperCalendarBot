@@ -254,6 +254,43 @@ describe('EventRepository', () => {
     expect(titles).toContain('Future one-off');
   });
 
+  test('clearLocationFieldsIfUnchanged drops only the place the caller read', () => {
+    const created = events.create({
+      user_id: USER_ID,
+      title: 'Dinner',
+      start_at: '2026-03-12T12:00:00Z',
+      timezone: 'UTC',
+      location: 'harbour cafe',
+    });
+    const place = (address: string, lat: number) => ({
+      resolved_address: address,
+      latitude: lat,
+      longitude: 4.3,
+      google_maps_url: `https://www.google.com/maps/search/?api=1&query=${lat},4.3`,
+      location_verified: 1,
+      venue_name: null,
+    });
+    events.updateLocationFields(created.id, place('Example Street 1', 52.1));
+    const read = events.findById(created.id, USER_ID)!;
+    // A newer place is confirmed after that read
+    events.updateLocationFields(created.id, place('Example Street 2', 52.2));
+
+    expect(events.clearLocationFieldsIfUnchanged(created.id, read)).toBe(false);
+    expect(events.findById(created.id, USER_ID)).toMatchObject(place('Example Street 2', 52.2));
+
+    const current = events.findById(created.id, USER_ID)!;
+    expect(events.clearLocationFieldsIfUnchanged(created.id, current)).toBe(true);
+    expect(events.findById(created.id, USER_ID)).toMatchObject({
+      location: 'harbour cafe',
+      resolved_address: null,
+      latitude: null,
+      longitude: null,
+      google_maps_url: null,
+      venue_name: null,
+      location_verified: 0,
+    });
+  });
+
   describe('recurring event helpers', () => {
     test('getExceptionsFrom returns exceptions on or after date', () => {
       const template = events.create({
