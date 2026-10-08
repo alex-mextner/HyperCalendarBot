@@ -406,11 +406,11 @@ function stripCount(rruleLine: string): string {
   );
 }
 
-/** Legacy fixed-time DST adjustment (pre-583, verbatim from main's `adjustOccurrenceForDst`) —
- * see `expandLegacy`. */
+/** Legacy fixed-time DST adjustment (pre-583 `adjustOccurrenceForDst`) — see `expandLegacy`.
+ * Builds the wall-clock date in its own zone: seeding with midnight UTC first would move
+ * negative-offset zones onto the previous local calendar day. */
 function legacyAdjustForDst(date: Date, timezone: string, h: number, m: number, s: number): Date {
   const occTz = new TZDate(date, timezone);
-  const local = new TZDate(new Date(Date.UTC(occTz.getFullYear(), occTz.getMonth(), occTz.getDate())), timezone);
-  local.setHours(h, m, s, 0);
+  const local = new TZDate(occTz.getFullYear(), occTz.getMonth(), occTz.getDate(), h, m, s, 0, timezone);
   return new Date(local.getTime());
 }
