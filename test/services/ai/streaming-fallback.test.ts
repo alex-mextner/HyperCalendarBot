@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import OpenAI from 'openai';
 import { closeGeminiQuotaStores } from '../../../src/services/ai/gemini-quota.ts';
+import { resetModelRegistry } from '../../../src/services/ai/model-registry.ts';
 
 // Build a fake OpenAI client whose chat.completions.create returns a scripted
 // async-iterable stream. Each script entry is one "round" the provider emits.
@@ -356,6 +357,122 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(fakeGemini.chat.completions.create.mock.calls[0][0].reasoning_effort).toBe('none');
     await aiStreamRound({ messages: [], maxTokens: 4096 });
     expect(fakeGemini.chat.completions.create.mock.calls[1][0].reasoning_effort).toBeUndefined();
+  });
+
+  // #356: Groq defaults GPT-OSS to medium reasoning. Only those two models get low.
+  test.each([
+    ['openai/gpt-oss-20b', true],
+    ['openai/gpt-oss-120b', false],
+  ] as const)('Groq %s requests low reasoning (fast=%p)', async (model, fast) => {
+    process.env.GROQ_API_KEY = 'groq-key';
+    process.env[fast ? 'GROQ_FAST_MODEL' : 'GROQ_MODEL'] = model;
+    process.env[fast ? 'AI_FAST_CHAIN' : 'AI_SMART_CHAIN'] = 'groq';
+    fakeGroq = buildFakeClient([{ kind: 'text', text: 'ok' }]);
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, fast });
+    expect(result.text).toBe('ok');
+    const params = fakeGroq.chat.completions.create.mock.calls[0][0];
+    expect(params.model).toBe(model);
+    expect(params.reasoning_effort).toBe('low');
+  });
+
+  test('Groq GPT-OSS keeps low reasoning when it serves as a fallback, other providers get none', async () => {
+    process.env.GROQ_API_KEY = 'groq-key';
+    process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
+    process.env.AI_SMART_CHAIN = 'zai,groq';
+    fakeZai = buildFakeClient(() => {
+      throw new OpenAI.APIError(500, { error: { message: 'overloaded' } }, 'server error', new Headers());
+    });
+    fakeGroq = buildFakeClient([{ kind: 'text', text: 'from groq' }]);
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
+    expect(result.text).toBe('from groq');
+    expect(fakeZai.chat.completions.create.mock.calls[0][0].reasoning_effort).toBeUndefined();
+    expect(fakeGroq.chat.completions.create.mock.calls[0][0].reasoning_effort).toBe('low');
+  });
+
+  test('Groq models other than GPT-OSS and other providers send no reasoning_effort', async () => {
+    process.env.GROQ_API_KEY = 'groq-key';
+    process.env.GROQ_MODEL = 'qwen/qwen3.8-27b';
+    process.env.AI_SMART_CHAIN = 'groq';
+    fakeGroq = buildFakeClient([{ kind: 'text', text: 'qwen' }]);
+    await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
+    expect(fakeGroq.chat.completions.create.mock.calls[0][0]).not.toHaveProperty('reasoning_effort');
+
+    for (const provider of ['zai', 'gemini', 'hf'] as const) {
+      process.env.AI_SMART_CHAIN = provider;
+      const script: ScriptEvent[] = [{ kind: 'text', text: provider }];
+      if (provider === 'zai') fakeZai = buildFakeClient(script);
+      else if (provider === 'gemini') fakeGemini = buildFakeClient(script);
+      else fakeHf = buildFakeClient(script);
+      await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
+      const fake = provider === 'zai' ? fakeZai : provider === 'gemini' ? fakeGemini : fakeHf;
+      expect(fake.chat.completions.create.mock.calls[0][0]).not.toHaveProperty('reasoning_effort');
+    }
+  });
+
+  test('the stream_options compatibility retry keeps low reasoning on Groq GPT-OSS', async () => {
+    process.env.GROQ_API_KEY = 'groq-key';
+    process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
+    process.env.AI_SMART_CHAIN = 'groq';
+    const paramsSeen: { stream_options?: unknown; reasoning_effort?: unknown }[] = [];
+    fakeGroq = {
+      chat: {
+        completions: {
+          create: mock(async (params: { stream_options?: unknown; reasoning_effort?: unknown }) => {
+            paramsSeen.push(params);
+            if (params.stream_options)
+              throw new OpenAI.APIError(
+                400,
+                { error: { message: 'Unknown parameter: stream_options' } },
+                'Unknown parameter: stream_options',
+                new Headers(),
+              );
+            return buildFakeClient([{ kind: 'text', text: 'compat' }]).chat.completions.create();
+          }),
+        },
+      },
+    };
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
+    expect(result.text).toBe('compat');
+    expect(paramsSeen.map((p) => [p.stream_options !== undefined, p.reasoning_effort])).toEqual([
+      [true, 'low'],
+      [false, 'low'],
+    ]);
+  });
+
+  test('a rediscovered Groq GPT-OSS replacement model also gets low reasoning', async () => {
+    resetModelRegistry();
+    process.env.GROQ_API_KEY = 'groq-key';
+    process.env.GROQ_MODEL = 'retired-groq-model';
+    process.env.AI_SMART_CHAIN = 'groq';
+    const modelsSeen: { model: string; reasoning_effort?: unknown }[] = [];
+    fakeGroq = {
+      models: { list: mock(async () => ({ data: [{ id: 'openai/gpt-oss-120b' }] })) },
+      chat: {
+        completions: {
+          create: mock(async (params: { model: string; reasoning_effort?: unknown }) => {
+            modelsSeen.push({ model: params.model, reasoning_effort: params.reasoning_effort });
+            if (params.model === 'retired-groq-model')
+              throw new OpenAI.APIError(
+                404,
+                { error: { message: 'model not found' } },
+                'model not found',
+                new Headers(),
+              );
+            return buildFakeClient([{ kind: 'text', text: 'replacement' }]).chat.completions.create();
+          }),
+        },
+      },
+    };
+    try {
+      const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
+      expect(result.text).toBe('replacement');
+      expect(modelsSeen).toEqual([
+        { model: 'retired-groq-model', reasoning_effort: undefined },
+        { model: 'openai/gpt-oss-120b', reasoning_effort: 'low' },
+      ]);
+    } finally {
+      resetModelRegistry();
+    }
   });
 
   test('Gemini local budget skips network rather than waiting when exhausted', async () => {
