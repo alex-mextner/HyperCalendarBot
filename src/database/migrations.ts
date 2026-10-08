@@ -1,4 +1,5 @@
 // src/database/migrations.ts
+import { backfillExceptionIdentity } from '../services/event/backfill-exception-identity.ts';
 import { backfillActiveRevision } from '../services/intent/revision-ledger.ts';
 import type { Migration } from './schema.ts';
 
@@ -1114,6 +1115,19 @@ export const migrations: Migration[] = [
       // Every existing row has no known origin and is never listed as a group answer.
       db.exec('ALTER TABLE event_participants ADD COLUMN source_group_id INTEGER');
       db.exec('ALTER TABLE event_participants ADD COLUMN source_group_recorded_at TEXT');
+    },
+  },
+  {
+    name: '066_recurrence_exception_identity',
+    up(db) {
+      // Exception identity moves from "local calendar date" to "exact original occurrence
+      // instant" (spec §5/§10, docs/superpowers/specs/2026-09-28-recurrence-semantics-583.md).
+      // identity_status flags a legacy exception row the backfill could not resolve
+      // unambiguously (zero or multiple parent-template occurrences landed on the same local
+      // date it was stored against) — expandRecurrence never guesses an unresolved exception
+      // onto a specific occurrence; the row is still shown at its own current start_at.
+      db.exec('ALTER TABLE events ADD COLUMN identity_status TEXT DEFAULT NULL');
+      backfillExceptionIdentity(db);
     },
   },
 ];

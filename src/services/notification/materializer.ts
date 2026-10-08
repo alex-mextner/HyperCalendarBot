@@ -3,9 +3,10 @@ import { z } from 'zod';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
+import type { EventOccurrence } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
-import { expandRecurrence } from '../event/recurrence.ts';
+import { expandRecurrence, RecurrenceUnsupportedError } from '../event/recurrence.ts';
 
 const INTERVAL_LABELS: Record<number, string> = {
   0: 'at start',
@@ -50,6 +51,9 @@ export class ReminderMaterializer {
   constructor(
     private reminderRepo: EventReminderRepository,
     private prefsRepo: NotificationPreferencesRepository,
+    /** Capability-gated recurrence-engine rollout (spec §10) — see `RECURRENCE_V2_ENABLED` in
+     * src/config/env.ts. Defaults to the pre-583 single-RRULE-line engine (safe/unchanged). */
+    private recurrenceV2Enabled = false,
   ) {}
 
   materialize(event: MaterializeEventData, userId: number): void {
@@ -158,7 +162,7 @@ export class ReminderMaterializer {
         const remindAt = allDayReminderUtc(`${dateStr}T00:00:00Z`, localTime, userTimezone);
         if (remindAt.getTime() < now) continue;
         const remindAtIso = remindAt.toISOString();
-        if (this.reminderRepo.existsForEventAt(eventId, remindAtIso)) continue;
+        if (this.reminderRepo.existsForOccurrence(eventId, userId, occurrenceStart, -1, label)) continue;
         this.reminderRepo.insert({
           event_id: eventId,
           user_id: userId,
@@ -187,7 +191,10 @@ export class ReminderMaterializer {
       const remindAt = truncateToMinute(new Date(eventStart.getTime() - minutes * 60_000));
       if (remindAt.getTime() < now) continue;
       const remindAtIso = remindAt.toISOString();
-      if (this.reminderRepo.existsForEventAt(eventId, remindAtIso)) continue;
+      if (
+        this.reminderRepo.existsForOccurrence(eventId, userId, occurrenceStart, minutes, formatIntervalLabel(minutes))
+      )
+        continue;
       this.reminderRepo.insert({
         event_id: eventId,
         user_id: userId,
@@ -204,7 +211,9 @@ export class ReminderMaterializer {
 
   /**
    * Rolling materializer: expand upcoming occurrences for all recurring events
-   * and create missing reminders for the next `horizonDays`.
+   * and create missing reminders for the next `horizonDays`. One template whose
+   * recurrence_rule is unsupported (spec §9/§10) is skipped and logged rather than
+   * failing the whole batch.
    */
   materializeUpcomingRecurringReminders(eventRepo: EventRepository, horizonDays = 7): number {
     const materializeLogger = logger.child({ module: 'recurring-materializer' });
@@ -214,10 +223,27 @@ export class ReminderMaterializer {
 
     const templates = eventRepo.getAllRecurringTemplates();
     let totalInserted = 0;
+    let skippedTemplates = 0;
 
     for (const template of templates) {
       const exceptions = eventRepo.getExceptions(template.id);
-      const occurrences = expandRecurrence(template, exceptions, rangeStart, rangeEnd);
+      let occurrences: EventOccurrence[];
+      try {
+        occurrences = expandRecurrence(template, exceptions, rangeStart, rangeEnd, {
+          legacyEngine: !this.recurrenceV2Enabled,
+        }).occurrences;
+      } catch (err) {
+        materializeLogger.warn(
+          {
+            err,
+            eventId: template.id,
+            reason: err instanceof RecurrenceUnsupportedError ? err.reason : undefined,
+          },
+          'Skipping unsupported recurrence series while materializing reminders',
+        );
+        skippedTemplates++;
+        continue;
+      }
 
       for (const occ of occurrences) {
         // Skip cancelled occurrences (exception with is_cancelled)
@@ -237,7 +263,7 @@ export class ReminderMaterializer {
     }
 
     materializeLogger.info(
-      { templates: templates.length, inserted: totalInserted, horizonDays },
+      { templates: templates.length, inserted: totalInserted, skippedTemplates, horizonDays },
       'Recurring reminder materialization completed',
     );
     return totalInserted;

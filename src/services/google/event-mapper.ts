@@ -1,5 +1,6 @@
 import type { CalendarEvent } from '../../database/types.ts';
 import { syncLogger } from '../../utils/logger.ts';
+import { parseRecurrenceBlock, RecurrenceUnsupportedError } from '../event/recurrence-block.ts';
 import { formatLocationPlain } from '../location/format-location.ts';
 
 interface LocalEventForGoogle
@@ -98,7 +99,27 @@ export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
   }
 
   if (local.recurrence_rule) {
-    event.recurrence = local.recurrence_rule.split('\n');
+    // Serialize the canonical prefixed block — a locally-created bare rule
+    // ("FREQ=WEEKLY;...", no RRULE: prefix) must be normalized before Google will accept it as
+    // a valid `recurrence` array entry; see spec §8. `GoogleCalendarApi.updateEvent` calls the
+    // Calendar API's `events.update`, a full-resource replace — omitting `recurrence` entirely
+    // would CLEAR an existing Google series, not merely fail to improve it. On an unsupported
+    // rule, fall back to the pre-583 raw line split instead of dropping the field: Google sees
+    // the same (possibly already-malformed) data it always did, not a newly destructive edit.
+    try {
+      const parsed = parseRecurrenceBlock(local.recurrence_rule, local.all_day ? 'date' : 'date-time');
+      event.recurrence = parsed.lines;
+    } catch (err) {
+      syncLogger.warn(
+        {
+          err,
+          eventId: local.id,
+          reason: err instanceof RecurrenceUnsupportedError ? err.reason : undefined,
+        },
+        'recurrence_rule failed validation on Google export; pushing the raw line split instead of clearing the series',
+      );
+      event.recurrence = local.recurrence_rule.split('\n');
+    }
   }
 
   if (local.reminder_overrides) {
@@ -122,6 +143,23 @@ export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
 export function googleToLocal(gEvent: GoogleEvent, userId: number, googleCalendarId: string): LocalEventFromGoogle {
   const isAllDay = !!gEvent.start?.date;
 
+  let recurrenceRule: string | null = null;
+  if (gEvent.recurrence && gEvent.recurrence.length > 0) {
+    try {
+      const parsed = parseRecurrenceBlock(gEvent.recurrence.join('\n'), isAllDay ? 'date' : 'date-time');
+      recurrenceRule = parsed.lines.join('\n');
+    } catch (err) {
+      // Store Google's lines verbatim (pre-583 behavior) instead of null: sync writes this value
+      // over an existing local series, and null would silently turn it into a one-off and clear
+      // the Google series on the next push. Expansion rejects/isolates the series explicitly.
+      recurrenceRule = gEvent.recurrence.join('\n');
+      syncLogger.warn(
+        { err, googleEventId: gEvent.id, reason: err instanceof RecurrenceUnsupportedError ? err.reason : undefined },
+        'Google recurrence failed validation; stored verbatim',
+      );
+    }
+  }
+
   return {
     user_id: userId,
     title: gEvent.summary ?? 'Untitled',
@@ -131,7 +169,7 @@ export function googleToLocal(gEvent: GoogleEvent, userId: number, googleCalenda
     all_day: isAllDay,
     timezone: gEvent.start?.timeZone ?? 'UTC',
     location: gEvent.location ?? null,
-    recurrence_rule: gEvent.recurrence ? gEvent.recurrence.join('\n') : null,
+    recurrence_rule: recurrenceRule,
     google_calendar_id: googleCalendarId,
     google_event_id: gEvent.id ?? '',
     google_etag: gEvent.etag ?? null,

@@ -298,8 +298,71 @@ describe('Recurring reminder materialization', () => {
   });
 });
 
-describe('EventReminderRepository.existsForEventAt', () => {
-  test('returns true when reminder exists, false otherwise', () => {
+describe('EventReminderRepository.existsForOccurrence', () => {
+  test('identity is (event, user, occurrence_start, interval_minutes, interval_label) — not remind_at_utc', () => {
+    const db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    new UserRepository(db).create({ telegram_id: 42 });
+    new UserRepository(db).create({ telegram_id: 43 });
+    const eventRepo = new EventRepository(db);
+    const event = eventRepo.create({
+      user_id: 42,
+      title: 'Test',
+      start_at: '2099-06-01T10:00:00Z',
+      timezone: 'UTC',
+    });
+    const repo = new EventReminderRepository(db);
+
+    expect(repo.existsForOccurrence(event.id, 42, '2099-06-01T10:00:00Z', 30, '30 minutes')).toBe(false);
+
+    repo.insert({
+      event_id: event.id,
+      user_id: 42,
+      remind_at_utc: '2099-06-01T09:30:00.000Z',
+      interval_minutes: 30,
+      interval_label: '30 minutes',
+      occurrence_start: '2099-06-01T10:00:00Z',
+    });
+
+    expect(repo.existsForOccurrence(event.id, 42, '2099-06-01T10:00:00Z', 30, '30 minutes')).toBe(true);
+    // Different interval_minutes on the same occurrence — not a match.
+    expect(repo.existsForOccurrence(event.id, 42, '2099-06-01T10:00:00Z', 0, 'at start')).toBe(false);
+    // Same event/occurrence/interval but a different recipient — not a match (the
+    // (event_id, remind_at_utc) key this replaces would have collided here).
+    expect(repo.existsForOccurrence(event.id, 43, '2099-06-01T10:00:00Z', 30, '30 minutes')).toBe(false);
+  });
+
+  test('a base row written by materialize() (occurrence_start NULL) matches the base occurrence', () => {
+    const db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    new UserRepository(db).create({ telegram_id: 42 });
+    const event = new EventRepository(db).create({
+      user_id: 42,
+      title: 'Weekly',
+      start_at: '2099-06-01T10:00:00Z',
+      timezone: 'UTC',
+      recurrence_rule: 'RRULE:FREQ=WEEKLY',
+    });
+    const repo = new EventReminderRepository(db);
+    repo.insert({
+      event_id: event.id,
+      user_id: 42,
+      remind_at_utc: '2099-06-01T09:30:00.000Z',
+      interval_minutes: 30,
+      interval_label: '30 minutes',
+    });
+
+    // The cron sees the base occurrence in canonical toISOString() form.
+    expect(repo.existsForOccurrence(event.id, 42, '2099-06-01T10:00:00.000Z', 30, '30 minutes')).toBe(true);
+    expect(repo.existsForOccurrence(event.id, 42, '2099-06-08T10:00:00.000Z', 30, '30 minutes')).toBe(false);
+  });
+
+  test('two occurrences whose computed remind_at_utc coincide stay distinct (BYHOUR reconciliation)', () => {
+    // recurrence-reminder-reconciliation-005: occurrence at 14:00 with a 240min-before
+    // reminder and occurrence at 10:00 with an at-start reminder both compute remind_at_utc
+    // 10:00Z — identity by occurrence_start + interval_minutes keeps both rows.
     const db = new Database(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
     runMigrations(db, migrations);
@@ -313,18 +376,54 @@ describe('EventReminderRepository.existsForEventAt', () => {
     });
     const repo = new EventReminderRepository(db);
 
-    expect(repo.existsForEventAt(event.id, '2099-06-01T09:30:00.000Z')).toBe(false);
+    repo.insert({
+      event_id: event.id,
+      user_id: 42,
+      remind_at_utc: '2099-06-01T10:00:00.000Z',
+      interval_minutes: 0,
+      interval_label: 'at start',
+      occurrence_start: '2099-06-01T10:00:00Z',
+    });
+    repo.insert({
+      event_id: event.id,
+      user_id: 42,
+      remind_at_utc: '2099-06-01T10:00:00.000Z',
+      interval_minutes: 240,
+      interval_label: '4 hours',
+      occurrence_start: '2099-06-01T14:00:00Z',
+    });
+
+    expect(repo.getForEvent(event.id).length).toBe(2);
+    expect(repo.existsForOccurrence(event.id, 42, '2099-06-01T10:00:00Z', 0, 'at start')).toBe(true);
+    expect(repo.existsForOccurrence(event.id, 42, '2099-06-01T14:00:00Z', 240, '4 hours')).toBe(true);
+  });
+
+  test('all-day "day before" and "day of" share interval_minutes -1 but stay distinct via interval_label', () => {
+    const db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    new UserRepository(db).create({ telegram_id: 42 });
+    const eventRepo = new EventRepository(db);
+    const event = eventRepo.create({
+      user_id: 42,
+      title: 'Birthday',
+      start_at: '2099-06-01T00:00:00Z',
+      timezone: 'UTC',
+      all_day: true,
+    });
+    const repo = new EventReminderRepository(db);
 
     repo.insert({
       event_id: event.id,
       user_id: 42,
-      remind_at_utc: '2099-06-01T09:30:00.000Z',
-      interval_minutes: 30,
-      interval_label: '30 minutes',
+      remind_at_utc: '2099-05-31T09:00:00.000Z',
+      interval_minutes: -1,
+      interval_label: 'day before',
+      occurrence_start: '2099-06-01T00:00:00Z',
     });
 
-    expect(repo.existsForEventAt(event.id, '2099-06-01T09:30:00.000Z')).toBe(true);
-    expect(repo.existsForEventAt(event.id, '2099-06-01T10:00:00.000Z')).toBe(false);
+    expect(repo.existsForOccurrence(event.id, 42, '2099-06-01T00:00:00Z', -1, 'day before')).toBe(true);
+    expect(repo.existsForOccurrence(event.id, 42, '2099-06-01T00:00:00Z', -1, 'day of')).toBe(false);
   });
 });
 

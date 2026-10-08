@@ -132,6 +132,50 @@ describe('event-mapper', () => {
       expect(result.recurrence).toEqual(['RRULE:FREQ=WEEKLY', 'EXDATE;TZID=Europe/Moscow:20260401T090000']);
     });
 
+    test('normalizes a locally-created bare rule (no RRULE: prefix) before export', () => {
+      // recurrence-google-roundtrip-003
+      const result = localToGoogle({
+        id: 5,
+        title: 'Bare rule',
+        start_at: '2026-03-15T10:00:00Z',
+        end_at: '2026-03-15T11:00:00Z',
+        all_day: 0,
+        timezone: 'UTC',
+        description: null,
+        location: null,
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
+        recurrence_rule: 'FREQ=WEEKLY;INTERVAL=1;COUNT=6',
+        reminder_overrides: null,
+        sync_version: 0,
+      });
+      expect(result.recurrence).toEqual(['RRULE:FREQ=WEEKLY;INTERVAL=1;COUNT=6']);
+    });
+
+    test('an unsupported multi-RRULE series falls back to the raw line split, never clears the field', () => {
+      // `events.update` is a full-resource replace — omitting `recurrence` here would delete
+      // an existing Google series, not just fail to improve it (found in review).
+      const result = localToGoogle({
+        id: 6,
+        title: 'Bad series',
+        start_at: '2026-03-15T10:00:00Z',
+        end_at: '2026-03-15T11:00:00Z',
+        all_day: 0,
+        timezone: 'UTC',
+        description: null,
+        location: null,
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
+        recurrence_rule: 'RRULE:FREQ=WEEKLY;COUNT=6\nRRULE:FREQ=DAILY;COUNT=3',
+        reminder_overrides: null,
+        sync_version: 0,
+      });
+      expect(result.recurrence).toEqual(['RRULE:FREQ=WEEKLY;COUNT=6', 'RRULE:FREQ=DAILY;COUNT=3']);
+      expect(result.summary).toBe('Bad series');
+    });
+
     test('sets extended properties with local event ID', () => {
       const result = localToGoogle({
         id: 42,
@@ -293,6 +337,79 @@ describe('event-mapper', () => {
         'primary',
       );
       expect(result.recurrence_rule).toBe('RRULE:FREQ=WEEKLY\nEXDATE;TZID=Europe/Moscow:20260401T090000');
+    });
+
+    test('a multiple-RRULE series is stored verbatim, not cleared to a one-off', () => {
+      const result = googleToLocal(
+        {
+          id: 'g-multi',
+          summary: 'Bad series',
+          start: { dateTime: '2026-01-01T10:00:00Z' },
+          end: { dateTime: '2026-01-01T11:00:00Z' },
+          status: 'confirmed',
+          recurrence: ['RRULE:FREQ=WEEKLY;COUNT=6', 'RRULE:FREQ=DAILY;COUNT=3'],
+        },
+        42,
+        'primary',
+      );
+      // Sync writes this over an existing local series; null would destroy it (and the Google
+      // series on the next push). Expansion isolates the unsupported rule explicitly instead.
+      expect(result.recurrence_rule).toBe('RRULE:FREQ=WEEKLY;COUNT=6\nRRULE:FREQ=DAILY;COUNT=3');
+      expect(result.title).toBe('Bad series');
+    });
+
+    test('an EXRULE series is stored verbatim, not cleared to a one-off', () => {
+      // recurrence-exrule-reject-002
+      const result = googleToLocal(
+        {
+          id: 'g-exrule',
+          summary: 'Legacy series',
+          start: { dateTime: '2026-01-01T10:00:00Z' },
+          end: { dateTime: '2026-01-01T11:00:00Z' },
+          status: 'confirmed',
+          recurrence: ['RRULE:FREQ=WEEKLY;COUNT=6', 'EXRULE:FREQ=WEEKLY;COUNT=2'],
+        },
+        42,
+        'primary',
+      );
+      expect(result.recurrence_rule).toBe('RRULE:FREQ=WEEKLY;COUNT=6\nEXRULE:FREQ=WEEKLY;COUNT=2');
+    });
+
+    test('EXDATE/RDATE round-trip: export then re-import preserves the full recurrence set', () => {
+      // recurrence-google-roundtrip-001
+      const exported = localToGoogle({
+        id: 7,
+        title: 'Weekly',
+        start_at: '2026-01-06T10:00:00Z',
+        end_at: '2026-01-06T11:00:00Z',
+        all_day: 0,
+        timezone: 'UTC',
+        description: null,
+        location: null,
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
+        recurrence_rule: 'RRULE:FREQ=WEEKLY;INTERVAL=1;COUNT=6\nEXDATE:20260113T100000Z\nRDATE:20260301T100000Z',
+        reminder_overrides: null,
+        sync_version: 0,
+      });
+
+      const reimported = googleToLocal(
+        {
+          id: 'g-roundtrip',
+          summary: exported.summary,
+          start: exported.start,
+          end: exported.end,
+          status: 'confirmed',
+          recurrence: exported.recurrence,
+        },
+        42,
+        'primary',
+      );
+
+      expect(reimported.recurrence_rule).toBe(
+        'RRULE:FREQ=WEEKLY;INTERVAL=1;COUNT=6\nEXDATE:20260113T100000Z\nRDATE:20260301T100000Z',
+      );
     });
   });
 });
