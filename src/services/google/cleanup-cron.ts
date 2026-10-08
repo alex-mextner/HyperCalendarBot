@@ -1,13 +1,13 @@
 // src/services/google/cleanup-cron.ts
-import type { Queue } from 'bullmq';
+
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
 import { syncLogger } from '../../utils/logger.ts';
-import type { GoogleSyncJobData } from './sync-queue.ts';
+import type { GoogleCronQueue } from './sync-cron.ts';
 
 const SYNC_LOG_RETENTION_DAYS = 30;
 
-export async function setupCleanupCron(queue: Queue<GoogleSyncJobData>): Promise<void> {
+export async function setupCleanupCron(queue: GoogleCronQueue): Promise<void> {
   await queue.add(
     'cleanup-tick',
     {
@@ -23,7 +23,10 @@ export async function setupCleanupCron(queue: Queue<GoogleSyncJobData>): Promise
   syncLogger.info('Cleanup cron scheduled (daily)');
 }
 
-export function executeCleanup(syncRepo: GoogleSyncRepository, calendarRepo: GoogleCalendarRepository): void {
+export function executeCleanup(
+  syncRepo: Pick<GoogleSyncRepository, 'pruneOldLogs'>,
+  calendarRepo: Pick<GoogleCalendarRepository, 'getExpiringChannels' | 'deleteWatchChannel'>,
+): void {
   syncRepo.pruneOldLogs(SYNC_LOG_RETENTION_DAYS);
 
   const nowIso = new Date().toISOString();

@@ -1,4 +1,4 @@
 [test]
-coverage = true
-coverageThreshold = { line = 80 }
+# Coverage is opt-in; ci/test-coverage.sh owns the full-suite output directories.
+# Bun config values override CLI reporter/directory flags, so do not set them here.
 coverageSkipTestFiles = true

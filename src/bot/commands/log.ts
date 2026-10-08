@@ -4,7 +4,12 @@ import type { ActionLogRepository } from '../../database/repositories/action-log
 import { telegramMessageLink } from '../../database/repositories/action-log.repository.ts';
 import type { UserActionLog } from '../../database/types.ts';
 import { splitMessage } from '../../utils/telegram.ts';
-import type { BotCommandContext } from '../types.ts';
+
+interface LogContext {
+  dbUser: { telegram_id: number } | undefined;
+  args?: string | null;
+  send(text: string, options?: { parse_mode: 'HTML' }): Promise<unknown>;
+}
 
 /**
  * /log [user_id] [limit] — admin-only command to browse action log.
@@ -15,8 +20,8 @@ import type { BotCommandContext } from '../types.ts';
  *   /log event:42     — all actions on event #42
  */
 export async function handleLog(
-  ctx: BotCommandContext,
-  actionLogRepo: ActionLogRepository,
+  ctx: LogContext,
+  actionLogRepo: Pick<ActionLogRepository, 'query' | 'getRecent' | 'getByEvent'>,
   adminId?: number,
 ): Promise<void> {
   const user = ctx.dbUser;
@@ -43,10 +48,14 @@ export async function handleLog(
     return;
   }
 
-  const userId = parts[0] ? Number.parseInt(parts[0], 10) : undefined;
-  const limit = parts[1] ? Number.parseInt(parts[1], 10) : 20;
+  const userId = parts[0] ? Number(parts[0]) : undefined;
+  const limit = parts[1] ? Number(parts[1]) : 20;
 
-  if (userId && Number.isNaN(userId)) {
+  if (
+    (userId !== undefined && (!Number.isSafeInteger(userId) || userId <= 0)) ||
+    !Number.isSafeInteger(limit) ||
+    limit <= 0
+  ) {
     await ctx.send('Usage: /log [user_id] [limit] or /log event:ID');
     return;
   }
@@ -56,7 +65,7 @@ export async function handleLog(
   await sendEntries(ctx, entries, title);
 }
 
-async function sendEntries(ctx: BotCommandContext, entries: UserActionLog[], title: string): Promise<void> {
+async function sendEntries(ctx: LogContext, entries: UserActionLog[], title: string): Promise<void> {
   if (entries.length === 0) {
     await ctx.send(`${title}: no entries.`);
     return;

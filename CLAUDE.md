@@ -426,7 +426,9 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - **Every commit must have tests**: no committing code without corresponding test coverage.
   New tool handlers, new utilities, new AI tools, bug fixes — all need tests in the same commit.
 - **Regression tests for every bugfix**: reproduce the exact bug scenario in a test BEFORE fixing.
-- **Maintain ~80% test coverage**: run `bun test --coverage` regularly. Currently at ~93% lines.
+- **Maintain ≥80% line coverage**: CI enforces it through `bash ci/local-ci.sh` → `ci/test-coverage.sh`, which
+  counts every `src/` file (unloaded files as fully uncovered; see `ci/COVERAGE.md`). Plain `bun test` no longer
+  collects coverage. On 2026-10-07: ~81% conservative, ~93% of loaded lines.
   New files must have corresponding test files. No shipping untested code.
 - **Centralize test casts in factory functions** — see "Test-only cast exceptions" in Coding Guidelines.
 - **Tests must assert behavior, not mock wiring** — "mock was called with X" is a weak assertion.
