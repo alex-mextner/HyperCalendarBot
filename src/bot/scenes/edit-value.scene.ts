@@ -112,8 +112,8 @@ export function createEditValueScene(
           }
         }
 
-        // Delivered invitation cards show the location as it was before this edit
-        const before = field === 'location' ? eventService.getEvent(eventId, user.telegram_id) : null;
+        // Delivered invitation cards need the event details from before this edit
+        const before = eventService.getEvent(eventId, user.telegram_id);
         const updated = eventService.updateEvent(eventId, user.telegram_id, updateData);
         const { chatId, messageId } = context.scene.params;
 

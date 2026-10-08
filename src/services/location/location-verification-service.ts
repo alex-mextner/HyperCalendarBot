@@ -183,17 +183,20 @@ export class LocationVerificationService {
     return { resolved: false, geocoded: null, cityExtracted: candidates[0]?.city ?? null, candidates };
   }
 
-  /**
-   * The event's location changed from `before` to `after` without a place being confirmed: an edit
-   * (a new text, an abstract place, a removal) or a question that dropped the confirmed place.
-   * Re-render the delivered invitation cards when their location line changes, so no card keeps a
-   * place the event no longer has, whether or not a question follows or finds anything.
-   */
+  /** Refresh delivered cards when the event's displayed title, schedule or location changes. */
   async refreshInvitationCards(before: CalendarEvent, after: CalendarEvent): Promise<void> {
-    if (formatLocationHtml(before) === formatLocationHtml(after)) return;
+    if (
+      before.title === after.title &&
+      before.start_at === after.start_at &&
+      before.end_at === after.end_at &&
+      before.all_day === after.all_day &&
+      before.timezone === after.timezone &&
+      formatLocationHtml(before) === formatLocationHtml(after)
+    )
+      return;
     // Never rejects: a card that cannot be re-rendered must not fail the edit or stop the question
     await this.updateInvitationMessages(after).catch((err) => {
-      logger.error({ err, eventId: after.id }, 'Failed to re-render invitation cards after the location change');
+      logger.error({ err, eventId: after.id }, 'Failed to re-render invitation cards after the event change');
     });
   }
 
