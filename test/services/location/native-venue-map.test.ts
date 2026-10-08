@@ -463,10 +463,10 @@ describe('Map button on the invitation', () => {
     expect(s.venues.map((v) => v.chat_id)).toEqual([GROUP_CHAT_ID]);
   });
 
-  test('a declined-then-cancelled invitee can no longer press Map', async () => {
+  test('a cancelled invitee can no longer press Map', async () => {
     const s = setup();
     await s.confirmCandidate(0);
-    new InvitationRepository(db).cancelForEvent(s.event.id);
+    expect(new InvitationRepository(db).updateStatus(s.invitation.id, 'cancelled', 'pending')).toBe(true);
     s.venues.length = 0;
 
     await s.tap(`ev_map:${s.event.id}`, { from: INVITEE_ID });
