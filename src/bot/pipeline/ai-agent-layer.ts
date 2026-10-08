@@ -4,7 +4,7 @@ import { t, toLang } from '../../config/constants.ts';
 import { agentGiveUpMessage, type CalendarBotAgent } from '../../services/ai/agent.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
-import type { AiMessageJobData, RetryJobStore } from '../../services/scheduled/types.ts';
+import type { AiMessageJobData, AiMessageJobGroup, RetryJobStore } from '../../services/scheduled/types.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { AgentContextBuilder } from '../agent-context-factory.ts';
 import type { BotCommandContext } from '../types.ts';
@@ -86,6 +86,16 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
       const queue = deps.retryQueue;
       const jobStore = deps.retryJobStore;
       const lang = toLang(user.language);
+      const groupContext = extra?.groupContext;
+      // A group question is retried in its group, or the answer lands in a DM the group never sees.
+      const group: AiMessageJobGroup | undefined =
+        groupContext?.isGroup && groupContext.groupChatId !== undefined
+          ? {
+              chatId: groupContext.groupChatId,
+              title: groupContext.groupTitle,
+              topicThreadId: groupContext.topicThreadId,
+            }
+          : undefined;
 
       agentContext.retryEnqueue = async (msg: string) => {
         if (currentAttempt >= MAX_RETRY_ATTEMPTS) {
@@ -101,7 +111,13 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
         }
         const delay = BACKOFF_DELAYS_MS[currentAttempt]!;
         const jobId = await queue.addDelayed(
-          { userId: user.telegram_id, message: msg, source: 'trigger', retryAttempt: currentAttempt + 1 },
+          {
+            userId: user.telegram_id,
+            message: msg,
+            source: 'trigger',
+            retryAttempt: currentAttempt + 1,
+            ...(group ? { group } : {}),
+          },
           delay,
         );
         // The job is stored and will run: the cancellation pointer is written in the background, so a

@@ -1097,8 +1097,8 @@ if (config.REDIS_URL) {
 
   // SyntheticPipelineRunner — runs IntentMatcher → AiAgent without GramIO context
   const syntheticRunner = new SyntheticPipelineRunner({
-    contextBuilder: (user, chatId, message) => {
-      const ctx = agentContextBuilder(user, chatId, message);
+    contextBuilder: (user, chatId, message, groupInfo) => {
+      const ctx = agentContextBuilder(user, chatId, message, groupInfo);
       if (ctx.scheduled) {
         ctx.scheduled.domainEvents = domainEventBus;
       }

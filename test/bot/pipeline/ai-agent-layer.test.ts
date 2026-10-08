@@ -6,6 +6,7 @@ import type { User } from '../../../src/database/types.ts';
 import type { AgentRunResult, AgentToolCallRecord, AgentToolResultRecord } from '../../../src/services/ai/agent.ts';
 import { aiFailureNotices } from '../../../src/services/ai/agent.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
+import type { AiMessageJobData } from '../../../src/services/scheduled/types.ts';
 
 /** Signature matching IntentLearner.analyze() for properly typed mock.calls access */
 type AnalyzeFn = (
@@ -337,6 +338,25 @@ describe('retry / backoff', () => {
     expect(await captured.ctx!.retryEnqueue!('retry msg')).toBe(true);
     const [, delay] = addDelayed.mock.calls[0] as unknown as [unknown, number];
     expect(delay).toBe(30_000);
+  });
+
+  test('a group message enqueues its retry with the group it came from (#668)', async () => {
+    const { deps, addDelayed, captured } = makeRetrySetup();
+    await createAiAgentLayer(deps)(makeCtx(), 'msg', {
+      retryAttempt: 0,
+      groupContext: { isGroup: true, groupChatId: -1_009_001, groupTitle: 'Synthetic group', topicThreadId: 7 },
+    });
+    await captured.ctx!.retryEnqueue!('retry msg');
+    const [data] = addDelayed.mock.calls[0] as unknown as [AiMessageJobData, number];
+    expect(data.group).toEqual({ chatId: -1_009_001, title: 'Synthetic group', topicThreadId: 7 });
+  });
+
+  test('a private message enqueues its retry without a group', async () => {
+    const { deps, addDelayed, captured } = makeRetrySetup();
+    await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 0 });
+    await captured.ctx!.retryEnqueue!('retry msg');
+    const [data] = addDelayed.mock.calls[0] as unknown as [AiMessageJobData, number];
+    expect(data.group).toBeUndefined();
   });
 
   test('attempt=1 → addDelayed called with 60s delay', async () => {
