@@ -176,6 +176,31 @@ describe('executeTool', () => {
     expect(result.success).toBe(true);
   });
 
+  // #270: an update that changes nothing must not be reported as an applied write.
+  test.each([
+    ['only an unsupported field', { start_time: '2026-03-15T12:00:00Z' }],
+    ['only a verified-place column', { latitude: 1, venue_name: 'Cafe' }],
+    ['only location_abstract', { location_abstract: true }],
+    ['no field at all', {}],
+  ])('update_event with %s is rejected as not applied and leaves the row intact', async (_label, extra) => {
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Old',
+      start_at: '2026-03-15T10:00:00Z',
+      timezone: 'UTC',
+    });
+    const before = ctx.eventService.getEvent(event.id, USER_ID);
+    const result = await executeTool(ctx, 'update_event', { event_id: event.id, ...extra });
+    expect(result.success).toBe(false);
+    expect(result.mutationState).toBe('not_applied');
+    expect(result.disposition).toBe('failed');
+    expect(result.error).toContain('start_at');
+    // Columns the tool schema does not declare (and so does not validate) are never offered
+    expect(result.error).not.toContain('all_day');
+    expect(result.error).not.toContain('reminder_overrides');
+    expect(ctx.eventService.getEvent(event.id, USER_ID)).toEqual(before);
+  });
+
   test('routes delete_event to handler', async () => {
     const event = ctx.eventService.createEvent({
       user_id: USER_ID,
