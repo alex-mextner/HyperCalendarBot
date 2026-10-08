@@ -149,6 +149,23 @@ for (const [name, handler] of Object.entries(handlers)) {
   });
 }
 
+const personalScopeHandlers = {
+  day: (ctx: AgentContext) => handleRenderDayImage(ctx, { date: '2099-06-01', scope: 'personal' }),
+  week: (ctx: AgentContext) => handleRenderWeekImage(ctx, { week_start: '2099-06-01', scope: 'personal' }),
+  month: (ctx: AgentContext) => handleRenderMonthImage(ctx, { month: '2099-06', scope: 'personal' }),
+};
+for (const [name, handler] of Object.entries(personalScopeHandlers)) {
+  test(`${name} personal calendar rendered into a group shows no descriptions or rosters`, async () => {
+    const { ctx, jobs } = setup(1, true);
+    expect((await handler(ctx)).success).toBe(true);
+    const payload = JSON.stringify(jobs);
+    expect(payload).toContain('PRIVATE MEETING');
+    expect(payload).not.toContain('TEXT ONLY SECRET NOTES');
+    expect(payload).not.toContain('descriptionPreview');
+    expect(payload).not.toContain('Private Other');
+  });
+}
+
 for (const timezone of ['Pacific/Kiritimati', 'Etc/GMT+12', 'America/Los_Angeles']) {
   for (const kind of ['day', 'week'] as const) {
     test(`${kind} selects the requested local calendar at ${timezone}`, async () => {
