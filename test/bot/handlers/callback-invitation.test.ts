@@ -1,10 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, mock, test } from 'bun:test';
 import type { InlineKeyboard } from 'gramio';
-import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
+import { type CallbackHandlerOpts, createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
 import { t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { GroupMemberRepository } from '../../../src/database/repositories/group-member.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
@@ -39,9 +40,10 @@ function makeGroupCtx(data: string, language: 'en' | 'ru' = 'en') {
   };
 }
 
-function makeHandler(invitationService: unknown) {
+function makeHandler(invitationService: unknown, groupMembership?: CallbackHandlerOpts['groupMembership']) {
   return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
     invitationService: invitationService as never,
+    groupMembership,
   });
 }
 
@@ -144,6 +146,72 @@ describe('invitation callbacks', () => {
 });
 
 describe('group RSVP callbacks', () => {
+  function membershipDb() {
+    const db = new Database(':memory:');
+    runMigrations(db, migrations);
+    return new GroupMemberRepository(db);
+  }
+
+  function recordSeeingMembership(repo: GroupMemberRepository) {
+    const seen: boolean[] = [];
+    const recordGroupAttendance = mock(() => {
+      const active = repo.isActiveMember(GROUP_CHAT_ID, 200);
+      seen.push(active);
+      return active ? { success: true } : { success: false, error: 'User is not an active member of this group' };
+    });
+    return { seen, recordGroupAttendance };
+  }
+
+  test('a member with no cached row is confirmed live and recorded before the RSVP', async () => {
+    const repo = membershipDb();
+    const getLiveMembership = mock(async () => true);
+    const { seen, recordGroupAttendance } = recordSeeingMembership(repo);
+    const ctx = makeGroupCtx('grsvp:42:going');
+
+    await makeHandler({ recordGroupAttendance }, { repo, getLiveMembership })(ctx as never);
+
+    expect(getLiveMembership).toHaveBeenCalledWith(GROUP_CHAT_ID, 200);
+    expect(seen).toEqual([true]);
+    expect(ctx.answer).toHaveBeenCalledWith(t('en').group_rsvp_recorded);
+  });
+
+  test('a cached member who has left per Telegram is marked left and denied', async () => {
+    const repo = membershipDb();
+    repo.upsert(GROUP_CHAT_ID, 200);
+    const getLiveMembership = mock(async () => false);
+    const { seen, recordGroupAttendance } = recordSeeingMembership(repo);
+    const ctx = makeGroupCtx('grsvp:42:going');
+
+    await makeHandler({ recordGroupAttendance }, { repo, getLiveMembership })(ctx as never);
+
+    expect(seen).toEqual([false]);
+    expect(repo.isActiveMember(GROUP_CHAT_ID, 200)).toBe(false);
+    expect(ctx.answer).toHaveBeenCalledWith({ text: t('en').group_rsvp_not_authorized });
+  });
+
+  test('a non-member per Telegram gets no membership row', async () => {
+    const repo = membershipDb();
+    const getLiveMembership = mock(async () => false);
+    const { recordGroupAttendance } = recordSeeingMembership(repo);
+    const ctx = makeGroupCtx('grsvp:42:going');
+
+    await makeHandler({ recordGroupAttendance }, { repo, getLiveMembership })(ctx as never);
+
+    expect(repo.isActiveMember(GROUP_CHAT_ID, 200)).toBe(false);
+    expect(ctx.answer).toHaveBeenCalledWith({ text: t('en').group_rsvp_not_authorized });
+  });
+
+  test('when Telegram cannot answer, the cached row decides', async () => {
+    const repo = membershipDb();
+    repo.upsert(GROUP_CHAT_ID, 200);
+    const getLiveMembership = mock(async () => null);
+    const { seen, recordGroupAttendance } = recordSeeingMembership(repo);
+
+    await makeHandler({ recordGroupAttendance }, { repo, getLiveMembership })(makeGroupCtx('grsvp:42:going') as never);
+
+    expect(seen).toEqual([true]);
+  });
+
   test('going records accepted attendance for the clicking member and toasts', async () => {
     const recordGroupAttendance = mock(() => ({ success: true }));
     const ctx = makeGroupCtx('grsvp:42:going');
