@@ -407,7 +407,17 @@ export class LocationVerificationService {
 
     // Re-read live access after the geocoding await (a real network round trip): a revoke, or an
     // edit/delete of the event, that lands during it must not let the pin still mutate the owner's
-    // event (#421). Use this freshly-read event for the mutation, not the pre-await one.
+    // event (#421).
+    if (!this.getEventVisibleToActor(eventId, userId)) return false;
+
+    // The shared location answers any open picker for this event; closing it before applying means a
+    // keep tap on it either lands before the location (and the location wins) or finds it answered.
+    await this.deps.candidateStore.del(eventId).catch((err) => {
+      logger.warn({ err, eventId }, 'Failed to delete location candidates from store');
+    });
+
+    // And once more after that await, with no await between this read and the write: the mutation
+    // uses this freshly-read event, never a pre-await one.
     const event = this.getEventVisibleToActor(eventId, userId);
     if (!event) return false;
 
@@ -419,11 +429,6 @@ export class LocationVerificationService {
       : this.deps.userRepo.findByTelegramId(userId);
     if (!scopeUser) return false;
 
-    // The shared location answers any open picker for this event; closing it before applying means a
-    // keep tap on it either lands before the location (and the location wins) or finds it answered.
-    await this.deps.candidateStore.del(eventId).catch((err) => {
-      logger.warn({ err, eventId }, 'Failed to delete location candidates from store');
-    });
     await this.applyResolvedLocation(event, geo);
     if (event.location) {
       await this.cacheAndUpdateCity(scopeUser, event.location, geo, !delegated);

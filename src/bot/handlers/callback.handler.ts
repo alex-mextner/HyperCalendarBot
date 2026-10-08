@@ -1694,8 +1694,9 @@ export function createCallbackHandler(
         reply_markup: undefined,
       });
       // The creator chose from text and links: show the chosen point on Telegram's map once. The
-      // picker itself keeps map links; a venue per candidate would flood the chat.
-      const event = eventService.getEvent(eventId, user.telegram_id);
+      // picker itself keeps map links; a venue per candidate would flood the chat. A write secretary
+      // answering the owner's picker sees the event through the secretary-aware resolver (#421).
+      const event = locationVerification.getEventVisibleToActor(eventId, user.telegram_id);
       const venue = event ? eventVenue(event) : null;
       if (venue) {
         await ctx.sendVenue(venue).catch((err: unknown) => {

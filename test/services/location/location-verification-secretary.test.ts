@@ -15,7 +15,9 @@ import { t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { AgendaRepository } from '../../../src/database/repositories/agenda.repository.ts';
 import { CalendarProposalRepository } from '../../../src/database/repositories/calendar-proposal.repository.ts';
+import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { GroupMemberRepository } from '../../../src/database/repositories/group-member.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
@@ -26,6 +28,7 @@ import { runMigrations } from '../../../src/database/schema.ts';
 import type { SecretaryPermission, SecretaryStatus } from '../../../src/database/types.ts';
 import { handleCreateEvent, handleUpdateEvent } from '../../../src/services/ai/tool-handlers/events.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
+import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import { AddressCache } from '../../../src/services/location/address-cache.ts';
@@ -209,10 +212,10 @@ function setup(opts: {
       isGroup: false,
       eventService,
       holidayService: new HolidayService(new HolidayRepository(db)),
-      chatHistory: null as never,
+      chatHistory: new ChatHistoryRepository(db),
       userRepo,
-      eventReminderRepo: null as never,
-      conversationLogger: null as never,
+      eventReminderRepo: new EventReminderRepository(db),
+      conversationLogger: new ConversationLogger(new ChatHistoryRepository(db)),
       locationVerification: service,
       secretary: {
         secretaryRepo,
@@ -222,6 +225,9 @@ function setup(opts: {
     };
   }
 
+  /** The chosen places shown on Telegram's map after a candidate tap. */
+  const venues: { chatId: number; address: string }[] = [];
+
   /** Press an inline button as `actorId`, through the real callback handler. */
   async function tap(data: string, actorId: number): Promise<EditedMessage[]> {
     const bot = new Bot('123:test');
@@ -230,6 +236,10 @@ function setup(opts: {
     bot.api.editMessageText = async (params) => {
       edited.push({ text: params.text.toString(), replyMarkup: params.reply_markup });
       return true;
+    };
+    bot.api.sendVenue = async (params) => {
+      venues.push({ chatId: Number(params.chat_id), address: params.address });
+      return { message_id: 11, date: 0, chat: { id: Number(params.chat_id), type: 'private' } };
     };
     const dbUser = userRepo.findByTelegramId(actorId);
     if (!dbUser) throw new Error(`missing user ${actorId}`);
@@ -276,6 +286,7 @@ function setup(opts: {
     flush,
     ctxFor,
     tap,
+    venues,
     revokeSecretary,
   };
 }
@@ -307,6 +318,8 @@ describe("a write secretary completes the place picker for the owner's personal 
     // Useful confirmation text: the real event title and the resolved address, not blank.
     expect(edits[0]!.text).toContain('Coffee with Ira');
     expect(edits[0]!.text).toContain(place().formattedAddress);
+    // The secretary also gets the chosen place on Telegram's map, as the owner would.
+    expect(s.venues).toEqual([{ chatId: SECRETARY_ID, address: place().formattedAddress }]);
 
     const stored = s.eventRepo.findById(eventId, OWNER_ID);
     expect(stored?.location_verified).toBe(1);
@@ -486,6 +499,36 @@ describe("a write secretary completes the place picker for the owner's personal 
     const stored = s.eventRepo.findById(created.id, OWNER_ID);
     expect(stored?.location_verified).toBe(0);
     expect(stored?.resolved_address).toBeNull();
+  });
+
+  test('write access revoked while the pin closes the open picker: the pin does not mutate the event', async () => {
+    const geocoder = scriptedGeocoder([place()]);
+    geocoder.service.reverseGeocode = async () => place();
+    const s = setup({ geocoder: geocoder.service });
+    const created = s.eventRepo.create({
+      user_id: OWNER_ID,
+      title: 'Планёрка',
+      start_at: futureStart(),
+      timezone: 'Europe/Belgrade',
+      location: RAW_LOCATION,
+    });
+    const del = s.candidateStore.del.bind(s.candidateStore);
+    s.candidateStore.del = async (eventId) => {
+      s.revokeSecretary();
+      await del(eventId);
+    };
+
+    const success = await s.service.resolveFromSharedLocation(
+      created.id,
+      { latitude: place().latitude, longitude: place().longitude, venue: null },
+      SECRETARY_ID,
+    );
+
+    expect(success).toBe(false);
+    const stored = s.eventRepo.findById(created.id, OWNER_ID);
+    expect(stored?.location_verified).toBe(0);
+    expect(stored?.resolved_address).toBeNull();
+    expect(await s.addressCache.findMapping(OWNER_ID, RAW_LOCATION)).toBeNull();
   });
 
   test('a stale picker replaced by a newer one cannot be answered by the secretary; the current one can', async () => {
