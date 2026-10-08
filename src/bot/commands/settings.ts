@@ -16,6 +16,7 @@ import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import { countryPickerKeyboard, reminderIntervalsKeyboard } from '../keyboards.ts';
+import { MASKED_PHONE_IN_HISTORY, withHistoryText } from '../reply-history-text.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
 const NumberArrayCodec = jsonCodec(z.array(z.number()));
@@ -242,21 +243,21 @@ function buildPrivacyView(
 
 // ─── Telegram Account ────────────────────────────────────────────────────────
 
+/** `historyText` is the chat_history copy of `text`, with the masked phone left out (GH-643). */
 export function buildTelegramView(
   session: TelegramSession | null,
   lang: 'en' | 'ru',
-): { text: string; kb: InlineKeyboard } {
+): { text: string; historyText: string; kb: InlineKeyboard } {
   const s = t(lang).settings;
 
-  const statusLine = session?.status === 'active' ? s.telegramConnected(session.phone_masked) : s.telegramNotConnected;
+  const connected = session?.status === 'active';
+  const text = connected ? s.telegramConnected(session.phone_masked) : s.telegramNotConnected;
+  const historyText = connected ? s.telegramConnected(MASKED_PHONE_IN_HISTORY) : text;
+  const kb = connected
+    ? backRow(new InlineKeyboard().text(s.telegramDisconnect, 'stg:tg_disconnect_confirm'), lang)
+    : backRow(new InlineKeyboard().text(s.telegramConnect, 'stg:tg_connect'), lang);
 
-  const text = statusLine;
-  const kb =
-    session?.status === 'active'
-      ? backRow(new InlineKeyboard().text(s.telegramDisconnect, 'stg:tg_disconnect_confirm'), lang)
-      : backRow(new InlineKeyboard().text(s.telegramConnect, 'stg:tg_connect'), lang);
-
-  return { text, kb };
+  return { text, historyText, kb };
 }
 
 // ─── Voice ──────────────────────────────────────────────────────────────────
@@ -543,9 +544,9 @@ export async function handleSettingsCallback(
 
   if (subAction === 'telegram' && telegramDeps) {
     const session = telegramDeps.sessionRepo.findByUserId(user.telegram_id);
-    const { text, kb } = buildTelegramView(session, lang);
+    const { text, historyText, kb } = buildTelegramView(session, lang);
     await ctx.answer();
-    await ctx.editText(text, { reply_markup: kb });
+    await ctx.editText(withHistoryText(ctx, text, historyText), { reply_markup: kb });
     return;
   }
 
