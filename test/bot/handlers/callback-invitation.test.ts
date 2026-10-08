@@ -152,45 +152,64 @@ describe('group RSVP callbacks', () => {
     return new GroupMemberRepository(db);
   }
 
+  function recordSeeingMembership(repo: GroupMemberRepository) {
+    const seen: boolean[] = [];
+    const recordGroupAttendance = mock(() => {
+      const active = repo.isActiveMember(GROUP_CHAT_ID, 200);
+      seen.push(active);
+      return active ? { success: true } : { success: false, error: 'User is not an active member of this group' };
+    });
+    return { seen, recordGroupAttendance };
+  }
+
   test('a member with no cached row is confirmed live and recorded before the RSVP', async () => {
     const repo = membershipDb();
-    const isLiveMember = mock(async () => true);
-    let activeAtRecord = false;
-    const recordGroupAttendance = mock(() => {
-      activeAtRecord = repo.isActiveMember(GROUP_CHAT_ID, 200);
-      return { success: true };
-    });
+    const getLiveMembership = mock(async () => true);
+    const { seen, recordGroupAttendance } = recordSeeingMembership(repo);
     const ctx = makeGroupCtx('grsvp:42:going');
 
-    await makeHandler({ recordGroupAttendance }, { repo, isLiveMember })(ctx as never);
+    await makeHandler({ recordGroupAttendance }, { repo, getLiveMembership })(ctx as never);
 
-    expect(isLiveMember).toHaveBeenCalledWith(GROUP_CHAT_ID, 200);
-    expect(activeAtRecord).toBe(true);
+    expect(getLiveMembership).toHaveBeenCalledWith(GROUP_CHAT_ID, 200);
+    expect(seen).toEqual([true]);
     expect(ctx.answer).toHaveBeenCalledWith(t('en').group_rsvp_recorded);
+  });
+
+  test('a cached member who has left per Telegram is marked left and denied', async () => {
+    const repo = membershipDb();
+    repo.upsert(GROUP_CHAT_ID, 200);
+    const getLiveMembership = mock(async () => false);
+    const { seen, recordGroupAttendance } = recordSeeingMembership(repo);
+    const ctx = makeGroupCtx('grsvp:42:going');
+
+    await makeHandler({ recordGroupAttendance }, { repo, getLiveMembership })(ctx as never);
+
+    expect(seen).toEqual([false]);
+    expect(repo.isActiveMember(GROUP_CHAT_ID, 200)).toBe(false);
+    expect(ctx.answer).toHaveBeenCalledWith({ text: t('en').group_rsvp_not_authorized });
   });
 
   test('a non-member per Telegram gets no membership row', async () => {
     const repo = membershipDb();
-    const isLiveMember = mock(async () => false);
-    const recordGroupAttendance = mock(() => ({ success: false, error: 'User is not an active member of this group' }));
+    const getLiveMembership = mock(async () => false);
+    const { recordGroupAttendance } = recordSeeingMembership(repo);
     const ctx = makeGroupCtx('grsvp:42:going');
 
-    await makeHandler({ recordGroupAttendance }, { repo, isLiveMember })(ctx as never);
+    await makeHandler({ recordGroupAttendance }, { repo, getLiveMembership })(ctx as never);
 
     expect(repo.isActiveMember(GROUP_CHAT_ID, 200)).toBe(false);
     expect(ctx.answer).toHaveBeenCalledWith({ text: t('en').group_rsvp_not_authorized });
   });
 
-  test('a cached active member skips the live check', async () => {
+  test('when Telegram cannot answer, the cached row decides', async () => {
     const repo = membershipDb();
     repo.upsert(GROUP_CHAT_ID, 200);
-    const isLiveMember = mock(async () => true);
-    const recordGroupAttendance = mock(() => ({ success: true }));
+    const getLiveMembership = mock(async () => null);
+    const { seen, recordGroupAttendance } = recordSeeingMembership(repo);
 
-    await makeHandler({ recordGroupAttendance }, { repo, isLiveMember })(makeGroupCtx('grsvp:42:going') as never);
+    await makeHandler({ recordGroupAttendance }, { repo, getLiveMembership })(makeGroupCtx('grsvp:42:going') as never);
 
-    expect(isLiveMember).not.toHaveBeenCalled();
-    expect(recordGroupAttendance).toHaveBeenCalled();
+    expect(seen).toEqual([true]);
   });
 
   test('going records accepted attendance for the clicking member and toasts', async () => {

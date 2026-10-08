@@ -96,10 +96,10 @@ export class InvitationService {
    * (groupChatId, userId) before writing anything. This uses the locally-cached membership table
    * (already the source of truth for the group fanout in `handleUpdateEvent`) so this method stays
    * synchronous. Because that table is filled only opportunistically, the grsvp callback handler
-   * first reconciles it: with no active row it asks Telegram (`getChatMember`) and upserts a
-   * confirmed member, so members who never posted are not denied. Remaining staleness: a user who
-   * left while their row is still active is only caught once a leave update reaches the bot —
-   * acceptable here since the existing invitation-
+   * first reconciles it on every tap via Telegram `getChatMember` (member → upsert, left/kicked/
+   * restricted non-member → leave), so members who never posted are not denied and members who
+   * left are. Only when Telegram cannot answer does the cached row decide — acceptable here since
+   * the existing invitation-
    * binding check already blocks the higher-value IDOR case (a forged event id from another
    * group). `groupMemberRepo` is optional for backward-compatible construction, but its absence
    * fails closed: no membership repo means the check cannot be proven, so the RSVP is denied.

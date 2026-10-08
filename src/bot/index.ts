@@ -256,6 +256,19 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     }
   };
 
+  // Tri-state for group RSVP reconciliation: null = Telegram could not answer (keep the cache).
+  // A restricted user is a member only while `is_member` is true.
+  const getLiveGroupMembership = async (chatId: number, userId: number): Promise<boolean | null> => {
+    try {
+      const member = await bot.api.getChatMember({ chat_id: chatId, user_id: userId });
+      if (member.status === 'restricted') return member.is_member;
+      return member.status !== 'left' && member.status !== 'kicked';
+    } catch (err) {
+      botLogger.warn({ err, chatId, userId }, 'getChatMember failed during group RSVP');
+      return null;
+    }
+  };
+
   const telegramMasterKey = envConfig?.TELEGRAM_SESSION_MASTER_KEY
     ? Buffer.from(envConfig.TELEGRAM_SESSION_MASTER_KEY, 'hex')
     : null;
@@ -698,7 +711,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         triggerSync: googleDeps?.triggerSync,
         renderService,
         invitationService,
-        groupMembership: { repo: db.groupMembers, isLiveMember: checkGroupMembership },
+        groupMembership: { repo: db.groupMembers, getLiveMembership: getLiveGroupMembership },
         eventRepo: db.events,
         chatHistoryRepo: db.chatHistory,
         onAiButtonClick: async (userId: number, chatId: number, text: string) => {

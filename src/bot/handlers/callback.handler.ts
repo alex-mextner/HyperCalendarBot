@@ -203,13 +203,14 @@ export interface CallbackHandlerOpts {
   weatherService?: WeatherService;
   /**
    * Group-RSVP membership reconciliation. `group_members` is only populated opportunistically
-   * (group text messages, `chat_member` updates), so a real member who never posted may have no
-   * row. Before the RSVP is authorized we fall back to a live Telegram membership check and record
-   * the answer, so `recordGroupAttendance`'s table check reflects Telegram's view.
+   * (group text messages; `chat_member` updates are not subscribed), so rows can be missing or
+   * stale in both directions. Every grsvp tap asks Telegram and records the answer, so
+   * `recordGroupAttendance`'s table check reflects Telegram's current view. `getLiveMembership`
+   * returns null when Telegram could not answer; the cached row then decides.
    */
   groupMembership?: {
     repo: GroupMemberRepository;
-    isLiveMember: (chatId: number, userId: number) => Promise<boolean>;
+    getLiveMembership: (chatId: number, userId: number) => Promise<boolean | null>;
   };
 }
 
@@ -1069,12 +1070,13 @@ export function createCallbackHandler(
       await ctx.answer({ text: t(lang).group_rsvp_not_authorized });
       return;
     }
-    // No cached active membership row (never posted, or a stale "left" row): ask Telegram and
-    // record the answer so the service's fail-closed table check sees the real membership.
-    if (groupMembership && !groupMembership.repo.isActiveMember(groupChatId, user.telegram_id)) {
-      if (await groupMembership.isLiveMember(groupChatId, user.telegram_id)) {
-        groupMembership.repo.upsert(groupChatId, user.telegram_id);
-      }
+    // Reconcile the cached membership row with Telegram before the service's fail-closed table
+    // check: a member who never posted gets a row, a member who left loses it. If Telegram cannot
+    // answer (null), the cached row stands.
+    if (groupMembership) {
+      const live = await groupMembership.getLiveMembership(groupChatId, user.telegram_id);
+      if (live === true) groupMembership.repo.upsert(groupChatId, user.telegram_id);
+      else if (live === false) groupMembership.repo.leave(groupChatId, user.telegram_id);
     }
     const status = action === 'going' ? 'accepted' : 'declined';
     const result = invitationService.recordGroupAttendance(eventId, user.telegram_id, status, groupChatId);
