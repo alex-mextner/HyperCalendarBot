@@ -16,7 +16,7 @@ type LocationFields = Pick<CalendarEvent, 'location' | 'google_maps_url' | 'reso
  */
 export function formatLocationHtml(event: LocationFields): string {
   const place = formatLocationPlain(event);
-  if (!place.trim()) return '';
+  if (!place) return '';
 
   const displayText = escapeHtml(place);
   const verifiedUrl = event.location_verified === 1 ? event.google_maps_url : null;
@@ -31,14 +31,17 @@ export function formatLocationHtml(event: LocationFields): string {
  * Format location as plain text (for contexts where HTML links aren't supported).
  * A verified location shows the resolved place ("Venue — Address"), also on an event with no typed
  * text that a pin resolved; an unverified one shows exactly the typed text, so an unconfirmed
- * geocode never leaves the bot.
+ * geocode never leaves the bot. Surrounding whitespace is dropped: '' means there is no place to
+ * show, also for text made only of spaces (a Google or ICS import can carry one).
  */
 export function formatLocationPlain(
   event: Pick<CalendarEvent, 'location' | 'resolved_address' | 'location_verified'> & { venue_name?: string | null },
 ): string {
-  if (event.location_verified !== 1) return event.location ?? '';
-  if (event.venue_name) {
-    return event.resolved_address ? `${event.venue_name} — ${event.resolved_address}` : event.venue_name;
+  if (event.location_verified !== 1) return event.location?.trim() ?? '';
+  const venue = event.venue_name?.trim();
+  if (venue) {
+    const address = event.resolved_address?.trim();
+    return address ? `${venue} — ${address}` : venue;
   }
-  return event.resolved_address ?? event.location ?? '';
+  return event.resolved_address?.trim() || event.location?.trim() || '';
 }
