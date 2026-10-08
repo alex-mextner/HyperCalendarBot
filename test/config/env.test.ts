@@ -146,6 +146,82 @@ describe('loadConfig', () => {
     });
   });
 
+  describe('optional Cerebras and Together providers', () => {
+    beforeEach(() => {
+      delete process.env.CEREBRAS_KEY;
+      delete process.env.CEREBRAS_BASE_URL;
+      delete process.env.CEREBRAS_MODEL;
+      delete process.env.CEREBRAS_FAST_MODEL;
+      delete process.env.TOGETHER_KEY;
+      delete process.env.TOGETHER_BASE_URL;
+      delete process.env.TOGETHER_MODEL;
+      delete process.env.TOGETHER_FAST_MODEL;
+    });
+
+    test('absent keys leave both providers unconfigured, not a startup failure', () => {
+      const config = loadConfig();
+      expect(config.CEREBRAS_KEY).toBeUndefined();
+      expect(config.CEREBRAS_MODEL).toBeUndefined();
+      expect(config.CEREBRAS_FAST_MODEL).toBeUndefined();
+      expect(config.CEREBRAS_BASE_URL).toBe('https://api.cerebras.ai/v1');
+      expect(config.TOGETHER_KEY).toBeUndefined();
+      expect(config.TOGETHER_MODEL).toBeUndefined();
+      expect(config.TOGETHER_FAST_MODEL).toBeUndefined();
+      expect(config.TOGETHER_BASE_URL).toBe('https://api.together.ai/v1');
+    });
+
+    test('a key alone fills in the default endpoint but never a model id', () => {
+      process.env.CEREBRAS_KEY = 'cerebras-secret';
+      process.env.TOGETHER_KEY = 'together-secret';
+      const config = loadConfig();
+      expect(config.CEREBRAS_KEY).toBe('cerebras-secret');
+      expect(config.CEREBRAS_BASE_URL).toBe('https://api.cerebras.ai/v1');
+      expect(config.CEREBRAS_MODEL).toBeUndefined();
+      expect(config.CEREBRAS_FAST_MODEL).toBeUndefined();
+      expect(config.TOGETHER_KEY).toBe('together-secret');
+      expect(config.TOGETHER_BASE_URL).toBe('https://api.together.ai/v1');
+      expect(config.TOGETHER_MODEL).toBeUndefined();
+      expect(config.TOGETHER_FAST_MODEL).toBeUndefined();
+    });
+
+    test('neither provider joins a default chain order', () => {
+      delete process.env.AI_SMART_CHAIN;
+      delete process.env.AI_FAST_CHAIN;
+      const config = loadConfig();
+      expect(config.AI_SMART_CHAIN.order).not.toContain('cerebras');
+      expect(config.AI_SMART_CHAIN.order).not.toContain('together');
+      expect(config.AI_FAST_CHAIN.order).not.toContain('cerebras');
+      expect(config.AI_FAST_CHAIN.order).not.toContain('together');
+    });
+
+    test('explicit env values are used as given', () => {
+      process.env.CEREBRAS_KEY = 'cerebras-secret';
+      process.env.CEREBRAS_BASE_URL = 'https://cerebras.example/v1';
+      process.env.CEREBRAS_MODEL = 'custom-main';
+      process.env.CEREBRAS_FAST_MODEL = 'custom-fast';
+      process.env.TOGETHER_KEY = 'together-secret';
+      process.env.TOGETHER_BASE_URL = 'https://together.example/v1';
+      process.env.TOGETHER_MODEL = 'custom-together-main';
+      process.env.TOGETHER_FAST_MODEL = 'custom-together-fast';
+      const config = loadConfig();
+      expect(config.CEREBRAS_BASE_URL).toBe('https://cerebras.example/v1');
+      expect(config.CEREBRAS_MODEL).toBe('custom-main');
+      expect(config.CEREBRAS_FAST_MODEL).toBe('custom-fast');
+      expect(config.TOGETHER_BASE_URL).toBe('https://together.example/v1');
+      expect(config.TOGETHER_MODEL).toBe('custom-together-main');
+      expect(config.TOGETHER_FAST_MODEL).toBe('custom-together-fast');
+    });
+
+    test('the two providers can be named in the chain order alongside the existing ones', () => {
+      process.env.AI_SMART_CHAIN = 'cerebras,together,groq';
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({
+        order: ['cerebras', 'together', 'groq'],
+        fromEnv: true,
+        fallback: ['groq', 'gemini', 'hf', 'zai'],
+      });
+    });
+  });
+
   test('throws if BOT_TOKEN is missing', () => {
     delete process.env.BOT_TOKEN;
     expect(() => loadConfig()).toThrow('BOT_TOKEN');

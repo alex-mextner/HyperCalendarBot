@@ -13,6 +13,8 @@ let zai: OpenAI | null = null;
 let groq: OpenAI | null = null;
 let hf: OpenAI | null = null;
 let gemini: OpenAI | null = null;
+let cerebras: OpenAI | null = null;
+let together: OpenAI | null = null;
 
 export function zaiClient(): OpenAI {
   if (!zai) {
@@ -66,10 +68,38 @@ export function geminiClient(): OpenAI {
   return gemini;
 }
 
+export function cerebrasClient(): OpenAI {
+  if (!cerebras) {
+    const cfg = loadConfig();
+    cerebras = new OpenAI({
+      apiKey: cfg.CEREBRAS_KEY!,
+      baseURL: cfg.CEREBRAS_BASE_URL,
+      timeout: DEFAULT_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+  }
+  return cerebras;
+}
+
+export function togetherClient(): OpenAI {
+  if (!together) {
+    const cfg = loadConfig();
+    together = new OpenAI({
+      apiKey: cfg.TOGETHER_KEY!,
+      baseURL: cfg.TOGETHER_BASE_URL,
+      timeout: DEFAULT_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+  }
+  return together;
+}
+
 /** Reset all client singletons. For tests only. */
 export function resetClients(): void {
   zai = null;
   groq = null;
   hf = null;
   gemini = null;
+  cerebras = null;
+  together = null;
 }

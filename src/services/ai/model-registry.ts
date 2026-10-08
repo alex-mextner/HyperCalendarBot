@@ -53,6 +53,8 @@ interface ModelPreferenceTable {
   groq: ProviderPreferences;
   gemini: ProviderPreferences;
   hf: ProviderPreferences;
+  cerebras: ProviderPreferences;
+  together: ProviderPreferences;
 }
 
 /**
@@ -71,6 +73,9 @@ const PREFERRED_MODELS: ModelPreferenceTable = {
   },
   gemini: { smart: [], fast: [] },
   hf: { smart: [], fast: [] },
+  // Never consulted: streaming.ts does not rediscover models for these two.
+  cerebras: { smart: [], fast: [] },
+  together: { smart: [], fast: [] },
 };
 
 /** Model ids that cannot serve a chat completion, matched case-insensitively. */
