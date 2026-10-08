@@ -1101,8 +1101,26 @@ const toolInputSchemaByName = new Map<string, ToolInputSchema>([
  * filtering (a tool's own schema does not change between modes). Used to
  * build error/hint excerpts — never to authorize or activate a tool call.
  */
-function getToolInputSchema(name: string): ToolInputSchema | undefined {
+export function getToolInputSchema(name: string): ToolInputSchema | undefined {
   return toolInputSchemaByName.get(name);
+}
+
+const EXCERPT_DESCRIPTION_MAX_CHARS = 100;
+
+/**
+ * Keeps an excerpt line short: the description's first sentence, capped at
+ * EXCERPT_DESCRIPTION_MAX_CHARS on a word boundary with an ellipsis. A blind
+ * call's whole-schema excerpt must stay a few hundred chars, not the full
+ * prompt-sized descriptions the model already has in its tool list.
+ */
+function shortenDescription(description: string): string {
+  const sentenceEnd = description.search(/[.!?](\s|$)/);
+  const sentence = sentenceEnd === -1 ? description : description.slice(0, sentenceEnd + 1);
+  if (sentence.length <= EXCERPT_DESCRIPTION_MAX_CHARS) return sentence;
+  // Reserve one char for the ellipsis so the result never exceeds the cap.
+  const cut = sentence.slice(0, EXCERPT_DESCRIPTION_MAX_CHARS - 1);
+  const lastSpace = cut.lastIndexOf(' ');
+  return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
 }
 
 /**
@@ -1119,7 +1137,7 @@ function formatSchemaExcerpt(schema: ToolInputSchema, fields?: readonly string[]
       if (typeof rawProp !== 'object' || rawProp === null) return null;
       const prop = rawProp as ToolSchemaProperty;
       const req = required.has(name) ? 'required' : 'optional';
-      const desc = prop.description ? ` — ${prop.description}` : '';
+      const desc = prop.description ? ` — ${shortenDescription(prop.description)}` : '';
       const baseType = Array.isArray(prop.type) ? prop.type.join('|') : (prop.type ?? 'any');
       // Surface the exact contract the model got wrong, not just "array" or
       // "string": an item type or an enum's actual values are precisely what

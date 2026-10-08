@@ -145,7 +145,7 @@ export interface ToolInputMap {
   get_contacts: { force?: boolean };
   get_user_info: { telegram_id: number };
   delete_contact: { contact_id: number };
-  add_contact: { name: string; username?: string };
+  add_contact: { name: string; preferred_name?: string; username?: string };
   find_contact: { name: string };
   update_contact: { search: string; name?: string; preferred_name?: string; username?: string };
   render_day_image: { date: string; scope?: 'personal' | 'group'; owner_id?: number };
@@ -589,7 +589,13 @@ function describeIssues(toolName: string, issues: readonly z.core.$ZodIssue[]): 
         ? issue.message.slice(ZOD_INVALID_INPUT_PREFIX.length)
         : issue.message;
       const field = issue.path.join('.');
-      if (!field) return reason;
+      // A path-less issue (object-level refine, non-object input) names no
+      // field, so the whole contract is the only actionable hint (#350).
+      if (!field) {
+        if (excerptShownFor.has('')) return reason;
+        excerptShownFor.add('');
+        return withSchemaExcerpt(reason, toolName);
+      }
       const base = `${field}: ${reason}`;
       // field is non-empty here (the !field check above returned already), so
       // split('.')[0] is never empty at runtime; the `|| field` fallback exists

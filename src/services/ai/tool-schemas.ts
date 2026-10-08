@@ -133,7 +133,9 @@ const notifyParticipantsSchema = z
 
 const getRemindersSchema = z
   .object({
-    event_id: numericId,
+    event_id: numericId.optional(),
+    event_ids: z.array(numericId).optional(),
+    query: z.string().optional(),
     scope: scopeField,
     owner_id: numericId.optional(),
   })
