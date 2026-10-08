@@ -41,6 +41,15 @@ export interface AiMessageJobData {
   retryAttempt?: number;
   /** Set on a retry of a scheduled/trigger run: it still answers no user message and may stay silent. */
   unprompted?: boolean;
+  /** Set on a retry of a group-chat message: the retry answers in that group, as its sender. */
+  group?: AiMessageJobGroup;
+}
+
+/** The group chat a retried message came from. */
+export interface AiMessageJobGroup {
+  chatId: number;
+  title?: string;
+  topicThreadId?: number;
 }
 
 /** Stores pending BullMQ retry job IDs per user for cancellation when a new message arrives. */
