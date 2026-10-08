@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
+import { ActionLogRepository } from '../../../src/database/repositories/action-log.repository.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
@@ -316,6 +317,7 @@ describe('executeTool', () => {
       );
 
       sharingCtx = {
+        actionLogRepo: new ActionLogRepository(db),
         user: userRepo.findByTelegramId(USER_ID)!,
         chatId: USER_ID,
         messageText: '',
@@ -399,6 +401,31 @@ describe('executeTool', () => {
       expect(result.success).toBe(true);
       expect(result.output).toContain('Invitation');
       expect(result.output).toContain('456');
+    });
+
+    test('username invitation records resolved numeric recipient through SQLite audit and query', async () => {
+      const recipient = 5000000001;
+      sharingCtx.messageText = 'Invite @resolved_person';
+      sharingCtx.resolveUsername = async () => ({ id: recipient, username: 'resolved_person', firstName: 'Recipient' });
+      const event = sharingCtx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Audit invitation',
+        start_at: '2027-03-15T14:00:00Z',
+        timezone: 'UTC',
+      });
+      const input = { event_id: event.id, invitee_username: 'resolved_person' };
+      const result = await executeTool(sharingCtx, 'send_invitation', input);
+      expect(result.success).toBe(true);
+      const entries = sharingCtx.actionLogRepo!.query({ user_id: USER_ID, target_user_id: recipient });
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.target_user_id).toBe(recipient);
+      expect(entries[0]?.success).toBe(1);
+      expect(input).toEqual({ event_id: event.id, invitee_username: 'resolved_person' });
+      const query = await executeTool(sharingCtx, 'get_action_log', { target_user_id: recipient });
+      expect(query.success).toBe(true);
+      expect(query.output).toContain('send_invitation');
+      expect(query.output).toContain(`target_user: ${recipient}`);
+      expect(sharingCtx.actionLogRepo!.query({ user_id: USER_ID, target_user_id: recipient + 1 })).toHaveLength(0);
     });
 
     test('send_invitation returns error for non-existent event', async () => {
