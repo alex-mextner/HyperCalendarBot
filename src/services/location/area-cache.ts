@@ -31,32 +31,48 @@ interface AreaCacheStore {
  * depends only on the city and country asked for, so it is shared by every user with the same
  * home area; a changed `users.city`, `country_code` or timezone asks for another area. Only found
  * areas are cached: `locateArea` also answers null when the request fails, and that must not stick.
- * A cache that cannot be read or written falls through to the geocoder.
+ * A cache that cannot be read or written falls through to the geocoder. Lookups of one area that
+ * start while another is running share its answer, so checks that start together on a missing or
+ * expired entry make one request (#489); the shared lookup is forgotten once it settles, so a
+ * failed one is asked again next time.
  */
 export function withCachedAreas(geocoder: GeocodingService, redis: AreaCacheStore): GeocodingService {
+  const running = new Map<string, Promise<GeocodedArea | null>>();
+
+  async function cachedOrLocated(
+    key: string,
+    area: { city: string | null; countryCode: string | null },
+  ): Promise<GeocodedArea | null> {
+    const cached = await redis.get(key).catch((err: unknown) => {
+      logger.warn({ err, key }, 'Failed to read the cached area');
+      return null;
+    });
+    if (cached) {
+      const parsed = AreaCodec.safeParse(cached);
+      if (parsed.success) return parsed.data;
+      logger.warn({ err: parsed.error, key }, 'Cached area is unreadable; locating it again');
+    }
+
+    const located: GeocodedArea | null = await geocoder.locateArea(area);
+    if (located) {
+      await redis.set(key, JSON.stringify(located), { ex: TTL_SECONDS }).catch((err: unknown) => {
+        logger.warn({ err, key }, 'Failed to cache the located area');
+      });
+    }
+    return located;
+  }
+
   return {
     ...geocoder,
-    async locateArea(area) {
+    locateArea(area) {
       // The country code goes to Google as given (`region`), so it keys the entry as given; a city
       // query does not depend on its letter case or surrounding spaces
       const key = `${KEY_PREFIX}${area.countryCode ?? ''}:${(area.city ?? '').trim().toLowerCase()}`;
-      const cached = await redis.get(key).catch((err: unknown) => {
-        logger.warn({ err, key }, 'Failed to read the cached area');
-        return null;
-      });
-      if (cached) {
-        const parsed = AreaCodec.safeParse(cached);
-        if (parsed.success) return parsed.data;
-        logger.warn({ err: parsed.error, key }, 'Cached area is unreadable; locating it again');
-      }
-
-      const located: GeocodedArea | null = await geocoder.locateArea(area);
-      if (located) {
-        await redis.set(key, JSON.stringify(located), { ex: TTL_SECONDS }).catch((err: unknown) => {
-          logger.warn({ err, key }, 'Failed to cache the located area');
-        });
-      }
-      return located;
+      const pending = running.get(key);
+      if (pending) return pending;
+      const lookup = cachedOrLocated(key, area).finally(() => running.delete(key));
+      running.set(key, lookup);
+      return lookup;
     },
   };
 }
