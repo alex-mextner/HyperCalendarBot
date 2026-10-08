@@ -1592,7 +1592,9 @@ export function createCallbackHandler(
 
   /** The confirmation edited into the picker or pin message: the title and the resolved place, linked. */
   function locationResolvedHtml(lang: Lang, eventId: number, userId: number): string {
-    const event = eventRepo?.findById(eventId, userId);
+    // A delegate answering the owner's picker cannot see the event through `eventRepo.findById`
+    // (owner/group visibility only); the service's live secretary-aware resolver covers that (#421).
+    const event = locationVerification?.getEventVisibleToActor(eventId, userId) ?? eventRepo?.findById(eventId, userId);
     const place = event ? formatLocationHtml(event) : '';
     return t(lang).aiTools.location.locationResolved(escapeHtml(event?.title ?? ''), place);
   }
@@ -1692,8 +1694,9 @@ export function createCallbackHandler(
         reply_markup: undefined,
       });
       // The creator chose from text and links: show the chosen point on Telegram's map once. The
-      // picker itself keeps map links; a venue per candidate would flood the chat.
-      const event = eventService.getEvent(eventId, user.telegram_id);
+      // picker itself keeps map links; a venue per candidate would flood the chat. A write secretary
+      // answering the owner's picker sees the event through the secretary-aware resolver (#421).
+      const event = locationVerification.getEventVisibleToActor(eventId, user.telegram_id);
       const venue = event ? eventVenue(event) : null;
       if (venue) {
         await ctx.sendVenue(venue).catch((err: unknown) => {
