@@ -235,4 +235,27 @@ describe('formatLocationPlain', () => {
       }),
     ).toBe('');
   });
+
+  test('returns nothing for typed text made only of whitespace', () => {
+    expect(
+      formatLocationPlain({ location: ' \t  ', resolved_address: null, venue_name: null, location_verified: 0 }),
+    ).toBe('');
+  });
+
+  test('drops whitespace around the typed text', () => {
+    expect(
+      formatLocationPlain({
+        location: '  Кофемания  ',
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
+      }),
+    ).toBe('Кофемания');
+  });
+
+  test('returns nothing for a verified place whose address and typed text are blank', () => {
+    expect(
+      formatLocationPlain({ location: '   ', resolved_address: '  ', venue_name: null, location_verified: 1 }),
+    ).toBe('');
+  });
 });
