@@ -99,8 +99,8 @@ describe('loadConfig', () => {
   });
 
   describe('provider chain order', () => {
-    const SMART_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
-    const FAST_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
+    const SMART_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai', 'claude'];
+    const FAST_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai', 'claude'];
 
     test('main and fast defaults prefer responsive providers while using their own configured models', () => {
       const config = loadConfig();

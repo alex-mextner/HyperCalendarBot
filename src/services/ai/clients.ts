@@ -1,7 +1,7 @@
 // src/services/ai/clients.ts
-// OpenAI SDK clients for all AI providers (z.ai, Groq, Gemini, HuggingFace Router).
+// OpenAI SDK clients for all AI providers (z.ai, Groq, Gemini, HuggingFace Router, Claude).
 // All use the same OpenAI SDK — only baseURL and apiKey differ.
-// Base URLs and API keys are loaded from env via loadConfig() — no hardcoded values.
+// Keys come from env via loadConfig(); Groq and Claude have fixed public endpoints.
 
 import OpenAI from 'openai';
 import { loadConfig } from '../../config/env.ts';
@@ -13,6 +13,7 @@ let zai: OpenAI | null = null;
 let groq: OpenAI | null = null;
 let hf: OpenAI | null = null;
 let gemini: OpenAI | null = null;
+let claude: OpenAI | null = null;
 
 export function zaiClient(): OpenAI {
   if (!zai) {
@@ -66,10 +67,30 @@ export function geminiClient(): OpenAI {
   return gemini;
 }
 
+/**
+ * Anthropic's OpenAI-compatible endpoint. Chat completions accept the bearer key alone,
+ * but `GET /v1/models` (live-model discovery) is the native API and rejects a request
+ * without `anthropic-version`.
+ */
+export function claudeClient(): OpenAI {
+  if (!claude) {
+    const cfg = loadConfig();
+    claude = new OpenAI({
+      apiKey: cfg.CLAUDE_API_TOKEN!,
+      baseURL: 'https://api.anthropic.com/v1/',
+      defaultHeaders: { 'anthropic-version': '2023-06-01' },
+      timeout: DEFAULT_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+  }
+  return claude;
+}
+
 /** Reset all client singletons. For tests only. */
 export function resetClients(): void {
   zai = null;
   groq = null;
   hf = null;
   gemini = null;
+  claude = null;
 }

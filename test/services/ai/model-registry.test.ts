@@ -239,6 +239,26 @@ describe('resolveModelOverride', () => {
     expect(list).toHaveBeenCalledTimes(1);
   });
 
+  // Claude is a paid reserve: every live id shares the `claude` family, so the family and
+  // alphabetical fallbacks would land on `claude-fable-*`/`claude-opus-*` — a silent switch
+  // to a pricier tier. Only an id from its own preference list may stand in.
+  test.each([
+    { fast: true, configuredModel: 'claude-haiku-5-5' },
+    { fast: false, configuredModel: 'claude-sonnet-5-5' },
+  ])('Claude ($configuredModel) never falls back outside its preference list', async ({ fast, configuredModel }) => {
+    const { client } = makeListingClient(['claude-fable-6', 'claude-opus-6', 'claude-sonnet-6', 'claude-haiku-6']);
+
+    expect(await resolveModelOverride({ provider: 'claude', client, configuredModel, fast })).toBeNull();
+  });
+
+  test('Claude still swaps to a live id from its preference list', async () => {
+    const { client } = makeListingClient(['claude-opus-5-5', 'claude-haiku-4-5-20251001']);
+
+    expect(
+      await resolveModelOverride({ provider: 'claude', client, configuredModel: 'claude-haiku-5-5', fast: true }),
+    ).toBe('claude-haiku-4-5-20251001');
+  });
+
   test('records the override and notifies listeners so the admin can be told the config is stale', async () => {
     const seen: { provider: string; configuredModel: string; resolvedModel: string }[] = [];
     onModelOverrideResolved((override) => {

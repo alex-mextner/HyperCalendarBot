@@ -7,14 +7,16 @@ import { type GroqTokenLimits, parseGroqTokenLimits } from './groq-token-limits.
 
 /** Main requests try responsive routes with their configured main model IDs.
  * Explicit operator order wins; token-fit guards, circuits and fallback stay intact.
+ * Claude follows z.ai: the paid reserve, skipped without CLAUDE_API_TOKEN or the chain's model.
  */
-export const DEFAULT_SMART_CHAIN: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
+export const DEFAULT_SMART_CHAIN: ProviderId[] = ['groq', 'gemini', 'hf', 'zai', 'claude'];
 /** Short requests try responsive providers first. Explicit operator order still wins.
  * September 18 runtime probes: old order spent 15s on z.ai before a healthy provider;
  * Groq OSS20B and Gemini each completed independently in under 1s. Empty responses,
  * exhausted quotas and oversized Groq payloads retain the normal guarded fallback.
+ * Claude follows z.ai here too, with its own fast model.
  */
-export const DEFAULT_FAST_CHAIN: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
+export const DEFAULT_FAST_CHAIN: ProviderId[] = ['groq', 'gemini', 'hf', 'zai', 'claude'];
 
 /**
  * A chain order together with where it came from. The source is carried rather
@@ -97,6 +99,10 @@ export interface EnvConfig {
   GROQ_TPM_LIMITS?: GroqTokenLimits;
   GROQ_MODEL?: string;
   GROQ_FAST_MODEL?: string;
+  // Anthropic Claude (paid reserve after z.ai; OpenAI-compatible endpoint)
+  CLAUDE_API_TOKEN?: string;
+  CLAUDE_MODEL?: string;
+  CLAUDE_FAST_MODEL?: string;
 
   /**
    * The order providers are tried in, first to last, for the chain that answers
@@ -234,6 +240,9 @@ export function loadConfig(): EnvConfig {
     GROQ_TPM_LIMITS: parseGroqTokenLimits(process.env.GROQ_TPM_LIMITS),
     GROQ_MODEL: process.env.GROQ_MODEL || undefined,
     GROQ_FAST_MODEL: process.env.GROQ_FAST_MODEL || undefined,
+    CLAUDE_API_TOKEN: process.env.CLAUDE_API_TOKEN || undefined,
+    CLAUDE_MODEL: process.env.CLAUDE_MODEL || undefined,
+    CLAUDE_FAST_MODEL: process.env.CLAUDE_FAST_MODEL || undefined,
     AI_TOOL_SCHEMA_MODE: toolSchemaMode,
     AI_TOOL_SCHEMA_USER_IDS: toolSchemaUserIds,
     AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),
