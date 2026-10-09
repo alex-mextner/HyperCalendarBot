@@ -515,6 +515,22 @@ export function acceptsSamplingTemperature(provider: ProviderId): boolean {
   return provider !== 'claude';
 }
 
+/** Anthropic's own request field; the compatible endpoint reads it from the body. */
+export interface ClaudeThinking {
+  type: 'disabled' | 'between_tools';
+}
+
+/**
+ * Claude 5.x thinks before answering by default and the compatible endpoint streams none of
+ * it, so the visible answer or tool call can end at `length`. Each model accepts exactly one
+ * way to turn that off (live, 2026-10-09): Sonnet 5.5 only `between_tools`, the other Sonnet
+ * and Haiku ids only `disabled`. Opus is never selected, so it is left alone.
+ */
+export function claudeThinkingFor(model: string): ClaudeThinking | undefined {
+  if (!/^claude-(?:sonnet|haiku)-/.test(model)) return undefined;
+  return { type: /^claude-sonnet-5-5(?:-|$)/.test(model) ? 'between_tools' : 'disabled' };
+}
+
 /** Standard OpenAI streaming adapter (works for every provider). */
 function streamingSlot(
   label: string,
@@ -531,10 +547,7 @@ function streamingSlot(
     getClient,
     stream: async (model, opts, cbs, onHttpAttempt) => {
       let attemptStartedAt = performance.now();
-      // `thinking` is Anthropic's own field; the compatible endpoint reads it from the body.
-      const params: OpenAI.ChatCompletionCreateParamsStreaming & {
-        thinking?: { type: 'disabled' | 'between_tools' };
-      } = {
+      const params: OpenAI.ChatCompletionCreateParamsStreaming & { thinking?: ClaudeThinking } = {
         model,
         messages: opts.messages,
         max_tokens: opts.maxTokens,
@@ -545,12 +558,8 @@ function streamingSlot(
       // Only the supported 2.5 Flash text routes: never send none to Pro/3.x.
       if (provider === 'gemini' && opts.fast && /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, '')))
         params.reasoning_effort = 'none';
-      // Claude 5.x thinks before answering by default and the compatible endpoint streams none of
-      // it, so the visible answer or tool call can end at `length`. Each model accepts exactly one
-      // way to turn that off (live, 2026-10-09): Sonnet 5.5 only `between_tools`, the other Sonnet
-      // and Haiku ids only `disabled`. Opus is never selected, so it is left alone.
-      if (provider === 'claude' && /^claude-(?:sonnet|haiku)-/.test(model))
-        params.thinking = { type: /^claude-sonnet-5-5(?:-|$)/.test(model) ? 'between_tools' : 'disabled' };
+      const thinking = provider === 'claude' ? claudeThinkingFor(model) : undefined;
+      if (thinking) params.thinking = thinking;
       if (opts.tools && opts.tools.length > 0) {
         params.tools = opts.tools;
       }

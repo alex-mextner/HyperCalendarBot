@@ -33,7 +33,7 @@ import { UserRepository } from '../src/database/repositories/user.repository.ts'
 import { runMigrations } from '../src/database/schema.ts';
 import { claudeClient, geminiClient, groqClient, hfClient, zaiClient } from '../src/services/ai/clients.ts';
 import type { ProviderId } from '../src/services/ai/provider-ids.ts';
-import { acceptsSamplingTemperature } from '../src/services/ai/streaming.ts';
+import { acceptsSamplingTemperature, type ClaudeThinking, claudeThinkingFor } from '../src/services/ai/streaming.ts';
 import { buildSystemPrompt } from '../src/services/ai/system-prompt.ts';
 import { getToolDefinitions } from '../src/services/ai/tools.ts';
 import type { AgentContext } from '../src/services/ai/types.ts';
@@ -201,12 +201,14 @@ async function completeWithRetry(
 
 async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<CaseOutcome> {
   const ctx = buildContext(testCase);
-  const request: OpenAI.ChatCompletionCreateParamsNonStreaming = {
+  const thinking = provider.name === 'claude' ? claudeThinkingFor(provider.model) : undefined;
+  const request: OpenAI.ChatCompletionCreateParamsNonStreaming & { thinking?: ClaudeThinking } = {
     model: provider.model,
     messages: [{ role: 'system', content: buildSystemPrompt(ctx) }, ...buildMessages(testCase)],
     tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
     max_tokens: MAX_COMPLETION_TOKENS,
     ...(acceptsSamplingTemperature(provider.name) ? { temperature: 0 } : {}),
+    ...(thinking ? { thinking } : {}),
   };
   try {
     const res = await completeWithRetry(provider, request);
