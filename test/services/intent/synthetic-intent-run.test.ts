@@ -118,6 +118,7 @@ function fixture(steps: JsonValue[]) {
   return {
     db,
     sent,
+    agentCtx,
     run: () => runSyntheticIntent(deps, agentCtx, 'scheduled duration'),
     runWithoutRepository: () => runSyntheticIntent({ ...deps, intentRepo: undefined }, agentCtx, 'scheduled duration'),
     minutes: () => users.findByTelegramId(USER)?.default_event_duration_minutes,
@@ -161,5 +162,27 @@ test('a registry that fails its integrity check runs nothing', async () => {
   const f = fixture([readSettings, setMinutes(30), { respond: 'Updated.' }]);
   f.db.run("UPDATE intents SET phrases='[\"tampered\"]' WHERE canonical_name='basis.time.now'");
   expect(await f.run()).toEqual({ handled: false });
+  expect(f.minutes()).toBe(60);
+});
+
+test('an event read is sent as the formatted agenda, not the tool text written for the agent', async () => {
+  const day = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const f = fixture([{ call: 'get_events', input: { start_date: day, end_date: day, scope: '{{env.scope}}' } }]);
+  f.agentCtx.eventService.createEvent({
+    user_id: USER,
+    title: 'English lesson',
+    start_at: `${day}T10:30:00.000Z`,
+    timezone: 'UTC',
+  });
+  const outcome = await f.run();
+  expect(outcome).toEqual({ handled: true, response: `${day} 10:30  English lesson` });
+  expect(f.sent).toEqual([`${day} 10:30  English lesson`]);
+});
+
+test('a run that fails before any write hands the message to the agent without sending its error', async () => {
+  // A scheduled message cannot answer ask_user, so the executor refuses the workflow up front.
+  const f = fixture([{ call: 'ask_user', input: { question: 'How long?' }, as: 'answer' }, setMinutes(30)]);
+  expect(await f.run()).toEqual({ handled: false });
+  expect(f.sent).toEqual([]);
   expect(f.minutes()).toBe(60);
 });

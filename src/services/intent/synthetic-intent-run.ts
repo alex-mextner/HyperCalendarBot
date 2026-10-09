@@ -9,6 +9,7 @@ import { cmdLogger } from '../../utils/logger.ts';
 import type { AgentContext, ToolResult } from '../ai/types.ts';
 import type { IntentExecutor } from './intent-executor.ts';
 import type { IntentMatcher } from './intent-matcher.ts';
+import { formatResponse } from './response-formatter.ts';
 import { evidenceMessage, guardRuleTools } from './rule-run-guard.ts';
 import { type Workflow, WorkflowSchema } from './workflow-schema.ts';
 
@@ -53,14 +54,28 @@ export async function runSyntheticIntent(
     firstName: agentCtx.user.first_name ?? undefined,
   };
   const result = await deps.executor.run(workflow, match.captures, userCtx, guard.run);
-  // A stop with no write is safe to hand to the agent, which answers from the current catalogue.
+  const evidence = result.mutationEvidence;
   const stopped = guard.changed();
-  if (stopped) {
-    const evidence = result.mutationEvidence;
-    cmdLogger.warn({ intentId: match.intentId, userId, evidence }, 'Synthetic intent run stopped: its rule changed');
+  // A stop or failure with no write is safe to hand to the agent, which answers from the
+  // current catalogue; a failure's own text was written for the agent, never for the user.
+  if (stopped || !result.success) {
+    cmdLogger.warn(
+      { intentId: match.intentId, userId, errorCode: result.errorCode, evidence },
+      stopped ? 'Synthetic intent run stopped: its rule changed' : 'Synthetic intent run failed',
+    );
     if (evidence !== 'applied' && evidence !== 'unknown') return { handled: false };
   }
-  const response = stopped ? evidenceMessage(agentCtx.user.language, result.mutationEvidence) : result.response;
+  const response =
+    stopped || !result.success
+      ? evidenceMessage(agentCtx.user.language, evidence)
+      : result.response &&
+        formatResponse(
+          intent.format,
+          result.response,
+          agentCtx.user.timezone,
+          agentCtx.user.language,
+          result.responseEvents,
+        );
   if (response && agentCtx.sender) {
     await agentCtx.sender.sendMessage(userId, response);
   }
