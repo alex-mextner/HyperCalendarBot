@@ -635,7 +635,7 @@ function streamingSlot(
         chunkCount,
         choiceCount,
         toolFragmentCount,
-        maxOutputTokens: opts.maxTokens,
+        maxOutputTokens: params.max_tokens ?? opts.maxTokens,
         messageCount: opts.messages.length,
         toolCount: opts.tools?.length ?? 0,
         usage: normalizedUsage,

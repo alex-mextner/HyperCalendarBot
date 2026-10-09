@@ -926,6 +926,23 @@ describe('provider order', () => {
     expect(zai.requests[0]?.reasoning_effort).toBeUndefined();
   });
 
+  // An empty Claude answer is diagnosed against the cap actually sent: hidden thinking is
+  // billed against it, so the caller's smaller budget would misstate what ran out.
+  test('an empty Claude answer records the max_tokens actually sent', async () => {
+    process.env.AI_FAST_CHAIN = 'claude';
+    Object.assign(process.env, { CLAUDE_API_TOKEN: 'claude-key', CLAUDE_FAST_MODEL: 'claude-haiku-5-5' });
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: '' }] });
+
+    const failure = await aiStreamRound({
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 256,
+      fast: true,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AllProvidersFailedError);
+    expect(failure).toMatchObject({ failures: [{ emptyResponse: { maxOutputTokens: 256 + 1024 } }] });
+  });
+
   test('the default chain ends at z.ai when no Claude token is configured', async () => {
     delete process.env.AI_SMART_CHAIN;
     delete process.env.CLAUDE_API_TOKEN;
