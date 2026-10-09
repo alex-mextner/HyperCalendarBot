@@ -46,6 +46,8 @@ export type ModelOverrideListener = (override: ModelOverride) => void;
 interface ProviderPreferences {
   smart: string[];
   fast: string[];
+  /** A replacement must come from these lists: the family/alphabetical fallback is off. */
+  preferredOnly?: true;
 }
 
 interface ModelPreferenceTable {
@@ -61,9 +63,10 @@ interface ModelPreferenceTable {
  * on 2026-09-01. The `qwen3.x-27b` ids are live on the same account but capped at
  * 8000 tokens per minute, which rejects the bot's ~11.5k-token tool payload with
  * 413 — so they are deliberately not listed. Claude ids were listed live by the
- * account's `/v1/models` on 2026-10-09; Opus is left out on purpose — the reserve
- * must not silently switch to the most expensive tier. Providers with an empty
- * list fall back to the heuristic in `selectReplacementModel`.
+ * account's `/v1/models` on 2026-10-09. Claude is a paid reserve and every id shares
+ * the `claude` family, so the heuristic would pick `claude-fable-*`/`claude-opus-*`;
+ * it is preferred-only and never switches to a pricier tier on its own. Other
+ * providers with an empty list fall back to the heuristic in `selectReplacementModel`.
  */
 const PREFERRED_MODELS: ModelPreferenceTable = {
   zai: { smart: [], fast: [] },
@@ -76,6 +79,7 @@ const PREFERRED_MODELS: ModelPreferenceTable = {
   claude: {
     smart: ['claude-sonnet-5-5', 'claude-sonnet-5'],
     fast: ['claude-haiku-5-5', 'claude-haiku-4-5-20251001'],
+    preferredOnly: true,
   },
 };
 
@@ -132,7 +136,7 @@ const MODEL_GONE_PHRASES = ['does not exist', 'not found', 'decommissioned', 'no
  * opposed to any other client error (bad tool schema, oversized payload, quota).
  *
  * A bare 404 counts, even without a body naming the model: the chat-completions
- * path is fixed and correct for all four providers, so the model id is what the
+ * path is fixed and correct for every provider, so the model id is what the
  * server did not find. A misconfigured base URL would also 404 here, but the
  * cost of guessing wrong is one cached `/v1/models` probe that finds nothing and
  * falls through — cheaper than staying dead because a provider returned a 404
@@ -296,10 +300,13 @@ async function probeAndCache(
     return commitProbeResult(key, sequence, { override: null, expiresAt: Date.now() + NEGATIVE_TTL_MS, sequence });
   }
 
+  const preferences = preferredModelsFor(provider, fast === true);
   const resolvedModel = selectReplacementModel({
-    liveModels,
+    liveModels: PREFERRED_MODELS[provider].preferredOnly
+      ? liveModels.filter((id) => preferences.includes(id))
+      : liveModels,
     configuredModel,
-    preferences: preferredModelsFor(provider, fast === true),
+    preferences,
     excludeModels: options.deadModel ? [options.deadModel] : [],
   });
 
