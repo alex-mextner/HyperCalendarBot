@@ -14,7 +14,7 @@ import type {
 } from '../../database/repositories/notification-preferences.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { EventOccurrence, FeatureUsageRow, NotificationPreferencesRow } from '../../database/types.ts';
-import { getDayRangeUtc } from '../../utils/date.ts';
+import { getDayRangeUtc, storedInstantMs } from '../../utils/date.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 import {
   renderBatchReminderForSpeech,
@@ -690,9 +690,12 @@ export class NotificationScheduler {
           calDate.setUTCDate(calDate.getUTCDate() + i);
           const dateStr = calDate.toISOString().slice(0, 10);
           const { start: dayStart, end: dayEnd } = getDayRangeUtc(calDate, pref.timezone);
-          const dayOccs = allWeekOccurrences.filter(
-            (occ) => occ.occurrence_start >= dayStart && occ.occurrence_start < dayEnd,
-          );
+          const dayStartMs = storedInstantMs(dayStart);
+          const dayEndMs = storedInstantMs(dayEnd);
+          const dayOccs = allWeekOccurrences.filter((occ) => {
+            const occMs = storedInstantMs(occ.occurrence_start);
+            return occMs >= dayStartMs && occMs < dayEndMs;
+          });
           const dayLabel = makeDayLabel(calDate, lang);
           days.push({
             date: dateStr,

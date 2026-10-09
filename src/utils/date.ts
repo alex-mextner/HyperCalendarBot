@@ -36,6 +36,24 @@ export function describeCalendarDay(dayKey: string, lang: string): { day: string
   };
 }
 
+/**
+ * Weekday + day label for a floating calendar date (an all-day event's date), in `formatDateShort`'s
+ * style. Parses the literal `YYYY-MM-DD` and formats it the same way `describeCalendarDay` does —
+ * never through `TZDate`/a viewer's timezone — so an all-day event names the calendar day it was
+ * created on for every reader, not a day shifted by whoever's zone happens to be reading it.
+ */
+export function formatCalendarDateShort(dateOnly: string, lang: string): string {
+  const date = parseISO(dateOnly);
+  const locale = lang === 'ru' ? ru : enUS;
+  return format(date, lang === 'ru' ? 'EEEEEE d' : 'EEE d', { locale });
+}
+
+/** Same floating-calendar-date contract as `formatCalendarDateShort`, in `Intl.DateTimeFormat`'s
+ * locale-native "medium" style (adds the year) for contexts that need it, e.g. a draft preview. */
+export function formatCalendarDateMedium(dateOnly: string, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { dateStyle: 'medium' }).format(parseISO(dateOnly));
+}
+
 export function formatTimeRange(startUtc: string, endUtc: string | null, timezone: string): string {
   const start = toUserTime(startUtc, timezone);
   if (!endUtc) return start;

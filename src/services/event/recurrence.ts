@@ -1,12 +1,15 @@
 import { TZDate } from '@date-fns/tz';
 import { rrulestr } from 'rrule';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
+import { storedInstantMs } from '../../utils/date.ts';
 import { logger } from '../../utils/logger.ts';
+import { addOneDay, localMidnightInstant } from '../calendar/wall-clock.ts';
 
 const recurrenceLogger = logger.child({ module: 'recurrence' });
 
 /** Pad range by ±3h to catch occurrences that shift across boundaries after DST adjustment */
 const DST_PAD_MS = 3 * 60 * 60_000;
+const DAY_MS = 86_400_000;
 
 export function expandRecurrence(
   template: CalendarEvent,
@@ -48,12 +51,21 @@ export function expandRecurrence(
 
   const durationMs = template.end_at ? new Date(template.end_at).getTime() - dtstart.getTime() : 0;
 
+  // An all-day template stored as a zone's local midnight (/add's offset-preserving rows, or a
+  // local midnight converted to UTC) rather than a floating UTC midnight recurs on calendar days
+  // in that zone: every occurrence starts at that day's own local midnight, so DST never moves it
+  // onto a neighbouring day for date-prefix readers (reminders, free slots, Google sync).
+  const anchoredAllDay = !!template.all_day && !!template.timezone && dtstart.getTime() % DAY_MS !== 0;
+  const anchorOffsetMs = anchoredAllDay ? -new TZDate(dtstart, template.timezone).getTimezoneOffset() * 60_000 : 0;
+  const spanDays = Math.max(1, Math.round(durationMs / DAY_MS));
+  const byLocalDate = adjustDst || anchoredAllDay;
+
   // Match exceptions by local calendar date when adjusting for DST — handles both
   // old exceptions (stored with pre-DST UTC) and new ones (stored with post-DST UTC).
   const exceptionMap = new Map<string, CalendarEvent>();
   for (const exc of exceptions) {
     if (exc.original_start_at) {
-      const key = adjustDst
+      const key = byLocalDate
         ? toLocalDateKey(exc.original_start_at, template.timezone)
         : new Date(exc.original_start_at).toISOString();
       exceptionMap.set(key, exc);
@@ -63,20 +75,40 @@ export function expandRecurrence(
   const rangeStart = new Date(rangeStartUtc);
   const rangeEnd = new Date(rangeEndUtc);
 
-  // Pad range so occurrences that shift across the boundary after DST adjustment
+  // Pad range so occurrences that shift across the boundary after DST/local-midnight adjustment
   // aren't lost. Post-filter to the original range after conversion.
-  const paddedStart = adjustDst ? new Date(rangeStart.getTime() - DST_PAD_MS) : rangeStart;
-  const paddedEnd = adjustDst ? new Date(rangeEnd.getTime() + DST_PAD_MS) : rangeEnd;
+  const padMs = adjustDst ? DST_PAD_MS : anchoredAllDay ? DAY_MS : 0;
+  const paddedStart = new Date(rangeStart.getTime() - padMs);
+  const paddedEnd = new Date(rangeEnd.getTime() + padMs);
   const dates = rule.between(paddedStart, paddedEnd, true);
 
   const occurrences: EventOccurrence[] = [];
 
   for (const date of dates) {
-    const utcDate = adjustDst ? adjustOccurrenceForDst(date, template.timezone, localH, localM, localS) : date;
+    let utcDate = date;
+    let occStart: string;
+    let anchoredEnd: string | null = null;
+    if (anchoredAllDay) {
+      // rrule steps the stored instant in UTC; shifting by the template's own offset lands on
+      // UTC midnight of the intended calendar day, whatever offset that day has locally.
+      const local = new Date(date.getTime() + anchorOffsetMs);
+      const day = { y: local.getUTCFullYear(), m: local.getUTCMonth() + 1, d: local.getUTCDate() };
+      const start = localMidnightInstant(day, template.timezone);
+      if (!start) continue; // the zone skipped this whole day (date-line move)
+      occStart = start;
+      utcDate = new Date(start);
+      if (durationMs) {
+        let endDay = day;
+        for (let i = 0; i < spanDays; i++) endDay = addOneDay(endDay);
+        anchoredEnd = localMidnightInstant(endDay, template.timezone);
+      }
+    } else {
+      if (adjustDst) utcDate = adjustOccurrenceForDst(date, template.timezone, localH, localM, localS);
+      occStart = utcDate.toISOString();
+    }
     if (utcDate.getTime() < rangeStart.getTime() || utcDate.getTime() > rangeEnd.getTime()) continue;
 
-    const occStart = utcDate.toISOString();
-    const occKey = adjustDst ? toLocalDateKey(occStart, template.timezone) : occStart;
+    const occKey = byLocalDate ? toLocalDateKey(occStart, template.timezone) : occStart;
     const exception = exceptionMap.get(occKey);
 
     if (exception) {
@@ -93,7 +125,11 @@ export function expandRecurrence(
         is_exception: true,
       });
     } else {
-      const occEnd = durationMs ? new Date(utcDate.getTime() + durationMs).toISOString() : null;
+      const occEnd = anchoredAllDay
+        ? anchoredEnd
+        : durationMs
+          ? new Date(utcDate.getTime() + durationMs).toISOString()
+          : null;
       occurrences.push({
         event: template,
         occurrence_start: occStart,
@@ -103,7 +139,7 @@ export function expandRecurrence(
     }
   }
 
-  return occurrences.sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
+  return occurrences.sort((a, b) => storedInstantMs(a.occurrence_start) - storedInstantMs(b.occurrence_start));
 }
 
 /** Format a UTC Date for rrule DTSTART (e.g. `20260301T090000Z`) */

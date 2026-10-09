@@ -50,6 +50,31 @@ describe('event-mapper', () => {
       expect(result.start?.dateTime).toBeUndefined();
     });
 
+    test('an offset-preserving local-midnight instant (GH-652 negative-zone fix) still maps to the correct calendar date', () => {
+      // add-event.scene.ts now stores all-day boundaries as the actual local-midnight instant
+      // with its real UTC offset (America/New_York in March is -05:00), not a naive
+      // "...T00:00:00.000Z" approximation. localToGoogle's date-prefix extraction must survive
+      // that unchanged — this is the concrete proof the mapper needed no code change.
+      const result = localToGoogle({
+        id: 2,
+        title: 'Holiday',
+        start_at: '2027-03-10T00:00:00.000-05:00',
+        end_at: '2027-03-11T00:00:00.000-05:00',
+        all_day: 1,
+        timezone: 'America/New_York',
+        description: null,
+        location: null,
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
+        recurrence_rule: null,
+        reminder_overrides: null,
+        sync_version: 0,
+      });
+      expect(result.start?.date).toBe('2027-03-10');
+      expect(result.end?.date).toBe('2027-03-11');
+    });
+
     test('single-day all-day event with end_at == start_at gets end.date bumped +1 day', () => {
       const result = localToGoogle({
         id: 2,
