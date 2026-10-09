@@ -47,7 +47,7 @@ Explain what a change does before citing its issue number. Use concrete dates fo
 
 - Colima was removed from the dev Mac on 2026-09-26 (its VM data disk kept growing past 20 GB) and must not be reinstalled — nor Docker Desktop, OrbStack, Lima, a podman machine or any other always-on Linux VM. Use Apple's native `container` stack.
 - Local compose and ad-hoc containers: `docker`/`docker compose` on PATH (`/opt/homebrew/bin/docker`) are a wrapper over `mocker` + Apple `container`; `mocker compose` runs this repo's `docker-compose.yml` (redis + bot). Port publishing (`-p`) and bind mounts (`-v`) were verified on 2026-09-22; `healthcheck` and `shm_size` (Playwright/Chromium) were not verified end-to-end.
-- Release images: `scripts/deploy-local-fallback.sh` (also run by `gh ship`'s post-merge deploy when hosted CI is down) builds linux/amd64 with `container build` and converts the saved OCI layout into the `docker save` artifact with `scripts/oci-to-docker-archive.py`. It only needs `container system start`; see `docs/reference/deploy-runbook.md`.
+- Release images: production is the home ODROID-N2+ (aarch64) since 2026-10-09, so every release image is linux/arm64. `scripts/deploy-local-fallback.sh` (also run by `gh ship`'s post-merge deploy when hosted CI is down) builds linux/arm64 with `container build` (native on Apple Silicon) and converts the saved OCI layout into the `docker save` artifact with `scripts/oci-to-docker-archive.py`. It only needs `container system start`; see `docs/reference/deploy-runbook.md`.
 - Images live in `~/Library/Application Support/com.apple.container`. Delete what you pull or build for experiments (`container image delete …`); disk on this Mac is tight.
 
 ## Prompt/tool contracts and provider budgets
