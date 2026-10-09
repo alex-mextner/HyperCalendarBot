@@ -33,7 +33,7 @@ import { UserRepository } from '../src/database/repositories/user.repository.ts'
 import { runMigrations } from '../src/database/schema.ts';
 import { claudeClient, geminiClient, groqClient, hfClient, zaiClient } from '../src/services/ai/clients.ts';
 import type { ProviderId } from '../src/services/ai/provider-ids.ts';
-import { acceptsSamplingTemperature, type ClaudeThinking, claudeThinkingFor } from '../src/services/ai/streaming.ts';
+import { acceptsSamplingTemperature, claudeReasoning } from '../src/services/ai/streaming.ts';
 import { buildSystemPrompt } from '../src/services/ai/system-prompt.ts';
 import { getToolDefinitions } from '../src/services/ai/tools.ts';
 import type { AgentContext } from '../src/services/ai/types.ts';
@@ -139,7 +139,8 @@ interface CaseOutcome {
   /** What was actually requested, so two saved runs can be compared or reproduced. */
   model: string;
   temperature: number | null;
-  thinking: ClaudeThinking['type'] | null;
+  reasoningEffort: string | null;
+  maxTokens: number | null;
   tools: string[];
   text: string;
   promptTokens: number | null;
@@ -205,19 +206,19 @@ async function completeWithRetry(
 
 async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<CaseOutcome> {
   const ctx = buildContext(testCase);
-  const thinking = provider.name === 'claude' ? claudeThinkingFor(provider.model) : undefined;
-  const request: OpenAI.ChatCompletionCreateParamsNonStreaming & { thinking?: ClaudeThinking } = {
+  const request: OpenAI.ChatCompletionCreateParamsNonStreaming = {
     model: provider.model,
     messages: [{ role: 'system', content: buildSystemPrompt(ctx) }, ...buildMessages(testCase)],
     tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
     max_tokens: MAX_COMPLETION_TOKENS,
     ...(acceptsSamplingTemperature(provider.name) ? { temperature: 0 } : {}),
-    ...(thinking ? { thinking } : {}),
+    ...(provider.name === 'claude' ? claudeReasoning(MAX_COMPLETION_TOKENS) : {}),
   };
   const settings = {
     model: provider.model,
     temperature: request.temperature ?? null,
-    thinking: thinking?.type ?? null,
+    reasoningEffort: request.reasoning_effort ?? null,
+    maxTokens: request.max_tokens ?? null,
   };
   try {
     const res = await completeWithRetry(provider, request);

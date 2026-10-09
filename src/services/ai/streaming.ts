@@ -515,20 +515,22 @@ export function acceptsSamplingTemperature(provider: ProviderId): boolean {
   return provider !== 'claude';
 }
 
-/** Anthropic's own request field; the compatible endpoint reads it from the body. */
-export interface ClaudeThinking {
-  type: 'disabled' | 'between_tools';
-}
+/** Measured on real agent turns: Haiku 5.5 thought for up to ~1000 tokens before one tool call. */
+const CLAUDE_MIN_THINKING_ALLOWANCE = 1024;
 
 /**
- * Claude 5.x thinks before answering by default and the compatible endpoint streams none of
- * it, so the visible answer or tool call can end at `length`. Each model accepts exactly one
- * way to turn that off (live, 2026-10-09): Sonnet 5.5 only `between_tools`, the other Sonnet
- * and Haiku ids only `disabled`. Opus is never selected, so it is left alone.
+ * Claude 5.x thinks before answering; the compatible endpoint streams none of that thinking but
+ * bills it against `max_tokens`, so a short budget can end at `length` with nothing visible
+ * (a 256-token summary came back empty, live 2026-10-09). Thinking stays on at medium effort,
+ * and the request carries an allowance for it on top of the caller's budget — the budget
+ * itself, at least CLAUDE_MIN_THINKING_ALLOWANCE — so the visible answer keeps every token
+ * the caller asked for. Adaptive thinking is refused by this endpoint.
  */
-export function claudeThinkingFor(model: string): ClaudeThinking | undefined {
-  if (!/^claude-(?:sonnet|haiku)-/.test(model)) return undefined;
-  return { type: /^claude-sonnet-5-5(?:-|$)/.test(model) ? 'between_tools' : 'disabled' };
+export function claudeReasoning(answerTokens: number): { reasoning_effort: 'medium'; max_tokens: number } {
+  return {
+    reasoning_effort: 'medium',
+    max_tokens: answerTokens + Math.max(answerTokens, CLAUDE_MIN_THINKING_ALLOWANCE),
+  };
 }
 
 /** Standard OpenAI streaming adapter (works for every provider). */
@@ -547,19 +549,18 @@ function streamingSlot(
     getClient,
     stream: async (model, opts, cbs, onHttpAttempt) => {
       let attemptStartedAt = performance.now();
-      const params: OpenAI.ChatCompletionCreateParamsStreaming & { thinking?: ClaudeThinking } = {
+      const params: OpenAI.ChatCompletionCreateParamsStreaming = {
         model,
         messages: opts.messages,
         max_tokens: opts.maxTokens,
         ...(acceptsSamplingTemperature(provider) ? { temperature: opts.temperature ?? 0.3 } : {}),
+        ...(provider === 'claude' ? claudeReasoning(opts.maxTokens) : {}),
         stream: true,
         ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
       };
       // Only the supported 2.5 Flash text routes: never send none to Pro/3.x.
       if (provider === 'gemini' && opts.fast && /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, '')))
         params.reasoning_effort = 'none';
-      const thinking = provider === 'claude' ? claudeThinkingFor(model) : undefined;
-      if (thinking) params.thinking = thinking;
       if (opts.tools && opts.tools.length > 0) {
         params.tools = opts.tools;
       }

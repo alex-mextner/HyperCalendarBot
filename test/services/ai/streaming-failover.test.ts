@@ -34,11 +34,13 @@ type Behavior =
   /** Waits for `gate` before answering, so two requests can be in flight together. */
   | { kind: 'hold'; gate: Promise<void>; text: string };
 
-/** The request fields these tests read; `thinking` is Anthropic's, outside the OpenAI shape. */
+/** The request fields these tests read. */
 interface FakeRequest {
   model: string;
   temperature?: number;
-  thinking?: { type: string };
+  max_tokens?: number;
+  reasoning_effort?: string;
+  thinking?: unknown;
 }
 
 interface FakeProvider {
@@ -893,29 +895,32 @@ describe('provider order', () => {
     expect(claude.requests.map((request) => request.temperature)).toEqual([undefined]);
   });
 
-  // Claude 5.5 thinks before answering by default and the compatible endpoint streams none of
-  // it (live, 2026-10-09): a 256-token Haiku summary came back 0 characters with finish `length`,
-  // and real Sonnet agent turns at a 600-token budget hit `length` 2 of 5 times. Haiku turns it
-  // off with `disabled`; Sonnet rejects that value with 400 and needs `between_tools` instead.
+  // Claude 5.5 thinks before answering and the compatible endpoint streams none of it, yet
+  // bills it against max_tokens (live, 2026-10-09): a 256-token Haiku summary came back empty
+  // at `length`. Thinking stays on at medium effort; an allowance on top of the caller's budget
+  // (the budget itself, at least 1024) keeps it from eating the visible answer.
   test.each([
-    { fast: true, model: 'claude-haiku-5-5', thinking: { type: 'disabled' } },
-    { fast: false, model: 'claude-haiku-5-5', thinking: { type: 'disabled' } },
-    { fast: false, model: 'claude-sonnet-5-5', thinking: { type: 'between_tools' } },
-    { fast: true, model: 'claude-sonnet-5-5', thinking: { type: 'between_tools' } },
-    { fast: false, model: 'claude-sonnet-5-5-20260928', thinking: { type: 'between_tools' } },
-    // The preference-list fallbacks reject `between_tools` and accept `disabled` (live, 2026-10-09).
-    { fast: false, model: 'claude-sonnet-5', thinking: { type: 'disabled' } },
-    { fast: true, model: 'claude-haiku-4-5-20251001', thinking: { type: 'disabled' } },
-    { fast: false, model: 'claude-opus-5-5', thinking: undefined },
-  ])('Claude $model (fast=$fast) is sent thinking $thinking', async ({ fast, model, thinking }) => {
-    process.env.AI_SMART_CHAIN = 'claude';
-    process.env.AI_FAST_CHAIN = 'claude';
+    { fast: true, model: 'claude-haiku-5-5', maxTokens: 256, sent: 256 + 1024 },
+    { fast: false, model: 'claude-sonnet-5-5', maxTokens: 4096, sent: 4096 * 2 },
+    { fast: false, model: 'claude-sonnet-5-5', maxTokens: 1024, sent: 2048 },
+  ])('Claude $model thinks at medium effort with $maxTokens answer tokens kept free', async ({
+    fast,
+    model,
+    maxTokens,
+    sent,
+  }) => {
+    process.env.AI_SMART_CHAIN = 'zai,claude';
+    process.env.AI_FAST_CHAIN = 'zai,claude';
     Object.assign(process.env, { CLAUDE_API_TOKEN: 'claude-key', CLAUDE_MODEL: model, CLAUDE_FAST_MODEL: model });
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
     claude = makeProvider({ behaviors: [{ kind: 'text', text: 'summary' }] });
 
-    await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 256, fast });
+    await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens, fast });
 
-    expect(claude.requests.map((request) => request.thinking)).toEqual([thinking]);
+    expect(claude.requests).toMatchObject([{ reasoning_effort: 'medium', max_tokens: sent }]);
+    expect(claude.requests[0]?.thinking).toBeUndefined();
+    expect(zai.requests).toMatchObject([{ max_tokens: maxTokens }]);
+    expect(zai.requests[0]?.reasoning_effort).toBeUndefined();
   });
 
   test('the default chain ends at z.ai when no Claude token is configured', async () => {
