@@ -136,6 +136,10 @@ function buildMessages(testCase: DryRunCase): OpenAI.ChatCompletionMessageParam[
 interface CaseOutcome {
   id: string;
   provider: string;
+  /** What was actually requested, so two saved runs can be compared or reproduced. */
+  model: string;
+  temperature: number | null;
+  thinking: ClaudeThinking['type'] | null;
   tools: string[];
   text: string;
   promptTokens: number | null;
@@ -210,6 +214,11 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
     ...(acceptsSamplingTemperature(provider.name) ? { temperature: 0 } : {}),
     ...(thinking ? { thinking } : {}),
   };
+  const settings = {
+    model: provider.model,
+    temperature: request.temperature ?? null,
+    thinking: thinking?.type ?? null,
+  };
   try {
     const res = await completeWithRetry(provider, request);
     const calls = res.choices[0]?.message.tool_calls ?? [];
@@ -218,6 +227,7 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
     return {
       id: testCase.id,
       provider: provider.name,
+      ...settings,
       tools,
       text,
       promptTokens: res.usage?.prompt_tokens ?? null,
@@ -230,6 +240,7 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
     return {
       id: testCase.id,
       provider: provider.name,
+      ...settings,
       tools: [],
       text: '',
       promptTokens: null,
