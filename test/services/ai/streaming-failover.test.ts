@@ -893,13 +893,20 @@ describe('provider order', () => {
     expect(claude.requests.map((request) => request.temperature)).toEqual([undefined]);
   });
 
-  // Haiku 5.5 thinks by default and the compatible endpoint streams none of it: a 256-token
-  // summary came back 0 characters with finish `length` (live, 2026-10-09). Sonnet 5.5 rejects
-  // `disabled` with 400 and does not think before answering, so only the fast Haiku route turns it off.
+  // Claude 5.5 thinks before answering by default and the compatible endpoint streams none of
+  // it (live, 2026-10-09): a 256-token Haiku summary came back 0 characters with finish `length`,
+  // and real Sonnet agent turns at a 600-token budget hit `length` 2 of 5 times. Haiku turns it
+  // off with `disabled`; Sonnet rejects that value with 400 and needs `between_tools` instead.
   test.each([
     { fast: true, model: 'claude-haiku-5-5', thinking: { type: 'disabled' } },
-    { fast: false, model: 'claude-sonnet-5-5', thinking: undefined },
-    { fast: true, model: 'claude-sonnet-5-5', thinking: undefined },
+    { fast: false, model: 'claude-haiku-5-5', thinking: { type: 'disabled' } },
+    { fast: false, model: 'claude-sonnet-5-5', thinking: { type: 'between_tools' } },
+    { fast: true, model: 'claude-sonnet-5-5', thinking: { type: 'between_tools' } },
+    { fast: false, model: 'claude-sonnet-5-5-20260928', thinking: { type: 'between_tools' } },
+    // The preference-list fallbacks reject `between_tools` and accept `disabled` (live, 2026-10-09).
+    { fast: false, model: 'claude-sonnet-5', thinking: { type: 'disabled' } },
+    { fast: true, model: 'claude-haiku-4-5-20251001', thinking: { type: 'disabled' } },
+    { fast: false, model: 'claude-opus-5-5', thinking: undefined },
   ])('Claude $model (fast=$fast) is sent thinking $thinking', async ({ fast, model, thinking }) => {
     process.env.AI_SMART_CHAIN = 'claude';
     process.env.AI_FAST_CHAIN = 'claude';

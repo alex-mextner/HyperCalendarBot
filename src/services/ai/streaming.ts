@@ -532,7 +532,9 @@ function streamingSlot(
     stream: async (model, opts, cbs, onHttpAttempt) => {
       let attemptStartedAt = performance.now();
       // `thinking` is Anthropic's own field; the compatible endpoint reads it from the body.
-      const params: OpenAI.ChatCompletionCreateParamsStreaming & { thinking?: { type: 'disabled' } } = {
+      const params: OpenAI.ChatCompletionCreateParamsStreaming & {
+        thinking?: { type: 'disabled' | 'between_tools' };
+      } = {
         model,
         messages: opts.messages,
         max_tokens: opts.maxTokens,
@@ -543,9 +545,12 @@ function streamingSlot(
       // Only the supported 2.5 Flash text routes: never send none to Pro/3.x.
       if (provider === 'gemini' && opts.fast && /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, '')))
         params.reasoning_effort = 'none';
-      // Haiku 5.x thinks by default and the compatible endpoint streams none of it, so a short
-      // fast budget can end at `length` with no text. Sonnet rejects `disabled` and does not think first.
-      if (provider === 'claude' && opts.fast && /^claude-haiku-/.test(model)) params.thinking = { type: 'disabled' };
+      // Claude 5.x thinks before answering by default and the compatible endpoint streams none of
+      // it, so the visible answer or tool call can end at `length`. Each model accepts exactly one
+      // way to turn that off (live, 2026-10-09): Sonnet 5.5 only `between_tools`, the other Sonnet
+      // and Haiku ids only `disabled`. Opus is never selected, so it is left alone.
+      if (provider === 'claude' && /^claude-(?:sonnet|haiku)-/.test(model))
+        params.thinking = { type: /^claude-sonnet-5-5(?:-|$)/.test(model) ? 'between_tools' : 'disabled' };
       if (opts.tools && opts.tools.length > 0) {
         params.tools = opts.tools;
       }
