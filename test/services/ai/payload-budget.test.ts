@@ -259,3 +259,24 @@ describe('shared schema fragments', () => {
     expect(ownerDescriptions.size).toBe(1);
   });
 });
+
+describe('voice transcription prompt safety', () => {
+  test('treats consequential transcribed details as uncertain and asks a narrow confirmation', () => {
+    const prompt = buildSystemPrompt(makeContext({ inputMode: 'voice_message' }));
+
+    expect(prompt).toContain('The transcription may contain errors');
+    expect(prompt.toLowerCase()).toContain('do not silently guess');
+    expect(prompt).toContain('consequential detail');
+    expect(prompt).toContain('likely interpretations');
+    expect(prompt.toLowerCase()).toContain('ask only about the ambiguous detail');
+  });
+
+  test('does not require clarification for a clear read-only voice request', () => {
+    const prompt = buildSystemPrompt(makeContext({ inputMode: 'voice_message' }));
+
+    expect(prompt).toContain('Read-only requests may proceed');
+    expect(prompt).not.toContain(
+      'Do NOT ask the user to repeat themselves unless the message is completely unintelligible',
+    );
+  });
+});
