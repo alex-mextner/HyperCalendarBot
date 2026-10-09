@@ -50,14 +50,15 @@ if [[ "$REF" == origin/* ]]; then
   git fetch origin "${REF#origin/}"
 fi
 SHA="$(git rev-parse "${REF}^{commit}")"
-SHORT_SHA="${SHA:0:12}"
 [[ "$SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'Expected exact SHA' >&2; exit 2; }
 git merge-base --is-ancestor "$SHA" origin/main
 [[ "$(git rev-parse origin/main)" == "$SHA" ]] || { echo 'Ref is not current origin/main' >&2; exit 2; }
 [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_/-]+$ && "$DEPLOY_PATH" != / && "$DEPLOY_PATH" != *..* ]] || exit 2
 [[ "$HOST" =~ ^[a-zA-Z0-9_@.-]+$ ]] || exit 2
 [[ "$IMAGE" =~ ^[a-z0-9][a-z0-9./_-]*$ ]] || exit 2
-REMOTE_SRC="/tmp/hypercal-source-${SHORT_SHA}-$$"
+# Stage on the deploy path's disk in the activator's release namespace, not /tmp: /tmp on
+# the odroid is a 1.9 GB tmpfs in its 3.7 GB of RAM, too small for source plus image archive.
+REMOTE_SRC="$DEPLOY_PATH/.incoming-$SHA-$(date +%s)-$$"
 LOCAL_SRC="$(mktemp -d)"
 trap 'rm -rf "$LOCAL_SRC"' EXIT
 # Local image builder. Colima was removed from the dev Mac on 2026-09-26 (its VM
@@ -129,7 +130,7 @@ CONFIG_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["co
 # A later merge must not be overwritten after a long local build.
 git fetch origin main
 [[ "$(git rev-parse origin/main)" == "$SHA" ]] || { echo 'Release superseded during local build' >&2; exit 2; }
-ssh -o BatchMode=yes "$HOST" "mkdir -p '$REMOTE_SRC'"
+ssh -o BatchMode=yes "$HOST" "mkdir -m 0700 '$REMOTE_SRC'"
 echo "== Uploading exact git archive $SHA =="
 git archive "$SHA" | ssh -o BatchMode=yes "$HOST" "tar -xf - -C '$REMOTE_SRC'"
 

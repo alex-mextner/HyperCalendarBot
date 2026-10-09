@@ -123,18 +123,25 @@ jobs:
         with:
           name: release-${{ github.sha }}
           path: release
+      # The odroid is a shared multi-user box where any local user can read process argument
+      # lists, so tokens stay in the environment and the request is made inside python3.
       - name: Release still targets main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EXPECTED_SHA: ${{ github.sha }}
         run: |
-          set -euo pipefail
-          MAIN_SHA="$(curl -fsS --max-time 30 \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/heads/main" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["object"]["sha"])')"
-          test "$MAIN_SHA" = "$EXPECTED_SHA"
+          python3 - <<'PY'
+          import json, os, sys, urllib.request
+          url = f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}/git/ref/heads/main"
+          request = urllib.request.Request(url, headers={
+              "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+              "Accept": "application/vnd.github+json",
+          })
+          with urllib.request.urlopen(request, timeout=30) as response:
+              main_sha = json.load(response)["object"]["sha"]
+          if main_sha != os.environ["EXPECTED_SHA"]:
+              sys.exit(f"main moved to {main_sha}; not deploying {os.environ['EXPECTED_SHA']}")
+          PY
       - name: Activate verified prebuilt release
         env:
           RELEASE_SHA: ${{ github.sha }}
@@ -153,11 +160,26 @@ jobs:
           ADMIN_ID: ${{ secrets.BOT_ADMIN_ID }}
           COMMIT_SHA: ${{ github.sha }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
-        # The odroid runner has no jq; python3 builds the JSON body.
+        # Same reason: BOT_TOKEN would sit in a curl URL argument. A failed notification
+        # only warns, as the curl version did for HTTP errors.
         run: |
-          python3 -c 'import json,os; first=os.environ["COMMIT_MSG"].split("\n")[0]; print(json.dumps({"chat_id": os.environ["ADMIN_ID"], "text": "✅ <b>Deployed</b> <code>%s</code>\n%s" % (os.environ["COMMIT_SHA"][:7], first), "parse_mode": "HTML"}))' \
-            | curl -s --max-time 30 -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-              -H "Content-Type: application/json" --data-binary @-
+          python3 - <<'PY'
+          import json, os, urllib.request
+          first = os.environ["COMMIT_MSG"].split("\n")[0]
+          body = json.dumps({
+              "chat_id": os.environ["ADMIN_ID"],
+              "text": "✅ <b>Deployed</b> <code>%s</code>\n%s" % (os.environ["COMMIT_SHA"][:7], first),
+              "parse_mode": "HTML",
+          }).encode()
+          request = urllib.request.Request(
+              f"https://api.telegram.org/bot{os.environ['BOT_TOKEN']}/sendMessage",
+              data=body, headers={"Content-Type": "application/json"},
+          )
+          try:
+              urllib.request.urlopen(request, timeout=30).close()
+          except Exception as error:
+              print(f"::warning::deploy notification failed: {type(error).__name__}")
+          PY
 
   notify-failure:
     name: Notify on failure

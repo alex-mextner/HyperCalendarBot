@@ -9,7 +9,8 @@ SHA="${4:?Source revision required}"
 ARCHIVE_SUM="${5:?Archive checksum required}"
 CONFIG_ID="${6:?Image config identity required}"
 # Validate ownership BEFORE arming any cleanup trap or touching the live service.
-# Hosted runs stage under DEPLOY_PATH; the local fallback uses its /tmp namespace.
+# Hosted runs and the local fallback stage under DEPLOY_PATH; /tmp/hypercal-source-* is the
+# fallback's namespace before #784 (the odroid's /tmp is a small RAM tmpfs).
 python3 - "$DEPLOY_PATH" "$REMOTE_SRC" "$SHA" <<'PYGUARD'
 from pathlib import Path
 import re

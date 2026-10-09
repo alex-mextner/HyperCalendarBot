@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
-import { readdirSync, readFileSync } from 'node:fs';
+import { describe, expect, test } from 'bun:test';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 
@@ -101,4 +101,73 @@ test('no pull-request-triggered workflow targets a self-hosted runner', () => {
       });
     }
   }
+});
+
+// The odroid is a shared multi-user box: any local user can read every process's argv in
+// /proc/*/cmdline. The main-ref check must authenticate with the token without ever putting
+// it on a command line, and must fail the deploy when main has moved.
+describe('the "Release still targets main" step on the self-hosted runner', () => {
+  const step = workflow.jobs.deploy.steps.find((candidate) => candidate.name === 'Release still targets main');
+  const script = step?.run;
+  const token = `ghs_synthetic${'0'.repeat(30)}`;
+  const expected = 'a'.repeat(40);
+
+  async function runCheck(mainSha: string) {
+    if (!script) throw new Error('deploy.yml has no "Release still targets main" step');
+    const seen: { authorization: string | null; path: string; tokenInArgv: string[] } = {
+      authorization: null,
+      path: '',
+      tokenInArgv: [],
+    };
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        seen.authorization = request.headers.get('authorization');
+        seen.path = new URL(request.url).pathname;
+        // While the step's request is in flight, look for the token in every process's argv.
+        if (existsSync('/proc/self/cmdline')) {
+          for (const pid of readdirSync('/proc').filter((name) => /^\d+$/.test(name))) {
+            try {
+              const argv = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+              if (argv.includes(token)) seen.tokenInArgv.push(argv.replaceAll('\0', ' '));
+            } catch {
+              // The process exited between listing and reading.
+            }
+          }
+        }
+        return Response.json({ object: { sha: mainSha } });
+      },
+    });
+    try {
+      const child = Bun.spawn(['bash', '-e', '-c', script], {
+        env: {
+          PATH: process.env.PATH ?? '/usr/bin:/bin',
+          GH_TOKEN: token,
+          EXPECTED_SHA: expected,
+          GITHUB_API_URL: `http://127.0.0.1:${server.port}`,
+          GITHUB_REPOSITORY: 'owner/repo',
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const exitCode = await child.exited;
+      return { exitCode, stderr: await new Response(child.stderr).text(), seen };
+    } finally {
+      server.stop(true);
+    }
+  }
+
+  test('passes when main is the release commit, with the token only in a header', async () => {
+    const { exitCode, stderr, seen } = await runCheck(expected);
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: '' });
+    expect(seen.path).toBe('/repos/owner/repo/git/ref/heads/main');
+    expect(seen.authorization).toBe(`Bearer ${token}`);
+    expect(seen.tokenInArgv).toEqual([]);
+  });
+
+  test('fails when main has moved on', async () => {
+    const { exitCode, stderr } = await runCheck('b'.repeat(40));
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain(`main moved to ${'b'.repeat(40)}`);
+  });
 });

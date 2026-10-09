@@ -308,7 +308,9 @@ print(body,end='')
         self.assertTrue(self.db.exists())
         self.assertFalse(self.log.exists())
 
-    def test_local_fallback_staging_namespace_remains_supported(self):
+    def test_pre_784_fallback_tmp_staging_namespace_is_still_accepted(self):
+        # deploy-local-fallback.sh now stages under the deploy path (covered by
+        # test_local_fallback_staging.py); the activator still owns the old /tmp names.
         stage = Path("/tmp") / ("hypercal-source-" + SHA[:12] + "-" + str(os.getpid()))
         stage.mkdir(exist_ok=False)
         self.addCleanup(shutil.rmtree, stage, True)
