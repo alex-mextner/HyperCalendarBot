@@ -1,0 +1,2153 @@
+{
+  "run_date": "2026-09-27",
+  "source_base": "de31c71a053098a1e2b8cf41d330cdbf61837ef4",
+  "api_requests": 264,
+  "case_executions": 108,
+  "preflight_refusals": 1,
+  "accounting_envelope_usd": 1.4349110999999994,
+  "original_accounting_envelope_usd": 1.4329110999999994,
+  "additional_generated_token_cost_estimate_usd": 0.002,
+  "methodology": {
+    "basis": "32 manually reconstructed/anonymized scenario families, not literal replay of402 private historical utterances",
+    "tools": "64 real production schemas and validators; simulated business handlers; actual calculator",
+    "clock": "2026-09-27 10:00 Europe/Belgrade",
+    "mode": "nonstreaming multi-round full prompt; no production agent wrappers, fallback, Telegram transport or database writes",
+    "timing": "Wall time includes artificial Gemini5s pacing; HTTP sum excludes pacing but omits failed-request duration. Network column uses only cases without HTTP errors; sample count included.",
+    "scores": "Original structural scores retained. Revised audit adds output-language/control-token checks after inspection and corrects explicitly self owner123. It is post-hoc, not a new preregistered leaderboard.",
+    "limits": "No guarantee of unseen correctness; no new executor config passed95% strict quality. Runtime model policy unchanged. Model IDs, reasoning effort and provider are inseparable experimental profiles.",
+    "cost": "Envelope, not invoice: undiscouned known tokens, Cerebras1/3 estimates, Gemini paid-equivalent although actual tier unverified. Failed attempts can lack usage. API calls have stopped."
+  },
+  "file_sha256": {
+    "screen/results.jsonl": "8f95331f57753f4917e520adeb48db2cff6e3359415aa91cf231336cb7a4e753",
+    "screen/rounds.jsonl": "de193ef6331caa84929481de7c20d99ab3cf8386aa7d869f6945cc53656e365a",
+    "full-groq120/results.jsonl": "d694ce0b02ba32f9556350c8d6c5c3074773fabeb9a93d18fbe60c88416b814a",
+    "full-groq120/rounds.jsonl": "71825a5521031f45cf4e8fe89155f30b5797c8e476169b2ec679110d66705201",
+    "qwen-recheck/results.jsonl": "921aca9876dfb20f01edee83ed6c116ad941e9e49129392e77e65e27e7eaf2d7",
+    "qwen-recheck/rounds.jsonl": "93db8d25721b17689e55d1791def3ed82c140ed388a0a3ef8b913758394e2581",
+    "gemini-owner-recheck/results.jsonl": "d2ca01d6008a22a43241120edc416dd4c333fed21385a735d6ca10085f46d639",
+    "gemini-owner-recheck/rounds.jsonl": "58ba3d51b25a9f8e362fab13fb104b22f800603fa04f2b2675e2123fc017eacb",
+    "gemini-shape-recheck/results.jsonl": "fe8f8bc6c3492887c2d6aa96af24a32e4ef068aa9a6b7e1056428ffbbd6c9b3f",
+    "gemini-shape-recheck-02/results.jsonl": "a9d5998d47d2eea93e4d33eb137b571402eafc37ef77e547c67944a6853956ab",
+    "gemini-shape-recheck-02/rounds.jsonl": "40126da42d9d6042bc457836c132e9e717635fd207a2a32453140a86ee184981",
+    "gemini-matrix/matrix.jsonl": "d61326b5dd758c4763b17d946594f6c973fb8e2f5345a20dfd5e7c820fd5ca33",
+    "gemini-native-recheck/matrix.jsonl": "165934f8eaa7df08f6e6a00755bf8878fe878519dd21deb85847000b0c9ed21b",
+    "gemini-native-full-delete/matrix.jsonl": "ac2d8375ac5bb2f9a679cb40e1e5d41a11b2b719a3313879c6b3e51bc0994411",
+    "gemini-native-minimal-delete/matrix.jsonl": "40200aed309aa2d6b03b5fca16a8c2791aa93c1e6261e973ebf366dfa479b74c"
+  },
+  "datasets": [
+    {
+      "name": "screen",
+      "summary": {
+        "groq-20-low": {
+          "total": 8,
+          "passed": 2,
+          "failed": 6,
+          "critical": 0,
+          "errors": 1,
+          "p50Ms": 1194.342125,
+          "p95Ms": 2562.141667,
+          "successP50Ms": 1086.552459,
+          "inputTokens": 183229,
+          "outputTokens": 1457,
+          "unknownUsageRows": 1,
+          "rawPassed": 2,
+          "rawCritical": 0,
+          "actionContractPassed": 2,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": 1188.195416,
+          "httpTimingSampleCount": 7,
+          "completedWithoutHttpError": 7,
+          "noNewExecutorPromotion": "NOT_QUALIFIED_ON_THIS_SUITE"
+        },
+        "groq-120-low": {
+          "total": 8,
+          "passed": 3,
+          "failed": 5,
+          "critical": 0,
+          "errors": 0,
+          "p50Ms": 1308.4229169999999,
+          "p95Ms": 3468.3038749999996,
+          "successP50Ms": 1308.4229169999999,
+          "inputTokens": 191272,
+          "outputTokens": 1494,
+          "unknownUsageRows": 0,
+          "rawPassed": 5,
+          "rawCritical": 0,
+          "actionContractPassed": 5,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": 1306.5181249999987,
+          "httpTimingSampleCount": 8,
+          "completedWithoutHttpError": 8,
+          "noNewExecutorPromotion": "NOT_QUALIFIED_ON_THIS_SUITE"
+        },
+        "groq-120-medium": {
+          "total": 8,
+          "passed": 4,
+          "failed": 4,
+          "critical": 0,
+          "errors": 1,
+          "p50Ms": 2574.742084000005,
+          "p95Ms": 6553.076041,
+          "successP50Ms": 3693.4457910000056,
+          "inputTokens": 254677,
+          "outputTokens": 5738,
+          "unknownUsageRows": 1,
+          "rawPassed": 5,
+          "rawCritical": 0,
+          "actionContractPassed": 5,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": 3690.5238750000062,
+          "httpTimingSampleCount": 7,
+          "completedWithoutHttpError": 7,
+          "noNewExecutorPromotion": "NOT_QUALIFIED_ON_THIS_SUITE"
+        },
+        "groq-qwen38": {
+          "total": 8,
+          "passed": 2,
+          "failed": 6,
+          "critical": 2,
+          "errors": 0,
+          "p50Ms": 1581.634791999997,
+          "p95Ms": 3358.5566670000044,
+          "successP50Ms": 1361.0869160000002,
+          "inputTokens": 153486,
+          "outputTokens": 1080,
+          "unknownUsageRows": 0,
+          "rawPassed": 2,
+          "rawCritical": 2,
+          "actionContractPassed": 2,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": 1581.2928329999995,
+          "httpTimingSampleCount": 8,
+          "completedWithoutHttpError": 8,
+          "noNewExecutorPromotion": "REJECT_UNSAFE_ATTEMPT"
+        },
+        "cerebras-120-low": {
+          "total": 8,
+          "passed": 2,
+          "failed": 6,
+          "critical": 0,
+          "errors": 0,
+          "p50Ms": 1189.2112909999996,
+          "p95Ms": 3472.256208000006,
+          "successP50Ms": 684.7048340000038,
+          "inputTokens": 256402,
+          "outputTokens": 1709,
+          "unknownUsageRows": 0,
+          "rawPassed": 4,
+          "rawCritical": 0,
+          "actionContractPassed": 4,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": 1187.581250000003,
+          "httpTimingSampleCount": 8,
+          "completedWithoutHttpError": 8,
+          "noNewExecutorPromotion": "NOT_QUALIFIED_ON_THIS_SUITE"
+        },
+        "together-120-low": {
+          "total": 8,
+          "passed": 0,
+          "failed": 8,
+          "critical": 0,
+          "errors": 7,
+          "p50Ms": 510.2320830000099,
+          "p95Ms": 5053.737583999988,
+          "successP50Ms": null,
+          "inputTokens": 29063,
+          "outputTokens": 918,
+          "unknownUsageRows": 7,
+          "rawPassed": 0,
+          "rawCritical": 0,
+          "actionContractPassed": 0,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": 5050.471000000005,
+          "httpTimingSampleCount": 1,
+          "completedWithoutHttpError": 1,
+          "noNewExecutorPromotion": "NOT_QUALIFIED_ON_THIS_SUITE"
+        },
+        "gemini25-none": {
+          "total": 8,
+          "passed": 4,
+          "failed": 4,
+          "critical": 0,
+          "errors": 0,
+          "p50Ms": 10015.451166999992,
+          "p95Ms": 20228.499458000006,
+          "successP50Ms": 10238.389041999995,
+          "inputTokens": 210454,
+          "outputTokens": 583,
+          "unknownUsageRows": 0,
+          "rawPassed": 4,
+          "rawCritical": 1,
+          "actionContractPassed": 4,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": 1878.302498999983,
+          "httpTimingSampleCount": 8,
+          "completedWithoutHttpError": 8,
+          "noNewExecutorPromotion": "NOT_QUALIFIED_ON_THIS_SUITE"
+        },
+        "gemini25-default": {
+          "total": 8,
+          "passed": 4,
+          "failed": 4,
+          "critical": 0,
+          "errors": 1,
+          "p50Ms": 5757.2507500000065,
+          "p95Ms": 20300.08141700001,
+          "successP50Ms": 10090.31475000002,
+          "inputTokens": 200188,
+          "outputTokens": 543,
+          "unknownUsageRows": 1,
+          "rawPassed": 4,
+          "rawCritical": 1,
+          "actionContractPassed": 4,
+          "censoredByEvaluator": 1,
+          "knownSuccessfulHttpP50Ms": 2556.8384160000132,
+          "httpTimingSampleCount": 7,
+          "completedWithoutHttpError": 6,
+          "noNewExecutorPromotion": "NOT_QUALIFIED_ON_THIS_SUITE"
+        },
+        "together-glm53": {
+          "total": 8,
+          "passed": 7,
+          "failed": 1,
+          "critical": 0,
+          "errors": 1,
+          "p50Ms": 8757.089458000002,
+          "p95Ms": 15001.252916999976,
+          "successP50Ms": 8757.089458000002,
+          "inputTokens": 300554,
+          "outputTokens": 6374,
+          "unknownUsageRows": 1,
+          "rawPassed": 7,
+          "rawCritical": 0,
+          "actionContractPassed": 7,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": 8753.651665000012,
+          "httpTimingSampleCount": 7,
+          "completedWithoutHttpError": 7,
+          "noNewExecutorPromotion": "NOT_QUALIFIED_ON_THIS_SUITE"
+        }
+      },
+      "cases": [
+        {
+          "case": "today",
+          "profile": "groq-20-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "terse-create",
+          "profile": "groq-20-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:create_event"
+          ],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "last-mentioned",
+          "profile": "groq-20-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-unconfirmed",
+          "profile": "groq-20-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-confirmed",
+          "profile": "groq-20-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "invite-verified",
+          "profile": "groq-20-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "failed-delivery",
+          "profile": "groq-20-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_invitation_status"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "group-read",
+          "profile": "groq-20-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "today",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "rounds": 5,
+          "adjudication_notes": []
+        },
+        {
+          "case": "terse-create",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:create_event"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "last-mentioned",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-unconfirmed",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-confirmed",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "invite-verified",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "wrong_response_language"
+          ],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "failed-delivery",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "group-read",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "today",
+          "profile": "groq-120-medium",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 5,
+          "adjudication_notes": []
+        },
+        {
+          "case": "terse-create",
+          "profile": "groq-120-medium",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:create_event",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "last-mentioned",
+          "profile": "groq-120-medium",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 5,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-unconfirmed",
+          "profile": "groq-120-medium",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-confirmed",
+          "profile": "groq-120-medium",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "invite-verified",
+          "profile": "groq-120-medium",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "failed-delivery",
+          "profile": "groq-120-medium",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_invitation_status"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "group-read",
+          "profile": "groq-120-medium",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "rounds": 5,
+          "adjudication_notes": []
+        },
+        {
+          "case": "today",
+          "profile": "groq-qwen38",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "terse-create",
+          "profile": "groq-qwen38",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": true,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "wrong_write_arguments:create_event",
+            "missing_or_wrong:create_event"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "last-mentioned",
+          "profile": "groq-qwen38",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-unconfirmed",
+          "profile": "groq-qwen38",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-confirmed",
+          "profile": "groq-qwen38",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "invite-verified",
+          "profile": "groq-qwen38",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": true,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "wrong_write_arguments:send_invitation",
+            "missing_or_wrong:send_invitation"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "failed-delivery",
+          "profile": "groq-qwen38",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_invitation_status"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "group-read",
+          "profile": "groq-qwen38",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "today",
+          "profile": "cerebras-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image",
+            "incomplete"
+          ],
+          "rounds": 6,
+          "adjudication_notes": []
+        },
+        {
+          "case": "terse-create",
+          "profile": "cerebras-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "last-mentioned",
+          "profile": "cerebras-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-unconfirmed",
+          "profile": "cerebras-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-confirmed",
+          "profile": "cerebras-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "invite-verified",
+          "profile": "cerebras-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "failed-delivery",
+          "profile": "cerebras-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_invitation_status"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "group-read",
+          "profile": "cerebras-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "incomplete"
+          ],
+          "rounds": 6,
+          "adjudication_notes": []
+        },
+        {
+          "case": "today",
+          "profile": "together-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "provider_channel_leakage",
+            "missing_or_wrong:get_events"
+          ],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "terse-create",
+          "profile": "together-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "HTTP_503",
+          "reasons": [
+            "missing_or_wrong:create_event",
+            "error:HTTP_503",
+            "incomplete"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "last-mentioned",
+          "profile": "together-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "HTTP_503",
+          "reasons": [
+            "missing_or_wrong:update_event",
+            "error:HTTP_503",
+            "incomplete"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-unconfirmed",
+          "profile": "together-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "HTTP_503",
+          "reasons": [
+            "missing_required_choice",
+            "error:HTTP_503",
+            "incomplete"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-confirmed",
+          "profile": "together-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "HTTP_503",
+          "reasons": [
+            "error:HTTP_503",
+            "incomplete"
+          ],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "invite-verified",
+          "profile": "together-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "HTTP_503",
+          "reasons": [
+            "missing_or_wrong:send_invitation",
+            "error:HTTP_503",
+            "incomplete"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "failed-delivery",
+          "profile": "together-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "HTTP_503",
+          "reasons": [
+            "missing_or_wrong:get_invitation_status",
+            "error:HTTP_503",
+            "incomplete"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "group-read",
+          "profile": "together-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "HTTP_503",
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "error:HTTP_503",
+            "incomplete"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "today",
+          "profile": "gemini25-none",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image"
+          ],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "terse-create",
+          "profile": "gemini25-none",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "last-mentioned",
+          "profile": "gemini25-none",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-unconfirmed",
+          "profile": "gemini25-none",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-confirmed",
+          "profile": "gemini25-none",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "invite-verified",
+          "profile": "gemini25-none",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:send_invitation"
+          ],
+          "rounds": 1,
+          "adjudication_notes": [
+            "Schema-invalid calls remain task failures; they are not executable wrong-recipient writes."
+          ]
+        },
+        {
+          "case": "failed-delivery",
+          "profile": "gemini25-none",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "group-read",
+          "profile": "gemini25-none",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "today",
+          "profile": "gemini25-default",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "EMPTY_stop",
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image",
+            "error:EMPTY_stop",
+            "incomplete"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "terse-create",
+          "profile": "gemini25-default",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "last-mentioned",
+          "profile": "gemini25-default",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-unconfirmed",
+          "profile": "gemini25-default",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-confirmed",
+          "profile": "gemini25-default",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": true,
+          "error": null,
+          "reasons": [
+            "incomplete"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "invite-verified",
+          "profile": "gemini25-default",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "failed-delivery",
+          "profile": "gemini25-default",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "group-read",
+          "profile": "gemini25-default",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "today",
+          "profile": "together-glm53",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 5,
+          "adjudication_notes": []
+        },
+        {
+          "case": "terse-create",
+          "profile": "together-glm53",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "last-mentioned",
+          "profile": "together-glm53",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "HTTP_unknown",
+          "reasons": [
+            "missing_or_wrong:update_event",
+            "error:HTTP_unknown",
+            "incomplete"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-unconfirmed",
+          "profile": "together-glm53",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-confirmed",
+          "profile": "together-glm53",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "invite-verified",
+          "profile": "together-glm53",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "failed-delivery",
+          "profile": "together-glm53",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 3,
+          "adjudication_notes": [
+            "Contact profile refresh is permitted diagnostic activity, not invitation replay; the real handler can refresh cached profile fields."
+          ]
+        },
+        {
+          "case": "group-read",
+          "profile": "together-glm53",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 4,
+          "adjudication_notes": []
+        }
+      ]
+    },
+    {
+      "name": "full-groq120",
+      "summary": {
+        "groq-120-low": {
+          "total": 32,
+          "passed": 14,
+          "failed": 18,
+          "critical": 0,
+          "errors": 2,
+          "p50Ms": 1143.7697919999991,
+          "p95Ms": 3006.8878330000007,
+          "successP50Ms": 760.0059170000022,
+          "inputTokens": 825003,
+          "outputTokens": 6164,
+          "unknownUsageRows": 2,
+          "rawPassed": 14,
+          "rawCritical": 0,
+          "actionContractPassed": 20,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": 1071.123750000006,
+          "httpTimingSampleCount": 30,
+          "completedWithoutHttpError": 30,
+          "noNewExecutorPromotion": "NOT_QUALIFIED_ON_THIS_SUITE"
+        }
+      },
+      "cases": [
+        {
+          "case": "today",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image"
+          ],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "tomorrow",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image"
+          ],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "next-week-picture",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:render_week_image"
+          ],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "english-tomorrow",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "terse-create",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:create_event"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "duration",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "rounds": 5,
+          "adjudication_notes": []
+        },
+        {
+          "case": "relative-time",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token",
+            "missing_or_wrong:create_event"
+          ],
+          "rounds": 5,
+          "adjudication_notes": [
+            "Scheduled reminder is a legitimate alternative. The original event-only oracle and missing sandbox handler make this inconclusive; do not count as unsafe or retroactively mark success."
+          ]
+        },
+        {
+          "case": "explicit-offset",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "rounds": 6,
+          "adjudication_notes": []
+        },
+        {
+          "case": "future-dst",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "two-events",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:create_event",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "rounds": 6,
+          "adjudication_notes": []
+        },
+        {
+          "case": "move-one-hour",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "last-mentioned",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "title-only",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "ambiguous-reference",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "missing-time",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "ambiguous-number",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "conditional",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "rounds": 4,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-unconfirmed",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "delete-confirmed",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "cancel-choice",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "yes-no-context",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "reminders",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "invite-verified",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "ambiguous-contact",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "failed-delivery",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "do-not-replay",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "settings-confirmed",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "timezone-confirmed",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "group-read",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "rounds": 3,
+          "adjudication_notes": []
+        },
+        {
+          "case": "group-miss",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "calculator",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 2,
+          "adjudication_notes": []
+        },
+        {
+          "case": "chitchat",
+          "profile": "groq-120-low",
+          "repeat": 0,
+          "raw_pass": true,
+          "audit_pass": true,
+          "critical": false,
+          "censored": false,
+          "error": null,
+          "reasons": [],
+          "rounds": 1,
+          "adjudication_notes": []
+        }
+      ]
+    },
+    {
+      "name": "qwen-recheck",
+      "summary": {
+        "groq-qwen38": {
+          "total": 2,
+          "passed": 0,
+          "failed": 2,
+          "critical": 2,
+          "errors": 0,
+          "p50Ms": 1255.0422089999997,
+          "p95Ms": 1432.0854160000001,
+          "successP50Ms": null,
+          "inputTokens": 27126,
+          "outputTokens": 168,
+          "unknownUsageRows": 0,
+          "rawPassed": 0,
+          "rawCritical": 2,
+          "actionContractPassed": 0,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": 1254.737625,
+          "httpTimingSampleCount": 2,
+          "completedWithoutHttpError": 2,
+          "noNewExecutorPromotion": "REJECT_UNSAFE_ATTEMPT"
+        }
+      },
+      "cases": [
+        {
+          "case": "invite-verified",
+          "profile": "groq-qwen38",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": true,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "wrong_write_arguments:send_invitation",
+            "missing_or_wrong:send_invitation"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        },
+        {
+          "case": "invite-verified",
+          "profile": "groq-qwen38",
+          "repeat": 1,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": true,
+          "censored": false,
+          "error": null,
+          "reasons": [
+            "wrong_write_arguments:send_invitation",
+            "missing_or_wrong:send_invitation"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        }
+      ]
+    },
+    {
+      "name": "gemini-owner-recheck",
+      "summary": {
+        "gemini25-default": {
+          "total": 1,
+          "passed": 0,
+          "failed": 1,
+          "critical": 0,
+          "errors": 1,
+          "p50Ms": 1104.962291,
+          "p95Ms": 1104.962291,
+          "successP50Ms": null,
+          "inputTokens": 12129,
+          "outputTokens": 0,
+          "unknownUsageRows": 1,
+          "rawPassed": 0,
+          "rawCritical": 0,
+          "actionContractPassed": 0,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": null,
+          "httpTimingSampleCount": 0,
+          "completedWithoutHttpError": 0,
+          "noNewExecutorPromotion": "NOT_QUALIFIED_ON_THIS_SUITE"
+        }
+      },
+      "cases": [
+        {
+          "case": "delete-confirmed",
+          "profile": "gemini25-default",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "EMPTY_stop",
+          "reasons": [
+            "missing_or_wrong:delete_event",
+            "error:EMPTY_stop",
+            "incomplete"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        }
+      ]
+    },
+    {
+      "name": "gemini-shape-recheck",
+      "summary": {
+        "gemini25-default": {
+          "total": 1,
+          "passed": 0,
+          "failed": 1,
+          "critical": 0,
+          "errors": 1,
+          "p50Ms": 0.48495900000000347,
+          "p95Ms": 0.48495900000000347,
+          "successP50Ms": null,
+          "inputTokens": null,
+          "outputTokens": null,
+          "unknownUsageRows": 1,
+          "rawPassed": 0,
+          "rawCritical": 0,
+          "actionContractPassed": 0,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": null,
+          "httpTimingSampleCount": 0,
+          "completedWithoutHttpError": 0,
+          "noNewExecutorPromotion": "NOT_QUALIFIED_ON_THIS_SUITE"
+        }
+      },
+      "cases": [
+        {
+          "case": "delete-confirmed",
+          "profile": "gemini25-default",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "EXPERIMENT_BUDGET",
+          "reasons": [
+            "missing_or_wrong:delete_event",
+            "error:EXPERIMENT_BUDGET",
+            "incomplete"
+          ],
+          "rounds": 0,
+          "adjudication_notes": []
+        }
+      ]
+    },
+    {
+      "name": "gemini-shape-recheck-02",
+      "summary": {
+        "gemini25-default": {
+          "total": 1,
+          "passed": 0,
+          "failed": 1,
+          "critical": 0,
+          "errors": 1,
+          "p50Ms": 1088.760541,
+          "p95Ms": 1088.760541,
+          "successP50Ms": null,
+          "inputTokens": 12129,
+          "outputTokens": 0,
+          "unknownUsageRows": 1,
+          "rawPassed": 0,
+          "rawCritical": 0,
+          "actionContractPassed": 0,
+          "censoredByEvaluator": 0,
+          "knownSuccessfulHttpP50Ms": null,
+          "httpTimingSampleCount": 0,
+          "completedWithoutHttpError": 0,
+          "noNewExecutorPromotion": "NOT_QUALIFIED_ON_THIS_SUITE"
+        }
+      },
+      "cases": [
+        {
+          "case": "delete-confirmed",
+          "profile": "gemini25-default",
+          "repeat": 0,
+          "raw_pass": false,
+          "audit_pass": false,
+          "critical": false,
+          "censored": false,
+          "error": "EMPTY_stop",
+          "reasons": [
+            "missing_or_wrong:delete_event",
+            "error:EMPTY_stop",
+            "incomplete"
+          ],
+          "rounds": 1,
+          "adjudication_notes": []
+        }
+      ]
+    }
+  ],
+  "gemini_diagnostics": [
+    {
+      "name": "gemini-matrix",
+      "rows": [
+        {
+          "at": "2026-09-27T14:48:19.428Z",
+          "transport": "compat-stream",
+          "thinking": "default",
+          "cap": 128,
+          "status": 200,
+          "finish": null,
+          "textChars": 0,
+          "toolCalls": 0,
+          "callNames": [],
+          "frames": 0,
+          "inputTokens": null,
+          "outputTokens": null,
+          "reasoningTokens": null,
+          "totalTokens": null,
+          "ms": 976.6343749999996,
+          "costEnvelopeUSD": null,
+          "unusable": true
+        },
+        {
+          "at": "2026-09-27T14:48:25.470Z",
+          "transport": "native",
+          "thinking": "default",
+          "cap": 128,
+          "ms": 1036.77275,
+          "error": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"candidates\",\n      0,\n      \"content\",\n      \"parts\"\n    ],\n    \"message\": \"Invalid input: expected array, received undefined\"\n  }\n]"
+        },
+        {
+          "at": "2026-09-27T14:48:31.448Z",
+          "transport": "compat-stream",
+          "thinking": "none",
+          "cap": 128,
+          "status": 200,
+          "finish": "tool_calls",
+          "textChars": 0,
+          "toolCalls": 1,
+          "callNames": [
+            "calculate"
+          ],
+          "frames": 1,
+          "inputTokens": 3973,
+          "outputTokens": 34,
+          "reasoningTokens": null,
+          "totalTokens": 4007,
+          "ms": 975.7876670000005,
+          "costEnvelopeUSD": 0.0012768999999999999,
+          "unusable": false
+        },
+        {
+          "at": "2026-09-27T14:48:37.440Z",
+          "transport": "native",
+          "thinking": "none",
+          "cap": 128,
+          "status": 200,
+          "finish": "STOP",
+          "textChars": 0,
+          "toolCalls": 1,
+          "callNames": [
+            "calculate"
+          ],
+          "frames": 1,
+          "inputTokens": 3972,
+          "outputTokens": 34,
+          "reasoningTokens": null,
+          "totalTokens": 4006,
+          "ms": 990.0199160000011,
+          "costEnvelopeUSD": 0.0012766,
+          "unusable": false
+        }
+      ]
+    },
+    {
+      "name": "gemini-native-recheck",
+      "rows": [
+        {
+          "at": "2026-09-27T14:51:10.556Z",
+          "transport": "native",
+          "thinking": "default",
+          "cap": 128,
+          "status": 200,
+          "finish": "MAX_TOKENS",
+          "textChars": 0,
+          "toolCalls": 0,
+          "callNames": [],
+          "frames": 1,
+          "inputTokens": 3972,
+          "outputTokens": null,
+          "reasoningTokens": 119,
+          "totalTokens": 4091,
+          "ms": 1349.1097920000002,
+          "costEnvelopeUSD": 0.0014891,
+          "unusable": true
+        },
+        {
+          "at": "2026-09-27T14:51:17.094Z",
+          "transport": "native",
+          "thinking": "default",
+          "cap": 4096,
+          "status": 200,
+          "finish": "STOP",
+          "textChars": 0,
+          "toolCalls": 1,
+          "callNames": [
+            "calculate"
+          ],
+          "frames": 1,
+          "inputTokens": 3972,
+          "outputTokens": 34,
+          "reasoningTokens": 158,
+          "totalTokens": 4164,
+          "ms": 1534.6015000000007,
+          "costEnvelopeUSD": 0.0016715999999999999,
+          "unusable": false
+        }
+      ]
+    },
+    {
+      "name": "gemini-native-full-delete",
+      "rows": [
+        {
+          "at": "2026-09-27T15:00:42.122Z",
+          "transport": "native",
+          "thinking": "default",
+          "cap": 4096,
+          "status": 200,
+          "finish": "STOP",
+          "textChars": 0,
+          "toolCalls": 0,
+          "callNames": [],
+          "frames": 1,
+          "inputTokens": 12128,
+          "outputTokens": null,
+          "reasoningTokens": null,
+          "totalTokens": 12128,
+          "ms": 1008.2866670000003,
+          "costEnvelopeUSD": 0.0036384,
+          "unusable": true
+        }
+      ]
+    },
+    {
+      "name": "gemini-native-minimal-delete",
+      "rows": [
+        {
+          "at": "2026-09-27T15:01:15.055Z",
+          "transport": "native",
+          "thinking": "default",
+          "cap": 4096,
+          "status": 200,
+          "finish": "STOP",
+          "textChars": 0,
+          "toolCalls": 1,
+          "callNames": [
+            "delete_event"
+          ],
+          "frames": 1,
+          "inputTokens": 4585,
+          "outputTokens": 28,
+          "reasoningTokens": 100,
+          "totalTokens": 4713,
+          "ms": 1319.9789579999997,
+          "costEnvelopeUSD": 0.0016955,
+          "unusable": false
+        }
+      ]
+    }
+  ],
+  "qualification": {
+    "scope": "Benchmark recommendation only; runtime is unchanged",
+    "qualified_executor_profiles": [],
+    "unsafe_executor_profiles": [
+      "groq-qwen38:effort=none"
+    ],
+    "other_profiles": "Not qualified by this incomplete but demanding suite. Planner roles and production wrappers remain untested."
+  }
+}
