@@ -80,11 +80,13 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    # The home ODROID-N2+ (6 cores, 3.7 GB RAM) hosts this bot since 2026-10-09, shared
+    # with ExpenseSyncBot, HyperSummaryBot and others: 1.5 CPUs leaves them headroom.
     deploy:
       resources:
         limits:
           memory: 1g
-          cpus: "0.9"
+          cpus: "1.5"
     logging:
       driver: "json-file"
       options:

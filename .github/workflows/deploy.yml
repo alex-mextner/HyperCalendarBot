@@ -51,10 +51,15 @@ jobs:
 
   build:
     needs: test
-    runs-on: ubuntu-latest
+    # Production runs on the home ODROID-N2+ (aarch64) since 2026-10-09 (#784): build the
+    # arm64 image natively on GitHub's free arm runner instead of emulating it.
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
+    outputs:
+      archive_sha256: ${{ steps.release.outputs.archive_sha256 }}
+      config_digest: ${{ steps.release.outputs.config_digest }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -68,7 +73,7 @@ jobs:
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/arm64
           push: true
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
@@ -77,20 +82,8 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-to: type=inline
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      # The odroid runner has no docker access and no registry credentials: it receives the
+      # exact image as a checksummed docker-save archive and only ever loads that.
       - name: Prepare exact release artifact
         id: release
         env:
@@ -98,49 +91,61 @@ jobs:
           RELEASE_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         run: |
           set -euo pipefail
-          docker pull --platform linux/amd64 "$RELEASE_IMAGE:$RELEASE_SHA"
+          docker pull --platform linux/arm64 "$RELEASE_IMAGE:$RELEASE_SHA"
           mkdir -p release/scripts
           docker save "$RELEASE_IMAGE:$RELEASE_SHA" | gzip -1 > release/image.tar.gz
           cp docker-compose.yml Caddyfile release/
           cp scripts/backup-db.sh scripts/healthcheck-alert.sh scripts/prepare-runtime-dirs.sh scripts/release-artifact.py scripts/deploy-prebuilt-image.sh scripts/migration-gate.py release/scripts/
           python3 scripts/release-artifact.py release/image.tar.gz "$RELEASE_SHA" "$RELEASE_IMAGE:$RELEASE_SHA" > release/artifact.json
           python3 -c 'import json; a=json.load(open("release/artifact.json")); print("archive_sha256="+a["archive_sha256"]); print("config_digest="+a["config_digest"])' >> "$GITHUB_OUTPUT"
-      - uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634 # v0.1.7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          source: release
-          target: ${{ secrets.DEPLOY_PATH }}/.incoming-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          strip_components: 1
-          timeout: 120s
-          command_timeout: 10m
+          name: release-${{ github.sha }}
+          path: release
+          if-no-files-found: error
+          retention-days: 3
+          # image.tar.gz is already gzip-compressed.
+          compression-level: 0
+
+  deploy:
+    needs: build
+    # Self-hosted runner on the odroid (user hcb-runner, no docker group). Only pushes to
+    # main reach it; no pull_request-triggered workflow may ever target this label.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, odroid-hcb]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Clear previous release files
+        run: rm -rf release
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-${{ github.sha }}
+          path: release
       - name: Release still targets main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$EXPECTED_SHA"
+          MAIN_SHA="$(curl -fsS --max-time 30 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/heads/main" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["object"]["sha"])')"
+          test "$MAIN_SHA" = "$EXPECTED_SHA"
       - name: Activate verified prebuilt release
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         env:
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-          RELEASE_STAGE: .incoming-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           RELEASE_SHA: ${{ github.sha }}
-          RELEASE_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          ARCHIVE_SUM: ${{ steps.release.outputs.archive_sha256 }}
-          CONFIG_ID: ${{ steps.release.outputs.config_digest }}
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          command_timeout: 10m
-          envs: DEPLOY_PATH,RELEASE_STAGE,RELEASE_SHA,RELEASE_IMAGE,ARCHIVE_SUM,CONFIG_ID
-          script: |
-            set -eu
-            REMOTE_SRC="$DEPLOY_PATH/$RELEASE_STAGE"
-            bash "$REMOTE_SRC/scripts/deploy-prebuilt-image.sh" "$DEPLOY_PATH" "$REMOTE_SRC" "$RELEASE_IMAGE" "$RELEASE_SHA" "$ARCHIVE_SUM" "$CONFIG_ID"
+          ARCHIVE_SUM: ${{ needs.build.outputs.archive_sha256 }}
+          CONFIG_ID: ${{ needs.build.outputs.config_digest }}
+        # Root wrapper installed by hand on the odroid (runbook "Odroid runner"): it copies the
+        # known release files into a root-owned stage and runs scripts/deploy-prebuilt-image.sh there.
+        run: sudo -n /usr/local/sbin/hypercal-activate-release "$PWD/release" "$RELEASE_SHA" "$ARCHIVE_SUM" "$CONFIG_ID"
+      - name: Remove release files
+        if: always()
+        run: rm -rf release
       - name: Notify deploy success
         if: success()
         env:
@@ -148,14 +153,11 @@ jobs:
           ADMIN_ID: ${{ secrets.BOT_ADMIN_ID }}
           COMMIT_SHA: ${{ github.sha }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # The odroid runner has no jq; python3 builds the JSON body.
         run: |
-          FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
-          TEXT=$(printf '✅ <b>Deployed</b> <code>%s</code>\n%s' "${COMMIT_SHA:0:7}" "$FIRST_LINE")
-          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg chat_id "$ADMIN_ID" --arg text "$TEXT" \
-              '{chat_id: $chat_id, text: $text, parse_mode: "HTML"}')"
+          python3 -c 'import json,os; first=os.environ["COMMIT_MSG"].split("\n")[0]; print(json.dumps({"chat_id": os.environ["ADMIN_ID"], "text": "✅ <b>Deployed</b> <code>%s</code>\n%s" % (os.environ["COMMIT_SHA"][:7], first), "parse_mode": "HTML"}))' \
+            | curl -s --max-time 30 -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+              -H "Content-Type: application/json" --data-binary @-
 
   notify-failure:
     name: Notify on failure
