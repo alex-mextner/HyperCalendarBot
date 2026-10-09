@@ -218,7 +218,7 @@ def _add_bytes(out: tarfile.TarFile, name: str, data: bytes) -> None:
     out.addfile(info, io.BytesIO(data))
 
 
-def convert(source: Path, target: Path, tag: str, os_name: str = "linux", arch: str = "amd64") -> str:
+def convert(source: Path, target: Path, tag: str, os_name: str = "linux", arch: str = "arm64") -> str:
     """Write a docker-save archive for tag to target; return the config digest."""
     with tarfile.open(source, "r:*") as archive:
         oci = OciArchive(archive)
@@ -268,7 +268,7 @@ def main() -> None:
     parser.add_argument("source", type=Path, help="OCI image-layout tar (container image save)")
     parser.add_argument("target", type=Path, help="docker-save tar to write")
     parser.add_argument("tag", help="image reference to select and record in RepoTags")
-    parser.add_argument("--platform", default="linux/amd64", help="os/arch (default linux/amd64)")
+    parser.add_argument("--platform", default="linux/arm64", help="os/arch (default linux/arm64)")
     args = parser.parse_args()
     os_name, _, arch = args.platform.partition("/")
     try:

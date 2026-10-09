@@ -287,7 +287,7 @@ def deploy(repo, pr, sha, *, call=run, sleep=time.sleep):
     commit = merged.get("mergeCommit")
     if not isinstance(commit, dict) or commit.get("oid") != sha:
         raise DeploymentError("PR merge identity mismatch")
-    host = os.environ.get("HYPERCAL_DEPLOY_HOST", "root@104.248.84.190")
+    host = os.environ.get("HYPERCAL_DEPLOY_HOST", "root@odroidn2")
     directory = os.environ.get("HYPERCAL_DEPLOY_PATH", "/opt/hypercal")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+", host):
         raise DeploymentError("invalid deployment host")

@@ -3,7 +3,7 @@
 # Deploys an exact Git commit via git archive; never copies the working tree.
 set -euo pipefail
 
-HOST="${HYPERCAL_DEPLOY_HOST:-root@104.248.84.190}"
+HOST="${HYPERCAL_DEPLOY_HOST:-root@odroidn2}"
 DEPLOY_PATH="${HYPERCAL_DEPLOY_PATH:-/opt/hypercal}"
 IMAGE="${HYPERCAL_IMAGE:-ghcr.io/alex-mextner/hypercalendarbot}"
 REF="origin/main"
@@ -21,14 +21,17 @@ Usage: scripts/deploy-local-fallback.sh [--ref <git-ref>] [--skip-tests]
 Defaults to origin/main and runs the local test/lint/typecheck gate first.
 Use --skip-tests only when the exact commit already passed the same local gate.
 
-Local linux/amd64 image builder (HYPERCAL_BUILD_BACKEND, default auto):
+Local linux/arm64 image builder (HYPERCAL_BUILD_BACKEND, default auto):
   container  Apple's native `container` CLI (macOS, no always-on Linux VM).
              auto picks it when `container` is installed and
-             HYPERCAL_DOCKER_CONTEXT is unset.
+             HYPERCAL_DOCKER_CONTEXT is unset. Native on Apple Silicon.
   docker     a real Docker Engine on a local Unix socket: HYPERCAL_DOCKER_CONTEXT
-             (default `default`) via HYPERCAL_DOCKER_BIN.
-Colima is not a supported builder on the dev Mac (removed 2026-09-26); do not
-reinstall it or any other Docker VM for this script.
+             (default `default`) via HYPERCAL_DOCKER_BIN. On an x86_64 Linux host
+             it needs binfmt_misc/QEMU arm64 emulation registered (e.g.
+             tonistiigi/binfmt) and builds far slower than native.
+Production is the home ODROID-N2+ (aarch64, root@odroidn2 over Tailscale) since
+2026-10-09. Colima is not a supported builder on the dev Mac (removed 2026-09-26);
+do not reinstall it or any other Docker VM for this script.
 EOF
 }
 
@@ -99,15 +102,15 @@ cleanup_remote() {
 }
 trap cleanup_remote EXIT
 
-echo "== Building Linux amd64 locally for $SHA ($BUILD_BACKEND) =="
+echo "== Building Linux arm64 locally for $SHA ($BUILD_BACKEND) =="
 if [[ "$BUILD_BACKEND" == container ]]; then
-  "$CONTAINER" build --progress plain --platform linux/amd64 --label "org.opencontainers.image.revision=$SHA" -t "$IMAGE:$SHA" "$LOCAL_SRC"
+  "$CONTAINER" build --progress plain --platform linux/arm64 --label "org.opencontainers.image.revision=$SHA" -t "$IMAGE:$SHA" "$LOCAL_SRC"
   # `container image save` writes an OCI image layout; convert it (digest-checked,
   # config bytes unchanged) to the `docker save` format that release-artifact.py
   # and the server's `docker load` identity checks expect.
   export_status=0
-  "$CONTAINER" image save --platform linux/amd64 "$IMAGE:$SHA" -o "$LOCAL_SRC/image.oci.tar" \
-    && python3 "$LOCAL_SRC/scripts/oci-to-docker-archive.py" "$LOCAL_SRC/image.oci.tar" "$LOCAL_SRC/image.tar" "$IMAGE:$SHA" \
+  "$CONTAINER" image save --platform linux/arm64 "$IMAGE:$SHA" -o "$LOCAL_SRC/image.oci.tar" \
+    && python3 "$LOCAL_SRC/scripts/oci-to-docker-archive.py" --platform linux/arm64 "$LOCAL_SRC/image.oci.tar" "$LOCAL_SRC/image.tar" "$IMAGE:$SHA" \
     && rm -f "$LOCAL_SRC/image.oci.tar" \
     && gzip -1 "$LOCAL_SRC/image.tar" \
     || export_status=$?
@@ -116,7 +119,7 @@ if [[ "$BUILD_BACKEND" == container ]]; then
   "$CONTAINER" image delete "$IMAGE:$SHA" >/dev/null 2>&1 || echo "warning: could not delete local image $IMAGE:$SHA; remove it with \`container image delete\`" >&2
   [[ "$export_status" == 0 ]] || { echo "Image export failed (exit $export_status)" >&2; exit "$export_status"; }
 else
-  docker_local build --platform linux/amd64 --label "org.opencontainers.image.revision=$SHA" -t "$IMAGE:$SHA" "$LOCAL_SRC"
+  docker_local build --platform linux/arm64 --label "org.opencontainers.image.revision=$SHA" -t "$IMAGE:$SHA" "$LOCAL_SRC"
   docker_local save "$IMAGE:$SHA" | gzip -1 > "$LOCAL_SRC/image.tar.gz"
 fi
 python3 "$LOCAL_SRC/scripts/release-artifact.py" "$LOCAL_SRC/image.tar.gz" "$SHA" "$IMAGE:$SHA" > "$LOCAL_SRC/artifact.json"
