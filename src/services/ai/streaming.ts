@@ -524,7 +524,9 @@ const CLAUDE_MIN_THINKING_ALLOWANCE = 1024;
  * (a 256-token summary came back empty, live 2026-10-09). Thinking stays on at medium effort,
  * and the request carries an allowance for it on top of the caller's budget — the budget
  * itself, at least CLAUDE_MIN_THINKING_ALLOWANCE — so the visible answer keeps every token
- * the caller asked for. Adaptive thinking is refused by this endpoint.
+ * the caller asked for (the cap is shared, so a short think leaves the answer more room).
+ * Adaptive thinking is refused by this endpoint; `medium` was accepted live by both 5.5 models
+ * and the preference-list fallbacks, and the largest caller budget (4096 → 8192) by both 5.5s.
  */
 export function claudeReasoning(answerTokens: number): { reasoning_effort: 'medium'; max_tokens: number } {
   return {

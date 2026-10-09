@@ -902,6 +902,9 @@ describe('provider order', () => {
   test.each([
     { fast: true, model: 'claude-haiku-5-5', maxTokens: 256, sent: 256 + 1024 },
     { fast: false, model: 'claude-sonnet-5-5', maxTokens: 4096, sent: 4096 * 2 },
+    // Preference-list fallbacks accepted `medium` live too (2026-10-09).
+    { fast: false, model: 'claude-sonnet-5', maxTokens: 4096, sent: 4096 * 2 },
+    { fast: true, model: 'claude-haiku-4-5-20251001', maxTokens: 64, sent: 64 + 1024 },
     { fast: false, model: 'claude-sonnet-5-5', maxTokens: 1024, sent: 2048 },
   ])('Claude $model thinks at medium effort with $maxTokens answer tokens kept free', async ({
     fast,
