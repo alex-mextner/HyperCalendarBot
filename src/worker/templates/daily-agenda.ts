@@ -1,4 +1,4 @@
-import { agendaDetailsCSS, renderAgendaDetails } from './agenda-details.ts';
+import { compactMetadataCSS, renderCompactMetadata } from './compact-metadata.ts';
 import {
   COMPACT_PX,
   computeEventColumns,
@@ -22,7 +22,7 @@ function renderAllDaySection(events: AgendaEvent[], locale: string): string {
       (ev) => `
     <div class="allday__item">
       <div class="allday__dot" style="background:${escapeHtml(ev.calendarColor)};"></div>
-      <div class="allday__title">${escapeHtml(ev.title)}</div>
+      <div class="allday__content"><div class="allday__title">${escapeHtml(ev.title)}</div>${renderCompactMetadata(ev)}</div>
       <div class="allday__label">${labels.allDay}</div>
     </div>`,
     )
@@ -65,7 +65,7 @@ function renderTimeline(data: DailyAgendaData): string {
   }));
   const cols = computeEventColumns(visualRanges);
 
-  type OverflowItem = {
+  type OverflowItem = Pick<AgendaEvent, 'location' | 'descriptionPreview' | 'displayMetadata'> & {
     top: number;
     endPx: number;
     height: number;
@@ -88,6 +88,9 @@ function renderTimeline(data: DailyAgendaData): string {
         endPx: top + height,
         height,
         title: ev.title,
+        location: ev.location,
+        descriptionPreview: ev.descriptionPreview,
+        displayMetadata: ev.displayMetadata,
         calendarColor: ev.calendarColor,
         startMinutes: ev.startMinutes,
         endMinutes: ev.endMinutes,
@@ -144,12 +147,11 @@ function renderTimeline(data: DailyAgendaData): string {
       const color = ev.calendarColor;
 
       const timeStr = `${formatTime(ev.startMinutes)} – ${formatTime(ev.endMinutes)}`;
-      const locationStr = ev.location ? ` · ${escapeHtml(ev.location)}` : '';
       const isCompact = height <= COMPACT_PX;
 
       return `<div class="event-block${isCompact ? ' event-block--compact' : ''}" style="top:${top}px;height:${height}px;left:calc(${leftPct}%);width:calc(${widthPct}% - 8px);background:${bg};border-left:4px solid ${border};color:${color};">
-      <div class="event-block__title">${escapeHtml(ev.title)}</div>
-      <div class="event-block__meta">${timeStr}${locationStr}</div>
+      <div class="event-block__heading"><div class="event-block__title">${escapeHtml(ev.title)}</div>${renderCompactMetadata(ev, true)}</div>
+      <div class="event-block__meta">${timeStr}</div>${renderCompactMetadata(ev)}
     </div>`;
     })
     .join('');
@@ -170,8 +172,8 @@ function renderTimeline(data: DailyAgendaData): string {
             const bg = `${item.calendarColor}20`;
             const timeStr = `${formatTime(item.startMinutes)} – ${formatTime(item.endMinutes)}`;
             return `<div class="event-block${isCompact ? ' event-block--compact' : ''}" style="top:${item.top}px;height:${item.height}px;left:calc(${leftPct}%);width:calc(${widthPct}% - 8px);background:${bg};border-left:4px solid ${item.calendarColor};color:${item.calendarColor};">
-      <div class="event-block__title">${escapeHtml(item.title)}</div>
-      <div class="event-block__meta">${timeStr}</div>
+      <div class="event-block__heading"><div class="event-block__title">${escapeHtml(item.title)}</div>${renderCompactMetadata(item, true)}</div>
+      <div class="event-block__meta">${timeStr}</div>${renderCompactMetadata(item)}
     </div>`;
           })
           .join('');
@@ -179,9 +181,11 @@ function renderTimeline(data: DailyAgendaData): string {
       // 3+ events: group card in the fixed overflow slot
       const h = Math.max(endPx - top, COMPACT_PX);
       const isCompact = h <= COMPACT_PX;
-      const visible = items.slice(0, MAX_OVERFLOW_LABELS);
+      const visible = isCompact ? [] : items.slice(0, MAX_OVERFLOW_LABELS);
       const remaining = items.length - visible.length;
-      const labelsHtml = visible.map((it) => `<div class="overflow-item">${escapeHtml(it.title)}</div>`).join('');
+      const labelsHtml = visible
+        .map((it) => `<div class="overflow-item">${escapeHtml(it.title)}${renderCompactMetadata(it, true)}</div>`)
+        .join('');
       const moreHtml = remaining > 0 ? `<div class="overflow-more">+${remaining} more</div>` : '';
       return `<div class="event-block event-block--overflow${isCompact ? ' event-block--compact' : ''}" style="top:${top}px;height:${h}px;left:calc(${ovfGroupLeftPct}%);width:calc(${ovfGroupWidthPct}% - 8px);">${labelsHtml}${moreHtml}</div>`;
     })
@@ -443,7 +447,7 @@ function render(data: DailyAgendaData): string {
 <html>
 <head>
 <meta charset="utf-8">
-<style>${css(data)}${agendaDetailsCSS}</style>
+<style>${css(data)}${compactMetadataCSS}</style>
 </head>
 <body>
 <div id="__root">
@@ -452,7 +456,6 @@ function render(data: DailyAgendaData): string {
     ${metaHtml}
   </div>
   ${bodyHtml}
-  ${renderAgendaDetails([...allDayEvents, ...timedEvents], data.locale)}
   <div class="footer">HyperCalendar</div>
 </div>
 </body>

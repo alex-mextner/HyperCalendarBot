@@ -112,7 +112,8 @@ for (const [name, handler] of Object.entries(handlers)) {
       expect((await handler(ctx)).success).toBe(true);
       expect(jobs).toHaveLength(1);
       const payload = JSON.stringify(jobs);
-      expect(payload).not.toContain('TEXT ONLY SECRET NOTES');
+      if (userId === 3) expect(payload).not.toContain('TEXT ONLY SECRET NOTES');
+      else expect(payload).toContain('TEXT ONLY SECRET NOTES');
       if (userId === 1) {
         expect(payload).toContain('Attendee: ⏳ pending');
         expect(payload).toContain('Private Other: ⏳ pending');
@@ -145,6 +146,23 @@ for (const [name, handler] of Object.entries(handlers)) {
     const { ctx, jobs } = setup(2);
     expect((await handler(ctx, 1)).success).toBe(false);
     expect(jobs).toHaveLength(0);
+  });
+}
+
+const personalScopeHandlers = {
+  day: (ctx: AgentContext) => handleRenderDayImage(ctx, { date: '2099-06-01', scope: 'personal' }),
+  week: (ctx: AgentContext) => handleRenderWeekImage(ctx, { week_start: '2099-06-01', scope: 'personal' }),
+  month: (ctx: AgentContext) => handleRenderMonthImage(ctx, { month: '2099-06', scope: 'personal' }),
+};
+for (const [name, handler] of Object.entries(personalScopeHandlers)) {
+  test(`${name} personal calendar rendered into a group shows no descriptions or rosters`, async () => {
+    const { ctx, jobs } = setup(1, true);
+    expect((await handler(ctx)).success).toBe(true);
+    const payload = JSON.stringify(jobs);
+    expect(payload).toContain('PRIVATE MEETING');
+    expect(payload).not.toContain('TEXT ONLY SECRET NOTES');
+    expect(payload).not.toContain('descriptionPreview');
+    expect(payload).not.toContain('Private Other');
   });
 }
 

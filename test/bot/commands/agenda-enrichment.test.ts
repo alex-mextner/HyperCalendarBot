@@ -132,7 +132,7 @@ for (const command of ['today', 'tomorrow', 'week', 'search', 'month'] as const)
       expect(JSON.stringify(documents)).toContain('PNG');
       expect(JSON.stringify(jobs)).toContain('Alice <friend>: ⏳ pending');
       expect(JSON.stringify(jobs)).toContain('Actual venue');
-      expect(JSON.stringify(jobs)).not.toContain('Text only notes');
+      expect(JSON.stringify(jobs)).toContain('Text only notes');
     }
   });
 }
