@@ -78,7 +78,9 @@ test('hosted deployment never follows latest or changes unrelated shared service
 // A self-hosted runner executes whatever a job gives it on the production box, so no
 // workflow that a pull request can trigger may ever be scheduled onto it.
 test('no pull-request-triggered workflow targets a self-hosted runner', () => {
-  const triggerSchema = z.union([z.string(), z.array(z.string()), z.record(z.string(), z.unknown())]);
+  // Only the trigger names matter; their configs are null, an object, or (schedule) a list.
+  const triggerConfig = z.union([z.null(), z.looseObject({}), z.array(z.looseObject({}))]);
+  const triggerSchema = z.union([z.string(), z.array(z.string()), z.record(z.string(), triggerConfig)]);
   const jobSchema = z.object({ 'runs-on': z.union([z.string(), z.array(z.string())]).optional() }).passthrough();
   const fileSchema = z.object({ on: triggerSchema, jobs: z.record(z.string(), jobSchema) }).passthrough();
   const files = readdirSync(WORKFLOWS).filter((name) => /\.ya?ml$/.test(name));
