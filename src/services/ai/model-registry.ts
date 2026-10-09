@@ -53,15 +53,17 @@ interface ModelPreferenceTable {
   groq: ProviderPreferences;
   gemini: ProviderPreferences;
   hf: ProviderPreferences;
+  claude: ProviderPreferences;
 }
 
 /**
- * Known-good chat model ids per provider, best first. Only Groq is populated:
- * these ids were verified live on 2026-09-01. The `qwen3.x-27b` ids are live on
- * the same account but capped at 8000 tokens per minute, which rejects the bot's
- * ~11.5k-token tool payload with 413 — so they are deliberately not listed.
- * Providers with an empty list fall back to the heuristic in
- * `selectReplacementModel`.
+ * Known-good chat model ids per provider, best first. Groq ids were verified live
+ * on 2026-09-01. The `qwen3.x-27b` ids are live on the same account but capped at
+ * 8000 tokens per minute, which rejects the bot's ~11.5k-token tool payload with
+ * 413 — so they are deliberately not listed. Claude ids were listed live by the
+ * account's `/v1/models` on 2026-10-09; Opus is left out on purpose — the reserve
+ * must not silently switch to the most expensive tier. Providers with an empty
+ * list fall back to the heuristic in `selectReplacementModel`.
  */
 const PREFERRED_MODELS: ModelPreferenceTable = {
   zai: { smart: [], fast: [] },
@@ -71,6 +73,10 @@ const PREFERRED_MODELS: ModelPreferenceTable = {
   },
   gemini: { smart: [], fast: [] },
   hf: { smart: [], fast: [] },
+  claude: {
+    smart: ['claude-sonnet-5-5', 'claude-sonnet-5'],
+    fast: ['claude-haiku-5-5', 'claude-haiku-4-5-20251001'],
+  },
 };
 
 /** Model ids that cannot serve a chat completion, matched case-insensitively. */

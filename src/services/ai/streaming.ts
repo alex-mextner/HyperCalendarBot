@@ -2,8 +2,8 @@
 // Unified AI streaming round with automatic provider fallback.
 //
 // Two chains, selected via options.fast:
-//   SMART_CHAIN (main): configured order, otherwise Groq ${GROQ_MODEL} → Gemini ${GEMINI_MODEL} → HF ${HF_MODEL} → z.ai ${ZAI_MODEL}
-//   FAST_CHAIN: configured order, otherwise Groq ${GROQ_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL} → z.ai ${ZAI_FAST_MODEL}
+//   SMART_CHAIN (main): configured order, otherwise Groq ${GROQ_MODEL} → Gemini ${GEMINI_MODEL} → HF ${HF_MODEL} → z.ai ${ZAI_MODEL} → Claude ${CLAUDE_MODEL}
+//   FAST_CHAIN: configured order, otherwise Groq ${GROQ_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL} → z.ai ${ZAI_FAST_MODEL} → Claude ${CLAUDE_FAST_MODEL}
 //
 // Callers that need live updates (agent.ts) pass `onTextDelta`/`onToolCallStart` callbacks.
 // Callers that just want the final text (validator, intent-learner, city-resolver,
@@ -22,7 +22,7 @@ import {
 } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger, logOnce } from '../../utils/logger.ts';
-import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
+import { claudeClient, geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
 import { isGeminiLocalSkip, reserveGeminiBudget } from './gemini-quota.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
 import {
@@ -507,7 +507,15 @@ function rejectsUsageStreamOption(error: unknown): boolean {
   );
 }
 
-/** Standard OpenAI streaming adapter (works for all four providers). */
+/**
+ * Claude 5.x answers 400 "`temperature` is deprecated for this model" to any request that
+ * names it, so its requests run on the provider's own sampling default.
+ */
+export function acceptsSamplingTemperature(provider: ProviderId): boolean {
+  return provider !== 'claude';
+}
+
+/** Standard OpenAI streaming adapter (works for every provider). */
 function streamingSlot(
   label: string,
   provider: ProviderId,
@@ -523,17 +531,21 @@ function streamingSlot(
     getClient,
     stream: async (model, opts, cbs, onHttpAttempt) => {
       let attemptStartedAt = performance.now();
-      const params: OpenAI.ChatCompletionCreateParamsStreaming = {
+      // `thinking` is Anthropic's own field; the compatible endpoint reads it from the body.
+      const params: OpenAI.ChatCompletionCreateParamsStreaming & { thinking?: { type: 'disabled' } } = {
         model,
         messages: opts.messages,
         max_tokens: opts.maxTokens,
-        temperature: opts.temperature ?? 0.3,
+        ...(acceptsSamplingTemperature(provider) ? { temperature: opts.temperature ?? 0.3 } : {}),
         stream: true,
         ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
       };
       // Only the supported 2.5 Flash text routes: never send none to Pro/3.x.
       if (provider === 'gemini' && opts.fast && /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, '')))
         params.reasoning_effort = 'none';
+      // Haiku 5.x thinks by default and the compatible endpoint streams none of it, so a short
+      // fast budget can end at `length` with no text. Sonnet rejects `disabled` and does not think first.
+      if (provider === 'claude' && opts.fast && /^claude-haiku-/.test(model)) params.thinking = { type: 'disabled' };
       if (opts.tools && opts.tools.length > 0) {
         params.tools = opts.tools;
       }
@@ -659,6 +671,7 @@ export const providerClients = {
   groq: groqClient,
   gemini: geminiClient,
   hf: hfClient,
+  claude: claudeClient,
 };
 
 const PROVIDER_LABELS: Record<ProviderId, string> = {
@@ -666,6 +679,7 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   groq: 'Groq',
   gemini: 'Gemini',
   hf: 'HF',
+  claude: 'Claude',
 };
 
 /**
@@ -765,6 +779,7 @@ function buildSmartChain(cfg: EnvConfig): ProviderSlot[] {
     groq: { model: cfg.GROQ_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_MODEL, apiKey: cfg.GEMINI_API_KEY, baseUrl: cfg.GEMINI_BASE_URL },
     hf: { model: cfg.HF_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
+    claude: { model: cfg.CLAUDE_MODEL, apiKey: cfg.CLAUDE_API_TOKEN },
   });
 }
 
@@ -774,6 +789,7 @@ function buildFastChain(cfg: EnvConfig): ProviderSlot[] {
     groq: { model: cfg.GROQ_FAST_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_FAST_MODEL, apiKey: cfg.GEMINI_API_KEY, baseUrl: cfg.GEMINI_BASE_URL },
     hf: { model: cfg.HF_FAST_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
+    claude: { model: cfg.CLAUDE_FAST_MODEL, apiKey: cfg.CLAUDE_API_TOKEN },
   });
 }
 
