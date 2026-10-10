@@ -223,6 +223,57 @@ test('no job on a self-hosted runner can write commit statuses', () => {
   expect(statusAccess).toEqual([{ job: 'deploy.yml:deploy', statuses: 'read' }]);
 });
 
+// Anything running as hcb-runner can read a job's environment from /proc/<pid>/environ, so
+// a job on a self-hosted runner, in any workflow, may see no secret but its own short-lived
+// GITHUB_TOKEN. Notifications that need BOT_TOKEN run on GitHub-hosted runners instead.
+test('jobs on a self-hosted runner reference no secret but GITHUB_TOKEN', () => {
+  const jobSchema = z.object({ 'runs-on': z.union([z.string(), z.array(z.string())]).optional() }).passthrough();
+  const fileSchema = z
+    .object({
+      env: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+      jobs: z.record(z.string(), jobSchema),
+    })
+    .passthrough();
+  const secretsByJob: { job: string; secrets: string[] }[] = [];
+  for (const file of readdirSync(WORKFLOWS).filter((name) => /\.ya?ml$/.test(name))) {
+    const parsed = fileSchema.parse(Bun.YAML.parse(readFileSync(resolve(WORKFLOWS, file), 'utf8')));
+    for (const [name, job] of Object.entries(parsed.jobs)) {
+      const labels = [job['runs-on'] ?? []].flat();
+      if (!labels.some((label) => label === 'self-hosted' || label.startsWith('odroid'))) continue;
+      // Workflow-level env reaches every job, so it counts as part of this one.
+      const text = JSON.stringify([parsed.env ?? {}, job]);
+      // `secrets.X`, `secrets['X']` and `secrets["X"]`, plus a bare `secrets` (toJSON(secrets)).
+      const named = [...text.matchAll(/\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*\\?['"]([^'"\\]+))?/g)].map(
+        (match) => match[1] ?? match[2] ?? '<all secrets>',
+      );
+      secretsByJob.push({ job: `${file}:${name}`, secrets: [...new Set(named)].sort() });
+    }
+  }
+  expect(secretsByJob).toEqual([{ job: 'deploy.yml:deploy', secrets: ['GITHUB_TOKEN'] }]);
+});
+
+test('the success notification runs on a GitHub-hosted runner after the deploy', () => {
+  const jobs = z
+    .object({ jobs: z.record(z.string(), z.object({}).passthrough()) })
+    .parse(Bun.YAML.parse(readFileSync(resolve(WORKFLOWS, 'deploy.yml'), 'utf8'))).jobs;
+  const notify = z
+    .object({
+      needs: z.literal('deploy'),
+      if: z.literal('success()'),
+      'runs-on': z.literal('ubuntu-latest'),
+      permissions: z.object({}).strict(),
+      steps: z.array(stepSchema),
+    })
+    .parse(jobs['notify-success']);
+  expect(notify.steps.map((step) => step.name)).toEqual(['Notify deploy success']);
+  const failure = z
+    .object({ needs: z.array(z.string()), if: z.string(), 'runs-on': z.literal('ubuntu-latest') })
+    .passthrough()
+    .parse(jobs['notify-failure']);
+  expect(failure.needs).toContain('deploy');
+  expect(failure.if).toContain("needs.deploy.result == 'failure'");
+});
+
 // The odroid is a shared multi-user box: any local user can read every process's argv in
 // /proc/*/cmdline. The activate step hands root only the SHA as an argument; the token
 // travels on stdin, and nothing on the box ever carries it in an argument list.

@@ -149,15 +149,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_SHA: ${{ github.sha }}
         run: printf '%s\n' "$GH_TOKEN" | sudo -n /usr/local/sbin/hypercal-activate-release "$RELEASE_SHA"
+
+  # Runs on a GitHub-hosted runner: the odroid jobs must see no secret but GITHUB_TOKEN, since
+  # anything running there as hcb-runner can read a job's environment from /proc.
+  notify-success:
+    name: Notify on success
+    needs: deploy
+    if: success()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
       - name: Notify deploy success
-        if: success()
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ADMIN_ID: ${{ secrets.BOT_ADMIN_ID }}
           COMMIT_SHA: ${{ github.sha }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
-        # BOT_TOKEN would sit in a curl URL argument, readable by every local user, so the
-        # request is made inside python3. A failed notification only warns.
+        # A GitHub-hosted runner is single-tenant, but the token still stays out of argv, as it
+        # did on the odroid. A failed notification only warns.
         run: |
           python3 - <<'PY'
           import json, os, urllib.request
