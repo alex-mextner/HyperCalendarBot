@@ -57,9 +57,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    outputs:
-      archive_sha256: ${{ steps.release.outputs.archive_sha256 }}
-      config_digest: ${{ steps.release.outputs.config_digest }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -82,10 +79,9 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-to: type=inline
-      # The odroid runner has no docker access and no registry credentials: it receives the
-      # exact image as a checksummed docker-save archive and only ever loads that.
+      # The odroid runner has no docker access and no registry credentials: root on the odroid
+      # fetches this artifact itself and loads only the checksummed docker-save archive in it.
       - name: Prepare exact release artifact
-        id: release
         env:
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -97,7 +93,6 @@ jobs:
           cp docker-compose.yml Caddyfile release/
           cp scripts/backup-db.sh scripts/healthcheck-alert.sh scripts/prepare-runtime-dirs.sh scripts/release-artifact.py scripts/deploy-prebuilt-image.sh scripts/migration-gate.py release/scripts/
           python3 scripts/release-artifact.py release/image.tar.gz "$RELEASE_SHA" "$RELEASE_IMAGE:$RELEASE_SHA" > release/artifact.json
-          python3 -c 'import json; a=json.load(open("release/artifact.json")); print("archive_sha256="+a["archive_sha256"]); print("config_digest="+a["config_digest"])' >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-${{ github.sha }}
@@ -115,44 +110,19 @@ jobs:
     runs-on: [self-hosted, odroid-hcb]
     timeout-minutes: 30
     permissions:
+      actions: read
       contents: read
     steps:
-      - name: Clear previous release files
-        run: rm -rf release
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: release-${{ github.sha }}
-          path: release
-      # The odroid is a shared multi-user box where any local user can read process argument
-      # lists, so tokens stay in the environment and the request is made inside python3.
-      - name: Release still targets main
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EXPECTED_SHA: ${{ github.sha }}
-        run: |
-          python3 - <<'PY'
-          import json, os, sys, urllib.request
-          url = f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}/git/ref/heads/main"
-          request = urllib.request.Request(url, headers={
-              "Authorization": "Bearer " + os.environ["GH_TOKEN"],
-              "Accept": "application/vnd.github+json",
-          })
-          with urllib.request.urlopen(request, timeout=30) as response:
-              main_sha = json.load(response)["object"]["sha"]
-          if main_sha != os.environ["EXPECTED_SHA"]:
-              sys.exit(f"main moved to {main_sha}; not deploying {os.environ['EXPECTED_SHA']}")
-          PY
+      # Root wrapper installed by hand on the odroid (runbook "Odroid runner"). It trusts only
+      # the SHA: it checks main itself, fetches release-<sha> from this repository's push-to-main
+      # run, verifies its digest and runs the staged scripts/deploy-prebuilt-image.sh. The token
+      # goes on stdin (printf is a shell builtin), never into a process argument list, because
+      # every local user on the shared odroid can read those.
       - name: Activate verified prebuilt release
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_SHA: ${{ github.sha }}
-          ARCHIVE_SUM: ${{ needs.build.outputs.archive_sha256 }}
-          CONFIG_ID: ${{ needs.build.outputs.config_digest }}
-        # Root wrapper installed by hand on the odroid (runbook "Odroid runner"): it copies the
-        # known release files into a root-owned stage and runs scripts/deploy-prebuilt-image.sh there.
-        run: sudo -n /usr/local/sbin/hypercal-activate-release "$PWD/release" "$RELEASE_SHA" "$ARCHIVE_SUM" "$CONFIG_ID"
-      - name: Remove release files
-        if: always()
-        run: rm -rf release
+        run: printf '%s\n' "$GH_TOKEN" | sudo -n /usr/local/sbin/hypercal-activate-release "$RELEASE_SHA"
       - name: Notify deploy success
         if: success()
         env:
@@ -160,8 +130,8 @@ jobs:
           ADMIN_ID: ${{ secrets.BOT_ADMIN_ID }}
           COMMIT_SHA: ${{ github.sha }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
-        # Same reason: BOT_TOKEN would sit in a curl URL argument. A failed notification
-        # only warns, as the curl version did for HTTP errors.
+        # BOT_TOKEN would sit in a curl URL argument, readable by every local user, so the
+        # request is made inside python3. A failed notification only warns.
         run: |
           python3 - <<'PY'
           import json, os, urllib.request

@@ -157,7 +157,7 @@ If a release that the override accepted with `rollback-compatible: no` fails ver
 
 Hosted deploys run on a self-hosted runner on the odroid (#784), set up by hand when production moved there:
 
-- Runner `odroid-hcb`, labels `self-hosted, Linux, ARM64, odroid-hcb`, registered for this repository only and installed at `/var/lib/hcb-runner/actions-runner` as the Unix user `hcb-runner` (not in the docker group, no general sudo). Jobs run under `/var/lib/hcb-runner/actions-runner/_work/`. The runner needs bash, curl and python3; it has no docker access and no `gh` CLI.
+- Runner `odroid-hcb`, labels `self-hosted, Linux, ARM64, odroid-hcb`, registered for this repository only and installed at `/var/lib/hcb-runner/actions-runner` as the Unix user `hcb-runner` (not in the docker group, no general sudo). Jobs run under `/var/lib/hcb-runner/actions-runner/_work/`. The runner needs bash and python3; it has no docker access and no `gh` CLI.
 - Only `deploy.yml`'s `deploy` job targets it, and only for pushes to `main`. No workflow triggered by `pull_request` may use a self-hosted label (`test/regressions/hosted-release-contract.test.ts` checks every workflow). The repository's fork pull-request approval policy is `all_external_contributors`.
 - Root activation wrapper: `scripts/odroid-activate-release.sh`, installed by hand after each change to it (deploys never update it):
   ```bash
@@ -167,8 +167,20 @@ Hosted deploys run on a self-hosted runner on the odroid (#784), set up by hand 
   ```
   hcb-runner ALL=(root) NOPASSWD: /usr/local/sbin/hypercal-activate-release
   ```
-- The job calls `sudo -n /usr/local/sbin/hypercal-activate-release "$PWD/release" <sha> <archive_sha256> <config_digest>`. The wrapper validates every argument (the release directory must be a real directory under the runner's `_work/`, with no symlink or `..` in its path), copies only the known release files into a fresh root-owned `0700` stage `/opt/hypercal/.incoming-<sha>-<time>-<pid>` without following symlinks, runs `scripts/deploy-prebuilt-image.sh` from that copy with an empty environment at `nice 10` / `ionice -c2 -n7`, removes the stage and returns the activator's exit code. Image name and deploy path are fixed in the wrapper.
-- Secrets never go on a command line in a job that runs here: every local user can read process argument lists (`ps`, `/proc/*/cmdline`). The deploy job's GitHub API check and Telegram notification read `GH_TOKEN`/`BOT_TOKEN` from the environment inside `python3` (`urllib.request`) instead of passing them to `curl`; `test/regressions/hosted-release-contract.test.ts` runs the main-ref check and looks for the token in every process's argv while the request is open.
+- The job's only deploy step is
+  ```bash
+  printf '%s\n' "$GH_TOKEN" | sudo -n /usr/local/sbin/hypercal-activate-release "$RELEASE_SHA"
+  ```
+  with the job's `GITHUB_TOKEN` (`permissions: actions: read, contents: read`). The token is passed on stdin (`printf` is a shell builtin) and the SHA is the only argument.
+- Trust model: root trusts nothing from the runner except that SHA, and the token is used only to authenticate GitHub API calls. The wrapper (constants fixed in the file: repository `alex-mextner/HyperCalendarBot`, workflow `.github/workflows/deploy.yml`, `https://api.github.com`, `/opt/hypercal`, the image name):
+  1. refuses unless `main` points at the SHA (`superseded: main is …`);
+  2. lists the `release-<sha>` artifacts and accepts exactly one unexpired artifact whose workflow run has `event` `push`, `head_branch` `main`, `head_sha` the SHA, `path` `.github/workflows/deploy.yml`, and this repository as both `repository` and `head_repository`. A `pull_request_target` run also reports `head_branch` `main`; the event and path checks exclude it. Zero or several matches are refused;
+  3. downloads the artifact zip, following at most 3 redirects itself and never sending the token past the first request, so it does not reach the storage host. It streams the zip into a fresh root-owned `0700` stage `/opt/hypercal/.incoming-<sha>-<time>-<pid>` (each file at most 4 GiB actually written) and refuses unless its sha256 equals the artifact `digest` GitHub recorded at upload;
+  4. extracts only the known release paths (`image.tar.gz`, `docker-compose.yml`, `Caddyfile`, `artifact.json`, and the six `scripts/` files the build copies), never names taken from the zip, then deletes the zip;
+  5. computes the archive sha256 and, with the staged `scripts/release-artifact.py`, the image config digest, and runs the staged `scripts/deploy-prebuilt-image.sh` with an empty environment at `nice 10` / `ionice -c2 -n7`. It returns the activator's exit code and always removes the stage. Refusals exit 2.
+
+  Residual risk: code running as `hcb-runner` (a job, or a process a job left behind) can at most redeploy the release that `main` currently points at. It cannot supply files, scripts or checksums. While the zip and the extracted image are both on disk, a deploy needs about twice the archive size free under `/opt/hypercal`. Re-running every job of a CI run uploads a second `release-<sha>` artifact if GitHub accepts it, and the wrapper then refuses to choose; push a new commit instead.
+- Secrets never go on a command line in a job that runs here: every local user can read process argument lists (`ps`, `/proc/*/cmdline`). The token reaches the wrapper on stdin, and the Telegram notification reads `BOT_TOKEN` from the environment inside `python3` instead of passing it to `curl`. `test/regressions/hosted-release-contract.test.ts` and `test/python/test_odroid_activate_release.py` look for the token in every process's argv during the run.
 - All four self-hosted runner services on the odroid have the systemd drop-in `50-yield-to-services.conf` (`CPUWeight=20`, `IOWeight=20`, `MemoryHigh=1200M`), and the microSD card `mmcblk0` uses the BFQ I/O scheduler (`/etc/udev/rules.d/60-mmc-bfq.rules`), so runner jobs and deploys yield to the live bots.
 - The nightly backup is root cron `0 3 * * *` on the odroid, in its local time zone Europe/Berlin.
 

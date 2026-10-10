@@ -114,9 +114,10 @@ On every push to `main` (`.github/workflows/deploy.yml`):
 
 1. **test** — `bun test`, lint, typecheck (ubuntu-latest)
 2. **build** — linux/arm64 image → push to ghcr.io; `docker save` release artifact + checksums (ubuntu-24.04-arm)
-3. **deploy** — odroid runner downloads the artifact, checks main still points at the commit, and runs
-   `sudo -n /usr/local/sbin/hypercal-activate-release`, which hands a root-owned copy to
-   `scripts/deploy-prebuilt-image.sh` (checksum, identity, schema gate, backup, rollback)
+3. **deploy** — the odroid runner pipes its token to `sudo -n /usr/local/sbin/hypercal-activate-release <sha>`.
+   As root, the wrapper checks that main still points at the commit, downloads and digest-checks the
+   push-to-main run's `release-<sha>` artifact, and runs the staged `scripts/deploy-prebuilt-image.sh`
+   (checksum, identity, schema gate, backup, rollback)
 
 ## Manual Deploy
 
