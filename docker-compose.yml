@@ -81,12 +81,17 @@ services:
       retries: 3
       start_period: 30s
     # The home ODROID-N2+ (6 cores, 3.7 GB RAM) hosts this bot since 2026-10-09, shared
-    # with ExpenseSyncBot, HyperSummaryBot and others: 1.5 CPUs leaves them headroom.
+    # with ExpenseSyncBot, HyperSummaryBot, Home Assistant and others: 1.5 CPUs leaves them
+    # headroom. RAM there is overcommitted (2 GB in swap on 2026-10-10, the idle bot down to
+    # 71 MB resident), so the reservation (cgroup memory.low) keeps the bot's working set out
+    # of reclaim and the next message is not served from swap; it never causes an OOM kill.
     deploy:
       resources:
         limits:
           memory: 1g
           cpus: "1.5"
+        reservations:
+          memory: 384m
     logging:
       driver: "json-file"
       options:

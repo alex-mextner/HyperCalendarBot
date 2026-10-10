@@ -150,7 +150,7 @@ If a release that the override accepted with `rollback-compatible: no` fails ver
 - Bot + Redis via `docker-compose.yml`, Docker Compose v2 plugin.
 - Images are linux/arm64 (the odroid is aarch64). The host never pulls from GHCR: every deploy loads a checksummed `docker save` archive.
 - `docker compose` requires root (neither `www-data` nor `hcb-runner` is in the docker group).
-- Resource limits: bot 1G/1.5cpu, redis 256M/0.5cpu. The odroid has 6 cores and 3.7 GB RAM shared with the neighbours listed above; keep the bot well below the whole box.
+- Resource limits: bot 1G/1.5cpu with a 384M reservation (cgroup `memory.low`), redis 256M/0.5cpu. The odroid has 6 cores and 3.7 GB RAM shared with the neighbours listed above and is overcommitted (on 2026-10-10 about 2 GB sat in swap and the idle bot was down to 71 MB resident); the reservation keeps the bot's working set out of reclaim so a message is not served from swap. Keep the bot well below the whole box.
 - No deploy secrets: the SSH secrets `SSH_HOST`, `SSH_USER`, `SSH_KEY`, `DEPLOY_PATH` are unused since #784.
 
 ## Odroid runner
