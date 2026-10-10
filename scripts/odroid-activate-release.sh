@@ -6,12 +6,15 @@
 #
 # Trust model: root trusts nothing the runner hands it except a commit SHA and a
 # short-lived GitHub token, and the token only authenticates API calls. Root itself
-# checks that main still points at the SHA, takes the newest `release-<sha>` artifact
-# uploaded by a push-to-main run of .github/workflows/deploy.yml in this repository,
-# downloads it (the token is not sent to the blob-storage redirect), checks it against
-# the artifact digest GitHub recorded at upload, extracts only the known release files
+# checks that main still points at the SHA and reads the newest `release-artifact`
+# commit status on it. Only the GitHub-hosted build job can post that status (the deploy
+# job has no `statuses: write`), and it names the artifact id and digest that job
+# uploaded. Root requires that artifact to be `release-<sha>` from the push-to-main run
+# of .github/workflows/deploy.yml the status links to, downloads it (the token is not sent
+# to the blob-storage redirect), checks the digest, extracts only the known release files
 # into a fresh root-owned stage, and runs the staged scripts/deploy-prebuilt-image.sh.
-# Code running as hcb-runner can therefore at most redeploy the current main release.
+# Code running as hcb-runner can therefore at most redeploy the release that main's
+# GitHub-hosted build job recorded, even if it uploads more artifacts into the same run.
 #
 # Usage: printf '%s\n' "$GITHUB_TOKEN" | sudo -n /usr/local/sbin/hypercal-activate-release <sha40>
 # The token is read from stdin only; it never appears in argv, the environment of a
@@ -55,7 +58,11 @@ import zipfile
 API, REPO, WORKFLOW_PATH, IMAGE, SHA, STAGE = sys.argv[1:]
 MAX_ARTIFACT_BYTES = 4 * 1024**3
 MAX_JSON_BYTES = 8 * 1024 * 1024
-MAX_ARTIFACT_PAGES = 10
+MAX_STATUS_PAGES = 10
+STATUS_CONTEXT = "release-artifact"
+STATUS_CREATOR = "github-actions[bot]"
+STATUS_DESCRIPTION = re.compile(r"artifact ([1-9][0-9]*) (sha256:[0-9a-f]{64})")
+RUN_URL = re.compile(r"https://github\.com/" + re.escape(REPO) + r"/actions/runs/([1-9][0-9]*)", re.IGNORECASE)
 MAX_REDIRECTS = 3
 REQUIRED = ("image.tar.gz", "docker-compose.yml", "Caddyfile")
 OPTIONAL = ("artifact.json",)
@@ -101,7 +108,7 @@ def authorized(token, url):
     })
 
 
-def api(token, path):
+def api(token, path, shape=dict):
     shown = path.split("?", 1)[0]
     try:
         with OPENER.open(authorized(token, API + path), timeout=30) as response:
@@ -116,8 +123,8 @@ def api(token, path):
         payload = json.loads(data)
     except ValueError:
         refuse(f"GitHub API {shown} answer is not JSON")
-    if not isinstance(payload, dict):
-        refuse(f"GitHub API {shown} answer is not an object")
+    if not isinstance(payload, shape):
+        refuse(f"GitHub API {shown} answer is not a JSON {shape.__name__}")
     return payload
 
 
@@ -134,54 +141,67 @@ def main_still_targets_release(token):
         refuse(f"superseded: main is {shown}, not {SHA}")
 
 
-def release_artifact(token):
-    """The one unexpired release-<sha> artifact from a push-to-main run of the deploy workflow."""
-    name = "release-" + SHA
-    listed = []
-    for page in range(1, MAX_ARTIFACT_PAGES + 1):
-        query = urllib.parse.urlencode({"name": name, "per_page": 100, "page": page})
-        payload = api(token, f"/repos/{REPO}/actions/artifacts?{query}")
-        total, artifacts = payload.get("total_count"), payload.get("artifacts")
-        # `type(...) is int`, not isinstance: a JSON true/false would otherwise pass as 1/0.
-        if type(total) is not int or not isinstance(artifacts, list):
-            refuse("invalid artifact list")
-        listed += artifacts
-        if len(listed) >= total or not artifacts:
+def pinned_release(token):
+    """(artifact id, digest, run id) recorded by the GitHub-hosted build job's commit status.
+
+    The deploy job itself runs on the odroid runner, so anything there can upload more
+    release-<sha> artifacts into the same trusted run. Only the build job, on a GitHub-hosted
+    runner, holds `statuses: write`; the newest `release-artifact` status it posted names the
+    one artifact to deploy.
+    """
+    for page in range(1, MAX_STATUS_PAGES + 1):
+        query = urllib.parse.urlencode({"per_page": 100, "page": page})
+        statuses = api(token, f"/repos/{REPO}/commits/{SHA}/statuses?{query}", shape=list)
+        # Newest first, so the first release-artifact entry is the current one.
+        status = next((s for s in statuses if isinstance(s, dict) and s.get("context") == STATUS_CONTEXT), None)
+        if status is not None or not statuses:
             break
     else:
-        refuse(f"too many artifacts named {name}")
-    matches = []
-    for artifact in listed:
-        if not isinstance(artifact, dict) or artifact.get("name") != name or artifact.get("expired") is not False:
-            continue
-        run = artifact.get("workflow_run")
-        if not isinstance(run, dict) or run.get("head_sha") != SHA:
-            continue
-        run_id = run.get("id")
-        if type(run_id) is not int or run_id <= 0:
-            continue
-        details = api(token, f"/repos/{REPO}/actions/runs/{run_id}")
-        if (
-            details.get("event") == "push"
-            and details.get("head_branch") == "main"
-            and details.get("head_sha") == SHA
-            and details.get("path") == WORKFLOW_PATH
-            and same_repository(details.get("repository"))
-            and same_repository(details.get("head_repository"))
-        ):
-            matches.append(artifact)
-    if not matches:
-        refuse(f"no {name} artifact from a push-to-main run of {WORKFLOW_PATH}")
-    # "Re-run all jobs" uploads another release-<sha> from the same trusted push-to-main
-    # run; every match passed the same provenance checks, so take the newest upload.
-    artifact = max(matches, key=lambda candidate: (str(candidate.get("created_at")), candidate.get("id") or 0))
-    artifact_id, size, digest = artifact.get("id"), artifact.get("size_in_bytes"), artifact.get("digest")
-    if type(artifact_id) is not int or artifact_id <= 0:
-        refuse("invalid artifact id")
+        refuse(f"no {STATUS_CONTEXT} status within the newest {MAX_STATUS_PAGES * 100} statuses on {SHA}")
+    if status is None:
+        refuse(f"no {STATUS_CONTEXT} commit status on {SHA}; the build job did not record a release")
+    if status.get("state") != "success":
+        refuse(f"{STATUS_CONTEXT} status is {status.get('state')!r}, not 'success'")
+    creator = status.get("creator")
+    if not isinstance(creator, dict) or creator.get("login") != STATUS_CREATOR:
+        refuse(f"{STATUS_CONTEXT} status was not posted by {STATUS_CREATOR}")
+    described = STATUS_DESCRIPTION.fullmatch(str(status.get("description")))
+    if described is None:
+        refuse(f"{STATUS_CONTEXT} status description is not 'artifact <id> sha256:<hex>'")
+    run = RUN_URL.fullmatch(str(status.get("target_url")))
+    if run is None:
+        refuse(f"{STATUS_CONTEXT} status target is not a workflow run of {REPO}")
+    return int(described[1]), described[2], int(run[1])
+
+
+def release_artifact(token):
+    """The pinned release-<sha> artifact, checked against the status and its push-to-main run."""
+    artifact_id, digest, run_id = pinned_release(token)
+    artifact = api(token, f"/repos/{REPO}/actions/artifacts/{artifact_id}")
+    if type(artifact.get("id")) is not int or artifact["id"] != artifact_id or artifact.get("name") != "release-" + SHA:
+        refuse(f"artifact {artifact_id} is not release-{SHA}")
+    if artifact.get("expired") is not False:
+        refuse(f"artifact {artifact_id} has expired")
+    if artifact.get("digest") != digest:
+        refuse(f"artifact {artifact_id} digest differs from the build job's status")
+    size = artifact.get("size_in_bytes")
+    # `type(...) is int`, not isinstance: a JSON true/false would otherwise pass as 1/0.
     if type(size) is not int or not 0 < size <= MAX_ARTIFACT_BYTES:
         refuse("artifact size is missing or above 4 GiB")
-    if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
-        refuse("artifact has no sha256 digest")
+    workflow_run = artifact.get("workflow_run")
+    if not isinstance(workflow_run, dict) or workflow_run.get("id") != run_id:
+        refuse(f"artifact {artifact_id} was not uploaded by run {run_id} named in the build job's status")
+    details = api(token, f"/repos/{REPO}/actions/runs/{run_id}")
+    if not (
+        details.get("id") == run_id
+        and details.get("event") == "push"
+        and details.get("head_branch") == "main"
+        and details.get("head_sha") == SHA
+        and details.get("path") == WORKFLOW_PATH
+        and same_repository(details.get("repository"))
+        and same_repository(details.get("head_repository"))
+    ):
+        refuse(f"run {run_id} is not a push-to-main run of {WORKFLOW_PATH} for {SHA}")
     return artifact_id, digest
 
 

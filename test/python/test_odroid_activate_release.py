@@ -60,10 +60,11 @@ def processes_holding(secret):
     return hits
 
 
-def image_archive(revision=SHA):
-    config = json.dumps(
-        {"architecture": "arm64", "os": "linux", "config": {"Labels": {"org.opencontainers.image.revision": revision}}}
-    ).encode()
+def image_archive(revision=SHA, extra_label=None):
+    labels = {"org.opencontainers.image.revision": revision}
+    if extra_label:
+        labels["fixture.variant"] = extra_label
+    config = json.dumps({"architecture": "arm64", "os": "linux", "config": {"Labels": labels}}).encode()
     config_path = "blobs/sha256/" + hashlib.sha256(config).hexdigest()
     manifest = json.dumps([{"Config": config_path, "RepoTags": [f"{IMAGE}:{SHA}"], "Layers": []}]).encode()
     raw = io.BytesIO()
@@ -80,7 +81,8 @@ class FakeGitHub:
 
     def __init__(self):
         self.main = SHA
-        self.artifacts = []
+        self.artifacts = {}
+        self.statuses = []
         self.runs = {}
         self.zips = {}
         self.page_size = 100
@@ -129,13 +131,16 @@ class FakeGitHub:
         base = f"/repos/{REPO}"
         if url.path == base + "/git/ref/heads/main":
             return request.reply(200, json.dumps({"object": {"sha": self.main}}).encode())
-        if url.path == base + "/actions/artifacts":
+        if url.path == f"{base}/commits/{SHA}/statuses":
             query = urllib.parse.parse_qs(url.query)
-            named = [a for a in self.artifacts if a["name"] == query["name"][0]]
             size = min(int(query["per_page"][0]), self.page_size)
             start = (int(query["page"][0]) - 1) * size
-            page = {"total_count": len(named), "artifacts": named[start : start + size]}
-            return request.reply(200, json.dumps(page).encode())
+            # GitHub lists statuses newest first.
+            newest_first = self.statuses[::-1]
+            return request.reply(200, json.dumps(newest_first[start : start + size]).encode())
+        artifact = re.fullmatch(re.escape(base) + r"/actions/artifacts/(\d+)", url.path)
+        if artifact and int(artifact[1]) in self.artifacts:
+            return request.reply(200, json.dumps(self.artifacts[int(artifact[1])]).encode())
         run = re.fullmatch(re.escape(base) + r"/actions/runs/(\d+)", url.path)
         if run and int(run[1]) in self.runs:
             return request.reply(200, json.dumps(self.runs[int(run[1])]).encode())
@@ -156,9 +161,8 @@ class FakeGitHub:
             return request.reply(302, headers=[("Location", f"/hop/{hops - 1}/{artifact_id}?sig=synthetic")])
         return request.reply(200, self.zips[artifact_id])
 
-    def publish(self, artifact_id, zip_bytes, digest=None, expired=False, created_at="2026-10-10T00:00:00Z", **run_changes):
-        """One release-<SHA> artifact uploaded at created_at by workflow run artifact_id * 10."""
-        run_id = artifact_id * 10
+    def upload(self, artifact_id, zip_bytes, run_id=70, digest=None, name="release-" + SHA, expired=False, **run_changes):
+        """An artifact uploaded into workflow run run_id, which is a push-to-main run unless changed."""
         self.runs[run_id] = {
             "id": run_id,
             "event": "push",
@@ -170,17 +174,33 @@ class FakeGitHub:
             **run_changes,
         }
         self.zips[artifact_id] = zip_bytes
-        self.artifacts.append(
+        self.artifacts[artifact_id] = {
+            "id": artifact_id,
+            "name": name,
+            "expired": expired,
+            "size_in_bytes": len(zip_bytes),
+            "digest": digest or "sha256:" + hashlib.sha256(zip_bytes).hexdigest(),
+            "workflow_run": {"id": run_id, "head_sha": SHA, "head_branch": "main"},
+        }
+        return "sha256:" + hashlib.sha256(zip_bytes).hexdigest()
+
+    def post_status(self, artifact_id, digest, run_id=70, **changes):
+        """A commit status as the build job's step posts it; later calls are newer."""
+        self.statuses.append(
             {
-                "id": artifact_id,
-                "name": "release-" + SHA,
-                "expired": expired,
-                "created_at": created_at,
-                "size_in_bytes": len(zip_bytes),
-                "digest": digest or "sha256:" + hashlib.sha256(zip_bytes).hexdigest(),
-                "workflow_run": {"id": run_id, "head_sha": SHA, "head_branch": run_changes.get("head_branch", "main")},
+                "context": "release-artifact",
+                "state": "success",
+                "description": f"artifact {artifact_id} {digest}",
+                "target_url": f"https://github.com/{REPO}/actions/runs/{run_id}",
+                "creator": {"login": "github-actions[bot]"},
+                **changes,
             }
         )
+
+    def publish(self, artifact_id, zip_bytes, run_id=70, **run_changes):
+        """The build job's release: the artifact plus the status that pins it."""
+        digest = self.upload(artifact_id, zip_bytes, run_id=run_id, **run_changes)
+        self.post_status(artifact_id, digest, run_id=run_id)
 
 
 class ActivateReleaseTests(unittest.TestCase):
@@ -311,14 +331,6 @@ class ActivateReleaseTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("artifact.json", self.recorded()["files"])
 
-    def test_artifact_on_a_later_page_is_found(self):
-        self.github.page_size = 1
-        self.github.publish(3, self.release_zip(), event="pull_request_target")
-        self.github.publish(4, self.release_zip())
-        result = self.run_wrapper()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.recorded()["args"][4], hashlib.sha256(self.image).hexdigest())
-
     def test_moved_main_is_refused_before_any_artifact_is_read(self):
         self.github.main = OTHER_SHA
         self.github.publish(7, self.release_zip())
@@ -327,7 +339,100 @@ class ActivateReleaseTests(unittest.TestCase):
         self.assertEqual([path for path, _ in self.github.api_requests], [f"/repos/{REPO}/git/ref/heads/main"])
         self.assertEqual(self.github.blob_requests, [])
 
-    def test_artifact_from_any_other_run_is_refused(self):
+    def test_artifact_the_status_does_not_name_is_never_deployed(self):
+        # Code on the odroid runner uploads a newer release-<sha> into the same trusted run.
+        # Its zip is a valid release with a different image; the status still names artifact 7.
+        planted_image, _ = image_archive(extra_label="planted")
+        self.github.publish(7, self.release_zip())
+        self.github.upload(8, self.release_zip(image=planted_image))
+        result = self.run_wrapper()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.recorded()["args"][4], hashlib.sha256(self.image).hexdigest())
+        requested = [path for path, _ in self.github.api_requests]
+        self.assertIn(f"/repos/{REPO}/actions/artifacts/7/zip", requested)
+        self.assertFalse(any("/actions/artifacts/8" in path for path in requested))
+
+    def test_rerun_status_naming_a_newer_artifact_wins(self):
+        # "Re-run all jobs" uploads again and posts a newer status. The older artifact here would
+        # fail its digest check, so success proves the newest status chose the newer artifact.
+        old_digest = self.github.upload(7, self.release_zip())
+        self.github.zips[7] = b"corrupted after upload"
+        self.github.post_status(7, old_digest)
+        self.github.publish(8, self.release_zip())
+        result = self.run_wrapper()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.recorded()["args"][4], hashlib.sha256(self.image).hexdigest())
+
+    def test_status_on_a_later_page_is_found_and_other_contexts_are_ignored(self):
+        self.github.page_size = 1
+        self.github.publish(7, self.release_zip())
+        # Newer statuses from other contexts, one of them pointing at a planted artifact.
+        planted = self.github.upload(9, self.release_zip())
+        self.github.post_status(9, planted, context="ci/other")
+        self.github.post_status(9, planted, context="release-artifact-extra")
+        result = self.run_wrapper()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        requested = [path for path, _ in self.github.api_requests]
+        self.assertIn(f"/repos/{REPO}/actions/artifacts/7/zip", requested)
+        self.assertFalse(any("/actions/artifacts/9" in path for path in requested))
+
+    def test_missing_or_untrusted_status_is_refused(self):
+        cases = {
+            "no status": None,
+            "pending": {"state": "pending"},
+            "failure": {"state": "failure"},
+            "posted by a user": {"creator": {"login": "alex-mextner"}},
+            "posted by another app": {"creator": {"login": "some-app[bot]"}},
+            "no creator": {"creator": None},
+            "description without digest": {"description": "artifact 7"},
+            "description with bare hex": {"description": "artifact 7 " + "a" * 64},
+            "description with trailing text": {"description": "artifact 7 sha256:" + "a" * 64 + " extra"},
+            "target outside the repository": {"target_url": "https://github.com/someone/HyperCalendarBot/actions/runs/70"},
+            "target not a run": {"target_url": f"https://github.com/{REPO}/pull/70"},
+            "target on another host": {"target_url": f"https://example.com/{REPO}/actions/runs/70"},
+        }
+        messages = {
+            "no status": "no release-artifact commit status",
+            "pending": "status is 'pending'",
+            "failure": "status is 'failure'",
+            "posted by a user": "not posted by github-actions[bot]",
+            "posted by another app": "not posted by github-actions[bot]",
+            "no creator": "not posted by github-actions[bot]",
+            "target outside the repository": "target is not a workflow run",
+            "target not a run": "target is not a workflow run",
+            "target on another host": "target is not a workflow run",
+        }
+        for label, changes in cases.items():
+            with self.subTest(label):
+                self.github.statuses.clear()
+                digest = self.github.upload(7, self.release_zip())
+                if changes is not None:
+                    self.github.post_status(7, digest, **changes)
+                self.assertRefused(self.run_wrapper(), messages.get(label, "status description is not"))
+                self.assertEqual(self.github.blob_requests, [])
+
+    def test_artifact_that_disagrees_with_the_status_is_refused(self):
+        cases = {
+            "status digest differs from the artifact": ({}, {"description": "artifact 7 sha256:" + "0" * 64}),
+            "artifact from another run": ({"run_id": 71}, {}),
+            "artifact named differently": ({"name": "release-" + OTHER_SHA}, {}),
+            "expired artifact": ({"expired": True}, {}),
+        }
+        messages = {
+            "status digest differs from the artifact": "digest differs from the build job's status",
+            "artifact from another run": "was not uploaded by run 70",
+            "artifact named differently": f"artifact 7 is not release-{SHA}",
+            "expired artifact": "artifact 7 has expired",
+        }
+        for label, (upload_changes, status_changes) in cases.items():
+            with self.subTest(label):
+                self.github.statuses.clear()
+                digest = self.github.upload(7, self.release_zip(), **upload_changes)
+                self.github.post_status(7, digest, **status_changes)
+                self.assertRefused(self.run_wrapper(), messages[label])
+                self.assertEqual(self.github.blob_requests, [])
+
+    def test_status_pointing_at_any_other_run_is_refused(self):
         cases = {
             "pull_request_target on main": {"event": "pull_request_target"},
             "workflow_dispatch": {"event": "workflow_dispatch"},
@@ -339,26 +444,14 @@ class ActivateReleaseTests(unittest.TestCase):
         }
         for label, changes in cases.items():
             with self.subTest(label):
-                self.github.artifacts.clear()
+                self.github.statuses.clear()
                 self.github.publish(7, self.release_zip(), **changes)
-                self.assertRefused(self.run_wrapper(), f"no release-{SHA} artifact from a push-to-main run")
+                self.assertRefused(self.run_wrapper(), f"run 70 is not a push-to-main run of {WORKFLOW_PATH}")
                 self.assertEqual(self.github.blob_requests, [])
 
-    def test_expired_artifact_is_refused(self):
-        self.github.publish(7, self.release_zip(), expired=True)
-        self.assertRefused(self.run_wrapper(), f"no release-{SHA} artifact")
-
-    def test_rerun_upload_wins_over_the_older_release_artifact(self):
-        # "Re-run all jobs" uploads a second release-<sha> from the same push-to-main run. The
-        # older upload here would fail its digest check, so success proves the newest was taken.
-        self.github.publish(8, self.release_zip(), created_at="2026-10-10T01:00:00Z")
-        self.github.publish(7, self.release_zip(), digest="sha256:" + "0" * 64, created_at="2026-10-10T00:00:00Z")
-        result = self.run_wrapper()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.recorded()["args"][4], hashlib.sha256(self.image).hexdigest())
-
-    def test_digest_mismatch_is_refused(self):
-        self.github.publish(7, self.release_zip(), digest="sha256:" + "0" * 64)
+    def test_downloaded_zip_that_differs_from_the_recorded_digest_is_refused(self):
+        self.github.publish(7, self.release_zip())
+        self.github.zips[7] = self.release_zip(drop=["artifact.json"])
         self.assertRefused(self.run_wrapper(), "artifact digest mismatch")
 
     def test_missing_release_file_is_refused(self):

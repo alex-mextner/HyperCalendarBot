@@ -113,11 +113,12 @@ manual bootstrap — never run from service startup or as recovery from a user's
 On every push to `main` (`.github/workflows/deploy.yml`):
 
 1. **test** — `bun test`, lint, typecheck (ubuntu-latest)
-2. **build** — linux/arm64 image → push to ghcr.io; `docker save` release artifact + checksums (ubuntu-24.04-arm)
+2. **build** — linux/arm64 image → push to ghcr.io; `docker save` release artifact + checksums, and a
+   `release-artifact` commit status that names the uploaded artifact's id and digest (ubuntu-24.04-arm)
 3. **deploy** — the odroid runner pipes its token to `sudo -n /usr/local/sbin/hypercal-activate-release <sha>`.
-   As root, the wrapper checks that main still points at the commit, downloads and digest-checks the
-   push-to-main run's `release-<sha>` artifact, and runs the staged `scripts/deploy-prebuilt-image.sh`
-   (checksum, identity, schema gate, backup, rollback)
+   As root, the wrapper checks that main still points at the commit, then downloads and digest-checks the
+   artifact that status names, after checking it came from the push-to-main run. Then it runs the staged
+   `scripts/deploy-prebuilt-image.sh` (checksum, identity, schema gate, backup, rollback)
 
 ## Manual Deploy
 

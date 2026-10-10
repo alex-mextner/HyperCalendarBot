@@ -57,6 +57,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Only this GitHub-hosted job may record which artifact is the release (see below).
+      statuses: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -93,7 +95,8 @@ jobs:
           cp docker-compose.yml Caddyfile release/
           cp scripts/backup-db.sh scripts/healthcheck-alert.sh scripts/prepare-runtime-dirs.sh scripts/release-artifact.py scripts/deploy-prebuilt-image.sh scripts/migration-gate.py release/scripts/
           python3 scripts/release-artifact.py release/image.tar.gz "$RELEASE_SHA" "$RELEASE_IMAGE:$RELEASE_SHA" > release/artifact.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-${{ github.sha }}
           path: release
@@ -101,6 +104,27 @@ jobs:
           retention-days: 3
           # image.tar.gz is already gzip-compressed.
           compression-level: 0
+      # The deploy job runs on the shared odroid runner, where anything left behind could upload
+      # more release-<sha> artifacts into this run. Root on the odroid deploys only the artifact
+      # this status names: posted from here, with a token the deploy job never gets.
+      - name: Record the release artifact on the commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          # upload-artifact v4.6.2 outputs the zip's sha256 as bare hex; the artifacts API
+          # reports it as sha256:<hex>.
+          DIGEST="sha256:${ARTIFACT_DIGEST#sha256:}"
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] \
+            || { echo "upload-artifact gave no usable id/digest: '$ARTIFACT_ID' '$ARTIFACT_DIGEST'" >&2; exit 1; }
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state=success \
+            -f context=release-artifact \
+            -f description="artifact $ARTIFACT_ID $DIGEST" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --silent
 
   deploy:
     needs: build
@@ -112,12 +136,14 @@ jobs:
     permissions:
       actions: read
       contents: read
+      # Read only: the release-artifact status must stay writable by the build job alone.
+      statuses: read
     steps:
       # Root wrapper installed by hand on the odroid (runbook "Odroid runner"). It trusts only
-      # the SHA: it checks main itself, fetches release-<sha> from this repository's push-to-main
-      # run, verifies its digest and runs the staged scripts/deploy-prebuilt-image.sh. The token
-      # goes on stdin (printf is a shell builtin), never into a process argument list, because
-      # every local user on the shared odroid can read those.
+      # the SHA: it checks main itself, deploys the artifact the build job's release-artifact
+      # commit status names, verifies its digest and push-to-main run, and runs the staged
+      # scripts/deploy-prebuilt-image.sh. The token goes on stdin (printf is a shell builtin),
+      # never into a process argument list, because every local user on the odroid can read those.
       - name: Activate verified prebuilt release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
