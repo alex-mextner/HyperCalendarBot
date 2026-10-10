@@ -31,7 +31,9 @@ import { EventReminderRepository } from '../src/database/repositories/event-remi
 import { HolidayRepository } from '../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../src/database/schema.ts';
-import { geminiClient, groqClient, hfClient, zaiClient } from '../src/services/ai/clients.ts';
+import { claudeClient, geminiClient, groqClient, hfClient, zaiClient } from '../src/services/ai/clients.ts';
+import type { ProviderId } from '../src/services/ai/provider-ids.ts';
+import { acceptsSamplingTemperature, claudeReasoning } from '../src/services/ai/streaming.ts';
 import { buildSystemPrompt } from '../src/services/ai/system-prompt.ts';
 import { getToolDefinitions } from '../src/services/ai/tools.ts';
 import type { AgentContext } from '../src/services/ai/types.ts';
@@ -48,7 +50,7 @@ const SENDER_ID = 1;
 const MAX_COMPLETION_TOKENS = 2048;
 
 interface ProviderSpec {
-  name: string;
+  name: ProviderId;
   model: string;
   client: () => OpenAI;
 }
@@ -69,6 +71,11 @@ function providers(): ProviderSpec[] {
       client: geminiClient,
     },
     { name: 'hf', model: process.env.DRYRUN_MODEL_HF ?? cfg.HF_MODEL ?? '', client: hfClient },
+    {
+      name: 'claude',
+      model: process.env.DRYRUN_MODEL_CLAUDE ?? cfg.CLAUDE_MODEL ?? 'claude-sonnet-5-5',
+      client: claudeClient,
+    },
   ];
   const unknown = wanted.filter((name) => !all.some((p) => p.name === name));
   if (unknown.length > 0) {
@@ -129,6 +136,11 @@ function buildMessages(testCase: DryRunCase): OpenAI.ChatCompletionMessageParam[
 interface CaseOutcome {
   id: string;
   provider: string;
+  /** What was actually requested, so two saved runs can be compared or reproduced. */
+  model: string;
+  temperature: number | null;
+  reasoningEffort: string | null;
+  maxTokens: number | null;
   tools: string[];
   text: string;
   promptTokens: number | null;
@@ -199,7 +211,14 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
     messages: [{ role: 'system', content: buildSystemPrompt(ctx) }, ...buildMessages(testCase)],
     tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
     max_tokens: MAX_COMPLETION_TOKENS,
-    temperature: 0,
+    ...(acceptsSamplingTemperature(provider.name) ? { temperature: 0 } : {}),
+    ...(provider.name === 'claude' ? claudeReasoning(MAX_COMPLETION_TOKENS) : {}),
+  };
+  const settings = {
+    model: provider.model,
+    temperature: request.temperature ?? null,
+    reasoningEffort: request.reasoning_effort ?? null,
+    maxTokens: request.max_tokens ?? null,
   };
   try {
     const res = await completeWithRetry(provider, request);
@@ -209,6 +228,7 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
     return {
       id: testCase.id,
       provider: provider.name,
+      ...settings,
       tools,
       text,
       promptTokens: res.usage?.prompt_tokens ?? null,
@@ -221,6 +241,7 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
     return {
       id: testCase.id,
       provider: provider.name,
+      ...settings,
       tools: [],
       text: '',
       promptTokens: null,

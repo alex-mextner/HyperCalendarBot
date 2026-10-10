@@ -2,8 +2,8 @@
 // Unified AI streaming round with automatic provider fallback.
 //
 // Two chains, selected via options.fast:
-//   SMART_CHAIN (main): configured order, otherwise Groq ${GROQ_MODEL} → Gemini ${GEMINI_MODEL} → HF ${HF_MODEL} → z.ai ${ZAI_MODEL}
-//   FAST_CHAIN: configured order, otherwise Groq ${GROQ_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL} → z.ai ${ZAI_FAST_MODEL}
+//   SMART_CHAIN (main): configured order, otherwise Groq ${GROQ_MODEL} → Gemini ${GEMINI_MODEL} → HF ${HF_MODEL} → z.ai ${ZAI_MODEL} → Claude ${CLAUDE_MODEL}
+//   FAST_CHAIN: configured order, otherwise Groq ${GROQ_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL} → z.ai ${ZAI_FAST_MODEL} → Claude ${CLAUDE_FAST_MODEL}
 //
 // Callers that need live updates (agent.ts) pass `onTextDelta`/`onToolCallStart` callbacks.
 // Callers that just want the final text (validator, intent-learner, city-resolver,
@@ -22,7 +22,7 @@ import {
 } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger, logOnce } from '../../utils/logger.ts';
-import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
+import { claudeClient, geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
 import { isGeminiLocalSkip, reserveGeminiBudget } from './gemini-quota.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
 import {
@@ -507,7 +507,35 @@ function rejectsUsageStreamOption(error: unknown): boolean {
   );
 }
 
-/** Standard OpenAI streaming adapter (works for all four providers). */
+/**
+ * Claude 5.x answers 400 "`temperature` is deprecated for this model" to any request that
+ * names it, so its requests run on the provider's own sampling default.
+ */
+export function acceptsSamplingTemperature(provider: ProviderId): boolean {
+  return provider !== 'claude';
+}
+
+/** Measured on real agent turns: Haiku 5.5 thought for up to ~1000 tokens before one tool call. */
+const CLAUDE_MIN_THINKING_ALLOWANCE = 1024;
+
+/**
+ * Claude 5.x thinks before answering; the compatible endpoint streams none of that thinking but
+ * bills it against `max_tokens`, so a short budget can end at `length` with nothing visible
+ * (a 256-token summary came back empty, live 2026-10-09). Thinking stays on at medium effort,
+ * and the request carries an allowance for it on top of the caller's budget — the budget
+ * itself, at least CLAUDE_MIN_THINKING_ALLOWANCE — so the visible answer keeps every token
+ * the caller asked for (the cap is shared, so a short think leaves the answer more room).
+ * Adaptive thinking is refused by this endpoint; `medium` was accepted live by both 5.5 models
+ * and the preference-list fallbacks, and the largest caller budget (4096 → 8192) by both 5.5s.
+ */
+export function claudeReasoning(answerTokens: number): { reasoning_effort: 'medium'; max_tokens: number } {
+  return {
+    reasoning_effort: 'medium',
+    max_tokens: answerTokens + Math.max(answerTokens, CLAUDE_MIN_THINKING_ALLOWANCE),
+  };
+}
+
+/** Standard OpenAI streaming adapter (works for every provider). */
 function streamingSlot(
   label: string,
   provider: ProviderId,
@@ -527,7 +555,8 @@ function streamingSlot(
         model,
         messages: opts.messages,
         max_tokens: opts.maxTokens,
-        temperature: opts.temperature ?? 0.3,
+        ...(acceptsSamplingTemperature(provider) ? { temperature: opts.temperature ?? 0.3 } : {}),
+        ...(provider === 'claude' ? claudeReasoning(opts.maxTokens) : {}),
         stream: true,
         ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
       };
@@ -606,7 +635,7 @@ function streamingSlot(
         chunkCount,
         choiceCount,
         toolFragmentCount,
-        maxOutputTokens: opts.maxTokens,
+        maxOutputTokens: params.max_tokens ?? opts.maxTokens,
         messageCount: opts.messages.length,
         toolCount: opts.tools?.length ?? 0,
         usage: normalizedUsage,
@@ -659,6 +688,7 @@ export const providerClients = {
   groq: groqClient,
   gemini: geminiClient,
   hf: hfClient,
+  claude: claudeClient,
 };
 
 const PROVIDER_LABELS: Record<ProviderId, string> = {
@@ -666,6 +696,7 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   groq: 'Groq',
   gemini: 'Gemini',
   hf: 'HF',
+  claude: 'Claude',
 };
 
 /**
@@ -765,6 +796,7 @@ function buildSmartChain(cfg: EnvConfig): ProviderSlot[] {
     groq: { model: cfg.GROQ_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_MODEL, apiKey: cfg.GEMINI_API_KEY, baseUrl: cfg.GEMINI_BASE_URL },
     hf: { model: cfg.HF_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
+    claude: { model: cfg.CLAUDE_MODEL, apiKey: cfg.CLAUDE_API_TOKEN },
   });
 }
 
@@ -774,6 +806,7 @@ function buildFastChain(cfg: EnvConfig): ProviderSlot[] {
     groq: { model: cfg.GROQ_FAST_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_FAST_MODEL, apiKey: cfg.GEMINI_API_KEY, baseUrl: cfg.GEMINI_BASE_URL },
     hf: { model: cfg.HF_FAST_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
+    claude: { model: cfg.CLAUDE_FAST_MODEL, apiKey: cfg.CLAUDE_API_TOKEN },
   });
 }
 

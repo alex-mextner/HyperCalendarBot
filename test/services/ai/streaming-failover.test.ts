@@ -34,13 +34,26 @@ type Behavior =
   /** Waits for `gate` before answering, so two requests can be in flight together. */
   | { kind: 'hold'; gate: Promise<void>; text: string };
 
+/** The request fields these tests read. */
+interface FakeRequest {
+  model: string;
+  temperature?: number;
+  max_tokens?: number;
+  reasoning_effort?: string;
+  thinking?: unknown;
+}
+
 interface FakeProvider {
   client: {
-    chat: { completions: { create: (params: { model: string }) => Promise<AsyncIterable<StreamChunk>> } };
+    chat: {
+      completions: { create: (params: FakeRequest) => Promise<AsyncIterable<StreamChunk>> };
+    };
     models: { list: () => Promise<{ data: { id: string }[] }> };
   };
   /** Model id sent with each chat completion request, in order. */
   requestedModels: string[];
+  /** Every chat completion request, in order. */
+  requests: FakeRequest[];
   modelsListCalls: number;
 }
 
@@ -76,12 +89,14 @@ function asOpenAIClient(fake: FakeProvider['client']): OpenAI {
 function makeProvider(options: FakeProviderOptions): FakeProvider {
   const provider: FakeProvider = {
     requestedModels: [],
+    requests: [],
     modelsListCalls: 0,
     client: {
       chat: {
         completions: {
-          create: async (params: { model: string }) => {
+          create: async (params: FakeRequest) => {
             provider.requestedModels.push(params.model);
+            provider.requests.push(params);
             const index = Math.min(provider.requestedModels.length - 1, options.behaviors.length - 1);
             const behavior = options.behaviors[index];
             if (!behavior) throw new Error('fake provider has no behavior scripted');
@@ -122,6 +137,7 @@ let zai: FakeProvider;
 let groq: FakeProvider;
 let gemini: FakeProvider;
 let hf: FakeProvider;
+let claude: FakeProvider;
 
 // Provider fakes are injected through the exported `providerClients` seam in
 // streaming.ts, and provider models come from real environment variables read
@@ -170,6 +186,8 @@ beforeEach(() => {
   providerClients.groq = () => asOpenAIClient(groq.client);
   providerClients.gemini = () => asOpenAIClient(gemini.client);
   providerClients.hf = () => asOpenAIClient(hf.client);
+  claude = unusedProvider();
+  providerClients.claude = () => asOpenAIClient(claude.client);
 });
 
 afterEach(() => {
@@ -831,6 +849,113 @@ describe('provider order', () => {
 
     expect(result.text).toBe('from hf');
     expect(groq.requestedModels).toEqual([]);
+  });
+
+  // Claude is the paid last resort: it follows z.ai in both default orders and
+  // each chain uses its own Claude model (Sonnet answers users, Haiku validates).
+  test.each([
+    { fast: false, chain: 'smart', model: 'claude-main' },
+    { fast: true, chain: 'fast', model: 'claude-fast' },
+  ])('default $chain chain reaches Claude $model only after z.ai fails', async ({ fast, chain, model }) => {
+    delete process.env.AI_SMART_CHAIN;
+    delete process.env.AI_FAST_CHAIN;
+    Object.assign(process.env, {
+      CLAUDE_API_TOKEN: 'claude-key',
+      CLAUDE_MODEL: 'claude-main',
+      CLAUDE_FAST_MODEL: 'claude-fast',
+    });
+    const down = () => makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
+    groq = down();
+    gemini = down();
+    hf = down();
+    zai = down();
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from Claude' }] });
+
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, fast });
+
+    expect(result.text).toBe('answer from Claude');
+    expect(result.metrics?.chain).toBe(chain);
+    expect(result.metrics?.attemptCount).toBe(5);
+    expect(zai.requestedModels).toHaveLength(1);
+    expect(claude.requestedModels).toEqual([model]);
+  });
+
+  // Claude 5.5 answers 400 "`temperature` is deprecated for this model" to any request
+  // carrying it (live, 2026-10-09) — sending the default would make the reserve dead.
+  test('Claude requests omit the sampling temperature that other providers still get', async () => {
+    process.env.AI_SMART_CHAIN = 'zai,claude';
+    Object.assign(process.env, { CLAUDE_API_TOKEN: 'claude-key', CLAUDE_MODEL: 'claude-main' });
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from Claude' }] });
+
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, temperature: 0 });
+
+    expect(result.text).toBe('answer from Claude');
+    expect(zai.requests.map((request) => request.temperature)).toEqual([0]);
+    expect(claude.requests.map((request) => request.temperature)).toEqual([undefined]);
+  });
+
+  // Claude 5.5 thinks before answering and the compatible endpoint streams none of it, yet
+  // bills it against max_tokens (live, 2026-10-09): a 256-token Haiku summary came back empty
+  // at `length`. Thinking stays on at medium effort; an allowance on top of the caller's budget
+  // (the budget itself, at least 1024) keeps it from eating the visible answer.
+  test.each([
+    { fast: true, model: 'claude-haiku-5-5', maxTokens: 256, sent: 256 + 1024 },
+    { fast: false, model: 'claude-sonnet-5-5', maxTokens: 4096, sent: 4096 * 2 },
+    // Preference-list fallbacks accepted `medium` live too (2026-10-09).
+    { fast: false, model: 'claude-sonnet-5', maxTokens: 4096, sent: 4096 * 2 },
+    { fast: true, model: 'claude-haiku-4-5-20251001', maxTokens: 64, sent: 64 + 1024 },
+    { fast: false, model: 'claude-sonnet-5-5', maxTokens: 1024, sent: 2048 },
+  ])('Claude $model thinks at medium effort with $maxTokens answer tokens kept free', async ({
+    fast,
+    model,
+    maxTokens,
+    sent,
+  }) => {
+    process.env.AI_SMART_CHAIN = 'zai,claude';
+    process.env.AI_FAST_CHAIN = 'zai,claude';
+    Object.assign(process.env, { CLAUDE_API_TOKEN: 'claude-key', CLAUDE_MODEL: model, CLAUDE_FAST_MODEL: model });
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'summary' }] });
+
+    await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens, fast });
+
+    expect(claude.requests).toMatchObject([{ reasoning_effort: 'medium', max_tokens: sent }]);
+    expect(claude.requests[0]?.thinking).toBeUndefined();
+    expect(zai.requests).toMatchObject([{ max_tokens: maxTokens }]);
+    expect(zai.requests[0]?.reasoning_effort).toBeUndefined();
+  });
+
+  // An empty Claude answer is diagnosed against the cap actually sent: hidden thinking is
+  // billed against it, so the caller's smaller budget would misstate what ran out.
+  test('an empty Claude answer records the max_tokens actually sent', async () => {
+    process.env.AI_FAST_CHAIN = 'claude';
+    Object.assign(process.env, { CLAUDE_API_TOKEN: 'claude-key', CLAUDE_FAST_MODEL: 'claude-haiku-5-5' });
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: '' }] });
+
+    const failure = await aiStreamRound({
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 256,
+      fast: true,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AllProvidersFailedError);
+    expect(failure).toMatchObject({ failures: [{ emptyResponse: { maxOutputTokens: 256 + 1024 } }] });
+  });
+
+  test('the default chain ends at z.ai when no Claude token is configured', async () => {
+    delete process.env.AI_SMART_CHAIN;
+    delete process.env.CLAUDE_API_TOKEN;
+    Object.assign(process.env, { CLAUDE_MODEL: 'claude-main', CLAUDE_FAST_MODEL: 'claude-fast' });
+    groq = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
+    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from z.ai' }] });
+
+    const result = await ask();
+
+    expect(result.text).toBe('answer from z.ai');
+    expect(claude.requestedModels).toEqual([]);
   });
 });
 

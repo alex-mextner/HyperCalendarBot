@@ -11,6 +11,7 @@ const accounts: [ProviderId, string, string][] = [
   ['groq', '', config.GROQ_API_KEY ?? ''],
   ['gemini', config.GEMINI_BASE_URL, config.GEMINI_API_KEY],
   ['hf', config.HF_BASE_URL, config.HF_TOKEN],
+  ['claude', '', config.CLAUDE_API_TOKEN ?? ''],
 ];
 if (!existsSync(path)) console.log(JSON.stringify({ initialized: false, providers: [] }, null, 2));
 else {

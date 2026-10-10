@@ -33,7 +33,6 @@ Default to using Bun instead of Node.js.
 ## APIs
 
 - `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- **Anthropic client**: never use `new Anthropic()` directly — it ignores `AI_BASE_URL` and will fail when a proxy is configured. Always use `createAnthropicClient()` from `src/services/ai/anthropic-client.ts`. Pass `{ apiKey, baseURL }` to override env defaults, or call without args to use `process.env.ANTHROPIC_API_KEY` / `process.env.AI_BASE_URL`.
 - `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
 - `Bun.redis` (singleton, default localhost) or `new Bun.RedisClient(url)` (custom URL) for Redis. Don't use `ioredis`. Note: `Bun.Redis` does not exist — use `Bun.RedisClient`.
 - `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
@@ -224,7 +223,6 @@ All `process.env.*` reads go through `src/config/env.ts` → `loadConfig()` and 
 
 **Exceptions** (infrastructure layer where config object is not injected):
 - `src/utils/logger.ts` — reads `NODE_ENV` at module load time, before config is available
-- `src/services/ai/anthropic-client.ts` — reads `ANTHROPIC_API_KEY`/`AI_BASE_URL` as fallbacks, by design
 
 When adding a new env var: (1) add it to `EnvConfig` interface in `env.ts`, (2) read and validate in `loadConfig()`, (3) use via `config.VAR_NAME` everywhere else.
 
@@ -234,7 +232,7 @@ provider ids in the order they are tried. The ids come from `PROVIDER_IDS` in
 layer and the AI layer can derive from it without a cycle. Add a provider there and it is
 nameable at once.
 A provider whose model or key is missing is skipped and the skip is logged — in practice
-that means Groq, since `loadConfig()` requires the z.ai, Hugging Face and Gemini credentials
+that means Groq and Claude, since `loadConfig()` requires the z.ai, Hugging Face and Gemini credentials
 and refuses to start without them. An unknown name is ignored with a warning, an order
 naming nothing known falls back to the default order, and an order whose providers are all
 unconfigured falls back to the default order over whatever IS configured (logged as an
