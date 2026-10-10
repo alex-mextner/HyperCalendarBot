@@ -53,8 +53,23 @@ if (( FREE_KIB * 1024 < 2 * IMAGE_BYTES )); then
   echo "Not enough disk to load the release: $((FREE_KIB * 1024)) bytes free on $DOCKER_ROOT, need $((2 * IMAGE_BYTES)) (twice the $IMAGE_BYTES-byte image). Remove superseded $IMAGE tags first (docs/reference/deploy-runbook.md, Disk space)." >&2
   exit 1
 fi
+# Docker's image store decides what `.Id` and a container's `.Image` are: the config digest on the
+# classic store, the digest of the manifest the archive's index.json names on the containerd store
+# (Docker 29 on the odroid, which other projects share, so its store stays). Comparing the config
+# digest there refused the first odroid release (run 38018033717, #784). release-artifact.py read
+# both digests from the verified archive; compare against the one this daemon uses.
+DRIVER_STATUS="$(docker info --format '{{json .DriverStatus}}')"
+EXPECTED_IMAGE_ID="$(python3 - "$DRIVER_STATUS" "$REMOTE_SRC/artifact.json" <<'STORE'
+import json,sys
+status,artifact=sys.argv[1:]
+containerd=["driver-type","io.containerd.snapshotter.v1"] in (json.loads(status) or [])
+print(json.load(open(artifact))["manifest_digest" if containerd else "config_digest"])
+STORE
+)"
+[[ "$EXPECTED_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Release image identity is not a sha256 digest: $EXPECTED_IMAGE_ID" >&2; exit 1; }
 docker load -i "$REMOTE_SRC/image.tar.gz"
-[[ "$(docker image inspect "$IMAGE:$SHA" --format '{{.Id}}')" == "$CONFIG_ID" ]] || { echo 'Loaded config identity mismatch' >&2; exit 1; }
+LOADED_ID="$(docker image inspect "$IMAGE:$SHA" --format '{{.Id}}')"
+[[ "$LOADED_ID" == "$EXPECTED_IMAGE_ID" ]] || { echo "Loaded image identity mismatch: loaded=$LOADED_ID expected=$EXPECTED_IMAGE_ID" >&2; exit 1; }
 CURRENT_IMAGE_ID="$(docker inspect hypercal-bot --format '{{.Image}}' 2>/dev/null)" || { echo 'Existing HyperCalendar container is required; use a reviewed first-install procedure' >&2; exit 1; }
 ROLLBACK_TAG="$IMAGE:rollback-$STAMP"
 docker tag "$CURRENT_IMAGE_ID" "$ROLLBACK_TAG"
@@ -102,7 +117,8 @@ wait_for_bot() {
 }
 
 # The previous image ID alone does not show a running bot. Readiness is reported, not required:
-# an AI provider outage fails it for every image.
+# an AI provider outage fails it for every image. CURRENT_IMAGE_ID and the restored container's
+# .Image both come from this daemon, so they are the same kind of ID on either image store.
 restore_image() {
   printf 'services:\n  bot:\n    image: "%s"\n' "$CURRENT_IMAGE_ID" > "$REMOTE_SRC/rollback.yml"
   (cd "$DEPLOY_PATH" && docker compose -f docker-compose.yml -f "$REMOTE_SRC/rollback.yml" up -d --no-deps --no-build --pull never --force-recreate bot) || return 1
@@ -175,7 +191,6 @@ cd "$DEPLOY_PATH"
 docker compose -f docker-compose.yml -f "$REMOTE_SRC/image.yml" up -d --no-deps --no-build --pull never --force-recreate bot
 # Do not reload the shared server proxy: this release changes no proxy routing.
 
-EXPECTED_IMAGE_ID="$(docker image inspect "$IMAGE:$SHA" --format '{{.Id}}')"
 ACTUAL_IMAGE_ID="$(docker inspect hypercal-bot --format '{{.Image}}')"
 if [[ "$ACTUAL_IMAGE_ID" != "$EXPECTED_IMAGE_ID" ]]; then
   echo "Container image mismatch: running=$ACTUAL_IMAGE_ID expected=$EXPECTED_IMAGE_ID" >&2
@@ -198,10 +213,12 @@ REVISION="$(docker image inspect "$IMAGE:$SHA" --format '{{index .Config.Labels 
 # Runtime verification is the commit point. Metadata or alias failures cannot undo it.
 switched=0
 printf 'RUNTIME_VERIFIED sha=%s image=%s ready=%s\n' "$REVISION" "$ACTUAL_IMAGE_ID" "$READY"
-python3 - "$DEPLOY_PATH/releases/current.json" "$REVISION" "$ACTUAL_IMAGE_ID" "$ARCHIVE_SUM" "$READY" "$ROLLBACK_TAG" <<'RECEIPT'
+# config_digest is the release identity on every store; image_id is what this daemon reports as the
+# container's .Image, which scripts/post-ship-deploy.py compares with the live container.
+python3 - "$DEPLOY_PATH/releases/current.json" "$REVISION" "$CONFIG_ID" "$ACTUAL_IMAGE_ID" "$ARCHIVE_SUM" "$READY" "$ROLLBACK_TAG" <<'RECEIPT'
 import datetime,json,os,sys
-path,sha,image,archive,ready,rollback=sys.argv[1:]
-record={"revision":sha,"config_digest":image,"archive_sha256":archive,"ready":ready,"rollback_image":rollback,"verified_at":datetime.datetime.now(datetime.timezone.utc).isoformat()}
+path,sha,config,image,archive,ready,rollback=sys.argv[1:]
+record={"revision":sha,"config_digest":config,"image_id":image,"archive_sha256":archive,"ready":ready,"rollback_image":rollback,"verified_at":datetime.datetime.now(datetime.timezone.utc).isoformat()}
 with open(path+'.tmp','w') as f:json.dump(record,f,indent=2)
 os.replace(path+'.tmp',path)
 RECEIPT

@@ -6,6 +6,9 @@ Since 2026-10-09 22:30 UTC (#784):
 
 - **Host**: `root@odroidn2` — home ODROID-N2+ (Tailscale MagicDNS name), aarch64, Armbian trixie
 - **Deploy path**: `/opt/hypercal`
+- **Docker image store**: containerd (Docker 29 on the odroid, shared with other projects). An image's
+  `.Id` is its manifest digest there; the deploy compares that with the release archive's indexed manifest
+  (deploy runbook, "Image identity").
 - **Domain**: hypercal.invntrm.ru — DNS still points at the DigitalOcean droplet `104.248.84.190`, whose
   Caddy (auto-TLS) proxies the bot paths to the odroid's Tailscale Funnel `https://odroidn2.tailbfe8ea.ts.net`.
   The droplet runs no bot container; it keeps the ingress and the external watchdog cron.

@@ -4,16 +4,20 @@
 The local deploy fallback builds with Apple's native `container` CLI, whose
 `container image save` writes a plain OCI image layout (index.json + blobs,
 gzip layers, a nested index that also carries a build attestation). The
-release path expects what `docker save` writes: scripts/release-artifact.py
+release path expects what `docker save` (Docker 25+) writes: scripts/release-artifact.py
 reads a top-level manifest.json naming exactly one image with its RepoTags and
-a config blob named by its own sha256, and the server's `docker load` +
-identity checks (scripts/deploy-prebuilt-image.sh) expect that same layout.
+a config blob named by its own sha256, plus an OCI layout whose index.json names
+one image manifest for that tag, and the server's `docker load` + identity checks
+(scripts/deploy-prebuilt-image.sh) expect that same layout.
 
 This selects the single image manifest for <tag> and the requested platform,
 verifies the digest of every blob it reads, decompresses gzip layers (checking
 each against the config's rootfs.diff_ids) and writes a docker-save archive:
-manifest.json, the config blob byte-for-byte (so the image ID, i.e. the config
-digest, is unchanged) and uncompressed layer tars under blobs/sha256/.
+manifest.json, the config blob byte-for-byte (so the config digest, the image
+ID on Docker's classic store, is unchanged), uncompressed layer tars under
+blobs/sha256/, and oci-layout + index.json + a new image manifest describing
+those uncompressed layers. On Docker's containerd image store (the odroid) the
+digest of that manifest becomes the image ID.
 Nothing is extracted to disk except layer data streamed into temporary files
 next to the output.
 """
@@ -38,8 +42,9 @@ INDEX_TYPES = {
     "application/vnd.oci.image.index.v1+json",
     "application/vnd.docker.distribution.manifest.list.v2+json",
 }
+OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
 MANIFEST_TYPES = {
-    "application/vnd.oci.image.manifest.v1+json",
+    OCI_MANIFEST,
     "application/vnd.docker.distribution.manifest.v2+json",
 }
 PLAIN_LAYER_TYPES = {
@@ -235,7 +240,8 @@ def convert(source: Path, target: Path, tag: str, os_name: str = "linux", arch: 
         config_digest = "sha256:" + hashlib.sha256(raw_config).hexdigest()
         target.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=target.parent, prefix=".oci-convert-") as work:
-            layer_names: list[str] = []
+            # (blob path, diff_id, uncompressed size) per layer, in manifest order.
+            converted: list[tuple[str, str, int]] = []
             written: set[str] = set()
             partial = Path(work) / "image.tar"
             with tarfile.open(partial, "w", format=tarfile.PAX_FORMAT) as out:
@@ -244,7 +250,7 @@ def convert(source: Path, target: Path, tag: str, os_name: str = "linux", arch: 
                     if not isinstance(descriptor, dict):
                         raise ConversionError("Invalid layer descriptor")
                     name, path = _copy_layer(oci, descriptor, diff_id, Path(work))
-                    layer_names.append(name)
+                    converted.append((name, str(diff_id), path.stat().st_size))
                     if name not in written:
                         info = out.gettarinfo(str(path), arcname=name)
                         info.mode, info.mtime = 0o644, 0
@@ -256,9 +262,42 @@ def convert(source: Path, target: Path, tag: str, os_name: str = "linux", arch: 
                 entry = {
                     "Config": blob_path(config_digest),
                     "RepoTags": [tag],
-                    "Layers": layer_names,
+                    "Layers": [name for name, _, _ in converted],
                 }
                 _add_bytes(out, "manifest.json", json.dumps([entry]).encode())
+                image_manifest = json.dumps(
+                    {
+                        "schemaVersion": 2,
+                        "mediaType": OCI_MANIFEST,
+                        "config": {
+                            "mediaType": "application/vnd.oci.image.config.v1+json",
+                            "digest": config_digest,
+                            "size": len(raw_config),
+                        },
+                        "layers": [
+                            {"mediaType": "application/vnd.oci.image.layer.v1.tar", "digest": diff_id, "size": size}
+                            for _, diff_id, size in converted
+                        ],
+                    }
+                ).encode()
+                manifest_digest = "sha256:" + hashlib.sha256(image_manifest).hexdigest()
+                _add_bytes(out, blob_path(manifest_digest), image_manifest)
+                # The annotations `docker save` writes; containerd names the loaded image by the first.
+                annotations = dict(zip(NAME_ANNOTATIONS, (tag, tag.rpartition(":")[2])))
+                index = {
+                    "schemaVersion": 2,
+                    "mediaType": "application/vnd.oci.image.index.v1+json",
+                    "manifests": [
+                        {
+                            "mediaType": OCI_MANIFEST,
+                            "digest": manifest_digest,
+                            "size": len(image_manifest),
+                            "annotations": annotations,
+                        }
+                    ],
+                }
+                _add_bytes(out, "index.json", json.dumps(index).encode())
+                _add_bytes(out, "oci-layout", json.dumps({"imageLayoutVersion": "1.0.0"}).encode())
             os.replace(partial, target)
     return config_digest
 

@@ -577,6 +577,7 @@ Full runbook: `docs/reference/deploy-runbook.md` (Docker, Dockerfile, bun lockfi
 
 - **Host**: `root@odroidn2` (home ODROID-N2+, Tailscale MagicDNS name; aarch64, Armbian trixie, 6 cores, 3.7 GB RAM, root on microSD) since 2026-10-09 22:30 UTC (#784). Shared with ExpenseSyncBot, HyperSummaryBot, mextner.com and three self-hosted GitHub runners.
 - **Images**: linux/arm64 only, built by CI on `ubuntu-24.04-arm` or by the local fallback.
+- **Image store**: the odroid's Docker 29 uses the containerd image store (other projects' containers live there; do not switch it). An image's `.Id` and a container's `.Image` are its manifest digest there, not the config digest. The release keeps `config_digest` as its identity; the activator compares loaded and running images with the archive's indexed `manifest_digest` on containerd (the config digest on a classic store). The first odroid release (run 38018033717, 2026-10-10) failed on this. Runbook "Image identity".
 - **Deploy path**: `/opt/hypercal`. Container mounts `/opt/hypercal/data`, reads `/opt/hypercal/.env`.
 - **Domain**: `hypercal.invntrm.ru`. TLS and ingress stay on the DigitalOcean droplet `104.248.84.190`: its Caddy proxies the bot paths to the Tailscale Funnel `https://odroidn2.tailbfe8ea.ts.net`, so webhook/OAuth/watch-channel URLs are unchanged.
 - **Caddy config**: the repo `Caddyfile` is that DO ingress config, applied by hand on DO. Deploys copy it to `/opt/hypercal` on the odroid but never reload any Caddy.

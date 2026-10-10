@@ -190,6 +190,20 @@ class OciConversionTests(unittest.TestCase):
             for layer in manifest[0]["Layers"]:
                 data = tar.extractfile(layer).read()
                 self.assertEqual("blobs/sha256/" + hashlib.sha256(data).hexdigest(), layer)
+            # The OCI layout `docker save` also writes: on Docker's containerd image store (the
+            # odroid, #784) the indexed manifest's digest becomes the loaded image's ID.
+            index = json.load(tar.extractfile("index.json"))
+            [entry] = index["manifests"]
+            self.assertEqual(entry["annotations"]["io.containerd.image.name"], self.tag)
+            self.assertEqual(entry["digest"], result["manifest_digest"])
+            image_manifest = json.load(tar.extractfile("blobs/sha256/" + entry["digest"][7:]))
+            self.assertEqual(image_manifest["config"]["digest"], config_id)
+            self.assertEqual(
+                [layer["digest"] for layer in image_manifest["layers"]],
+                ["sha256:" + name.rpartition("/")[2] for name in manifest[0]["Layers"]],
+            )
+            for layer in image_manifest["layers"]:
+                self.assertEqual(tar.getmember("blobs/sha256/" + layer["digest"][7:]).size, layer["size"])
 
     def test_uncompressed_oci_and_docker_layer_types_convert_too(self):
         for layer_type in (
