@@ -1,7 +1,7 @@
 """Execute the real remote shell with fake Docker/HTTP; preserve real SQLite writes."""
 
 import hashlib
-import io
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -11,6 +11,8 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+
+from docker_save_fixture import add_members, docker_save_members
 
 ROOT = Path(__file__).resolve().parents[2]
 SHA = "a" * 40
@@ -98,7 +100,12 @@ if args and args[0]=='load' and os.environ.get('LOAD_FAILURE')=='1':sys.exit(42)
 if args and args[0]=='load':store['repo/image:'+os.environ['FIXTURE_SHA']]=os.environ['FIXTURE_ID'];save()
 if args and args[0]=='tag' and args[-1].endswith(':latest') and os.environ.get('TAG_FAILURE')=='1':sys.exit(43)
 if args and args[0]=='tag':store[args[2]]=store.get(args[1],args[1]);save()
-if args[:1]==['info']:print(root)
+if args[:1]==['info'] and 'DriverStatus' in args[-1]:
+    # Compact, as Go's {{json}} prints it; the odroid's Docker 29 reports the containerd image store
+    # this way (#784).
+    status=[["driver-type","io.containerd.snapshotter.v1"]] if os.environ.get('FIXTURE_STORE')=='containerd' else [["Backing Filesystem","extfs"],["Supports d_type","true"]]
+    print(json.dumps(status,separators=(',',':')))
+elif args[:1]==['info']:print(root)
 elif args[:1]==['images']:
     print(''.join(f"{t.rsplit(':',1)[1]}\t{i}\n" for t,i in store.items() if t.rsplit(':',1)[0]==args[-1]),end='')
 elif args[:2]==['image','rm']:
@@ -133,7 +140,7 @@ elif args and args[0]=='run':
 elif args and args[0]=='compose' and 'up' in args:
     override=Path(args[args.index('-f',args.index('-f')+1)+1]).read_text() if args.count('-f') >= 2 else 'candidate'
     old='sha256:old' in override
-    current.write_text('sha256:old' if old else os.environ['FIXTURE_ID'])
+    current.write_text('sha256:old' if old else os.environ.get('FIXTURE_RUNNING_ID',os.environ['FIXTURE_ID']))
     if not old:
         # The release's migration runner records every new migration unless one of them fails.
         c=sqlite3.connect(root/'data/calendar.db');c.execute("INSERT INTO evidence VALUES ('after-start')")
@@ -197,18 +204,10 @@ print(body,end='')
             }
         ).encode()
         self.config_id = "sha256:" + hashlib.sha256(config).hexdigest()
-        cfg = "blobs/sha256/" + self.config_id[7:]
-        manifest = [{"Config": cfg, "RepoTags": [TAG], "Layers": ["blobs/sha256/layer"]}]
+        # A layer large enough that the disk check's 2x margin spans whole KiB.
+        members, self.manifest_id = docker_save_members(TAG, config, (bytes(1024 * 1024),))
         with tarfile.open(self.src / "image.tar.gz", "w:gz") as tar:
-            for name, data in [
-                ("manifest.json", json.dumps(manifest).encode()),
-                (cfg, config),
-                # A layer large enough that the disk check's 2x margin spans whole KiB.
-                ("blobs/sha256/layer", bytes(1024 * 1024)),
-            ]:
-                info = tarfile.TarInfo(name)
-                info.size = len(data)
-                tar.addfile(info, io.BytesIO(data))
+            add_members(tar, members)
         with tarfile.open(self.src / "image.tar.gz") as tar:
             self.image_bytes = sum(m.size for m in tar.getmembers() if m.isfile())
         self.digest = hashlib.sha256(
@@ -325,11 +324,59 @@ print(body,end='')
         self.assertEqual(result.returncode, 0, result.stderr)
         receipt = json.loads((self.dep / "releases/current.json").read_text())
         self.assertEqual(receipt["config_digest"], self.config_id)
+        # Docker's classic image store reports the config digest as the image ID.
+        self.assertEqual(receipt["image_id"], self.config_id)
         self.assertEqual(receipt["revision"], SHA)
         self.assertEqual(self.rows(), ["before", "after-start"])
         calls = self.log.read_text()
         self.assertNotIn('"build"', calls)
         self.assertIn("--no-build", calls)
+
+    def test_containerd_store_release_is_verified_by_its_indexed_manifest_digest(self):
+        # The odroid's Docker 29 uses the containerd image store, where `docker load` makes the
+        # manifest the archive's index.json names the image ID (run 38018033717, #784).
+        result = self.run_deploy(FIXTURE_STORE="containerd", FIXTURE_ID=self.manifest_id)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.dep / "current").read_text(), self.manifest_id)
+        receipt = json.loads((self.dep / "releases/current.json").read_text())
+        self.assertEqual(receipt["config_digest"], self.config_id)
+        self.assertEqual(receipt["image_id"], self.manifest_id)
+        self.assertIn("DEPLOYED sha=" + SHA + " image=" + self.manifest_id, result.stdout)
+        # scripts/post-ship-deploy.py recognizes this receipt next to the live container's .Image.
+        spec = importlib.util.spec_from_file_location("post_ship_deploy", ROOT / "scripts/post-ship-deploy.py")
+        post_ship = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(post_ship)
+        live = {"receipt": receipt, "image": self.manifest_id, "running": True, "revision": SHA, "health": "ok", "ready": "ok"}
+        self.assertTrue(post_ship.runtime_matches(live, SHA))
+
+    def test_loaded_image_that_is_not_the_archive_for_this_store_is_refused_before_any_change(self):
+        unrelated = "sha256:" + "e" * 64
+        cases = {
+            "classic, unrelated ID": ("classic", unrelated),
+            "containerd, unrelated ID": ("containerd", unrelated),
+            # Each store has one right digest; the other one never stands in for it.
+            "classic, manifest digest": ("classic", self.manifest_id),
+            "containerd, config digest": ("containerd", self.config_id),
+        }
+        for label, (store, loaded) in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                result = self.run_deploy(FIXTURE_STORE=store, FIXTURE_ID=loaded)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Loaded image identity mismatch: loaded=" + loaded, result.stderr)
+                self.assertFalse((self.dep / "data/before.db").exists(), "backup-db.sh ran after a bad load")
+                self.assertEqual((self.dep / "current").read_text(), "sha256:old")
+                self.assertEqual(self.rows(), ["before"])
+                self.assertNotIn('"compose"', self.log.read_text())
+                self.assertFalse((self.dep / "releases/current.json").exists())
+
+    def test_containerd_store_container_running_another_image_is_rolled_back(self):
+        result = self.run_deploy(FIXTURE_STORE="containerd", FIXTURE_ID=self.manifest_id, FIXTURE_RUNNING_ID=self.config_id)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f"Container image mismatch: running={self.config_id} expected={self.manifest_id}", result.stderr)
+        self.assertIn("ROLLBACK image=sha256:old health=ok", result.stderr)
+        self.assertEqual((self.dep / "current").read_text(), "sha256:old")
+        self.assertFalse((self.dep / "releases/current.json").exists())
 
     def test_ai_outage_rolls_back_image_without_losing_later_user_writes(self):
         result = self.run_deploy(READY_BODY="ai chain down")

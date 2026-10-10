@@ -6,9 +6,14 @@ Since 2026-10-09 22:30 UTC (#784):
 
 - **Host**: `root@odroidn2` — home ODROID-N2+ (Tailscale MagicDNS name), aarch64, Armbian trixie
 - **Deploy path**: `/opt/hypercal`
+- **Docker image store**: containerd (Docker 29 on the odroid, shared with other projects). An image's
+  `.Id` is its manifest digest there; the deploy compares that with the release archive's indexed manifest
+  (deploy runbook, "Image identity").
 - **Domain**: hypercal.invntrm.ru — DNS still points at the DigitalOcean droplet `104.248.84.190`, whose
-  Caddy (auto-TLS) proxies the bot paths to the odroid's Tailscale Funnel `https://odroidn2.tailbfe8ea.ts.net`.
-  The droplet runs no bot container; it keeps the ingress and the external watchdog cron.
+  Caddy (auto-TLS) proxies the bot paths over the tailnet to the odroid at `100.116.57.66:3001`. The
+  droplet is tailnet node `do-edge` (`100.113.21.91`) with a direct WireGuard path to the odroid. It runs
+  no bot container; it keeps the ingress and the external watchdog cron. Until 2026-10-10 the upstream was
+  the odroid's Tailscale Funnel; Funnel failed that night from 00:00 to 03:10 UTC and is now off.
 
 ## Stack
 
@@ -16,7 +21,7 @@ Since 2026-10-09 22:30 UTC (#784):
 |-----------|-----|
 | Bot | Docker container (ghcr.io/alex-mextner/hypercalendarbot, linux/arm64, pinned by commit SHA) |
 | Redis | Docker container (redis:7-alpine, AOF persistence) |
-| Reverse proxy | Caddy on the DO droplet → Tailscale Funnel on the odroid |
+| Reverse proxy | Caddy on the DO droplet → the odroid's tailnet address |
 | Orchestration | Docker Compose v2 plugin |
 | CI/CD | GitHub Actions → arm64 build on `ubuntu-24.04-arm` → GHCR + release artifact → self-hosted odroid runner → root activation wrapper |
 
@@ -28,8 +33,8 @@ One-time steps for a fresh server.
 
 Docker Engine with the Compose v2 plugin: `docker compose version` must work as root.
 
-Ingress is the DO droplet's Caddy plus Tailscale Funnel on the odroid (section 4); the odroid runs no
-Caddy for this bot.
+Ingress is the DO droplet's Caddy, which reaches the odroid over the tailnet (section 4); the odroid runs
+no Caddy for this bot.
 
 ### 2. Create deploy directory
 
@@ -60,7 +65,8 @@ Note: `REDIS_URL` and `NODE_ENV` are overridden by docker-compose.yml — values
 ### 4. DNS and ingress
 
 `hypercal.invntrm.ru` stays an A record to `104.248.84.190`. The repo `Caddyfile` is the DO Caddy
-config, applied by hand there; the odroid exposes the bot to it through Tailscale Funnel.
+config, applied by hand there; it proxies to the bot's published port 3001 on the odroid's tailnet
+address, so both hosts must stay on the tailnet.
 
 ### 5. Deploy runner
 

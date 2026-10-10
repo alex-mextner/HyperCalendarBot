@@ -9,11 +9,14 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 SHA = "a" * 40
 IMAGE = "sha256:" + "b" * 64
+CONFIG = "sha256:" + "d" * 64
 
 
-def snapshot(sha=SHA, image=IMAGE, ready="ok"):
+def snapshot(sha=SHA, image=IMAGE, ready="ok", config=CONFIG):
+    # The odroid's containerd image store reports the manifest digest as the container's .Image,
+    # so image_id and config_digest differ there (#784); the classic store makes them equal.
     return {
-        "receipt": {"revision": sha, "config_digest": image},
+        "receipt": {"revision": sha, "config_digest": config, "image_id": image},
         "revision": sha,
         "image": image,
         "running": True,
@@ -152,6 +155,22 @@ class PostShipTests(unittest.TestCase):
             s[key] = value
             self.assertFalse(module.runtime_matches(s, SHA))
         self.assertTrue(module.runtime_matches(snapshot(ready="ok (unverified)"), SHA))
+
+    def test_runtime_recognizes_both_image_stores_by_the_receipt_image_id(self):
+        # Containerd store: the live .Image is the manifest digest, not the config digest.
+        self.assertTrue(module.runtime_matches(snapshot(image=IMAGE, config=CONFIG), SHA))
+        # Classic store: the live .Image is the config digest itself.
+        self.assertTrue(module.runtime_matches(snapshot(image=CONFIG, config=CONFIG), SHA))
+        for label, change in {
+            "receipt for another image": {"image_id": "sha256:" + "e" * 64},
+            "receipt without image_id": {"image_id": None},
+            # A receipt written before #784 named only the config digest.
+            "config digest names the live image only": {"image_id": None, "config_digest": IMAGE},
+        }.items():
+            with self.subTest(label):
+                s = snapshot()
+                s["receipt"].update(change)
+                self.assertFalse(module.runtime_matches(s, SHA))
 
     def test_identical_verified_release_is_noop(self):
         fake = FakeCommands(self.root, already=True)

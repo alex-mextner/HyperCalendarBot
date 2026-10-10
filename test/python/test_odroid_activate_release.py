@@ -24,6 +24,8 @@ import unittest
 import urllib.parse
 import zipfile
 
+from docker_save_fixture import add_members, docker_save_members
+
 ROOT = Path(__file__).resolve().parents[2]
 WRAPPER = ROOT / "scripts/odroid-activate-release.sh"
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -65,14 +67,10 @@ def image_archive(revision=SHA, extra_label=None):
     if extra_label:
         labels["fixture.variant"] = extra_label
     config = json.dumps({"architecture": "arm64", "os": "linux", "config": {"Labels": labels}}).encode()
-    config_path = "blobs/sha256/" + hashlib.sha256(config).hexdigest()
-    manifest = json.dumps([{"Config": config_path, "RepoTags": [f"{IMAGE}:{SHA}"], "Layers": []}]).encode()
+    members, _ = docker_save_members(f"{IMAGE}:{SHA}", config)
     raw = io.BytesIO()
     with tarfile.open(fileobj=raw, mode="w:gz") as tar:
-        for name, data in (("manifest.json", manifest), (config_path, config)):
-            info = tarfile.TarInfo(name)
-            info.size = len(data)
-            tar.addfile(info, io.BytesIO(data))
+        add_members(tar, members)
     return raw.getvalue(), "sha256:" + hashlib.sha256(config).hexdigest()
 
 

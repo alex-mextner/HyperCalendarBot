@@ -93,7 +93,10 @@ class LocalFallbackStagingTests(unittest.TestCase):
         exe(
             self.bin / "docker",
             "#!/usr/bin/env python3\n"
-            "import hashlib, io, json, sys, tarfile\n"
+            "import json, sys, tarfile\n"
+            "sys.dont_write_bytecode = True\n"
+            f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
+            "from docker_save_fixture import add_members, docker_save_members\n"
             "args = sys.argv[1:]\n"
             "if args[:2] == ['context', 'inspect']:\n"
             "    print('unix:///var/run/docker.sock'); sys.exit(0)\n"
@@ -112,11 +115,9 @@ class LocalFallbackStagingTests(unittest.TestCase):
             "    os_name, arch = built['platform'].split('/')\n"
             "    key, value = built['label'].split('=', 1)\n"
             "    config = json.dumps({'architecture': arch, 'os': os_name, 'config': {'Labels': {key: value}}}).encode()\n"
-            "    path = 'blobs/sha256/' + hashlib.sha256(config).hexdigest()\n"
-            "    manifest = json.dumps([{'Config': path, 'RepoTags': [args[1]], 'Layers': []}]).encode()\n"
+            "    members, _ = docker_save_members(args[1], config)\n"
             "    with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as out:\n"
-            "        for name, data in (('manifest.json', manifest), (path, config)):\n"
-            "            info = tarfile.TarInfo(name); info.size = len(data); out.addfile(info, io.BytesIO(data))\n"
+            "        add_members(out, members)\n"
             "    sys.exit(0)\n"
             "sys.exit(f'unexpected docker call: {args}')\n",
         )

@@ -33,7 +33,7 @@ describe('local deploy transport contracts (behavior exercised in Python harness
   test('source, artifact and container have explicit identity checks', () => {
     expect(script).toContain('Ref is not current origin/main');
     expect(remote).toContain('Archive checksum mismatch');
-    expect(remote).toContain('Loaded config identity mismatch');
+    expect(remote).toContain('Loaded image identity mismatch');
     expect(remote).toContain('"$REVISION" == "$SHA"');
   });
   test('readiness must be healthy, not just routed to a bot', () => {

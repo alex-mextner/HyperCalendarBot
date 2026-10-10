@@ -108,12 +108,14 @@ def runtime_matches(snapshot, sha):
         return False
     receipt = snapshot["receipt"]
     image = snapshot.get("image")
+    # The receipt's image_id is the container's .Image the activator verified: the config digest on
+    # Docker's classic image store, the manifest digest on the containerd store (the odroid, #784).
     return (
         receipt.get("revision") == sha
         and snapshot.get("revision") == sha
         and isinstance(image, str)
         and DIGEST.fullmatch(image) is not None
-        and receipt.get("config_digest") == image
+        and receipt.get("image_id") == image
         and snapshot.get("running") is True
         and snapshot.get("health") == "ok"
         and snapshot.get("ready") in ("ok", "ok (unverified)")
