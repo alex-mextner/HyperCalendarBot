@@ -515,24 +515,25 @@ export function acceptsSamplingTemperature(provider: ProviderId): boolean {
   return provider !== 'claude';
 }
 
-/** Measured on real agent turns: Haiku 5.5 thought for up to ~1000 tokens before one tool call. */
-const CLAUDE_MIN_THINKING_ALLOWANCE = 1024;
+/**
+ * Room for hidden thinking on top of the caller's budget. On real agent turns Haiku 5.5 thought
+ * 800–2000 tokens before one tool call (live, 2026-10-09/10), so a reserve scaled to small budgets
+ * cuts it close. `max_tokens` is only a cap: unused reserve costs nothing.
+ */
+const CLAUDE_THINKING_RESERVE_TOKENS = 8192;
 
 /**
- * Claude 5.x thinks before answering; the compatible endpoint streams none of that thinking but
- * bills it against `max_tokens`, so a short budget can end at `length` with nothing visible
- * (a 256-token summary came back empty, live 2026-10-09). Thinking stays on at medium effort,
- * and the request carries an allowance for it on top of the caller's budget — the budget
- * itself, at least CLAUDE_MIN_THINKING_ALLOWANCE — so the visible answer keeps every token
- * the caller asked for (the cap is shared, so a short think leaves the answer more room).
- * Adaptive thinking is refused by this endpoint; `medium` was accepted live by both 5.5 models
- * and the preference-list fallbacks, and the largest caller budget (4096 → 8192) by both 5.5s.
+ * The `max_tokens` to send Claude for an answer of `answerTokens`. Claude 5.x thinks before
+ * answering at its own level; the compatible endpoint streams none of it but bills it against
+ * `max_tokens`, so a short budget can end at `length` with nothing visible (a 256-token summary
+ * came back empty). The endpoint offers no working control over how much it thinks: adaptive
+ * thinking is refused, and `reasoning_effort`, `output_config.effort` and `thinking.budget_tokens`
+ * left the amount unchanged on real prompts — only the off switches act, and thinking stays on.
+ * So 5.x gets CLAUDE_THINKING_RESERVE_TOKENS on top, keeping every token the caller asked for
+ * free for the visible answer. Older models (Haiku 4.5) do not think and get the plain budget.
  */
-export function claudeReasoning(answerTokens: number): { reasoning_effort: 'medium'; max_tokens: number } {
-  return {
-    reasoning_effort: 'medium',
-    max_tokens: answerTokens + Math.max(answerTokens, CLAUDE_MIN_THINKING_ALLOWANCE),
-  };
+export function claudeMaxTokens(model: string, answerTokens: number): number {
+  return /^claude-[a-z]+-5(?:-|$)/.test(model) ? answerTokens + CLAUDE_THINKING_RESERVE_TOKENS : answerTokens;
 }
 
 /** Standard OpenAI streaming adapter (works for every provider). */
@@ -554,9 +555,8 @@ function streamingSlot(
       const params: OpenAI.ChatCompletionCreateParamsStreaming = {
         model,
         messages: opts.messages,
-        max_tokens: opts.maxTokens,
+        max_tokens: provider === 'claude' ? claudeMaxTokens(model, opts.maxTokens) : opts.maxTokens,
         ...(acceptsSamplingTemperature(provider) ? { temperature: opts.temperature ?? 0.3 } : {}),
-        ...(provider === 'claude' ? claudeReasoning(opts.maxTokens) : {}),
         stream: true,
         ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
       };
