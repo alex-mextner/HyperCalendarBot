@@ -32,7 +32,9 @@ type Behavior =
   /** Streams `text`, then dies — the provider failed after output reached the caller. */
   | { kind: 'partial-then-throw'; text: string; error: Error }
   /** Waits for `gate` before answering, so two requests can be in flight together. */
-  | { kind: 'hold'; gate: Promise<void>; text: string };
+  | { kind: 'hold'; gate: Promise<void>; text: string }
+  /** Streams each part as its own chunk (text, or fragments of one tool call's arguments), counting what was read. */
+  | { kind: 'chunks'; parts: string[]; served: { count: number }; toolName?: string };
 
 /** The request fields these tests read. */
 interface FakeRequest {
@@ -102,6 +104,26 @@ function makeProvider(options: FakeProviderOptions): FakeProvider {
             if (!behavior) throw new Error('fake provider has no behavior scripted');
             if (behavior.kind === 'throw') throw behavior.error;
             if (behavior.kind === 'hold') await behavior.gate;
+            if (behavior.kind === 'chunks') {
+              const { parts, served, toolName } = behavior;
+              async function* chunks(): AsyncGenerator<StreamChunk> {
+                for (const [index, part] of parts.entries()) {
+                  served.count += 1;
+                  const delta = toolName
+                    ? {
+                        tool_calls: [
+                          index === 0
+                            ? { index: 0, id: 'call_1', function: { name: toolName, arguments: part } }
+                            : { index: 0, function: { arguments: part } },
+                        ],
+                      }
+                    : { content: part };
+                  yield { choices: [{ delta, finish_reason: null }] };
+                }
+                yield { choices: [{ delta: {}, finish_reason: toolName ? 'tool_calls' : 'stop' }] };
+              }
+              return chunks();
+            }
             const text = behavior.text;
             const failAfterText = behavior.kind === 'partial-then-throw' ? behavior.error : null;
             async function* gen(): AsyncGenerator<StreamChunk> {
@@ -895,18 +917,16 @@ describe('provider order', () => {
     expect(claude.requests.map((request) => request.temperature)).toEqual([undefined]);
   });
 
-  // Claude 5.x thinks before answering and the compatible endpoint streams none of it, yet
-  // bills it against max_tokens (live, 2026-10-09): a 256-token Haiku summary came back empty
-  // at `length`, and Haiku thought 800–2000 tokens on real agent turns. Thinking stays on at the
-  // model's own level (the endpoint ignored reasoning_effort, output_config.effort and
-  // thinking.budget_tokens alike); a fixed 8192-token reserve keeps it from eating the visible
-  // answer. Haiku 4.5 does not think, so a reserve would only widen its visible output.
+  // Claude 5.5 thinks before answering and the compatible endpoint streams none of it, yet
+  // bills it against max_tokens (live, 2026-10-09/10): a 256-token Haiku summary came back empty
+  // at `length`. No request field caps the thinking (reasoning_effort, output_config.effort and
+  // thinking.budget_tokens all left it unchanged), so thinking must not count toward the
+  // caller's limit: Claude gets its 128000-token ceiling and the limit is enforced on the
+  // visible stream instead.
   test.each([
-    { fast: true, model: 'claude-haiku-5-5', maxTokens: 256, sent: 256 + 8192 },
-    { fast: false, model: 'claude-sonnet-5-5', maxTokens: 4096, sent: 4096 + 8192 },
-    { fast: false, model: 'claude-sonnet-5', maxTokens: 4096, sent: 4096 + 8192 },
-    { fast: true, model: 'claude-haiku-4-5-20251001', maxTokens: 64, sent: 64 },
-  ])('Claude $model is sent max_tokens $sent for a $maxTokens answer', async ({ fast, model, maxTokens, sent }) => {
+    { fast: true, model: 'claude-haiku-5-5', maxTokens: 256 },
+    { fast: false, model: 'claude-sonnet-5-5', maxTokens: 4096 },
+  ])('Claude $model is sent its output ceiling for a $maxTokens answer', async ({ fast, model, maxTokens }) => {
     process.env.AI_SMART_CHAIN = 'zai,claude';
     process.env.AI_FAST_CHAIN = 'zai,claude';
     Object.assign(process.env, { CLAUDE_API_TOKEN: 'claude-key', CLAUDE_MODEL: model, CLAUDE_FAST_MODEL: model });
@@ -915,10 +935,62 @@ describe('provider order', () => {
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens, fast });
 
-    expect(claude.requests).toMatchObject([{ max_tokens: sent }]);
+    expect(claude.requests).toMatchObject([{ max_tokens: 128_000 }]);
     expect(claude.requests[0]?.reasoning_effort).toBeUndefined();
     expect(claude.requests[0]?.thinking).toBeUndefined();
     expect(zai.requests).toMatchObject([{ max_tokens: maxTokens }]);
+  });
+
+  // The caller's limit binds Claude's visible output only, so the stream reader enforces it:
+  // reading stops on the chunk that passes the limit, exactly like a provider stop at `length`.
+  test('a Claude answer past the caller limit is cut at length on the visible stream', async () => {
+    process.env.AI_FAST_CHAIN = 'claude';
+    Object.assign(process.env, { CLAUDE_API_TOKEN: 'claude-key', CLAUDE_FAST_MODEL: 'claude-haiku-5-5' });
+    const served = { count: 0 };
+    // 35 ASCII characters estimate at 10 tokens each.
+    claude = makeProvider({ behaviors: [{ kind: 'chunks', parts: Array(6).fill('a'.repeat(35)), served }] });
+
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 20, fast: true });
+
+    expect(result.finishReason).toBe('length');
+    expect(result.text).toBe('a'.repeat(105));
+    expect(served.count).toBe(3);
+  });
+
+  test('a Claude answer within the caller limit is read to the end', async () => {
+    process.env.AI_FAST_CHAIN = 'claude';
+    Object.assign(process.env, { CLAUDE_API_TOKEN: 'claude-key', CLAUDE_FAST_MODEL: 'claude-haiku-5-5' });
+    const served = { count: 0 };
+    claude = makeProvider({ behaviors: [{ kind: 'chunks', parts: Array(2).fill('a'.repeat(35)), served }] });
+
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 20, fast: true });
+
+    expect(result.finishReason).toBe('stop');
+    expect(result.text).toBe('a'.repeat(70));
+    expect(served.count).toBe(2);
+  });
+
+  // Tool-call names and argument fragments are visible output too: a runaway tool call is cut
+  // by the same limit as text, and its truncated arguments fail like any tool call that a
+  // provider stopped at `length`, so nothing half-written is executed.
+  test('Claude tool-call arguments count toward the caller limit', async () => {
+    process.env.AI_FAST_CHAIN = 'claude';
+    Object.assign(process.env, { CLAUDE_API_TOKEN: 'claude-key', CLAUDE_FAST_MODEL: 'claude-haiku-5-5' });
+    const served = { count: 0 };
+    claude = makeProvider({
+      behaviors: [{ kind: 'chunks', parts: Array(6).fill('a'.repeat(35)), served, toolName: 'create_event' }],
+    });
+
+    const failure = await aiStreamRound({
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 20,
+      fast: true,
+    }).catch((error: unknown) => error);
+
+    // 12 name characters + 70 argument characters estimate at 24 tokens, past the limit of 20.
+    expect(failure).toBeInstanceOf(AllProvidersFailedError);
+    expect(failure).toMatchObject({ failures: [{ emptyResponse: { finishReason: 'length' } }] });
+    expect(served.count).toBe(2);
   });
 
   // An empty Claude answer is diagnosed against the cap actually sent: hidden thinking is
@@ -935,7 +1007,7 @@ describe('provider order', () => {
     }).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(AllProvidersFailedError);
-    expect(failure).toMatchObject({ failures: [{ emptyResponse: { maxOutputTokens: 256 + 8192 } }] });
+    expect(failure).toMatchObject({ failures: [{ emptyResponse: { maxOutputTokens: 128_000 } }] });
   });
 
   test('the default chain ends at z.ai when no Claude token is configured', async () => {

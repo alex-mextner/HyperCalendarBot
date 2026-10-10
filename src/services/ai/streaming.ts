@@ -385,11 +385,21 @@ interface ConsumedStream {
   usage: CompletionUsage | null;
 }
 
+/** No character estimates above 1/1.2 tokens (see token-estimate.ts). */
+const MIN_CHARS_PER_TOKEN = 1.2;
+
+/**
+ * `visibleTokenLimit`, when set, stops reading once the visible output (text, tool-call names and
+ * argument fragments) passes that many estimated tokens, as if the provider had stopped at
+ * `length`. Claude bills hidden thinking against `max_tokens`, so its server cap cannot carry
+ * the caller's limit; the reader enforces it instead.
+ */
 async function consumeStream(
   stream: AsyncIterable<OpenAI.ChatCompletionChunk>,
   cbs: StreamCallbacks,
   startedAt: number,
   signal?: AbortSignal,
+  visibleTokenLimit?: number,
 ): Promise<ConsumedStream> {
   let text = '';
   let finishReason = 'stop';
@@ -401,6 +411,11 @@ async function consumeStream(
   let firstUsableMs: number | null = null;
   let usage: CompletionUsage | null = null;
   const toolCalls = new Map<number, PendingToolCall>();
+  const limitVisible = visibleTokenLimit !== undefined;
+  let visible = '';
+  // Each character adds at most 1/MIN_CHARS_PER_TOKEN tokens, so until the visible output grows
+  // past this length the estimate cannot pass the limit and need not be recomputed.
+  let estimateAtChars = limitVisible ? visibleTokenLimit * MIN_CHARS_PER_TOKEN : Number.POSITIVE_INFINITY;
   const markUsable = () => {
     if (firstUsableMs === null) firstUsableMs = Math.max(0, performance.now() - startedAt);
   };
@@ -432,13 +447,27 @@ async function consumeStream(
       if (delta.content) {
         markUsable();
         text += delta.content;
+        if (limitVisible) visible += delta.content;
         cbs.onTextDelta?.(delta.content);
       }
 
       if (delta.tool_calls) {
         toolFragmentCount += delta.tool_calls.length;
         if (delta.tool_calls.some((tc) => tc.id || tc.function?.name || tc.function?.arguments)) markUsable();
-        for (const tc of delta.tool_calls) applyToolCallDelta(tc, toolCalls, cbs);
+        for (const tc of delta.tool_calls) {
+          applyToolCallDelta(tc, toolCalls, cbs);
+          if (limitVisible) visible += (tc.function?.name ?? '') + (tc.function?.arguments ?? '');
+        }
+      }
+
+      if (visibleTokenLimit !== undefined && visible.length > estimateAtChars) {
+        const estimate = estimateTokens(visible);
+        if (estimate > visibleTokenLimit) {
+          finishReason = 'length';
+          finishReasonSeen = true;
+          break;
+        }
+        estimateAtChars = visible.length + (visibleTokenLimit - estimate) * MIN_CHARS_PER_TOKEN;
       }
     }
   } finally {
@@ -516,25 +545,13 @@ export function acceptsSamplingTemperature(provider: ProviderId): boolean {
 }
 
 /**
- * Room for hidden thinking on top of the caller's budget. On real agent turns Haiku 5.5 thought
- * 800–2000 tokens before one tool call (live, 2026-10-09/10), so a reserve scaled to small budgets
- * cuts it close. `max_tokens` is only a cap: unused reserve costs nothing.
+ * The `max_tokens` every Claude request carries: the live-verified output ceiling of both
+ * claude-sonnet-5-5 and claude-haiku-5-5 (2026-10-10; one more is a 400). Claude 5.5 thinks before
+ * answering, streams none of it on the compatible endpoint, yet bills it against `max_tokens`,
+ * and no request field caps that thinking. So the server cap stays out of the way and the
+ * caller's limit is enforced on the visible stream; the per-attempt deadline bounds runaway thinking.
  */
-const CLAUDE_THINKING_RESERVE_TOKENS = 8192;
-
-/**
- * The `max_tokens` to send Claude for an answer of `answerTokens`. Claude 5.x thinks before
- * answering at its own level; the compatible endpoint streams none of it but bills it against
- * `max_tokens`, so a short budget can end at `length` with nothing visible (a 256-token summary
- * came back empty). The endpoint offers no working control over how much it thinks: adaptive
- * thinking is refused, and `reasoning_effort`, `output_config.effort` and `thinking.budget_tokens`
- * left the amount unchanged on real prompts — only the off switches act, and thinking stays on.
- * So 5.x gets CLAUDE_THINKING_RESERVE_TOKENS on top, keeping every token the caller asked for
- * free for the visible answer. Older models (Haiku 4.5) do not think and get the plain budget.
- */
-export function claudeMaxTokens(model: string, answerTokens: number): number {
-  return /^claude-[a-z]+-5(?:-|$)/.test(model) ? answerTokens + CLAUDE_THINKING_RESERVE_TOKENS : answerTokens;
-}
+export const CLAUDE_MAX_OUTPUT_TOKENS = 128_000;
 
 /** Standard OpenAI streaming adapter (works for every provider). */
 function streamingSlot(
@@ -555,7 +572,7 @@ function streamingSlot(
       const params: OpenAI.ChatCompletionCreateParamsStreaming = {
         model,
         messages: opts.messages,
-        max_tokens: provider === 'claude' ? claudeMaxTokens(model, opts.maxTokens) : opts.maxTokens,
+        max_tokens: provider === 'claude' ? CLAUDE_MAX_OUTPUT_TOKENS : opts.maxTokens,
         ...(acceptsSamplingTemperature(provider) ? { temperature: opts.temperature ?? 0.3 } : {}),
         stream: true,
         ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
@@ -600,7 +617,13 @@ function streamingSlot(
         choiceCount,
         toolFragmentCount,
         refusalSeen,
-      } = await consumeStream(stream as AsyncIterable<OpenAI.ChatCompletionChunk>, cbs, attemptStartedAt, opts.signal);
+      } = await consumeStream(
+        stream as AsyncIterable<OpenAI.ChatCompletionChunk>,
+        cbs,
+        attemptStartedAt,
+        opts.signal,
+        provider === 'claude' ? opts.maxTokens : undefined,
+      );
 
       const invalidTools =
         (toolFragmentCount > 0 && toolCalls.length === 0) ||
