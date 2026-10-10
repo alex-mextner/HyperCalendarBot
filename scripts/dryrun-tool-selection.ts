@@ -33,8 +33,9 @@ import { UserRepository } from '../src/database/repositories/user.repository.ts'
 import { runMigrations } from '../src/database/schema.ts';
 import { claudeClient, geminiClient, groqClient, hfClient, zaiClient } from '../src/services/ai/clients.ts';
 import type { ProviderId } from '../src/services/ai/provider-ids.ts';
-import { acceptsSamplingTemperature, claudeMaxTokens } from '../src/services/ai/streaming.ts';
+import { acceptsSamplingTemperature, CLAUDE_MAX_OUTPUT_TOKENS } from '../src/services/ai/streaming.ts';
 import { buildSystemPrompt } from '../src/services/ai/system-prompt.ts';
+import { estimateTokens } from '../src/services/ai/token-estimate.ts';
 import { getToolDefinitions } from '../src/services/ai/tools.ts';
 import type { AgentContext } from '../src/services/ai/types.ts';
 import { ConversationLogger } from '../src/services/conversation-logger.ts';
@@ -209,8 +210,7 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
     model: provider.model,
     messages: [{ role: 'system', content: buildSystemPrompt(ctx) }, ...buildMessages(testCase)],
     tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
-    max_tokens:
-      provider.name === 'claude' ? claudeMaxTokens(provider.model, MAX_COMPLETION_TOKENS) : MAX_COMPLETION_TOKENS,
+    max_tokens: provider.name === 'claude' ? CLAUDE_MAX_OUTPUT_TOKENS : MAX_COMPLETION_TOKENS,
     ...(acceptsSamplingTemperature(provider.name) ? { temperature: 0 } : {}),
   };
   const settings = {
@@ -223,6 +223,10 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
     const calls = res.choices[0]?.message.tool_calls ?? [];
     const tools = calls.map((c) => ('function' in c ? c.function.name : c.type));
     const text = res.choices[0]?.message.content ?? '';
+    // Production cuts Claude's visible output at the caller budget on the stream; this
+    // non-streaming replay cannot, so an answer past the budget scores as that cut.
+    const visible = text + calls.map((c) => ('function' in c ? c.function.name + c.function.arguments : '')).join('');
+    const cut = provider.name === 'claude' && estimateTokens(visible) > MAX_COMPLETION_TOKENS;
     return {
       id: testCase.id,
       provider: provider.name,
@@ -230,9 +234,9 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
       tools,
       text,
       promptTokens: res.usage?.prompt_tokens ?? null,
-      finishReason: res.choices[0]?.finish_reason ?? null,
+      finishReason: cut ? 'length' : (res.choices[0]?.finish_reason ?? null),
       error: null,
-      ok: verdict(testCase, tools, text),
+      ok: !cut && verdict(testCase, tools, text),
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -62,9 +62,9 @@ interface ModelPreferenceTable {
  * Known-good chat model ids per provider, best first. Groq ids were verified live
  * on 2026-09-01. The `qwen3.x-27b` ids are live on the same account but capped at
  * 8000 tokens per minute, which rejects the bot's ~11.5k-token tool payload with
- * 413 — so they are deliberately not listed. Claude ids were listed live by the
- * account's `/v1/models` on 2026-10-09. Claude is a paid reserve and every id shares
- * the `claude` family, so the heuristic would pick `claude-fable-*`/`claude-opus-*`;
+ * 413 — so they are deliberately not listed. Claude is pinned to the 5.5 models by
+ * owner decision (2026-10-10): no older fallbacks. It is a paid reserve and every id
+ * shares the `claude` family, so the heuristic would pick `claude-fable-*`/`claude-opus-*`;
  * it is preferred-only and never switches to a pricier tier on its own. Other
  * providers with an empty list fall back to the heuristic in `selectReplacementModel`.
  */
@@ -77,8 +77,8 @@ const PREFERRED_MODELS: ModelPreferenceTable = {
   gemini: { smart: [], fast: [] },
   hf: { smart: [], fast: [] },
   claude: {
-    smart: ['claude-sonnet-5-5', 'claude-sonnet-5'],
-    fast: ['claude-haiku-5-5', 'claude-haiku-4-5-20251001'],
+    smart: ['claude-sonnet-5-5'],
+    fast: ['claude-haiku-5-5'],
     preferredOnly: true,
   },
 };

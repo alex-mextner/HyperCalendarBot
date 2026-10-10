@@ -22,6 +22,7 @@ and not a percentile claim.
 | 66c665c3 | Sonnet 5.5 `between_tools`; others `disabled` | omitted | caller budget |
 | c7daca39 (merged #782) | `reasoning_effort: medium` | omitted | budget + max(budget, 1024) |
 | #787 | none (model default) | omitted | 5.x: budget + 8192; Haiku 4.5: budget |
+| #789 | none (model default) | omitted | 128000 (model ceiling); caller budget enforced on the visible stream |
 
 `temperature` is rejected with 400 by Claude 5.5. Adaptive thinking is rejected with 400 by this
 endpoint. Sonnet 5.5 accepts only `between_tools` as an off switch; `claude-sonnet-5` and both Haiku
@@ -46,3 +47,24 @@ Thinking stays on at the model's own level; the endpoint offers no working effor
 fixed 8192-token reserve on top of the caller's budget (unused reserve is not billed). Haiku 4.5 does
 not think and gets the plain budget. Native Messages API support would be needed for a real effort
 setting.
+
+## Results after the revision (#789, 2026-10-10)
+| Run | Sample | Outcome |
+|---|---|---|
+| Hard math prompt, Haiku 5.5 | 1 synthetic | thought past 8192 tokens: the fixed reserve could still end empty |
+| Cap acceptance | sonnet-5-5, haiku-5-5 | `max_tokens` 128000 accepted, 128001 is a 400; a 128000 cap did not reduce the output-token rate-limit headroom |
+| `aiStreamRound` fast chain = Haiku 5.5, 13 real logged prompts × 256/400 | 26 calls | 22 `tool_calls`, 4 `stop`; 0 empty, 0 `length`; peak 848 completion tokens incl. thinking |
+| `aiStreamRound` smart chain = Sonnet 5.5, same 13 prompts × 4096 | 13 calls | 9 `tool_calls`, 4 `stop`; 0 empty, 0 `length`; peak 589 |
+| Visible cut, Haiku 5.5, open-length story at 64 tokens | 3 runs | 2 × finish `length` at 93 and 103 estimated visible tokens (the cut lands after the chunk that crosses the limit); 1 × fast-chain deadline (8 s) before any visible token |
+| Time to first visible token, "600-word story" | 1 run each | Haiku 10.2 s, Sonnet 18.0 s of hidden thinking: longer than the fast (8 s) and smart (15 s) attempt deadlines |
+| Fast callers (validator backed/invented, both summarizers, TTS translation) | 5 checks | all pass |
+| Corpus first move | Haiku 5.5 / Sonnet 5.5 | 22/23 / 21/23, no provider errors (misses: read-first `get_upcoming`, `find_contact`) |
+
+## Decision (2026-10-10, revised)
+Thinking must not count toward the caller's limit, and only the 5.5 models are used (owner decision).
+Since no request field caps the thinking, every Claude request sends `max_tokens` 128000, the
+verified output ceiling of both 5.5 models, with no thinking or effort fields. The caller's budget
+limits the visible answer only: the stream reader estimates visible tokens (text, tool-call names and
+arguments) and stops at finish `length` once they pass the budget. Runaway thinking is bounded by the
+per-attempt deadlines (8 s fast, 15 s smart), not by `max_tokens`. The fixed 8192-token reserve and the
+`claude-sonnet-5` / `claude-haiku-4-5` fallbacks are gone.

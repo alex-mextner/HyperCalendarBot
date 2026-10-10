@@ -252,11 +252,11 @@ describe('resolveModelOverride', () => {
   });
 
   test('Claude still swaps to a live id from its preference list', async () => {
-    const { client } = makeListingClient(['claude-opus-5-5', 'claude-haiku-4-5-20251001']);
+    const { client } = makeListingClient(['claude-opus-5-5', 'claude-haiku-5-5']);
 
     expect(
-      await resolveModelOverride({ provider: 'claude', client, configuredModel: 'claude-haiku-5-5', fast: true }),
-    ).toBe('claude-haiku-4-5-20251001');
+      await resolveModelOverride({ provider: 'claude', client, configuredModel: 'claude-haiku-retired', fast: true }),
+    ).toBe('claude-haiku-5-5');
   });
 
   test('records the override and notifies listeners so the admin can be told the config is stale', async () => {
