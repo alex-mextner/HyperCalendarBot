@@ -895,23 +895,18 @@ describe('provider order', () => {
     expect(claude.requests.map((request) => request.temperature)).toEqual([undefined]);
   });
 
-  // Claude 5.5 thinks before answering and the compatible endpoint streams none of it, yet
+  // Claude 5.x thinks before answering and the compatible endpoint streams none of it, yet
   // bills it against max_tokens (live, 2026-10-09): a 256-token Haiku summary came back empty
-  // at `length`, and Haiku thought ~1000 tokens on real agent turns. Thinking stays on at medium
-  // effort; a fixed 8192-token reserve on top of the caller's budget keeps it from eating the
-  // visible answer at every budget size.
+  // at `length`, and Haiku thought 800–2000 tokens on real agent turns. Thinking stays on at the
+  // model's own level (the endpoint ignored reasoning_effort, output_config.effort and
+  // thinking.budget_tokens alike); a fixed 8192-token reserve keeps it from eating the visible
+  // answer. Haiku 4.5 does not think, so a reserve would only widen its visible output.
   test.each([
     { fast: true, model: 'claude-haiku-5-5', maxTokens: 256, sent: 256 + 8192 },
     { fast: false, model: 'claude-sonnet-5-5', maxTokens: 4096, sent: 4096 + 8192 },
-    // Preference-list fallbacks accepted `medium` live too (2026-10-09).
     { fast: false, model: 'claude-sonnet-5', maxTokens: 4096, sent: 4096 + 8192 },
-    { fast: true, model: 'claude-haiku-4-5-20251001', maxTokens: 64, sent: 64 + 8192 },
-  ])('Claude $model thinks at medium effort with $maxTokens answer tokens kept free', async ({
-    fast,
-    model,
-    maxTokens,
-    sent,
-  }) => {
+    { fast: true, model: 'claude-haiku-4-5-20251001', maxTokens: 64, sent: 64 },
+  ])('Claude $model is sent max_tokens $sent for a $maxTokens answer', async ({ fast, model, maxTokens, sent }) => {
     process.env.AI_SMART_CHAIN = 'zai,claude';
     process.env.AI_FAST_CHAIN = 'zai,claude';
     Object.assign(process.env, { CLAUDE_API_TOKEN: 'claude-key', CLAUDE_MODEL: model, CLAUDE_FAST_MODEL: model });
@@ -920,10 +915,10 @@ describe('provider order', () => {
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens, fast });
 
-    expect(claude.requests).toMatchObject([{ reasoning_effort: 'medium', max_tokens: sent }]);
+    expect(claude.requests).toMatchObject([{ max_tokens: sent }]);
+    expect(claude.requests[0]?.reasoning_effort).toBeUndefined();
     expect(claude.requests[0]?.thinking).toBeUndefined();
     expect(zai.requests).toMatchObject([{ max_tokens: maxTokens }]);
-    expect(zai.requests[0]?.reasoning_effort).toBeUndefined();
   });
 
   // An empty Claude answer is diagnosed against the cap actually sent: hidden thinking is
