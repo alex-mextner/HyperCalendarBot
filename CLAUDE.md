@@ -575,16 +575,17 @@ Full runbook: `docs/reference/deploy-runbook.md` (Docker, Dockerfile, bun lockfi
 
 ### Server
 
-- **Host**: 104.248.84.190 (Digital Ocean, 1 CPU, shared with other projects)
-- **SSH**: `root@` for docker/sudo, `www-data@` for files.
+- **Host**: `root@odroidn2` (home ODROID-N2+, Tailscale MagicDNS name; aarch64, Armbian trixie, 6 cores, 3.7 GB RAM, root on microSD) since 2026-10-09 22:30 UTC (#784). Shared with ExpenseSyncBot, HyperSummaryBot, mextner.com and three self-hosted GitHub runners.
+- **Images**: linux/arm64 only, built by CI on `ubuntu-24.04-arm` or by the local fallback.
 - **Deploy path**: `/opt/hypercal`. Container mounts `/opt/hypercal/data`, reads `/opt/hypercal/.env`.
-- **Domain**: `hypercal.invntrm.ru` (Caddy auto-TLS)
-- **Caddy config**: CI deploys repo's `Caddyfile` to `/opt/hypercal/Caddyfile` and runs `caddy reload`.
-- **Cron**: `0 3 * * *` backup, `*/2 * * * *` healthcheck (both log to `/opt/hypercal/logs/`).
+- **Domain**: `hypercal.invntrm.ru`. TLS and ingress stay on the DigitalOcean droplet `104.248.84.190`: its Caddy proxies the bot paths to the Tailscale Funnel `https://odroidn2.tailbfe8ea.ts.net`, so webhook/OAuth/watch-channel URLs are unchanged.
+- **Caddy config**: the repo `Caddyfile` is that DO ingress config, applied by hand on DO. Deploys copy it to `/opt/hypercal` on the odroid but never reload any Caddy.
+- **CI deploy**: the `deploy` job runs on the odroid's self-hosted runner `odroid-hcb` (user `hcb-runner`, no docker group) and only pipes its `GITHUB_TOKEN` on stdin to `sudo -n /usr/local/sbin/hypercal-activate-release <sha>` (`scripts/odroid-activate-release.sh`). Root checks main and deploys only the `release-<sha>` artifact named by the `release-artifact` commit status, which the GitHub-hosted build job posts (it alone has `statuses: write`). Root trusts nothing else from the runner. No SSH secrets. Runner setup and trust model: runbook "Odroid runner".
+- **Cron**: odroid: `0 3 * * *` backup. DO: `*/2 * * * *` external watchdog (`scripts/healthcheck-alert.sh`, reads DO's `/opt/hypercal/.env`). Both log to their host's `/opt/hypercal/logs/`.
 - **Alerts**: `healthcheck-alert.sh` posts to `/admin/alerts` on DOWN. CI `notify-failure` does the same. `scripts/mac-alert-watcher.sh` (Mac LaunchAgent) polls `/admin/alerts/next` and launches `omp` in a new Terminal window to auto-investigate.
 - **Never renumber existing migrations** — only append new ones at the end.
 - **Every new migration ships `docs/reference/migrations/<name>.md`** starting with the front matter from the runbook's "Schema gate" section (`rollback-compatible`, `data-deletion`). Without it the deploy refuses the release; `rollback-compatible: no` or `data-deletion: yes` needs a reviewed migration procedure. `test/python/test_migration_gate.py` checks every checked-in doc.
-- **Shared server**: never `pm2 delete all`, `docker system prune`, or kill PIDs without checking. Port 3001 = HyperCalendarBot.
+- **Shared server**: never `pm2 delete all`, `docker system prune`, or kill PIDs without checking ownership. Port 3001 = HyperCalendarBot.
 - **Image retention**: a verified deploy keeps the five newest `rollback-*` tags plus the current and previous release images and removes other hypercalendarbot tags; a release that does not fit twice on the Docker root is refused before `docker load` (runbook "Disk space").
 
 ## MCP Tools

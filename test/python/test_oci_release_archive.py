@@ -1,7 +1,7 @@
 """OCI layout -> docker-save conversion feeding the release artifact checks.
 
 Builds real OCI image-layout tars shaped like Apple's `container image save`
-output (a named outer index, a nested index with the linux/amd64 manifest plus
+output (a named outer index, a nested index with the linux/arm64 manifest plus
 an unknown/unknown attestation manifest, gzip layers), converts them, and runs
 the converted archive through scripts/release-artifact.py.
 """
@@ -53,7 +53,7 @@ class OciConversionTests(unittest.TestCase):
     def oci(
         self,
         *,
-        arch="amd64",
+        arch="arm64",
         name=None,
         tamper_layer=False,
         wrong_diff_id=False,
@@ -182,7 +182,7 @@ class OciConversionTests(unittest.TestCase):
         self.assertEqual(converted_id, config_id)
         result = self.artifact.inspect_archive(packed, self.sha, self.tag)
         self.assertEqual(result["config_digest"], config_id)
-        self.assertEqual((result["os"], result["architecture"]), ("linux", "amd64"))
+        self.assertEqual((result["os"], result["architecture"]), ("linux", "arm64"))
         with tarfile.open(target) as tar:
             manifest = json.load(tar.extractfile("manifest.json"))
             self.assertEqual(manifest[0]["RepoTags"], [self.tag])
@@ -217,7 +217,7 @@ class OciConversionTests(unittest.TestCase):
 
     def test_rejects_wrong_platform_tag_integrity_and_unsupported_layers(self):
         cases = [
-            ({"arch": "arm64"}, "Expected exactly one linux/amd64"),
+            ({"arch": "amd64"}, "Expected exactly one linux/arm64"),
             ({"name": "ghcr.io/other/image:latest"}, "is not named in index.json"),
             ({"tamper_layer": True}, "Layer digest mismatch"),
             ({"wrong_diff_id": True}, "diff_id mismatch"),

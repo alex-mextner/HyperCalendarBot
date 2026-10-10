@@ -2,21 +2,23 @@
 
 ## Server
 
-- **Provider**: Digital Ocean
-- **Host**: 104.248.84.190
-- **User**: www-data
-- **Deploy path**: /var/www/hypercal.invntrm.ru
-- **Domain**: hypercal.invntrm.ru (Caddy auto-TLS via Let's Encrypt)
+Since 2026-10-09 22:30 UTC (#784):
+
+- **Host**: `root@odroidn2` — home ODROID-N2+ (Tailscale MagicDNS name), aarch64, Armbian trixie
+- **Deploy path**: `/opt/hypercal`
+- **Domain**: hypercal.invntrm.ru — DNS still points at the DigitalOcean droplet `104.248.84.190`, whose
+  Caddy (auto-TLS) proxies the bot paths to the odroid's Tailscale Funnel `https://odroidn2.tailbfe8ea.ts.net`.
+  The droplet runs no bot container; it keeps the ingress and the external watchdog cron.
 
 ## Stack
 
 | Component | How |
 |-----------|-----|
-| Bot | Docker container (ghcr.io/alex-mextner/hypercalendarbot:latest) |
+| Bot | Docker container (ghcr.io/alex-mextner/hypercalendarbot, linux/arm64, pinned by commit SHA) |
 | Redis | Docker container (redis:7-alpine, AOF persistence) |
-| Reverse proxy | Caddy (host-level, auto-HTTPS) |
-| Orchestration | docker-compose v1 (1.29.2) |
-| CI/CD | GitHub Actions → build image → push to GHCR → SSH deploy |
+| Reverse proxy | Caddy on the DO droplet → Tailscale Funnel on the odroid |
+| Orchestration | Docker Compose v2 plugin |
+| CI/CD | GitHub Actions → arm64 build on `ubuntu-24.04-arm` → GHCR + release artifact → self-hosted odroid runner → root activation wrapper |
 
 ## Initial Server Setup
 
@@ -24,31 +26,23 @@ One-time steps for a fresh server.
 
 ### 1. Prerequisites
 
-```bash
-# Docker
-apt-get update && apt-get install -y docker.io docker-compose
+Docker Engine with the Compose v2 plugin: `docker compose version` must work as root.
 
-# Caddy
-apt-get install -y caddy
-
-# Ensure /etc/caddy/Caddyfile imports per-site configs:
-#   import /var/www/*/Caddyfile
-```
+Ingress is the DO droplet's Caddy plus Tailscale Funnel on the odroid (section 4); the odroid runs no
+Caddy for this bot.
 
 ### 2. Create deploy directory
 
 ```bash
-mkdir -p /var/www/hypercal.invntrm.ru/data
-chown -R www-data:www-data /var/www/hypercal.invntrm.ru
+mkdir -p /opt/hypercal/data /opt/hypercal/logs /opt/hypercal/scripts
 ```
 
 ### 3. Configure .env
 
-Copy `.env.example` to the server and fill in real values:
+Create it root-only, then fill in real values from `.env.example`:
 
 ```bash
-scp .env.example www-data@104.248.84.190:/var/www/hypercal.invntrm.ru/.env
-# Then edit on server with real credentials
+install -m 600 -o root -g root /dev/null /opt/hypercal/.env
 ```
 
 Required variables:
@@ -63,20 +57,15 @@ Optional but recommended:
 
 Note: `REDIS_URL` and `NODE_ENV` are overridden by docker-compose.yml — values in .env are ignored for these. `REDIS_PASSWORD` is used only to build `REDIS_URL` and the redis container's auth; the bot container gets it blanked. Keep `.env` at mode `0600` (see `docs/reference/deploy-runbook.md`).
 
-### 4. DNS
+### 4. DNS and ingress
 
-Point `hypercal.invntrm.ru` A record to `104.248.84.190`. Caddy handles TLS automatically.
+`hypercal.invntrm.ru` stays an A record to `104.248.84.190`. The repo `Caddyfile` is the DO Caddy
+config, applied by hand there; the odroid exposes the bot to it through Tailscale Funnel.
 
-### 5. GitHub Secrets
+### 5. Deploy runner
 
-Set these in the repo (Settings → Secrets → Actions):
-
-| Secret | Value |
-|--------|-------|
-| `SSH_HOST` | `104.248.84.190` |
-| `SSH_USER` | `www-data` |
-| `SSH_KEY` | Contents of the deployment SSH private key |
-| `DEPLOY_PATH` | `/var/www/hypercal.invntrm.ru` |
+No SSH secrets. The `deploy` job runs on the self-hosted runner `odroid-hcb` on the odroid; its setup
+(user, labels, sudoers line, activation wrapper) is in `docs/reference/deploy-runbook.md`, "Odroid runner".
 
 ### 6. Telegram MTProto (optional)
 
@@ -93,7 +82,7 @@ link to the inviter (proposals and secretary DMs: Bot API → a deep link). It i
 (interactive terminal):
 
 ```bash
-cd /var/www/hypercal.invntrm.ru
+cd /opt/hypercal
 uv venv --python 3.12 venv
 uv pip install -r pyproject.toml --python venv/bin/python
 # Voice calls only: build patched ntgcalls (5+ min, needs 5GB RAM)
@@ -121,37 +110,36 @@ manual bootstrap — never run from service startup or as recovery from a user's
 
 ## CI/CD Pipeline
 
-On every push to `main`:
+On every push to `main` (`.github/workflows/deploy.yml`):
 
-1. **test** — `bun install && bun test`
-2. **build** — Docker image → push to ghcr.io
-3. **deploy** — SCP docker-compose.yml + Caddyfile → SSH → docker-compose up
+1. **test** — `bun test`, lint, typecheck (ubuntu-latest)
+2. **build** — linux/arm64 image → push to ghcr.io; `docker save` release artifact + checksums, and a
+   `release-artifact` commit status that names the uploaded artifact's id and digest (ubuntu-24.04-arm)
+3. **deploy** — the odroid runner pipes its token to `sudo -n /usr/local/sbin/hypercal-activate-release <sha>`.
+   As root, the wrapper checks that main still points at the commit, then downloads and digest-checks the
+   artifact that status names, after checking it came from the push-to-main run. Then it runs the staged
+   `scripts/deploy-prebuilt-image.sh` (checksum, identity, schema gate, backup, rollback)
 
 ## Manual Deploy
 
-```bash
-ssh www-data@104.248.84.190
-cd /var/www/hypercal.invntrm.ru
-docker pull ghcr.io/alex-mextner/hypercalendarbot:latest
-docker-compose down --remove-orphans
-docker-compose up -d
-```
+`scripts/deploy-local-fallback.sh` builds the exact `origin/main` commit locally as linux/arm64 and runs
+the same activator on `root@odroidn2`; see the deploy runbook, "Local deploy fallback".
 
 ## Monitoring
 
 ```bash
 # Logs
-docker-compose logs -f bot
-docker-compose logs -f redis
+ssh root@odroidn2 'docker compose -f /opt/hypercal/docker-compose.yml logs -f bot'
+ssh root@odroidn2 'docker compose -f /opt/hypercal/docker-compose.yml logs -f redis'
 
 # Health check
 curl https://hypercal.invntrm.ru/health
 
 # Container status
-docker-compose ps
+ssh root@odroidn2 'docker compose -f /opt/hypercal/docker-compose.yml ps'
 
-# Caddy logs
-tail -f /var/log/caddy/hypercal.invntrm.ru.log
+# Caddy logs (ingress, on the DO droplet)
+ssh root@104.248.84.190 'tail -f /var/log/caddy/hypercal.invntrm.ru.log'
 ```
 
 ## Resource Limits

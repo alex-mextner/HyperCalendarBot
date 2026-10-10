@@ -1,4 +1,4 @@
-import importlib.util, json, os, signal, subprocess, sys, tempfile, time, unittest
+import importlib.util, json, os, signal, subprocess, sys, tempfile, time, unittest, unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -159,6 +159,14 @@ class PostShipTests(unittest.TestCase):
         self.assertFalse(
             any(a[0] == "bash" or a[:3] == ["gh", "run", "list"] for a, k in fake.calls)
         )
+
+    def test_live_probe_defaults_to_the_odroid_production_host(self):
+        fake = FakeCommands(self.root, already=True)
+        environment = {k: v for k, v in os.environ.items() if k != "HYPERCAL_DEPLOY_HOST"}
+        with unittest.mock.patch.dict(os.environ, environment, clear=True):
+            self.invoke(fake)
+        hosts = [args[args.index("ConnectTimeout=10") + 1] for args, _ in fake.calls if args[0] == "ssh"]
+        self.assertEqual(hosts, ["root@odroidn2"])
 
     def test_verified_fallback_uses_merged_blob_and_full_local_gate(self):
         for mode in ["none", "unavailable"]:

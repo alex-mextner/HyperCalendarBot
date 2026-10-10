@@ -7,9 +7,9 @@ const script = readFileSync(join(ROOT, 'scripts/deploy-local-fallback.sh'), 'utf
 const remote = readFileSync(join(ROOT, 'scripts/deploy-prebuilt-image.sh'), 'utf8');
 
 describe('local deploy transport contracts (behavior exercised in Python harness)', () => {
-  test('local Unix daemon builds exact archive as linux/amd64', () => {
+  test('local Unix daemon builds exact archive as linux/arm64', () => {
     expect(script).toContain('git archive "$SHA"');
-    expect(script).toContain('docker_local build --platform linux/amd64');
+    expect(script).toContain('docker_local build --platform linux/arm64');
     expect(script).toContain('"$endpoint" == unix://*');
     expect(remote).not.toMatch(/docker build|bun test|bun install/);
   });
@@ -17,10 +17,10 @@ describe('local deploy transport contracts (behavior exercised in Python harness
     expect(script).not.toContain('HYPERCAL_DOCKER_CONTEXT:-colima');
     expect(script).toContain('"$CONTAINER" system status');
     expect(script).toContain(
-      '"$CONTAINER" build --progress plain --platform linux/amd64 --label "org.opencontainers.image.revision=$SHA"',
+      '"$CONTAINER" build --progress plain --platform linux/arm64 --label "org.opencontainers.image.revision=$SHA"',
     );
     // Apple's OCI layout is converted to the docker-save format the artifact checks expect.
-    expect(script).toContain('"$CONTAINER" image save --platform linux/amd64');
+    expect(script).toContain('"$CONTAINER" image save --platform linux/arm64');
     expect(script).toContain('"$LOCAL_SRC/scripts/oci-to-docker-archive.py"');
     // A failed export must not strand the image: delete runs before the failure exit.
     const deleteAt = script.indexOf('"$CONTAINER" image delete');

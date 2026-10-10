@@ -51,10 +51,10 @@ def inspect_archive(path: Path, revision: str, tag: str) -> dict:
             raise ValueError("Image config digest mismatch")
         if (
             not isinstance(config, dict)
-            or config.get("architecture") != "amd64"
+            or config.get("architecture") != "arm64"
             or config.get("os") != "linux"
         ):
-            raise ValueError("Expected a Linux amd64 artifact")
+            raise ValueError("Expected a Linux arm64 artifact")
         runtime = config.get("config") or {}
         if (
             not isinstance(runtime, dict)
@@ -73,7 +73,7 @@ def inspect_archive(path: Path, revision: str, tag: str) -> dict:
         "archive_sha256": hasher.hexdigest(),
         # What docker load unpacks: the deploy refuses to start without twice this free.
         "image_bytes": sum(member.size for member in members if member.isfile()),
-        "architecture": "amd64",
+        "architecture": "arm64",
         "os": "linux",
     }
 

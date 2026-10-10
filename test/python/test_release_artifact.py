@@ -28,7 +28,7 @@ class ArtifactTests(unittest.TestCase):
         self,
         *,
         revision=None,
-        arch="amd64",
+        arch="arm64",
         duplicate=False,
         bad_digest=False,
         tag=None,
@@ -64,13 +64,13 @@ class ArtifactTests(unittest.TestCase):
         result = self.module.inspect_archive(archive, self.sha, self.tag)
         self.assertEqual(result["config_digest"], config_id)
         self.assertEqual(result["revision"], self.sha)
-        self.assertEqual(result["architecture"], "amd64")
+        self.assertEqual(result["architecture"], "arm64")
         self.assertEqual(len(result["archive_sha256"]), 64)
 
     def test_rejects_wrong_revision_arch_tag_digest_and_duplicate(self):
         for args in [
             {"revision": "b" * 40},
-            {"arch": "arm64"},
+            {"arch": "amd64"},
             {"tag": "elsewhere:latest"},
             {"bad_digest": True},
             {"duplicate": True},

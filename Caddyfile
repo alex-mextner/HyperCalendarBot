@@ -1,9 +1,16 @@
+# DigitalOcean ingress for hypercal.invntrm.ru (#784). Since 2026-10-09 the bot runs on
+# the home ODROID-N2+ and this Caddy only forwards to its Tailscale Funnel, so the
+# public domain, OAuth redirect, Calendar watch channels and Telegram webhook URL did not
+# change. Applied by hand to the DO droplet's Caddy followed by `caddy reload`; deploys
+# copy this file to /opt/hypercal on the odroid but never load it there.
 hypercal.invntrm.ru {
 	# All bot API paths — retry during container restarts so clients see a delay, not 502.
 	# Caddy holds the connection and retries every 500ms for up to 10s.
 	@bot path /webhook/* /oauth/* /webhooks/* /ws/* /health /ready /admin/*
 	handle @bot {
-		reverse_proxy localhost:3001 {
+		reverse_proxy https://odroidn2.tailbfe8ea.ts.net {
+			# Funnel routes by SNI/Host: send the upstream's name, not hypercal.invntrm.ru.
+			header_up Host {upstream_hostport}
 			lb_try_duration 10s
 			lb_try_interval 500ms
 		}

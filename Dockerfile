@@ -31,8 +31,14 @@ RUN ln -s /usr/local/bin/bun /usr/local/bin/node
 # MTProto service-tier lookups (check-session, resolve-username, get-user-info, get-chat-members,
 # fetch-birthdays). Heavy deps (torch, ntgcalls, silero) run on host, not in container.
 COPY requirements.docker.txt ./
-RUN python3 -m venv venv && \
-    uv pip install --no-cache-dir -r requirements.docker.txt --python venv/bin/python
+# tgcrypto ships no aarch64 wheel, so the arm64 image (home odroid) compiles it; the
+# toolchain is removed in the same layer.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc libc6-dev python3-dev && \
+    python3 -m venv venv && \
+    uv pip install --no-cache-dir -r requirements.docker.txt --python venv/bin/python && \
+    apt-get purge -y --auto-remove gcc libc6-dev python3-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 # Locked node_modules from prod-deps stage
 COPY --from=prod-deps /app/node_modules ./node_modules

@@ -62,7 +62,7 @@ class DeployTests(unittest.TestCase):
         cls.backup_script.chmod(0o555)
         cls.exe(cls.bin / "flock", "#!/bin/sh\nexit ${LOCK_FAILURE:-0}\n")
         cls.exe(cls.bin / "caddy", "#!/bin/sh\nexit 0\n")
-        cls.exe(cls.bin / "uname", "#!/bin/sh\nprintf 'x86_64\\n'\n")
+        cls.exe(cls.bin / "uname", "#!/bin/sh\nprintf 'aarch64\\n'\n")
         cls.exe(cls.bin / "seq", "#!/bin/sh\nprintf '1\\n'\n")
         cls.exe(cls.bin / "sleep", "#!/bin/sh\nexit 0\n")
         cls.exe(
@@ -191,7 +191,7 @@ print(body,end='')
         )
         config = json.dumps(
             {
-                "architecture": "amd64",
+                "architecture": "arm64",
                 "os": "linux",
                 "config": {"Labels": {"org.opencontainers.image.revision": SHA}},
             }
@@ -308,7 +308,9 @@ print(body,end='')
         self.assertTrue(self.db.exists())
         self.assertFalse(self.log.exists())
 
-    def test_local_fallback_staging_namespace_remains_supported(self):
+    def test_pre_784_fallback_tmp_staging_namespace_is_still_accepted(self):
+        # deploy-local-fallback.sh now stages under the deploy path (covered by
+        # test_local_fallback_staging.py); the activator still owns the old /tmp names.
         stage = Path("/tmp") / ("hypercal-source-" + SHA[:12] + "-" + str(os.getpid()))
         stage.mkdir(exist_ok=False)
         self.addCleanup(shutil.rmtree, stage, True)

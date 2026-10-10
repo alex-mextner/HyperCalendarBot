@@ -19,6 +19,7 @@ const caddyfile = readFileSync(join(ROOT, 'Caddyfile'), 'utf8');
 const watchdog = readFileSync(join(ROOT, 'scripts/healthcheck-alert.sh'), 'utf8');
 const deployWorkflow = readFileSync(join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
 const deployActivator = readFileSync(join(ROOT, 'scripts/deploy-prebuilt-image.sh'), 'utf8');
+const activationWrapper = readFileSync(join(ROOT, 'scripts/odroid-activate-release.sh'), 'utf8');
 
 /** The paths the @bot matcher forwards to the bot. */
 function proxiedPaths(): string[] {
@@ -66,8 +67,9 @@ function deployProbeTimeoutSeconds(): number {
 }
 
 function deployCopiedFiles(): Set<string> {
-  const source = deployWorkflow.match(/^\s*source:\s*(.+)$/m)?.[1];
-  if (source !== 'release') throw new Error('deploy.yml must upload its prepared release directory');
+  if (!/^\s*path:\s*release\s*$/m.test(deployWorkflow)) {
+    throw new Error('deploy.yml must upload its prepared release directory');
+  }
   const copied = [...deployWorkflow.matchAll(/^\s*cp (.+) release(?:\/scripts)?\/\s*$/gm)];
   if (copied.length === 0) throw new Error('deploy.yml stages no release files');
   return new Set(copied.flatMap((match) => match[1]!.trim().split(/\s+/)));
@@ -140,7 +142,8 @@ describe('Caddy routing', () => {
   // Hosted deployment must invoke the shared activator that verifies the actual
   // routed URL. A disconnected helper containing this URL is not sufficient.
   test('the deploy verifies the URL the watchdog polls', () => {
-    expect(deployWorkflow).toContain('"$REMOTE_SRC/scripts/deploy-prebuilt-image.sh"');
+    expect(deployWorkflow).toContain('sudo -n /usr/local/sbin/hypercal-activate-release');
+    expect(activationWrapper).toContain('bash "$STAGE/scripts/deploy-prebuilt-image.sh"');
     expect(deployActivator).toContain(watchdogUrl());
   });
 
