@@ -156,8 +156,8 @@ class FakeGitHub:
             return request.reply(302, headers=[("Location", f"/hop/{hops - 1}/{artifact_id}?sig=synthetic")])
         return request.reply(200, self.zips[artifact_id])
 
-    def publish(self, artifact_id, zip_bytes, digest=None, expired=False, **run_changes):
-        """One release-<SHA> artifact uploaded by workflow run artifact_id * 10."""
+    def publish(self, artifact_id, zip_bytes, digest=None, expired=False, created_at="2026-10-10T00:00:00Z", **run_changes):
+        """One release-<SHA> artifact uploaded at created_at by workflow run artifact_id * 10."""
         run_id = artifact_id * 10
         self.runs[run_id] = {
             "id": run_id,
@@ -175,6 +175,7 @@ class FakeGitHub:
                 "id": artifact_id,
                 "name": "release-" + SHA,
                 "expired": expired,
+                "created_at": created_at,
                 "size_in_bytes": len(zip_bytes),
                 "digest": digest or "sha256:" + hashlib.sha256(zip_bytes).hexdigest(),
                 "workflow_run": {"id": run_id, "head_sha": SHA, "head_branch": run_changes.get("head_branch", "main")},
@@ -347,10 +348,14 @@ class ActivateReleaseTests(unittest.TestCase):
         self.github.publish(7, self.release_zip(), expired=True)
         self.assertRefused(self.run_wrapper(), f"no release-{SHA} artifact")
 
-    def test_two_matching_artifacts_are_refused(self):
-        self.github.publish(7, self.release_zip())
-        self.github.publish(8, self.release_zip())
-        self.assertRefused(self.run_wrapper(), "refusing to choose")
+    def test_rerun_upload_wins_over_the_older_release_artifact(self):
+        # "Re-run all jobs" uploads a second release-<sha> from the same push-to-main run. The
+        # older upload here would fail its digest check, so success proves the newest was taken.
+        self.github.publish(8, self.release_zip(), created_at="2026-10-10T01:00:00Z")
+        self.github.publish(7, self.release_zip(), digest="sha256:" + "0" * 64, created_at="2026-10-10T00:00:00Z")
+        result = self.run_wrapper()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.recorded()["args"][4], hashlib.sha256(self.image).hexdigest())
 
     def test_digest_mismatch_is_refused(self):
         self.github.publish(7, self.release_zip(), digest="sha256:" + "0" * 64)

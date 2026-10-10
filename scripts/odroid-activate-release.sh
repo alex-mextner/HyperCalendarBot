@@ -6,7 +6,7 @@
 #
 # Trust model: root trusts nothing the runner hands it except a commit SHA and a
 # short-lived GitHub token, and the token only authenticates API calls. Root itself
-# checks that main still points at the SHA, finds the one `release-<sha>` artifact
+# checks that main still points at the SHA, takes the newest `release-<sha>` artifact
 # uploaded by a push-to-main run of .github/workflows/deploy.yml in this repository,
 # downloads it (the token is not sent to the blob-storage redirect), checks it against
 # the artifact digest GitHub recorded at upload, extracts only the known release files
@@ -172,9 +172,9 @@ def release_artifact(token):
             matches.append(artifact)
     if not matches:
         refuse(f"no {name} artifact from a push-to-main run of {WORKFLOW_PATH}")
-    if len(matches) > 1:
-        refuse(f"{len(matches)} {name} artifacts from push-to-main runs; refusing to choose")
-    artifact = matches[0]
+    # "Re-run all jobs" uploads another release-<sha> from the same trusted push-to-main
+    # run; every match passed the same provenance checks, so take the newest upload.
+    artifact = max(matches, key=lambda candidate: (str(candidate.get("created_at")), candidate.get("id") or 0))
     artifact_id, size, digest = artifact.get("id"), artifact.get("size_in_bytes"), artifact.get("digest")
     if type(artifact_id) is not int or artifact_id <= 0:
         refuse("invalid artifact id")
