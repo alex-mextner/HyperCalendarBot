@@ -175,4 +175,17 @@ describe('Caddy routing', () => {
     expect(caddyfile).toContain('respond "HyperCalendarBot is running" 200');
     expect(proxiedPaths().some((pattern) => matches(pattern, '/not-a-bot-path'))).toBe(false);
   });
+
+  // Funnel failed for three hours on 2026-10-10 (#784): the droplet now reaches the odroid
+  // over the tailnet, at the port docker-compose.yml publishes for the bot, with no Funnel
+  // Host rewrite left behind.
+  test('proxies to the bot port the odroid publishes, over the tailnet', () => {
+    const compose = readFileSync(join(ROOT, 'docker-compose.yml'), 'utf8');
+    const published = compose.match(/^\s*- "(\d+):3311"$/m)?.[1];
+    if (!published) throw new Error('docker-compose.yml publishes no host port for the bot');
+    const upstreams = [...caddyfile.matchAll(/^\s*reverse_proxy\s+(\S+)\s*\{/gm)].map((match) => match[1]);
+    expect(upstreams).toEqual([`100.116.57.66:${published}`]);
+    expect(caddyfile).not.toContain('header_up');
+    expect(caddyfile).not.toContain('ts.net');
+  });
 });

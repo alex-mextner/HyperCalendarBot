@@ -41,7 +41,7 @@ test('Caddy cannot serve previously published desktop installers', () => {
   const caddy = readFileSync(new URL('../../Caddyfile', import.meta.url), 'utf8');
   expect(caddy).not.toMatch(/handle\s+\/downloads\/\*/);
   expect(caddy).not.toContain('file_server');
-  expect(caddy).toContain('reverse_proxy https://odroidn2.tailbfe8ea.ts.net');
+  expect(caddy).toContain('reverse_proxy 100.116.57.66:3001 {');
 });
 
 test('retired pairing instructions are absent in both languages', () => {

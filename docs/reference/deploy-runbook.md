@@ -69,8 +69,10 @@ Neighbours on the odroid:
 - `watchdog.service`
 
 The DO droplet keeps only:
-- the public ingress: its Caddy serves `hypercal.invntrm.ru` and proxies the bot paths to the Tailscale Funnel `https://odroidn2.tailbfe8ea.ts.net` with `header_up Host {upstream_hostport}` (repo `Caddyfile`, applied by hand there). `PUBLIC_DOMAIN`, the Google OAuth redirect, Calendar watch channels and the Telegram webhook URL did not change;
+- the public ingress: its Caddy serves `hypercal.invntrm.ru` and proxies the bot paths over the tailnet to `100.116.57.66:3001`, the odroid's tailnet address and the bot's published port (repo `Caddyfile`, applied by hand there). The droplet is tailnet node `do-edge` (`100.113.21.91`) and has a direct WireGuard path to the odroid. `PUBLIC_DOMAIN`, the Google OAuth redirect, Calendar watch channels and the Telegram webhook URL did not change;
 - the external watchdog cron `*/2 * * * *` (`scripts/healthcheck-alert.sh`, reading DO's `/opt/hypercal/.env`).
+
+Until 2026-10-10 the upstream was the odroid's Tailscale Funnel `https://odroidn2.tailbfe8ea.ts.net`. Funnel failed that night from 00:00 to 03:10 UTC: two of its three ingress IPs reset TLS. Since then DO Caddy proxies over the tailnet and Funnel is off on the odroid; nothing depends on it.
 
 The `hypercal-bot` container and `docker-compose.yml` were removed from DO on purpose: a deploy aimed there stops at `deploy-prebuilt-image.sh` with "Existing HyperCalendar container is required". The nightly `backup-db.sh` cron now runs on the odroid.
 
