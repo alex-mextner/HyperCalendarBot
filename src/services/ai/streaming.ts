@@ -515,24 +515,24 @@ export function acceptsSamplingTemperature(provider: ProviderId): boolean {
   return provider !== 'claude';
 }
 
-/** Measured on real agent turns: Haiku 5.5 thought for up to ~1000 tokens before one tool call. */
-const CLAUDE_MIN_THINKING_ALLOWANCE = 1024;
+/**
+ * Room for hidden thinking on top of the caller's budget. Haiku 5.5 thought ~1000 tokens before
+ * one tool call on real agent turns (live, 2026-10-09), so a reserve scaled to small budgets
+ * cuts it close. `max_tokens` is only a cap: unused reserve costs nothing.
+ */
+const CLAUDE_THINKING_RESERVE_TOKENS = 8192;
 
 /**
  * Claude 5.x thinks before answering; the compatible endpoint streams none of that thinking but
  * bills it against `max_tokens`, so a short budget can end at `length` with nothing visible
- * (a 256-token summary came back empty, live 2026-10-09). Thinking stays on at medium effort,
- * and the request carries an allowance for it on top of the caller's budget — the budget
- * itself, at least CLAUDE_MIN_THINKING_ALLOWANCE — so the visible answer keeps every token
- * the caller asked for (the cap is shared, so a short think leaves the answer more room).
- * Adaptive thinking is refused by this endpoint; `medium` was accepted live by both 5.5 models
- * and the preference-list fallbacks, and the largest caller budget (4096 → 8192) by both 5.5s.
+ * (a 256-token summary came back empty, live 2026-10-09). Thinking stays on at medium effort and
+ * the request carries CLAUDE_THINKING_RESERVE_TOKENS on top of the caller's budget, so the
+ * visible answer keeps every token the caller asked for (the cap is shared, so a short think
+ * leaves the answer more room). Adaptive thinking is refused by this endpoint; `medium` and the
+ * largest cap (4096 + 8192) were accepted live by both 5.5 models and the preference-list fallbacks.
  */
 export function claudeReasoning(answerTokens: number): { reasoning_effort: 'medium'; max_tokens: number } {
-  return {
-    reasoning_effort: 'medium',
-    max_tokens: answerTokens + Math.max(answerTokens, CLAUDE_MIN_THINKING_ALLOWANCE),
-  };
+  return { reasoning_effort: 'medium', max_tokens: answerTokens + CLAUDE_THINKING_RESERVE_TOKENS };
 }
 
 /** Standard OpenAI streaming adapter (works for every provider). */

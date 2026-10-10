@@ -897,15 +897,15 @@ describe('provider order', () => {
 
   // Claude 5.5 thinks before answering and the compatible endpoint streams none of it, yet
   // bills it against max_tokens (live, 2026-10-09): a 256-token Haiku summary came back empty
-  // at `length`. Thinking stays on at medium effort; an allowance on top of the caller's budget
-  // (the budget itself, at least 1024) keeps it from eating the visible answer.
+  // at `length`, and Haiku thought ~1000 tokens on real agent turns. Thinking stays on at medium
+  // effort; a fixed 8192-token reserve on top of the caller's budget keeps it from eating the
+  // visible answer at every budget size.
   test.each([
-    { fast: true, model: 'claude-haiku-5-5', maxTokens: 256, sent: 256 + 1024 },
-    { fast: false, model: 'claude-sonnet-5-5', maxTokens: 4096, sent: 4096 * 2 },
+    { fast: true, model: 'claude-haiku-5-5', maxTokens: 256, sent: 256 + 8192 },
+    { fast: false, model: 'claude-sonnet-5-5', maxTokens: 4096, sent: 4096 + 8192 },
     // Preference-list fallbacks accepted `medium` live too (2026-10-09).
-    { fast: false, model: 'claude-sonnet-5', maxTokens: 4096, sent: 4096 * 2 },
-    { fast: true, model: 'claude-haiku-4-5-20251001', maxTokens: 64, sent: 64 + 1024 },
-    { fast: false, model: 'claude-sonnet-5-5', maxTokens: 1024, sent: 2048 },
+    { fast: false, model: 'claude-sonnet-5', maxTokens: 4096, sent: 4096 + 8192 },
+    { fast: true, model: 'claude-haiku-4-5-20251001', maxTokens: 64, sent: 64 + 8192 },
   ])('Claude $model thinks at medium effort with $maxTokens answer tokens kept free', async ({
     fast,
     model,
@@ -940,7 +940,7 @@ describe('provider order', () => {
     }).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(AllProvidersFailedError);
-    expect(failure).toMatchObject({ failures: [{ emptyResponse: { maxOutputTokens: 256 + 1024 } }] });
+    expect(failure).toMatchObject({ failures: [{ emptyResponse: { maxOutputTokens: 256 + 8192 } }] });
   });
 
   test('the default chain ends at z.ai when no Claude token is configured', async () => {
