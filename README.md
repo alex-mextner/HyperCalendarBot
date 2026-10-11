@@ -144,8 +144,8 @@ venv/bin/python scripts/pyrogram-auth.py
 
 ```bash
 bun run src/index.ts     # start the bot
-bun test                 # run all tests (~1700 tests, ~93% coverage)
-bun test --coverage      # coverage report
+bun test test/<one>.test.ts   # one test file; the full suite (~1700 tests, ~93% coverage) and
+                              # coverage run on CI or a Runpod pod — AGENTS.md § Heavy work runs on Runpod
 bun run lint             # Biome lint check
 bun run lint:fix         # auto-fix lint issues
 bun run format           # format with Biome
@@ -194,9 +194,8 @@ Once the upstream PR is merged, remove the patch/override and bump the version.
 ## Testing
 
 ```bash
-bun test                                                    # all tests
-bun test test/services/intent/intent-learner.test.ts       # single file
-bun test --coverage                                         # with coverage
+bun test test/services/intent/intent-learner.test.ts       # single file (the local limit)
+# all tests / coverage: CI or a Runpod pod — AGENTS.md § Heavy work runs on Runpod
 ```
 
 TDD is required: write a failing test first, confirm it fails for the right reason, then implement.

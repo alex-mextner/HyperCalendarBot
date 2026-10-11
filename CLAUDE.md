@@ -44,9 +44,8 @@ Default to using Bun instead of Node.js.
 
 ```sh
 bun run src/index.ts                        # start the bot
-bun test                                    # run all tests
-bun test test/services/intent/intent-learner.test.ts  # run a single test file
-bun test --coverage                         # coverage report
+bun test test/services/intent/intent-learner.test.ts  # run a single test file (the local limit)
+# ALL tests / coverage: on a Runpod pod, never locally — the exact runpod-run line is in AGENTS.md § Heavy work runs on Runpod
 bun run lint                                # check linting
 bun run lint:fix                            # auto-fix lint issues
 bun run format                              # format with Biome
@@ -455,8 +454,9 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - **Commits must NEVER break the tree**: before `git commit`, all of the following must pass clean:
   - `tsc --noEmit` — zero type errors
   - `bun run lint` — zero lint errors AND zero warnings
-  - `bun test` — all tests green (or a narrowly scoped subset when the change is truly local; run
-    the full suite before the final commit of a multi-commit series)
+  - `bun test` — all tests green: one file locally when the change is truly local; the full
+    suite on Runpod (AGENTS.md § Heavy work runs on Runpod) before the final commit of a
+    multi-commit series
   If any of these are red, fix the root cause before committing. Never commit on top of a broken tree
   with a "will fix in next commit" note.
 - **Always restart the bot** after code changes to src/. Kill by exact PID, verify 1 process running.
@@ -631,7 +631,9 @@ Plans live in `docs/plans/`. Do NOT use `docs/superpowers/plans/`.
 ```
 /loop 20 min — check ralphex progress
 ```
-In the loop, check: `git log --oneline -5`, `bun test 2>&1 | tail -20`, `git diff --stat`.
+In the loop, check: `git log --oneline -5`, `git diff --stat`, and the test file(s) the
+current task touches (`bun test test/<one>.test.ts`; the full suite only on Runpod,
+AGENTS.md § Heavy work runs on Runpod).
 
 **Important:** ralphex manages its own Claude sessions. Don't run it while actively editing the same
 files in another terminal. Use `--worktree` if you need isolation.
