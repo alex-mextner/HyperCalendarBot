@@ -126,6 +126,17 @@ describe('handleMonth', () => {
       disable_notification: true,
     });
   });
+
+  test('a month render failure does not blame the date range', async () => {
+    const ctx = makeCtx();
+    const svc = makeEventService();
+    const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
+
+    await handleMonth(ctx as never, svc as never, undefined, renderService as never);
+
+    expect(ctx.send).toHaveBeenCalledTimes(2);
+    expect(ctx.send).toHaveBeenLastCalledWith('⚠️ Image generation failed. Use text version above.');
+  });
 });
 
 describe('handleMonth group context', () => {

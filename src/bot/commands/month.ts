@@ -4,6 +4,7 @@ import { agendaImageErrorMessage, sendAgendaImage } from '../../utils/agenda-ima
 
 import { TZDate } from '@date-fns/tz';
 import { endOfMonth, format, getDay, getDaysInMonth, startOfMonth } from 'date-fns';
+import { t } from '../../config/constants.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { EventOccurrence } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
@@ -251,9 +252,7 @@ export async function handleMonth(
       });
     } catch (err) {
       imageLogger.error({ err }, 'Month render failed');
-      await ctx.send(
-        agendaImageErrorMessage(err) ?? 'Agenda image could not be generated. Choose a shorter date range.',
-      );
+      await ctx.send(agendaImageErrorMessage(err) ?? t(lang).callbackErrors.imageGenerationFailed);
     }
   }
 }

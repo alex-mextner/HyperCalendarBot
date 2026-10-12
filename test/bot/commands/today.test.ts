@@ -56,17 +56,35 @@ describe('handleToday', () => {
     expect(ctx.sendPhoto).not.toHaveBeenCalled();
   });
 
-  test('does not call sendPhoto when renderService render fails', async () => {
-    const { handleToday } = await import('../../../src/bot/commands/today.ts');
+  test('a render failure that is not about size does not blame the date range', async () => {
     const ctx = makeCtx();
+    const svc = makeEventService();
+    // The exact error production returned on 2026-10-12 when the render outlived the wait.
+    const renderService = {
+      renderDirect: mock(() =>
+        Promise.reject(
+          new Error(
+            'Job wait render timed out before finishing, no finish notification arrived after 15000ms (id=539)',
+          ),
+        ),
+      ),
+    };
+
+    await handleToday(ctx as never, svc as never, undefined, renderService as never);
+
+    expect(ctx.send).toHaveBeenCalledTimes(2);
+    expect(ctx.send).toHaveBeenLastCalledWith('⚠️ Image generation failed. Use text version above.');
+    expect(ctx.sendPhoto).not.toHaveBeenCalled();
+  });
+
+  test('the render failure notice follows the user language', async () => {
+    const ctx = makeCtx({ dbUser: userRu });
     const svc = makeEventService();
     const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
 
     await handleToday(ctx as never, svc as never, undefined, renderService as never);
 
-    expect(ctx.send).toHaveBeenCalledTimes(2);
-    expect(ctx.send).toHaveBeenLastCalledWith('Agenda image could not be generated. Choose a shorter date range.');
-    expect(ctx.sendPhoto).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenLastCalledWith('⚠️ Не удалось сгенерировать изображение. Смотри текстовую версию выше.');
   });
 
   test('pins image after successful render', async () => {

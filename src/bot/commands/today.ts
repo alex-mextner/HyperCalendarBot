@@ -3,6 +3,7 @@ import { agendaImageErrorMessage, sendAgendaImage } from '../../utils/agenda-ima
 // src/bot/commands/today.ts
 
 import { TZDate } from '@date-fns/tz';
+import { t } from '../../config/constants.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { EventService } from '../../services/event/event-service.ts';
@@ -122,9 +123,7 @@ export async function handleToday(
       });
     } catch (err) {
       imageLogger.error({ err }, 'Render failed');
-      await ctx.send(
-        agendaImageErrorMessage(err) ?? 'Agenda image could not be generated. Choose a shorter date range.',
-      );
+      await ctx.send(agendaImageErrorMessage(err) ?? t(lang).callbackErrors.imageGenerationFailed);
     }
   }
 }

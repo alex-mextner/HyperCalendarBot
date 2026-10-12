@@ -63,7 +63,7 @@ describe('handleTomorrow', () => {
 
     await handleTomorrow(ctx as never, svc as never, undefined, renderService as never);
     expect(ctx.send).toHaveBeenCalledTimes(2);
-    expect(ctx.send).toHaveBeenLastCalledWith('Agenda image could not be generated. Choose a shorter date range.');
+    expect(ctx.send).toHaveBeenLastCalledWith('⚠️ Image generation failed. Use text version above.');
   });
 
   test('shows holiday entries when holidayService returns them', async () => {
