@@ -2,7 +2,10 @@ import type { Queue, QueueEvents } from 'bullmq';
 import { imageLogger } from '../../utils/logger.ts';
 import type { ImageRenderJob, ImageRenderResult } from '../../worker/image-render.queue.ts';
 
-const RENDER_TIMEOUT_MS = 15_000;
+// Production (ODROID-N2+, since 2026-10-09) renders take 6–15 s because the idle Chromium and
+// Bun heap sit in swap between renders; 15 s dropped a finished 15.2 s render on 2026-10-12.
+// 45 s is 3× the slowest measured render and still leaves room inside the 90 s AI turn.
+const RENDER_TIMEOUT_MS = 45_000;
 
 /** Structural interface for image rendering — use this in AgentContext and tests instead of RenderService class. */
 export interface ImageRenderer {
