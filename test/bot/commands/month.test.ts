@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleMonth } from '../../../src/bot/commands/month.ts';
+import type { ImageRenderer } from '../../../src/services/image/render-service.ts';
 import { png } from '../../fixtures/png.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
@@ -18,6 +19,20 @@ function makeEventService(occurrences: Array<{ occurrence_start: string; occurre
   return {
     getEventsInRange: mock(() => occurrences),
   };
+}
+
+type MonthArgs = Parameters<typeof handleMonth>;
+
+/** Runs /month on partial doubles; the test-only cast stays in this one factory (CLAUDE.md). */
+async function runMonthWithRender(renderService: ImageRenderer) {
+  const ctx = makeCtx();
+  await handleMonth(
+    ctx as unknown as MonthArgs[0],
+    makeEventService() as unknown as MonthArgs[1],
+    undefined,
+    renderService,
+  );
+  return ctx;
 }
 
 describe('handleMonth', () => {
@@ -128,11 +143,9 @@ describe('handleMonth', () => {
   });
 
   test('a month render failure does not blame the date range', async () => {
-    const ctx = makeCtx();
-    const svc = makeEventService();
     const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
 
-    await handleMonth(ctx as never, svc as never, undefined, renderService as never);
+    const ctx = await runMonthWithRender(renderService);
 
     expect(ctx.send).toHaveBeenCalledTimes(2);
     expect(ctx.send).toHaveBeenLastCalledWith('⚠️ Image generation failed. Use text version above.');
