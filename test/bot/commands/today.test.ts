@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleToday } from '../../../src/bot/commands/today.ts';
+import type { ImageRenderer } from '../../../src/services/image/render-service.ts';
 import { png } from '../../fixtures/png.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
@@ -18,6 +19,20 @@ function makeEventService(occurrences = []) {
   return {
     getEventsForDay: mock(() => occurrences),
   };
+}
+
+type TodayArgs = Parameters<typeof handleToday>;
+
+/** Runs /today on partial doubles; the test-only cast stays in this one factory (CLAUDE.md). */
+async function runTodayWithRender(renderService: ImageRenderer, overrides = {}) {
+  const ctx = makeCtx(overrides);
+  await handleToday(
+    ctx as unknown as TodayArgs[0],
+    makeEventService() as unknown as TodayArgs[1],
+    undefined,
+    renderService,
+  );
+  return ctx;
 }
 
 describe('handleToday', () => {
@@ -56,17 +71,31 @@ describe('handleToday', () => {
     expect(ctx.sendPhoto).not.toHaveBeenCalled();
   });
 
-  test('does not call sendPhoto when renderService render fails', async () => {
-    const { handleToday } = await import('../../../src/bot/commands/today.ts');
-    const ctx = makeCtx();
-    const svc = makeEventService();
-    const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
+  test('a render failure that is not about size does not blame the date range', async () => {
+    // The exact error production returned on 2026-10-12 when the render outlived the wait.
+    const renderService = {
+      renderDirect: mock(() =>
+        Promise.reject(
+          new Error(
+            'Job wait render timed out before finishing, no finish notification arrived after 15000ms (id=539)',
+          ),
+        ),
+      ),
+    };
 
-    await handleToday(ctx as never, svc as never, undefined, renderService as never);
+    const ctx = await runTodayWithRender(renderService);
 
     expect(ctx.send).toHaveBeenCalledTimes(2);
-    expect(ctx.send).toHaveBeenLastCalledWith('Agenda image could not be generated. Choose a shorter date range.');
+    expect(ctx.send).toHaveBeenLastCalledWith('⚠️ Image generation failed. Use text version above.');
     expect(ctx.sendPhoto).not.toHaveBeenCalled();
+  });
+
+  test('the render failure notice follows the user language', async () => {
+    const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
+
+    const ctx = await runTodayWithRender(renderService, { dbUser: userRu });
+
+    expect(ctx.send).toHaveBeenLastCalledWith('⚠️ Не удалось сгенерировать изображение. Смотри текстовую версию выше.');
   });
 
   test('pins image after successful render', async () => {
