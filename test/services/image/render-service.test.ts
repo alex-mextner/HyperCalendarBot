@@ -90,7 +90,8 @@ describe('RenderService', () => {
     });
 
     expect(buffer.toString()).toBe('late-png');
-    // Still bounded: a stuck worker must not hold a command (or the 90 s AI turn) for long.
-    expect(waitUntilFinished.mock.calls[0]?.[1]).toBeLessThanOrEqual(45_000);
+    // About 3× the slowest measured production render (15.2 s), yet bounded so a stuck worker
+    // cannot hold a command for long.
+    expect(waitUntilFinished.mock.calls[0]?.[1]).toBe(45_000);
   });
 });
