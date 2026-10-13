@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import OpenAI from 'openai';
+import { geminiClient, resetClients } from '../../../src/services/ai/clients.ts';
 import { closeGeminiQuotaStores } from '../../../src/services/ai/gemini-quota.ts';
 
 // Build a fake OpenAI client whose chat.completions.create returns a scripted
@@ -356,6 +357,91 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(fakeGemini.chat.completions.create.mock.calls[0][0].reasoning_effort).toBe('none');
     await aiStreamRound({ messages: [], maxTokens: 4096 });
     expect(fakeGemini.chat.completions.create.mock.calls[1][0].reasoning_effort).toBeUndefined();
+  });
+
+  const syntheticTools: OpenAI.ChatCompletionTool[] = [
+    { type: 'function', function: { name: 'get_events', parameters: { type: 'object', properties: {} } } },
+  ];
+
+  test.each([
+    'gemini-2.5-flash',
+    'models/gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+  ])('main tool-calling requests on %s disable thinking so they do not stop empty', async (model) => {
+    process.env.AI_SMART_CHAIN = 'gemini';
+    process.env.GEMINI_MODEL = model;
+    // Reproduces the observed provider behavior: with tools and default thinking,
+    // 2.5 Flash answers HTTP 200 + stop with zero output; with thinking off it calls the tool.
+    fakeGemini = {
+      chat: {
+        completions: {
+          create: mock(async (params: { reasoning_effort?: string }) =>
+            (async function* () {
+              if (params.reasoning_effort === 'none') {
+                yield {
+                  choices: [
+                    {
+                      delta: {
+                        tool_calls: [{ index: 0, id: 'read-one', function: { name: 'get_events', arguments: '{}' } }],
+                      },
+                      finish_reason: 'tool_calls',
+                    },
+                  ],
+                };
+              } else {
+                yield {
+                  choices: [{ delta: {}, finish_reason: 'stop' }],
+                  usage: { prompt_tokens: 8396, completion_tokens: 0, total_tokens: 8396 },
+                };
+              }
+            })(),
+          ),
+        },
+      },
+    };
+    const result = await aiStreamRound({
+      messages: [{ role: 'user', content: 'Synthetic agenda' }],
+      tools: syntheticTools,
+      maxTokens: 4096,
+    });
+    expect(result.toolCalls).toEqual([{ id: 'read-one', name: 'get_events', arguments: '{}' }]);
+    expect(result.metrics?.attemptCount).toBe(1);
+  });
+
+  test.each([
+    'gemini-2.5-pro',
+    'gemini-3.1-pro-preview',
+    'gemini-3-flash',
+  ])('main tool-calling requests on %s keep their own thinking policy', async (model) => {
+    process.env.AI_SMART_CHAIN = 'gemini';
+    process.env.GEMINI_MODEL = model;
+    fakeGemini = buildFakeClient([{ kind: 'text', text: 'Synthetic response' }]);
+    await aiStreamRound({ messages: [], tools: syntheticTools, maxTokens: 4096 });
+    expect(fakeGemini.chat.completions.create.mock.calls[0][0].reasoning_effort).toBeUndefined();
+  });
+
+  test('a Gemini array error envelope falls through once instead of a bodiless retry', async () => {
+    resetClients();
+    process.env.AI_SMART_CHAIN = 'gemini,hf';
+    const http = mock(
+      async () =>
+        new Response(
+          JSON.stringify([
+            { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Synthetic invalid tool schema' } },
+          ]),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    fakeGemini = geminiClient().withOptions({ fetch: http });
+    fakeHf = buildFakeClient([{ kind: 'text', text: 'Working alternate' }]);
+    try {
+      const result = await aiStreamRound({ messages: [], maxTokens: 128 });
+      expect(http).toHaveBeenCalledTimes(1);
+      expect(result.text).toBe('Working alternate');
+      expect(result.metrics?.attemptCount).toBe(2);
+    } finally {
+      resetClients();
+    }
   });
 
   test('Gemini local budget skips network rather than waiting when exhausted', async () => {
