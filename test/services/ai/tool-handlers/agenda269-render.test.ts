@@ -1,6 +1,7 @@
 // AI image entry points use real visibility/metadata storage and capture render jobs locally.
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { TZDate } from '@date-fns/tz';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { AgendaRepository } from '../../../../src/database/repositories/agenda.repository.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
@@ -218,3 +219,63 @@ test('AI preserves the screenshot allocation error after queue serialization', a
   expect(result.success).toBe(false);
   expect(result.error).toBe(message);
 });
+
+for (const timezone of ['Pacific/Kiritimati', 'Etc/GMT+12', 'America/Los_Angeles']) {
+  test(`month renderer keeps both local boundaries in ${timezone}`, async () => {
+    const { ctx, jobs } = setup(1);
+    ctx.user.timezone = timezone;
+    const utc = (month: number, day: number, hour: number, minute = 0) =>
+      new Date(new TZDate(2099, month, day, hour, minute, timezone).getTime()).toISOString();
+    for (const [title, start_at] of [
+      ['FIRST_LOCAL_DAY', utc(5, 1, 0, 1)],
+      ['LAST_LOCAL_DAY', utc(5, 30, 23, 59)],
+      ['BEFORE_MONTH', utc(4, 31, 23, 59)],
+      ['AFTER_MONTH', utc(6, 1, 0, 0)],
+    ])
+      ctx.eventService.createEvent({ user_id: 1, title: title!, start_at: start_at!, timezone });
+    const result = await handleRenderMonthImage(ctx, { month: '2099-06' });
+    expect(result.success).toBe(true);
+    expect(jobs).toHaveLength(1);
+    const payload = JSON.stringify(jobs[0]);
+    expect(payload).toContain('FIRST_LOCAL_DAY');
+    expect(payload).toContain('LAST_LOCAL_DAY');
+    expect(payload).not.toContain('BEFORE_MONTH');
+    expect(payload).not.toContain('AFTER_MONTH');
+  });
+}
+for (const month of ['2099-13', '2099-00', '2099-06-other', '2099-02-30']) {
+  test(`invalid month ${month} cannot generate a successful empty image`, async () => {
+    const { ctx, jobs } = setup(1);
+    const result = await handleRenderMonthImage(ctx, { month });
+    expect(result.success).toBe(false);
+    expect(jobs).toHaveLength(0);
+  });
+}
+
+for (const group of [false, true]) {
+  for (const timezone of ['UTC', 'Pacific/Kiritimati', 'Etc/GMT+12']) {
+    test(`month exclusive end excludes next-month recurring and group events: ${group}/${timezone}`, async () => {
+      const { ctx, jobs } = setup(1, group);
+      ctx.user.timezone = timezone;
+      const utc = (month: number, day: number) =>
+        new Date(new TZDate(2099, month, day, 0, 0, 0, 0, timezone).getTime()).toISOString();
+      const scope = group ? { owner_type: 'group' as const, group_id: -10 } : {};
+      ctx.eventService.createEvent({
+        user_id: 1,
+        title: 'BOUNDARY_SERIES',
+        start_at: utc(5, 30),
+        timezone,
+        recurrence_rule: 'FREQ=DAILY;COUNT=2',
+        ...scope,
+      });
+      ctx.eventService.createEvent({ user_id: 1, title: 'NEXT_MONTH_ONLY', start_at: utc(6, 1), timezone, ...scope });
+      const result = await handleRenderMonthImage(ctx, { month: '2099-06', scope: group ? 'group' : 'personal' });
+      expect(result.success).toBe(true);
+      const image = jobs[0];
+      if (!image || image.type !== 'monthly-calendar') throw new Error('Expected monthly render data');
+      const events = image.data.weeks.flatMap((day) => day.flatMap((cell) => cell.events));
+      expect(events.filter((event) => event.title.includes('BOUNDARY_SERIES'))).toHaveLength(1);
+      expect(events.some((event) => event.title === 'NEXT_MONTH_ONLY')).toBe(false);
+    });
+  }
+}

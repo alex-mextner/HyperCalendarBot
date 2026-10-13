@@ -305,18 +305,36 @@ export async function handleRenderMonthImage(
     return { success: false, error: 'Group context required for group scope' };
   }
 
-  // Parse "YYYY-MM" or "YYYY-MM-DD"
-  const parts = input.month.split('-');
-  const year = Number.parseInt(parts[0]!, 10);
-  const month = Number.parseInt(parts[1]!, 10) - 1; // 0-based
+  let year: number;
+  let month: number;
+  let startUtc: string;
+  let endUtc: string;
+  try {
+    // Validate the complete supplied date, then select the full LOCAL month.
+    const monthDate = localCalendarDate(
+      /^\d{4}-\d{2}$/.test(input.month) ? `${input.month}-01` : input.month,
+      ctx.user.timezone,
+    );
+    year = monthDate.getFullYear();
+    month = monthDate.getMonth();
+    startUtc = new Date(new TZDate(year, month, 1, 0, 0, 0, 0, ctx.user.timezone).getTime()).toISOString();
+    endUtc = new Date(new TZDate(year, month + 1, 1, 0, 0, 0, 0, ctx.user.timezone).getTime()).toISOString();
+  } catch {
+    return { success: false, error: 'Invalid calendar month. Use YYYY-MM or a valid YYYY-MM-DD.' };
+  }
 
-  const startUtc = new Date(Date.UTC(year, month, 1)).toISOString();
-  const endUtc = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999)).toISOString();
-
-  const occurrences =
+  const candidates =
     scope === 'group'
       ? ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, startUtc, endUtc)
       : ctx.eventService.getEventsInRange(userId, startUtc, endUtc);
+  // Repositories and recurrence expansion differ at the upper endpoint. Make
+  // this view's [start, next-month) contract explicit before enrichment.
+  const startMillis = Date.parse(startUtc);
+  const endMillis = Date.parse(endUtc);
+  const occurrences = candidates.filter((occurrence) => {
+    const when = Date.parse(occurrence.occurrence_start);
+    return when >= startMillis && when < endMillis;
+  });
 
   const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
   const sender = ctx.sender;
