@@ -1116,4 +1116,12 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE event_participants ADD COLUMN source_group_recorded_at TEXT');
     },
   },
+  {
+    name: '066_events_color',
+    up(db) {
+      // Per-event color from Google Calendar's colorId (#29), so renders keep the color the user
+      // picked in Google. NULL means no per-event color: renders use the theme rotation as before.
+      db.exec('ALTER TABLE events ADD COLUMN color TEXT');
+    },
+  },
 ];

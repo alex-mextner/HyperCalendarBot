@@ -1,6 +1,6 @@
 import { TZDate } from '@date-fns/tz';
 import { addDays } from 'date-fns';
-import type { EventOccurrence } from '../../database/types.ts';
+import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import { formatDuration, formatTime } from '../../worker/templates/helpers.ts';
 import { getLabels } from '../../worker/templates/labels.ts';
 import type {
@@ -20,6 +20,29 @@ import type { DayWeather } from '../weather/types.ts';
 import { weatherEmoji } from '../weather/weather-service.ts';
 
 const BIRTHDAY_COLOR = '#EC4899';
+const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
+
+/** Share of white mixed into a Google color on the dark theme. */
+const DARK_THEME_LIGHTEN = 0.4;
+
+/**
+ * An event's render color: its own Google Calendar color (#29) when stored as a #RRGGBB hex, else
+ * the theme's rotation at `index`. All four render mappers use it, so only hex values reach the
+ * templates' inline CSS. Google's palette is made for light backgrounds and several of its colors
+ * (Basil, Blueberry, Grape, Graphite) are unreadable as title text on the dark theme, so there the
+ * color is mixed toward white, as the dark theme's own rotation is a lighter set.
+ */
+function eventColor({ color }: Pick<CalendarEvent, 'color'>, theme: Theme, index: number): string {
+  if (!color || !HEX_COLOR.test(color)) return theme.eventColors[index % theme.eventColors.length]!;
+  if (theme.name !== 'dark') return color;
+  const channels = [1, 3, 5].map((at) => {
+    const value = Number.parseInt(color.slice(at, at + 2), 16);
+    return Math.round(value + (255 - value) * DARK_THEME_LIGHTEN)
+      .toString(16)
+      .padStart(2, '0');
+  });
+  return `#${channels.join('').toUpperCase()}`;
+}
 
 function eventTitle(occ: EventOccurrence, locale: 'ru' | 'en'): string {
   const ev = occ.event;
@@ -61,7 +84,7 @@ function mapToAgendaEvent(
   occ: EventOccurrence,
   tz: string,
   colorIdx: number,
-  colors: string[],
+  theme: Theme,
   locale: 'ru' | 'en' = 'en',
 ): AgendaEvent {
   const ev = occ.event;
@@ -73,7 +96,7 @@ function mapToAgendaEvent(
     endMinutes: occ.occurrence_end ? toMinutes(occ.occurrence_end, tz) : toMinutes(occ.occurrence_start, tz) + 60,
     location: formatLocationPlain(ev) || undefined,
     displayMetadata: ev.displayMetadata,
-    calendarColor: isBirthday ? BIRTHDAY_COLOR : colors[colorIdx % colors.length]!,
+    calendarColor: isBirthday ? BIRTHDAY_COLOR : eventColor(ev, theme, colorIdx),
     isAllDay: ev.all_day === 1,
   };
 }
@@ -101,8 +124,8 @@ export function mapDailyAgendaData(params: {
     currentTimeMinutes: params.currentTimeMinutes,
     isHoliday: params.isHoliday,
     holidayName: params.holidayName,
-    allDayEvents: allDay.map((o, i) => mapToAgendaEvent(o, timezone, i, theme.eventColors, locale)),
-    timedEvents: timed.map((o, i) => mapToAgendaEvent(o, timezone, allDay.length + i, theme.eventColors, locale)),
+    allDayEvents: allDay.map((o, i) => mapToAgendaEvent(o, timezone, i, theme, locale)),
+    timedEvents: timed.map((o, i) => mapToAgendaEvent(o, timezone, allDay.length + i, theme, locale)),
     theme,
     locale,
   };
@@ -165,10 +188,7 @@ export function mapWeeklyOverviewData(params: {
               : o.occurrence_end
                 ? toMinutes(o.occurrence_end, timezone)
                 : toMinutes(o.occurrence_start, timezone) + 60,
-          color:
-            o.event.event_type === 'birthday'
-              ? BIRTHDAY_COLOR
-              : theme.eventColors[occs.indexOf(o) % theme.eventColors.length]!,
+          color: o.event.event_type === 'birthday' ? BIRTHDAY_COLOR : eventColor(o.event, theme, occs.indexOf(o)),
           isAllDay: o.event.all_day === 1,
         }),
       ),
@@ -212,7 +232,7 @@ export function mapEventCardData(params: {
     location: formatLocationPlain(ev) || undefined,
     displayMetadata: ev.displayMetadata,
     calendarName: 'HyperCalendar',
-    calendarColor: ev.event_type === 'birthday' ? BIRTHDAY_COLOR : theme.eventColors[0]!,
+    calendarColor: ev.event_type === 'birthday' ? BIRTHDAY_COLOR : eventColor(ev, theme, 0),
     isAllDay: ev.all_day === 1,
     theme,
     locale,
@@ -316,10 +336,7 @@ function makeDay(
             : o.occurrence_end
               ? toMinutes(o.occurrence_end, params.timezone)
               : toMinutes(o.occurrence_start, params.timezone) + 60,
-        color:
-          o.event.event_type === 'birthday'
-            ? BIRTHDAY_COLOR
-            : params.theme.eventColors[i % params.theme.eventColors.length]!,
+        color: o.event.event_type === 'birthday' ? BIRTHDAY_COLOR : eventColor(o.event, params.theme, i),
         isAllDay: o.event.all_day === 1,
       }),
     ),

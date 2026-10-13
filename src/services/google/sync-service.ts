@@ -11,7 +11,7 @@ import { syncLogger } from '../../utils/logger.ts';
 import type { EventChangeNotifier } from '../event/event-change-notifier.ts';
 import { type GoogleCalendarApi, googleGoneStatus } from './calendar-api.ts';
 import { computeEventDiff, snapshotFromCalendarEvent, snapshotFromGoogleLocal } from './change-detection.ts';
-import { type GoogleEvent, googleToLocal, localToGoogle } from './event-mapper.ts';
+import { type GoogleEvent, gcalColorId, googleToLocal, localToGoogle } from './event-mapper.ts';
 import {
   handleParticipantChange,
   handleParticipantDelete,
@@ -77,6 +77,7 @@ export class SyncService {
             google_event_id: local.google_event_id,
             google_etag: local.google_etag,
             is_cancelled: local.is_cancelled ?? false,
+            color: local.color,
           });
           totalImported++;
         }
@@ -157,7 +158,8 @@ export class SyncService {
         break;
       }
       case 'update': {
-        const gEvent = localToGoogle(event);
+        // The update replaces the whole Google event: send the stored color back so it survives
+        const gEvent = { ...localToGoogle(event), colorId: gcalColorId(event.color) };
         const updated = await api.updateEvent(calendarId, event.google_event_id!, gEvent);
         this.eventRepo.updateSyncFields(eventId, {
           google_etag: updated.etag ?? undefined,
@@ -259,6 +261,7 @@ export class SyncService {
           timezone: local.timezone,
           location: local.location,
           recurrence_rule: local.recurrence_rule,
+          color: local.color,
         });
         this.syncRepo.logSync({
           user_id: userId,
@@ -318,6 +321,7 @@ export class SyncService {
           google_event_id: local.google_event_id,
           google_etag: local.google_etag,
           is_cancelled: local.is_cancelled ?? false,
+          color: local.color,
         });
         this.syncRepo.logSync({
           user_id: userId,

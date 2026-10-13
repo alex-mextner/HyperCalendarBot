@@ -73,6 +73,7 @@ describe('connect-telegram post-connect pending invitation', () => {
       location_verified: 0,
       venue_name: null,
       is_deleted: 0,
+      color: null,
       last_synced_at: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

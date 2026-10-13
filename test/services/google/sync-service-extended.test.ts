@@ -94,6 +94,7 @@ describe('SyncService — extended coverage', () => {
       google_event_id: 'g-exist',
       google_etag: '"old-etag"',
       is_cancelled: false,
+      color: null,
     });
 
     const api = createMockApi({
@@ -148,6 +149,7 @@ describe('SyncService — extended coverage', () => {
       google_event_id: 'g-del',
       google_etag: '"e1"',
       is_cancelled: false,
+      color: null,
     });
 
     const api = createMockApi({
@@ -265,6 +267,30 @@ describe('SyncService — extended coverage', () => {
     const updated = eventRepo.findById(event.id, 1);
     expect(updated!.sync_status).toBe('synced');
     expect(updated!.google_etag).toBe('"etag-upd"');
+  });
+
+  test('pushEvent update sends the stored Google color back, and none for an uncolored event', async () => {
+    const pushed = async (color: string | null) => {
+      const event = eventRepo.create({
+        user_id: 1,
+        title: 'Colored',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      eventRepo.update(event.id, 1, { color });
+      eventRepo.updateSyncFields(event.id, {
+        sync_status: 'pending_push',
+        google_calendar_id: 'cal-1',
+        google_event_id: `g-color-${event.id}`,
+      });
+      const api = createMockApi();
+      await service.pushEvent(api as never, 1, event.id, 'update');
+      return (api.updateEvent.mock.calls[0] as unknown[])[2] as { colorId?: string };
+    };
+
+    expect((await pushed('#D50000')).colorId).toBe('1');
+    expect((await pushed('#616161')).colorId).toBe('11');
+    expect((await pushed(null)).colorId).toBeUndefined();
   });
 
   test('pushEvent delete calls deleteEvent and removes from DB', async () => {
@@ -403,6 +429,7 @@ describe('SyncService — extended coverage', () => {
       google_event_id: 'g-conflict',
       google_etag: '"old"',
       is_cancelled: false,
+      color: null,
     });
 
     // Mark as pending_push to trigger conflict resolution
@@ -457,6 +484,7 @@ describe('SyncService — extended coverage', () => {
       google_event_id: 'g-local-wins',
       google_etag: '"old"',
       is_cancelled: false,
+      color: null,
     });
 
     const existing = eventRepo.findByGoogleEventId(1, 'cal-1', 'g-local-wins')!;

@@ -130,6 +130,19 @@ describe('EventRepository', () => {
     expect(updated!.title).toBe('New');
   });
 
+  test('update persists color', () => {
+    const created = events.create({
+      user_id: USER_ID,
+      title: 'Colored',
+      start_at: '2026-03-11T10:00:00Z',
+      timezone: 'UTC',
+    });
+    expect(created.color).toBeNull();
+    const updated = events.update(created.id, USER_ID, { color: '#D50000' });
+    expect(updated!.color).toBe('#D50000');
+    expect(events.findById(created.id, USER_ID)!.color).toBe('#D50000');
+  });
+
   test('remove soft-deletes event (row persists, filtered from reads)', () => {
     const created = events.create({
       user_id: USER_ID,
@@ -833,5 +846,51 @@ describe('EventRepository.updateSyncFields column allowlist', () => {
     expect(() => events.updateSyncFields(event.id, { malicious: '1; DROP TABLE events; --' } as never)).toThrow(
       'Unknown sync field: malicious',
     );
+  });
+});
+
+describe('EventRepository.insertSyncedEvent', () => {
+  let db: Database;
+  let events: EventRepository;
+  const USER_ID = 1;
+
+  beforeEach(() => {
+    db = createTestDb();
+    events = new EventRepository(db);
+    new UserRepository(db).create({ telegram_id: USER_ID });
+  });
+
+  function baseSyncedEvent(overrides: Partial<Parameters<EventRepository['insertSyncedEvent']>[0]> = {}) {
+    return {
+      user_id: USER_ID,
+      title: 'Synced Event',
+      description: null,
+      start_at: '2026-03-15T10:00:00Z',
+      end_at: '2026-03-15T11:00:00Z',
+      all_day: false,
+      timezone: 'UTC',
+      location: null,
+      recurrence_rule: null,
+      google_calendar_id: 'primary',
+      google_event_id: 'g-color-1',
+      google_etag: '"etag1"',
+      is_cancelled: false,
+      color: null,
+      ...overrides,
+    };
+  }
+
+  test('persists a non-null color', () => {
+    events.insertSyncedEvent(baseSyncedEvent({ color: '#D50000' }));
+    const inserted = events.findByGoogleEventId(USER_ID, 'primary', 'g-color-1');
+    expect(inserted).not.toBeNull();
+    expect(inserted!.color).toBe('#D50000');
+  });
+
+  test('persists a null color when the Google event has no colorId', () => {
+    events.insertSyncedEvent(baseSyncedEvent({ color: null }));
+    const inserted = events.findByGoogleEventId(USER_ID, 'primary', 'g-color-1');
+    expect(inserted).not.toBeNull();
+    expect(inserted!.color).toBeNull();
   });
 });

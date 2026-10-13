@@ -61,6 +61,7 @@ export const EVENT_UPDATE_FIELDS = [
   'google_maps_url',
   'location_verified',
   'venue_name',
+  'color',
 ] satisfies readonly (keyof UpdateEventData)[];
 
 /**
@@ -710,14 +711,15 @@ export class EventRepository {
     google_event_id: string;
     google_etag: string | null;
     is_cancelled: boolean | number;
+    color: string | null;
   }): void {
     this.db
       .prepare(`
       INSERT OR IGNORE INTO events (
         user_id, title, description, start_at, end_at, all_day,
         timezone, location, recurrence_rule, google_calendar_id, google_event_id,
-        google_etag, sync_status, sync_version, is_cancelled
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, ?)
+        google_etag, sync_status, sync_version, is_cancelled, color
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, ?, ?)
     `)
       .run(
         data.user_id,
@@ -733,6 +735,7 @@ export class EventRepository {
         data.google_event_id,
         data.google_etag,
         data.is_cancelled ? 1 : 0,
+        data.color,
       );
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { googleToLocal, localToGoogle } from '../../../src/services/google/event-mapper.ts';
+import { gcalColorId, googleToLocal, localToGoogle } from '../../../src/services/google/event-mapper.ts';
 
 describe('event-mapper', () => {
   describe('localToGoogle', () => {
@@ -293,6 +293,99 @@ describe('event-mapper', () => {
         'primary',
       );
       expect(result.recurrence_rule).toBe('RRULE:FREQ=WEEKLY\nEXDATE;TZID=Europe/Moscow:20260401T090000');
+    });
+
+    test('maps known colorId to its hex code', () => {
+      const result = googleToLocal(
+        {
+          id: 'g-color',
+          summary: 'Tomato Event',
+          start: { dateTime: '2026-03-15T10:00:00Z' },
+          end: { dateTime: '2026-03-15T11:00:00Z' },
+          status: 'confirmed',
+          colorId: '1',
+        },
+        42,
+        'primary',
+      );
+      expect(result.color).toBe('#D50000');
+    });
+
+    test('maps every documented GCal colorId to its hex code', () => {
+      const expected: Record<string, string> = {
+        '1': '#D50000',
+        '2': '#E67C73',
+        '3': '#F4511E',
+        '4': '#F6BF26',
+        '5': '#33B679',
+        '6': '#0B8043',
+        '7': '#039BE5',
+        '8': '#3F51B5',
+        '9': '#7986CB',
+        '10': '#8E24AA',
+        '11': '#616161',
+      };
+      for (const [colorId, hex] of Object.entries(expected)) {
+        const result = googleToLocal(
+          {
+            id: `g-color-${colorId}`,
+            start: { dateTime: '2026-03-15T10:00:00Z' },
+            end: { dateTime: '2026-03-15T11:00:00Z' },
+            status: 'confirmed',
+            colorId,
+          },
+          42,
+          'primary',
+        );
+        expect(result.color).toBe(hex);
+      }
+    });
+
+    test('unknown colorId maps to null', () => {
+      const result = googleToLocal(
+        {
+          id: 'g-unknown-color',
+          start: { dateTime: '2026-03-15T10:00:00Z' },
+          end: { dateTime: '2026-03-15T11:00:00Z' },
+          status: 'confirmed',
+          colorId: '99',
+        },
+        42,
+        'primary',
+      );
+      expect(result.color).toBeNull();
+    });
+
+    test('a colorId naming an Object prototype member maps to null, never a function or object', () => {
+      for (const colorId of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+        const result = googleToLocal(
+          { id: 'g-proto', start: { dateTime: '2026-03-15T10:00:00Z' }, status: 'confirmed', colorId },
+          42,
+          'primary',
+        );
+        expect(result.color).toBeNull();
+      }
+    });
+
+    test('gcalColorId maps a stored palette hex back to its colorId and anything else to undefined', () => {
+      expect(gcalColorId('#D50000')).toBe('1');
+      expect(gcalColorId('#8E24AA')).toBe('10');
+      expect(gcalColorId(null)).toBeUndefined();
+      expect(gcalColorId('#123456')).toBeUndefined();
+    });
+
+    test('missing colorId maps to null', () => {
+      const result = googleToLocal(
+        {
+          id: 'g-no-color',
+          start: { dateTime: '2026-03-15T10:00:00Z' },
+          end: { dateTime: '2026-03-15T11:00:00Z' },
+          status: 'confirmed',
+        },
+        42,
+        'primary',
+      );
+      expect(result.color).toBeNull();
     });
   });
 });

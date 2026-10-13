@@ -88,6 +88,7 @@ for (const userId of activeUsers) {
               google_event_id: local.google_event_id,
               google_etag: local.google_etag,
               is_cancelled: local.is_cancelled ?? false,
+              color: local.color,
             });
           }
         });
