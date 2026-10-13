@@ -444,4 +444,11 @@ describe('place on the daily agenda image', () => {
     expect(html).not.toContain('📍');
     expect(html).not.toContain('Damrak');
   });
+
+  test('a place made only of spaces leaves the event meta at the time range, with no separator', () => {
+    const html = renderDay({ location: '   ', resolved_address: null, google_maps_url: null, location_verified: 0 });
+    const meta = html.match(/<div class="event-block__meta">([^<]*)<\/div>/)?.[1];
+    expect(meta).toBe('11:00 – 12:00');
+    expect(html).not.toContain('📍');
+  });
 });

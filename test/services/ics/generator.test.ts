@@ -114,4 +114,9 @@ describe('generateIcs', () => {
     ]);
     expect(ics).toContain('LOCATION:Кафе Ромашка — ул. Примерная\\, 1\\, Москва\n');
   });
+
+  test('no LOCATION for a location made only of spaces', () => {
+    const ics = generateIcs([makeEvent({ location: '   ', location_verified: 0 })]);
+    expect(ics).not.toContain('LOCATION');
+  });
 });
