@@ -1,5 +1,9 @@
 // src/services/ics/parser.ts
 import { TZDate } from '@date-fns/tz';
+import { logger } from '../../utils/logger.ts';
+import { parseRecurrenceBlock, RecurrenceUnsupportedError } from '../event/recurrence-block.ts';
+
+const icsParserLogger = logger.child({ module: 'ics-parser' });
 
 export interface IcsEvent {
   title: string;
@@ -8,6 +12,11 @@ export interface IcsEvent {
   description?: string;
   location?: string;
   recurrence_rule?: string;
+  /** Set instead of `recurrence_rule` when the VEVENT's recurrence lines are explicitly
+   * unsupported (multiple RRULE, EXRULE, or an EXDATE/RDATE value-type mismatch with DTSTART —
+   * see spec §9) — the event still imports as a one-off rather than being silently dropped or
+   * truncated to whichever RRULE line came first. */
+  recurrenceUnsupportedReason?: string;
 }
 
 /**
@@ -20,15 +29,29 @@ export function parseIcs(icsContent: string): IcsEvent[] {
 
   let inEvent = false;
   let current: Partial<IcsEvent> = {};
+  let dtstartValueKind: 'date' | 'date-time' = 'date-time';
+  let recurrenceLines: string[] = [];
 
   for (const line of lines) {
     if (line === 'BEGIN:VEVENT') {
       inEvent = true;
       current = {};
+      dtstartValueKind = 'date-time';
+      recurrenceLines = [];
       continue;
     }
     if (line === 'END:VEVENT') {
       inEvent = false;
+      if (recurrenceLines.length > 0) {
+        try {
+          const parsed = parseRecurrenceBlock(recurrenceLines.join('\n'), dtstartValueKind);
+          current.recurrence_rule = parsed.lines.join('\n');
+        } catch (err) {
+          const reason = err instanceof RecurrenceUnsupportedError ? err.reason : 'invalid_rrule_syntax';
+          icsParserLogger.warn({ err, reason }, 'Skipping unsupported recurrence lines in ICS import');
+          current.recurrenceUnsupportedReason = reason;
+        }
+      }
       if (current.title && current.start_at) {
         events.push(current as IcsEvent);
       }
@@ -51,6 +74,7 @@ export function parseIcs(icsContent: string): IcsEvent[] {
         break;
       case 'DTSTART':
         current.start_at = icsDateToIso(value, tzid);
+        dtstartValueKind = value.trim().length === 8 ? 'date' : 'date-time';
         break;
       case 'DTEND':
         current.end_at = icsDateToIso(value, tzid);
@@ -62,7 +86,12 @@ export function parseIcs(icsContent: string): IcsEvent[] {
         current.location = unescapeIcs(value);
         break;
       case 'RRULE':
-        current.recurrence_rule = value;
+      case 'EXRULE':
+      case 'EXDATE':
+      case 'RDATE':
+        // Kept as the original line (property + params + value) — parseRecurrenceBlock reads
+        // the full prefixed block once every VEVENT's lines are collected, at END:VEVENT.
+        recurrenceLines.push(line);
         break;
     }
   }

@@ -19,6 +19,7 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     recurrence_end_at: null,
     parent_event_id: null,
     original_start_at: null,
+    identity_status: null,
     is_cancelled: 0,
     is_deleted: 0,
     reminder_overrides: null,
@@ -70,6 +71,33 @@ describe('generateIcs', () => {
   test('includes RRULE if present', () => {
     const ics = generateIcs([makeEvent({ recurrence_rule: 'FREQ=DAILY' })]);
     expect(ics).toContain('RRULE:FREQ=DAILY');
+  });
+
+  test('does not double-prefix RRULE on a Google-synced multi-line recurrence_rule', () => {
+    // spec §1.4/§8: naive `RRULE:${recurrence_rule}` concatenation on an already-prefixed
+    // Google-synced block produced `RRULE:RRULE:...` — invalid ICS.
+    const ics = generateIcs([
+      makeEvent({
+        recurrence_rule: 'RRULE:FREQ=WEEKLY;INTERVAL=1;COUNT=6\nEXDATE:20260113T100000Z\nRDATE:20260301T100000Z',
+      }),
+    ]);
+    expect(ics).not.toContain('RRULE:RRULE:');
+    expect(ics).toContain('RRULE:FREQ=WEEKLY;INTERVAL=1;COUNT=6');
+    expect(ics).toContain('EXDATE:20260113T100000Z');
+    expect(ics).toContain('RDATE:20260301T100000Z');
+  });
+
+  test('normalizes a locally-created bare rule (no RRULE: prefix) before export', () => {
+    const ics = generateIcs([makeEvent({ recurrence_rule: 'FREQ=WEEKLY;INTERVAL=1;COUNT=6' })]);
+    expect(ics).toContain('RRULE:FREQ=WEEKLY;INTERVAL=1;COUNT=6');
+    expect(ics).not.toContain('RRULE:RRULE:');
+  });
+
+  test('skips (does not export a malformed RRULE line for) an unsupported multi-RRULE series', () => {
+    const ics = generateIcs([makeEvent({ recurrence_rule: 'RRULE:FREQ=WEEKLY;COUNT=6\nRRULE:FREQ=DAILY;COUNT=3' })]);
+    expect(ics).not.toContain('RRULE:');
+    // The rest of the event still exports.
+    expect(ics).toContain('SUMMARY:Test Event');
   });
 
   test('handles multiple events', () => {

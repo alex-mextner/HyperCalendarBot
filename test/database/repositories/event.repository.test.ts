@@ -376,6 +376,24 @@ describe('EventRepository', () => {
       const updated = events.findById(template.id, USER_ID);
       expect(updated!.recurrence_rule).toBe('FREQ=WEEKLY;UNTIL=20260314T000000Z');
     });
+
+    test('setRecurrenceUntil strips an existing COUNT (RFC 5545 forbids COUNT and UNTIL together)', () => {
+      // Reviewed (correctness): parseRecurrenceBlock now rejects COUNT+UNTIL together
+      // (count_and_until_conflict); this "this and future" split path must not produce it.
+      const template = events.create({
+        user_id: USER_ID,
+        title: 'Weekly',
+        start_at: '2026-03-01T10:00:00Z',
+        timezone: 'UTC',
+        recurrence_rule: 'FREQ=WEEKLY;COUNT=6',
+      });
+
+      events.setRecurrenceUntil(template.id, '2026-03-14T00:00:00Z');
+
+      const updated = events.findById(template.id, USER_ID);
+      expect(updated!.recurrence_rule).toBe('FREQ=WEEKLY;UNTIL=20260314T000000Z');
+      expect(updated!.recurrence_rule).not.toContain('COUNT=');
+    });
   });
 
   describe('birthday queries', () => {

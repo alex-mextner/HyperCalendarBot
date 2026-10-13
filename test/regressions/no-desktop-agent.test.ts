@@ -89,7 +89,13 @@ test('retirement preserves populated users, related events and migration trackin
         .map((column) => column.name),
     ).toEqual(retainedColumns);
     expect(users()).toEqual(beforeUsers);
-    expect(db.query('SELECT * FROM events').all()).toEqual(beforeEvents);
+    // Every column events had before this run must keep its value — a later migration may add
+    // a new nullable column (e.g. 066's identity_status), which is not a data loss.
+    const afterEvents = db.query('SELECT * FROM events').all();
+    expect(afterEvents).toHaveLength(beforeEvents.length);
+    afterEvents.forEach((row, i) => {
+      expect(row).toMatchObject(beforeEvents[i] as { [key: string]: unknown });
+    });
     const applied = db.query('SELECT * FROM migrations').all();
     expect(applied).toHaveLength(migrations.length);
     runMigrations(db, migrations);

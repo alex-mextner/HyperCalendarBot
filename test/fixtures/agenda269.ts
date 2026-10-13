@@ -16,6 +16,7 @@ export function agendaEvent(overrides: Partial<CalendarEvent> = {}): CalendarEve
     recurrence_end_at: null,
     parent_event_id: null,
     original_start_at: null,
+    identity_status: null,
     is_cancelled: 0,
     is_deleted: 0,
     reminder_overrides: null,

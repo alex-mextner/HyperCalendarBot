@@ -51,6 +51,11 @@ export interface CalendarEvent {
   parent_event_id: number | null;
   original_start_at: string | null;
   is_cancelled: number; // 0 | 1
+  /** Recurrence exception identity migration (GH-657): 'unresolved' when a legacy exception's
+   * original_start_at could not be matched to exactly one parent-template occurrence on the
+   * same local calendar date; null once resolved to (or created with) an exact instant. Only
+   * meaningful on exception rows (parent_event_id NOT NULL). */
+  identity_status: 'unresolved' | null;
   is_deleted: number; // 0 | 1 — soft-delete flag
   reminder_overrides: string | null; // JSON array "[5, 30]"
   google_event_id: string | null;

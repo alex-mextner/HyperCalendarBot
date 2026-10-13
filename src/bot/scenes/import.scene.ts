@@ -68,6 +68,7 @@ export function createImportScene(
               : {};
 
           let imported = 0;
+          let recurrenceUnsupportedCount = 0;
           for (const icsEvent of parsed) {
             eventService.createEvent({
               user_id: user.telegram_id,
@@ -81,6 +82,7 @@ export function createImportScene(
               ...groupFields,
             });
             imported++;
+            if (icsEvent.recurrenceUnsupportedReason) recurrenceUnsupportedCount++;
           }
 
           actionLogRepo?.insert({
@@ -93,11 +95,18 @@ export function createImportScene(
             result_summary: `imported ${imported}`,
           });
 
-          await context.send(
+          const importedMessage =
             lang === 'ru'
               ? `✅ Импортировано ${imported} ${ruPlural(imported, 'событие', 'события', 'событий')}.`
-              : `✅ Imported ${imported} ${imported === 1 ? 'event' : 'events'}.`,
-          );
+              : `✅ Imported ${imported} ${imported === 1 ? 'event' : 'events'}.`;
+          const unsupportedNote =
+            recurrenceUnsupportedCount > 0
+              ? lang === 'ru'
+                ? `\n⚠️ Правило повторения не импортировано для ${recurrenceUnsupportedCount} ${ruPlural(recurrenceUnsupportedCount, 'события', 'событий', 'событий')} (неподдерживаемый формат); событие добавлено без повторения.`
+                : `\n⚠️ Recurrence rule not imported for ${recurrenceUnsupportedCount} ${recurrenceUnsupportedCount === 1 ? 'event' : 'events'} (unsupported format); added as a one-off event.`
+              : '';
+
+          await context.send(importedMessage + unsupportedNote);
         } catch (err: unknown) {
           botLogger.warn({ err }, 'import scene: failed to read ICS file');
           await context.send(lang === 'ru' ? 'Не удалось прочитать файл.' : 'Failed to read file.');

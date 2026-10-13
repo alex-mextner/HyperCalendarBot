@@ -2,7 +2,11 @@
 // Not currently wired up — /export command has not been implemented yet.
 // src/services/ics/generator.ts
 import type { CalendarEvent } from '../../database/types.ts';
+import { logger } from '../../utils/logger.ts';
+import { parseRecurrenceBlock, RecurrenceUnsupportedError } from '../event/recurrence-block.ts';
 import { formatLocationPlain } from '../location/format-location.ts';
+
+const icsLogger = logger.child({ module: 'ics-generator' });
 
 /**
  * Generate ICS (iCalendar) string from events
@@ -23,7 +27,24 @@ function eventToVevent(event: CalendarEvent): string {
   if (event.description) lines.push(`DESCRIPTION:${escapeIcs(event.description)}`);
   const location = formatLocationPlain(event);
   if (location) lines.push(`LOCATION:${escapeIcs(location)}`);
-  if (event.recurrence_rule) lines.push(`RRULE:${event.recurrence_rule}`);
+  if (event.recurrence_rule) {
+    // Serialize the full canonical block (RRULE + EXDATE/RDATE), not `RRULE:${recurrence_rule}`:
+    // a Google-synced series already stores a prefixed multi-line block, and naive
+    // concatenation doubled the prefix (`RRULE:RRULE:...`) — see spec §1.4/§8.
+    try {
+      const parsed = parseRecurrenceBlock(event.recurrence_rule, event.all_day ? 'date' : 'date-time');
+      lines.push(...parsed.lines);
+    } catch (err) {
+      icsLogger.warn(
+        {
+          err,
+          eventId: event.id,
+          reason: err instanceof RecurrenceUnsupportedError ? err.reason : undefined,
+        },
+        'Skipping unsupported recurrence_rule in ICS export',
+      );
+    }
+  }
   lines.push(`CREATED:${isoToIcsDate(event.created_at)}`);
   lines.push('END:VEVENT');
   return lines.join('\n');
