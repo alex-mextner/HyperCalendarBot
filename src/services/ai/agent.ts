@@ -7,6 +7,7 @@ import type { ChatHistoryMessage } from '../../database/types.ts';
 import { isBalanceExhausted } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
+import { buildAddressContext } from '../location/address-context.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import { resolveTurnDayReferences, weekdayMismatchNotice } from './day-reference-guard.ts';
 import {
@@ -63,6 +64,11 @@ const RETRY_STORE_TIMEOUT_MS = 1_500;
  * retry-store bound plus a second for the notice and the history write.
  */
 export const AGENT_DRAIN_SETTLE_MS = RETRY_STORE_TIMEOUT_MS + 1_000;
+/**
+ * Longest a turn waits for the user's saved places (two Redis reads) before it builds the prompt
+ * without them: a stalled Redis must cost a moment, not the whole request deadline.
+ */
+const ADDRESS_PRELOAD_TIMEOUT_MS = 1_000;
 
 /**
  * What became of a failed turn's retry: stored, declined with the pipeline's give-up line,
@@ -924,6 +930,29 @@ export class CalendarBotAgent {
     return turn;
   }
 
+  /**
+   * Fills `ctx.preloadedAddressContext` from the address cache, so the system prompt lists the
+   * places this user confirmed (Known Locations). A store that fails or stalls past
+   * ADDRESS_PRELOAD_TIMEOUT_MS leaves the field unset and the turn runs without the section.
+   */
+  private async preloadAddressContext(ctx: AgentContext, requestSignal: AbortSignal): Promise<void> {
+    const addressCache = ctx.addressCache;
+    if (!addressCache || ctx.preloadedAddressContext !== undefined) return;
+    const signal = AbortSignal.any([requestSignal, AbortSignal.timeout(ADDRESS_PRELOAD_TIMEOUT_MS)]);
+    try {
+      ctx.preloadedAddressContext = await waitForAbort(
+        () => buildAddressContext(addressCache, ctx.user.telegram_id),
+        signal,
+      );
+    } catch (err) {
+      requestSignal.throwIfAborted();
+      aiLogger.warn(
+        { err, userId: ctx.user.telegram_id },
+        'Address context preload failed; prompt has no Known Locations',
+      );
+    }
+  }
+
   private async runTurn(ctx: AgentContext, dbg: AiDebugRunContext | null): Promise<AgentRunResult> {
     const startTime = Date.now();
     const requestSignal = AbortSignal.any([AbortSignal.timeout(this.requestTimeoutMs), this.shutdown.signal]);
@@ -1101,6 +1130,7 @@ export class CalendarBotAgent {
       const turnHistory =
         ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 30) : history;
       ctx.dayReferences = resolveTurnDayReferences(ctx.messageText, turnHistory, new Date(), ctx.user.timezone);
+      await this.preloadAddressContext(ctx, requestSignal);
       const { systemPrompt, messages: rawHistoryMessages } = await waitForAbort(
         () => this.buildMessages(ctx, history, summaryStream, requestSignal),
         requestSignal,
