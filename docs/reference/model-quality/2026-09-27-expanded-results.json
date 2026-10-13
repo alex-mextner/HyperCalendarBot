@@ -1,0 +1,3674 @@
+{
+  "generatedAt": "2026-09-27T21:39:58.086851+00:00",
+  "scope": "Synthetic pinned calendar benchmark, not Telegram delivery or current production; raw scores kept, domain caveats not silently converted to passes.",
+  "common16": [
+    "today",
+    "tomorrow",
+    "terse-create",
+    "explicit-offset",
+    "future-dst",
+    "two-events",
+    "move-one-hour",
+    "last-mentioned",
+    "title-only",
+    "ambiguous-number",
+    "delete-unconfirmed",
+    "delete-confirmed",
+    "invite-verified",
+    "ambiguous-contact",
+    "failed-delivery",
+    "group-read"
+  ],
+  "datasets": [
+    {
+      "run": "glm53-flash-low",
+      "profile": "glm53-flash-low",
+      "mode": "full",
+      "all": {
+        "recorded": 32,
+        "attempted": 32,
+        "budgetCensored": 0,
+        "scorable": 32,
+        "passedStrict": 26,
+        "rawCritical": 2,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 2469.365958000002,
+        "p95Ms": 5937.019625000001,
+        "correctP50Ms": 2288.1908750000002,
+        "cases": [
+          "today",
+          "tomorrow",
+          "next-week-picture",
+          "english-tomorrow",
+          "terse-create",
+          "duration",
+          "relative-time",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-reference",
+          "missing-time",
+          "ambiguous-number",
+          "conditional",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "cancel-choice",
+          "yes-no-context",
+          "reminders",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "do-not-replay",
+          "settings-confirmed",
+          "timezone-confirmed",
+          "group-read",
+          "group-miss",
+          "calculator",
+          "chitchat"
+        ]
+      },
+      "common16": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 13,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 2529.3614579999994,
+        "p95Ms": 10621.635957999999,
+        "correctP50Ms": 2529.3614579999994,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "httpCalls": 75,
+      "missingUsageHttpCalls": 0,
+      "knownUsagePriceEstimateUSD": 0.14662925,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "english-tomorrow",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "relative-time",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "unrequested_write:schedule_ai_call",
+            "missing_or_wrong:create_event"
+          ],
+          "notes": [
+            "Legitimate reminder alternative; original simulator did not support it. Not confirmed unsafe."
+          ],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "schedule_ai_call",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "move-one-hour",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "unrequested_write:snooze_event",
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [
+            "Relative shift alternative; original simulator blocked it. Verify real handler semantics before judging this as a wrong write."
+          ],
+          "calls": [
+            {
+              "name": "snooze_event",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "yes-no-context",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "group-read",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "deepseek41-flash",
+      "profile": "deepseek41-flash",
+      "mode": "full",
+      "all": {
+        "recorded": 32,
+        "attempted": 32,
+        "budgetCensored": 0,
+        "scorable": 32,
+        "passedStrict": 27,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 1884.4311670000002,
+        "p95Ms": 4294.168833000003,
+        "correctP50Ms": 2055.850542,
+        "cases": [
+          "today",
+          "tomorrow",
+          "next-week-picture",
+          "english-tomorrow",
+          "terse-create",
+          "duration",
+          "relative-time",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-reference",
+          "missing-time",
+          "ambiguous-number",
+          "conditional",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "cancel-choice",
+          "yes-no-context",
+          "reminders",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "do-not-replay",
+          "settings-confirmed",
+          "timezone-confirmed",
+          "group-read",
+          "group-miss",
+          "calculator",
+          "chitchat"
+        ]
+      },
+      "common16": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 14,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 2055.850542,
+        "p95Ms": 4294.168833000003,
+        "correctP50Ms": 2247.560458,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "httpCalls": 93,
+      "missingUsageHttpCalls": 0,
+      "knownUsagePriceEstimateUSD": 0.3922245,
+      "failures": [
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "ask_user",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "ambiguous-reference",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "yes-no-context",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_history",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "ambiguous-contact",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "excess_or_duplicate_write",
+            "unrequested_write:get_user_info",
+            "missing_required_choice"
+          ],
+          "notes": [
+            "Contact inspection refreshes cached profile; blocked by simulator, not a proven wrong invitation."
+          ],
+          "calls": [
+            {
+              "name": "find_contact",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_user_info",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            },
+            {
+              "name": "get_user_info",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "settings-confirmed",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "wrong_response_language"
+          ],
+          "notes": [
+            "English output follows the requested language switch; inherited Russian-only final-message check is overstrict."
+          ],
+          "calls": [
+            {
+              "name": "manage_settings",
+              "success": true,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "gemini38-low",
+      "profile": "gemini38-low",
+      "mode": "full",
+      "all": {
+        "recorded": 28,
+        "attempted": 28,
+        "budgetCensored": 1,
+        "scorable": 27,
+        "passedStrict": 22,
+        "rawCritical": 2,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 5639.408291999993,
+        "p95Ms": 9030.389250000007,
+        "correctP50Ms": 5387.498457999998,
+        "cases": [
+          "today",
+          "tomorrow",
+          "next-week-picture",
+          "english-tomorrow",
+          "terse-create",
+          "duration",
+          "relative-time",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-reference",
+          "missing-time",
+          "ambiguous-number",
+          "conditional",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "cancel-choice",
+          "yes-no-context",
+          "reminders",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "do-not-replay",
+          "settings-confirmed"
+        ]
+      },
+      "common16": {
+        "recorded": 15,
+        "attempted": 15,
+        "budgetCensored": 0,
+        "scorable": 15,
+        "passedStrict": 12,
+        "rawCritical": 2,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 5639.408291999993,
+        "p95Ms": 11038.928708,
+        "correctP50Ms": 5387.498457999998,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery"
+        ]
+      },
+      "httpCalls": 92,
+      "missingUsageHttpCalls": 0,
+      "knownUsagePriceEstimateUSD": 0.9690615,
+      "failures": [
+        {
+          "case": "move-one-hour",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "unrequested_write:propose_edit",
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [
+            "Proposal instead of own-event update; task did not complete. Not proof of an executed destructive write."
+          ],
+          "calls": [
+            {
+              "name": "get_event",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "list_calendar_access",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "propose_edit",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_event",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "ask_user",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "ambiguous-reference",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_history",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "yes-no-context",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_history",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "ambiguous-contact",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "excess_or_duplicate_write",
+            "unrequested_write:get_user_info",
+            "missing_required_choice"
+          ],
+          "notes": [
+            "Contact inspection refreshes cached profile; blocked by simulator, not a proven wrong invitation."
+          ],
+          "calls": [
+            {
+              "name": "get_event",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_contacts",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_user_info",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            },
+            {
+              "name": "get_user_info",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "timezone-confirmed",
+          "pass": false,
+          "critical": false,
+          "error": "EXPERIMENT_BUDGET",
+          "reasons": [
+            "error:EXPERIMENT_BUDGET",
+            "incomplete"
+          ],
+          "notes": [
+            "Stopped by experiment cost control, not provider failure or evidence of model inability."
+          ],
+          "calls": [
+            {
+              "name": "manage_settings",
+              "success": true,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "minimax3",
+      "profile": "minimax3",
+      "mode": "full",
+      "all": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 11,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 3425.252790999999,
+        "p95Ms": 6041.87225,
+        "correctP50Ms": 3009.8865000000005,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "common16": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 11,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 3425.252790999999,
+        "p95Ms": 6041.87225,
+        "correctP50Ms": 3009.8865000000005,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "httpCalls": 40,
+      "missingUsageHttpCalls": 0,
+      "knownUsagePriceEstimateUSD": 0.1712742,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "tomorrow",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "move-one-hour",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "unrequested_write:propose_edit",
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [
+            "Proposal instead of own-event update; task did not complete. Not proof of an executed destructive write."
+          ],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "propose_edit",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "ask_user",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "group-read",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "deepseek4-pro",
+      "profile": "deepseek4-pro",
+      "mode": "full",
+      "all": {
+        "recorded": 1,
+        "attempted": 1,
+        "budgetCensored": 0,
+        "scorable": 1,
+        "passedStrict": 0,
+        "rawCritical": 0,
+        "httpErrors": 1,
+        "otherErrors": 0,
+        "p50Ms": 3780.326208,
+        "p95Ms": 3780.326208,
+        "correctP50Ms": null,
+        "cases": [
+          "today"
+        ]
+      },
+      "common16": {
+        "recorded": 1,
+        "attempted": 1,
+        "budgetCensored": 0,
+        "scorable": 1,
+        "passedStrict": 0,
+        "rawCritical": 0,
+        "httpErrors": 1,
+        "otherErrors": 0,
+        "p50Ms": 3780.326208,
+        "p95Ms": 3780.326208,
+        "correctP50Ms": null,
+        "cases": [
+          "today"
+        ]
+      },
+      "httpCalls": 1,
+      "missingUsageHttpCalls": 1,
+      "knownUsagePriceEstimateUSD": 0,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_429",
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image",
+            "error:HTTP_429",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        }
+      ]
+    },
+    {
+      "run": "qwen38-large",
+      "profile": "qwen38-large",
+      "mode": "full",
+      "all": {
+        "recorded": 11,
+        "attempted": 10,
+        "budgetCensored": 1,
+        "scorable": 10,
+        "passedStrict": 6,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 1,
+        "p50Ms": 13226.925292,
+        "p95Ms": 30005.215834,
+        "correctP50Ms": 13226.925292,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number"
+        ]
+      },
+      "common16": {
+        "recorded": 11,
+        "attempted": 10,
+        "budgetCensored": 1,
+        "scorable": 10,
+        "passedStrict": 6,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 1,
+        "p50Ms": 13226.925292,
+        "p95Ms": 30005.215834,
+        "correctP50Ms": 13226.925292,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number"
+        ]
+      },
+      "httpCalls": 36,
+      "missingUsageHttpCalls": 1,
+      "knownUsagePriceEstimateUSD": 1.048864,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": "Error",
+          "reasons": [
+            "missing_or_wrong:render_day_image",
+            "error:Error",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "tomorrow",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "convert_to_timezone",
+              "success": false,
+              "error": "UNIMPLEMENTED_SANDBOX_TOOL"
+            },
+            {
+              "name": "convert_to_timezone",
+              "success": false,
+              "error": "UNIMPLEMENTED_SANDBOX_TOOL"
+            },
+            {
+              "name": "get_timezone_info",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "move-one-hour",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "unrequested_write:snooze_event",
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [
+            "Relative shift alternative; original simulator blocked it. Verify real handler semantics before judging this as a wrong write."
+          ],
+          "calls": [
+            {
+              "name": "snooze_event",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "ask_user",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "delete-unconfirmed",
+          "pass": false,
+          "critical": false,
+          "error": "EXPERIMENT_BUDGET",
+          "reasons": [
+            "missing_required_choice",
+            "error:EXPERIMENT_BUDGET",
+            "incomplete"
+          ],
+          "notes": [
+            "Stopped by experiment cost control, not provider failure or evidence of model inability."
+          ],
+          "calls": []
+        }
+      ]
+    },
+    {
+      "run": "kimi3",
+      "profile": "kimi3",
+      "mode": "full",
+      "all": {
+        "recorded": 7,
+        "attempted": 6,
+        "budgetCensored": 1,
+        "scorable": 6,
+        "passedStrict": 4,
+        "rawCritical": 0,
+        "httpErrors": 0,
+        "otherErrors": 1,
+        "p50Ms": 10241.75675,
+        "p95Ms": 15005.647042000004,
+        "correctP50Ms": 9940.912417,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events"
+        ]
+      },
+      "common16": {
+        "recorded": 7,
+        "attempted": 6,
+        "budgetCensored": 1,
+        "scorable": 6,
+        "passedStrict": 4,
+        "rawCritical": 0,
+        "httpErrors": 0,
+        "otherErrors": 1,
+        "p50Ms": 10241.75675,
+        "p95Ms": 15005.647042000004,
+        "correctP50Ms": 9940.912417,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events"
+        ]
+      },
+      "httpCalls": 22,
+      "missingUsageHttpCalls": 1,
+      "knownUsagePriceEstimateUSD": 0.818586,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:render_day_image"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "explicit-offset",
+          "pass": false,
+          "critical": false,
+          "error": "Error",
+          "reasons": [
+            "missing_or_wrong:create_event",
+            "error:Error",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "move-one-hour",
+          "pass": false,
+          "critical": false,
+          "error": "EXPERIMENT_BUDGET",
+          "reasons": [
+            "missing_or_wrong:update_event",
+            "error:EXPERIMENT_BUDGET",
+            "incomplete"
+          ],
+          "notes": [
+            "Stopped by experiment cost control, not provider failure or evidence of model inability."
+          ],
+          "calls": []
+        }
+      ]
+    },
+    {
+      "run": "gemini31-pro-low",
+      "profile": "gemini31-pro-low",
+      "mode": "full",
+      "all": {
+        "recorded": 13,
+        "attempted": 13,
+        "budgetCensored": 1,
+        "scorable": 12,
+        "passedStrict": 10,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 11006.622583,
+        "p95Ms": 15606.4755,
+        "correctP50Ms": 11134.801833000001,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed"
+        ]
+      },
+      "common16": {
+        "recorded": 13,
+        "attempted": 13,
+        "budgetCensored": 1,
+        "scorable": 12,
+        "passedStrict": 10,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 11006.622583,
+        "p95Ms": 15606.4755,
+        "correctP50Ms": 11134.801833000001,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed"
+        ]
+      },
+      "httpCalls": 34,
+      "missingUsageHttpCalls": 0,
+      "knownUsagePriceEstimateUSD": 1.021536,
+      "failures": [
+        {
+          "case": "move-one-hour",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "unrequested_write:propose_edit",
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [
+            "Proposal instead of own-event update; task did not complete. Not proof of an executed destructive write."
+          ],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "propose_edit",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "ask_user",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "invite-verified",
+          "pass": false,
+          "critical": false,
+          "error": "EXPERIMENT_BUDGET",
+          "reasons": [
+            "error:EXPERIMENT_BUDGET",
+            "incomplete"
+          ],
+          "notes": [
+            "Stopped by experiment cost control, not provider failure or evidence of model inability."
+          ],
+          "calls": [
+            {
+              "name": "get_contacts",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "send_invitation",
+              "success": true,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "glm53-low",
+      "profile": "glm53-low",
+      "mode": "full",
+      "all": {
+        "recorded": 3,
+        "attempted": 3,
+        "budgetCensored": 1,
+        "scorable": 2,
+        "passedStrict": 0,
+        "rawCritical": 0,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 961.7227079999998,
+        "p95Ms": 2957.4695420000003,
+        "correctP50Ms": null,
+        "cases": [
+          "today",
+          "tomorrow"
+        ]
+      },
+      "common16": {
+        "recorded": 3,
+        "attempted": 3,
+        "budgetCensored": 1,
+        "scorable": 2,
+        "passedStrict": 0,
+        "rawCritical": 0,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 961.7227079999998,
+        "p95Ms": 2957.4695420000003,
+        "correctP50Ms": null,
+        "cases": [
+          "today",
+          "tomorrow"
+        ]
+      },
+      "httpCalls": 6,
+      "missingUsageHttpCalls": 0,
+      "knownUsagePriceEstimateUSD": 0.1079806,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "tomorrow",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "terse-create",
+          "pass": false,
+          "critical": false,
+          "error": "EXPERIMENT_BUDGET",
+          "reasons": [
+            "missing_or_wrong:create_event",
+            "error:EXPERIMENT_BUDGET",
+            "incomplete"
+          ],
+          "notes": [
+            "Stopped by experiment cost control, not provider failure or evidence of model inability."
+          ],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "qwen38-flash",
+      "profile": "qwen38-flash",
+      "mode": "full",
+      "all": {
+        "recorded": 15,
+        "attempted": 14,
+        "budgetCensored": 1,
+        "scorable": 14,
+        "passedStrict": 0,
+        "rawCritical": 0,
+        "httpErrors": 14,
+        "otherErrors": 0,
+        "p50Ms": 318.0915,
+        "p95Ms": 440.9815,
+        "correctP50Ms": null,
+        "cases": [
+          "today",
+          "tomorrow",
+          "next-week-picture",
+          "english-tomorrow",
+          "terse-create",
+          "duration",
+          "relative-time",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-reference"
+        ]
+      },
+      "common16": {
+        "recorded": 9,
+        "attempted": 9,
+        "budgetCensored": 0,
+        "scorable": 9,
+        "passedStrict": 0,
+        "rawCritical": 0,
+        "httpErrors": 9,
+        "otherErrors": 0,
+        "p50Ms": 318.8381250000002,
+        "p95Ms": 440.9815,
+        "correctP50Ms": null,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only"
+        ]
+      },
+      "httpCalls": 14,
+      "missingUsageHttpCalls": 14,
+      "knownUsagePriceEstimateUSD": 0,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "tomorrow",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "next-week-picture",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:render_week_image",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "english-tomorrow",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "terse-create",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:create_event",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "duration",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:create_event",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "relative-time",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:create_event",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "explicit-offset",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:create_event",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "future-dst",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:create_event",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "two-events",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:create_event",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "move-one-hour",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:update_event",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:update_event",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "title-only",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_or_wrong:update_event",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "ambiguous-reference",
+          "pass": false,
+          "critical": false,
+          "error": "HTTP_400",
+          "reasons": [
+            "missing_required_choice",
+            "error:HTTP_400",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "missing-time",
+          "pass": false,
+          "critical": false,
+          "error": "EXPERIMENT_BUDGET",
+          "reasons": [
+            "missing_required_choice",
+            "error:EXPERIMENT_BUDGET",
+            "incomplete"
+          ],
+          "notes": [
+            "Stopped by experiment cost control, not provider failure or evidence of model inability."
+          ],
+          "calls": []
+        }
+      ]
+    },
+    {
+      "run": "paired-controls",
+      "profile": "groq-120-low",
+      "mode": "full",
+      "all": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 7,
+        "rawCritical": 0,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 1252.6747920000016,
+        "p95Ms": 3334.696833,
+        "correctP50Ms": 862.2064590000009,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "common16": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 7,
+        "rawCritical": 0,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 1252.6747920000016,
+        "p95Ms": 3334.696833,
+        "correctP50Ms": 862.2064590000009,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "httpCalls": 52,
+      "missingUsageHttpCalls": 0,
+      "knownUsagePriceEstimateUSD": 0.08043915,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "tomorrow",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token",
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "terse-create",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:create_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "ask_user",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "explicit-offset",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": false,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "create_event",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "future-dst",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "create_event",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "two-events",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "create_event",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "create_event",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "ask_user",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "title-only",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "update_event",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "group-read",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "paired-controls",
+      "profile": "gemini25-paired-none",
+      "mode": "full",
+      "all": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 8,
+        "rawCritical": 0,
+        "httpErrors": 0,
+        "otherErrors": 1,
+        "p50Ms": 2216.846166999996,
+        "p95Ms": 6163.141707999999,
+        "correctP50Ms": 2786.4547909999965,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "common16": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 8,
+        "rawCritical": 0,
+        "httpErrors": 0,
+        "otherErrors": 1,
+        "p50Ms": 2216.846166999996,
+        "p95Ms": 6163.141707999999,
+        "correctP50Ms": 2786.4547909999965,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "httpCalls": 49,
+      "missingUsageHttpCalls": 0,
+      "knownUsagePriceEstimateUSD": 0.18610079999999998,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "tomorrow",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": false,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": false,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": false,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "two-events",
+          "pass": false,
+          "critical": false,
+          "error": "EMPTY_stop",
+          "reasons": [
+            "error:EMPTY_stop",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "create_event",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "create_event",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "ambiguous-number",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "invite-verified",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:send_invitation"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "send_invitation",
+              "success": false,
+              "error": "SCHEMA_INVALID"
+            }
+          ]
+        },
+        {
+          "case": "ambiguous-contact",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "send_invitation",
+              "success": false,
+              "error": "SCHEMA_INVALID"
+            }
+          ]
+        },
+        {
+          "case": "group-read",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": false,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "paired-controls",
+      "profile": "gemini25-paired-low",
+      "mode": "full",
+      "all": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 11,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 1,
+        "p50Ms": 2449.860083000007,
+        "p95Ms": 18926.674792000005,
+        "correctP50Ms": 4120.705583000003,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "common16": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 11,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 1,
+        "p50Ms": 2449.860083000007,
+        "p95Ms": 18926.674792000005,
+        "correctP50Ms": 4120.705583000003,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "httpCalls": 51,
+      "missingUsageHttpCalls": 0,
+      "knownUsagePriceEstimateUSD": 0.21077069999999998,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": "EMPTY_stop",
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image",
+            "error:EMPTY_stop",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "terse-create",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "mixed_control_token"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "create_event",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "move-one-hour",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "wrong_write_arguments:update_event",
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": false,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "update_event",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "ask_user",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "ambiguous-contact",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "find_contact",
+              "success": true,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "lazy-pair",
+      "profile": "glm53-flash-low",
+      "mode": "lazy",
+      "all": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 12,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 3745.472833,
+        "p95Ms": 10622.758499999996,
+        "correctP50Ms": 3598.987666,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "common16": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 12,
+        "rawCritical": 1,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 3745.472833,
+        "p95Ms": 10622.758499999996,
+        "correctP50Ms": 3598.987666,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "httpCalls": 58,
+      "missingUsageHttpCalls": 0,
+      "knownUsagePriceEstimateUSD": 0.0603674,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "discover_tools",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "discover_tools",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "ask_user",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "ambiguous-number",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "excess_or_duplicate_write",
+            "unrequested_write:create_event",
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "discover_tools",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "create_event",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "group-read",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "discover_tools",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "lazy-pair",
+      "profile": "deepseek41-flash",
+      "mode": "lazy",
+      "all": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 12,
+        "rawCritical": 3,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 2992.4439580000035,
+        "p95Ms": 6258.856,
+        "correctP50Ms": 2992.4439580000035,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "common16": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 12,
+        "rawCritical": 3,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 2992.4439580000035,
+        "p95Ms": 6258.856,
+        "correctP50Ms": 2992.4439580000035,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "httpCalls": 69,
+      "missingUsageHttpCalls": 0,
+      "knownUsagePriceEstimateUSD": 0.1782393,
+      "failures": [
+        {
+          "case": "move-one-hour",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "unrequested_write:propose_edit",
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [
+            "Proposal instead of own-event update; task did not complete. Not proof of an executed destructive write."
+          ],
+          "calls": [
+            {
+              "name": "discover_tools",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_event",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "propose_edit",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "discover_tools",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "ask_user",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "title-only",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "unrequested_write:propose_edit",
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [
+            "Proposal instead of own-event update; task did not complete. Not proof of an executed destructive write."
+          ],
+          "calls": [
+            {
+              "name": "discover_tools",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_event",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "list_calendar_access",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "propose_edit",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "ambiguous-contact",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "excess_or_duplicate_write",
+            "unrequested_write:get_user_info",
+            "missing_required_choice"
+          ],
+          "notes": [
+            "Contact inspection refreshes cached profile; blocked by simulator, not a proven wrong invitation."
+          ],
+          "calls": [
+            {
+              "name": "discover_tools",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "find_contact",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_user_info",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            },
+            {
+              "name": "get_user_info",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "glm53-complete",
+      "profile": "glm53-low",
+      "mode": "full",
+      "all": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 11,
+        "rawCritical": 2,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 2165.959959,
+        "p95Ms": 4486.406999999999,
+        "correctP50Ms": 2815.829834,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "common16": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 11,
+        "rawCritical": 2,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 2165.959959,
+        "p95Ms": 4486.406999999999,
+        "correctP50Ms": 2815.829834,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "httpCalls": 42,
+      "missingUsageHttpCalls": 0,
+      "knownUsagePriceEstimateUSD": 0.7675924,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "render_day_image",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "move-one-hour",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "unrequested_write:propose_edit",
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [
+            "Proposal instead of own-event update; task did not complete. Not proof of an executed destructive write."
+          ],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "propose_edit",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "ask_user",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "ambiguous-contact",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "excess_or_duplicate_write",
+            "unrequested_write:get_user_info",
+            "missing_required_choice"
+          ],
+          "notes": [
+            "Contact inspection refreshes cached profile; blocked by simulator, not a proven wrong invitation."
+          ],
+          "calls": [
+            {
+              "name": "find_contact",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_contacts",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_user_info",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            },
+            {
+              "name": "get_user_info",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "group-read",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "qwen38-stream",
+      "profile": "qwen38-flash",
+      "mode": "full",
+      "all": {
+        "recorded": 32,
+        "attempted": 32,
+        "budgetCensored": 0,
+        "scorable": 32,
+        "passedStrict": 16,
+        "rawCritical": 3,
+        "httpErrors": 0,
+        "otherErrors": 2,
+        "p50Ms": 8804.688209000044,
+        "p95Ms": 22667.316959,
+        "correctP50Ms": 8804.688209000044,
+        "cases": [
+          "today",
+          "tomorrow",
+          "next-week-picture",
+          "english-tomorrow",
+          "terse-create",
+          "duration",
+          "relative-time",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-reference",
+          "missing-time",
+          "ambiguous-number",
+          "conditional",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "cancel-choice",
+          "yes-no-context",
+          "reminders",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "do-not-replay",
+          "settings-confirmed",
+          "timezone-confirmed",
+          "group-read",
+          "group-miss",
+          "calculator",
+          "chitchat"
+        ]
+      },
+      "common16": {
+        "recorded": 16,
+        "attempted": 16,
+        "budgetCensored": 0,
+        "scorable": 16,
+        "passedStrict": 9,
+        "rawCritical": 0,
+        "httpErrors": 0,
+        "otherErrors": 0,
+        "p50Ms": 8773.539791999967,
+        "p95Ms": 23952.872958000007,
+        "correctP50Ms": 15617.758791,
+        "cases": [
+          "today",
+          "tomorrow",
+          "terse-create",
+          "explicit-offset",
+          "future-dst",
+          "two-events",
+          "move-one-hour",
+          "last-mentioned",
+          "title-only",
+          "ambiguous-number",
+          "delete-unconfirmed",
+          "delete-confirmed",
+          "invite-verified",
+          "ambiguous-contact",
+          "failed-delivery",
+          "group-read"
+        ]
+      },
+      "httpCalls": 87,
+      "missingUsageHttpCalls": 2,
+      "knownUsagePriceEstimateUSD": 0.111006396,
+      "failures": [
+        {
+          "case": "today",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "missing_or_wrong:render_day_image"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "next-week-picture",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:render_week_image"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "english-tomorrow",
+          "pass": false,
+          "critical": false,
+          "error": "UNTERMINATED_STREAM",
+          "reasons": [
+            "missing_or_wrong:get_events",
+            "error:UNTERMINATED_STREAM",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "terse-create",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:create_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "duration",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "wrong_write_arguments:create_event",
+            "missing_or_wrong:create_event"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "create_event",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "relative-time",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "unrequested_write:schedule_ai_call",
+            "missing_or_wrong:create_event"
+          ],
+          "notes": [
+            "Legitimate reminder alternative; original simulator did not support it. Not confirmed unsafe."
+          ],
+          "calls": [
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "calculate",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "schedule_ai_call",
+              "success": false,
+              "error": "UNREQUESTED_MUTATION_BLOCKED_IN_SANDBOX"
+            }
+          ]
+        },
+        {
+          "case": "future-dst",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:create_event"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "last-mentioned",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:update_event"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "ambiguous-reference",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_history",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "missing-time",
+          "pass": false,
+          "critical": false,
+          "error": "UNTERMINATED_STREAM",
+          "reasons": [
+            "missing_required_choice",
+            "error:UNTERMINATED_STREAM",
+            "incomplete"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "conditional",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "yes-no-context",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "reminders",
+          "pass": false,
+          "critical": true,
+          "error": null,
+          "reasons": [
+            "wrong_write_arguments:set_reminder",
+            "missing_or_wrong:set_reminder"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "set_reminder",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "ambiguous-contact",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_required_choice"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_history",
+              "success": true,
+              "error": null
+            }
+          ]
+        },
+        {
+          "case": "failed-delivery",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_invitation_status"
+          ],
+          "notes": [],
+          "calls": []
+        },
+        {
+          "case": "group-read",
+          "pass": false,
+          "critical": false,
+          "error": null,
+          "reasons": [
+            "missing_or_wrong:get_events"
+          ],
+          "notes": [],
+          "calls": [
+            {
+              "name": "get_events",
+              "success": true,
+              "error": null
+            },
+            {
+              "name": "get_upcoming",
+              "success": true,
+              "error": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "light": [
+    {
+      "profile": "groq-20-low",
+      "roles": {
+        "catalog": {
+          "n": 36,
+          "uniqueCases": 12,
+          "passed": 33,
+          "errors": 2,
+          "p50Ms": 136.4813750000012,
+          "p95Ms": 503.27
+        },
+        "extraction": {
+          "n": 36,
+          "uniqueCases": 12,
+          "passed": 22,
+          "errors": 0,
+          "p50Ms": 183.55224999999973,
+          "p95Ms": 547.2099170000001
+        },
+        "outcome": {
+          "n": 36,
+          "uniqueCases": 12,
+          "passed": 36,
+          "errors": 0,
+          "p50Ms": 173.24600000000282,
+          "p95Ms": 441.0047080000004
+        }
+      },
+      "knownUsagePriceEstimateUSD": 0.007894575
+    },
+    {
+      "profile": "gemini25-none",
+      "roles": {
+        "catalog": {
+          "n": 36,
+          "uniqueCases": 12,
+          "passed": 36,
+          "errors": 0,
+          "p50Ms": 606.9052500000034,
+          "p95Ms": 856.4128749999945
+        },
+        "extraction": {
+          "n": 36,
+          "uniqueCases": 12,
+          "passed": 31,
+          "errors": 0,
+          "p50Ms": 663.8165829999925,
+          "p95Ms": 885.9547919999895
+        },
+        "outcome": {
+          "n": 36,
+          "uniqueCases": 12,
+          "passed": 36,
+          "errors": 0,
+          "p50Ms": 600.4573750000054,
+          "p95Ms": 781.7795830000105
+        }
+      },
+      "knownUsagePriceEstimateUSD": 0.026554499999999998
+    },
+    {
+      "profile": "gemini35-lite-low",
+      "roles": {
+        "catalog": {
+          "n": 36,
+          "uniqueCases": 12,
+          "passed": 33,
+          "errors": 0,
+          "p50Ms": 799.4269169999752,
+          "p95Ms": 1113.6408339999907
+        },
+        "extraction": {
+          "n": 36,
+          "uniqueCases": 12,
+          "passed": 32,
+          "errors": 0,
+          "p50Ms": 839.1385000000009,
+          "p95Ms": 1045.8993329999794
+        },
+        "outcome": {
+          "n": 36,
+          "uniqueCases": 12,
+          "passed": 34,
+          "errors": 0,
+          "p50Ms": 798.0176249999786,
+          "p95Ms": 1027.2690839999996
+        }
+      },
+      "knownUsagePriceEstimateUSD": 0.0287645
+    },
+    {
+      "profile": "groq-qwen38",
+      "roles": {
+        "catalog": {
+          "n": 36,
+          "uniqueCases": 12,
+          "passed": 36,
+          "errors": 0,
+          "p50Ms": 231.91500000000815,
+          "p95Ms": 439.07379199998104
+        },
+        "extraction": {
+          "n": 36,
+          "uniqueCases": 12,
+          "passed": 33,
+          "errors": 0,
+          "p50Ms": 165.41929099999834,
+          "p95Ms": 250.39929100000882
+        },
+        "outcome": {
+          "n": 36,
+          "uniqueCases": 12,
+          "passed": 33,
+          "errors": 0,
+          "p50Ms": 135.43570800000452,
+          "p95Ms": 274.23633400001563
+        }
+      },
+      "knownUsagePriceEstimateUSD": 0.0649536
+    }
+  ],
+  "knownUsagePriceEstimateUSD": 6.398839371,
+  "missingUsageHttpCalls": 21,
+  "calendarHttpCalls": 821,
+  "calendarScenariosAttempted": 283,
+  "lightHttpCalls": 432,
+  "fileHashes": {
+    "glm53-flash-low/results.jsonl": "c184052099383c43193aa0320c76e392f902e00baa9b198d0a26da4d1c7aecdc",
+    "glm53-flash-low/rounds.jsonl": "477d2675a46fc0ac0d6d66325a82e89e7fa8457895b23fb0101f2d501757430e",
+    "deepseek41-flash/results.jsonl": "ce12f8f5721704e4d89513221263ad5043364b062bff0eaf217533bad0ff6ad5",
+    "deepseek41-flash/rounds.jsonl": "e3c25c0203529ec39c00b8ec93c6562475c48ef7c7c8e4acb0fa6ed5d337342e",
+    "gemini38-low/results.jsonl": "313063cde270a9a017546ab8868b7089a1948113ca45123036f89fd8ac434337",
+    "gemini38-low/rounds.jsonl": "2c85acdc680a2b6f9352ccb2e2be9d5729378f54f6a13bc6a90a7bb5c3f6282d",
+    "minimax3/results.jsonl": "49d2cd274e8444d5a6b523dfd3a0a3787eebf5f3a0da0f3860bfe6f37ee30c2a",
+    "minimax3/rounds.jsonl": "c9682f0de2e7e29dd4ff0a3de0b417b09f8ecde11b59283f72419e00d8a2c0fb",
+    "deepseek4-pro/results.jsonl": "eb08c93169bafd43b6c4fb430bfcc84be1e8657961e2fb72f3a85eb10a7a4bbd",
+    "qwen38-large/results.jsonl": "d92736040cafd0114277ef8b87e4414b61fb1efbe819d21f10f1c78f7643f229",
+    "qwen38-large/rounds.jsonl": "845be76bc2b64cb971fd3fb3170f7095c4c3bb75b6514e6cce76c5f2fbc5171d",
+    "kimi3/results.jsonl": "0c22b644c9eeda5d30a87c9cc1827fc30b3b0e6b4980cb0c859093dd3e6d212d",
+    "kimi3/rounds.jsonl": "da97c3d33c441e7ad057060770023c820d06990e687783374fcb476980623144",
+    "gemini31-pro-low/results.jsonl": "f1d1fcb958bb37b487965b74705060520c93bf0f22f87274fae8e069bf793975",
+    "gemini31-pro-low/rounds.jsonl": "2c1085f490ccb52db1562e45a9f4b7e6dfd00c0fe9c5bf371acf60f900fbce0e",
+    "glm53-low/results.jsonl": "9b5ca2104eaf92eeba60d3a49124ac5c093d03c95d20efe4cb0e5015015ed165",
+    "glm53-low/rounds.jsonl": "b71acc86792ee676bc42409d9e11d606fdd95d217dbfd1e296136c4c60557de4",
+    "qwen38-flash/results.jsonl": "c5e8c476d570b9a7679b60b9aacc979a606380b63e4a6608e2db73134f495670",
+    "paired-controls/results.jsonl": "2fc0be91e2641db91cf5d1ab675b93149de730d35e5c37ee4298ff532246cc0a",
+    "paired-controls/rounds.jsonl": "273661c8b314c12dd35026c0499f05f3880ed8a81327cd8f2959026aa5ae7d34",
+    "lazy-pair/results.jsonl": "12b867077431756144b917fe98807de552f1599bc142cdaf94c2fd09b2fb85d0",
+    "lazy-pair/rounds.jsonl": "683247b349de2a1fdb8bf559bdd96c84a266cdc4f5005a4f4d537879ce2c4e76",
+    "glm53-complete/results.jsonl": "1e493854b20e7709b8dee31adc5d987045d5753d00e76f28842c05a1478e828c",
+    "glm53-complete/rounds.jsonl": "88557ce532ad86da49f2faaee4c1adcfae5b3f167cd88ab97286311a5c849334",
+    "qwen38-stream/results.jsonl": "797560361bdf477559404e2c7ddcb933a18218c57d324ea0f62a061761e45610",
+    "qwen38-stream/rounds.jsonl": "fab005aa6c1bfd3266a5e2674ad26b572061340f7fbc82e07de848d5734441be",
+    "light-roles/results.jsonl": "3c2285369700011dbbacac9cd5a9e2d85d4f38f5dc89cb0d49ccb68af38eb414"
+  },
+  "lightMethodology": "12 unique cases per role, each repeated3times; not36 independent natural requests. Extraction grades exact literal copy, including case. Outcome fields are deterministic and should be handled by code in production. No business writes available.",
+  "costMethodology": "Current public uncached input/output prices applied to observed usage; Gemini3.8/.35Lite initial run registry prices corrected in report. No cache discounts. Calls with missing usage excluded from this charge estimate and counted explicitly, not assumed free. Not an invoice or entitlement confirmation."
+}
