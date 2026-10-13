@@ -290,6 +290,15 @@ describe('dispatchTool validation integration', () => {
     expect(result.error).toContain('Invalid input');
   });
 
+  test('path-less validation issue carries a whole-schema excerpt (#350)', async () => {
+    // Object-level refine: neither invitee field given, so the issue has no path.
+    const result = await executeTool(ctx, 'send_invitation', { event_id: 1 });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Either invitee_id or invitee_username must be provided');
+    expect(result.error).toContain('[schema: ');
+    expect(result.error).toContain('invitee_username (string, optional)');
+  });
+
   test('returns validation error for missing required fields', async () => {
     const result = await executeTool(ctx, 'create_event', {});
     expect(result.success).toBe(false);
