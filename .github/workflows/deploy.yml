@@ -43,9 +43,7 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit != 'true'
       - run: bunx playwright install-deps chromium-headless-shell
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-      - run: bun test
-      - run: bun run lint
-      - run: ./node_modules/.bin/tsc --noEmit
+      - run: bash ci/local-ci.sh
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 

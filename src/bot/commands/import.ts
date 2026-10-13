@@ -2,13 +2,18 @@
 
 import type { AnyScene } from '@gramio/scenes';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
-import { getGroupId, isGroup } from '../group-context.ts';
-import type { BotCommandContext } from '../types.ts';
+import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
+
+interface ImportContext extends CtxWithChat {
+  dbUser?: { language: string };
+  send(text: string): Promise<unknown>;
+  scene: { enter(scene: AnyScene, state?: { groupId: number; groupTimezone: string }): Promise<unknown> };
+}
 
 export async function handleImport(
-  ctx: BotCommandContext,
+  ctx: ImportContext,
   importScene: AnyScene,
-  groupRepo?: GroupChatRepository,
+  groupRepo?: Pick<GroupChatRepository, 'getTimezone'>,
 ): Promise<void> {
   if (isGroup(ctx)) {
     const groupId = getGroupId(ctx);

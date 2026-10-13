@@ -1,13 +1,13 @@
 // src/services/google/watch-renewal-cron.ts
-import type { Queue } from 'bullmq';
+
 import type { EnvConfig } from '../../config/env.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import { syncLogger } from '../../utils/logger.ts';
 import { GoogleCalendarApi } from './calendar-api.ts';
 import type { GoogleOAuthService } from './oauth.ts';
-import type { GoogleSyncJobData } from './sync-queue.ts';
+import type { GoogleCronQueue } from './sync-cron.ts';
 
-export async function setupWatchRenewalCron(queue: Queue<GoogleSyncJobData>): Promise<void> {
+export async function setupWatchRenewalCron(queue: GoogleCronQueue): Promise<void> {
   await queue.add(
     'watch-renewal-tick',
     {
@@ -25,8 +25,11 @@ export async function setupWatchRenewalCron(queue: Queue<GoogleSyncJobData>): Pr
 
 export async function renewExpiringChannels(
   config: EnvConfig,
-  oauthService: GoogleOAuthService,
-  calendarRepo: GoogleCalendarRepository,
+  oauthService: Pick<GoogleOAuthService, 'getAuthClient'>,
+  calendarRepo: Pick<GoogleCalendarRepository, 'getExpiringChannels' | 'deleteWatchChannel' | 'addWatchChannel'>,
+  createApi: (
+    auth: Awaited<ReturnType<GoogleOAuthService['getAuthClient']>>,
+  ) => Pick<GoogleCalendarApi, 'stopChannel' | 'watchEvents'> = (auth) => new GoogleCalendarApi(auth),
 ): Promise<void> {
   if (!config.PUBLIC_DOMAIN) return;
 
@@ -36,7 +39,7 @@ export async function renewExpiringChannels(
   for (const channel of expiring) {
     try {
       const authClient = await oauthService.getAuthClient(channel.user_id);
-      const api = new GoogleCalendarApi(authClient);
+      const api = createApi(authClient);
 
       await api.stopChannel(channel.channel_id, channel.resource_id);
       calendarRepo.deleteWatchChannel(channel.id);

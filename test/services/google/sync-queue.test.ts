@@ -1,5 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { OAuth2Client } from 'google-auth-library';
 import type { EnvConfig } from '../../../src/config/env.ts';
+import { GoogleCalendarApi } from '../../../src/services/google/calendar-api.ts';
 import { flushPromises } from '../../helpers/mock-context.ts';
 
 // ─── BullMQ mock setup (must come before dynamic import) ──────────────────────
@@ -77,20 +79,18 @@ const mockListCalendars = mock(
       calendar_name: string;
       color: string | null;
       is_primary: boolean;
-      access_role: string;
+      access_role: 'owner' | 'writer' | 'reader' | 'freeBusyReader';
     }[]
   > => [],
 );
 const mockStopChannel = mock(async () => {});
 const mockDeleteEvent = mock(async () => {});
 
-mock.module('../../../src/services/google/calendar-api.ts', () => ({
-  GoogleCalendarApi: class MockGoogleCalendarApi {
-    listCalendars = mockListCalendars;
-    stopChannel = mockStopChannel;
-    deleteEvent = mockDeleteEvent;
-  },
-}));
+class FakeCalendarApi extends GoogleCalendarApi {
+  override listCalendars = mockListCalendars;
+  override stopChannel = mockStopChannel;
+  override deleteEvent = mockDeleteEvent;
+}
 
 const { createGoogleSyncQueue } = await import('../../../src/services/google/sync-queue.ts');
 
@@ -137,6 +137,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     calendarRepo: fakeCalendarRepo as never,
     sendMessage: fakeSendMessage,
     syncService: fakeSyncService as never,
+    createCalendarApi: () => new FakeCalendarApi(new OAuth2Client()),
     ...overrides,
   };
 }
