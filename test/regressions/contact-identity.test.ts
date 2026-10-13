@@ -1,7 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, test } from 'bun:test';
 import { strict as assert } from 'node:assert';
+import { migrations } from '../../src/database/migrations.ts';
 import { ContactRepository } from '../../src/database/repositories/contact.repository.ts';
+import { UserRepository } from '../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../src/database/schema.ts';
 
 // Deliberately synthetic data. No production user IDs, sessions or contact names.
 describe('incident: contact identity and deletion boundaries', () => {
@@ -9,11 +12,12 @@ describe('incident: contact identity and deletion boundaries', () => {
   let contacts: ContactRepository;
   beforeEach(() => {
     db = new Database(':memory:');
-    db.exec(`CREATE TABLE contacts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
-      name TEXT NOT NULL, username TEXT, telegram_id INTEGER, preferred_name TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')));
-      CREATE UNIQUE INDEX idx_contacts_user_name ON contacts(user_id, LOWER(name));`);
+    runMigrations(db, migrations);
+    // Every telegram_id this file addresses as a contact-book owner (#654 migration
+    // 066_contact_directory backfills a primary alias per contact, referencing users.telegram_id).
+    const users = new UserRepository(db);
+    users.create({ telegram_id: 10, timezone: 'UTC' });
+    users.create({ telegram_id: 20, timezone: 'UTC' });
     contacts = new ContactRepository(db);
   });
   afterEach(() => db.close());

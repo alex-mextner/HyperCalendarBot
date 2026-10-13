@@ -4,6 +4,7 @@ import { t } from '../../../../src/config/constants.ts';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { ContactRepository } from '../../../../src/database/repositories/contact.repository.ts';
+import { ContactGroupRepository } from '../../../../src/database/repositories/contact-group.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
@@ -463,6 +464,17 @@ describe('meta tool handlers', () => {
       expect(result.success).toBe(true);
       expect(result.output).toContain('NewName');
       expect(contactRepo.findByName(USER_ID, 'NewName')).not.toBeNull();
+    });
+
+    test('rename refuses an explicit group alias without throwing or mutating', async () => {
+      const contactRepo = new ContactRepository(db);
+      const contact = contactRepo.add(USER_ID, 'OldName');
+      new ContactGroupRepository(db).create(USER_ID, 'family');
+      ctx.contactRepo = contactRepo;
+      const result = handleUpdateContact(ctx, { search: 'OldName', name: 'FAMILY' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('group');
+      expect(contactRepo.findById(USER_ID, contact.id)?.name).toBe('OldName');
     });
 
     test('finds contact by @username', async () => {

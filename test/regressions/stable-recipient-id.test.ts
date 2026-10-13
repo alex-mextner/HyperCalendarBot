@@ -12,9 +12,8 @@ let db: Database;
 let contacts: ContactRepository;
 beforeEach(() => {
   db = new Database(':memory:');
-  db.exec(
-    "CREATE TABLE contacts(id INTEGER PRIMARY KEY, user_id INTEGER, name TEXT, username TEXT, telegram_id INTEGER, preferred_name TEXT, created_at TEXT DEFAULT (datetime('now')))",
-  );
+  runMigrations(db, migrations);
+  new UserRepository(db).create({ telegram_id: 10, timezone: 'UTC' });
   contacts = new ContactRepository(db);
 });
 afterEach(() => db.close());

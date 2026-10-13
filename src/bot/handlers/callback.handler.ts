@@ -22,6 +22,8 @@ import type { CalendarProposalRepository } from '../../database/repositories/cal
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
+import type { ContactAliasRepository } from '../../database/repositories/contact-alias.repository.ts';
+import type { ContactGroupRepository } from '../../database/repositories/contact-group.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
@@ -78,6 +80,7 @@ import { cmdLogger, imageLogger } from '../../utils/logger.ts';
 import { escapeHtml, formatUtcOffset, type ParseMode } from '../../utils/telegram.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import { buildCalendarPickerKeyboard, handleCalendarPickerCallback } from '../commands/calendars.ts';
+import { type ContactsDeps, handleContactsCallback } from '../commands/contacts.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
 import { type DisconnectDeps, executeDisconnect } from '../commands/disconnect-google.ts';
 import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts';
@@ -185,6 +188,8 @@ export interface CallbackHandlerOpts {
     stressDictionary?: StressDictionary;
   };
   contactRepo?: ContactRepository;
+  contactAliasRepo?: ContactAliasRepository;
+  contactGroupRepo?: ContactGroupRepository;
   timezoneScene?: AnyScene;
   connectTelegramScene?: AnyScene;
   telegramDeps?: {
@@ -240,6 +245,8 @@ export function createCallbackHandler(
     invitationRepo,
     voiceDeps,
     contactRepo,
+    contactAliasRepo,
+    contactGroupRepo,
     timezoneScene,
     connectTelegramScene,
     telegramDeps,
@@ -2053,6 +2060,24 @@ export function createCallbackHandler(
     telegramDeps.sessionRepo.setTzConsentAt(user.telegram_id, 'never');
     await ctx.answer();
     await ctx.editText(t(lang).connectTelegram.tzConsentNo, { reply_markup: undefined });
+  });
+
+  // Contacts: list/detail/alias/group callbacks (#654)
+  const contactsDeps: ContactsDeps | undefined =
+    contactRepo && contactAliasRepo && contactGroupRepo
+      ? { contactRepo, contactAliasRepo, contactGroupRepo }
+      : undefined;
+  dispatch.set(CB.CONTACTS, async (ctx, payload, _parts, user) => {
+    if (!contactsDeps) {
+      await ctx.answer();
+      return;
+    }
+    await handleContactsCallback(
+      ctx,
+      payload,
+      { telegram_id: user.telegram_id, language: (user.language ?? 'en') as Lang },
+      contactsDeps,
+    );
   });
 
   return async (ctx: BotCallbackContext) => {

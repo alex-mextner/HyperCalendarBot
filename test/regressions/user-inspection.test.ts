@@ -1,14 +1,16 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
+import { migrations } from '../../src/database/migrations.ts';
 import { ContactRepository } from '../../src/database/repositories/contact.repository.ts';
+import { UserRepository } from '../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../src/database/schema.ts';
 import { executeTool } from '../../src/services/ai/tool-executor.ts';
 import type { AgentContext } from '../../src/services/ai/types.ts';
 
 function setup(): { db: Database; ctx: AgentContext } {
   const db = new Database(':memory:');
-  db.exec(
-    "CREATE TABLE contacts(id INTEGER PRIMARY KEY,user_id INTEGER,name TEXT,username TEXT,telegram_id INTEGER,preferred_name TEXT,created_at TEXT DEFAULT (datetime('now')))",
-  );
+  runMigrations(db, migrations);
+  new UserRepository(db).create({ telegram_id: 10, timezone: 'UTC' });
   const contacts = new ContactRepository(db);
   contacts.add(10, 'Alex', 'old', 5000000001, 'Sasha');
   return {

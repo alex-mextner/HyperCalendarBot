@@ -1116,4 +1116,73 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE event_participants ADD COLUMN source_group_recorded_at TEXT');
     },
   },
+  {
+    name: '066_contact_directory',
+    up(db) {
+      // GH-654 (#232, #554 design §23). idx_contacts_user_name enforced UNIQUE(user_id, LOWER(name)),
+      // so two different people could never share a name in one book — contacts.name stays the
+      // "primary alias" of record, and every other name a user calls a contact by (a nickname, a
+      // corrected spelling, "the plumber") lives in contact_aliases instead. Dropping the index
+      // does NOT touch existing rows or contacts.name's meaning; it only stops blocking a second
+      // person with the same name. The replacement index below is scoped per-contact (not
+      // per-user), so two different contacts are explicitly allowed to share an alias/name — that
+      // is real-world data (two "Lena"s), not corruption. Because the old index was already
+      // enforcing name uniqueness for every existing row, backfilling one primary alias per
+      // contact from its current name can never collide with a per-contact unique index — this
+      // backfill is safe by construction, not by a runtime check.
+      db.exec('DROP INDEX idx_contacts_user_name');
+      db.exec(`
+        CREATE TABLE contact_aliases (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id    INTEGER NOT NULL,
+          contact_id INTEGER NOT NULL,
+          alias      TEXT NOT NULL,
+          is_primary INTEGER NOT NULL DEFAULT 0,
+          source     TEXT NOT NULL CHECK (source IN ('primary_name', 'confirmed_correction', 'manual')),
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+          FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+        )
+      `);
+      // A contact cannot hold the same alias twice, but two different contacts (same owner) MAY
+      // share an alias/name string — that is a real collision to disambiguate at lookup time
+      // (findByNameStrict/searchByName), never a constraint violation. Uniqueness is deliberately
+      // scoped to contact_id, not user_id: see #654 design note on duplicate-name identity.
+      db.exec('CREATE UNIQUE INDEX idx_contact_aliases_contact_alias ON contact_aliases(contact_id, LOWER(alias))');
+      // At most one primary alias per contact — set-primary is a transactional flag swap, never two
+      // primaries at once.
+      db.exec('CREATE UNIQUE INDEX idx_contact_aliases_primary ON contact_aliases(contact_id) WHERE is_primary = 1');
+      db.exec('CREATE INDEX idx_contact_aliases_contact ON contact_aliases(contact_id)');
+
+      db.exec(`
+        CREATE TABLE contact_groups (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id    INTEGER NOT NULL,
+          alias      TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        )
+      `);
+      // A collective alias ("грюковы") shares the same per-user namespace as person aliases so an
+      // exact match is never ambiguous between "the person nicknamed X" and "the group named X".
+      db.exec('CREATE UNIQUE INDEX idx_contact_groups_user_alias ON contact_groups(user_id, LOWER(alias))');
+      db.exec('CREATE INDEX idx_contact_groups_user ON contact_groups(user_id)');
+
+      db.exec(`
+        CREATE TABLE contact_group_members (
+          group_id   INTEGER NOT NULL,
+          contact_id INTEGER NOT NULL,
+          added_at   TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (group_id, contact_id),
+          FOREIGN KEY (group_id) REFERENCES contact_groups(id) ON DELETE CASCADE,
+          FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+        )
+      `);
+      db.exec('CREATE INDEX idx_contact_group_members_contact ON contact_group_members(contact_id)');
+
+      db.exec(
+        "INSERT INTO contact_aliases (user_id, contact_id, alias, is_primary, source) SELECT user_id, id, name, 1, 'primary_name' FROM contacts",
+      );
+    },
+  },
 ];

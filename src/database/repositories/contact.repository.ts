@@ -36,12 +36,19 @@ export class ContactRepository {
    *
    * Done in JS (not SQL) because SQLite's built-in LOWER() is ASCII-only —
    * "Лена" stays "Лена", breaking Cyrillic case-insensitive comparison.
+   *
+   * #654: since migration 066 two different contacts of the same owner may now share an exact
+   * name (the old unique index that made this impossible is gone). More than one exact match is
+   * therefore ambiguous, never "pick the first row" — returns null so `upsert()` creates a new
+   * contact instead of silently patching an arbitrary same-named one. Disambiguating an existing
+   * duplicate by identity is `ContactResolver`'s job (exact_ambiguous), not this method's.
    */
   findByNameStrict(userId: number, name: string): Contact | null {
     const lower = name.trim().toLowerCase();
     if (lower.length === 0) return null;
     const contacts = this.db.prepare('SELECT * FROM contacts WHERE user_id = ?').all(userId) as Contact[];
-    return contacts.find((c) => c.name.trim().toLowerCase() === lower) ?? null;
+    const matches = contacts.filter((c) => c.name.trim().toLowerCase() === lower);
+    return matches.length === 1 ? matches[0]! : null;
   }
 
   /**
@@ -131,15 +138,61 @@ export class ContactRepository {
     })();
   }
 
+  /**
+   * Every contact always has exactly one primary alias row in contact_aliases (#654 migration
+   * 066_contact_directory) — that invariant is created here, not left to callers, so
+   * ContactAliasRepository.promote()/delete() can rely on a primary always existing.
+   */
   add(userId: number, name: string, username?: string, telegramId?: number, preferredName?: string): Contact {
-    const inserted = this.db
-      .query<Contact, [number, string, string | null, number | null, string | null]>(
-        `INSERT INTO contacts (user_id, name, username, telegram_id, preferred_name) VALUES (?, ?, ?, ?, ?)
+    return this.db.transaction(() => {
+      const inserted = this.db
+        .query<Contact, [number, string, string | null, number | null, string | null]>(
+          `INSERT INTO contacts (user_id, name, username, telegram_id, preferred_name) VALUES (?, ?, ?, ?, ?)
        RETURNING id, user_id, name, username, telegram_id, preferred_name, created_at`,
-      )
-      .get(userId, name, username ? normalizeUsername(username) : null, telegramId ?? null, preferredName ?? null);
-    if (!inserted) throw new Error('Contact insert returned no row');
-    return inserted;
+        )
+        .get(userId, name, username ? normalizeUsername(username) : null, telegramId ?? null, preferredName ?? null);
+      if (!inserted) throw new Error('Contact insert returned no row');
+      this.db
+        .prepare(
+          "INSERT INTO contact_aliases (user_id, contact_id, alias, is_primary, source) VALUES (?, ?, ?, 1, 'primary_name')",
+        )
+        .run(userId, inserted.id, name);
+      return inserted;
+    })();
+  }
+
+  /**
+   * Mirrors a `contacts.name` rename onto the contact's primary alias row. If the new name
+   * already exists as a different (non-primary) alias on this contact, that alias is promoted
+   * instead of writing a duplicate — contact_aliases stays unique per (contact_id, LOWER(alias)).
+   * A no-op pre-066 defensive guard: every contact created via add()/upsert() has a primary row.
+   */
+  private syncPrimaryAliasOnRename(contactId: number, userId: number, newName: string): void {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    const rows = this.db
+      .prepare('SELECT id, alias, is_primary FROM contact_aliases WHERE contact_id = ?')
+      .all(contactId) as { id: number; alias: string; is_primary: number }[];
+    const primary = rows.find((row) => row.is_primary === 1);
+    if (!primary || primary.alias.trim().toLowerCase() === trimmed.toLowerCase()) return;
+
+    const lower = trimmed.toLowerCase();
+    const groups = this.db.prepare('SELECT alias FROM contact_groups WHERE user_id = ?').all(userId) as {
+      alias: string;
+    }[];
+    if (groups.some((row) => row.alias.trim().toLowerCase() === lower)) {
+      throw new Error('CONTACT_ALIAS_CONFLICT: that primary label already names a group in your contacts');
+    }
+
+    const existingAlias = rows.find((row) => row.id !== primary.id && row.alias.trim().toLowerCase() === lower);
+    if (existingAlias) {
+      this.db.prepare('UPDATE contact_aliases SET is_primary = 0 WHERE id = ?').run(primary.id);
+      this.db
+        .prepare('UPDATE contact_aliases SET alias = ?, is_primary = 1 WHERE id = ?')
+        .run(trimmed, existingAlias.id);
+    } else {
+      this.db.prepare('UPDATE contact_aliases SET alias = ? WHERE id = ?').run(trimmed, primary.id);
+    }
   }
 
   update(id: number, patch: { name?: string; username?: string; telegram_id?: number; preferred_name?: string }): void {
@@ -176,10 +229,37 @@ export class ContactRepository {
       if (patch.preferred_name !== undefined) {
         fields.push('preferred_name = ?');
         values.push(patch.preferred_name);
+      } else if (
+        patch.name !== undefined &&
+        patch.name.trim() !== current.name.trim() &&
+        current.preferred_name?.trim()
+      ) {
+        const stalePreferred = current.preferred_name.trim();
+        const staleLower = stalePreferred.toLowerCase();
+        const newLower = patch.name.trim().toLowerCase();
+        if (staleLower !== newLower) {
+          const aliases = this.db.prepare('SELECT alias FROM contact_aliases WHERE contact_id = ?').all(id) as {
+            alias: string;
+          }[];
+          const groups = this.db.prepare('SELECT alias FROM contact_groups WHERE user_id = ?').all(current.user_id) as {
+            alias: string;
+          }[];
+          const alreadyAliased = aliases.some((row) => row.alias.trim().toLowerCase() === staleLower);
+          const shadowedByGroup = groups.some((row) => row.alias.trim().toLowerCase() === staleLower);
+          if (!alreadyAliased && !shadowedByGroup) {
+            this.db
+              .prepare(
+                "INSERT INTO contact_aliases (user_id, contact_id, alias, is_primary, source) VALUES (?, ?, ?, 0, 'manual')",
+              )
+              .run(current.user_id, id, stalePreferred);
+          }
+        }
+        fields.push('preferred_name = NULL');
       }
       if (fields.length === 0) return;
       values.push(id);
       this.db.prepare(`UPDATE contacts SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+      if (patch.name !== undefined) this.syncPrimaryAliasOnRename(id, current.user_id, patch.name);
     })();
   }
 
