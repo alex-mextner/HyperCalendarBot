@@ -25,7 +25,7 @@ import {
   handleSnoozeEvent,
   handleUpdateEvent,
 } from '../../../../src/services/ai/tool-handlers/events.ts';
-import type { AgentContext, GroupCapability } from '../../../../src/services/ai/types.ts';
+import type { AgentContext, GroupCapability, SecretaryCapability } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { localToGoogle } from '../../../../src/services/google/event-mapper.ts';
 import type { GroupMemberService } from '../../../../src/services/group/member-service.ts';
@@ -1230,6 +1230,10 @@ describe('event tool handlers', () => {
       return overrides as unknown as GroupCapability;
     }
 
+    function makeSecretaryCapability(overrides: Partial<SecretaryCapability>): SecretaryCapability {
+      return overrides as unknown as SecretaryCapability;
+    }
+
     test('handleUpdateEvent (group) skips declined members in Google fanout, pushes undecided members', async () => {
       const DECLINED_MEMBER = 501;
       const PENDING_MEMBER = 502;
@@ -1278,6 +1282,130 @@ describe('event tool handlers', () => {
       expect(updatedIds).toContain(NO_ROW_MEMBER);
       // Organizer is never part of the member fanout.
       expect(updatedIds).not.toContain(USER_ID);
+    });
+
+    test('handleUpdateEvent (group) pushes exactly one update to an accepted group member', async () => {
+      const ACCEPTED_MEMBER = 504;
+
+      const event = createGroupEvent('Budget Review', '2026-03-23T09:00:00Z');
+
+      const groupMemberRepo = new GroupMemberRepository(db);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, USER_ID);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, ACCEPTED_MEMBER);
+
+      // Member both accepted the event's participant invite AND is an active group
+      // member: they must appear in exactly one Google fanout, not both.
+      const participantRepo = new ParticipantRepository(db);
+      participantRepo.add(event.id, ACCEPTED_MEMBER, 'accepted');
+
+      const pushed: { userId: number; action: string }[] = [];
+      const scheduleParticipantPush = mock(
+        async (userId: number, _eventId: number, action: 'create' | 'update' | 'delete') => {
+          pushed.push({ userId, action });
+        },
+      );
+
+      const gCtx: AgentContext = {
+        ...makeGroupCtx(),
+        participantRepo,
+        group: makeGroupCapability({ groupMemberRepo }),
+        google: { googleCalendarRepo: new GoogleCalendarRepository(db), scheduleParticipantPush },
+      };
+
+      const result = await handleUpdateEvent(gCtx, {
+        event_id: event.id,
+        title: 'Budget Review Updated',
+        scope: 'group',
+      });
+
+      expect(result.success).toBe(true);
+      const updatesToMember = pushed.filter((p) => p.userId === ACCEPTED_MEMBER && p.action === 'update');
+      expect(updatesToMember.length).toBe(1);
+    });
+
+    test('handleUpdateEvent (group) still pushes to an accepted participant who is not a group member', async () => {
+      const ACCEPTED_NON_MEMBER = 505;
+
+      const event = createGroupEvent('Offsite Planning', '2026-03-24T09:00:00Z');
+
+      const groupMemberRepo = new GroupMemberRepository(db);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, USER_ID);
+
+      // Accepted via a personal invite/share link, not a member of this Telegram group.
+      const participantRepo = new ParticipantRepository(db);
+      participantRepo.add(event.id, ACCEPTED_NON_MEMBER, 'accepted');
+
+      const pushed: { userId: number; action: string }[] = [];
+      const scheduleParticipantPush = mock(
+        async (userId: number, _eventId: number, action: 'create' | 'update' | 'delete') => {
+          pushed.push({ userId, action });
+        },
+      );
+
+      const gCtx: AgentContext = {
+        ...makeGroupCtx(),
+        participantRepo,
+        group: makeGroupCapability({ groupMemberRepo }),
+        google: { googleCalendarRepo: new GoogleCalendarRepository(db), scheduleParticipantPush },
+      };
+
+      const result = await handleUpdateEvent(gCtx, {
+        event_id: event.id,
+        title: 'Offsite Planning Updated',
+        scope: 'group',
+      });
+
+      expect(result.success).toBe(true);
+      const updatesToParticipant = pushed.filter((p) => p.userId === ACCEPTED_NON_MEMBER && p.action === 'update');
+      expect(updatesToParticipant.length).toBe(1);
+    });
+
+    test('handleUpdateEvent (group) still pushes to an accepted participant who is the acting secretary', async () => {
+      const OWNER_ID = 601;
+
+      const event = createGroupEvent('Vendor Sync', '2026-03-25T09:00:00Z');
+
+      const userRepo = new UserRepository(db);
+      userRepo.create({ telegram_id: OWNER_ID, timezone: 'UTC' });
+
+      const secretaryRepo = new SecretaryRepository(db);
+      const secretary = secretaryRepo.upsert({ owner_id: OWNER_ID, secretary_id: USER_ID, permission: 'write' });
+      secretaryRepo.updateStatus(secretary.id, 'active');
+
+      const groupMemberRepo = new GroupMemberRepository(db);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, USER_ID);
+
+      // The secretary (the caller, USER_ID) accepted the event as a participant while
+      // acting on OWNER_ID's calendar — distinct from OWNER_ID, whose own participant
+      // row (if any) is excluded from the accepted-participants fanout.
+      const participantRepo = new ParticipantRepository(db);
+      participantRepo.add(event.id, USER_ID, 'accepted');
+
+      const pushed: { userId: number; action: string }[] = [];
+      const scheduleParticipantPush = mock(
+        async (userId: number, _eventId: number, action: 'create' | 'update' | 'delete') => {
+          pushed.push({ userId, action });
+        },
+      );
+
+      const gCtx: AgentContext = {
+        ...makeGroupCtx(),
+        participantRepo,
+        secretary: makeSecretaryCapability({ secretaryRepo }),
+        group: makeGroupCapability({ groupMemberRepo }),
+        google: { googleCalendarRepo: new GoogleCalendarRepository(db), scheduleParticipantPush },
+      };
+
+      const result = await handleUpdateEvent(gCtx, {
+        event_id: event.id,
+        title: 'Vendor Sync Updated',
+        scope: 'group',
+        owner_id: OWNER_ID,
+      });
+
+      expect(result.success).toBe(true);
+      const updatesToSecretary = pushed.filter((p) => p.userId === USER_ID && p.action === 'update');
+      expect(updatesToSecretary.length).toBe(1);
     });
 
     test('handleCreateEvent uses invite link as clickable group link when available', async () => {
