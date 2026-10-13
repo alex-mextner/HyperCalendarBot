@@ -1,0 +1,754 @@
+{
+  "audited_at": "2026-09-27T22:38:51.537114+00:00",
+  "base_commit": "7399876eeb572e0c021cb44004931aec80624311",
+  "kind": "local synthetic diagnosis and read-only source inventory;not production validation",
+  "presets": {
+    "benchmark_head": "ec1044a8b48a88ee2d5b21aba0f4c28e050048a2",
+    "benchmark_pr": 429,
+    "runtime_routing_pr": 267,
+    "laya_in_main": false,
+    "installed_task_cli_release": "release-9dac58e",
+    "installed_task_cli_default": "convaiinnovations/laya",
+    "aisis_model_effort_spec": "docs/specs/040-model-router-and-providers.md"
+  },
+  "laya": {
+    "library": "0.3.20",
+    "torch": "2.14.0",
+    "device": "Apple MPS",
+    "torch_threads": 2,
+    "english_revision": "5e7b2b1b8ca2ecdd3f2322d94069c9b6ce7e844b",
+    "multilingual_revision": "e4e9ddf21a7b1903b7acffd8814ad4307bf63a67",
+    "initial": {
+      "installed-english": {
+        "routing": {
+          "n": 12,
+          "correct": 3,
+          "p50_ms": 36.20114600198576,
+          "p95_ms": 1046.553916996345,
+          "mismatches": [
+            {
+              "case": "read",
+              "expected": "read",
+              "answer": {
+                "type": "choice",
+                "choice": "chat",
+                "probabilities": {
+                  "read": 0.1038,
+                  "write": 0.2239,
+                  "clarify": 0.2656,
+                  "repair": 0.1176,
+                  "chat": 0.2891
+                },
+                "confidence": 0.0476,
+                "answer_confidence": 0.2891,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "greeting",
+              "expected": "chat",
+              "answer": {
+                "type": "choice",
+                "choice": "clarify",
+                "probabilities": {
+                  "read": 0.2173,
+                  "write": 0.1769,
+                  "clarify": 0.2541,
+                  "repair": 0.2197,
+                  "chat": 0.1321
+                },
+                "confidence": 0.0142,
+                "answer_confidence": 0.2541,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "quoted",
+              "expected": "read",
+              "answer": {
+                "type": "choice",
+                "choice": "write",
+                "probabilities": {
+                  "read": 0.1169,
+                  "write": 0.3295,
+                  "clarify": 0.2493,
+                  "repair": 0.1932,
+                  "chat": 0.1111
+                },
+                "confidence": 0.0526,
+                "answer_confidence": 0.3295,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "third-party",
+              "expected": "read",
+              "answer": {
+                "type": "choice",
+                "choice": "clarify",
+                "probabilities": {
+                  "read": 0.0917,
+                  "write": 0.2146,
+                  "clarify": 0.354,
+                  "repair": 0.2713,
+                  "chat": 0.0684
+                },
+                "confidence": 0.0963,
+                "answer_confidence": 0.354,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "missing-time",
+              "expected": "clarify",
+              "answer": {
+                "type": "choice",
+                "choice": "write",
+                "probabilities": {
+                  "read": 0.0771,
+                  "write": 0.4173,
+                  "clarify": 0.153,
+                  "repair": 0.2051,
+                  "chat": 0.1475
+                },
+                "confidence": 0.0949,
+                "answer_confidence": 0.4173,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "complaint",
+              "expected": "repair",
+              "answer": {
+                "type": "choice",
+                "choice": "clarify",
+                "probabilities": {
+                  "read": 0.1516,
+                  "write": 0.1911,
+                  "clarify": 0.2772,
+                  "repair": 0.2635,
+                  "chat": 0.1166
+                },
+                "confidence": 0.0308,
+                "answer_confidence": 0.2772,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "explain",
+              "expected": "chat",
+              "answer": {
+                "type": "choice",
+                "choice": "clarify",
+                "probabilities": {
+                  "read": 0.0743,
+                  "write": 0.0679,
+                  "clarify": 0.6521,
+                  "repair": 0.047,
+                  "chat": 0.1588
+                },
+                "confidence": 0.3225,
+                "answer_confidence": 0.6521,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "read-status",
+              "expected": "read",
+              "answer": {
+                "type": "choice",
+                "choice": "clarify",
+                "probabilities": {
+                  "read": 0.1216,
+                  "write": 0.2186,
+                  "clarify": 0.3515,
+                  "repair": 0.2321,
+                  "chat": 0.0762
+                },
+                "confidence": 0.0734,
+                "answer_confidence": 0.3515,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "explicit",
+              "expected": "chat",
+              "answer": {
+                "type": "choice",
+                "choice": "repair",
+                "probabilities": {
+                  "read": 0.1913,
+                  "write": 0.2386,
+                  "clarify": 0.1622,
+                  "repair": 0.3239,
+                  "chat": 0.0839
+                },
+                "confidence": 0.0515,
+                "answer_confidence": 0.3239,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            }
+          ]
+        },
+        "evidence": {
+          "n": 12,
+          "correct": 10,
+          "p50_ms": 31.01941699787858,
+          "p95_ms": 158.16008300316753,
+          "mismatches": [
+            {
+              "case": "delivered",
+              "expected": "supported",
+              "answer": {
+                "type": "choice",
+                "choice": "unsupported",
+                "probabilities": {
+                  "supported": 0.1647,
+                  "unsupported": 0.8353
+                },
+                "confidence": 0.3546,
+                "answer_confidence": 0.8353,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "applied",
+              "expected": "supported",
+              "answer": {
+                "type": "choice",
+                "choice": "unsupported",
+                "probabilities": {
+                  "supported": 0.0848,
+                  "unsupported": 0.9152
+                },
+                "confidence": 0.5811,
+                "answer_confidence": 0.9152,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            }
+          ]
+        },
+        "load_ms": 9766.697167004168
+      },
+      "multilingual": {
+        "routing": {
+          "n": 12,
+          "correct": 4,
+          "p50_ms": 20.03033300570678,
+          "p95_ms": 439.02616699779173,
+          "mismatches": [
+            {
+              "case": "missing",
+              "expected": "clarify",
+              "answer": {
+                "type": "choice",
+                "choice": "read",
+                "probabilities": {
+                  "read": 0.3226,
+                  "write": 0.2955,
+                  "clarify": 0.1005,
+                  "repair": 0.2629,
+                  "chat": 0.0185
+                },
+                "confidence": 0.1418,
+                "answer_confidence": 0.3226,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "quoted",
+              "expected": "read",
+              "answer": {
+                "type": "choice",
+                "choice": "repair",
+                "probabilities": {
+                  "read": 0.0176,
+                  "write": 0.0036,
+                  "clarify": 0.0028,
+                  "repair": 0.9738,
+                  "chat": 0.0023
+                },
+                "confidence": 0.9084,
+                "answer_confidence": 0.9738,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "third-party",
+              "expected": "read",
+              "answer": {
+                "type": "choice",
+                "choice": "repair",
+                "probabilities": {
+                  "read": 0.1086,
+                  "write": 0.0961,
+                  "clarify": 0.0375,
+                  "repair": 0.7253,
+                  "chat": 0.0326
+                },
+                "confidence": 0.4199,
+                "answer_confidence": 0.7253,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "missing-time",
+              "expected": "clarify",
+              "answer": {
+                "type": "choice",
+                "choice": "write",
+                "probabilities": {
+                  "read": 0.0212,
+                  "write": 0.9311,
+                  "clarify": 0.0101,
+                  "repair": 0.0276,
+                  "chat": 0.0101
+                },
+                "confidence": 0.7888,
+                "answer_confidence": 0.9311,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "complaint",
+              "expected": "repair",
+              "answer": {
+                "type": "choice",
+                "choice": "read",
+                "probabilities": {
+                  "read": 0.4344,
+                  "write": 0.0676,
+                  "clarify": 0.0355,
+                  "repair": 0.4285,
+                  "chat": 0.0341
+                },
+                "confidence": 0.291,
+                "answer_confidence": 0.4344,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "explain",
+              "expected": "chat",
+              "answer": {
+                "type": "choice",
+                "choice": "clarify",
+                "probabilities": {
+                  "read": 0.0823,
+                  "write": 0.1282,
+                  "clarify": 0.6875,
+                  "repair": 0.0642,
+                  "chat": 0.0377
+                },
+                "confidence": 0.3621,
+                "answer_confidence": 0.6875,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "read-status",
+              "expected": "read",
+              "answer": {
+                "type": "choice",
+                "choice": "repair",
+                "probabilities": {
+                  "read": 0.3598,
+                  "write": 0.0294,
+                  "clarify": 0.0563,
+                  "repair": 0.5382,
+                  "chat": 0.0163
+                },
+                "confidence": 0.3576,
+                "answer_confidence": 0.5382,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "explicit",
+              "expected": "chat",
+              "answer": {
+                "type": "choice",
+                "choice": "repair",
+                "probabilities": {
+                  "read": 0.181,
+                  "write": 0.102,
+                  "clarify": 0.0951,
+                  "repair": 0.5389,
+                  "chat": 0.083
+                },
+                "confidence": 0.1887,
+                "answer_confidence": 0.5389,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            }
+          ]
+        },
+        "evidence": {
+          "n": 12,
+          "correct": 9,
+          "p50_ms": 19.041562503844034,
+          "p95_ms": 183.4638329964946,
+          "mismatches": [
+            {
+              "case": "queued",
+              "expected": "unsupported",
+              "answer": {
+                "type": "choice",
+                "choice": "supported",
+                "probabilities": {
+                  "supported": 0.5816,
+                  "unsupported": 0.4184
+                },
+                "confidence": 0.0193,
+                "answer_confidence": 0.5816,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "applied",
+              "expected": "supported",
+              "answer": {
+                "type": "choice",
+                "choice": "unsupported",
+                "probabilities": {
+                  "supported": 0.0708,
+                  "unsupported": 0.9292
+                },
+                "confidence": 0.6312,
+                "answer_confidence": 0.9292,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            },
+            {
+              "case": "quoted-injection",
+              "expected": "unsupported",
+              "answer": {
+                "type": "choice",
+                "choice": "supported",
+                "probabilities": {
+                  "supported": 0.5964,
+                  "unsupported": 0.4036
+                },
+                "confidence": 0.027,
+                "answer_confidence": 0.5964,
+                "action": {
+                  "act_probability": 1.0
+                }
+              }
+            }
+          ]
+        },
+        "load_ms": 32880.885083002795
+      }
+    },
+    "narrow": {
+      "change": {
+        "n": 36,
+        "correct": 28,
+        "wrong_high_probability": [
+          {
+            "case": "add-quoted",
+            "order": "normal",
+            "expected": "A",
+            "actual": "B",
+            "selected_probability": 0.9979
+          },
+          {
+            "case": "delete",
+            "order": "normal",
+            "expected": "A",
+            "actual": "B",
+            "selected_probability": 0.8553
+          },
+          {
+            "case": "add-quoted",
+            "order": "reversed",
+            "expected": "A",
+            "actual": "B",
+            "selected_probability": 0.9728
+          }
+        ]
+      },
+      "repair": {
+        "n": 36,
+        "correct": 23,
+        "wrong_high_probability": [
+          {
+            "case": "move-missing",
+            "order": "normal",
+            "expected": "B",
+            "actual": "A",
+            "selected_probability": 0.8643
+          },
+          {
+            "case": "quoted",
+            "order": "normal",
+            "expected": "B",
+            "actual": "A",
+            "selected_probability": 0.941
+          },
+          {
+            "case": "cancel",
+            "order": "normal",
+            "expected": "B",
+            "actual": "A",
+            "selected_probability": 0.8785
+          },
+          {
+            "case": "quoted",
+            "order": "reversed",
+            "expected": "B",
+            "actual": "A",
+            "selected_probability": 0.9388
+          }
+        ]
+      },
+      "calls": 36,
+      "unique_inputs": 18,
+      "p50_batched_two_question_ms": 20.408853997651022
+    },
+    "limitations": [
+      "Small synthetic diagnostic;no training/calibration and no production acceptance claim.",
+      "Initial five-label task mixes dimensions;the separate narrow task is a new measurement,not a replacement score.",
+      "Option-order repeats are not independent unique requests.",
+      "MPS timings are not measurements on the deployment server;initial load includes download and warm-up.",
+      "Selected class probability and Laya confidence are different fields;neither proves correctness."
+    ]
+  },
+  "current_history_inventory": {
+    "history_schema": [
+      [
+        "id",
+        "INTEGER"
+      ],
+      [
+        "user_id",
+        "INTEGER"
+      ],
+      [
+        "role",
+        "TEXT"
+      ],
+      [
+        "content",
+        "TEXT"
+      ],
+      [
+        "created_at",
+        "TEXT"
+      ],
+      [
+        "chat_id",
+        "INTEGER"
+      ]
+    ],
+    "roles": [
+      [
+        "assistant",
+        945,
+        "2026-06-29 00:08:01",
+        "2026-09-27 22:27:13"
+      ],
+      [
+        "tool",
+        491,
+        "2026-06-29 00:08:01",
+        "2026-09-27 21:15:36"
+      ],
+      [
+        "user",
+        407,
+        "2026-06-29 00:07:53",
+        "2026-09-27 22:27:13"
+      ]
+    ],
+    "users": 11,
+    "tables": [
+      "chat_history",
+      "workflow_sessions",
+      "user_action_log",
+      "gramio_scenes"
+    ]
+  },
+  "earlier_inventory": {
+    "retainedDistinctRows": 2919,
+    "uniqueNaturalUtterances": 402,
+    "source": "26 historical snapshots plus March/April;overlaps current history;timezone reconstruction incomplete"
+  },
+  "payload": {
+    "measuredAt": "2026-09-27T22:29:39.205Z",
+    "kind": "synthetic_payload_estimate",
+    "estimator": "estimateTokens ±20%; no history/data/HTTP latency",
+    "rows": [
+      {
+        "label": "DM (default) full",
+        "toolCount": 64,
+        "toolChars": 35829,
+        "toolTokens": 10293,
+        "promptChars": 15157,
+        "promptTokens": 4526,
+        "totalTokens": 14819
+      },
+      {
+        "label": "DM (default) lazy_initial",
+        "toolCount": 2,
+        "toolChars": 2660,
+        "toolTokens": 762,
+        "promptChars": 22509,
+        "promptTokens": 6653,
+        "totalTokens": 7415
+      },
+      {
+        "label": "DM (default) lazy_read",
+        "toolCount": 8,
+        "toolChars": 5718,
+        "toolTokens": 1635,
+        "promptChars": 22509,
+        "promptTokens": 6653,
+        "totalTokens": 8288
+      },
+      {
+        "label": "group full",
+        "toolCount": 64,
+        "toolChars": 35829,
+        "toolTokens": 10293,
+        "promptChars": 22833,
+        "promptTokens": 6854,
+        "totalTokens": 17147
+      },
+      {
+        "label": "group lazy_initial",
+        "toolCount": 2,
+        "toolChars": 2660,
+        "toolTokens": 762,
+        "promptChars": 30185,
+        "promptTokens": 8982,
+        "totalTokens": 9744
+      },
+      {
+        "label": "group lazy_read",
+        "toolCount": 8,
+        "toolChars": 5718,
+        "toolTokens": 1635,
+        "promptChars": 30185,
+        "promptTokens": 8982,
+        "totalTokens": 10617
+      },
+      {
+        "label": "live_call full",
+        "toolCount": 60,
+        "toolChars": 33301,
+        "toolTokens": 9571,
+        "promptChars": 16246,
+        "promptTokens": 4843,
+        "totalTokens": 14414
+      },
+      {
+        "label": "live_call lazy_initial",
+        "toolCount": 2,
+        "toolChars": 2586,
+        "toolTokens": 740,
+        "promptChars": 23124,
+        "promptTokens": 6833,
+        "totalTokens": 7573
+      },
+      {
+        "label": "live_call lazy_read",
+        "toolCount": 8,
+        "toolChars": 5644,
+        "toolTokens": 1614,
+        "promptChars": 23124,
+        "promptTokens": 6833,
+        "totalTokens": 8447
+      },
+      {
+        "label": "supplement full",
+        "toolCount": 64,
+        "toolChars": 35755,
+        "toolTokens": 10272,
+        "promptChars": 16144,
+        "promptTokens": 4811,
+        "totalTokens": 15083
+      },
+      {
+        "label": "supplement lazy_initial",
+        "toolCount": 2,
+        "toolChars": 2659,
+        "toolTokens": 761,
+        "promptChars": 23479,
+        "promptTokens": 6933,
+        "totalTokens": 7694
+      },
+      {
+        "label": "supplement lazy_read",
+        "toolCount": 8,
+        "toolChars": 5717,
+        "toolTokens": 1635,
+        "promptChars": 23479,
+        "promptTokens": 6933,
+        "totalTokens": 8568
+      }
+    ]
+  },
+  "safety": {
+    "real_history_sent_to_model": false,
+    "paid_generation_calls": 0,
+    "production_mutations": 0,
+    "task_cli_config_changed": false,
+    "billing_changed": false,
+    "public_log_contains_only_synthetic_cases_and_aggregate_metadata": true
+  },
+  "source_sha256": {
+    "laya-probe.py": "adee6601598515d5f5644ebcbf5dcf5015b33ebebb7e1b257289e923d673b179",
+    "laya-cases.json": "43f62f0f9b182ad13cd4e4662255cd78724a479460430dad3e68e0d6e07d90d1",
+    "laya-installed-english.jsonl": "8017f2fcc58a1388cd984b0241a31bfdcc1bd334d45f4c94984d1e073ecaae48",
+    "laya-multilingual.jsonl": "2318b0a7de22ed718e6132e92917de935d28db11db73d622da7b84b84f03c0f3",
+    "laya-narrow.py": "b04d9943859e33c15e8d0daee35aa892cb3ebffac7811d32ca1d870117e6a175",
+    "laya-narrow-inputs.json": "07373933f427fe4e0d93c5f2925e64054c4d26aeef26efc21bfa4332ab6465b7",
+    "laya-narrow-results.jsonl": "89b2e5c4559c518dbe73dab731fa4ecbe438ee93628564921573f5d56aa13b8d",
+    "history-inventory.json": "db0aef77b4a01d44cfa2dd6639467b8d00881954006aef24c7aba45e3a7b2731",
+    "payload-main.log": "afa0312de0e8dea9d267aad65cd884578c87e85ad7f3b1e47212857ef806e0b3"
+  }
+}
