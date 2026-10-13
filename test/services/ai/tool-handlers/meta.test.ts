@@ -743,6 +743,45 @@ describe('handleCalculate', () => {
     expect(r.output).toBe('1354');
   });
 
+  test.each([
+    ['0.1 + 0.2', '0.3'],
+    ['1.005 * 3', '3.015'],
+    ['1 / 3 * 3', '1'],
+    ['(1 / 3 - 0.3333333333333333333333) * 10000000000000000000000', '0.3333333333333333333333333333333333333333'],
+    ['2 / 3', '0.6666666666666666666666666666666666666667'],
+    ['-2 / 3', '-0.6666666666666666666666666666666666666667'],
+    ['10 × 3', '30'],
+    ['100 ÷ 4', '25'],
+    ['-(2 + 3) * -2', '10'],
+    ['99999999999999999999 + 1', '100000000000000000000'],
+    ['100 - 7.5%', '92.5'],
+    ['(40 + 60) + 20%', '120'],
+    ['0.1 + 0.2 - 0.3', '0'],
+    ['1 / 1024 / 1024 / 1024 / 1024 / 1024', '0.00000000000000088817841970012523233890533447265625'],
+    ['-0.00000000000000000000000000000000000000000004', '-0.00000000000000000000000000000000000000000004'],
+    ['.5 * 4', '2'],
+  ])('exact decimal arithmetic: %s = %s', (expression, output) => {
+    expect(handleCalculate({ expression })).toMatchObject({ success: true, output });
+  });
+
+  test('division by zero and malformed arithmetic are refused', () => {
+    expect(handleCalculate({ expression: '1 / (2 - 2)' })).toMatchObject({
+      success: false,
+      error: 'Division by zero: 1 / (2 - 2)',
+    });
+    for (const expression of ['1 +', '(1 + 2', '1.2.3 + 1', '5%', '2 * 50% + 1']) {
+      expect(handleCalculate({ expression }).success).toBe(false);
+    }
+  });
+
+  test('caps input at 500 characters before parsing', () => {
+    expect(handleCalculate({ expression: `${'1+'.repeat(250)}1` })).toMatchObject({
+      success: false,
+      error: 'Expression exceeds the 500 character limit',
+    });
+    expect(handleCalculate({ expression: `${'1+'.repeat(249)}1` })).toMatchObject({ success: true, output: '250' });
+  });
+
   test('adds minutes to HH:MM', async () => {
     const r = handleCalculate({ expression: '22:34 + 31min' });
     expect(r.success).toBe(true);
@@ -835,6 +874,22 @@ describe('handleCalculate', () => {
       success: true,
       output: '10:30:45',
     });
+  });
+
+  test('date-less fixed offsets say when the UTC time falls on another day', () => {
+    expect(handleCalculate({ expression: '00:30 UTC+2 to UTC' })).toMatchObject({
+      success: true,
+      output: '22:30 (previous day)',
+    });
+    expect(handleCalculate({ expression: '23:30 UTC-2 to UTC' })).toMatchObject({
+      success: true,
+      output: '01:30 (next day)',
+    });
+    expect(handleCalculate({ expression: '00:00:15 UTC+14 to UTC' })).toMatchObject({
+      success: true,
+      output: '10:00:15 (previous day)',
+    });
+    expect(handleCalculate({ expression: '02:00 UTC+2 to UTC' })).toMatchObject({ success: true, output: '00:00' });
   });
 
   test('production-invalid datetime forms return a self-correcting ISO example', () => {

@@ -802,7 +802,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'calculate',
     description:
-      'Deterministic calculator and local-time converter. ALWAYS use this tool for math/time conversion — never compute in your head. Supports numbers, durations, ISO datetime arithmetic/differences, and local → UTC conversion as "YYYY-MM-DD HH:MM Europe/Belgrade to UTC" or an explicit fixed offset such as "2026-09-23 12:30 UTC+2 to UTC". IANA conversion applies the offset for that event date, including DST.',
+      'Deterministic calculator and local-time converter. ALWAYS use this tool for math/time conversion — never compute in your head. Supports exact decimal arithmetic (+ - * / × ÷, parentheses, percent change such as "100 - 7.5%"; no currency conversion), durations, ISO datetime arithmetic/differences, and local → UTC conversion as "YYYY-MM-DD HH:MM Europe/Belgrade to UTC" or an explicit fixed offset such as "2026-09-23 12:30 UTC+2 to UTC". IANA conversion applies the offset for that event date, including DST.',
     input_schema: {
       type: 'object' as const,
       properties: {

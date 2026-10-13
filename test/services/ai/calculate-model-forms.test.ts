@@ -248,6 +248,43 @@ describe('calculate: instant to zone', () => {
   });
 
   test.each([
+    // Northern hemisphere, 1 h fall-back.
+    ['2026-10-25 02:30 Europe/Belgrade to UTC', 'UTC+02:00', 'UTC+01:00', '2026-10-25T00:30:00.000Z'],
+    ['2026-11-01 01:30 America/New_York to UTC', 'UTC-04:00', 'UTC-05:00', '2026-11-01T05:30:00.000Z'],
+    // Southern hemisphere: the fold is in April.
+    ['2026-04-05 02:30 Australia/Sydney to UTC', 'UTC+11:00', 'UTC+10:00', '2026-04-04T15:30:00.000Z'],
+    // Lord Howe shifts by 30 minutes only.
+    ['2026-04-05 01:45 Australia/Lord_Howe to UTC', 'UTC+11:00', 'UTC+10:30', '2026-04-04T14:45:00.000Z'],
+  ])('a DST fold names both offsets and quotes a runnable fix: %s', async (expression, first, second, earlier) => {
+    const error = await expectSelfCorrectingRefusal(expression, 'ambiguous', `${first} and again at ${second}`);
+    const [example] = quotedExamples(error);
+    expect(await calc(example!)).toMatchObject({ success: true, output: earlier });
+  });
+
+  test.each([
+    ['2026-03-08 02:30 America/New_York to UTC'],
+    ['2026-10-04 02:30 Australia/Sydney to UTC'],
+    ['2026-10-04 02:15 Australia/Lord_Howe to UTC'],
+  ])('a wall clock skipped by spring-forward is refused: %s', async (expression) => {
+    expect(await calc(expression)).toMatchObject({ success: false });
+    expect((await calc(expression)).error).toContain('does not exist');
+  });
+
+  test.each([
+    // One minute either side of each transition resolves to the offset in force on that side.
+    ['2026-03-29 01:59 Europe/Belgrade to UTC', '2026-03-29T00:59:00.000Z'],
+    ['2026-03-29 03:00 Europe/Belgrade to UTC', '2026-03-29T01:00:00.000Z'],
+    ['2026-10-25 01:59 Europe/Belgrade to UTC', '2026-10-24T23:59:00.000Z'],
+    ['2026-10-25 03:00 Europe/Belgrade to UTC', '2026-10-25T02:00:00.000Z'],
+    ['2026-03-29T00:59:00Z to Europe/Belgrade', '2026-03-29T01:59:00+01:00'],
+    ['2026-03-29T01:00:00Z to Europe/Belgrade', '2026-03-29T03:00:00+02:00'],
+    ['2026-10-25T00:30:00Z to Europe/Belgrade', '2026-10-25T02:30:00+02:00'],
+    ['2026-10-25T01:30:00Z to Europe/Belgrade', '2026-10-25T02:30:00+01:00'],
+  ])('DST transition edge %s → %s', async (expression, expected) => {
+    expect(await calc(expression)).toMatchObject({ success: true, output: expected });
+  });
+
+  test.each([
     ['2026-09-27 10:30 UTC to Europe/Nowhere', 'Invalid timezone: Europe/Nowhere'],
     ['2026-09-27 10:30 Europe/Nowhere to Europe/Belgrade', 'Invalid timezone: Europe/Nowhere'],
     ['2026-09-27T10:30:00Z to Mars/Olympus', 'Invalid timezone: Mars/Olympus'],
