@@ -1041,6 +1041,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         if (ctx.document?.fileName?.endsWith('.ics')) trackFeatureUsage(db.featureUsage, userId, 'action', 'ics_file');
         if (ctx.location) trackFeatureUsage(db.featureUsage, userId, 'action', 'geolocation');
       }
+      // Built per message, never hoisted: src/index.ts sets msgDeps.aiRetryQueue/aiRetryJobStore
+      // after createBot() returns, and a handler built here once would keep them undefined (#125).
       return createMessageHandler(msgDeps)(ctx);
     })
     // Error handler

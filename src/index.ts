@@ -21,6 +21,7 @@ import { configureProviderCircuit } from './services/ai/provider-circuit.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
 import { runSyntheticIntent } from './services/intent/synthetic-intent-run.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
+import { createRedisRetryJobStore } from './services/scheduled/retry-job-store.ts';
 import { InvitationCardRefresher } from './services/sharing/invitation-cards.ts';
 import { createVoiceSender } from './services/voice/voice-sender.ts';
 import { hasChainAnswered, initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
@@ -1080,19 +1081,7 @@ if (config.REDIS_URL) {
   msgDeps.aiRetryQueue = aiMsgQueue;
 
   // Redis store for pending retry job IDs — enables cancellation when user sends new message
-  const RETRY_JOB_TTL_S = 300; // 5 min covers max backoff (30s + 60s + 120s) + buffer
-  const retryRedis = new Bun.RedisClient(config.REDIS_URL);
-  const retryJobStore = {
-    async set(userId: number, jobId: string): Promise<void> {
-      await retryRedis.set(`retry:${userId}`, jobId, 'EX', RETRY_JOB_TTL_S);
-    },
-    async get(userId: number): Promise<string | null> {
-      return retryRedis.get(`retry:${userId}`);
-    },
-    async del(userId: number): Promise<void> {
-      await retryRedis.del(`retry:${userId}`);
-    },
-  };
+  const retryJobStore = createRedisRetryJobStore(new Bun.RedisClient(config.REDIS_URL));
   msgDeps.aiRetryJobStore = retryJobStore;
 
   // SyntheticPipelineRunner — runs IntentMatcher → AiAgent without GramIO context

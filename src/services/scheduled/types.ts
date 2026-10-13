@@ -48,6 +48,8 @@ export interface RetryJobStore {
   set(userId: number, jobId: string): Promise<void>;
   get(userId: number): Promise<string | null>;
   del(userId: number): Promise<void>;
+  /** Clears the pointer only while it still names `jobId`, so a newer retry's pointer survives. */
+  delIfMatch(userId: number, jobId: string): Promise<void>;
 }
 
 /** Dependency injection interface for the job queue. */
