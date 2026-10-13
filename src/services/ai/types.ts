@@ -429,7 +429,8 @@ export interface TelegramSender {
   sendMessageWithKeyboard?(
     chatId: number,
     text: string,
-    keyboard: import('gramio').InlineKeyboard,
+    keyboard: InlineKeyboard,
+    parseMode?: ParseMode,
   ): Promise<{ message_id: number }>;
   editMessageText(chatId: number, messageId: number, text: string, parseMode?: ParseMode): Promise<void>;
   sendButtons?(

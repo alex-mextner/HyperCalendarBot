@@ -360,6 +360,22 @@ const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'show_event',
+    description:
+      'Send the canonical event card (same as /edit) to the chat for an explicit "show this event" request, instead of get_event + your own prose. ' +
+      'event_id shows one event; start_date+end_date shows a period (one match sends a card, several send a picker, none sends a clear empty message).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: { type: 'number', description: 'ID of one specific event to show.' },
+        start_date: { type: 'string', description: 'Period start, ISO 8601 UTC.' },
+        end_date: { type: 'string', description: 'Period end, ISO 8601 UTC.' },
+        scope: scopeProperty,
+        owner_id: ownerIdProperty,
+      },
+    },
+  },
+  {
     name: 'get_reminders',
     description:
       'Get upcoming reminders for one or more events: event_id for one, event_ids for several, or query to search by title.',
@@ -1039,6 +1055,7 @@ const CALL_EXCLUDED_TOOLS = new Set([
   'render_week_image',
   'render_month_image',
   'pick_users',
+  'show_event',
 ]);
 // Tools only available during a live call
 const CALL_ONLY_TOOLS = new Set(['end_call']);
