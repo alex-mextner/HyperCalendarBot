@@ -28,6 +28,7 @@ import {
   type StreamCallbacks,
   type StreamRoundOptions,
   type StreamRoundResult,
+  type StreamToolCall,
 } from '../../../src/services/ai/streaming.ts';
 import { TelegramStreamWriter } from '../../../src/services/ai/telegram-stream.ts';
 import { _resetToolThrottleForTest, executeTool } from '../../../src/services/ai/tool-executor.ts';
@@ -638,6 +639,146 @@ describe('CalendarBotAgent.run()', () => {
     expect(retryNames).toContain('add_contact');
     expect(upsert).toHaveBeenCalledTimes(1);
     expect(contactRepo.list(USER_ID)).toHaveLength(1);
+  });
+
+  describe('Groq returns unlisted tool calls to the local exposure gate (GH-357)', () => {
+    /**
+     * Emulates Groq: without disable_tool_validation it rejects a round whose call is not
+     * in request.tools (the production `tool_use_failed`); with it, the call comes back.
+     */
+    function groqLike(rounds: (StreamToolCall[] | string)[]) {
+      const seen: { allowUnlistedToolCalls: boolean | undefined; tools: Set<string> }[] = [];
+      /** Tool-result content the model was shown, by tool_call_id. */
+      const replies = new Map<string, string>();
+      let round = 0;
+      const impl = async (opts: StreamRoundOptions): Promise<StreamRoundResult> => {
+        if (isValidatorCall(opts))
+          return {
+            text: 'APPROVE',
+            toolCalls: [],
+            finishReason: 'stop',
+            assistantMessage: { role: 'assistant', content: 'APPROVE' },
+            providerUsed: 'mock-validator',
+            metrics: fakeMetrics('groq', 10, 2),
+          };
+        const tools = new Set(opts.tools?.flatMap((t) => (t.type === 'function' ? [t.function.name] : [])) ?? []);
+        seen.push({ allowUnlistedToolCalls: opts.allowUnlistedToolCalls, tools });
+        for (const message of opts.messages)
+          if (message.role === 'tool' && typeof message.content === 'string')
+            replies.set(message.tool_call_id, message.content);
+        const current = rounds[round];
+        if (current === undefined) throw new Error(`Scripted Groq ran out of rounds (call ${round + 1})`);
+        const unlisted = typeof current === 'string' ? undefined : current.find((tc) => !tools.has(tc.name));
+        if (unlisted && !opts.allowUnlistedToolCalls)
+          throw new AllProvidersFailedError([
+            {
+              provider: 'Groq (openai/gpt-oss-120b)',
+              providerId: 'groq',
+              model: 'openai/gpt-oss-120b',
+              message: `Tool call validation failed: attempted to call tool '${unlisted.name}' which was not in request.tools`,
+              transient: true,
+            },
+          ]);
+        round++;
+        if (typeof current === 'string')
+          return {
+            text: current,
+            toolCalls: [],
+            finishReason: 'stop',
+            assistantMessage: { role: 'assistant', content: current },
+            providerUsed: 'Groq (openai/gpt-oss-120b)',
+          };
+        return {
+          text: '',
+          toolCalls: current,
+          finishReason: 'tool_calls',
+          assistantMessage: {
+            role: 'assistant',
+            content: null,
+            tool_calls: current.map((tc) => ({
+              id: tc.id,
+              type: 'function' as const,
+              function: { name: tc.name, arguments: tc.arguments },
+            })),
+          },
+          providerUsed: 'Groq (openai/gpt-oss-120b)',
+        };
+      };
+      return { impl, seen, replies };
+    }
+
+    const contactInput = JSON.stringify({ name: 'Name', username: 'someuser' });
+
+    test.each([true, false])('the unlisted-tool flag follows the local lazy exposure only: %s', async (lazy) => {
+      const groq = groqLike(['Synthetic reply.']);
+      await new CalendarBotAgent({ ...config, toolSchemaMode: lazy ? 'lazy' : 'full' }, sender, {
+        streamImpl: groq.impl,
+      }).run(ctx);
+      expect(groq.seen.map((round) => round.allowUnlistedToolCalls)).toEqual([lazy ? true : undefined]);
+    });
+
+    test('a live call keeps provider tool validation even with lazy mode configured', async () => {
+      ctx.inputMode = 'live_call';
+      const groq = groqLike(['Synthetic spoken reply.']);
+      await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, { streamImpl: groq.impl }).run(ctx);
+      expect(groq.seen.map((round) => round.allowUnlistedToolCalls)).toEqual([undefined]);
+    });
+
+    test('an unlisted known call is rejected unexecuted, revealed, and the identical next call executes once; an unknown tool never executes', async () => {
+      ctx.messageText = '@someuser Name\nAdd to contacts';
+      const contactRepo = new ContactRepository(db);
+      ctx.contactRepo = contactRepo;
+      const upsert = spyOn(contactRepo, 'upsert');
+      const groq = groqLike([
+        [
+          { id: 'unknown', name: 'purge_calendar', arguments: '{}' },
+          { id: 'blind', name: 'add_contact', arguments: contactInput },
+        ],
+        [{ id: 'retry', name: 'add_contact', arguments: contactInput }],
+        'Saved.',
+      ]);
+      const result = await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, {
+        streamImpl: groq.impl,
+      }).run(ctx);
+      // Groq answered every round itself: no server-side rejection, no lost round.
+      expect(groq.seen).toHaveLength(3);
+      expect(groq.seen.every((round) => round.allowUnlistedToolCalls === true)).toBe(true);
+      expect(groq.seen[0]?.tools.has('add_contact')).toBe(false);
+      expect(groq.seen[1]?.tools.has('add_contact')).toBe(true);
+      expect(groq.seen.some((round) => round.tools.has('purge_calendar'))).toBe(false);
+      expect(result.toolCalls.map((call) => call.name)).toEqual(['purge_calendar', 'add_contact', 'add_contact']);
+      expect(result.toolResults.map((r) => r.success)).toEqual([false, false, true]);
+      // Rejected by the exposure gate, never dispatched: executeTool would answer "Unknown tool".
+      expect(groq.replies.get('unknown')).toStartWith('Error: TOOL_SCHEMA_NOT_EXPOSED: reveal the tool');
+      expect(groq.replies.get('blind')).toStartWith(
+        'Error: TOOL_SCHEMA_NOT_EXPOSED: its real parameter schema is now revealed',
+      );
+      expect(groq.replies.get('blind')).toContain('name (string, required)');
+      expect(upsert).toHaveBeenCalledTimes(1);
+      expect(contactRepo.list(USER_ID)).toHaveLength(1);
+    });
+
+    test('a same-batch discover and call stays rejected; only the next round executes', async () => {
+      ctx.messageText = '@someuser Name\nAdd to contacts';
+      const contactRepo = new ContactRepository(db);
+      ctx.contactRepo = contactRepo;
+      const upsert = spyOn(contactRepo, 'upsert');
+      const groq = groqLike([
+        [
+          { id: 'discover', name: 'discover_tools', arguments: JSON.stringify({ groups: [], tools: ['add_contact'] }) },
+          { id: 'same-batch', name: 'add_contact', arguments: contactInput },
+        ],
+        [{ id: 'next-round', name: 'add_contact', arguments: contactInput }],
+        'Saved.',
+      ]);
+      const result = await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, {
+        streamImpl: groq.impl,
+      }).run(ctx);
+      expect(result.toolCalls.map((call) => call.name)).toEqual(['add_contact', 'add_contact']);
+      expect(result.toolResults.map((r) => r.success)).toEqual([false, true]);
+      expect(groq.replies.get('same-batch')).toStartWith('Error: TOOL_SCHEMA_NOT_EXPOSED');
+      expect(upsert).toHaveBeenCalledTimes(1);
+    });
   });
 
   function setupInvitations() {

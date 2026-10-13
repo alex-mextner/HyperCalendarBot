@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import OpenAI from 'openai';
 import { closeGeminiQuotaStores } from '../../../src/services/ai/gemini-quota.ts';
+import { resetModelRegistry } from '../../../src/services/ai/model-registry.ts';
 
 // Build a fake OpenAI client whose chat.completions.create returns a scripted
 // async-iterable stream. Each script entry is one "round" the provider emits.
@@ -156,6 +157,154 @@ describe('aiStreamRound — provider chain fallback', () => {
 
   afterEach(() => {
     // Each fake is recreated per test
+  });
+
+  describe('Groq disable_tool_validation for lazy tool exposure (GH-357)', () => {
+    const lazyTools: OpenAI.ChatCompletionTool[] = [
+      { type: 'function', function: { name: 'discover_tools', parameters: { type: 'object' } } },
+    ];
+    const groqParams = (call: number) => fakeGroq.chat.completions.create.mock.calls[call]?.[0];
+
+    beforeEach(() => {
+      resetModelRegistry();
+      process.env.GROQ_API_KEY = 'groq-key';
+      process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
+      process.env.AI_SMART_CHAIN = 'groq';
+    });
+
+    afterEach(() => {
+      resetModelRegistry();
+    });
+
+    test('a lazy-exposure Groq request lets the model return unlisted tool calls to the local gate', async () => {
+      fakeGroq = buildFakeClient([
+        { kind: 'tool', id: 'blind', name: 'search_events', args: '{"query":"standup"}' },
+        { kind: 'finish', reason: 'tool_calls' },
+      ]);
+      const result = await aiStreamRound({
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: lazyTools,
+        maxTokens: 100,
+        allowUnlistedToolCalls: true,
+      });
+      expect(groqParams(0)?.disable_tool_validation).toBe(true);
+      // The call is only returned, never executed here: the agent's exposure gate decides.
+      expect(result.toolCalls.map((call) => call.name)).toEqual(['search_events']);
+    });
+
+    test('Groq full-mode requests keep provider tool validation', async () => {
+      fakeGroq = buildFakeClient([
+        { kind: 'text', text: 'full' },
+        { kind: 'finish', reason: 'stop' },
+      ]);
+      await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], tools: lazyTools, maxTokens: 100 });
+      expect(groqParams(0)).not.toHaveProperty('disable_tool_validation');
+    });
+
+    test.each(['gemini', 'hf', 'zai'] as const)('%s never receives the Groq-only flag', async (provider) => {
+      process.env.AI_SMART_CHAIN = provider;
+      const fake = buildFakeClient([
+        { kind: 'text', text: provider },
+        { kind: 'finish', reason: 'stop' },
+      ]);
+      if (provider === 'gemini') fakeGemini = fake;
+      else if (provider === 'hf') fakeHf = fake;
+      else fakeZai = fake;
+      const sent = provider === 'gemini' ? fakeGemini : provider === 'hf' ? fakeHf : fakeZai;
+      await aiStreamRound({
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: lazyTools,
+        maxTokens: 100,
+        allowUnlistedToolCalls: true,
+      });
+      expect(sent.chat.completions.create).toHaveBeenCalledTimes(1);
+      expect(sent.chat.completions.create.mock.calls[0]?.[0]).not.toHaveProperty('disable_tool_validation');
+    });
+
+    test('only the Groq slot of a mixed chain sends the flag after Groq fails over', async () => {
+      process.env.AI_SMART_CHAIN = 'groq,gemini';
+      fakeGroq = buildFakeClient(() => {
+        throw new OpenAI.APIError(503, { error: { message: 'overloaded' } }, 'overloaded', new Headers());
+      });
+      fakeGemini = buildFakeClient([
+        { kind: 'text', text: 'gemini' },
+        { kind: 'finish', reason: 'stop' },
+      ]);
+      await aiStreamRound({
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: lazyTools,
+        maxTokens: 100,
+        allowUnlistedToolCalls: true,
+      });
+      expect(groqParams(0)?.disable_tool_validation).toBe(true);
+      expect(fakeGemini.chat.completions.create.mock.calls[0]?.[0]).not.toHaveProperty('disable_tool_validation');
+    });
+
+    test('the compatibility retry without stream_options keeps the flag', async () => {
+      fakeGroq = {
+        chat: {
+          completions: {
+            create: mock(async (params: { stream_options?: unknown }) => {
+              if (params.stream_options) {
+                throw new OpenAI.APIError(
+                  400,
+                  { error: { message: 'Unknown parameter: stream_options' } },
+                  'Unknown parameter: stream_options',
+                  new Headers(),
+                );
+              }
+              return buildFakeClient([
+                { kind: 'text', text: 'compat' },
+                { kind: 'finish', reason: 'stop' },
+              ]).chat.completions.create();
+            }),
+          },
+        },
+      };
+      const result = await aiStreamRound({
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: lazyTools,
+        maxTokens: 100,
+        allowUnlistedToolCalls: true,
+      });
+      expect(result.text).toBe('compat');
+      expect(groqParams(1)?.stream_options).toBeUndefined();
+      expect(groqParams(1)?.disable_tool_validation).toBe(true);
+    });
+
+    test('a rediscovered replacement model keeps the flag', async () => {
+      process.env.GROQ_MODEL = 'retired-groq-model';
+      fakeGroq = {
+        models: { list: mock(async () => ({ data: [{ id: 'openai/gpt-oss-120b' }] })) },
+        chat: {
+          completions: {
+            create: mock(async (params: { model: string }) => {
+              if (params.model === 'retired-groq-model') {
+                throw new OpenAI.APIError(
+                  404,
+                  { error: { message: 'The model does not exist', code: 'model_not_found' } },
+                  'The model `retired-groq-model` does not exist',
+                  new Headers(),
+                );
+              }
+              return buildFakeClient([
+                { kind: 'text', text: 'replacement' },
+                { kind: 'finish', reason: 'stop' },
+              ]).chat.completions.create();
+            }),
+          },
+        },
+      };
+      const result = await aiStreamRound({
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: lazyTools,
+        maxTokens: 100,
+        allowUnlistedToolCalls: true,
+      });
+      expect(result.text).toBe('replacement');
+      expect(groqParams(1)?.model).toBe('openai/gpt-oss-120b');
+      expect(groqParams(1)?.disable_tool_validation).toBe(true);
+    });
   });
 
   test('a safety stop is explicit and is not retried through another provider', async () => {
