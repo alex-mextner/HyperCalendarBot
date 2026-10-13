@@ -1,0 +1,921 @@
+{
+  "schemaVersion": 1,
+  "note": "Synthetic cases written from scratch for the intent coverage harness. No text comes from real users. Clock and zone apply to every case unless a case overrides them.",
+  "defaults": {
+    "at": "2026-09-10T07:00:00.000Z",
+    "timezone": "Europe/Berlin"
+  },
+  "calendars": {
+    "standard": [
+      {
+        "title": "Планёрка отдела",
+        "start": "2026-09-10T09:00:00.000Z",
+        "end": "2026-09-10T10:00:00.000Z"
+      },
+      {
+        "title": "Обзор бюджета",
+        "start": "2026-09-11T08:00:00.000Z",
+        "end": "2026-09-11T09:00:00.000Z"
+      },
+      {
+        "title": "Team retro",
+        "start": "2026-09-10T14:00:00.000Z",
+        "end": "2026-09-10T15:00:00.000Z"
+      }
+    ],
+    "empty": []
+  },
+  "cases": [
+    {
+      "caseId": "syn-d01",
+      "origin": "synthetic",
+      "request": "что у меня на сегодня",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "agenda",
+        "expectedTools": ["get_events"],
+        "idealResponse": "Сегодня, 10 сентября: 11:00 Планёрка отдела и 16:00 Team retro."
+      },
+      "historicalAnswer": "Сегодня две встречи: планёрка и ретро.",
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d02",
+      "origin": "synthetic",
+      "request": "что будет завтра",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "agenda",
+        "expectedTools": ["get_events"],
+        "idealResponse": "Завтра, 11 сентября: 10:00 Обзор бюджета."
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d03",
+      "origin": "synthetic",
+      "request": "what is next",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "agenda",
+        "expectedTools": ["get_upcoming"],
+        "idealResponse": "Next up: Planning at 11:00 today."
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d04",
+      "origin": "synthetic",
+      "request": "сколько у меня встреч завтра",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "count",
+        "expectedTools": ["get_events"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d05",
+      "origin": "synthetic",
+      "request": "найди встречи про бюджет",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "search",
+        "expectedTools": ["search_events"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d06",
+      "origin": "synthetic",
+      "request": "show my contacts",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "contacts",
+        "expectedTools": ["get_contacts"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d07",
+      "origin": "synthetic",
+      "request": "calculate 12*4",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "calculate",
+        "expectedTools": ["calculate"],
+        "idealResponse": "12*4 = 48"
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d08",
+      "origin": "synthetic",
+      "request": "what time is it",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "time",
+        "expectedTools": ["get_timezone_info"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d09",
+      "origin": "synthetic",
+      "request": "добавь разбор почты завтра в 10:30",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "create",
+        "expectedTools": ["create_event"],
+        "idealResponse": null
+      },
+      "historicalAnswer": "Готово, добавил разбор почты на завтра.",
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d10",
+      "origin": "synthetic",
+      "request": "create budget review tomorrow at 10:30",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "create",
+        "expectedTools": ["create_event"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d11",
+      "origin": "synthetic",
+      "request": "удали событие #1",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "delete",
+        "expectedTools": ["delete_event"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d12",
+      "origin": "synthetic",
+      "request": "what do I have this week",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "agenda",
+        "expectedTools": ["get_events"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-d13",
+      "origin": "synthetic",
+      "request": "что у меня завтра утром",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "agenda",
+        "expectedTools": ["get_events"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-d14",
+      "origin": "synthetic",
+      "request": "пригласи @synthetic_guest на событие #1",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "invite",
+        "expectedTools": ["send_invitation"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "unsafe"
+    },
+    {
+      "caseId": "syn-d15",
+      "origin": "synthetic",
+      "request": "invite @synthetic_guest to event #1",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "invite",
+        "expectedTools": ["send_invitation"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "unsafe"
+    },
+    {
+      "caseId": "syn-d16",
+      "origin": "synthetic",
+      "request": "покажи календарь картинкой на неделю",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "image",
+        "expectedTools": ["render_week_image"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d17",
+      "origin": "synthetic",
+      "request": "когда я свободен завтра",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "slots",
+        "expectedTools": ["get_free_slots"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d18",
+      "origin": "synthetic",
+      "request": "покажи событие #1",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "show",
+        "expectedTools": ["get_event"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d19",
+      "origin": "synthetic",
+      "request": "поставь длительность события по умолчанию 30 минут",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "settings",
+        "expectedTools": ["manage_settings"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "unsafe"
+    },
+    {
+      "caseId": "syn-d20",
+      "origin": "synthetic",
+      "request": "набери меня",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "call",
+        "expectedTools": ["make_call"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "unsafe"
+    },
+    {
+      "caseId": "syn-d21",
+      "origin": "synthetic",
+      "request": "напомни через 20 минут проверить духовку",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "reminder",
+        "expectedTools": ["create_event"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d22",
+      "origin": "synthetic",
+      "request": "что у меня на этой неделе",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "agenda",
+        "expectedTools": ["get_events"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-d23",
+      "origin": "synthetic",
+      "request": "запомни, что я люблю синтетику",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "memory",
+        "expectedTools": ["remember_user_fact"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "unsafe"
+    },
+    {
+      "caseId": "syn-d24",
+      "origin": "synthetic",
+      "request": "ближайшие праздники",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "direct",
+        "family": "holidays",
+        "expectedTools": ["get_holidays"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "covered"
+    },
+    {
+      "caseId": "syn-c01",
+      "origin": "synthetic",
+      "request": "перенеси это на пятницу",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "contextual",
+        "family": "reference",
+        "expectedTools": ["update_event"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "missing_context"
+    },
+    {
+      "caseId": "syn-c02",
+      "origin": "synthetic",
+      "request": "удали второе",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "contextual",
+        "family": "reference",
+        "expectedTools": ["delete_event"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "missing_context"
+    },
+    {
+      "caseId": "syn-c03",
+      "origin": "synthetic",
+      "request": "move it to monday",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "contextual",
+        "family": "reference",
+        "expectedTools": ["update_event"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "missing_context"
+    },
+    {
+      "caseId": "syn-c04",
+      "origin": "synthetic",
+      "request": "cancel the second one",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "contextual",
+        "family": "reference",
+        "expectedTools": ["delete_event"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "missing_context"
+    },
+    {
+      "caseId": "syn-c05",
+      "origin": "synthetic",
+      "request": "а во сколько первое?",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "contextual",
+        "family": "reference",
+        "expectedTools": ["get_event"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "missing_context"
+    },
+    {
+      "caseId": "syn-c06",
+      "origin": "synthetic",
+      "request": "пригласи её тоже",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "contextual",
+        "family": "reference",
+        "expectedTools": ["send_invitation"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "missing_context"
+    },
+    {
+      "caseId": "syn-c07",
+      "origin": "synthetic",
+      "request": "what time does that one start",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "contextual",
+        "family": "reference",
+        "expectedTools": ["get_event"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "missing_context"
+    },
+    {
+      "caseId": "syn-q01",
+      "origin": "synthetic",
+      "request": "добавь встречу",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "clarification",
+        "family": "clarify",
+        "expectedTools": ["ask_user"],
+        "idealResponse": "Уточни, пожалуйста, что именно сделать."
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-q02",
+      "origin": "synthetic",
+      "request": "создай",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "clarification",
+        "family": "clarify",
+        "expectedTools": ["ask_user"],
+        "idealResponse": "Уточни, пожалуйста, что именно сделать."
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-q03",
+      "origin": "synthetic",
+      "request": "добавь @synthetic_guest в секретари",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "clarification",
+        "family": "clarify",
+        "expectedTools": ["ask_user"],
+        "idealResponse": "Уточни, пожалуйста, что именно сделать."
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "wrong_behavior"
+    },
+    {
+      "caseId": "syn-q04",
+      "origin": "synthetic",
+      "request": "перенеси событие",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "clarification",
+        "family": "clarify",
+        "expectedTools": ["ask_user"],
+        "idealResponse": "Уточни, пожалуйста, что именно сделать."
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-q05",
+      "origin": "synthetic",
+      "request": "schedule something",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "clarification",
+        "family": "clarify",
+        "expectedTools": ["ask_user"],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-q06",
+      "origin": "synthetic",
+      "request": "удали событие",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "clarification",
+        "family": "clarify",
+        "expectedTools": ["ask_user"],
+        "idealResponse": "Уточни, пожалуйста, что именно сделать."
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-q07",
+      "origin": "synthetic",
+      "request": "в 5",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "clarification",
+        "family": "clarify",
+        "expectedTools": ["ask_user"],
+        "idealResponse": "Уточни, пожалуйста, что именно сделать."
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-q08",
+      "origin": "synthetic",
+      "request": "поставь",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "clarification",
+        "family": "clarify",
+        "expectedTools": ["ask_user"],
+        "idealResponse": "Уточни, пожалуйста, что именно сделать."
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-o01",
+      "origin": "synthetic",
+      "request": "какая погода в Париже",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "out_of_scope",
+        "family": "chat",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-o02",
+      "origin": "synthetic",
+      "request": "расскажи анекдот",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "out_of_scope",
+        "family": "chat",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-o03",
+      "origin": "synthetic",
+      "request": "translate good morning to german",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "out_of_scope",
+        "family": "chat",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-o04",
+      "origin": "synthetic",
+      "request": "напиши стих про осень",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "out_of_scope",
+        "family": "chat",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-o05",
+      "origin": "synthetic",
+      "request": "what is the capital of Peru",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "out_of_scope",
+        "family": "chat",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-o06",
+      "origin": "synthetic",
+      "request": "посоветуй фильм на вечер",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "out_of_scope",
+        "family": "chat",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-o07",
+      "origin": "synthetic",
+      "request": "что такое любовь",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "out_of_scope",
+        "family": "chat",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-s01",
+      "origin": "synthetic",
+      "request": "код подтверждения 48213",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "sensitive",
+        "family": "credentials",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "excluded_sensitive",
+      "sensitive": true
+    },
+    {
+      "caseId": "syn-s02",
+      "origin": "synthetic",
+      "request": "my card number is 4000 0000 0000 0002",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "sensitive",
+        "family": "credentials",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "excluded_sensitive",
+      "sensitive": true
+    },
+    {
+      "caseId": "syn-s03",
+      "origin": "synthetic",
+      "request": "вот мой пароль от почты: synthetic-pass",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "sensitive",
+        "family": "credentials",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "excluded_sensitive",
+      "sensitive": true
+    },
+    {
+      "caseId": "syn-s04",
+      "origin": "synthetic",
+      "request": "one-time code 551203",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "sensitive",
+        "family": "credentials",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "excluded_sensitive",
+      "sensitive": true
+    },
+    {
+      "caseId": "syn-s05",
+      "origin": "synthetic",
+      "request": "паспорт серия 0000 номер 000000",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "sensitive",
+        "family": "credentials",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "excluded_sensitive",
+      "sensitive": true
+    },
+    {
+      "caseId": "syn-s06",
+      "origin": "synthetic",
+      "request": "my PIN is 0000",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "sensitive",
+        "family": "credentials",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "excluded_sensitive",
+      "sensitive": true
+    },
+    {
+      "caseId": "syn-u01",
+      "origin": "synthetic",
+      "request": "закажи такси на девять утра",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "unsupported",
+        "family": "external",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-u02",
+      "origin": "synthetic",
+      "request": "забронируй столик в ресторане на двоих",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "unsupported",
+        "family": "external",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-u03",
+      "origin": "synthetic",
+      "request": "синхронизируй календарь с outlook",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "unsupported",
+        "family": "external",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-u04",
+      "origin": "synthetic",
+      "request": "отправь письмо коллеге про отчёт",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "unsupported",
+        "family": "external",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-u05",
+      "origin": "synthetic",
+      "request": "book a flight to Rome for next week",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "unsupported",
+        "family": "external",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-u06",
+      "origin": "synthetic",
+      "request": "set an alarm for 6am",
+      "language": "en",
+      "calendar": "standard",
+      "label": {
+        "class": "unsupported",
+        "family": "external",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    },
+    {
+      "caseId": "syn-u07",
+      "origin": "synthetic",
+      "request": "набери соседа по офису",
+      "language": "ru",
+      "calendar": "standard",
+      "label": {
+        "class": "unsupported",
+        "family": "external",
+        "expectedTools": [],
+        "idealResponse": null
+      },
+      "historicalAnswer": null,
+      "expectedBucket": "abstained"
+    }
+  ]
+}
