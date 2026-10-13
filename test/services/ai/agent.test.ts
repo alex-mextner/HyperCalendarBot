@@ -375,13 +375,61 @@ describe('CalendarBotAgent', () => {
 
       // The newest saved row is the tool result, not the other member's question,
       // so the retried question still goes last.
-      expect(shape(messages).slice(1)).toEqual([
+      expect(shape(messages).slice(1, -1)).toEqual([
         'call:call_x',
         'tool:call_x',
         `user:[From: Member (id:${OTHER_MEMBER_ID})] ${ctx.messageText}`,
-        `user:${ctx.messageText}`,
       ]);
+      expect(messages.at(-1)).toEqual({ role: 'user', content: `[From: User (id:${USER_ID})] ${ctx.messageText}` });
     });
+
+    test("a group retry re-asks its question with the retrying member's sender tag (#668)", async () => {
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText, GROUP_CHAT_ID);
+      ctx.chatHistory.save(
+        USER_ID,
+        'assistant',
+        JSON.stringify({ role: 'assistant', content: 'One sec' }),
+        GROUP_CHAT_ID,
+      );
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'user', 'Should we meet on Friday?', GROUP_CHAT_ID);
+      ctx.retryAttempt = 1;
+
+      const messages = await buildGroupMessages();
+
+      expect(messages.at(-2)?.content).toContain(`[From: Member (id:${OTHER_MEMBER_ID})] Should we meet on Friday?`);
+      expect(messages.at(-1)).toEqual({ role: 'user', content: `[From: User (id:${USER_ID})] ${ctx.messageText}` });
+    });
+
+    test("another member's identical question is not the retrying member's question", async () => {
+      ctx.chatHistory.save(OTHER_MEMBER_ID, 'user', ctx.messageText, GROUP_CHAT_ID);
+      ctx.retryAttempt = 1;
+
+      const messages = await buildGroupMessages();
+
+      expect(messages).toHaveLength(2);
+      expect(messages.at(-1)).toEqual({ role: 'user', content: `[From: User (id:${USER_ID})] ${ctx.messageText}` });
+    });
+
+    test('a group retry whose own question is still the newest row does not ask it twice', async () => {
+      ctx.chatHistory.save(USER_ID, 'user', ctx.messageText, GROUP_CHAT_ID);
+      ctx.retryAttempt = 1;
+
+      const messages = await buildGroupMessages();
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]?.content).toContain(`[From: User (id:${USER_ID})] ${ctx.messageText}`);
+    });
+  });
+
+  test('a private-chat retry re-asks its question without a sender tag', async () => {
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify({ role: 'assistant', content: 'One sec' }));
+    ctx.retryAttempt = 1;
+    const agent = new CalendarBotAgent(config, sender);
+
+    const { messages } = await agent.buildMessages(ctx, ctx.chatHistory.getRecent(USER_ID));
+
+    expect(messages.at(-1)).toEqual({ role: 'user', content: ctx.messageText });
   });
 
   test('buildMessages drops legacy Anthropic tool_result rows that cannot be mapped', async () => {

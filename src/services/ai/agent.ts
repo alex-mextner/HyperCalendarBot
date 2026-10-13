@@ -760,11 +760,17 @@ export class CalendarBotAgent {
     // idea which question it still owes an answer to.
     // The check reads the newest saved row, before regrouping moved anything to the end.
     if ((ctx.retryAttempt ?? 0) > 0 && ctx.messageText.trim().length > 0) {
+      // In a group every other user row names its sender; the re-asked question must too, or
+      // the model cannot tell which member it still owes the answer to. Another member asking
+      // the same words last does not count as this sender's question.
+      const reAsk =
+        ctx.isGroup && ctx.groupChatId
+          ? tagSender(ctx.messageText, ctx.user.first_name ?? ctx.user.username ?? 'User', ctx.user.telegram_id)
+          : ctx.messageText;
       const last = messages[messages.length - 1];
-      const alreadyAsked =
-        last?.role === 'user' && typeof last.content === 'string' && last.content.includes(ctx.messageText);
+      const alreadyAsked = last?.role === 'user' && typeof last.content === 'string' && last.content.includes(reAsk);
       if (!alreadyAsked) {
-        ordered.push({ role: 'user', content: ctx.messageText });
+        ordered.push({ role: 'user', content: reAsk });
       }
     }
 
