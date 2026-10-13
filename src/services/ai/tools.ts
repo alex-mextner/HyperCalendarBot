@@ -861,8 +861,16 @@ const toolDefinitions: ToolDefinition[] = [
       properties: {
         limit: { type: 'number', description: 'Max entries to return. Default 50.' },
         search: { type: 'string', description: 'Filter entries containing this text' },
-        before: { type: 'string', description: 'Entries before this ISO 8601 datetime or date. Ignored in groups.' },
-        after: { type: 'string', description: 'Entries after this ISO 8601 datetime or date. Ignored in groups.' },
+        before: {
+          type: 'string',
+          description:
+            'Entries strictly before this date or datetime (T or space separator; optional timezone offset). No timezone means UTC.',
+        },
+        after: {
+          type: 'string',
+          description:
+            'Entries strictly after this date or datetime (T or space separator; optional timezone offset). No timezone means UTC.',
+        },
       },
       required: [],
     },
@@ -875,6 +883,7 @@ const toolDefinitions: ToolDefinition[] = [
     input_schema: {
       type: 'object' as const,
       properties: {
+        target_user_id: { type: 'number', description: 'Filter actions by the affected Telegram user ID.' },
         event_id: { type: 'number', description: 'Show only actions that affected this event' },
         action_type: {
           type: 'string',
@@ -882,8 +891,16 @@ const toolDefinitions: ToolDefinition[] = [
           description: 'Filter by action type',
         },
         action_name: { type: 'string', description: 'Filter by name, e.g. "create_event", "/add"' },
-        after: { type: 'string', description: 'Entries after this ISO 8601 datetime' },
-        before: { type: 'string', description: 'Entries before this ISO 8601 datetime' },
+        after: {
+          type: 'string',
+          description:
+            'Entries strictly after this date or datetime (T or space separator; optional timezone offset). No timezone means UTC.',
+        },
+        before: {
+          type: 'string',
+          description:
+            'Entries strictly before this date or datetime (T or space separator; optional timezone offset). No timezone means UTC.',
+        },
         limit: { type: 'number', description: 'Max entries to return. Default 30.' },
       },
       required: [],

@@ -1116,4 +1116,15 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE event_participants ADD COLUMN source_group_recorded_at TEXT');
     },
   },
+  {
+    name: '066_action_log_reflection_indexes',
+    up(db) {
+      // get_action_log reads one owner's actions newest-first, narrowed to a recipient (#245) or to
+      // the current group chat. Both composite indexes serve the ORDER BY without a sort.
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_action_log_recipient
+        ON user_action_log (user_id, target_user_id, created_at DESC, id DESC)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_action_log_owner_chat
+        ON user_action_log (user_id, chat_id, created_at DESC, id DESC)`);
+    },
+  },
 ];

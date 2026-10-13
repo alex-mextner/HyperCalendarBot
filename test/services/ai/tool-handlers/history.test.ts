@@ -104,6 +104,7 @@ describe('handleGetHistory', () => {
 
     ctx.isGroup = true;
     ctx.groupChatId = GROUP_CHAT_ID;
+    ctx.chatId = GROUP_CHAT_ID;
 
     const result = handleGetHistory(ctx, {});
     expect(result.success).toBe(true);
@@ -138,6 +139,7 @@ describe('handleGetHistory', () => {
 
     ctx.isGroup = true;
     ctx.groupChatId = GROUP_CHAT_ID;
+    ctx.chatId = GROUP_CHAT_ID;
 
     const result = handleGetHistory(ctx, { search: 'встреч' });
     expect(result.success).toBe(true);

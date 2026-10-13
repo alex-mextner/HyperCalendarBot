@@ -1,11 +1,12 @@
 // src/services/ai/tool-handlers/action-log.ts
 
-import { isValid, parseISO } from 'date-fns';
 import { t } from '../../../config/constants.ts';
 import { telegramMessageLink } from '../../../database/repositories/action-log.repository.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
+import { hasInvalidReflectionScope, normalizeReflectionLimit, reflectionBoundary } from './reflection.ts';
 
 interface GetActionLogInput {
+  target_user_id?: number;
   event_id?: number;
   action_type?: string;
   action_name?: string;
@@ -14,25 +15,32 @@ interface GetActionLogInput {
   limit?: number;
 }
 
-function toSqliteDateTime(ts: string): string {
-  if (/^\d{4}-\d{2}-\d{2} /.test(ts)) return ts.slice(0, 19);
-  const date = parseISO(ts);
-  if (isValid(date)) return date.toISOString().slice(0, 19).replace('T', ' ');
-  return ts.slice(0, 19);
-}
-
-export function handleGetActionLog(ctx: AgentContext, input: GetActionLogInput): ToolResult {
+export function handleGetActionLog(
+  ctx: Pick<AgentContext, 'user' | 'chatId' | 'isGroup' | 'groupChatId' | 'actionLogRepo'>,
+  input: GetActionLogInput,
+): ToolResult {
   if (!ctx.actionLogRepo) {
     return { success: false, error: 'Action log not available' };
   }
 
-  const limit = input.limit ?? 30;
-  const after = input.after ? toSqliteDateTime(input.after) : undefined;
-  const before = input.before ? toSqliteDateTime(input.before) : undefined;
+  if (hasInvalidReflectionScope(ctx)) {
+    return { success: false, error: t(ctx.user.language).aiTools.history.scopeUnavailable };
+  }
+  const limit = normalizeReflectionLimit(input.limit, 30);
+  let before: string | undefined;
+  let after: string | undefined;
+  try {
+    before = reflectionBoundary(input.before);
+    after = reflectionBoundary(input.after);
+  } catch {
+    return { success: false, error: t(ctx.user.language).aiTools.history.invalidBoundary };
+  }
 
   const entries = ctx.actionLogRepo.query({
     user_id: ctx.user.telegram_id,
+    chat_id: ctx.isGroup ? ctx.groupChatId : undefined,
     target_event_id: input.event_id,
+    target_user_id: input.target_user_id,
     action_type: input.action_type,
     action_name: input.action_name,
     after,
@@ -65,4 +73,4 @@ export function handleGetActionLog(ctx: AgentContext, input: GetActionLogInput):
 
   return { success: true, output: lines.join('\n\n') };
 }
-handleGetActionLog.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
+handleGetActionLog.meta = { readonly: true, skipActionLog: true, skipPersist: true } satisfies ToolHandlerMeta;

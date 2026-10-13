@@ -568,6 +568,8 @@ export const MSG = {
           `That fact is too long to keep — length ${length}, limit ${limit}. Say the essence in one short sentence, or split it into several facts.`,
       },
       history: {
+        scopeUnavailable: 'Cannot verify the current group. Open this request in the correct chat.',
+        invalidBoundary: 'Invalid before/after time. Use YYYY-MM-DD or a datetime with an optional UTC offset.',
         notFound: 'No history found.',
       },
       actionLog: {
@@ -1596,6 +1598,9 @@ export const MSG = {
           `Этот факт слишком длинный, чтобы его хранить — длина ${length}, лимит ${limit}. Скажи суть одним коротким предложением или раздели на несколько фактов.`,
       },
       history: {
+        scopeUnavailable: 'Не могу подтвердить текущую группу. Открой запрос в нужном чате.',
+        invalidBoundary:
+          'Неверное время before/after. Укажи YYYY-MM-DD или дату со временем и, если нужно, смещением от UTC.',
         notFound: 'История не найдена.',
       },
       actionLog: {
