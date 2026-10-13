@@ -229,3 +229,75 @@ describe('a broken area cache never stops the area from being located', () => {
     expect(geocoder.located).toEqual(['Belgrade|RS']);
   });
 });
+
+describe('location checks that start together share one area request (#489)', () => {
+  const belgradeQuery = { city: 'Belgrade', countryCode: 'RS' };
+
+  test('two concurrent location checks for one uncached home area make one area request', async () => {
+    const s = setup({ city: 'Belgrade', countryCode: 'RS', timezone: 'Europe/Belgrade' });
+
+    await Promise.all([s.check('Kafana Sunce'), s.check('Sonder Dorcol')]);
+
+    expect(s.located).toEqual(['Belgrade|RS']);
+  });
+
+  test('a city asked in another letter case joins the running request', async () => {
+    const geocoder = countingGeocoder();
+    const areas = withCachedAreas(geocoder.service, memoryRedis());
+
+    const answers = await Promise.all([
+      areas.locateArea(belgradeQuery),
+      areas.locateArea({ city: ' belgrade ', countryCode: 'RS' }),
+    ]);
+
+    expect(answers).toEqual([BELGRADE, BELGRADE]);
+    expect(geocoder.located).toEqual(['Belgrade|RS']);
+  });
+
+  test('a failed shared lookup is not remembered: the next check asks Google again', async () => {
+    const located: string[] = [];
+    let fail = true;
+    const areas = withCachedAreas(
+      {
+        ...countingGeocoder().service,
+        // `locateArea` answers null when the request fails
+        locateArea: async () => {
+          located.push('Belgrade|RS');
+          return fail ? null : BELGRADE;
+        },
+      },
+      memoryRedis(),
+    );
+
+    expect(await Promise.all([areas.locateArea(belgradeQuery), areas.locateArea(belgradeQuery)])).toEqual([null, null]);
+    expect(located).toEqual(['Belgrade|RS']);
+
+    fail = false;
+    expect(await areas.locateArea(belgradeQuery)).toEqual(BELGRADE);
+    expect(located).toEqual(['Belgrade|RS', 'Belgrade|RS']);
+  });
+
+  test('a shared lookup that throws rejects every caller and is asked again next time', async () => {
+    const located: string[] = [];
+    let fail = true;
+    const areas = withCachedAreas(
+      {
+        ...countingGeocoder().service,
+        locateArea: async () => {
+          located.push('Belgrade|RS');
+          if (fail) throw new Error('ETIMEDOUT');
+          return BELGRADE;
+        },
+      },
+      memoryRedis(),
+    );
+
+    const results = await Promise.allSettled([areas.locateArea(belgradeQuery), areas.locateArea(belgradeQuery)]);
+    expect(results.map((r) => r.status)).toEqual(['rejected', 'rejected']);
+    expect(located).toEqual(['Belgrade|RS']);
+
+    fail = false;
+    expect(await areas.locateArea(belgradeQuery)).toEqual(BELGRADE);
+    expect(located).toEqual(['Belgrade|RS', 'Belgrade|RS']);
+  });
+});

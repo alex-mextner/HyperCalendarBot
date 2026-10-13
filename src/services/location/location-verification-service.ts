@@ -314,7 +314,9 @@ export class LocationVerificationService {
 
   /**
    * Resolve the event's place from a location the user shared for it: a Telegram venue is applied as
-   * picked, with its name and address; a plain pin is reverse-geocoded to an address.
+   * picked, with its name and address; a plain pin is reverse-geocoded to an address. A venue carries
+   * no city: for a user without a home city its coordinates are reverse-geocoded after the venue is
+   * applied, only to learn the city (#680).
    */
   async resolveFromSharedLocation(eventId: number, shared: SharedLocation, userId: number): Promise<boolean> {
     // Verify user has access to the event before doing any work
@@ -348,9 +350,23 @@ export class LocationVerificationService {
     });
     await this.applyResolvedLocation(event, geo);
     if (event.location) {
-      await this.cacheAndUpdateCity(user, event.location, geo);
+      const learned = venue && !user.city ? await this.withVenueCity(geo) : geo;
+      await this.cacheAndUpdateCity(user, event.location, learned);
     }
     return true;
+  }
+
+  /**
+   * The venue with the city, country and country code of the address at its coordinates; its name
+   * and address stay as picked. Unchanged when the reverse geocode finds nothing or fails.
+   */
+  private async withVenueCity(venue: GeocodedLocation): Promise<GeocodedLocation> {
+    const found = await this.deps.geocodingService.reverseGeocode(venue.latitude, venue.longitude).catch((err) => {
+      logger.warn({ err }, 'Failed to reverse geocode a venue for the home city');
+      return null;
+    });
+    if (!found) return venue;
+    return { ...venue, city: found.city, country: found.country, countryCode: found.countryCode ?? null };
   }
 
   /**
@@ -438,23 +454,28 @@ export class LocationVerificationService {
    * showed.
    */
   private async keepOnlyTypedText(event: CalendarEvent): Promise<void> {
-    const typedOnly = await this.dropResolvedPlace(event);
+    if (!(await this.dropResolvedPlace(event))) return;
     logger.info({ eventId: event.id }, 'Event location kept as typed');
 
-    await this.updateInvitationMessages(typedOnly);
+    await this.updateInvitationMessages({ ...event, ...UNRESOLVED_PLACE });
   }
 
   /**
-   * Drop the event's resolved place, if it has one, so only the typed text remains, unverified, and
-   * re-push the Google copies that showed it. Returns the event as it now is.
+   * Drop the place `event` holds, if any, so only the typed text remains, unverified, and re-push
+   * the Google copies that showed it. `event` may be older than the stored row: a place confirmed
+   * since it was read (a pin or a candidate tap during an await) is newer than the one to drop, so
+   * it is kept and false is returned; that confirmation re-pushed and re-rendered the copies itself
+   * (#681). A confirmation of exactly the same place cannot be told apart from it and is dropped;
+   * the question that follows asks the creator again.
    */
-  private async dropResolvedPlace(event: CalendarEvent): Promise<CalendarEvent> {
-    const typedOnly: CalendarEvent = { ...event, ...UNRESOLVED_PLACE };
-    if (event.location_verified !== 0 || event.resolved_address !== null) {
-      this.deps.eventRepo.clearLocationFields(event.id);
-      await this.pushGoogleCopiesIfShownPlaceChanged(event, typedOnly);
+  private async dropResolvedPlace(event: CalendarEvent): Promise<boolean> {
+    if (event.location_verified === 0 && event.resolved_address === null) return true;
+    if (!this.deps.eventRepo.clearLocationFieldsIfUnchanged(event.id, event)) {
+      logger.info({ eventId: event.id }, 'A place was confirmed after the event was read; keeping it');
+      return false;
     }
-    return typedOnly;
+    await this.pushGoogleCopiesIfShownPlaceChanged(event, { ...event, ...UNRESOLVED_PLACE });
+    return true;
   }
 
   /**
