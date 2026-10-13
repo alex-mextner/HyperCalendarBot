@@ -4,6 +4,8 @@ import { TZDate } from '@date-fns/tz';
 import { type Lang, t, toLang } from '../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import {
+  allDayDates,
+  formatCalendarDateShort,
   formatDateHeader,
   formatDateShort,
   formatDuration,
@@ -164,10 +166,13 @@ export function formatEventDetail(
     }
   }
 
-  const dateStr = formatDateShort(event.start_at, timezone, lang);
   if (event.all_day) {
-    lines.push(`📅 ${dateStr}, ${l.allDayInline}`);
+    // allDayDates reads floating UTC-midnight rows by date part and zone-converted rows on the
+    // event's own wall clock, so every viewer sees the day the event was created for (GH-652).
+    const day = allDayDates(event.start_at, null, event.timezone || timezone).first;
+    lines.push(`📅 ${formatCalendarDateShort(day, lang)}, ${l.allDayInline}`);
   } else {
+    const dateStr = formatDateShort(event.start_at, timezone, lang);
     const time = formatTimeRange(event.start_at, event.end_at, timezone);
     if (event.end_at) {
       const duration = formatDuration(event.start_at, event.end_at, lang);

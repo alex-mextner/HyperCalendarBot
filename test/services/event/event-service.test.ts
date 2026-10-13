@@ -56,6 +56,31 @@ describe('EventService', () => {
     expect(thirtyMinRow!.remind_at_utc).toBe('2099-06-01T17:01:00.000Z');
   });
 
+  test('getEventsInRange() orders a mixed offset-suffixed all-day event and Z-suffixed timed event by real instant, not raw string', () => {
+    // GH-652 all-day storage now preserves the real local-midnight instant with its actual
+    // offset (e.g. "+09:00" for Tokyo), while timed events remain "Z"-suffixed. A raw
+    // `.localeCompare`/string sort over that mixed column misorders them: the all-day event's
+    // offset-suffixed string sorts as if it were a full day later than its real instant.
+    service.createEvent({
+      user_id: USER_ID,
+      title: 'Tokyo Holiday',
+      start_at: '2026-04-10T00:00:00.000+09:00', // real instant: 2026-04-09T15:00:00.000Z
+      end_at: '2026-04-11T00:00:00.000+09:00',
+      all_day: true,
+      timezone: 'Asia/Tokyo',
+    });
+    service.createEvent({
+      user_id: USER_ID,
+      title: 'Evening Call',
+      start_at: '2026-04-09T16:00:00.000Z', // one real hour after the all-day event's instant
+      timezone: 'UTC',
+    });
+
+    const occurrences = service.getEventsInRange(USER_ID, '2026-04-09T00:00:00.000Z', '2026-04-11T00:00:00.000Z');
+    const titles = occurrences.map((o) => o.event.title);
+    expect(titles).toEqual(['Tokyo Holiday', 'Evening Call']);
+  });
+
   test('createEvent uses explicit reminder_minutes for materialization, not user prefs', () => {
     const eventReminderRepo = new EventReminderRepository(db);
     const prefsRepo = new NotificationPreferencesRepository(db);
