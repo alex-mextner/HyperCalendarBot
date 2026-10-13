@@ -340,6 +340,23 @@ describe('edit_value scene: Location button with real verification', () => {
     };
   }
 
+  for (const [field, input, visible] of [
+    ['title', 'Later dinner', 'Later dinner'],
+    ['time', '9 oct 19:00', '19:00'],
+    ['duration', '2h', '19:00'],
+  ] as const) {
+    test(`editing ${field} refreshes the delivered invitation without changing its answer`, async () => {
+      const event = resolvedInvitedEvent();
+      const before = invitations.getByEvent(event.id);
+      const context = locationCtx(event.id, input);
+      context.scene.params.field = field;
+      await step(context, () => Promise.resolve());
+      expect(invitationCards).toHaveLength(1);
+      expect(invitationCards[0]).toContain(visible);
+      expect(invitations.getByEvent(event.id)).toEqual(before);
+    });
+  }
+
   /** The `index|keep` choices of the picker, after checking they all answer one picker of the event. */
   function pickerChoices(offer: Offer, eventId: number): { pickerId: string; choices: string[] } {
     const parts = offer.callbacks.map((data) => data.split(':'));

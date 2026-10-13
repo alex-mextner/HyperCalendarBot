@@ -194,9 +194,10 @@ describe('a location edit re-renders delivered invitation cards that showed the 
     await s.editLocation({ location: 'seaside hotel', start_at: '2026-10-05T18:00:00Z' });
 
     expect(s.events.findById(s.event.id, OWNER_ID)?.location_verified).toBe(0);
-    expect(s.cards).toHaveLength(1);
-    expect(s.cards[0]?.text).toContain('seaside hotel');
-    expectNoOldPlace(s.cards[0]);
+    // The new time re-renders the card at once; the question's render then drops the place
+    expect(s.cards).toHaveLength(2);
+    expect(s.cards.at(-1)?.text).toContain('seaside hotel');
+    expectNoOldPlace(s.cards.at(-1));
   });
 
   test('two edits before the creator answers, then keep as typed: no card shows the original place', async () => {
@@ -241,10 +242,11 @@ describe('a location edit re-renders delivered invitation cards that showed the 
     released.resolve();
     await Promise.all(questions.mock.results.map((r) => r.value));
 
-    // Only the second edit's render: the question's older snapshot must not repaint the card
-    expect(s.cards).toHaveLength(1);
-    expect(s.cards[0]?.text).toContain('at Ira’s place');
-    expectNoOldPlace(s.cards[0]);
+    // The first edit's new time and the second edit each render once; the question's older
+    // snapshot must not repaint the card
+    expect(s.cards).toHaveLength(2);
+    expect(s.cards.at(-1)?.text).toContain('at Ira’s place');
+    expectNoOldPlace(s.cards.at(-1));
   });
 
   test('a time edit landing while the question for the re-sent text starts: the card shows the newer time', async () => {
@@ -260,7 +262,7 @@ describe('a location edit re-renders delivered invitation cards that showed the 
       start_at: '2026-10-05T18:00:00Z',
     });
     expect(first.success).toBe(true);
-    // A time-only edit meanwhile leaves the location line alone, so it does not re-render the card
+    // A time-only edit meanwhile re-renders the card with the new time
     const moved = await handleUpdateEvent(s.agentCtx, {
       event_id: s.event.id,
       start_at: '2026-10-05T19:30:00Z',
@@ -270,11 +272,12 @@ describe('a location edit re-renders delivered invitation cards that showed the 
     released.resolve();
     await Promise.all(questions.mock.results.map((r) => r.value));
 
-    // The question drops the place from the card, with the event's time as it is now
-    expect(s.cards).toHaveLength(1);
-    expect(s.cards[0]?.text).toContain('seaside hotel');
-    expect(s.cards[0]?.text).toContain('19:30');
-    expect(s.cards[0]?.text).not.toContain('18:00');
-    expectNoOldPlace(s.cards[0]);
+    // Each time edit renders; the question then drops the place, with the event's time as it is now
+    expect(s.cards).toHaveLength(3);
+    expect(s.cards[1]?.text).toContain('19:30');
+    expect(s.cards.at(-1)?.text).toContain('seaside hotel');
+    expect(s.cards.at(-1)?.text).toContain('19:30');
+    expect(s.cards.at(-1)?.text).not.toContain('18:00');
+    expectNoOldPlace(s.cards.at(-1));
   });
 });
