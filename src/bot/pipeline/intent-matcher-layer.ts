@@ -184,14 +184,23 @@ export function createIntentMatcherLayer(
       return { handled: true };
     }
     // The answer was consumed by the resumed workflow, so it cannot be replayed as a fresh request.
-    if (!result.success && result.mutationEvidence !== undefined) {
+    // A failed run never shows its tool's text: that was written for the AI agent, not the user.
+    if (!result.success) {
       cmdLogger.warn(
-        { intentId: session.intentId, userId, errorCode: result.errorCode, evidence: result.mutationEvidence },
+        { intentId, userId, errorCode: result.errorCode, evidence: result.mutationEvidence },
         'Resumed intent workflow failed',
       );
+      if (notifyAdmin) {
+        notifyAdmin(
+          `⚠️ Resumed intent failed: ${row.canonical_name} (id=${intentId})\nAnswer: "${messageText}"\nError: ${result.errorCode ?? result.response ?? 'no response'}`,
+        ).catch((err: unknown) => {
+          cmdLogger.error({ err }, 'Failed to send resumed intent fail report to admin');
+        });
+      }
       await ctx.send(evidenceMessage(user.language, result.mutationEvidence));
       return { handled: true };
     }
+    if (result.mentionedEventId !== undefined) onEventMentioned?.(userId, result.mentionedEventId);
     if (result.response) {
       // Same formatting as a first-pass match: a resumed workflow can end in a tool
       // whose text output is written for the AI agent, not for the user.
