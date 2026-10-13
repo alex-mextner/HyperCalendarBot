@@ -83,10 +83,19 @@ import { type DisconnectDeps, executeDisconnect } from '../commands/disconnect-g
 import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts';
 import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
+import { invitePickPrompt } from '../commands/invite.ts';
 import { handleMonth } from '../commands/month.ts';
+import { buildSearchResultsView, findSearchResults } from '../commands/search.ts';
 import { handleSettingsCallback, pendingGroupTzInput } from '../commands/settings.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
-import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
+import {
+  EVENT_PICKER_PAGE_SIZE,
+  editFieldKeyboard,
+  eventActionsKeyboard,
+  eventPickerKeyboard,
+  inviteContactPickerKeyboard,
+  parseEventPickerPage,
+} from '../keyboards.ts';
 import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
 import type { BotCallbackContext } from '../types.ts';
 import { type AgentContinuationDeps, continueWithAgent } from './agent-continuation.ts';
@@ -200,6 +209,51 @@ export interface CallbackHandlerOpts {
   locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
   pendingGeoStore?: import('../../services/location/pending-geo-store.ts').PendingGeoStore;
   weatherService?: WeatherService;
+}
+
+/**
+ * Answer a `page:N` callback of an event picker (delete/edit/invite): fetch
+ * one page, over-fetching by one item beyond the page size to detect whether
+ * a further page exists, and re-render the picker keyboard for that page.
+ * Personal and group event sources are paginated identically: fetch enough
+ * items to cover every page up to and including this one, then slice off the
+ * pages before it. A malformed or out-of-range page is ignored.
+ */
+async function renderEventPickerPage(
+  ctx: BotCallbackContext,
+  eventService: EventService,
+  groupRepo: GroupChatRepository | undefined,
+  user: User,
+  rawPage: string,
+  prefix: string,
+  text: string,
+): Promise<unknown> {
+  await ctx.answer();
+  const page = parseEventPickerPage(rawPage);
+  if (page === null) return;
+  const lang = (user.language ?? 'en') as 'en' | 'ru';
+  const groupId = getGroupId(ctx);
+  const fetchLimit = (page + 1) * EVENT_PICKER_PAGE_SIZE + 1;
+  const pageOffset = page * EVENT_PICKER_PAGE_SIZE;
+
+  const overfetched =
+    groupId !== null
+      ? eventService
+          .getUpcomingForGroup(groupId, fetchLimit)
+          .slice(pageOffset)
+          .map((o) => ({ ...o.event, start_at: o.occurrence_start }))
+      : eventService.getUpcoming(user.telegram_id, fetchLimit).slice(pageOffset);
+  const timezone = groupId !== null ? (groupRepo?.getTimezone(groupId) ?? 'UTC') : user.timezone;
+
+  const hasMore = overfetched.length > EVENT_PICKER_PAGE_SIZE;
+  const pageItems = overfetched.slice(0, EVENT_PICKER_PAGE_SIZE);
+  return ctx.editText(text, {
+    reply_markup: eventPickerKeyboard(pageItems, timezone, prefix, lang, {
+      page,
+      hasMore,
+      onPage: (p) => `${prefix}:page:${p}`,
+    }),
+  });
 }
 
 /**
@@ -369,15 +423,33 @@ export function createCallbackHandler(
     await ctx.send(t(lang).callbackErrors.sceneHelpPrompt);
   });
 
-  // Event view
+  // Event view — also the search-results picker (CB.EVENT_VIEW is search.ts's only prefix)
   dispatch.set(CB.EVENT_VIEW, async (ctx, payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
     if (payload === 'cancel') {
       await ctx.answer();
-      return ctx.editText(t((user.language ?? 'en') as Lang).callbackErrors.closed);
+      return ctx.editText(t(lang).callbackErrors.closed);
+    }
+    if (payload === 'noop') {
+      await ctx.answer();
+      return;
+    }
+    // Search-results page — payload: "page:N:{query}"
+    if (payload.startsWith('page:')) {
+      await ctx.answer();
+      const rest = payload.slice('page:'.length);
+      const colonIdx = rest.indexOf(':');
+      const page = colonIdx === -1 ? null : parseEventPickerPage(rest.slice(0, colonIdx));
+      const query = rest.slice(colonIdx + 1).trim();
+      if (page === null || !query) return;
+      const groupId = getGroupId(ctx);
+      const timezone = groupId !== null ? (groupRepo?.getTimezone(groupId) ?? user.timezone) : user.timezone;
+      const results = findSearchResults(eventService, user, groupId, query);
+      const { text, keyboard } = buildSearchResultsView(results, page, timezone, user.language as 'en' | 'ru', query);
+      return editAgendaText(ctx, text, { reply_markup: keyboard });
     }
     const eventId = Number(payload);
     const event = eventService.getEvent(eventId, user.telegram_id);
-    const lang = (user.language ?? 'en') as Lang;
     if (!event) return ctx.answer({ text: t(lang).callbackErrors.notFound });
     const detail = formatEventDetail(
       enrichAgendaEvents(
@@ -399,11 +471,20 @@ export function createCallbackHandler(
     });
   });
 
-  // Event edit — payload: "42" (one-off) or "42:2026-03-15T10:00:00Z" (recurring)
+  // Event edit — payload: "42" (one-off), "42:2026-03-15T10:00:00Z" (recurring), or "page:N"
   dispatch.set(CB.EVENT_EDIT, async (ctx, payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
     if (payload === 'cancel') {
       await ctx.answer();
-      return ctx.editText(t((user.language ?? 'en') as Lang).callbackErrors.editCancelled);
+      return ctx.editText(t(lang).callbackErrors.editCancelled);
+    }
+    if (payload === 'noop') {
+      await ctx.answer();
+      return;
+    }
+    if (payload.startsWith('page:')) {
+      const rawPage = payload.slice('page:'.length);
+      return renderEventPickerPage(ctx, eventService, groupRepo, user, rawPage, CB.EVENT_EDIT, t(lang).edit_pick);
     }
     const colonIdx = payload.indexOf(':');
     if (colonIdx === -1) {
@@ -424,11 +505,20 @@ export function createCallbackHandler(
     return handleEditFieldCallback(ctx, user, Number(eidStr), field!, editValueScene);
   });
 
-  // Event delete — payload: "42" or "42:2026-03-15T10:00:00Z"
+  // Event delete — payload: "42", "42:2026-03-15T10:00:00Z", or "page:N"
   dispatch.set(CB.EVENT_DELETE, async (ctx, payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
     if (payload === 'cancel') {
       await ctx.answer();
-      return ctx.editText(t((user.language ?? 'en') as Lang).callbackErrors.deletionCancelled);
+      return ctx.editText(t(lang).callbackErrors.deletionCancelled);
+    }
+    if (payload === 'noop') {
+      await ctx.answer();
+      return;
+    }
+    if (payload.startsWith('page:')) {
+      const rawPage = payload.slice('page:'.length);
+      return renderEventPickerPage(ctx, eventService, groupRepo, user, rawPage, CB.EVENT_DELETE, t(lang).delete_pick);
     }
     const colonIdx = payload.indexOf(':');
     if (colonIdx === -1) {
@@ -1305,6 +1395,15 @@ export function createCallbackHandler(
     if (payload === 'cancel') {
       await ctx.answer();
       await ctx.editText(t(lang).callbackErrors.cancelled);
+      return;
+    }
+    if (payload === 'noop') {
+      await ctx.answer();
+      return;
+    }
+    if (payload.startsWith('page:')) {
+      const rawPage = payload.slice('page:'.length);
+      await renderEventPickerPage(ctx, eventService, groupRepo, user, rawPage, CB.INVITE_PICK, invitePickPrompt(lang));
       return;
     }
     const eventId = Number(payload);
