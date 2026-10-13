@@ -1,6 +1,7 @@
 import { TZDate } from '@date-fns/tz';
 import { format, startOfWeek } from 'date-fns';
 import { t } from '../../../config/constants.ts';
+import type { EventOccurrence } from '../../../database/types.ts';
 import { agendaImageErrorMessage, sendAgendaImage } from '../../../utils/agenda-image.ts';
 import { autoPin } from '../../../utils/auto-pin.ts';
 import { getDayRangeUtc, getWeekRangeUtc, localCalendarDate } from '../../../utils/date.ts';
@@ -18,6 +19,26 @@ import { resolveScope } from './shared.ts';
 type Scope = 'personal' | 'group';
 
 const renderLogger = logger.child({ module: 'ai-tools' });
+
+/**
+ * Agenda rows for a calendar image. A personal calendar rendered into a group chat
+ * is seen by every member: it gets neither private rosters nor description previews
+ * (descriptions often carry call links, passcodes or someone else's notes).
+ */
+function imageAgenda(
+  ctx: AgentContext,
+  scope: Scope,
+  userId: number,
+  language: 'ru' | 'en',
+  occurrences: EventOccurrence[],
+): EventOccurrence[] {
+  const viewer = { userId, language, groupId: scope === 'group' ? ctx.groupChatId : undefined };
+  if (!ctx.isGroup || scope === 'group') return enrichAgenda(occurrences, viewer, ctx.eventService.agendaRepository);
+  return enrichAgenda(
+    occurrences.map((occurrence) => ({ ...occurrence, event: { ...occurrence.event, description: null } })),
+    viewer,
+  );
+}
 
 /**
  * Pin the rendered image if chat policy demands it. Pin is a secondary
@@ -103,11 +124,7 @@ export async function handleRenderDayImage(
   try {
     const buffer = await renderDayImage(
       ctx.renderService,
-      enrichAgenda(
-        occurrences,
-        { userId, language: lang, groupId: scope === 'group' ? ctx.groupChatId : undefined },
-        ctx.isGroup && scope !== 'group' ? undefined : ctx.eventService.agendaRepository,
-      ),
+      imageAgenda(ctx, scope, userId, lang, occurrences),
       date,
       ctx.user.timezone,
       lang,
@@ -251,11 +268,7 @@ export async function handleRenderWeekImage(
   try {
     const buffer = await renderWeekImage(
       ctx.renderService,
-      enrichAgenda(
-        occurrences,
-        { userId, language: lang, groupId: scope === 'group' ? ctx.groupChatId : undefined },
-        ctx.isGroup && scope !== 'group' ? undefined : ctx.eventService.agendaRepository,
-      ),
+      imageAgenda(ctx, scope, userId, lang, occurrences),
       weekStartIso,
       ctx.user.timezone,
       lang,
@@ -325,11 +338,7 @@ export async function handleRenderMonthImage(
   try {
     const buffer = await renderMonthImage(
       ctx.renderService,
-      enrichAgenda(
-        occurrences,
-        { userId, language: lang, groupId: scope === 'group' ? ctx.groupChatId : undefined },
-        ctx.isGroup && scope !== 'group' ? undefined : ctx.eventService.agendaRepository,
-      ),
+      imageAgenda(ctx, scope, userId, lang, occurrences),
       year,
       month,
       ctx.user.timezone,

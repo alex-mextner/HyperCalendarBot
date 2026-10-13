@@ -49,18 +49,25 @@ test('missing optional text fields produce no labels or placeholders', () => {
 });
 
 for (const name of ['day', 'week', 'month', 'event-card']) {
-  test(`${name} image includes full location/status but never description in HTML or view data`, () => {
+  test(`${name} image uses compact calendar details and retains full dedicated-card metadata`, () => {
     const image = agendaImages().find((image) => image.name === name)!;
-    expect(image.html).toContain(escapeHtml('LongLocation'.repeat(35)));
-    expect(image.html).toContain('Accepted: Alex &amp; Sam; Pending: Jo &lt;guest&gt;');
-    expect(image.html).not.toContain('DESCRIPTION_ONLY_TEXT');
-    expect(JSON.stringify(image.data)).not.toContain('DESCRIPTION_ONLY_TEXT');
+    if (name === 'event-card') {
+      expect(image.html).toContain(escapeHtml('LongLocation'.repeat(35)));
+      expect(image.html).toContain('Accepted: Alex &amp; Sam; Pending: Jo &lt;guest&gt;');
+      expect(image.html).not.toContain('DESCRIPTION_ONLY_TEXT');
+    } else {
+      expect(image.html).not.toContain('LongLocation'.repeat(35));
+      expect(image.html).not.toContain('agenda-details');
+      expect(image.html).toContain('compact-metadata');
+      expect(image.html).toContain('📝');
+      expect(image.html).toContain('✉️');
+    }
     expect(image.html).not.toContain('<guest>');
   });
 }
 
 test('empty and whitespace metadata stays quiet in every image', () => {
-  const event = agendaEvent({ location: ' ', description: 'TEXT_ONLY', displayMetadata: { invitationStatus: '  ' } });
+  const event = agendaEvent({ location: ' ', description: '  ', displayMetadata: { invitationStatus: '  ' } });
   const occurrence = { event, occurrence_start: event.start_at, occurrence_end: event.end_at, is_exception: false };
   const common = { timezone: 'UTC', locale: 'en' as const, theme: THEME_LIGHT };
   const occurrencesByDay = new Map([['2026-03-11', [occurrence]]]);

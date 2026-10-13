@@ -9,12 +9,13 @@ import { dailyAgendaTemplate } from '../../src/worker/templates/daily-agenda.ts'
 import { eventCardTemplate } from '../../src/worker/templates/event-card.ts';
 import { monthlyCalendarTemplate } from '../../src/worker/templates/monthly-calendar.ts';
 import { THEME_LIGHT } from '../../src/worker/templates/themes.ts';
+import type { Theme } from '../../src/worker/templates/types.ts';
 import { weeklyOverviewTemplate } from '../../src/worker/templates/weekly-overview.ts';
 import { agendaOccurrences } from './agenda269.ts';
 
-export function agendaImages() {
+export function agendaImages(theme: Theme = THEME_LIGHT) {
   const occurrences = agendaOccurrences();
-  const common = { timezone: 'UTC', locale: 'en' as const, theme: THEME_LIGHT };
+  const common = { timezone: 'UTC', locale: 'en' as const, theme };
   const occurrencesByDay = new Map([['2026-03-11', occurrences]]);
   const day = mapDailyAgendaData({ ...common, occurrences, dateIso: '2026-03-11' });
   const week = mapWeeklyOverviewData({ ...common, occurrencesByDay, weekStartIso: '2026-03-09' });

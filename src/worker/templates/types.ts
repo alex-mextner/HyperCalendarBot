@@ -16,6 +16,7 @@ export interface Theme {
 }
 
 export interface AgendaEvent {
+  descriptionPreview?: string;
   displayMetadata?: EventDisplayMetadata;
   id: number;
   title: string;
@@ -44,6 +45,7 @@ export interface DailyAgendaData {
 }
 
 export interface MiniEvent {
+  descriptionPreview?: string;
   location?: string;
   displayMetadata?: EventDisplayMetadata;
   title: string;

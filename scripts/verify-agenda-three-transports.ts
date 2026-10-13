@@ -1,4 +1,7 @@
 // Actual command and AI handlers deliver the real Chromium artifact through the production sender.
+// The compact overflow-group redesign keeps even this 100-event fixture within Telegram's photo
+// size/aspect thresholds (src/utils/agenda-image.ts), so delivery now legitimately goes through
+// sendPhoto instead of the lossless-document fallback reserved for images that exceed them.
 import { Database } from 'bun:sqlite';
 import { strict as assert } from 'node:assert';
 import { Bot, MessageContext } from 'gramio';
@@ -27,14 +30,15 @@ try {
   events.createEvent({ user_id: 1, title: 'Transport proof', start_at: new Date().toISOString(), timezone: 'UTC' });
   const bot = new Bot('123:test');
   const payload = { message_id: 42, date: 0, chat: { id: 1, type: 'private' as const } };
+  let photos = 0;
   let documents = 0;
-  bot.api.sendPhoto = async () => {
-    throw new Error('Oversized photo attempted');
+  bot.api.sendPhoto = async (params) => {
+    assert(params.photo instanceof File);
+    assert.deepEqual(Buffer.from(await params.photo.arrayBuffer()), bytes);
+    photos++;
+    return payload;
   };
-  bot.api.sendDocument = async (params) => {
-    assert(params.document instanceof File);
-    assert.deepEqual(Buffer.from(await params.document.arrayBuffer()), bytes);
-    assert(String(params.caption).includes('lossless'));
+  bot.api.sendDocument = async () => {
     documents++;
     return payload;
   };
@@ -48,7 +52,8 @@ try {
     scene: { enter: async () => {} },
   });
   await handleToday(command, events, undefined, renderer);
-  assert.equal(documents, 1);
+  assert.equal(photos, 1);
+  assert.equal(documents, 0);
   const history = new ChatHistoryRepository(db);
   const ctx: AgentContext = {
     holidayService: new HolidayService(new HolidayRepository(db)),
@@ -66,14 +71,16 @@ try {
   };
   const result = await handleRenderDayImage(ctx, { date: new Date().toISOString().slice(0, 10) });
   assert.equal(result.success, true);
-  assert.equal(documents, 2);
+  assert.equal(photos, 2);
+  assert.equal(documents, 0);
   console.log(
     JSON.stringify({
       actualCommand: 'today',
       actualAI: 'render_day_image',
       actualSender: true,
       realPNGBytes: bytes.length,
-      losslessDocuments: documents,
+      photosDelivered: photos,
+      documentsDelivered: documents,
     }),
   );
 } finally {
