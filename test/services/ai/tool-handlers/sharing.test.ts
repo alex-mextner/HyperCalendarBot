@@ -1406,7 +1406,14 @@ describe('sharing tool handlers', () => {
       beforeEach(() => {
         participantRepo = new ParticipantRepository(db);
         groupMemberRepo = new GroupMemberRepository(db);
-        invitations = new InvitationService(invitationRepo, eventRepo, sharingSettingsRepo, participantRepo);
+        invitations = new InvitationService(
+          invitationRepo,
+          eventRepo,
+          sharingSettingsRepo,
+          participantRepo,
+          undefined,
+          groupMemberRepo,
+        );
         userRepo.create({ telegram_id: THIRD_USER_ID, timezone: 'UTC' });
         userRepo.create({ telegram_id: STRANGER_ID, timezone: 'UTC' });
       });

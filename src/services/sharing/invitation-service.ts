@@ -1,4 +1,5 @@
 import type { EventRepository } from '../../database/repositories/event.repository';
+import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository';
@@ -39,6 +40,7 @@ export class InvitationService {
     private settingsRepo: SharingSettingsRepository,
     private participantRepo?: ParticipantRepository,
     private domainEvents?: DomainEventBus,
+    private groupMemberRepo?: GroupMemberRepository,
   ) {}
 
   sendInvitation(eventId: number, inviterId: number, inviteeId: number, inviteeUsername?: string): InvitationResult {
@@ -87,6 +89,20 @@ export class InvitationService {
    * never insert the caller into an arbitrary owner's event. `event_participants` is per-user
    * (`UNIQUE(event_id, user_id)`), so each member gets their own row and members never collide on
    * a shared invitation status.
+   *
+   * The invitation binding alone does not prove the tapping user is still in the group — Telegram
+   * can deliver a stale callback for a message from before the user left. We additionally require
+   * `groupMemberRepo` to report an active membership row (`group_members`, `left_at IS NULL`) for
+   * (groupChatId, userId) before writing anything. This uses the locally-cached membership table
+   * (already the source of truth for the group fanout in `handleUpdateEvent`) so this method stays
+   * synchronous. Because that table is filled only opportunistically, the grsvp callback handler
+   * first reconciles it on every tap via Telegram `getChatMember` (member → upsert, left/kicked/
+   * restricted non-member → leave), so members who never posted are not denied and members who
+   * left are. Only when Telegram cannot answer does the cached row decide — acceptable here since
+   * the existing invitation-
+   * binding check already blocks the higher-value IDOR case (a forged event id from another
+   * group). `groupMemberRepo` is optional for backward-compatible construction, but its absence
+   * fails closed: no membership repo means the check cannot be proven, so the RSVP is denied.
    */
   recordGroupAttendance(
     eventId: number,
@@ -100,6 +116,9 @@ export class InvitationService {
     const groupInvitation = this.invRepo.findActiveByEventAndInvitee(eventId, groupChatId);
     if (!groupInvitation) {
       return { success: false, error: 'No active group invitation links this event to this chat' };
+    }
+    if (!this.groupMemberRepo?.isActiveMember(groupChatId, userId)) {
+      return { success: false, error: 'User is not an active member of this group' };
     }
     const existing = this.participantRepo.findByEventAndUser(eventId, userId);
     if (existing) {
