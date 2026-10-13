@@ -117,13 +117,26 @@ export function handleAddContact(
     const user = ctx.userRepo.findByUsername(input.username);
     if (user) telegramId = user.telegram_id;
   }
-  const contact = ctx.contactRepo.upsert(
-    ctx.user.telegram_id,
-    input.name,
-    input.username,
-    telegramId,
-    input.preferred_name,
-  );
+  let contact: Contact;
+  try {
+    contact = ctx.contactRepo.upsert(
+      ctx.user.telegram_id,
+      input.name,
+      input.username,
+      telegramId,
+      input.preferred_name,
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('CONTACT_IDENTITY_CONFLICT:')) {
+      return {
+        success: false,
+        mutationState: 'not_applied',
+        error: t(ctx.user.language).aiTools.meta.recipientIdentityConflict,
+        agentHint: 'Several contacts or identities match. Ask which person is meant (by @username) before saving.',
+      };
+    }
+    throw error;
+  }
   const savedName = `"${contact.preferred_name ?? contact.name}"${contact.username ? ` (@${contact.username})` : ''}`;
   return { success: true, output: t(ctx.user.language).aiTools.meta.contactSaved(savedName) };
 }

@@ -36,12 +36,21 @@ export class ContactRepository {
    *
    * Done in JS (not SQL) because SQLite's built-in LOWER() is ASCII-only —
    * "Лена" stays "Лена", breaking Cyrillic case-insensitive comparison.
+   *
+   * More than one strict match is ambiguous: throws CONTACT_IDENTITY_CONFLICT instead of picking
+   * a row, so `upsert()` never attaches a Telegram ID/username to an arbitrary one of several
+   * same-named contacts. Such pairs exist whenever names differ only by non-ASCII case or
+   * surrounding whitespace (the unique index folds neither), and freely once that index is gone.
    */
   findByNameStrict(userId: number, name: string): Contact | null {
     const lower = name.trim().toLowerCase();
     if (lower.length === 0) return null;
     const contacts = this.db.prepare('SELECT * FROM contacts WHERE user_id = ?').all(userId) as Contact[];
-    return contacts.find((c) => c.name.trim().toLowerCase() === lower) ?? null;
+    const matches = contacts.filter((c) => c.name.trim().toLowerCase() === lower);
+    if (matches.length > 1) {
+      throw new Error('CONTACT_IDENTITY_CONFLICT: several contacts share this name; identify by username or ID');
+    }
+    return matches[0] ?? null;
   }
 
   /**

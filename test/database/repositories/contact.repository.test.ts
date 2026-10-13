@@ -28,6 +28,25 @@ describe('ContactRepository', () => {
     expect(repo.list(USER_ID)).toEqual([]);
   });
 
+  test('upsert refuses to patch either of two same-named contacts (Cyrillic case variants)', () => {
+    // The unique index folds only ASCII case, so these coexist on the current schema.
+    const first = repo.add(USER_ID, 'Лена', undefined, 111);
+    const second = repo.add(USER_ID, 'лена', undefined, 222);
+    expect(() => repo.upsert(USER_ID, 'Лена', 'new_lena')).toThrow('CONTACT_IDENTITY_CONFLICT');
+    expect(repo.findById(USER_ID, first.id)?.username).toBeNull();
+    expect(repo.findById(USER_ID, second.id)?.username).toBeNull();
+    expect(repo.list(USER_ID)).toHaveLength(2);
+  });
+
+  test('upsert refuses ambiguous exact duplicates once the name index is gone (#654 rollback)', () => {
+    db.exec('DROP INDEX idx_contacts_user_name');
+    const first = repo.add(USER_ID, 'Лена', undefined, 111);
+    const second = repo.add(USER_ID, 'Лена', undefined, 222);
+    expect(() => repo.upsert(USER_ID, 'Лена', 'new_lena')).toThrow('CONTACT_IDENTITY_CONFLICT');
+    expect(repo.findById(USER_ID, first.id)?.username).toBeNull();
+    expect(repo.findById(USER_ID, second.id)?.username).toBeNull();
+  });
+
   test('add creates a contact and findByName retrieves it', () => {
     const contact = repo.add(USER_ID, 'Лена', 'larichkina_b', 716928723);
     expect(contact.name).toBe('Лена');
