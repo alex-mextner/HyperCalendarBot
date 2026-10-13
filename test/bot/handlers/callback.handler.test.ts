@@ -40,6 +40,10 @@ function makeCtx(data: string, overrides: MockCallbackCtxOverrides = {}) {
   };
 }
 
+function asCallbackCtx(ctx: ReturnType<typeof makeCtx>): BotCallbackContext {
+  return ctx as unknown as BotCallbackContext;
+}
+
 function makeHandler(overrides: { [key: string]: unknown } = {}) {
   const eventService = {
     getEvent: mock(() => ({
@@ -673,5 +677,78 @@ describe('group settings timezone callback', () => {
 
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('silent-guard callbacks: missing dependency still answers (issue #51)', () => {
+  test('GROUP_SETTINGS_TZ: no groupRepo → ctx.answer called, no crash', async () => {
+    const handler = makeHandler();
+    const ctx = makeCtx('gst:select');
+    await handler(asCallbackCtx(ctx));
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+  });
+
+  test('fb_close: no feedbackDeps → ctx.answer called, no crash', async () => {
+    const handler = makeHandler();
+    const ctx = makeCtx('fb_close:1');
+    await handler(asCallbackCtx(ctx));
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+  });
+
+  test('intent_accept: no intentDeps → ctx.answer called, no crash', async () => {
+    const handler = makeHandler();
+    const ctx = makeCtx('intent_accept:1');
+    await handler(asCallbackCtx(ctx));
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+  });
+
+  test('prop: no proposalDeps and no matching action → ctx.answer still called', async () => {
+    // Regression: the prop handler previously had no fallthrough ctx.answer(), leaving
+    // the Telegram button in a permanent loading-spinner state when proposalDeps was
+    // missing or the action prefix matched neither accept nor decline.
+    const handler = makeHandler();
+    const ctx = makeCtx('prop:accept:1');
+    await handler(asCallbackCtx(ctx));
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+  });
+
+  test('snooze: no snoozeDeps → ctx.answer called, no crash', async () => {
+    const handler = makeHandler();
+    const ctx = makeCtx('snooze:10:5');
+    await handler(asCallbackCtx(ctx));
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+  });
+
+  test('GCAL: unknown sub-action falls through with no matching branch → ctx.answer still called', async () => {
+    // Regression: the gc handler previously had no fallthrough ctx.answer(), leaving the
+    // button in a permanent loading-spinner state for an unrecognized sub-action.
+    const handler = makeHandler();
+    const ctx = makeCtx('gc:not_a_real_subaction');
+    await handler(asCallbackCtx(ctx));
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+  });
+
+  test('GCAL: cal sub-action with no calendarRepo → ctx.answer still called', async () => {
+    const handler = makeHandler();
+    const ctx = makeCtx('gc:cal:open');
+    await handler(asCallbackCtx(ctx));
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+  });
+
+  test('GCAL: onboard sub-action with unrecognized payload → ctx.answer still called', async () => {
+    const handler = makeHandler();
+    const ctx = makeCtx('gc:onboard:unknown');
+    await handler(asCallbackCtx(ctx));
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+  });
+
+  test('EDIT_PROPOSAL: unknown sub-action falls through with no matching branch → ctx.answer still called', async () => {
+    // Regression: the epr handler previously had no fallthrough ctx.answer() when subAction
+    // was neither 'accept' nor 'reject', leaving the button spinner stuck forever.
+    const { handler, updateStatus } = makeEditProposalDeps();
+    const ctx = makeCtx('epr:snooze:7', { from: { id: 100 } });
+    await handler(asCallbackCtx(ctx));
+    expect(updateStatus).not.toHaveBeenCalled();
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
   });
 });
