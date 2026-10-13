@@ -43,15 +43,16 @@ function toAgendaEvents(occurrences: EventOccurrence[], timezone: string, lang: 
     const totalMin = Math.round(durationMs / 60000);
     const hours = Math.floor(totalMin / 60);
     const mins = totalMin % 60;
+    const msg = t(toLang(lang)).notifications;
     let duration: string;
     if (totalMin === 0) {
-      duration = lang === 'ru' ? '?' : '?';
+      duration = msg.cardDurationUnknown;
     } else if (hours === 0) {
-      duration = lang === 'ru' ? `${mins}мин` : `${mins}m`;
+      duration = msg.cardDurationMinutes(mins);
     } else if (mins === 0) {
-      duration = lang === 'ru' ? `${hours}ч` : `${hours}h`;
+      duration = msg.cardDurationHours(hours);
     } else {
-      duration = lang === 'ru' ? `${hours}ч ${mins}мин` : `${hours}h ${mins}m`;
+      duration = msg.cardDurationHoursMinutes(hours, mins);
     }
     const isAllDay = occ.event.all_day === 1;
     return {
@@ -71,8 +72,9 @@ function toAgendaEvents(occurrences: EventOccurrence[], timezone: string, lang: 
 
 function makeDateLabel(dateStr: string, timezone: string, lang: string): string {
   const d = new TZDate(`${dateStr}T12:00:00Z`, timezone);
-  const locale = lang === 'ru' ? ru : enUS;
-  const pattern = lang === 'ru' ? 'EEEE, d MMMM' : 'EEEE, MMMM d';
+  const language = toLang(lang);
+  const locale = language === 'ru' ? ru : enUS;
+  const pattern = t(language).notifications.dateLabelPattern;
   return format(d, pattern, { locale });
 }
 
@@ -97,9 +99,7 @@ function makeWeekRangeLabel(monDate: Date, sunDate: Date, lang: string): string 
   const sunDay = sunDate.getUTCDate();
   const monMonth = monDate.getUTCMonth();
   const sunMonth = sunDate.getUTCMonth();
-  const MONTHS_RU = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-  const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const months = lang === 'ru' ? MONTHS_RU : MONTHS_EN;
+  const months = t(toLang(lang)).notifications.monthsShort;
   if (monMonth === sunMonth) {
     return `${monDay}–${sunDay} ${months[sunMonth]}`;
   }
@@ -107,9 +107,7 @@ function makeWeekRangeLabel(monDate: Date, sunDate: Date, lang: string): string 
 }
 
 function makeDayLabel(date: Date, lang: string): string {
-  const DAY_SHORT_RU = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-  const DAY_SHORT_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const days = lang === 'ru' ? DAY_SHORT_RU : DAY_SHORT_EN;
+  const days = t(toLang(lang)).notifications.weekdaysShortFromSunday;
   const day = days[date.getUTCDay()]!;
   return `${day} ${date.getUTCDate()}`;
 }

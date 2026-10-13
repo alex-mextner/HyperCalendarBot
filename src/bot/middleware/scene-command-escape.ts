@@ -56,7 +56,7 @@ export function createSceneCommandEscape(storage: Storage) {
 
     await storage.delete(key);
 
-    const lang = (ctx.dbUser?.language ?? 'en') as 'en' | 'ru';
+    const lang = ctx.dbUser?.language ?? 'en';
 
     // At the connect wizard's prompts a "/…" text may be the 2FA password: end the wizard like its
     // cancel button (stop the login, drop its temp session) and hand it to no command handler or AI.
@@ -67,7 +67,7 @@ export function createSceneCommandEscape(storage: Storage) {
       return;
     }
 
-    const message = SCENE_CANCEL_MESSAGES[sceneData.name]?.[lang] ?? (lang === 'ru' ? 'Отменено.' : 'Cancelled.');
+    const message = SCENE_CANCEL_MESSAGES[sceneData.name]?.[lang] ?? t(lang).cancelled;
 
     await ctx.send(message, { reply_markup: { remove_keyboard: true } });
 

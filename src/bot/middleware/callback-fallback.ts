@@ -1,6 +1,7 @@
 // src/bot/middleware/callback-fallback.ts
 
 import type { Next } from 'gramio';
+import { t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 
 interface Storage {
@@ -38,25 +39,18 @@ export function createCallbackFallback(sceneStorage: Storage) {
 
     if (answered) return;
 
-    const lang = (ctx.dbUser?.language ?? 'en') as 'en' | 'ru';
+    const lang = ctx.dbUser?.language ?? 'en';
     const userId = ctx.from?.id;
 
     if (userId) {
       const key = `@gramio/scenes:${userId}`;
       const sceneData = await sceneStorage.get(key);
       if (sceneData) {
-        await origAnswer({
-          text:
-            lang === 'ru'
-              ? 'Идёт другое действие. /cancel для отмены.'
-              : 'Another action in progress. /cancel to cancel.',
-        });
+        await origAnswer({ text: t(lang).callbackErrors.anotherActionInProgress });
         return;
       }
     }
 
-    await origAnswer({
-      text: lang === 'ru' ? 'Действие устарело.' : 'Action expired.',
-    });
+    await origAnswer({ text: t(lang).callbackErrors.actionExpired });
   };
 }
