@@ -7,7 +7,7 @@
 //   SHA256SUMS     written once at the end
 //
 //   bun --env-file=.env scripts/model-quality/run.ts --out <new dir> --models deepseek41-flash@openrouter \
-//     --roles executor,repair,planner --budget 1 [--already-spent 0.2] [--cases today,tomorrow] [--repeats 1]
+//     --roles executor,repair,planner --budget 1 [--already-spent 0.2] [--cases today,tomorrow] [--repeats 1] [--light-repeats 3]
 
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -30,6 +30,7 @@ const { values } = parseArgs({
     roles: { type: 'string', default: 'executor,repair,planner' },
     cases: { type: 'string' },
     repeats: { type: 'string', default: '1' },
+    'light-repeats': { type: 'string', default: '3' },
     budget: { type: 'string' },
     'already-spent': { type: 'string', default: '0' },
     mode: { type: 'string', default: 'full' },
@@ -56,7 +57,8 @@ const chosen = fixtures.filter((f) => !caseIds || caseIds.includes(f.id));
 const lightChosen = lightCases.filter((c) => !caseIds || caseIds.includes(c.id));
 if (!chosen.length && roles.some((r) => r !== 'planner')) throw new Error('No scenarios selected');
 const repeats = Number(values.repeats);
-if (!Number.isInteger(repeats) || repeats < 1 || repeats > 3) throw new Error('Invalid repeats');
+const lightRepeats = Number(values['light-repeats']);
+for (const n of [repeats, lightRepeats]) if (!Number.isInteger(n) || n < 1 || n > 3) throw new Error('Invalid repeats');
 const maxRounds = Number(values.rounds);
 if (!Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > 12) throw new Error('Invalid max rounds');
 const budget = new Budget(Number(values.budget), Number(values['already-spent']));
@@ -74,6 +76,7 @@ writeFileSync(
       roles,
       caseIds: [...chosen.map((f) => f.id), ...(roles.includes('planner') ? lightChosen.map((c) => c.id) : [])],
       repeats,
+      lightRepeats,
       budgetUsd: budget.capUsd,
       alreadySpentUsd: Number(values['already-spent']),
       mode,
@@ -132,7 +135,7 @@ for (const candidate of selected) {
   const round = roundFor(candidate, client);
   const light = lightCallFor(client);
   for (const role of roles) {
-    for (let repetition = 0; repetition < repeats && !stop; repetition++) {
+    for (let repetition = 0; repetition < (role === 'planner' ? lightRepeats : repeats) && !stop; repetition++) {
       if (role === 'planner') {
         for (const fixture of lightChosen) {
           rows++;

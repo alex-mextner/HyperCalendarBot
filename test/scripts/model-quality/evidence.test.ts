@@ -16,6 +16,7 @@ function manifest() {
     roles: ['executor', 'repair', 'planner'],
     caseIds: fixtures.map((f) => f.id),
     repeats: 1,
+    lightRepeats: 3,
     budgetUsd: 1,
     alreadySpentUsd: 0.5,
     mode: 'full',
@@ -36,6 +37,7 @@ test('the manifest pins source, fixture, prompt and tool versions and the scope'
     expect(m[key]).toMatch(/^[0-9a-f]{64}$/);
   expect(m.toolCount).toBeGreaterThan(50);
   expect(m.caseIds).toHaveLength(32);
+  expect([m.repeats, m.lightRepeats]).toEqual([1, 3]);
   expect(m.scope.privateHistorySent).toBe(false);
   expect(m.scope.productionSideEffects).toBe(false);
   expect(m.scope.qualification).toBeNull();

@@ -44,6 +44,7 @@ export interface ManifestInput {
   roles: string[];
   caseIds: string[];
   repeats: number;
+  lightRepeats: number;
   budgetUsd: number;
   alreadySpentUsd: number;
   mode: 'full' | 'lazy';
@@ -63,6 +64,7 @@ export function buildManifest(input: ManifestInput) {
     roles: input.roles,
     caseIds: input.caseIds,
     repeats: input.repeats,
+    lightRepeats: input.lightRepeats,
     toolSchemaMode: input.mode,
     maxRounds: input.maxRounds,
     candidates: input.candidates.map((c) => ({
