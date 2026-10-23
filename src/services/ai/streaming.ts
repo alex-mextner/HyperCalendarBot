@@ -42,13 +42,14 @@ import {
   settleInconclusive,
 } from './provider-circuit.ts';
 import { waitForAbort, withinProviderDeadline } from './provider-deadline.ts';
-import { clearBlock, isBlocked, noteFailureForEligibility } from './provider-eligibility.ts';
+import { type BenchChain, clearBlock, isBlocked, noteFailureForEligibility } from './provider-eligibility.ts';
 import type { ProviderId } from './provider-ids.ts';
 import { roleForPurpose, rolesApplyTo } from './role-routing.ts';
 import { estimateTokens } from './token-estimate.ts';
 import { classifyProviderError } from './usage-classification.ts';
 import {
   type AiCallPurpose,
+  type AiTokenUsage,
   type AttemptScope,
   answeredAttempt,
   failedAttempt,
@@ -98,12 +99,8 @@ export interface StreamToolCall {
   arguments: string;
 }
 
-export interface StreamTokenUsage {
-  promptTokens: number | null;
-  completionTokens: number | null;
+export interface StreamTokenUsage extends AiTokenUsage {
   totalTokens: number | null;
-  cachedTokens: number | null;
-  reasoningTokens: number | null;
 }
 
 export interface StreamRoundMetrics {
@@ -298,6 +295,12 @@ interface ProviderSlot {
   configuredModel: string;
   /** Identifies the provider account (endpoint + credential) for the durable circuit. */
   circuitKey: string;
+  /** The circuit of the whole credential, for a provider whose `circuitKey` is per model (OpenRouter). */
+  accountCircuitKey?: string;
+  /** Role whose chain this slot belongs to; unset on a legacy-chain slot. */
+  role?: ModelRole;
+  /** Registry preset the slot runs, set with the preset's own settings; such a slot runs only its measured model. */
+  presetId?: string;
   getClient: () => OpenAI;
   stream: (
     model: string,
@@ -480,12 +483,14 @@ function finite(value: unknown): number | null {
 
 function normalizeUsage(usage: CompletionUsage | null): StreamTokenUsage | null {
   if (!usage) return null;
+  const reportedCost = 'cost' in usage ? finite(usage.cost) : null;
   return {
     promptTokens: finite(usage.prompt_tokens),
     completionTokens: finite(usage.completion_tokens),
     totalTokens: finite(usage.total_tokens),
     cachedTokens: finite(usage.prompt_tokens_details?.cached_tokens),
     reasoningTokens: finite(usage.completion_tokens_details?.reasoning_tokens),
+    ...(reportedCost === null ? {} : { costUsd: reportedCost }),
   };
 }
 
@@ -552,6 +557,7 @@ export function streamingSlot(
     provider,
     configuredModel,
     circuitKey,
+    ...(preset ? { presetId: preset.id } : {}),
     getClient,
     stream: async (model, opts, cbs, onHttpAttempt) => {
       let attemptStartedAt = performance.now();
@@ -770,15 +776,16 @@ function buildChain(
         );
         continue;
       }
-      chain.push(
-        streamingSlot(
+      chain.push({
+        ...streamingSlot(
           PROVIDER_LABELS[provider],
           provider,
           providerClients[provider],
           model,
-          providerCircuitKey(provider, baseUrl ?? '', apiKey),
+          slotCircuitKey(provider, baseUrl ?? '', apiKey, model),
         ),
-      );
+        ...accountCircuitKeyFor(provider, baseUrl ?? '', apiKey),
+      });
     }
     return chain;
   };
@@ -821,6 +828,21 @@ export function openrouterCircuitScope(baseUrl: string, model: string | undefine
   return `${baseUrl}#${model ?? ''}`;
 }
 
+/** The circuit key of one slot: per model for OpenRouter (see above), one per account for every other provider. */
+function slotCircuitKey(provider: ProviderId, baseUrl: string, apiKey: string, model: string): string {
+  return provider === 'openrouter'
+    ? providerCircuitKey(provider, openrouterCircuitScope(baseUrl, model), apiKey)
+    : providerCircuitKey(provider, baseUrl, apiKey);
+}
+
+/**
+ * OpenRouter's whole-key circuit: a revoked or empty key is one incident for every model behind it, while
+ * rate limits and outages stay on the per-model circuit.
+ */
+function accountCircuitKeyFor(provider: ProviderId, baseUrl: string, apiKey: string): { accountCircuitKey?: string } {
+  return provider === 'openrouter' ? { accountCircuitKey: providerCircuitKey(provider, baseUrl, apiKey) } : {};
+}
+
 function buildSmartChain(cfg: EnvConfig): ProviderSlot[] {
   return buildChain('smart', cfg.AI_SMART_CHAIN, {
     zai: { model: cfg.ZAI_MODEL, apiKey: cfg.ZAI_API_KEY, baseUrl: cfg.ZAI_BASE_URL },
@@ -829,7 +851,7 @@ function buildSmartChain(cfg: EnvConfig): ProviderSlot[] {
     openrouter: {
       model: cfg.OPENROUTER_MODEL,
       apiKey: cfg.OPENROUTER_API_KEY,
-      baseUrl: openrouterCircuitScope(cfg.OPENROUTER_BASE_URL, cfg.OPENROUTER_MODEL),
+      baseUrl: cfg.OPENROUTER_BASE_URL,
     },
   });
 }
@@ -842,7 +864,7 @@ function buildFastChain(cfg: EnvConfig): ProviderSlot[] {
     openrouter: {
       model: cfg.OPENROUTER_FAST_MODEL,
       apiKey: cfg.OPENROUTER_API_KEY,
-      baseUrl: openrouterCircuitScope(cfg.OPENROUTER_BASE_URL, cfg.OPENROUTER_FAST_MODEL),
+      baseUrl: cfg.OPENROUTER_BASE_URL,
     },
   });
 }
@@ -877,7 +899,7 @@ function buildRoleChain(role: ModelRole, cfg: EnvConfig): ProviderSlot[] {
     const model = entry.presetId ? preset?.models[entry.provider] : account.model;
     const refusal = (() => {
       if (entry.presetId && !preset) return 'unknown preset';
-      if (preset && !isQualifiedFor(preset, role)) return 'preset is not qualified for this role';
+      if (preset && !isQualifiedFor(preset, role, entry.provider)) return 'preset is not qualified for this role here';
       if (!model) return 'no model for this provider';
       if (!account.apiKey) return 'provider has no key';
       return excludedModelReason(model);
@@ -891,20 +913,42 @@ function buildRoleChain(role: ModelRole, cfg: EnvConfig): ProviderSlot[] {
       );
       continue;
     }
-    const baseUrl =
-      entry.provider === 'openrouter' ? openrouterCircuitScope(cfg.OPENROUTER_BASE_URL, model) : account.baseUrl;
-    slots.push(
-      streamingSlot(
-        PROVIDER_LABELS[entry.provider],
-        entry.provider,
-        providerClients[entry.provider],
-        model,
-        providerCircuitKey(entry.provider, baseUrl ?? '', account.apiKey),
-        preset ?? undefined,
-      ),
+    const slot = streamingSlot(
+      PROVIDER_LABELS[entry.provider],
+      entry.provider,
+      providerClients[entry.provider],
+      model,
+      slotCircuitKey(entry.provider, account.baseUrl ?? '', account.apiKey, model),
+      preset ?? undefined,
     );
+    slots.push({
+      ...slot,
+      role,
+      ...accountCircuitKeyFor(entry.provider, account.baseUrl ?? '', account.apiKey),
+    });
   }
   return slots;
+}
+
+/**
+ * What a provider bench is scoped to for this slot: the legacy chain it serves, or its role and model.
+ * A role slot never shares a bench with the legacy chains, nor with another role or model.
+ */
+function benchChainOf(slot: ProviderSlot, kind: ProviderChainKind): BenchChain {
+  return slot.role ? `role:${slot.role}:${slot.configuredModel}` : kind;
+}
+
+/**
+ * The slots of `legacy` that no plain slot of `tried` already asked the same way: a second identical ask fails
+ * the same way. A preset slot asks differently (its own settings, its model never replaced), so the plain
+ * legacy slot with that model stays: it may fit a request the preset's settings did not, and it can still
+ * find a live replacement for a model that is gone.
+ */
+function withoutModelsOf(tried: readonly ProviderSlot[], legacy: readonly ProviderSlot[]): ProviderSlot[] {
+  const asked = new Set(
+    tried.filter((slot) => slot.presetId === undefined).map((slot) => `${slot.provider}\0${slot.configuredModel}`),
+  );
+  return legacy.filter((slot) => !asked.has(`${slot.provider}\0${slot.configuredModel}`));
 }
 
 // ── Slot execution with live-model discovery ───────────────────────────────
@@ -958,13 +1002,16 @@ async function runSlot(
   cbs: StreamCallbacks,
   onAttempt: () => void,
 ): Promise<StreamRoundResult> {
-  const cachedOverride = getModelOverride(slot.provider, slot.configuredModel);
+  // A preset slot runs the model that was measured and nothing else: neither a cached replacement nor a
+  // fresh heuristic one, which would serve the role unmeasured.
+  const measured = slot.presetId !== undefined;
+  const cachedOverride = measured ? null : getModelOverride(slot.provider, slot.configuredModel);
   const model = cachedOverride ?? slot.configuredModel;
 
   try {
     return await streamRetryingBodilessRejection(slot, model, opts, cbs, onAttempt);
   } catch (error) {
-    if (!isModelNotFoundError(error)) throw error;
+    if (measured || !isModelNotFoundError(error)) throw error;
 
     const replacement = await resolveModelOverride({
       provider: slot.provider,
@@ -1010,8 +1057,12 @@ function describeFailure(slot: ProviderSlot, error: unknown): ProviderFailure {
   };
 }
 
-/** The model a request to this slot names now: the live replacement when the configured one was found gone. */
+/**
+ * The model a request to this slot names now: the live replacement when the configured one was found gone.
+ * A preset slot has no replacement: its model is the one that was measured.
+ */
 function modelRequestedFrom(slot: ProviderSlot): string {
+  if (slot.presetId !== undefined) return slot.configuredModel;
   return getModelOverride(slot.provider, slot.configuredModel) ?? slot.configuredModel;
 }
 
@@ -1093,15 +1144,24 @@ export async function aiStreamRound(
   const cfg = loadConfig();
   const role = roleForPurpose(options.purpose);
   const roleChain = role && rolesApplyTo(cfg, options.userId) ? buildRoleChain(role, cfg) : [];
-  // A role chain with nothing loadable leaves the call on the legacy chains rather than answering nobody.
-  const chain = roleChain.length > 0 ? roleChain : options.fast ? buildFastChain(cfg) : buildSmartChain(cfg);
+  const legacyChain = options.fast ? buildFastChain(cfg) : buildSmartChain(cfg);
+  // A role chain is tried first and the legacy chain follows it, minus models the role chain already asked:
+  // roles can fail or be skipped at runtime (open circuit, bench, deadline) as well as fail to load, and a
+  // user must not get no answer from a role chain while the legacy chain they were on yesterday is healthy.
+  const chain = roleChain.length > 0 ? [...roleChain, ...withoutModelsOf(roleChain, legacyChain)] : legacyChain;
   const failures: ProviderFailure[] = [];
   let actualAttempts = 0;
   // Anything the caller has already shown the user for this round: streamed text
   // or a "running <tool>" label. Both must be cleared before another provider
   // starts, otherwise the user sees output from a round that never finished.
   let partialOutputShown = false;
-  const scope: AttemptScope = { chain: chainKind, purpose: options.purpose, requestId: options.requestId };
+  const scopeOf = (slot: ProviderSlot): AttemptScope => ({
+    chain: slot.role ? `role:${slot.role}` : chainKind,
+    purpose: options.purpose,
+    requestId: options.requestId,
+    role: slot.role ?? null,
+    preset: slot.presetId ?? null,
+  });
 
   const wrappedCallbacks: StreamCallbacks = {
     onTextDelta: (text) => {
@@ -1119,14 +1179,16 @@ export async function aiStreamRound(
   // beats no answer, and this is the one place a memory of past failure could
   // turn into silence.
   const hasTools = (options.tools?.length ?? 0) > 0;
-  const eligible = chain.filter((slot) => !isBlocked(slot.provider, chainKind, hasTools));
+  const eligible = chain.filter((slot) => !isBlocked(slot.provider, benchChainOf(slot, chainKind), hasTools));
   const attempts = eligible.length > 0 ? eligible : chain;
   if (eligible.length === 0 && chain.length > 0) {
     aiLogger.warn({ chain: chainKind }, 'Every provider is benched — trying them anyway rather than answering nobody');
   }
   if (eligible.length > 0) {
     for (const benched of chain.filter((slot) => !eligible.includes(slot))) {
-      recordAiUsage(skippedAttempt(scope, benched.provider, modelRequestedFrom(benched), 'eligibility_bench'));
+      recordAiUsage(
+        skippedAttempt(scopeOf(benched), benched.provider, modelRequestedFrom(benched), 'eligibility_bench'),
+      );
     }
   }
 
@@ -1136,16 +1198,20 @@ export async function aiStreamRound(
     if (remainingMs < Math.min(cap, 1000)) {
       aiLogger.warn({ requestId: options.requestId }, 'AI round deadline reached before next provider');
       for (const unattempted of attempts.slice(position)) {
-        recordAiUsage(skippedAttempt(scope, unattempted.provider, modelRequestedFrom(unattempted), 'round_deadline'));
+        recordAiUsage(
+          skippedAttempt(scopeOf(unattempted), unattempted.provider, modelRequestedFrom(unattempted), 'round_deadline'),
+        );
       }
       break;
     }
 
     const requestModel = modelRequestedFrom(slot);
+    const benchChain = benchChainOf(slot, chainKind);
 
     // Circuit admission is the last gate before the request: a slot skipped earlier never spends the half-open probe.
     const circuit: CircuitContext = {
       key: slot.circuitKey,
+      ...(slot.accountCircuitKey ? { accountKey: slot.accountCircuitKey } : {}),
       provider: slot.provider,
       label: slotName(slot.label, requestModel),
       chain: chainKind,
@@ -1153,7 +1219,9 @@ export async function aiStreamRound(
     const admission = admitProvider(circuit);
     if (admission.kind === 'skip') {
       failures.push(skippedByCircuit(slot, requestModel, admission));
-      recordAiUsage(skippedAttempt(scope, slot.provider, requestModel, 'circuit_open', admission.status ?? null));
+      recordAiUsage(
+        skippedAttempt(scopeOf(slot), slot.provider, requestModel, 'circuit_open', admission.status ?? null),
+      );
       continue;
     }
 
@@ -1190,7 +1258,7 @@ export async function aiStreamRound(
       // about.
       reportProviderAnswered(slot.label, chainKind);
       settleAnswered(circuit);
-      clearBlock(slot.provider, chainKind, hasTools);
+      clearBlock(slot.provider, benchChain, hasTools);
       if (result.metrics) {
         result.metrics = {
           ...result.metrics,
@@ -1203,7 +1271,7 @@ export async function aiStreamRound(
       }
       recordAiUsage(
         answeredAttempt(
-          scope,
+          scopeOf(slot),
           slot.provider,
           result.metrics?.model ?? requestModel,
           attemptAt,
@@ -1216,7 +1284,7 @@ export async function aiStreamRound(
       if (error instanceof ProviderSafetyStopError) {
         recordAiUsage(
           failedAttempt(
-            scope,
+            scopeOf(slot),
             slot.provider,
             requestModel,
             attemptAt,
@@ -1225,7 +1293,7 @@ export async function aiStreamRound(
             error.diagnostics.usage,
           ),
         );
-        settleInconclusive(circuit, admission, { pushBack: false });
+        settleInconclusive(admission, { pushBack: false });
         if (partialOutputShown) callbacks.onProviderSwitch?.();
         aiLogger.warn(
           { provider: slot.provider, model: requestModel, diagnostics: error.diagnostics },
@@ -1236,7 +1304,9 @@ export async function aiStreamRound(
       const failure = describeFailure(slot, error);
       failures.push(failure);
       const callerAborted = isCallerAbort(options.signal);
-      recordAiUsage(failureAttempt(scope, slot, failure.model, error, callerAborted, attemptAt, attemptStartedAt));
+      recordAiUsage(
+        failureAttempt(scopeOf(slot), slot, failure.model, error, callerAborted, attemptAt, attemptStartedAt),
+      );
       // An account-level failure is owned by the durable circuit, which tells the
       // admin once per incident from stored facts; it is not reported again here.
       const ownedByCircuit = settleCircuitAfterFailure(circuit, admission, error, failure, callerAborted);
@@ -1247,7 +1317,7 @@ export async function aiStreamRound(
         if (!ownedByCircuit && ![400, 403, 422].includes(failure.status ?? 0)) {
           noteFailureForEligibility(
             slot.provider,
-            chainKind,
+            benchChain,
             hasTools,
             failure.status === 429 ? 413 : failure.status,
             failure.message,
@@ -1311,7 +1381,7 @@ function settleCircuitAfterFailure(
   callerAborted: boolean,
 ): boolean {
   if (callerAborted) {
-    settleInconclusive(circuit, admission, { pushBack: false });
+    settleInconclusive(admission, { pushBack: false });
     return false;
   }
   return settleFailure(circuit, admission, {

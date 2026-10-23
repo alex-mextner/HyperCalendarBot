@@ -267,7 +267,7 @@ describe('half-open lease', () => {
     settleFailure(c, admitProvider(c), CREDITS);
     clock += circuitBackoffMs('quota_exhausted', 0);
     const probe = admitProvider(c);
-    settleInconclusive(c, probe, { pushBack: false });
+    settleInconclusive(probe, { pushBack: false });
     expect(admitProvider(c).kind).toBe('probe');
   });
 });
@@ -495,4 +495,132 @@ test('SQLite state and WAL stay private even with a permissive process umask', (
     circuit.close();
     process.umask(previous);
   }
+});
+
+describe('an account that serves several models (OpenRouter)', () => {
+  const model = (id: string) => ({
+    key: providerCircuitKey('openrouter', `https://or.test#${id}`, 'or-key'),
+    accountKey: providerCircuitKey('openrouter', 'https://or.test', 'or-key'),
+    provider: 'openrouter' as const,
+    label: `OpenRouter (${id})`,
+    chain: 'smart' as const,
+  });
+  const a = model('vendor/a');
+  const b = model('vendor/b');
+  const REVOKED = { status: 401, message: 'No auth credentials found', providerDown: false };
+  const RATE_LIMITED = { status: 429, message: 'Rate limit exceeded: upstream is busy', providerDown: false };
+
+  test('a revoked key opens one circuit for every model and sends one notice', () => {
+    configureProviderCircuit(dbPath);
+    settleFailure(a, admitProvider(a), REVOKED);
+
+    expect(admitProvider(b).kind).toBe('skip');
+    expect(admitProvider(a).kind).toBe('skip');
+    settleFailure(b, { kind: 'allow' }, REVOKED);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('OpenRouter');
+    expect(sent[0]).not.toContain('vendor/a');
+  });
+
+  test('spent credit (402) is account-wide too', () => {
+    configureProviderCircuit(dbPath);
+    settleFailure(a, admitProvider(a), CREDITS);
+    expect(admitProvider(b).kind).toBe('skip');
+    expect(sent).toHaveLength(1);
+  });
+
+  test('a rate limit or an outage of one model leaves the other models usable', () => {
+    configureProviderCircuit(dbPath);
+    settleFailure(a, admitProvider(a), RATE_LIMITED);
+
+    expect(admitProvider(a).kind).toBe('skip');
+    expect(admitProvider(b).kind).toBe('allow');
+
+    const down = { status: 503, message: 'upstream outage', providerDown: true };
+    for (let i = 0; i < TRANSIENT_OPEN_THRESHOLD; i++) settleFailure(b, admitProvider(b), down);
+    expect(admitProvider(b).kind).toBe('skip');
+  });
+
+  test('an answer from any model proves the key and closes the account incident', () => {
+    configureProviderCircuit(dbPath);
+    settleFailure(a, admitProvider(a), REVOKED);
+    clock += circuitBackoffMs('auth_failed', 0);
+
+    const probe = admitProvider(b);
+    expect(probe.kind).toBe('probe');
+    settleAnswered(b);
+
+    expect(admitProvider(a).kind).toBe('allow');
+    expect(admitProvider(b).kind).toBe('allow');
+  });
+
+  test('a failed probe of the account re-opens it with a longer backoff', () => {
+    configureProviderCircuit(dbPath);
+    settleFailure(a, admitProvider(a), REVOKED);
+    clock += circuitBackoffMs('auth_failed', 0);
+    const probe = admitProvider(b);
+    settleFailure(b, probe, REVOKED);
+
+    clock += circuitBackoffMs('auth_failed', 0);
+    expect(admitProvider(a).kind).toBe('skip');
+    clock += circuitBackoffMs('auth_failed', 1);
+    expect(admitProvider(a).kind).toBe('probe');
+  });
+
+  test('a provider with no account key keeps the single-key behaviour', () => {
+    configureProviderCircuit(dbPath);
+    const c = ctx('zai');
+    settleFailure(c, admitProvider(c), CREDITS);
+    expect(admitProvider(c).kind).toBe('skip');
+    expect(admitProvider(ctx('zai', 'smart', 'other-key')).kind).toBe('allow');
+  });
+
+  test('a 401 or 403 worded like spent credit is still the whole key, not one model', () => {
+    configureProviderCircuit(dbPath);
+    settleFailure(a, admitProvider(a), {
+      status: 403,
+      message: 'account is not active: out of credits',
+      providerDown: false,
+    });
+    expect(admitProvider(b).kind).toBe('skip');
+  });
+
+  test('a half-open account probe is not spent on a model whose own circuit is still open', () => {
+    configureProviderCircuit(dbPath);
+    settleFailure(a, admitProvider(a), REVOKED);
+    clock += 4 * MINUTE;
+    // Model b's own limit opens later, so it is still cooling down when the account becomes probeable.
+    settleFailure(b, { kind: 'allow' }, RATE_LIMITED);
+    clock += MINUTE;
+
+    expect(admitProvider(b).kind).toBe('skip');
+    // The lease the account circuit offered was handed back, so a model that is usable gets the probe.
+    expect(admitProvider(model('vendor/c')).kind).toBe('probe');
+  });
+
+  test('a model-level failure on an account probe hands the account lease back for the next caller', () => {
+    configureProviderCircuit(dbPath);
+    settleFailure(a, admitProvider(a), REVOKED);
+    clock += circuitBackoffMs('auth_failed', 0);
+    const probe = admitProvider(b);
+    expect(probe.kind).toBe('probe');
+
+    settleFailure(b, probe, RATE_LIMITED);
+
+    expect(admitProvider(model('vendor/c')).kind).toBe('probe');
+  });
+
+  test('with both circuits half-open a model-level failure still advances the model backoff', () => {
+    configureProviderCircuit(dbPath);
+    settleFailure(a, admitProvider(a), RATE_LIMITED);
+    settleFailure(b, { kind: 'allow' }, REVOKED);
+    clock += circuitBackoffMs('auth_failed', 0);
+    const probe = admitProvider(a);
+    expect(probe.kind).toBe('probe');
+
+    settleFailure(a, probe, RATE_LIMITED);
+
+    // Neither circuit may be probed again at once: the model's own backoff moved on, and the account's lease went back.
+    expect(admitProvider(a).kind).toBe('skip');
+  });
 });

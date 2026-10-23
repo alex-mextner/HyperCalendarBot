@@ -1,6 +1,7 @@
 // src/services/ai/usage-report.ts
-// Pure aggregation of AI usage rows into per provider:model statistics and one verdict per provider.
-// Shared by scripts/report-ai-usage.ts and the admin command /ai_stats; formatting lives with each of them.
+// Pure aggregation of AI usage rows into per provider:model statistics, a per role and provider view with
+// cost and latency, and one verdict per provider. Shared by scripts/report-ai-usage.ts and the admin command
+// /ai_stats; formatting lives with each of them.
 
 import {
   AI_USAGE_RETENTION_DAYS,
@@ -8,12 +9,16 @@ import {
   type AiSkipReason,
   type AiUsageEvent,
 } from '../../database/repositories/ai-usage.repository.ts';
+import { MODEL_ROLES } from './model-presets.ts';
 import { PROVIDER_IDS } from './provider-ids.ts';
 
 /** Share of attempts that reached the provider and were answered, below which a provider counts as degraded. */
 const DEGRADED_BELOW_SUCCESS_RATE = 0.9;
 
 const DEFAULT_REPORT_DAYS = 7;
+
+/** What the role view calls the attempts that no role served: the legacy smart and fast chains. */
+export const LEGACY_ROLE = 'legacy';
 
 /** The report window in days: a whole number from 1 to the retention horizon, a week when absent, null when invalid. */
 export function parseReportDays(raw: string | undefined): number | null {
@@ -41,9 +46,19 @@ export interface TokenTotals {
   unknownRows: number;
 }
 
-export interface ModelUsage {
-  provider: string;
-  model: string;
+/**
+ * Cost in micro-USD over a group's rows. `sumMicroUsd` is null when no row had a known cost; a known zero
+ * is a zero. `unknownRows` counts answered rows whose cost is unknown (nothing reported, no price for the
+ * route): they are not in the sum and are never shown as zero.
+ */
+export interface CostTotals {
+  sumMicroUsd: number | null;
+  reportedRows: number;
+  unknownRows: number;
+}
+
+/** Counts, errors, tokens, cost and latency of one group of attempts. */
+export interface UsageStats {
   attempts: number;
   ok: number;
   errors: number;
@@ -53,12 +68,24 @@ export interface ModelUsage {
   /** Answered over answered + failed; skips never reached the provider. Null when nothing was sent. */
   successRate: number | null;
   tokens: { prompt: TokenTotals; completion: TokenTotals; reasoning: TokenTotals; cached: TokenTotals };
+  cost: CostTotals;
   /** Nearest-rank percentiles over the durations of answered attempts. */
   p50DurationMs: number | null;
   p95DurationMs: number | null;
   firstOkAt: number | null;
   lastOkAt: number | null;
   lastError: LastError | null;
+}
+
+export interface ModelUsage extends UsageStats {
+  provider: string;
+  model: string;
+}
+
+/** One routing role on one provider; `role` is `legacy` for attempts that no role served. */
+export interface RoleUsage extends UsageStats {
+  role: string;
+  provider: string;
 }
 
 export interface LastError {
@@ -83,32 +110,37 @@ export interface UsageSummary {
   window: UsageWindow;
   totalAttempts: number;
   models: ModelUsage[];
+  /** Empty unless some attempt in the window was served by a role: without roles the report is the legacy one. */
+  roles: RoleUsage[];
   /** Every known provider, in chain-config order, then any other id found in the rows. */
   providers: ProviderUsage[];
 }
 
 type TokenField = 'promptTokens' | 'completionTokens' | 'reasoningTokens' | 'cachedTokens';
 
+interface Counter {
+  sum: number;
+  reported: number;
+  unknown: number;
+}
+
 interface Accumulator {
-  provider: string;
-  model: string;
   ok: number;
   errors: number;
   skipped: number;
   errorsByClass: { [errorClass in AiErrorClass]?: number };
   skippedByReason: { [reason in AiSkipReason]?: number };
   okDurations: number[];
-  tokenSums: { [field in TokenField]: { sum: number; reported: number; unknown: number } };
+  tokenSums: { [field in TokenField]: Counter };
+  cost: Counter;
   firstOkAt: number | null;
   lastOkAt: number | null;
   lastError: LastError | null;
 }
 
-function newAccumulator(provider: string, model: string): Accumulator {
-  const tokens = () => ({ sum: 0, reported: 0, unknown: 0 });
+function newAccumulator(): Accumulator {
+  const counter = (): Counter => ({ sum: 0, reported: 0, unknown: 0 });
   return {
-    provider,
-    model,
     ok: 0,
     errors: 0,
     skipped: 0,
@@ -116,11 +148,12 @@ function newAccumulator(provider: string, model: string): Accumulator {
     skippedByReason: {},
     okDurations: [],
     tokenSums: {
-      promptTokens: tokens(),
-      completionTokens: tokens(),
-      reasoningTokens: tokens(),
-      cachedTokens: tokens(),
+      promptTokens: counter(),
+      completionTokens: counter(),
+      reasoningTokens: counter(),
+      cachedTokens: counter(),
     },
+    cost: counter(),
     firstOkAt: null,
     lastOkAt: null,
     lastError: null,
@@ -129,23 +162,25 @@ function newAccumulator(provider: string, model: string): Accumulator {
 
 const TOKEN_FIELDS: TokenField[] = ['promptTokens', 'completionTokens', 'reasoningTokens', 'cachedTokens'];
 
+function tally(counter: Counter, value: number | null, answered: boolean): void {
+  if (value !== null) {
+    counter.sum += value;
+    counter.reported++;
+  } else if (answered) {
+    counter.unknown++;
+  }
+}
+
 function add(acc: Accumulator, event: AiUsageEvent): void {
   if (event.outcome === 'skipped') {
     acc.skipped++;
     if (event.skipReason) acc.skippedByReason[event.skipReason] = (acc.skippedByReason[event.skipReason] ?? 0) + 1;
     return;
   }
-  for (const field of TOKEN_FIELDS) {
-    const value = event[field];
-    const totals = acc.tokenSums[field];
-    if (value !== null) {
-      totals.sum += value;
-      totals.reported++;
-    } else if (event.outcome === 'ok') {
-      totals.unknown++;
-    }
-  }
-  if (event.outcome === 'ok') {
+  const answered = event.outcome === 'ok';
+  for (const field of TOKEN_FIELDS) tally(acc.tokenSums[field], event[field], answered);
+  tally(acc.cost, event.costMicroUsd, answered);
+  if (answered) {
     acc.ok++;
     if (event.durationMs !== null) acc.okDurations.push(event.durationMs);
     acc.firstOkAt = acc.firstOkAt === null ? event.at : Math.min(acc.firstOkAt, event.at);
@@ -169,15 +204,21 @@ function nearestRank(sorted: number[], quantile: number): number | null {
   return sorted[Math.max(0, Math.ceil(quantile * sorted.length) - 1)] ?? null;
 }
 
-function totalsOf(entry: Accumulator['tokenSums'][TokenField]): TokenTotals {
+function totalsOf(entry: Counter): TokenTotals {
   return { sum: entry.reported === 0 ? null : entry.sum, reportedRows: entry.reported, unknownRows: entry.unknown };
 }
 
-function modelUsageOf(acc: Accumulator): ModelUsage {
+function costOf(entry: Counter): CostTotals {
+  return {
+    sumMicroUsd: entry.reported === 0 ? null : entry.sum,
+    reportedRows: entry.reported,
+    unknownRows: entry.unknown,
+  };
+}
+
+function statsOf(acc: Accumulator): UsageStats {
   const sortedDurations = [...acc.okDurations].sort((a, b) => a - b);
   return {
-    provider: acc.provider,
-    model: acc.model,
     attempts: acc.ok + acc.errors + acc.skipped,
     ok: acc.ok,
     errors: acc.errors,
@@ -191,6 +232,7 @@ function modelUsageOf(acc: Accumulator): ModelUsage {
       reasoning: totalsOf(acc.tokenSums.reasoningTokens),
       cached: totalsOf(acc.tokenSums.cachedTokens),
     },
+    cost: costOf(acc.cost),
     p50DurationMs: nearestRank(sortedDurations, 0.5),
     p95DurationMs: nearestRank(sortedDurations, 0.95),
     firstOkAt: acc.firstOkAt,
@@ -229,35 +271,58 @@ function providerUsageOf(provider: string, models: ModelUsage[]): ProviderUsage 
   };
 }
 
+const ROLE_ORDER: readonly string[] = [...MODEL_ROLES, LEGACY_ROLE];
+
 export function summarizeAiUsage(events: Iterable<AiUsageEvent>, window: UsageWindow): UsageSummary {
-  const groups = new Map<string, Accumulator>();
+  const modelGroups = new Map<string, { provider: string; model: string; acc: Accumulator }>();
+  const roleGroups = new Map<string, { role: string; provider: string; acc: Accumulator }>();
   let totalAttempts = 0;
   for (const event of events) {
     totalAttempts++;
-    const key = `${event.provider}\u0000${event.model}`;
-    let acc = groups.get(key);
-    if (!acc) {
-      acc = newAccumulator(event.provider, event.model);
-      groups.set(key, acc);
+    const modelKey = `${event.provider}\u0000${event.model}`;
+    let modelGroup = modelGroups.get(modelKey);
+    if (!modelGroup) {
+      modelGroup = { provider: event.provider, model: event.model, acc: newAccumulator() };
+      modelGroups.set(modelKey, modelGroup);
     }
-    add(acc, event);
+    add(modelGroup.acc, event);
+
+    const role = event.role ?? LEGACY_ROLE;
+    const roleKey = `${role}\u0000${event.provider}`;
+    let roleGroup = roleGroups.get(roleKey);
+    if (!roleGroup) {
+      roleGroup = { role, provider: event.provider, acc: newAccumulator() };
+      roleGroups.set(roleKey, roleGroup);
+    }
+    add(roleGroup.acc, event);
   }
 
   const providerOrder: string[] = [...PROVIDER_IDS];
-  const rank = (provider: string) => {
-    const index = providerOrder.indexOf(provider);
-    return index === -1 ? providerOrder.length : index;
+  const rankIn = (order: readonly string[], value: string) => {
+    const index = order.indexOf(value);
+    return index === -1 ? order.length : index;
   };
-  const models = [...groups.values()]
-    .map(modelUsageOf)
-    .sort(
-      (a, b) =>
-        rank(a.provider) - rank(b.provider) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model),
-    );
+  const byProvider = (a: { provider: string }, b: { provider: string }) =>
+    rankIn(providerOrder, a.provider) - rankIn(providerOrder, b.provider) || a.provider.localeCompare(b.provider);
+  const models: ModelUsage[] = [...modelGroups.values()]
+    .map(({ provider, model, acc }) => ({ provider, model, ...statsOf(acc) }))
+    .sort((a, b) => byProvider(a, b) || a.model.localeCompare(b.model));
+  // Roles exist only on rows written by role routing; without any, the legacy report is unchanged.
+  const roles: RoleUsage[] = [...roleGroups.values()].some((group) => group.role !== LEGACY_ROLE)
+    ? [...roleGroups.values()]
+        .map(({ role, provider, acc }) => ({ role, provider, ...statsOf(acc) }))
+        .sort((a, b) => rankIn(ROLE_ORDER, a.role) - rankIn(ROLE_ORDER, b.role) || byProvider(a, b))
+    : [];
   const providerIds = [
     ...providerOrder,
     ...new Set(models.map((m) => m.provider).filter((p) => !providerOrder.includes(p))),
   ];
 
-  return { window, totalAttempts, models, providers: providerIds.map((provider) => providerUsageOf(provider, models)) };
+  return {
+    window,
+    totalAttempts,
+    models,
+    roles,
+    providers: providerIds.map((provider) => providerUsageOf(provider, models)),
+  };
 }

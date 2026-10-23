@@ -6,10 +6,12 @@ import { migrations } from '../../src/database/migrations.ts';
 import { runMigrations } from '../../src/database/schema.ts';
 
 const MIGRATION = '066_ai_usage_events';
+/** The schema as migration 066 left it; 067 (role, preset, cost) is covered by migrations-067.test.ts. */
+const UP_TO_066 = migrations.slice(0, migrations.findIndex((migration) => migration.name === MIGRATION) + 1);
 
-test('is the last migration, appended after 064 which was appended after 065', () => {
-  expect(migrations.at(-1)?.name).toBe(MIGRATION);
-  expect(migrations.slice(-3).map((migration) => migration.name)).toEqual([
+test('was appended after 064 which was appended after 065, and later migrations only follow it', () => {
+  const names = migrations.map((migration) => migration.name);
+  expect(names.slice(names.indexOf('065_intent_revisions'), names.indexOf(MIGRATION) + 1)).toEqual([
     '065_intent_revisions',
     '064_event_participant_source_group',
     MIGRATION,
@@ -18,8 +20,8 @@ test('is the last migration, appended after 064 which was appended after 065', (
 
 test('creates the ledger with nullable usage columns and both read indexes, once', () => {
   const db = new Database(':memory:');
-  runMigrations(db, migrations);
-  runMigrations(db, migrations);
+  runMigrations(db, UP_TO_066);
+  runMigrations(db, UP_TO_066);
 
   const columns = db
     .query<{ name: string; notnull: number }, []>('SELECT name, "notnull" FROM pragma_table_info(\'ai_usage_events\')')

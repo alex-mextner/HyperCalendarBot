@@ -4,9 +4,12 @@ import OpenAI from 'openai';
 import type { AiUsageEvent } from '../../../src/database/repositories/ai-usage.repository.ts';
 import { classifyProviderError } from '../../../src/services/ai/usage-classification.ts';
 import {
+  answeredAttempt,
   configureAiUsageRecording,
+  failedAttempt,
   flushAiUsageEvents,
   recordAiUsage,
+  skippedAttempt,
 } from '../../../src/services/ai/usage-recorder.ts';
 
 function nextImmediate(): Promise<void> {
@@ -48,6 +51,24 @@ describe('classifyProviderError', () => {
     expect(classifyProviderError(apiError(400, 'Your credit balance is too low to access the API'), false)).toEqual({
       errorClass: 'quota',
       httpStatus: 400,
+    });
+  });
+
+  test.each([
+    'This model requires moderation and your input was flagged for harassment',
+    'Rejected by the content policy',
+    'blocked by the safety filter',
+  ])('a 403 about one input (%s) is a bad request, not an auth failure of the key', (message) => {
+    expect(classifyProviderError(apiError(403, message), false)).toEqual({
+      errorClass: 'bad_request',
+      httpStatus: 403,
+    });
+  });
+
+  test('a plain 403 stays an auth failure', () => {
+    expect(classifyProviderError(apiError(403, 'Forbidden: key disabled'), false)).toEqual({
+      errorClass: 'auth',
+      httpStatus: 403,
     });
   });
 
@@ -141,6 +162,9 @@ function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
     reasoningTokens: null,
     cachedTokens: null,
     requestId: null,
+    role: null,
+    preset: null,
+    costMicroUsd: null,
     ...overrides,
   };
 }
@@ -190,5 +214,80 @@ describe('AI usage recorder', () => {
     flushAiUsageEvents();
 
     expect(seen).toEqual([1]);
+  });
+});
+
+describe('attempt rows carry role, preset and cost', () => {
+  const scope = {
+    chain: 'role:executor',
+    purpose: 'agent',
+    requestId: 'r1',
+    role: 'executor',
+    preset: 'deepseek41-flash',
+  } as const;
+  const tokens = { promptTokens: 1000, completionTokens: 500, reasoningTokens: null, cachedTokens: null };
+  const OPENROUTER_DEEPSEEK = 'deepseek/deepseek-v4.1-flash';
+
+  test('role and preset come from the slot, and a legacy slot has neither', () => {
+    const row = answeredAttempt(scope, 'openrouter', OPENROUTER_DEEPSEEK, 5, 100, tokens);
+    expect([row.chain, row.role, row.preset]).toEqual(['role:executor', 'executor', 'deepseek41-flash']);
+    const legacy = answeredAttempt(
+      { chain: 'smart', purpose: 'agent', requestId: undefined, role: null, preset: null },
+      'zai',
+      'm',
+      5,
+      100,
+      null,
+    );
+    expect([legacy.chain, legacy.role, legacy.preset]).toEqual(['smart', null, null]);
+  });
+
+  test('the cost OpenRouter reported wins, converted from USD to micro-USD', () => {
+    const row = answeredAttempt(scope, 'openrouter', OPENROUTER_DEEPSEEK, 5, 100, { ...tokens, costUsd: 0.000321 });
+    expect(row.costMicroUsd).toBe(321);
+  });
+
+  test('a reported cost of zero is a known zero', () => {
+    const row = answeredAttempt(scope, 'openrouter', OPENROUTER_DEEPSEEK, 5, 100, { ...tokens, costUsd: 0 });
+    expect(row.costMicroUsd).toBe(0);
+  });
+
+  test('without a reported cost the dated price table prices a known route', () => {
+    const row = answeredAttempt(scope, 'openrouter', OPENROUTER_DEEPSEEK, 5, 100, tokens);
+    expect(row.costMicroUsd).toBe(900);
+  });
+
+  test.each([Number.NaN, -1, Number.POSITIVE_INFINITY])('an unusable reported cost (%p) is ignored', (costUsd) => {
+    const row = answeredAttempt(scope, 'openrouter', 'unpriced/model', 5, 100, { ...tokens, costUsd });
+    expect(row.costMicroUsd).toBeNull();
+  });
+
+  test('a route with no price and no reported cost is unknown, never zero', () => {
+    expect(answeredAttempt(scope, 'claude', 'claude-haiku-5-5', 5, 100, tokens).costMicroUsd).toBeNull();
+    expect(answeredAttempt(scope, 'openrouter', 'unpriced/model', 5, 100, tokens).costMicroUsd).toBeNull();
+  });
+
+  test('an answer without usage has an unknown cost', () => {
+    expect(answeredAttempt(scope, 'openrouter', OPENROUTER_DEEPSEEK, 5, 100, null).costMicroUsd).toBeNull();
+  });
+
+  test('only OpenRouter is trusted to report a cost; another provider’s field is ignored', () => {
+    const row = answeredAttempt(scope, 'zai', 'glm-5.1', 5, 100, { ...tokens, costUsd: 3 });
+    expect(row.costMicroUsd).toBeNull();
+  });
+
+  test('a failed attempt that was billed carries its cost; a skipped one never does', () => {
+    const failed = failedAttempt(
+      scope,
+      'openrouter',
+      OPENROUTER_DEEPSEEK,
+      5,
+      100,
+      { errorClass: 'empty', httpStatus: null },
+      { ...tokens, costUsd: 0.0001 },
+    );
+    expect([failed.role, failed.preset, failed.costMicroUsd]).toEqual(['executor', 'deepseek41-flash', 100]);
+    const skipped = skippedAttempt(scope, 'openrouter', OPENROUTER_DEEPSEEK, 'circuit_open');
+    expect([skipped.role, skipped.preset, skipped.costMicroUsd]).toEqual(['executor', 'deepseek41-flash', null]);
   });
 });

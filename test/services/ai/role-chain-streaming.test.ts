@@ -50,11 +50,13 @@ const QUALIFIED: ModelPreset = {
   temperature: 1,
   prices: {},
   roles: ['executor', 'repair'],
-  qualification: {
-    sha: 'abc1234',
-    measuredAt: '2026-10-23',
-    rolePass: { executor: 0.97, repair: 0.5 },
-    historyPass: 1,
+  qualifications: {
+    openrouter: {
+      sha: 'abc1234',
+      measuredAt: '2026-10-23',
+      rolePass: { executor: 0.97, repair: 0.5 },
+      historyPass: 1,
+    },
   },
 };
 

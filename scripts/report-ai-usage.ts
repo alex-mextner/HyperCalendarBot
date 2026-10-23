@@ -51,6 +51,17 @@ try {
     console.error('ai_usage_events does not exist: this database has not run migration 066_ai_usage_events yet');
     process.exit(1);
   }
+  const migration067Columns = db
+    .query<{ n: number }, []>(
+      "SELECT count(*) AS n FROM pragma_table_info('ai_usage_events') WHERE name IN ('role', 'preset', 'cost_micro_usd')",
+    )
+    .get();
+  if (migration067Columns?.n !== 3) {
+    console.error(
+      'ai_usage_events has no role, preset or cost columns: this database has not run migration 067_ai_usage_role_preset_cost yet',
+    );
+    process.exit(1);
+  }
   const untilMs = Date.now();
   const window = { sinceMs: untilMs - days * DAY_MS, untilMs };
   const summary = summarizeAiUsage(new AiUsageRepository(db).iterateSince(window.sinceMs), window);

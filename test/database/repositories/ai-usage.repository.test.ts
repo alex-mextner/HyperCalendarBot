@@ -28,6 +28,9 @@ function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
     reasoningTokens: 5,
     cachedTokens: 0,
     requestId: 'req-1',
+    role: null,
+    preset: null,
+    costMicroUsd: null,
     ...overrides,
   };
 }
@@ -95,6 +98,21 @@ describe('AiUsageRepository', () => {
     const [failed, skipped] = [...repo.iterateSince(0)];
     expect(failed).toMatchObject({ outcome: 'error', errorClass: 'rate_limit', httpStatus: 429, requestId: null });
     expect(skipped).toMatchObject({ outcome: 'skipped', skipReason: 'circuit_open', httpStatus: 402 });
+  });
+
+  test('round-trips role, preset and cost; a legacy row and an unknown cost read back NULL, a known zero stays 0', () => {
+    repo.insertMany([
+      event({ at: 1, role: 'executor', preset: 'glm53-flash-low', costMicroUsd: 1234 }),
+      event({ at: 2 }),
+      event({ at: 3, role: 'repair', preset: null, costMicroUsd: 0 }),
+    ]);
+
+    const rows = [...repo.iterateSince(0)];
+    expect(rows.map((row) => [row.role, row.preset, row.costMicroUsd])).toEqual([
+      ['executor', 'glm53-flash-low', 1234],
+      [null, null, null],
+      ['repair', null, 0],
+    ]);
   });
 
   test('writes a whole batch in one transaction: a bad row leaves none of it behind', () => {

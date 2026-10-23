@@ -26,6 +26,9 @@ function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
     reasoningTokens: null,
     cachedTokens: null,
     requestId: null,
+    role: null,
+    preset: null,
+    costMicroUsd: null,
     ...overrides,
   };
 }
@@ -113,5 +116,74 @@ describe('formatUsageReport', () => {
 
     expect(text).toContain('AI usage, last 7 d · attempts: 0');
     expect(text).toContain('hf: no traffic in window');
+  });
+
+  test('shows the cost of a model, a dash for an unknown one, and how many answers had none', () => {
+    const text = formatUsageReport(
+      summarizeAiUsage(
+        [
+          event({ provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash', costMicroUsd: 1500 }),
+          event({ provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash', costMicroUsd: null }),
+          event(),
+        ],
+        WINDOW,
+      ),
+      7,
+      t('en').aiStats,
+    );
+
+    const priced = text.slice(text.indexOf('openrouter:deepseek'));
+    expect(priced).toContain('cost: $0.0015');
+    expect(priced).toContain('answers without a known cost: 1');
+    const unpriced = text.slice(text.indexOf('zai:glm-5.1'), text.indexOf('openrouter:deepseek'));
+    expect(unpriced).toContain('cost: —');
+    expect(unpriced).not.toContain('$0');
+  });
+
+  test('lists cost and latency per role and provider only when some row has a role', () => {
+    const roleRows = [
+      event({
+        provider: 'openrouter',
+        model: 'z-ai/glm-5.3-flash',
+        chain: 'role:executor',
+        role: 'executor',
+        preset: 'glm53-flash-low',
+        durationMs: 700,
+        costMicroUsd: 2500,
+      }),
+      event(),
+    ];
+
+    const text = formatUsageReport(summarizeAiUsage(roleRows, WINDOW), 7, t('en').aiStats);
+    const section = text.slice(text.indexOf('Roles'), text.indexOf('Models'));
+    expect(section).toContain('executor · openrouter');
+    expect(section).toContain('legacy · zai');
+    expect(section).toContain('p50 700 ms · p95 700 ms');
+    expect(section).toContain('cost: $0.0025');
+    expect(formatUsageReport(summarizeAiUsage(rows, WINDOW), 7, t('en').aiStats)).not.toContain('Roles');
+  });
+
+  test('prints the role section in Russian for a Russian reader', () => {
+    const text = formatUsageReport(
+      summarizeAiUsage([event({ chain: 'role:repair', role: 'repair', costMicroUsd: 400 })], WINDOW),
+      7,
+      t('ru').aiStats,
+    );
+
+    expect(text).toContain('Роли');
+    expect(text).toContain('repair · zai');
+    expect(text).toContain('стоимость: $0.0004');
+  });
+
+  test('a cost below a ten-thousandth of a dollar is still shown, not rounded to zero', () => {
+    const text = formatUsageReport(summarizeAiUsage([event({ costMicroUsd: 3 })], WINDOW), 7, t('en').aiStats);
+
+    expect(text).toContain('cost: <$0.0001');
+  });
+
+  test('a known zero cost is shown as a zero', () => {
+    const text = formatUsageReport(summarizeAiUsage([event({ costMicroUsd: 0 })], WINDOW), 7, t('en').aiStats);
+
+    expect(text).toContain('cost: $0.0000');
   });
 });

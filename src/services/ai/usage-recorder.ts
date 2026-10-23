@@ -9,7 +9,10 @@ import type {
   AiUsageEvent,
   AiUsageRepository,
 } from '../../database/repositories/ai-usage.repository.ts';
+import type { ProviderChainKind } from '../../utils/ai-provider-alert.ts';
 import { dbLogger } from '../../utils/logger.ts';
+import { estimateCostMicroUsd, MICRO_USD_PER_USD, type ModelRole } from './model-presets.ts';
+import type { ProviderId } from './provider-ids.ts';
 
 /** What an AI round is for; callers that name none are stored as `unlabeled`. */
 export type AiCallPurpose =
@@ -31,13 +34,20 @@ export interface AiTokenUsage {
   completionTokens: number | null;
   reasoningTokens: number | null;
   cachedTokens: number | null;
+  /** Cost in USD the provider reported for the request (OpenRouter's `usage.cost`); absent when it did not. */
+  costUsd?: number | null;
 }
 
-/** What every attempt of one round shares. */
+/**
+ * What every attempt of one slot shares. `role` and `preset` are null on a legacy-chain slot, and its
+ * `chain` is then `smart` or `fast`; a role slot's chain reads `role:<role>`.
+ */
 export interface AttemptScope {
-  chain: string;
+  chain: ProviderChainKind | `role:${ModelRole}`;
   purpose: AiCallPurpose | undefined;
   requestId: string | undefined;
+  role: ModelRole | null;
+  preset: string | null;
 }
 
 type AiUsageSink = Pick<AiUsageRepository, 'insertMany'>;
@@ -84,9 +94,23 @@ const NO_TOKENS: AiTokenUsage = {
   cachedTokens: null,
 };
 
+/**
+ * The cost of an attempt in micro-USD, or null when unknown. A cost OpenRouter reported for the request
+ * is the billed truth and wins; any other provider's `cost` field is not trusted. Without one, the dated
+ * list price of the route prices known tokens. Never 0 for "don't know".
+ */
+function costMicroUsdOf(provider: ProviderId, model: string, usage: AiTokenUsage): number | null {
+  const reported = usage.costUsd;
+  if (provider === 'openrouter' && typeof reported === 'number' && Number.isFinite(reported) && reported >= 0) {
+    const micro = Math.round(reported * MICRO_USD_PER_USD);
+    if (Number.isSafeInteger(micro)) return micro;
+  }
+  return estimateCostMicroUsd(provider, model, usage.promptTokens, usage.completionTokens);
+}
+
 function attempt(
   scope: AttemptScope,
-  provider: string,
+  provider: ProviderId,
   model: string,
   at: number,
   fields: Pick<AiUsageEvent, 'outcome' | 'errorClass' | 'httpStatus' | 'skipReason' | 'durationMs'>,
@@ -105,12 +129,15 @@ function attempt(
     reasoningTokens: tokens.reasoningTokens,
     cachedTokens: tokens.cachedTokens,
     requestId: scope.requestId ?? null,
+    role: scope.role,
+    preset: scope.preset,
+    costMicroUsd: usage ? costMicroUsdOf(provider, model, usage) : null,
   };
 }
 
 export function answeredAttempt(
   scope: AttemptScope,
-  provider: string,
+  provider: ProviderId,
   model: string,
   at: number,
   durationMs: number,
@@ -122,7 +149,7 @@ export function answeredAttempt(
 
 export function failedAttempt(
   scope: AttemptScope,
-  provider: string,
+  provider: ProviderId,
   model: string,
   at: number,
   durationMs: number,
@@ -135,7 +162,7 @@ export function failedAttempt(
 
 export function skippedAttempt(
   scope: AttemptScope,
-  provider: string,
+  provider: ProviderId,
   model: string,
   skipReason: AiSkipReason,
   httpStatus: number | null = null,
