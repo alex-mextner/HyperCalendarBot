@@ -3,14 +3,10 @@
  * tokenizer dependency.
  *
  * The rates below are average characters-per-token for the byte-pair vocabularies
- * used by the providers in the fallback chain (z.ai, Groq, Gemini, HuggingFace).
- * They are calibrated against two measured points:
- *
- * - the 41 759-character tool catalog was billed by a provider at ~11 900 tokens
- *   when sent as raw JSON (3.5 chars/token);
- * - Groq's own per-minute accounting reported ~7 750 tokens for the same catalog,
- *   because its Harmony template renders tool schemas as a compact type
- *   declaration instead of JSON.
+ * used by the providers in the fallback chain (z.ai, Claude, HuggingFace).
+ * They are calibrated against a measured point: the 41 759-character tool
+ * catalog was billed by a provider at ~11 900 tokens when sent as raw JSON
+ * (3.5 chars/token).
  *
  * So treat the result as a conservative upper bound with roughly ±20% error. It
  * exists to compare payload sizes before and after a change and to guard budgets

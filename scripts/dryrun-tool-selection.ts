@@ -12,9 +12,9 @@
  * evidence about tool choice for a request of this shape, not proof about a long
  * production conversation.
  *
- *   bun run scripts/dryrun-tool-selection.ts                    # all providers
- *   DRYRUN_PROVIDERS=gemini bun run scripts/dryrun-tool-selection.ts
- *   DRYRUN_MODEL_GEMINI=models/gemini-3-flash bun run scripts/…  # override a model
+ *   bun run scripts/dryrun-tool-selection.ts                    # z.ai only (Claude is paid: DRYRUN_PROVIDERS=claude)
+ *   DRYRUN_PROVIDERS=zai bun run scripts/dryrun-tool-selection.ts
+ *   DRYRUN_MODEL_ZAI=glm-5.1 bun run scripts/…                  # override a model
  *   DRYRUN_OUT=before.json bun run scripts/…                     # save for diffing
  *
  * Model ids are read from env so they can follow provider changes without edits.
@@ -31,7 +31,7 @@ import { EventReminderRepository } from '../src/database/repositories/event-remi
 import { HolidayRepository } from '../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../src/database/schema.ts';
-import { claudeClient, geminiClient, groqClient, hfClient, zaiClient } from '../src/services/ai/clients.ts';
+import { claudeClient, hfClient, zaiClient } from '../src/services/ai/clients.ts';
 import type { ProviderId } from '../src/services/ai/provider-ids.ts';
 import { acceptsSamplingTemperature, CLAUDE_MAX_OUTPUT_TOKENS } from '../src/services/ai/streaming.ts';
 import { buildSystemPrompt } from '../src/services/ai/system-prompt.ts';
@@ -58,19 +58,9 @@ interface ProviderSpec {
 
 function providers(): ProviderSpec[] {
   const cfg = loadConfig();
-  const wanted = (process.env.DRYRUN_PROVIDERS ?? 'gemini,groq').split(',').map((s) => s.trim());
+  const wanted = (process.env.DRYRUN_PROVIDERS ?? 'zai').split(',').map((s) => s.trim());
   const all: ProviderSpec[] = [
     { name: 'zai', model: process.env.DRYRUN_MODEL_ZAI ?? cfg.ZAI_MODEL ?? 'glm-5.1', client: zaiClient },
-    {
-      name: 'groq',
-      model: process.env.DRYRUN_MODEL_GROQ ?? cfg.GROQ_MODEL ?? 'openai/gpt-oss-120b',
-      client: groqClient,
-    },
-    {
-      name: 'gemini',
-      model: process.env.DRYRUN_MODEL_GEMINI ?? cfg.GEMINI_MODEL ?? 'models/gemini-2.5-flash',
-      client: geminiClient,
-    },
     { name: 'hf', model: process.env.DRYRUN_MODEL_HF ?? cfg.HF_MODEL ?? '', client: hfClient },
     {
       name: 'claude',
@@ -173,37 +163,6 @@ function verdict(testCase: DryRunCase, tools: string[], text: string): boolean {
   return tools.some((name) => expected.includes(name));
 }
 
-/**
- * Groq's tier caps tokens per minute; its 429 says how long to wait. Waiting only
- * helps when the request would fit on its own — a request larger than the whole
- * per-minute allowance never becomes servable, so that case fails immediately.
- */
-function retryDelayMs(message: string): number | null {
-  if (!message.includes('rate_limit') && !message.includes('Rate limit')) return null;
-  const requested = message.match(/Requested (\d+)/);
-  const limit = message.match(/Limit (\d+)/);
-  if (requested && limit && Number(requested[1]) > Number(limit[1])) return null;
-  const seconds = message.match(/try again in ([\d.]+)s/);
-  return seconds ? Math.ceil(Number(seconds[1]) * 1000) + 500 : 20_000;
-}
-
-async function completeWithRetry(
-  provider: ProviderSpec,
-  request: OpenAI.ChatCompletionCreateParamsNonStreaming,
-): Promise<OpenAI.ChatCompletion> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await provider.client().chat.completions.create(request);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const delay = attempt < 3 ? retryDelayMs(message) : null;
-      if (delay === null) throw err;
-      console.log(`  … ${provider.name} rate-limited, waiting ${Math.round(delay / 1000)}s`);
-      await Bun.sleep(delay);
-    }
-  }
-}
-
 async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<CaseOutcome> {
   const ctx = buildContext(testCase);
   const request: OpenAI.ChatCompletionCreateParamsNonStreaming = {
@@ -219,7 +178,7 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
     maxTokens: request.max_tokens ?? null,
   };
   try {
-    const res = await completeWithRetry(provider, request);
+    const res = await provider.client().chat.completions.create(request);
     const calls = res.choices[0]?.message.tool_calls ?? [];
     const tools = calls.map((c) => ('function' in c ? c.function.name : c.type));
     const text = res.choices[0]?.message.content ?? '';

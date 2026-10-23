@@ -25,10 +25,6 @@ describe('loadConfig', () => {
     process.env.HF_BASE_URL = 'https://router.huggingface.co/v1';
     process.env.HF_MODEL = 'Qwen/Qwen3-235B-A22B';
     process.env.HF_FAST_MODEL = 'meta-llama/Llama-3.3-70B-Instruct';
-    process.env.GEMINI_API_KEY = 'test-gemini-key';
-    process.env.GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-    process.env.GEMINI_MODEL = 'gemini-2.5-pro';
-    process.env.GEMINI_FAST_MODEL = 'gemini-2.5-flash';
   };
 
   beforeEach(() => {
@@ -58,49 +54,41 @@ describe('loadConfig', () => {
     expect(loadConfig().AI_TOOL_SCHEMA_USER_IDS).toBeUndefined();
   });
 
-  test('Groq account token limits are optional, strict and model-specific', () => {
-    delete process.env.GROQ_TPM_LIMITS;
-    expect(loadConfig().GROQ_TPM_LIMITS).toBeUndefined();
-    process.env.GROQ_TPM_LIMITS = '{"openai/gpt-oss-120b":250000}';
-    expect(loadConfig().GROQ_TPM_LIMITS).toEqual({ 'openai/gpt-oss-120b': 250000 });
-    for (const invalid of [
-      '',
-      'null',
-      '[]',
-      '{broken',
-      '{"x":0}',
-      '{"x":-1}',
-      '{"x":1.5}',
-      '{"x":"8000"}',
-      '{"__proto__":8000}',
-      '{"x":1e20}',
-      ' '.repeat(4097),
-      JSON.stringify(Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`model${i}`, 8000]))),
-    ]) {
-      process.env.GROQ_TPM_LIMITS = invalid;
-      expect(() => loadConfig()).toThrow('GROQ_TPM_LIMITS');
-    }
+  test('leftover Groq chat settings in the environment never break loading', () => {
+    process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
+    process.env.GROQ_FAST_MODEL = 'openai/gpt-oss-20b';
+    process.env.GROQ_TPM_LIMITS = '{not json';
+    expect(() => loadConfig()).not.toThrow();
+    expect(loadConfig()).not.toHaveProperty('GROQ_MODEL');
+    expect(loadConfig()).not.toHaveProperty('GROQ_TPM_LIMITS');
   });
 
-  test('Gemini quota budget is explicit and rejects invalid values', () => {
-    process.env.GEMINI_RATE_LIMITS = JSON.stringify({ scope: 'test-project', rpm: 2, tpm: 100000, rpd: 10 });
-    expect(loadConfig().GEMINI_RATE_LIMITS).toMatchObject({ rpm: 2, rpd: 10 });
-    for (const raw of [
-      '{}',
-      'null',
-      '{"scope":"x","rpm":0,"tpm":1,"rpd":1}',
-      '{"scope":"x","rpm":2,"tpm":1,"rpd":1,"unknown":1}',
-    ]) {
-      process.env.GEMINI_RATE_LIMITS = raw;
-      expect(() => loadConfig()).toThrow();
+  test('GROQ_API_KEY alone still loads (voice transcription uses it)', () => {
+    process.env.GROQ_API_KEY = 'whisper-key';
+    expect(loadConfig().GROQ_API_KEY).toBe('whisper-key');
+    delete process.env.GROQ_API_KEY;
+    expect(loadConfig().GROQ_API_KEY).toBeUndefined();
+  });
+
+  test('a leftover Gemini setting in the environment never breaks loading', () => {
+    process.env.GEMINI_API_KEY = 'leftover-key';
+    process.env.GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+    process.env.GEMINI_MODEL = 'gemini-2.5-pro';
+    process.env.GEMINI_FAST_MODEL = 'gemini-2.5-flash';
+    process.env.GEMINI_RATE_LIMITS = '{not json';
+    expect(() => loadConfig()).not.toThrow();
+  });
+
+  test('loads with only the z.ai and Hugging Face credentials', () => {
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith('GEMINI_')) delete process.env[key];
     }
-    delete process.env.GEMINI_RATE_LIMITS;
-    expect(loadConfig().GEMINI_RATE_LIMITS).toBeUndefined();
+    expect(() => loadConfig()).not.toThrow();
   });
 
   describe('provider chain order', () => {
-    const SMART_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai', 'claude'];
-    const FAST_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai', 'claude'];
+    const SMART_DEFAULT: ProviderId[] = ['zai', 'claude', 'hf'];
+    const FAST_DEFAULT: ProviderId[] = ['zai', 'claude', 'hf'];
 
     test('main and fast defaults prefer responsive providers while using their own configured models', () => {
       const config = loadConfig();
@@ -111,18 +99,18 @@ describe('loadConfig', () => {
     // Each chain carries its own fallback, so one cannot be built with the
     // other's default — the fast chain prioritizes short-call latency independently.
     test('the fast chain reads its own variable and keeps its own fallback', () => {
-      process.env.AI_FAST_CHAIN = 'gemini,zai';
+      process.env.AI_FAST_CHAIN = 'hf,zai';
       const config = loadConfig();
-      expect(config.AI_FAST_CHAIN).toEqual({ order: ['gemini', 'zai'], fromEnv: true, fallback: FAST_DEFAULT });
+      expect(config.AI_FAST_CHAIN).toEqual({ order: ['hf', 'zai'], fromEnv: true, fallback: FAST_DEFAULT });
       expect(config.AI_SMART_CHAIN.order).toEqual(SMART_DEFAULT);
     });
 
     // The reason to reorder arrives as an incident, so it has to be doable
     // without a deploy.
     test('takes the order from the environment', () => {
-      process.env.AI_SMART_CHAIN = 'gemini, hf ,zai';
+      process.env.AI_SMART_CHAIN = 'claude, hf ,zai';
       expect(loadConfig().AI_SMART_CHAIN).toEqual({
-        order: ['gemini', 'hf', 'zai'],
+        order: ['claude', 'hf', 'zai'],
         fromEnv: true,
         fallback: SMART_DEFAULT,
       });
@@ -131,6 +119,16 @@ describe('loadConfig', () => {
     test('drops a name it does not know rather than failing to start', () => {
       process.env.AI_SMART_CHAIN = 'hf,openai,zai';
       expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['hf', 'zai'], fromEnv: true, fallback: SMART_DEFAULT });
+    });
+
+    test('a retired provider name left in the order is dropped like any unknown one', () => {
+      process.env.AI_SMART_CHAIN = 'gemini,zai';
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['zai'], fromEnv: true, fallback: SMART_DEFAULT });
+    });
+
+    test('the removed Groq chat provider is dropped from the order as an unknown id', () => {
+      process.env.AI_SMART_CHAIN = 'groq,zai';
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['zai'], fromEnv: true, fallback: SMART_DEFAULT });
     });
 
     test('ignores a repeated provider instead of trying it twice', () => {
@@ -191,26 +189,6 @@ describe('loadConfig', () => {
     expect(() => loadConfig()).toThrow('HF_FAST_MODEL');
   });
 
-  test('throws if GEMINI_API_KEY is missing', () => {
-    delete process.env.GEMINI_API_KEY;
-    expect(() => loadConfig()).toThrow('GEMINI_API_KEY');
-  });
-
-  test('throws if GEMINI_BASE_URL is missing', () => {
-    delete process.env.GEMINI_BASE_URL;
-    expect(() => loadConfig()).toThrow('GEMINI_BASE_URL');
-  });
-
-  test('throws if GEMINI_MODEL is missing', () => {
-    delete process.env.GEMINI_MODEL;
-    expect(() => loadConfig()).toThrow('GEMINI_MODEL');
-  });
-
-  test('throws if GEMINI_FAST_MODEL is missing', () => {
-    delete process.env.GEMINI_FAST_MODEL;
-    expect(() => loadConfig()).toThrow('GEMINI_FAST_MODEL');
-  });
-
   test('retired AGENT_JWT_SECRET is absent from config when unset', () => {
     delete process.env.AGENT_JWT_SECRET;
     delete process.env.AGENT_DOWNLOAD_URL;
@@ -246,10 +224,6 @@ describe('loadConfig', () => {
     expect(config.HF_BASE_URL).toBe('https://router.huggingface.co/v1');
     expect(config.HF_MODEL).toBe('Qwen/Qwen3-235B-A22B');
     expect(config.HF_FAST_MODEL).toBe('meta-llama/Llama-3.3-70B-Instruct');
-    expect(config.GEMINI_API_KEY).toBe('test-gemini-key');
-    expect(config.GEMINI_BASE_URL).toBe('https://generativelanguage.googleapis.com/v1beta/openai/');
-    expect(config.GEMINI_MODEL).toBe('gemini-2.5-pro');
-    expect(config.GEMINI_FAST_MODEL).toBe('gemini-2.5-flash');
   });
 
   test('respects DATABASE_PATH override', () => {

@@ -3,7 +3,7 @@ import { AgentRequestMetrics } from '../../../src/services/ai/request-metrics.ts
 import type { StreamRoundMetrics } from '../../../src/services/ai/streaming.ts';
 
 const round = (usage: StreamRoundMetrics['usage']): StreamRoundMetrics => ({
-  provider: 'groq',
+  provider: 'hf',
   model: 'synthetic',
   chain: 'fast',
   firstUsableSinceAttemptMs: 5,

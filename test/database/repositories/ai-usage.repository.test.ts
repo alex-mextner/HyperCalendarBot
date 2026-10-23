@@ -14,8 +14,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
   return {
     at: 1_000,
-    provider: 'groq',
-    model: 'openai/gpt-oss-120b',
+    provider: 'zai',
+    model: 'glm-5.1',
     chain: 'smart',
     purpose: 'agent',
     outcome: 'ok',
@@ -52,6 +52,27 @@ describe('AiUsageRepository', () => {
     expect(rows.map((row) => [row.promptTokens, row.completionTokens, row.reasoningTokens, row.cachedTokens])).toEqual([
       [null, null, null, null],
       [0, 0, 0, 0],
+    ]);
+  });
+
+  test('rows of retired providers and retired skip reasons are read back as stored', () => {
+    repo.insertMany([
+      event({ at: 1, provider: 'gemini', model: 'gemini-3-flash' }),
+      event({
+        at: 2,
+        provider: 'groq',
+        model: 'openai/gpt-oss-120b',
+        outcome: 'skipped',
+        skipReason: 'preflight_size',
+      }),
+      event({ at: 3, provider: 'gemini', outcome: 'skipped', skipReason: 'local_budget' }),
+    ]);
+
+    const rows = [...repo.iterateSince(0)];
+    expect(rows.map((row) => [row.provider, row.skipReason])).toEqual([
+      ['gemini', null],
+      ['groq', 'preflight_size'],
+      ['gemini', 'local_budget'],
     ]);
   });
 

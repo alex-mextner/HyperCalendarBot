@@ -4,7 +4,7 @@
 //
 // WHY THIS EXISTS. On 2026-09-01 every provider in the fallback chain broke at
 // the same time: z.ai hit its weekly/monthly plan cap (HTTP 429, vendor code
-// 1310), Groq had deleted both configured models (HTTP 404), and the Hugging
+// 1310), another provider had deleted both configured models (HTTP 404), and the Hugging
 // Face token had been revoked (HTTP 401). The bot answered nobody for hours and
 // the admin got zero alerts, because the previous implementation only fired on a
 // handful of "balance exhausted" substrings — none of which those three errors
@@ -19,7 +19,7 @@
 //    their own. The chain is built to absorb them; alerting on them is the noise
 //    that trains the admin to ignore alerts.
 //  * Deduplication is per provider AND per failure class, not one global window.
-//    "z.ai out of quota" and "Groq model id is stale" are different problems with
+//    "z.ai out of quota" and "model id is stale" are different problems with
 //    different fixes and must not silence each other. The previous code used one
 //    7-day window per provider: one alert, then a week of silence no matter how
 //    the outage changed shape.
@@ -89,7 +89,7 @@ export const ALERT_POLICY = {
 export type ProviderFailureClass = 'quota_exhausted' | 'auth_failed' | 'model_gone' | 'transient';
 
 export interface ProviderFailure {
-  /** Chain slot name as used by streaming.ts, e.g. "Groq (llama-3.3-70b-versatile)". */
+  /** Chain slot name as used by streaming.ts, e.g. "Claude (claude-sonnet-5-5)". */
   provider: string;
   /** HTTP status when the provider returned one. */
   status?: number;
@@ -173,9 +173,9 @@ function classifyByStatus(status: number | undefined, lowerMessage: string): Pro
   }
   if (status === 404) return 'model_gone';
   if (status === 429) return matchesAny(lowerMessage, QUOTA_PATTERNS) ? 'quota_exhausted' : 'transient';
-  // Groq returns 413 for per-minute token limits ("on tokens per minute (TPM):
-  // Limit 12000, Requested 24355" plus a link to its billing page). That is a
-  // back-off, not an exhausted budget — the link used to make it look like one.
+  // 413 is a per-minute token limit (TPM) with, often, a link to the provider's
+  // billing page. That is a back-off, not an exhausted budget — the link used to
+  // make it look like one.
   if (status === 413 || status >= 500) return 'transient';
   return null;
 }
@@ -357,7 +357,7 @@ const SERVING_CHAIN: ProviderChainKind = 'smart';
 let chainAnswered = false;
 let uninitializedReadWarned = false;
 
-/** "Groq (llama-3.3-70b-versatile)" → "groq" — the model id must not split the dedup key. */
+/** "Claude (claude-sonnet-5-5)" → "claude" — the model id must not split the dedup key. */
 function providerFamily(provider: string): string {
   return providerLabel(provider).toLowerCase();
 }
@@ -699,8 +699,7 @@ interface ProviderEnvNames {
 function envNames(provider: string): ProviderEnvNames {
   const family = providerFamily(provider);
   if (family.startsWith('z.ai')) return { apiKey: 'ZAI_API_KEY', model: 'ZAI_MODEL / ZAI_FAST_MODEL' };
-  if (family.startsWith('groq')) return { apiKey: 'GROQ_API_KEY', model: 'GROQ_MODEL / GROQ_FAST_MODEL' };
-  if (family.startsWith('gemini')) return { apiKey: 'GEMINI_API_KEY', model: 'GEMINI_MODEL / GEMINI_FAST_MODEL' };
+  if (family.startsWith('claude')) return { apiKey: 'CLAUDE_API_TOKEN', model: 'CLAUDE_MODEL / CLAUDE_FAST_MODEL' };
   if (family.startsWith('hf')) return { apiKey: 'HF_TOKEN', model: 'HF_MODEL / HF_FAST_MODEL' };
   return { apiKey: 'the provider API key', model: 'the configured model id' };
 }

@@ -37,7 +37,7 @@ describe('production metric JSONL ingestion', () => {
         msg: 'AI model call metric',
         requestId: 'synthetic-a',
         purpose: 'agent',
-        provider: 'groq',
+        provider: 'zai',
         model: 'synthetic',
         chain: 'fast',
         firstUsableSinceAttemptMs: 5,
@@ -75,8 +75,8 @@ describe('production metric JSONL ingestion', () => {
     const r = report(lines.map((v) => JSON.stringify(v)));
     expect(r.data.metricRows).toBe(2);
     expect(r.data.malformedRows).toBe(0);
-    expect(Object.keys(r.data.byProvider)).toEqual(['groq:synthetic']);
-    expect(r.data.byProvider['groq:synthetic']).toMatchObject({ n: 1, failures: 0 });
+    expect(Object.keys(r.data.byProvider)).toEqual(['zai:synthetic']);
+    expect(r.data.byProvider['zai:synthetic']).toMatchObject({ n: 1, failures: 0 });
     expect(r.text).not.toContain('123456');
     expect(r.text).not.toContain('NEVER_PUBLISH');
   });

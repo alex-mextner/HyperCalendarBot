@@ -210,8 +210,8 @@ describe('runRoundRevealingRejectedTools', () => {
     return new AllProvidersFailedError(
       [
         {
-          provider: 'groq (test)',
-          providerId: 'groq',
+          provider: 'hf (test)',
+          providerId: 'hf',
           model: 'test',
           status: 400,
           message: REJECTION,

@@ -176,16 +176,16 @@ describe('agent failure notices', () => {
         transient: false,
       },
       {
-        provider: 'Groq (openai/gpt-oss-120b)',
-        providerId: 'groq',
+        provider: 'HF (synthetic)',
+        providerId: 'hf',
         model: 'synthetic',
         status: 404,
         message: 'model does not exist',
         transient: false,
       },
       {
-        provider: 'Gemini (models/gemini-2.5-flash)',
-        providerId: 'gemini',
+        provider: 'Claude (claude-synthetic)',
+        providerId: 'claude',
         model: 'synthetic',
         status: 401,
         message: 'invalid key',
@@ -212,8 +212,8 @@ describe('agent failure notices', () => {
   test('every provider dead with no quota wording → still an honest message', async () => {
     const dead = new AllProvidersFailedError([
       {
-        provider: 'Groq (openai/gpt-oss-120b)',
-        providerId: 'groq',
+        provider: 'HF (synthetic)',
+        providerId: 'hf',
         model: 'synthetic',
         status: 404,
         message: 'model does not exist',
@@ -253,8 +253,8 @@ describe('agent failure notices', () => {
         transient: true,
       },
       {
-        provider: 'Gemini (models/gemini-2.5-flash)',
-        providerId: 'gemini',
+        provider: 'Claude (claude-synthetic)',
+        providerId: 'claude',
         model: 'synthetic',
         status: 500,
         message: 'internal error',

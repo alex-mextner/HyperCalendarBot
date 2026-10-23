@@ -36,8 +36,8 @@ function asContext(fake: FakeContext): BotCommandContext {
 function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
   return {
     at: Date.now() - DAY_MS,
-    provider: 'groq',
-    model: 'openai/gpt-oss-120b',
+    provider: 'zai',
+    model: 'glm-5.1',
     chain: 'smart',
     purpose: 'agent',
     outcome: 'ok',

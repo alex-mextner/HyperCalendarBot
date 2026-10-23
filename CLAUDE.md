@@ -225,13 +225,17 @@ All `process.env.*` reads go through `src/config/env.ts` → `loadConfig()` and 
 
 When adding a new env var: (1) add it to `EnvConfig` interface in `env.ts`, (2) read and validate in `loadConfig()`, (3) use via `config.VAR_NAME` everywhere else.
 
-**Provider order is configuration, not code**: `AI_SMART_CHAIN` and `AI_FAST_CHAIN` list
-provider ids in the order they are tried. The ids come from `PROVIDER_IDS` in
+**Provider order is configuration, not code**: `AI_SMART_CHAIN` and `AI_FAST_CHAIN` list provider ids (`zai`, `claude`, `hf`); the default for both is z.ai → Claude → HF (the owner's order, identical in ExpenseSyncBot); providers without key/model are skipped. The ids come from `PROVIDER_IDS` in
 `src/services/ai/provider-ids.ts` — a leaf module that imports nothing, so both the config
 layer and the AI layer can derive from it without a cycle. Add a provider there and it is
-nameable at once.
+nameable at once. Gemini was removed in full (2026-10): no id, no `GEMINI_*` variable is read, and a
+leftover one in `.env` is ignored. Groq as a chat provider was removed in 2026-10 because gpt-oss tested badly
+and there is no replacement Groq model: no `groq` id, no `GROQ_MODEL`/`GROQ_FAST_MODEL`/`GROQ_TPM_LIMITS`
+(leftovers in `.env` are ignored, and `groq` in a chain variable is dropped as an unknown id). `GROQ_API_KEY`
+remains ONLY for Whisper voice transcription (`src/services/voice/transcription-service.ts`, initialised in
+`src/index.ts` when the key is set); it is not an AI chat key.
 A provider whose model or key is missing is skipped and the skip is logged — in practice
-that means Groq and Claude, since `loadConfig()` requires the z.ai, Hugging Face and Gemini credentials
+that means Claude, since `loadConfig()` requires the z.ai and Hugging Face credentials
 and refuses to start without them. An unknown name is ignored with a warning, an order
 naming nothing known falls back to the default order, and an order whose providers are all
 unconfigured falls back to the default order over whatever IS configured (logged as an
@@ -262,8 +266,8 @@ eligibility-benched is still attempted rather than answering nobody.
 
 **Every provider attempt leaves one row in `ai_usage_events`** (migration 066, `src/services/ai/usage-recorder.ts`):
 `aiStreamRound` records the attempt of each slot as `ok`, `error` (with a class from `usage-classification.ts`
-and the HTTP status, never the provider's error body) or `skipped` before any request (`preflight_size`,
-`circuit_open`, `eligibility_bench`, `local_budget`, `round_deadline`). Token columns are NULL when the provider
+and the HTTP status, never the provider's error body) or `skipped` before any request (`circuit_open`,
+`eligibility_bench`, `round_deadline`; historical rows may still carry the retired `local_budget` and `preflight_size`, which the report keeps showing). Token columns are NULL when the provider
 reported no usage — unknown is never written as 0. The row holds no prompt, completion, user or chat id. Rows
 are buffered, written in one batch on the next event-loop turn, and a failed write is logged with
 `dbLogger.warn({ err })` and dropped: the answer never waits on it. Callers say what a round is for with
@@ -271,10 +275,24 @@ are buffered, written in one batch on the next event-loop turn, and a failed wri
 180 days (`AI_USAGE_RETENTION_DAYS`). Reading: `bun scripts/report-ai-usage.ts [--days N] [--json]` (read-only, per
 provider:model counts, errors by class, token sums with the answers that reported none counted apart, p50/p95,
 and one verdict per provider that says `no traffic in window` for a provider that served nothing) and the
-admin-only Telegram command `/ai_stats [days]` (same report, `t(lang).aiStats`, fail closed). Claude is a
-fallback slot and gets no traffic while Groq is healthy, so prove it alive with the real code path:
+admin-only Telegram command `/ai_stats [days]` (same report, `t(lang).aiStats`, fail closed). Claude is second in the
+default order and gets no traffic while z.ai answers, so prove it alive with the real code path:
 `AI_SMART_CHAIN=claude AI_FAST_CHAIN=claude bun scripts/probe-ai-chain.ts --usage-database <temp.db> --expect-provider claude [--smart]`
 prints the probe result and the `ai_usage_events` row it wrote (never point it at the live database).
+Rows (and the report) of retired providers such as `gemini` and `groq` stay readable: the report lists any provider id
+found in the rows after the configured ones. The retired `gemini_usage` table lives only in the sidecar
+`<DATABASE_PATH>.gemini-quota.sqlite`, which no code opens any more; it is left on disk untouched (delete the file by hand when convenient).
+
+**Cost risk of the order**: while z.ai is out of quota (its circuit is open, skipped silently) Claude is the de-facto
+primary and every request is paid for. Claude keeps its `CLAUDE_MAX_OUTPUT_TOKENS` (128000) `max_tokens` and its thinking
+behaviour unchanged. Watch `bun scripts/report-ai-usage.ts` and set `AI_SMART_CHAIN`/`AI_FAST_CHAIN` (e.g. `zai,hf`, or `hf` alone) if the cost
+is not acceptable; the ExpenseSyncBot OCR chain is separate and stays Claude vision → HF vision.
+Both fallbacks have run dry before: z.ai's quota ran out on 2026-09-24 (its circuit has been open since), and Hugging Face
+answered 402 "no credits" in ExpenseSyncBot on 2026-10-12. With z.ai depleted and HF the only provider behind Claude,
+Claude carries the traffic; keep an eye on its spend and on HF credit.
+z.ai is first in both chains, so a slow-but-not-failing z.ai delays every call before Claude is tried: up to 8 s per provider on the
+fast chain (validators, city resolver), up to 15 s on the smart chain; an open circuit costs nothing. The chain order is the owner's choice — shorten
+`ZAI_TIMEOUT_MS` in `clients.ts` or reorder via `AI_FAST_CHAIN` if that latency shows up in `/ai_stats`.
 
 Optional features that depend on an env var must deactivate gracefully when the var is absent — never throw at startup. Validate at the point of use, not at startup.
 

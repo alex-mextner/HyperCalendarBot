@@ -93,9 +93,7 @@ Explain what a change does before citing its issue number. Use concrete dates fo
 - Every concrete tool-call example in a prompt or schema is an executable contract fixture. Run the generated prompt against real parsers/handlers with synthetic data; a substring assertion is not enough. Cover UTC/IANA zones, DST boundaries and dates, both full/lazy modes and validation retries.
 - A prompt-mandated tool must be available immediately or the prompt must explicitly discover it first. Preserve real execution outcomes; schema discovery is never a business operation.
 - Keep finish reasons from terminal chunks even without delta. Preserve safe empty-response metadata (token usage/counts/termination/request shape), not raw user prompts, generated reasoning, credentials or private calendar data. Unknown fields remain unknown, not zero.
-- For Gemini 2.5 Flash fast summarizers/validators, match output and thinking budgets. Do not blindly disable thinking on Pro/3.x or solve empty output with unlimited output tokens. Reproduce provider-specific options on synthetic probes first.
 - Bound connection plus full response stream and the overall round, abort late producers and ignore their callbacks. An expired shared deadline cannot launch another provider. Every HTTP retry consumes quota; failed or uncertain writes are never replayed to fix wording.
-- Gemini quotas are per project, not API key; all routes sharing a project must share their admission scope/store. Limits in application config are budgets, not proof of provider entitlement. Validate actual account limits separately; preserve reactive quota cooldown and never sleep a chat request until tomorrow.
 - Before restarting a container, retain redacted incident/benchmark evidence with timestamps and source revisions. Never replace older slow or failed results with newer successes.
 
 ## Intent answer review

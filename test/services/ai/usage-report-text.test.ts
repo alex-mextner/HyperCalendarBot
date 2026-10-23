@@ -12,8 +12,8 @@ const WINDOW = { sinceMs: NOW - 7 * DAY_MS, untilMs: NOW };
 function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
   return {
     at: Date.UTC(2026, 9, 22, 18, 3),
-    provider: 'groq',
-    model: 'openai/gpt-oss-120b',
+    provider: 'zai',
+    model: 'glm-5.1',
     chain: 'smart',
     purpose: 'agent',
     outcome: 'ok',
@@ -41,6 +41,7 @@ const rows = [
     promptTokens: null,
     completionTokens: null,
   }),
+  // A provider retired from the code whose rows remain in the ledger.
   event({ provider: 'gemini', model: 'gemini-3-flash', promptTokens: null, completionTokens: null }),
 ];
 
@@ -49,7 +50,7 @@ describe('formatUsageReport', () => {
     const text = formatUsageReport(summarizeAiUsage(rows, WINDOW), 7, t('en').aiStats);
 
     expect(text).toContain('claude: no traffic in window');
-    expect(text).toContain('zai: no traffic in window');
+    expect(text).toContain('hf: no traffic in window');
   });
 
   test('prints the Russian wording through t(lang) for a Russian reader', () => {
@@ -63,7 +64,7 @@ describe('formatUsageReport', () => {
   test('gives each provider:model its counts, latency, answer range and last error', () => {
     const text = formatUsageReport(summarizeAiUsage(rows, WINDOW), 7, t('en').aiStats);
 
-    expect(text).toContain('groq:openai/gpt-oss-120b');
+    expect(text).toContain('zai:glm-5.1');
     expect(text).toContain('2 ok · 1 err · 0 skipped · 66.7%');
     expect(text).toContain('errors: rate_limit 1');
     expect(text).toContain('p50 410 ms · p95 1200 ms');
@@ -86,7 +87,7 @@ describe('formatUsageReport', () => {
     const text = formatUsageReport(summarizeAiUsage(rows, WINDOW), 7, t('en').aiStats);
 
     expect(text.indexOf('Providers')).toBeLessThan(text.indexOf('Models'));
-    expect(text).toContain('groq: degraded');
+    expect(text).toContain('zai: degraded');
     expect(text).toContain('gemini: healthy');
   });
 
@@ -111,6 +112,6 @@ describe('formatUsageReport', () => {
     const text = formatUsageReport(summarizeAiUsage([], WINDOW), 7, t('en').aiStats);
 
     expect(text).toContain('AI usage, last 7 d · attempts: 0');
-    expect(text).toContain('groq: no traffic in window');
+    expect(text).toContain('hf: no traffic in window');
   });
 });

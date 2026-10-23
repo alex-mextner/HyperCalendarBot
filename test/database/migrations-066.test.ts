@@ -57,7 +57,7 @@ test('refuses an outcome the report does not know', () => {
   runMigrations(db, migrations);
   expect(() =>
     db.exec(
-      "INSERT INTO ai_usage_events (at, provider, model, chain, purpose, outcome) VALUES (1, 'groq', 'm', 'smart', 'agent', 'maybe')",
+      "INSERT INTO ai_usage_events (at, provider, model, chain, purpose, outcome) VALUES (1, 'zai', 'm', 'smart', 'agent', 'maybe')",
     ),
   ).toThrow();
 });

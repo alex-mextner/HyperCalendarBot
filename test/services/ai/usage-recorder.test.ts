@@ -51,10 +51,13 @@ describe('classifyProviderError', () => {
     });
   });
 
-  test("Groq's ordinary per-minute 429, which ends with a billing upsell link, is a rate limit and not a spent quota", () => {
-    const groq429 =
-      'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_x` on tokens per minute (TPM): Limit 6000, Used 5000, Requested 2000. Please try again in 10s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing';
-    expect(classifyProviderError(apiError(429, groq429), false)).toEqual({ errorClass: 'rate_limit', httpStatus: 429 });
+  test('an ordinary per-minute 429 that ends with a billing upsell link is a rate limit and not a spent quota', () => {
+    const rateLimited =
+      'Rate limit reached for model `some-model` in organization `org_x` on tokens per minute (TPM): Limit 6000, Used 5000, Requested 2000. Please try again in 10s. Need more tokens? Upgrade to Dev Tier today at https://provider.example/settings/billing';
+    expect(classifyProviderError(apiError(429, rateLimited), false)).toEqual({
+      errorClass: 'rate_limit',
+      httpStatus: 429,
+    });
   });
 
   test('a 4xx that only links to a billing page is not quota', () => {
@@ -124,7 +127,7 @@ describe('classifyProviderError', () => {
 function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
   return {
     at: 1,
-    provider: 'groq',
+    provider: 'zai',
     model: 'm',
     chain: 'smart',
     purpose: 'agent',

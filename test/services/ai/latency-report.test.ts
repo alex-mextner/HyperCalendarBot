@@ -51,7 +51,7 @@ describe('AI production latency report', () => {
       {
         msg: 'AI model call metric',
         requestId: 'a',
-        provider: 'groq',
+        provider: 'hf',
         model: 'qwen',
         providerDurationMs: 80,
         totalDurationMs: 300,
@@ -63,7 +63,7 @@ describe('AI production latency report', () => {
       {
         msg: 'AI model call metric',
         requestId: 'b',
-        provider: 'groq',
+        provider: 'hf',
         model: 'qwen',
         providerDurationMs: 100,
         totalDurationMs: 700,
@@ -86,7 +86,7 @@ describe('AI production latency report', () => {
       attempts: 4,
       calls: 3,
     });
-    expect(summary.byProvider['groq:qwen']).toEqual({
+    expect(summary.byProvider['hf:qwen']).toEqual({
       n: 2,
       p50: 80,
       p90: 100,
@@ -119,16 +119,16 @@ test('preflight skips are separate from actual provider failures', () => {
     {
       msg: 'AI model call metric',
       requestId: 'a',
-      provider: 'gemini',
+      provider: 'claude',
       model: 'winner',
       providerDurationMs: 30,
       totalDurationMs: 100,
       failedProviders: [{ provider: 'zai', model: 'failed' }],
-      skippedProviders: [{ provider: 'groq', model: 'oversized' }],
+      skippedProviders: [{ provider: 'hf', model: 'oversized' }],
       success: true,
     },
   ]);
-  expect(summary.byProvider['groq:oversized']).toMatchObject({ n: 0, failures: 0, skippedBeforeRequest: 1 });
+  expect(summary.byProvider['hf:oversized']).toMatchObject({ n: 0, failures: 0, skippedBeforeRequest: 1 });
   expect(summary.byProvider['zai:failed']).toMatchObject({ n: 0, failures: 1, skippedBeforeRequest: 0 });
-  expect(summary.byProvider['gemini:winner']).toMatchObject({ p50: 30, failures: 0, skippedBeforeRequest: 0 });
+  expect(summary.byProvider['claude:winner']).toMatchObject({ p50: 30, failures: 0, skippedBeforeRequest: 0 });
 });

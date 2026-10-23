@@ -1,7 +1,7 @@
 // test/utils/ai-provider-alert.test.ts
 //
 // Regression suite for the 2026-09-01 silent outage: every provider in the AI
-// fallback chain failed at once (z.ai weekly/monthly cap, Groq deleted both
+// fallback chain failed at once (z.ai weekly/monthly cap, another provider deleted both
 // configured models, revoked Hugging Face token) and the admin received zero
 // alerts, because the alerting code only matched a few "balance exhausted"
 // substrings. The error fixtures below are the real messages from that day.
@@ -25,8 +25,8 @@ import {
 const ZAI_QUOTA_MESSAGE =
   '429 {"error":{"code":"1310","message":"API call limit reached: Weekly/Monthly Limit Exhausted. ' +
   'Quota will be restored at 2026-09-03."}}';
-const GROQ_MODEL_GONE_MESSAGE =
-  '404 {"error":{"message":"The model `llama-3.3-70b-versatile` does not exist or you do not have ' +
+const MODEL_GONE_MESSAGE =
+  '404 {"error":{"message":"The model `hf-main` does not exist or you do not have ' +
   'access to it","type":"invalid_request_error","code":"model_not_found"}}';
 const HF_AUTH_MESSAGE = '401 Invalid username or password.';
 
@@ -91,12 +91,12 @@ describe('classifyProviderFailure — the four real failure shapes of 2026-09-01
     );
   });
 
-  test('Groq deleted model (HTTP 404 model_not_found) is a stale model id', () => {
+  test('a deleted model (HTTP 404 model_not_found) is a stale model id', () => {
     expect(
       classifyProviderFailure({
-        provider: 'Groq (llama-3.3-70b-versatile)',
+        provider: 'HF (hf-main)',
         status: 404,
-        message: GROQ_MODEL_GONE_MESSAGE,
+        message: MODEL_GONE_MESSAGE,
       }),
     ).toBe('model_gone');
   });
@@ -109,7 +109,7 @@ describe('classifyProviderFailure — the four real failure shapes of 2026-09-01
 
   test('classification works from the message alone when no HTTP status is available', () => {
     expect(classifyProviderFailure({ provider: 'z.ai', message: ZAI_QUOTA_MESSAGE })).toBe('quota_exhausted');
-    expect(classifyProviderFailure({ provider: 'Groq', message: GROQ_MODEL_GONE_MESSAGE })).toBe('model_gone');
+    expect(classifyProviderFailure({ provider: 'HF', message: MODEL_GONE_MESSAGE })).toBe('model_gone');
     expect(classifyProviderFailure({ provider: 'HF', message: HF_AUTH_MESSAGE })).toBe('auth_failed');
   });
 
@@ -124,25 +124,25 @@ describe('classifyProviderFailure — transient failures must stay quiet', () =>
   test('ordinary per-minute 429 is transient', () => {
     expect(
       classifyProviderFailure({
-        provider: 'Groq',
+        provider: 'HF',
         status: 429,
         message: 'Rate limit reached for model, please try again in 2.5s',
       }),
     ).toBe('transient');
   });
 
-  test('5xx and Groq 413 token-per-minute limits are transient', () => {
-    expect(classifyProviderFailure({ provider: 'Gemini', status: 503, message: 'model is overloaded' })).toBe(
+  test('5xx and 413 token-per-minute limits are transient', () => {
+    expect(classifyProviderFailure({ provider: 'Claude', status: 503, message: 'model is overloaded' })).toBe(
       'transient',
     );
-    expect(classifyProviderFailure({ provider: 'Gemini', status: 500, message: 'internal error' })).toBe('transient');
+    expect(classifyProviderFailure({ provider: 'Claude', status: 500, message: 'internal error' })).toBe('transient');
     expect(
       classifyProviderFailure({
-        provider: 'Groq',
+        provider: 'HF',
         status: 413,
         message:
           'Request too large for model on tokens per minute (TPM): Limit 12000, Requested 24355. ' +
-          'Upgrade at https://console.groq.com/settings/billing',
+          'Upgrade at https://provider.example/settings/billing',
       }),
     ).toBe('transient');
   });
@@ -165,12 +165,12 @@ describe('isBalanceExhausted', () => {
     expect(isBalanceExhausted(new Error('402 payment required'))).toBe(true);
   });
 
-  test('false for Groq 413 TPM rate-limit message (regression — used to false-positive on "/billing" URL)', () => {
+  test('false for a 413 TPM rate-limit message (regression — used to false-positive on "/billing" URL)', () => {
     const msg =
-      '413 Request too large for model `llama-3.3-70b-versatile` in organization `org_x` ' +
+      '413 Request too large for model `some-model` in organization `org_x` ' +
       'service tier `on_demand` on tokens per minute (TPM): Limit 12000, Requested 24355, ' +
       'please reduce your message size and try again. Need more tokens? Upgrade to Dev Tier ' +
-      'today at https://console.groq.com/settings/billing';
+      'today at https://provider.example/settings/billing';
     expect(isBalanceExhausted(new Error(msg))).toBe(false);
   });
 
@@ -187,34 +187,37 @@ describe('single-provider alerts', () => {
   beforeEach(setupAlerts);
 
   test('a transient failure alone never reaches the admin', () => {
-    reportProviderFailure(
-      { provider: 'Groq (llama-3.3-70b-versatile)', status: 429, message: 'try again in 2s' },
-      'smart',
-    );
-    reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' }, 'smart');
+    reportProviderFailure({ provider: 'HF (hf-main)', status: 429, message: 'try again in 2s' }, 'smart');
+    reportProviderFailure({ provider: 'Claude (claude-sonnet-5-5)', status: 503, message: 'overloaded' }, 'smart');
     advance(ALERT_POLICY.digestWindowMs * 3);
     expect(sent).toEqual([]);
   });
 
-  test('a stale Groq model id alerts once and names the env var to update', () => {
+  test('a stale model id alerts once and names the env var to update', () => {
     reportProviderFailure(
       {
-        provider: 'Groq (llama-3.3-70b-versatile)',
+        provider: 'HF (hf-main)',
         status: 404,
-        message: GROQ_MODEL_GONE_MESSAGE,
+        message: MODEL_GONE_MESSAGE,
       },
       'smart',
     );
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toContain('Groq');
-    expect(sent[0]).toContain('GROQ_MODEL');
-    expect(sent[0]).toContain('llama-3.3-70b-versatile');
+    expect(sent[0]).toContain('HF');
+    expect(sent[0]).toContain('HF_MODEL');
+    expect(sent[0]).toContain('hf-main');
   });
 
   test('a revoked Hugging Face token alerts and tells the operator to rotate HF_TOKEN', () => {
     reportProviderFailure({ provider: 'HF (Qwen/Qwen3-Coder)', status: 401, message: HF_AUTH_MESSAGE }, 'smart');
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain('HF_TOKEN');
+  });
+
+  test('a revoked Claude token alerts and tells the operator to rotate CLAUDE_API_TOKEN', () => {
+    reportProviderFailure({ provider: 'Claude (claude-sonnet-5-5)', status: 401, message: HF_AUTH_MESSAGE }, 'smart');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('CLAUDE_API_TOKEN');
   });
 
   test('nothing is sent during the startup grace window (restart-storm guard)', () => {
@@ -274,17 +277,14 @@ describe('burst coalescing and escalation', () => {
   });
 
   test('a non-quota outage still re-notifies on the widening escalation schedule', () => {
-    const failGroq = () =>
-      reportProviderFailure(
-        { provider: 'Groq (llama-3.3-70b-versatile)', status: 404, message: GROQ_MODEL_GONE_MESSAGE },
-        'smart',
-      );
+    const failHf = () =>
+      reportProviderFailure({ provider: 'HF (hf-main)', status: 404, message: MODEL_GONE_MESSAGE }, 'smart');
 
-    failGroq();
+    failHf();
     expect(sent).toHaveLength(1);
 
     advance(ALERT_POLICY.providerEscalationMs[0] + 1000);
-    failGroq();
+    failHf();
     expect(sent.filter(isFullAlert)).toHaveLength(2);
   });
 
@@ -304,8 +304,8 @@ describe('burst coalescing and escalation', () => {
   });
 
   test('a provider that never alerted recovers silently', () => {
-    reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' }, 'smart');
-    reportProviderAnswered('Gemini (gemini-2.5-flash)', 'smart');
+    reportProviderFailure({ provider: 'Claude (claude-sonnet-5-5)', status: 503, message: 'overloaded' }, 'smart');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'smart');
     expect(sent).toEqual([]);
   });
 });
@@ -315,9 +315,8 @@ describe('total chain outage', () => {
 
   const chainFailures = [
     { provider: 'z.ai (glm-4.6)', status: 429, message: ZAI_QUOTA_MESSAGE },
-    { provider: 'Groq (llama-3.3-70b-versatile)', status: 404, message: GROQ_MODEL_GONE_MESSAGE },
-    { provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'model is overloaded' },
-    { provider: 'HF (Qwen/Qwen3-Coder)', status: 401, message: HF_AUTH_MESSAGE },
+    { provider: 'Claude (claude-sonnet-5-5)', status: 503, message: 'model is overloaded' },
+    { provider: 'HF (hf-main)', status: 404, message: MODEL_GONE_MESSAGE },
   ];
 
   test('one alert names every provider with its own reason and the action to take', () => {
@@ -325,15 +324,12 @@ describe('total chain outage', () => {
     expect(sent).toHaveLength(1);
     const text = sent[0] ?? '';
     expect(text).toContain('z.ai');
-    expect(text).toContain('Groq');
-    expect(text).toContain('Gemini');
+    expect(text).toContain('Claude');
     expect(text).toContain('HF');
     expect(text).toContain('429');
     expect(text).toContain('404');
-    expect(text).toContain('401');
     expect(text).toContain('503');
-    expect(text).toContain('GROQ_MODEL');
-    expect(text).toContain('HF_TOKEN');
+    expect(text).toContain('HF_MODEL');
   });
 
   test('a repeated chain outage escalates instead of repeating every time', () => {
@@ -350,7 +346,7 @@ describe('total chain outage', () => {
   test('any provider answering again clears the chain outage with one recovery notice', () => {
     reportAllProvidersFailed(chainFailures, 'smart');
     advance(60_000);
-    reportProviderAnswered('Gemini (gemini-2.5-flash)', 'smart');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'smart');
     expect(sent).toHaveLength(2);
     expect(sent[1]).toContain('again');
   });
@@ -394,26 +390,12 @@ describe('hourly ceiling', () => {
       advance(1000);
     }
     // This provider never got its alert out.
-    reportProviderFailure(
-      {
-        provider: 'Groq (llama-3.3-70b-versatile)',
-        status: 404,
-        message: GROQ_MODEL_GONE_MESSAGE,
-      },
-      'smart',
-    );
-    expect(sent.filter((m) => m.includes('GROQ_MODEL'))).toHaveLength(0);
+    reportProviderFailure({ provider: 'HF (hf-main)', status: 404, message: MODEL_GONE_MESSAGE }, 'smart');
+    expect(sent.filter((m) => m.includes('HF_MODEL'))).toHaveLength(0);
 
     advance(60 * 60_000 + 1000); // the rolling hour window empties
-    reportProviderFailure(
-      {
-        provider: 'Groq (llama-3.3-70b-versatile)',
-        status: 404,
-        message: GROQ_MODEL_GONE_MESSAGE,
-      },
-      'smart',
-    );
-    expect(sent.filter((m) => m.includes('GROQ_MODEL'))).toHaveLength(1);
+    reportProviderFailure({ provider: 'HF (hf-main)', status: 404, message: MODEL_GONE_MESSAGE }, 'smart');
+    expect(sent.filter((m) => m.includes('HF_MODEL'))).toHaveLength(1);
   });
 
   test('held-back alerts are counted and reported in the next message that gets through', () => {

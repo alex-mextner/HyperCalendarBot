@@ -1,8 +1,8 @@
 // src/services/ai/model-registry.ts
 // Live-model discovery for the AI provider chain.
 //
-// Providers delete models without notice (Groq removed `llama-3.3-70b-versatile`
-// and `llama-3.1-8b-instant` on 2026-09-01, which returned 404 for every request).
+// Providers delete models without notice (a provider removed its chat models on
+// 2026-09-01, which returned 404 for every request).
 // When that happens the bot must not stay dead until a human edits `.env`: it
 // probes the provider's OpenAI-compatible `GET /v1/models` endpoint once, picks a
 // live replacement by a deterministic, explainable rule, and caches the override
@@ -52,17 +52,12 @@ interface ProviderPreferences {
 
 interface ModelPreferenceTable {
   zai: ProviderPreferences;
-  groq: ProviderPreferences;
-  gemini: ProviderPreferences;
   hf: ProviderPreferences;
   claude: ProviderPreferences;
 }
 
 /**
- * Known-good chat model ids per provider, best first. Groq ids were verified live
- * on 2026-09-01. The `qwen3.x-27b` ids are live on the same account but capped at
- * 8000 tokens per minute, which rejects the bot's ~11.5k-token tool payload with
- * 413 — so they are deliberately not listed. Claude is pinned to the 5.5 models by
+ * Known-good chat model ids per provider, best first. Claude is pinned to the 5.5 models by
  * owner decision (2026-10-10): no older fallbacks. It is a paid reserve and every id
  * shares the `claude` family, so the heuristic would pick `claude-fable-*`/`claude-opus-*`;
  * it is preferred-only and never switches to a pricier tier on its own. Other
@@ -70,11 +65,6 @@ interface ModelPreferenceTable {
  */
 const PREFERRED_MODELS: ModelPreferenceTable = {
   zai: { smart: [], fast: [] },
-  groq: {
-    smart: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'groq/compound'],
-    fast: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'groq/compound-mini'],
-  },
-  gemini: { smart: [], fast: [] },
   hf: { smart: [], fast: [] },
   claude: {
     smart: ['claude-sonnet-5-5'],

@@ -38,7 +38,7 @@ function apiError(status: number, message: string, code?: string) {
 }
 
 describe('isModelNotFoundError', () => {
-  test('detects Groq 404 for a deleted model', () => {
+  test('detects a 404 for a deleted model', () => {
     const error = apiError(404, 'The model `llama-3.3-70b-versatile` does not exist or you do not have access to it');
     expect(isModelNotFoundError(error)).toBe(true);
   });
@@ -53,8 +53,8 @@ describe('isModelNotFoundError', () => {
     expect(isModelNotFoundError(error)).toBe(true);
   });
 
-  test('does NOT treat the Groq Harmony tool-template 400 as model-not-found', () => {
-    const error = apiError(400, 'failed to template request: HarmonyError: Tools should have a name!');
+  test('does NOT treat a chat-template tool 400 as model-not-found', () => {
+    const error = apiError(400, 'failed to template request: Tools should have a name!');
     expect(isModelNotFoundError(error)).toBe(false);
   });
 
@@ -68,31 +68,24 @@ describe('isModelNotFoundError', () => {
 });
 
 describe('selectReplacementModel', () => {
-  const groqLive = [
-    'whisper-large-v3',
-    'meta-llama/llama-guard-4-12b',
-    'openai/gpt-oss-120b',
-    'openai/gpt-oss-20b',
-    'qwen/qwen3.8-27b',
-    'groq/compound',
-  ];
+  const claudeLive = ['whisper-large-v3', 'claude-opus-5-5', 'claude-haiku-5-5', 'claude-sonnet-5-5'];
 
   test('picks the first live id from the preference list, not the first id in the response', () => {
     const picked = selectReplacementModel({
-      liveModels: groqLive,
-      configuredModel: 'llama-3.3-70b-versatile',
-      preferences: preferredModelsFor('groq', false),
+      liveModels: claudeLive,
+      configuredModel: 'claude-sonnet-retired',
+      preferences: preferredModelsFor('claude', false),
     });
-    expect(picked).toBe('openai/gpt-oss-120b');
+    expect(picked).toBe('claude-sonnet-5-5');
   });
 
-  test('fast tier prefers the small gpt-oss model', () => {
+  test('fast tier prefers the small model', () => {
     const picked = selectReplacementModel({
-      liveModels: groqLive,
-      configuredModel: 'llama-3.1-8b-instant',
-      preferences: preferredModelsFor('groq', true),
+      liveModels: claudeLive,
+      configuredModel: 'claude-haiku-retired',
+      preferences: preferredModelsFor('claude', true),
     });
-    expect(picked).toBe('openai/gpt-oss-20b');
+    expect(picked).toBe('claude-haiku-5-5');
   });
 
   test('skips transcription, guard and other non-chat ids when no preference matches', () => {
@@ -103,12 +96,12 @@ describe('selectReplacementModel', () => {
         'meta-llama/llama-prompt-guard-2-86m',
         'text-embedding-3-large',
         'canopylabs/orpheus-3b',
-        'gemini-2.5-flash',
+        'qwen-2.5-chat',
       ],
-      configuredModel: 'gemini-9.9-nonexistent',
+      configuredModel: 'qwen-9.9-nonexistent',
       preferences: [],
     });
-    expect(picked).toBe('gemini-2.5-flash');
+    expect(picked).toBe('qwen-2.5-chat');
   });
 
   test('prefers a model from the same family as the dead one when nothing is preferred', () => {
@@ -131,12 +124,12 @@ describe('selectReplacementModel', () => {
 
   test('excludes a replacement already proven dead, even if the listing still advertises it', () => {
     const picked = selectReplacementModel({
-      liveModels: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
-      configuredModel: 'llama-3.3-70b-versatile',
-      preferences: preferredModelsFor('groq', false),
-      excludeModels: ['openai/gpt-oss-120b'],
+      liveModels: ['model-a', 'model-b'],
+      configuredModel: 'dead-model',
+      preferences: ['model-a', 'model-b'],
+      excludeModels: ['model-a'],
     });
-    expect(picked).toBe('openai/gpt-oss-20b');
+    expect(picked).toBe('model-b');
   });
 
   test('returns null when nothing usable is live', () => {
@@ -158,7 +151,7 @@ describe('resolveModelOverride', () => {
     const { client, list } = makeListingClient(['whisper-large-v3', 'openai/gpt-oss-120b']);
 
     const resolved = await resolveModelOverride({
-      provider: 'groq',
+      provider: 'hf',
       client,
       configuredModel: 'llama-3.3-70b-versatile',
     });
@@ -170,9 +163,9 @@ describe('resolveModelOverride', () => {
   test('caches the resolution: repeated failures probe /v1/models only once', async () => {
     const { client, list } = makeListingClient(['openai/gpt-oss-120b']);
 
-    const first = await resolveModelOverride({ provider: 'groq', client, configuredModel: 'dead-model' });
-    const second = await resolveModelOverride({ provider: 'groq', client, configuredModel: 'dead-model' });
-    const third = await resolveModelOverride({ provider: 'groq', client, configuredModel: 'dead-model' });
+    const first = await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
+    const second = await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
+    const third = await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
 
     expect([first, second, third]).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-120b', 'openai/gpt-oss-120b']);
     expect(list).toHaveBeenCalledTimes(1);
@@ -180,22 +173,22 @@ describe('resolveModelOverride', () => {
 
   test('getModelOverride returns the cached replacement so later requests skip the dead model', async () => {
     const { client } = makeListingClient(['openai/gpt-oss-120b']);
-    expect(getModelOverride('groq', 'dead-model')).toBeNull();
+    expect(getModelOverride('hf', 'dead-model')).toBeNull();
 
-    await resolveModelOverride({ provider: 'groq', client, configuredModel: 'dead-model' });
+    await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
 
-    expect(getModelOverride('groq', 'dead-model')).toBe('openai/gpt-oss-120b');
-    expect(getModelOverride('groq', 'some-other-model')).toBeNull();
-    expect(getModelOverride('gemini', 'dead-model')).toBeNull();
+    expect(getModelOverride('hf', 'dead-model')).toBe('openai/gpt-oss-120b');
+    expect(getModelOverride('hf', 'some-other-model')).toBeNull();
+    expect(getModelOverride('zai', 'dead-model')).toBeNull();
   });
 
   test('forceRefresh re-probes when the previously resolved replacement also died', async () => {
     const { client, list } = makeListingClient(['openai/gpt-oss-120b']);
-    await resolveModelOverride({ provider: 'groq', client, configuredModel: 'dead-model' });
+    await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
 
     const { client: newer, list: newerList } = makeListingClient(['openai/gpt-oss-20b']);
     const resolved = await resolveModelOverride({
-      provider: 'groq',
+      provider: 'hf',
       client: newer,
       configuredModel: 'dead-model',
       forceRefresh: true,
@@ -204,14 +197,14 @@ describe('resolveModelOverride', () => {
     expect(resolved).toBe('openai/gpt-oss-20b');
     expect(list).toHaveBeenCalledTimes(1);
     expect(newerList).toHaveBeenCalledTimes(1);
-    expect(getModelOverride('groq', 'dead-model')).toBe('openai/gpt-oss-20b');
+    expect(getModelOverride('hf', 'dead-model')).toBe('openai/gpt-oss-20b');
   });
 
   test('deadModel keeps a lying listing from handing back the id that just failed', async () => {
     const { client } = makeListingClient(['openai/gpt-oss-120b', 'openai/gpt-oss-20b']);
 
     const resolved = await resolveModelOverride({
-      provider: 'groq',
+      provider: 'hf',
       client,
       configuredModel: 'llama-3.3-70b-versatile',
       deadModel: 'openai/gpt-oss-120b',
@@ -223,18 +216,18 @@ describe('resolveModelOverride', () => {
   test('returns null and never throws when /v1/models errors', async () => {
     const { client, list } = makeFailingListingClient(new Error('models endpoint unreachable'));
 
-    const resolved = await resolveModelOverride({ provider: 'groq', client, configuredModel: 'dead-model' });
+    const resolved = await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
 
     expect(resolved).toBeNull();
     expect(list).toHaveBeenCalledTimes(1);
-    expect(getModelOverride('groq', 'dead-model')).toBeNull();
+    expect(getModelOverride('hf', 'dead-model')).toBeNull();
   });
 
   test('returns null when the endpoint yields nothing usable, and does not re-probe within the TTL', async () => {
     const { client, list } = makeListingClient(['whisper-large-v3']);
 
-    expect(await resolveModelOverride({ provider: 'groq', client, configuredModel: 'dead-model' })).toBeNull();
-    expect(await resolveModelOverride({ provider: 'groq', client, configuredModel: 'dead-model' })).toBeNull();
+    expect(await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' })).toBeNull();
+    expect(await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' })).toBeNull();
 
     expect(list).toHaveBeenCalledTimes(1);
   });
@@ -270,12 +263,12 @@ describe('resolveModelOverride', () => {
     });
 
     const { client } = makeListingClient(['openai/gpt-oss-120b']);
-    await resolveModelOverride({ provider: 'groq', client, configuredModel: 'llama-3.3-70b-versatile' });
+    await resolveModelOverride({ provider: 'hf', client, configuredModel: 'llama-3.3-70b-versatile' });
     // A cached second call must not re-notify.
-    await resolveModelOverride({ provider: 'groq', client, configuredModel: 'llama-3.3-70b-versatile' });
+    await resolveModelOverride({ provider: 'hf', client, configuredModel: 'llama-3.3-70b-versatile' });
 
     expect(seen).toEqual([
-      { provider: 'groq', configuredModel: 'llama-3.3-70b-versatile', resolvedModel: 'openai/gpt-oss-120b' },
+      { provider: 'hf', configuredModel: 'llama-3.3-70b-versatile', resolvedModel: 'openai/gpt-oss-120b' },
     ]);
     expect(listModelOverrides()).toHaveLength(1);
     expect(listModelOverrides()[0]?.resolvedModel).toBe('openai/gpt-oss-120b');
@@ -285,8 +278,8 @@ describe('resolveModelOverride', () => {
     const { client, list } = makeListingClient(['openai/gpt-oss-120b']);
 
     const results = await Promise.all([
-      resolveModelOverride({ provider: 'groq', client, configuredModel: 'dead-model' }),
-      resolveModelOverride({ provider: 'groq', client, configuredModel: 'dead-model' }),
+      resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' }),
+      resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' }),
     ]);
 
     expect(results).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-120b']);
@@ -298,17 +291,17 @@ describe('resolveModelOverride', () => {
     // Each asks for a refresh; they must join the same probe, not start two that
     // finish out of order and leave the cache holding the older answer.
     const { client } = makeListingClient(['openai/gpt-oss-120b']);
-    await resolveModelOverride({ provider: 'groq', client, configuredModel: 'dead-model' });
+    await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
 
     const { client: refreshed, list: refreshedList } = makeListingClient(['openai/gpt-oss-20b']);
     const results = await Promise.all([
-      resolveModelOverride({ provider: 'groq', client: refreshed, configuredModel: 'dead-model', forceRefresh: true }),
-      resolveModelOverride({ provider: 'groq', client: refreshed, configuredModel: 'dead-model', forceRefresh: true }),
+      resolveModelOverride({ provider: 'hf', client: refreshed, configuredModel: 'dead-model', forceRefresh: true }),
+      resolveModelOverride({ provider: 'hf', client: refreshed, configuredModel: 'dead-model', forceRefresh: true }),
     ]);
 
     expect(results).toEqual(['openai/gpt-oss-20b', 'openai/gpt-oss-20b']);
     expect(refreshedList).toHaveBeenCalledTimes(1);
-    expect(getModelOverride('groq', 'dead-model')).toBe('openai/gpt-oss-20b');
+    expect(getModelOverride('hf', 'dead-model')).toBe('openai/gpt-oss-20b');
   });
 
   test('a slow probe does not clear a newer probe started for the same model', async () => {
@@ -324,10 +317,10 @@ describe('resolveModelOverride', () => {
     });
     const slow: ModelListingClient = { models: { list: firstList } };
 
-    const first = resolveModelOverride({ provider: 'groq', client: slow, configuredModel: 'dead-model' });
+    const first = resolveModelOverride({ provider: 'hf', client: slow, configuredModel: 'dead-model' });
     const { client: second, list: secondList } = makeListingClient(['openai/gpt-oss-20b']);
     const forced = resolveModelOverride({
-      provider: 'groq',
+      provider: 'hf',
       client: second,
       configuredModel: 'dead-model',
       forceRefresh: true,
@@ -336,7 +329,7 @@ describe('resolveModelOverride', () => {
     releaseFirst();
     await Promise.all([first, forced]);
 
-    const third = await resolveModelOverride({ provider: 'groq', client: second, configuredModel: 'dead-model' });
+    const third = await resolveModelOverride({ provider: 'hf', client: second, configuredModel: 'dead-model' });
 
     expect(third).toBe('openai/gpt-oss-20b');
     expect(secondList).toHaveBeenCalledTimes(1);
