@@ -62,11 +62,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function ctx(
-  provider: 'zai' | 'groq' | 'gemini' | 'hf',
-  chain: 'smart' | 'fast' = 'smart',
-  apiKey = `${provider}-key`,
-) {
+function ctx(provider: 'zai' | 'claude' | 'hf', chain: 'smart' | 'fast' = 'smart', apiKey = `${provider}-key`) {
   return {
     key: providerCircuitKey(provider, 'https://example.test/v1', apiKey),
     provider,
@@ -184,7 +180,7 @@ describe('sidecar file', () => {
   test('an unusable path degrades to an in-memory circuit instead of throwing', () => {
     const blocker = join(dir, 'blocker');
     writeFileSync(blocker, 'a file, not a directory');
-    const c = ctx('groq');
+    const c = ctx('hf');
     expect(() => configureProviderCircuit(join(blocker, 'nested', 'state.sqlite'))).not.toThrow();
     settleFailure(c, admitProvider(c), CREDITS);
     expect(admitProvider(c).kind).toBe('skip');
@@ -294,7 +290,7 @@ describe('closing and re-opening', () => {
   });
 
   test('availability faults open only after consecutive failures and notify once', () => {
-    const c = ctx('gemini');
+    const c = ctx('claude');
     configureProviderCircuit(dbPath);
     const down = { status: 503, message: 'upstream', providerDown: true };
     for (let i = 0; i < TRANSIENT_OPEN_THRESHOLD - 1; i++) settleFailure(c, admitProvider(c), down);
@@ -312,7 +308,7 @@ describe('closing and re-opening', () => {
 
 describe('admin notice', () => {
   test('one notice per incident, across probes and restarts', () => {
-    const c = ctx('groq');
+    const c = ctx('hf');
     configureProviderCircuit(dbPath);
     settleFailure(c, admitProvider(c), { status: 401, message: 'Invalid API key', providerDown: false });
     expect(sent).toHaveLength(1);
@@ -418,7 +414,7 @@ describe('one actual account incident across models and chains', () => {
   });
   test('an availability circuit emits one opening notice, not a repeated outage timer', () => {
     configureProviderCircuit(dbPath);
-    const context = ctx('gemini');
+    const context = ctx('claude');
     const down = { status: 503, message: 'Temporary outage', providerDown: true };
     for (let i = 0; i < TRANSIENT_OPEN_THRESHOLD; i++) settleFailure(context, admitProvider(context), down);
     expect(sent).toHaveLength(1);
@@ -441,7 +437,7 @@ test('asynchronous notification failure is contained, backed off, then delivered
       sent.push(text);
     },
   });
-  const context = ctx('gemini');
+  const context = ctx('claude');
   settleFailure(context, admitProvider(context), CREDITS);
   await flushProviderCircuitNotices();
   expect(attempts).toBe(1);
@@ -460,7 +456,7 @@ test('asynchronous notification failure is contained, backed off, then delivered
 });
 test('a crashed notice sender leaves a renewable lease, not an eternal lost message', () => {
   const circuit = openProviderCircuitStore(dbPath);
-  const context = ctx('groq');
+  const context = ctx('hf');
   circuit.recordFailure(
     context,
     { failureClass: 'auth_failed', status: 401, retryAtMs: null, resetHint: null },
@@ -484,7 +480,7 @@ test('SQLite state and WAL stay private even with a permissive process umask', (
   const circuit = openProviderCircuitStore(dbPath);
   try {
     circuit.recordFailure(
-      ctx('groq'),
+      ctx('hf'),
       { failureClass: 'auth_failed', status: 401, retryAtMs: null, resetHint: null },
       null,
       clock,

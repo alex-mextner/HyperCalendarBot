@@ -10,8 +10,8 @@ const WINDOW = { sinceMs: NOW - 7 * DAY_MS, untilMs: NOW };
 function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
   return {
     at: NOW - DAY_MS,
-    provider: 'groq',
-    model: 'gpt-oss',
+    provider: 'zai',
+    model: 'glm-5.1',
     chain: 'smart',
     purpose: 'agent',
     outcome: 'ok',
@@ -73,7 +73,7 @@ describe('summarizeAiUsage — per provider:model', () => {
 
     const summary = summarizeAiUsage(rows, WINDOW);
 
-    expect(summary.models.map((m) => `${m.provider}:${m.model}`)).toEqual(['groq:gpt-oss', 'groq:other-model']);
+    expect(summary.models.map((m) => `${m.provider}:${m.model}`)).toEqual(['zai:glm-5.1', 'zai:other-model']);
     expect(summary.models[0]).toMatchObject({
       attempts: 6,
       ok: 2,
@@ -88,13 +88,13 @@ describe('summarizeAiUsage — per provider:model', () => {
   test('success rate counts only attempts that reached the provider: a skip is not a failure', () => {
     const group = groupOf(
       [event(), event(), event(), failed('timeout', null), skipped('eligibility_bench')],
-      'groq:gpt-oss',
+      'zai:glm-5.1',
     );
     expect(group.successRate).toBeCloseTo(0.75, 5);
   });
 
   test('success rate is unknown, not zero, when nothing was sent', () => {
-    expect(groupOf([skipped('circuit_open')], 'groq:gpt-oss').successRate).toBeNull();
+    expect(groupOf([skipped('circuit_open')], 'zai:glm-5.1').successRate).toBeNull();
   });
 
   test('token sums skip unknown values and count answered rows that reported none — unknown is never zero', () => {
@@ -104,7 +104,7 @@ describe('summarizeAiUsage — per provider:model', () => {
         event({ promptTokens: 50, completionTokens: 0, reasoningTokens: null, cachedTokens: null }),
         event({ promptTokens: null, completionTokens: null, reasoningTokens: null, cachedTokens: null }),
       ],
-      'groq:gpt-oss',
+      'zai:glm-5.1',
     );
 
     expect(group.tokens).toEqual({
@@ -122,7 +122,7 @@ describe('summarizeAiUsage — per provider:model', () => {
         event({ outcome: 'error', errorClass: 'empty', promptTokens: 200, completionTokens: 30 }),
         failed('server', 503),
       ],
-      'groq:gpt-oss',
+      'zai:glm-5.1',
     );
 
     expect(group.tokens.prompt).toEqual({ sum: 210, reportedRows: 2, unknownRows: 0 });
@@ -132,7 +132,7 @@ describe('summarizeAiUsage — per provider:model', () => {
   test('a group with no token value at all reports a null sum, not 0', () => {
     const group = groupOf(
       [event({ promptTokens: null, completionTokens: null }), event({ promptTokens: null, completionTokens: null })],
-      'groq:gpt-oss',
+      'zai:glm-5.1',
     );
     expect(group.tokens.prompt).toEqual({ sum: null, reportedRows: 0, unknownRows: 2 });
   });
@@ -141,14 +141,14 @@ describe('summarizeAiUsage — per provider:model', () => {
     const rows = Array.from({ length: 20 }, (_, index) => event({ durationMs: (index + 1) * 10 }));
     rows.push(failed('timeout', null));
 
-    const group = groupOf(rows, 'groq:gpt-oss');
+    const group = groupOf(rows, 'zai:glm-5.1');
 
     expect(group.p50DurationMs).toBe(100);
     expect(group.p95DurationMs).toBe(190);
   });
 
   test('duration is unknown when no answered attempt carries one', () => {
-    expect(groupOf([failed('server', 500)], 'groq:gpt-oss')).toMatchObject({
+    expect(groupOf([failed('server', 500)], 'zai:glm-5.1')).toMatchObject({
       p50DurationMs: null,
       p95DurationMs: null,
     });
@@ -163,7 +163,7 @@ describe('summarizeAiUsage — per provider:model', () => {
         failed('quota', 402, NOW - 3 * DAY_MS),
         failed('timeout', null, NOW - 1 * DAY_MS),
       ],
-      'groq:gpt-oss',
+      'zai:glm-5.1',
     );
 
     expect(group.firstOkAt).toBe(NOW - 5 * DAY_MS);
@@ -172,8 +172,8 @@ describe('summarizeAiUsage — per provider:model', () => {
   });
 
   test('a group that never failed has no last error and one that never answered has no ok times', () => {
-    expect(groupOf([event()], 'groq:gpt-oss').lastError).toBeNull();
-    expect(groupOf([failed('auth', 401)], 'groq:gpt-oss')).toMatchObject({ firstOkAt: null, lastOkAt: null });
+    expect(groupOf([event()], 'zai:glm-5.1').lastError).toBeNull();
+    expect(groupOf([failed('auth', 401)], 'zai:glm-5.1')).toMatchObject({ firstOkAt: null, lastOkAt: null });
   });
 
   test('the input may be any iterable (the repository hands rows out lazily)', () => {
@@ -195,12 +195,12 @@ describe('summarizeAiUsage — one verdict per provider', () => {
   test('lists every known provider, so a provider with no rows says so explicitly', () => {
     const summary = summarizeAiUsage([event()], WINDOW);
 
-    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'groq', 'gemini', 'hf', 'claude']);
+    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf']);
     expect(verdictOf([event()], 'claude')).toMatchObject({ verdict: 'no_traffic', attempts: 0, successRate: null });
   });
 
   test('healthy: it answered and almost nothing failed', () => {
-    expect(verdictOf(Array.from({ length: 19 }, () => event()).concat(failed('server', 500)), 'groq')).toMatchObject({
+    expect(verdictOf(Array.from({ length: 19 }, () => event()).concat(failed('server', 500)), 'zai')).toMatchObject({
       verdict: 'healthy',
       ok: 19,
       errors: 1,
@@ -208,11 +208,11 @@ describe('summarizeAiUsage — one verdict per provider', () => {
   });
 
   test('degraded: it answered but too often failed', () => {
-    expect(verdictOf([event(), failed('rate_limit', 429), failed('rate_limit', 429)], 'groq').verdict).toBe('degraded');
+    expect(verdictOf([event(), failed('rate_limit', 429), failed('rate_limit', 429)], 'zai').verdict).toBe('degraded');
   });
 
   test('failing: it never answered in the window, and the last error is named', () => {
-    const verdict = verdictOf([failed('quota', 402, NOW - 3 * DAY_MS), failed('auth', 401, NOW - DAY_MS)], 'groq');
+    const verdict = verdictOf([failed('quota', 402, NOW - 3 * DAY_MS), failed('auth', 401, NOW - DAY_MS)], 'zai');
     expect(verdict).toMatchObject({
       verdict: 'failing',
       ok: 0,
@@ -221,7 +221,7 @@ describe('summarizeAiUsage — one verdict per provider', () => {
   });
 
   test('skipped only: the provider was never contacted', () => {
-    expect(verdictOf([skipped('circuit_open'), skipped('eligibility_bench')], 'groq')).toMatchObject({
+    expect(verdictOf([skipped('circuit_open'), skipped('eligibility_bench')], 'zai')).toMatchObject({
       verdict: 'skipped_only',
       attempts: 2,
       successRate: null,
@@ -230,7 +230,30 @@ describe('summarizeAiUsage — one verdict per provider', () => {
 
   test('a provider id the code no longer knows still appears, after the known ones', () => {
     const summary = summarizeAiUsage([event({ provider: 'retired' }), event()], WINDOW);
-    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'groq', 'gemini', 'hf', 'claude', 'retired']);
+    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'retired']);
+  });
+
+  test('a historical gemini ledger row still appears after the configured providers and does not throw', () => {
+    const summary = summarizeAiUsage([event({ provider: 'gemini', model: 'gemini-3-flash' }), event()], WINDOW);
+    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'gemini']);
+    expect(summary.providers.find((p) => p.provider === 'gemini')).toMatchObject({ verdict: 'healthy', ok: 1 });
+  });
+
+  test('a historical groq ledger row still appears after the configured providers and does not throw', () => {
+    const summary = summarizeAiUsage([event({ provider: 'groq', model: 'openai/gpt-oss-120b' }), event()], WINDOW);
+    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'groq']);
+    expect(summary.providers.find((p) => p.provider === 'groq')).toMatchObject({ verdict: 'healthy', ok: 1 });
+    expect(summary.models.map((m) => `${m.provider}:${m.model}`)).toContain('groq:openai/gpt-oss-120b');
+  });
+
+  test('a historical gemini local_budget skip row is counted, not rejected', () => {
+    const summary = summarizeAiUsage(
+      [event({ provider: 'gemini', model: 'gemini-3-flash', outcome: 'skipped', skipReason: 'local_budget' })],
+      WINDOW,
+    );
+    const gemini = summary.providers.find((p) => p.provider === 'gemini');
+    expect(gemini).toMatchObject({ verdict: 'skipped_only', skipped: 1 });
+    expect(summary.models[0]?.skippedByReason).toEqual({ local_budget: 1 });
   });
 
   test('carries the window it summarised', () => {

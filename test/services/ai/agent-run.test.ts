@@ -80,11 +80,11 @@ function asAssistantMessage(round: ScriptedRound): OpenAI.ChatCompletionMessageP
   return { role: 'assistant', content: '' };
 }
 
-function fakeMetrics(provider: 'zai' | 'groq', promptTokens: number, completionTokens: number) {
+function fakeMetrics(provider: 'zai' | 'hf', promptTokens: number, completionTokens: number) {
   return {
     provider,
-    model: provider === 'groq' ? 'validator-model' : 'agent-model',
-    chain: provider === 'groq' ? ('fast' as const) : ('smart' as const),
+    model: provider === 'hf' ? 'validator-model' : 'agent-model',
+    chain: provider === 'hf' ? ('fast' as const) : ('smart' as const),
     firstUsableSinceAttemptMs: 5,
     providerDurationMs: 10,
     totalDurationMs: 12,
@@ -131,7 +131,7 @@ function makeStreamImpl(script: ScriptedRound[]): {
         finishReason: 'stop',
         assistantMessage: validatorMsg,
         providerUsed: 'mock-validator',
-        metrics: fakeMetrics('groq', 10, 2),
+        metrics: fakeMetrics('hf', 10, 2),
       };
     }
 
@@ -631,9 +631,9 @@ describe('CalendarBotAgent.run()', () => {
     ctx.contactRepo = contactRepo;
     const upsert = spyOn(contactRepo, 'upsert');
     const rejection: ProviderFailure = {
-      provider: 'Groq (openai/gpt-oss-120b)',
-      providerId: 'groq',
-      model: 'openai/gpt-oss-120b',
+      provider: 'HF (hf-main)',
+      providerId: 'hf',
+      model: 'hf-main',
       message:
         "Tool call validation failed: tool call validation failed: attempted to call tool 'add_contact' which was not in request.tools",
       transient: true,
@@ -2520,7 +2520,7 @@ describe('CalendarBotAgent.run()', () => {
           finishReason: 'stop',
           assistantMessage: { role: 'assistant' as const, content: verdict },
           providerUsed: 'mock-validator',
-          metrics: fakeMetrics('groq', 10, 2),
+          metrics: fakeMetrics('hf', 10, 2),
         };
       };
       ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);

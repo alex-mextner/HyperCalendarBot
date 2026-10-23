@@ -1,7 +1,7 @@
 // test/services/ai/streaming-failover.test.ts
-// Regression tests for the 2026-09-01 outage: Groq deleted both configured
+// Regression tests for the 2026-09-01 outage: a provider deleted both configured
 // models, returned 404, and the chain ABORTED instead of falling through to a
-// healthy Gemini. Also covers the model auto-detection path that keeps the bot
+// healthy Claude. Also covers the model auto-detection path that keeps the bot
 // alive when a provider deletes the model named in .env.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -156,8 +156,6 @@ function apiError(status: number, message: string, code?: string) {
 }
 
 let zai: FakeProvider;
-let groq: FakeProvider;
-let gemini: FakeProvider;
 let hf: FakeProvider;
 let claude: FakeProvider;
 
@@ -184,13 +182,9 @@ beforeEach(() => {
     ZAI_BASE_URL: 'https://zai.example/v1',
     ZAI_MODEL: 'glm-5.1',
     ZAI_FAST_MODEL: 'glm-5.1-air',
-    GROQ_API_KEY: 'test-groq-key',
-    GROQ_MODEL: 'llama-3.3-70b-versatile',
-    GROQ_FAST_MODEL: 'llama-3.1-8b-instant',
-    GEMINI_API_KEY: 'gemini-key',
-    GEMINI_BASE_URL: 'https://gemini.example/v1',
-    GEMINI_MODEL: 'gemini-main',
-    GEMINI_FAST_MODEL: 'gemini-fast',
+    CLAUDE_API_TOKEN: 'claude-key',
+    CLAUDE_MODEL: 'claude-main',
+    CLAUDE_FAST_MODEL: 'claude-fast',
     HF_TOKEN: 'hf-token',
     HF_BASE_URL: 'https://hf.example/v1',
     HF_MODEL: 'hf-main',
@@ -198,15 +192,13 @@ beforeEach(() => {
     // These tests are about what happens when a provider fails, not about which
     // one is tried first, so they pin the order rather than inherit the default
     // — which is configuration and will change again the next time a tier does.
-    AI_SMART_CHAIN: 'zai,groq,gemini,hf',
-    AI_FAST_CHAIN: 'zai,groq,gemini,hf',
+    AI_SMART_CHAIN: 'zai,hf,claude',
+    AI_FAST_CHAIN: 'zai,hf,claude',
   });
   resetLogOnce();
   resetEligibility();
   resetProviderCircuit();
   providerClients.zai = () => asOpenAIClient(zai.client);
-  providerClients.groq = () => asOpenAIClient(groq.client);
-  providerClients.gemini = () => asOpenAIClient(gemini.client);
   providerClients.hf = () => asOpenAIClient(hf.client);
   claude = unusedProvider();
   providerClients.claude = () => asOpenAIClient(claude.client);
@@ -222,12 +214,11 @@ afterEach(() => {
 const { AllProvidersFailedError, aiStreamRound } = await import('../../../src/services/ai/streaming.ts');
 
 const ZAI_QUOTA = apiError(429, 'Weekly/Monthly Limit Exhausted, quota resets 2026-09-03');
-const GROQ_MODEL_GONE = apiError(
+const MODEL_GONE = apiError(
   404,
-  'The model `llama-3.3-70b-versatile` does not exist or you do not have access to it',
+  'The model `hf-main` does not exist or you do not have access to it',
   'model_not_found',
 );
-const GROQ_HARMONY = apiError(400, 'failed to template request: HarmonyError: Tools should have a name!');
 
 function ask() {
   return aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
@@ -237,58 +228,31 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
   beforeEach(() => {
     resetModelRegistry();
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: ZAI_QUOTA }] });
-    groq = makeProvider({ behaviors: [{ kind: 'throw', error: GROQ_MODEL_GONE }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from Gemini' }] });
-    hf = unusedProvider();
+    hf = makeProvider({ behaviors: [{ kind: 'throw', error: MODEL_GONE }] });
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from Claude' }] });
   });
 
-  test('regression: Groq 404 model_not_found does not abort — Gemini still answers', async () => {
-    // 2026-09-01 outage: z.ai out of quota, Groq deleted the model, and the 404
-    // propagated out of aiStreamRound, so healthy Gemini was never tried.
+  test('regression: 404 model_not_found does not abort — Claude still answers', async () => {
+    // 2026-09-01 outage: z.ai out of quota, another provider deleted the model, and the 404
+    // propagated out of aiStreamRound, so healthy Claude was never tried.
     const result = await ask();
 
-    expect(result.text).toBe('answer from Gemini');
-    expect(result.providerUsed).toContain('Gemini');
-    expect(groq.requestedModels).toEqual(['llama-3.3-70b-versatile']);
-    expect(hf.requestedModels).toEqual([]);
-  });
-
-  test('Groq 400 Harmony tool-template error falls through to the next provider', async () => {
-    groq = makeProvider({ behaviors: [{ kind: 'throw', error: GROQ_HARMONY }] });
-
-    const result = await ask();
-
-    expect(result.text).toBe('answer from Gemini');
-    // A tool-schema 400 is not a missing model — no /v1/models probe.
-    expect(groq.modelsListCalls).toBe(0);
+    expect(result.text).toBe('answer from Claude');
+    expect(result.providerUsed).toContain('Claude');
+    expect(hf.requestedModels).toEqual(['hf-main']);
   });
 
   test('401 and 403 fall through instead of aborting the chain', async () => {
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(401, 'Invalid API key') }] });
-    groq = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(403, 'Forbidden') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(403, 'Forbidden') }] });
 
     const result = await ask();
 
-    expect(result.text).toBe('answer from Gemini');
-  });
-
-  test('known-oversized Groq gpt-oss request is skipped before network dispatch', async () => {
-    process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
-    groq = makeProvider({ behaviors: [{ kind: 'throw', error: new Error('Groq must not be called') }] });
-
-    const result = await aiStreamRound({
-      messages: [{ role: 'user', content: 'x'.repeat(50_000) }],
-      maxTokens: 200,
-    });
-
-    expect(result.text).toBe('answer from Gemini');
-    expect(groq.requestedModels).toEqual([]);
-    expect(gemini.requestedModels).toEqual(['gemini-main']);
+    expect(result.text).toBe('answer from Claude');
   });
 
   test('every slot failing throws AllProvidersFailedError naming each provider and reason', async () => {
-    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(500, 'gemini overloaded') }] });
-    hf = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'hf unavailable') }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(500, 'claude overloaded') }] });
 
     const error = await ask().then(
       () => null,
@@ -298,23 +262,18 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
     expect(error).toBeInstanceOf(AllProvidersFailedError);
     if (!(error instanceof AllProvidersFailedError)) throw new Error('expected AllProvidersFailedError');
 
-    expect(error.failures.map((f) => f.status)).toEqual([429, 404, 500, 503]);
-    expect(error.failures.map((f) => f.provider)).toEqual([
-      'z.ai (glm-5.1)',
-      'Groq (llama-3.3-70b-versatile)',
-      'Gemini (gemini-main)',
-      'HF (hf-main)',
-    ]);
+    expect(error.failures.map((f) => f.status)).toEqual([429, 404, 500]);
+    expect(error.failures.map((f) => f.provider)).toEqual(['z.ai (glm-5.1)', 'HF (hf-main)', 'Claude (claude-main)']);
     expect(error.failures[0]?.message).toContain('Weekly/Monthly Limit Exhausted');
-    expect(error.failures[3]?.message).toContain('hf unavailable');
+    expect(error.failures[2]?.message).toContain('claude overloaded');
     // The aggregate message alone must be enough to diagnose the outage.
-    expect(error.message).toContain('Groq (llama-3.3-70b-versatile)');
-    expect(error.message).toContain('Gemini (gemini-main)');
+    expect(error.message).toContain('HF (hf-main)');
+    expect(error.message).toContain('Claude (claude-main)');
   });
 
   test('partial text from a dying provider is discarded and the next provider answers', async () => {
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: new Error('connection closed') }] });
-    groq = makeProvider({ behaviors: [{ kind: 'throw', error: GROQ_MODEL_GONE }] });
+    hf = makeProvider({ behaviors: [{ kind: 'throw', error: MODEL_GONE }] });
     // z.ai emits a delta before dying: simulate by scripting a stream that throws mid-iteration.
     zai.client.chat.completions.create = async (params: { model: string }) => {
       zai.requestedModels.push(params.model);
@@ -337,8 +296,8 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
       },
     );
 
-    expect(result.text).toBe('answer from Gemini');
-    expect(deltas).toEqual(['partial ', 'answer from Gemini']);
+    expect(result.text).toBe('answer from Claude');
+    expect(deltas).toEqual(['partial ', 'answer from Claude']);
     expect(switched).toBe(1);
   });
 
@@ -375,7 +334,7 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
     );
 
     expect(toolLabels).toEqual(['get_events']);
-    expect(result.text).toBe('answer from Gemini');
+    expect(result.text).toBe('answer from Claude');
     expect(switched).toBe(1);
   });
 
@@ -388,7 +347,7 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
       aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, signal: controller.signal }),
     ).rejects.toMatchObject({ name: 'AbortError' });
 
-    expect(groq.requestedModels).toEqual([]);
+    expect(hf.requestedModels).toEqual([]);
   });
 
   test('an exhausted caller deadline cannot start another provider', async () => {
@@ -397,7 +356,7 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
     await expect(aiStreamRound({ messages: [], maxTokens: 100, signal })).rejects.toMatchObject({
       name: 'TimeoutError',
     });
-    expect(gemini.requestedModels).toEqual([]);
+    expect(claude.requestedModels).toEqual([]);
   });
 });
 
@@ -417,45 +376,43 @@ describe('benching a provider that said it is out', () => {
     zai = makeProvider({
       behaviors: [{ kind: 'throw', error: apiError(429, 'Weekly/Monthly Limit Exhausted, resets tomorrow') }],
     });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
-    groq = unusedProvider();
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
     hf = unusedProvider();
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
 
     expect(zai.requestedModels).toHaveLength(1);
-    expect(gemini.requestedModels).toHaveLength(2);
+    expect(claude.requestedModels).toHaveLength(2);
   });
 
-  // Groq's tier cannot take a request carrying the tool catalog, but the short
+  // A provider's tier may not take a request carrying the tool catalog, but the short
   // summaries on the fast chain fit — benching it for everything would throw
   // away the one thing it is still good for.
   test.each([413, 429])('a size rejection %i benches only the requests that carry tools', async (sizeStatus) => {
-    groq = makeProvider({
+    hf = makeProvider({
       behaviors: [
         { kind: 'throw', error: apiError(sizeStatus, 'Request too large ... tokens per minute (TPM): Limit 8000') },
-        { kind: 'text', text: 'from groq' },
+        { kind: 'text', text: 'from hf' },
       ],
     });
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(429, 'Rate limit reached') }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
-    hf = unusedProvider();
-    process.env.AI_SMART_CHAIN = 'groq,gemini';
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
+    process.env.AI_SMART_CHAIN = 'hf,claude';
 
     const tools = [{ type: 'function' as const, function: { name: 'get_events', description: 'x', parameters: {} } }];
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, tools }, {});
     const withTools = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, tools }, {});
-    expect(withTools.text).toBe('from gemini');
-    expect(groq.requestedModels).toHaveLength(1);
+    expect(withTools.text).toBe('from claude');
+    expect(hf.requestedModels).toHaveLength(1);
 
     const withoutTools = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
-    expect(withoutTools.text).toBe('from groq');
+    expect(withoutTools.text).toBe('from hf');
   });
 
   // A provider that reported a spent account is never forced: while every
   // circuit is open the round fails with skipped diagnostics instead of paying
-  // four guaranteed rejections (this used to be "try them anyway").
+  // three guaranteed rejections (this used to be "try them anyway").
   test('a chain where every account is depleted is not forced', async () => {
     const spent = apiError(429, 'Weekly/Monthly Limit Exhausted, resets tomorrow');
     zai = makeProvider({
@@ -464,9 +421,8 @@ describe('benching a provider that said it is out', () => {
         { kind: 'text', text: 'from zai' },
       ],
     });
-    groq = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
     hf = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {}).catch(() => null);
     const second = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {}).catch(
@@ -475,7 +431,7 @@ describe('benching a provider that said it is out', () => {
 
     expect(second).toBeInstanceOf(AllProvidersFailedError);
     if (!(second instanceof AllProvidersFailedError)) throw new Error('unreachable');
-    expect(second.failures).toHaveLength(4);
+    expect(second.failures).toHaveLength(3);
     expect(second.failures.every((f) => f.skippedBeforeRequest === true)).toBe(true);
     expect(second.roundMetrics.attemptCount).toBe(0);
     expect(zai.requestedModels).toHaveLength(1);
@@ -487,8 +443,7 @@ describe('benching a provider that said it is out', () => {
   test('a benched chain still reports the outage', async () => {
     const spent = apiError(429, 'Weekly/Monthly Limit Exhausted, resets tomorrow');
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
-    groq = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
     hf = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {}).catch(() => null);
@@ -535,38 +490,36 @@ describe('durable provider circuit', () => {
     rmSync(stateDir, { recursive: true, force: true });
   });
 
-  test('two non-HF providers with different failures are skipped afterwards, one notice each', async () => {
+  test('two providers with different failures are skipped afterwards, one notice each', async () => {
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
-    groq = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(401, 'Invalid API key') }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+    hf = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(401, 'Invalid API key') }] });
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
 
     await ask();
     await ask();
     const third = await ask();
 
-    expect(third.text).toBe('from gemini');
+    expect(third.text).toBe('from claude');
     expect(zai.requestedModels).toHaveLength(1);
-    expect(groq.requestedModels).toHaveLength(1);
-    expect(gemini.requestedModels).toHaveLength(3);
+    expect(hf.requestedModels).toHaveLength(1);
+    expect(claude.requestedModels).toHaveLength(3);
     expect(incidentNotices()).toHaveLength(2);
   });
 
   test('a depleted account is skipped on the OTHER chain too', async () => {
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
-    groq = unusedProvider();
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, fast: true });
     const smart = await ask();
 
-    expect(smart.text).toBe('from gemini');
+    expect(smart.text).toBe('from claude');
     expect(zai.requestedModels).toEqual(['glm-5.1-air']);
   });
 
   test('a restart does not repeat the notice or re-ask the provider', async () => {
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
-    groq = unusedProvider();
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
     await ask();
     expect(incidentNotices()).toHaveLength(1);
 
@@ -587,8 +540,7 @@ describe('durable provider circuit', () => {
         { kind: 'throw', error: apiError(402, 'Payment Required') },
       ],
     });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
-    groq = unusedProvider();
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
 
     await ask();
     clock += 24 * 60 * MINUTE;
@@ -598,7 +550,7 @@ describe('durable provider circuit', () => {
 
     clock += 30 * MINUTE;
     const again = await ask(); // closed now: zai is asked again and fails again
-    expect(again.text).toBe('from gemini');
+    expect(again.text).toBe('from claude');
     expect(zai.requestedModels).toHaveLength(3);
     expect(incidentNotices()).toHaveLength(2);
   });
@@ -614,8 +566,7 @@ describe('durable provider circuit', () => {
         { kind: 'hold', gate, text: 'from zai' },
       ],
     });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
-    groq = unusedProvider();
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
     await ask();
     clock += 24 * 60 * MINUTE;
 
@@ -624,7 +575,7 @@ describe('durable provider circuit', () => {
     release();
     const texts = (await Promise.all([first, second])).map((r) => r.text).sort();
 
-    expect(texts).toEqual(['from gemini', 'from zai']);
+    expect(texts).toEqual(['from claude', 'from zai']);
     expect(zai.requestedModels).toHaveLength(2);
   });
 
@@ -632,8 +583,7 @@ describe('durable provider circuit', () => {
     zai = makeProvider({
       behaviors: [{ kind: 'partial-then-throw', text: 'half an ans', error: apiError(402, 'Payment Required') }],
     });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
-    groq = unusedProvider();
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
     const events: string[] = [];
     const callbacks = {
       onTextDelta: (text: string) => events.push(`text:${text}`),
@@ -643,19 +593,18 @@ describe('durable provider circuit', () => {
     const first = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, callbacks);
     const second = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, callbacks);
 
-    expect(first.text).toBe('from gemini');
-    expect(second.text).toBe('from gemini');
-    expect(events).toEqual(['text:half an ans', 'switch', 'text:from gemini', 'text:from gemini']);
+    expect(first.text).toBe('from claude');
+    expect(second.text).toBe('from claude');
+    expect(events).toEqual(['text:half an ans', 'switch', 'text:from claude', 'text:from claude']);
     expect(zai.requestedModels).toHaveLength(1);
-    expect(gemini.requestedModels).toHaveLength(2);
+    expect(claude.requestedModels).toHaveLength(2);
     expect(incidentNotices()).toHaveLength(1);
   });
 
   test('skipped providers stay visible in telemetry and are not counted as attempts', async () => {
-    process.env.AI_SMART_CHAIN = 'zai,gemini';
+    process.env.AI_SMART_CHAIN = 'zai,claude';
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
-    groq = unusedProvider();
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
     await ask();
 
     const result = await ask();
@@ -669,8 +618,7 @@ describe('durable provider circuit', () => {
     zai = makeProvider({
       behaviors: [{ kind: 'text', text: 'from zai' }],
     });
-    gemini = unusedProvider();
-    groq = unusedProvider();
+    claude = unusedProvider();
     const controller = new AbortController();
     controller.abort(apiError(402, 'Payment Required'));
     expect(zai.requestedModels).toEqual([]);
@@ -692,8 +640,7 @@ describe('durable provider circuit', () => {
         { kind: 'text', text: 'from zai' },
       ],
     });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
-    groq = unusedProvider();
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
     const tools = [{ type: 'function' as const, function: { name: 'get_events', description: 'x', parameters: {} } }];
 
     await ask();
@@ -706,8 +653,7 @@ describe('durable provider circuit', () => {
 
   test('a rate-limit incident notifies once and is silently skipped afterward', async () => {
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(429, 'Rate limit reached') }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
-    groq = unusedProvider();
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
 
     await ask();
     await ask();
@@ -718,8 +664,7 @@ describe('durable provider circuit', () => {
 
   test('the incident notice never contains the provider error body', async () => {
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required SECRET-BODY-TEXT') }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
-    groq = unusedProvider();
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
 
     await ask();
 
@@ -729,75 +674,54 @@ describe('durable provider circuit', () => {
 });
 
 describe('provider order', () => {
-  test('verified account limit reaches actual Groq request preflight', async () => {
-    process.env.AI_SMART_CHAIN = 'groq,gemini';
-    process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
-    process.env.GROQ_TPM_LIMITS = '{"openai/gpt-oss-120b":250000}';
-    groq = makeProvider({ behaviors: [{ kind: 'text', text: 'large request admitted' }] });
-    gemini = unusedProvider();
-    hf = unusedProvider();
-    zai = unusedProvider();
-    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'x'.repeat(50000) }], maxTokens: 200 });
-    expect(result.text).toBe('large request admitted');
-    expect(result.metrics?.attemptCount).toBe(1);
-    expect(groq.requestedModels).toEqual(['openai/gpt-oss-120b']);
-    expect(gemini.requestedModels).toEqual([]);
-  });
-
-  test('default main route starts with configured OSS120 without waiting on z.ai', async () => {
+  test('default main route starts with z.ai', async () => {
     delete process.env.AI_SMART_CHAIN;
-    process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
-    groq = makeProvider({ behaviors: [{ kind: 'text', text: 'main reply' }] });
-    gemini = unusedProvider();
+    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'main reply' }] });
+    claude = unusedProvider();
     hf = unusedProvider();
-    zai = unusedProvider();
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'synthetic request' }], maxTokens: 256 });
     expect(result.text).toBe('main reply');
     expect(result.metrics?.attemptCount).toBe(1);
-    expect(groq.requestedModels).toEqual(['openai/gpt-oss-120b']);
-    expect(zai.requestedModels).toEqual([]);
+    expect(zai.requestedModels).toEqual(['glm-5.1']);
+    expect(claude.requestedModels).toEqual([]);
     expect(hf.requestedModels).toEqual([]);
   });
-  test('default main failure falls directly to configured Gemini main, not its fast model', async () => {
+  test('default main failure falls directly to configured Claude main, not its fast model', async () => {
     delete process.env.AI_SMART_CHAIN;
-    groq = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'unavailable') }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'main fallback' }] });
-    zai = unusedProvider();
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'unavailable') }] });
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'main fallback' }] });
     hf = unusedProvider();
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'synthetic request' }], maxTokens: 256 });
     expect(result.text).toBe('main fallback');
     expect(result.metrics?.attemptCount).toBe(2);
-    expect(gemini.requestedModels).toEqual(['gemini-main']);
-    expect(zai.requestedModels).toEqual([]);
+    expect(claude.requestedModels).toEqual(['claude-main']);
+    expect(hf.requestedModels).toEqual([]);
   });
 
-  test('default main fallback still reaches HF before z.ai after both responsive providers fail', async () => {
+  test('default main fallback reaches HF last after z.ai and Claude fail', async () => {
     delete process.env.AI_SMART_CHAIN;
-    groq = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic groq unavailable') }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic google unavailable') }] });
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic z.ai unavailable') }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic claude unavailable') }] });
     hf = makeProvider({ behaviors: [{ kind: 'text', text: 'verified HF recovery' }] });
-    zai = unusedProvider();
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'synthetic request' }], maxTokens: 256 });
     expect(result.text).toBe('verified HF recovery');
     expect(result.metrics?.attemptCount).toBe(3);
     expect(result.metrics?.chain).toBe('smart');
     expect(hf.requestedModels).toEqual(['hf-main']);
-    expect(zai.requestedModels).toEqual([]);
   });
   // The order is the whole point of the configuration: a provider that answers
   // 429 all week, or whose tier rejects every request of this size, must be
   // routed around without a deploy.
   test('tries providers in the configured order', async () => {
-    process.env.AI_SMART_CHAIN = 'gemini,hf,zai,groq';
-    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(429, 'rate limited') }] });
+    process.env.AI_SMART_CHAIN = 'claude,hf,zai';
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(429, 'rate limited') }] });
     hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
     zai = unusedProvider();
-    groq = unusedProvider();
 
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
 
     expect(result.text).toBe('from hf');
-    expect(gemini.requestedModels).toEqual(['gemini-main']);
+    expect(claude.requestedModels).toEqual(['claude-main']);
     expect(hf.requestedModels).toEqual(['hf-main']);
     expect(zai.requestedModels).toEqual([]);
   });
@@ -807,97 +731,83 @@ describe('provider order', () => {
   // fallback has to keep the preference the default order encodes, not the
   // order the provider ids happen to be declared in.
   test('an order naming nothing configured falls back to the default order', async () => {
-    process.env.AI_SMART_CHAIN = 'groq';
-    process.env.GROQ_API_KEY = '';
+    process.env.AI_SMART_CHAIN = 'claude';
+    delete process.env.CLAUDE_API_TOKEN;
     hf = unusedProvider();
-    zai = unusedProvider();
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
-    groq = unusedProvider();
+    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'from z.ai' }] });
+    claude = unusedProvider();
 
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
 
-    expect(result.text).toBe('from gemini');
-    expect(gemini.requestedModels).toEqual(['gemini-main']);
+    expect(result.text).toBe('from z.ai');
+    expect(zai.requestedModels).toEqual(['glm-5.1']);
     expect(hf.requestedModels).toEqual([]);
-    expect(zai.requestedModels).toEqual([]);
+    expect(claude.requestedModels).toEqual([]);
   });
 
   // Missing configured fast providers fall back to the short-call default, not smart order.
   test('the fast chain falls back to its own default order', async () => {
-    process.env.AI_FAST_CHAIN = 'groq';
-    process.env.GROQ_API_KEY = '';
-    zai = unusedProvider();
+    process.env.AI_FAST_CHAIN = 'claude';
+    delete process.env.CLAUDE_API_TOKEN;
+    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'from z.ai fast' }] });
     hf = unusedProvider();
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini fast' }] });
-    groq = unusedProvider();
+    claude = unusedProvider();
 
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, fast: true }, {});
 
-    expect(result.text).toBe('from gemini fast');
-    expect(zai.requestedModels).toEqual([]);
-    expect(gemini.requestedModels).toEqual(['gemini-fast']);
-    expect(groq.requestedModels).toEqual([]);
+    expect(result.text).toBe('from z.ai fast');
+    expect(claude.requestedModels).toEqual([]);
+    expect(zai.requestedModels).toEqual(['glm-5.1-air']);
+    expect(hf.requestedModels).toEqual([]);
   });
 
   test.each([
     '',
     '   ',
-  ])('empty first Groq response %j falls through to the exact Gemini fast model', async (emptyText) => {
-    delete process.env.AI_FAST_CHAIN;
-    process.env.GROQ_FAST_MODEL = 'openai/gpt-oss-20b';
-    groq = makeProvider({ behaviors: [{ kind: 'text', text: emptyText }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'verified fallback' }] });
+  ])('empty first HF response %j falls through to the exact Claude fast model', async (emptyText) => {
+    process.env.AI_FAST_CHAIN = 'hf,claude';
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: emptyText }] });
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'verified fallback' }] });
     zai = unusedProvider();
-    hf = unusedProvider();
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 128, fast: true });
     expect(result.text).toBe('verified fallback');
-    expect(groq.requestedModels).toEqual(['openai/gpt-oss-20b']);
-    expect(gemini.requestedModels).toEqual(['gemini-fast']);
+    expect(hf.requestedModels).toEqual(['hf-fast']);
+    expect(claude.requestedModels).toEqual(['claude-fast']);
     expect(result.metrics?.attemptCount).toBe(2);
     expect(zai.requestedModels).toEqual([]);
   });
 
-  // A name in the order is a preference, not a requirement: Groq is optional
+  // A name in the order is a preference, not a requirement: Claude is optional
   // configuration and the chain has to hold together without it.
   test('skips a provider that has no model configured', async () => {
-    process.env.AI_SMART_CHAIN = 'groq,hf';
-    process.env.GROQ_MODEL = '';
+    process.env.AI_SMART_CHAIN = 'claude,hf';
+    process.env.CLAUDE_MODEL = '';
     hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
     zai = unusedProvider();
-    groq = unusedProvider();
-    gemini = unusedProvider();
+    claude = unusedProvider();
 
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
 
     expect(result.text).toBe('from hf');
-    expect(groq.requestedModels).toEqual([]);
+    expect(claude.requestedModels).toEqual([]);
   });
 
-  // Claude is the paid last resort: it follows z.ai in both default orders and
-  // each chain uses its own Claude model (Sonnet answers users, Haiku validates).
+  // Claude follows z.ai in both default orders and each chain uses its own
+  // Claude model (Sonnet answers users, Haiku validates).
   test.each([
     { fast: false, chain: 'smart', model: 'claude-main' },
     { fast: true, chain: 'fast', model: 'claude-fast' },
-  ])('default $chain chain reaches Claude $model only after z.ai fails', async ({ fast, chain, model }) => {
+  ])('default $chain chain reaches Claude $model directly after z.ai fails', async ({ fast, chain, model }) => {
     delete process.env.AI_SMART_CHAIN;
     delete process.env.AI_FAST_CHAIN;
-    Object.assign(process.env, {
-      CLAUDE_API_TOKEN: 'claude-key',
-      CLAUDE_MODEL: 'claude-main',
-      CLAUDE_FAST_MODEL: 'claude-fast',
-    });
-    const down = () => makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
-    groq = down();
-    gemini = down();
-    hf = down();
-    zai = down();
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
     claude = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from Claude' }] });
 
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, fast });
 
     expect(result.text).toBe('answer from Claude');
     expect(result.metrics?.chain).toBe(chain);
-    expect(result.metrics?.attemptCount).toBe(5);
+    expect(result.metrics?.attemptCount).toBe(2);
     expect(zai.requestedModels).toHaveLength(1);
     expect(claude.requestedModels).toEqual([model]);
   });
@@ -1010,19 +920,18 @@ describe('provider order', () => {
     expect(failure).toMatchObject({ failures: [{ emptyResponse: { maxOutputTokens: 128_000 } }] });
   });
 
-  test('the default chain ends at z.ai when no Claude token is configured', async () => {
+  test('the default chain skips Claude without a token and falls through to HF', async () => {
     delete process.env.AI_SMART_CHAIN;
     delete process.env.CLAUDE_API_TOKEN;
     Object.assign(process.env, { CLAUDE_MODEL: 'claude-main', CLAUDE_FAST_MODEL: 'claude-fast' });
-    groq = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
-    hf = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
-    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from z.ai' }] });
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from hf' }] });
 
     const result = await ask();
 
-    expect(result.text).toBe('answer from z.ai');
+    expect(result.text).toBe('answer from hf');
     expect(claude.requestedModels).toEqual([]);
+    expect(result.metrics?.attemptCount).toBe(2);
   });
 });
 
@@ -1030,96 +939,96 @@ describe('aiStreamRound — auto-detecting a live model', () => {
   beforeEach(() => {
     resetModelRegistry();
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: ZAI_QUOTA }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from Gemini' }] });
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from Claude' }] });
     hf = unusedProvider();
   });
 
-  test('deleted Groq model → /v1/models probed → request retried on Groq and succeeds', async () => {
-    groq = makeProvider({
+  test('deleted model → /v1/models probed → request retried on the live model and succeeds', async () => {
+    hf = makeProvider({
       behaviors: [
-        { kind: 'throw', error: GROQ_MODEL_GONE },
-        { kind: 'text', text: 'answer from Groq' },
+        { kind: 'throw', error: MODEL_GONE },
+        { kind: 'text', text: 'answer from HF' },
       ],
-      liveModels: ['whisper-large-v3', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+      liveModels: ['whisper-large-v3', 'replacement-model'],
     });
 
     const result = await ask();
 
-    expect(result.text).toBe('answer from Groq');
-    expect(result.providerUsed).toBe('Groq (openai/gpt-oss-120b)');
-    expect(groq.requestedModels).toEqual(['llama-3.3-70b-versatile', 'openai/gpt-oss-120b']);
-    expect(gemini.requestedModels).toEqual([]);
-    expect(result.metrics?.attemptCount).toBe(3); // z.ai quota + dead Groq model + replacement Groq request
+    expect(result.text).toBe('answer from HF');
+    expect(result.providerUsed).toBe('HF (replacement-model)');
+    expect(hf.requestedModels).toEqual(['hf-main', 'replacement-model']);
+    expect(claude.requestedModels).toEqual([]);
+    expect(result.metrics?.attemptCount).toBe(3); // z.ai quota + dead HF model + replacement HF request
     expect(result.metrics?.fallbackCount).toBe(1);
   });
 
   test('the resolved model is cached: the next request skips the dead model and the second probe', async () => {
-    groq = makeProvider({
+    hf = makeProvider({
       behaviors: [
-        { kind: 'throw', error: GROQ_MODEL_GONE },
-        { kind: 'text', text: 'answer from Groq' },
+        { kind: 'throw', error: MODEL_GONE },
+        { kind: 'text', text: 'answer from HF' },
       ],
-      liveModels: ['openai/gpt-oss-120b'],
+      liveModels: ['replacement-model'],
     });
 
     await ask();
     const second = await ask();
 
-    expect(second.text).toBe('answer from Groq');
-    expect(groq.requestedModels).toEqual([
-      'llama-3.3-70b-versatile',
-      'openai/gpt-oss-120b',
-      'openai/gpt-oss-120b', // second request goes straight to the live model
+    expect(second.text).toBe('answer from HF');
+    expect(hf.requestedModels).toEqual([
+      'hf-main',
+      'replacement-model',
+      'replacement-model', // second request goes straight to the live model
     ]);
-    expect(groq.modelsListCalls).toBe(1);
+    expect(hf.modelsListCalls).toBe(1);
   });
 
   test('discovery failure degrades gracefully to the next provider', async () => {
-    groq = makeProvider({
-      behaviors: [{ kind: 'throw', error: GROQ_MODEL_GONE }],
+    hf = makeProvider({
+      behaviors: [{ kind: 'throw', error: MODEL_GONE }],
       modelsListError: new Error('models endpoint unreachable'),
     });
 
     const result = await ask();
 
-    expect(result.text).toBe('answer from Gemini');
-    expect(groq.modelsListCalls).toBe(1);
-    expect(groq.requestedModels).toEqual(['llama-3.3-70b-versatile']);
+    expect(result.text).toBe('answer from Claude');
+    expect(hf.modelsListCalls).toBe(1);
+    expect(hf.requestedModels).toEqual(['hf-main']);
   });
 
   test('discovery finding nothing usable falls through to the next provider', async () => {
-    groq = makeProvider({
-      behaviors: [{ kind: 'throw', error: GROQ_MODEL_GONE }],
+    hf = makeProvider({
+      behaviors: [{ kind: 'throw', error: MODEL_GONE }],
       liveModels: ['whisper-large-v3', 'playai-tts'],
     });
 
     const result = await ask();
 
-    expect(result.text).toBe('answer from Gemini');
-    expect(groq.requestedModels).toEqual(['llama-3.3-70b-versatile']);
+    expect(result.text).toBe('answer from Claude');
+    expect(hf.requestedModels).toEqual(['hf-main']);
   });
 
   test('a replacement that also dies triggers one re-probe, then falls through', async () => {
-    groq = makeProvider({
-      behaviors: [{ kind: 'throw', error: GROQ_MODEL_GONE }],
-      liveModels: ['openai/gpt-oss-120b'],
+    hf = makeProvider({
+      behaviors: [{ kind: 'throw', error: MODEL_GONE }],
+      liveModels: ['replacement-model'],
     });
 
-    await ask(); // caches openai/gpt-oss-120b, which also 404s → falls through to Gemini
+    await ask(); // caches replacement-model, which also 404s → falls through to Claude
     const result = await ask();
 
-    expect(result.text).toBe('answer from Gemini');
+    expect(result.text).toBe('answer from Claude');
     // First request: dead configured model + retry on the replacement.
     // Second request: straight to the cached replacement, then one forced re-probe.
-    expect(groq.modelsListCalls).toBe(2);
+    expect(hf.modelsListCalls).toBe(2);
 
-    // The re-probe found only the model that just died, so Groq is recorded as
+    // The re-probe found only the model that just died, so HF is recorded as
     // having nothing usable. Further requests must NOT probe /v1/models again —
     // otherwise a provider whose listing lies costs an extra HTTP round trip on
     // every single user message.
     await ask();
     await ask();
-    expect(groq.modelsListCalls).toBe(2);
+    expect(hf.modelsListCalls).toBe(2);
   });
 });
 
@@ -1145,22 +1054,19 @@ describe('the chain a round runs on reaches the alert layer', () => {
       "Tool call validation failed: tool call validation failed: attempted to call tool 'create_event' which was not in request.tools",
     );
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
-    groq = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
-    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
     hf = makeProvider({ behaviors: [{ kind: 'throw', error: rejection }] });
   }
 
   function allProvidersAnswer(): void {
     zai = makeProvider({ behaviors: [{ kind: 'text', text: 'answer' }] });
-    groq = unusedProvider();
-    gemini = unusedProvider();
+    claude = unusedProvider();
     hf = unusedProvider();
   }
 
   function allProvidersDead(): void {
     zai = makeProvider({ behaviors: DEAD });
-    groq = makeProvider({ behaviors: DEAD });
-    gemini = makeProvider({ behaviors: DEAD });
+    claude = makeProvider({ behaviors: DEAD });
     hf = makeProvider({ behaviors: DEAD });
   }
 
@@ -1246,14 +1152,14 @@ describe('the chain a round runs on reaches the alert layer', () => {
 test('request-specific failure does not trigger an account incident from echoed text', async () => {
   const messages: string[] = [];
   initProviderAlerts({ botToken: 'synthetic', adminId: 1, send: (text) => messages.push(text), schedule: () => {} });
-  process.env.AI_SMART_CHAIN = 'zai,gemini';
+  process.env.AI_SMART_CHAIN = 'zai,claude';
   zai = makeProvider({
     behaviors: [
       { kind: 'throw', error: apiError(400, 'Bad input text contains: payment required') },
       { kind: 'text', text: 'healthy next request' },
     ],
   });
-  gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'fallback' }] });
+  claude = makeProvider({ behaviors: [{ kind: 'text', text: 'fallback' }] });
   const options = { messages: [{ role: 'user' as const, content: 'synthetic' }], maxTokens: 80 };
   expect((await aiStreamRound(options)).text).toBe('fallback');
   expect((await aiStreamRound(options)).text).toBe('healthy next request');

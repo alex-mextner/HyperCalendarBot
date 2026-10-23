@@ -2,11 +2,10 @@
 //
 // Some provider failures are not bad luck — they are a standing fact with a
 // known end. On 2026-09-02 z.ai answered every request with "Weekly/Monthly
-// Limit Exhausted. Your limit will reset at 2026-09-03 21:15:09", and Groq
-// answered 413 to every request carrying the tool catalog: 18 725 tokens
-// against a tier that allows 8 000 per minute. Retrying either changes nothing;
-// the chain simply paid two round trips before reaching a provider that works,
-// on every round of every message.
+// Limit Exhausted. Your limit will reset at 2026-09-03 21:15:09". Retrying
+// changes nothing; the chain simply paid a wasted round trip before reaching a
+// provider that works, on every round of every message. A request-size
+// rejection (413) on the tool catalog is the same kind of standing fact.
 //
 // This remembers "that provider is out until T" so the chain can skip it. Three
 // rules keep the memory from lying:
@@ -47,7 +46,7 @@ const TOO_LARGE_BLOCK_MS = 60 * 60 * 1000;
 /**
  * What a block covers. A spent quota blocks everything; a request rejected for
  * its size blocks only requests of that shape, and the fast chain's short
- * summaries still go through — that is most of what Groq is useful for here.
+ * summaries still go through.
  */
 export type BlockScope = 'all' | 'with-tools';
 

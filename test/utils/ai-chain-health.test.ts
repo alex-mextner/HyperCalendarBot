@@ -13,8 +13,8 @@ import {
 
 const DEAD: ProviderFailure[] = [
   { provider: 'z.ai (glm-5.1)', status: 429, message: 'Weekly/Monthly Limit Exhausted' },
-  { provider: 'Groq (openai/gpt-oss-120b)', status: 404, message: 'model does not exist' },
-  { provider: 'Gemini (models/gemini-2.5-flash)', status: 401, message: 'invalid key' },
+  { provider: 'HF (hf-main)', status: 404, message: 'model does not exist' },
+  { provider: 'Claude (claude-sonnet-5-5)', status: 401, message: 'invalid key' },
 ];
 
 describe('isAiChainDown — what the readiness endpoint asks', () => {
@@ -37,7 +37,7 @@ describe('isAiChainDown — what the readiness endpoint asks', () => {
 
   test('a provider answering again clears it', () => {
     reportAllProvidersFailed(DEAD, 'smart');
-    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'smart');
     expect(isAiChainDown()).toBe(false);
   });
 
@@ -81,7 +81,7 @@ describe('isAiChainDown — what the readiness endpoint asks', () => {
     clock += ALERT_POLICY.startupGraceMs + 1;
     reportAllProvidersFailed(DEAD, 'smart');
     clock += 12 * 60 * 60 * 1000;
-    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'smart');
     expect(isAiChainDown()).toBe(false);
   });
 
@@ -96,7 +96,7 @@ describe('isAiChainDown — what the readiness endpoint asks', () => {
 
     clock += ALERT_POLICY.startupGraceMs + 1;
     reportAllProvidersFailed(DEAD, 'smart');
-    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'smart');
     expect(isAiChainDown()).toBe(false);
 
     clock += ALERT_POLICY.flapGuardMs - 1;
@@ -111,7 +111,7 @@ describe('isAiChainDown — what the readiness endpoint asks', () => {
 
     clock += ALERT_POLICY.startupGraceMs + 1;
     reportAllProvidersFailed(DEAD, 'smart');
-    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'smart');
 
     clock += ALERT_POLICY.flapGuardMs + 1;
     reportAllProvidersFailed(DEAD, 'smart');
@@ -135,7 +135,7 @@ describe('hasChainAnswered — whether this process has proof either way', () =>
   });
 
   test('a provider answering is the proof', () => {
-    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'smart');
     expect(hasChainAnswered()).toBe(true);
   });
 
@@ -168,27 +168,27 @@ describe('isAiChainDown — the two chains are tracked apart', () => {
   // announce a recovery — the exact blind spot this work exists to close.
   test('a fast-chain answer does not clear a smart-chain outage', () => {
     reportAllProvidersFailed(DEAD, 'smart');
-    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'fast');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'fast');
     expect(isAiChainDown()).toBe(true);
   });
 
   test('a smart-chain answer clears it', () => {
     reportAllProvidersFailed(DEAD, 'smart');
-    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'smart');
     expect(isAiChainDown()).toBe(false);
   });
 
   test('only a smart-chain answer counts as proof the bot works', () => {
-    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'fast');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'fast');
     expect(hasChainAnswered()).toBe(false);
-    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'smart');
     expect(hasChainAnswered()).toBe(true);
   });
 
-  // The same false recovery one level down. Groq runs a large model in the smart
+  // The same false recovery one level down. HF runs a large model in the smart
   // chain and a small one in the fast chain; the large one going stale is
   // exactly the 2026-09-01 failure. If the small one answering closed that
-  // outage, the admin would be told Groq is working again while every
+  // outage, the admin would be told HF is working again while every
   // conversation still failed on it.
   test('a fast-chain answer does not announce the smart chain provider as working', () => {
     const sent: string[] = [];
@@ -204,16 +204,13 @@ describe('isAiChainDown — the two chains are tracked apart', () => {
     });
     clock += ALERT_POLICY.startupGraceMs + 1;
 
-    reportProviderFailure(
-      { provider: 'Groq (openai/gpt-oss-120b)', status: 404, message: 'model does not exist' },
-      'smart',
-    );
-    expect(sent.some((m) => m.includes('Groq'))).toBe(true);
+    reportProviderFailure({ provider: 'HF (hf-main)', status: 404, message: 'model does not exist' }, 'smart');
+    expect(sent.some((m) => m.includes('HF'))).toBe(true);
 
-    reportProviderAnswered('Groq (llama-3.1-8b-instant)', 'fast');
+    reportProviderAnswered('HF (hf-fast)', 'fast');
     expect(sent.some((m) => m.includes('working again'))).toBe(false);
 
-    reportProviderAnswered('Groq (openai/gpt-oss-120b)', 'smart');
+    reportProviderAnswered('HF (hf-main)', 'smart');
     expect(sent.some((m) => m.includes('working again'))).toBe(true);
   });
 });
@@ -232,7 +229,7 @@ describe('isAiChainDown — with no admin chat configured', () => {
     expect(isAiChainDown()).toBe(false);
     reportAllProvidersFailed(DEAD, 'smart');
     expect(isAiChainDown()).toBe(true);
-    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'smart');
     expect(isAiChainDown()).toBe(false);
   });
 });

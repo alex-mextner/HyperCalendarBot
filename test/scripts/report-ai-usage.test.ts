@@ -18,8 +18,8 @@ afterEach(() => {
 function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
   return {
     at: Date.now() - DAY_MS,
-    provider: 'groq',
-    model: 'openai/gpt-oss-120b',
+    provider: 'zai',
+    model: 'glm-5.1',
     chain: 'smart',
     purpose: 'agent',
     outcome: 'ok',
@@ -79,12 +79,12 @@ describe('scripts/report-ai-usage.ts', () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('AI usage, last 7 d · attempts: 2');
-    expect(result.stdout).toContain('groq:openai/gpt-oss-120b');
+    expect(result.stdout).toContain('zai:glm-5.1');
     expect(result.stdout).toContain('claude: no traffic in window');
   });
 
   test('--json prints the same data as machine-readable JSON', () => {
-    const database = databaseWith([event(), event({ provider: 'gemini', model: 'g' })]);
+    const database = databaseWith([event(), event({ provider: 'hf', model: 'g' })]);
 
     const result = run('--database', database, '--json', '--days', '30');
 
@@ -92,7 +92,7 @@ describe('scripts/report-ai-usage.ts', () => {
     const report = jsonReport.parse(result.stdout);
     expect(report.days).toBe(30);
     expect(report.totalAttempts).toBe(2);
-    expect(report.models.map((m) => `${m.provider}:${m.model}`)).toEqual(['groq:openai/gpt-oss-120b', 'gemini:g']);
+    expect(report.models.map((m) => `${m.provider}:${m.model}`)).toEqual(['zai:glm-5.1', 'hf:g']);
     expect(report.providers.find((p) => p.provider === 'claude')?.verdict).toBe('no_traffic');
   });
 

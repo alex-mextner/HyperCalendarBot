@@ -16,7 +16,7 @@ function classifyStatus(status: number, message: string): AiErrorClass {
   if (status === 402) return 'quota';
   if (status === 401 || status === 403) return 'auth';
   if (status === 408) return 'timeout';
-  // 413 is Groq's per-minute token limit; the chain treats it as a rate limit too.
+  // 413 is a per-minute token limit; the chain treats it as a rate limit too.
   if (status === 413) return 'rate_limit';
   if (status === 429) return QUOTA_WORDING.test(message) ? 'quota' : 'rate_limit';
   if (status >= 500) return 'server';

@@ -33,12 +33,10 @@ describe('estimateTokens', () => {
     expect(Math.abs(joined - parts)).toBeLessThanOrEqual(2);
   });
 
-  test('estimates the live tool payload close to what Groq reported for it', () => {
-    // Groq's own TPM accounting reported ~7 750 tokens for the 41 759-char tool
-    // catalog. Harmony renders tool schemas more compactly than raw JSON, so the
-    // estimate is expected to sit above that but in the same order of magnitude.
+  test('estimates the live tool payload close to what a provider billed for it', () => {
+    // A provider billed ~11 900 tokens for the 41 759-char tool catalog sent as raw JSON.
     const estimate = estimateTokens('x'.repeat(41_759));
-    expect(estimate).toBeGreaterThan(7_000);
+    expect(estimate).toBeGreaterThan(10_000);
     expect(estimate).toBeLessThan(14_000);
   });
 });

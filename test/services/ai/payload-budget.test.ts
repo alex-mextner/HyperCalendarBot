@@ -8,7 +8,6 @@ import { EventReminderRepository } from '../../../src/database/repositories/even
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
-import { preflightRequestFit } from '../../../src/services/ai/streaming.ts';
 import { buildSystemPrompt } from '../../../src/services/ai/system-prompt.ts';
 import { estimateTokens } from '../../../src/services/ai/token-estimate.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
@@ -24,12 +23,8 @@ import { HolidayService } from '../../../src/services/holiday/holiday-service.ts
  * verbose length, not to force further shrinking.
  *
  * The token budgets are in `estimateTokens` units, which are NOT any provider's
- * tokenizer: for this mix of JSON and Cyrillic the estimator reads high. The real
- * number, from Groq's own accounting on 2026-09-01, is 9 723 tokens for the
- * catalog plus the system prompt and one user turn, down from 11 977. Read the
- * budgets as "no bigger than today", never as "fits in provider X" — Groq's tier
- * caps a request at 8 000 tokens per minute, which even the reduced request does
- * not fit, and no budget here changes that.
+ * tokenizer: for this mix of JSON and Cyrillic the estimator reads high. Read the
+ * budgets as "no bigger than today", never as "fits in provider X".
  */
 const TOOL_CATALOG_CHAR_BUDGET = 36_000;
 const TOOL_CATALOG_TOKEN_BUDGET = 10_500;
@@ -138,21 +133,6 @@ describe('tool catalog budget', () => {
     const tools = catalog();
     const request = buildSystemPrompt(ctx) + catalogJson(tools) + ctx.messageText;
     expect(estimateTokens(request)).toBeLessThanOrEqual(budget);
-  });
-
-  test('the current full direct request is preflight-rejected for Groq gpt-oss 8K before network dispatch', () => {
-    const ctx = makeContext();
-    const tools = getToolDefinitions('text', false, WITH_CALLS);
-    const rejection = preflightRequestFit('groq', 'openai/gpt-oss-120b', {
-      messages: [
-        { role: 'system', content: buildSystemPrompt(ctx) },
-        { role: 'user', content: ctx.messageText },
-      ],
-      tools,
-      maxTokens: 1_024,
-    });
-    expect(rejection).not.toBeNull();
-    expect(rejection?.conservativeRequestedTokens).toBeGreaterThan(8_000);
   });
 
   test('every other mode stays within the same budget', () => {

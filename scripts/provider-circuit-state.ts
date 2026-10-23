@@ -8,8 +8,6 @@ const config = loadConfig();
 const path = `${config.DATABASE_PATH}.provider-state.sqlite`;
 const accounts: [ProviderId, string, string][] = [
   ['zai', config.ZAI_BASE_URL, config.ZAI_API_KEY],
-  ['groq', '', config.GROQ_API_KEY ?? ''],
-  ['gemini', config.GEMINI_BASE_URL, config.GEMINI_API_KEY],
   ['hf', config.HF_BASE_URL, config.HF_TOKEN],
   ['claude', '', config.CLAUDE_API_TOKEN ?? ''],
 ];

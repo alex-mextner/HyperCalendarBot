@@ -15,8 +15,8 @@ import {
 
 const NOW = Date.parse('2026-09-02T20:00:00Z');
 const ZAI_QUOTA = 'Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-09-03 21:15:09';
-const GROQ_TOO_LARGE =
-  'Request too large for model `openai/gpt-oss-120b` in organization `org_x` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 18725';
+const TOO_LARGE =
+  'Request too large for model `some-model` in organization `org_x` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 18725';
 
 function headersWith(retryAfter: string): Headers {
   return new Headers({ 'retry-after': retryAfter });
@@ -60,18 +60,18 @@ describe('what a failure implies', () => {
   // Two blocks with different scopes coexist: the shorter one used to overwrite
   // the longer, and the size rejection came back a request later.
   test('a brief quota block does not cut a standing size block short', () => {
-    noteFailureForEligibility('groq', 'smart', true, 413, GROQ_TOO_LARGE, undefined, NOW);
-    noteFailureForEligibility('groq', 'smart', false, 429, 'Rate limit reached', undefined, NOW);
+    noteFailureForEligibility('hf', 'smart', true, 413, TOO_LARGE, undefined, NOW);
+    noteFailureForEligibility('hf', 'smart', false, 429, 'Rate limit reached', undefined, NOW);
 
-    expect(isBlocked('groq', 'smart', false, NOW + 5 * 60 * 1000)).toBe(false);
-    expect(isBlocked('groq', 'smart', true, NOW + 5 * 60 * 1000)).toBe(true);
+    expect(isBlocked('hf', 'smart', false, NOW + 5 * 60 * 1000)).toBe(false);
+    expect(isBlocked('hf', 'smart', true, NOW + 5 * 60 * 1000)).toBe(true);
   });
 
   // A rate limit with no stated end gets the short block: guessing long is the
   // expensive mistake.
   test('a rate limit with no stated end gets two minutes', () => {
     const block = noteFailureForEligibility(
-      'gemini',
+      'zai',
       'smart',
       false,
       429,
@@ -101,10 +101,10 @@ describe('what a failure implies', () => {
 
   // The tier cannot grow a request; the catalog cannot shrink without a deploy.
   test('a size rejection blocks only the requests that carry tools', () => {
-    const block = noteFailureForEligibility('groq', 'smart', true, 413, GROQ_TOO_LARGE, undefined, NOW);
+    const block = noteFailureForEligibility('hf', 'smart', true, 413, TOO_LARGE, undefined, NOW);
     expect(block?.scope).toBe('with-tools');
-    expect(isBlocked('groq', 'smart', true, NOW + 60_000)).toBe(true);
-    expect(isBlocked('groq', 'smart', false, NOW + 60_000)).toBe(false);
+    expect(isBlocked('hf', 'smart', true, NOW + 60_000)).toBe(true);
+    expect(isBlocked('hf', 'smart', false, NOW + 60_000)).toBe(false);
   });
 
   // Everything else is worth retrying at once — benching on a 500 would turn a
@@ -135,16 +135,16 @@ describe('what a block does not cover', () => {
   // A request that was too large without the catalog was too large for its own
   // reasons; the next one may be short.
   test('a size rejection without tools benches nobody', () => {
-    expect(noteFailureForEligibility('groq', 'fast', false, 413, GROQ_TOO_LARGE, undefined, NOW)).toBeNull();
-    expect(isBlocked('groq', 'fast', false, NOW + 1000)).toBe(false);
+    expect(noteFailureForEligibility('hf', 'fast', false, 413, TOO_LARGE, undefined, NOW)).toBeNull();
+    expect(isBlocked('hf', 'fast', false, NOW + 1000)).toBe(false);
   });
 
   // A short request getting through says nothing about whether the catalog
   // fits, and ordinary summary traffic must not wipe that evidence.
   test('a success without tools leaves the size block standing', () => {
-    noteFailureForEligibility('groq', 'smart', true, 413, GROQ_TOO_LARGE, undefined, NOW);
-    clearBlock('groq', 'smart', false);
-    expect(isBlocked('groq', 'smart', true, NOW + 60_000)).toBe(true);
+    noteFailureForEligibility('hf', 'smart', true, 413, TOO_LARGE, undefined, NOW);
+    clearBlock('hf', 'smart', false);
+    expect(isBlocked('hf', 'smart', true, NOW + 60_000)).toBe(true);
   });
 
   // Error bodies echo the request and quote the provider's own rate-limit
@@ -179,7 +179,7 @@ describe('what a block does not cover', () => {
 describe('recognising the two failures', () => {
   test('reads the provider messages seen in production', () => {
     expect(isQuotaExhausted(429, ZAI_QUOTA)).toBe(true);
-    expect(isRequestTooLarge(413, GROQ_TOO_LARGE)).toBe(true);
+    expect(isRequestTooLarge(413, TOO_LARGE)).toBe(true);
     expect(isQuotaExhausted(500, 'Internal Server Error')).toBe(false);
     expect(isRequestTooLarge(400, 'Bad Request')).toBe(false);
   });

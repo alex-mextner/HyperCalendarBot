@@ -328,10 +328,9 @@ function regroupToolCallBlocks(messages: MessageParam[]): MessageParam[] {
  *      'tool_calls' must be followed by tool messages`.
  *   3. A tool-role message is sent only inside the complete call block directly
  *      above it, once per tool_call_id. Any other result is dropped: most often
- *      the history window starts on a result whose call row was cut off. Groq's
- *      Harmony renderer names a tool message after the call it answers and
- *      rejects a nameless one with `400 … Tools should have a name!`; Gemini
- *      rejects it with a bodiless 400.
+ *      the history window starts on a result whose call row was cut off. Chat
+ *      templates resolve a tool message's name from the call it answers and can
+ *      reject an orphaned result.
  */
 function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
   const paired: MessageParam[] = [];
