@@ -132,11 +132,29 @@ describe('selectReplacementModel', () => {
     expect(picked).toBe('model-b');
   });
 
+  test('never picks an excluded model, even when it is live and listed as preferred', () => {
+    const picked = selectReplacementModel({
+      liveModels: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'meta/llama-4-70b'],
+      configuredModel: 'dead-model',
+      preferences: ['openai/gpt-oss-120b'],
+    });
+    expect(picked).toBe('meta/llama-4-70b');
+  });
+
+  test('returns null when only excluded models are live', () => {
+    const picked = selectReplacementModel({
+      liveModels: ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b'],
+      configuredModel: 'dead-model',
+      preferences: [],
+    });
+    expect(picked).toBeNull();
+  });
+
   test('returns null when nothing usable is live', () => {
     const picked = selectReplacementModel({
       liveModels: ['whisper-large-v3', 'playai-tts'],
       configuredModel: 'dead-model',
-      preferences: ['openai/gpt-oss-120b'],
+      preferences: ['vendor/model-120b'],
     });
     expect(picked).toBeNull();
   });
@@ -148,7 +166,7 @@ describe('resolveModelOverride', () => {
   });
 
   test('probes /v1/models and returns a live replacement', async () => {
-    const { client, list } = makeListingClient(['whisper-large-v3', 'openai/gpt-oss-120b']);
+    const { client, list } = makeListingClient(['whisper-large-v3', 'vendor/model-120b']);
 
     const resolved = await resolveModelOverride({
       provider: 'hf',
@@ -156,37 +174,37 @@ describe('resolveModelOverride', () => {
       configuredModel: 'llama-3.3-70b-versatile',
     });
 
-    expect(resolved).toBe('openai/gpt-oss-120b');
+    expect(resolved).toBe('vendor/model-120b');
     expect(list).toHaveBeenCalledTimes(1);
   });
 
   test('caches the resolution: repeated failures probe /v1/models only once', async () => {
-    const { client, list } = makeListingClient(['openai/gpt-oss-120b']);
+    const { client, list } = makeListingClient(['vendor/model-120b']);
 
     const first = await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
     const second = await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
     const third = await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
 
-    expect([first, second, third]).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-120b', 'openai/gpt-oss-120b']);
+    expect([first, second, third]).toEqual(['vendor/model-120b', 'vendor/model-120b', 'vendor/model-120b']);
     expect(list).toHaveBeenCalledTimes(1);
   });
 
   test('getModelOverride returns the cached replacement so later requests skip the dead model', async () => {
-    const { client } = makeListingClient(['openai/gpt-oss-120b']);
+    const { client } = makeListingClient(['vendor/model-120b']);
     expect(getModelOverride('hf', 'dead-model')).toBeNull();
 
     await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
 
-    expect(getModelOverride('hf', 'dead-model')).toBe('openai/gpt-oss-120b');
+    expect(getModelOverride('hf', 'dead-model')).toBe('vendor/model-120b');
     expect(getModelOverride('hf', 'some-other-model')).toBeNull();
     expect(getModelOverride('zai', 'dead-model')).toBeNull();
   });
 
   test('forceRefresh re-probes when the previously resolved replacement also died', async () => {
-    const { client, list } = makeListingClient(['openai/gpt-oss-120b']);
+    const { client, list } = makeListingClient(['vendor/model-120b']);
     await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
 
-    const { client: newer, list: newerList } = makeListingClient(['openai/gpt-oss-20b']);
+    const { client: newer, list: newerList } = makeListingClient(['vendor/model-20b']);
     const resolved = await resolveModelOverride({
       provider: 'hf',
       client: newer,
@@ -194,23 +212,23 @@ describe('resolveModelOverride', () => {
       forceRefresh: true,
     });
 
-    expect(resolved).toBe('openai/gpt-oss-20b');
+    expect(resolved).toBe('vendor/model-20b');
     expect(list).toHaveBeenCalledTimes(1);
     expect(newerList).toHaveBeenCalledTimes(1);
-    expect(getModelOverride('hf', 'dead-model')).toBe('openai/gpt-oss-20b');
+    expect(getModelOverride('hf', 'dead-model')).toBe('vendor/model-20b');
   });
 
   test('deadModel keeps a lying listing from handing back the id that just failed', async () => {
-    const { client } = makeListingClient(['openai/gpt-oss-120b', 'openai/gpt-oss-20b']);
+    const { client } = makeListingClient(['vendor/model-120b', 'vendor/model-20b']);
 
     const resolved = await resolveModelOverride({
       provider: 'hf',
       client,
       configuredModel: 'llama-3.3-70b-versatile',
-      deadModel: 'openai/gpt-oss-120b',
+      deadModel: 'vendor/model-120b',
     });
 
-    expect(resolved).toBe('openai/gpt-oss-20b');
+    expect(resolved).toBe('vendor/model-20b');
   });
 
   test('returns null and never throws when /v1/models errors', async () => {
@@ -278,27 +296,27 @@ describe('resolveModelOverride', () => {
       });
     });
 
-    const { client } = makeListingClient(['openai/gpt-oss-120b']);
+    const { client } = makeListingClient(['vendor/model-120b']);
     await resolveModelOverride({ provider: 'hf', client, configuredModel: 'llama-3.3-70b-versatile' });
     // A cached second call must not re-notify.
     await resolveModelOverride({ provider: 'hf', client, configuredModel: 'llama-3.3-70b-versatile' });
 
     expect(seen).toEqual([
-      { provider: 'hf', configuredModel: 'llama-3.3-70b-versatile', resolvedModel: 'openai/gpt-oss-120b' },
+      { provider: 'hf', configuredModel: 'llama-3.3-70b-versatile', resolvedModel: 'vendor/model-120b' },
     ]);
     expect(listModelOverrides()).toHaveLength(1);
-    expect(listModelOverrides()[0]?.resolvedModel).toBe('openai/gpt-oss-120b');
+    expect(listModelOverrides()[0]?.resolvedModel).toBe('vendor/model-120b');
   });
 
   test('concurrent resolutions share a single /v1/models probe', async () => {
-    const { client, list } = makeListingClient(['openai/gpt-oss-120b']);
+    const { client, list } = makeListingClient(['vendor/model-120b']);
 
     const results = await Promise.all([
       resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' }),
       resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' }),
     ]);
 
-    expect(results).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-120b']);
+    expect(results).toEqual(['vendor/model-120b', 'vendor/model-120b']);
     expect(list).toHaveBeenCalledTimes(1);
   });
 
@@ -306,18 +324,18 @@ describe('resolveModelOverride', () => {
     // Two user messages arriving together both hit the dead cached replacement.
     // Each asks for a refresh; they must join the same probe, not start two that
     // finish out of order and leave the cache holding the older answer.
-    const { client } = makeListingClient(['openai/gpt-oss-120b']);
+    const { client } = makeListingClient(['vendor/model-120b']);
     await resolveModelOverride({ provider: 'hf', client, configuredModel: 'dead-model' });
 
-    const { client: refreshed, list: refreshedList } = makeListingClient(['openai/gpt-oss-20b']);
+    const { client: refreshed, list: refreshedList } = makeListingClient(['vendor/model-20b']);
     const results = await Promise.all([
       resolveModelOverride({ provider: 'hf', client: refreshed, configuredModel: 'dead-model', forceRefresh: true }),
       resolveModelOverride({ provider: 'hf', client: refreshed, configuredModel: 'dead-model', forceRefresh: true }),
     ]);
 
-    expect(results).toEqual(['openai/gpt-oss-20b', 'openai/gpt-oss-20b']);
+    expect(results).toEqual(['vendor/model-20b', 'vendor/model-20b']);
     expect(refreshedList).toHaveBeenCalledTimes(1);
-    expect(getModelOverride('hf', 'dead-model')).toBe('openai/gpt-oss-20b');
+    expect(getModelOverride('hf', 'dead-model')).toBe('vendor/model-20b');
   });
 
   test('a slow probe does not clear a newer probe started for the same model', async () => {
@@ -329,12 +347,12 @@ describe('resolveModelOverride', () => {
       await new Promise<void>((resolve) => {
         releaseFirst = resolve;
       });
-      return { data: [{ id: 'openai/gpt-oss-120b' }] };
+      return { data: [{ id: 'vendor/model-120b' }] };
     });
     const slow: ModelListingClient = { models: { list: firstList } };
 
     const first = resolveModelOverride({ provider: 'hf', client: slow, configuredModel: 'dead-model' });
-    const { client: second, list: secondList } = makeListingClient(['openai/gpt-oss-20b']);
+    const { client: second, list: secondList } = makeListingClient(['vendor/model-20b']);
     const forced = resolveModelOverride({
       provider: 'hf',
       client: second,
@@ -347,7 +365,7 @@ describe('resolveModelOverride', () => {
 
     const third = await resolveModelOverride({ provider: 'hf', client: second, configuredModel: 'dead-model' });
 
-    expect(third).toBe('openai/gpt-oss-20b');
+    expect(third).toBe('vendor/model-20b');
     expect(secondList).toHaveBeenCalledTimes(1);
   });
 });

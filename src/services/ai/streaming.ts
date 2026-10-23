@@ -23,6 +23,7 @@ import {
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger, logOnce } from '../../utils/logger.ts';
 import { claudeClient, hfClient, openrouterClient, zaiClient } from './clients.ts';
+import { excludedModelReason, type ModelPreset, presetRequestFields } from './model-presets.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
 import {
   type Admission,
@@ -523,13 +524,20 @@ export function acceptsSamplingTemperature(provider: ProviderId): boolean {
  */
 export const CLAUDE_MAX_OUTPUT_TOKENS = 128_000;
 
-/** Standard OpenAI streaming adapter (works for every provider). */
-function streamingSlot(
+/**
+ * Standard OpenAI streaming adapter (works for every provider). A `preset` carries the settings its
+ * model was measured with, and applies only while the slot sends exactly that model: its temperature
+ * replaces the caller's, its output ceiling is a floor under the caller's limit (a reasoning model spends
+ * output tokens before it answers; the visible stream is still cut at the caller's limit) and its effort
+ * goes out in the field the provider understands.
+ */
+export function streamingSlot(
   label: string,
   provider: ProviderId,
   getClient: () => OpenAI,
   configuredModel: string,
   circuitKey: string,
+  preset?: ModelPreset,
 ): ProviderSlot {
   return {
     label,
@@ -539,11 +547,19 @@ function streamingSlot(
     getClient,
     stream: async (model, opts, cbs, onHttpAttempt) => {
       let attemptStartedAt = performance.now();
+      // Settings were measured on one model: a live replacement for it, or another model's slot, runs plain.
+      const active = preset && preset.models[provider] === model ? preset : undefined;
+      // A raised server cap must not raise what the caller gets: the visible stream is cut at its own limit.
+      const raisedOutputCap = (active?.maxOutputTokens ?? 0) > opts.maxTokens;
       const params: OpenAI.ChatCompletionCreateParamsStreaming = {
         model,
         messages: opts.messages,
-        max_tokens: provider === 'claude' ? CLAUDE_MAX_OUTPUT_TOKENS : opts.maxTokens,
-        ...(acceptsSamplingTemperature(provider) ? { temperature: opts.temperature ?? 0.3 } : {}),
+        max_tokens:
+          provider === 'claude' ? CLAUDE_MAX_OUTPUT_TOKENS : Math.max(opts.maxTokens, active?.maxOutputTokens ?? 0),
+        ...(acceptsSamplingTemperature(provider)
+          ? { temperature: active?.temperature ?? opts.temperature ?? 0.3 }
+          : {}),
+        ...(active ? presetRequestFields(provider, active) : {}),
         stream: true,
         ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
       };
@@ -589,7 +605,7 @@ function streamingSlot(
         cbs,
         attemptStartedAt,
         opts.signal,
-        provider === 'claude' ? opts.maxTokens : undefined,
+        provider === 'claude' || raisedOutputCap ? opts.maxTokens : undefined,
       );
 
       const invalidTools =
@@ -734,6 +750,16 @@ function buildChain(
           if (wasChosen) aiLogger.warn(detail, 'Provider named in the chain order is not configured — skipping it');
           else aiLogger.debug(detail, 'Optional provider in the default chain order is not configured — skipping it');
         });
+        continue;
+      }
+      const excludedReason = excludedModelReason(model);
+      if (excludedReason) {
+        logOnce(`excluded:${kind}:${provider}:${model}`, () =>
+          aiLogger.error(
+            { chain: kind, provider, model },
+            `Configured model is on the excluded list (${excludedReason}) — skipping it`,
+          ),
+        );
         continue;
       }
       chain.push(
