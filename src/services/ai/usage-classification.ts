@@ -12,8 +12,15 @@ const CONNECTION_FAULT_CODES = ['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENET
 const QUOTA_WORDING =
   /exceeded your current quota|quota (?:exceeded|exhausted|reset)|limit exhausted|insufficient (?:balance|funds|credit)|credit balance/i;
 
+/**
+ * A 403 that rejects one INPUT (the provider's content policy or moderation) says nothing about the
+ * key. Shared with the circuit, which refuses to open on it for the same reason.
+ */
+export const MODERATION_REJECTION = /content policy|safety (?:policy|filter)|requires moderation|input was flagged/i;
+
 function classifyStatus(status: number, message: string): AiErrorClass {
   if (status === 402) return 'quota';
+  if (status === 403 && MODERATION_REJECTION.test(message)) return 'bad_request';
   if (status === 401 || status === 403) return 'auth';
   if (status === 408) return 'timeout';
   // 413 is a per-minute token limit; the chain treats it as a rate limit too.

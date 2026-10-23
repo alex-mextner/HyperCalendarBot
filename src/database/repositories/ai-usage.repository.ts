@@ -45,6 +45,15 @@ export interface AiUsageEvent {
   cachedTokens: number | null;
   /** Opaque per-agent-run correlation id. */
   requestId: string | null;
+  /** Routing role (`planner`, `executor`, `repair`) of a role-routed attempt; null on a legacy chain. */
+  role: string | null;
+  /** Model preset id the slot ran; null when none. */
+  preset: string | null;
+  /**
+   * Cost of the attempt in micro-USD (1e-6 USD): the cost the provider reported, else the dated list
+   * price of the route. null is unknown, never zero.
+   */
+  costMicroUsd: number | null;
 }
 
 export interface AiUsageRow extends AiUsageEvent {
@@ -68,6 +77,9 @@ interface AiUsageRecord {
   reasoning_tokens: number | null;
   cached_tokens: number | null;
   request_id: string | null;
+  role: string | null;
+  preset: string | null;
+  cost_micro_usd: number | null;
 }
 
 const READ_BATCH_SIZE = 500;
@@ -85,8 +97,9 @@ export class AiUsageRepository {
     const insert = this.db.prepare(
       `INSERT INTO ai_usage_events
          (at, provider, model, chain, purpose, outcome, error_class, http_status, skip_reason, duration_ms,
-          prompt_tokens, completion_tokens, reasoning_tokens, cached_tokens, request_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          prompt_tokens, completion_tokens, reasoning_tokens, cached_tokens, request_id,
+          role, preset, cost_micro_usd)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     this.db.transaction(() => {
       for (const e of events) {
@@ -106,6 +119,9 @@ export class AiUsageRepository {
           e.reasoningTokens,
           e.cachedTokens,
           e.requestId,
+          e.role,
+          e.preset,
+          e.costMicroUsd,
         );
       }
     })();
@@ -115,7 +131,8 @@ export class AiUsageRepository {
   *iterateSince(sinceMs: number, batchSize = READ_BATCH_SIZE): Generator<AiUsageRow> {
     const page = this.db.prepare<AiUsageRecord, [number, number, number]>(
       `SELECT id, at, provider, model, chain, purpose, outcome, error_class, http_status, skip_reason, duration_ms,
-              prompt_tokens, completion_tokens, reasoning_tokens, cached_tokens, request_id
+              prompt_tokens, completion_tokens, reasoning_tokens, cached_tokens, request_id,
+              role, preset, cost_micro_usd
        FROM ai_usage_events WHERE at >= ? AND id > ? ORDER BY id LIMIT ?`,
     );
     let afterId = 0;
@@ -139,6 +156,9 @@ export class AiUsageRepository {
           reasoningTokens: row.reasoning_tokens,
           cachedTokens: row.cached_tokens,
           requestId: row.request_id,
+          role: row.role,
+          preset: row.preset,
+          costMicroUsd: row.cost_micro_usd,
         };
         afterId = row.id;
       }

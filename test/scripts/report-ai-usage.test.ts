@@ -32,6 +32,9 @@ function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
     reasoningTokens: null,
     cachedTokens: null,
     requestId: null,
+    role: null,
+    preset: null,
+    costMicroUsd: null,
     ...overrides,
   };
 }
@@ -125,6 +128,37 @@ describe('scripts/report-ai-usage.ts', () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('ai_usage_events');
+  });
+
+  test('--json carries the cost and the per-role view', () => {
+    const database = databaseWith([
+      event({ role: 'executor', preset: 'glm53-flash-low', chain: 'role:executor', costMicroUsd: 1200 }),
+      event(),
+    ]);
+    const report = jsonCodec(
+      z.object({
+        models: z.array(z.object({ cost: z.object({ sumMicroUsd: z.number().nullable() }) })),
+        roles: z.array(z.object({ role: z.string(), provider: z.string() })),
+      }),
+    ).parse(run('--database', database, '--json').stdout);
+
+    expect(report.models[0]?.cost.sumMicroUsd).toBe(1200);
+    expect(report.roles.map((r) => `${r.role}/${r.provider}`)).toEqual(['executor/zai', 'legacy/zai']);
+    expect(run('--database', database).stdout).toContain('executor · zai');
+  });
+
+  test('a database that has the ledger but not migration 067 is reported as such', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hcb-ai-usage-'));
+    dirs.push(dir);
+    const path = join(dir, 'calendar.db');
+    const db = new Database(path);
+    runMigrations(db, migrations.slice(0, -1));
+    db.close();
+
+    const result = run('--database', path);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('067_ai_usage_role_preset_cost');
   });
 
   test('a missing database file is an error and is not created', () => {

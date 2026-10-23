@@ -26,6 +26,7 @@
 
 import type { ProviderChainKind } from '../../utils/ai-provider-alert.ts';
 import { logger } from '../../utils/logger.ts';
+import type { ModelRole } from './model-presets.ts';
 import type { ProviderId } from './provider-ids.ts';
 
 const eligibilityLogger = logger.child({ module: 'ai-eligibility' });
@@ -65,18 +66,26 @@ interface Block {
 type ProviderBlocks = { [scope in BlockScope]?: Block };
 
 /**
- * Keyed by provider AND chain, because the two chains talk to different models
+ * What a bench is scoped to besides the provider: a legacy chain (`smart`, `fast`) or one role round on
+ * one model (`role:executor:<model>`). The two legacy chains talk to different models of the same
+ * provider and fail independently, and a role round runs a model the legacy chains may not use at all,
+ * so a canary's 413 on its executor model must not bench the provider for every other user.
+ */
+export type BenchChain = ProviderChainKind | `role:${ModelRole}:${string}`;
+
+/**
+ * Keyed by provider AND chain, because the chains talk to different models
  * of the same provider and fail independently — the alerting layer already
  * treats them apart. A per-minute limit hit by a background summary must not
  * bench the model that answers people; when the same account-wide quota does
  * apply to both, the other chain learns it from its own next request, at the
  * cost of one round trip.
  */
-type BlockKey = `${ProviderId}:${ProviderChainKind}`;
+type BlockKey = `${ProviderId}:${BenchChain}`;
 
 const blocks = new Map<BlockKey, ProviderBlocks>();
 
-function blockKey(provider: ProviderId, chain: ProviderChainKind): BlockKey {
+function blockKey(provider: ProviderId, chain: BenchChain): BlockKey {
   return `${provider}:${chain}`;
 }
 
@@ -164,7 +173,7 @@ export function isQuotaExhausted(status: number | undefined, message: string): b
  */
 export function noteFailureForEligibility(
   provider: ProviderId,
-  chain: ProviderChainKind,
+  chain: BenchChain,
   hasTools: boolean,
   status: number | undefined,
   message: string,
@@ -229,7 +238,7 @@ export function noteFailureForEligibility(
  * block — otherwise ordinary summary traffic wipes the evidence and the next
  * user round pays the same guaranteed rejection.
  */
-export function clearBlock(provider: ProviderId, chain: ProviderChainKind, hasTools: boolean): void {
+export function clearBlock(provider: ProviderId, chain: BenchChain, hasTools: boolean): void {
   const key = blockKey(provider, chain);
   const existing = blocks.get(key);
   if (!existing) return;
@@ -255,7 +264,7 @@ function activeBlock(key: BlockKey, scope: BlockScope, now: number): Block | und
 /** True when a request of this shape should skip the provider right now. */
 export function isBlocked(
   provider: ProviderId,
-  chain: ProviderChainKind,
+  chain: BenchChain,
   hasTools: boolean,
   now: number = Date.now(),
 ): boolean {

@@ -45,9 +45,10 @@ export interface ModelPreset {
   maxOutputTokens?: number;
   /** Per provider: the same model costs different amounts on different hosts. Absent means unknown. */
   prices: Partial<Record<ProviderId, TokenPrice>>;
-  /** Roles the preset may be measured for; admission still needs a qualification per role. */
+  /** Roles the preset may be measured for; admission still needs a qualification per provider and role. */
   roles: readonly ModelRole[];
-  qualification: Qualification | null;
+  /** The measurement that admitted this preset, per provider it was measured through. Empty: none yet. */
+  qualifications: Partial<Record<ProviderId, Qualification>>;
 }
 
 /** Own-role task correctness a preset needs before it may take that role. */
@@ -74,7 +75,7 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
       },
     },
     roles: ['planner', 'executor'],
-    qualification: null,
+    qualifications: {},
   },
   {
     id: 'glm53-flash-low',
@@ -91,7 +92,7 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
       },
     },
     roles: ['planner', 'executor'],
-    qualification: null,
+    qualifications: {},
   },
   {
     id: 'glm53-low',
@@ -106,14 +107,14 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
       },
     },
     roles: ['repair'],
-    qualification: null,
+    qualifications: {},
   },
   {
     id: 'haiku',
     models: { claude: 'claude-haiku-5-5' },
     prices: {},
     roles: ['planner', 'executor'],
-    qualification: null,
+    qualifications: {},
   },
 ];
 
@@ -142,15 +143,42 @@ export function excludedModelReason(model: string): string | null {
   return EXCLUDED_MODELS.find(({ pattern }) => pattern.test(model))?.reason ?? null;
 }
 
-/** True when the preset was measured for `role` at or above both thresholds. */
-export function isQualifiedFor(preset: ModelPreset, role: ModelRole): boolean {
-  const { qualification } = preset;
-  if (!qualification || !preset.roles.includes(role)) return false;
+/**
+ * True when the preset was measured for `role` THROUGH `provider` at or above both thresholds. A model
+ * measured on one host says nothing about another: the effort control, the upstream and the limits differ,
+ * so z.ai serving a preset that was qualified through OpenRouter is a different, unmeasured route.
+ */
+export function isQualifiedFor(preset: ModelPreset, role: ModelRole, provider: ProviderId): boolean {
+  const qualification = preset.qualifications[provider];
+  if (!qualification || !preset.models[provider] || !preset.roles.includes(role)) return false;
   const rolePass = qualification.rolePass[role];
   // Positive tests: a NaN score (0 cases / 0) must not pass because `NaN < x` is false.
   if (rolePass === undefined || !Number.isFinite(rolePass) || !(rolePass >= ROLE_PASS_MIN)) return false;
   const { historyPass } = qualification;
   return historyPass !== null && Number.isFinite(historyPass) && historyPass >= HISTORY_PASS_REQUIRED;
+}
+
+/** Micro-USD in one USD: the unit of `ai_usage_events.cost_micro_usd`. */
+export const MICRO_USD_PER_USD = 1_000_000;
+
+/**
+ * Cost in micro-USD (1e-6 USD) of one attempt from the dated list price of the preset that names this
+ * provider and model: tokens times the per-million price. Used only when the provider reported no cost
+ * itself. `null` is unknown, never zero: no price for the route, or a token count the provider did not
+ * report. List price without cache discounts, so an upper bound.
+ */
+export function estimateCostMicroUsd(
+  provider: ProviderId,
+  model: string,
+  promptTokens: number | null,
+  completionTokens: number | null,
+  presets: readonly ModelPreset[] = MODEL_PRESETS,
+): number | null {
+  if (promptTokens === null || completionTokens === null) return null;
+  const price = presets.find((preset) => preset.models[provider] === model)?.prices[provider];
+  if (!price) return null;
+  const cost = Math.round(promptTokens * price.inputUsdPerMTok + completionTokens * price.outputUsdPerMTok);
+  return Number.isSafeInteger(cost) && cost >= 0 ? cost : null;
 }
 
 /**

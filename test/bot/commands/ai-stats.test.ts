@@ -50,6 +50,9 @@ function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
     reasoningTokens: null,
     cachedTokens: null,
     requestId: null,
+    role: null,
+    preset: null,
+    costMicroUsd: null,
     ...overrides,
   };
 }
@@ -118,6 +121,28 @@ describe('handleAiStats', () => {
     await handleAiStats(asContext(ctx), repo, ADMIN_ID);
 
     expect(sent(ctx)[0]).toContain('claude: за период запросов нет');
+  });
+
+  test('shows cost and latency per role once a role-routed attempt is in the window', async () => {
+    repo.insertMany([
+      event({
+        provider: 'openrouter',
+        model: 'z-ai/glm-5.3-flash',
+        chain: 'role:executor',
+        role: 'executor',
+        preset: 'glm53-flash-low',
+        costMicroUsd: 2500,
+      }),
+      event(),
+    ]);
+    const ctx = makeCtx();
+
+    await handleAiStats(asContext(ctx), repo, ADMIN_ID);
+
+    const [text] = sent(ctx);
+    expect(text).toContain('executor · openrouter');
+    expect(text).toContain('legacy · zai');
+    expect(text).toContain('cost: $0.0025');
   });
 
   test('honours the days argument, so older rows drop out of the window', async () => {

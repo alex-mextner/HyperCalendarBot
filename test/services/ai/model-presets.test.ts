@@ -4,6 +4,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import {
+  estimateCostMicroUsd,
   excludedModelReason,
   HISTORY_PASS_REQUIRED,
   isQualifiedFor,
@@ -13,6 +14,7 @@ import {
   presetRequestFields,
   ROLE_PASS_MIN,
 } from '../../../src/services/ai/model-presets.ts';
+import type { ProviderId } from '../../../src/services/ai/provider-ids.ts';
 
 function preset(overrides: Partial<ModelPreset> = {}): ModelPreset {
   return {
@@ -20,7 +22,7 @@ function preset(overrides: Partial<ModelPreset> = {}): ModelPreset {
     models: { openrouter: 'vendor/model' },
     roles: ['executor'],
     prices: {},
-    qualification: null,
+    qualifications: {},
     ...overrides,
   };
 }
@@ -49,8 +51,12 @@ describe('seeded presets', () => {
 
   test('nothing is qualified until a measurement says so', () => {
     for (const p of MODEL_PRESETS) {
-      expect(p.qualification).toBeNull();
-      for (const role of p.roles) expect(isQualifiedFor(p, role)).toBe(false);
+      expect(p.qualifications).toEqual({});
+      for (const role of p.roles) {
+        for (const provider of Object.keys(p.models) as ProviderId[]) {
+          expect(isQualifiedFor(p, role, provider)).toBe(false);
+        }
+      }
     }
   });
 
@@ -90,7 +96,11 @@ describe('the excluded list', () => {
 describe('the qualification gate', () => {
   const sha = 'abc1234';
   const qualified = (rolePass: number, historyPass: number | null) =>
-    preset({ qualification: { sha, measuredAt: '2026-10-23', rolePass: { executor: rolePass }, historyPass } });
+    preset({
+      qualifications: {
+        openrouter: { sha, measuredAt: '2026-10-23', rolePass: { executor: rolePass }, historyPass },
+      },
+    });
 
   test('thresholds are 95% own-role and 100% history', () => {
     expect(ROLE_PASS_MIN).toBe(0.95);
@@ -98,34 +108,94 @@ describe('the qualification gate', () => {
   });
 
   test('a NaN score (zero cases measured) is never a pass', () => {
-    expect(isQualifiedFor(qualified(Number.NaN, 1), 'executor')).toBe(false);
-    expect(isQualifiedFor(qualified(1, Number.NaN), 'executor')).toBe(false);
+    expect(isQualifiedFor(qualified(Number.NaN, 1), 'executor', 'openrouter')).toBe(false);
+    expect(isQualifiedFor(qualified(1, Number.NaN), 'executor', 'openrouter')).toBe(false);
   });
   test('admits only at or above both thresholds', () => {
-    expect(isQualifiedFor(qualified(0.95, 1), 'executor')).toBe(true);
-    expect(isQualifiedFor(qualified(0.949, 1), 'executor')).toBe(false);
-    expect(isQualifiedFor(qualified(1, 0.99), 'executor')).toBe(false);
+    expect(isQualifiedFor(qualified(0.95, 1), 'executor', 'openrouter')).toBe(true);
+    expect(isQualifiedFor(qualified(0.949, 1), 'executor', 'openrouter')).toBe(false);
+    expect(isQualifiedFor(qualified(1, 0.99), 'executor', 'openrouter')).toBe(false);
   });
 
   test('an unmeasured history is not a pass', () => {
-    expect(isQualifiedFor(qualified(1, null), 'executor')).toBe(false);
+    expect(isQualifiedFor(qualified(1, null), 'executor', 'openrouter')).toBe(false);
   });
 
   test('a role it was never measured for is not qualified, even if the preset lists the role', () => {
     const p = preset({
       roles: ['executor', 'repair'],
-      qualification: { sha, measuredAt: '2026-10-23', rolePass: { executor: 1 }, historyPass: 1 },
+      qualifications: {
+        openrouter: { sha, measuredAt: '2026-10-23', rolePass: { executor: 1 }, historyPass: 1 },
+      },
     });
-    expect(isQualifiedFor(p, 'executor')).toBe(true);
-    expect(isQualifiedFor(p, 'repair')).toBe(false);
+    expect(isQualifiedFor(p, 'executor', 'openrouter')).toBe(true);
+    expect(isQualifiedFor(p, 'repair', 'openrouter')).toBe(false);
   });
 
   test('a role outside the preset role set is never qualified', () => {
     const p = preset({
       roles: ['planner'],
-      qualification: { sha, measuredAt: '2026-10-23', rolePass: { executor: 1 }, historyPass: 1 },
+      qualifications: {
+        openrouter: { sha, measuredAt: '2026-10-23', rolePass: { executor: 1 }, historyPass: 1 },
+      },
     });
-    expect(isQualifiedFor(p, 'executor')).toBe(false);
+    expect(isQualifiedFor(p, 'executor', 'openrouter')).toBe(false);
+  });
+});
+
+describe('qualification is per provider', () => {
+  const sha = 'abc1234';
+  const viaOpenrouter = preset({
+    models: { openrouter: 'vendor/model', zai: 'model' },
+    qualifications: {
+      openrouter: { sha, measuredAt: '2026-10-23', rolePass: { executor: 1 }, historyPass: 1 },
+    },
+  });
+
+  test('a preset measured through OpenRouter is not qualified on z.ai, where the effort control was never verified', () => {
+    expect(isQualifiedFor(viaOpenrouter, 'executor', 'openrouter')).toBe(true);
+    expect(isQualifiedFor(viaOpenrouter, 'executor', 'zai')).toBe(false);
+  });
+
+  test('a provider the preset has no model for is never qualified, whatever the table says', () => {
+    const p = preset({
+      models: { openrouter: 'vendor/model' },
+      qualifications: { zai: { sha, measuredAt: '2026-10-23', rolePass: { executor: 1 }, historyPass: 1 } },
+    });
+    expect(isQualifiedFor(p, 'executor', 'zai')).toBe(false);
+  });
+});
+
+describe('estimateCostMicroUsd (the dated price table, used only when the provider reported no cost)', () => {
+  const priced = preset({
+    models: { openrouter: 'vendor/model' },
+    prices: {
+      openrouter: { inputUsdPerMTok: 0.3, outputUsdPerMTok: 1.2, asOf: '2026-10-23', source: 'test' },
+    },
+  });
+
+  test('is tokens times the per-million price in micro-USD', () => {
+    expect(estimateCostMicroUsd('openrouter', 'vendor/model', 1000, 500, [priced])).toBe(900);
+    expect(estimateCostMicroUsd('openrouter', 'vendor/model', 1_000_000, 1_000_000, [priced])).toBe(1_500_000);
+  });
+
+  test('is unknown, never zero, without a price for that provider and model', () => {
+    expect(estimateCostMicroUsd('zai', 'vendor/model', 1000, 500, [priced])).toBeNull();
+    expect(estimateCostMicroUsd('openrouter', 'other/model', 1000, 500, [priced])).toBeNull();
+  });
+
+  test('is unknown when either token count was not reported', () => {
+    expect(estimateCostMicroUsd('openrouter', 'vendor/model', null, 500, [priced])).toBeNull();
+    expect(estimateCostMicroUsd('openrouter', 'vendor/model', 1000, null, [priced])).toBeNull();
+  });
+
+  test('a real zero-token answer costs a known zero', () => {
+    expect(estimateCostMicroUsd('openrouter', 'vendor/model', 0, 0, [priced])).toBe(0);
+  });
+
+  test('defaults to the seeded registry, which prices the OpenRouter models', () => {
+    expect(estimateCostMicroUsd('openrouter', 'deepseek/deepseek-v4.1-flash', 1_000_000, 0)).toBe(300_000);
+    expect(estimateCostMicroUsd('claude', 'claude-haiku-5-5', 1000, 1000)).toBeNull();
   });
 });
 

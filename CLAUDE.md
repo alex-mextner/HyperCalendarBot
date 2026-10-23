@@ -252,14 +252,15 @@ cap) apply only to the `claude` provider, so do not route Claude models through 
 measuring. Live-model replacement is off for it (it lists hundreds of
 differently priced models), and OpenRouter accepts the `content: null` assistant turn that carries tool calls,
 so the transcript is sent unchanged. Never reintroduce gpt-oss, Groq chat or Gemini through it. Its circuit is
-scoped to the key AND the model (`openrouterCircuitScope`), because OpenRouter routes each model to a different
-upstream: a limit on one model must not bench the other.
+scoped to the model (`openrouterCircuitScope`) for rate limits and outages, because OpenRouter routes each model to a different
+upstream: a limit on one model must not bench the other. A rejected or spent key (401, 402, a non-moderation 403) opens one circuit for the
+whole key instead (`CircuitContext.accountKey`, one notice), and any answer closes both.
 
 **Model presets** (`src/services/ai/model-presets.ts`, 2026-10-23): one table of presets — a model plus the settings it was
 measured with (`deepseek41-flash`, `glm53-flash-low`, `glm53-low`, `haiku`). `models` maps a provider id to the model id
 that serves the preset there, `prices` states USD per million tokens with date and source per provider (absent = unknown, never
-0), `roles` lists the roles it may be measured for and `qualification` holds the measurement that admitted it
-(`null` for every seeded preset: nothing is qualified yet). `isQualifiedFor(preset, role)` is the gate: own-role
+0), `roles` lists the roles it may be measured for and `qualifications` holds, per provider, the measurement that admitted it
+(`{}` for every seeded preset: nothing is qualified yet). `isQualifiedFor(preset, role, provider)` is the gate: own-role
 correctness >= 95% AND 100% of the full labelled history. The excluded list (`excludedModelReason`: GPT-OSS, the small
 Qwen 3.8 27B) is enforced twice: `buildChain` skips a configured model on it with an error log, and live-model
 replacement (`selectReplacementModel`) never picks one — so a dead model cannot be swapped for a banned one. A slot given
@@ -271,12 +272,16 @@ provider whose control was verified — `reasoning.effort`. Chains still name pl
 `roles` is on) and one chain per role, `AI_PLANNER_CHAIN` / `AI_EXECUTOR_CHAIN` / `AI_REPAIR_CHAIN`, entries `provider` or `provider:preset`
 (same names in ExpenseSyncBot). Only agent rounds are roles: purpose `agent` is the executor, `retry` (the round after the answer validator
 rejected a draft) is the repair; the planner has no caller yet. Summaries, validators, intent learning etc. stay on the legacy fast chain. A preset
-entry loads only if the preset names a model for that provider, the model is not excluded, the provider has a key and `isQualifiedFor(preset, role)`
+entry loads only if the preset names a model for that provider, the model is not excluded, the provider has a key and `isQualifiedFor(preset, role, provider)`
 holds; every refused entry is logged at error level, and a role chain with nothing loadable falls back to the legacy chain. A plain `provider`
 entry is NOT gated, so `roles` mode with only unqualified presets leaves the plain entries (e.g. Claude) serving agent rounds: do not turn it on
-without a qualified preset or a deliberate plain chain. Known gaps recorded on #808 (roles are off by default and nothing is qualified): the provider
-bench and `ai_usage_events.chain` do not distinguish role rounds from legacy ones, the gate has no per-provider dimension, and a chain that
-empties at runtime does not fall back to legacy. Rollback is `AI_ROUTING=legacy`.
+without a qualified preset or a deliberate plain chain. Rollback is `AI_ROUTING=legacy`. Known limit: only OpenRouter has a per-model circuit, so a model-specific 429 on a z.ai preset slot opens the shared z.ai account circuit for every user's legacy rounds too (it was always so; recorded on #808). Four things keep a canary from touching anyone else through the bench, the ledger, qualification and replacement
+(#808, fixed in B4): a role slot's provider bench is keyed by `role:<role>:<model>` (`BenchChain` in `provider-eligibility.ts`), never the
+legacy `smart`/`fast` bench, and its ledger `chain` reads `role:<role>`; the gate is per provider (`isQualifiedFor(preset, role, provider)`
+reads `preset.qualifications[provider]`, so a preset measured through OpenRouter does not load on z.ai); a preset slot never runs a
+live-model replacement (neither a cached nor a fresh heuristic one) because that would serve the role unmeasured; and a role chain is
+followed by the legacy chain (minus models the role chain already asked), so a role chain whose slots all fail, are benched or sit behind an
+open circuit at runtime hands the round to the legacy chain instead of answering nobody.
 
 **A depleted or rejected provider account is skipped, not retried**: `src/services/ai/provider-circuit.ts`
 keeps one durable circuit per provider account for every provider in the chain (key = fingerprint
@@ -308,9 +313,15 @@ reported no usage — unknown is never written as 0. The row holds no prompt, co
 are buffered, written in one batch on the next event-loop turn, and a failed write is logged with
 `dbLogger.warn({ err })` and dropped: the answer never waits on it. Callers say what a round is for with
 `StreamRoundOptions.purpose`. The `cron-ai-usage-cleanup` job of the bot-tasks queue prunes rows older than
-180 days (`AI_USAGE_RETENTION_DAYS`). Reading: `bun scripts/report-ai-usage.ts [--days N] [--json]` (read-only, per
-provider:model counts, errors by class, token sums with the answers that reported none counted apart, p50/p95,
-and one verdict per provider that says `no traffic in window` for a provider that served nothing) and the
+180 days (`AI_USAGE_RETENTION_DAYS`). **Role, preset and cost** (migration 067, stage B4, same column names and meaning as
+ExpenseSyncBot's ledger): `role` (`planner`/`executor`/`repair`) and `preset` are set on the attempts of a role-routed slot and NULL on
+legacy-chain rows; such a row's `chain` reads `role:<role>` instead of `smart`/`fast`. `cost_micro_usd` (micro-USD, `>= 0`) is the cost
+OpenRouter reported in the response usage (`usage.cost`, trusted from OpenRouter only), else the dated list price of the preset that
+names that provider and model times the reported tokens (`estimateCostMicroUsd`, an upper bound: no cache discount), else NULL — unknown
+is never written as 0 and a failed attempt that was billed carries its cost. Reading: `bun scripts/report-ai-usage.ts [--days N] [--json]` (read-only, per
+provider:model counts, errors by class, token sums with the answers that reported none counted apart, cost (`—` when unknown, with a
+count of answers without a cost next to a partial sum), p50/p95, a Roles section of cost and latency per role and provider once any
+row has a role (role-less rows are `legacy`), and one verdict per provider that says `no traffic in window` for a provider that served nothing; it refuses a database that has not run 067) and the
 admin-only Telegram command `/ai_stats [days]` (same report, `t(lang).aiStats`, fail closed). Claude is second in the
 default order and gets no traffic while z.ai answers, so prove it alive with the real code path:
 `AI_SMART_CHAIN=claude AI_FAST_CHAIN=claude bun scripts/probe-ai-chain.ts --usage-database <temp.db> --expect-provider claude [--smart]`

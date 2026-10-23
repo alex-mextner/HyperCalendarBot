@@ -24,6 +24,9 @@ function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
     reasoningTokens: null,
     cachedTokens: null,
     requestId: null,
+    role: null,
+    preset: null,
+    costMicroUsd: null,
     ...overrides,
   };
 }
@@ -258,6 +261,110 @@ describe('summarizeAiUsage — one verdict per provider', () => {
 
   test('carries the window it summarised', () => {
     expect(summarizeAiUsage([], WINDOW).window).toEqual(WINDOW);
+  });
+});
+
+describe('summarizeAiUsage — cost', () => {
+  test('sums the known costs, billed failures included, and counts answers with an unknown cost apart', () => {
+    const group = groupOf(
+      [
+        event({ costMicroUsd: 100 }),
+        event({ costMicroUsd: 250 }),
+        event({ costMicroUsd: null }),
+        { ...failed('empty', null), costMicroUsd: 30 },
+      ],
+      'zai:glm-5.1',
+    );
+
+    expect(group.cost).toEqual({ sumMicroUsd: 380, reportedRows: 3, unknownRows: 1 });
+  });
+
+  test('a group with no known cost is unknown, never zero; a known zero stays zero', () => {
+    expect(groupOf([event(), event()], 'zai:glm-5.1').cost).toEqual({
+      sumMicroUsd: null,
+      reportedRows: 0,
+      unknownRows: 2,
+    });
+    expect(groupOf([event({ costMicroUsd: 0 })], 'zai:glm-5.1').cost).toEqual({
+      sumMicroUsd: 0,
+      reportedRows: 1,
+      unknownRows: 0,
+    });
+  });
+});
+
+describe('summarizeAiUsage — roles', () => {
+  const executor = (overrides: Partial<AiUsageEvent> = {}) =>
+    event({
+      provider: 'openrouter',
+      model: 'z-ai/glm-5.3-flash',
+      chain: 'role:executor',
+      role: 'executor',
+      preset: 'glm53-flash-low',
+      ...overrides,
+    });
+
+  test('there is no role view while no row carries a role, so the legacy report is unchanged', () => {
+    expect(summarizeAiUsage([event(), event()], WINDOW).roles).toEqual([]);
+  });
+
+  test('groups by role and provider, with latency, tokens and cost, and calls role-less rows legacy', () => {
+    const summary = summarizeAiUsage(
+      [
+        executor({ durationMs: 100, costMicroUsd: 10 }),
+        executor({ durationMs: 300, costMicroUsd: 30 }),
+        executor({ durationMs: 900, costMicroUsd: null }),
+        { ...executor(), outcome: 'error', errorClass: 'server', durationMs: 50, costMicroUsd: null },
+        event({ durationMs: 40 }),
+      ],
+      WINDOW,
+    );
+
+    expect(summary.roles.map((r) => [r.role, r.provider])).toEqual([
+      ['executor', 'openrouter'],
+      ['legacy', 'zai'],
+    ]);
+    expect(summary.roles[0]).toMatchObject({
+      ok: 3,
+      errors: 1,
+      p50DurationMs: 300,
+      p95DurationMs: 900,
+      cost: { sumMicroUsd: 40, reportedRows: 2, unknownRows: 1 },
+    });
+    // Every row of the fixture carries 10 prompt tokens, the failed attempt included.
+    expect(summary.roles[0]?.tokens.prompt.sum).toBe(40);
+    expect(summary.roles[1]).toMatchObject({ ok: 1, p50DurationMs: 40 });
+  });
+
+  test('orders planner, executor, repair, then legacy, and providers within a role in chain order', () => {
+    const summary = summarizeAiUsage(
+      [
+        event(),
+        executor({ role: 'repair', chain: 'role:repair' }),
+        executor({ provider: 'claude', model: 'claude-haiku-5-5' }),
+        executor(),
+        executor({ role: 'planner', chain: 'role:planner' }),
+      ],
+      WINDOW,
+    );
+
+    expect(summary.roles.map((r) => `${r.role}/${r.provider}`)).toEqual([
+      'planner/openrouter',
+      'executor/claude',
+      'executor/openrouter',
+      'repair/openrouter',
+      'legacy/zai',
+    ]);
+  });
+
+  test('a skipped row is counted as skipped in the role view and does not lower its success rate', () => {
+    const summary = summarizeAiUsage(
+      [executor(), skipped('circuit_open', { role: 'executor', provider: 'openrouter' })],
+      WINDOW,
+    );
+
+    expect(summary.roles[0]).toMatchObject({ ok: 1, skipped: 1, attempts: 2 });
+    expect(summary.roles[0]?.successRate).toBe(1);
   });
 });
 

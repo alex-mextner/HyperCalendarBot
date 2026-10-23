@@ -12,6 +12,10 @@
 //   • Scope is the account, not the chain. The key is a fingerprint of provider
 //     id, endpoint and credential, so a depleted account is skipped by the smart
 //     and the fast chain alike, and a rotated key starts with a clean record.
+//     A provider that serves many models behind one credential (OpenRouter) adds
+//     `CircuitContext.accountKey`: a rejected or spent key (401, 402, a 403 that is
+//     not a moderation rejection) opens that circuit once for every model, while
+//     rate limits and outages stay on the per-model `key`.
 //   • Opening is immediate for account failures (402, quota-worded 429, 401/403)
 //     and needs a streak for availability faults (5xx, connection errors) —
 //     one blip must not silence a provider. A size rejection, a bad request and a caller abort say nothing about the account and never count;
@@ -51,6 +55,7 @@ import {
 import { logger } from '../../utils/logger.ts';
 import { retryAfterMs } from './provider-eligibility.ts';
 import type { ProviderId } from './provider-ids.ts';
+import { MODERATION_REJECTION } from './usage-classification.ts';
 
 const circuitLogger = logger.child({ module: 'ai-circuit' });
 
@@ -125,11 +130,7 @@ export function classifyCircuitFailure(input: CircuitFailureInput, now: number):
     /request (?:is )?too (?:large|big)|context (?:length|window)|maximum (?:context|input)/i.test(input.message)
   )
     return null;
-  if (
-    status === 403 &&
-    /content policy|safety (?:policy|filter)|requires moderation|input was flagged/i.test(input.message)
-  )
-    return null;
+  if (status === 403 && MODERATION_REJECTION.test(input.message)) return null;
   if (status === 401 || status === 402 || status === 403 || status === 429) {
     const classified = classifyProviderFailure({ provider: 'circuit', status, message: input.message });
     const failureClass = status === 429 ? 'quota_exhausted' : classified;
@@ -162,6 +163,12 @@ export function providerCircuitKey(provider: ProviderId, baseUrl: string, apiKey
 
 export interface CircuitContext {
   key: string;
+  /**
+   * The circuit of the whole key, for a provider that serves many models behind one credential
+   * (OpenRouter), where `key` is per model. A rejected or spent key opens this one, so a revoked key is
+   * one incident, not one per model; rate limits and outages stay on `key`.
+   */
+  accountKey?: string;
   provider: ProviderId;
   /** Provider slot name including the model, e.g. `z.ai (glm-5.1)`. */
   label: string;
@@ -193,10 +200,20 @@ interface CircuitRow {
   reset_hint: string | null;
 }
 
+/**
+ * `key` names the circuit that decided: the lease of a probe sits on it, and a skip's notice belongs to it.
+ * `companion` is the second lease of a request that was probe for both its account and its model circuit.
+ */
 export type Admission =
   | { kind: 'allow' }
-  | { kind: 'probe'; owner: string }
-  | { kind: 'skip'; status: number | null; failureClass: CircuitFailureClass; noticePending: boolean };
+  | { kind: 'probe'; owner: string; key: string; companion?: { key: string; owner: string } }
+  | { kind: 'skip'; key: string; status: number | null; failureClass: CircuitFailureClass; noticePending: boolean };
+
+/** Every probe lease an admission holds. */
+function leasesOf(admission: Admission): { key: string; owner: string }[] {
+  if (admission.kind !== 'probe') return [];
+  return [{ key: admission.key, owner: admission.owner }, ...(admission.companion ? [admission.companion] : [])];
+}
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS provider_circuit (
   key TEXT PRIMARY KEY,
@@ -236,6 +253,7 @@ export class ProviderCircuitStore {
     if (!row || row.state !== 'open') return { kind: 'allow' };
     const skip: Admission = {
       kind: 'skip',
+      key,
       status: row.status,
       failureClass: row.failure_class,
       noticePending:
@@ -249,7 +267,7 @@ export class ProviderCircuitStore {
        WHERE key = ? AND state = 'open' AND ready_at <= ? AND lease_until <= ?`,
       [owner, now + CIRCUIT_LEASE_MS, key, now, now],
     );
-    return claimed.changes === 1 ? { kind: 'probe', owner } : skip;
+    return claimed.changes === 1 ? { kind: 'probe', owner, key } : skip;
   }
 
   /** Records a failure. Returns true when this call opened a new incident. */
@@ -454,25 +472,49 @@ function deliverPendingNotice(key: string): void {
 
 // ── Attempt lifecycle ──────────────────────────────────────────────────────
 
-/** Whether a request may use the provider now: allow, probe (holds the lease) or skip. */
+/** A skip is logged and, when its incident still owes the admin a notice, delivers it. */
+function noteSkip(ctx: CircuitContext, admission: Extract<Admission, { kind: 'skip' }>): Admission {
+  circuitLogger.debug(
+    { provider: ctx.provider, chain: ctx.chain, failureClass: admission.failureClass },
+    'Provider circuit open — skipping without a request',
+  );
+  if (admission.noticePending) deliverPendingNotice(admission.key);
+  return admission;
+}
+
+/**
+ * Whether a request may use the provider now: allow, probe (holds the lease) or skip. A context with an
+ * account circuit (OpenRouter) needs BOTH circuits to let the request through: an open circuit of either
+ * skips it, so a half-open account probe is never spent on a model whose own circuit is still cooling
+ * down. A lease claimed on the circuit that did not decide is handed back at once.
+ */
 export function admitProvider(ctx: CircuitContext): Admission {
   return guarded<Admission>('admit', { kind: 'allow' }, () => {
-    const admission = store().admit(ctx.key, providerCircuitClock.now());
-    if (admission.kind === 'skip') {
-      circuitLogger.debug(
-        { provider: ctx.provider, chain: ctx.chain, failureClass: admission.failureClass },
-        'Provider circuit open — skipping without a request',
-      );
-      if (admission.noticePending) deliverPendingNotice(ctx.key);
+    const circuits = store();
+    const now = providerCircuitClock.now();
+    const account: Admission = ctx.accountKey ? circuits.admit(ctx.accountKey, now) : { kind: 'allow' };
+    if (account.kind === 'skip') return noteSkip(ctx, account);
+    const model = circuits.admit(ctx.key, now);
+    if (model.kind === 'skip') {
+      if (account.kind === 'probe') circuits.releaseLease(account.key, account.owner, null);
+      return noteSkip(ctx, model);
     }
-    return admission;
+    if (account.kind === 'probe') {
+      // Both are half-open: keep both leases, so whichever circuit the verdict belongs to advances its own backoff.
+      return model.kind === 'probe' ? { ...account, companion: { key: model.key, owner: model.owner } } : account;
+    }
+    return model;
   });
 }
 
-/** The provider answered: the incident, if any, is over. */
+/** The provider answered: the incident, if any, is over. An answer proves the key as well as the model. */
 export function settleAnswered(ctx: CircuitContext): void {
   guarded('answered', undefined, () => {
-    if (store().recordSuccess(ctx.key)) {
+    let closed = false;
+    for (const key of ctx.accountKey ? [ctx.key, ctx.accountKey] : [ctx.key]) {
+      closed = store().recordSuccess(key) || closed;
+    }
+    if (closed) {
       circuitLogger.info({ provider: ctx.provider, chain: ctx.chain }, 'Provider circuit closed — provider answered');
     }
   });
@@ -487,18 +529,30 @@ export function settleFailure(ctx: CircuitContext, admission: Admission, input: 
     const now = providerCircuitClock.now();
     const verdict = classifyCircuitFailure(input, now);
     if (!verdict) {
-      settleInconclusive(ctx, admission, { pushBack: true });
+      settleInconclusive(admission, { pushBack: true });
       return false;
     }
-    const lease = admission.kind === 'probe' ? admission.owner : null;
-    const opened = store().recordFailure(ctx, verdict, lease, now);
+    // A rejected or spent KEY (401, 402, 403; a moderation 403 never reaches here) is the same incident for
+    // every model behind it, whatever the provider's wording says about it; a rate limit or an outage is a
+    // statement about one model's upstream.
+    const accountWide = verdict.status === 401 || verdict.status === 402 || verdict.status === 403;
+    const key = accountWide && ctx.accountKey ? ctx.accountKey : ctx.key;
+    const leases = leasesOf(admission);
+    for (const lease of leases.filter((held) => held.key !== key)) {
+      // A lease on the circuit this verdict does not settle goes back untouched.
+      store().releaseLease(lease.key, lease.owner, null);
+    }
+    const lease = leases.find((held) => held.key === key)?.owner ?? null;
+    // The incident of a whole key names the provider, not the one model that happened to meet it first.
+    const label = key === ctx.accountKey ? ctx.label.replace(/ \(.*\)$/, ' (all models)') : ctx.label;
+    const opened = store().recordFailure({ ...ctx, key, label }, verdict, lease, now);
     if (opened) {
       circuitLogger.warn(
         { provider: ctx.provider, chain: ctx.chain, failureClass: verdict.failureClass, status: verdict.status },
         'Provider circuit opened',
       );
     }
-    deliverPendingNotice(ctx.key);
+    deliverPendingNotice(key);
     return true; // One notice path owns every account incident.
   });
 }
@@ -508,14 +562,15 @@ export function settleFailure(ctx: CircuitContext, admission: Admission, input: 
  * rejection). A probe lease is handed back; `pushBack` delays the next probe by
  * the current backoff when the provider was actually contacted and misbehaved.
  */
-export function settleInconclusive(ctx: CircuitContext, admission: Admission, options: { pushBack: boolean }): void {
-  if (admission.kind !== 'probe') return;
+export function settleInconclusive(admission: Admission, options: { pushBack: boolean }): void {
   guarded('release', undefined, () => {
-    const row = store().read(ctx.key);
-    const retryAt =
-      options.pushBack && row
-        ? providerCircuitClock.now() + circuitBackoffMs(row.failure_class, row.backoff_step)
-        : null;
-    store().releaseLease(ctx.key, admission.owner, retryAt);
+    for (const { key, owner } of leasesOf(admission)) {
+      const row = store().read(key);
+      const retryAt =
+        options.pushBack && row
+          ? providerCircuitClock.now() + circuitBackoffMs(row.failure_class, row.backoff_step)
+          : null;
+      store().releaseLease(key, owner, retryAt);
+    }
   });
 }

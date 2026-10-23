@@ -1146,4 +1146,18 @@ export const migrations: Migration[] = [
       db.exec('CREATE INDEX idx_ai_usage_events_provider_at ON ai_usage_events(provider, at)');
     },
   },
+  {
+    name: '067_ai_usage_role_preset_cost',
+    up(db) {
+      // Stage B4: which routing role and registry preset served an attempt, and what it cost. All three
+      // are NULL on legacy-chain rows and on every row written before this migration; cost_micro_usd is
+      // NULL whenever the cost is unknown (nothing reported, no price for the route) and never 0 for
+      // "don't know". Same names and meaning as ExpenseSyncBot's ai_usage_events.
+      db.exec('ALTER TABLE ai_usage_events ADD COLUMN role TEXT');
+      db.exec('ALTER TABLE ai_usage_events ADD COLUMN preset TEXT');
+      db.exec(
+        'ALTER TABLE ai_usage_events ADD COLUMN cost_micro_usd INTEGER CHECK (cost_micro_usd IS NULL OR cost_micro_usd >= 0)',
+      );
+    },
+  },
 ];

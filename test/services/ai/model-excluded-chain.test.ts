@@ -111,7 +111,7 @@ describe('a preset on a slot', () => {
     maxOutputTokens: 8192,
     prices: {},
     roles: ['executor'],
-    qualification: null,
+    qualifications: {},
   };
   const MODEL_BY_PROVIDER = { openrouter: 'z-ai/glm-5.3-flash', zai: 'glm-5.3-flash' };
   interface RunOptions {
