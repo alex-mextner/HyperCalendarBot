@@ -191,3 +191,19 @@ test('a failed Claude request still leaves its error row, with the class and sta
   ]);
   expect(JSON.stringify(report)).not.toContain('SECRET');
 });
+
+test('--expect-provider without --usage-database is refused, so a pass can never look like proof of that provider', () => {
+  const run = Bun.spawnSync(
+    [
+      process.execPath,
+      '--no-env-file',
+      join(import.meta.dir, '../../scripts/probe-ai-chain.ts'),
+      '--expect-provider',
+      'claude',
+    ],
+    { stdout: 'pipe', stderr: 'pipe', env: { PATH: process.env.PATH ?? '' } },
+  );
+
+  expect(run.exitCode).toBe(2);
+  expect(new TextDecoder().decode(run.stderr)).toContain('--usage-database');
+});

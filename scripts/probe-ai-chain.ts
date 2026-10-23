@@ -121,7 +121,6 @@ export async function probeWithUsageLedger(
 }
 
 if (import.meta.main) {
-  const config = loadConfig();
   const { values } = parseArgs({
     args: process.argv.slice(2),
     options: {
@@ -138,6 +137,11 @@ if (import.meta.main) {
     process.exit(2);
   }
   const usageDatabase = values['usage-database'];
+  if (usageDatabase === undefined && expected !== undefined) {
+    console.error('--expect-provider needs --usage-database: only a recorded row proves which provider answered');
+    process.exit(2);
+  }
+  const config = loadConfig();
   if (usageDatabase === undefined) {
     configureProviderCircuit(`${config.DATABASE_PATH}.provider-state.sqlite`);
     const result = await probeAiChain(!values.smart);
