@@ -1744,6 +1744,7 @@ export class CalendarBotAgent {
             maxTokens: 4096,
             temperature: 0.3,
             signal: AbortSignal.timeout(Math.max(1, this.requestTimeoutMs - (Date.now() - startTime))),
+            userId: ctx.user.telegram_id,
             deferOutageAlert,
           },
           callbacks,

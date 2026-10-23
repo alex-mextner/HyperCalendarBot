@@ -1,6 +1,14 @@
 // src/config/env.ts
 
+import { MODEL_ROLES } from '../services/ai/model-presets.ts';
 import { PROVIDER_IDS, type ProviderId } from '../services/ai/provider-ids.ts';
+import {
+  AI_ROUTING_MODES,
+  type AiRoutingMode,
+  parseRoleChain,
+  ROLE_CHAIN_VARIABLES,
+  type RoleChains,
+} from '../services/ai/role-routing.ts';
 import { logger, logOnce } from '../utils/logger.ts';
 
 /** Owner-chosen order for main requests: z.ai, then Claude, then Hugging Face.
@@ -108,6 +116,11 @@ export interface EnvConfig {
   AI_TOOL_SCHEMA_USER_IDS?: number[];
   AI_SMART_CHAIN: ChainOrder;
   AI_FAST_CHAIN: ChainOrder;
+  /** `legacy` (default): the smart/fast chains above. `roles`: planner/executor/repair chains, see role-routing.ts. */
+  AI_ROUTING: AiRoutingMode;
+  /** Canary for `roles`: only these users. Absent: everyone, once AI_ROUTING is `roles`. */
+  AI_ROUTING_USER_IDS?: number[];
+  AI_ROLE_CHAINS: RoleChains;
   BOT_ADMIN_ID?: number;
   INTENT_LEARNER_DAILY_LIMIT: number;
   INLINE_BOT_TOKEN?: string;
@@ -122,6 +135,20 @@ export interface EnvConfig {
   TELEGRAM_SESSION_MASTER_KEY?: string;
 }
 
+/** A bounded list of positive safe-integer user ids (a canary), or undefined when the variable is unset. */
+function parseUserIdList(name: string): number[] | undefined {
+  const raw = process.env[name];
+  if (raw === undefined) return undefined;
+  const parts = raw.split(',');
+  if (
+    raw.length > 1800 ||
+    parts.length > 100 ||
+    parts.some((p) => !/^[1-9][0-9]*$/.test(p.trim()) || !Number.isSafeInteger(Number(p)))
+  )
+    throw new Error(`${name} must be at most 100 positive safe integer IDs`);
+  return [...new Set(parts.map(Number))];
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`${name} environment variable is required`);
@@ -134,17 +161,20 @@ export function loadConfig(): EnvConfig {
   if (toolSchemaMode !== 'full' && toolSchemaMode !== 'lazy')
     throw new Error('AI_TOOL_SCHEMA_MODE must be full or lazy');
 
-  const rawToolUserIds = process.env.AI_TOOL_SCHEMA_USER_IDS;
-  let toolSchemaUserIds: number[] | undefined;
-  if (rawToolUserIds !== undefined) {
-    const parts = rawToolUserIds.split(',');
-    if (
-      rawToolUserIds.length > 1800 ||
-      parts.length > 100 ||
-      parts.some((p) => !/^[1-9][0-9]*$/.test(p.trim()) || !Number.isSafeInteger(Number(p)))
-    )
-      throw new Error('AI_TOOL_SCHEMA_USER_IDS must be at most 100 positive safe integer IDs');
-    toolSchemaUserIds = [...new Set(parts.map(Number))];
+  const toolSchemaUserIds = parseUserIdList('AI_TOOL_SCHEMA_USER_IDS');
+
+  const routingMode = process.env.AI_ROUTING ?? 'legacy';
+  const aiRouting = AI_ROUTING_MODES.find((mode) => mode === routingMode);
+  if (!aiRouting) throw new Error('AI_ROUTING must be legacy or roles');
+  const aiRoutingUserIds = parseUserIdList('AI_ROUTING_USER_IDS');
+  const aiRoleChains: RoleChains = { planner: [], executor: [], repair: [] };
+  for (const role of MODEL_ROLES) {
+    const variable = ROLE_CHAIN_VARIABLES[role];
+    aiRoleChains[role] = parseRoleChain(process.env[variable], (entry) =>
+      logOnce(`${variable}:unknown:${entry}`, () =>
+        logger.warn({ variable, entry }, 'Unknown provider or malformed entry in role chain — ignoring it'),
+      ),
+    );
   }
 
   const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || undefined;
@@ -236,6 +266,9 @@ export function loadConfig(): EnvConfig {
     AI_TOOL_SCHEMA_USER_IDS: toolSchemaUserIds,
     AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),
     AI_FAST_CHAIN: parseChain('AI_FAST_CHAIN', DEFAULT_FAST_CHAIN),
+    AI_ROUTING: aiRouting,
+    AI_ROUTING_USER_IDS: aiRoutingUserIds,
+    AI_ROLE_CHAINS: aiRoleChains,
     BOT_ADMIN_ID,
     INTENT_LEARNER_DAILY_LIMIT,
     INLINE_BOT_TOKEN: process.env.INLINE_BOT_TOKEN || undefined,

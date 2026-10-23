@@ -23,7 +23,14 @@ import {
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger, logOnce } from '../../utils/logger.ts';
 import { claudeClient, hfClient, openrouterClient, zaiClient } from './clients.ts';
-import { excludedModelReason, type ModelPreset, presetRequestFields } from './model-presets.ts';
+import {
+  excludedModelReason,
+  isQualifiedFor,
+  type ModelPreset,
+  type ModelRole,
+  presetById,
+  presetRequestFields,
+} from './model-presets.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
 import {
   type Admission,
@@ -37,6 +44,7 @@ import {
 import { waitForAbort, withinProviderDeadline } from './provider-deadline.ts';
 import { clearBlock, isBlocked, noteFailureForEligibility } from './provider-eligibility.ts';
 import type { ProviderId } from './provider-ids.ts';
+import { roleForPurpose, rolesApplyTo } from './role-routing.ts';
 import { estimateTokens } from './token-estimate.ts';
 import { classifyProviderError } from './usage-classification.ts';
 import {
@@ -839,6 +847,66 @@ function buildFastChain(cfg: EnvConfig): ProviderSlot[] {
   });
 }
 
+/** Test seam: which preset table role chains read. */
+export const roleRoutingSeams = { presetById };
+
+function providerAccount(cfg: EnvConfig, provider: ProviderId): { apiKey?: string; baseUrl?: string; model?: string } {
+  switch (provider) {
+    case 'zai':
+      return { apiKey: cfg.ZAI_API_KEY, baseUrl: cfg.ZAI_BASE_URL, model: cfg.ZAI_MODEL };
+    case 'hf':
+      return { apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL, model: cfg.HF_MODEL };
+    case 'claude':
+      return { apiKey: cfg.CLAUDE_API_TOKEN, model: cfg.CLAUDE_MODEL };
+    case 'openrouter':
+      return { apiKey: cfg.OPENROUTER_API_KEY, baseUrl: cfg.OPENROUTER_BASE_URL, model: cfg.OPENROUTER_MODEL };
+  }
+}
+
+/**
+ * One role's chain. An entry is `provider` (its ordinary model) or `provider:preset`. A preset entry
+ * loads only when the preset names a model for that provider, the model is not excluded, the provider
+ * has a key, and the preset is qualified for this role: roles can never promote an unmeasured model.
+ * An unusable entry is skipped with an error log, never silently.
+ */
+function buildRoleChain(role: ModelRole, cfg: EnvConfig): ProviderSlot[] {
+  const slots: ProviderSlot[] = [];
+  for (const entry of cfg.AI_ROLE_CHAINS[role]) {
+    const account = providerAccount(cfg, entry.provider);
+    const preset = entry.presetId ? roleRoutingSeams.presetById(entry.presetId) : null;
+    const model = entry.presetId ? preset?.models[entry.provider] : account.model;
+    const refusal = (() => {
+      if (entry.presetId && !preset) return 'unknown preset';
+      if (preset && !isQualifiedFor(preset, role)) return 'preset is not qualified for this role';
+      if (!model) return 'no model for this provider';
+      if (!account.apiKey) return 'provider has no key';
+      return excludedModelReason(model);
+    })();
+    if (refusal || !model || !account.apiKey) {
+      logOnce(`role-skip:${role}:${entry.provider}:${entry.presetId ?? ''}:${refusal}`, () =>
+        aiLogger.error(
+          { role, provider: entry.provider, preset: entry.presetId },
+          `Role chain entry skipped: ${refusal}`,
+        ),
+      );
+      continue;
+    }
+    const baseUrl =
+      entry.provider === 'openrouter' ? openrouterCircuitScope(cfg.OPENROUTER_BASE_URL, model) : account.baseUrl;
+    slots.push(
+      streamingSlot(
+        PROVIDER_LABELS[entry.provider],
+        entry.provider,
+        providerClients[entry.provider],
+        model,
+        providerCircuitKey(entry.provider, baseUrl ?? '', account.apiKey),
+        preset ?? undefined,
+      ),
+    );
+  }
+  return slots;
+}
+
 // ── Slot execution with live-model discovery ───────────────────────────────
 
 /**
@@ -1023,7 +1091,10 @@ export async function aiStreamRound(
   const roundStartedAt = performance.now();
   const chainKind: ProviderChainKind = options.fast ? 'fast' : 'smart';
   const cfg = loadConfig();
-  const chain = options.fast ? buildFastChain(cfg) : buildSmartChain(cfg);
+  const role = roleForPurpose(options.purpose);
+  const roleChain = role && rolesApplyTo(cfg, options.userId) ? buildRoleChain(role, cfg) : [];
+  // A role chain with nothing loadable leaves the call on the legacy chains rather than answering nobody.
+  const chain = roleChain.length > 0 ? roleChain : options.fast ? buildFastChain(cfg) : buildSmartChain(cfg);
   const failures: ProviderFailure[] = [];
   let actualAttempts = 0;
   // Anything the caller has already shown the user for this round: streamed text
