@@ -95,3 +95,16 @@ test('planner request: Claude gets its ceiling and no temperature', () => {
   expect(request.max_tokens).toBe(CLAUDE_MAX_OUTPUT_TOKENS);
   expect(request.temperature).toBeUndefined();
 });
+
+test('planner request: Claude gets the group schema without maxItems, other routes keep it', () => {
+  const claude = lightRequest(candidateFor('haiku', 'claude'), catalogCase);
+  const other = lightRequest(candidate, catalogCase);
+  expect(JSON.stringify(claude.response_format)).not.toContain('maxItems');
+  expect(JSON.stringify(other.response_format)).toContain('maxItems');
+});
+
+test('planner grading still enforces the group bound the Claude schema leaves out', () => {
+  expect(
+    lightSchemas.catalog.safeParse({ groups: ['calendar.read', 'contacts', 'sharing', 'history', 'settings'] }).success,
+  ).toBe(false);
+});

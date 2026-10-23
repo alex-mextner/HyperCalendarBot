@@ -36,6 +36,26 @@ export interface LightRow extends MeasuredRow {
 
 const LIGHT_MIN_OUTPUT_TOKENS = 1536;
 
+/**
+ * Claude's structured output answers 400 to an array `maxItems` ("property 'maxItems' is not supported",
+ * seen live 2026-10-23). It gets the schema without that keyword; grading still parses the answer with the
+ * full schema, so a fifth group is still a failure.
+ */
+function stripMaxItems(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripMaxItems);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== 'maxItems')
+      .map(([key, entry]) => [key, stripMaxItems(entry)]),
+  );
+}
+
+function schemaFor(provider: Candidate['provider'], role: LightCase['role']): Record<string, unknown> {
+  const schema = z.toJSONSchema(lightSchemas[role]);
+  return provider === 'claude' ? Object.fromEntries(Object.entries(stripMaxItems(schema) ?? {})) : schema;
+}
+
 export function lightRequest(candidate: Candidate, fixture: LightCase): OpenAI.ChatCompletionCreateParamsNonStreaming {
   const { preset, provider } = candidate;
   const temperature = preset.temperature ?? 0;
@@ -51,7 +71,7 @@ export function lightRequest(candidate: Candidate, fixture: LightCase): OpenAI.C
     ...presetRequestFields(provider, preset),
     response_format: {
       type: 'json_schema',
-      json_schema: { name: fixture.role, strict: true, schema: z.toJSONSchema(lightSchemas[fixture.role]) },
+      json_schema: { name: fixture.role, strict: true, schema: schemaFor(provider, fixture.role) },
     },
   };
 }
