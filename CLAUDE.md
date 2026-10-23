@@ -255,6 +255,17 @@ so the transcript is sent unchanged. Never reintroduce gpt-oss, Groq chat or Gem
 scoped to the key AND the model (`openrouterCircuitScope`), because OpenRouter routes each model to a different
 upstream: a limit on one model must not bench the other.
 
+**Model presets** (`src/services/ai/model-presets.ts`, 2026-10-23): one table of presets — a model plus the settings it was
+measured with (`deepseek41-flash`, `glm53-flash-low`, `glm53-low`, `haiku`). `models` maps a provider id to the model id
+that serves the preset there, `prices` states USD per million tokens with date and source per provider (absent = unknown, never
+0), `roles` lists the roles it may be measured for and `qualification` holds the measurement that admitted it
+(`null` for every seeded preset: nothing is qualified yet). `isQualifiedFor(preset, role)` is the gate: own-role
+correctness >= 95% AND 100% of the full labelled history. The excluded list (`excludedModelReason`: GPT-OSS, the small
+Qwen 3.8 27B) is enforced twice: `buildChain` skips a configured model on it with an error log, and live-model
+replacement (`selectReplacementModel`) never picks one — so a dead model cannot be swapped for a banned one. A slot given
+a preset (`streamingSlot(..., preset)`) sends the preset's temperature, an output floor and — on OpenRouter only, the one
+provider whose control was verified — `reasoning.effort`. Chains still name plain providers, so behaviour is unchanged.
+
 **A depleted or rejected provider account is skipped, not retried**: `src/services/ai/provider-circuit.ts`
 keeps one durable circuit per provider account for every provider in the chain (key = fingerprint
 of provider id, endpoint and credential, so it covers the smart and the fast chain and resets when

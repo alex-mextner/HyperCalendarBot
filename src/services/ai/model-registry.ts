@@ -11,6 +11,7 @@
 
 import OpenAI from 'openai';
 import { logger } from '../../utils/logger.ts';
+import { excludedModelReason } from './model-presets.ts';
 import type { ProviderId } from './provider-ids.ts';
 
 const registryLogger = logger.child({ module: 'ai-model-registry' });
@@ -174,7 +175,8 @@ export interface ReplacementSelection {
  *      dead one (`llama-3.3-70b-versatile` → another `llama-*`);
  *   3. otherwise the alphabetically first remaining live chat model.
  * Transcription, text-to-speech, embedding, rerank, guard and image ids are
- * excluded, as are the configured model and anything in `excludeModels`.
+ * excluded, as are the configured model, anything in `excludeModels` and every model on the
+ * owner's excluded list (`model-presets.ts`): a dead model is never replaced by one the owner banned.
  */
 export function selectReplacementModel({
   liveModels,
@@ -183,7 +185,9 @@ export function selectReplacementModel({
   excludeModels = [],
 }: ReplacementSelection): string | null {
   const excluded = new Set([configuredModel, ...excludeModels]);
-  const candidates = liveModels.filter((id) => !excluded.has(id) && isChatModelId(id));
+  const candidates = liveModels.filter(
+    (id) => !excluded.has(id) && isChatModelId(id) && excludedModelReason(id) === null,
+  );
   if (candidates.length === 0) return null;
 
   for (const preferred of preferences) {
