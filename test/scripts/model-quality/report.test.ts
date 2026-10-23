@@ -136,3 +136,32 @@ test('the readable report states the null qualification and the unevaluated hist
   expect(text).toContain('#565');
   expect(text).toContain('deepseek41-flash@openrouter');
 });
+
+test('a cell that stopped before its planned attempts claims no threshold verdict and names why it stopped', () => {
+  const rows = [
+    row({ caseId: 'a' }),
+    row({ caseId: 'b' }),
+    row({ caseId: 'c', pass: false, error: 'HTTP_402', reasons: ['error:HTTP_402', 'incomplete'], usageMissing: true }),
+  ];
+  const cell = aggregate(rows, { ...meta, expected: { executor: 32, repair: 32, planner: 108 } }).cells[0]!;
+  expect(cell.expected).toBe(32);
+  expect(cell.complete).toBe(false);
+  expect(cell.stoppedBy).toBe('HTTP_402');
+  expect(cell.meetsOwnRoleThreshold).toBeNull();
+  expect(cell.passRate).toBeCloseTo(2 / 3, 9);
+});
+
+test('a complete cell is complete and has no stop reason', () => {
+  const rows = Array.from({ length: 32 }, (_, i) => row({ caseId: `c${i}` }));
+  const cell = aggregate(rows, { ...meta, expected: { executor: 32, repair: 32, planner: 108 } }).cells[0]!;
+  expect(cell.complete).toBe(true);
+  expect(cell.stoppedBy).toBeNull();
+  expect(cell.meetsOwnRoleThreshold).toBe(true);
+});
+
+test('the readable report marks an unfinished cell instead of printing a verdict', () => {
+  const rows = [row({}), row({ pass: false, error: 'HTTP_402', usageMissing: true })];
+  const text = renderReport(aggregate(rows, { ...meta, expected: { executor: 32, repair: 32, planner: 108 } }));
+  expect(text).toContain('неполная');
+  expect(text).toContain('HTTP_402');
+});
