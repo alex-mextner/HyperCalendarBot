@@ -17,7 +17,15 @@ import { isBlocked, resetEligibility } from '../../../src/services/ai/provider-e
 import { configureAiUsageRecording, flushAiUsageEvents } from '../../../src/services/ai/usage-recorder.ts';
 import { resetLogOnce } from '../../../src/utils/logger.ts';
 
-type Script = { text: string; usage?: Record<string, unknown> } | { error: Error };
+interface FakeUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  /** OpenRouter's reported cost in USD. */
+  cost?: number;
+}
+
+type Script = { text: string; usage?: FakeUsage } | { error: Error };
 
 interface FakeRequest {
   model: string;
