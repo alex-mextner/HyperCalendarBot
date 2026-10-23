@@ -195,7 +195,7 @@ describe('summarizeAiUsage — one verdict per provider', () => {
   test('lists every known provider, so a provider with no rows says so explicitly', () => {
     const summary = summarizeAiUsage([event()], WINDOW);
 
-    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf']);
+    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'openrouter']);
     expect(verdictOf([event()], 'claude')).toMatchObject({ verdict: 'no_traffic', attempts: 0, successRate: null });
   });
 
@@ -230,18 +230,18 @@ describe('summarizeAiUsage — one verdict per provider', () => {
 
   test('a provider id the code no longer knows still appears, after the known ones', () => {
     const summary = summarizeAiUsage([event({ provider: 'retired' }), event()], WINDOW);
-    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'retired']);
+    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'openrouter', 'retired']);
   });
 
   test('a historical gemini ledger row still appears after the configured providers and does not throw', () => {
     const summary = summarizeAiUsage([event({ provider: 'gemini', model: 'gemini-3-flash' }), event()], WINDOW);
-    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'gemini']);
+    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'openrouter', 'gemini']);
     expect(summary.providers.find((p) => p.provider === 'gemini')).toMatchObject({ verdict: 'healthy', ok: 1 });
   });
 
   test('a historical groq ledger row still appears after the configured providers and does not throw', () => {
     const summary = summarizeAiUsage([event({ provider: 'groq', model: 'openai/gpt-oss-120b' }), event()], WINDOW);
-    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'groq']);
+    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'openrouter', 'groq']);
     expect(summary.providers.find((p) => p.provider === 'groq')).toMatchObject({ verdict: 'healthy', ok: 1 });
     expect(summary.models.map((m) => `${m.provider}:${m.model}`)).toContain('groq:openai/gpt-oss-120b');
   });

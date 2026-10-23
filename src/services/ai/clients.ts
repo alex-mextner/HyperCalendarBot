@@ -1,5 +1,5 @@
 // src/services/ai/clients.ts
-// OpenAI SDK clients for all AI providers (z.ai, HuggingFace Router, Claude).
+// OpenAI SDK clients for all AI providers (z.ai, HuggingFace Router, Claude, OpenRouter).
 // All use the same OpenAI SDK — only baseURL and apiKey differ.
 // Keys come from env via loadConfig(); Claude has a fixed public endpoint.
 
@@ -12,6 +12,7 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 let zai: OpenAI | null = null;
 let hf: OpenAI | null = null;
 let claude: OpenAI | null = null;
+let openrouter: OpenAI | null = null;
 
 export function zaiClient(): OpenAI {
   if (!zai) {
@@ -39,6 +40,19 @@ export function hfClient(): OpenAI {
   return hf;
 }
 
+export function openrouterClient(): OpenAI {
+  if (!openrouter) {
+    const cfg = loadConfig();
+    openrouter = new OpenAI({
+      apiKey: cfg.OPENROUTER_API_KEY!,
+      baseURL: cfg.OPENROUTER_BASE_URL,
+      timeout: DEFAULT_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+  }
+  return openrouter;
+}
+
 /**
  * Anthropic's OpenAI-compatible endpoint. Chat completions accept the bearer key alone,
  * but `GET /v1/models` (live-model discovery) is the native API and rejects a request
@@ -63,4 +77,5 @@ export function resetClients(): void {
   zai = null;
   hf = null;
   claude = null;
+  openrouter = null;
 }

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { loadConfig } from '../src/config/env.ts';
 import { openProviderCircuitStore, providerCircuitKey } from '../src/services/ai/provider-circuit.ts';
 import type { ProviderId } from '../src/services/ai/provider-ids.ts';
+import { openrouterCircuitScope } from '../src/services/ai/streaming.ts';
 
 const config = loadConfig();
 const path = `${config.DATABASE_PATH}.provider-state.sqlite`;
@@ -10,6 +11,16 @@ const accounts: [ProviderId, string, string][] = [
   ['zai', config.ZAI_BASE_URL, config.ZAI_API_KEY],
   ['hf', config.HF_BASE_URL, config.HF_TOKEN],
   ['claude', '', config.CLAUDE_API_TOKEN ?? ''],
+  [
+    'openrouter',
+    openrouterCircuitScope(config.OPENROUTER_BASE_URL, config.OPENROUTER_MODEL),
+    config.OPENROUTER_API_KEY ?? '',
+  ],
+  [
+    'openrouter',
+    openrouterCircuitScope(config.OPENROUTER_BASE_URL, config.OPENROUTER_FAST_MODEL),
+    config.OPENROUTER_API_KEY ?? '',
+  ],
 ];
 if (!existsSync(path)) console.log(JSON.stringify({ initialized: false, providers: [] }, null, 2));
 else {

@@ -125,7 +125,11 @@ export function classifyCircuitFailure(input: CircuitFailureInput, now: number):
     /request (?:is )?too (?:large|big)|context (?:length|window)|maximum (?:context|input)/i.test(input.message)
   )
     return null;
-  if (status === 403 && /content policy|safety (?:policy|filter)/i.test(input.message)) return null;
+  if (
+    status === 403 &&
+    /content policy|safety (?:policy|filter)|requires moderation|input was flagged/i.test(input.message)
+  )
+    return null;
   if (status === 401 || status === 402 || status === 403 || status === 429) {
     const classified = classifyProviderFailure({ provider: 'circuit', status, message: input.message });
     const failureClass = status === 429 ? 'quota_exhausted' : classified;

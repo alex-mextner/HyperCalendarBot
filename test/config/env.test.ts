@@ -86,6 +86,45 @@ describe('loadConfig', () => {
     expect(() => loadConfig()).not.toThrow();
   });
 
+  describe('optional OpenRouter provider', () => {
+    test('is unset by default and never joins the default chains', () => {
+      for (const name of [
+        'OPENROUTER_API_KEY',
+        'OPENROUTER_BASE_URL',
+        'OPENROUTER_MODEL',
+        'OPENROUTER_FAST_MODEL',
+        'AI_SMART_CHAIN',
+        'AI_FAST_CHAIN',
+      ]) {
+        delete process.env[name];
+      }
+      const config = loadConfig();
+      expect(config.OPENROUTER_API_KEY).toBeUndefined();
+      expect(config.OPENROUTER_MODEL).toBeUndefined();
+      expect(config.OPENROUTER_FAST_MODEL).toBeUndefined();
+      expect(config.OPENROUTER_BASE_URL).toBe('https://openrouter.ai/api/v1');
+      expect(config.AI_SMART_CHAIN.order).not.toContain('openrouter');
+      expect(config.AI_FAST_CHAIN.order).not.toContain('openrouter');
+    });
+
+    test('reads key, endpoint and both models from the environment', () => {
+      process.env.OPENROUTER_API_KEY = 'or-key';
+      process.env.OPENROUTER_BASE_URL = 'https://openrouter.example/api/v1';
+      process.env.OPENROUTER_MODEL = 'deepseek/deepseek-v4.1-flash';
+      process.env.OPENROUTER_FAST_MODEL = 'z-ai/glm-5.3-flash';
+      const config = loadConfig();
+      expect(config.OPENROUTER_API_KEY).toBe('or-key');
+      expect(config.OPENROUTER_BASE_URL).toBe('https://openrouter.example/api/v1');
+      expect(config.OPENROUTER_MODEL).toBe('deepseek/deepseek-v4.1-flash');
+      expect(config.OPENROUTER_FAST_MODEL).toBe('z-ai/glm-5.3-flash');
+    });
+
+    test('can be named in a chain order', () => {
+      process.env.AI_SMART_CHAIN = 'openrouter,claude';
+      expect(loadConfig().AI_SMART_CHAIN.order).toEqual(['openrouter', 'claude']);
+    });
+  });
+
   describe('provider chain order', () => {
     const SMART_DEFAULT: ProviderId[] = ['zai', 'claude', 'hf'];
     const FAST_DEFAULT: ProviderId[] = ['zai', 'claude', 'hf'];

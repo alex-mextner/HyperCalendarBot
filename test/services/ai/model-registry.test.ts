@@ -252,6 +252,22 @@ describe('resolveModelOverride', () => {
     ).toBe('claude-haiku-5-5');
   });
 
+  // OpenRouter lists hundreds of differently priced models: a dead configured id is never
+  // replaced by a guessed one.
+  test('OpenRouter never swaps a dead model for another listed one', async () => {
+    const { client, list } = makeListingClient(['deepseek/deepseek-v4.1-flash', 'z-ai/glm-5.3', 'z-ai/glm-5.3-prime']);
+
+    expect(
+      await resolveModelOverride({
+        provider: 'openrouter',
+        client,
+        configuredModel: 'z-ai/glm-5.3-flash',
+        fast: true,
+      }),
+    ).toBeNull();
+    expect(list).not.toHaveBeenCalled();
+  });
+
   test('records the override and notifies listeners so the admin can be told the config is stale', async () => {
     const seen: { provider: string; configuredModel: string; resolvedModel: string }[] = [];
     onModelOverrideResolved((override) => {
