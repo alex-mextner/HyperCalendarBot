@@ -1116,4 +1116,34 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE event_participants ADD COLUMN source_group_recorded_at TEXT');
     },
   },
+  {
+    name: '066_ai_usage_events',
+    up(db) {
+      // One row per provider attempt of an AI round (answered, failed or skipped before any request).
+      // Token columns are NULL when the provider reported no usage: unknown is not zero. The table
+      // holds no prompt, completion, user, chat or credential data and is pruned by age.
+      db.exec(`
+        CREATE TABLE ai_usage_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          at INTEGER NOT NULL,
+          provider TEXT NOT NULL,
+          model TEXT NOT NULL,
+          chain TEXT NOT NULL,
+          purpose TEXT NOT NULL,
+          outcome TEXT NOT NULL CHECK (outcome IN ('ok', 'error', 'skipped')),
+          error_class TEXT,
+          http_status INTEGER,
+          skip_reason TEXT,
+          duration_ms INTEGER,
+          prompt_tokens INTEGER,
+          completion_tokens INTEGER,
+          reasoning_tokens INTEGER,
+          cached_tokens INTEGER,
+          request_id TEXT
+        )
+      `);
+      db.exec('CREATE INDEX idx_ai_usage_events_at ON ai_usage_events(at)');
+      db.exec('CREATE INDEX idx_ai_usage_events_provider_at ON ai_usage_events(provider, at)');
+    },
+  },
 ];

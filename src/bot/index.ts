@@ -53,6 +53,7 @@ import type { ParseMode } from '../utils/telegram.ts';
 import type { CallRequest } from '../worker/call-queue.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
+import { handleAiStats } from './commands/ai-stats.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
@@ -623,6 +624,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .command('admin_tg_sessions', (ctx) =>
       handleAdminTgSessions(ctx, db.telegramSessions, db.notificationLog, botAdminId),
     )
+    .command('ai_stats', (ctx) => handleAiStats(ctx, db.aiUsage, botAdminId))
     // Sharing commands
     .command('invite', (ctx) =>
       handleInvite(ctx, {

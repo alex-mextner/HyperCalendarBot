@@ -613,6 +613,7 @@ async function handleIntentEditInstruction(
           },
         ],
         maxTokens: INTENT_EDIT_MAX_TOKENS,
+        purpose: 'intent_edit',
       });
 
       rawText = result.text;

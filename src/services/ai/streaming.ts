@@ -14,6 +14,7 @@ import type { CompletionUsage } from 'openai/resources/completions';
 import { z } from 'zod';
 import { type ChainOrder, type EnvConfig, loadConfig } from '../../config/env.ts';
 import type { GroqTokenLimits } from '../../config/groq-token-limits.ts';
+import type { AiUsageEvent } from '../../database/repositories/ai-usage.repository.ts';
 import {
   type ProviderChainKind,
   reportAllProvidersFailed,
@@ -38,6 +39,15 @@ import { waitForAbort, withinProviderDeadline } from './provider-deadline.ts';
 import { clearBlock, isBlocked, noteFailureForEligibility } from './provider-eligibility.ts';
 import type { ProviderId } from './provider-ids.ts';
 import { estimateTokens } from './token-estimate.ts';
+import { classifyProviderError } from './usage-classification.ts';
+import {
+  type AiCallPurpose,
+  type AttemptScope,
+  answeredAttempt,
+  failedAttempt,
+  recordAiUsage,
+  skippedAttempt,
+} from './usage-recorder.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
 const toolArgumentsCodec = jsonCodec(z.record(z.string(), z.json()));
@@ -58,6 +68,8 @@ export interface StreamRoundOptions {
   userId?: number;
   /** Opaque per-agent-run correlation id; contains no user content. */
   requestId?: string;
+  /** What the round is for; recorded with each provider attempt. */
+  purpose?: AiCallPurpose;
   /**
    * The caller reveals a tool the providers rejected as unexposed and retries the round,
    * and reports the outage itself if that recovery gives up. Only such a caller sets this.
@@ -924,7 +936,7 @@ export function providerFailureMetrics(failures: readonly ProviderFailure[]) {
 function describeFailure(slot: ProviderSlot, error: unknown): ProviderFailure {
   const status = error instanceof OpenAI.APIError && typeof error.status === 'number' ? error.status : undefined;
   const message = error instanceof Error ? error.message : String(error);
-  const model = getModelOverride(slot.provider, slot.configuredModel) ?? slot.configuredModel;
+  const model = modelRequestedFrom(slot);
   return {
     provider: slotName(slot.label, model),
     providerId: slot.provider,
@@ -935,6 +947,46 @@ function describeFailure(slot: ProviderSlot, error: unknown): ProviderFailure {
     ...(isGeminiLocalSkip(error) ? { skippedBeforeRequest: true } : {}),
     ...(error instanceof EmptyProviderResponseError && error.diagnostics ? { emptyResponse: error.diagnostics } : {}),
   };
+}
+
+/** The model a request to this slot names now: the live replacement when the configured one was found gone. */
+function modelRequestedFrom(slot: ProviderSlot): string {
+  return getModelOverride(slot.provider, slot.configuredModel) ?? slot.configuredModel;
+}
+
+/** The usage row for a slot that failed: a skip when it never reached the network, otherwise an error with its class. */
+function failureAttempt(
+  scope: AttemptScope,
+  slot: ProviderSlot,
+  model: string,
+  error: unknown,
+  callerAborted: boolean,
+  attemptAt: number,
+  attemptStartedAt: number,
+): AiUsageEvent {
+  if (isGeminiLocalSkip(error)) return skippedAttempt(scope, slot.provider, model, 'local_budget');
+  const durationMs = Math.round(Math.max(0, performance.now() - attemptStartedAt));
+  if (error instanceof EmptyProviderResponseError) {
+    const usage = error.diagnostics?.usage ?? null;
+    return failedAttempt(
+      scope,
+      slot.provider,
+      model,
+      attemptAt,
+      durationMs,
+      { errorClass: 'empty', httpStatus: null },
+      usage,
+    );
+  }
+  return failedAttempt(
+    scope,
+    slot.provider,
+    model,
+    attemptAt,
+    durationMs,
+    classifyProviderError(error, callerAborted),
+    null,
+  );
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -987,6 +1039,7 @@ export async function aiStreamRound(
   // or a "running <tool>" label. Both must be cleared before another provider
   // starts, otherwise the user sees output from a round that never finished.
   let partialOutputShown = false;
+  const scope: AttemptScope = { chain: chainKind, purpose: options.purpose, requestId: options.requestId };
 
   const wrappedCallbacks: StreamCallbacks = {
     onTextDelta: (text) => {
@@ -1009,16 +1062,24 @@ export async function aiStreamRound(
   if (eligible.length === 0 && chain.length > 0) {
     aiLogger.warn({ chain: chainKind }, 'Every provider is benched — trying them anyway rather than answering nobody');
   }
+  if (eligible.length > 0) {
+    for (const benched of chain.filter((slot) => !eligible.includes(slot))) {
+      recordAiUsage(skippedAttempt(scope, benched.provider, modelRequestedFrom(benched), 'eligibility_bench'));
+    }
+  }
 
-  for (const slot of attempts) {
+  for (const [position, slot] of attempts.entries()) {
     options.signal?.throwIfAborted();
     const remainingMs = 30_000 - (performance.now() - roundStartedAt);
     if (remainingMs < Math.min(cap, 1000)) {
       aiLogger.warn({ requestId: options.requestId }, 'AI round deadline reached before next provider');
+      for (const unattempted of attempts.slice(position)) {
+        recordAiUsage(skippedAttempt(scope, unattempted.provider, modelRequestedFrom(unattempted), 'round_deadline'));
+      }
       break;
     }
 
-    const requestModel = getModelOverride(slot.provider, slot.configuredModel) ?? slot.configuredModel;
+    const requestModel = modelRequestedFrom(slot);
     const fitRejection = preflightRequestFit(slot.provider, requestModel, options, cfg.GROQ_TPM_LIMITS);
     if (fitRejection) {
       const provider = slotName(slot.label, requestModel);
@@ -1031,6 +1092,7 @@ export async function aiStreamRound(
         transient: false,
         skippedBeforeRequest: true,
       });
+      recordAiUsage(skippedAttempt(scope, slot.provider, requestModel, 'preflight_size'));
       aiLogger.info(
         { provider, userId: options.userId, ...fitRejection },
         'Skipping provider because the request cannot fit its known token budget',
@@ -1049,9 +1111,12 @@ export async function aiStreamRound(
     const admission = admitProvider(circuit);
     if (admission.kind === 'skip') {
       failures.push(skippedByCircuit(slot, requestModel, admission));
+      recordAiUsage(skippedAttempt(scope, slot.provider, requestModel, 'circuit_open', admission.status ?? null));
       continue;
     }
 
+    const attemptAt = Date.now();
+    const attemptStartedAt = performance.now();
     try {
       aiLogger.info(
         { provider: slot.label, model: slot.configuredModel, userId: options.userId, requestId: options.requestId },
@@ -1104,9 +1169,30 @@ export async function aiStreamRound(
           totalDurationMs: Math.max(0, performance.now() - roundStartedAt),
         };
       }
+      recordAiUsage(
+        answeredAttempt(
+          scope,
+          slot.provider,
+          result.metrics?.model ?? requestModel,
+          attemptAt,
+          Math.round(Math.max(0, performance.now() - attemptStartedAt)),
+          result.metrics?.usage ?? null,
+        ),
+      );
       return result;
     } catch (error) {
       if (error instanceof ProviderSafetyStopError) {
+        recordAiUsage(
+          failedAttempt(
+            scope,
+            slot.provider,
+            requestModel,
+            attemptAt,
+            Math.round(Math.max(0, performance.now() - attemptStartedAt)),
+            { errorClass: 'other', httpStatus: null },
+            error.diagnostics.usage,
+          ),
+        );
         settleInconclusive(circuit, admission, { pushBack: false });
         if (partialOutputShown) callbacks.onProviderSwitch?.();
         aiLogger.warn(
@@ -1118,6 +1204,7 @@ export async function aiStreamRound(
       const failure = describeFailure(slot, error);
       failures.push(failure);
       const callerAborted = isCallerAbort(options.signal);
+      recordAiUsage(failureAttempt(scope, slot, failure.model, error, callerAborted, attemptAt, attemptStartedAt));
       // An account-level failure is owned by the durable circuit, which tells the
       // admin once per incident from stored facts; it is not reported again here.
       const ownedByCircuit = settleCircuitAfterFailure(circuit, admission, error, failure, callerAborted);

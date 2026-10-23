@@ -97,7 +97,7 @@ For periodic/scheduled tasks always use BullMQ repeating jobs — never `setInte
 BullMQ on Redis; the main queues:
 - **image-render** — Playwright renders weekly/monthly calendar images.
 - **call-reminders** — voice call reminders via the Python bridge; created only when the MTProto service tier is enabled.
-- **bot-tasks** — periodic jobs: secretary expiry (daily), sharing cleanup (10min), proposal expiry (hourly), per-user session keepalive (14 days), birthday sync (daily, only when the service tier is enabled).
+- **bot-tasks** — periodic jobs: secretary expiry (daily), sharing cleanup (10min), proposal expiry (hourly), per-user session keepalive (14 days), AI usage ledger cleanup (daily), birthday sync (daily, only when the service tier is enabled).
 
 ### GramIO Scenes (`src/bot/scenes/`)
 
@@ -259,6 +259,22 @@ the request carried the tool catalog; blocks are keyed by provider AND chain). T
 suppresses calls, never observations: the outage records the readiness endpoint and the admin
 alerting read are written exactly as before, and a chain where every provider is only
 eligibility-benched is still attempted rather than answering nobody.
+
+**Every provider attempt leaves one row in `ai_usage_events`** (migration 066, `src/services/ai/usage-recorder.ts`):
+`aiStreamRound` records the attempt of each slot as `ok`, `error` (with a class from `usage-classification.ts`
+and the HTTP status, never the provider's error body) or `skipped` before any request (`preflight_size`,
+`circuit_open`, `eligibility_bench`, `local_budget`, `round_deadline`). Token columns are NULL when the provider
+reported no usage — unknown is never written as 0. The row holds no prompt, completion, user or chat id. Rows
+are buffered, written in one batch on the next event-loop turn, and a failed write is logged with
+`dbLogger.warn({ err })` and dropped: the answer never waits on it. Callers say what a round is for with
+`StreamRoundOptions.purpose`. The `cron-ai-usage-cleanup` job of the bot-tasks queue prunes rows older than
+180 days (`AI_USAGE_RETENTION_DAYS`). Reading: `bun scripts/report-ai-usage.ts [--days N] [--json]` (read-only, per
+provider:model counts, errors by class, token sums with the answers that reported none counted apart, p50/p95,
+and one verdict per provider that says `no traffic in window` for a provider that served nothing) and the
+admin-only Telegram command `/ai_stats [days]` (same report, `t(lang).aiStats`, fail closed). Claude is a
+fallback slot and gets no traffic while Groq is healthy, so prove it alive with the real code path:
+`AI_SMART_CHAIN=claude AI_FAST_CHAIN=claude bun scripts/probe-ai-chain.ts --usage-database <temp.db> --expect-provider claude [--smart]`
+prints the probe result and the `ai_usage_events` row it wrote (never point it at the live database).
 
 Optional features that depend on an env var must deactivate gracefully when the var is absent — never throw at startup. Validate at the point of use, not at startup.
 

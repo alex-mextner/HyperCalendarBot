@@ -164,6 +164,7 @@ export class IntentLearner {
       const result = await streamImpl({
         messages: [{ role: 'system', content: LEARNER_SYSTEM_PROMPT }, ...conversationMessages],
         maxTokens: 2048,
+        purpose: 'intent_learner',
       });
 
       if (result.finishReason === 'length') {

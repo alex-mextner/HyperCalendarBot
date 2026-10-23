@@ -19,6 +19,7 @@ import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { HistorySummarizer } from './services/ai/history-summarizer.ts';
 import { configureProviderCircuit } from './services/ai/provider-circuit.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
+import { configureAiUsageRecording } from './services/ai/usage-recorder.ts';
 import { runSyntheticIntent } from './services/intent/synthetic-intent-run.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { InvitationCardRefresher } from './services/sharing/invitation-cards.ts';
@@ -81,6 +82,9 @@ initProviderAlerts({ botToken: config.BOT_TOKEN, adminId: config.BOT_ADMIN_ID })
 // Durable per-account provider circuits live in a sidecar next to the calendar
 // database, so a deploy does not forget which accounts are out.
 configureProviderCircuit(`${config.DATABASE_PATH}.provider-state.sqlite`);
+
+// Every provider attempt of an AI round is recorded in the calendar database for per-provider statistics.
+configureAiUsageRecording(db.aiUsage);
 
 // Returns a BullMQ 'failed' handler: logs via pino, Telegrams the admin, pushes to alert queue.
 // When BOT_ADMIN_ID is absent (dev/test), still logs — just skips Telegram + alert queue.
@@ -643,6 +647,7 @@ if (config.REDIS_URL) {
     setupRecurringRemindersCron,
     setupActionLogCleanupCron,
     setupSessionKeepaliveCron,
+    setupAiUsageCleanupCron,
   } = await import('./worker/bot-tasks-queue.ts');
   const { runSqliteBackup } = await import('./database/backup.ts');
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
@@ -714,6 +719,10 @@ if (config.REDIS_URL) {
       const deleted = db.actionLog.deleteOlderThan(cutoff);
       if (deleted > 0) botLogger.info({ deleted }, 'Action log cleanup: removed old entries');
     },
+    onAiUsageCleanup: () => {
+      const deleted = db.aiUsage.pruneExpired(Date.now());
+      if (deleted > 0) botLogger.info({ deleted }, 'AI usage cleanup: removed expired rows');
+    },
     onBirthdaySync,
     onChatHistoryCleanup: () => {
       const deleted = db.chatHistory.deleteOlderThan(90);
@@ -751,6 +760,7 @@ if (config.REDIS_URL) {
   await setupSqliteBackupCron(botTasksQueue);
   await setupRecurringRemindersCron(botTasksQueue);
   await setupActionLogCleanupCron(botTasksQueue);
+  await setupAiUsageCleanupCron(botTasksQueue);
   if (config.TELEGRAM_SESSION_MASTER_KEY) {
     await setupSessionKeepaliveCron(botTasksQueue);
   }
@@ -1275,6 +1285,8 @@ async function shutdown(): Promise<void> {
   if (googleRedisClient) googleRedisClient.close();
   summarizerRedis.close();
   if (webServerHandle) webServerHandle.stop();
+  // Last: turns drained above have recorded their attempts; this writes what is still buffered.
+  configureAiUsageRecording(null);
   db.close();
 }
 

@@ -46,6 +46,7 @@ const {
   setupSessionCleanupCron,
   setupBirthdaySyncCron,
   setupChatHistoryCleanupCron,
+  setupAiUsageCleanupCron,
   setupSessionKeepaliveCron,
 } = await import('../../src/worker/bot-tasks-queue.ts');
 
@@ -121,6 +122,13 @@ describe('bot-tasks job processor', () => {
     expect(onChatHistoryCleanup).toHaveBeenCalledTimes(1);
   });
 
+  test('calls onAiUsageCleanup for cron-ai-usage-cleanup', async () => {
+    const onAiUsageCleanup = mock(() => {});
+    createBotTasksQueue({ redisUrl: 'redis://localhost:6379', onAiUsageCleanup });
+    await capturedProcessor({ data: { type: 'cron-ai-usage-cleanup' } });
+    expect(onAiUsageCleanup).toHaveBeenCalledTimes(1);
+  });
+
   test('calls onSessionKeepalive for cron-session-keepalive', async () => {
     const onSessionKeepalive = mock(async () => {});
     createBotTasksQueue({ redisUrl: 'redis://localhost:6379', onSessionKeepalive });
@@ -135,6 +143,7 @@ describe('bot-tasks job processor', () => {
     await expect(capturedProcessor({ data: { type: 'cron-birthday-sync' } })).resolves.toBeUndefined();
     await expect(capturedProcessor({ data: { type: 'cron-chat-history-cleanup' } })).resolves.toBeUndefined();
     await expect(capturedProcessor({ data: { type: 'cron-session-keepalive' } })).resolves.toBeUndefined();
+    await expect(capturedProcessor({ data: { type: 'cron-ai-usage-cleanup' } })).resolves.toBeUndefined();
   });
 
   test('failed handler logs without throwing when job is present', () => {
@@ -258,6 +267,19 @@ describe('cron setup functions', () => {
     expect(data.type).toBe('cron-chat-history-cleanup');
     expect(opts.repeat.every).toBe(24 * 60 * 60_000);
     expect(opts.jobId).toBe('chat-history-cleanup-tick');
+  });
+
+  test('setupAiUsageCleanupCron adds a daily repeating job, never a timer', async () => {
+    mockQueueAdd.mockClear();
+    const { queue } = createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
+    await setupAiUsageCleanupCron(queue);
+    expect(mockQueueAdd.mock.calls).toEqual([
+      [
+        'ai-usage-cleanup-tick',
+        { type: 'cron-ai-usage-cleanup' },
+        { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'ai-usage-cleanup-tick' },
+      ],
+    ]);
   });
 
   test('setupSessionKeepaliveCron adds job with 14-day interval whether or not birthdays sync', async () => {

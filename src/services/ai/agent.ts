@@ -960,7 +960,7 @@ export class CalendarBotAgent {
         };
         try {
           const result = await waitForAbort(
-            () => this.streamImpl({ ...options, requestId, signal }, guardedCallbacks),
+            () => this.streamImpl({ ...options, requestId, signal, purpose }, guardedCallbacks),
             signal,
           );
           requestMetrics.recordRound(result.metrics);
