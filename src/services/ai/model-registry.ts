@@ -54,6 +54,7 @@ interface ModelPreferenceTable {
   zai: ProviderPreferences;
   hf: ProviderPreferences;
   claude: ProviderPreferences;
+  openrouter: ProviderPreferences;
 }
 
 /**
@@ -71,6 +72,9 @@ const PREFERRED_MODELS: ModelPreferenceTable = {
     fast: ['claude-haiku-5-5'],
     preferredOnly: true,
   },
+  // OpenRouter lists hundreds of models at very different prices, so a dead configured id is
+  // never swapped for a guessed one: with no preferred ids the replacement stays off.
+  openrouter: { smart: [], fast: [], preferredOnly: true },
 };
 
 /** Model ids that cannot serve a chat completion, matched case-insensitively. */
@@ -285,6 +289,10 @@ async function probeAndCache(
   sequence: number,
 ): Promise<string | null> {
   const { provider, configuredModel, fast } = options;
+  // Nothing can be chosen from an empty preferred-only list, so the catalogue is not worth listing.
+  if (PREFERRED_MODELS[provider].preferredOnly && preferredModelsFor(provider, fast === true).length === 0) {
+    return commitProbeResult(key, sequence, { override: null, expiresAt: Date.now() + NEGATIVE_TTL_MS, sequence });
+  }
   const liveModels = await listLiveModels(options.client);
   if (!liveModels) {
     return commitProbeResult(key, sequence, { override: null, expiresAt: Date.now() + NEGATIVE_TTL_MS, sequence });

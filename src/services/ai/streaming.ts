@@ -22,7 +22,7 @@ import {
 } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger, logOnce } from '../../utils/logger.ts';
-import { claudeClient, hfClient, zaiClient } from './clients.ts';
+import { claudeClient, hfClient, openrouterClient, zaiClient } from './clients.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
 import {
   type Admission,
@@ -677,12 +677,14 @@ export const providerClients = {
   zai: zaiClient,
   hf: hfClient,
   claude: claudeClient,
+  openrouter: openrouterClient,
 };
 
 const PROVIDER_LABELS: Record<ProviderId, string> = {
   zai: 'z.ai',
   hf: 'HF',
   claude: 'Claude',
+  openrouter: 'OpenRouter',
 };
 
 /**
@@ -776,11 +778,25 @@ function buildChain(
   return fallback;
 }
 
+/**
+ * OpenRouter routes every model to a different upstream, so a rate limit or outage of one model is
+ * not a statement about the others: the circuit is scoped to the key AND the model. Exported so
+ * the circuit-state script fingerprints the same account.
+ */
+export function openrouterCircuitScope(baseUrl: string, model: string | undefined): string {
+  return `${baseUrl}#${model ?? ''}`;
+}
+
 function buildSmartChain(cfg: EnvConfig): ProviderSlot[] {
   return buildChain('smart', cfg.AI_SMART_CHAIN, {
     zai: { model: cfg.ZAI_MODEL, apiKey: cfg.ZAI_API_KEY, baseUrl: cfg.ZAI_BASE_URL },
     hf: { model: cfg.HF_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
     claude: { model: cfg.CLAUDE_MODEL, apiKey: cfg.CLAUDE_API_TOKEN },
+    openrouter: {
+      model: cfg.OPENROUTER_MODEL,
+      apiKey: cfg.OPENROUTER_API_KEY,
+      baseUrl: openrouterCircuitScope(cfg.OPENROUTER_BASE_URL, cfg.OPENROUTER_MODEL),
+    },
   });
 }
 
@@ -789,6 +805,11 @@ function buildFastChain(cfg: EnvConfig): ProviderSlot[] {
     zai: { model: cfg.ZAI_FAST_MODEL, apiKey: cfg.ZAI_API_KEY, baseUrl: cfg.ZAI_BASE_URL },
     hf: { model: cfg.HF_FAST_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
     claude: { model: cfg.CLAUDE_FAST_MODEL, apiKey: cfg.CLAUDE_API_TOKEN },
+    openrouter: {
+      model: cfg.OPENROUTER_FAST_MODEL,
+      apiKey: cfg.OPENROUTER_API_KEY,
+      baseUrl: openrouterCircuitScope(cfg.OPENROUTER_BASE_URL, cfg.OPENROUTER_FAST_MODEL),
+    },
   });
 }
 

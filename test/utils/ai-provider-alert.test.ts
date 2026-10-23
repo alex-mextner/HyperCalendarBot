@@ -101,6 +101,16 @@ describe('classifyProviderFailure — the four real failure shapes of 2026-09-01
     ).toBe('model_gone');
   });
 
+  test('an OpenRouter moderation 403 about one message is not a rejected key', () => {
+    expect(
+      classifyProviderFailure({
+        provider: 'OpenRouter (anthropic/claude-haiku-5.5)',
+        status: 403,
+        message: 'This model requires moderation and your input was flagged for harassment',
+      }),
+    ).toBe('transient');
+  });
+
   test('Hugging Face revoked token (HTTP 401) is an authentication failure', () => {
     expect(classifyProviderFailure({ provider: 'HF (model)', status: 401, message: HF_AUTH_MESSAGE })).toBe(
       'auth_failed',
@@ -218,6 +228,15 @@ describe('single-provider alerts', () => {
     reportProviderFailure({ provider: 'Claude (claude-sonnet-5-5)', status: 401, message: HF_AUTH_MESSAGE }, 'smart');
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain('CLAUDE_API_TOKEN');
+  });
+
+  test('a rejected OpenRouter key alerts and tells the operator to rotate OPENROUTER_API_KEY', () => {
+    reportProviderFailure(
+      { provider: 'OpenRouter (deepseek/deepseek-v4.1-flash)', status: 401, message: HF_AUTH_MESSAGE },
+      'smart',
+    );
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('OPENROUTER_API_KEY');
   });
 
   test('nothing is sent during the startup grace window (restart-storm guard)', () => {

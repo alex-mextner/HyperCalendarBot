@@ -31,7 +31,7 @@ import { EventReminderRepository } from '../src/database/repositories/event-remi
 import { HolidayRepository } from '../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../src/database/schema.ts';
-import { claudeClient, hfClient, zaiClient } from '../src/services/ai/clients.ts';
+import { claudeClient, hfClient, openrouterClient, zaiClient } from '../src/services/ai/clients.ts';
 import type { ProviderId } from '../src/services/ai/provider-ids.ts';
 import { acceptsSamplingTemperature, CLAUDE_MAX_OUTPUT_TOKENS } from '../src/services/ai/streaming.ts';
 import { buildSystemPrompt } from '../src/services/ai/system-prompt.ts';
@@ -66,6 +66,11 @@ function providers(): ProviderSpec[] {
       name: 'claude',
       model: process.env.DRYRUN_MODEL_CLAUDE ?? cfg.CLAUDE_MODEL ?? 'claude-sonnet-5-5',
       client: claudeClient,
+    },
+    {
+      name: 'openrouter',
+      model: process.env.DRYRUN_MODEL_OPENROUTER ?? cfg.OPENROUTER_MODEL ?? '',
+      client: openrouterClient,
     },
   ];
   const unknown = wanted.filter((name) => !all.some((p) => p.name === name));

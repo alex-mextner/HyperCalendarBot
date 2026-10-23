@@ -1,7 +1,7 @@
 // test/services/ai/clients.test.ts
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import OpenAI from 'openai';
-import { hfClient, resetClients, zaiClient } from '../../../src/services/ai/clients.ts';
+import { hfClient, openrouterClient, resetClients, zaiClient } from '../../../src/services/ai/clients.ts';
 
 const originalEnv = { ...process.env };
 
@@ -40,9 +40,28 @@ test('hfClient returns an OpenAI instance wired to HF env vars', () => {
   expect(client.baseURL).toBe('https://hf.example/v1');
 });
 
+test('openrouterClient is wired to the OpenRouter env vars with no retries', () => {
+  process.env.OPENROUTER_API_KEY = 'or-key';
+  delete process.env.OPENROUTER_BASE_URL;
+  const client = openrouterClient();
+  expect(client).toBeInstanceOf(OpenAI);
+  expect(client.apiKey).toBe('or-key');
+  expect(client.baseURL).toBe('https://openrouter.ai/api/v1');
+  expect(client.maxRetries).toBe(0);
+  expect(client.timeout).toBe(60_000);
+});
+
+test('openrouterClient honours OPENROUTER_BASE_URL', () => {
+  process.env.OPENROUTER_API_KEY = 'or-key';
+  process.env.OPENROUTER_BASE_URL = 'https://or.example/v1';
+  expect(openrouterClient().baseURL).toBe('https://or.example/v1');
+});
+
 test('each factory returns the same singleton on repeat calls', () => {
   expect(zaiClient()).toBe(zaiClient());
   expect(hfClient()).toBe(hfClient());
+  process.env.OPENROUTER_API_KEY = 'or-key';
+  expect(openrouterClient()).toBe(openrouterClient());
 });
 
 test('resetClients clears the singletons so new instances are built', () => {
@@ -50,6 +69,10 @@ test('resetClients clears the singletons so new instances are built', () => {
   resetClients();
   const secondZai = zaiClient();
   expect(secondZai).not.toBe(firstZai);
+  process.env.OPENROUTER_API_KEY = 'or-key';
+  const firstOpenrouter = openrouterClient();
+  resetClients();
+  expect(openrouterClient()).not.toBe(firstOpenrouter);
 });
 
 test('the two providers are independent singletons', () => {

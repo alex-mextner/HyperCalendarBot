@@ -225,7 +225,7 @@ All `process.env.*` reads go through `src/config/env.ts` → `loadConfig()` and 
 
 When adding a new env var: (1) add it to `EnvConfig` interface in `env.ts`, (2) read and validate in `loadConfig()`, (3) use via `config.VAR_NAME` everywhere else.
 
-**Provider order is configuration, not code**: `AI_SMART_CHAIN` and `AI_FAST_CHAIN` list provider ids (`zai`, `claude`, `hf`); the default for both is z.ai → Claude → HF (the owner's order, identical in ExpenseSyncBot); providers without key/model are skipped. The ids come from `PROVIDER_IDS` in
+**Provider order is configuration, not code**: `AI_SMART_CHAIN` and `AI_FAST_CHAIN` list provider ids (`zai`, `claude`, `hf`, optional `openrouter`); the default for both is z.ai → Claude → HF (the owner's order, identical in ExpenseSyncBot); providers without key/model are skipped. The ids come from `PROVIDER_IDS` in
 `src/services/ai/provider-ids.ts` — a leaf module that imports nothing, so both the config
 layer and the AI layer can derive from it without a cycle. Add a provider there and it is
 nameable at once. Gemini was removed in full (2026-10): no id, no `GEMINI_*` variable is read, and a
@@ -241,6 +241,19 @@ naming nothing known falls back to the default order, and an order whose provide
 unconfigured falls back to the default order over whatever IS configured (logged as an
 error). Reordering during an incident is an `.env` edit and a restart — do not hardcode
 a new order in `streaming.ts`.
+
+**Optional OpenRouter provider** (id `openrouter`, 2026-10-23): one key that serves DeepSeek and GLM Flash.
+`OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL` (default `https://openrouter.ai/api/v1`), `OPENROUTER_MODEL` (smart
+chain) and `OPENROUTER_FAST_MODEL` (fast chain); no model default. It is in neither default chain: it runs only
+when `AI_SMART_CHAIN` / `AI_FAST_CHAIN` name it AND both the key and that chain's model are set, otherwise its slot
+is skipped like any unconfigured provider. Live-verified ids (2026-10-23, `/models`): `deepseek/deepseek-v4.1-flash`
+and `z-ai/glm-5.3-flash`. Claude-specific request rules (no `temperature`, the 128k `max_tokens`, the visible-token
+cap) apply only to the `claude` provider, so do not route Claude models through OpenRouter in a chain without
+measuring. Live-model replacement is off for it (it lists hundreds of
+differently priced models), and OpenRouter accepts the `content: null` assistant turn that carries tool calls,
+so the transcript is sent unchanged. Never reintroduce gpt-oss, Groq chat or Gemini through it. Its circuit is
+scoped to the key AND the model (`openrouterCircuitScope`), because OpenRouter routes each model to a different
+upstream: a limit on one model must not bench the other.
 
 **A depleted or rejected provider account is skipped, not retried**: `src/services/ai/provider-circuit.ts`
 keeps one durable circuit per provider account for every provider in the chain (key = fingerprint

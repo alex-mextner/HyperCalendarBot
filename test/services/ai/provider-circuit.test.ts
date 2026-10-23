@@ -107,6 +107,11 @@ describe('classifyCircuitFailure', () => {
     expect(classifyCircuitFailure({ status: 404, message: 'model not found', providerDown: false }, T0)).toBeNull();
   });
 
+  test('an OpenRouter moderation 403 about one input never opens the account circuit', () => {
+    const flagged = 'This model requires moderation and your input was flagged for harassment';
+    expect(classifyCircuitFailure({ status: 403, message: flagged, providerDown: false }, T0)).toBeNull();
+  });
+
   test('message text without a status is never enough — echoed request text must not open a circuit', () => {
     expect(
       classifyCircuitFailure({ status: undefined, message: 'payment required, unauthorized', providerDown: false }, T0),

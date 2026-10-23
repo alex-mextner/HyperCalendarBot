@@ -169,6 +169,7 @@ function classifyByStatus(status: number | undefined, lowerMessage: string): Pro
   if (status === undefined) return null;
   if (status === 402) return 'quota_exhausted';
   if (status === 401 || status === 403) {
+    if (status === 403 && /requires moderation|input was flagged/.test(lowerMessage)) return 'transient';
     return matchesAny(lowerMessage, QUOTA_PATTERNS) ? 'quota_exhausted' : 'auth_failed';
   }
   if (status === 404) return 'model_gone';
@@ -692,16 +693,20 @@ const CLASS_EMOJI: Record<ProviderFailureClass, string> = {
 };
 
 interface ProviderEnvNames {
-  apiKey: string;
+  /** Name of the environment variable holding the provider credential. */
+  keyVar: string;
   model: string;
 }
 
 function envNames(provider: string): ProviderEnvNames {
   const family = providerFamily(provider);
-  if (family.startsWith('z.ai')) return { apiKey: 'ZAI_API_KEY', model: 'ZAI_MODEL / ZAI_FAST_MODEL' };
-  if (family.startsWith('claude')) return { apiKey: 'CLAUDE_API_TOKEN', model: 'CLAUDE_MODEL / CLAUDE_FAST_MODEL' };
-  if (family.startsWith('hf')) return { apiKey: 'HF_TOKEN', model: 'HF_MODEL / HF_FAST_MODEL' };
-  return { apiKey: 'the provider API key', model: 'the configured model id' };
+  if (family.startsWith('z.ai')) return { keyVar: 'ZAI_API_KEY', model: 'ZAI_MODEL / ZAI_FAST_MODEL' };
+  if (family.startsWith('claude')) return { keyVar: 'CLAUDE_API_TOKEN', model: 'CLAUDE_MODEL / CLAUDE_FAST_MODEL' };
+  if (family.startsWith('hf')) return { keyVar: 'HF_TOKEN', model: 'HF_MODEL / HF_FAST_MODEL' };
+  if (family.startsWith('openrouter')) {
+    return { keyVar: 'OPENROUTER_API_KEY', model: 'OPENROUTER_MODEL / OPENROUTER_FAST_MODEL' };
+  }
+  return { keyVar: 'the provider API key', model: 'the configured model id' };
 }
 
 function actionHint(provider: string, failureClass: ProviderFailureClass): string {
@@ -710,7 +715,7 @@ function actionHint(provider: string, failureClass: ProviderFailureClass): strin
     case 'quota_exhausted':
       return `The plan budget is spent — top it up or wait for the quota window to reset. Until then this provider stays down.`;
     case 'auth_failed':
-      return `Issue a new key and update ${env.apiKey} in the .env file on the server, then redeploy.`;
+      return `Issue a new key and update ${env.keyVar} in the .env file on the server, then redeploy.`;
     case 'model_gone':
       return `The configured model id no longer exists — pick a current one and update ${env.model} in the .env file.`;
     case 'transient':

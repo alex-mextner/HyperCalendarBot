@@ -13,6 +13,8 @@ export const DEFAULT_SMART_CHAIN: ProviderId[] = ['zai', 'claude', 'hf'];
  */
 export const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'claude', 'hf'];
 
+export const DEFAULT_OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+
 /**
  * A chain order together with where it came from. The source is carried rather
  * than inferred, because the two cases warrant different noise: a provider the
@@ -89,6 +91,12 @@ export interface EnvConfig {
   CLAUDE_API_TOKEN?: string;
   CLAUDE_MODEL?: string;
   CLAUDE_FAST_MODEL?: string;
+  // OpenRouter (optional; serves DeepSeek and GLM Flash behind one key). Used only when
+  // a chain names it and both the key and that chain's model are set.
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_BASE_URL: string;
+  OPENROUTER_MODEL?: string;
+  OPENROUTER_FAST_MODEL?: string;
 
   /**
    * The order providers are tried in, first to last, for the chain that answers
@@ -220,6 +228,10 @@ export function loadConfig(): EnvConfig {
     CLAUDE_API_TOKEN: process.env.CLAUDE_API_TOKEN || undefined,
     CLAUDE_MODEL: process.env.CLAUDE_MODEL || undefined,
     CLAUDE_FAST_MODEL: process.env.CLAUDE_FAST_MODEL || undefined,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || undefined,
+    OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL || DEFAULT_OPENROUTER_BASE_URL,
+    OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || undefined,
+    OPENROUTER_FAST_MODEL: process.env.OPENROUTER_FAST_MODEL || undefined,
     AI_TOOL_SCHEMA_MODE: toolSchemaMode,
     AI_TOOL_SCHEMA_USER_IDS: toolSchemaUserIds,
     AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),
