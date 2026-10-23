@@ -15,6 +15,7 @@ export type BotTaskJobType =
   | 'cron-sqlite-backup'
   | 'cron-recurring-reminders'
   | 'cron-action-log-cleanup'
+  | 'cron-ai-usage-cleanup'
   | 'cron-session-keepalive';
 
 export interface BotTaskJobData {
@@ -34,6 +35,7 @@ export interface BotTasksQueueDeps {
   onSqliteBackup?: () => Promise<void>;
   onRecurringReminders?: () => void;
   onActionLogCleanup?: () => void;
+  onAiUsageCleanup?: () => void;
   onSessionKeepalive?: () => Promise<void>;
 }
 
@@ -91,6 +93,10 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
       }
       if (job.data.type === 'cron-action-log-cleanup') {
         deps.onActionLogCleanup?.();
+        return;
+      }
+      if (job.data.type === 'cron-ai-usage-cleanup') {
+        deps.onAiUsageCleanup?.();
         return;
       }
       if (job.data.type === 'cron-session-keepalive') {
@@ -216,6 +222,15 @@ export async function setupActionLogCleanupCron(queue: Queue<BotTaskJobData>): P
     { repeat: { every: WEEKLY_MS }, removeOnComplete: true, jobId: 'action-log-cleanup-tick' },
   );
   botTasksLogger.info('Action log cleanup cron scheduled (weekly, retains 90 days)');
+}
+
+export async function setupAiUsageCleanupCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'ai-usage-cleanup-tick',
+    { type: 'cron-ai-usage-cleanup' },
+    { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'ai-usage-cleanup-tick' },
+  );
+  botTasksLogger.info('AI usage cleanup cron scheduled (daily, retains 180 days)');
 }
 
 export async function setupSessionKeepaliveCron(queue: Queue<BotTaskJobData>): Promise<void> {

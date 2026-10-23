@@ -130,6 +130,7 @@ export async function resolveCity(
       ],
       maxTokens: 64,
       fast: true,
+      purpose: 'city_resolver',
     });
 
     const tz = result.text.trim();

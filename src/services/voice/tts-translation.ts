@@ -45,6 +45,7 @@ export class TtsTranslationService {
           ],
           maxTokens: 1024,
           fast: true,
+          purpose: 'tts_translation',
         },
         onDelta ? { onTextDelta: onDelta } : {},
       );

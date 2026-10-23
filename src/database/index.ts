@@ -5,6 +5,7 @@ import { dirname } from 'node:path';
 import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
 import { ActionLogRepository } from './repositories/action-log.repository.ts';
+import { AiUsageRepository } from './repositories/ai-usage.repository.ts';
 import { AlertRepository } from './repositories/alert.repository.ts';
 import { BirthdayMetadataRepository } from './repositories/birthday-metadata.repository.ts';
 import { CalendarProposalRepository } from './repositories/calendar-proposal.repository.ts';
@@ -66,6 +67,7 @@ export class DatabaseService {
   readonly birthdayMeta: BirthdayMetadataRepository;
   readonly userMemory: UserMemoryRepository;
   readonly actionLog: ActionLogRepository;
+  readonly aiUsage: AiUsageRepository;
   readonly alerts: AlertRepository;
   readonly featureUsage: FeatureUsageRepository;
   readonly participantGoogleSync: ParticipantGoogleSyncRepository;
@@ -113,6 +115,7 @@ export class DatabaseService {
     this.birthdayMeta = new BirthdayMetadataRepository(this.db);
     this.userMemory = new UserMemoryRepository(this.db);
     this.actionLog = new ActionLogRepository(this.db);
+    this.aiUsage = new AiUsageRepository(this.db);
     this.alerts = new AlertRepository(this.db);
     this.featureUsage = new FeatureUsageRepository(this.db);
     this.participantGoogleSync = new ParticipantGoogleSyncRepository(this.db);

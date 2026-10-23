@@ -43,7 +43,8 @@ test('runs once after the already applied 065 and leaves every existing answer w
   runMigrations(db, migrations);
   runMigrations(db, migrations);
 
-  expect(ledger(db)).toEqual([...ledgerBefore, { name: MIGRATION }]);
+  const applied = migrations.slice(migrations.findIndex((migration) => migration.name === MIGRATION));
+  expect(ledger(db)).toEqual([...ledgerBefore, ...applied.map((migration) => ({ name: migration.name }))]);
   expect(answers(db)).toEqual(answersBefore);
   const participants = new ParticipantRepository(db);
   expect(participants.getByEvent(eventId).map((row) => row.source_group_id)).toEqual([null, null]);

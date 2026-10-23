@@ -386,6 +386,21 @@ describe('CalendarBotAgent.run()', () => {
     expect(toolNames.includes('create_event')).toBe(!included);
   });
 
+  test('every model round names its purpose so its usage rows say what the call was for', async () => {
+    const script = makeStreamImpl([{ kind: 'text', text: 'A response requiring validation.' }]);
+    const purposes: (StreamRoundOptions['purpose'] | 'validator-call')[] = [];
+    const impl: typeof script.impl = async (opts, cbs) => {
+      purposes.push(isValidatorCall(opts) ? 'validator-call' : opts.purpose);
+      if (isValidatorCall(opts)) expect(opts.purpose).toBe('validator');
+      return script.impl(opts, cbs);
+    };
+
+    await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+    expect(purposes).toContain('agent');
+    expect(purposes).not.toContain(undefined);
+  });
+
   test('live calls keep their full tool contract during the text-only lazy canary', async () => {
     ctx.inputMode = 'live_call';
     const script = makeStreamImpl([{ kind: 'text', text: 'Synthetic spoken reply.' }]);
