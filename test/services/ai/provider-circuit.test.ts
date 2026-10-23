@@ -63,7 +63,7 @@ afterEach(() => {
 });
 
 function ctx(
-  provider: 'zai' | 'groq' | 'gemini' | 'hf',
+  provider: 'zai' | 'groq' | 'claude' | 'hf',
   chain: 'smart' | 'fast' = 'smart',
   apiKey = `${provider}-key`,
 ) {
@@ -294,7 +294,7 @@ describe('closing and re-opening', () => {
   });
 
   test('availability faults open only after consecutive failures and notify once', () => {
-    const c = ctx('gemini');
+    const c = ctx('claude');
     configureProviderCircuit(dbPath);
     const down = { status: 503, message: 'upstream', providerDown: true };
     for (let i = 0; i < TRANSIENT_OPEN_THRESHOLD - 1; i++) settleFailure(c, admitProvider(c), down);
@@ -418,7 +418,7 @@ describe('one actual account incident across models and chains', () => {
   });
   test('an availability circuit emits one opening notice, not a repeated outage timer', () => {
     configureProviderCircuit(dbPath);
-    const context = ctx('gemini');
+    const context = ctx('claude');
     const down = { status: 503, message: 'Temporary outage', providerDown: true };
     for (let i = 0; i < TRANSIENT_OPEN_THRESHOLD; i++) settleFailure(context, admitProvider(context), down);
     expect(sent).toHaveLength(1);
@@ -441,7 +441,7 @@ test('asynchronous notification failure is contained, backed off, then delivered
       sent.push(text);
     },
   });
-  const context = ctx('gemini');
+  const context = ctx('claude');
   settleFailure(context, admitProvider(context), CREDITS);
   await flushProviderCircuitNotices();
   expect(attempts).toBe(1);

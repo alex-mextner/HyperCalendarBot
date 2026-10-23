@@ -195,7 +195,7 @@ describe('summarizeAiUsage — one verdict per provider', () => {
   test('lists every known provider, so a provider with no rows says so explicitly', () => {
     const summary = summarizeAiUsage([event()], WINDOW);
 
-    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'groq', 'gemini', 'hf', 'claude']);
+    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'groq', 'hf']);
     expect(verdictOf([event()], 'claude')).toMatchObject({ verdict: 'no_traffic', attempts: 0, successRate: null });
   });
 
@@ -230,7 +230,23 @@ describe('summarizeAiUsage — one verdict per provider', () => {
 
   test('a provider id the code no longer knows still appears, after the known ones', () => {
     const summary = summarizeAiUsage([event({ provider: 'retired' }), event()], WINDOW);
-    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'groq', 'gemini', 'hf', 'claude', 'retired']);
+    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'groq', 'hf', 'retired']);
+  });
+
+  test('a historical gemini ledger row still appears after the configured providers and does not throw', () => {
+    const summary = summarizeAiUsage([event({ provider: 'gemini', model: 'gemini-3-flash' }), event()], WINDOW);
+    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'groq', 'hf', 'gemini']);
+    expect(summary.providers.find((p) => p.provider === 'gemini')).toMatchObject({ verdict: 'healthy', ok: 1 });
+  });
+
+  test('a historical gemini local_budget skip row is counted, not rejected', () => {
+    const summary = summarizeAiUsage(
+      [event({ provider: 'gemini', model: 'gemini-3-flash', outcome: 'skipped', skipReason: 'local_budget' })],
+      WINDOW,
+    );
+    const gemini = summary.providers.find((p) => p.provider === 'gemini');
+    expect(gemini).toMatchObject({ verdict: 'skipped_only', skipped: 1 });
+    expect(summary.models[0]?.skippedByReason).toEqual({ local_budget: 1 });
   });
 
   test('carries the window it summarised', () => {

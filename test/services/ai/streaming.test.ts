@@ -95,7 +95,7 @@ describe('preflightRequestFit', () => {
 
   test('does not invent a budget for providers or Groq models whose limit is unknown', () => {
     const large = { messages: [{ role: 'user' as const, content: 'x'.repeat(50_000) }], maxTokens: 200 };
-    expect(preflightRequestFit('gemini', 'models/gemini-2.5-flash', large)).toBeNull();
+    expect(preflightRequestFit('zai', 'glm-4.6', large)).toBeNull();
     expect(preflightRequestFit('groq', 'groq/compound', large)).toBeNull();
   });
 });

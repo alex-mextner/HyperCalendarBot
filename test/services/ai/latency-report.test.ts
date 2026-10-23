@@ -119,7 +119,7 @@ test('preflight skips are separate from actual provider failures', () => {
     {
       msg: 'AI model call metric',
       requestId: 'a',
-      provider: 'gemini',
+      provider: 'claude',
       model: 'winner',
       providerDurationMs: 30,
       totalDurationMs: 100,
@@ -130,5 +130,5 @@ test('preflight skips are separate from actual provider failures', () => {
   ]);
   expect(summary.byProvider['groq:oversized']).toMatchObject({ n: 0, failures: 0, skippedBeforeRequest: 1 });
   expect(summary.byProvider['zai:failed']).toMatchObject({ n: 0, failures: 1, skippedBeforeRequest: 0 });
-  expect(summary.byProvider['gemini:winner']).toMatchObject({ p50: 30, failures: 0, skippedBeforeRequest: 0 });
+  expect(summary.byProvider['claude:winner']).toMatchObject({ p50: 30, failures: 0, skippedBeforeRequest: 0 });
 });

@@ -330,8 +330,7 @@ function regroupToolCallBlocks(messages: MessageParam[]): MessageParam[] {
  *      above it, once per tool_call_id. Any other result is dropped: most often
  *      the history window starts on a result whose call row was cut off. Groq's
  *      Harmony renderer names a tool message after the call it answers and
- *      rejects a nameless one with `400 … Tools should have a name!`; Gemini
- *      rejects it with a bodiless 400.
+ *      rejects a nameless one with `400 … Tools should have a name!`.
  */
 function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
   const paired: MessageParam[] = [];

@@ -53,7 +53,6 @@ interface ProviderPreferences {
 interface ModelPreferenceTable {
   zai: ProviderPreferences;
   groq: ProviderPreferences;
-  gemini: ProviderPreferences;
   hf: ProviderPreferences;
   claude: ProviderPreferences;
 }
@@ -74,7 +73,6 @@ const PREFERRED_MODELS: ModelPreferenceTable = {
     smart: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'groq/compound'],
     fast: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'groq/compound-mini'],
   },
-  gemini: { smart: [], fast: [] },
   hf: { smart: [], fast: [] },
   claude: {
     smart: ['claude-sonnet-5-5'],

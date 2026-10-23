@@ -184,8 +184,8 @@ describe('agent failure notices', () => {
         transient: false,
       },
       {
-        provider: 'Gemini (models/gemini-2.5-flash)',
-        providerId: 'gemini',
+        provider: 'Claude (claude-synthetic)',
+        providerId: 'claude',
         model: 'synthetic',
         status: 401,
         message: 'invalid key',
@@ -253,8 +253,8 @@ describe('agent failure notices', () => {
         transient: true,
       },
       {
-        provider: 'Gemini (models/gemini-2.5-flash)',
-        providerId: 'gemini',
+        provider: 'Claude (claude-synthetic)',
+        providerId: 'claude',
         model: 'synthetic',
         status: 500,
         message: 'internal error',

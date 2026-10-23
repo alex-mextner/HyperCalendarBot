@@ -132,10 +132,10 @@ describe('classifyProviderFailure — transient failures must stay quiet', () =>
   });
 
   test('5xx and Groq 413 token-per-minute limits are transient', () => {
-    expect(classifyProviderFailure({ provider: 'Gemini', status: 503, message: 'model is overloaded' })).toBe(
+    expect(classifyProviderFailure({ provider: 'Claude', status: 503, message: 'model is overloaded' })).toBe(
       'transient',
     );
-    expect(classifyProviderFailure({ provider: 'Gemini', status: 500, message: 'internal error' })).toBe('transient');
+    expect(classifyProviderFailure({ provider: 'Claude', status: 500, message: 'internal error' })).toBe('transient');
     expect(
       classifyProviderFailure({
         provider: 'Groq',
@@ -191,7 +191,7 @@ describe('single-provider alerts', () => {
       { provider: 'Groq (llama-3.3-70b-versatile)', status: 429, message: 'try again in 2s' },
       'smart',
     );
-    reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' }, 'smart');
+    reportProviderFailure({ provider: 'Claude (claude-sonnet-5-5)', status: 503, message: 'overloaded' }, 'smart');
     advance(ALERT_POLICY.digestWindowMs * 3);
     expect(sent).toEqual([]);
   });
@@ -304,8 +304,8 @@ describe('burst coalescing and escalation', () => {
   });
 
   test('a provider that never alerted recovers silently', () => {
-    reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' }, 'smart');
-    reportProviderAnswered('Gemini (gemini-2.5-flash)', 'smart');
+    reportProviderFailure({ provider: 'Claude (claude-sonnet-5-5)', status: 503, message: 'overloaded' }, 'smart');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'smart');
     expect(sent).toEqual([]);
   });
 });
@@ -316,7 +316,7 @@ describe('total chain outage', () => {
   const chainFailures = [
     { provider: 'z.ai (glm-4.6)', status: 429, message: ZAI_QUOTA_MESSAGE },
     { provider: 'Groq (llama-3.3-70b-versatile)', status: 404, message: GROQ_MODEL_GONE_MESSAGE },
-    { provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'model is overloaded' },
+    { provider: 'Claude (claude-sonnet-5-5)', status: 503, message: 'model is overloaded' },
     { provider: 'HF (Qwen/Qwen3-Coder)', status: 401, message: HF_AUTH_MESSAGE },
   ];
 
@@ -326,7 +326,7 @@ describe('total chain outage', () => {
     const text = sent[0] ?? '';
     expect(text).toContain('z.ai');
     expect(text).toContain('Groq');
-    expect(text).toContain('Gemini');
+    expect(text).toContain('Claude');
     expect(text).toContain('HF');
     expect(text).toContain('429');
     expect(text).toContain('404');
@@ -350,7 +350,7 @@ describe('total chain outage', () => {
   test('any provider answering again clears the chain outage with one recovery notice', () => {
     reportAllProvidersFailed(chainFailures, 'smart');
     advance(60_000);
-    reportProviderAnswered('Gemini (gemini-2.5-flash)', 'smart');
+    reportProviderAnswered('Claude (claude-sonnet-5-5)', 'smart');
     expect(sent).toHaveLength(2);
     expect(sent[1]).toContain('again');
   });

@@ -3,7 +3,7 @@
  * tokenizer dependency.
  *
  * The rates below are average characters-per-token for the byte-pair vocabularies
- * used by the providers in the fallback chain (z.ai, Groq, Gemini, HuggingFace).
+ * used by the providers in the fallback chain (z.ai, Claude, Groq, HuggingFace).
  * They are calibrated against two measured points:
  *
  * - the 41 759-character tool catalog was billed by a provider at ~11 900 tokens

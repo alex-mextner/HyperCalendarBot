@@ -5,7 +5,7 @@
  *   bun scripts/test-ai-chains.ts
  *
  * Hits real providers, so every env var loaded by src/config/env.ts must be set
- * (all ZAI_*, HF_*, GEMINI_* plus BOT_TOKEN — the BOT_TOKEN is only read to
+ * (all ZAI_*, HF_* plus BOT_TOKEN — the BOT_TOKEN is only read to
  * satisfy loadConfig(), we don't actually talk to Telegram here).
  */
 import { aiStreamRound } from '../src/services/ai/streaming.ts';

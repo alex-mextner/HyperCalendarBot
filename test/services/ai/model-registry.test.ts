@@ -103,12 +103,12 @@ describe('selectReplacementModel', () => {
         'meta-llama/llama-prompt-guard-2-86m',
         'text-embedding-3-large',
         'canopylabs/orpheus-3b',
-        'gemini-2.5-flash',
+        'qwen-2.5-chat',
       ],
-      configuredModel: 'gemini-9.9-nonexistent',
+      configuredModel: 'qwen-9.9-nonexistent',
       preferences: [],
     });
-    expect(picked).toBe('gemini-2.5-flash');
+    expect(picked).toBe('qwen-2.5-chat');
   });
 
   test('prefers a model from the same family as the dead one when nothing is preferred', () => {
@@ -186,7 +186,7 @@ describe('resolveModelOverride', () => {
 
     expect(getModelOverride('groq', 'dead-model')).toBe('openai/gpt-oss-120b');
     expect(getModelOverride('groq', 'some-other-model')).toBeNull();
-    expect(getModelOverride('gemini', 'dead-model')).toBeNull();
+    expect(getModelOverride('hf', 'dead-model')).toBeNull();
   });
 
   test('forceRefresh re-probes when the previously resolved replacement also died', async () => {

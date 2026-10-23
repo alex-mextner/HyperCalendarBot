@@ -2,21 +2,17 @@
 
 import { PROVIDER_IDS, type ProviderId } from '../services/ai/provider-ids.ts';
 import { logger, logOnce } from '../utils/logger.ts';
-import { type GeminiRateLimits, parseGeminiRateLimits } from './gemini-rate-limits.ts';
 import { type GroqTokenLimits, parseGroqTokenLimits } from './groq-token-limits.ts';
 
-/** Main requests try responsive routes with their configured main model IDs.
- * Explicit operator order wins; token-fit guards, circuits and fallback stay intact.
- * Claude follows z.ai: the paid reserve, skipped without CLAUDE_API_TOKEN or the chain's model.
+/** Owner-chosen order for main requests: z.ai, then Claude, then Groq, then Hugging Face.
+ * Explicit operator order (AI_SMART_CHAIN) wins; token-fit guards, circuits and fallback stay intact.
+ * A provider without its key or the chain's model is skipped, so a depleted z.ai falls through to Claude.
  */
-export const DEFAULT_SMART_CHAIN: ProviderId[] = ['groq', 'gemini', 'hf', 'zai', 'claude'];
-/** Short requests try responsive providers first. Explicit operator order still wins.
- * September 18 runtime probes: old order spent 15s on z.ai before a healthy provider;
- * Groq OSS20B and Gemini each completed independently in under 1s. Empty responses,
- * exhausted quotas and oversized Groq payloads retain the normal guarded fallback.
- * Claude follows z.ai here too, with its own fast model.
+export const DEFAULT_SMART_CHAIN: ProviderId[] = ['zai', 'claude', 'groq', 'hf'];
+/** Short requests use the same owner-chosen order, with each provider's fast model.
+ * Explicit operator order (AI_FAST_CHAIN) still wins.
  */
-export const DEFAULT_FAST_CHAIN: ProviderId[] = ['groq', 'gemini', 'hf', 'zai', 'claude'];
+export const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'claude', 'groq', 'hf'];
 
 /**
  * A chain order together with where it came from. The source is carried rather
@@ -76,13 +72,6 @@ export interface EnvConfig {
   HF_BASE_URL: string;
   HF_MODEL: string;
   HF_FAST_MODEL: string;
-
-  // Google Gemini (fallback, tool calling capable)
-  GEMINI_API_KEY: string;
-  GEMINI_BASE_URL: string;
-  GEMINI_MODEL: string;
-  GEMINI_FAST_MODEL: string;
-  GEMINI_RATE_LIMITS?: GeminiRateLimits;
 
   REDIS_URL: string;
   GOOGLE_CLIENT_ID?: string;
@@ -217,12 +206,6 @@ export function loadConfig(): EnvConfig {
     HF_MODEL: requireEnv('HF_MODEL'),
     HF_FAST_MODEL: requireEnv('HF_FAST_MODEL'),
 
-    // Gemini
-    GEMINI_API_KEY: requireEnv('GEMINI_API_KEY'),
-    GEMINI_BASE_URL: requireEnv('GEMINI_BASE_URL'),
-    GEMINI_MODEL: requireEnv('GEMINI_MODEL'),
-    GEMINI_FAST_MODEL: requireEnv('GEMINI_FAST_MODEL'),
-
     REDIS_URL,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || undefined,
@@ -248,7 +231,6 @@ export function loadConfig(): EnvConfig {
     AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),
     AI_FAST_CHAIN: parseChain('AI_FAST_CHAIN', DEFAULT_FAST_CHAIN),
     BOT_ADMIN_ID,
-    GEMINI_RATE_LIMITS: parseGeminiRateLimits(process.env.GEMINI_RATE_LIMITS),
     INTENT_LEARNER_DAILY_LIMIT,
     INLINE_BOT_TOKEN: process.env.INLINE_BOT_TOKEN || undefined,
     INLINE_BOT_USERNAME: process.env.INLINE_BOT_USERNAME || undefined,

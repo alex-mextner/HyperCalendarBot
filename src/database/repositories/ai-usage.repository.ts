@@ -14,7 +14,11 @@ export type AiErrorClass =
   | 'bad_request'
   | 'other';
 
-/** Why a provider was passed over without a request being sent. */
+/**
+ * Why a provider was passed over without a request being sent. `local_budget` is retired (Gemini's
+ * local quota admission, removed in #806) and is never written any more; it stays so that historical
+ * rows keep their type.
+ */
 export type AiSkipReason = 'preflight_size' | 'circuit_open' | 'eligibility_bench' | 'local_budget' | 'round_deadline';
 
 /**

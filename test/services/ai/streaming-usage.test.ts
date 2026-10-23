@@ -4,9 +4,6 @@
 
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import OpenAI from 'openai';
 import { migrations } from '../../../src/database/migrations.ts';
 import { AiUsageRepository, type AiUsageRow } from '../../../src/database/repositories/ai-usage.repository.ts';
@@ -111,7 +108,6 @@ const realPerformanceNow = performance.now.bind(performance);
 
 let zai: FakeProvider;
 let groq: FakeProvider;
-let gemini: FakeProvider;
 let claude: FakeProvider;
 let db: Database;
 let repo: AiUsageRepository;
@@ -132,10 +128,6 @@ beforeEach(() => {
     GROQ_API_KEY: 'test-groq-key',
     GROQ_MODEL: 'llama-3.3-70b-versatile',
     GROQ_FAST_MODEL: 'llama-3.1-8b-instant',
-    GEMINI_API_KEY: 'gemini-key',
-    GEMINI_BASE_URL: 'https://gemini.example/v1',
-    GEMINI_MODEL: 'gemini-main',
-    GEMINI_FAST_MODEL: 'gemini-fast',
     HF_TOKEN: 'hf-token',
     HF_BASE_URL: 'https://hf.example/v1',
     HF_MODEL: 'hf-main',
@@ -143,8 +135,8 @@ beforeEach(() => {
     CLAUDE_API_TOKEN: 'claude-key',
     CLAUDE_MODEL: 'claude-sonnet-5-5',
     CLAUDE_FAST_MODEL: 'claude-haiku-5-5',
-    AI_SMART_CHAIN: 'zai,groq,gemini',
-    AI_FAST_CHAIN: 'zai,groq,gemini',
+    AI_SMART_CHAIN: 'zai,groq,claude',
+    AI_FAST_CHAIN: 'zai,groq,claude',
   });
   resetLogOnce();
   resetEligibility();
@@ -152,12 +144,10 @@ beforeEach(() => {
   resetModelRegistry();
   providerClients.zai = () => asOpenAIClient(zai.client);
   providerClients.groq = () => asOpenAIClient(groq.client);
-  providerClients.gemini = () => asOpenAIClient(gemini.client);
   providerClients.claude = () => asOpenAIClient(claude.client);
   const unused = makeProvider({ kind: 'throw', error: new Error('must not be called') });
   zai = unused;
   groq = unused;
-  gemini = unused;
   claude = unused;
   db = new Database(':memory:');
   runMigrations(db, migrations);
@@ -251,7 +241,7 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
   test('a fallback leaves a failed row for every provider that failed and an ok row for the one that answered', async () => {
     zai = makeProvider({ kind: 'throw', error: apiError(402, 'Insufficient balance') });
     groq = makeProvider({ kind: 'throw', error: apiError(401, 'Invalid API key') });
-    gemini = makeProvider({ kind: 'text', text: 'answer', usage: USAGE });
+    claude = makeProvider({ kind: 'text', text: 'answer', usage: USAGE });
 
     const result = await ask({ purpose: 'agent' });
 
@@ -259,21 +249,21 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
     expect(rows().map((row) => [row.provider, row.outcome, row.errorClass, row.httpStatus, row.promptTokens])).toEqual([
       ['zai', 'error', 'quota', 402, null],
       ['groq', 'error', 'auth', 401, null],
-      ['gemini', 'ok', null, null, 1200],
+      ['claude', 'ok', null, null, 1200],
     ]);
   });
 
   test('server errors, rate limits and rejected requests are classified from the status', async () => {
     zai = makeProvider({ kind: 'throw', error: apiError(503, 'overloaded') });
     groq = makeProvider({ kind: 'throw', error: apiError(429, 'Rate limit reached for model') });
-    gemini = makeProvider({ kind: 'throw', error: apiError(400, 'Invalid JSON payload') });
+    claude = makeProvider({ kind: 'throw', error: apiError(400, 'Invalid JSON payload') });
 
     await expect(ask()).rejects.toThrow('All 3 AI providers failed');
 
     expect(rows().map((row) => [row.provider, row.errorClass, row.httpStatus])).toEqual([
       ['zai', 'server', 503],
       ['groq', 'rate_limit', 429],
-      ['gemini', 'bad_request', 400],
+      ['claude', 'bad_request', 400],
     ]);
   });
 
@@ -333,15 +323,15 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
 
   test('a request too big for the provider is skipped before any request and says why', async () => {
     process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
-    process.env.AI_SMART_CHAIN = 'groq,gemini';
+    process.env.AI_SMART_CHAIN = 'groq,claude';
     groq = makeProvider({ kind: 'throw', error: new Error('Groq must not be called') });
-    gemini = makeProvider({ kind: 'text', text: 'answer' });
+    claude = makeProvider({ kind: 'text', text: 'answer' });
 
     await ask({ messages: [{ role: 'user', content: 'x'.repeat(50_000) }], maxTokens: 200 });
 
     expect(rows().map((row) => [row.provider, row.outcome, row.skipReason, row.durationMs, row.promptTokens])).toEqual([
       ['groq', 'skipped', 'preflight_size', null, null],
-      ['gemini', 'ok', null, expect.any(Number), null],
+      ['claude', 'ok', null, expect.any(Number), null],
     ]);
   });
 
@@ -378,26 +368,6 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
     ]);
   });
 
-  test('a Gemini slot the local quota store refused is a skip, not an error against Gemini', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hcb-usage-quota-'));
-    try {
-      process.env.DATABASE_PATH = join(dir, 'missing', 'calendar.db');
-      process.env.GEMINI_RATE_LIMITS = JSON.stringify({ scope: 'fake-project', rpm: 1, tpm: 50000, rpd: 10 });
-      process.env.AI_SMART_CHAIN = 'gemini,groq';
-      gemini = makeProvider({ kind: 'throw', error: new Error('must not be called') });
-      groq = makeProvider({ kind: 'text', text: 'reserve' });
-
-      await ask();
-
-      expect(rows().map((row) => [row.provider, row.outcome, row.errorClass, row.skipReason])).toEqual([
-        ['gemini', 'skipped', null, 'local_budget'],
-        ['groq', 'ok', null, null],
-      ]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
   test('providers left unattempted when the round deadline passes are recorded as skipped', async () => {
     let clock = 0;
     performance.now = () => clock;
@@ -409,14 +379,14 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
       },
     });
     groq = makeProvider({ kind: 'throw', error: new Error('must not be called') });
-    gemini = makeProvider({ kind: 'throw', error: new Error('must not be called') });
+    claude = makeProvider({ kind: 'throw', error: new Error('must not be called') });
 
     await expect(ask()).rejects.toThrow();
 
     expect(rows().map((row) => [row.provider, row.outcome, row.skipReason])).toEqual([
       ['zai', 'error', null],
       ['groq', 'skipped', 'round_deadline'],
-      ['gemini', 'skipped', 'round_deadline'],
+      ['claude', 'skipped', 'round_deadline'],
     ]);
   });
 

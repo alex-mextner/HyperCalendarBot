@@ -71,7 +71,7 @@ describe('what a failure implies', () => {
   // expensive mistake.
   test('a rate limit with no stated end gets two minutes', () => {
     const block = noteFailureForEligibility(
-      'gemini',
+      'zai',
       'smart',
       false,
       429,

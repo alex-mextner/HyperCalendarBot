@@ -84,7 +84,7 @@ describe('scripts/report-ai-usage.ts', () => {
   });
 
   test('--json prints the same data as machine-readable JSON', () => {
-    const database = databaseWith([event(), event({ provider: 'gemini', model: 'g' })]);
+    const database = databaseWith([event(), event({ provider: 'hf', model: 'g' })]);
 
     const result = run('--database', database, '--json', '--days', '30');
 
@@ -92,7 +92,7 @@ describe('scripts/report-ai-usage.ts', () => {
     const report = jsonReport.parse(result.stdout);
     expect(report.days).toBe(30);
     expect(report.totalAttempts).toBe(2);
-    expect(report.models.map((m) => `${m.provider}:${m.model}`)).toEqual(['groq:openai/gpt-oss-120b', 'gemini:g']);
+    expect(report.models.map((m) => `${m.provider}:${m.model}`)).toEqual(['groq:openai/gpt-oss-120b', 'hf:g']);
     expect(report.providers.find((p) => p.provider === 'claude')?.verdict).toBe('no_traffic');
   });
 

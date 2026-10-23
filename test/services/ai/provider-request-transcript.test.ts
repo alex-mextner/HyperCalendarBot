@@ -3,8 +3,8 @@
 // 30-row chat_history window began on a stored tool result whose assistant
 // tool_calls row had just fallen out of the window. That orphan result reached
 // the providers, so Groq (gpt-oss) answered 400 "HarmonyError ... Tools should
-// have a name!" — a tool message's name is resolved from its tool_call_id — and
-// Gemini's OpenAI-compatible route answered 400 with no body, on every round.
+// have a name!" — a tool message's name is resolved from its tool_call_id — on
+// every round.
 // The requests are captured at the provider client, exactly as serialized.
 
 import { Database } from 'bun:sqlite';
@@ -18,7 +18,6 @@ import { HolidayRepository } from '../../../src/database/repositories/holiday.re
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
-import { closeGeminiQuotaStores } from '../../../src/services/ai/gemini-quota.ts';
 import { resetProviderCircuit } from '../../../src/services/ai/provider-circuit.ts';
 import { resetEligibility } from '../../../src/services/ai/provider-eligibility.ts';
 import { providerClients } from '../../../src/services/ai/streaming.ts';
@@ -27,7 +26,7 @@ import { ConversationLogger } from '../../../src/services/conversation-logger.ts
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 
-type ProviderUnderTest = 'groq' | 'gemini';
+type ProviderUnderTest = 'groq' | 'claude';
 
 interface CapturedRequest {
   messages: OpenAI.ChatCompletionMessageParam[];
@@ -209,10 +208,9 @@ beforeEach(() => {
     GROQ_FAST_MODEL: 'openai/gpt-oss-20b',
     // Production account limit; the on-demand default would skip the full-catalog request as too large.
     GROQ_TPM_LIMITS: '{"openai/gpt-oss-120b":250000,"openai/gpt-oss-20b":250000}',
-    GEMINI_API_KEY: 'gemini-key',
-    GEMINI_BASE_URL: 'https://gemini.example/v1',
-    GEMINI_MODEL: 'models/gemini-2.5-flash',
-    GEMINI_FAST_MODEL: 'models/gemini-2.5-flash',
+    CLAUDE_API_TOKEN: 'claude-key',
+    CLAUDE_MODEL: 'claude-sonnet-5-5',
+    CLAUDE_FAST_MODEL: 'claude-haiku-5-5',
     HF_TOKEN: 'hf-token',
     HF_BASE_URL: 'https://hf.example/v1',
     HF_MODEL: 'hf-main',
@@ -247,7 +245,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  closeGeminiQuotaStores();
   resetProviderCircuit();
   process.env = { ...savedEnv };
   Object.assign(providerClients, realProviderClients);
@@ -260,7 +257,7 @@ describe('serialized provider request after a pick_users exchange', () => {
     expect(window[0]?.content).toContain('call_old_2');
   });
 
-  for (const provider of ['groq', 'gemini'] satisfies ProviderUnderTest[]) {
+  for (const provider of ['groq', 'claude'] satisfies ProviderUnderTest[]) {
     for (const toolSchemaMode of ['full', 'lazy'] as const) {
       test(`${provider} (${toolSchemaMode} tools): every tool, call and result carries a resolvable name`, async () => {
         process.env.AI_SMART_CHAIN = provider;
@@ -269,8 +266,8 @@ describe('serialized provider request after a pick_users exchange', () => {
         providerClients.zai = () => asOpenAIClient(refusingClient());
         providerClients.hf = () => asOpenAIClient(refusingClient());
         providerClients.groq = () => asOpenAIClient(provider === 'groq' ? capturingClient(captured) : refusingClient());
-        providerClients.gemini = () =>
-          asOpenAIClient(provider === 'gemini' ? capturingClient(captured) : refusingClient());
+        providerClients.claude = () =>
+          asOpenAIClient(provider === 'claude' ? capturingClient(captured) : refusingClient());
 
         await new CalendarBotAgent({ toolSchemaMode }, sender).run(ctx);
 
@@ -298,7 +295,7 @@ describe('serialized provider request after a pick_users exchange', () => {
     const captured: CapturedRequest[] = [];
     providerClients.zai = () => asOpenAIClient(refusingClient());
     providerClients.hf = () => asOpenAIClient(refusingClient());
-    providerClients.gemini = () => asOpenAIClient(refusingClient());
+    providerClients.claude = () => asOpenAIClient(refusingClient());
     providerClients.groq = () => asOpenAIClient(capturingClient(captured));
 
     await new CalendarBotAgent({ toolSchemaMode: 'full' }, sender).run(ctx);

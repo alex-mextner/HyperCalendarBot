@@ -118,7 +118,7 @@ export async function resolveCity(
     return libResult;
   }
 
-  // 5. AI fallback via the fast provider chain (z.ai flash → Gemini flash → HF Llama).
+  // 5. AI fallback via the fast provider chain (z.ai → Claude → Groq → HF fast models).
   //    aiStreamRound handles provider selection, retries, and fallback internally.
   cmdLogger.info({ city: trimmed }, 'City resolver: falling back to AI');
 

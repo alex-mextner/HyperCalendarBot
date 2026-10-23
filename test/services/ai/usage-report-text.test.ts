@@ -41,6 +41,7 @@ const rows = [
     promptTokens: null,
     completionTokens: null,
   }),
+  // A provider retired from the code whose rows remain in the ledger.
   event({ provider: 'gemini', model: 'gemini-3-flash', promptTokens: null, completionTokens: null }),
 ];
 

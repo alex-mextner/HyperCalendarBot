@@ -2,8 +2,8 @@
 // Unified AI streaming round with automatic provider fallback.
 //
 // Two chains, selected via options.fast:
-//   SMART_CHAIN (main): configured order, otherwise Groq ${GROQ_MODEL} → Gemini ${GEMINI_MODEL} → HF ${HF_MODEL} → z.ai ${ZAI_MODEL} → Claude ${CLAUDE_MODEL}
-//   FAST_CHAIN: configured order, otherwise Groq ${GROQ_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL} → z.ai ${ZAI_FAST_MODEL} → Claude ${CLAUDE_FAST_MODEL}
+//   SMART_CHAIN (main): configured order, otherwise z.ai ${ZAI_MODEL} → Claude ${CLAUDE_MODEL} → Groq ${GROQ_MODEL} → HF ${HF_MODEL}
+//   FAST_CHAIN: configured order, otherwise z.ai ${ZAI_FAST_MODEL} → Claude ${CLAUDE_FAST_MODEL} → Groq ${GROQ_FAST_MODEL} → HF ${HF_FAST_MODEL}
 //
 // Callers that need live updates (agent.ts) pass `onTextDelta`/`onToolCallStart` callbacks.
 // Callers that just want the final text (validator, intent-learner, city-resolver,
@@ -23,8 +23,7 @@ import {
 } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger, logOnce } from '../../utils/logger.ts';
-import { claudeClient, geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
-import { isGeminiLocalSkip, reserveGeminiBudget } from './gemini-quota.ts';
+import { claudeClient, groqClient, hfClient, zaiClient } from './clients.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
 import {
   type Admission,
@@ -303,7 +302,7 @@ export function isTransientProviderError(error: unknown): boolean {
   // not from the user.
   if (error instanceof OpenAI.APIError && error.status === undefined) return true;
   if (error instanceof OpenAI.APIError && typeof error.status === 'number') {
-    // 400 with no body is a transient provider issue (Gemini returns this intermittently).
+    // 400 with no body is a transient provider issue (seen intermittently from providers).
     // A real 400 always includes a body describing the error.
     if (error.status === 400 && error.message.includes('no body')) return true;
     // 413 Request Too Large: Groq returns this for per-minute TPM rate limits
@@ -354,7 +353,7 @@ interface PendingToolCall {
 
 /**
  * OpenAI spec requires `index` on every tool_call delta, but some providers
- * (HF Router, early Gemini) ship chunks without it:
+ * (HF Router) ship chunks without it:
  *   1. numeric `index` → use it directly;
  *   2. no index but an id or function name → a NEW tool call, fresh slot;
  *   3. no index and no id/name → continuation of the most recently opened slot;
@@ -589,9 +588,6 @@ function streamingSlot(
         stream: true,
         ...(providersWithoutStreamingUsage.has(provider) ? {} : { stream_options: { include_usage: true } }),
       };
-      // Only the supported 2.5 Flash text routes: never send none to Pro/3.x.
-      if (provider === 'gemini' && opts.fast && /^gemini-2\.5-flash(?:-lite)?$/.test(model.replace(/^models\//, '')))
-        params.reasoning_effort = 'none';
       if (opts.tools && opts.tools.length > 0) {
         params.tools = opts.tools;
       }
@@ -721,7 +717,6 @@ function slotName(label: string, model: string): string {
 export const providerClients = {
   zai: zaiClient,
   groq: groqClient,
-  gemini: geminiClient,
   hf: hfClient,
   claude: claudeClient,
 };
@@ -729,15 +724,14 @@ export const providerClients = {
 const PROVIDER_LABELS: Record<ProviderId, string> = {
   zai: 'z.ai',
   groq: 'Groq',
-  gemini: 'Gemini',
   hf: 'HF',
   claude: 'Claude',
 };
 
 /**
  * What a provider needs before it can be put in a chain. Both are optional
- * because Groq's are: loadConfig requires the z.ai, Hugging Face and Gemini
- * credentials and models at startup, so for those three the check always
+ * because Groq's and Claude's are: loadConfig requires the z.ai and Hugging Face
+ * credentials and models at startup, so for those two the check always
  * passes. Live-model discovery does not change that — it replaces a configured
  * model that turned out to be dead, and has nothing to start from without one.
  */
@@ -804,10 +798,10 @@ function buildChain(
   // one path where the configured order could not be honoured.
   const fallback = slotsFor(fallbackOrder);
   if (fallback.length === 0) {
-    // Not reachable today — loadConfig requires the z.ai, HF and Gemini
-    // credentials and refuses to start without them, so at least three
-    // providers always have both. Kept because that is a startup rule, not an
-    // invariant of this function, and an empty chain fails every request.
+    // Not reachable today — loadConfig requires the z.ai and HF credentials and
+    // refuses to start without them, so at least two providers always have both.
+    // Kept because that is a startup rule, not an invariant of this function,
+    // and an empty chain fails every request.
     logOnce(`none:${kind}:${order.join(',')}`, () =>
       aiLogger.error(
         { chain: kind, order },
@@ -829,7 +823,6 @@ function buildSmartChain(cfg: EnvConfig): ProviderSlot[] {
   return buildChain('smart', cfg.AI_SMART_CHAIN, {
     zai: { model: cfg.ZAI_MODEL, apiKey: cfg.ZAI_API_KEY, baseUrl: cfg.ZAI_BASE_URL },
     groq: { model: cfg.GROQ_MODEL, apiKey: cfg.GROQ_API_KEY },
-    gemini: { model: cfg.GEMINI_MODEL, apiKey: cfg.GEMINI_API_KEY, baseUrl: cfg.GEMINI_BASE_URL },
     hf: { model: cfg.HF_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
     claude: { model: cfg.CLAUDE_MODEL, apiKey: cfg.CLAUDE_API_TOKEN },
   });
@@ -839,7 +832,6 @@ function buildFastChain(cfg: EnvConfig): ProviderSlot[] {
   return buildChain('fast', cfg.AI_FAST_CHAIN, {
     zai: { model: cfg.ZAI_FAST_MODEL, apiKey: cfg.ZAI_API_KEY, baseUrl: cfg.ZAI_BASE_URL },
     groq: { model: cfg.GROQ_FAST_MODEL, apiKey: cfg.GROQ_API_KEY },
-    gemini: { model: cfg.GEMINI_FAST_MODEL, apiKey: cfg.GEMINI_API_KEY, baseUrl: cfg.GEMINI_BASE_URL },
     hf: { model: cfg.HF_FAST_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
     claude: { model: cfg.CLAUDE_FAST_MODEL, apiKey: cfg.CLAUDE_API_TOKEN },
   });
@@ -944,7 +936,6 @@ function describeFailure(slot: ProviderSlot, error: unknown): ProviderFailure {
     status,
     message,
     transient: isTransientProviderError(error),
-    ...(isGeminiLocalSkip(error) ? { skippedBeforeRequest: true } : {}),
     ...(error instanceof EmptyProviderResponseError && error.diagnostics ? { emptyResponse: error.diagnostics } : {}),
   };
 }
@@ -964,7 +955,6 @@ function failureAttempt(
   attemptAt: number,
   attemptStartedAt: number,
 ): AiUsageEvent {
-  if (isGeminiLocalSkip(error)) return skippedAttempt(scope, slot.provider, model, 'local_budget');
   const durationMs = Math.round(Math.max(0, performance.now() - attemptStartedAt));
   if (error instanceof EmptyProviderResponseError) {
     const usage = error.diagnostics?.usage ?? null;
@@ -1034,7 +1024,6 @@ export async function aiStreamRound(
   const chain = options.fast ? buildFastChain(cfg) : buildSmartChain(cfg);
   const failures: ProviderFailure[] = [];
   let actualAttempts = 0;
-  let geminiInputTokens: number | undefined;
   // Anything the caller has already shown the user for this round: streamed text
   // or a "running <tool>" label. Both must be cleared before another provider
   // starts, otherwise the user sees output from a round that never finished.
@@ -1137,16 +1126,6 @@ export async function aiStreamRound(
             },
             () => {
               signal.throwIfAborted();
-              if (slot.provider === 'gemini' && cfg.GEMINI_RATE_LIMITS) {
-                geminiInputTokens ??= Math.ceil(
-                  estimateTokens(JSON.stringify({ messages: options.messages, tools: options.tools ?? [] })) * 1.25,
-                );
-                reserveGeminiBudget(
-                  `${cfg.DATABASE_PATH}.gemini-quota.sqlite`,
-                  cfg.GEMINI_RATE_LIMITS,
-                  geminiInputTokens,
-                );
-              }
               actualAttempts++;
             },
           ),
@@ -1212,7 +1191,7 @@ export async function aiStreamRound(
         reportSlotFailure(failure, error, options.userId, chainKind, false);
         // Recorded after the alerting, never instead of it: a bench suppresses
         // calls, and the outage records must keep saying what actually happened.
-        if (!ownedByCircuit && !isGeminiLocalSkip(error) && ![400, 403, 422].includes(failure.status ?? 0)) {
+        if (!ownedByCircuit && ![400, 403, 422].includes(failure.status ?? 0)) {
           noteFailureForEligibility(
             slot.provider,
             chainKind,
@@ -1278,7 +1257,7 @@ function settleCircuitAfterFailure(
   failure: ProviderFailure,
   callerAborted: boolean,
 ): boolean {
-  if (callerAborted || isGeminiLocalSkip(error)) {
+  if (callerAborted) {
     settleInconclusive(circuit, admission, { pushBack: false });
     return false;
   }

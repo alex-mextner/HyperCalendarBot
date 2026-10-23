@@ -13,8 +13,8 @@
  * production conversation.
  *
  *   bun run scripts/dryrun-tool-selection.ts                    # all providers
- *   DRYRUN_PROVIDERS=gemini bun run scripts/dryrun-tool-selection.ts
- *   DRYRUN_MODEL_GEMINI=models/gemini-3-flash bun run scripts/…  # override a model
+ *   DRYRUN_PROVIDERS=zai bun run scripts/dryrun-tool-selection.ts
+ *   DRYRUN_MODEL_ZAI=glm-5.1 bun run scripts/…                  # override a model
  *   DRYRUN_OUT=before.json bun run scripts/…                     # save for diffing
  *
  * Model ids are read from env so they can follow provider changes without edits.
@@ -31,7 +31,7 @@ import { EventReminderRepository } from '../src/database/repositories/event-remi
 import { HolidayRepository } from '../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../src/database/schema.ts';
-import { claudeClient, geminiClient, groqClient, hfClient, zaiClient } from '../src/services/ai/clients.ts';
+import { claudeClient, groqClient, hfClient, zaiClient } from '../src/services/ai/clients.ts';
 import type { ProviderId } from '../src/services/ai/provider-ids.ts';
 import { acceptsSamplingTemperature, CLAUDE_MAX_OUTPUT_TOKENS } from '../src/services/ai/streaming.ts';
 import { buildSystemPrompt } from '../src/services/ai/system-prompt.ts';
@@ -58,18 +58,13 @@ interface ProviderSpec {
 
 function providers(): ProviderSpec[] {
   const cfg = loadConfig();
-  const wanted = (process.env.DRYRUN_PROVIDERS ?? 'gemini,groq').split(',').map((s) => s.trim());
+  const wanted = (process.env.DRYRUN_PROVIDERS ?? 'zai,groq').split(',').map((s) => s.trim());
   const all: ProviderSpec[] = [
     { name: 'zai', model: process.env.DRYRUN_MODEL_ZAI ?? cfg.ZAI_MODEL ?? 'glm-5.1', client: zaiClient },
     {
       name: 'groq',
       model: process.env.DRYRUN_MODEL_GROQ ?? cfg.GROQ_MODEL ?? 'openai/gpt-oss-120b',
       client: groqClient,
-    },
-    {
-      name: 'gemini',
-      model: process.env.DRYRUN_MODEL_GEMINI ?? cfg.GEMINI_MODEL ?? 'models/gemini-2.5-flash',
-      client: geminiClient,
     },
     { name: 'hf', model: process.env.DRYRUN_MODEL_HF ?? cfg.HF_MODEL ?? '', client: hfClient },
     {
