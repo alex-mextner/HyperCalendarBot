@@ -51,7 +51,9 @@ function stripMaxItems(value: unknown): unknown {
   );
 }
 
-function schemaFor(provider: Candidate['provider'], role: LightCase['role']): Record<string, unknown> {
+type JsonSchemaObject = NonNullable<OpenAI.ResponseFormatJSONSchema['json_schema']['schema']>;
+
+function schemaFor(provider: Candidate['provider'], role: LightCase['role']): JsonSchemaObject {
   const schema = z.toJSONSchema(lightSchemas[role]);
   return provider === 'claude' ? Object.fromEntries(Object.entries(stripMaxItems(schema) ?? {})) : schema;
 }
