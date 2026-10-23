@@ -125,6 +125,49 @@ describe('loadConfig', () => {
     });
   });
 
+  describe('role routing', () => {
+    const names = ['AI_ROUTING', 'AI_ROUTING_USER_IDS', 'AI_PLANNER_CHAIN', 'AI_EXECUTOR_CHAIN', 'AI_REPAIR_CHAIN'];
+    beforeEach(() => {
+      for (const name of names) delete process.env[name];
+    });
+
+    test('defaults to legacy with empty role chains and no canary list', () => {
+      const config = loadConfig();
+      expect(config.AI_ROUTING).toBe('legacy');
+      expect(config.AI_ROUTING_USER_IDS).toBeUndefined();
+      expect(config.AI_ROLE_CHAINS).toEqual({ planner: [], executor: [], repair: [] });
+    });
+
+    test('reads the mode, the canary ids and each role chain', () => {
+      process.env.AI_ROUTING = 'roles';
+      process.env.AI_ROUTING_USER_IDS = '11,22,11';
+      process.env.AI_EXECUTOR_CHAIN = 'openrouter:glm53-flash-low,claude';
+      process.env.AI_REPAIR_CHAIN = 'claude';
+      const config = loadConfig();
+      expect(config.AI_ROUTING).toBe('roles');
+      expect(config.AI_ROUTING_USER_IDS).toEqual([11, 22]);
+      expect(config.AI_ROLE_CHAINS.executor).toEqual([
+        { provider: 'openrouter', presetId: 'glm53-flash-low' },
+        { provider: 'claude' },
+      ]);
+      expect(config.AI_ROLE_CHAINS.repair).toEqual([{ provider: 'claude' }]);
+      expect(config.AI_ROLE_CHAINS.planner).toEqual([]);
+    });
+
+    test('an unknown mode or a malformed canary list fails loudly', () => {
+      process.env.AI_ROUTING = 'rolez';
+      expect(() => loadConfig()).toThrow('AI_ROUTING');
+      process.env.AI_ROUTING = 'roles';
+      process.env.AI_ROUTING_USER_IDS = '1,,2';
+      expect(() => loadConfig()).toThrow('AI_ROUTING_USER_IDS');
+    });
+
+    test('a retired provider in a role chain is dropped, not fatal', () => {
+      process.env.AI_EXECUTOR_CHAIN = 'groq,claude';
+      expect(loadConfig().AI_ROLE_CHAINS.executor).toEqual([{ provider: 'claude' }]);
+    });
+  });
+
   describe('provider chain order', () => {
     const SMART_DEFAULT: ProviderId[] = ['zai', 'claude', 'hf'];
     const FAST_DEFAULT: ProviderId[] = ['zai', 'claude', 'hf'];

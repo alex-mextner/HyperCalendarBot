@@ -266,6 +266,18 @@ replacement (`selectReplacementModel`) never picks one — so a dead model canno
 a preset (`streamingSlot(..., preset)`) sends the preset's temperature, an output floor and — on OpenRouter only, the one
 provider whose control was verified — `reasoning.effort`. Chains still name plain providers, so behaviour is unchanged.
 
+**Role routing** (`src/services/ai/role-routing.ts`, 2026-10-23): `AI_ROUTING=legacy|roles` (default `legacy`: nothing below applies),
+`AI_ROUTING_USER_IDS` (comma-separated positive ints, at most 100, the canary: roles apply to those Telegram users only; unset = everyone once
+`roles` is on) and one chain per role, `AI_PLANNER_CHAIN` / `AI_EXECUTOR_CHAIN` / `AI_REPAIR_CHAIN`, entries `provider` or `provider:preset`
+(same names in ExpenseSyncBot). Only agent rounds are roles: purpose `agent` is the executor, `retry` (the round after the answer validator
+rejected a draft) is the repair; the planner has no caller yet. Summaries, validators, intent learning etc. stay on the legacy fast chain. A preset
+entry loads only if the preset names a model for that provider, the model is not excluded, the provider has a key and `isQualifiedFor(preset, role)`
+holds; every refused entry is logged at error level, and a role chain with nothing loadable falls back to the legacy chain. A plain `provider`
+entry is NOT gated, so `roles` mode with only unqualified presets leaves the plain entries (e.g. Claude) serving agent rounds: do not turn it on
+without a qualified preset or a deliberate plain chain. Known gaps recorded on #808 (roles are off by default and nothing is qualified): the provider
+bench and `ai_usage_events.chain` do not distinguish role rounds from legacy ones, the gate has no per-provider dimension, and a chain that
+empties at runtime does not fall back to legacy. Rollback is `AI_ROUTING=legacy`.
+
 **A depleted or rejected provider account is skipped, not retried**: `src/services/ai/provider-circuit.ts`
 keeps one durable circuit per provider account for every provider in the chain (key = fingerprint
 of provider id, endpoint and credential, so it covers the smart and the fast chain and resets when
