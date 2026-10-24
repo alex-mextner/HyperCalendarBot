@@ -225,6 +225,8 @@ All `process.env.*` reads go through `src/config/env.ts` → `loadConfig()` and 
 
 When adding a new env var: (1) add it to `EnvConfig` interface in `env.ts`, (2) read and validate in `loadConfig()`, (3) use via `config.VAR_NAME` everywhere else.
 
+**Model ids are env values, refreshed against the live catalogs** (2026-10-24; `ZAI_*`/`HF_*` are required env, `CLAUDE_*` optional). z.ai coding endpoint `/models`: newest are `glm-5.3` (smart) and `glm-5.3-flash` (fast; `glm-5.3-flashx` is not in the Max plan, code 1311). Both answer 429 code 1310 while the weekly premium quota is exhausted (an unknown id would be 400 code 1211), so a 429 does not mean a bad id; the chain falls through to Claude. `glm-5.1` and `glm-4.7-flash` still exist but are superseded. Anthropic `/v1/models`: `claude-sonnet-5-5` and `claude-haiku-5-5` are the newest Sonnet and Haiku (nothing above 5.5 in those tiers). HF router: `meta-llama/Llama-3.3-70B-Instruct` and `Qwen/Qwen3-235B-A22B` are still listed live; HF has no credits (402), so a replacement cannot be probed and the ids are kept until they disappear from `/models`.
+
 **Provider order is configuration, not code**: `AI_SMART_CHAIN` and `AI_FAST_CHAIN` list provider ids (`zai`, `claude`, `hf`, optional `openrouter`); the default for both is z.ai → Claude → HF (the owner's order, identical in ExpenseSyncBot); providers without key/model are skipped. The ids come from `PROVIDER_IDS` in
 `src/services/ai/provider-ids.ts` — a leaf module that imports nothing, so both the config
 layer and the AI layer can derive from it without a cycle. Add a provider there and it is

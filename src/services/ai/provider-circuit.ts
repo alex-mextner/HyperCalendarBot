@@ -170,7 +170,7 @@ export interface CircuitContext {
    */
   accountKey?: string;
   provider: ProviderId;
-  /** Provider slot name including the model, e.g. `z.ai (glm-5.1)`. */
+  /** Provider slot name including the model, e.g. `z.ai (glm-5.3)`. */
   label: string;
   /** Chain that observed the failure; only used to route the admin notice. */
   chain: ProviderChainKind;
