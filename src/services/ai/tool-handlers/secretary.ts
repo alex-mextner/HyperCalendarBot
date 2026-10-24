@@ -17,8 +17,11 @@ async function sendSecretaryInvite(
   ctx: AgentContext,
   record: CalendarSecretary,
   secretaryUser: { telegram_id: number; username?: string | null; first_name?: string | null },
-): Promise<void> {
-  if (!ctx.sender) return;
+): Promise<boolean> {
+  if (!ctx.sender) {
+    secretaryLogger.warn({ recordId: record.id }, 'Secretary invite skipped: sender not configured');
+    return false;
+  }
 
   const ownerName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
   const ownerHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
@@ -51,11 +54,21 @@ async function sendSecretaryInvite(
   if (result.messageId) {
     ctx.secretary!.secretaryRepo.setDmMessageId(record.id, result.messageId);
   }
+  if (!result.delivered) {
+    secretaryLogger.warn(
+      { recordId: record.id, fallbackSent: result.fallbackSent },
+      'Secretary invite not delivered directly (fallback or total failure)',
+    );
+  }
+  return result.delivered;
 }
 
-async function sendSecretaryNotification(ctx: AgentContext, targetId: number, text: string): Promise<void> {
-  if (!ctx.sender) return;
-  await deliverMessage({
+async function sendSecretaryNotification(ctx: AgentContext, targetId: number, text: string): Promise<boolean> {
+  if (!ctx.sender) {
+    secretaryLogger.warn({ targetId }, 'Secretary notification skipped: sender not configured');
+    return false;
+  }
+  const result = await deliverMessage({
     targetId,
     text,
     fallbackRecipientId: ctx.user.telegram_id,
@@ -65,6 +78,13 @@ async function sendSecretaryNotification(ctx: AgentContext, targetId: number, te
       return { message_id: sent.message_id };
     },
   });
+  if (!result.delivered) {
+    secretaryLogger.warn(
+      { targetId, fallbackSent: result.fallbackSent },
+      'Secretary notification not delivered directly (fallback or total failure)',
+    );
+  }
+  return result.delivered;
 }
 
 export async function handleManageSecretaries(ctx: AgentContext, input: ManageSecretariesInput): Promise<ToolResult> {
@@ -87,8 +107,9 @@ export async function handleManageSecretaries(ctx: AgentContext, input: ManageSe
       permission,
     });
 
+    let delivered = true;
     try {
-      await sendSecretaryInvite(ctx, record, secretaryUser);
+      delivered = await sendSecretaryInvite(ctx, record, secretaryUser);
     } catch (err) {
       secretaryLogger.error({ err, recordId: record.id }, 'Failed to send secretary invite');
       return {
@@ -101,6 +122,9 @@ export async function handleManageSecretaries(ctx: AgentContext, input: ManageSe
     return {
       success: true,
       output: JSON.stringify({ status: 'awaiting_confirmation', secretary_access_id: record.id }),
+      agentHint: delivered
+        ? undefined
+        : 'Invite is saved in the DB but could not be delivered directly to the invitee (only a fallback, or nothing, went through). Tell the user the invite is pending and the invitee may need to start the bot first.',
     };
   }
 
@@ -113,11 +137,12 @@ export async function handleManageSecretaries(ctx: AgentContext, input: ManageSe
     ctx.secretary!.secretaryRepo.updateStatus(record.id, 'revoked');
 
     const secUser = ctx.userRepo!.findByTelegramId(record.secretary_id);
+    let notified = true;
     if (secUser && ctx.sender) {
       const ownerName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
       const ownerHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
       try {
-        await sendSecretaryNotification(
+        notified = await sendSecretaryNotification(
           ctx,
           record.secretary_id,
           `Твой доступ к календарю ${ownerName}${ownerHandle} был отозван.`,
@@ -125,9 +150,22 @@ export async function handleManageSecretaries(ctx: AgentContext, input: ManageSe
       } catch (err) {
         // Revocation is already committed — notification failure is logged, not surfaced.
         secretaryLogger.error({ err }, 'failed to send revoke notification');
+        notified = false;
       }
+    } else {
+      secretaryLogger.warn(
+        { recordId: record.id, hasSecUser: Boolean(secUser), hasSender: Boolean(ctx.sender) },
+        'Secretary revoke notification skipped: secretary user or sender not available',
+      );
+      notified = false;
     }
-    return { success: true, output: JSON.stringify({ ok: true }) };
+    return {
+      success: true,
+      output: JSON.stringify({ ok: true }),
+      agentHint: notified
+        ? undefined
+        : 'Access was revoked in the DB, but the secretary could not be notified directly. Tell the user the revocation succeeded even though the secretary may not see a notification.',
+    };
   }
 
   if (input.action === 'self_remove') {
@@ -141,9 +179,10 @@ export async function handleManageSecretaries(ctx: AgentContext, input: ManageSe
     const secName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
     const secHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
     const ownerUser = ctx.userRepo!.findByTelegramId(record.owner_id);
+    let notified = true;
     if (ownerUser && ctx.sender) {
       try {
-        await sendSecretaryNotification(
+        notified = await sendSecretaryNotification(
           ctx,
           record.owner_id,
           `${secName}${secHandle} добровольно покинул роль секретаря твоего календаря.`,
@@ -151,9 +190,22 @@ export async function handleManageSecretaries(ctx: AgentContext, input: ManageSe
       } catch (err) {
         // Self-removal is already committed — notification failure is logged, not surfaced.
         secretaryLogger.error({ err }, 'failed to send self_remove notification');
+        notified = false;
       }
+    } else {
+      secretaryLogger.warn(
+        { recordId: record.id, hasOwnerUser: Boolean(ownerUser), hasSender: Boolean(ctx.sender) },
+        'Secretary self-remove notification skipped: owner user or sender not available',
+      );
+      notified = false;
     }
-    return { success: true, output: JSON.stringify({ ok: true }) };
+    return {
+      success: true,
+      output: JSON.stringify({ ok: true }),
+      agentHint: notified
+        ? undefined
+        : 'Self-removal succeeded, but the calendar owner could not be notified directly. Tell the user the removal succeeded even though the owner may not see a notification.',
+    };
   }
 
   return { success: false, error: `Unknown action: ${(input as { action: string }).action}` };
