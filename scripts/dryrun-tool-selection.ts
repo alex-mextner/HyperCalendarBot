@@ -14,7 +14,7 @@
  *
  *   bun run scripts/dryrun-tool-selection.ts                    # z.ai only (Claude is paid: DRYRUN_PROVIDERS=claude)
  *   DRYRUN_PROVIDERS=zai bun run scripts/dryrun-tool-selection.ts
- *   DRYRUN_MODEL_ZAI=glm-5.1 bun run scripts/…                  # override a model
+ *   DRYRUN_MODEL_ZAI=glm-5.3 bun run scripts/…                  # override a model
  *   DRYRUN_OUT=before.json bun run scripts/…                     # save for diffing
  *
  * Model ids are read from env so they can follow provider changes without edits.
@@ -60,7 +60,7 @@ function providers(): ProviderSpec[] {
   const cfg = loadConfig();
   const wanted = (process.env.DRYRUN_PROVIDERS ?? 'zai').split(',').map((s) => s.trim());
   const all: ProviderSpec[] = [
-    { name: 'zai', model: process.env.DRYRUN_MODEL_ZAI ?? cfg.ZAI_MODEL ?? 'glm-5.1', client: zaiClient },
+    { name: 'zai', model: process.env.DRYRUN_MODEL_ZAI ?? cfg.ZAI_MODEL ?? 'glm-5.3', client: zaiClient },
     { name: 'hf', model: process.env.DRYRUN_MODEL_HF ?? cfg.HF_MODEL ?? '', client: hfClient },
     {
       name: 'claude',
