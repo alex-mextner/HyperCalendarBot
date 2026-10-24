@@ -165,6 +165,14 @@ function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
     role: null,
     preset: null,
     costMicroUsd: null,
+    firstTokenMs: null,
+    generationMs: null,
+    systemPromptTokens: null,
+    toolCatalogTokens: null,
+    historyTokens: null,
+    userTokens: null,
+    toolCount: null,
+    messageCount: null,
     ...overrides,
   };
 }
@@ -289,5 +297,94 @@ describe('attempt rows carry role, preset and cost', () => {
     expect([failed.role, failed.preset, failed.costMicroUsd]).toEqual(['executor', 'deepseek41-flash', 100]);
     const skipped = skippedAttempt(scope, 'openrouter', OPENROUTER_DEEPSEEK, 'circuit_open');
     expect([skipped.role, skipped.preset, skipped.costMicroUsd]).toEqual(['executor', 'deepseek41-flash', null]);
+  });
+});
+
+describe('attempt rows carry first-token and generation time', () => {
+  const scope = { chain: 'smart', purpose: 'agent', requestId: undefined, role: null, preset: null } as const;
+  const tokens = { promptTokens: 10, completionTokens: 20, reasoningTokens: null, cachedTokens: null };
+
+  test('an answered attempt stores the measured times rounded to whole milliseconds', () => {
+    const row = answeredAttempt(scope, 'claude', 'claude-haiku-5-5', 5, 900, tokens, {
+      firstTokenMs: 612.4,
+      generationMs: 287.6,
+    });
+    expect([row.firstTokenMs, row.generationMs]).toEqual([612, 288]);
+  });
+
+  test('an answer whose stream timing is unknown keeps both NULL, never 0', () => {
+    const row = answeredAttempt(scope, 'claude', 'claude-haiku-5-5', 5, 900, tokens, {
+      firstTokenMs: null,
+      generationMs: null,
+    });
+    expect([row.firstTokenMs, row.generationMs]).toEqual([null, null]);
+    const omitted = answeredAttempt(scope, 'claude', 'claude-haiku-5-5', 5, 900, tokens);
+    expect([omitted.firstTokenMs, omitted.generationMs]).toEqual([null, null]);
+  });
+
+  test('a measured zero is kept as zero', () => {
+    const row = answeredAttempt(scope, 'zai', 'm', 5, 900, tokens, { firstTokenMs: 0, generationMs: 0 });
+    expect([row.firstTokenMs, row.generationMs]).toEqual([0, 0]);
+  });
+
+  test('failed and skipped attempts keep both NULL', () => {
+    const failed = failedAttempt(scope, 'zai', 'm', 5, 100, { errorClass: 'empty', httpStatus: null }, tokens);
+    const skipped = skippedAttempt(scope, 'zai', 'm', 'circuit_open');
+    expect([failed.firstTokenMs, failed.generationMs, skipped.firstTokenMs, skipped.generationMs]).toEqual([
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
+});
+
+describe('attempt rows carry the estimated prompt size', () => {
+  const promptSize = {
+    systemPromptTokens: 400,
+    toolCatalogTokens: 9000,
+    historyTokens: 1200,
+    userTokens: 30,
+    toolCount: 41,
+    messageCount: 7,
+  };
+  const scope = {
+    chain: 'smart',
+    purpose: 'agent',
+    requestId: undefined,
+    role: null,
+    preset: null,
+    promptSize,
+  } as const;
+  const tokens = { promptTokens: 10600, completionTokens: 20, reasoningTokens: null, cachedTokens: null };
+
+  test('answered and failed attempts carry the size of the round', () => {
+    expect(answeredAttempt(scope, 'claude', 'm', 5, 900, tokens)).toMatchObject(promptSize);
+    expect(failedAttempt(scope, 'claude', 'm', 5, 100, { errorClass: 'server', httpStatus: 503 }, null)).toMatchObject(
+      promptSize,
+    );
+  });
+
+  test('a skipped attempt sent no request and has no size', () => {
+    expect(skippedAttempt(scope, 'claude', 'm', 'circuit_open')).toMatchObject({
+      systemPromptTokens: null,
+      toolCatalogTokens: null,
+      historyTokens: null,
+      userTokens: null,
+      toolCount: null,
+      messageCount: null,
+    });
+  });
+
+  test('a scope that measured nothing leaves every component NULL', () => {
+    const { promptSize: _unused, ...unmeasured } = scope;
+    expect(answeredAttempt(unmeasured, 'claude', 'm', 5, 900, tokens)).toMatchObject({
+      systemPromptTokens: null,
+      toolCatalogTokens: null,
+      historyTokens: null,
+      userTokens: null,
+      toolCount: null,
+      messageCount: null,
+    });
   });
 });

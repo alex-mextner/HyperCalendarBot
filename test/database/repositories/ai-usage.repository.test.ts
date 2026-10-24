@@ -31,6 +31,14 @@ function event(overrides: Partial<AiUsageEvent> = {}): AiUsageEvent {
     role: null,
     preset: null,
     costMicroUsd: null,
+    firstTokenMs: null,
+    generationMs: null,
+    systemPromptTokens: null,
+    toolCatalogTokens: null,
+    historyTokens: null,
+    userTokens: null,
+    toolCount: null,
+    messageCount: null,
     ...overrides,
   };
 }
@@ -147,5 +155,68 @@ describe('AiUsageRepository', () => {
 
   test('the retention horizon is 180 days', () => {
     expect(AI_USAGE_RETENTION_DAYS).toBe(180);
+  });
+});
+
+describe('AiUsageRepository speed columns', () => {
+  test('round-trips first_token_ms and generation_ms; unknown is NULL and a measured zero stays 0', () => {
+    const db = new Database(':memory:');
+    runMigrations(db, migrations);
+    const repo = new AiUsageRepository(db);
+    repo.insertMany([
+      event({ at: 1, firstTokenMs: 640, generationMs: 1800 }),
+      event({ at: 2, firstTokenMs: null, generationMs: null }),
+      event({ at: 3, firstTokenMs: 0, generationMs: 0 }),
+    ]);
+
+    const rows = [...repo.iterateSince(0)];
+    expect(rows.map((row) => [row.firstTokenMs, row.generationMs])).toEqual([
+      [640, 1800],
+      [null, null],
+      [0, 0],
+    ]);
+  });
+});
+
+describe('AiUsageRepository prompt-size columns', () => {
+  test('round-trips the estimated components; unknown is NULL and a measured zero stays 0', () => {
+    const db = new Database(':memory:');
+    runMigrations(db, migrations);
+    const repo = new AiUsageRepository(db);
+    repo.insertMany([
+      event({
+        at: 1,
+        systemPromptTokens: 400,
+        toolCatalogTokens: 9000,
+        historyTokens: 1200,
+        userTokens: 30,
+        toolCount: 41,
+        messageCount: 7,
+      }),
+      event({ at: 2 }),
+      event({
+        at: 3,
+        systemPromptTokens: 0,
+        toolCatalogTokens: 0,
+        historyTokens: 0,
+        userTokens: 0,
+        toolCount: 0,
+        messageCount: 1,
+      }),
+    ]);
+
+    const rows = [...repo.iterateSince(0)].map((row) => [
+      row.systemPromptTokens,
+      row.toolCatalogTokens,
+      row.historyTokens,
+      row.userTokens,
+      row.toolCount,
+      row.messageCount,
+    ]);
+    expect(rows).toEqual([
+      [400, 9000, 1200, 30, 41, 7],
+      [null, null, null, null, null, null],
+      [0, 0, 0, 0, 0, 1],
+    ]);
   });
 });

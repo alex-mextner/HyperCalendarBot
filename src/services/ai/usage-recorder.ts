@@ -12,6 +12,7 @@ import type {
 import type { ProviderChainKind } from '../../utils/ai-provider-alert.ts';
 import { dbLogger } from '../../utils/logger.ts';
 import { estimateCostMicroUsd, MICRO_USD_PER_USD, type ModelRole } from './model-presets.ts';
+import { type PromptSize, UNKNOWN_PROMPT_SIZE } from './prompt-size.ts';
 import type { ProviderId } from './provider-ids.ts';
 
 /** What an AI round is for; callers that name none are stored as `unlabeled`. */
@@ -39,6 +40,15 @@ export interface AiTokenUsage {
 }
 
 /**
+ * Stream timing of an answered attempt, in milliseconds, as measured by the stream reader: request start
+ * to the first content or tool-call delta, and first to last such delta. null is unknown, never zero.
+ */
+export interface AttemptSpeed {
+  firstTokenMs: number | null;
+  generationMs: number | null;
+}
+
+/**
  * What every attempt of one slot shares. `role` and `preset` are null on a legacy-chain slot, and its
  * `chain` is then `smart` or `fast`; a role slot's chain reads `role:<role>`.
  */
@@ -48,6 +58,8 @@ export interface AttemptScope {
   requestId: string | undefined;
   role: ModelRole | null;
   preset: string | null;
+  /** Estimated size of the request every attempt of the round sends; absent where nothing was measured. */
+  promptSize?: PromptSize;
 }
 
 type AiUsageSink = Pick<AiUsageRepository, 'insertMany'>;
@@ -94,6 +106,12 @@ const NO_TOKENS: AiTokenUsage = {
   cachedTokens: null,
 };
 
+const NO_SPEED: AttemptSpeed = { firstTokenMs: null, generationMs: null };
+
+function wholeMs(ms: number | null): number | null {
+  return ms === null || !Number.isFinite(ms) ? null : Math.max(0, Math.round(ms));
+}
+
 /**
  * The cost of an attempt in micro-USD, or null when unknown. A cost OpenRouter reported for the request
  * is the billed truth and wins; any other provider's `cost` field is not trusted. Without one, the dated
@@ -115,6 +133,7 @@ function attempt(
   at: number,
   fields: Pick<AiUsageEvent, 'outcome' | 'errorClass' | 'httpStatus' | 'skipReason' | 'durationMs'>,
   usage: AiTokenUsage | null,
+  speed: AttemptSpeed = NO_SPEED,
 ): AiUsageEvent {
   const tokens = usage ?? NO_TOKENS;
   return {
@@ -132,6 +151,9 @@ function attempt(
     role: scope.role,
     preset: scope.preset,
     costMicroUsd: usage ? costMicroUsdOf(provider, model, usage) : null,
+    firstTokenMs: wholeMs(speed.firstTokenMs),
+    generationMs: wholeMs(speed.generationMs),
+    ...(fields.outcome === 'skipped' ? UNKNOWN_PROMPT_SIZE : (scope.promptSize ?? UNKNOWN_PROMPT_SIZE)),
   };
 }
 
@@ -142,9 +164,10 @@ export function answeredAttempt(
   at: number,
   durationMs: number,
   usage: AiTokenUsage | null,
+  speed: AttemptSpeed = NO_SPEED,
 ): AiUsageEvent {
   const fields = { outcome: 'ok', errorClass: null, httpStatus: null, skipReason: null, durationMs } as const;
-  return attempt(scope, provider, model, at, fields, usage);
+  return attempt(scope, provider, model, at, fields, usage, speed);
 }
 
 export function failedAttempt(

@@ -54,6 +54,25 @@ export interface AiUsageEvent {
    * price of the route. null is unknown, never zero.
    */
   costMicroUsd: number | null;
+  /**
+   * Milliseconds from the request start to the first content or tool-call delta of the attempt. null is
+   * unknown (failed or skipped attempt, no stream timing), never zero.
+   */
+  firstTokenMs: number | null;
+  /** Milliseconds from the first to the last content or tool-call delta; null is unknown. */
+  generationMs: number | null;
+  /**
+   * Estimated size of the request in tokens (token-estimate.ts, not the provider's count, which stays in
+   * `promptTokens`), split by what a compaction can change. null is unknown: a skipped attempt, or a row
+   * written before the sizes were recorded. No prompt text is stored.
+   */
+  systemPromptTokens: number | null;
+  toolCatalogTokens: number | null;
+  historyTokens: number | null;
+  /** The last message when it is the user's; 0 when the request does not end with one. */
+  userTokens: number | null;
+  toolCount: number | null;
+  messageCount: number | null;
 }
 
 export interface AiUsageRow extends AiUsageEvent {
@@ -80,6 +99,14 @@ interface AiUsageRecord {
   role: string | null;
   preset: string | null;
   cost_micro_usd: number | null;
+  first_token_ms: number | null;
+  generation_ms: number | null;
+  system_prompt_tokens: number | null;
+  tool_catalog_tokens: number | null;
+  history_tokens: number | null;
+  user_tokens: number | null;
+  tool_count: number | null;
+  message_count: number | null;
 }
 
 const READ_BATCH_SIZE = 500;
@@ -98,8 +125,9 @@ export class AiUsageRepository {
       `INSERT INTO ai_usage_events
          (at, provider, model, chain, purpose, outcome, error_class, http_status, skip_reason, duration_ms,
           prompt_tokens, completion_tokens, reasoning_tokens, cached_tokens, request_id,
-          role, preset, cost_micro_usd)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          role, preset, cost_micro_usd, first_token_ms, generation_ms, system_prompt_tokens,
+          tool_catalog_tokens, history_tokens, user_tokens, tool_count, message_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     this.db.transaction(() => {
       for (const e of events) {
@@ -122,6 +150,14 @@ export class AiUsageRepository {
           e.role,
           e.preset,
           e.costMicroUsd,
+          e.firstTokenMs,
+          e.generationMs,
+          e.systemPromptTokens,
+          e.toolCatalogTokens,
+          e.historyTokens,
+          e.userTokens,
+          e.toolCount,
+          e.messageCount,
         );
       }
     })();
@@ -132,7 +168,8 @@ export class AiUsageRepository {
     const page = this.db.prepare<AiUsageRecord, [number, number, number]>(
       `SELECT id, at, provider, model, chain, purpose, outcome, error_class, http_status, skip_reason, duration_ms,
               prompt_tokens, completion_tokens, reasoning_tokens, cached_tokens, request_id,
-              role, preset, cost_micro_usd
+              role, preset, cost_micro_usd, first_token_ms, generation_ms, system_prompt_tokens,
+              tool_catalog_tokens, history_tokens, user_tokens, tool_count, message_count
        FROM ai_usage_events WHERE at >= ? AND id > ? ORDER BY id LIMIT ?`,
     );
     let afterId = 0;
@@ -159,6 +196,14 @@ export class AiUsageRepository {
           role: row.role,
           preset: row.preset,
           costMicroUsd: row.cost_micro_usd,
+          firstTokenMs: row.first_token_ms,
+          generationMs: row.generation_ms,
+          systemPromptTokens: row.system_prompt_tokens,
+          toolCatalogTokens: row.tool_catalog_tokens,
+          historyTokens: row.history_tokens,
+          userTokens: row.user_tokens,
+          toolCount: row.tool_count,
+          messageCount: row.message_count,
         };
         afterId = row.id;
       }

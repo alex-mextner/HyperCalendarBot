@@ -7,6 +7,7 @@ const round = (usage: StreamRoundMetrics['usage']): StreamRoundMetrics => ({
   model: 'synthetic',
   chain: 'fast',
   firstUsableSinceAttemptMs: 5,
+  generationMs: 20,
   providerDurationMs: 20,
   totalDurationMs: 30,
   attemptCount: 2,

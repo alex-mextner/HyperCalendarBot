@@ -972,6 +972,9 @@ export class CalendarBotAgent {
               model: metrics?.model ?? null,
               chain: metrics?.chain ?? null,
               firstUsableSinceAttemptMs: metrics?.firstUsableSinceAttemptMs ?? null,
+              firstTokenMs:
+                metrics?.firstUsableSinceAttemptMs == null ? null : Math.round(metrics.firstUsableSinceAttemptMs),
+              generationMs: metrics?.generationMs == null ? null : Math.round(metrics.generationMs),
               providerDurationMs: metrics?.providerDurationMs ?? null,
               totalDurationMs: metrics?.totalDurationMs ?? elapsedMs(startedAt),
               attemptCount: metrics?.attemptCount ?? null,

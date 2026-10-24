@@ -1160,4 +1160,29 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    name: '068_ai_usage_speed_prompt_size',
+    up(db) {
+      // Response speed per attempt: request start to the first content or tool-call delta (first_token_ms)
+      // and first to last such delta (generation_ms). Both NULL on a failed or skipped attempt, on a
+      // provider whose stream timing is unknown and on every row written before this migration; a
+      // measured 0 is stored as 0. Tokens per second is derived at read time, never stored.
+      // Estimated prompt components of the request (token-estimate.ts, not the provider's count; the
+      // provider's prompt_tokens stays the truth): system prompt, tool catalog, history, the user's last
+      // message, plus tool and message counts. NULL on skipped attempts and on every older row.
+      // Same names and meaning as ExpenseSyncBot's ai_usage_events.
+      for (const column of [
+        'first_token_ms',
+        'generation_ms',
+        'system_prompt_tokens',
+        'tool_catalog_tokens',
+        'history_tokens',
+        'user_tokens',
+        'tool_count',
+        'message_count',
+      ]) {
+        db.exec(`ALTER TABLE ai_usage_events ADD COLUMN ${column} INTEGER CHECK (${column} IS NULL OR ${column} >= 0)`);
+      }
+    },
+  },
 ];

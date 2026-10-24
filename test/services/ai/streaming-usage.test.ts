@@ -9,6 +9,7 @@ import { migrations } from '../../../src/database/migrations.ts';
 import { AiUsageRepository, type AiUsageRow } from '../../../src/database/repositories/ai-usage.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { resetModelRegistry } from '../../../src/services/ai/model-registry.ts';
+import { estimatePromptSize } from '../../../src/services/ai/prompt-size.ts';
 import { providerCircuitClock, resetProviderCircuit } from '../../../src/services/ai/provider-circuit.ts';
 import { resetEligibility } from '../../../src/services/ai/provider-eligibility.ts';
 import type { StreamRoundOptions } from '../../../src/services/ai/streaming.ts';
@@ -31,10 +32,12 @@ type Behavior =
   /** 200 OK, no text, no tool calls; usage still arrives. */
   | { kind: 'empty'; usage?: Usage }
   /** Runs `before`, then fails — lets a test move a clock between attempts. */
-  | { kind: 'throw-after'; error: Error; before: () => void };
+  | { kind: 'throw-after'; error: Error; before: () => void }
+  /** Yields each chunk after running its `before`, so a test can move the clock between chunks. */
+  | { kind: 'timeline'; steps: { before: () => void; chunk: Chunk }[] };
 
 interface Chunk {
-  choices: { delta: { content?: string }; finish_reason: string | null }[];
+  choices: { delta: { content?: string; tool_calls?: unknown[] }; finish_reason: string | null }[];
   usage?: Usage;
 }
 
@@ -73,6 +76,11 @@ function makeProvider(...behaviors: Behavior[]): FakeProvider {
               } else if (behavior?.kind === 'empty') {
                 yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
                 if (behavior.usage) yield { choices: [], usage: behavior.usage };
+              } else if (behavior?.kind === 'timeline') {
+                for (const step of behavior.steps) {
+                  step.before();
+                  yield step.chunk;
+                }
               }
             }
             return chunks();
@@ -400,6 +408,152 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
     ]);
     expect(claude.requests[0]?.max_tokens).toBe(128_000);
     expect(claude.requests[0]?.temperature).toBeUndefined();
+  });
+
+  describe('first-token and generation time', () => {
+    let clock = 0;
+    const at = (ms: number) => () => {
+      clock = ms;
+    };
+    const content = (text: string, finish: string | null = null): Chunk => ({
+      choices: [{ delta: { content: text }, finish_reason: finish }],
+    });
+
+    beforeEach(() => {
+      clock = 0;
+      performance.now = () => clock;
+    });
+
+    test('first_token_ms is request start to the first content delta, generation_ms first to last content delta', async () => {
+      zai = makeProvider({
+        kind: 'timeline',
+        steps: [
+          { before: at(700), chunk: content('Hel') },
+          { before: at(1000), chunk: content('lo') },
+          { before: at(1400), chunk: { choices: [{ delta: {}, finish_reason: 'stop' }] } },
+          { before: at(1450), chunk: { choices: [], usage: USAGE } },
+        ],
+      });
+
+      await ask();
+
+      expect(rows()).toMatchObject([{ outcome: 'ok', firstTokenMs: 700, generationMs: 300 }]);
+    });
+
+    test('a single content delta has generation_ms 0, a measured value rather than unknown', async () => {
+      zai = makeProvider({ kind: 'timeline', steps: [{ before: at(500), chunk: content('hi', 'stop') }] });
+
+      await ask();
+
+      expect(rows()).toMatchObject([{ firstTokenMs: 500, generationMs: 0 }]);
+    });
+
+    test('a tool call counts as the first token and its last fragment ends the window', async () => {
+      const toolDelta = (args: string, id?: string, name?: string): Chunk => ({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                { index: 0, ...(id ? { id } : {}), function: { ...(name ? { name } : {}), arguments: args } },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      });
+      zai = makeProvider({
+        kind: 'timeline',
+        steps: [
+          { before: at(900), chunk: toolDelta('{"a":', 'call_1', 'get_events') },
+          { before: at(1100), chunk: toolDelta('1}') },
+          { before: at(1500), chunk: { choices: [{ delta: {}, finish_reason: 'tool_calls' }] } },
+        ],
+      });
+
+      await ask({ tools: [{ type: 'function', function: { name: 'get_events', parameters: { type: 'object' } } }] });
+
+      expect(rows()).toMatchObject([{ firstTokenMs: 900, generationMs: 200 }]);
+    });
+
+    test('an attempt that fails keeps both NULL, and the next provider that answers records its own', async () => {
+      zai = makeProvider({ kind: 'empty', usage: USAGE });
+      hf = makeProvider({ kind: 'timeline', steps: [{ before: at(300), chunk: content('ok', 'stop') }] });
+
+      await ask();
+
+      expect(rows().map((row) => [row.provider, row.outcome, row.firstTokenMs, row.generationMs])).toEqual([
+        ['zai', 'error', null, null],
+        ['hf', 'ok', 300, 0],
+      ]);
+    });
+
+    test('timing is stored as whole milliseconds, matching the INTEGER column', async () => {
+      zai = makeProvider({
+        kind: 'timeline',
+        steps: [
+          { before: at(100.4), chunk: content('a') },
+          { before: at(250.2), chunk: content('b', 'stop') },
+        ],
+      });
+
+      await ask();
+
+      const [row] = rows();
+      expect(row?.firstTokenMs).toBe(100);
+      expect(row?.generationMs).toBe(150);
+    });
+  });
+
+  test('every sent attempt records the estimated prompt components of the round; a skip records none', async () => {
+    zai = makeProvider({ kind: 'throw', error: apiError(503, 'down') });
+    hf = makeProvider({ kind: 'text', text: 'answer' });
+    const messages = [
+      { role: 'system' as const, content: 'You are a calendar assistant.' },
+      { role: 'user' as const, content: 'earlier question' },
+      { role: 'assistant' as const, content: 'earlier answer' },
+      { role: 'user' as const, content: 'new question' },
+    ];
+    const tools = [{ type: 'function' as const, function: { name: 'get_events', parameters: { type: 'object' } } }];
+
+    await ask({ messages, tools });
+
+    const expected = estimatePromptSize(messages, tools);
+    expect(expected.toolCount).toBe(1);
+    expect(expected.messageCount).toBe(4);
+    const pick = (row: AiUsageRow) => ({
+      systemPromptTokens: row.systemPromptTokens,
+      toolCatalogTokens: row.toolCatalogTokens,
+      historyTokens: row.historyTokens,
+      userTokens: row.userTokens,
+      toolCount: row.toolCount,
+      messageCount: row.messageCount,
+    });
+    const written = rows();
+    expect(written.map((row) => [row.provider, row.outcome])).toEqual([
+      ['zai', 'error'],
+      ['hf', 'ok'],
+    ]);
+    for (const row of written) expect(pick(row)).toEqual(expected);
+  });
+
+  test('a skipped attempt has no prompt size: nothing was assembled for it', async () => {
+    process.env.AI_SMART_CHAIN = 'zai,hf';
+    zai = makeProvider({ kind: 'throw', error: apiError(413, 'Request too large for model') });
+    hf = makeProvider({ kind: 'text', text: 'first' }, { kind: 'text', text: 'second' });
+    const tools = [{ type: 'function' as const, function: { name: 'get_events', parameters: { type: 'object' } } }];
+
+    await ask({ tools });
+    await ask({ tools });
+
+    const skipped = rows().find((row) => row.outcome === 'skipped');
+    expect(skipped).toMatchObject({
+      systemPromptTokens: null,
+      toolCatalogTokens: null,
+      historyTokens: null,
+      userTokens: null,
+      toolCount: null,
+      messageCount: null,
+    });
   });
 
   test('stores no text: the row holds only the documented columns', async () => {

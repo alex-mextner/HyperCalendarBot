@@ -32,6 +32,7 @@ import {
   presetRequestFields,
 } from './model-presets.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
+import { estimatePromptSize } from './prompt-size.ts';
 import {
   type Admission,
   admitProvider,
@@ -109,6 +110,8 @@ export interface StreamRoundMetrics {
   chain: ProviderChainKind;
   /** First usable delta measured from the winning provider attempt start. */
   firstUsableSinceAttemptMs: number | null;
+  /** First to last content or tool-call delta of the winning attempt; null when no delta arrived. */
+  generationMs: number | null;
   /** Duration of the winning provider attempt only. */
   providerDurationMs: number;
   totalDurationMs: number;
@@ -364,6 +367,8 @@ interface ConsumedStream {
   toolCalls: StreamToolCall[];
   finishReason: string;
   firstUsableMs: number | null;
+  /** The last content or tool-call delta, measured like `firstUsableMs`; the usage-only trailer does not count. */
+  lastUsableMs: number | null;
   usage: CompletionUsage | null;
 }
 
@@ -391,6 +396,7 @@ async function consumeStream(
   let finishReasonSeen = false;
   let refusalSeen = false;
   let firstUsableMs: number | null = null;
+  let lastUsableMs: number | null = null;
   let usage: CompletionUsage | null = null;
   const toolCalls = new Map<number, PendingToolCall>();
   const limitVisible = visibleTokenLimit !== undefined;
@@ -399,7 +405,9 @@ async function consumeStream(
   // past this length the estimate cannot pass the limit and need not be recomputed.
   let estimateAtChars = limitVisible ? visibleTokenLimit * MIN_CHARS_PER_TOKEN : Number.POSITIVE_INFINITY;
   const markUsable = () => {
-    if (firstUsableMs === null) firstUsableMs = Math.max(0, performance.now() - startedAt);
+    const sinceStartMs = Math.max(0, performance.now() - startedAt);
+    if (firstUsableMs === null) firstUsableMs = sinceStartMs;
+    lastUsableMs = sinceStartMs;
   };
 
   const iterator = stream[Symbol.asyncIterator]();
@@ -472,6 +480,7 @@ async function consumeStream(
     chunkCount,
     finishReasonSeen,
     firstUsableMs,
+    lastUsableMs,
     usage,
     toolCalls: [...toolCalls.values()].map((tc) => ({ id: tc.id, name: tc.name, arguments: tc.args })),
   };
@@ -608,6 +617,7 @@ export function streamingSlot(
         toolCalls,
         finishReason,
         firstUsableMs,
+        lastUsableMs,
         usage,
         chunkCount,
         finishReasonSeen,
@@ -676,6 +686,8 @@ export function streamingSlot(
           model,
           chain: opts.fast ? 'fast' : 'smart',
           firstUsableSinceAttemptMs: firstUsableMs,
+          generationMs:
+            firstUsableMs === null || lastUsableMs === null ? null : Math.max(0, lastUsableMs - firstUsableMs),
           providerDurationMs: Math.max(0, performance.now() - attemptStartedAt),
           totalDurationMs: 0,
           attemptCount: 1,
@@ -1155,12 +1167,16 @@ export async function aiStreamRound(
   // or a "running <tool>" label. Both must be cleared before another provider
   // starts, otherwise the user sees output from a round that never finished.
   let partialOutputShown = false;
+  // The request is the same for every attempt of the round, so its size is estimated once, here, where it
+  // is assembled. Estimates only; the provider's own prompt_tokens stays the truth.
+  const promptSize = estimatePromptSize(options.messages, options.tools);
   const scopeOf = (slot: ProviderSlot): AttemptScope => ({
     chain: slot.role ? `role:${slot.role}` : chainKind,
     purpose: options.purpose,
     requestId: options.requestId,
     role: slot.role ?? null,
     preset: slot.presetId ?? null,
+    promptSize,
   });
 
   const wrappedCallbacks: StreamCallbacks = {
@@ -1277,6 +1293,10 @@ export async function aiStreamRound(
           attemptAt,
           Math.round(Math.max(0, performance.now() - attemptStartedAt)),
           result.metrics?.usage ?? null,
+          {
+            firstTokenMs: result.metrics?.firstUsableSinceAttemptMs ?? null,
+            generationMs: result.metrics?.generationMs ?? null,
+          },
         ),
       );
       return result;

@@ -86,6 +86,7 @@ function fakeMetrics(provider: 'zai' | 'hf', promptTokens: number, completionTok
     model: provider === 'hf' ? 'validator-model' : 'agent-model',
     chain: provider === 'hf' ? ('fast' as const) : ('smart' as const),
     firstUsableSinceAttemptMs: 5,
+    generationMs: 20,
     providerDurationMs: 10,
     totalDurationMs: 12,
     attemptCount: 1,

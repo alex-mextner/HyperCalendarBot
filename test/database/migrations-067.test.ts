@@ -7,9 +7,9 @@ import { runMigrations } from '../../src/database/schema.ts';
 
 const MIGRATION = '067_ai_usage_role_preset_cost';
 
-test('is the last migration, appended after 066', () => {
-  expect(migrations.at(-1)?.name).toBe(MIGRATION);
-  expect(migrations.at(-2)?.name).toBe('066_ai_usage_events');
+test('is appended directly after 066', () => {
+  const names = migrations.map((migration) => migration.name);
+  expect(names.indexOf(MIGRATION)).toBe(names.indexOf('066_ai_usage_events') + 1);
 });
 
 test('adds role, preset and cost_micro_usd, all nullable, once; rows written before it read back NULL', () => {
