@@ -61,6 +61,9 @@ function makeHandler(overrides: { [key: string]: unknown } = {}) {
       },
     ]),
     getEventsForWeek: mock(() => []),
+    resolveOccurrenceView: mock((event: unknown, occurrenceDate?: unknown) =>
+      occurrenceDate === undefined ? event : null,
+    ),
     ...overrides,
   };
   return createCallbackHandler(eventService as never, {} as never, {} as never, {} as never);

@@ -26,8 +26,8 @@ import { HolidayService } from '../../../src/services/holiday/holiday-service.ts
  * tokenizer: for this mix of JSON and Cyrillic the estimator reads high. Read the
  * budgets as "no bigger than today", never as "fits in provider X".
  */
-const TOOL_CATALOG_CHAR_BUDGET = 36_000;
-const TOOL_CATALOG_TOKEN_BUDGET = 10_500;
+const TOOL_CATALOG_CHAR_BUDGET = 36_800;
+const TOOL_CATALOG_TOKEN_BUDGET = 10_600;
 /**
  * The catalog is the largest part of a request but not the whole of it: the
  * system prompt travels with it every time. Guarding only the catalog would let
@@ -37,9 +37,9 @@ const TOOL_CATALOG_TOKEN_BUDGET = 10_500;
  * leave the largest real requests free to grow.
  */
 const FULL_REQUEST_TOKEN_BUDGETS = {
-  direct: 15_000,
-  group: 17_300,
-  supplement: 15_200,
+  direct: 15_200,
+  group: 17_550,
+  supplement: 15_500,
   liveCall: 14_500,
 } as const;
 

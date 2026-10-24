@@ -332,6 +332,40 @@ export class EventService {
     });
   }
 
+  /**
+   * Validate a (event, occurrenceDate) pair an inbound callback claims to target against the
+   * event's real, current, visible occurrence set — never trusting a client-supplied timestamp
+   * (GH-653). `event` must already be owner/group-authorized by the caller via `getEvent`/
+   * `getEventForGroup`; this only resolves *which instant* within that already-authorized
+   * event/series is real. Returns:
+   *  - `event` unchanged when no occurrenceDate is claimed;
+   *  - `event` unchanged when it is already a concrete occurrence — a one-off event, or a stored
+   *    exception row fetched directly by its own id — and its own start matches the claim, so an
+   *    edited/moved instance's actual fields (and a genuinely null end) come through untouched;
+   *  - the template projected onto the exact matched RRULE slot for a recurring template, when
+   *    that slot is not covered by a stored exception;
+   *  - `null` for a fabricated timestamp, a cancelled occurrence, or a claim a stored exception
+   *    has actually moved away from. The caller must treat this as "not found" — never render a
+   *    card reconstructed from an unvalidated instant.
+   */
+  resolveOccurrenceView(event: CalendarEvent, occurrenceDate?: string): CalendarEvent | null {
+    if (occurrenceDate === undefined) return event;
+    if (!event.recurrence_rule) {
+      return event.start_at === occurrenceDate ? event : null;
+    }
+    const claimed = new Date(occurrenceDate);
+    if (Number.isNaN(claimed.getTime())) return null;
+    const dayMs = 24 * 60 * 60_000;
+    const windowStart = new Date(claimed.getTime() - dayMs).toISOString();
+    const windowEnd = new Date(claimed.getTime() + dayMs).toISOString();
+    const exceptions = this.eventRepo.getExceptions(event.id);
+    const match = expandRecurrence(event, exceptions, windowStart, windowEnd).find(
+      (occ) => occ.occurrence_start === occurrenceDate,
+    );
+    if (!match) return null;
+    return { ...match.event, start_at: match.occurrence_start, end_at: match.occurrence_end };
+  }
+
   splitRecurrence(templateId: number, occurrenceDate: string, userId: number): CalendarEvent | null {
     const template = this.eventRepo.findById(templateId, userId);
     if (!template || !template.recurrence_rule) return null;

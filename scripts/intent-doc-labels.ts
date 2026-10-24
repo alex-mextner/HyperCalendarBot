@@ -14,6 +14,7 @@ export const canonicalTitles: { [name: string]: string } = {
   'basis.holidays.upcoming': 'Ближайшие праздники',
   'basis.event.create': 'Создать событие с названием, днём и временем',
   'basis.event.show': 'Показать одно событие по номеру или точному названию',
+  'basis.event.show_relative_day': 'Показать событие сегодняшнего/завтрашнего дня',
   'basis.event.reschedule': 'Перенести событие на явный день и время',
   'basis.event.rename': 'Переименовать событие',
   'basis.event.set_detail': 'Изменить место или описание события',

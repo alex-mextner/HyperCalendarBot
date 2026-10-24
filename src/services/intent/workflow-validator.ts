@@ -28,6 +28,7 @@ const STEP_SCHEMAS_BY_NAME: Record<string, z.ZodType> = { ...TOOL_SCHEMAS_BY_NAM
  */
 const REQUIRED_ANY_OF: Record<string, string[][]> = {
   send_invitation: [['invitee_id', 'invitee_username']],
+  show_event: [['event_id', 'start_date']],
 };
 
 /**

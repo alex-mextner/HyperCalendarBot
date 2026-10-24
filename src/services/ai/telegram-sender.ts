@@ -25,11 +25,12 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
       });
       return { message_id: result.message_id };
     },
-    async sendMessageWithKeyboard(chatId: number, text: string, keyboard: InlineKeyboard) {
+    async sendMessageWithKeyboard(chatId: number, text: string, keyboard: InlineKeyboard, parseMode?: ParseMode) {
       const result = await bot.api.sendMessage({
         chat_id: chatId,
         text,
         reply_markup: keyboard,
+        ...(parseMode ? { parse_mode: parseMode } : {}),
       });
       return { message_id: result.message_id };
     },

@@ -239,11 +239,15 @@ function buildEventCreationRules(): string {
 - DESTRUCTIVE actions (delete events, change settings, cancel invitations): ALWAYS confirm first with ask_user. For events pass event_ids: the bot lists them and deletes on the user's tap — never call delete_event for them. List other affected items; proceed only after explicit "Да".`;
 }
 
-function buildOutputRules(): string {
+function buildOutputRules(ctx: AgentContext): string {
+  const showEventLine =
+    ctx.inputMode === 'live_call'
+      ? ''
+      : '\n- show_event sends the real card+buttons for an explicit "show my event" request — do not get_event + describe it yourself; reply "[SKIP]" after it succeeds unless more is needed.';
   return `- Use Telegram-safe formatting: bold with *, italic with _, code with \`. Never use markdown tables — Telegram does not render them.
 - NEVER start your reply with a prefix like "[Bot:", "[Assistant:", or any similar label. Just write the message directly.
 - CRITICAL — set_reaction protocol: after calling set_reaction, your ENTIRE text response must be EXACTLY "[SKIP]" — nothing before, nothing after, no emoji, no "Готово", no commentary. The reaction emoji on the message IS your complete response to the user. Writing any text defeats the purpose — the user sees both the reaction AND your text, which is redundant and noisy. "[SKIP]" is a machine-parsed 6-character token (English, uppercase, square brackets) that tells the system to delete the progress message. Do not translate it.
-- Never invent events — only report what tools return.
+- Never invent events — only report what tools return.${showEventLine}
 - After ask_user or pick_users, the conversation STOPS. Do not generate any text after these tools.`;
 }
 
@@ -283,9 +287,9 @@ function buildRulesSection(ctx: AgentContext, utcOffset: string, durationMins: n
     buildTimeRules(ctx, utcOffset),
     '- Be concise. No unnecessary preamble.',
     buildEventCreationRules(),
-    buildOutputRules(),
     buildDataRules(durationMins),
     buildPeopleRules(ctx, durationMins, now),
+    buildOutputRules(ctx),
   ].join('\n');
 }
 
