@@ -39,9 +39,17 @@ STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
 trap 'rm -rf "$REMOTE_SRC"' EXIT
 exec 9>"$DEPLOY_PATH/.release.lock"
 flock -n 9 || { echo 'Another release owns this service' >&2; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for helper in odroid-deploy-lock.sh deploy-health.py deploy-evidence.py log-retention.py; do
+  [[ -f "$SCRIPT_DIR/$helper" ]] || { echo "Release is missing scripts/$helper; the build must ship it (docs/reference/deploy-runbook.md, Release files)" >&2; exit 1; }
+done
+# shellcheck source=odroid-deploy-lock.sh
+source "$SCRIPT_DIR/odroid-deploy-lock.sh"
 [[ "$(sha256sum "$REMOTE_SRC/image.tar.gz" | cut -d ' ' -f1)" == "$ARCHIVE_SUM" ]] || { echo 'Archive checksum mismatch' >&2; exit 1; }
 python3 "$REMOTE_SRC/scripts/release-artifact.py" "$REMOTE_SRC/image.tar.gz" "$SHA" "$IMAGE:$SHA" > "$REMOTE_SRC/artifact.json"
 [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$REMOTE_SRC/artifact.json")" == "$CONFIG_ID" ]] || exit 1
+# Both repositories deploy to this one box: serialize with the other one's image load and swap (#823).
+odroid_deploy_lock_acquire hcb || exit $?
 # docker load unpacks the whole archive before it registers the layers, so it needs about twice
 # the unpacked image free on the Docker root. Refuse here, with the numbers, rather than fail
 # halfway with a bare "no space left on device" as the 2026-09-28 release did (#481).
@@ -102,18 +110,34 @@ restore_host_files() {
 
 HEALTH=""
 READY=""
-# Poll until /health is ok and, unless $1 is "health", /ready answers ok or "ok (unverified)".
+VERDICT_REASON=""
+# The verdict probes the bot's own published port on this host: the public ingress (Cloudflare tunnel,
+# proxy) answers 502 instantly while the container restarts and is not what this release controls.
+# PUBLIC_DOMAIN (root-only .env; last assignment wins, inline " #comment", quotes, CR and spaces
+# dropped) is only used for one informational public probe after verification.
+HEALTH_URL=http://127.0.0.1:3001
+PUBLIC_DOMAIN_VALUE="$(sed -n 's/^PUBLIC_DOMAIN=//p' "$DEPLOY_PATH/.env" 2>/dev/null | tail -n 1 | sed 's/[[:space:]]#.*$//' | tr -d "\"' \r" || true)"
+ready_acceptable() { case "$1" in ok|"ok (unverified)") return 0 ;; *) return 1 ;; esac; }
+# The multi-signal verdict lives in scripts/deploy-health.py (container state, restart count,
+# /health, /ready against its pre-deploy value, fresh error logs, load-aware budget); a slow start
+# is not a failure, a dead or crash-looping container is. $1 = "health" skips /ready (rollback).
+# Sets HEALTH, READY and VERDICT_REASON from its RESULT line; returns its exit status.
 wait_for_bot() {
-  for _ in $(seq 1 15); do
-    HEALTH="$(curl -fsS --max-time 20 https://hypercal.invntrm.ru/health 2>/dev/null || true)"
-    READY="$(curl -fsS --max-time 20 https://hypercal.invntrm.ru/ready 2>/dev/null || true)"
-    if [[ "$HEALTH" == ok ]]; then
-      if [[ "$1" == health ]]; then return 0; fi
-      case "$READY" in ok|"ok (unverified)") return 0 ;; esac
-    fi
-    sleep 4
-  done
-  return 1
+  local out="$REMOTE_SRC/health.out" rc line
+  python3 "$SCRIPT_DIR/deploy-health.py" wait --container hypercal-bot --url "$HEALTH_URL" \
+    --mode "$1" --baseline-ready "${BASELINE_READY:-}" \
+    --base-budget "${HYPERCAL_HEALTH_BASE_BUDGET:-240}" --hard-cap "${HYPERCAL_HEALTH_HARD_CAP:-900}" \
+    --poll "${HYPERCAL_HEALTH_POLL:-4}" --stable "${HYPERCAL_HEALTH_STABLE:-15}" \
+    --stall "${HYPERCAL_HEALTH_STALL:-120}" | tee "$out" >&2
+  rc="${PIPESTATUS[0]}"
+  line="$(sed -n 's/^RESULT //p' "$out" | tail -n 1)"
+  HEALTH=""; READY=""; VERDICT_REASON="${line#*reason=}"
+  if [[ "$line" =~ health=(.*)\ ready=(.*)\ elapsed= ]]; then
+    HEALTH="${BASH_REMATCH[1]}"; READY="${BASH_REMATCH[2]}"
+    [[ "$HEALTH" != '<none>' ]] || HEALTH=""
+    [[ "$READY" != '<none>' ]] || READY=""
+  fi
+  return "$rc"
 }
 
 # The previous image ID alone does not show a running bot. Readiness is reported, not required:
@@ -152,6 +176,12 @@ rollback() {
   rc=$?
   trap - EXIT INT TERM
   set +e
+  if [[ "$rc" != 0 && "$switched" == 1 ]]; then
+    # Evidence first: the rollback recreates the container and its logs would be gone.
+    FAILED_EVIDENCE="$(timeout 300 python3 "$SCRIPT_DIR/deploy-evidence.py" failed --container hypercal-bot --logs-root "$DEPLOY_PATH/logs" \
+      --sha "$SHA" --receipt "$DEPLOY_PATH/releases/current.json" 2>&1 | sed -n 's/^EVIDENCE_DIR=//p')"
+    [[ -z "$FAILED_EVIDENCE" ]] || printf 'FAILED_EVIDENCE %s\n' "$FAILED_EVIDENCE" >&2
+  fi
   if [[ "$rc" != 0 && "$switched" == 1 ]] && old_image_may_run; then
     echo 'Verification failed; restoring image and host files, never restoring an older user database' >&2
     restore_host_files || rc=1
@@ -166,6 +196,15 @@ trap 'exit 143' TERM
 
 # Back up the live DB before replacing any deployed host files or container.
 "$DEPLOY_PATH/scripts/backup-db.sh"
+# Readiness before the swap. The verdict waives /ready only when it was KNOWINGLY worse (an answered
+# 503, e.g. the AI chain is down for every image); a probe that failed or answered something that
+# is not a bot response proves nothing, so it leaves readiness required.
+BASELINE_CODE="$(curl -sS --max-time 20 -o "$REMOTE_SRC/baseline-ready.body" -w '%{http_code}' "$HEALTH_URL/ready" 2>/dev/null)" || BASELINE_CODE=000
+BASELINE_BODY="$(head -c 200 "$REMOTE_SRC/baseline-ready.body" 2>/dev/null | tr -d '\r\n' || true)"
+BASELINE_READY=""
+if [[ "$BASELINE_CODE" == 200 ]] && ready_acceptable "$BASELINE_BODY"; then BASELINE_READY="$BASELINE_BODY"; fi
+if [[ "$BASELINE_CODE" == 503 ]]; then BASELINE_READY="${BASELINE_BODY:-not ready (HTTP 503)}"; fi
+CURRENT_REVISION="$(docker inspect hypercal-bot --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null | cut -c1-12)" || CURRENT_REVISION=""
 
 switched=1
 install -d -m 0755 "$DEPLOY_PATH/scripts"
@@ -185,6 +224,11 @@ for file in healthcheck.log backup.log; do
   fi
 done
 
+# The outgoing container's complete log goes to the host before the recreate destroys it (owner
+# requirement 7). Best effort: it never blocks the release.
+timeout 300 python3 "$SCRIPT_DIR/deploy-evidence.py" release-logs --container hypercal-bot --logs-root "$DEPLOY_PATH/logs" \
+  --label "${CURRENT_REVISION:-${CURRENT_IMAGE_ID:7:12}}" >&2 || true
+
 # Pin the runtime selector, independent of environment or stale :latest aliases.
 printf 'services:\n  bot:\n    image: "%s"\n' "$IMAGE:$SHA" > "$REMOTE_SRC/image.yml"
 cd "$DEPLOY_PATH"
@@ -197,20 +241,24 @@ if [[ "$ACTUAL_IMAGE_ID" != "$EXPECTED_IMAGE_ID" ]]; then
   exit 1
 fi
 
-wait_for_bot ready || true
-
-if [[ "$HEALTH" != ok ]]; then
-  echo "Health check failed after deploy" >&2
+if ! wait_for_bot ready; then
+  if [[ "$HEALTH" != ok ]]; then
+    echo "Health check failed after deploy: $VERDICT_REASON" >&2
+  elif ! ready_acceptable "$READY"; then
+    echo "Readiness path is not returning a bot response: ${READY:-<empty>} ($VERDICT_REASON)" >&2
+  else
+    echo "Release did not stay healthy: $VERDICT_REASON" >&2
+  fi
   exit 1
 fi
-case "$READY" in
-  ok|"ok (unverified)") ;;
-  *) echo "Readiness path is not returning a bot response: ${READY:-<empty>}" >&2; exit 1 ;;
-esac
 
 REVISION="$(docker image inspect "$IMAGE:$SHA" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
 [[ "$REVISION" == "$SHA" ]] || exit 1
 # Runtime verification is the commit point. Metadata or alias failures cannot undo it.
+if [[ "$PUBLIC_DOMAIN_VALUE" =~ ^[A-Za-z0-9.-]+$ ]]; then
+  PUBLIC_HEALTH="$(curl -sS --max-time 20 "https://$PUBLIC_DOMAIN_VALUE/health" 2>/dev/null || true)"
+  printf 'PUBLIC_PROBE host=%s health=%s (informational: the release is verified on its own port)\n' "$PUBLIC_DOMAIN_VALUE" "${PUBLIC_HEALTH:-<none>}"
+fi
 switched=0
 printf 'RUNTIME_VERIFIED sha=%s image=%s ready=%s\n' "$REVISION" "$ACTUAL_IMAGE_ID" "$READY"
 # config_digest is the release identity on every store; image_id is what this daemon reports as the
@@ -250,3 +298,13 @@ for tag in sorted(t for t in tags if t not in keep_tags and tags[t] not in keep_
         print(f"IMAGE_RETENTION removed={image}:{tag}")
 sys.exit(1 if failed else 0)
 RETENTION
+
+# Log retention (owner requirement 7): deploys and rollbacks never delete logs; only a violated size,
+# file-count or free-space criterion does, oldest first, sparing the last deploy's and the last
+# failure's directories (scripts/log-retention.py). After the commit point, so a problem here is
+# reported and never fails or undoes the verified release.
+# The installed copy is what root cron runs between deploys (disk-space watchdog, runbook).
+install -m 0755 "$SCRIPT_DIR/log-retention.py" "$DEPLOY_PATH/scripts/log-retention.py" >&2 \
+  || echo 'LOG_RETENTION install failed; cron keeps running the previous copy' >&2
+python3 "$SCRIPT_DIR/log-retention.py" --root "$DEPLOY_PATH/logs" --env-file "$DEPLOY_PATH/.env" --alert >&2 \
+  || echo 'LOG_RETENTION reported a violated criterion; the verified release stays in place' >&2

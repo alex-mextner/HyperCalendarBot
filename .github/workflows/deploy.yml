@@ -94,6 +94,8 @@ jobs:
           docker save "$RELEASE_IMAGE:$RELEASE_SHA" | gzip -1 > release/image.tar.gz
           cp docker-compose.yml Caddyfile release/
           cp scripts/backup-db.sh scripts/healthcheck-alert.sh scripts/prepare-runtime-dirs.sh scripts/release-artifact.py scripts/deploy-prebuilt-image.sh scripts/migration-gate.py release/scripts/
+          # Host-side deploy helpers (#823): the activator refuses a release without them.
+          cp scripts/odroid-deploy-lock.sh scripts/deploy-health.py scripts/deploy-evidence.py scripts/log-retention.py release/scripts/
           python3 scripts/release-artifact.py release/image.tar.gz "$RELEASE_SHA" "$RELEASE_IMAGE:$RELEASE_SHA" > release/artifact.json
       - id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -132,13 +134,19 @@ jobs:
     # main reach it; no pull_request-triggered workflow may ever target this label.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, odroid-hcb]
-    timeout-minutes: 30
+    # A deploy may first WAIT up to 40 min for the other repository's deploy (host deploy lock, runbook
+    # "Deploy reliability"), then load, gate on stage and swap: the job limit has to outlast both.
+    timeout-minutes: 100
     permissions:
       actions: read
       contents: read
       # Read only: the release-artifact status must stay writable by the build job alone.
       statuses: read
+    outputs:
+      failed_evidence: ${{ steps.evidence.outputs.dir }}
     steps:
+      - name: Mark the start of this deploy attempt
+        run: touch "$RUNNER_TEMP/deploy-started"
       # Root wrapper installed by hand on the odroid (runbook "Odroid runner"). It trusts only
       # the SHA: it checks main itself, deploys the artifact the build job's release-artifact
       # commit status names, verifies its digest and push-to-main run, and runs the staged
@@ -149,6 +157,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_SHA: ${{ github.sha }}
         run: printf '%s\n' "$GH_TOKEN" | sudo -n /usr/local/sbin/hypercal-activate-release "$RELEASE_SHA"
+      # Names the evidence directory the activator saved before a rollback, for the failure alert. Only
+      # the directory name is read (the odroid's logs dir lists for every local user; its content is root-only).
+      - name: Locate failed-release evidence
+        id: evidence
+        if: failure()
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          # Only a directory created after this job started: an earlier attempt of the same SHA may have left one.
+          dir="$(find /opt/hypercal/logs -maxdepth 1 -type d -name "failed-${RELEASE_SHA:0:12}-*" -newer "$RUNNER_TEMP/deploy-started" 2>/dev/null | sort | tail -n 1 || true)"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
   # Runs on a GitHub-hosted runner: the odroid jobs must see no secret but GITHUB_TOKEN, since
   # anything running there as hcb-runner can read a job's environment from /proc.
@@ -202,6 +221,7 @@ jobs:
           TEST_RESULT: ${{ needs.test.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
+          FAILED_EVIDENCE: ${{ needs.deploy.outputs.failed_evidence }}
           ADMIN_ALERT_TOKEN: ${{ secrets.ADMIN_ALERT_TOKEN }}
         run: |
           FAILED=""
@@ -210,6 +230,10 @@ jobs:
           [[ "$DEPLOY_RESULT" == "failure" ]] && FAILED+="deploy"
           FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
           TEXT=$(printf '🚨 <b>CI/CD failed</b> [%s]\n<code>%s</code> — %s\n%s' "$FAILED" "${COMMIT_SHA:0:7}" "$FIRST_LINE" "$RUN_URL")
+          # The activator saved the failed container's logs before rolling back (runbook, Deploy reliability).
+          if [ -n "$FAILED_EVIDENCE" ]; then
+            TEXT+=$(printf '\nFailed-release evidence on the odroid: <code>%s</code>' "$FAILED_EVIDENCE")
+          fi
           curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
             -H "Content-Type: application/json" \
             -d "$(jq -n --arg chat_id "$ADMIN_ID" --arg text "$TEXT" \
