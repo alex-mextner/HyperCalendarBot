@@ -12,7 +12,8 @@ Since 2026-10-09 22:30 UTC (#784):
 - **Domain**: hypercal.invntrm.ru — DNS still points at the DigitalOcean droplet `104.248.84.190`, whose
   Caddy (auto-TLS) proxies the bot paths over the tailnet to the odroid at `100.116.57.66:3001`. The
   droplet is tailnet node `do-edge` (`100.113.21.91`) with a direct WireGuard path to the odroid. It runs
-  no bot container; it keeps the ingress and the external watchdog cron. Until 2026-10-10 the upstream was
+  no bot container; it keeps the ingress and the external watchdog cron (disabled 2026-10-10 to 2026-10-24,
+  re-enabled in #822; runbook "Alert watcher"). Until 2026-10-10 the upstream was
   the odroid's Tailscale Funnel; Funnel failed that night from 00:00 to 03:10 UTC and is now off.
 
 ## Stack
