@@ -664,33 +664,27 @@ describe('queued alerts', () => {
   });
 
   test('a body that cannot be read after the pop is recorded, not lost silently', async () => {
-    server.stop(true);
-    server = Bun.serve({
-      port: 0,
-      fetch(req) {
-        const path = new URL(req.url).pathname;
-        if (path === '/ready') return new Response('ok');
-        let sent = false;
+    const cfg = config();
+    const broken = {
+      ...deps(cfg),
+      // The server answered 200 (and consumed the alert), then the connection died while the body was read.
+      fetch: async (url: string) => {
+        if (url.endsWith('/ready')) return new Response('ok');
         const body = new ReadableStream({
           pull(controller) {
-            if (!sent) {
-              sent = true;
-              controller.enqueue(new TextEncoder().encode('{"id": 5,'));
-              return;
-            }
             controller.error(new Error('connection reset'));
           },
         });
         return new Response(body, { status: 200 });
       },
-    });
-    const cfg = config({ baseUrl: `http://127.0.0.1:${server.port}` });
-    await runCycle(cfg, deps(cfg));
+    };
+    await runCycle(cfg, broken);
 
     const saved = readdirSync(join(cfg.stateDir, 'unreadable'));
     expect(saved).toHaveLength(1);
-    // Depending on the client the cut-off body arrives as a short read (saved as is) or as an error (saved as a marker).
-    expect(readFileSync(join(cfg.stateDir, 'unreadable', saved[0] ?? ''), 'utf8')).toMatch(/unreadable body|"id": 5,/);
+    expect(readFileSync(join(cfg.stateDir, 'unreadable', saved[0] ?? ''), 'utf8')).toMatch(
+      /unreadable body.*connection reset/,
+    );
   });
 
   test('a queue that keeps answering 200 with a page instead of JSON is saved once per cycle, not 50 times', async () => {
