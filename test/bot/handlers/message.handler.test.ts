@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { AnyScene } from '@gramio/scenes';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler.ts';
 import {
@@ -1063,6 +1063,28 @@ describe('toEventSummary', () => {
 describe('voice reply TTS fallback', () => {
   const audioBuffer = Buffer.from('fake-audio');
   const fakeAudioDownload = mock(() => Promise.resolve(Buffer.from('fake-voice-download')));
+
+  // GH-669: handleVoiceMessage fires a bare fetch() to sendChatAction before
+  // synthesizing the TTS reply. These tests never mock it, so without this
+  // stub they reach real api.telegram.org and hang until the 5s bun test
+  // timeout whenever that host is unreachable from the build/dev machine.
+  // Stub only the exact sendChatAction call this handler makes and restore
+  // the real fetch after every test; any other URL fails loudly instead of
+  // silently reaching the network.
+  let originalFetch: typeof fetch;
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.includes('/sendChatAction')) {
+        return new Response(JSON.stringify({ ok: true }));
+      }
+      throw new Error(`voice reply TTS fallback tests: unexpected fetch to ${urlStr}`);
+    }) as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
 
   function makeVoiceDeps(overrides: { [key: string]: unknown } = {}) {
     return makeDeps({
