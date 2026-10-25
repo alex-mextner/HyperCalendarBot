@@ -2,7 +2,11 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { Lang } from '../../../config/constants.ts';
 import { t, toLang } from '../../../config/constants.ts';
-import { CLEARED_LOCATION, RESOLVED_PLACE_COLUMNS } from '../../../database/repositories/event.repository.ts';
+import {
+  CLEARED_LOCATION,
+  EVENT_UPDATE_FIELDS,
+  RESOLVED_PLACE_COLUMNS,
+} from '../../../database/repositories/event.repository.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
 import { allDayDates, formatLocalEventSpan, getDayRangeUtc, localCalendarDate } from '../../../utils/date.ts';
 import { eventTimestampError } from '../../../utils/event-timestamps.ts';
@@ -554,6 +558,16 @@ async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, us
   }
 }
 
+/** Columns the update_event tool schema declares; a confirmed place is set only by the verification flow (#620). */
+const MODEL_UPDATE_FIELDS = [
+  'title',
+  'start_at',
+  'end_at',
+  'description',
+  'location',
+  'recurrence_rule',
+] as const satisfies readonly (typeof EVENT_UPDATE_FIELDS)[number][];
+
 export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
@@ -570,6 +584,15 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
   for (const column of RESOLVED_PLACE_COLUMNS) Reflect.deleteProperty(fields, column);
   // Removing the location also drops a place a pin set on an event without typed text
   const updates = fields.location === null ? { ...fields, ...CLEARED_LOCATION } : fields;
+  // An update that writes no column (misnamed or model-forbidden fields only) changes
+  // nothing; reporting it as applied would be an unsupported success claim (#270)
+  if (!EVENT_UPDATE_FIELDS.some((field) => Reflect.get(updates, field) !== undefined)) {
+    return {
+      success: false,
+      mutationState: 'not_applied',
+      error: `Nothing to update: no supported field was given. Supported fields: ${MODEL_UPDATE_FIELDS.join(', ')}.`,
+    };
+  }
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
   }

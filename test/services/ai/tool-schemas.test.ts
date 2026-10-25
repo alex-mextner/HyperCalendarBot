@@ -454,11 +454,13 @@ describe('a model payload never confirms a place (#620)', () => {
     ]);
   });
 
-  test('update_event without a new text cannot confirm the typed place', async () => {
+  test('update_event without a new text cannot confirm the typed place and is not reported as applied', async () => {
     const eventId = createEvent('Cafe Lisbon');
     const result = await executeTool(ctx, 'update_event', { event_id: eventId, location_verified: 1, ...MODEL_PLACE });
 
-    expect(result.success).toBe(true);
+    // Every field was a model-forbidden place column, so nothing was written (#270)
+    expect(result.success).toBe(false);
+    expect(result.mutationState).toBe('not_applied');
     expect(resolvedPlace(ctx.eventService.getEvent(eventId, USER_ID))).toEqual(UNRESOLVED_PLACE);
     expect(verifiedEvents).toEqual([]);
   });
