@@ -497,6 +497,45 @@ describe('formatEventDetail — edge cases', () => {
     expect(result).toContain('📅');
   });
 
+  test('all-day event stored as legacy literal UTC midnight still shows its written day in a negative-offset zone (GH-652)', () => {
+    // Legacy rows (e.g. birthday-service.ts, and any pre-GH-652 all-day row) store dates as
+    // `${date}T00:00:00Z` regardless of zone. formatCalendarDateShort reads only the date
+    // prefix, so a negative-offset viewer must not read that literal UTC midnight as the
+    // previous local day the way `formatDateShort` (a real zone conversion) would.
+    const event = makeEvent({ title: 'Legacy Holiday', all_day: 1, start_at: '2026-09-27T00:00:00Z' });
+    const result = formatEventDetail(event, 'America/New_York', 'en');
+    expect(result).toContain('Sun 27');
+    expect(result).not.toContain('Sat 26');
+  });
+
+  test('AI-created all-day row (event-zone local midnight converted to UTC) shows its day for a viewer in another zone (GH-652)', () => {
+    // create_event stores a Belgrade all-day Mon 28 as 2026-09-27T22:00:00Z; it must be read on the
+    // EVENT's wall clock, not as its UTC date prefix nor through the viewer's zone.
+    const event = makeEvent({
+      title: 'Belgrade Holiday',
+      all_day: 1,
+      timezone: 'Europe/Belgrade',
+      start_at: '2026-09-27T22:00:00.000Z',
+    });
+    const result = formatEventDetail(event, 'Pacific/Honolulu', 'en');
+    expect(result).toContain('Mon 28');
+    expect(result).not.toContain('Sun 27');
+  });
+
+  test('all-day event stored with its own zone offset still shows its written day for a viewer in a very different zone (GH-652)', () => {
+    // /add stores all-day boundaries as the EVENT zone's local midnight with its offset; a viewer far
+    // to the west (Honolulu) must still see the event's own calendar day.
+    const event = makeEvent({
+      title: 'NY Holiday',
+      all_day: 1,
+      timezone: 'America/New_York',
+      start_at: '2026-09-27T00:00:00.000-04:00',
+    });
+    const result = formatEventDetail(event, 'Pacific/Honolulu', 'en');
+    expect(result).toContain('Sun 27');
+    expect(result).not.toContain('Sat 26');
+  });
+
   test('event without end_at omits duration', () => {
     const event = makeEvent({ title: 'Open-ended', end_at: null });
     const result = formatEventDetail(event, 'UTC', 'en');

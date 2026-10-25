@@ -5,7 +5,7 @@ import type { EventRepository } from '../../database/repositories/event.reposito
 import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { CalendarEvent, CreateEventData, EventOccurrence, UpdateEventData } from '../../database/types.ts';
-import { getDayRangeUtc, getNDayRangeUtc, getWeekRangeUtc } from '../../utils/date.ts';
+import { getDayRangeUtc, getNDayRangeUtc, getWeekRangeUtc, storedInstantMs } from '../../utils/date.ts';
 import { logger } from '../../utils/logger.ts';
 import { computeEventDiff, snapshotFromCalendarEvent } from '../google/change-detection.ts';
 import type { ReminderMaterializer } from '../notification/materializer.ts';
@@ -223,18 +223,16 @@ export class EventService {
       if (template.owner_type === 'group' && template.group_id && this.groupMemberRepo) {
         const membership = this.groupMemberRepo.getMembership(template.group_id, userId);
         if (membership) {
-          expanded = expanded.filter(
-            (occ) =>
-              occ.occurrence_start >= membership.joined_at &&
-              (!membership.left_at || occ.occurrence_start < membership.left_at),
-          );
+          expanded = expanded.filter((occ) => isWithinMembership(occ.occurrence_start, membership));
         }
       }
 
       recurring.push(...expanded);
     }
 
-    return [...oneOff, ...recurring].sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
+    return [...oneOff, ...recurring].sort(
+      (a, b) => storedInstantMs(a.occurrence_start) - storedInstantMs(b.occurrence_start),
+    );
   }
 
   private computeFreeSlots(
@@ -400,7 +398,9 @@ export class EventService {
       recurring.push(...expanded);
     }
 
-    return [...oneOff, ...recurring].sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
+    return [...oneOff, ...recurring].sort(
+      (a, b) => storedInstantMs(a.occurrence_start) - storedInstantMs(b.occurrence_start),
+    );
   }
 
   getEventForGroup(eventId: number, groupId: number): CalendarEvent | null {
@@ -464,7 +464,7 @@ export class EventService {
     }
 
     return [...oneOff, ...recurring]
-      .sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start))
+      .sort((a, b) => storedInstantMs(a.occurrence_start) - storedInstantMs(b.occurrence_start))
       .slice(0, limit);
   }
 
@@ -499,8 +499,9 @@ export class EventService {
 
     for (const occ of occurrences) {
       if (occ.is_exception && occ.event.is_cancelled) continue;
-      // Skip the base occurrence — already materialized by the caller
-      if (occ.occurrence_start === event.start_at) continue;
+      // Skip the base occurrence — already materialized by the caller. Compare instants: an
+      // all-day series may render the base in another ISO form (offset vs Z) than stored.
+      if (storedInstantMs(occ.occurrence_start) === storedInstantMs(event.start_at)) continue;
 
       this.materializer.materializeForOccurrence(
         event.id,

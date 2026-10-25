@@ -17,6 +17,7 @@ export interface AddEventState {
   startAt?: string;
   pendingDate?: string;
   endAt?: string;
+  allDay?: boolean;
   recurrenceRule?: string | null;
   recEndMode?: 'until' | 'count';
   description?: string;
