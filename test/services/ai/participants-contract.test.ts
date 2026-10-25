@@ -182,10 +182,18 @@ afterEach(() => {
 });
 
 describe('creating an event with people: the prompt example, executed', () => {
-  const cases: { name: string; timezone: string; now?: string; mode: 'full' | 'lazy' }[] = [
+  const cases: { name: string; timezone: string; now?: string; mode: 'full' | 'lazy' | 'hybrid' }[] = [
     { name: 'real time, Europe/Belgrade, full schemas', timezone: 'Europe/Belgrade', mode: 'full' },
     { name: 'real time, UTC, lazy schemas', timezone: 'UTC', mode: 'lazy' },
     { name: 'real time, Asia/Kolkata, lazy schemas', timezone: 'Asia/Kolkata', mode: 'lazy' },
+    // create_event and send_invitation are always on in hybrid mode: the prompt example runs without a discovery round.
+    { name: 'real time, Europe/Belgrade, hybrid schemas', timezone: 'Europe/Belgrade', mode: 'hybrid' },
+    {
+      name: 'DST eve, America/New_York, hybrid schemas',
+      timezone: 'America/New_York',
+      now: '2026-03-07T17:00:00Z',
+      mode: 'hybrid',
+    },
     // "Tomorrow" is after the spring-forward / fall-back: today's offset is not tomorrow's.
     { name: 'DST eve, Europe/Belgrade', timezone: 'Europe/Belgrade', now: '2026-03-28T12:00:00Z', mode: 'full' },
     { name: 'DST eve, America/New_York', timezone: 'America/New_York', now: '2026-03-07T17:00:00Z', mode: 'lazy' },
@@ -193,6 +201,12 @@ describe('creating an event with people: the prompt example, executed', () => {
     // "Tomorrow" is in the next month / the next year.
     { name: 'month end, America/New_York', timezone: 'America/New_York', now: '2026-01-31T20:00:00Z', mode: 'full' },
     { name: 'year end, Pacific/Kiritimati', timezone: 'Pacific/Kiritimati', now: '2026-12-31T09:00:00Z', mode: 'lazy' },
+    {
+      name: 'year end, Pacific/Kiritimati, hybrid schemas',
+      timezone: 'Pacific/Kiritimati',
+      now: '2026-12-31T09:00:00Z',
+      mode: 'hybrid',
+    },
   ];
 
   for (const { name, timezone, now, mode } of cases) {

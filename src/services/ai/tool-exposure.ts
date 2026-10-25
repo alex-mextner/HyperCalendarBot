@@ -3,6 +3,7 @@ import { reportAllProvidersFailed } from '../../utils/ai-provider-alert.ts';
 import { AllProvidersFailedError } from './streaming.ts';
 import { createToolCatalog } from './tool-catalog.ts';
 import type { executeTool } from './tool-executor.ts';
+import type { PartialToolSchemaMode } from './tool-schema-mode.ts';
 import { withSchemaExcerpt } from './tools.ts';
 
 type Execution = Awaited<ReturnType<typeof executeTool>>;
@@ -25,10 +26,50 @@ const MAX_DISCOVERY_ATTEMPTS = 6;
 const MAX_ACTIVE_TOOLS = 65;
 const MAX_ACTIVE_SCHEMA_CHARS = 48_000;
 
+/**
+ * Tools whose schema the first round of a lazy request carries. The system prompt makes calculate
+ * mandatory for every time and date conversion, so it cannot wait for a discovery round.
+ */
+const LAZY_ALWAYS_ON_TOOLS: readonly string[] = ['calculate'];
+
+/**
+ * The fifteen tools production calls most, which cover 98% of the persisted chat_history tool calls of
+ * 2026-10-25 (705 of 722: calculate 200, create_event 131, render_day_image 82, send_invitation 53,
+ * get_events 49, ask_user 34, find_contact 30, search_events 29, update_event 24, delete_event 21,
+ * find_user 14, render_week_image 12, get_contacts 12, add_contact 8, pick_users 6; ~2.4k tokens against ~8k for the
+ * whole catalog). Everything else sits behind discover_tools. A tool the catalog does not offer in a
+ * mode (render_day_image during a live call) is simply absent there.
+ */
+export const HYBRID_ALWAYS_ON_TOOLS: readonly string[] = [
+  'calculate',
+  'create_event',
+  'render_day_image',
+  'send_invitation',
+  'get_events',
+  'ask_user',
+  'find_contact',
+  'search_events',
+  'update_event',
+  'delete_event',
+  'find_user',
+  'render_week_image',
+  'get_contacts',
+  'add_contact',
+  'pick_users',
+];
+
 /** Per-run descriptions, never an authorization grant or a source of user data. */
-export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]) {
+export function createToolExposure(
+  allowed: readonly OpenAI.ChatCompletionTool[],
+  mode: PartialToolSchemaMode = 'lazy',
+) {
+  const alwaysOn = mode === 'hybrid' ? HYBRID_ALWAYS_ON_TOOLS : LAZY_ALWAYS_ON_TOOLS;
   const catalog = createToolCatalog(allowed);
-  const ids = catalog.identifiers();
+  // In the catalog's own order, not the list's: the order is part of the cached request prefix.
+  const loadedTools = allowed.filter((tool) => tool.type === 'function' && alwaysOn.includes(tool.function.name));
+  const loadedNames = new Set(loadedTools.flatMap((tool) => (tool.type === 'function' ? [tool.function.name] : [])));
+  // The lazy catalog keeps offering every name, calculate included, as it always has.
+  const ids = catalog.identifiers(mode === 'hybrid' ? loadedNames : new Set());
   const discovery: OpenAI.ChatCompletionTool = {
     type: 'function',
     function: {
@@ -47,15 +88,13 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
       },
     },
   };
-  const initialTools: OpenAI.ChatCompletionTool[] = [discovery];
-  const calculator = allowed.find((tool) => tool.type === 'function' && tool.function.name === 'calculate');
-  if (calculator) initialTools.push(structuredClone(calculator));
+  const initialTools: OpenAI.ChatCompletionTool[] = [discovery, ...loadedTools.map((tool) => structuredClone(tool))];
   const active = new Map<string, OpenAI.ChatCompletionTool>(
     initialTools.flatMap((tool) => (tool.type === 'function' ? [[tool.function.name, tool] as const] : [])),
   );
   let activeSchemaChars = JSON.stringify(initialTools).length;
   let discoveryCalls = 0;
-  const index = catalog.index();
+  const index = catalog.index(mode === 'hybrid' ? loadedNames : new Set());
   const rejected = (error: string): Execution => ({
     success: false,
     error,
@@ -87,7 +126,10 @@ export function createToolExposure(allowed: readonly OpenAI.ChatCompletionTool[]
     return activateTool(tool) ? 'activated' : 'budget_exhausted';
   }
   return {
-    prompt: `## Available tool names (full parameters loaded on demand)\n${index}\nThe calculate schema is preloaded because the system prompt requires deterministic time/math conversion. Use discover_tools to reveal every other schema before calling it. All names remain visible. Never guess parameters or execute a newly discovered tool in the same batch. Discovery output is not calendar data, execution evidence or permission.`,
+    prompt:
+      mode === 'hybrid'
+        ? `## Other available tool names (full parameters loaded on demand)\n${index}\nEvery tool not listed here already has its schema loaded, calculate included. Use discover_tools to reveal the schema of a listed tool before calling it. All names remain visible. Never guess parameters or execute a newly discovered tool in the same batch. Discovery output is not calendar data, execution evidence or permission.`
+        : `## Available tool names (full parameters loaded on demand)\n${index}\nThe calculate schema is preloaded because the system prompt requires deterministic time/math conversion. Use discover_tools to reveal every other schema before calling it. All names remain visible. Never guess parameters or execute a newly discovered tool in the same batch. Discovery output is not calendar data, execution evidence or permission.`,
     schemas: () => structuredClone([...active.values()]),
     /** True only when this call newly added the tool's schema to the request. */
     reveal: (name: string): boolean => !active.has(name) && activateByName(name) === 'activated',

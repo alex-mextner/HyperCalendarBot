@@ -78,9 +78,12 @@ interface Row {
   sharedPrefixTokens: number;
 }
 
-function measure({ label, ctx }: Variant, schemas: 'full' | 'lazy_initial' | 'lazy_read' = 'full'): Row {
+type SchemaView = 'full' | 'lazy_initial' | 'lazy_read' | 'hybrid_initial';
+
+function measure({ label, ctx }: Variant, schemas: SchemaView = 'full'): Row {
   const allTools = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
-  const exposure = schemas === 'full' ? undefined : createToolExposure(allTools);
+  const exposure =
+    schemas === 'full' ? undefined : createToolExposure(allTools, schemas === 'hybrid_initial' ? 'hybrid' : 'lazy');
   if (exposure && schemas === 'lazy_read') {
     const result = exposure.intercept(
       'discover_tools',
@@ -140,7 +143,7 @@ function printTable(rows: Row[]): void {
 
 const base = buildBaseContext();
 const rows = buildVariants(base).flatMap((variant) =>
-  (['full', 'lazy_initial', 'lazy_read'] as const).map((mode) => measure(variant, mode)),
+  (['full', 'lazy_initial', 'lazy_read', 'hybrid_initial'] as const).map((mode) => measure(variant, mode)),
 );
 if (Bun.argv.includes('--json')) {
   console.log(

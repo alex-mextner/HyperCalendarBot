@@ -13,9 +13,12 @@
  * production conversation.
  *
  *   bun run scripts/dryrun-tool-selection.ts                    # z.ai only (Claude is paid: DRYRUN_PROVIDERS=claude)
+ *   DRYRUN_TOOL_MODE=hybrid bun run scripts/…                   # full|lazy|hybrid: how much of the catalog a request carries;
+ *                                                               # lazy/hybrid follow discover_tools rounds and report how many
  *   DRYRUN_PROVIDERS=zai bun run scripts/dryrun-tool-selection.ts
  *   DRYRUN_MODEL_ZAI=glm-5.3 bun run scripts/…                  # override a model
  *   DRYRUN_OUT=before.json bun run scripts/…                     # save for diffing
+ *   DRYRUN_ONLY=create-with-invite,agenda-week bun run scripts/…  # just those cases (reruns after provider timeouts)
  *
  * Model ids are read from env so they can follow provider changes without edits.
  */
@@ -23,6 +26,7 @@ import { Database } from 'bun:sqlite';
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type OpenAI from 'openai';
+import { z } from 'zod';
 import { loadConfig } from '../src/config/env.ts';
 import { migrations } from '../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../src/database/repositories/chat-history.repository.ts';
@@ -34,8 +38,10 @@ import { runMigrations } from '../src/database/schema.ts';
 import { claudeClient, hfClient, openrouterClient, zaiClient } from '../src/services/ai/clients.ts';
 import type { ProviderId } from '../src/services/ai/provider-ids.ts';
 import { acceptsSamplingTemperature, CLAUDE_MAX_OUTPUT_TOKENS } from '../src/services/ai/streaming.ts';
-import { buildSystemPrompt } from '../src/services/ai/system-prompt.ts';
+import { assembleSystemPrompt, buildSystemPromptParts } from '../src/services/ai/system-prompt.ts';
 import { estimateTokens } from '../src/services/ai/token-estimate.ts';
+import { createToolExposure, DISCOVERY_TOOL } from '../src/services/ai/tool-exposure.ts';
+import { TOOL_SCHEMA_MODES, type ToolSchemaMode } from '../src/services/ai/tool-schema-mode.ts';
 import { getToolDefinitions } from '../src/services/ai/tools.ts';
 import type { AgentContext } from '../src/services/ai/types.ts';
 import { ConversationLogger } from '../src/services/conversation-logger.ts';
@@ -49,6 +55,15 @@ const SENDER_ID = 1;
 /** Reasoning models spend completion tokens before the tool call; a tight cap
  *  truncates the turn and looks like "the model chose no tool". */
 const MAX_COMPLETION_TOKENS = 2048;
+/** A first move that needs more model rounds than this (discovery or blind retries) is a failed case; production allows six discovery attempts, a first move rarely needs more than one. */
+const MAX_ROUNDS = 4;
+
+function toolMode(): ToolSchemaMode {
+  const wanted = process.env.DRYRUN_TOOL_MODE ?? 'full';
+  const mode = TOOL_SCHEMA_MODES.find((candidate) => candidate === wanted);
+  if (!mode) throw new Error(`DRYRUN_TOOL_MODE must be one of ${TOOL_SCHEMA_MODES.join(', ')}, got ${wanted}`);
+  return mode;
+}
 
 interface ProviderSpec {
   name: ProviderId;
@@ -141,6 +156,10 @@ interface CaseOutcome {
   promptTokens: number | null;
   finishReason: string | null;
   error: string | null;
+  /** Rounds that contained a discover_tools call (also when a carried real tool shared the batch); always 0 when the request carries every schema. */
+  discoverRounds: number;
+  /** Real tools called without a schema in the request; production rejects the call and reveals the schema. */
+  blindCalls: number;
   ok: boolean;
 }
 
@@ -169,39 +188,82 @@ function verdict(testCase: DryRunCase, tools: string[], text: string): boolean {
 }
 
 async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<CaseOutcome> {
+  const mode = toolMode();
   const ctx = buildContext(testCase);
-  const request: OpenAI.ChatCompletionCreateParamsNonStreaming = {
-    model: provider.model,
-    messages: [{ role: 'system', content: buildSystemPrompt(ctx) }, ...buildMessages(testCase)],
-    tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
-    max_tokens: provider.name === 'claude' ? CLAUDE_MAX_OUTPUT_TOKENS : MAX_COMPLETION_TOKENS,
-    ...(acceptsSamplingTemperature(provider.name) ? { temperature: 0 } : {}),
-  };
-  const settings = {
-    model: provider.model,
-    temperature: request.temperature ?? null,
-    maxTokens: request.max_tokens ?? null,
-  };
+  const allowed = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
+  const exposure = mode === 'full' ? undefined : createToolExposure(allowed, mode);
+  const messages: OpenAI.ChatCompletionMessageParam[] = [
+    { role: 'system', content: assembleSystemPrompt(buildSystemPromptParts(ctx), exposure?.prompt) },
+    ...buildMessages(testCase),
+  ];
+  const maxTokens = provider.name === 'claude' ? CLAUDE_MAX_OUTPUT_TOKENS : MAX_COMPLETION_TOKENS;
+  const temperature = acceptsSamplingTemperature(provider.name) ? 0 : null;
+  const settings = { model: provider.model, temperature, maxTokens };
+  let discoverRounds = 0;
+  let blindCalls = 0;
+  let firstPromptTokens: number | null = null;
   try {
-    const res = await provider.client().chat.completions.create(request);
-    const calls = res.choices[0]?.message.tool_calls ?? [];
-    const tools = calls.map((c) => ('function' in c ? c.function.name : c.type));
-    const text = res.choices[0]?.message.content ?? '';
-    // Production cuts Claude's visible output at the caller budget on the stream; this
-    // non-streaming replay cannot, so an answer past the budget scores as that cut.
-    const visible = text + calls.map((c) => ('function' in c ? c.function.name + c.function.arguments : '')).join('');
-    const cut = provider.name === 'claude' && estimateTokens(visible) > MAX_COMPLETION_TOKENS;
-    return {
-      id: testCase.id,
-      provider: provider.name,
-      ...settings,
-      tools,
-      text,
-      promptTokens: res.usage?.prompt_tokens ?? null,
-      finishReason: cut ? 'length' : (res.choices[0]?.finish_reason ?? null),
-      error: null,
-      ok: !cut && verdict(testCase, tools, text),
-    };
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const exposed = exposure?.snapshot();
+      const res = await provider.client().chat.completions.create({
+        model: provider.model,
+        messages,
+        tools: exposure ? exposure.schemas() : allowed,
+        max_tokens: maxTokens,
+        ...(temperature === null ? {} : { temperature }),
+      });
+      if (round === 0) firstPromptTokens = res.usage?.prompt_tokens ?? null;
+      const message = res.choices[0]?.message;
+      const calls = (message?.tool_calls ?? []).flatMap((call) => ('function' in call ? [call] : []));
+      const tools = calls.map((call) => call.function.name);
+      const text = message?.content ?? '';
+      const discovered = tools.includes(DISCOVERY_TOOL);
+      const blind = exposed ? tools.filter((name) => name !== DISCOVERY_TOOL && !exposed.has(name)) : [];
+      // A batch that already holds a real tool the request carried is the model's first move: production runs it in this round.
+      const carried = tools.filter((name) => name !== DISCOVERY_TOOL && !blind.includes(name));
+      const needsAnotherRound = carried.length === 0 && (blind.length > 0 || discovered);
+      if (discovered) discoverRounds++;
+      blindCalls += blind.length;
+      if (exposure && exposed && message && needsAnotherRound && round < MAX_ROUNDS - 1) {
+        messages.push({ role: 'assistant', content: message.content, tool_calls: calls });
+        for (const call of calls) {
+          let input: unknown = {};
+          try {
+            input = JSON.parse(call.function.arguments || '{}');
+          } catch {
+            // Malformed arguments are the model's miss; the exposure answers the call as it would in production.
+          }
+          const result = exposure.intercept(call.function.name, input, exposed);
+          // Real tools are not executed in a dry run: the first move is what is judged.
+          messages.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            content: result ? (result.output ?? result.error ?? '') : '{"dry_run":"not executed"}',
+          });
+        }
+        continue;
+      }
+      // Production cuts Claude's visible output at the caller budget on the stream; this
+      // non-streaming replay cannot, so an answer past the budget scores as that cut.
+      const visible = text + calls.map((call) => call.function.name + call.function.arguments).join('');
+      const cut = provider.name === 'claude' && estimateTokens(visible) > MAX_COMPLETION_TOKENS;
+      const firstMoves = tools.filter((name) => name !== DISCOVERY_TOOL && !blind.includes(name));
+      return {
+        id: testCase.id,
+        provider: provider.name,
+        ...settings,
+        tools: firstMoves,
+        text,
+        promptTokens: firstPromptTokens,
+        finishReason: cut ? 'length' : (res.choices[0]?.finish_reason ?? null),
+        error: null,
+        discoverRounds,
+        blindCalls,
+        // A request still discovering on the last round has not chosen a first move.
+        ok: !cut && !needsAnotherRound && verdict(testCase, firstMoves, text),
+      };
+    }
+    throw new Error('the last round always returns');
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -213,6 +275,8 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
       promptTokens: null,
       finishReason: null,
       error: message.slice(0, 160).replace(/\s+/g, ' '),
+      discoverRounds,
+      blindCalls,
       ok: false,
     };
   }
@@ -224,27 +288,68 @@ function report(outcomes: CaseOutcome[]): void {
     const reason = o.finishReason && o.finishReason !== 'tool_calls' ? ` [${o.finishReason}]` : '';
     const said = o.tools.length === 0 ? `"${o.text.trim().slice(0, 40)}"` : '';
     const detail = o.error ? `ERROR ${o.error}` : `${o.tools.join(',') || said || '(no tool calls)'}${reason}`;
-    console.log(`${mark} ${o.provider.padEnd(7)} ${o.id.padEnd(22)} ${detail}`);
+    const discovery =
+      o.discoverRounds + o.blindCalls > 0 ? ` (discover rounds ${o.discoverRounds}, blind ${o.blindCalls})` : '';
+    console.log(`${mark} ${o.provider.padEnd(7)} ${o.id.padEnd(22)} ${detail}${discovery}`);
   }
-  const byProvider = new Map<string, { pass: number; total: number; tokens: number[] }>();
+  const byProvider = new Map<
+    string,
+    { pass: number; total: number; tokens: number[]; rounds: number; blind: number }
+  >();
   for (const o of outcomes) {
-    const agg = byProvider.get(o.provider) ?? { pass: 0, total: 0, tokens: [] };
+    const agg = byProvider.get(o.provider) ?? { pass: 0, total: 0, tokens: [], rounds: 0, blind: 0 };
     agg.total++;
     if (o.ok) agg.pass++;
     if (o.promptTokens !== null) agg.tokens.push(o.promptTokens);
+    agg.rounds += o.discoverRounds;
+    agg.blind += o.blindCalls;
     byProvider.set(o.provider, agg);
   }
   console.log('');
   for (const [name, agg] of byProvider) {
     const avg = agg.tokens.length > 0 ? Math.round(agg.tokens.reduce((a, b) => a + b, 0) / agg.tokens.length) : null;
-    console.log(`${name}: ${agg.pass}/${agg.total} cases matched; prompt_tokens avg ${avg ?? 'n/a'}`);
+    console.log(
+      `${name}: ${agg.pass}/${agg.total} cases matched; first-request prompt_tokens avg ${avg ?? 'n/a'}; ` +
+        `discover_tools rounds ${agg.rounds}, blind calls ${agg.blind} (tool mode ${toolMode()})`,
+    );
   }
+}
+
+const corpusCaseBase = {
+  id: z.string(),
+  message: z.string(),
+  group: z.boolean().optional(),
+  history: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string() })).optional(),
+  addressContext: z.string().optional(),
+};
+const corpusSchema = z.array(
+  z.union([
+    z.object({ ...corpusCaseBase, expectAnyOf: z.array(z.string()).nonempty() }),
+    z.object({ ...corpusCaseBase, expectSilence: z.literal(true) }),
+  ]),
+);
+
+/**
+ * DRYRUN_CORPUS=path.json replaces the built-in cases with a (scrubbed) historical corpus of the same shape.
+ * DRYRUN_ONLY=id,id reruns just those cases, e.g. the ones a provider timed out on.
+ */
+async function selectedCases(): Promise<DryRunCase[]> {
+  const corpus = process.env.DRYRUN_CORPUS;
+  const cases: DryRunCase[] = corpus ? corpusSchema.parse(await Bun.file(corpus).json()) : DRYRUN_CASES;
+  const only = process.env.DRYRUN_ONLY?.split(',')
+    .map((id) => id.trim())
+    .filter((id) => id !== '');
+  if (!only || only.length === 0) return cases;
+  const unknown = only.filter((id) => !cases.some((testCase) => testCase.id === id));
+  if (unknown.length > 0) throw new Error(`Unknown case id(s) in DRYRUN_ONLY: ${unknown.join(', ')}`);
+  return cases.filter((testCase) => only.includes(testCase.id));
 }
 
 async function main(): Promise<void> {
   const outcomes: CaseOutcome[] = [];
+  const cases = await selectedCases();
   for (const provider of providers()) {
-    for (const testCase of DRYRUN_CASES) {
+    for (const testCase of cases) {
       outcomes.push(await runCase(provider, testCase));
     }
   }

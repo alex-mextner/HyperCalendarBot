@@ -9,6 +9,7 @@ import {
   ROLE_CHAIN_VARIABLES,
   type RoleChains,
 } from '../services/ai/role-routing.ts';
+import { TOOL_SCHEMA_MODES, type ToolSchemaMode } from '../services/ai/tool-schema-mode.ts';
 import { logger, logOnce } from '../utils/logger.ts';
 
 /** Owner-chosen order for main requests: z.ai, then Claude, then Hugging Face.
@@ -112,8 +113,7 @@ export interface EnvConfig {
    * provider whose model or key is missing is skipped, so a name here is a
    * preference, not a requirement.
    */
-  AI_TOOL_SCHEMA_MODE?: 'full' | 'lazy';
-  AI_TOOL_SCHEMA_USER_IDS?: number[];
+  AI_TOOL_SCHEMA_MODE?: ToolSchemaMode;
   AI_SMART_CHAIN: ChainOrder;
   AI_FAST_CHAIN: ChainOrder;
   /** `legacy` (default): the smart/fast chains above. `roles`: planner/executor/repair chains, see role-routing.ts. */
@@ -157,11 +157,9 @@ function requireEnv(name: string): string {
 
 export function loadConfig(): EnvConfig {
   const BOT_TOKEN = requireEnv('BOT_TOKEN');
-  const toolSchemaMode = process.env.AI_TOOL_SCHEMA_MODE ?? 'full';
-  if (toolSchemaMode !== 'full' && toolSchemaMode !== 'lazy')
-    throw new Error('AI_TOOL_SCHEMA_MODE must be full or lazy');
-
-  const toolSchemaUserIds = parseUserIdList('AI_TOOL_SCHEMA_USER_IDS');
+  const requestedToolSchemaMode = process.env.AI_TOOL_SCHEMA_MODE ?? 'full';
+  const toolSchemaMode = TOOL_SCHEMA_MODES.find((mode) => mode === requestedToolSchemaMode);
+  if (!toolSchemaMode) throw new Error(`AI_TOOL_SCHEMA_MODE must be one of ${TOOL_SCHEMA_MODES.join(', ')}`);
 
   const routingMode = process.env.AI_ROUTING ?? 'legacy';
   const aiRouting = AI_ROUTING_MODES.find((mode) => mode === routingMode);
@@ -263,7 +261,6 @@ export function loadConfig(): EnvConfig {
     OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || undefined,
     OPENROUTER_FAST_MODEL: process.env.OPENROUTER_FAST_MODEL || undefined,
     AI_TOOL_SCHEMA_MODE: toolSchemaMode,
-    AI_TOOL_SCHEMA_USER_IDS: toolSchemaUserIds,
     AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),
     AI_FAST_CHAIN: parseChain('AI_FAST_CHAIN', DEFAULT_FAST_CHAIN),
     AI_ROUTING: aiRouting,

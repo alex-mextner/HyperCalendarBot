@@ -370,7 +370,10 @@ describe('CalendarBotAgent.run()', () => {
     expect(result.responseText).not.toContain('late answer');
   });
 
-  test.each([true, false])('lazy rollout can be scoped to the configured user only: %s', async (included) => {
+  test.each([
+    ['full', true, false],
+    ['lazy', false, true],
+  ] as const)('%s mode sends the full catalog only when it is full', async (toolSchemaMode, hasCreateEvent, hasDiscovery) => {
     const script = makeStreamImpl([{ kind: 'text', text: 'Synthetic reply.' }]);
     let toolNames: string[] = [];
     const impl: typeof script.impl = async (opts, cbs) => {
@@ -378,13 +381,9 @@ describe('CalendarBotAgent.run()', () => {
         toolNames = opts.tools?.flatMap((t) => (t.type === 'function' ? [t.function.name] : [])) ?? [];
       return script.impl(opts, cbs);
     };
-    await new CalendarBotAgent(
-      { ...config, toolSchemaMode: 'lazy', toolSchemaUserIds: [included ? USER_ID : USER_ID + 1] },
-      sender,
-      { streamImpl: impl },
-    ).run(ctx);
-    expect(toolNames.includes('discover_tools')).toBe(included);
-    expect(toolNames.includes('create_event')).toBe(!included);
+    await new CalendarBotAgent({ ...config, toolSchemaMode }, sender, { streamImpl: impl }).run(ctx);
+    expect(toolNames.includes('discover_tools')).toBe(hasDiscovery);
+    expect(toolNames.includes('create_event')).toBe(hasCreateEvent);
   });
 
   test('every model round names its purpose so its usage rows say what the call was for', async () => {
@@ -509,6 +508,70 @@ describe('CalendarBotAgent.run()', () => {
     expect(result.toolCalls.map((call) => call.name)).toEqual(['calculate']);
     expect(result.toolResults[0]).toMatchObject({ success: true, output: '2026-07-15T10:30:00.000Z' });
     expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('TOOL_SCHEMA_NOT_EXPOSED');
+  });
+
+  test('hybrid mode sends the always-on tools in round one and runs one of them without discovery', async () => {
+    const script = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'events',
+        name: 'get_events',
+        input: { start_date: '2030-01-01T00:00:00Z', end_date: '2030-01-02T00:00:00Z' },
+      },
+      { kind: 'text', text: 'Nothing planned.' },
+    ]);
+    const sentTools: string[][] = [];
+    const impl: typeof script.impl = async (opts, cbs) => {
+      if (!isValidatorCall(opts))
+        sentTools.push(opts.tools?.flatMap((t) => (t.type === 'function' ? [t.function.name] : [])) ?? []);
+      return script.impl(opts, cbs);
+    };
+    const result = await new CalendarBotAgent({ ...config, toolSchemaMode: 'hybrid' }, sender, {
+      streamImpl: impl,
+    }).run(ctx);
+    expect(sentTools[0]).toHaveLength(16);
+    expect(sentTools[0]).toContain('discover_tools');
+    expect(sentTools[0]).toContain('get_events');
+    expect(sentTools[0]).not.toContain('get_history');
+    // Same tools, same order, next round: nothing was revealed, so the cached prefix is untouched.
+    expect(sentTools[1]).toEqual(sentTools[0]);
+    expect(result.toolCalls.map((call) => call.name)).toEqual(['get_events']);
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('TOOL_SCHEMA_NOT_EXPOSED');
+  });
+
+  test('hybrid mode reveals a tool outside the always-on set with one discovery round', async () => {
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'discover', name: 'discover_tools', input: { tools: ['get_history'] } },
+      { kind: 'text', text: 'Looked it up.' },
+    ]);
+    const sentTools: string[][] = [];
+    const impl: typeof script.impl = async (opts, cbs) => {
+      if (!isValidatorCall(opts))
+        sentTools.push(opts.tools?.flatMap((t) => (t.type === 'function' ? [t.function.name] : [])) ?? []);
+      return script.impl(opts, cbs);
+    };
+    await new CalendarBotAgent({ ...config, toolSchemaMode: 'hybrid' }, sender, { streamImpl: impl }).run(ctx);
+    expect(sentTools[1]).toEqual([...(sentTools[0] ?? []), 'get_history']);
+  });
+
+  test('hybrid mode sends the always-on tools plus discovery, and live calls keep the full contract', async () => {
+    const names = async (inputMode?: 'live_call') => {
+      ctx.inputMode = inputMode ?? ctx.inputMode;
+      const script = makeStreamImpl([{ kind: 'text', text: 'Synthetic reply.' }]);
+      let sent: string[] = [];
+      const impl: typeof script.impl = async (opts, cbs) => {
+        if (!isValidatorCall(opts))
+          sent = opts.tools?.flatMap((t) => (t.type === 'function' ? [t.function.name] : [])) ?? [];
+        return script.impl(opts, cbs);
+      };
+      await new CalendarBotAgent({ ...config, toolSchemaMode: 'hybrid' }, sender, { streamImpl: impl }).run(ctx);
+      return sent;
+    };
+    const text = await names();
+    expect(text).toContain('discover_tools');
+    expect(text).toContain('create_event');
+    expect(text).not.toContain('get_history');
+    expect(await names('live_call')).not.toContain('discover_tools');
   });
 
   test('discover_tools recovers from single-array payloads instead of exhausting into a hallucinated answer (GH-285 incident)', async () => {
