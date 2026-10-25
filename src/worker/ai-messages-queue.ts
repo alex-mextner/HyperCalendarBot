@@ -29,7 +29,15 @@ export class SyntheticPipelineRunner {
 
   async run(user: User, jobData: AiMessageJobData): Promise<void> {
     try {
-      const agentCtx = this.deps.contextBuilder(user, user.telegram_id, jobData.message);
+      const group = jobData.group;
+      const agentCtx = group
+        ? this.deps.contextBuilder(user, group.chatId, jobData.message, {
+            isGroup: true,
+            groupChatId: group.chatId,
+            groupTitle: group.title,
+            topicThreadId: group.topicThreadId,
+          })
+        : this.deps.contextBuilder(user, user.telegram_id, jobData.message);
       const currentAttempt = jobData.retryAttempt ?? 0;
       agentCtx.retryAttempt = currentAttempt;
       // The schedule/trigger itself and its own retries answer no user message; only
@@ -47,7 +55,7 @@ export class SyntheticPipelineRunner {
             const giveUp = agentGiveUpMessage(user.telegram_id, lang);
             if (giveUp) {
               if (agentCtx.sender) {
-                await agentCtx.sender.sendMessage(user.telegram_id, giveUp);
+                await agentCtx.sender.sendMessage(agentCtx.chatId, giveUp);
               } else {
                 queueLogger.warn(
                   { userId: user.telegram_id },
@@ -69,6 +77,7 @@ export class SyntheticPipelineRunner {
               source: 'trigger',
               retryAttempt: currentAttempt + 1,
               ...(unprompted ? { unprompted } : {}),
+              ...(group ? { group } : {}),
             },
             delay,
           );

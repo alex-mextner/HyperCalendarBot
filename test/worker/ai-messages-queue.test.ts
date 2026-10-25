@@ -301,6 +301,74 @@ describe('SyntheticPipelineRunner', () => {
 
     expect(seen).toEqual([unprompted, unprompted]);
   });
+
+  test("a group message's retry runs in its group as its sender and keeps the group on the next retry (#668)", async () => {
+    const group = { chatId: -1_009_001, title: 'Synthetic group', topicThreadId: 7 };
+    const built: unknown[][] = [];
+    const addDelayed = mock(async (_data: AiMessageJobData, _delay: number): Promise<string> => 'job-2');
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: (...args) => {
+        built.push(args);
+        return { user: fakeUser } as unknown as AgentContext;
+      },
+      intentRun: async () => ({ handled: false }),
+      agentRun: async (ctx: AgentContext) => {
+        await ctx.retryEnqueue?.('what do we have on Friday?');
+      },
+      retryQueue: { addDelayed },
+    });
+
+    await runner.run(fakeUser, {
+      userId: fakeUser.telegram_id,
+      message: 'what do we have on Friday?',
+      source: 'trigger',
+      retryAttempt: 1,
+      group,
+    });
+
+    expect(built).toEqual([
+      [
+        fakeUser,
+        group.chatId,
+        'what do we have on Friday?',
+        { isGroup: true, groupChatId: group.chatId, groupTitle: group.title, topicThreadId: group.topicThreadId },
+      ],
+    ]);
+    expect(addDelayed.mock.calls[0]?.[0]).toEqual({
+      userId: fakeUser.telegram_id,
+      message: 'what do we have on Friday?',
+      source: 'trigger',
+      retryAttempt: 2,
+      group,
+    });
+  });
+
+  test('a spent group retry posts its give-up line in the group', async () => {
+    aiFailureNotices.reset();
+    aiFailureNotices.decide(fakeUser.telegram_id, 'en', { hardOutage: false, willRetry: true, isRetryAttempt: false });
+    const sendMessage = mock(async (_chatId: number, _text: string) => ({ message_id: 1 }));
+    const captured: { ctx?: AgentContext } = {};
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: (_user, chatId) =>
+        ({ user: fakeUser, chatId, sender: { sendMessage } }) as unknown as AgentContext,
+      intentRun: async (ctx: AgentContext) => {
+        captured.ctx = ctx;
+        return { handled: false };
+      },
+      agentRun: async () => {},
+      retryQueue: { addDelayed: mock(async () => 'job-1') },
+    });
+    await runner.run(fakeUser, {
+      userId: fakeUser.telegram_id,
+      message: 'что у нас в пятницу?',
+      source: 'trigger',
+      retryAttempt: 3,
+      group: { chatId: -1_009_001 },
+    });
+
+    expect(await captured.ctx!.retryEnqueue!('что у нас в пятницу?')).toBe(false);
+    expect(sendMessage.mock.calls[0]?.[0]).toBe(-1_009_001);
+  });
 });
 
 // ─── createAiMessagesQueue ─────────────────────────────────────────────────────
