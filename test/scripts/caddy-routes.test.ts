@@ -28,16 +28,16 @@ function proxiedPaths(): string[] {
   return matcher.trim().split(/\s+/);
 }
 
-/** The readiness URL the cron watchdog polls. */
+/** The readiness URL the cron watchdog polls, with the host left as the PUBLIC_DOMAIN placeholder. */
 function watchdogUrl(): string {
-  const url = watchdog.match(/^HEALTH_URL="([^"]+)"/m)?.[1];
+  const url = watchdog.match(/^\s*HEALTH_URL="([^"]+)"/m)?.[1];
   if (!url) throw new Error('healthcheck-alert.sh has no HEALTH_URL');
   return url;
 }
 
 /** The path the cron watchdog polls, taken from its own HEALTH_URL. */
 function watchdogPath(): string {
-  return new URL(watchdogUrl()).pathname;
+  return new URL(watchdogUrl().replace('${PUBLIC_DOMAIN}', 'bot.example.com')).pathname;
 }
 
 /** The bodies a shell `case` branch accepts, unquoted and sorted. */
@@ -140,9 +140,10 @@ describe('Caddy routing', () => {
     for (const script of referencedScripts) expect(copied.has(script)).toBe(true);
   });
 
-  // Hosted deployment must invoke the shared activator that verifies the actual
-  // routed URL. A disconnected helper containing this URL is not sufficient.
-  test('the deploy verifies the path the watchdog polls', () => {
+  // Hosted deployment must invoke the shared activator that verifies the actual routed URL.
+  // The watchdog takes its host from PUBLIC_DOMAIN in the live .env, so it cannot keep probing
+  // a retired name (#828). The activator's own host is owned by the deploy-reliability work.
+  test('the deploy verifies the path the watchdog polls, and the watchdog host comes from PUBLIC_DOMAIN', () => {
     expect(deployWorkflow).toContain('sudo -n /usr/local/sbin/hypercal-activate-release');
     expect(activationWrapper).toContain('bash "$STAGE/scripts/deploy-prebuilt-image.sh"');
     // The activator delegates the verdict to scripts/deploy-health.py, which polls /health and /ready
@@ -151,6 +152,13 @@ describe('Caddy routing', () => {
     expect(deployActivator).toContain('HEALTH_URL=http://127.0.0.1:3001');
     const verdict = readFileSync(join(ROOT, 'scripts/deploy-health.py'), 'utf8');
     expect(verdict).toContain(`f"{base}${watchdogPath()}"`);
+    expect(watchdogUrl()).toStartWith('https://${PUBLIC_DOMAIN}/');
+  });
+
+  test('no deploy or watchdog script names a retired host', () => {
+    for (const source of [watchdog, deployWorkflow]) {
+      expect(source).not.toContain('invntrm.ru');
+    }
   });
 
   // The watchdog recognizes an outage body, but a deployment cannot declare an

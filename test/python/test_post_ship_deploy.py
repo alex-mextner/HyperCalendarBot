@@ -469,5 +469,73 @@ class WrapperTests(unittest.TestCase):
                     self.assertEqual(out.stdout, "")
 
 
+class RemoteProbeHostTests(unittest.TestCase):
+    """The probe runs on the odroid and must follow PUBLIC_DOMAIN, not a host baked into the script (#828)."""
+
+    def probe_urls(self, env_text):
+        with tempfile.TemporaryDirectory() as tmp:
+            deploy = Path(tmp)
+            if env_text is not None:
+                (deploy / ".env").write_text(env_text)
+            seen = []
+
+            class Reply:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return False
+
+                def read(self, size):
+                    return b"ok"
+
+            def fake_urlopen(url, timeout):
+                seen.append(url)
+                return Reply()
+
+            inspect = "sha256:" + "b" * 64 + "|true|" + SHA
+            with unittest.mock.patch.object(sys, "argv", ["probe", str(deploy)]), \
+                unittest.mock.patch("subprocess.check_output", return_value=inspect), \
+                unittest.mock.patch("urllib.request.urlopen", fake_urlopen), \
+                unittest.mock.patch("builtins.print"):
+                exec(module.REMOTE_PROBE, {})
+            return seen
+
+    def test_probe_uses_the_public_domain_from_the_deploy_env_file(self):
+        urls = self.probe_urls("BOT_TOKEN=x\nPUBLIC_DOMAIN=hypercal.mextner.com\n")
+        self.assertEqual(
+            urls,
+            ["https://hypercal.mextner.com/health", "https://hypercal.mextner.com/ready"],
+        )
+
+    def test_probe_takes_the_last_assignment_and_drops_an_inline_comment(self):
+        urls = self.probe_urls(
+            "PUBLIC_DOMAIN=hypercal.invntrm.ru\nPUBLIC_DOMAIN=\"hypercal.mextner.com\" # prod\n"
+        )
+        self.assertEqual(
+            urls,
+            ["https://hypercal.mextner.com/health", "https://hypercal.mextner.com/ready"],
+        )
+
+    def test_probe_strips_single_quotes_around_the_host(self):
+        urls = self.probe_urls("PUBLIC_DOMAIN='hypercal.mextner.com'\n")
+        self.assertEqual(
+            urls,
+            ["https://hypercal.mextner.com/health", "https://hypercal.mextner.com/ready"],
+        )
+
+    def test_probe_falls_back_to_the_local_port_without_a_public_domain(self):
+        for env_text in (None, "BOT_TOKEN=x\n", "PUBLIC_DOMAIN=\n"):
+            with self.subTest(env=env_text):
+                self.assertEqual(
+                    self.probe_urls(env_text),
+                    ["http://127.0.0.1:3001/health", "http://127.0.0.1:3001/ready"],
+                )
+
+    def test_no_retired_host_is_baked_into_the_script(self):
+        self.assertNotIn("invntrm", module.REMOTE_PROBE)
+        self.assertNotIn("invntrm", (ROOT / "scripts/post-ship-deploy.py").read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

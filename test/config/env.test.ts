@@ -361,6 +361,49 @@ describe('loadConfig', () => {
     expect(config.GOOGLE_REDIRECT_URI).toBe('https://example.com/oauth/google/callback');
   });
 
+  test('PUBLIC_DOMAIN hypercal.mextner.com derives the OAuth redirect on that host', () => {
+    setAgentVars();
+    process.env.REDIS_URL = 'redis://localhost:6379';
+    process.env.GOOGLE_CLIENT_ID = 'cid';
+    process.env.GOOGLE_CLIENT_SECRET = 'csec';
+    process.env.ENCRYPTION_KEY = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+    process.env.PUBLIC_DOMAIN = 'hypercal.mextner.com';
+    delete process.env.GOOGLE_REDIRECT_URI;
+    const config = loadConfig();
+    expect(config.PUBLIC_DOMAIN).toBe('hypercal.mextner.com');
+    expect(config.GOOGLE_REDIRECT_URI).toBe('https://hypercal.mextner.com/oauth/google/callback');
+  });
+
+  test('an explicit GOOGLE_REDIRECT_URI wins over the one derived from PUBLIC_DOMAIN', () => {
+    setAgentVars();
+    process.env.REDIS_URL = 'redis://localhost:6379';
+    process.env.GOOGLE_CLIENT_ID = 'cid';
+    process.env.GOOGLE_CLIENT_SECRET = 'csec';
+    process.env.ENCRYPTION_KEY = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+    process.env.PUBLIC_DOMAIN = 'hypercal.mextner.com';
+    process.env.GOOGLE_REDIRECT_URI = 'https://oauth.example.com/oauth/google/callback';
+    const config = loadConfig();
+    expect(config.GOOGLE_REDIRECT_URI).toBe('https://oauth.example.com/oauth/google/callback');
+  });
+
+  test('PUBLIC_DOMAIN with a scheme or path is refused, not registered as https://https://…', () => {
+    setAgentVars();
+    process.env.REDIS_URL = 'redis://localhost:6379';
+    const bad = [
+      'https://hypercal.mextner.com',
+      'hypercal.mextner.com/',
+      'hypercal.mextner.com/path',
+      'a b',
+      'foo..bar',
+      '-foo.example.com',
+      'foo-.example.com',
+    ];
+    for (const value of bad) {
+      process.env.PUBLIC_DOMAIN = value;
+      expect(() => loadConfig()).toThrow('PUBLIC_DOMAIN must be a bare host');
+    }
+  });
+
   test('BOT_ADMIN_ID is undefined when not set', () => {
     setAgentVars();
     delete process.env.BOT_ADMIN_ID;

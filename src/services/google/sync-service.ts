@@ -2,6 +2,7 @@
 import type { Database } from 'bun:sqlite';
 import type { calendar_v3 } from 'googleapis';
 import { type Lang, t } from '../../config/constants.ts';
+import { GOOGLE_CALENDAR_WEBHOOK_PATH, publicUrl } from '../../config/public-url.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
@@ -541,7 +542,7 @@ export class SyncService {
   ): Promise<void> {
     const channelId = crypto.randomUUID();
     const channelToken = crypto.randomUUID();
-    const webhookUrl = `https://${publicDomain}/webhooks/google-calendar`;
+    const webhookUrl = publicUrl(publicDomain, GOOGLE_CALENDAR_WEBHOOK_PATH);
     const expirationMs = Date.now() + 7 * 24 * 60 * 60 * 1000;
 
     const result = await api.watchEvents(calendarId, channelId, webhookUrl, expirationMs, channelToken);

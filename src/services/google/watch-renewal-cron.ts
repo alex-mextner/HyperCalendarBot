@@ -1,6 +1,7 @@
 // src/services/google/watch-renewal-cron.ts
 import type { Queue } from 'bullmq';
 import type { EnvConfig } from '../../config/env.ts';
+import { GOOGLE_CALENDAR_WEBHOOK_PATH, publicUrl } from '../../config/public-url.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import { syncLogger } from '../../utils/logger.ts';
 import { GoogleCalendarApi } from './calendar-api.ts';
@@ -43,7 +44,7 @@ export async function renewExpiringChannels(
 
       const newChannelId = crypto.randomUUID();
       const channelToken = crypto.randomUUID();
-      const webhookUrl = `https://${config.PUBLIC_DOMAIN}/webhooks/google-calendar`;
+      const webhookUrl = publicUrl(config.PUBLIC_DOMAIN, GOOGLE_CALENDAR_WEBHOOK_PATH);
       const expMs = Date.now() + 7 * 24 * 60 * 60 * 1000;
       const result = await api.watchEvents(channel.google_calendar_id, newChannelId, webhookUrl, expMs, channelToken);
 

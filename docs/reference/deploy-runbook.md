@@ -31,12 +31,12 @@ docker compose up -d --no-deps bot
 ssh root@odroidn2 'docker compose -f /opt/hypercal/docker-compose.yml logs -f --tail 100 bot'
 
 # Liveness — process started and Redis answers:
-curl https://hypercal.invntrm.ru/health
+curl https://hypercal.mextner.com/health
 
 # Readiness — everything above, plus the AI provider chain is answering.
 # The alert watcher on the owner's PC polls this every 30 s; a 503 here with a 200 on /health means
 # the bot is running but cannot answer anyone.
-curl https://hypercal.invntrm.ru/ready
+curl https://hypercal.mextner.com/ready
 ```
 
 `/ready` has three answers, and the body distinguishes the last two:
@@ -64,16 +64,16 @@ Neighbours on the odroid:
 - ExpenseSyncBot prod and stage — PM2, user `www-data`
 - HyperSummaryBot
 - mextner.com — `caddy-mextner`
-- `cloudflared`
+- `cloudflared` — the `odroid-home` tunnel client, the public ingress for every `*.mextner.com` name here, including `hypercal.mextner.com` (see "Public ingress")
 - three self-hosted GitHub runners, one per repository, user `www-data` (labels such as `odroid`, `odroid-hsb`, `odroid-mextner`), plus this repo's `odroid-hcb` (user `hcb-runner`, see "Odroid runner")
 - `watchdog.service`
 
-The DO droplet keeps only the public ingress:
-- its Caddy serves `hypercal.invntrm.ru` and proxies the bot paths over the tailnet to `100.116.57.66:3001`, the odroid's tailnet address and the bot's published port (repo `Caddyfile`, applied by hand there). The droplet is tailnet node `do-edge` (`100.113.21.91`) and has a direct WireGuard path to the odroid. `PUBLIC_DOMAIN`, the Google OAuth redirect, Calendar watch channels and the Telegram webhook URL did not change.
+The DO droplet is being retired. Until it is deleted it still holds:
+- the old ingress for `hypercal.invntrm.ru` (its Caddy proxies the bot paths over the tailnet to `100.116.57.66:3001`; repo `Caddyfile`, applied by hand there; tailnet node `do-edge`, `100.113.21.91`). Nothing new uses that name: `PUBLIC_DOMAIN`, the Telegram webhook and the OAuth redirect moved to `hypercal.mextner.com` on 2026-10-25 (#828);
 
-It also runs the external watchdog: cron `*/2 * * * *` `scripts/healthcheck-alert.sh` (log `/opt/hypercal/logs/healthcheck.log`). That line was commented out on 2026-10-10 ("HCB moved to odroid") and nothing watched the bot until it was re-enabled on 2026-10-24 (#822). The re-enable also removed the stale `/tmp/hypercal-down` from 2026-10-10 01:01 UTC: while that file exists the script believes an outage is already announced and stays silent, so any future re-enable must check `ls /tmp/hypercal-*` on the droplet first. The pre-change crontab is saved as `/root/crontab.bak-20261024-hcb822` on the droplet (revert: `crontab /root/crontab.bak-20261024-hcb822`).
+- the external watchdog cron `*/2 * * * *` (an older copy of `scripts/healthcheck-alert.sh` reading DO's `/opt/hypercal/.env`, log `/opt/hypercal/logs/healthcheck.log`) that still probes the old name. That line was commented out on 2026-10-10 ("HCB moved to odroid") and nothing watched the bot until it was re-enabled on 2026-10-24 (#822). The re-enable also removed the stale `/tmp/hypercal-down` from 2026-10-10 01:01 UTC: while that file exists the script believes an outage is already announced and stays silent, so any future re-enable must check `ls /tmp/hypercal-*` on the droplet first. The pre-change crontab is saved as `/root/crontab.bak-20261024-hcb822` on the droplet (revert: `crontab /root/crontab.bak-20261024-hcb822`).
 
-Until 2026-10-10 the upstream was the odroid's Tailscale Funnel `https://odroidn2.tailbfe8ea.ts.net`. Funnel failed that night from 00:00 to 03:10 UTC: two of its three ingress IPs reset TLS. Since then DO Caddy proxies over the tailnet and Funnel is off on the odroid; nothing depends on it.
+Until 2026-10-10 the upstream of that ingress was the odroid's Tailscale Funnel `https://odroidn2.tailbfe8ea.ts.net`. Funnel failed that night from 00:00 to 03:10 UTC: two of its three ingress IPs reset TLS. Since then Funnel is off on the odroid; nothing depends on it.
 
 The `hypercal-bot` container and `docker-compose.yml` were removed from DO on purpose: a deploy aimed there stops at `deploy-prebuilt-image.sh` with "Existing HyperCalendar container is required". The nightly `backup-db.sh` cron now runs on the odroid.
 
@@ -109,6 +109,29 @@ Backlog triage (alerts that piled up while nothing consumed the queue): the serv
 Known limits: the probe runs on the PC, so a PC that is off or offline raises nothing (the DO watchdog still messages the owner then), and a PC whose own network is down counts as a down bot after three failed probes (cached DNS still answers); failures more than about six minutes apart (suspend, service stopped) never add up to an outage. The DO watchdog posts its queue alert only while the bot is up, so only the PC probe turns a hard outage into an investigation session. The unit and every session it starts run with `PATH=~/.local/bin:~/.bun/bin:/usr/local/bin:/usr/bin:/bin` and no ssh agent (key-file auth to `root@odroidn2` works, verified under `systemd-run --user --pipe`); the installer warns about `omp`, `gh`, `ssh`, `tmux`, `ctmux`, `systemd-run` missing from that PATH and pins `tg` by absolute path. After a failed launch the launcher is left alone for a minute.
 
 Also known: (1) an outage seen by the PC probe and, separately, by a queued alert (the DO watchdog's POST, a crash alert) can start two sessions 30 minutes apart: dedupe is per alert id and per probe incident, not across sources; the second session's brief tells it to check `omp-steer list` first. (2) The unit starts at login or boot (linger); if the keyring is still locked, `keychain exec` fails with its own exit code, which `RestartPreventExitStatus=78` does not cover: the unit restarts every 30 s without being able to tell you. After a reboot check `systemctl --user is-active hcb-alert-watcher`; `keychain unlock` fixes it. (3) Bun loads the script once: after a merge that changes `scripts/hcb-alert-watcher.ts` run `systemctl --user restart hcb-alert-watcher` (the installer restarts only when the unit text changes). (4) A pop whose response times out before any header arrives may have consumed an alert on the server; only the journal line "queue step failed" shows it. (5) The queue poll refuses redirects so the token never travels to another host.
+
+## Public ingress (Cloudflare tunnel)
+
+`hypercal.mextner.com` is a proxied CNAME in the `mextner.com` Cloudflare zone (account `invntrm@gmail.com`) to the tunnel `odroid-home` (`872e1f2e-3488-4e80-955e-8aba2fada806`). cloudflared on the odroid (`cloudflared.service`, `--token-file /etc/cloudflared/token`) runs it with a remotely managed configuration, so the hostname rules are edited in Cloudflare, not on the odroid. Bot traffic is the rule `hypercal.mextner.com` -> `http://localhost:3001`; every path reaches the bot, which serves only its own routes (`/health`, `/ready`, `/webhook/telegram`, `/webhooks/google-calendar`, `/oauth/google/callback`, `/admin/alerts*` behind the bearer token). While the container is being replaced the tunnel answers 502; Telegram and Google retry, but there is no proxy holding requests as the retired DO Caddy did (`lb_try_duration`).
+
+Tooling (credentials stay in `~/.config/cloudflare/config/` and the keychain, never printed): the `cf` CLI with the profile `mextner` and `CLOUDFLARE_ACCOUNT_ID=535199eee5a421a25d445e3445394522`.
+
+```bash
+cf tunnels config get 872e1f2e-3488-4e80-955e-8aba2fada806 --profile mextner        # read the rules; save the output first
+cf tunnels config update 872e1f2e-3488-4e80-955e-8aba2fada806 --profile mextner --body '{"config":{"ingress":[...,{"hostname":"hypercal.mextner.com","service":"http://localhost:3001"},{"service":"http_status:404"}],"warp-routing":{"enabled":false}}}'
+keychain exec --env CLOUDFLARE_API_TOKEN=agent/cloudflare-mextner-dns -- cf dns records list -z mextner.com   # DNS-only token, zone mextner.com
+```
+
+The rule list must keep the final `http_status:404` rule and every existing hostname (the same tunnel serves `mextner.com`, `finbot*`, `hyper-summary-bot`); it replaces the whole list, so rollback is the same command with the previously saved list. A new name also needs `cf dns records create -z mextner.com --body '{"type":"CNAME","name":"<label>","content":"872e1f2e-3488-4e80-955e-8aba2fada806.cfargotunnel.com","proxied":true}'`.
+
+### Move of 2026-10-25 (#828)
+
+The owner is retiring `invntrm.ru`, so the ingress moved from the DO droplet to this tunnel with both names live in parallel:
+
+1. Tunnel rule + CNAME added; `https://hypercal.mextner.com/health` and `/ready` answered `ok` while `hypercal.invntrm.ru` still worked. Rollback: restore the saved rule list, delete the CNAME.
+2. `/opt/hypercal/.env` backed up (`.env.backup-ingress-move-20261025T210552Z`, mode 0600, with the container's logs, inspect line and `getWebhookInfo` of the old state in `/opt/hypercal/evidence-ingress-move-20261025T210552Z/`), then `PUBLIC_DOMAIN=hypercal.mextner.com` set and the bot container recreated on the image it was already running (`docker compose up -d --no-deps --no-build --pull never --force-recreate bot`, holding `.release.lock`). The bot registers its Telegram webhook at every start, so the webhook moved with the recreate. Rollback: copy the backup over `.env` and run the same compose command; the old name still routes to the bot through the droplet.
+3. `GOOGLE_REDIRECT_URI` was pinned to the old callback in `.env` until `https://hypercal.mextner.com/oauth/google/callback` was added to the Google OAuth client (Cloud Console only, no API for web clients); with the new URI listed, remove the pin and recreate again. Keep the old URI in the client until the old domain is gone.
+4. Calendar watch channels: production had none (`google_watch_channels` was empty on 2026-10-25 and nothing enqueues `setup-watch`, #831), so there was nothing to move. Any channel created from now on carries the new host; `renewExpiringChannels` (every 6 h, channels expiring within 24 h) keeps that true.
 
 ## Normal ship deployment
 

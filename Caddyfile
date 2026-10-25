@@ -1,8 +1,9 @@
-# DigitalOcean ingress for hypercal.invntrm.ru (#784). Since 2026-10-09 the bot runs on
-# the home ODROID-N2+ and this Caddy only forwards to it, so the public domain, OAuth
-# redirect, Calendar watch channels and Telegram webhook URL did not change. Applied by
-# hand to the DO droplet's Caddy followed by `caddy reload`; deploys copy this file to
-# /opt/hypercal on the odroid but never load it there.
+# RETIRED (#828): DigitalOcean ingress for hypercal.invntrm.ru (#784). The public host is now
+# hypercal.mextner.com, served by the odroid's Cloudflare tunnel straight to the bot's port 3001
+# (docs/specs/deployment.md, "DNS and ingress"); nothing loads this file any more. It stays
+# until the droplet is deleted, because the release artifact still carries it. It was applied by
+# hand to the DO droplet's Caddy followed by `caddy reload`; deploys copy it to /opt/hypercal on
+# the odroid but never load it there.
 #
 # The upstream is the odroid's tailnet address and the bot's published port: the droplet
 # is tailnet node do-edge (100.113.21.91) with a direct WireGuard path to the odroid.

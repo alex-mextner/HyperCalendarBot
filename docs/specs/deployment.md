@@ -9,12 +9,14 @@ Since 2026-10-09 22:30 UTC (#784):
 - **Docker image store**: containerd (Docker 29 on the odroid, shared with other projects). An image's
   `.Id` is its manifest digest there; the deploy compares that with the release archive's indexed manifest
   (deploy runbook, "Image identity").
-- **Domain**: hypercal.invntrm.ru — DNS still points at the DigitalOcean droplet `104.248.84.190`, whose
-  Caddy (auto-TLS) proxies the bot paths over the tailnet to the odroid at `100.116.57.66:3001`. The
-  droplet is tailnet node `do-edge` (`100.113.21.91`) with a direct WireGuard path to the odroid. It runs
-  no bot container; it keeps the ingress and the external watchdog cron (disabled 2026-10-10 to 2026-10-24,
-  re-enabled in #822; runbook "Alert watcher"). Until 2026-10-10 the upstream was
-  the odroid's Tailscale Funnel; Funnel failed that night from 00:00 to 03:10 UTC and is now off.
+- **Domain**: hypercal.mextner.com — a proxied Cloudflare CNAME to the tunnel `odroid-home`, whose cloudflared
+  runs on the odroid and forwards the hostname to `http://localhost:3001` (the bot's published port). Since
+  2026-10-25 (#828); before that the name was hypercal.invntrm.ru on a DigitalOcean droplet
+  (`104.248.84.190`, tailnet node `do-edge`) whose Caddy proxied to the odroid over the tailnet, and before
+  2026-10-10 over the odroid's Tailscale Funnel (which failed that night from 00:00 to 03:10 UTC and is off).
+  The old name stays up beside the new one only until the droplet is deleted.
+  The external watchdog cron on the droplet was disabled 2026-10-10 to 2026-10-24 and re-enabled in #822 (runbook
+  "Alert watcher").
 
 ## Stack
 
@@ -58,16 +60,19 @@ Required variables:
 
 Optional but recommended:
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ENCRYPTION_KEY` — for Google Calendar sync
-- `PUBLIC_DOMAIN=hypercal.invntrm.ru` — required for OAuth redirect
-- `GOOGLE_REDIRECT_URI=https://hypercal.invntrm.ru/oauth/google/callback`
+- `PUBLIC_DOMAIN=hypercal.mextner.com` — bare host, no scheme. Required: the Telegram webhook (`/webhook/telegram`, registered on every start), the Calendar watch-channel address (`/webhooks/google-calendar`) and the OAuth redirect (`https://<PUBLIC_DOMAIN>/oauth/google/callback`, the value that must be listed as an authorized redirect URI on the Google OAuth client) are built from it by `src/config/public-url.ts`
+- `GOOGLE_REDIRECT_URI` — only to pin the redirect to another URI than the one derived from `PUBLIC_DOMAIN`
 
 Note: `REDIS_URL` and `NODE_ENV` are overridden by docker-compose.yml — values in .env are ignored for these. `REDIS_PASSWORD` is used only to build `REDIS_URL` and the redis container's auth; the bot container gets it blanked. Keep `.env` at mode `0600` (see `docs/reference/deploy-runbook.md`).
 
 ### 4. DNS and ingress
 
-`hypercal.invntrm.ru` stays an A record to `104.248.84.190`. The repo `Caddyfile` is the DO Caddy
-config, applied by hand there; it proxies to the bot's published port 3001 on the odroid's tailnet
-address, so both hosts must stay on the tailnet.
+`hypercal.mextner.com` is a proxied CNAME in the `mextner.com` Cloudflare zone to the tunnel `odroid-home`
+(`<tunnel-id>.cfargotunnel.com`). The tunnel is remotely managed: its ingress rules live in Cloudflare
+(Zero Trust > Networks > Tunnels, or `cf tunnels config get|update <tunnel-id>`), one rule per hostname, and
+the rule `hypercal.mextner.com` -> `http://localhost:3001` sends everything to the bot, which answers only
+its own routes. A new public name needs both the rule and the CNAME. The repo `Caddyfile` is the retired
+DigitalOcean ingress for the old name and has no part in this path.
 
 ### 5. Deploy runner
 
@@ -140,13 +145,13 @@ ssh root@odroidn2 'docker compose -f /opt/hypercal/docker-compose.yml logs -f bo
 ssh root@odroidn2 'docker compose -f /opt/hypercal/docker-compose.yml logs -f redis'
 
 # Health check
-curl https://hypercal.invntrm.ru/health
+curl https://hypercal.mextner.com/health
 
 # Container status
 ssh root@odroidn2 'docker compose -f /opt/hypercal/docker-compose.yml ps'
 
-# Caddy logs (ingress, on the DO droplet)
-ssh root@104.248.84.190 'tail -f /var/log/caddy/hypercal.invntrm.ru.log'
+# Tunnel client (ingress)
+ssh root@odroidn2 'journalctl -u cloudflared -n 50 --no-pager'
 ```
 
 ## Resource Limits

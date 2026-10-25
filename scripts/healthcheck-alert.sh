@@ -7,11 +7,8 @@
 
 set -euo pipefail
 
-# /ready, not /health: /health is pure process liveness, while this watchdog has
-# to notice the failure users actually feel — a running bot whose whole AI
-# provider chain is dead answers nobody, and /health says "ok" throughout.
-HEALTH_URL="https://hypercal.invntrm.ru/ready"
-ALERT_URL="https://hypercal.invntrm.ru/admin/alerts"
+# HEALTH_URL and ALERT_URL are built from PUBLIC_DOMAIN in $ENV_FILE below, so a move of
+# the public host needs no edit here.
 ENV_FILE="/opt/hypercal/.env"
 STATE_FILE="/tmp/hypercal-down"
 # When the unverified wait began. Separate from STATE_FILE because that one is
@@ -43,11 +40,18 @@ UNVERIFIED_HOLD=1800
 BOT_TOKEN=$(grep -m1 "^BOT_TOKEN=" "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
 ADMIN_ID=$(grep -m1 "^BOT_ADMIN_ID=" "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
 ADMIN_ALERT_TOKEN=$(grep -m1 "^ADMIN_ALERT_TOKEN=" "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
+PUBLIC_DOMAIN=$(grep "^PUBLIC_DOMAIN=" "$ENV_FILE" | tail -n1 | cut -d= -f2- | sed -e 's/[[:space:]]#.*$//' | tr -d "\"'\r[:space:]" || true)
 
 if [[ -z "$BOT_TOKEN" || -z "$ADMIN_ID" ]]; then
   echo "ERROR: BOT_TOKEN or BOT_ADMIN_ID not found in $ENV_FILE" >&2
   exit 1
 fi
+
+# /ready, not /health: /health is pure process liveness, while this watchdog has
+# to notice the failure users actually feel — a running bot whose whole AI
+# provider chain is dead answers nobody, and /health says "ok" throughout.
+HEALTH_URL="https://${PUBLIC_DOMAIN}/ready"
+ALERT_URL="https://${PUBLIC_DOMAIN}/admin/alerts"
 
 send_telegram() {
   local text="$1"
@@ -58,6 +62,20 @@ send_telegram() {
     -d "parse_mode=HTML" \
     -o /dev/null
 }
+
+# A watchdog without a host watches nothing, so say so once instead of dying quietly every 2 minutes.
+if [[ -z "$PUBLIC_DOMAIN" ]]; then
+  echo "ERROR: PUBLIC_DOMAIN not found in $ENV_FILE" >&2
+  if [[ ! -f "${STATE_FILE}.no-domain" ]]; then
+    # Mark only after the send worked, so a failed send is retried on the next run.
+    if send_telegram "🚨 <b>HyperCalendarBot watchdog is blind</b>
+PUBLIC_DOMAIN is missing from <code>${ENV_FILE}</code>, so nothing is being probed."; then
+      touch "${STATE_FILE}.no-domain"
+    fi
+  fi
+  exit 1
+fi
+rm -f "${STATE_FILE}.no-domain"
 
 # Post to the alert queue so hcb-alert-watcher (the owner's PC) can start an omp investigation.
 push_alert() {
