@@ -106,6 +106,15 @@ if args[:1]==['info'] and 'DriverStatus' in args[-1]:
     status=[["driver-type","io.containerd.snapshotter.v1"]] if os.environ.get('FIXTURE_STORE')=='containerd' else [["Backing Filesystem","extfs"],["Supports d_type","true"]]
     print(json.dumps(status,separators=(',',':')))
 elif args[:1]==['info']:print(root)
+elif args[:1]==['inspect'] and '--format' in args and 'json .State' in args[args.index('--format')+1]:
+    # The health verdict's state read: the release is a live container unless a test kills it.
+    dead=os.environ.get('RELEASE_DEAD')=='1' and current.read_text()!='sha256:old'
+    print(json.dumps({"Status":"exited" if dead else "running","Running":not dead,"Restarting":False,"OOMKilled":False,"ExitCode":1 if dead else 0,"StartedAt":"2026-10-25T00:00:00Z"})+'|0')
+elif args[:1]==['logs'] and '--tail' in args:print('boot')
+elif args[:1]==['logs']:print(os.environ.get('CONTAINER_LOG','{"level":30,"msg":"started"}'))
+elif args==['inspect','hypercal-bot']:
+    print(json.dumps([{"Id":"abc","State":{"Status":"running","ExitCode":0,"OOMKilled":False},"RestartCount":0,"Config":{"Image":"x","Env":["BOT_TOKEN=123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"]}}]))
+elif args[:1]==['ps']:print('hypercal-bot\tUp 1 minute')
 elif args[:1]==['images']:
     print(''.join(f"{t.rsplit(':',1)[1]}\t{i}\n" for t,i in store.items() if t.rsplit(':',1)[0]==args[-1]),end='')
 elif args[:2]==['image','rm']:
@@ -155,8 +164,12 @@ elif args and args[0]=='compose' and 'up' in args:
 import os,sys
 from pathlib import Path
 restored=(Path(os.environ['FIXTURE_DEP'])/'current').read_text()=='sha256:old'
+if '-w' in sys.argv and 'ready' in sys.argv[-1]:
+    # The activator's baseline probe asks for the status code and the body separately.
+    body=(os.environ.get('RESTORED_READY_BODY','ok') if restored else os.environ.get('READY_BODY','ok'))
+    open(sys.argv[sys.argv.index('-o')+1],'w').write(body);print('503' if body=='ai chain down' else os.environ.get('BASELINE_READY_CODE','200'),end='');sys.exit(0)
 if 'ready' in sys.argv[-1]:
-    body=os.environ.get('READY_BODY','ok');print(body,end='');sys.exit(22 if body=='ai chain down' else 0)
+    body=(os.environ.get('RESTORED_READY_BODY','ok') if restored else os.environ.get('READY_BODY','ok'));print(body,end='');sys.exit(22 if body=='ai chain down' else 0)
 body=os.environ.get('RESTORED_HEALTH_BODY','ok') if restored else os.environ.get('HEALTH_BODY','ok')
 if body=='unreachable':sys.exit(7)
 print(body,end='')
@@ -237,6 +250,13 @@ print(body,end='')
             FIXTURE_LOG=str(self.log),
             FIXTURE_ID=self.config_id,
             FIXTURE_SHA=SHA,
+            # The verdict's clocks are real time: keep them short so failing releases fail fast.
+            HYPERCAL_HEALTH_BASE_BUDGET="0.4",
+            HYPERCAL_HEALTH_HARD_CAP="1",
+            HYPERCAL_HEALTH_POLL="0.01",
+            HYPERCAL_HEALTH_STABLE="0",
+            HYPERCAL_HEALTH_STALL="0.2",
+            ODROID_DEPLOY_LOCK_FILE=str(self.path / "odroid-deploy.lock"),
         )
         env.update(changes)
         return subprocess.run(
@@ -744,6 +764,106 @@ print(body,end='')
         self.assertEqual((self.dep / "current").read_text(), self.config_id)
         self.assertEqual(json.loads((self.dep / "releases/current.json").read_text())["revision"], SHA)
         self.assertNotIn("ROLLBACK", result.stderr)
+
+    # --- #823: evidence, log retention, the shared host lock and the multi-signal verdict ---
+
+    def logs_dir(self):
+        return self.dep / "logs"
+
+    def evidence_dirs(self, prefix):
+        return sorted(p for p in self.logs_dir().iterdir() if p.name.startswith(prefix)) if self.logs_dir().exists() else []
+
+    def seed_old_logs(self):
+        old = self.logs_dir()
+        old.mkdir(exist_ok=True)
+        names = ["healthcheck_2026-04-10_23-42-26.log.gz", "backup_2026-09-23_21-25-29.log.gz"]
+        for name in names:
+            (old / name).write_bytes(b"old log")
+        (old / "chats").mkdir(exist_ok=True)
+        (old / "chats/1.log").write_text("chat debug log")
+        return names
+
+    def assert_old_logs_kept(self, names):
+        for name in names:
+            self.assertTrue((self.logs_dir() / name).exists(), f"{name} was deleted by the deploy")
+        self.assertEqual((self.logs_dir() / "chats/1.log").read_text(), "chat debug log")
+
+    def test_successful_deploy_copies_the_outgoing_containers_log_and_deletes_nothing(self):
+        names = self.seed_old_logs()
+        result = self.run_deploy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        (release_logs,) = self.evidence_dirs("release-")
+        self.assertTrue((release_logs / "container.log.gz").stat().st_size > 0)
+        self.assertEqual(release_logs.stat().st_mode & 0o777, 0o700)
+        self.assert_old_logs_kept(names)
+        self.assertEqual(self.evidence_dirs("failed-"), [])
+
+    def test_rollback_saves_failed_container_evidence_before_recreating_it(self):
+        names = self.seed_old_logs()
+        result = self.run_deploy(READY_BODY="ai chain down", RESTORED_READY_BODY="ok")
+        self.assertNotEqual(result.returncode, 0)
+        (failed,) = self.evidence_dirs("failed-" + SHA[:12])
+        self.assertIn(f"FAILED_EVIDENCE {failed}", result.stderr)
+        for name in ["container.log.gz", "container.tail.redacted.log", "inspect.json", "state.txt", "host-load.txt"]:
+            self.assertTrue((failed / name).exists(), name)
+        text = "".join((failed / n).read_text() for n in ["inspect.json", "state.txt", "host-load.txt", "container.tail.redacted.log"])
+        self.assertNotIn("ABCDEFGHIJKLMNOPQRSTUVWXYZ", text, "a token reached the evidence bundle")
+        self.assertNotIn("Env", text)
+        # The evidence was taken before the force-recreate of the rollback.
+        calls = self.calls()
+        first_log = next(i for i, c in enumerate(calls) if c[:1] == ["logs"] and "--timestamps" in c and "--tail" not in c)
+        recreate = [i for i, c in enumerate(calls) if c[:1] == ["compose"] and "--force-recreate" in c]
+        self.assertLess(first_log, recreate[-1])
+        self.assert_old_logs_kept(names)
+        self.assertEqual(len(self.evidence_dirs("release-")), 1)
+
+    def test_dead_release_is_detected_immediately_and_rolled_back_with_evidence(self):
+        result = self.run_deploy(RELEASE_DEAD="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("verdict=dead", result.stderr)
+        self.assertIn("exit_code=1", result.stderr)
+        self.assertIn("ROLLBACK image=sha256:old health=ok", result.stderr)
+        self.assertEqual(len(self.evidence_dirs("failed-")), 1)
+
+    def test_a_failed_baseline_readiness_probe_keeps_readiness_required(self):
+        # The probe before the swap proved nothing (no answer): a release whose /ready is broken must not pass.
+        result = self.run_deploy(BASELINE_READY_CODE="000", READY_BODY="ai chain down")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Readiness path is not returning a bot response", result.stderr)
+        self.assertEqual((self.dep / "current").read_text(), "sha256:old")
+
+    def test_unreadable_readiness_before_the_deploy_does_not_roll_back_a_healthy_release(self):
+        # An AI outage fails /ready for every image: the release is not at fault.
+        result = self.run_deploy(READY_BODY="ai chain down", RESTORED_READY_BODY="ai chain down")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.dep / "current").read_text(), self.config_id)
+
+    def test_error_log_storm_after_start_fails_the_release(self):
+        lines = "\n".join(['{"level":50,"msg":"x"}'] * 8)
+        result = self.run_deploy(CONTAINER_LOG=lines)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("level>=50", result.stderr)
+        self.assertEqual((self.dep / "current").read_text(), "sha256:old")
+
+    def test_deploy_takes_the_shared_host_lock_for_this_repository(self):
+        result = self.run_deploy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # The lock is released with the process; its owner file shows who held it last.
+        self.assertIn("repo=hcb", (self.path / "odroid-deploy.lock.owner").read_text())
+
+    def test_release_without_the_new_helper_scripts_is_refused_before_any_change(self):
+        broken = self.path / "broken-scripts"
+        shutil.copytree(ROOT / "scripts", broken)
+        (broken / "deploy-health.py").unlink()
+        result = subprocess.run(
+            ["bash", str(broken / "deploy-prebuilt-image.sh"), str(self.dep), str(self.src), "repo/image", SHA, self.digest, self.config_id],
+            cwd=self.dep, text=True, capture_output=True, timeout=15,
+            env=dict(os.environ, PATH=str(self.bin) + ":" + os.environ["PATH"], FIXTURE_DEP=str(self.dep), FIXTURE_LOG=str(self.log),
+                     FIXTURE_ID=self.config_id, FIXTURE_SHA=SHA),
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing scripts/deploy-health.py", result.stderr)
+        self.assertFalse(self.log.exists())
 
 
 if __name__ == "__main__":

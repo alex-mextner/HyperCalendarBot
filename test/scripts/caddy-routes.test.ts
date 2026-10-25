@@ -59,10 +59,11 @@ function proxyRetryWindowSeconds(): number {
   return Number(value);
 }
 
-/** How long the deploy's own readiness probe waits, in seconds. */
+/** How long the deploy's own readiness probe waits per attempt, in seconds (the verdict script's curl). */
 function deployProbeTimeoutSeconds(): number {
-  const value = deployActivator.match(/curl -[a-zA-Z]+ --max-time (\d+) https:\/\/\S*\/ready/)?.[1];
-  if (!value) throw new Error('The shared deploy activator has no readiness probe');
+  const verdict = readFileSync(join(ROOT, 'scripts/deploy-health.py'), 'utf8');
+  const value = verdict.match(/\["curl", "-fsS", "--max-time", "(\d+)", url\]/)?.[1];
+  if (!value) throw new Error('The deploy health verdict has no readiness probe');
   return Number(value);
 }
 
@@ -141,23 +142,37 @@ describe('Caddy routing', () => {
 
   // Hosted deployment must invoke the shared activator that verifies the actual
   // routed URL. A disconnected helper containing this URL is not sufficient.
-  test('the deploy verifies the URL the watchdog polls', () => {
+  test('the deploy verifies the path the watchdog polls', () => {
     expect(deployWorkflow).toContain('sudo -n /usr/local/sbin/hypercal-activate-release');
     expect(activationWrapper).toContain('bash "$STAGE/scripts/deploy-prebuilt-image.sh"');
-    expect(deployActivator).toContain(watchdogUrl());
+    // The activator delegates the verdict to scripts/deploy-health.py, which polls /health and /ready
+    // on the container's own port (the public host is not what the release controls).
+    expect(deployActivator).toContain('deploy-health.py');
+    expect(deployActivator).toContain('HEALTH_URL=http://127.0.0.1:3001');
+    const verdict = readFileSync(join(ROOT, 'scripts/deploy-health.py'), 'utf8');
+    expect(verdict).toContain(`f"{base}${watchdogPath()}"`);
   });
 
   // The watchdog recognizes an outage body, but a deployment cannot declare an
   // outage healthy. The activator's real rollback is covered by Python fixtures.
   test('the deploy accepts only healthy or explicitly unverified server bodies', () => {
-    const branch = deployActivator.match(/^\s*(ok[^\n]+)\)\s*;;$/m)?.[1];
-    if (!branch) throw new Error('The shared activator has no readiness acceptance branch');
-    expect(acceptedBodies(branch)).toEqual(
+    const verdict = readFileSync(join(ROOT, 'scripts/deploy-health.py'), 'utf8');
+    const tuple = verdict.match(/^READY_OK = \((.*)\)$/m)?.[1];
+    if (!tuple) throw new Error('The deploy health verdict has no readiness acceptance list');
+    const accepted = tuple
+      .split(',')
+      .map((item) => item.trim().replace(/^"|"$/g, ''))
+      .filter(Boolean)
+      .sort();
+    expect(accepted).toEqual(
       Object.values(READINESS_BODY)
         .filter((body) => body !== 'ai chain down')
         .sort(),
     );
-    expect(acceptedBodies(branch)).not.toContain('ai chain down');
+    expect(accepted).not.toContain('ai chain down');
+    // The shell side must agree with it.
+    const branch = deployActivator.match(/ready_acceptable\(\) \{ case "\$1" in (.+?)\) return 0 ;;/)?.[1];
+    expect(acceptedBodies(branch ?? '')).toEqual(accepted);
   });
 
   // The watchdog holds the same list, for the same reason: a 200 from anything

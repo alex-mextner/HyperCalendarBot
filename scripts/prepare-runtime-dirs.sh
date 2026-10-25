@@ -8,7 +8,12 @@ BOT_UID="${BOT_UID:-999}"
 BOT_GID="${BOT_GID:-999}"
 
 mkdir -p "$ROOT/data" "$ROOT/logs"
-chown -R "$BOT_UID:$BOT_GID" "$ROOT/data" "$ROOT/logs"
+chown "$BOT_UID:$BOT_GID" "$ROOT/data" "$ROOT/logs"
+chown -R "$BOT_UID:$BOT_GID" "$ROOT/data"
+# logs/ is bind-mounted into the bot container. The deploy's own evidence (release-*, failed-*:
+# raw container logs, failure bundles) stays root-only: a compromised bot process must not read it.
+find "$ROOT/logs" -mindepth 1 \( -path "$ROOT/logs/release-*" -o -path "$ROOT/logs/failed-*" \) -prune -o \
+  -exec chown "$BOT_UID:$BOT_GID" {} +
 
 owner_of() {
   stat -c '%u:%g' "$1" 2>/dev/null || stat -f '%u:%g' "$1"

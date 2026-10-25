@@ -329,6 +329,22 @@ class ActivateReleaseTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("artifact.json", self.recorded()["files"])
 
+    def test_helper_scripts_of_later_changes_are_optional_so_older_releases_still_deploy(self):
+        self.github.publish(7, self.release_zip(drop=["scripts/deploy-health.py", "scripts/log-retention.py"]))
+        result = self.run_wrapper()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        files = self.recorded()["files"]
+        self.assertNotIn("scripts/deploy-health.py", files)
+        self.assertIn("scripts/deploy-evidence.py", files)
+
+    def test_every_script_the_workflow_ships_is_extracted_by_the_wrapper(self):
+        self.github.publish(7, self.release_zip())
+        result = self.run_wrapper()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        files = set(self.recorded()["files"])
+        for name in workflow_release_files():
+            self.assertIn(name, files, f"the wrapper would drop {name}, which the build ships")
+
     def test_moved_main_is_refused_before_any_artifact_is_read(self):
         self.github.main = OTHER_SHA
         self.github.publish(7, self.release_zip())
