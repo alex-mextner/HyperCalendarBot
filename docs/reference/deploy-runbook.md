@@ -4,7 +4,7 @@ Detailed deployment reference for HyperCalendarBot. Summary in CLAUDE.md, full d
 
 ## .env on Server
 
-Single `.env` file: `/opt/hypercal/.env` on the production host `root@odroidn2`. Read by `docker compose`. The DO droplet keeps its own `/opt/hypercal/.env` only for the external watchdog (`scripts/healthcheck-alert.sh`).
+Single `.env` file: `/opt/hypercal/.env` on the production host `root@odroidn2`. Read by `docker compose`. The DO droplet's own `/opt/hypercal/.env` serves only the external watchdog (`scripts/healthcheck-alert.sh`, see "Alert watcher").
 
 It holds every production secret and the host is shared with other services, so `.env` and every backup of it must be mode `0600`, owner `root:root`. Plain `cp` creates a `0644` copy under the default umask; back it up with:
 ```bash
@@ -34,7 +34,7 @@ ssh root@odroidn2 'docker compose -f /opt/hypercal/docker-compose.yml logs -f --
 curl https://hypercal.invntrm.ru/health
 
 # Readiness — everything above, plus the AI provider chain is answering.
-# This is what the cron watchdog polls; a 503 here with a 200 on /health means
+# The alert watcher on the owner's PC polls this every 30 s; a 503 here with a 200 on /health means
 # the bot is running but cannot answer anyone.
 curl https://hypercal.invntrm.ru/ready
 ```
@@ -68,9 +68,10 @@ Neighbours on the odroid:
 - three self-hosted GitHub runners, one per repository, user `www-data` (labels such as `odroid`, `odroid-hsb`, `odroid-mextner`), plus this repo's `odroid-hcb` (user `hcb-runner`, see "Odroid runner")
 - `watchdog.service`
 
-The DO droplet keeps only:
-- the public ingress: its Caddy serves `hypercal.invntrm.ru` and proxies the bot paths over the tailnet to `100.116.57.66:3001`, the odroid's tailnet address and the bot's published port (repo `Caddyfile`, applied by hand there). The droplet is tailnet node `do-edge` (`100.113.21.91`) and has a direct WireGuard path to the odroid. `PUBLIC_DOMAIN`, the Google OAuth redirect, Calendar watch channels and the Telegram webhook URL did not change;
-- the external watchdog cron `*/2 * * * *` (`scripts/healthcheck-alert.sh`, reading DO's `/opt/hypercal/.env`).
+The DO droplet keeps only the public ingress:
+- its Caddy serves `hypercal.invntrm.ru` and proxies the bot paths over the tailnet to `100.116.57.66:3001`, the odroid's tailnet address and the bot's published port (repo `Caddyfile`, applied by hand there). The droplet is tailnet node `do-edge` (`100.113.21.91`) and has a direct WireGuard path to the odroid. `PUBLIC_DOMAIN`, the Google OAuth redirect, Calendar watch channels and the Telegram webhook URL did not change.
+
+It also runs the external watchdog: cron `*/2 * * * *` `scripts/healthcheck-alert.sh` (log `/opt/hypercal/logs/healthcheck.log`). That line was commented out on 2026-10-10 ("HCB moved to odroid") and nothing watched the bot until it was re-enabled on 2026-10-24 (#822). The re-enable also removed the stale `/tmp/hypercal-down` from 2026-10-10 01:01 UTC: while that file exists the script believes an outage is already announced and stays silent, so any future re-enable must check `ls /tmp/hypercal-*` on the droplet first. The pre-change crontab is saved as `/root/crontab.bak-20261024-hcb822` on the droplet (revert: `crontab /root/crontab.bak-20261024-hcb822`).
 
 Until 2026-10-10 the upstream was the odroid's Tailscale Funnel `https://odroidn2.tailbfe8ea.ts.net`. Funnel failed that night from 00:00 to 03:10 UTC: two of its three ingress IPs reset TLS. Since then DO Caddy proxies over the tailnet and Funnel is off on the odroid; nothing depends on it.
 
@@ -78,6 +79,36 @@ The `hypercal-bot` container and `docker-compose.yml` were removed from DO on pu
 
 **Never run `pm2 delete all`, `docker system prune`, or kill PIDs without checking ownership.** Memory and microSD I/O are shared: a deploy activation runs at reduced CPU/I/O priority for that reason.
 Port 3001 belongs to HyperCalendarBot Docker. Do not reassign it.
+
+## Alert watcher
+
+Why it exists: until 2026-09-28 a macOS LaunchAgent polled `/admin/alerts/next` and opened an omp session; after the Mac was sold nothing consumed the queue (7 alerts pending on 2026-10-24, the newest a failed deploy), and from 2026-10-10 to 2026-10-24 nothing raised DOWN either. The queue is the bot's own SQLite table `alerts`, so a bot that is down cannot store its own DOWN alert (the watchdog's POST to `/admin/alerts` fails and is swallowed). Down detection therefore has two paths that do not need the bot: the DO watchdog sends a Telegram message straight through the Bot API, and the consumer below probes readiness itself and starts the investigation.
+
+What runs: the systemd **user** service `hcb-alert-watcher` on the owner's Ubuntu PC (`scripts/hcb-alert-watcher.ts`). Every 30 s it
+
+1. probes `https://hypercal.mextner.com/ready` (`HCB_BASE_URL` overrides; healthy = `200` with body `ok` or `ok (unverified)`); three failed probes in a row raise one `down-<epoch>` incident for the whole outage. A name that does not resolve on the PC is not a failed probe (it says nothing about the bot): after three in a row the owner gets one `tg --tag problem` notice that the watcher is blind, and no session starts. On 2026-10-25 this PC's systemd-resolved returned `Name not found` for the new host's A record while the ISP resolvers answered it; check with `resolvectl query -t A hypercal.mextner.com`;
+2. pops `/admin/alerts/next` until it answers `204`. The pop is destructive on the server, so every alert is written to the local spool (`~/.local/state/hcb-alert-watcher/pending/`) first; alerts older than 12 hours are consumed and logged as stale, not investigated;
+3. starts **one** detached omp session for everything pending, at most one per 30 minutes (alerts that arrive meanwhile wait and share the next session), at most once per alert id (`launched/<key>` markers survive restarts). The session starts through the sanctioned `rig-detached-omp` launcher in the repository checkout, plus a tmux window `hcb-alert-<utc stamp>` in the canonical `main` session that follows its log (`/tmp/agent-logs/<name>.log`) and closes 15 minutes after the session ends.
+
+The brief the session gets (`~/.local/state/hcb-alert-watcher/briefs/`) fences the alert text as untrusted data, makes the first phase read-only, forbids restart/stop/rollback/redeploy, database writes, deletions and merging without the owner (#596), and requires a Russian `tg report` with the root cause first. The watcher itself tells the owner with `tg --tag problem` when it is blind: the launcher fails (alerts stay pending), or the queue answers 401/403/404 three times in a row (token rotated or endpoint disabled); each notice is sent once per streak. Every helper process it spawns (launcher, tmux, ctmux, tg) has a 30 s deadline and runs without the alert token; the tmux server and window are started in their own systemd scope so restarting the unit never kills the owner's tmux.
+
+Install (idempotent; the token lives only in the keychain as `hcb-alert-watcher/admin-alert-token` and reaches the service through `keychain exec --caller hcb-alert-watcher`):
+
+```bash
+scripts/install-alert-watcher.sh --fetch-token-from root@odroidn2   # first time: also copies the production ADMIN_ALERT_TOKEN into the keychain
+scripts/install-alert-watcher.sh                                    # later: update unit, restart only if it changed
+HCB_BASE_URL=https://other.example scripts/install-alert-watcher.sh # probe another public host (written into the unit; re-run without it to drop it)
+scripts/install-alert-watcher.sh --uninstall
+systemctl --user status hcb-alert-watcher; journalctl --user -u hcb-alert-watcher -f
+```
+
+Run it from a checkout whose `main` contains the watcher; the unit points at the canonical checkout, not at a worktree. Install it on the machine that hosts the owner's omp sessions only (the home laptop does not need it: a second watcher would pop alerts the first one then never sees). Tuning is by `HCB_*` environment variables read by `loadConfig` in the script (`HCB_ALERT_POLL_SECONDS`, `HCB_ALERT_RATE_LIMIT_SECONDS`, `HCB_ALERT_DOWN_PROBES`, `HCB_ALERT_STALE_HOURS`, `HCB_ALERT_COMMAND_TIMEOUT_SECONDS`, `HCB_BASE_URL`, `HCB_ALERT_STATE_DIR`).
+
+Backlog triage (alerts that piled up while nothing consumed the queue): the service pops the whole queue on its first cycle and, with the default 12 h limit, marks old alerts stale without investigating them, so triage BEFORE the first install (or after `systemctl --user stop hcb-alert-watcher`): `keychain exec --caller hcb-alert-watcher --env ADMIN_ALERT_TOKEN=hcb-alert-watcher/admin-alert-token -- env HCB_ALERT_STALE_HOURS=1000 bun scripts/hcb-alert-watcher.ts --once` (the pending alerts go to one session; one run pops at most 50, so with a bigger queue repeat it, after the 30-minute rate limit, until the log shows no `queued from` line), then install or `systemctl --user start hcb-alert-watcher`. Never run `--once` while the service runs: the two processes share the state directory without a lock and could each start a session. A 200 from the queue that the watcher cannot parse is kept in `~/.local/state/hcb-alert-watcher/unreadable/` (the server's pop already consumed it; one file per cycle at most). A launcher that hits its 30 s deadline is not retried (the session may already run): the owner is told once and the alerts are marked handled. After a restart in the middle of a launch, a claim whose session log (`HCB_AGENT_LOG_DIR`, default `/tmp/agent-logs`) already exists is confirmed, not launched again.
+
+Known limits: the probe runs on the PC, so a PC that is off or offline raises nothing (the DO watchdog still messages the owner then), and a PC whose own network is down counts as a down bot after three failed probes (cached DNS still answers); failures more than about six minutes apart (suspend, service stopped) never add up to an outage. The DO watchdog posts its queue alert only while the bot is up, so only the PC probe turns a hard outage into an investigation session. The unit and every session it starts run with `PATH=~/.local/bin:~/.bun/bin:/usr/local/bin:/usr/bin:/bin` and no ssh agent (key-file auth to `root@odroidn2` works, verified under `systemd-run --user --pipe`); the installer warns about `omp`, `gh`, `ssh`, `tmux`, `ctmux`, `systemd-run` missing from that PATH and pins `tg` by absolute path. After a failed launch the launcher is left alone for a minute.
+
+Also known: (1) an outage seen by the PC probe and, separately, by a queued alert (the DO watchdog's POST, a crash alert) can start two sessions 30 minutes apart: dedupe is per alert id and per probe incident, not across sources; the second session's brief tells it to check `omp-steer list` first. (2) The unit starts at login or boot (linger); if the keyring is still locked, `keychain exec` fails with its own exit code, which `RestartPreventExitStatus=78` does not cover: the unit restarts every 30 s without being able to tell you. After a reboot check `systemctl --user is-active hcb-alert-watcher`; `keychain unlock` fixes it. (3) Bun loads the script once: after a merge that changes `scripts/hcb-alert-watcher.ts` run `systemctl --user restart hcb-alert-watcher` (the installer restarts only when the unit text changes). (4) A pop whose response times out before any header arrives may have consumed an alert on the server; only the journal line "queue step failed" shows it. (5) The queue poll refuses redirects so the token never travels to another host.
 
 ## Normal ship deployment
 
