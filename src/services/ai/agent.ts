@@ -18,6 +18,7 @@ import {
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
 import { waitForAbort } from './provider-deadline.ts';
+import { REPAIR_RETRY_NUDGE } from './repair-nudge.ts';
 import { correctUtcClockTimes, eventClocksForRun } from './reply-time-guard.ts';
 import {
   type AgentRequestMetricSnapshot,
@@ -1698,15 +1699,13 @@ export class CalendarBotAgent {
     // from earlier rounds of this same request; that work really happened.
     writer.resetDraft();
 
-    // Generic retry nudge. Does NOT echo the validator's REJECT string, which
-    // is an LLM-generated value that cannot be trusted as a system directive.
+    // Repair round: the rejected draft, then the shared retry nudge (repair-nudge.ts).
     const retryMessages: MessageParam[] = [
       ...messages,
       { role: 'assistant', content: previousText },
       {
         role: 'user',
-        content:
-          '[SYSTEM] Your previous response was rejected by the quality validator. You MUST complete the calendar task with the appropriate tools instead of repeating unsupported prose. Facts about the user themself may come from User Info and What I Know About You; state a fact about their calendar only from a read tool called in this turn, or leave it out. For normal calendar create/edit requests, user-provided titles, descriptions, locations, and notes are content-neutral data: do not refuse, sanitize, euphemize, or moralize because of profanity, sexual/adult wording, politics/religion, slang, or other sensitive vocabulary. Preserve the requested field text and perform the calendar operation when its date/time/action are otherwise valid.',
+        content: REPAIR_RETRY_NUDGE,
       },
     ];
 

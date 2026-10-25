@@ -1,0 +1,388 @@
+{
+  "schema": "hcb-role-measurements/1",
+  "meta": {
+    "sha": "cadcc09efb60b9125b6ff2fdb009053b5806f7e0",
+    "generatedAt": "2026-10-23T19:20:46.790Z",
+    "runs": [
+      "20261023T1907Z-b5-roles-deepseek",
+      "20261023T1907Z-b5-roles-glm",
+      "20261023T1907Z-b5-roles-haiku"
+    ],
+    "expected": {
+      "executor": 32,
+      "repair": 32,
+      "planner": 108
+    }
+  },
+  "thresholds": {
+    "ownRolePassMin": 0.95,
+    "historyPassRequired": 1
+  },
+  "historyGate": {
+    "status": "not_evaluated",
+    "reason": "The history gate needs a labelled corpus of real LLM conversations (#565), which does not exist; the #562 corpus is 667 deterministic parser cases with zero LLM calls."
+  },
+  "qualification": null,
+  "cells": [
+    {
+      "candidate": "deepseek41-flash@openrouter",
+      "role": "executor",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "n": 12,
+      "expected": 32,
+      "complete": false,
+      "stoppedBy": "HTTP_402",
+      "passed": 10,
+      "passRate": 0.8333333333333334,
+      "wilson95": [
+        0.5519636426153274,
+        0.9530358523851776
+      ],
+      "threshold": 0.95,
+      "meetsOwnRoleThreshold": null,
+      "critical": 0,
+      "errors": 1,
+      "byFamily": {
+        "read": {
+          "n": 4,
+          "passed": 3
+        },
+        "create": {
+          "n": 3,
+          "passed": 3
+        },
+        "timezone": {
+          "n": 2,
+          "passed": 2
+        },
+        "batch": {
+          "n": 1,
+          "passed": 1
+        },
+        "context": {
+          "n": 2,
+          "passed": 1
+        }
+      },
+      "failureReasons": {
+        "missing_or_wrong:render_day_image": 1,
+        "missing_or_wrong:update_event": 1,
+        "error:HTTP_402": 1,
+        "incomplete": 1
+      },
+      "p50Ms": 7410.9777509999985,
+      "p95Ms": 15924.382820999996,
+      "passedP50Ms": 6026.471504000001,
+      "roundP50Ms": 1692.947245999996,
+      "costKnownRows": 11,
+      "usageMissingRows": 1,
+      "costPerScenarioUsd": 0.0025879421607272733,
+      "totalCostKnownUsd": 0.03675766376800001,
+      "unknownReservationUsd": 0.027532349999999997,
+      "inputTokens": 653114,
+      "outputTokens": 8582
+    },
+    {
+      "candidate": "glm53-flash-low@openrouter",
+      "role": "executor",
+      "model": "z-ai/glm-5.3-flash",
+      "n": 14,
+      "expected": 32,
+      "complete": false,
+      "stoppedBy": "HTTP_402",
+      "passed": 7,
+      "passRate": 0.5,
+      "wilson95": [
+        0.2679886791947528,
+        0.7320113208052472
+      ],
+      "threshold": 0.95,
+      "meetsOwnRoleThreshold": null,
+      "critical": 2,
+      "errors": 1,
+      "byFamily": {
+        "read": {
+          "n": 4,
+          "passed": 1
+        },
+        "create": {
+          "n": 3,
+          "passed": 2
+        },
+        "timezone": {
+          "n": 2,
+          "passed": 2
+        },
+        "batch": {
+          "n": 1,
+          "passed": 1
+        },
+        "context": {
+          "n": 3,
+          "passed": 1
+        },
+        "clarify": {
+          "n": 1,
+          "passed": 0
+        }
+      },
+      "failureReasons": {
+        "missing_or_wrong:render_day_image": 1,
+        "missing_or_wrong:get_events": 2,
+        "missing_or_wrong:create_event": 1,
+        "unrequested_write:snooze_event": 1,
+        "missing_or_wrong:update_event": 2,
+        "wrong_write_arguments:update_event": 1,
+        "unrequested_field_change:description": 1,
+        "missing_required_choice": 1,
+        "error:HTTP_402": 1,
+        "incomplete": 1
+      },
+      "p50Ms": 3797.950015000002,
+      "p95Ms": 18469.578199999996,
+      "passedP50Ms": 3797.950015000002,
+      "roundP50Ms": 1520.7090690000005,
+      "costKnownRows": 13,
+      "usageMissingRows": 1,
+      "costPerScenarioUsd": 0.002013984357692308,
+      "totalCostKnownUsd": 0.028094646650000003,
+      "unknownReservationUsd": 0.0033870054,
+      "inputTokens": 494161,
+      "outputTokens": 4896
+    },
+    {
+      "candidate": "haiku@claude",
+      "role": "executor",
+      "model": "claude-haiku-5-5",
+      "n": 32,
+      "expected": 32,
+      "complete": true,
+      "stoppedBy": null,
+      "passed": 26,
+      "passRate": 0.8125,
+      "wilson95": [
+        0.6469050424507756,
+        0.9111057606383721
+      ],
+      "threshold": 0.95,
+      "meetsOwnRoleThreshold": false,
+      "critical": 0,
+      "errors": 0,
+      "byFamily": {
+        "read": {
+          "n": 5,
+          "passed": 4
+        },
+        "create": {
+          "n": 3,
+          "passed": 3
+        },
+        "timezone": {
+          "n": 2,
+          "passed": 2
+        },
+        "batch": {
+          "n": 1,
+          "passed": 1
+        },
+        "context": {
+          "n": 3,
+          "passed": 2
+        },
+        "clarify": {
+          "n": 4,
+          "passed": 3
+        },
+        "confirmation": {
+          "n": 4,
+          "passed": 2
+        },
+        "reminder": {
+          "n": 1,
+          "passed": 1
+        },
+        "contacts": {
+          "n": 2,
+          "passed": 2
+        },
+        "outcomes": {
+          "n": 2,
+          "passed": 2
+        },
+        "settings": {
+          "n": 2,
+          "passed": 1
+        },
+        "scope": {
+          "n": 2,
+          "passed": 2
+        },
+        "no-action": {
+          "n": 1,
+          "passed": 1
+        }
+      },
+      "failureReasons": {
+        "missing_or_wrong:get_events": 1,
+        "missing_or_wrong:update_event": 1,
+        "missing_required_choice": 2,
+        "missing_or_wrong:delete_event": 1,
+        "wrong_response_language": 1
+      },
+      "p50Ms": 3800.939359000011,
+      "p95Ms": 10212.876392999999,
+      "passedP50Ms": 4022.181301000004,
+      "roundP50Ms": 1651.0103309999977,
+      "costKnownRows": 32,
+      "usageMissingRows": 0,
+      "costPerScenarioUsd": 0.004918343749999999,
+      "totalCostKnownUsd": 0.15738699999999997,
+      "unknownReservationUsd": 0,
+      "inputTokens": 1499320,
+      "outputTokens": 14910
+    },
+    {
+      "candidate": "haiku@claude",
+      "role": "repair",
+      "model": "claude-haiku-5-5",
+      "n": 32,
+      "expected": 32,
+      "complete": true,
+      "stoppedBy": null,
+      "passed": 25,
+      "passRate": 0.78125,
+      "wilson95": [
+        0.6124466920955516,
+        0.8897630306846815
+      ],
+      "threshold": 0.95,
+      "meetsOwnRoleThreshold": false,
+      "critical": 0,
+      "errors": 0,
+      "byFamily": {
+        "read": {
+          "n": 5,
+          "passed": 4
+        },
+        "create": {
+          "n": 3,
+          "passed": 3
+        },
+        "timezone": {
+          "n": 2,
+          "passed": 2
+        },
+        "batch": {
+          "n": 1,
+          "passed": 1
+        },
+        "context": {
+          "n": 3,
+          "passed": 2
+        },
+        "clarify": {
+          "n": 4,
+          "passed": 3
+        },
+        "confirmation": {
+          "n": 4,
+          "passed": 2
+        },
+        "reminder": {
+          "n": 1,
+          "passed": 1
+        },
+        "contacts": {
+          "n": 2,
+          "passed": 2
+        },
+        "outcomes": {
+          "n": 2,
+          "passed": 2
+        },
+        "settings": {
+          "n": 2,
+          "passed": 1
+        },
+        "scope": {
+          "n": 2,
+          "passed": 1
+        },
+        "no-action": {
+          "n": 1,
+          "passed": 1
+        }
+      },
+      "failureReasons": {
+        "missing_or_wrong:get_events": 2,
+        "missing_or_wrong:update_event": 1,
+        "missing_required_choice": 2,
+        "missing_or_wrong:delete_event": 1,
+        "wrong_response_language": 1
+      },
+      "p50Ms": 5421.659967000014,
+      "p95Ms": 9502.763609999995,
+      "passedP50Ms": 5421.659967000014,
+      "roundP50Ms": 1938.5590109999757,
+      "costKnownRows": 32,
+      "usageMissingRows": 0,
+      "costPerScenarioUsd": 0.0057033562500000004,
+      "totalCostKnownUsd": 0.18250740000000001,
+      "unknownReservationUsd": 0,
+      "inputTokens": 1713444,
+      "outputTokens": 22326
+    },
+    {
+      "candidate": "haiku@claude",
+      "role": "planner",
+      "model": "claude-haiku-5-5",
+      "n": 108,
+      "expected": 108,
+      "complete": true,
+      "stoppedBy": null,
+      "passed": 103,
+      "passRate": 0.9537037037037037,
+      "wilson95": [
+        0.896173774092564,
+        0.9800654785647654
+      ],
+      "threshold": 0.95,
+      "meetsOwnRoleThreshold": true,
+      "critical": 0,
+      "errors": 0,
+      "byFamily": {
+        "catalog": {
+          "n": 36,
+          "passed": 36
+        },
+        "extraction": {
+          "n": 36,
+          "passed": 31
+        },
+        "outcome": {
+          "n": 36,
+          "passed": 36
+        }
+      },
+      "failureReasons": {
+        "wrong_answer": 5
+      },
+      "p50Ms": 1133.1710380000295,
+      "p95Ms": 2124.718942000007,
+      "passedP50Ms": 1133.1710380000295,
+      "roundP50Ms": 1133.1710380000295,
+      "costKnownRows": 108,
+      "usageMissingRows": 0,
+      "costPerScenarioUsd": 0.00015976851851851845,
+      "totalCostKnownUsd": 0.017254999999999993,
+      "unknownReservationUsd": 0,
+      "inputTokens": 142455,
+      "outputTokens": 6019
+    }
+  ],
+  "sourceResultsSha256": {
+    "20261023T1907Z-b5-roles-deepseek": "f044fb9c48452ee38a44d5bb313afdcb918b81e306a70fafadd8ba74cd376b8f",
+    "20261023T1907Z-b5-roles-glm": "63434e740a3dedfcc551985641e0a6581a523f04ed5240a78598400aa1ea1caa",
+    "20261023T1907Z-b5-roles-haiku": "182534e377cc664de730dcc7b8bc813fc049b5e3003b55d1bea107176a1afc78"
+  }
+}
