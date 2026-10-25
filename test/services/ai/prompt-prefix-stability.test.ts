@@ -2,10 +2,12 @@ import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import type OpenAI from 'openai';
 import { migrations } from '../../../src/database/migrations.ts';
+import { CalendarProposalRepository } from '../../../src/database/repositories/calendar-proposal.repository.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
+import { SecretaryRepository } from '../../../src/database/repositories/secretary.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { EventOccurrence } from '../../../src/database/types.ts';
@@ -110,9 +112,9 @@ describe('prompt prefix stability', () => {
           botUsername: 'cal_bot',
           recentEventsWindow: occurrences(8),
           secretary: {
-            secretaryRepo: undefined as never,
+            secretaryRepo: new SecretaryRepository(db),
             secretaryForLine: '@carol_pm (read+write)',
-            calendarProposalRepo: undefined as never,
+            calendarProposalRepo: new CalendarProposalRepository(db),
           },
         },
         shown: ['Pacific/Auckland', 'Борис', 'Окленд', 'Standup 3', '@carol_pm'],
