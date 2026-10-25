@@ -3,6 +3,11 @@
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { EnvConfig } from '../config/env.ts';
+import {
+  GOOGLE_CALENDAR_WEBHOOK_PATH,
+  GOOGLE_OAUTH_CALLBACK_PATH,
+  TELEGRAM_WEBHOOK_PATH,
+} from '../config/public-url.ts';
 import type { AlertRepository } from '../database/repositories/alert.repository.ts';
 import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../database/repositories/google-sync.repository.ts';
@@ -166,7 +171,7 @@ async function handleRequest(
     return new Response(READINESS_BODY.ready);
   }
 
-  if (req.method === 'GET' && url.pathname === '/oauth/google/callback') {
+  if (req.method === 'GET' && url.pathname === GOOGLE_OAUTH_CALLBACK_PATH) {
     const clientIp = server.requestIP(req)?.address ?? 'unknown';
     if (!oauthRateLimiter.isAllowed(clientIp)) {
       webLogger.warn({ clientIp }, 'OAuth callback rate limit exceeded');
@@ -186,7 +191,7 @@ async function handleRequest(
     });
   }
 
-  if (req.method === 'POST' && url.pathname === '/webhook/telegram') {
+  if (req.method === 'POST' && url.pathname === TELEGRAM_WEBHOOK_PATH) {
     if (!deps.telegramWebhookHandler) {
       return new Response('Not Found', { status: 404 });
     }
@@ -196,7 +201,7 @@ async function handleRequest(
     return deps.telegramWebhookHandler(req);
   }
 
-  if (req.method === 'POST' && url.pathname === '/webhooks/google-calendar') {
+  if (req.method === 'POST' && url.pathname === GOOGLE_CALENDAR_WEBHOOK_PATH) {
     if (!deps.calendarRepo) {
       return new Response('Not Found', { status: 404 });
     }

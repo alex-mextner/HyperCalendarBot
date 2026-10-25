@@ -128,9 +128,21 @@ p=pathlib.Path(sys.argv[1])/"releases/current.json"
 receipt=json.loads(p.read_text()) if p.is_file() else {}
 fmt='{{.Image}}|{{.State.Running}}|{{index .Config.Labels "org.opencontainers.image.revision"}}'
 parts=subprocess.check_output(['docker','inspect','hypercal-bot','--format',fmt],text=True).strip().split('|')
+def public_base_url():
+ # https://$PUBLIC_DOMAIN from the live .env; without one the bot runs in polling mode and only its published port answers.
+ # The last assignment wins and an inline "# comment" is dropped, as in docker compose's env_file.
+ host=''
+ try:
+  for line in (pathlib.Path(sys.argv[1])/".env").read_text().splitlines():
+   if line.startswith('PUBLIC_DOMAIN='):
+    host=line.split('=',1)[1].split(' #',1)[0].split('\t#',1)[0].strip().strip('"\'')
+ except OSError:
+  pass
+ return 'https://'+host if host else 'http://127.0.0.1:3001'
+BASE=public_base_url()
 def body(path):
  try:
-  with urllib.request.urlopen('https://hypercal.invntrm.ru/'+path,timeout=10) as r:
+  with urllib.request.urlopen(BASE+'/'+path,timeout=10) as r:
    return r.read(256).decode().strip()
  except Exception:
   return None

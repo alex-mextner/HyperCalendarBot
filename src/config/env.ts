@@ -10,6 +10,7 @@ import {
   type RoleChains,
 } from '../services/ai/role-routing.ts';
 import { logger, logOnce } from '../utils/logger.ts';
+import { GOOGLE_OAUTH_CALLBACK_PATH, publicUrl } from './public-url.ts';
 
 /** Owner-chosen order for main requests: z.ai, then Claude, then Hugging Face.
  * Explicit operator order (AI_SMART_CHAIN) wins; token-fit guards, circuits and fallback stay intact.
@@ -181,6 +182,13 @@ export function loadConfig(): EnvConfig {
   const REDIS_URL = requireEnv('REDIS_URL');
   const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || undefined;
   const PUBLIC_DOMAIN = process.env.PUBLIC_DOMAIN || undefined;
+  if (
+    PUBLIC_DOMAIN &&
+    !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d+)?$/i.test(PUBLIC_DOMAIN)
+  ) {
+    // A scheme or path would register https://https://… with Telegram and Google.
+    throw new Error('PUBLIC_DOMAIN must be a bare host such as hypercal.mextner.com, without scheme or path');
+  }
 
   if (GOOGLE_CLIENT_ID) {
     if (!ENCRYPTION_KEY) {
@@ -192,7 +200,8 @@ export function loadConfig(): EnvConfig {
   }
 
   const GOOGLE_REDIRECT_URI =
-    process.env.GOOGLE_REDIRECT_URI || (PUBLIC_DOMAIN ? `https://${PUBLIC_DOMAIN}/oauth/google/callback` : undefined);
+    process.env.GOOGLE_REDIRECT_URI ||
+    (PUBLIC_DOMAIN ? publicUrl(PUBLIC_DOMAIN, GOOGLE_OAUTH_CALLBACK_PATH) : undefined);
 
   const BOT_ADMIN_ID = process.env.BOT_ADMIN_ID
     ? (() => {

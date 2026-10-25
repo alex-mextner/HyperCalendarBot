@@ -82,7 +82,10 @@ function ageUnverified(seconds: number): void {
 
 beforeEach(() => {
   work = mkdtempSync(join(tmpdir(), 'hypercal-watchdog-'));
-  writeFileSync(join(work, 'env'), 'BOT_TOKEN=t\nBOT_ADMIN_ID=1\nADMIN_ALERT_TOKEN=x\n');
+  writeFileSync(
+    join(work, 'env'),
+    'BOT_TOKEN=t\nBOT_ADMIN_ID=1\nADMIN_ALERT_TOKEN=x\nPUBLIC_DOMAIN=hypercal.mextner.com\n',
+  );
   writeFileSync(join(work, 'sent.log'), '');
   Bun.spawnSync(['mkdir', '-p', join(work, 'bin')]);
   stubCurl();
@@ -110,6 +113,52 @@ describe('healthcheck watchdog', () => {
     await poll('503', READINESS_BODY.chainDown);
     const after = readFileSync(join(work, 'sent.log'), 'utf8').split('\n').length;
     expect(after).toBe(before);
+  });
+
+  // The watchdog probes the host the bot itself is configured with, so moving the public
+  // ingress (hypercal.invntrm.ru -> hypercal.mextner.com, #828) is an .env edit, not a script edit.
+  test('the DOWN alert names the readiness URL built from PUBLIC_DOMAIN', async () => {
+    const sent = await poll('503', 'bot not started');
+    expect(sent).toContain('https://hypercal.mextner.com/ready');
+    expect(sent).not.toContain('invntrm');
+  });
+
+  test('a missing PUBLIC_DOMAIN stops the run, says so once and probes no guessed host', () => {
+    writeFileSync(join(work, 'env'), 'BOT_TOKEN=t\nBOT_ADMIN_ID=1\nADMIN_ALERT_TOKEN=x\n');
+    const options = {
+      env: { ...process.env, PATH: `${join(work, 'bin')}:${process.env.PATH}`, SENT_LOG: join(work, 'sent.log') },
+    };
+    const first = Bun.spawnSync(['bash', stagedScript()], options);
+    expect(first.exitCode).toBe(1);
+    expect(first.stderr.toString()).toContain('PUBLIC_DOMAIN not found');
+    const sent = readFileSync(join(work, 'sent.log'), 'utf8');
+    expect(sent).toContain('watchdog is blind');
+    expect(sent).not.toContain('/ready');
+    Bun.spawnSync(['bash', stagedScript()], options);
+    expect(readFileSync(join(work, 'sent.log'), 'utf8')).toBe(sent);
+  });
+
+  // docker compose's env_file takes the last assignment and drops an inline comment; the watchdog
+  // has to probe the host the bot actually registered.
+  test('the last PUBLIC_DOMAIN line wins and an inline comment is ignored', async () => {
+    writeFileSync(
+      join(work, 'env'),
+      'BOT_TOKEN=t\nBOT_ADMIN_ID=1\nADMIN_ALERT_TOKEN=x\nPUBLIC_DOMAIN=hypercal.invntrm.ru\nPUBLIC_DOMAIN="hypercal.mextner.com" # prod\n',
+    );
+    const sent = await poll('503', 'bot not started');
+    expect(sent).toContain('https://hypercal.mextner.com/ready');
+    expect(sent).not.toContain('invntrm');
+  });
+
+  // An editor's CRLF or a trailing space in .env must not leave a control character in the probed URL.
+  test('PUBLIC_DOMAIN with a CRLF line ending still probes a clean URL', async () => {
+    writeFileSync(
+      join(work, 'env'),
+      'BOT_TOKEN=t\nBOT_ADMIN_ID=1\nADMIN_ALERT_TOKEN=x\nPUBLIC_DOMAIN=hypercal.mextner.com \r\n',
+    );
+    const sent = await poll('503', 'bot not started');
+    expect(sent).toContain('https://hypercal.mextner.com/ready');
+    expect(sent).not.toContain('\r');
   });
 
   // The likeliest reaction to the alert is a restart, and a restarted process

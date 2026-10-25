@@ -11,6 +11,7 @@ import { createBot, type GoogleBotDeps } from './bot/index.ts';
 import type { Lang } from './config/constants.ts';
 import { t } from './config/constants.ts';
 import { loadConfig } from './config/env.ts';
+import { publicUrl, TELEGRAM_WEBHOOK_PATH } from './config/public-url.ts';
 import { createDatabase } from './database/index.ts';
 import { AgendaRepository } from './database/repositories/agenda.repository.ts';
 import type { CalendarEvent } from './database/types.ts';
@@ -1319,7 +1320,7 @@ process.on('SIGTERM', async () => {
 if (config.PUBLIC_DOMAIN) {
   const { webhookHandler } = await import('gramio');
   const webhookSecret = crypto.randomUUID();
-  const webhookUrl = `https://${config.PUBLIC_DOMAIN}/webhook/telegram`;
+  const webhookUrl = publicUrl(config.PUBLIC_DOMAIN, TELEGRAM_WEBHOOK_PATH);
 
   webServerDeps.telegramWebhookHandler = webhookHandler(bot, 'Bun.serve', {
     secretToken: webhookSecret,
