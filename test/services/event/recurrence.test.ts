@@ -235,3 +235,22 @@ describe('expandRecurrence', () => {
     });
   });
 });
+
+for (const [timezone, start_at, next] of [
+  ['Etc/GMT+12', '2026-06-30T12:00:00.000Z', '2026-07-01T12:00:00.000Z'],
+  ['Pacific/Kiritimati', '2026-06-29T10:00:00.000Z', '2026-06-30T10:00:00.000Z'],
+  ['America/Los_Angeles', '2026-03-07T17:00:00.000Z', '2026-03-08T16:00:00.000Z'],
+  ['Europe/Belgrade', '2026-03-28T11:30:00.000Z', '2026-03-29T10:30:00.000Z'],
+]) {
+  test(`recurrence reconstructs the intended LOCAL calendar day: ${timezone}`, () => {
+    const template = makeTemplate({ timezone, start_at, end_at: null, recurrence_rule: 'FREQ=DAILY;COUNT=2' });
+    const first = Date.parse(start_at!);
+    const result = expandRecurrence(
+      template,
+      [],
+      new Date(first - 86400000).toISOString(),
+      new Date(first + 3 * 86400000).toISOString(),
+    );
+    expect(result.map((occurrence) => occurrence.occurrence_start)).toEqual([start_at!, next!]);
+  });
+}

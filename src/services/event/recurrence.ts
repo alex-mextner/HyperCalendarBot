@@ -125,10 +125,9 @@ function formatRRuleDate(date: Date): string {
 function adjustOccurrenceForDst(date: Date, timezone: string, h: number, m: number, s: number): Date {
   // Determine which local calendar date this UTC occurrence maps to
   const occTz = new TZDate(date, timezone);
-  // Construct a TZDate at midnight UTC on that local date, then set the
-  // event's intended local time — TZDate applies DST rules for this date.
-  const local = new TZDate(new Date(Date.UTC(occTz.getFullYear(), occTz.getMonth(), occTz.getDate())), timezone);
-  local.setHours(h, m, s, 0);
+  // Construct the wall-clock date in its own zone. Seeding with midnight UTC
+  // first moves negative-offset zones onto the previous local calendar day.
+  const local = new TZDate(occTz.getFullYear(), occTz.getMonth(), occTz.getDate(), h, m, s, 0, timezone);
   return new Date(local.getTime());
 }
 
