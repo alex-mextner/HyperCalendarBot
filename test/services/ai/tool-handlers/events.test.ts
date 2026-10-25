@@ -1,6 +1,8 @@
+// Event tool contracts exercised with synthetic in-memory repositories.
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
+import { AgendaRepository } from '../../../../src/database/repositories/agenda.repository.ts';
 import { CalendarProposalRepository } from '../../../../src/database/repositories/calendar-proposal.repository.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
@@ -9,6 +11,7 @@ import { GoogleCalendarRepository } from '../../../../src/database/repositories/
 import { GroupChatRepository } from '../../../../src/database/repositories/group-chat.repository.ts';
 import { GroupMemberRepository } from '../../../../src/database/repositories/group-member.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
+import { InvitationRepository } from '../../../../src/database/repositories/invitation.repository.ts';
 import { ParticipantRepository } from '../../../../src/database/repositories/participant.repository.ts';
 import { SecretaryRepository } from '../../../../src/database/repositories/secretary.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
@@ -31,6 +34,9 @@ import { localToGoogle } from '../../../../src/services/google/event-mapper.ts';
 import type { GroupMemberService } from '../../../../src/services/group/member-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 import { generateIcs } from '../../../../src/services/ics/generator.ts';
+import { AddressCache } from '../../../../src/services/location/address-cache.ts';
+import { InMemoryLocationCandidateStore } from '../../../../src/services/location/location-candidate-store.ts';
+import { LocationVerificationService } from '../../../../src/services/location/location-verification-service.ts';
 import { buildUserSessionInvitationText } from '../../../../src/services/telegram-session/invitation-text.ts';
 
 function createTestDb() {
@@ -498,6 +504,51 @@ describe('event tool handlers', () => {
   });
 
   describe('handleUpdateEvent', () => {
+    for (const [change, visible] of [
+      [{ title: 'Updated synthetic meeting' }, 'Updated synthetic meeting'],
+      [{ start_at: '2026-10-09T13:00:00Z', end_at: '2026-10-09T14:00:00Z' }, 'Fri 9'],
+      [{ start_at: '2026-10-08T15:00:00Z', end_at: '2026-10-08T16:00:00Z' }, '15:00'],
+    ] as const) {
+      test(`AI update refreshes delivered cards for ${JSON.stringify(change)}`, async () => {
+        const invitations = new InvitationRepository(db);
+        const event = ctx.eventService.createEvent({
+          user_id: USER_ID,
+          title: 'Synthetic meeting',
+          timezone: 'UTC',
+          start_at: '2026-10-08T13:00:00Z',
+          end_at: '2026-10-08T14:00:00Z',
+        });
+        ctx.userRepo.create({ telegram_id: 456, timezone: 'UTC' });
+        const invitation = invitations.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: 456 });
+        invitations.setMessageInfo(invitation.id, 999, 456);
+        const before = invitations.getByEvent(event.id);
+        const editMessage = mock(async (_chatId: number, _messageId: number, _text: string) => {});
+        ctx.locationVerification = new LocationVerificationService({
+          geocodingService: {
+            findPlace: async () => [],
+            geocodeAddress: async () => [],
+            reverseGeocode: async () => null,
+            locateArea: async () => null,
+          },
+          addressCache: new AddressCache({ get: async () => null, compareAndSet: async () => false }),
+          eventRepo: new EventRepository(db),
+          userRepo: ctx.userRepo,
+          invitationRepo: invitations,
+          agendaRepository: new AgendaRepository(db),
+          candidateStore: new InMemoryLocationCandidateStore(),
+          sendMessage: async () => {},
+          editMessage,
+        });
+
+        const result = await handleUpdateEvent(ctx, { event_id: event.id, ...change });
+
+        expect(result.success).toBe(true);
+        expect(editMessage).toHaveBeenCalledTimes(1);
+        expect(editMessage.mock.calls[0]?.[2]).toContain(visible);
+        expect(invitations.getByEvent(event.id)).toEqual(before);
+      });
+    }
+
     test('updates event title', async () => {
       const event = ctx.eventService.createEvent({
         user_id: USER_ID,
