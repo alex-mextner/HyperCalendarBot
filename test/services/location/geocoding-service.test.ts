@@ -88,6 +88,48 @@ describe('Google requests are biased toward the home area', () => {
     expect(findPlace?.searchParams.get('locationbias')).toBe('rectangle:42.23,18.82|46.19,23.01');
   });
 
+  test('a place outside the bias rectangle is still returned, never filtered out — bias only ranks', async () => {
+    const belgradeBias: GeoBounds = { south: 44.68, west: 20.2, north: 44.94, east: 20.62 };
+    const nisComponents = [
+      { long_name: 'Ниш', short_name: 'Ниш', types: ['locality', 'political'] },
+      { long_name: 'Сербия', short_name: 'RS', types: ['country', 'political'] },
+    ];
+    // Nis (43.32, 21.9) sits well outside the Belgrade bias rectangle biased toward below.
+    const requests = googleReturning({
+      status: 'OK',
+      candidates: [
+        {
+          name: 'Nis Cafe',
+          formatted_address: 'Obrenovićeva 1, Ниш, Сербия',
+          place_id: 'place-nis',
+          geometry: { location: { lat: 43.32, lng: 21.9 } },
+        },
+      ],
+      results: [
+        {
+          formatted_address: 'Obrenovićeva 1, Ниш, Сербия',
+          geometry: {
+            location: { lat: 43.32, lng: 21.9 },
+            viewport: { northeast: { lat: 43.33, lng: 21.91 }, southwest: { lat: 43.31, lng: 21.89 } },
+          },
+          address_components: nisComponents,
+          place_id: 'place-nis',
+        },
+      ],
+    });
+
+    const results = await createGeocodingService('key').findPlace('Nis Cafe', {
+      countryCode: 'RS',
+      bounds: belgradeBias,
+    });
+
+    const findPlace = requests.find((u) => u.pathname.endsWith('/findplacefromtext/json'));
+    expect(findPlace?.searchParams.get('locationbias')).toBe('rectangle:44.68,20.2|44.94,20.62');
+    expect(results).toHaveLength(1);
+    expect(results[0]?.formattedAddress).toBe('Obrenovićeva 1, Ниш, Сербия');
+    expect(results[0]?.city).toBe('Ниш');
+  });
+
   test('Geocoding sends the region and bounds, and the text query stays as typed', async () => {
     const requests = googleReturning({ status: 'ZERO_RESULTS', results: [] });
 
