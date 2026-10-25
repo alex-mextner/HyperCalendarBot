@@ -65,7 +65,20 @@ STATUS_DESCRIPTION = re.compile(r"artifact ([1-9][0-9]*) (sha256:[0-9a-f]{64})")
 RUN_URL = re.compile(r"https://github\.com/" + re.escape(REPO) + r"/actions/runs/([1-9][0-9]*)", re.IGNORECASE)
 MAX_REDIRECTS = 3
 REQUIRED = ("image.tar.gz", "docker-compose.yml", "Caddyfile")
-OPTIONAL = ("artifact.json",)
+# docker-compose.stage.yml only exists once the stage gate ships (#805); the wrapper is installed by
+# hand, so it accepts the release files of later changes ahead of time and a release built before
+# them still deploys. The activator itself (deploy-prebuilt-image.sh) refuses a release that lacks
+# a helper it needs, so optional here does not mean optional for the deploy.
+OPTIONAL = ("artifact.json", "docker-compose.stage.yml")
+OPTIONAL_SCRIPTS = (
+    "odroid-deploy-lock.sh",
+    "deploy-health.py",
+    "deploy-evidence.py",
+    "log-retention.py",
+    "stage-smoke.py",
+    "stage-smoke-cases.json",
+    "stage-gate.sh",
+)
 SCRIPTS = (
     "backup-db.sh",
     "healthcheck-alert.sh",
@@ -256,6 +269,7 @@ def extract_known_files(zip_path):
     wanted = [(name, True) for name in REQUIRED]
     wanted += [(name, False) for name in OPTIONAL]
     wanted += [("scripts/" + name, True) for name in SCRIPTS]
+    wanted += [("scripts/" + name, False) for name in OPTIONAL_SCRIPTS]
     sums = {}
     with zipfile.ZipFile(zip_path) as archive:
         names = archive.namelist()
