@@ -10,6 +10,7 @@ import { UserRepository } from '../../../src/database/repositories/user.reposito
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { ChatHistoryMessage } from '../../../src/database/types.ts';
 import { CalendarBotAgent, toolCallKey } from '../../../src/services/ai/agent.ts';
+import { assembleSystemPrompt } from '../../../src/services/ai/system-prompt.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
@@ -66,8 +67,8 @@ describe('CalendarBotAgent', () => {
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText); // middleware saves before pipeline
     const history = ctx.chatHistory.getRecent(USER_ID);
     const agent = new CalendarBotAgent(config, sender);
-    const { systemPrompt, messages } = await agent.buildMessages(ctx, history);
-    expect(systemPrompt).toContain('calendar assistant');
+    const { systemParts, messages } = await agent.buildMessages(ctx, history);
+    expect(assembleSystemPrompt(systemParts)).toContain('calendar assistant');
     expect(messages.length).toBe(1);
     expect(messages[0]!.role).toBe('user');
     expect(messages[0]!.content as string).toContain('What do I have today?');

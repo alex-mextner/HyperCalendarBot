@@ -39,6 +39,7 @@ import { DeepLinkService } from '../../../src/services/sharing/deep-link-service
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 import { PrivacyService } from '../../../src/services/sharing/privacy-service.ts';
 import { SharingService } from '../../../src/services/sharing/sharing-service.ts';
+import { commonPrefixLength } from '../../helpers/common-prefix.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -413,6 +414,46 @@ describe('CalendarBotAgent.run()', () => {
     await new CalendarBotAgent({ ...config, toolSchemaMode: 'lazy' }, sender, { streamImpl: impl }).run(ctx);
     expect(names).not.toContain('discover_tools');
     expect(names).toContain('end_call');
+  });
+
+  test.each([
+    'full',
+    'lazy',
+  ] as const)('the system message sent in %s mode shares its leading bytes between users and puts the clock last', async (toolSchemaMode) => {
+    const sent: string[] = [];
+    const run = async (agentCtx: AgentContext) => {
+      const script = makeStreamImpl([{ kind: 'text', text: 'Synthetic reply.' }]);
+      const impl: typeof script.impl = async (opts, cbs) => {
+        const system = opts.messages[0];
+        if (!isValidatorCall(opts) && sent.length < 2 && system?.role === 'system') sent.push(String(system.content));
+        return script.impl(opts, cbs);
+      };
+      await new CalendarBotAgent({ ...config, toolSchemaMode }, sender, { streamImpl: impl }).run(agentCtx);
+    };
+    const other = ctx.userRepo.create({
+      telegram_id: USER_ID + 1,
+      first_name: 'Борис',
+      timezone: 'Pacific/Auckland',
+      language: 'ru',
+    });
+    await run(ctx);
+    await run({ ...ctx, user: other, chatId: other.telegram_id });
+
+    expect(sent).toHaveLength(2);
+    const [first, second] = sent as [string, string];
+    expect(first).not.toBe(second);
+    const shared = commonPrefixLength(first, second);
+    // Everything before the user's own values is identical, and it is most of the prompt.
+    const userInfoAt = first.indexOf('## User Info');
+    expect(userInfoAt).toBeGreaterThan(0);
+    expect(shared).toBeGreaterThanOrEqual(userInfoAt);
+    expect(shared / first.length).toBeGreaterThan(0.8);
+    expect(first.indexOf('Current local time:')).toBeGreaterThan(first.length * 0.8);
+    if (toolSchemaMode === 'lazy') {
+      const indexAt = first.indexOf('## Available tool names');
+      expect(indexAt).toBeGreaterThan(0);
+      expect(indexAt).toBeLessThan(userInfoAt);
+    }
   });
 
   test('lazy schemas keep all names visible but expose only requested parameters', async () => {
