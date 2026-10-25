@@ -206,7 +206,7 @@ ${cityLine}${secretaryLine}`;
 
 function buildContextSection(): string {
   return `## Context
-- "Current local time" above is the authoritative clock. Each message includes a LOCAL timestamp in brackets, e.g. [2026-03-18 10:30] — already in the user's timezone, no conversion needed.
+- "Current local time" in User Info is the authoritative clock. Each message includes a LOCAL timestamp in brackets, e.g. [2026-03-18 10:30] — already in the user's timezone, no conversion needed.
 - CALCULATE RULE: For ANY arithmetic — time, dates, durations, numbers — ALWAYS call the \`calculate\` tool. Never compute in your head. If calculate returns an error, report it to the user — do not compute manually.
 - Messages from group chats are prefixed with [From: name (id:N)] after the timestamp. In groups, be brief and relevant — you were triggered by a calendar keyword or direct mention.
 - Messages from private chats have no group prefix.`;
@@ -247,25 +247,33 @@ function buildOutputRules(): string {
 - After ask_user or pick_users, the conversation STOPS. Do not generate any text after these tools.`;
 }
 
-function buildDataRules(durationMins: number): string {
+function buildDataRules(): string {
   return `- SEARCH SCOPE: When searching for events (search_events), if the default scope returns no results, retry with the other scope before telling the user nothing was found. In DMs: try "personal" first, then "group" — both are safe. In groups: try "group" first. If group scope returns empty, do NOT silently search "personal" — personal calendar data must NEVER be exposed in a group without the user's explicit request. Instead, tell the user the event was not found in the group calendar and suggest they check their personal calendar in DM. Only search personal scope in a group if the user explicitly asked for it (e.g. "мой личный календарь", "my personal events"). When reporting "not found", specify which scope you searched — never say generic "в календаре нет" without clarifying whether you checked personal, group, or both.
 - ALWAYS use tools to get fresh data. You have NO built-in knowledge of the user's state. Even if a tool returned an error earlier, TRY AGAIN — settings change between messages. Never assume a feature is "not available" based on a previous error.
 - When asked to delete all events, use get_events with a wide date range to find them ALL, then pass all their ids to ask_user event_ids.
-- If a tool returns an error, tell the user briefly without technical details. If the error says "temporarily unavailable" or "server-side", don't suggest the user change their settings — say the feature is temporarily down and will work later.
-- Default event duration: ${durationMins} minutes. When creating an event with no explicit end time or duration, set end_at = start_at + ${durationMins} minutes.`;
+- If a tool returns an error, tell the user briefly without technical details. If the error says "temporarily unavailable" or "server-side", don't suggest the user change their settings — say the feature is temporarily down and will work later.`;
 }
 
-function buildPeopleRules(ctx: AgentContext, durationMins: number, now: TZDate): string {
-  // Tomorrow 15:00 in the user's zone, in the exact form calculate returns, with the default duration.
+function buildDurationRule(durationMins: number): string {
+  return `- Default event duration: ${durationMins} minutes. When creating an event with no explicit end time or duration, set end_at = start_at + ${durationMins} minutes.`;
+}
+
+/** The one rule line that carries a dated example: tomorrow 15:00 in the user's zone, in the exact form calculate returns, with the default duration. */
+function buildParticipantsExample(ctx: AgentContext, durationMins: number, now: TZDate): string {
   const start = new TZDate(now.getFullYear(), now.getMonth(), now.getDate() + 1, 15, 0, 0, ctx.user.timezone);
   const example = JSON.stringify({
     title: 'Встреча с Леной',
     start_at: new Date(start.getTime()).toISOString(),
     end_at: new Date(start.getTime() + durationMins * 60_000).toISOString(),
   });
+  return `- PARTICIPANTS example: "завтра в 15 с Леной и мной" → create_event(${example}), invite Лена.`;
+}
+
+/** Static people rules. The PARTICIPANTS rule's dated example is `buildParticipantsExample`, kept in the per-user rules. */
+function buildPeopleRules(): string {
   return `- NAMES: Use exactly the user's name form: "Алекс", never "Алексей"/"Александр"; "Вова", never "Владимир". Save it via add_contact. For contacts use preferred_name if set, otherwise their display name.
 - CONTACTS RESULT DISPLAY: After add_contact/update_contact, immediately call get_contacts and show the full updated list; never assume success without that result.
-- PARTICIPANTS: invite them as below, never list them in description; attendance only from get_invitation_status. The user ("мной"/"me") is the organizer: never invite, pick or list them. "завтра в 15 с Леной и мной" → create_event(${example}), invite Лена.
+- PARTICIPANTS: invite them as below, never list them in description; attendance only from get_invitation_status. The user ("мной"/"me") is the organizer: never invite, pick or list them.
 - IMPORTANT: When the user mentions OTHER PEOPLE in an event, follow this sequence:
   1. Create the event first.
   2. For each mentioned person, determine how they were referenced:
@@ -276,16 +284,26 @@ function buildPeopleRules(ctx: AgentContext, durationMins: number, now: TZDate):
 - DELIVERY LANGUAGE: When send_invitation or resend_invitation returns success, say the invitation was *created and is being sent*. NEVER say it was delivered, received, or that you are waiting for a response — delivery is async and may fail.`;
 }
 
-function buildRulesSection(ctx: AgentContext, utcOffset: string, durationMins: number, now: TZDate): string {
+/** Rules whose wording is the same for every user and every request. */
+function buildStaticRulesSection(): string {
   return [
     '## Rules',
-    `- ${buildLanguageRule(ctx)}`,
-    buildTimeRules(ctx, utcOffset),
     '- Be concise. No unnecessary preamble.',
     buildEventCreationRules(),
     buildOutputRules(),
-    buildDataRules(durationMins),
-    buildPeopleRules(ctx, durationMins, now),
+    buildDataRules(),
+    buildPeopleRules(),
+  ].join('\n');
+}
+
+/** Rules that quote this user's language, timezone, default duration or the current date. */
+function buildUserRulesSection(ctx: AgentContext, utcOffset: string, durationMins: number, now: TZDate): string {
+  return [
+    '## Rules for This User',
+    `- ${buildLanguageRule(ctx)}`,
+    buildTimeRules(ctx, utcOffset),
+    buildDurationRule(durationMins),
+    buildParticipantsExample(ctx, durationMins, now),
   ].join('\n');
 }
 
@@ -438,10 +456,15 @@ If the message is about the user's own calendar — act normally (no proposal ne
 If it's unclear whose calendar is meant — call ask_user: ["Мой", "@alice"].`;
 }
 
-function buildGroupSection(ctx: AgentContext): string {
-  if (!ctx.isGroup || !ctx.groupTitle) return '';
-  return `## Group Context
-You are in group "${ctx.groupTitle}" (chat_id: ${ctx.groupChatId}).
+/** One predicate for both group sections, so the static rules and the identity line always appear together. */
+function isNamedGroup(ctx: AgentContext): boolean {
+  return ctx.isGroup && Boolean(ctx.groupTitle);
+}
+
+/** The group's static rules: the same text for every group, so it can sit in the shared prefix. */
+function buildGroupRulesSection(ctx: AgentContext): string {
+  if (!isNamedGroup(ctx)) return '';
+  return `## Group Mode
 Default scope for all event tools is "group" — you manage the GROUP calendar.
 The user can explicitly ask about their personal calendar — then use scope "personal".
 
@@ -460,11 +483,18 @@ ${buildGroupSilenceRules()}
 ${buildGroupHelpRules(ctx)}`;
 }
 
+/** Which group this is: the only part of the group prompt that differs between groups. */
+function buildGroupContextSection(ctx: AgentContext): string {
+  if (!isNamedGroup(ctx)) return '';
+  return `## Group Context
+You are in group "${ctx.groupTitle}" (chat_id: ${ctx.groupChatId}).`;
+}
+
 function buildSecretarySection(ctx: AgentContext): string {
   if (!ctx.secretary?.secretaryForLine) return '';
   return `## Secretary Access
 
-If "Calendars you can manage as secretary" is listed above:
+If "Calendars you can manage as secretary" is listed in User Info:
 - If the message clearly targets someone else's calendar (they name the person, say "у Алисы", "для Алисы", etc.) — pass owner_id to the event tool.
 - If ambiguous (no person mentioned, the user could mean their own or a delegating user's calendar) — call ask_user with options like ["Мой", "@alice_cto"]. Do not assume.
 - If clearly the user's own calendar — do NOT pass owner_id.
@@ -529,32 +559,70 @@ You MUST help complete the action. When done:
 - Call cancel_scene if you completed everything via tools (e.g., created the event directly)`;
 }
 
-export function buildSystemPrompt(ctx: AgentContext): string {
+/**
+ * The system prompt in the order a prefix cache needs it.
+ *
+ * Providers cache a request by its leading bytes: z.ai's implicit cache and Anthropic's
+ * cache_control breakpoints both reuse everything up to the first byte that differs from an
+ * earlier request. The request therefore runs from what no request changes to what every
+ * request changes, and a per-request value (the clock, the user's name, an id) never
+ * appears ahead of text that does not depend on it.
+ */
+export interface SystemPromptParts {
+  /** Identical for every request: the role, the rules and the guidance, with no per-request value. */
+  stable: string;
+  /** Static text that depends only on the request's mode (a group chat, a voice message), never on user data. */
+  modeRules: string;
+  /** Everything that carries a value of this user or this moment: profile, clock, memory, schedule, group identity. */
+  dynamic: string;
+}
+
+function joinSections(sections: readonly string[]): string {
+  return sections.filter((section) => section.length > 0).join('\n\n');
+}
+
+export function buildSystemPromptParts(ctx: AgentContext): SystemPromptParts {
   const durationMins = ctx.user.default_event_duration_minutes ?? 60;
   const utcOffset = formatUtcOffset(ctx.user.timezone);
   // One instant for the displayed local time and the dated example, so midnight cannot fall between them.
   const now = new TZDate(Date.now(), ctx.user.timezone);
 
-  const sections = [
-    'You are a calendar assistant for a Telegram bot. You help users manage their schedule.',
-    buildUserInfoSection(ctx, utcOffset, now),
-    buildMemorySection(ctx),
-    buildAddressSection(ctx),
-    buildPendingGeoSection(ctx),
-    buildContextSection(),
-    buildEventsWindowSection(ctx),
-    buildRulesSection(ctx, utcOffset, durationMins, now),
-    buildProactiveSection(),
-    buildSharedEventsSection(),
-    buildStallSection(),
-    buildInputModeSection(ctx),
-    buildGroupSection(ctx),
-    buildSecretarySection(ctx),
-    buildSupplementSection(ctx),
-    buildScenePausedSection(ctx),
-  ];
+  return {
+    stable: joinSections([
+      'You are a calendar assistant for a Telegram bot. You help users manage their schedule.',
+      buildContextSection(),
+      buildStaticRulesSection(),
+      buildProactiveSection(),
+      buildSharedEventsSection(),
+      buildStallSection(),
+    ]),
+    modeRules: joinSections([buildInputModeSection(ctx), buildGroupRulesSection(ctx)]),
+    dynamic: joinSections([
+      buildUserInfoSection(ctx, utcOffset, now),
+      buildUserRulesSection(ctx, utcOffset, durationMins, now),
+      buildMemorySection(ctx),
+      buildAddressSection(ctx),
+      buildPendingGeoSection(ctx),
+      buildEventsWindowSection(ctx),
+      buildGroupContextSection(ctx),
+      buildSecretarySection(ctx),
+      buildSupplementSection(ctx),
+      buildScenePausedSection(ctx),
+    ]),
+  };
+}
 
-  return sections.filter((section) => section.length > 0).join('\n\n');
+/**
+ * One system message from its parts. The tool index of a lazy catalog is as static as the rules, so it
+ * goes ahead of the dynamic part; behind it, it would push the shared prefix back to the clock.
+ */
+export function assembleSystemPrompt(parts: SystemPromptParts, toolIndex?: string): string {
+  return joinSections([parts.stable, parts.modeRules, toolIndex ?? '', parts.dynamic]);
+}
+
+/** The whole prompt as one string, for callers that do not need the parts (offline scripts and tests). */
+export function buildSystemPrompt(ctx: AgentContext): string {
+  return assembleSystemPrompt(buildSystemPromptParts(ctx));
 }
 
 /**

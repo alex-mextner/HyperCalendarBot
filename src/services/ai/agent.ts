@@ -39,7 +39,12 @@ import {
   providerFailureMetrics,
   type StreamCallbacks,
 } from './streaming.ts';
-import { buildSystemPrompt, buildUserProfileEvidence } from './system-prompt.ts';
+import {
+  assembleSystemPrompt,
+  buildSystemPromptParts,
+  buildUserProfileEvidence,
+  type SystemPromptParts,
+} from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
 import { createToolExposure, DISCOVERY_TOOL, runRoundRevealingRejectedTools } from './tool-exposure.ts';
@@ -706,11 +711,11 @@ export class CalendarBotAgent {
     history: ChatHistoryMessage[],
     measuredStream?: typeof aiStreamRound,
     signal?: AbortSignal,
-  ): Promise<{ systemPrompt: string; messages: MessageParam[] }> {
+  ): Promise<{ systemParts: SystemPromptParts; messages: MessageParam[] }> {
     // IMPORTANT: history must already contain the current user message.
     // The chat-logging middleware (bot/middleware/chat-logging.ts) saves it via ConversationLogger
     // before the pipeline runs, so by the time agent.run() is called, it is present.
-    const systemPrompt = buildSystemPrompt(ctx);
+    const systemParts = buildSystemPromptParts(ctx);
 
     const relevantHistory =
       ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 50) : history;
@@ -767,7 +772,7 @@ export class CalendarBotAgent {
       }
     }
 
-    return { systemPrompt, messages: sanitizeMessages(ordered) };
+    return { systemParts, messages: sanitizeMessages(ordered) };
   }
 
   /**
@@ -1100,7 +1105,7 @@ export class CalendarBotAgent {
       const turnHistory =
         ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 30) : history;
       ctx.dayReferences = resolveTurnDayReferences(ctx.messageText, turnHistory, new Date(), ctx.user.timezone);
-      const { systemPrompt, messages: rawHistoryMessages } = await waitForAbort(
+      const { systemParts, messages: rawHistoryMessages } = await waitForAbort(
         () => this.buildMessages(ctx, history, summaryStream, requestSignal),
         requestSignal,
       );
@@ -1111,7 +1116,7 @@ export class CalendarBotAgent {
             requestSignal,
           )
         : rawHistoryMessages;
-      const activePrompt = exposure ? `${systemPrompt}\n\n${exposure.prompt}` : systemPrompt;
+      const activePrompt = assembleSystemPrompt(systemParts, exposure?.prompt);
       dbg?.logSystemPrompt(activePrompt);
       dbg?.logHistory(historyMessages);
       currentMessages = [{ role: 'system', content: activePrompt }, ...historyMessages];

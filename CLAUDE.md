@@ -69,7 +69,11 @@ Each layer returns `{ handled: true }` to stop propagation, or `{ handled: false
 - `tools.ts` — 40+ tool definitions (the Claude API schema).
 - `tool-executor.ts` — dispatches tool name → handler function.
 - `tool-handlers/` — one file per domain: `events`, `reminders`, `sharing`, `secretary`, `proposals`, `slots`, `settings`, `meta`, `feedback`, `history`.
-- `system-prompt.ts` — builds dynamic system prompt with user context (timezone, secretary access, group mode).
+- `system-prompt.ts` — builds the system prompt as `SystemPromptParts` in prefix-cache order. Providers cache by leading bytes (z.ai implicit cache, Anthropic `cache_control`), so a per-request value must never be added ahead of static text; `test/services/ai/prompt-prefix-stability.test.ts` enforces it and `scripts/measure-ai-payload.ts` reports the shared-prefix tokens.
+  - `stable` — identical for every request (role, Context, static Rules, Proactive, Shared Events, Stall).
+  - `modeRules` — static text that depends only on the mode (group chat rules, voice/live-call instructions), never on user data.
+  - `dynamic` — everything carrying a per-user or per-moment value: User Info and clock, the rules that quote the timezone/language/default duration/dated example, memory, schedule, group identity, secretary, supplement/scene state.
+  - `assembleSystemPrompt(parts, toolIndex?)` joins them; the lazy tool index goes before `dynamic`.
 - `telegram-sender.ts` — abstracts all Telegram API calls; injected as `AgentContext.sender`.
 
 ### Intent Learning System (`src/services/intent/`)

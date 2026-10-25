@@ -14,7 +14,7 @@ import { EventReminderRepository } from '../src/database/repositories/event-remi
 import { HolidayRepository } from '../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../src/database/schema.ts';
-import { buildSystemPrompt } from '../src/services/ai/system-prompt.ts';
+import { assembleSystemPrompt, buildSystemPromptParts } from '../src/services/ai/system-prompt.ts';
 import { estimateTokens } from '../src/services/ai/token-estimate.ts';
 import { createToolExposure } from '../src/services/ai/tool-exposure.ts';
 import { getToolDefinitions } from '../src/services/ai/tools.ts';
@@ -74,6 +74,8 @@ interface Row {
   promptChars: number;
   promptTokens: number;
   totalTokens: number;
+  /** Tokens a provider can reuse from an earlier request: the tools and every system byte before the first per-request value. */
+  sharedPrefixTokens: number;
 }
 
 function measure({ label, ctx }: Variant, schemas: 'full' | 'lazy_initial' | 'lazy_read' = 'full'): Row {
@@ -89,9 +91,13 @@ function measure({ label, ctx }: Variant, schemas: 'full' | 'lazy_initial' | 'la
   }
   const tools = exposure?.schemas() ?? allTools;
   const toolJson = JSON.stringify(tools);
-  const prompt = buildSystemPrompt(ctx) + (exposure ? `\n\n${exposure.prompt}` : '');
+  const parts = buildSystemPromptParts(ctx);
+  const prompt = assembleSystemPrompt(parts, exposure?.prompt);
   const toolTokens = estimateTokens(toolJson);
   const promptTokens = estimateTokens(prompt);
+  const sharedPrefixTokens = estimateTokens(
+    `${toolJson}\n${assembleSystemPrompt({ ...parts, dynamic: '' }, exposure?.prompt)}`,
+  );
   return {
     label: `${label} ${schemas}`,
     toolCount: tools.length,
@@ -100,11 +106,21 @@ function measure({ label, ctx }: Variant, schemas: 'full' | 'lazy_initial' | 'la
     promptChars: prompt.length,
     promptTokens,
     totalTokens: toolTokens + promptTokens,
+    sharedPrefixTokens,
   };
 }
 
 function printTable(rows: Row[]): void {
-  const header = ['mode', 'tools', 'tool chars', 'tool tok', 'prompt chars', 'prompt tok', 'total tok'];
+  const header = [
+    'mode',
+    'tools',
+    'tool chars',
+    'tool tok',
+    'prompt chars',
+    'prompt tok',
+    'total tok',
+    'shared prefix tok',
+  ];
   const body = rows.map((r) => [
     r.label,
     String(r.toolCount),
@@ -113,6 +129,7 @@ function printTable(rows: Row[]): void {
     String(r.promptChars),
     String(r.promptTokens),
     String(r.totalTokens),
+    String(r.sharedPrefixTokens),
   ]);
   const widths = header.map((h, i) => Math.max(h.length, ...body.map((row) => row[i]!.length)));
   const line = (cells: string[]) => cells.map((c, i) => c.padEnd(widths[i]!)).join('  ');
