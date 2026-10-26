@@ -331,8 +331,12 @@ const corpusCaseBase = {
 };
 const corpusSchema = z.array(
   z.union([
-    z.object({ ...corpusCaseBase, expectAnyOf: z.array(z.string()).nonempty() }),
-    z.object({ ...corpusCaseBase, expectSilence: z.literal(true) }),
+    z.object({
+      ...corpusCaseBase,
+      expectAnyOf: z.tuple([z.string()], z.string()),
+      expectSilence: z.literal(false).optional(),
+    }),
+    z.object({ ...corpusCaseBase, expectSilence: z.literal(true), expectAnyOf: z.undefined().optional() }),
   ]),
 );
 
