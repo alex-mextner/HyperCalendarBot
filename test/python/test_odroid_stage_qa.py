@@ -309,6 +309,8 @@ class StageWorld(unittest.TestCase):
         process.stdin.flush()
         if done or token is None:
             process.stdin.close()
+            # Python 3.12's communicate() flushes stdin when it is still attached, and a closed file raises there.
+            process.stdin = None
         return process
 
     def run_entry(self, sha=SHA, token=FAKE_TOKEN, **kwargs):

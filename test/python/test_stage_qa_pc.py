@@ -219,6 +219,8 @@ class DriverCase(unittest.TestCase):
                                    stderr=subprocess.PIPE, text=True, env=self.env)
         process.stdin.write(token)
         process.stdin.close()
+        # Python 3.12's communicate() flushes stdin when it is still attached, and a closed file raises there.
+        process.stdin = None
         return process
 
     def run_driver(self, sha=SHA, token=FAKE_TOKEN + "\n", config=True):
