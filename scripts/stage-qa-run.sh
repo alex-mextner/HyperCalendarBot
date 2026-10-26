@@ -36,7 +36,7 @@ trap '' PIPE
 LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly LIB
 readonly STAGE_DIR="$DEPLOY_PATH/stage"
-readonly IMAGE_REPO=hypercalendarbot-stage
+readonly IMAGE_REPO=ghcr.io/alex-mextner/hypercalendarbot-stage
 readonly COMPOSE_PROJECT=hypercalstage
 readonly CONTAINER=hypercal-bot-stage
 readonly HEALTH_URL=http://127.0.0.1:3002
@@ -181,8 +181,9 @@ WATCHDOG_PID=$!
 # A run killed uncleanly (SIGKILL, power loss) left its containers and image behind; the locks prove
 # nothing of the stage is legitimately alive, so remove them before taking memory and disk again.
 docker rm -f "$CONTAINER" hypercal-stage-redis >/dev/null 2>&1 || true
+# Only this stage repository's images: whatever `docker image ls` returns, a production image is never removed here.
 while IFS= read -r stale_image; do
-  [[ -z "$stale_image" ]] || docker rmi "$stale_image" >/dev/null 2>&1 || true
+  [[ "$stale_image" == "$IMAGE_REPO":* ]] && docker rmi "$stale_image" >/dev/null 2>&1 || true
 done < <(docker image ls "$IMAGE_REPO" --format '{{.Repository}}:{{.Tag}}' 2>/dev/null || true)
 
 # The wait can take many minutes: the PR may have been force-pushed, merged or closed meanwhile.

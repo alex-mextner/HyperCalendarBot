@@ -28,6 +28,7 @@ RUN = ROOT / "scripts/stage-qa-run.sh"
 INSTALLER = ROOT / "scripts/install-stage-qa.sh"
 REAL_LOCK_LIB = ROOT / "scripts/odroid-deploy-lock.sh"
 SHA = "0123456789abcdef0123456789abcdef01234567"
+STAGE_IMAGE = "ghcr.io/alex-mextner/hypercalendarbot-stage"
 FAKE_TOKEN = "FAKE-GITHUB-TOKEN-FOR-STAGE-TESTS-" + "0" * 10
 PROD_BOT_TOKEN = "1234567:PROD-TELEGRAM-TOKEN-MUST-NEVER-REACH-STAGE"
 STAGE_BOT_TOKEN = "7654321:STAGE-TELEGRAM-TOKEN"
@@ -374,7 +375,7 @@ class StageWorld(unittest.TestCase):
 
     def assertTornDown(self):
         self.assertTrue(self.has_event("compose-down"), self.events())
-        self.assertTrue(self.has_event(f"docker-rmi hypercalendarbot-stage:{SHA}"), self.events())
+        self.assertTrue(self.has_event(f"docker-rmi {STAGE_IMAGE}:{SHA}"), self.events())
         self.assertEqual(self.leftover_work_dirs(), [])
 
 
@@ -405,7 +406,7 @@ class RunOutcomes(StageWorld):
         self.assertEqual(ready, {"sha": SHA, "username": "hypercal_stage_bot", "peer": "7654321",
                                  "cases": GUARD_JSON["cases"], "base_cases": 5})
         self.assertFalse(self.has_event("compose-down"))
-        self.assertFalse(self.has_event("docker-rmi hypercalendarbot-stage:" + SHA))
+        self.assertFalse(self.has_event(f"docker-rmi {STAGE_IMAGE}:" + SHA))
         self.assertFalse(self.has_event("evidence"))
         self.assertFalse(lock_is_free(self.stage_lock))
         self.assertFalse(lock_is_free(self.host_lock))
@@ -843,15 +844,23 @@ class Hardening(StageWorld):
 
     def test_leftover_stage_containers_and_images_of_a_killed_run_are_swept_before_loading(self):
         (self.rec / "stale-images").write_text(
-            "hypercalendarbot-stage:" + "b" * 40 + "\nhypercalendarbot-stage:" + "c" * 40 + "\n")
+            f"{STAGE_IMAGE}:" + "b" * 40 + f"\n{STAGE_IMAGE}:" + "c" * 40 + "\n")
         self.assertOutcome(self.run_entry(), 0, "passed")
         events = self.events()
         self.assertIn("docker-rm rm -f hypercal-bot-stage hypercal-stage-redis", events)
         for tag in ("b" * 40, "c" * 40):
-            self.assertIn(f"docker-rmi hypercalendarbot-stage:{tag}", events)
+            self.assertIn(f"docker-rmi {STAGE_IMAGE}:{tag}", events)
         sweep = max(events.index("docker-rm rm -f hypercal-bot-stage hypercal-stage-redis"),
-                    events.index(f"docker-rmi hypercalendarbot-stage:{'c' * 40}"))
+                    events.index(f"docker-rmi {STAGE_IMAGE}:{'c' * 40}"))
         self.assertLess(sweep, self.index_of("docker-load"))
+
+    def test_the_sweep_never_removes_a_production_image_even_if_docker_lists_one(self):
+        prod = "ghcr.io/alex-mextner/hypercalendarbot:" + "d" * 40
+        (self.rec / "stale-images").write_text(f"{prod}\n{STAGE_IMAGE}:{'b' * 40}\n")
+        self.assertOutcome(self.run_entry(), 0, "passed")
+        events = self.events()
+        self.assertIn(f"docker-rmi {STAGE_IMAGE}:{'b' * 40}", events)
+        self.assertNotIn(f"docker-rmi {prod}", events)
 
     def test_sweep_is_not_reached_when_not_provisioned(self):
         (self.stage / "stage.env").unlink()

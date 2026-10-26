@@ -287,7 +287,7 @@ def inspect_image(out, archive_sum):
     """Run release-artifact.py (tag + revision label checks) on the image; return its JSON object."""
     lib = os.path.dirname(os.path.abspath(__file__))
     inspected = subprocess.run(
-        [sys.executable, os.path.join(lib, "release-artifact.py"), os.path.join(out, "image.tar.gz"), SHA, f"hypercalendarbot-stage:{SHA}"],
+        [sys.executable, os.path.join(lib, "release-artifact.py"), os.path.join(out, "image.tar.gz"), SHA, f"ghcr.io/alex-mextner/hypercalendarbot-stage:{SHA}"],
         env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
         stdin=subprocess.DEVNULL,
         capture_output=True,

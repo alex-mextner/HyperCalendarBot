@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/stage-fetch-artifact.py"
 ACTIVATOR = ROOT / "scripts/odroid-activate-release.sh"
 SHA = "0123456789abcdef0123456789abcdef01234567"
+STAGE_IMAGE = "ghcr.io/alex-mextner/hypercalendarbot-stage"
 OTHER_SHA = "f" * 40
 FAKE_TOKEN = "FAKE-TOKEN-FOR-STAGE-TESTS-" + "0" * 12
 REPO = "alex-mextner/HyperCalendarBot"
@@ -56,7 +57,7 @@ def image_archive(revision=SHA, tag=None):
     config = json.dumps(
         {"architecture": "arm64", "os": "linux", "config": {"Labels": {"org.opencontainers.image.revision": revision}}}
     ).encode()
-    members, _ = docker_save_members(tag or f"hypercalendarbot-stage:{SHA}", config)
+    members, _ = docker_save_members(tag or f"{STAGE_IMAGE}:{SHA}", config)
     raw = io.BytesIO()
     with tarfile.open(fileobj=raw, mode="w:gz") as tar:
         add_members(tar, members)
@@ -241,7 +242,7 @@ class StageFetchArtifactTests(unittest.TestCase):
         artifact = json.loads((self.out / "artifact.json").read_text())
         self.assertEqual(artifact["archive_sha256"], archive_sum)
         self.assertEqual(artifact["config_digest"], self.config_id)
-        self.assertEqual(artifact["image_ref"], f"hypercalendarbot-stage:{SHA}")
+        self.assertEqual(artifact["image_ref"], f"{STAGE_IMAGE}:{SHA}")
         # The token authenticates every API call, never reaches the blob host, argv or any output.
         self.assertTrue(self.github.api_requests)
         self.assertEqual({auth for _, auth, _ in self.github.api_requests}, {"Bearer " + FAKE_TOKEN})
@@ -394,8 +395,9 @@ class StageFetchArtifactTests(unittest.TestCase):
     def test_image_that_does_not_match_the_sha_is_refused(self):
         wrong = {
             "label": image_archive(revision=OTHER_SHA)[0],
-            "tag": image_archive(tag=f"hypercalendarbot-stage:{OTHER_SHA}")[0],
+            "tag": image_archive(tag=f"{STAGE_IMAGE}:{OTHER_SHA}")[0],
             "prod tag": image_archive(tag=f"ghcr.io/alex-mextner/hypercalendarbot:{SHA}")[0],
+            "bare docker.io name": image_archive(tag=f"hypercalendarbot-stage:{SHA}")[0],
             "not an image": b"garbage",
         }
         for label, image in wrong.items():

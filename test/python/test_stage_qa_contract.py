@@ -98,6 +98,13 @@ class SmokeTargetsOnlyTheStageBot(unittest.TestCase):
         self.assertRegex(STAGE_COMPOSE, r"127\.0\.0\.1:3002:3311")
         self.assertNotIn("ghcr.io", STAGE_COMPOSE)
 
+    def test_the_stage_image_name_is_spelled_the_same_in_every_place_that_uses_it(self):
+        # One load-bearing name: the build tags it, the odroid fetcher checks the archive for it, the run script loads and removes it.
+        name = "ghcr.io/alex-mextner/hypercalendarbot-stage"
+        self.assertEqual(BUILD_WORKFLOW.count(f"{name}:"), 3)
+        self.assertIn(f'f"{name}:{{SHA}}"', text("scripts/stage-fetch-artifact.py"))
+        self.assertIn(f"readonly IMAGE_REPO={name}\n", RUN)
+
     def test_stage_environment_is_an_allow_list_without_telegram_google_or_mtproto(self):
         allowed = re.search(r"ALLOWED_ENV='([^']*)'", RUN).group(1)
         for forbidden in ("GOOGLE", "MTPROTO", "TELEGRAM", "PUBLIC_DOMAIN", "INLINE", "BOT_TOKEN", "SMTP", "ENCRYPTION", "BOT_ADMIN"):

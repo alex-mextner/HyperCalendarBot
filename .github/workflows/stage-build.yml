@@ -79,8 +79,11 @@ jobs:
           load: true
           labels: |
             org.opencontainers.image.revision=${{ github.event.pull_request.head.sha }}
+          # Registry-qualified on purpose, and never pushed (push: false): docker normalises a bare name to
+          # docker.io/library/..., and the archive check (release-artifact.py) compares the exact name the
+          # archive carries, as it does for the production image.
           tags: |
-            hypercalendarbot-stage:${{ github.event.pull_request.head.sha }}
+            ghcr.io/alex-mextner/hypercalendarbot-stage:${{ github.event.pull_request.head.sha }}
           cache-from: type=gha,scope=stage-build
           cache-to: type=gha,scope=stage-build,mode=max
       # Root on the odroid fetches this artifact itself and loads only the checksummed docker-save
@@ -91,9 +94,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p stage-artifact
-          docker save "hypercalendarbot-stage:$HEAD_SHA" | gzip -1 > stage-artifact/image.tar.gz
+          docker save "ghcr.io/alex-mextner/hypercalendarbot-stage:$HEAD_SHA" | gzip -1 > stage-artifact/image.tar.gz
           # The same archive check the host repeats: one image, this tag, this revision label.
-          python3 scripts/release-artifact.py stage-artifact/image.tar.gz "$HEAD_SHA" "hypercalendarbot-stage:$HEAD_SHA" > /dev/null
+          python3 scripts/release-artifact.py stage-artifact/image.tar.gz "$HEAD_SHA" "ghcr.io/alex-mextner/hypercalendarbot-stage:$HEAD_SHA" > /dev/null
           cp scripts/stage-smoke-cases.json stage-artifact/
           # Optional hook: cases built from the historical corpus (runbook "Stage QA").
           if [ -f scripts/stage-smoke-cases.replay.json ]; then cp scripts/stage-smoke-cases.replay.json stage-artifact/; fi

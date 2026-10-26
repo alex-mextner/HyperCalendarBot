@@ -103,12 +103,15 @@ describe('Stage build: the pull request image is built on GitHub, never on the o
     expect(docker?.with?.push).toBe(false);
     expect(docker?.with?.load).toBe(true);
     expect(docker?.with?.platforms).toBe('linux/arm64');
-    expect(String(docker?.with?.tags).trim()).toBe('hypercalendarbot-stage:${{ github.event.pull_request.head.sha }}');
+    expect(String(docker?.with?.tags).trim()).toBe(
+      'ghcr.io/alex-mextner/hypercalendarbot-stage:${{ github.event.pull_request.head.sha }}',
+    );
     expect(String(docker?.with?.labels)).toContain(
       'org.opencontainers.image.revision=${{ github.event.pull_request.head.sha }}',
     );
     expect(buildJob.steps.some((candidate) => candidate.uses?.startsWith('docker/login-action@'))).toBe(false);
-    expect(JSON.stringify(build)).not.toContain('ghcr.io/');
+    // Qualified name for the archive check, but nothing is ever pushed anywhere.
+    expect(JSON.stringify(build)).not.toMatch(/docker push|"push":true/);
   });
 
   test('uploads one artifact named for the head SHA holding the image and the case list', () => {
