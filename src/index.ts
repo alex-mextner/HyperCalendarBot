@@ -977,7 +977,6 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       debugLogger: aiDebugLogger,
       summarizer: historySummarizer,
       toolSchemaMode: config.AI_TOOL_SCHEMA_MODE,
-      toolSchemaUserIds: config.AI_TOOL_SCHEMA_USER_IDS,
     },
     {
       googleDeps,

@@ -45,6 +45,7 @@ import type { TelegramProfile } from '../telegram-session/service-tier.ts';
 import type { StressDictionary } from '../voice/stress-dictionary.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
 import type { DayReferenceSet } from './day-references.ts';
+import type { ToolSchemaMode } from './tool-schema-mode.ts';
 
 // ---------------------------------------------------------------------------
 // Capability group interfaces — each group is optional as a whole;
@@ -403,9 +404,8 @@ export interface ToolHandlerMeta {
 }
 
 export interface AgentConfig {
-  /** Opt-in rollout; default preserves the full canonical tool payload. */
-  toolSchemaMode?: 'full' | 'lazy';
-  toolSchemaUserIds?: readonly number[];
+  /** Which tool schemas a text request carries; the composition root passes the configured mode (default hybrid). */
+  toolSchemaMode?: ToolSchemaMode;
   debugLogger?: import('./debug-logger.ts').AiDebugLogger;
   summarizer?: import('./history-summarizer.ts').HistorySummarizer;
 }

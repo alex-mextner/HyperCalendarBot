@@ -136,18 +136,22 @@ export function createToolCatalog(allowed: readonly OpenAI.ChatCompletionTool[],
   }
 
   return {
-    identifiers(): { groups: string[]; tools: string[] } {
-      return { groups: [...byGroup.keys()], tools: [...byName.keys()] };
+    /** Group and tool names a discovery request may name; `loaded` tools already carry their schema and are left out of the tool names. */
+    identifiers(loaded: ReadonlySet<string> = new Set()): { groups: string[]; tools: string[] } {
+      return { groups: [...byGroup.keys()], tools: [...byName.keys()].filter((name) => !loaded.has(name)) };
     },
-    index(): string {
+    /** One line per tool that is not `loaded`, grouped by domain; a domain whose tools are all loaded is left out. */
+    index(loaded: ReadonlySet<string> = new Set()): string {
       return [...byGroup]
-        .map(([group, names]) => {
-          const entries = names.map((name) => {
-            const description = (byName.get(name)?.function.description ?? '').replace(/\s+/g, ' ').trim();
-            const brief = description.length > 100 ? `${description.slice(0, 99)}…` : description;
-            return `${name}: ${brief}`;
-          });
-          return `[${group}]\n${entries.join('\n')}`;
+        .flatMap(([group, names]) => {
+          const entries = names
+            .filter((name) => !loaded.has(name))
+            .map((name) => {
+              const description = (byName.get(name)?.function.description ?? '').replace(/\s+/g, ' ').trim();
+              const brief = description.length > 100 ? `${description.slice(0, 99)}…` : description;
+              return `${name}: ${brief}`;
+            });
+          return entries.length === 0 ? [] : [`[${group}]\n${entries.join('\n')}`];
         })
         .join('\n');
     },
