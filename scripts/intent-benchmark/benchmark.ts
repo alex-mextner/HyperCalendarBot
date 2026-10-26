@@ -54,7 +54,7 @@ const RuleList = z.array(
   z.object({
     canonical_name: z.string(),
     pattern: z.string(),
-    workflow: z.record(z.string(), z.unknown()),
+    workflow: z.looseObject({}),
     phrases: z.array(z.string()),
     trigger_words: z.array(z.string()),
     source_message: z.string(),

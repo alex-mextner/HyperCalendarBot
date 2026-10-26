@@ -307,7 +307,7 @@ function renderConverted(answer: ToolAnswer, context: RenderContext): RenderedAn
 
 const SettingsValue = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 type SettingsValueType = z.infer<typeof SettingsValue>;
-const SettingsRecordCodec = jsonCodec(z.record(z.string(), z.unknown()));
+const SettingsRecordCodec = jsonCodec(z.looseObject({}));
 const FlatSettings = z.record(z.string(), SettingsValue);
 const SETTINGS_CATEGORIES: readonly SettingsCategory[] = ['general', 'notifications', 'calls', 'privacy', 'voice'];
 

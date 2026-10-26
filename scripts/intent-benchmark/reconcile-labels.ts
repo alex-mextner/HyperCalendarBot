@@ -15,7 +15,7 @@ export const Label = z.strictObject({
     z.strictObject({
       route: z.literal('rule'),
       family: z.enum(Object.keys(FamilySlots) as [string, ...string[]]),
-      slots: z.record(z.string(), z.unknown()),
+      slots: z.looseObject({}),
       confirm: z.enum(['yes', 'no']).optional(),
     }),
   ]),

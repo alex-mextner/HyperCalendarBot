@@ -79,9 +79,17 @@ beforeEach(() => {
 });
 afterEach(() => registry.close());
 
+/** The parts of the tool's JSON output a test reads by name; every other key is matched with toMatchObject. */
+interface CliJson {
+  recentActivations?: unknown;
+  openDrafts?: unknown;
+  revisions?: unknown;
+  revisionId?: unknown;
+  backup?: unknown;
+}
 interface CliRun {
   code: number;
-  json: Record<string, unknown>;
+  json: CliJson;
   stderr: string;
 }
 function run(...args: string[]): CliRun {
