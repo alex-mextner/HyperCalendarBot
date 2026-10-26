@@ -43,6 +43,13 @@ function overlapCandidateSql(alias: string): string {
       > julianday(?) - (CASE WHEN ${col}all_day = 1 THEN 1.0 ELSE 0.0 END)`;
 }
 
+// SQL fragment: an event belongs to a Google calendar. The bot pushes what it creates to the
+// `primary` alias and stores no calendar id for it (NULL, or `primary`), so the user's primary
+// calendar also owns those rows.
+// Expects 2 bind params (googleCalendarId, 1 for the user's primary calendar else 0).
+const GOOGLE_CALENDAR_OWNS_SQL = `(google_calendar_id = ?
+  OR (? = 1 AND (google_calendar_id IS NULL OR google_calendar_id = 'primary')))`;
+
 export const EVENT_UPDATE_FIELDS = [
   'title',
   'description',
@@ -645,12 +652,51 @@ export class EventRepository {
       .run(newRule, eventId);
   }
 
-  findByGoogleEventId(userId: number, googleCalendarId: string, googleEventId: string): CalendarEvent | null {
+  /**
+   * The user's event linked to a Google event of this calendar. `primaryCalendar` is true when the
+   * calendar being read is the user's primary one: it then also owns the rows the bot pushed to the
+   * `primary` alias (see GOOGLE_CALENDAR_OWNS_SQL).
+   */
+  findByGoogleEventId(
+    userId: number,
+    googleCalendarId: string,
+    googleEventId: string,
+    opts: { primaryCalendar: boolean } = { primaryCalendar: false },
+  ): CalendarEvent | null {
     return this.db
       .prepare(
-        'SELECT * FROM events WHERE user_id = ? AND google_calendar_id = ? AND google_event_id = ? AND is_deleted = 0',
+        `SELECT * FROM events
+         WHERE user_id = ? AND google_event_id = ? AND is_deleted = 0 AND ${GOOGLE_CALENDAR_OWNS_SQL}
+         ORDER BY google_calendar_id = ? DESC, id
+         LIMIT 1`,
       )
-      .get(userId, googleCalendarId, googleEventId) as CalendarEvent | null;
+      .get(
+        userId,
+        googleEventId,
+        googleCalendarId,
+        opts.primaryCalendar ? 1 : 0,
+        googleCalendarId,
+      ) as CalendarEvent | null;
+  }
+
+  /** Every live event of the user linked to a Google event of this calendar (same ownership rule as findByGoogleEventId). */
+  findLinkedToGoogleCalendar(
+    userId: number,
+    googleCalendarId: string,
+    opts: { primaryCalendar: boolean },
+  ): CalendarEvent[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM events
+         WHERE user_id = ? AND google_event_id IS NOT NULL AND is_deleted = 0 AND parent_event_id IS NULL
+           AND ${GOOGLE_CALENDAR_OWNS_SQL}`,
+      )
+      .all(userId, googleCalendarId, opts.primaryCalendar ? 1 : 0) as CalendarEvent[];
+  }
+
+  /** Marks a recurrence exception as a cancelled occurrence. */
+  cancelException(exceptionId: number): void {
+    this.db.prepare("UPDATE events SET is_cancelled = 1, updated_at = datetime('now') WHERE id = ?").run(exceptionId);
   }
 
   updateSyncFields(

@@ -105,8 +105,23 @@ export class EventChangeNotifier {
     }
   }
 
-  async onEventDeleted(params: { event: CalendarEvent; source: ChangeSource }): Promise<void> {
-    const { event, source } = params;
+  /**
+   * `notifyParticipants: false` keeps every side effect of the delete (invitation cards, the
+   * participants' Google copies, the sync rows) but sends no new message to the participants: a
+   * deletion read from Google that is over, or of unknown age, is not news to them.
+   *
+   * `committed` gates every side effect: the participants and open invitations are read at once (the
+   * delete removes them in the same tick), but nothing is edited, sent or queued until it resolves, and
+   * a rejection abandons the delete. A caller whose own database write may still fail passes the
+   * promise of that write, so a failed write is never announced and a retry cannot announce it twice.
+   */
+  async onEventDeleted(params: {
+    event: CalendarEvent;
+    source: ChangeSource;
+    notifyParticipants?: boolean;
+    committed?: Promise<void>;
+  }): Promise<void> {
+    const { event, source, notifyParticipants = true, committed } = params;
     if (event.owner_type !== 'user') return;
 
     const participants = this.deps.participantRepo.getByEvent(event.id);
@@ -127,6 +142,7 @@ export class EventChangeNotifier {
           : [],
       );
 
+    await committed;
     await this.expirePendingProposals(event);
 
     // Editing without a keyboard removes the RSVP buttons, which could no longer be answered.
@@ -140,10 +156,15 @@ export class EventChangeNotifier {
     }
 
     for (const p of active) {
-      const lang = this.deps.getUserLang(p.user_id);
-      await this.deps.notifyUser(p.user_id, t(lang).sync.eventCancelled(event.title)).catch((err) => {
-        logger.error({ err, userId: p.user_id, eventId: event.id }, 'Failed to notify participant about event delete');
-      });
+      if (notifyParticipants) {
+        const lang = this.deps.getUserLang(p.user_id);
+        await this.deps.notifyUser(p.user_id, t(lang).sync.eventCancelled(event.title)).catch((err) => {
+          logger.error(
+            { err, userId: p.user_id, eventId: event.id },
+            'Failed to notify participant about event delete',
+          );
+        });
+      }
 
       const copy = copies.get(p.user_id);
       await this.deps.syncQueue

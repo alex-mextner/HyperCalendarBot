@@ -46,6 +46,8 @@ export interface GoogleEvent {
   status?: string | null;
   updated?: string | null;
   recurringEventId?: string | null;
+  /** For an occurrence of a series: the start the series' rule gave it, before any edit. */
+  originalStartTime?: GoogleEventTime;
 }
 
 export interface LocalEventFromGoogle {

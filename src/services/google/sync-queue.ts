@@ -23,6 +23,7 @@ import { SyncService } from './sync-service.ts';
 export type GoogleSyncJobType =
   | 'initial-sync'
   | 'pull-sync'
+  | 'reconcile-sync'
   | 'push-event'
   | 'push-participant-event'
   | 'refresh-calendars'
@@ -38,7 +39,7 @@ export interface GoogleSyncJobData {
   calendarId?: string;
   eventId?: number;
   action?: 'create' | 'update' | 'delete';
-  trigger?: 'cron' | 'webhook' | 'manual';
+  trigger?: 'cron' | 'webhook' | 'manual' | 'startup';
   googleEventId?: string;
 }
 
@@ -190,6 +191,15 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
             for (const cal of calendars) {
               await syncService.incrementalPull(api, userId, cal.google_calendar_id);
             }
+          }
+          break;
+        }
+        case 'reconcile-sync': {
+          const calendarIds = calendarId
+            ? [calendarId]
+            : deps.calendarRepo.getEnabledCalendars(userId).map((cal) => cal.google_calendar_id);
+          for (const id of calendarIds) {
+            await syncService.reconcileDeletions(api, userId, id);
           }
           break;
         }
