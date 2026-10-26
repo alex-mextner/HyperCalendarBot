@@ -39,11 +39,13 @@ describe('real-history corpus: leak gates', () => {
     expect(manifest.leakGates).toMatchObject({ passed: true, entityForms: 0, wholeEntityStrings: 0, regex: {} });
   });
 
+  const PLACEHOLDER_URL = /^(?:https?:\/\/|www\.)?example\.org\//i;
+
   test('no e-mail, URL or handle survives except the scrubber placeholders', () => {
     const offenders: string[] = [];
     for (const value of everyString()) {
       for (const match of value.matchAll(EMAIL)) if (!match[0].endsWith('@example.org')) offenders.push(match[0]);
-      for (const match of value.matchAll(URL_FORM)) if (!match[0].includes('example.org/')) offenders.push(match[0]);
+      for (const match of value.matchAll(URL_FORM)) if (!PLACEHOLDER_URL.test(match[0])) offenders.push(match[0]);
       for (const match of value.matchAll(HANDLE)) if (!match[0].startsWith('@px_')) offenders.push(match[0]);
     }
     expect(offenders).toEqual([]);
