@@ -288,6 +288,9 @@ def judge(case, replies):
     return problems
 
 
+REPLY_PREVIEW_CHARS = 200
+
+
 async def run_cases(cases, transport, scale):
     results = []
     for case in cases:
@@ -304,6 +307,12 @@ async def run_cases(cases, transport, scale):
         print(f"SMOKE {status} {case['name']} replies={len(replies)} first={result['first_reply_s']}s"
               + (f" source={result['source']}" if "source" in result else "")
               + "".join(f" problem={p}" for p in problems))
+        if problems:
+            # Only for a failed case: the stage bot's own reply to a fixed test phrase (no user data lives on stage),
+            # one line each and cut short, so a red check can be diagnosed from the job log alone.
+            for index, (text, _) in enumerate(replies, 1):
+                shown = " ".join((text or "").split())[:REPLY_PREVIEW_CHARS]
+                print(f"SMOKE REPLY {case['name']} #{index}: {shown}")
     return results
 
 
