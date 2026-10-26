@@ -413,6 +413,20 @@ class RunTests(Base):
         self.assertEqual(code, 1)
         self.assertIn("no reply matched any of the expected patterns", out)
 
+    def test_a_failed_case_prints_what_the_stage_bot_answered_one_line_and_cut_short(self):
+        long_reply = "line one\nline two " + "x" * 400
+        code, out, _, _ = self.run_smoke(answers={"/ping": [("something else", 0.2), (long_reply, 0.3)], "hi": [("ok", 0.2)]})
+        self.assertEqual(code, 1)
+        self.assertIn("SMOKE REPLY ping #1: something else", out)
+        second = next(line for line in out.splitlines() if line.startswith("SMOKE REPLY ping #2: "))
+        self.assertTrue(second.startswith("SMOKE REPLY ping #2: line one line two xxx"))
+        self.assertEqual(len(second), len("SMOKE REPLY ping #2: ") + smoke.REPLY_PREVIEW_CHARS)
+
+    def test_a_passing_case_prints_no_reply_text(self):
+        code, out, _, _ = self.run_smoke()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("SMOKE REPLY", out)
+
     def test_forbidden_text_fails(self):
         code, out, _, _ = self.run_smoke(
             answers={"/ping": [("pong", 0.2)], "hi": [("Traceback (most recent call last)", 0.2)]}
