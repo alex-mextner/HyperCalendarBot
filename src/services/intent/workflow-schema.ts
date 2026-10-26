@@ -34,7 +34,7 @@ const TypedTool = z
     name: z
       .string()
       .min(1)
-      .refine((name) => !['ask_user', 'respond'].includes(name), 'Use steps for workflow control'),
+      .refine((name) => !['ask_user', 'respond', 'plan_move'].includes(name), 'Use steps for workflow control'),
     input: TypedInput,
   })
   .strict();
@@ -46,9 +46,14 @@ const TypedStep = z
     when: z.string().optional(),
     respond: z.string().optional(),
     stop: z.boolean().optional(),
+    /** Hand the message to the AI agent: the rule recognised the command but cannot safely act on this wording. */
+    abstain: z.boolean().optional(),
   })
   .strict()
-  .refine((step) => (step.call !== undefined) !== (step.respond !== undefined), 'A step has one call or response');
+  .refine(
+    (step) => [step.call !== undefined, step.respond !== undefined, step.abstain === true].filter(Boolean).length === 1,
+    'A step has one call, response or abstention',
+  );
 const TypedWorkflow = z.custom<unknown>(isBoundedJson, 'Workflow exceeds JSON input constraints').pipe(
   z.union([
     z

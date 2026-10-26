@@ -24,6 +24,10 @@ docs/*
 !docs/reference
 docs/reference/*
 !docs/reference/migrations
+# docs/intents/kpi-gate.json is read at boot (src/services/intent/kpi-gate.ts); nothing else there ships.
+!docs/intents
+docs/intents/*
+!docs/intents/kpi-gate.json
 .claude
 .cursor
 .serena

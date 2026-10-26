@@ -6,7 +6,7 @@ import type { User } from '../../database/types.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
 import type { IntentExecutor, MutationEvidence } from '../../services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
-import { formatResponse } from '../../services/intent/response-formatter.ts';
+import { renderAnswer } from '../../services/intent/response-formatter.ts';
 import { evidenceMessage, guardRuleTools, type RunTools } from '../../services/intent/rule-run-guard.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
@@ -61,7 +61,7 @@ export function createIntentMatcherLayer(
 ) {
   type Result = Awaited<ReturnType<IntentExecutor['run']>>;
   async function deliverResponse(ctx: BotCommandContext, plainText: string, removeKeyboard = false): Promise<void> {
-    // formatResponse returns display text, not a trusted Telegram HTML document.
+    // renderAnswer returns display text, not a trusted Telegram HTML document.
     const chunks = splitMessage(escapeHtml(plainText), 4000, 'HTML');
     for (const [index, chunk] of chunks.entries())
       await ctx.send(chunk, {
@@ -193,9 +193,13 @@ export function createIntentMatcherLayer(
       return { handled: true };
     }
     if (result.response) {
-      // Same formatting as a first-pass match: a resumed workflow can end in a tool
+      // Same rendering as a first-pass match: a resumed workflow can end in a tool
       // whose text output is written for the AI agent, not for the user.
-      const text = formatResponse(row.format, result.response, user.timezone, user.language, result.responseEvents);
+      const { text } = renderAnswer(row.format, result.response, result.answer, {
+        now: new Date(),
+        timezone: user.timezone,
+        language: user.language,
+      });
       if (session.workflow.version === 2) {
         await deliverResponse(ctx, text, true);
       } else await ctx.send(text);
@@ -288,6 +292,11 @@ export function createIntentMatcherLayer(
       return { handled: true };
     }
 
+    // A rule that read the command but could not read its slots safely (or abstained) is not a failure: no admin
+    // alert carrying the user's text, the AI agent answers.
+    if ((result.errorCode === 'ABSTAIN' || result.errorCode === 'INVALID_INPUT') && result.mutationEvidence === 'none')
+      return { handled: false };
+
     // 6. Fall through to AI agent on failure with no write evidence (e.g. unresolved variables, read error)
     if (!result.success) {
       cmdLogger.warn(
@@ -315,19 +324,20 @@ export function createIntentMatcherLayer(
 
     // 8. Format and send response
     if (result.response) {
-      const formatted = formatResponse(
-        intent.format,
-        result.response,
-        user.timezone,
-        user.language,
-        result.responseEvents,
-      );
+      const rendered = renderAnswer(intent.format, result.response, result.answer, {
+        now: new Date(),
+        timezone: user.timezone,
+        language: user.language,
+      });
       // ctx.send is wrapped in bot/index.ts and already writes this to chat history;
       // the supplement agent reads the text from supplementAutoResponse, not from history.
-      if (workflow.version === 2) await deliverResponse(ctx, formatted);
-      else await ctx.send(formatted);
-      if (result.completeResponse) return { handled: true };
-      return { handled: true, needsSupplement: true, supplementAutoResponse: formatted };
+      if (workflow.version === 2) await deliverResponse(ctx, rendered.text);
+      else await ctx.send(rendered.text);
+      // A whole read, or a sentence the rule wrote to close the exchange, leaves nothing for the AI to add. A read
+      // that came after a write is not a read-only answer, so it keeps the supplement.
+      if (result.completeResponse === true || (rendered.complete && result.mutationEvidence === 'none'))
+        return { handled: true };
+      return { handled: true, needsSupplement: true, supplementAutoResponse: rendered.text };
     }
 
     return { handled: true };

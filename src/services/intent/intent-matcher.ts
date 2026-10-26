@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Intent } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import { type CanonicalText, canonicalize, repairTypos } from './canonical-input.ts';
 import { parseFilterChain } from './filter-parser.ts';
 import { normalize, normalizeWithOffsets, tokenize } from './normalizer.ts';
 
@@ -26,7 +27,15 @@ const MAX_WORKFLOW_NODES = 4096;
 const MAX_WORKFLOW_CHARS = 65536;
 interface MatchInput {
   raw: string;
-  normalized: () => ReturnType<typeof normalizeWithOffsets>;
+  normalized: () => NormalizedText;
+  /** Folded, de-noised text for strict rules; the second pass reads the typo-repaired one. */
+  canonical: () => CanonicalText;
+  repaired: () => CanonicalText | null;
+}
+type Pass = 'plain' | 'repaired';
+interface NormalizedText {
+  text: string;
+  spans: { start: number; end: number }[];
 }
 
 function captureRequirements(workflow: string): { required: string[]; parameterized: boolean } | null {
@@ -62,18 +71,33 @@ function captureRequirements(workflow: string): { required: string[]; parameteri
   return pending.length ? null : { required: [...required], parameterized };
 }
 
-function extract(entry: IntentEntry, input: MatchInput): MatchResult | null {
+function rebuildCapture(canon: CanonicalText, raw: string, from: number, to: number): string {
+  let out = '';
+  for (let i = from; i < to; i++) {
+    const span = canon.spans[i];
+    if (canon.replaced?.[i]) out += canon.text[i] ?? '';
+    else if (span) out += raw.slice(span.start, span.end);
+  }
+  return out;
+}
+
+function extract(entry: IntentEntry, input: MatchInput, pass: Pass = 'plain'): MatchResult | null {
   if (!entry.pattern) return entry.parameterized ? null : { intentId: entry.intentId, captures: {} };
   const raw = input.raw;
-  const structured = entry.strictStructure ? raw.replace(/[?!]+$/, '').trimEnd() : raw;
-  let match = entry.pattern.exec(structured);
-  let offsets: ReturnType<typeof normalizeWithOffsets> | undefined;
-  if (!match || match.index !== 0 || match[0].length !== structured.length) {
+  // Strict rules match the canonical text and read every capture back from the raw message.
+  // The plain pass is the whole message; the repaired pass runs only for rules that did not match it.
+  const strictText = entry.strictStructure ? (pass === 'plain' ? input.canonical() : input.repaired()) : null;
+  if (entry.strictStructure && !strictText) return null;
+  let match = entry.pattern.exec(strictText ? strictText.text : raw);
+  let offsets: NormalizedText | undefined = strictText ?? undefined;
+  const covers = (text: string) => match !== null && match.index === 0 && match[0].length === text.length;
+  if (!covers(strictText ? strictText.text : raw)) {
     if (entry.strictStructure) return null;
     offsets = input.normalized();
     match = entry.pattern.exec(offsets.text);
-    if (!match || match.index !== 0 || match[0].length !== offsets.text.length) return null;
+    if (!covers(offsets.text)) return null;
   }
+  if (!match) return null;
   const captures: Record<string, string> = {};
   for (let i = 1; i < match.length; i++) {
     if (match[i] === undefined) continue;
@@ -82,7 +106,12 @@ function extract(entry: IntentEntry, input: MatchInput): MatchResult | null {
     else if (range && range[1] > range[0]) {
       const first = offsets.spans[range[0]],
         last = offsets.spans[range[1] - 1];
-      if (first && last) captures[`$${i}`] = raw.slice(first.start, last.end);
+      if (first && last)
+        // After a typo repair the binding reads the repaired words ("завтро" → "завтра"); the rest stays as typed.
+        captures[`$${i}`] =
+          strictText?.replaced && pass === 'repaired'
+            ? rebuildCapture(strictText, raw, range[0], range[1])
+            : raw.slice(first.start, last.end);
     } else captures[`$${i}`] = '';
   }
   return entry.required.some((key) => captures[key] === undefined || captures[key] === '')
@@ -151,9 +180,19 @@ export class IntentMatcher {
   /** Deterministic selection diagnostics; no generated confidence score or execution side effect. */
   explain(text: string): MatchDecision {
     if (text.length > MAX_INPUT_CHARS) return { kind: 'abstain', reason: 'input_too_long', candidates: [] };
-    let normalizedInput: ReturnType<typeof normalizeWithOffsets> | undefined;
+    let normalizedInput: NormalizedText | undefined;
+    let canonicalInput: CanonicalText | undefined;
+    let repairedInput: { value: CanonicalText | null } | undefined;
     const raw = text.trim();
-    const input: MatchInput = { raw, normalized: () => (normalizedInput ??= this.mapInput(raw)) };
+    const input: MatchInput = {
+      raw,
+      normalized: () => (normalizedInput ??= this.mapInput(raw)),
+      canonical: () => (canonicalInput ??= canonicalize(raw)),
+      repaired: () => {
+        repairedInput ??= { value: repairTypos(input.canonical()) };
+        return repairedInput.value;
+      },
+    };
     const exact = this.phraseMap.get(normalize(text));
     if (exact?.length) {
       if (exact.length !== 1)
@@ -170,10 +209,23 @@ export class IntentMatcher {
     const candidates = new Map<number, IntentEntry>();
     for (const word of tokenize(text))
       for (const entry of this.triggerIndex.get(word) ?? []) candidates.set(entry.intentId, entry);
-    const results: MatchResult[] = [];
-    for (const entry of candidates.values()) {
-      const result = extract(entry, input);
-      if (result) results.push(result);
+    const gather = (pass: Pass, pool: Map<number, IntentEntry>): MatchResult[] => {
+      const found: MatchResult[] = [];
+      for (const entry of pool.values()) {
+        const result = extract(entry, input, pass);
+        if (result) found.push(result);
+      }
+      return found;
+    };
+    let results = gather('plain', candidates);
+    if (results.length === 0) {
+      // Nothing matched the message as written: retry once with the command words' single-letter typos repaired.
+      const repaired = input.repaired();
+      if (repaired) {
+        for (const word of tokenize(repaired.text))
+          for (const entry of this.triggerIndex.get(word) ?? []) candidates.set(entry.intentId, entry);
+        results = gather('repaired', candidates);
+      }
     }
     if (results.length === 1) return { kind: 'matched', strategy: 'pattern', result: results[0]! };
     return {

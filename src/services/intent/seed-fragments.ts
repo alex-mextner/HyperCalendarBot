@@ -28,6 +28,8 @@ export interface SeedStep {
   as?: string;
   when?: string;
   respond?: string;
+  /** Hand the message to the AI agent: the rule recognised the command but cannot safely act on this wording. */
+  abstain?: boolean;
 }
 
 export interface LanguageStrings {
@@ -100,6 +102,17 @@ export const ANY_DAY_RX = `(?:${DAY_WORD_RX}|${ABSOLUTE_DATE_RX})`;
 const CLOCK_SUFFIX = 'am|pm|a\\s?m|p\\s?m|утра|дня|вечера|ночи';
 export const TIME_RX = String.raw`(?:\d{1,2}(?:[:.\s]\d{2})?(?:\s?(?:${CLOCK_SUFFIX}))?|полдень|полночь|noon|midnight)`;
 
+/** Word edges that also work next to Cyrillic, where `\\b` never matches (the rule patterns carry no `u` flag). */
+export const WB = '(?<![A-Za-zА-Яа-яЁё0-9_])';
+export const WE = '(?![A-Za-zА-Яа-яЁё0-9_])';
+
+/** Lookahead fragments: the message names a clock time / a day somewhere. They gate free-form rules; the binding does the reading. */
+// "05.10.2026" is a date, not the clock time "05.10": a dot or slash and a digit after it rule the clock reading out.
+const WEEKDAY_WORDS =
+  'понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur';
+export const TIME_SIGNAL = String.raw`(?=.*(?:${WB}\d{1,2}:\d{2}|${WB}(?:в|к|at)\s+\d{1,2}(?:[.:]\d{2})?(?:\s?(?:am|pm|утра|дня|вечера|ночи))?${WE}|${WB}(?:полдень|полночь|noon|midnight)${WE}|${WB}\d{1,2}\.\d{2}(?![./]\d)${WE}|${WB}(?:с|from)\s+\d{1,2}\s+(?:до|to|until)\s+\d{1,2}${WE}|${WB}(?:сегодня|завтра|послезавтра|today|tomorrow|${WEEKDAY_WORDS}|\d{1,2}\s+${MONTH_RX}|\d{1,2}[./]\d{1,2})[,.]?\s+(?:1[3-9]|2[0-3])${WE}))`;
+export const DATE_SIGNAL = String.raw`(?=.*(?:${WB}(?:сегодня|завтра|послезавтра|вчера|today|tomorrow|yesterday|${WEEKDAY_WORDS})${WE}|${WB}\d{1,2}(?:-?го)?\s+${MONTH_RX}|${WB}${MONTH_EN_RX}\.?\s+\d{1,2}|${WB}\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?${MONTH_EN_RX}|${WB}\d{1,2}[./]\d{1,2}(?:[./]\d{4})?${WE}|${WB}\d{4}[-./]\d{1,2}[-./]\d{1,2}${WE}|${WB}(?:через|in)\s+(?:\d{1,3}|одну)\s+(?:дн|день|недел|day|week)))`;
+
 type PeriodKey =
   | 'today'
   | 'tomorrow'
@@ -139,36 +152,79 @@ export const DURATION_UNITS = phraseTable([
   [HOUR_WORDS, 60],
 ]);
 
+/**
+ * A span of time as people say it, for "на 30 минут", "за час до", "через полчаса": an amount with a unit, or a unit that
+ * stands for one by itself. `table` maps either to minutes; days are left out where a span that long makes no sense.
+ */
+export function spanVocabulary(withDays: boolean): { unit: string; bare: string; table: { [key: string]: number } } {
+  const units: (readonly [readonly string[], number])[] = [
+    [MINUTE_WORDS, 1],
+    [HOUR_WORDS, 60],
+  ];
+  const bare: (readonly [readonly string[], number])[] = [
+    [['минуту', 'a minute', 'one minute'], 1],
+    [['час', 'an hour', 'one hour'], 60],
+    [['полчаса', 'half an hour', 'half hour'], 30],
+  ];
+  if (withDays) {
+    units.push([['день', 'дня', 'дней', 'day', 'days'], 1440]);
+    bare.push([['день', 'a day', 'one day'], 1440]);
+  }
+  return {
+    unit: alt(units.flatMap(([words]) => words)),
+    bare: alt(bare.flatMap(([words]) => words)),
+    table: phraseTable([...units, ...bare]),
+  };
+}
+
 // ─── references ─────────────────────────────────────────────────────────────
 
 /** An event named by number, or by exact title in quotes; safe next to other free text. */
 export const QUOTED_OR_ID_RX = String.raw`((?:#|№)\d{1,9}|«[^»\n]{1,120}»|"[^"\n]{1,120}"|“[^”\n]{1,120}”)`;
 export const EVENT_NOUN_RX = alt(['событие', 'встречу', 'event', 'meeting']);
-export const BULK_WORDS = ['все', 'всё', 'всех', 'all', 'every', 'everything', 'любое', 'любую'];
+export const BULK_WORDS = [
+  'все',
+  'всё',
+  'всех',
+  'all',
+  'every',
+  'everything',
+  'любое',
+  'любую',
+  'любой',
+  'каждое',
+  'каждую',
+  'каждый',
+  'each',
+  'both',
+  'оба',
+  'обе',
+];
 export const USERNAME_RX = '[A-Za-z][A-Za-z0-9_]{4,31}';
+/** "удали, пожалуйста, обед": courtesy between a command verb and its object. */
+export const COURTESY = String.raw`(?:\s*,)?(?:\s+(?:пожалуйста|плиз|плз|please|pls))?(?:\s*,)?`;
 
 // ─── shared strings and steps ───────────────────────────────────────────────
 
 export const COMMON_STRINGS: LanguageStrings = {
   ru: {
     private_only: 'Это личные данные — работаю с ними только в личке с ботом.',
-    not_found: 'Не нашёл такое событие. Назови точное название или номер, например #12.',
-    ambiguous: 'Нашёл несколько событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}',
+    ambiguous: 'Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}',
     cancelled: 'Отменено, ничего не изменилось.',
     ok: 'Да',
     cancel: 'Отмена',
+    // The event as the user knows it: title, day in words, clock time. Never an id or a raw date.
     target:
-      '«{{tool_outputs.target.title}}» (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default("")}})',
+      '«{{tool_outputs.target.title}}» ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default("")|ternary(" в ", "")}}{{tool_outputs.target.time|default("")}})',
   },
   en: {
     private_only: 'This is private data — I only handle it in a private chat with the bot.',
-    not_found: "I couldn't find that event. Give the exact title or its number, like #12.",
     ambiguous: 'Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}',
     cancelled: 'Cancelled, nothing was changed.',
     ok: 'Yes',
     cancel: 'Cancel',
     target:
-      '“{{tool_outputs.target.title}}” (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default("")}})',
+      '“{{tool_outputs.target.title}}” ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default("")|ternary(" at ", "")}}{{tool_outputs.target.time|default("")}})',
   },
 };
 
@@ -176,18 +232,25 @@ export const COMMON_STRINGS: LanguageStrings = {
 export const guardPrivate = (): SeedStep => ({ when: 'group.is_group == true', respond: '{{t.private_only}}' });
 
 /**
- * Resolve `bind.ref` to exactly one event in `tool_outputs.target`. A number is looked up
- * directly; a title must match exactly one event or the workflow stops and asks for the number.
+ * Private tools never run in a group, but a refusal sentence there answers a request the AI may be able to serve: the
+ * rule steps aside and the AI agent decides what a group chat may do.
  */
-export function resolveEvent(): SeedStep[] {
+export const abstainInGroup = (): SeedStep => ({ when: 'group.is_group == true', abstain: true });
+
+/**
+ * Resolve the event reference binding at `ref` (`bind.ref`, or `bind.ev.ref` for a reference read out of a phrase)
+ * to exactly one event in `tool_outputs.target`. A number is looked up directly; a title must match exactly one event
+ * or the workflow stops: several matches are listed by number, none hands the message to the AI, which knows more.
+ */
+export function resolveEvent(ref = 'bind.ref'): SeedStep[] {
   return [
     {
-      when: "bind.ref.kind == 'id'",
+      when: `${ref}.kind == 'id'`,
       call: 'get_event',
-      input: { event_id: '{{bind.ref.id}}', scope: SCOPE },
+      input: { event_id: `{{${ref}.id}}`, scope: SCOPE },
       as: 'target',
     },
-    ...resolveEventByName(),
+    ...resolveEventByName(ref),
   ];
 }
 
@@ -195,15 +258,15 @@ export function resolveEvent(): SeedStep[] {
  * The title half of resolveEvent: search the actor's own calendar and stop unless exactly one
  * event matches, leaving it in `tool_outputs.target`. Does nothing for an id reference.
  */
-export function resolveEventByName(): SeedStep[] {
+export function resolveEventByName(ref = 'bind.ref'): SeedStep[] {
   return [
     {
-      when: "bind.ref.kind == 'name'",
+      when: `${ref}.kind == 'name'`,
       call: 'search_events',
-      input: { query: '{{bind.ref.query}}', scope: SCOPE, event_type: 'regular' },
+      input: { query: `{{${ref}.query}}`, scope: SCOPE, event_type: 'regular' },
       as: 'found',
     },
-    { when: 'count(found) == 0 && bind.ref.kind == "name"', respond: '{{t.not_found}}' },
+    { when: `count(found) == 0 && ${ref}.kind == 'name'`, abstain: true },
     { when: 'count(found) > 1', respond: '{{t.ambiguous}}' },
     {
       when: 'count(found) == 1',
@@ -224,4 +287,39 @@ export function confirmStep(questionKey: string): SeedStep[] {
     },
     { when: "ask.confirm != 'да' && ask.confirm != 'yes'", respond: '{{t.cancelled}}' },
   ];
+}
+
+/** A phrasing of a request: `slot('ref')` writes the place of the slot's capture group among the words. */
+export type SlotForm = (slot: (name: string) => string) => string;
+
+/**
+ * One whole-message pattern for several phrasings of the same request ("напомни за 15 минут до стендапа" and "за 15
+ * минут до стендапа напомни"). Each phrasing places its slots; every placement becomes a capture group and `read(name)`
+ * is the template that yields whichever placement matched, so a binding reads a slot however the words were ordered.
+ * Slot patterns must not capture themselves. `prefix` is lookahead text about the whole message that comes first,
+ * once, so it is not repeated in every phrasing.
+ */
+export function slotForms(
+  forms: readonly SlotForm[],
+  slots: { [name: string]: string },
+  prefix = '',
+): { pattern: string; read: (name: string) => string } {
+  const groups: { [name: string]: number[] } = {};
+  let count = 0;
+  const slot = (name: string): string => {
+    const rx = slots[name];
+    if (rx === undefined) throw new Error(`Unknown pattern slot: ${name}`);
+    count++;
+    groups[name] = [...(groups[name] ?? []), count];
+    return `(${rx})`;
+  };
+  const alternatives = forms.map((form) => form(slot)).join('|');
+  return {
+    pattern: `^${prefix}(?:${alternatives})$`,
+    read: (name) => {
+      const indices = groups[name];
+      if (!indices) throw new Error(`Pattern slot never placed: ${name}`);
+      return indices.map((index) => `{{$${index}|default("")}}`).join('');
+    },
+  };
 }

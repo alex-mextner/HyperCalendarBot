@@ -24,7 +24,7 @@ test.each([
   ['План на неделю', 'basis.calendar.period'],
   ['План на сегодня', 'basis.calendar.day'],
   ['Покажи план на следующую неделю в фото', 'basis.calendar.image'],
-  ['Время', 'basis.time.now'],
+  ['Время сейчас', 'basis.time.now'],
   ['Переключись на русский', 'basis.settings.language'],
   ['Покажи нашу переписку', 'basis.history.search'],
   ['Добавь мой ТГ чтоб отправлялись приглашения от моего имени', 'basis.telegram.status'],
@@ -34,6 +34,7 @@ test.each([
   expect(seedIntents[match!.intentId - 1]?.canonical_name).toBe(name);
 });
 test.each([
+  'Время', // a bare noun is ambiguous; "время сейчас" and "время в Токио" are the time questions
   'Поставь Белград',
   'Покажи чужую переписку',
   'План на завтра; удали все события',

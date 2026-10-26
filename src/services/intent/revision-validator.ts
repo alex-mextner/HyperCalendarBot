@@ -40,8 +40,8 @@ export type RevisionOutcome =
 const MAX_OPERATION_RULES = 32;
 const DRAFT_NAME = /^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)*$/;
 const CATASTROPHIC_BACKTRACKING = 'a group or backreference repeated without bound can backtrack catastrophically';
-/** A group may repeat at most this often; `{1,2}` in the source catalogue is well inside. */
-const MAX_GROUP_REPEAT = 3;
+/** A group may repeat at most this often; the catalogue's filler words ("что там у меня есть") repeat up to 4 times. */
+const MAX_GROUP_REPEAT = 4;
 const BRACES = /^\{(\d+)?(,)?(\d+)?\}/;
 
 /** `+`, `*`, `{n,}` or a `{n,m}` whose upper bound exceeds MAX_GROUP_REPEAT, at `index`. */

@@ -1,6 +1,7 @@
 // src/services/intent/filter-parser.ts
 
 import { format as dateFnsFormat, parseISO } from 'date-fns';
+import { type HumanTimeContext, humanDay, humanDuration, humanWhen } from './human-time.ts';
 import { type Token, tokenize } from './lexer.ts';
 
 // ---------------------------------------------------------------------------
@@ -128,9 +129,13 @@ const KNOWN_FILTERS = new Set([
   'sub',
   'mul',
   'div',
+  'human_day',
+  'human_when',
+  'human_duration',
 ]);
 
-export function applyFilters(value: unknown, filters: FilterCall[]): string {
+/** `context` carries the reader's language, zone and clock for the wording filters (human_day, human_when). */
+export function applyFilters(value: unknown, filters: FilterCall[], context?: HumanTimeContext): string {
   let current: unknown = value;
 
   for (const filter of filters) {
@@ -199,6 +204,20 @@ export function applyFilters(value: unknown, filters: FilterCall[]): string {
             current = String(current);
           }
         }
+        break;
+      }
+      case 'human_day':
+      case 'human_when': {
+        const text = current === undefined || current === null ? '' : String(current);
+        if (!context) throw new Error(`${filter.name}() needs the user's language and zone`);
+        current = filter.name === 'human_day' ? humanDay(text, context) : humanWhen(text, context);
+        break;
+      }
+      case 'human_duration': {
+        const minutes = Number(current);
+        if (!context) throw new Error("human_duration() needs the user's language");
+        if (!Number.isFinite(minutes)) throw new Error('human_duration() needs a number of minutes');
+        current = humanDuration(minutes, context.language);
         break;
       }
       case 'ternary': {

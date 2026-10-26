@@ -1,0 +1,138 @@
+{
+  "builtAt": "2026-10-25T23:25:30Z",
+  "byChat": {
+    "group": 24,
+    "private": 528
+  },
+  "byLang": {
+    "en": 32,
+    "ru": 520
+  },
+  "byMonth": {
+    "2026-03": 161,
+    "2026-06": 78,
+    "2026-07": 34,
+    "2026-08": 35,
+    "2026-09": 198,
+    "2026-10": 46
+  },
+  "checksum": "2f793c2471dc077084a074d650ea29306a25a0998544b8174e9377d65a1d2de9",
+  "distinctTexts": 552,
+  "entities": {
+    "lemmas": 402,
+    "listSha256": "617753b11239fefb7c03bc33a3577ad17f3b8b43ef37a1f645f29e7903918968",
+    "registeredByKind": {
+      "first": 14256,
+      "other": 12725,
+      "place": 296,
+      "surname": 1616,
+      "text": 133686
+    }
+  },
+  "file": "corpus.jsonl",
+  "knownWeakSpots": [
+    "A first name that is in no database table, not in the built-in gazetteer and written in lower case is replaced only after a preposition cue (with/for/to/from/about) and when it is not one edit from a dictionary word.",
+    "Narrative content with no name in it (health, family, pets, travel plans, long voice transcripts) is kept as written: it is not name-based personal data and the engine needs it.",
+    "Absolute dates and clock times are real: only names, places, contacts and ids are pseudonymised.",
+    "Two of twelve users write most of the rows (u07, u09): report per-user results, not only pooled ones.",
+    "Pseudonyms are drawn from a small public pool; an inflected pseudonym can read slightly oddly (Cyrillic ending on a Latin or place pseudonym)."
+  ],
+  "leakGates": {
+    "entityForms": 0,
+    "note": "entity forms and stems, whole-string and regex gates run on every string of every record",
+    "passed": true,
+    "regex": {},
+    "wholeEntityStrings": 0,
+    "verifiedOnCommittedFile": {
+      "at": "2026-10-26",
+      "command": "build_real_corpus.py --verify corpus.jsonl (odroid, live entity registry)",
+      "records": 552,
+      "entityForms": 0,
+      "wholeEntityStrings": 0,
+      "regex": {},
+      "entityListSha256": "617753b11239fefb7c03bc33a3577ad17f3b8b43ef37a1f645f29e7903918968"
+    }
+  },
+  "mapping": "private: kept at 0600 on the build host, never exported",
+  "records": 552,
+  "recordsBySourceClass": {
+    "action_log": 9,
+    "apple_disk": 322,
+    "chat_log": 135,
+    "debug_run": 59,
+    "droplet_archive": 304,
+    "prod_backup": 285,
+    "prod_db": 257,
+    "retained_corpus": 294
+  },
+  "schemaVersion": 1,
+  "scrubberVersion": "1.0.0",
+  "skipped": {
+    "connect_wizard": 7,
+    "digits_only": 1
+  },
+  "sourceRows": {
+    "databasesByClass": {
+      "apple_disk": 5,
+      "droplet_archive": 111,
+      "prod_backup": 33,
+      "prod_db": 1
+    },
+    "databasesRead": 150,
+    "rowsFoundAndNewByClass": {
+      "action_log": {
+        "found": 2152,
+        "new": 1
+      },
+      "apple_disk": {
+        "found": 6952,
+        "new": 1258
+      },
+      "chat_log": {
+        "found": 341,
+        "new": 66
+      },
+      "debug_run": {
+        "found": 222,
+        "new": 222
+      },
+      "droplet_archive": {
+        "found": 210592,
+        "new": 2738
+      },
+      "prod_backup": {
+        "found": 79975,
+        "new": 379
+      },
+      "prod_db": {
+        "found": 2453,
+        "new": 0
+      },
+      "retained_corpus": {
+        "found": 8945,
+        "new": 348
+      }
+    },
+    "uniqueRowsAfterDedupe": 5012
+  },
+  "userTexts": 983,
+  "users": 30,
+  "withExecutedTools": 247,
+  "labels": {
+    "file": "labels.jsonl",
+    "records": 552,
+    "method": "two independent model annotators per chunk following LABELING.md (round 1: preliminary 366-row cut, 341 labels carried over by identical text/date/clock; round 2: 211 rows), schema-validated, disagreements adjudicated by a stated rule, any unclear mark makes the label unclear",
+    "agreementFile": "labels-agreement.json",
+    "routeKappaRound1": 0.863560111835974,
+    "routeKappaRound2": 0.827942375645556
+  },
+  "split": {
+    "file": "split.json",
+    "heldoutShare": 0.3395,
+    "dev": 356,
+    "heldout": 183,
+    "excludedQaProbes": 13,
+    "stratifiedBy": "user x family; decided once from the labels, never reshuffled",
+    "note": "Two users (u07, u09) write about 83% of the rows; per-user results are reported; rule-eligible rows are about 23% of rows (dev 85, held-out 42), so intervals on the held-out are wide."
+  }
+}

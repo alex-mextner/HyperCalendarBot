@@ -259,3 +259,7 @@ Private repository.
 
 [Browse the full intent catalogue and current-seed status in GitHub](docs/intents/README.md).
 Run `bun run docs:intents` to regenerate Markdown/HTML/JSON; `bun run docs:intents:check` and the normal test suite detect stale output. Private DB/history snapshots are never required for a public build.
+
+## Intent seed KPI gate
+
+Seed revision 6 answers a rule-eligible request without the AI. Its coverage is measured on real, scrubbed message history (point estimate, 95% interval printed beside it; the held-out split is small and no longer pristine) with a synthetic split as a second audit: `bun --no-env-file scripts/benchmark-intents.ts --gate`. A deploy activates the seed only when the committed `docs/intents/kpi-gate.json` passes for exactly that seed; roll back with `scripts/intent-revision.ts rollback`, watch it with `scripts/intent-rule-monitor.ts`. See [docs/intents/engine.md](docs/intents/engine.md) and [docs/intents/model-history/README.md](docs/intents/model-history/README.md).

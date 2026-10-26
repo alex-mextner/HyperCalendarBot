@@ -111,6 +111,8 @@ function resolveVar(
   stepResults?: StepResults,
   i18n?: I18nMap,
   policy?: ResolvePolicy,
+  /** The template gives this variable a default(), so its absence is expected, not worth a warning. */
+  hasDefault = false,
 ): unknown {
   consumeResolution(policy);
   const now = new TZDate(new Date(), userCtx.timezone);
@@ -190,7 +192,7 @@ function resolveVar(
     if (value !== undefined) return value;
   }
 
-  cmdLogger.warn({ varName: name }, 'Intent template variable could not be resolved');
+  if (!hasDefault) cmdLogger.warn({ varName: name }, 'Intent template variable could not be resolved');
   return undefined;
 }
 
@@ -246,7 +248,15 @@ function resolveInner(
       const varName = (pipeIdx === -1 ? expr : expr.slice(0, pipeIdx)).trim();
       const filterExpr = pipeIdx === -1 ? '' : expr.slice(pipeIdx + 1);
 
-      const resolved = resolveVar(varName, captures, userCtx, stepResults, i18n, policy);
+      const resolved = resolveVar(
+        varName,
+        captures,
+        userCtx,
+        stepResults,
+        i18n,
+        policy,
+        /\bdefault\(/.test(filterExpr),
+      );
 
       if (!filterExpr) {
         if (resolved === undefined && policy?.strict) throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
@@ -265,7 +275,11 @@ function resolveInner(
       // default() can produce a value even when resolved is undefined
       if (resolved === undefined && policy?.strict && !filters.some((f) => f.name === 'default' && f.args.length === 1))
         throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
-      const result = applyFilters(resolved, filters);
+      const result = applyFilters(resolved, filters, {
+        now: new Date(),
+        timezone: userCtx.timezone,
+        language: userCtx.language,
+      });
       return replacement(result, match.length);
     });
     return accountOutput(output, policy);

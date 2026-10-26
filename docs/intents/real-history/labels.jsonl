@@ -1,0 +1,552 @@
+{"id": "rh-0001", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "урок с Давид", "day": {"rel": 0}, "time": "13:45"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0002", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "ответ боту", "basis": "agreed"}
+{"id": "rh-0003", "expect": {"route": "ai", "why": "recurrence", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "сделать регулярным", "basis": "agreed"}
+{"id": "rh-0004", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет дня", "basis": "agreed"}
+{"id": "rh-0005", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет ссылки на событие", "basis": "agreed"}
+{"id": "rh-0006", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "ответ на вопрос бота", "basis": "agreed"}
+{"id": "rh-0007", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет ссылки на приглашение", "basis": "agreed"}
+{"id": "rh-0008", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "продолжение реплики", "basis": "agreed"}
+{"id": "rh-0009", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "отзыв и новое приглашение", "basis": "agreed"}
+{"id": "rh-0010", "expect": {"route": "ai", "why": "unsupported", "intentLike": false}, "status": "unclear", "historical": "none", "note": "call request handled by an approved rule (basis.call.start) outside the family set", "basis": "adjudicated"}
+{"id": "rh-0011", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 0}}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0012", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "занятие с Лилей", "day": {"rel": 0}, "time": "15:00"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0013", "expect": {"route": "ai", "why": "missing_slot", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "ответ на вопрос бота", "basis": "agreed"}
+{"id": "rh-0014", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "удалить все", "basis": "agreed"}
+{"id": "rh-0015", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "ответ «Да»", "basis": "agreed"}
+{"id": "rh-0016", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет дня", "basis": "agreed"}
+{"id": "rh-0017", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "удаление всех + создание", "basis": "agreed"}
+{"id": "rh-0018", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "ответ «Нет»", "basis": "agreed"}
+{"id": "rh-0019", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет ссылки на событие", "basis": "agreed"}
+{"id": "rh-0020", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 0}}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0021", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "unclear", "historical": "none", "note": "фрагмент", "basis": "agreed"}
+{"id": "rh-0022", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "none", "note": "фрагмент: вопрос или утверждение", "basis": "agreed"}
+{"id": "rh-0023", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "удаление всех + создание", "basis": "agreed"}
+{"id": "rh-0024", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет дня", "basis": "agreed"}
+{"id": "rh-0025", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0026", "expect": {"route": "ai", "why": "past_or_invalid", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "прошедшее время, продолжение", "basis": "agreed"}
+{"id": "rh-0027", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "загадки/болтовня", "basis": "agreed"}
+{"id": "rh-0028", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "загадки/болтовня", "basis": "agreed"}
+{"id": "rh-0029", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "загадки/болтовня", "basis": "agreed"}
+{"id": "rh-0030", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "загадки/болтовня", "basis": "agreed"}
+{"id": "rh-0031", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "загадки/болтовня", "basis": "agreed"}
+{"id": "rh-0032", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "загадки/болтовня", "basis": "agreed"}
+{"id": "rh-0033", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "загадки/болтовня", "basis": "agreed"}
+{"id": "rh-0034", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "загадки/болтовня", "basis": "agreed"}
+{"id": "rh-0035", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "загадки/болтовня", "basis": "agreed"}
+{"id": "rh-0036", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "загадки/болтовня", "basis": "agreed"}
+{"id": "rh-0037", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "unclear", "historical": "none", "note": "отмена без контекста", "basis": "agreed"}
+{"id": "rh-0038", "expect": {"route": "ai", "why": "unsupported", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "передать сообщение контакту", "basis": "agreed"}
+{"id": "rh-0039", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "событие + приглашение контакта", "basis": "agreed"}
+{"id": "rh-0040", "expect": {"route": "rule", "family": "contacts.list", "slots": {}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0041", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "съездить в МУП с Радик", "day": {"rel": 1}, "time": "08:15"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0042", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "звезди с Назаром", "day": {"rel": 0}, "time": "22:00"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0043", "expect": {"route": "rule", "family": "bot.info", "slots": {}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0044", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Урок с Платоном", "day": {"weekday": "fri"}, "time": "13:45"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0045", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "урок с Лилей", "day": {"rel": 1}, "time": "15:30"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0046", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Урок с Лилей", "day": {"weekday": "fri"}, "time": "11:00"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0047", "expect": {"route": "rule", "family": "calendar.period", "slots": {"period": "week"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0048", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "создание + напоминание", "basis": "agreed"}
+{"id": "rh-0049", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "none", "note": "день не назван, вероятно сегодня", "basis": "agreed"}
+{"id": "rh-0050", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "отмена + уведомление", "basis": "agreed"}
+{"id": "rh-0051", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 1}}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0052", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "событие без названия, ссылка по времени", "basis": "agreed"}
+{"id": "rh-0053", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "встреча на 10, без названия", "basis": "agreed"}
+{"id": "rh-0054", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "выдача карточки ПМЖ", "day": {"rel": 7}, "time": "12:45"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0055", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "цветок2ь по носу Эталон", "day": {"rel": 0}, "time": "09:26"}}, "status": "unclear", "historical": "none", "note": "название искажено опечаткой", "basis": "agreed"}
+{"id": "rh-0056", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет события/пользователя", "basis": "agreed"}
+{"id": "rh-0057", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "жалоба", "basis": "agreed"}
+{"id": "rh-0058", "expect": {"route": "ai", "why": "unsupported", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "звонок", "basis": "agreed"}
+{"id": "rh-0059", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "имя контакта вместо @username", "basis": "agreed"}
+{"id": "rh-0060", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "имя контакта вместо @username", "basis": "agreed"}
+{"id": "rh-0061", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "продолжение реплики", "basis": "agreed"}
+{"id": "rh-0062", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "ответ боту", "basis": "agreed"}
+{"id": "rh-0063", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "имя контакта вместо @username", "basis": "agreed"}
+{"id": "rh-0064", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "none", "note": "ссылка на событие только по времени", "basis": "agreed"}
+{"id": "rh-0065", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "unclear", "historical": "none", "note": "фрагмент", "basis": "agreed"}
+{"id": "rh-0066", "expect": {"route": "rule", "family": "contacts.list", "slots": {}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0067", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "переименование контакта", "basis": "agreed"}
+{"id": "rh-0068", "expect": {"route": "rule", "family": "contacts.list", "slots": {}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0069", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "жалоба на переименование", "basis": "agreed"}
+{"id": "rh-0070", "expect": {"route": "rule", "family": "contacts.list", "slots": {}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0071", "expect": {"route": "rule", "family": "event.delete", "slots": {"ref": {"title": "кофе с Леонидом"}}}, "seedEvents": [{"title": "Кофе с Леонидом", "dayOffset": 1, "at": "19:00", "durationMin": 60}], "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0072", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "переименование контакта", "basis": "agreed"}
+{"id": "rh-0073", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": -1}}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0074", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет ссылки на событие", "basis": "agreed"}
+{"id": "rh-0075", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "удалить все сегодняшние", "basis": "agreed"}
+{"id": "rh-0076", "expect": {"route": "ai", "why": "unsupported", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "смена языка", "basis": "agreed"}
+{"id": "rh-0077", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "жалоба на настройки", "basis": "agreed"}
+{"id": "rh-0078", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 0}}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0079", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет названия, относительное время", "basis": "agreed"}
+{"id": "rh-0080", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет ссылки на событие", "basis": "agreed"}
+{"id": "rh-0081", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "unclear", "historical": "none", "note": "в 12 + альтер-эго, после полуночи", "basis": "agreed"}
+{"id": "rh-0082", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет названия/времени", "basis": "agreed"}
+{"id": "rh-0083", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "в 12, нет дня", "basis": "agreed"}
+{"id": "rh-0084", "expect": {"route": "ai", "why": "unsupported", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "звонок", "basis": "agreed"}
+{"id": "rh-0085", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "disagrees", "note": "бессмыслица", "basis": "agreed"}
+{"id": "rh-0086", "expect": {"route": "rule", "family": "calc.evaluate", "slots": {"expression": "two plus two"}}, "status": "unclear", "historical": "none", "note": "голосовая проба?", "basis": "agreed"}
+{"id": "rh-0087", "expect": {"route": "ai", "why": "missing_slot", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "ответ «No»", "basis": "agreed"}
+{"id": "rh-0088", "expect": {"route": "rule", "family": "bot.info", "slots": {}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0089", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0090", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0091", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "сказка", "basis": "agreed"}
+{"id": "rh-0092", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 1}}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0093", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет времени/названия", "basis": "agreed"}
+{"id": "rh-0094", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0095", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0096", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0097", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "none", "note": "нет ссылки на событие", "basis": "agreed"}
+{"id": "rh-0098", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0099", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0100", "expect": {"route": "ai", "why": "unsupported", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "завершить звонок", "basis": "agreed"}
+{"id": "rh-0101", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "unclear", "historical": "none", "note": "бессмыслица", "basis": "agreed"}
+{"id": "rh-0102", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "unclear", "historical": "none", "note": "непонятно", "basis": "agreed"}
+{"id": "rh-0103", "expect": {"route": "ai", "why": "unsupported", "intentLike": false}, "status": "unclear", "historical": "none", "note": "language switch: an existing rule answers it but no benchmark family expresses it; excluded from precision", "basis": "adjudicated"}
+{"id": "rh-0104", "expect": {"route": "ai", "why": "unsupported", "intentLike": false}, "status": "unclear", "historical": "none", "note": "language switch: an existing rule answers it but no benchmark family expresses it; excluded from precision", "basis": "adjudicated"}
+{"id": "rh-0105", "expect": {"route": "ai", "why": "unsupported", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "смена языка/персоны", "basis": "agreed"}
+{"id": "rh-0106", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "обрывок", "basis": "agreed"}
+{"id": "rh-0107", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет времени/названия", "basis": "agreed"}
+{"id": "rh-0108", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0109", "expect": {"route": "ai", "why": "unsupported", "intentLike": false}, "status": "unclear", "historical": "none", "note": "show-the-conversation request answered by an approved rule (basis.history.search) outside the family set", "basis": "adjudicated"}
+{"id": "rh-0110", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "Смоленск: другой часовой пояс", "basis": "agreed"}
+{"id": "rh-0111", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "жалоба на ошибку пояса", "basis": "agreed"}
+{"id": "rh-0112", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "time given in another place's zone (\"по <place>\"): the rules cannot read a zone phrase", "basis": "adjudicated"}
+{"id": "rh-0113", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "time given in another place's zone (\"по <place>\"): the rules cannot read a zone phrase (round-1 rule applied to the rest of the corpus)", "basis": "adjudicated"}
+{"id": "rh-0114", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 0}}}, "status": "confirmed", "historical": "unclear", "note": "план на день = сегодня; бот прислал картинку", "basis": "agreed"}
+{"id": "rh-0115", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "несколько событий в прошлом", "basis": "agreed"}
+{"id": "rh-0116", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "ответ на вопрос бота", "basis": "agreed"}
+{"id": "rh-0117", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет конкретного времени", "basis": "agreed"}
+{"id": "rh-0118", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "жалоба и вопрос о времени", "basis": "agreed"}
+{"id": "rh-0119", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "жалоба на время начала", "basis": "agreed"}
+{"id": "rh-0120", "expect": {"route": "rule", "family": "calendar.period", "slots": {"period": "week"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0121", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "два события таблицей", "basis": "agreed"}
+{"id": "rh-0122", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 1}}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0123", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "заметка-задача разработчика", "basis": "agreed"}
+{"id": "rh-0124", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "общий вопрос про перевод часов", "basis": "agreed"}
+{"id": "rh-0125", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0126", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "рассуждение о поясах", "basis": "agreed"}
+{"id": "rh-0127", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"weekday": "tue"}}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0128", "expect": {"route": "ai", "why": "recurrence", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "сделай регулярным", "basis": "agreed"}
+{"id": "rh-0129", "expect": {"route": "ai", "why": "recurrence", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "сделай регулярным", "basis": "agreed"}
+{"id": "rh-0130", "expect": {"route": "ai", "why": "recurrence", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "сделай регулярным", "basis": "agreed"}
+{"id": "rh-0131", "expect": {"route": "rule", "family": "event.create_range", "slots": {"title": "обед с Радик", "titleAlt": ["Обед с Радик в Курган Шелк5"], "day": {"weekday": "wed"}, "time": "13:00", "endTime": "15:00"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0132", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "отвезти Ларионова на прививку", "day": {"weekday": "mon"}, "time": "13:00"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0133", "expect": {"route": "rule", "family": "event.create_range", "slots": {"title": "день рождения Вани шашлыки", "titleAlt": ["День рождения Вани, шашлыки"], "day": {"weekday": "sat"}, "time": "12:00", "endTime": "18:00"}}, "status": "confirmed", "historical": "none", "note": "6.00 вечера = 18:00", "basis": "agreed"}
+{"id": "rh-0134", "expect": {"route": "rule", "family": "calendar.period", "slots": {"period": "next_week"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0135", "expect": {"route": "rule", "family": "event.reschedule", "slots": {"ref": {"title": "Ларионова"}, "time": "11:00"}}, "seedEvents": [{"title": "Отвезти Ларионова на прививку", "dayOffset": 3, "at": "13:00", "durationMin": 60}], "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0136", "expect": {"route": "ai", "why": "recurrence", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "переименование регулярных", "basis": "agreed"}
+{"id": "rh-0137", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "Лев именем, не @username", "basis": "agreed"}
+{"id": "rh-0138", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "удалить «уроки» (много)", "basis": "agreed"}
+{"id": "rh-0139", "expect": {"route": "ai", "why": "ambiguous_day", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "суббота = сегодня; «это же время»", "basis": "agreed"}
+{"id": "rh-0140", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "приглашённые именами", "basis": "agreed"}
+{"id": "rh-0141", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "правка названия без ссылки на событие", "basis": "agreed"}
+{"id": "rh-0142", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "служебное приглашение от бота", "basis": "agreed"}
+{"id": "rh-0143", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "служебное приглашение от бота", "basis": "agreed"}
+{"id": "rh-0144", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "приглашённые именами", "basis": "agreed"}
+{"id": "rh-0145", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "приглашённые именами", "basis": "agreed"}
+{"id": "rh-0146", "expect": {"route": "rule", "family": "calendar.period", "slots": {"period": "weekend"}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0147", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "служебное приглашение от бота", "basis": "agreed"}
+{"id": "rh-0148", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "служебное приглашение от бота", "basis": "agreed"}
+{"id": "rh-0149", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "unclear", "historical": "none", "note": "invite for a relative clock (in 31 minutes): no family takes a relative start for an invite; reading unclear", "basis": "adjudicated"}
+{"id": "rh-0150", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "болтовня в группе", "basis": "agreed"}
+{"id": "rh-0151", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "болтовня в группе", "basis": "agreed"}
+{"id": "rh-0152", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "болтовня в группе", "basis": "agreed"}
+{"id": "rh-0153", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "болтовня в группе", "basis": "agreed"}
+{"id": "rh-0154", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "болтовня в группе", "basis": "agreed"}
+{"id": "rh-0155", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "Леонид именем; глагол затёрт", "basis": "agreed"}
+{"id": "rh-0156", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ на вопрос бота", "basis": "agreed"}
+{"id": "rh-0157", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "встреча с Леонидом", "day": {"rel": 1}, "time": "18:00"}}, "status": "unclear", "historical": "none", "note": "глагол затёрт скраббером", "basis": "agreed"}
+{"id": "rh-0158", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "none", "note": "delete of today's meeting without a title; target event unclear", "basis": "adjudicated"}
+{"id": "rh-0159", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "unclear", "note": "обрывок названия без действия", "basis": "agreed"}
+{"id": "rh-0160", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет дня", "basis": "agreed"}
+{"id": "rh-0161", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 0}}}, "status": "confirmed", "historical": "none", "note": "", "basis": "agreed"}
+{"id": "rh-0162", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "окрашивание", "day": {"rel": 6}, "time": "13:45"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0163", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "окрашивание", "day": {"rel": 1}, "time": "13:15"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0164", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "отмена всех регулярных занятий"}
+{"id": "rh-0165", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "пилон", "titleAlt": ["Занятие по пилону"], "day": {"rel": 1}, "time": "13:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0166", "expect": {"route": "rule", "family": "event.delete", "slots": {"ref": {"title": "окрашивание"}}}, "seedEvents": [{"title": "Окрашивание", "dayOffset": 1, "at": "13:15", "durationMin": 60}], "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0167", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "нотариус", "day": {"rel": 11}, "time": "14:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0168", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "пилон", "titleAlt": ["Занятие по пилону"], "day": {"weekday": "thu"}, "time": "14:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0169", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "приглашение по имени контакта"}
+{"id": "rh-0170", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "окрашивание", "day": {"rel": 14}, "time": "13:30"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0171", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "пилон", "titleAlt": ["Занятие по пилону"], "day": {"weekday": "tue"}, "time": "12:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0172", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 1}}}, "status": "confirmed", "historical": "agrees", "note": "планы на завтра"}
+{"id": "rh-0173", "expect": {"route": "rule", "family": "event.delete", "slots": {"ref": {"title": "окрашивание"}}}, "seedEvents": [{"title": "Окрашивание", "dayOffset": 1, "at": "13:45", "durationMin": 60}], "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0174", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "вишни", "day": {"rel": 1}, "time": "13:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0175", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "нянчить Броню", "day": {"weekday": "sat"}, "time": "18:30"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0176", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "приглашение по имени, название неясно"}
+{"id": "rh-0177", "expect": {"route": "rule", "family": "event.snooze", "slots": {"ref": {"title": "завтрак"}, "minutes": 60}}, "seedEvents": [{"title": "Завтрак с Альберт", "dayOffset": 0, "at": "15:00", "durationMin": 60}], "status": "unclear", "historical": "disagrees", "note": "«на час позже»; событие уже прошло, чужое"}
+{"id": "rh-0178", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "создание+адрес+приглашение по @username"}
+{"id": "rh-0179", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "продолжение прошлой реплики"}
+{"id": "rh-0180", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "календарь другого пользователя"}
+{"id": "rh-0181", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "поправка к прошлой реплике"}
+{"id": "rh-0182", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "«в 12» без утра/вечера"}
+{"id": "rh-0183", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "unclear", "historical": "unclear", "note": "второе время «в 7.00» без AM/PM", "basis": "agreed"}
+{"id": "rh-0184", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Маркет Идеал", "titleAlt": ["gavin misina 6a маркет Идеал", "маркет Идеал"], "day": {"weekday": "sat"}, "time": "18:00"}}, "status": "unclear", "historical": "agrees", "note": "verbless create with an address in the title; title boundary unclear", "basis": "adjudicated"}
+{"id": "rh-0185", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "подготовить доки и найти нотариуса", "day": {"rel": 0}, "time": "13:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0186", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "нет дня"}
+{"id": "rh-0187", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "нотариус", "day": {"rel": 1}, "time": "13:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0188", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "agrees", "note": "несколько «Нотариус», ref по времени неоднозначен"}
+{"id": "rh-0189", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "пегас", "day": {"rel": 1}, "time": "14:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0190", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "булочка ветеринар", "titleAlt": ["Булочка — ветеринар"], "day": {"rel": 1}, "time": "15:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0191", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "отдать крыс", "day": {"rel": 1}, "time": "16:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0192", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "«в 12» + два дела"}
+{"id": "rh-0193", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "взять с собой холодилки", "titleAlt": ["Взять холодилки"], "day": {"rel": 1}, "time": "12:10"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0194", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "«в 12»"}
+{"id": "rh-0195", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "нет дня, приглашения по именам"}
+{"id": "rh-0196", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "приглашение по имени контакта"}
+{"id": "rh-0197", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "нет ссылки на событие, два поля"}
+{"id": "rh-0198", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 0}}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0199", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Комарова и Толя", "day": {"weekday": "tue"}, "time": "20:00"}}, "status": "unclear", "historical": "unclear", "note": "возможно это приглашаемые люди"}
+{"id": "rh-0200", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "«у нас обоих» без @username"}
+{"id": "rh-0201", "expect": {"route": "rule", "family": "calendar.period", "slots": {"period": "week"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0202", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "перенос + уведомление участников"}
+{"id": "rh-0203", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "«12» без утра/вечера"}
+{"id": "rh-0204", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "приглашение по именам, две персоны"}
+{"id": "rh-0205", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Ада", "day": {"weekday": "fri"}, "time": "16:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0206", "expect": {"route": "ai", "why": "recurrence", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "каждый месяц"}
+{"id": "rh-0207", "expect": {"route": "ai", "why": "recurrence", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "продолжение, ежемесячное напоминание"}
+{"id": "rh-0208", "expect": {"route": "ai", "why": "recurrence", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "продолжение, ежемесячно"}
+{"id": "rh-0209", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ на вопрос о городе (часовой пояс)"}
+{"id": "rh-0210", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "поставить созвон с Аркадием Жуковим", "titleAlt": ["Созвон с Аркадием Жуковим"], "day": {"rel": 1}, "time": "09:00"}}, "status": "confirmed", "historical": "agrees", "note": "напоминание = создание"}
+{"id": "rh-0211", "expect": {"route": "rule", "family": "calendar.period", "slots": {"period": "week"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0212", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "создание+геолокация+приглашение по имени"}
+{"id": "rh-0213", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "«в 12» + приглашение по имени"}
+{"id": "rh-0214", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "все события на завтра кроме одного"}
+{"id": "rh-0215", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "три перелёта", "basis": "agreed"}
+{"id": "rh-0216", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "«в 12», приглашения по именам"}
+{"id": "rh-0217", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "unclear", "historical": "agrees", "note": "connect-Telegram request handled by an approved rule (basis.telegram.status) outside the family set", "basis": "adjudicated"}
+{"id": "rh-0218", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ на вопрос бота о названии"}
+{"id": "rh-0219", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ боту о времени"}
+{"id": "rh-0220", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ боту о времени"}
+{"id": "rh-0221", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ о длительности"}
+{"id": "rh-0222", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ на «Сколько раз?»"}
+{"id": "rh-0223", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ о дате окончания"}
+{"id": "rh-0224", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "голый @username"}
+{"id": "rh-0225", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ «Да, пригласить»"}
+{"id": "rh-0226", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "unclear", "historical": "agrees", "note": "путаная просьба: создать+пригласить+перенести"}
+{"id": "rh-0227", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "список дел, много событий"}
+{"id": "rh-0228", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "список дел, много событий"}
+{"id": "rh-0229", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "недельный план"}
+{"id": "rh-0230", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ боту"}
+{"id": "rh-0231", "expect": {"route": "ai", "why": "recurrence", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "напоминания каждый день"}
+{"id": "rh-0232", "expect": {"route": "rule", "family": "event.delete", "slots": {"ref": {"title": "укол меридиан"}}}, "seedEvents": [{"title": "Укол Меридиан", "dayOffset": 7, "at": "20:00", "durationMin": 60}], "status": "unclear", "historical": "unclear", "note": "событие повторяющееся"}
+{"id": "rh-0233", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ на уточнение бота"}
+{"id": "rh-0234", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "agrees", "note": "сообщение о местоположении"}
+{"id": "rh-0235", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "нет цели удаления, плюс часовой пояс"}
+{"id": "rh-0236", "expect": {"route": "ai", "why": "unsupported", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "удаление памяти бота"}
+{"id": "rh-0237", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "смена часового пояса"}
+{"id": "rh-0238", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "акк Динамо оживет", "titleAlt": ["user44516e@example.org акк Динамо оживет", "Акк Динамо оживет", "Напомнить что user44516e@example.org акк Динамо оживет"], "day": {"weekday": "tue"}, "time": "21:00"}}, "status": "unclear", "historical": "agrees", "note": "reminder whose text holds an e-mail pseudonym; title boundary unclear"}
+{"id": "rh-0239", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "жалоба на ответ бота"}
+{"id": "rh-0240", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "приглашение по имени, описание"}
+{"id": "rh-0241", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "подтверждение боту"}
+{"id": "rh-0242", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "относительное время, приглашение по имени"}
+{"id": "rh-0243", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "настройка уведомлений"}
+{"id": "rh-0244", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "настройка уведомлений"}
+{"id": "rh-0245", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "событие+напоминания+часовой пояс+контакт"}
+{"id": "rh-0246", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "часовой пояс + напоминание"}
+{"id": "rh-0247", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "вопрос к ответу бота"}
+{"id": "rh-0248", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "вопрос к ответу бота"}
+{"id": "rh-0249", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "местоположение/часовой пояс"}
+{"id": "rh-0250", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "много событий + приглашение", "basis": "agreed"}
+{"id": "rh-0251", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ на вопрос бота (адрес)"}
+{"id": "rh-0252", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ на вопрос бота"}
+{"id": "rh-0253", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "адрес, продолжение"}
+{"id": "rh-0254", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "контакт для приглашения, продолжение"}
+{"id": "rh-0255", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "продолжение прошлой реплики"}
+{"id": "rh-0256", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "agrees", "note": "two-line message: a statement about a past move plus a bare weekday; reading unclear"}
+{"id": "rh-0257", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ на вопрос бота"}
+{"id": "rh-0258", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "нет дня/контекста"}
+{"id": "rh-0259", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ на вопрос бота"}
+{"id": "rh-0260", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "список событий", "basis": "agreed"}
+{"id": "rh-0261", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "продолжение прошлой реплики"}
+{"id": "rh-0262", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "disagrees", "note": "George-повторяющееся, отмена за сегодня неясна"}
+{"id": "rh-0263", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "создание и перенос"}
+{"id": "rh-0264", "expect": {"route": "rule", "family": "reminder.after", "slots": {"text": "китайский отель", "minutes": 90}}, "status": "confirmed", "historical": "unclear", "note": "напоминание через 1.5 часа"}
+{"id": "rh-0265", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "удалить всё на два дня"}
+{"id": "rh-0266", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ-подтверждение"}
+{"id": "rh-0267", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "голосовая расшифровка, бессмысленно"}
+{"id": "rh-0268", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "жалоба на прошлый ответ"}
+{"id": "rh-0269", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "удалить повторяющиеся, плюс комментарий"}
+{"id": "rh-0270", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Запись к врачу Захарову", "titleAlt": ["Семейная поликлиника №1", "Врач Захаров"], "day": {"rel": 15}, "time": "17:40"}}, "status": "unclear", "historical": "agrees", "note": "много деталей, название неоднозначно"}
+{"id": "rh-0271", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "имя вместо @username, продолжение"}
+{"id": "rh-0272", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "создание, напоминание, приглашение"}
+{"id": "rh-0273", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "прописка", "day": {"rel": 7}, "time": "15:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0274", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "часовой пояс GMT+4 в запросе"}
+{"id": "rh-0275", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "отмена серии занятий до даты"}
+{"id": "rh-0276", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "личная болтовня/голосовое"}
+{"id": "rh-0277", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "личная болтовня/голосовое"}
+{"id": "rh-0278", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "личная болтовня/голосовое"}
+{"id": "rh-0279", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "личная болтовня/голосовое"}
+{"id": "rh-0280", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "личная болтовня/голосовое"}
+{"id": "rh-0281", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "мск + приглашение + напоминание", "basis": "agreed"}
+{"id": "rh-0282", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "контакт и приглашение"}
+{"id": "rh-0283", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "«по Смоленску» другой пояс + приглашение", "basis": "agreed"}
+{"id": "rh-0284", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Булку к ветеринару", "titleAlt": ["Булка к ветеринару"], "day": {"rel": 8}, "time": "12:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0285", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Английский", "day": {"weekday": "wed"}, "time": "13:30"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0286", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "приглашение по имени, не @username"}
+{"id": "rh-0287", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "приглашение и описание, bare hour"}
+{"id": "rh-0288", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "смена часового пояса"}
+{"id": "rh-0289", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "time given in another place's zone (\"по <place>\"): the rules cannot read a zone phrase (round-1 rule applied to the rest of the corpus)", "basis": "adjudicated"}
+{"id": "rh-0290", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "создание и приглашение по имени"}
+{"id": "rh-0291", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "time given in another place's zone (\"по <place>\"): the rules cannot read a zone phrase"}
+{"id": "rh-0292", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "приглашение по имени"}
+{"id": "rh-0293", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "приглашение по имени"}
+{"id": "rh-0294", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "событие в чужом календаре"}
+{"id": "rh-0295", "expect": {"route": "rule", "family": "event.reschedule", "slots": {"ref": {"title": "Английский"}, "time": "12:30"}}, "seedEvents": [{"title": "Английский", "dayOffset": 1, "at": "13:30", "durationMin": 60}], "status": "confirmed", "historical": "unclear", "note": ""}
+{"id": "rh-0296", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "time given in another place's zone (\"по <place>\"): the rules cannot read a zone phrase"}
+{"id": "rh-0297", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Хутор", "day": {"weekday": "fri"}, "time": "16:15"}}, "status": "confirmed", "historical": "agrees", "note": "со ссылкой"}
+{"id": "rh-0298", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Поехать в гости к Пётр", "titleAlt": ["Гости у Пётр", "В гости к Пётр"], "day": {"rel": 1}, "time": "19:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0299", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "отменить всё"}
+{"id": "rh-0300", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ-подтверждение"}
+{"id": "rh-0301", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Английский", "day": {"rel": 1}, "time": "12:30"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0302", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Придет баяна", "titleAlt": ["Баяна в гостях", "Баяна придет", "Баяна"], "day": {"rel": 12}, "time": "11:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0303", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0304", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "все занятия"}
+{"id": "rh-0305", "expect": {"route": "rule", "family": "settings.view", "slots": {}}, "status": "confirmed", "historical": "agrees", "note": "вопрос о часовом поясе настроек"}
+{"id": "rh-0306", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "час тридцать без части суток"}
+{"id": "rh-0307", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "В Липецк", "titleAlt": ["Поездка в Липецк", "Липецк"], "day": {"rel": 1}, "time": "13:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0308", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Английский", "day": {"weekday": "wed"}, "time": "12:30"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0309", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "окрашивание", "day": {"rel": 9}, "time": "16:00"}}, "status": "confirmed", "historical": "unclear", "note": "историческая система не ответила по делу"}
+{"id": "rh-0310", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "жалоба"}
+{"id": "rh-0311", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "список событий"}
+{"id": "rh-0312", "expect": {"route": "rule", "family": "time.now", "slots": {"place": "Тамбов"}}, "status": "confirmed", "historical": "disagrees", "note": "ответ по часовому поясу пользователя"}
+{"id": "rh-0313", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "окрашивание", "day": {"rel": 9}, "time": "16:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0314", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "в два часа, приглашение по имени"}
+{"id": "rh-0315", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "вопрос и сообщение о смене места"}
+{"id": "rh-0316", "expect": {"route": "rule", "family": "calendar.when", "slots": {"query": "Арсенала"}}, "seedEvents": [{"title": "Приход Арсенала", "dayOffset": 3, "at": "15:00", "durationMin": 60}], "status": "confirmed", "historical": "agrees", "note": "поиск по названию"}
+{"id": "rh-0317", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "два события"}
+{"id": "rh-0318", "expect": {"route": "rule", "family": "calendar.period", "slots": {"period": "week"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0319", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "список из семи событий"}
+{"id": "rh-0320", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Забрать страховую карту", "titleAlt": ["сходить забрать страховую карту", "сходить забрать страховую картицу"], "day": {"weekday": "wed"}, "time": "12:00"}}, "status": "confirmed", "historical": "agrees", "note": "typo \"картицу\" repaired; title variants listed"}
+{"id": "rh-0321", "expect": {"route": "rule", "family": "event.reschedule", "slots": {"ref": {"title": "Регистрация авто"}, "day": {"weekday": "wed"}}}, "seedEvents": [{"title": "Регистрация авто", "dayOffset": 1, "at": "14:00", "durationMin": 60}], "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0322", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "два события, время «после английского»"}
+{"id": "rh-0323", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "unclear", "note": "declined name without the word event; target event unclear"}
+{"id": "rh-0324", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "вопрос к прошлому ответу"}
+{"id": "rh-0325", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Английский", "day": {"rel": 15}, "time": "13:30"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0326", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "приглашение по имени, много деталей"}
+{"id": "rh-0327", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "приглашение по имени"}
+{"id": "rh-0328", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "вопросы про контакты"}
+{"id": "rh-0329", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "жалоба, удаление контакта и приглашения"}
+{"id": "rh-0330", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "disagrees", "note": "жалоба на отсутствие ответов"}
+{"id": "rh-0331", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "жалоба"}
+{"id": "rh-0332", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "вопрос о контактах"}
+{"id": "rh-0333", "expect": {"route": "ai", "why": "missing_slot", "intentLike": false}, "status": "confirmed", "historical": "agrees", "note": "ответ на вопрос о городе"}
+{"id": "rh-0334", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0335", "expect": {"route": "rule", "family": "event.create_range", "slots": {"title": "Шансь татуировку", "titleAlt": ["Татуировка", "Сделать татуировку"], "day": {"weekday": "mon"}, "time": "16:00", "endTime": "23:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0336", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0337", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "нет времени, только вечер, контакт"}
+{"id": "rh-0338", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Булку к врачу", "titleAlt": ["Булка к врачу"], "day": {"weekday": "mon"}, "time": "13:00"}}, "status": "unclear", "historical": "agrees", "note": "«понедельник 13» двусмысленно"}
+{"id": "rh-0339", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "список из пяти задач"}
+{"id": "rh-0340", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "вопрос и новая запись"}
+{"id": "rh-0341", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "жалоба на дубли"}
+{"id": "rh-0342", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "несколько событий/приглашений; инвайты упали", "basis": "agreed"}
+{"id": "rh-0343", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "несколько вопросов-претензий"}
+{"id": "rh-0344", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "удалить + приглашения"}
+{"id": "rh-0345", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"weekday": "wed"}}}, "status": "confirmed", "historical": "agrees", "note": "план на среду"}
+{"id": "rh-0346", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "концерт Жемчуг Гарант", "day": {"rel": 7}, "time": "18:30"}}, "status": "confirmed", "historical": "agrees", "note": "дата 22 сентября"}
+{"id": "rh-0347", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Назара к врачу", "titleAlt": ["Назар к врачу"], "day": {"rel": 1}, "time": "17:40"}}, "status": "confirmed", "historical": "unclear", "note": "лишнее приглашение"}
+{"id": "rh-0348", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "нет дня; система выбрала завтра"}
+{"id": "rh-0349", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "чинить сушку", "day": {"rel": 0}, "time": "14:00"}}, "status": "confirmed", "historical": "agrees", "note": "14 = 14:00"}
+{"id": "rh-0350", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "agrees", "note": "обрывок без глагола"}
+{"id": "rh-0351", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "голое 00"}
+{"id": "rh-0352", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "«через 2 часа» + имя; создано на текущее время", "basis": "agreed"}
+{"id": "rh-0353", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "много событий в чужой календарь"}
+{"id": "rh-0354", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "несколько событий с приглашениями"}
+{"id": "rh-0355", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "расписание на неделю", "basis": "agreed"}
+{"id": "rh-0356", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "расписание на неделю", "basis": "agreed"}
+{"id": "rh-0357", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "расписание на неделю", "basis": "agreed"}
+{"id": "rh-0358", "expect": {"route": "rule", "family": "event.delete", "slots": {"ref": {"title": "Английский"}}}, "seedEvents": [{"title": "Английский", "dayOffset": 5, "at": "12:30", "durationMin": 60}], "status": "unclear", "historical": "agrees", "note": "weekly series: several events share the title; target unclear"}
+{"id": "rh-0359", "expect": {"route": "ai", "why": "unsupported", "intentLike": false}, "status": "unclear", "historical": "agrees", "note": "непонятная фраза"}
+{"id": "rh-0360", "expect": {"route": "rule", "family": "calendar.image", "slots": {"period": "week"}}, "status": "confirmed", "historical": "agrees", "note": "неделя картинкой"}
+{"id": "rh-0361", "expect": {"route": "rule", "family": "calendar.image", "slots": {"period": "next_week"}}, "status": "confirmed", "historical": "agrees", "note": "следующая неделя картинкой"}
+{"id": "rh-0362", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "qa проба"}
+{"id": "rh-0363", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "расписание капель, много событий"}
+{"id": "rh-0364", "expect": {"route": "ai", "why": "missing_slot", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "ответ на вопрос о городе"}
+{"id": "rh-0365", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "много событий в чужой календарь"}
+{"id": "rh-0366", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "qa проба"}
+{"id": "rh-0367", "expect": {"route": "ai", "why": "missing_slot", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "ответ на вопрос о городе"}
+{"id": "rh-0368", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "qa проба"}
+{"id": "rh-0369", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 1}}}, "status": "confirmed", "historical": "none", "note": "с хвостом AUTO-RESPONSE; первое сообщение «Что завтра?»", "basis": "agreed"}
+{"id": "rh-0370", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 1}}}, "status": "confirmed", "historical": "agrees", "note": "что завтра"}
+{"id": "rh-0371", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "qa проба"}
+{"id": "rh-0372", "expect": {"route": "ai", "why": "missing_slot", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "ответ на вопрос о городе"}
+{"id": "rh-0373", "expect": {"route": "rule", "family": "event.create_invite", "slots": {"title": "созвон", "titleAlt": ["созвон Кристалля"], "day": {"rel": 1}, "time": "15:00", "invitee": "@px_a76943ff"}}, "status": "confirmed", "historical": "disagrees", "note": "find_user провалился"}
+{"id": "rh-0374", "expect": {"route": "rule", "family": "event.create_invite", "slots": {"title": "созвон", "titleAlt": ["созвон Кристалля", "Кристалля созвон"], "day": {"rel": 0}, "time": "15:00", "invitee": "@px_a76943ff"}}, "status": "confirmed", "historical": "disagrees", "note": "find_user провалился", "basis": "adjudicated"}
+{"id": "rh-0375", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "удалить + добавить два", "basis": "agreed"}
+{"id": "rh-0376", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "удалить + добавить два", "basis": "agreed"}
+{"id": "rh-0377", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "удалить + добавить два", "basis": "agreed"}
+{"id": "rh-0378", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "удалить + добавить два", "basis": "agreed"}
+{"id": "rh-0379", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "добавить в контакты"}
+{"id": "rh-0380", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 0}}}, "status": "confirmed", "historical": "agrees", "note": "планы на сегодня"}
+{"id": "rh-0381", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 0}}}, "status": "confirmed", "historical": "none", "note": "хвост AUTO-RESPONSE", "basis": "agreed"}
+{"id": "rh-0382", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "два события и приглашение"}
+{"id": "rh-0383", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "претензия по ответу"}
+{"id": "rh-0384", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "удалить у себя, оставить у другого"}
+{"id": "rh-0385", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера создания"}
+{"id": "rh-0386", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера создания"}
+{"id": "rh-0387", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера создания"}
+{"id": "rh-0388", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера создания"}
+{"id": "rh-0389", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "ответ мастера создания"}
+{"id": "rh-0390", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "вопрос к прошлому ответу"}
+{"id": "rh-0391", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера создания"}
+{"id": "rh-0392", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "ответ мастера создания"}
+{"id": "rh-0393", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "ответ мастера создания"}
+{"id": "rh-0394", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет дня и времени"}
+{"id": "rh-0395", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера создания"}
+{"id": "rh-0396", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "ответ мастера создания"}
+{"id": "rh-0397", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "ответ мастера создания"}
+{"id": "rh-0398", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "ответ мастера создания"}
+{"id": "rh-0399", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "ответ мастера создания"}
+{"id": "rh-0400", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "приглашение по имени, не @username"}
+{"id": "rh-0401", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "unclear", "note": "приглашение по имени; неприемлемый заголовок"}
+{"id": "rh-0402", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "unclear", "note": "приглашение по имени; неприемлемый заголовок"}
+{"id": "rh-0403", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "создать+приглашения+место; время в прошлом"}
+{"id": "rh-0404", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "приглашённые именами + место", "basis": "agreed"}
+{"id": "rh-0405", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "приглашённые именами + место", "basis": "agreed"}
+{"id": "rh-0406", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "приглашённые именами + место", "basis": "agreed"}
+{"id": "rh-0407", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "нет названия"}
+{"id": "rh-0408", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "создать+два приглашения+место"}
+{"id": "rh-0409", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "приглашённые именами + место", "basis": "agreed"}
+{"id": "rh-0410", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "приглашённые именами + место", "basis": "agreed"}
+{"id": "rh-0411", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "приглашённые именами + место", "basis": "agreed"}
+{"id": "rh-0412", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "создана на 20:00 вместо 22:00"}
+{"id": "rh-0413", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Ебать пизду хуёвых бледей", "day": {"rel": 1}, "time": "13:00"}}, "status": "confirmed", "historical": "disagrees", "note": "создана на 11:00 вместо 13:00"}
+{"id": "rh-0414", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет дня и времени"}
+{"id": "rh-0415", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "приглашение по имени, не @username"}
+{"id": "rh-0416", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "unclear", "note": "нет названия"}
+{"id": "rh-0417", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "отмена всех событий"}
+{"id": "rh-0418", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "в 12 без утра/вечера, группа"}
+{"id": "rh-0419", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "нет деталей"}
+{"id": "rh-0420", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "в 12 без утра/вечера + приглашения"}
+{"id": "rh-0421", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "«в 12» без утра/вечера; имена", "basis": "agreed"}
+{"id": "rh-0422", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "«в 12» без утра/вечера; имена", "basis": "agreed"}
+{"id": "rh-0423", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "«в 12» без утра/вечера; имена", "basis": "agreed"}
+{"id": "rh-0424", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "болтовня в группе"}
+{"id": "rh-0425", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "болтовня в группе"}
+{"id": "rh-0426", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "несколько напоминаний"}
+{"id": "rh-0427", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "голое время"}
+{"id": "rh-0428", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "нет времени, чужой календарь"}
+{"id": "rh-0429", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "unclear", "historical": "unclear", "note": "голое время"}
+{"id": "rh-0430", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "просьба к человеку в группе"}
+{"id": "rh-0431", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "парикмахерская у котов", "titleAlt": ["парикмахерская"], "day": {"rel": 1}, "time": "13:00"}}, "status": "confirmed", "historical": "agrees", "note": "13 = 13:00"}
+{"id": "rh-0432", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "удалить все на завтра"}
+{"id": "rh-0433", "expect": {"route": "rule", "family": "event.delete", "slots": {"ref": {"title": "курить траву"}}}, "seedEvents": [{"title": "Курить траву и зинаидя", "dayOffset": 1, "at": "22:00", "durationMin": 60}], "status": "confirmed", "historical": "agrees", "note": "удалено"}
+{"id": "rh-0434", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "английский", "titleAlt": ["Английский"], "day": {"rel": 1}, "time": "12:30"}}, "status": "confirmed", "historical": "agrees", "note": "12:30 явное"}
+{"id": "rh-0435", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "три события с приглашениями"}
+{"id": "rh-0436", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "несколько событий", "basis": "agreed"}
+{"id": "rh-0437", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "несколько событий", "basis": "agreed"}
+{"id": "rh-0438", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "несколько событий", "basis": "agreed"}
+{"id": "rh-0439", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "уточнение к прошлой реплике"}
+{"id": "rh-0440", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "продолжение прошлой реплики"}
+{"id": "rh-0441", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 0}}}, "status": "confirmed", "historical": "none", "note": "хвост AUTO-RESPONSE", "basis": "agreed"}
+{"id": "rh-0442", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 0}}}, "status": "confirmed", "historical": "agrees", "note": "что сегодня"}
+{"id": "rh-0443", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "встреча + приглашения по именам"}
+{"id": "rh-0444", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "продолжение прошлой реплики", "basis": "agreed"}
+{"id": "rh-0445", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "продолжение прошлой реплики", "basis": "agreed"}
+{"id": "rh-0446", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "продолжение прошлой реплики", "basis": "agreed"}
+{"id": "rh-0447", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "продолжение прошлой реплики", "basis": "agreed"}
+{"id": "rh-0448", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "продолжение прошлой реплики"}
+{"id": "rh-0449", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "продолжение: место"}
+{"id": "rh-0450", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "место без события", "basis": "agreed"}
+{"id": "rh-0451", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "место без события", "basis": "agreed"}
+{"id": "rh-0452", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "место без события", "basis": "agreed"}
+{"id": "rh-0453", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "продолжение: добавить себя"}
+{"id": "rh-0454", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "отвезти клетку", "titleAlt": ["Отвезти клетку"], "day": {"rel": 1}, "time": "20:30"}}, "status": "confirmed", "historical": "unclear", "note": "20.30 = 20:30"}
+{"id": "rh-0455", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "болтовня в группе"}
+{"id": "rh-0456", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "болтовня в группе"}
+{"id": "rh-0457", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 1}}}, "status": "confirmed", "historical": "none", "note": "хвост AUTO-RESPONSE", "basis": "agreed"}
+{"id": "rh-0458", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ на вопрос бота"}
+{"id": "rh-0459", "expect": {"route": "rule", "family": "calendar.when", "slots": {"query": "английский"}}, "seedEvents": [{"title": "Английский с Назаром", "dayOffset": 2, "at": "12:30", "durationMin": 60}], "status": "confirmed", "historical": "disagrees", "note": "ответ не получен"}
+{"id": "rh-0460", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "приглашение по имени контакта, нет @username"}
+{"id": "rh-0461", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "английский у Назара", "day": {"weekday": "wed"}, "time": "12:30"}}, "status": "confirmed", "historical": "disagrees", "note": "история ответила что событие есть"}
+{"id": "rh-0462", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "календарь другого человека"}
+{"id": "rh-0463", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ на вопрос бота"}
+{"id": "rh-0464", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "контакт по имени, нет @username"}
+{"id": "rh-0465", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Булку к ветеринару", "titleAlt": ["Булка к ветеринару", "Ветеринар"], "day": {"weekday": "tue"}, "time": "13:00"}}, "status": "confirmed", "historical": "agrees", "note": "declined title variants listed"}
+{"id": "rh-0466", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "весь английский"}
+{"id": "rh-0467", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "вопрос к прошлому ответу"}
+{"id": "rh-0468", "expect": {"route": "rule", "family": "calendar.period", "slots": {"period": "week"}}, "status": "confirmed", "historical": "none", "note": "хвост AUTO-RESPONSE", "basis": "agreed"}
+{"id": "rh-0469", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера создания"}
+{"id": "rh-0470", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера"}
+{"id": "rh-0471", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера: место"}
+{"id": "rh-0472", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"rel": 1}}}, "status": "confirmed", "historical": "none", "note": "хвост AUTO-RESPONSE", "basis": "agreed"}
+{"id": "rh-0473", "expect": {"route": "rule", "family": "invite.status", "slots": {"ref": {"id": 643}}}, "seedEvents": [{"title": "Отвезти клетку", "dayOffset": 0, "at": "20:30", "durationMin": 60}], "status": "confirmed", "historical": "disagrees", "note": "событие #643 есть, система не нашла", "basis": "agreed"}
+{"id": "rh-0474", "expect": {"route": "rule", "family": "invite.status", "slots": {"ref": {"id": 643}}}, "seedEvents": [{"title": "Отвезти клетку", "dayOffset": 0, "at": "20:30", "durationMin": 60}], "status": "confirmed", "historical": "agrees", "note": "хвост AUTO-RESPONSE", "basis": "agreed"}
+{"id": "rh-0475", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "болтовня в группе"}
+{"id": "rh-0476", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "болтовня в группе"}
+{"id": "rh-0477", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "болтовня в группе"}
+{"id": "rh-0478", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": "болтовня в группе"}
+{"id": "rh-0479", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "в 7 без утра/вечера + контакт"}
+{"id": "rh-0480", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "продолжение реплики"}
+{"id": "rh-0481", "expect": {"route": "rule", "family": "calendar.day", "slots": {"day": {"weekday": "wed"}}}, "status": "confirmed", "historical": "agrees", "note": "", "basis": "agreed"}
+{"id": "rh-0482", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "четыре события для другого", "basis": "agreed"}
+{"id": "rh-0483", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "продолжение"}
+{"id": "rh-0484", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "четыре события для другого", "basis": "agreed"}
+{"id": "rh-0485", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": ""}
+{"id": "rh-0486", "expect": {"route": "ai", "why": "chitchat", "intentLike": false}, "status": "confirmed", "historical": "none", "note": ""}
+{"id": "rh-0487", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "служебная проба qaProbe"}
+{"id": "rh-0488", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "проба: приглашение группы"}
+{"id": "rh-0489", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "карточка с кнопками в группе"}
+{"id": "rh-0490", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "проба перенос"}
+{"id": "rh-0491", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "проба перенос"}
+{"id": "rh-0492", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "инструкция вызвать инструмент"}
+{"id": "rh-0493", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "приглашение группы"}
+{"id": "rh-0494", "expect": {"route": "ai", "why": "recurrence", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "проба: ежегодное в прошлом"}
+{"id": "rh-0495", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "подтверждение"}
+{"id": "rh-0496", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "проба"}
+{"id": "rh-0497", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "проба: приглашение группового чата"}
+{"id": "rh-0498", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "одно слово HCB"}
+{"id": "rh-0499", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "приглашение группы"}
+{"id": "rh-0500", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "проба перенос"}
+{"id": "rh-0501", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "resend_invitation"}
+{"id": "rh-0502", "expect": {"route": "rule", "family": "calendar.period", "slots": {"period": "week"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0503", "expect": {"route": "ai", "why": "chitchat", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "проба перенос"}
+{"id": "rh-0504", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "нет цели"}
+{"id": "rh-0505", "expect": {"route": "rule", "family": "event.delete", "slots": {"ref": {"title": "Созвон"}}}, "seedEvents": [{"title": "Созвон по маргарите", "dayOffset": 0, "at": "12:30", "durationMin": 60}], "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0506", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "нет дня, контакт по имени"}
+{"id": "rh-0507", "expect": {"route": "ai", "why": "missing_slot", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "номер квартиры"}
+{"id": "rh-0508", "expect": {"route": "ai", "why": "missing_slot", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "ответ про город"}
+{"id": "rh-0509", "expect": {"route": "ai", "why": "missing_slot", "intentLike": false}, "status": "confirmed", "historical": "unclear", "note": "ответ про город"}
+{"id": "rh-0510", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "два события"}
+{"id": "rh-0511", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "товар со ссылкой, нет дня/времени"}
+{"id": "rh-0512", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ на вопрос бота"}
+{"id": "rh-0513", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ"}
+{"id": "rh-0514", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ"}
+{"id": "rh-0515", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ, нет названия"}
+{"id": "rh-0516", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "несколько событий"}
+{"id": "rh-0517", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ"}
+{"id": "rh-0518", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "продолжение, нет ссылки на событие"}
+{"id": "rh-0519", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "контакт по имени"}
+{"id": "rh-0520", "expect": {"route": "rule", "family": "invite.send", "slots": {"ref": {"title": "Английский"}, "invitee": "@px_8ef2391a"}}, "seedEvents": [{"title": "Английский с Назаром", "dayOffset": 3, "at": "12:30", "durationMin": 60}], "status": "unclear", "historical": "disagrees", "note": "неоднозначное название"}
+{"id": "rh-0521", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ"}
+{"id": "rh-0522", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "часовой пояс мск"}
+{"id": "rh-0523", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "удалить и сдвинуть"}
+{"id": "rh-0524", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "жалоба про мск"}
+{"id": "rh-0525", "expect": {"route": "ai", "why": "bare_hour", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "завтра 12 — без утра/вечера"}
+{"id": "rh-0526", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера"}
+{"id": "rh-0527", "expect": {"route": "ai", "why": "past_or_invalid", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "19:90 не существует"}
+{"id": "rh-0528", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера"}
+{"id": "rh-0529", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "нет дня и названия-имени гостей", "basis": "agreed"}
+{"id": "rh-0530", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "нет ссылки, два действия"}
+{"id": "rh-0531", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "на уралу", "day": {"rel": 1}, "time": "08:15", "titleAlt": ["Уралу"]}}, "status": "unclear", "historical": "none", "note": "verbless create whose title is a place pseudonym", "basis": "adjudicated"}
+{"id": "rh-0532", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера"}
+{"id": "rh-0533", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "ответ мастера"}
+{"id": "rh-0534", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "длинная диктовка", "basis": "agreed"}
+{"id": "rh-0535", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "ответ"}
+{"id": "rh-0536", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "жалоба"}
+{"id": "rh-0537", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "нет ссылки на событие"}
+{"id": "rh-0538", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "контакт по имени"}
+{"id": "rh-0539", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "картинг", "day": {"weekday": "sat"}, "time": "14:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0540", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "самокат", "day": {"weekday": "mon"}, "time": "13:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0541", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "сюрприз", "day": {"weekday": "mon"}, "time": "18:40"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0542", "expect": {"route": "ai", "why": "unsupported", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "календарь другого человека"}
+{"id": "rh-0543", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "disagrees", "note": "ответ боту"}
+{"id": "rh-0544", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "событие + программа + много гостей", "basis": "agreed"}
+{"id": "rh-0545", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "нет дня, приглашение"}
+{"id": "rh-0546", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "none", "note": "контакт по имени"}
+{"id": "rh-0547", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "сделать ключи", "day": {"rel": 0}, "time": "13:00"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0548", "expect": {"route": "ai", "why": "bulk", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "две стрижки"}
+{"id": "rh-0549", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "контакт по имени"}
+{"id": "rh-0550", "expect": {"route": "rule", "family": "event.create", "slots": {"title": "Английский", "day": {"rel": 9}, "time": "12:30"}}, "status": "confirmed", "historical": "agrees", "note": ""}
+{"id": "rh-0551", "expect": {"route": "ai", "why": "multi_request", "intentLike": true}, "status": "confirmed", "historical": "agrees", "note": "два дня"}
+{"id": "rh-0552", "expect": {"route": "ai", "why": "missing_slot", "intentLike": true}, "status": "confirmed", "historical": "unclear", "note": "нет дня, контакт по имени"}

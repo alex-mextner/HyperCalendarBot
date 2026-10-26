@@ -1,7 +1,8 @@
 import { Database } from 'bun:sqlite';
-import { chmodSync, closeSync, fsyncSync, linkSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { snapshotDatabase } from '../src/services/intent/db-backup.ts';
 import { seedIntents } from '../src/services/intent/seed-catalog.ts';
 import {
   applySeedReplacement,
@@ -10,37 +11,6 @@ import {
   planSeedReplacement,
 } from '../src/services/intent/seed-replacement.ts';
 
-function durableSnapshot(db: Database, destination: string): void {
-  const target = resolve(destination);
-  const temporary = mkdtempSync(join(dirname(target), '.intent-basis-backup-'));
-  try {
-    const file = join(temporary, 'before.sqlite');
-    db.query('VACUUM INTO ?').run(file);
-    chmodSync(file, 0o600);
-    const saved = new Database(file, { readonly: true, create: false });
-    try {
-      const check = saved.query<{ quick_check: string }, []>('PRAGMA quick_check').all();
-      if (check.length !== 1 || check[0]?.quick_check !== 'ok') throw new Error('Backup integrity failed');
-    } finally {
-      saved.close();
-    }
-    const fd = openSync(file, 'r+');
-    try {
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-    linkSync(file, target); // Atomic no-clobber; refuse an existing backup.
-    const parent = openSync(dirname(target), 'r');
-    try {
-      fsyncSync(parent);
-    } finally {
-      closeSync(parent);
-    }
-  } finally {
-    rmSync(temporary, { recursive: true, force: true });
-  }
-}
 export function runSeedReplacementCli(): void {
   const { values } = parseArgs({
     args: process.argv.slice(2),
@@ -65,7 +35,7 @@ export function runSeedReplacementCli(): void {
     }
     if (values.expect !== plan.previousFingerprint) throw new Error('Intent definitions changed after operator review');
     assertReplacementWindow(db);
-    durableSnapshot(db, values.backup!);
+    snapshotDatabase(db, values.backup!);
     const archive = `${values.backup!}.intents.json`;
     writeFileSync(archive, JSON.stringify({ plan, rows: intentRows(db) }, null, 2), { flag: 'wx', mode: 0o600 });
     const result = applySeedReplacement(db, seedIntents, plan, values.backup!);

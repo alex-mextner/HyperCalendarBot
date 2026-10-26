@@ -1,5 +1,22 @@
 import { TZDate } from '@date-fns/tz';
 import { z } from 'zod';
+import { canonicalize, repairTypos } from './canonical-input.ts';
+import {
+  addDays,
+  type CalendarDay,
+  DAY_WORD_OFFSETS,
+  daysInMonth,
+  fail,
+  isoDay,
+  pad2,
+  parseDate,
+  parseTime,
+  today,
+  weekdayMondayZero,
+} from './date-time-words.ts';
+import { parseEventPhrase } from './event-phrase.ts';
+import { distinctiveStem } from './event-reference.ts';
+import { humanWhen } from './human-time.ts';
 import { normalize } from './normalizer.ts';
 import { resolveVariables, type UserContext } from './variable-resolver.ts';
 import { WorkflowInputError, type WorkflowInputValue } from './workflow-input.ts';
@@ -60,6 +77,8 @@ export const BindingSchema = z.discriminatedUnion('type', [
       type: z.literal('text'),
       from: Template,
       max: z.number().int().min(1).max(500).optional(),
+      /** Upper-case the first letter, as a calendar title reads ("растяжка" → "Растяжка"). */
+      capitalize: z.boolean().optional(),
       optional: z.boolean().optional(),
       default: z.string().max(64).optional(),
     })
@@ -116,7 +135,34 @@ export const BindingSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('relative_instant'), duration: z.string().regex(BINDING_NAME) }).strict(),
   z.object({ type: z.literal('timezone'), from: Template }).strict(),
   z
-    .object({ type: z.literal('eventref'), from: Template, reject: z.array(z.string().max(32)).max(24).optional() })
+    .object({
+      type: z.literal('eventref'),
+      from: Template,
+      reject: z.array(z.string().max(32)).max(24).optional(),
+      /** Search by the most distinctive word's stem, so an inflected mention ("йогу") finds its event ("Йога"). */
+      stem: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('event_phrase'),
+      from: Template,
+      /** The phrase must name a day / a clock time; a reference phrase ("удали стендап") must name neither. */
+      date: z.enum(['require', 'forbid']).optional(),
+      time: z.enum(['require', 'forbid']).optional(),
+      /** An explicit end time or duration is read; 'forbid' rejects a phrase that carries one. */
+      span: z.enum(['allow', 'forbid']).optional(),
+      invitee: z.enum(['require', 'forbid']).optional(),
+      /**
+       * The title is the mention of an existing event, not a new name: it is read as an event reference (`ref`,
+       * found by its distinctive word) and a digit left in it, a bare hour that no grammar read, makes the phrase refused.
+       */
+      reference: z.boolean().optional(),
+      /** Words that make a reference mean "many events" ("все"); the phrase is refused when it contains one. */
+      reject: z.array(z.string().max(32)).max(24).optional(),
+      future: z.boolean().optional(),
+      default_minutes: z.number().int().min(1).max(1440).optional(),
+    })
     .strict(),
   z.object({ type: z.literal('recipient'), from: Template }).strict(),
 ]);
@@ -127,191 +173,6 @@ export const BindingsSchema = z
 export type Bindings = z.infer<typeof BindingsSchema>;
 export type BindValues = { [name: string]: WorkflowInputValue };
 
-const fail = (): never => {
-  throw new WorkflowInputError('INVALID_INPUT');
-};
-const pad2 = (n: number): string => String(n).padStart(2, '0');
-
-interface CalendarDay {
-  y: number;
-  m: number;
-  d: number;
-}
-
-function isoDay({ y, m, d }: CalendarDay): string {
-  return `${String(y).padStart(4, '0')}-${pad2(m)}-${pad2(d)}`;
-}
-
-/** Calendar arithmetic on the proleptic calendar; independent of any UTC offset. */
-function addDays(day: CalendarDay, delta: number): CalendarDay {
-  const moved = new Date(Date.UTC(day.y, day.m - 1, day.d + delta));
-  return { y: moved.getUTCFullYear(), m: moved.getUTCMonth() + 1, d: moved.getUTCDate() };
-}
-
-function weekdayMondayZero(day: CalendarDay): number {
-  return (new Date(Date.UTC(day.y, day.m - 1, day.d)).getUTCDay() + 6) % 7;
-}
-
-function daysInMonth(y: number, m: number): number {
-  return new Date(Date.UTC(y, m, 0)).getUTCDate();
-}
-
-function validDay(day: CalendarDay): boolean {
-  return (
-    day.y >= 1970 && day.y <= 2200 && day.m >= 1 && day.m <= 12 && day.d >= 1 && day.d <= daysInMonth(day.y, day.m)
-  );
-}
-
-function today(now: Date, timezone: string): CalendarDay {
-  const local = new TZDate(now, timezone);
-  return { y: local.getFullYear(), m: local.getMonth() + 1, d: local.getDate() };
-}
-
-const DAY_WORD_OFFSETS: { [word in (typeof DAY_WORDS)[number]]: number } = {
-  yesterday: -1,
-  today: 0,
-  tomorrow: 1,
-  day_after_tomorrow: 2,
-};
-
-const MONTHS: { [name: string]: number } = {
-  январь: 1,
-  января: 1,
-  jan: 1,
-  january: 1,
-  февраль: 2,
-  февраля: 2,
-  feb: 2,
-  february: 2,
-  март: 3,
-  марта: 3,
-  mar: 3,
-  march: 3,
-  апрель: 4,
-  апреля: 4,
-  apr: 4,
-  april: 4,
-  май: 5,
-  мая: 5,
-  may: 5,
-  июнь: 6,
-  июня: 6,
-  jun: 6,
-  june: 6,
-  июль: 7,
-  июля: 7,
-  jul: 7,
-  july: 7,
-  август: 8,
-  августа: 8,
-  aug: 8,
-  august: 8,
-  сентябрь: 9,
-  сентября: 9,
-  sep: 9,
-  sept: 9,
-  september: 9,
-  октябрь: 10,
-  октября: 10,
-  oct: 10,
-  october: 10,
-  ноябрь: 11,
-  ноября: 11,
-  nov: 11,
-  november: 11,
-  декабрь: 12,
-  декабря: 12,
-  dec: 12,
-  december: 12,
-};
-
-function parseAbsoluteDay(text: string): { day: Partial<CalendarDay> & { m: number; d: number } } | null {
-  const iso = /^(\d{4})[-./\s](\d{1,2})[-./\s](\d{1,2})$/.exec(text);
-  if (iso) return { day: { y: Number(iso[1]), m: Number(iso[2]), d: Number(iso[3]) } };
-  const numeric = /^(\d{1,2})[-./\s](\d{1,2})(?:[-./\s](\d{4}))?$/.exec(text);
-  if (numeric) {
-    return { day: { ...(numeric[3] ? { y: Number(numeric[3]) } : {}), m: Number(numeric[2]), d: Number(numeric[1]) } };
-  }
-  const dayFirst = /^(\d{1,2})\s+([a-zа-яё]{3,9})(?:\s+(\d{4}))?$/.exec(text);
-  if (dayFirst && Object.hasOwn(MONTHS, dayFirst[2]!)) {
-    return {
-      day: { ...(dayFirst[3] ? { y: Number(dayFirst[3]) } : {}), m: MONTHS[dayFirst[2]!]!, d: Number(dayFirst[1]) },
-    };
-  }
-  const monthFirst = /^([a-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s+(\d{4}))?$/.exec(text);
-  if (monthFirst && Object.hasOwn(MONTHS, monthFirst[1]!)) {
-    return {
-      day: {
-        ...(monthFirst[3] ? { y: Number(monthFirst[3]) } : {}),
-        m: MONTHS[monthFirst[1]!]!,
-        d: Number(monthFirst[2]),
-      },
-    };
-  }
-  return null;
-}
-
-/** Until this local hour, 'today' and 'tomorrow' may still count from the day that has just ended. */
-const AFTER_MIDNIGHT_END_HOUR = 4;
-
-/** `dayBefore` reads a marked word said just after midnight as counted from the day that has just ended. */
-function parseDate(
-  raw: string,
-  binding: Extract<Binding, { type: 'date' }>,
-  now: Date,
-  timezone: string,
-  dayBefore: boolean,
-): string {
-  const key = normalize(raw);
-  const current = today(now, timezone);
-  const word = binding.words && Object.hasOwn(binding.words, key) ? binding.words[key] : undefined;
-  if (word) {
-    // Someone still awake at 01:22 on Monday may say 'tomorrow' for Monday and 'today' for Sunday.
-    const fromDayBefore =
-      dayBefore &&
-      binding.after_midnight === 'both' &&
-      (word === 'today' || word === 'tomorrow') &&
-      new TZDate(now, timezone).getHours() < AFTER_MIDNIGHT_END_HOUR;
-    return isoDay(addDays(current, DAY_WORD_OFFSETS[word] - (fromDayBefore ? 1 : 0)));
-  }
-  const parsed = parseAbsoluteDay(key);
-  if (!parsed) return fail();
-  const withYear = (year: number): CalendarDay => ({ y: year, m: parsed.day.m, d: parsed.day.d });
-  let day = withYear(parsed.day.y ?? current.y);
-  if (!validDay(day)) return fail();
-  if (parsed.day.y === undefined && binding.future && isoDay(day) < isoDay(current)) day = withYear(current.y + 1);
-  return validDay(day) ? isoDay(day) : fail();
-}
-
-function hourFromSuffix(hour: number, suffix: string): number {
-  if (suffix === 'am' || suffix === 'a m') return hour >= 1 && hour <= 12 ? hour % 12 : fail();
-  if (suffix === 'pm' || suffix === 'p m') return hour >= 1 && hour <= 12 ? (hour % 12) + 12 : fail();
-  if (suffix === 'утра') return hour >= 4 && hour <= 11 ? hour : fail();
-  if (suffix === 'дня') return hour === 12 ? 12 : hour >= 1 && hour <= 6 ? hour + 12 : fail();
-  if (suffix === 'вечера') return hour >= 4 && hour <= 11 ? hour + 12 : fail();
-  if (suffix === 'ночи')
-    return hour === 12 ? 0 : hour >= 1 && hour <= 5 ? hour : hour >= 9 && hour <= 11 ? hour + 12 : fail();
-  return fail();
-}
-
-/** A bare hour from 1 to 12 is ambiguous between morning and evening and is never guessed. */
-function parseTime(raw: string): string {
-  const text = raw.trim().toLowerCase().replace(/\s+/g, ' ');
-  if (text === 'полдень' || text === 'noon') return '12:00';
-  if (text === 'полночь' || text === 'midnight') return '00:00';
-  const match = /^(\d{1,2})(?:[:.\s](\d{2}))?(?: ?(am|pm|a m|p m|утра|дня|вечера|ночи))?$/.exec(text);
-  if (!match) return fail();
-  const hour = Number(match[1]);
-  const minute = match[2] === undefined ? 0 : Number(match[2]);
-  if (minute > 59) return fail();
-  let resolved: number;
-  if (match[3]) resolved = hourFromSuffix(hour, match[3]);
-  else if (hour > 23) return fail();
-  else if (match[2] === undefined && hour >= 1 && hour <= 12) return fail();
-  else resolved = hour;
-  return `${pad2(resolved)}:${pad2(minute)}`;
-}
-
 function offsetMinutesAt(utcMs: number, timezone: string): number {
   return -new TZDate(utcMs, timezone).getTimezoneOffset();
 }
@@ -321,7 +182,7 @@ function formatOffset(minutes: number): string {
   return `${minutes < 0 ? '-' : '+'}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
 }
 
-function formatLocalInstant(utcMs: number, timezone: string): string {
+export function formatLocalInstant(utcMs: number, timezone: string): string {
   const local = new TZDate(utcMs, timezone);
   const stamp =
     `${String(local.getFullYear()).padStart(4, '0')}-${pad2(local.getMonth() + 1)}-${pad2(local.getDate())}` +
@@ -333,7 +194,7 @@ function formatLocalInstant(utcMs: number, timezone: string): string {
  * Resolve a wall-clock time in an IANA zone to exactly one instant. A time skipped by a
  * clock change or repeated by one has zero or two instants and is rejected, never guessed.
  */
-function uniqueInstant(day: CalendarDay, hour: number, minute: number, timezone: string): number {
+export function uniqueInstant(day: CalendarDay, hour: number, minute: number, timezone: string): number {
   const wall = Date.UTC(day.y, day.m - 1, day.d, hour, minute);
   const candidates = new Set<number>();
   for (const probe of [wall - 86_400_000, wall, wall + 86_400_000]) {
@@ -362,6 +223,66 @@ function buildDatetime(
   const start = uniqueInstant(day, Number(parts[1]), Number(parts[2]), timezone);
   if (binding.future && start <= now.getTime()) return fail();
   return formatLocalInstant(start + (binding.plus_minutes ?? 0) * 60_000, timezone);
+}
+
+/**
+ * One free-form phrase read into the slots of a calendar request. The parser refuses anything ambiguous; here the
+ * requested shape (day and time required or forbidden, span, invitee) is enforced and the start and end instants are
+ * built in the user's zone, so a time skipped or repeated by a clock change fails before any tool runs.
+ */
+function buildEventPhrase(
+  binding: Extract<Binding, { type: 'event_phrase' }>,
+  raw: string,
+  evaluation: Evaluation,
+): WorkflowInputValue {
+  const { now, userCtx } = evaluation;
+  const reference = binding.reference === true;
+  // A day word spelled with one slip ("пятнитцу") is read as the word it is a single edit from; the title is unaffected
+  // unless it is itself that close to a command or day word.
+  const text = reference ? (repairTypos(canonicalize(raw))?.text ?? raw) : raw;
+  const phrase = parseEventPhrase(text, { now, timezone: userCtx.timezone, requireTitle: !reference });
+  const shape = (rule: 'require' | 'forbid' | undefined, present: boolean) => {
+    if ((rule === 'require' && !present) || (rule === 'forbid' && present)) fail();
+  };
+  shape(binding.date, phrase.date !== null);
+  shape(binding.time, phrase.time !== null);
+  shape(binding.invitee ?? 'forbid', phrase.invitee !== null);
+  const hasSpan = phrase.endTime !== null || phrase.durationMinutes !== null;
+  if (hasSpan && (binding.span ?? 'forbid') === 'forbid') fail();
+  const out: { [key: string]: WorkflowInputValue } = { title: phrase.title, has_end: hasSpan };
+  if (reference) out.ref = parseMention(phrase.title, binding.reject);
+  if (phrase.date !== null) out.date = phrase.date;
+  if (phrase.time !== null) out.time = phrase.time;
+  if (phrase.invitee !== null) out.invitee = phrase.invitee;
+  if (phrase.date !== null && phrase.time !== null) {
+    const day = parseDayPart(phrase.date);
+    const [hour, minute] = phrase.time.split(':').map(Number) as [number, number];
+    const start = uniqueInstant(day, hour, minute, userCtx.timezone);
+    if (binding.future && start <= now.getTime()) fail();
+    let minutes = binding.default_minutes ?? 60;
+    if (phrase.endTime !== null) {
+      const [endHour, endMinute] = phrase.endTime.split(':').map(Number) as [number, number];
+      minutes = Math.round((uniqueInstant(day, endHour, endMinute, userCtx.timezone) - start) / 60_000);
+      if (minutes <= 0) fail();
+    } else if (phrase.durationMinutes !== null) minutes = phrase.durationMinutes;
+    out.start = formatLocalInstant(start, userCtx.timezone);
+    out.end = formatLocalInstant(start + minutes * 60_000, userCtx.timezone);
+    out.when_text = humanWhen(out.start, { now, timezone: userCtx.timezone, language: userCtx.language });
+    if (phrase.endTime !== null) out.end_suffix = `–${phrase.endTime}`;
+  }
+  return out;
+}
+
+/** "встречу #12", "meeting 12": a noun that only says "an event" in front of a number names that number. */
+const NOUN_BEFORE_ID = /^(?:встреч[ауие]|запись|meetings?|appointments?)\s+(?=(?:#|№|id\s*:?\s*)?\d{1,9}$)/iu;
+
+/** A mention of an existing event as an event reference: a number, or the word its title is found by. */
+function parseMention(title: string, reject: string[] | undefined): WorkflowInputValue {
+  const ref = parseEventRef(title.replace(NOUN_BEFORE_ID, ''), reject, true);
+  // A digit the grammar did not read as a day or clock time ("на 2", "to 4") is a time it could not place: refuse.
+  if (typeof ref === 'object' && ref !== null && !Array.isArray(ref) && ref.kind === 'name' && /\d/.test(title))
+    return fail();
+  return ref;
 }
 
 /**
@@ -461,6 +382,8 @@ function hasControlCharacters(text: string): boolean {
   return false;
 }
 
+const capitalizeFirst = (text: string): string => (text === '' ? text : text[0]!.toUpperCase() + text.slice(1));
+
 const QUOTE_PAIRS: { [open: string]: string } = { '«': '»', '"': '"', '“': '”', "'": "'" };
 
 function parseText(raw: string, max: number): string {
@@ -471,18 +394,20 @@ function parseText(raw: string, max: number): string {
   return text;
 }
 
-function parseEventRef(raw: string, reject: string[] | undefined): WorkflowInputValue {
+function parseEventRef(raw: string, reject: string[] | undefined, stem: boolean | undefined): WorkflowInputValue {
   const idMatch = /^(?:#|№|id\s*:?\s*)?(\d{1,9})$/i.exec(raw.trim());
   if (idMatch) return Number(idMatch[1]) > 0 ? { kind: 'id', id: Number(idMatch[1]) } : fail();
-  const query = parseText(raw, 120);
+  const label = parseText(raw, 120);
   const blocked = new Set((reject ?? []).map(normalize));
   if (
-    normalize(query)
+    normalize(label)
       .split(' ')
       .some((token) => blocked.has(token))
   )
     return fail();
-  return { kind: 'name', query };
+  if (!stem) return { kind: 'name', query: label, label };
+  const query = distinctiveStem(label);
+  return query === null ? fail() : { kind: 'name', query, label };
 }
 
 function parseRecipient(raw: string): WorkflowInputValue {
@@ -535,7 +460,9 @@ function evaluateOne(
   if (binding.type === 'relative_instant') {
     const duration = bound[binding.duration];
     if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0 || duration > 10080) return fail();
-    return new Date(now.getTime() + duration * 60000).toISOString();
+    // A calendar entry starts on a whole minute; the nearest one keeps it within half a minute of the asked delay.
+    const wholeMinute = Math.round((now.getTime() + duration * 60000) / 60000) * 60000;
+    return formatLocalInstant(wholeMinute, userCtx.timezone);
   }
   const raw = resolveFrom(binding.from, evaluation);
   const optionalDefault = 'optional' in binding && binding.optional && isBlank(raw);
@@ -545,7 +472,11 @@ function evaluateOne(
     case 'enum':
       return optionalDefault ? (binding.default ?? fail()) : lookup(binding.values, raw);
     case 'text':
-      return optionalDefault ? (binding.default ?? fail()) : parseText(raw, binding.max ?? 200);
+      return optionalDefault
+        ? (binding.default ?? fail())
+        : binding.capitalize
+          ? capitalizeFirst(parseText(raw, binding.max ?? 200))
+          : parseText(raw, binding.max ?? 200);
     case 'date':
       return optionalDefault
         ? isoDay(addDays(today(now, userCtx.timezone), DAY_WORD_OFFSETS[binding.default ?? fail()]))
@@ -563,7 +494,9 @@ function evaluateOne(
     case 'timezone':
       return parseTimezone(raw);
     case 'eventref':
-      return parseEventRef(raw, binding.reject);
+      return parseEventRef(raw, binding.reject, binding.stem);
+    case 'event_phrase':
+      return buildEventPhrase(binding, raw, evaluation);
     case 'recipient':
       return parseRecipient(raw);
   }

@@ -1,20 +1,30 @@
+// The text a rule sends: the last tool's result rendered for the user (answer-renderers.ts), a rule's own sentence, or
+// the legacy JSON `format`s of learned rules. Tool text is written for the AI agent, so it is never forwarded when
+// the structured result can be rendered.
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import { z } from 'zod';
-import { t, toLang } from '../../config/constants.ts';
-import { formatTime } from '../../utils/date.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
-import { DAY_MS, relativeDayWord } from '../ai/empty-agenda.ts';
+import { cmdLogger } from '../../utils/logger.ts';
+import {
+  plainAnswer,
+  type RenderContext,
+  type RenderedAnswer,
+  renderAgenda,
+  renderSettingsOutput,
+  renderToolAnswer,
+  type ToolAnswer,
+} from './answer-renderers.ts';
+import { wordingFor } from './answer-wording.ts';
+import { type HumanTimeContext, humanDay, humanDayHeading, humanDayParts } from './human-time.ts';
 import type { EventSummary } from './variable-resolver.ts';
 
-const TextMapCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
 const EventsListCodec = jsonCodec(
   z.array(z.object({ title: z.string(), start_at: z.string(), end_at: z.string().optional() })),
 );
 const FreeSlotsCodec = jsonCodec(z.array(z.object({ start: z.string(), end: z.string() })));
 const SearchResultsCodec = jsonCodec(z.array(z.object({ title: z.string(), start_at: z.string() })));
 const HolidaysCodec = jsonCodec(z.array(z.object({ name: z.string(), date: z.string() })));
-const SettingsCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
 
 /**
  * Render events the user can read: `HH:MM  Title`. When every event falls on today
@@ -22,6 +32,9 @@ const SettingsCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.numb
  * date, today's too. A single result from `get_upcoming` or `search_events` can land
  * weeks away, so a lone future event needs its date, and an undated line inside a
  * dated list reads as belonging to the day above it. All-day events carry no time.
+ *
+ * This is the compact form the reply-time guard quotes as verified evidence; a rule's own
+ * answer is the headed agenda of renderAnswer.
  */
 export function formatEventSummaries(events: EventSummary[], timezone: string): string {
   const todayKey = format(new TZDate(new Date(), timezone), 'yyyy-MM-dd');
@@ -35,45 +48,24 @@ export function formatEventSummaries(events: EventSummary[], timezone: string): 
 }
 
 /**
- * Format tool output into a user-friendly response string.
- * @param format - format type name
- * @param toolOutput - raw tool output string (often JSON)
- * @param timezone - user timezone (IANA)
- * @param language - user language ('en' or 'ru')
- * @param events - structured events from the tool result; preferred over parsing toolOutput,
- *                 whose text form is written for the AI agent and is not fit to show a user
- * @returns formatted string for display
+ * The answer for a rule whose last step was a tool call, or the plain text of a rule's own sentence.
+ * @param legacyFormat - the rule's stored `format`; only learned rules use anything but 'text'
+ * @param response - what the workflow returned as its text (a tool's output or a `respond` sentence)
+ * @param answer - the last tool's structured result; absent when the workflow ended in a `respond` sentence
  */
-export function formatResponse(
-  format: string,
-  toolOutput: string,
-  timezone: string,
-  language: string,
-  events?: EventSummary[],
-): string {
-  if (events !== undefined && events.length > 0) {
-    return formatEventSummaries(events, timezone);
-  }
+export function renderAnswer(
+  legacyFormat: string,
+  response: string,
+  answer: ToolAnswer | undefined,
+  context: RenderContext,
+): RenderedAnswer {
   try {
-    switch (format) {
-      case 'text':
-        return formatText(toolOutput);
-      case 'events_list':
-        return formatEventsList(toolOutput, timezone, language);
-      case 'free_slots':
-        return formatFreeSlots(toolOutput, timezone, language);
-      case 'search_results':
-        return formatSearchResults(toolOutput, timezone, language);
-      case 'holidays':
-        return formatHolidays(toolOutput, language);
-      case 'settings':
-        return formatSettings(toolOutput, language);
-      default:
-        return formatText(toolOutput);
-    }
-  } catch {
-    // On any error (JSON parse, etc.), fall back to raw text
-    return toolOutput;
+    if (answer) return renderToolAnswer(answer, context);
+    // A sentence the rule itself wrote is not a read result; whether it ends the conversation is the executor's call.
+    return { text: renderLegacy(legacyFormat, response, context), complete: false };
+  } catch (error) {
+    cmdLogger.warn({ err: error, tool: answer?.tool }, 'Intent answer could not be rendered, showing the tool text');
+    return { text: plainAnswer(answer?.output ?? response, context.language).text, complete: false };
   }
 }
 
@@ -82,119 +74,108 @@ export interface DayAnswer {
   /** YYYY-MM-DD in the user's timezone. */
   day: string;
   response?: string;
-  events?: EventSummary[];
+  answer?: ToolAnswer;
 }
 
 /**
  * Answer for several days, each under a heading with the day relative to today, its weekday and
- * date ("Сегодня, пн 14.09:"), then that day's events or the tool's own text about it. Weekday and
+ * date ("Сегодня, пн 14 сентября:"), then that day's events or the tool's own text about it. Weekday and
  * date come from the calendar day itself, never from generated text.
  */
-export function formatDayAnswers(answers: DayAnswer[], timezone: string, language: string, now: Date): string {
-  const messages = t(toLang(language));
-  const today = Date.parse(format(new TZDate(now, timezone), 'yyyy-MM-dd'));
-  return answers
-    .map(({ day, response, events }) => {
-      const date = new Date(`${day}T00:00:00Z`);
-      const heading = messages.intentWorkflow.dayHeading(
-        relativeDayWord(messages.aiTools.events.emptyAgenda.relativeDay, (date.getTime() - today) / DAY_MS),
-        messages.intentWorkflow.weekdaysShort[(date.getUTCDay() + 6) % 7]!,
-        day.slice(8, 10),
-        day.slice(5, 7),
+export function formatDayAnswers(answers: DayAnswer[], context: HumanTimeContext): RenderedAnswer {
+  const bodies = answers.map(({ day, response, answer }) => {
+    // The heading names the day, so the day's own lines carry no heading of their own.
+    const body = answer
+      ? renderToolAnswer(answer, { ...context, headings: false })
+      : { text: plainAnswer(response ?? '', context.language).text, complete: false };
+    return { text: `${humanDayHeading(day, context)}:\n${body.text}`, complete: body.complete };
+  });
+  return { text: bodies.map((body) => body.text).join('\n\n'), complete: bodies.every((body) => body.complete) };
+}
+
+function renderLegacy(legacyFormat: string, response: string, context: RenderContext): string {
+  const words = wordingFor(context.language);
+  const plain = (): string => plainAnswer(response, context.language).text;
+  switch (legacyFormat) {
+    case 'events_list': {
+      const events = EventsListCodec.safeParse(response);
+      if (!events.success) return plain();
+      if (events.data.length === 0) return words.emptyList;
+      return renderAgenda(
+        events.data.map((event, index) => legacyEvent(index, event, context.timezone)),
+        context,
+        'personal',
       );
-      // The heading names the day, so event rows carry only their time.
-      const body = events?.length
-        ? events.map((event) => `${event.all_day ? '' : (event.time ?? '')}  ${event.title}`.trim()).join('\n')
-        : formatText(response ?? '');
-      return `${heading}:\n${body}`;
-    })
-    .join('\n\n');
-}
-
-function formatText(output: string): string {
-  const trimmed = output.trim();
-  // Fast path: not JSON-like — return as-is (most tool outputs are human-readable strings)
-  if ((!trimmed.startsWith('{') && !trimmed.startsWith('[')) || trimmed.length < 3) {
-    return output;
-  }
-  // JSON object — try to extract a human-readable field
-  const result = TextMapCodec.safeParse(trimmed);
-  if (result.success) {
-    for (const key of ['output', 'message', 'text', 'result']) {
-      const val = result.data[key];
-      if (typeof val === 'string') return val;
     }
+    case 'free_slots': {
+      const slots = FreeSlotsCodec.safeParse(response);
+      if (!slots.success) return plain();
+      return slots.data.length === 0
+        ? `${capitalize(words.noFreeWindowsInline)}.`
+        : legacyFreeWindows(slots.data, context);
+    }
+    case 'search_results': {
+      const events = SearchResultsCodec.safeParse(response);
+      if (!events.success) return plain();
+      if (events.data.length === 0) return words.emptyList;
+      return events.data
+        .map((event, index) => {
+          const { date, time } = localStart(event.start_at, context.timezone);
+          return `${index + 1}. ${humanDay(date, context)}, ${time}  ${event.title}`;
+        })
+        .join('\n');
+    }
+    case 'holidays': {
+      const holidays = HolidaysCodec.safeParse(response);
+      if (!holidays.success) return plain();
+      if (holidays.data.length === 0) return words.nothingFound;
+      return holidays.data.map((holiday) => `${humanDay(holiday.date, context)} — ${holiday.name}`).join('\n');
+    }
+    case 'settings':
+      return renderSettingsOutput(response, undefined, context) ?? plain();
+    default:
+      return plain();
   }
-  // JSON but no extractable text — return raw as last resort
-  return output;
 }
 
-function formatEventsList(output: string, timezone: string, language: string): string {
-  const events = EventsListCodec.parse(output);
-  if (events.length === 0) {
-    return language === 'ru' ? 'Нет событий' : 'No events';
+const capitalize = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
+function localStart(instant: string, timezone: string): { date: string; time: string } {
+  const local = new TZDate(Date.parse(instant), timezone);
+  return { date: format(local, 'yyyy-MM-dd'), time: format(local, 'HH:mm') };
+}
+
+function legacyEvent(
+  index: number,
+  event: { title: string; start_at: string; end_at?: string | undefined },
+  timezone: string,
+): EventSummary {
+  const { date, time } = localStart(event.start_at, timezone);
+  return {
+    id: index + 1,
+    title: event.title,
+    date,
+    time,
+    all_day: false,
+    ...(event.end_at ? { end_at: event.end_at } : {}),
+  };
+}
+
+/** Free windows of a learned rule, one sentence per local day they fall on. */
+function legacyFreeWindows(slots: Array<{ start: string; end: string }>, context: RenderContext): string {
+  const words = wordingFor(context.language);
+  const days: Array<{ day: string; windows: string[] }> = [];
+  for (const slot of slots) {
+    const { date, time } = localStart(slot.start, context.timezone);
+    const window = `${time}–${localStart(slot.end, context.timezone).time}`;
+    const last = days.at(-1);
+    if (last && last.day === date) last.windows.push(window);
+    else days.push({ day: date, windows: [window] });
   }
-
-  return events
-    .map((e) => {
-      const startTime = formatTime(e.start_at, timezone);
-      let timeStr = startTime;
-
-      if (e.end_at) {
-        const endTime = formatTime(e.end_at, timezone);
-        timeStr = `${startTime}–${endTime}`;
-      }
-
-      return `${timeStr}  ${e.title}`;
+  return days
+    .map(({ day, windows }) => {
+      const parts = humanDayParts(day, context);
+      return parts ? words.freeWindows(parts, windows.join(', ')) : windows.join(', ');
     })
-    .join('\n');
-}
-
-function formatFreeSlots(output: string, timezone: string, _language: string): string {
-  const slots = FreeSlotsCodec.parse(output);
-  if (slots.length === 0) {
-    return '';
-  }
-
-  return slots
-    .map((slot) => {
-      const startTime = formatTime(slot.start, timezone);
-      const endTime = formatTime(slot.end, timezone);
-      return `${startTime}–${endTime}`;
-    })
-    .join('\n');
-}
-
-function formatSearchResults(output: string, timezone: string, _language: string): string {
-  const events = SearchResultsCodec.parse(output);
-  if (events.length === 0) {
-    return '';
-  }
-
-  return events
-    .map((e, index) => {
-      const time = formatTime(e.start_at, timezone);
-      return `${index + 1}. ${time}  ${e.title}`;
-    })
-    .join('\n');
-}
-
-function formatHolidays(output: string, _language: string): string {
-  const holidays = HolidaysCodec.parse(output);
-  if (holidays.length === 0) {
-    return '';
-  }
-
-  return holidays.map((h) => `${h.name} (${h.date})`).join('\n');
-}
-
-function formatSettings(output: string, _language: string): string {
-  const result = SettingsCodec.safeParse(output);
-  if (!result.success) {
-    return '';
-  }
-
-  return Object.entries(result.data)
-    .map(([key, value]) => `${key}: ${value}`)
     .join('\n');
 }

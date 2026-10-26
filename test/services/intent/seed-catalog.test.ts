@@ -100,10 +100,17 @@ describe('patterns are finite, whole-message and free of backtracking hazards', 
       expect(pattern.endsWith('$'), name).toBe(true);
       expect(() => new RegExp(pattern, 'di'), name).not.toThrow();
       expect(/\\[1-9]/.test(pattern), `${name} backreference`).toBe(false);
-      expect(/\(\?<?[=!]/.test(pattern), `${name} lookaround`).toBe(false);
+      // Lookaheads keep the gates of free-form rules disjoint; the hazard to rule out is runtime, so the budget is measured.
+      const hostile = `${'а '.repeat(7000)}в 10:00`;
+      const started = performance.now();
+      new RegExp(pattern, 'di').exec(hostile);
+      expect(performance.now() - started, `${name} regex time on 16k characters`).toBeLessThan(100);
       expect(/\)[*+]/.test(pattern), `${name} unbounded group repeat`).toBe(false);
       expect(/\)\{\d+,\}/.test(pattern), `${name} open-ended group repeat`).toBe(false);
-      expect(/\.[*+](?!\?)/.test(pattern.replaceAll('\\.', '')), `${name} unbounded dot`).toBe(false);
+      expect(
+        /\.[*+](?!\?)/.test(pattern.replaceAll('\\.', '').replaceAll('(?=.*', '(?=').replaceAll('(?!.*', '(?!')),
+        `${name} unbounded dot`,
+      ).toBe(false);
     }
   });
 

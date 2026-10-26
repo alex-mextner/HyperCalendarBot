@@ -24,11 +24,14 @@ import { GroupSessionManager } from '../services/group/group-session.ts';
 import { GroupMemberService } from '../services/group/member-service.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
 import type { RenderService } from '../services/image/render-service.ts';
+import { databaseDirectory } from '../services/intent/db-backup.ts';
 import type { EventMentionStore } from '../services/intent/event-mention-store.ts';
 import { IntentExecutor } from '../services/intent/intent-executor.ts';
 import { IntentLearner } from '../services/intent/intent-learner.ts';
 import { IntentMatcher } from '../services/intent/intent-matcher.ts';
+import { readKpiGate } from '../services/intent/kpi-gate.ts';
 import { IntentRevisionService } from '../services/intent/revision-service.ts';
+import { activateGatedSeed } from '../services/intent/seed-activation.ts';
 import { seedIntents } from '../services/intent/seed-catalog.ts';
 import { ReminderMaterializer } from '../services/notification/materializer.ts';
 import { NotificationPreferencesService } from '../services/notification/preferences.ts';
@@ -240,6 +243,25 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     new IntentRevisionService(db.db, { sessions: db.workflowSessions }).ensureSourceBaselineDraft(seedIntents);
   } catch (err) {
     botLogger.error({ err }, 'recording the source intent catalogue as a revision draft failed');
+  }
+
+  // A seed whose committed KPI gate passes is activated here, before the matcher loads, so it serves
+  // from this boot. It logs one line per boot and never stops the bot.
+  try {
+    const dataDir = databaseDirectory(db.db);
+    if (dataDir)
+      activateGatedSeed({
+        db: db.db,
+        dataDir,
+        seed: seedIntents,
+        gate: readKpiGate(),
+        sessions: db.workflowSessions,
+        now: Date.now,
+        log: botLogger,
+      });
+    else botLogger.warn({ outcome: 'no_data_dir' }, 'intent seed activation skipped: database has no file directory');
+  } catch (err) {
+    botLogger.error({ err }, 'intent seed activation failed');
   }
 
   // Load approved intents into matcher on startup
