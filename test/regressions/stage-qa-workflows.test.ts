@@ -191,6 +191,8 @@ describe('Stage QA: the trusted workflow_run workflow is the only way onto the s
   test('qa hands the installed PC driver the head SHA as its only argument and the token on stdin', () => {
     const run = getStep('stage-qa.yml', 'qa', 'Run the stage QA through qa-cli');
     expect(run.env?.HEAD_SHA).toBe('${{ github.event.workflow_run.head_sha }}');
+    // The ship gate finds the tested head in the run name: a workflow_run run's own head_sha is main's commit.
+    expect(load('stage-qa.yml')['run-name']).toBe('Stage QA ${{ github.event.workflow_run.head_sha }}');
     expect(run.run).toContain('printf \'%s\\n\' "$GH_TOKEN" | "$HOME/.local/bin/hypercal-stage-qa-pc" "$HEAD_SHA"');
     expect(run.run).not.toContain('sudo');
     expect(qa.name).toBe('Stage QA run');

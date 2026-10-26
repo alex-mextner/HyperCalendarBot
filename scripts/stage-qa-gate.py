@@ -127,8 +127,10 @@ def evaluate(repo, pr):
         problems.append(f"event is {run.get('event')!r}, expected workflow_run")
     if run.get("status") != "completed" or run.get("conclusion") != "success":
         problems.append(f"run is {run.get('status')}/{run.get('conclusion')}, expected completed/success")
-    if run.get("head_sha") != head:
-        problems.append(f"run head_sha {str(run.get('head_sha'))[:12]} differs from PR head {short}")
+    # A workflow_run run reports the default branch's commit as its own head_sha, so the tested PR head is bound
+    # through the run name instead: stage-qa.yml (main's copy, which a PR cannot change) names every run after it.
+    if run.get("display_title") != f"Stage QA {head}":
+        problems.append(f"run is named {run.get('display_title')!r}, expected 'Stage QA {head}' (it tested another commit)")
     for key in ("repository", "head_repository"):
         if full_name(run.get(key)) != repo:
             problems.append(f"{key} is {full_name(run.get(key))!r}, expected {repo}")

@@ -10,6 +10,9 @@
 # The job runs on its own runner label (qa-pc) on the PC: the Telegram Web session of qa-cli lives there,
 # and a queue of stage runs can never delay a production deploy on the odroid runner.
 name: Stage QA
+# The run is named after the commit it tested: `gh ship` (scripts/stage-qa-gate.py) binds the stage-qa status to the
+# PR head through this name, because a workflow_run run reports the default branch's commit as its own head_sha.
+run-name: Stage QA ${{ github.event.workflow_run.head_sha }}
 
 on:
   workflow_run:

@@ -65,7 +65,9 @@ def good_run(**over):
         "event": "workflow_run",
         "status": "completed",
         "conclusion": "success",
-        "head_sha": HEAD,
+        # A workflow_run run reports the DEFAULT branch's commit as its own head_sha; the tested PR head is in its name.
+        "head_sha": "b" * 40,
+        "display_title": f"Stage QA {HEAD}",
         "repository": {"full_name": REPO},
         "head_repository": {"full_name": REPO},
     }
@@ -167,7 +169,8 @@ class GateTest(unittest.TestCase):
         cases = {
             "event": {"event": "pull_request"},
             "path": {"path": ".github/workflows/other.yml"},
-            "head_sha": {"head_sha": OLD},
+            "run named after another head": {"display_title": f"Stage QA {OLD}"},
+            "run named after nothing": {"display_title": "Stage QA"},
             "not completed": {"status": "in_progress", "conclusion": None},
             "conclusion": {"conclusion": "failure"},
             "repository": {"repository": {"full_name": "evil/fork"}},

@@ -183,8 +183,11 @@ class TheShipGateRequiresTheCheck(unittest.TestCase):
         self.assertRegex(QA_WORKFLOW, r"-f context=stage-qa|context=stage-qa")
 
     def test_the_gate_binds_the_status_to_a_trusted_run_not_to_the_status_alone(self):
-        for needle in ("workflow_run", "github-actions[bot]", "head_sha"):
+        for needle in ("workflow_run", "github-actions[bot]", "display_title"):
             self.assertIn(needle, GATE)
+        # The tested head travels in the run name of the trusted workflow: both sides must spell it the same way.
+        self.assertIn("run-name: Stage QA ${{ github.event.workflow_run.head_sha }}", QA_WORKFLOW)
+        self.assertIn('f"Stage QA {head}"', GATE)
 
 
 if __name__ == "__main__":
