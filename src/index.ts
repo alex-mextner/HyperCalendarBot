@@ -194,7 +194,9 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { createPushScheduler, createParticipantPushScheduler, createEventCopiesPushScheduler } = await import(
     './services/google/push-scheduler.ts'
   );
-  const { executeSyncCronTick, setupSyncCron } = await import('./services/google/sync-cron.ts');
+  const { enqueueStartupReconcile, executeSyncCronTick, setupSyncCron } = await import(
+    './services/google/sync-cron.ts'
+  );
   const { renewExpiringChannels, setupWatchRenewalCron } = await import('./services/google/watch-renewal-cron.ts');
   const { executeCleanup, setupCleanupCron } = await import('./services/google/cleanup-cron.ts');
   const redis = new Bun.RedisClient(config.REDIS_URL);
@@ -372,6 +374,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   };
 
   await setupSyncCron(queue);
+  await enqueueStartupReconcile(queue, db.googleSync);
   await setupWatchRenewalCron(queue);
   await setupCleanupCron(queue);
 

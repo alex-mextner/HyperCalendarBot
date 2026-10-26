@@ -60,12 +60,14 @@ const mockInitialSync = mock(async () => 0);
 const mockIncrementalPull = mock(async () => {});
 const mockPushEvent = mock(async () => {});
 const mockSetupWatchChannel = mock(async () => {});
+const mockReconcileDeletions = mock(async () => ({}));
 
 const fakeSyncService = {
   initialSync: mockInitialSync,
   incrementalPull: mockIncrementalPull,
   pushEvent: mockPushEvent,
   setupWatchChannel: mockSetupWatchChannel,
+  reconcileDeletions: mockReconcileDeletions,
 };
 
 // ─── GoogleCalendarApi mock ────────────────────────────────────────────────────
@@ -90,6 +92,7 @@ mock.module('../../../src/services/google/calendar-api.ts', () => ({
     stopChannel = mockStopChannel;
     deleteEvent = mockDeleteEvent;
   },
+  googleGoneStatus: (err: { code?: number } | null) => (err?.code === 404 || err?.code === 410 ? err.code : null),
 }));
 
 const { createGoogleSyncQueue } = await import('../../../src/services/google/sync-queue.ts');
@@ -359,6 +362,40 @@ describe('google-sync job processor — job types', () => {
     const [, userId, calId] = mockIncrementalPull.mock.calls[0] as unknown as [unknown, number, string];
     expect(userId).toBe(2);
     expect(calId).toBe('cal-work');
+  });
+
+  test('reconcile-sync calls reconcileDeletions for the calendar', async () => {
+    mockReconcileDeletions.mockClear();
+    createGoogleSyncQueue(makeDeps());
+    await capturedProcessor({
+      id: 'j23r',
+      name: 'reconcile-sync',
+      data: { type: 'reconcile-sync', userId: 2, calendarId: 'cal-work' },
+      attemptsMade: 0,
+    });
+    expect(mockReconcileDeletions).toHaveBeenCalledTimes(1);
+    const [, userId, calendarId] = mockReconcileDeletions.mock.calls[0] as unknown as [unknown, number, string];
+    expect(userId).toBe(2);
+    expect(calendarId).toBe('cal-work');
+  });
+
+  test('reconcile-sync without a calendarId reconciles every enabled calendar', async () => {
+    mockReconcileDeletions.mockClear();
+    fakeCalendarRepo.getEnabledCalendars.mockImplementationOnce(() => [
+      { google_calendar_id: 'cal-a' },
+      { google_calendar_id: 'cal-b' },
+    ]);
+    createGoogleSyncQueue(makeDeps());
+    await capturedProcessor({
+      id: 'j23s',
+      name: 'reconcile-sync',
+      data: { type: 'reconcile-sync', userId: 2 },
+      attemptsMade: 0,
+    });
+    const calendars = mockReconcileDeletions.mock.calls.map(
+      (call) => (call as unknown as [unknown, number, string])[2],
+    );
+    expect(calendars).toEqual(['cal-a', 'cal-b']);
   });
 
   test('pull-sync iterates enabled calendars when calendarId is absent', async () => {

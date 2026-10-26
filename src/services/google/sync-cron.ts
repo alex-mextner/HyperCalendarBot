@@ -47,3 +47,25 @@ export async function executeSyncCronTick(
     }
   }
 }
+
+/**
+ * Once per start: one reconcile job per connected user, which removes the events whose Google copy is
+ * gone. It repairs the deletions the pulls missed before deletions were applied (#844): the delta that
+ * carried them is no longer available, so no later pull brings them back.
+ */
+export async function enqueueStartupReconcile(
+  queue: Queue<GoogleSyncJobData>,
+  syncRepo: GoogleSyncRepository,
+): Promise<number> {
+  const activeUsers = syncRepo.getActiveUsers();
+  for (const userId of activeUsers) {
+    await queue.add(
+      'reconcile-sync',
+      { type: 'reconcile-sync', userId, trigger: 'startup' },
+      // One per user: a restart while the job is still queued does not queue a second full listing.
+      { jobId: `reconcile-${userId}`, removeOnComplete: true, removeOnFail: true },
+    );
+  }
+  syncLogger.info({ users: activeUsers.length }, 'Startup reconcile of Google deletions enqueued');
+  return activeUsers.length;
+}

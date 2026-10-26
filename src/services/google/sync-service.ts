@@ -8,8 +8,10 @@ import type { GoogleCalendarRepository } from '../../database/repositories/googl
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
 import type { ParticipantGoogleSyncRepository } from '../../database/repositories/participant-google-sync.repository.ts';
 import type { CalendarEvent, ParticipantGoogleSync } from '../../database/types.ts';
+import { storedInstantMs } from '../../utils/date.ts';
 import { syncLogger } from '../../utils/logger.ts';
 import type { EventChangeNotifier } from '../event/event-change-notifier.ts';
+import { expandRecurrence } from '../event/recurrence.ts';
 import { type GoogleCalendarApi, googleGoneStatus } from './calendar-api.ts';
 import { computeEventDiff, snapshotFromCalendarEvent, snapshotFromGoogleLocal } from './change-detection.ts';
 import { type GoogleEvent, googleToLocal, localToGoogle } from './event-mapper.ts';
@@ -37,6 +39,111 @@ interface GoneParticipantCopyEvidence {
   new_google_event_id?: string;
 }
 
+/** Counters of one incremental pull, written to the log line that ends it. */
+interface PullStats {
+  userId: number;
+  calendarId: string;
+  pages: number;
+  /** Items Google returned, tombstones included. */
+  items: number;
+  /** Events removed because Google reported them deleted. */
+  deleted: number;
+  /** Occurrences of a series cancelled because Google reported them deleted. */
+  occurrencesCancelled: number;
+  /** The user's own copies of someone else's event that were deleted in Google (a decline). */
+  participantCopiesDeleted: number;
+  /** Tombstones of events the bot has no live row for (its own deletions echoing back, foreign events). */
+  unmatchedTombstones: number;
+  /** Copies the bot pushed that were read as changed; their edits are not read back (#224). */
+  botCopiesSkipped: number;
+}
+
+/** Counters of one reconcile of a calendar against a complete Google read. */
+interface ReconcileResult {
+  userId: number;
+  calendarId: string;
+  /** Live events of the user linked to a Google event of this calendar. */
+  tracked: number;
+  /** Events the complete read listed. */
+  listed: number;
+  removed: number;
+  skippedPending: number;
+  skippedFresh: number;
+  /** The removal was not applied because it would have emptied most of the calendar. */
+  refused: boolean;
+}
+
+/** Why a deletion was applied; written to the `reason` of its sync_log receipt. */
+type GoogleDeleteReason = 'cancelled_in_google' | 'absent_in_full_list' | 'occurrence_cancelled_in_google';
+
+/** A reconcile never removes more than half of a calendar's linked events at once once this many are missing. */
+const RECONCILE_REFUSE_MIN = 3;
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Whether an event needs no "cancelled" message to its participants: a one-off event that has ended.
+ * A series always counts as upcoming, because the end of its last occurrence is not tracked. An
+ * all-day event without an end lasts until the end of its day.
+ */
+function eventIsOver(event: CalendarEvent): boolean {
+  if (event.recurrence_rule) return false;
+  const endMs = event.end_at
+    ? storedInstantMs(event.end_at)
+    : storedInstantMs(event.start_at) + (event.all_day ? DAY_MS : 0);
+  return endMs < Date.now();
+}
+
+/** The calendar day an instant falls on in a time zone, as `YYYY-MM-DD`. */
+function localDay(instantMs: number, timezone: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(instantMs);
+  } catch {
+    return new Date(instantMs).toISOString().slice(0, 10);
+  }
+}
+
+/**
+ * The start the series' rule gave an occurrence Google names in `originalStartTime`, as the ISO
+ * instant `expandRecurrence` produces for it (the identity of a recurrence exception). A timed
+ * occurrence is that instant; an all-day one names a day, resolved to the series' own occurrence on
+ * that day in its time zone, because the bot stores an all-day start as UTC midnight or as local midnight.
+ */
+function occurrenceOriginalStart(series: CalendarEvent, time: GoogleEvent['originalStartTime']): string | null {
+  if (time?.dateTime) {
+    const ms = Date.parse(time.dateTime);
+    return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+  }
+  if (!time?.date) return null;
+  const dayMs = Date.parse(time.date);
+  if (Number.isNaN(dayMs)) return null;
+  // An occurrence's local day can sit up to 14 h either side of the UTC day Google names (zone offsets),
+  // so the window reaches a day and a half back and two and a half days forward.
+  const nearby = expandRecurrence(
+    series,
+    [],
+    new Date(dayMs - 1.5 * DAY_MS).toISOString(),
+    new Date(dayMs + 2.5 * DAY_MS).toISOString(),
+  );
+  // The bot stores an all-day start as UTC midnight (the day written) or as local midnight; a UTC-midnight
+  // occurrence is that UTC day, any other is its day in the series' zone.
+  const dayOf = (occurrenceStart: string): string =>
+    occurrenceStart.endsWith('T00:00:00.000Z')
+      ? occurrenceStart.slice(0, 10)
+      : localDay(Date.parse(occurrenceStart), series.timezone);
+  // A bot-pushed local-midnight series reaches Google under its UTC date part (localToGoogle), so that
+  // spelling is the fallback when no occurrence has the date as its own day.
+  const onDay =
+    nearby.find((occurrence) => dayOf(occurrence.occurrence_start) === time.date) ??
+    nearby.find((occurrence) => occurrence.occurrence_start.slice(0, 10) === time.date);
+  return onDay ? new Date(onDay.occurrence_start).toISOString() : null;
+}
+
 export class SyncService {
   constructor(
     private db: Database,
@@ -50,7 +157,20 @@ export class SyncService {
     private participantHandlerDeps?: ParticipantHandlerDeps,
   ) {}
 
-  async initialSync(api: GoogleCalendarApi, userId: number, calendarId: string): Promise<number> {
+  /**
+   * A full read of the calendar: imports what the bot does not have yet and stores the sync token the
+   * next pulls continue from. `removeAbsent` is set when Google expired the old token (410): the delta
+   * that carried the deletions is lost, so the read ends by removing the events it no longer lists. A
+   * first read after connecting never removes anything.
+   */
+  async initialSync(
+    api: GoogleCalendarApi,
+    userId: number,
+    calendarId: string,
+    opts: { removeAbsent: boolean } = { removeAbsent: false },
+  ): Promise<number> {
+    const readStartedAt = Date.now();
+    const live = new Set<string>();
     let pageToken: string | undefined;
     let nextSyncToken: string | null = null;
     let totalImported = 0;
@@ -60,8 +180,9 @@ export class SyncService {
 
       const insertBatch = this.db.transaction(() => {
         for (const gEvent of result.events) {
-          if (gEvent.extendedProperties?.private?.hypercalendarbot_event_id) continue;
           if (gEvent.status === 'cancelled') continue;
+          if (gEvent.id) live.add(gEvent.id);
+          if (gEvent.extendedProperties?.private?.hypercalendarbot_event_id) continue;
 
           const local = googleToLocal(gEvent as GoogleEvent, userId, calendarId);
           this.eventRepo.insertSyncedEvent({
@@ -89,14 +210,31 @@ export class SyncService {
     } while (pageToken);
 
     const cal = this.calendarRepo.getCalendarByGoogleId(userId, calendarId);
+    syncLogger.info({ userId, calendarId, totalImported }, 'Initial sync completed');
+    if (opts.removeAbsent) {
+      await this.removeEventsAbsentFromList(
+        userId,
+        calendarId,
+        cal?.is_primary === 1,
+        live,
+        readStartedAt,
+        'token_reset',
+      );
+    }
+    // Stored last, after the repair above: a token that moved on would hide a repair that failed.
     if (cal && nextSyncToken) {
       this.calendarRepo.updateSyncToken(cal.id, nextSyncToken);
     }
-
-    syncLogger.info({ userId, calendarId, totalImported }, 'Initial sync completed');
     return totalImported;
   }
 
+  /**
+   * Applies every change since the stored sync token. Google splits a long delta into pages read with
+   * the same sync token; only the last page carries the next token, stored after every page was
+   * applied. A failure on any page keeps the old token, so the next pull reads the whole delta again
+   * (a deletion already applied then finds no live row and changes nothing). Every pull ends with one
+   * counter line, a failed one with the counters reached so far.
+   */
   async incrementalPull(api: GoogleCalendarApi, userId: number, calendarId: string): Promise<void> {
     const cal = this.calendarRepo.getCalendarByGoogleId(userId, calendarId);
     if (!cal?.sync_token) {
@@ -104,34 +242,57 @@ export class SyncService {
       return;
     }
 
+    const primaryCalendar = cal.is_primary === 1;
+    const stats: PullStats = {
+      userId,
+      calendarId,
+      pages: 0,
+      items: 0,
+      deleted: 0,
+      occurrencesCancelled: 0,
+      participantCopiesDeleted: 0,
+      unmatchedTombstones: 0,
+      botCopiesSkipped: 0,
+    };
+    let pageToken: string | undefined;
+    let nextSyncToken: string | null = null;
     try {
-      const result = await api.listEvents(calendarId, { syncToken: cal.sync_token });
+      do {
+        const result = await api.listEvents(calendarId, { syncToken: cal.sync_token, pageToken });
+        stats.pages++;
+        stats.items += result.events.length;
 
-      for (const gEvent of result.events) {
-        if (gEvent.extendedProperties?.private?.hypercalendarbot_event_id) continue;
-
-        if (gEvent.status === 'cancelled') {
-          await this.handleDeletedEvent(userId, calendarId, gEvent.id!);
-        } else {
-          await this.handleUpdatedOrNewEvent(userId, calendarId, gEvent as GoogleEvent);
+        for (const gEvent of result.events) {
+          if (gEvent.status === 'cancelled') {
+            await this.handleDeletedEvent(userId, calendarId, gEvent as GoogleEvent, primaryCalendar, stats);
+          } else if (gEvent.extendedProperties?.private?.hypercalendarbot_event_id) {
+            stats.botCopiesSkipped++;
+          } else {
+            await this.handleUpdatedOrNewEvent(userId, calendarId, gEvent as GoogleEvent);
+          }
         }
-      }
 
-      if (result.nextSyncToken) {
-        this.calendarRepo.updateSyncToken(cal.id, result.nextSyncToken);
-      }
-
-      syncLogger.info({ userId, calendarId, changes: result.events.length }, 'Incremental pull completed');
+        pageToken = result.nextPageToken ?? undefined;
+        nextSyncToken = result.nextSyncToken;
+      } while (pageToken);
     } catch (err: unknown) {
       const error = err as { code?: number };
       if (error.code === 410) {
-        syncLogger.warn({ userId, calendarId }, 'Sync token expired, falling back to full sync');
-        this.calendarRepo.updateSyncToken(cal.id, null);
-        await this.initialSync(api, userId, calendarId);
+        syncLogger.warn(stats, 'Sync token expired, falling back to full sync');
+        // The old token stays until the full read has been applied: a failed read or repair makes the
+        // next pull hit the 410 again and repeat the repair, instead of continuing without it.
+        await this.initialSync(api, userId, calendarId, { removeAbsent: true });
         return;
       }
+      syncLogger.error({ ...stats, err }, 'Google pull failed');
       throw err;
     }
+
+    if (nextSyncToken) {
+      this.calendarRepo.updateSyncToken(cal.id, nextSyncToken);
+    }
+
+    syncLogger.info(stats, 'Google pull applied');
   }
 
   async pushEvent(
@@ -191,28 +352,268 @@ export class SyncService {
     return googleMs > localMs ? 'keep_google' : 'keep_local';
   }
 
-  private async handleDeletedEvent(userId: number, calendarId: string, googleEventId: string): Promise<void> {
-    const existing = this.eventRepo.findByGoogleEventId(userId, calendarId, googleEventId);
-
-    if (existing) {
-      if (this.changeNotifier) {
-        await this.changeNotifier.onEventDeleted({ event: existing, source: 'google_sync' });
-      }
-      this.eventRepo.remove(existing.id, userId);
-      this.syncRepo.logSync({
-        user_id: userId,
-        event_id: existing.id,
-        google_event_id: googleEventId,
-        direction: 'pull',
-        action: 'delete',
-      });
+  /**
+   * Applies one tombstone (status=cancelled) of a delta. Google keeps the whole body of a deleted
+   * event, including the marker of a copy the bot pushed, so a tombstone is recognised by its status
+   * alone. The row is found through the primary-calendar alias (the bot stores no calendar id for what
+   * it pushed). A cancelled occurrence of a series cancels that occurrence of the series, and the row
+   * the bot may hold for the occurrence's own id goes with it.
+   */
+  private async handleDeletedEvent(
+    userId: number,
+    calendarId: string,
+    gEvent: GoogleEvent,
+    primaryCalendar: boolean,
+    stats: PullStats,
+  ): Promise<void> {
+    const googleEventId = gEvent.id;
+    if (!googleEventId) {
+      stats.unmatchedTombstones++;
       return;
     }
+    const existing = this.eventRepo.findByGoogleEventId(userId, calendarId, googleEventId, { primaryCalendar });
+    const occurrence = gEvent.recurringEventId
+      ? this.cancelOccurrenceDeletedInGoogle(userId, calendarId, gEvent, primaryCalendar)
+      : 'no_series';
+    if (occurrence === 'cancelled') stats.occurrencesCancelled++;
+
+    if (existing?.parent_event_id) {
+      // An exception row that carries the occurrence's Google id stays, as the cancelled occurrence
+      // (cancelOccurrenceDeletedInGoogle already did that when the series is known).
+      if (occurrence === 'no_series') {
+        if (!existing.is_cancelled) this.cancelExceptionRow(existing);
+        else stats.unmatchedTombstones++;
+      }
+      return;
+    }
+    if (existing) {
+      await this.removeEventGoneFromGoogle(existing, 'cancelled_in_google', !eventIsOver(existing));
+      stats.deleted++;
+      return;
+    }
+    if (occurrence !== 'no_series') return;
 
     const participantSync = this.participantSyncRepo?.getByUserAndGoogleEventId(userId, googleEventId);
-    if (participantSync && this.participantHandlerDeps) {
-      await handleParticipantDelete(userId, participantSync, this.participantHandlerDeps);
+    if (
+      participantSync &&
+      this.participantHandlerDeps &&
+      this.isCopyInCalendar(participantSync, calendarId, primaryCalendar)
+    ) {
+      // An event the bot itself deleted: its removal of the participant's copy echoes back as this tombstone.
+      const master = this.eventRepo.findByIdUnfiltered(participantSync.event_id);
+      if (master) {
+        await handleParticipantDelete(userId, participantSync, this.participantHandlerDeps);
+        stats.participantCopiesDeleted++;
+        return;
+      }
     }
+    stats.unmatchedTombstones++;
+  }
+
+  /**
+   * Whether a participant's linked copy lives in the calendar being read. Participant copies go to
+   * `primary` (pushParticipantEvent), which the user's primary calendar owns, the same alias rule as
+   * GOOGLE_CALENDAR_OWNS_SQL for the user's own events.
+   */
+  private isCopyInCalendar(copy: ParticipantGoogleSync, calendarId: string, primaryCalendar: boolean): boolean {
+    const copyCalendar = copy.google_calendar_id;
+    return copyCalendar === calendarId || (primaryCalendar && (!copyCalendar || copyCalendar === 'primary'));
+  }
+
+  /** The durable receipt of a deletion read from Google: `reason` plus what the case adds. */
+  private logGoogleDelete(
+    row: { user_id: number; id: number; google_event_id?: string | null },
+    reason: GoogleDeleteReason,
+    extra: Record<string, string | boolean> = {},
+  ): void {
+    this.syncRepo.logSync({
+      user_id: row.user_id,
+      event_id: row.id,
+      google_event_id: row.google_event_id ?? undefined,
+      direction: 'pull',
+      action: 'delete',
+      details: JSON.stringify({ reason, ...extra }),
+    });
+  }
+
+  /**
+   * Removes an event whose Google copy is gone and leaves a durable receipt in sync_log. The notifier
+   * reads the participants and open invitations before its first await (see onEventDeleted), so it is
+   * started first and the row is removed right after, as EventService.deleteEvent does; it sends nothing
+   * until the removal and the receipt are committed, and is abandoned when they fail. A retry therefore
+   * finds either no live row (nothing is sent twice) or a live row nobody was told about.
+   */
+  private async removeEventGoneFromGoogle(
+    event: CalendarEvent,
+    reason: GoogleDeleteReason,
+    notifyParticipants: boolean,
+  ): Promise<void> {
+    const gate = Promise.withResolvers<void>();
+    // The notifier awaits the gate; this keeps one that returned early from leaving an unhandled rejection.
+    gate.promise.catch(() => {});
+    const notified = this.changeNotifier
+      ?.onEventDeleted({ event, source: 'google_sync', notifyParticipants, committed: gate.promise })
+      .catch((err: unknown) => {
+        syncLogger.error({ err, eventId: event.id }, 'EventChangeNotifier.onEventDeleted failed for a Google deletion');
+      });
+    try {
+      this.db.transaction(() => {
+        this.eventRepo.remove(event.id, event.user_id);
+        this.logGoogleDelete(event, reason, { notified_participants: notifyParticipants });
+      })();
+      gate.resolve();
+    } catch (err) {
+      gate.reject(err);
+      throw err;
+    }
+    await notified;
+  }
+
+  /** Marks an exception row that carries the Google id of a deleted occurrence as cancelled, with a receipt. */
+  private cancelExceptionRow(exception: CalendarEvent): void {
+    this.db.transaction(() => {
+      this.eventRepo.cancelException(exception.id);
+      this.logGoogleDelete(exception, 'occurrence_cancelled_in_google');
+    })();
+  }
+
+  /**
+   * A deleted occurrence of a series becomes a cancelled recurrence exception, the same row
+   * EventService.cancelOccurrence writes for a deletion made in the bot. Idempotent: an occurrence
+   * that is already cancelled stays one exception.
+   */
+  private cancelOccurrenceDeletedInGoogle(
+    userId: number,
+    calendarId: string,
+    gEvent: GoogleEvent,
+    primaryCalendar: boolean,
+  ): 'cancelled' | 'already_cancelled' | 'no_series' {
+    if (!gEvent.recurringEventId) return 'no_series';
+    const series = this.eventRepo.findByGoogleEventId(userId, calendarId, gEvent.recurringEventId, { primaryCalendar });
+    if (!series?.recurrence_rule) return 'no_series';
+    const original = occurrenceOriginalStart(series, gEvent.originalStartTime);
+    if (!original) return 'no_series';
+
+    const originalMs = Date.parse(original);
+    const exception = this.eventRepo
+      .getExceptions(series.id)
+      .find(
+        (candidate) =>
+          (candidate.original_start_at !== null && storedInstantMs(candidate.original_start_at) === originalMs) ||
+          (gEvent.id != null && candidate.google_event_id === gEvent.id),
+      );
+    if (exception?.is_cancelled) return 'already_cancelled';
+
+    this.db.transaction(() => {
+      if (exception) {
+        this.eventRepo.cancelException(exception.id);
+      } else {
+        this.eventRepo.createException(series.id, {
+          user_id: series.user_id,
+          title: series.title,
+          start_at: original,
+          timezone: series.timezone,
+          original_start_at: original,
+          is_cancelled: true,
+        });
+      }
+      this.logGoogleDelete({ ...series, google_event_id: gEvent.id }, 'occurrence_cancelled_in_google', {
+        original_start_at: original,
+      });
+    })();
+    return 'cancelled';
+  }
+
+  /**
+   * Removes the events of one calendar whose Google copy a full read no longer lists. It repairs the
+   * deletions an earlier pull missed (the delta that carried them is gone for good) without touching
+   * the sync token. Throws when the read fails, and removes nothing then.
+   */
+  async reconcileDeletions(api: GoogleCalendarApi, userId: number, calendarId: string): Promise<ReconcileResult> {
+    const cal = this.calendarRepo.getCalendarByGoogleId(userId, calendarId);
+    const startedAt = Date.now();
+    const live = new Set<string>();
+    let pageToken: string | undefined;
+    do {
+      const result = await api.listEvents(calendarId, { pageToken });
+      for (const gEvent of result.events) {
+        if (gEvent.id && gEvent.status !== 'cancelled') live.add(gEvent.id);
+      }
+      pageToken = result.nextPageToken ?? undefined;
+    } while (pageToken);
+    return this.removeEventsAbsentFromList(userId, calendarId, cal?.is_primary === 1, live, startedAt, 'startup');
+  }
+
+  /**
+   * `live` is every id a complete read of the calendar listed, `readStartedAt` when that read began,
+   * `source` what ran the read (it labels the log lines). Kept: an event with a local edit waiting to
+   * be pushed (its push decides), and one whose last sync is newer than the read (its Google copy may
+   * simply have been created after the list was taken); both are checked again on the current row right
+   * before each removal, because the notifier awaits between removals.
+   * Refused: a read that lists nothing while events are linked, and more than half of the linked
+   * events (at least three) missing at once. Both point at a wrong read, not at a user who deleted
+   * that much (a real clear-out arrives as tombstones); the counts are logged at error level.
+   */
+  private async removeEventsAbsentFromList(
+    userId: number,
+    calendarId: string,
+    primaryCalendar: boolean,
+    live: ReadonlySet<string>,
+    readStartedAt: number,
+    source: 'startup' | 'token_reset',
+  ): Promise<ReconcileResult> {
+    const tracked = this.eventRepo.findLinkedToGoogleCalendar(userId, calendarId, { primaryCalendar });
+    const result: ReconcileResult = {
+      userId,
+      calendarId,
+      tracked: tracked.length,
+      listed: live.size,
+      removed: 0,
+      skippedPending: 0,
+      skippedFresh: 0,
+      refused: false,
+    };
+
+    /** Why a row must stay (counted), or null when the read proves its Google copy gone. */
+    const keepReason = (event: CalendarEvent): 'pending' | 'fresh' | null => {
+      if (event.sync_status === 'pending_push') return 'pending';
+      // A margin: stored sync times can be second-precise while the read start is not.
+      if (storedInstantMs(event.last_synced_at ?? event.created_at) > readStartedAt - 5000) return 'fresh';
+      return null;
+    };
+    const count = (reason: 'pending' | 'fresh'): void => {
+      if (reason === 'pending') result.skippedPending++;
+      else result.skippedFresh++;
+    };
+
+    const gone: CalendarEvent[] = [];
+    for (const event of tracked) {
+      if (!event.google_event_id || live.has(event.google_event_id)) continue;
+      const reason = keepReason(event);
+      if (reason) count(reason);
+      else gone.push(event);
+    }
+
+    const emptyRead = live.size === 0 && gone.length > 0;
+    if (emptyRead || (gone.length >= RECONCILE_REFUSE_MIN && gone.length * 2 > tracked.length)) {
+      result.refused = true;
+      syncLogger.error({ ...result, source }, 'Google reconcile refused');
+      return result;
+    }
+    for (const stale of gone) {
+      const current = this.eventRepo.findById(stale.id, stale.user_id);
+      // Gone, relinked to another Google event, edited or pushed since the list was read: not this read's to remove.
+      if (!current || current.google_event_id !== stale.google_event_id) continue;
+      const reason = keepReason(current);
+      if (reason) {
+        count(reason);
+        continue;
+      }
+      await this.removeEventGoneFromGoogle(current, 'absent_in_full_list', false);
+      result.removed++;
+    }
+    syncLogger.info({ ...result, source }, 'Google reconcile applied');
+    return result;
   }
 
   private async handleUpdatedOrNewEvent(userId: number, calendarId: string, gEvent: GoogleEvent): Promise<void> {

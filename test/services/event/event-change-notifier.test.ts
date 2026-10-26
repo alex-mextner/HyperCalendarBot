@@ -233,6 +233,51 @@ describe('EventChangeNotifier.onEventDeleted', () => {
     expect(deleteJobs).toHaveLength(2);
   });
 
+  test('notifyParticipants=false sends no message but still removes the participants Google copies', async () => {
+    const participants = [makeParticipant(200), makeParticipant(300)];
+    const { deps, notifyUser, syncQueueAdd, deleteByEvent } = makeDeps({ participants });
+    const notifier = new EventChangeNotifier(deps as never);
+    await notifier.onEventDeleted({ event: makeEvent(), source: 'google_sync', notifyParticipants: false });
+    expect(notifyUser).not.toHaveBeenCalled();
+    expect(deleteByEvent).toHaveBeenCalledWith(1);
+    const deleteJobs = (syncQueueAdd.mock.calls as unknown[][]).filter(
+      (c) => (c[1] as { action?: string }).action === 'delete',
+    );
+    expect(deleteJobs).toHaveLength(2);
+  });
+
+  test('committed rejects: nothing is sent, queued or unlinked, and the delete is abandoned', async () => {
+    const participants = [makeParticipant(200)];
+    const { deps, notifyUser, syncQueueAdd, deleteByEvent } = makeDeps({ participants });
+    const notifier = new EventChangeNotifier(deps as never);
+    await expect(
+      notifier.onEventDeleted({
+        event: makeEvent(),
+        source: 'google_sync',
+        committed: Promise.reject(new Error('write failed')),
+      }),
+    ).rejects.toThrow('write failed');
+    expect(notifyUser).not.toHaveBeenCalled();
+    expect(syncQueueAdd).not.toHaveBeenCalled();
+    expect(deleteByEvent).not.toHaveBeenCalled();
+  });
+
+  test('committed pending: the participants are read at once, but nothing goes out until it resolves', async () => {
+    const participants = [makeParticipant(200)];
+    const { deps, notifyUser, syncQueueAdd } = makeDeps({ participants });
+    const notifier = new EventChangeNotifier(deps as never);
+    const gate = Promise.withResolvers<void>();
+    const done = notifier.onEventDeleted({ event: makeEvent(), source: 'google_sync', committed: gate.promise });
+    expect(deps.participantRepo.getByEvent).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    expect(notifyUser).not.toHaveBeenCalled();
+    expect(syncQueueAdd).not.toHaveBeenCalled();
+    gate.resolve();
+    await done;
+    expect(notifyUser).toHaveBeenCalledTimes(1);
+    expect(syncQueueAdd).toHaveBeenCalledTimes(1);
+  });
+
   test('source=bot → push delete to organizer GCal', async () => {
     const participants = [makeParticipant(200)];
     const { deps, syncQueueAdd } = makeDeps({ participants });
