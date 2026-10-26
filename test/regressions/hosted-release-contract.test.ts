@@ -159,7 +159,10 @@ test('hosted deployment never follows latest or changes unrelated shared service
 });
 
 // A self-hosted runner executes whatever a job gives it on the production box, so no
-// workflow that a pull request can trigger may ever be scheduled onto it.
+// workflow that a pull request can trigger may ever be scheduled onto it. The per-PR stage QA
+// (#840) reaches the odroid only through stage-qa.yml, triggered by `workflow_run`: it always runs
+// the default branch's copy, checks nothing out, and receives a SHA instead of code
+// (stage-qa-workflows.test.ts pins that).
 test('no pull-request-triggered workflow targets a self-hosted runner', () => {
   // Only the trigger names matter; their configs are null, an object, or (schedule) a list.
   const triggerConfig = z.union([z.null(), z.looseObject({}), z.array(z.looseObject({}))]);
@@ -220,7 +223,11 @@ test('no job on a self-hosted runner can write commit statuses', () => {
       statusAccess.push({ job: `${file}:${name}`, statuses });
     }
   }
-  expect(statusAccess).toEqual([{ job: 'deploy.yml:deploy', statuses: 'read' }]);
+  // readdirSync order differs between filesystems: compare by job name.
+  expect(statusAccess.sort((a, b) => a.job.localeCompare(b.job))).toEqual([
+    { job: 'deploy.yml:deploy', statuses: 'read' },
+    { job: 'stage-qa.yml:qa', statuses: 'read' },
+  ]);
 });
 
 // Anything running as hcb-runner can read a job's environment from /proc/<pid>/environ, so
@@ -249,7 +256,10 @@ test('jobs on a self-hosted runner reference no secret but GITHUB_TOKEN', () => 
       secretsByJob.push({ job: `${file}:${name}`, secrets: [...new Set(named)].sort() });
     }
   }
-  expect(secretsByJob).toEqual([{ job: 'deploy.yml:deploy', secrets: ['GITHUB_TOKEN'] }]);
+  expect(secretsByJob.sort((a, b) => a.job.localeCompare(b.job))).toEqual([
+    { job: 'deploy.yml:deploy', secrets: ['GITHUB_TOKEN'] },
+    { job: 'stage-qa.yml:qa', secrets: ['GITHUB_TOKEN'] },
+  ]);
 });
 
 test('the success notification runs on a GitHub-hosted runner after the deploy', () => {

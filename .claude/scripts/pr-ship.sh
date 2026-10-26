@@ -26,6 +26,19 @@ for argument in "$@"; do
   fi
   previous="$argument"
 done
+# Stage QA must be green for the exact PR head before the shared ship may merge (#840). The gate that
+# runs is origin/main's copy, never the PR checkout's: a PR could otherwise edit its own gate. Until the
+# script exists on main (bootstrap) there is nothing to run, and the notice says so.
+git -C "$canonical" fetch -q origin main 2>/dev/null || true
+gate="$(mktemp)"
+gate_rc=0
+if git -C "$canonical" show origin/main:scripts/stage-qa-gate.py >"$gate" 2>/dev/null; then
+  (cd "$(git rev-parse --show-toplevel)" && python3 -B "$gate" --repo "$name" --pr "$pr") || gate_rc=$?
+else
+  echo 'stage-qa gate: scripts/stage-qa-gate.py is not on origin/main yet (bootstrap); Stage QA is NOT enforced for this ship.' >&2
+fi
+rm -f "$gate"
+(( gate_rc == 0 )) || exit "$gate_rc"
 after_merge() {
   "$shared" "$@"
   cd "$canonical"

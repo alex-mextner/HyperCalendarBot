@@ -1,0 +1,126 @@
+# Per-PR stage QA, part 2 of 2 (#840; runbook "Stage QA"): run the PR's image as the stage bot on the
+# odroid, drive it with real Telegram messages through qa-cli, and post the required `stage-qa` status.
+#
+# Trust boundary. A `workflow_run` workflow always runs the copy of this file on the default branch,
+# so a pull request cannot change what runs on the QA runner. This file never checks out code and never
+# downloads or uploads an artifact: the qa job passes the head SHA (and its short-lived token) to the
+# driver hypercal-stage-qa-pc, installed by hand on the owner's PC from a reviewed checkout of main. The
+# driver asks the root wrapper on the odroid (forced ssh command) to verify that SHA against GitHub, start
+# the stage bot and tear it down; the replies are read through qa-cli (Telegram Web) from the PC session.
+# The job runs on its own runner label (qa-pc) on the PC: the Telegram Web session of qa-cli lives there,
+# and a queue of stage runs can never delay a production deploy on the odroid runner.
+name: Stage QA
+
+on:
+  workflow_run:
+    workflows: [Stage build]
+    types: [completed]
+
+# A newer head of the same branch replaces an older run that is still queued or running; the wrapper
+# tears the older stage instance down when the runner cancels it.
+concurrency:
+  group: stage-qa-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  qa:
+    name: Stage QA run
+    # Only a successful run of Stage build on a same-repository pull_request, from the build workflow's
+    # own file (a pull request cannot make another workflow of the same name pass this check).
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.path == '.github/workflows/stage-build.yml'
+    runs-on: [self-hosted, qa-pc]
+    # The driver may wait for the PC's qa-cli lock (the other repository's stage run), the stage lock
+    # (other pull requests) and the host deploy lock (a deploy of either repository) before it runs.
+    timeout-minutes: 210
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      # Read only: the stage-qa verdict is posted by the hosted `report` job, never from the odroid.
+      statuses: read
+    outputs:
+      rc: ${{ steps.run.outputs.rc }}
+      cases: ${{ steps.run.outputs.cases }}
+    steps:
+      # The token goes on stdin (printf is a shell builtin), never into a process argument list:
+      # every local user can read those. The SHA is the driver's only argument.
+      - name: Run the stage QA through qa-cli
+        id: run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # GitHub runs `run:` scripts with -e; the driver's exit code is data here, not an abort.
+          set -uo pipefail
+          set +e
+          out="$RUNNER_TEMP/stage-qa.out"
+          printf '%s\n' "$GH_TOKEN" | "$HOME/.local/bin/hypercal-stage-qa-pc" "$HEAD_SHA" 2>&1 | tee "$out"
+          rc="${PIPESTATUS[1]}"
+          # A driver that never printed its result line did not run (not installed, crashed at start): that
+          # is neither a pass nor a verdict on the pull request.
+          grep -q '^STAGE_QA_RESULT ' "$out" || rc=70
+          cases="$(sed -n 's/^STAGE_QA_RESULT .* cases=\([0-9][0-9]*\) .*$/\1/p' "$out" | tail -n 1)"
+          { echo "rc=$rc"; echo "cases=${cases:-0}"; } >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+  # Hosted: the only job allowed to write the status. Anything running on a self-hosted runner can read a
+  # job's token but cannot post the verdict.
+  report:
+    name: Post stage-qa
+    needs: qa
+    if: >-
+      always() &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.path == '.github/workflows/stage-build.yml'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Post the stage-qa status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BUILD_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          BUILD_RUN_ID: ${{ github.event.workflow_run.id }}
+          BUILD_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          QA_RESULT: ${{ needs.qa.result }}
+          QA_RC: ${{ needs.qa.outputs.rc }}
+          QA_CASES: ${{ needs.qa.outputs.cases }}
+        run: |
+          set -euo pipefail
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "refusing: head SHA is not a full commit SHA" >&2; exit 1; }
+          post() {
+            gh api --method POST "repos/$REPO/statuses/$HEAD_SHA" \
+              -f state="$1" -f context=stage-qa -f description="$2" -f target_url="$3" --silent
+          }
+          case "$BUILD_CONCLUSION" in
+            success) ;;
+            failure) post failure "stage build failed run=$BUILD_RUN_ID" "$BUILD_RUN_URL"; exit 0 ;;
+            # Cancelled (a newer push replaced this head) or skipped: a newer head carries the verdict.
+            *) echo "stage build ended '$BUILD_CONCLUSION'; nothing to report for $HEAD_SHA"; exit 0 ;;
+          esac
+          case "$QA_RESULT:$QA_RC" in
+            success:0)
+              if [[ "$QA_CASES" =~ ^[1-9][0-9]*$ ]]; then
+                post success "passed cases=$QA_CASES run=$RUN_ID" "$RUN_URL"
+              else
+                post error "could not run: no smoke case ran run=$RUN_ID" "$RUN_URL"
+              fi ;;
+            failure:1) post failure "failed run=$RUN_ID" "$RUN_URL" ;;
+            failure:2) post error "could not run: refused run=$RUN_ID" "$RUN_URL" ;;
+            failure:3) post error "could not run: not provisioned run=$RUN_ID" "$RUN_URL" ;;
+            failure:70) post error "could not run: no result from the wrapper run=$RUN_ID" "$RUN_URL" ;;
+            failure:75) post error "could not run: lock wait timed out run=$RUN_ID" "$RUN_URL" ;;
+            # Superseded (76), cancelled by a newer run, or qa skipped: no verdict for this head.
+            *) echo "stage QA ended '$QA_RESULT' rc='$QA_RC'; nothing to report for $HEAD_SHA" ;;
+          esac
