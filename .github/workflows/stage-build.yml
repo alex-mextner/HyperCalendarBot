@@ -1,0 +1,109 @@
+# Per-PR stage QA, part 1 of 2 (#840; runbook "Stage QA"): build the pull request's image.
+#
+# This workflow runs the PR's own code (its Dockerfile, its dependencies), so it runs ONLY on a
+# GitHub-hosted runner, with no secret and no package access. It never reaches the odroid. The
+# trusted workflow `Stage QA` (stage-qa.yml, always the copy on the default branch) is triggered
+# when this one completes, hands the head SHA to a root wrapper on the odroid, and that wrapper
+# pulls the artifact below by itself, after checking that it came from this workflow run.
+name: Stage build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# A newer push replaces the build of an older head of the same pull request.
+concurrency:
+  group: stage-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the stage image
+    # Same-repository, non-draft pull requests by a person only: a fork or a bot-authored pull request
+    # (dependency updates) would put code nobody on this team wrote on the QA bot's data and keys.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.type != 'Bot' &&
+      github.event.sender.type != 'Bot'
+    # The odroid is arm64: build natively on GitHub's arm runner instead of emulating.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      # The pending status only; the verdict is posted by Stage QA.
+      statuses: write
+    steps:
+      - name: Mark stage-qa pending
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # The pull request that introduces Stage QA has no trusted stage-qa.yml on the default branch to
+          # resolve a pending status, and the ship's CI gate would wait on it forever: post nothing then.
+          # Any other lookup failure fails the build instead of guessing.
+          lookup_err="$(mktemp)"
+          if ! gh api "repos/$REPO/contents/.github/workflows/stage-qa.yml" --silent 2>"$lookup_err"; then
+            if grep -q 'HTTP 404' "$lookup_err"; then
+              echo "stage-qa.yml is not on the default branch yet; no stage-qa status for $HEAD_SHA"
+              exit 0
+            fi
+            cat "$lookup_err" >&2
+            exit 1
+          fi
+          gh api --method POST "repos/$REPO/statuses/$HEAD_SHA" \
+            -f state=pending \
+            -f context=stage-qa \
+            -f description="stage build started" \
+            -f target_url="$RUN_URL" \
+            --silent
+      # The exact head, not the merge with the base branch: the check names the commit that ships.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/arm64
+          # Loaded into this runner's docker only: nothing is pushed to a registry, so a pull request
+          # can never replace :latest or any tag the production deploy uses.
+          push: false
+          load: true
+          labels: |
+            org.opencontainers.image.revision=${{ github.event.pull_request.head.sha }}
+          tags: |
+            hypercalendarbot-stage:${{ github.event.pull_request.head.sha }}
+          cache-from: type=gha,scope=stage-build
+          cache-to: type=gha,scope=stage-build,mode=max
+      # Root on the odroid fetches this artifact itself and loads only the checksummed docker-save
+      # archive in it; the case list is data its trusted runner validates. Nothing here is executed there.
+      - name: Prepare the stage artifact
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p stage-artifact
+          docker save "hypercalendarbot-stage:$HEAD_SHA" | gzip -1 > stage-artifact/image.tar.gz
+          # The same archive check the host repeats: one image, this tag, this revision label.
+          python3 scripts/release-artifact.py stage-artifact/image.tar.gz "$HEAD_SHA" "hypercalendarbot-stage:$HEAD_SHA" > /dev/null
+          cp scripts/stage-smoke-cases.json stage-artifact/
+          # Optional hook: cases built from the historical corpus (runbook "Stage QA").
+          if [ -f scripts/stage-smoke-cases.replay.json ]; then cp scripts/stage-smoke-cases.replay.json stage-artifact/; fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: stage-${{ github.event.pull_request.head.sha }}
+          path: stage-artifact
+          if-no-files-found: error
+          retention-days: 2
+          # A re-run of this workflow replaces the earlier attempt's artifact of the same name.
+          overwrite: true
+          # image.tar.gz is already gzip-compressed.
+          compression-level: 0

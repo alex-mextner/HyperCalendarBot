@@ -15,7 +15,14 @@ test('Python regression suite discovery is nonempty', () => {
 // do not spend the invitation-transport suite's deadline or share its Python mocks.
 // The deploy harness runs the real remote shell against a fake docker for every case,
 // which takes over a minute on a loaded machine.
-const TIMEOUT_MS: Record<string, number> = { 'test_prebuilt_deploy.py': 180_000 };
+// The stage QA suites run the real root scripts, the PC driver and a fake ssh, docker or qa per case.
+const TIMEOUT_MS: Record<string, number> = {
+  'test_prebuilt_deploy.py': 180_000,
+  'test_odroid_stage_qa.py': 180_000,
+  'test_stage_fetch_artifact.py': 180_000,
+  'test_stage_qa_pc.py': 180_000,
+  'test_stage_smoke.py': 180_000,
+};
 for (const suite of suites) {
   const timeout = TIMEOUT_MS[suite] ?? 30_000;
   test(

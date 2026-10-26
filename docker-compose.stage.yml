@@ -1,0 +1,88 @@
+# Stage instance of HyperCalendarBot for the per-PR QA check (#840), started by
+# scripts/stage-qa-run.sh on the odroid next to production and removed again when the run ends.
+#
+# Nothing here is shared with production:
+#   * its own Telegram bot (token in /opt/hypercal/stage/stage.env, never in git); no PUBLIC_DOMAIN,
+#     so the bot long-polls and registers no webhook, and no public ingress points at it;
+#   * its own SQLite file (stage/data) and its own Redis container with its own password, so
+#     queues, reminders and cron cannot reach prod users or prod jobs;
+#   * no MTProto service tier, Google OAuth, e-mail or inline bot: the bot.env that
+#     scripts/stage-qa-run.sh builds keeps only the stage bot's token and an allow-list of
+#     AI-provider keys from the production .env;
+#   * its own published port, bound to loopback.
+# The image under test is pinned by an override file the run writes (the pull request's build,
+# loaded from its verified artifact), as the prod deploy does; this file never names a registry.
+name: hypercalstage
+
+services:
+  redis-stage:
+    image: redis:7-alpine
+    container_name: hypercal-stage-redis
+    restart: "no"
+    # The password stays out of argv (see docker-compose.yml): redis-server reads it from stdin.
+    environment:
+      REDISCLI_AUTH: ${STAGE_REDIS_PASSWORD}
+    command:
+      - sh
+      - -c
+      - |
+        case "$$REDISCLI_AUTH" in
+          '') echo 'STAGE_REDIS_PASSWORD must be set' >&2; exit 1 ;;
+          *[!A-Za-z0-9]*) echo 'STAGE_REDIS_PASSWORD must be alphanumeric' >&2; exit 1 ;;
+        esac
+        exec docker-entrypoint.sh redis-server --save "" --appendonly no --maxmemory 48mb --maxmemory-policy noeviction - <<EOF
+        requirepass "$$REDISCLI_AUTH"
+        EOF
+    deploy:
+      resources:
+        limits:
+          memory: 96m
+          cpus: "0.3"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  bot-stage:
+    image: hypercalendarbot-stage:set-by-override
+    # A manual `compose up` without the run's image override must fail locally instead of pulling the bogus tag.
+    pull_policy: never
+    container_name: hypercal-bot-stage
+    restart: "no"
+    depends_on:
+      redis-stage:
+        condition: service_healthy
+    env_file: stage/bot.env
+    environment:
+      - REDIS_URL=redis://:${STAGE_REDIS_PASSWORD}@redis-stage:6379
+      - REDIS_PASSWORD=
+      - DATABASE_PATH=/app/data/calendar.db
+      - NODE_ENV=production
+    ports:
+      - "127.0.0.1:3002:3311"
+    shm_size: '256m'
+    volumes:
+      - ./stage/data:/app/data
+      - ./stage/logs:/app/logs
+    # The image is a pull request's build: it gets no new privileges and a bounded process count on top
+    # of the limits. The shared odroid is memory-bound: stage lives only while the run holds its locks
+    # and gets less than prod.
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+          cpus: "1.0"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

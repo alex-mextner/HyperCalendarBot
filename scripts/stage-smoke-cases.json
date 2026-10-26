@@ -1,0 +1,66 @@
+[
+  {
+    "name": "start",
+    "send": "/start",
+    "expect": [
+      "Choose your language|Выберите язык|Welcome back|С возвращением"
+    ],
+    "forbid": [
+      "Traceback|went wrong|пошло не так|Произошла ошибка"
+    ],
+    "max_first_reply_s": 30,
+    "timeout_s": 60
+  },
+  {
+    "name": "ping",
+    "send": "/ping",
+    "expect": [
+      "pong|понг"
+    ],
+    "max_first_reply_s": 20,
+    "timeout_s": 40
+  },
+  {
+    "name": "help-lists-commands",
+    "send": "/help",
+    "expect": [
+      "/today"
+    ],
+    "forbid": [
+      "Traceback|went wrong|пошло не так|Произошла ошибка"
+    ],
+    "max_first_reply_s": 20,
+    "timeout_s": 40
+  },
+  {
+    "name": "today-read-only-calendar",
+    "send": "/today",
+    "forbid": [
+      "Traceback|went wrong|пошло не так|Произошла ошибка"
+    ],
+    "max_first_reply_s": 30,
+    "timeout_s": 60
+  },
+  {
+    "name": "validation-search-without-query",
+    "send": "/search",
+    "expect": [
+      "/search <(query|запрос)>"
+    ],
+    "forbid": [
+      "Traceback|went wrong|пошло не так|Произошла ошибка"
+    ],
+    "max_first_reply_s": 20,
+    "timeout_s": 40
+  },
+  {
+    "name": "simple-intent-phrase",
+    "send": "что у меня завтра?",
+    "forbid": [
+      "Traceback|went wrong|пошло не так|Произошла ошибка|не удалось ответить"
+    ],
+    "max_first_reply_s": 90,
+    "timeout_s": 120,
+    "settle_s": 5
+  }
+]

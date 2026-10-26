@@ -135,7 +135,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, odroid-hcb]
     # A deploy may first WAIT up to 40 min for the other repository's deploy (host deploy lock, runbook
-    # "Deploy reliability"), then load, gate on stage and swap: the job limit has to outlast both.
+    # "Deploy reliability"), then load and swap: the job limit has to outlast both.
     timeout-minutes: 100
     permissions:
       actions: read
