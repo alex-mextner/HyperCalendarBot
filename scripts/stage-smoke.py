@@ -198,6 +198,10 @@ def telegram_get_me(token):
         raise Refused(f"getMe for the stage token failed ({type(error).__name__})") from None
 
 
+# qa-cli's own wording for a page, a search result or a chat that did not show up in time, all before any text is typed.
+COLD_START_TIMEOUT = re.compile(r"timed out after \d+s waiting for (Telegram Web to load|search result|chat \S+ to open)")
+
+
 class QaCliTransport:
     """Drives one chat with the stage bot through `qa telegram chat ...`; each call is a short-lived subprocess."""
 
@@ -209,6 +213,8 @@ class QaCliTransport:
         self.username = username
         self.poll_interval = 1.0
         self.call_grace = 60  # qa re-opens the chat and may take a while beyond its own --timeout
+        self.send_attempts = 3
+        self.retry_delay = 5.0
 
     async def __aenter__(self):
         return self
@@ -294,10 +300,20 @@ class QaCliTransport:
         """
         require_one_line(text, "exchange")
         send_started_at = time.monotonic()
-        code, sent = await asyncio.to_thread(
-            self.qa, "send", *self.text_flag(text), timeout=timeout
-        )
-        sent_id = self.sent_message_id(code, sent)
+        for attempt in range(1, self.send_attempts + 1):
+            code, sent = await asyncio.to_thread(
+                self.qa, "send", *self.text_flag(text), timeout=timeout
+            )
+            try:
+                sent_id = self.sent_message_id(code, sent)
+                break
+            except ConnectionError:
+                # Only a timeout BEFORE the message is typed is retried: the first call of a run starts a cold
+                # headless browser on a busy host, and nothing was sent. Any other failure may have delivered it.
+                if attempt == self.send_attempts or not COLD_START_TIMEOUT.search(str(sent.get("error", ""))):
+                    raise
+            await asyncio.sleep(self.retry_delay)
+        sent_at = time.monotonic()
         code, first = await asyncio.to_thread(
             self.qa,
             "wait",
@@ -315,7 +331,9 @@ class QaCliTransport:
         reply = first["message"]
         texts = {reply["id"]: reply.get("text") or ""}
         latencies = {reply["id"]: latency}
-        deadline = send_started_at + timeout
+        # The window for the answer counts from the moment the message was sent, not from the first send attempt:
+        # cold-start retries of the send must not eat it.
+        deadline = sent_at + timeout
         last_change = time.monotonic()
         snapshot = frozenset(texts.items())
         while time.monotonic() - last_change < settle and time.monotonic() < deadline:
