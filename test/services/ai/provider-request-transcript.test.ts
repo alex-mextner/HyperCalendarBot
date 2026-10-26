@@ -252,7 +252,7 @@ describe('serialized provider request after a pick_users exchange', () => {
   });
 
   for (const provider of ['zai', 'claude'] satisfies ProviderUnderTest[]) {
-    for (const toolSchemaMode of ['full', 'lazy'] as const) {
+    for (const toolSchemaMode of ['full', 'lazy', 'hybrid'] as const) {
       test(`${provider} (${toolSchemaMode} tools): every tool, call and result carries a resolvable name`, async () => {
         process.env.AI_SMART_CHAIN = provider;
         process.env.AI_FAST_CHAIN = provider;

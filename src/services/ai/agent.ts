@@ -48,6 +48,7 @@ import {
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
 import { createToolExposure, DISCOVERY_TOOL, runRoundRevealingRejectedTools } from './tool-exposure.ts';
+import type { ToolSchemaMode } from './tool-schema-mode.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import { getToolDefinitions } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender, ToolResult } from './types.ts';
@@ -672,8 +673,7 @@ export interface AgentRunResult {
 }
 
 export class CalendarBotAgent {
-  private toolSchemaMode: 'full' | 'lazy';
-  private toolSchemaUserIds?: ReadonlySet<number>;
+  private toolSchemaMode: ToolSchemaMode;
   private sender: TelegramSender;
   private debugLogger?: AiDebugLogger;
   private streamImpl: typeof aiStreamRound;
@@ -691,7 +691,6 @@ export class CalendarBotAgent {
     opts?: { streamImpl?: typeof aiStreamRound; requestTimeoutMs?: number; retryStoreTimeoutMs?: number },
   ) {
     this.toolSchemaMode = config.toolSchemaMode ?? 'full';
-    this.toolSchemaUserIds = config.toolSchemaUserIds ? new Set(config.toolSchemaUserIds) : undefined;
     this.sender = sender;
     this.debugLogger = config.debugLogger;
     this.streamImpl = opts?.streamImpl ?? aiStreamRound;
@@ -1023,11 +1022,10 @@ export class CalendarBotAgent {
     const validatorStream = measuredStream('validator');
     const retryStream = measuredStream('retry');
 
+    const schemaMode = this.toolSchemaMode;
     const exposure =
-      this.toolSchemaMode === 'lazy' &&
-      ctx.inputMode !== 'live_call' &&
-      (!this.toolSchemaUserIds || this.toolSchemaUserIds.has(ctx.user.telegram_id))
-        ? createToolExposure(toolDefinitionsFor(ctx))
+      schemaMode !== 'full' && ctx.inputMode !== 'live_call'
+        ? createToolExposure(toolDefinitionsFor(ctx), schemaMode)
         : undefined;
 
     const effectiveSender: TelegramSender = ctx.supplementMode

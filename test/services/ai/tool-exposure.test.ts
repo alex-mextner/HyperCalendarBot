@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type OpenAI from 'openai';
 import { AllProvidersFailedError } from '../../../src/services/ai/streaming.ts';
-import { createToolExposure, runRoundRevealingRejectedTools } from '../../../src/services/ai/tool-exposure.ts';
+import {
+  createToolExposure,
+  HYBRID_ALWAYS_ON_TOOLS,
+  runRoundRevealingRejectedTools,
+} from '../../../src/services/ai/tool-exposure.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 import { initProviderAlerts, isAiChainDown, resetProviderAlertState } from '../../../src/utils/ai-provider-alert.ts';
 
@@ -268,5 +272,121 @@ describe('runRoundRevealingRejectedTools', () => {
       }),
     ).rejects.toThrow(AllProvidersFailedError);
     expect(isAiChainDown()).toBe(false);
+  });
+});
+
+describe('hybrid exposure: the most-used tools always loaded, the rest behind a compact index', () => {
+  const toolName = (tool: OpenAI.ChatCompletionTool) => (tool.type === 'function' ? tool.function.name : '');
+  const names = (tools: readonly OpenAI.ChatCompletionTool[]) => tools.map(toolName);
+
+  test('the first round carries discover_tools and exactly the always-on tools, in catalog order', () => {
+    const s = createToolExposure(allowed, 'hybrid');
+    const loaded = names(s.schemas());
+    expect(loaded[0]).toBe('discover_tools');
+    expect(loaded.slice(1)).toEqual(names(allowed).filter((name) => HYBRID_ALWAYS_ON_TOOLS.includes(name)));
+    expect(loaded.slice(1)).toHaveLength(17);
+  });
+
+  test('the always-on set is the 15 most called tools in production plus two settings tools, all in the text catalog', () => {
+    // 15 counted from chat_history tool_calls on 2026-10-25 (aggregates only), 705 of 722 persisted calls (98%);
+    // manage_settings and connect_telegram_status added from the user hold-out on the scrubbed real history.
+    expect([...HYBRID_ALWAYS_ON_TOOLS].sort()).toEqual(
+      [
+        'add_contact',
+        'ask_user',
+        'calculate',
+        'create_event',
+        'delete_event',
+        'find_contact',
+        'find_user',
+        'get_contacts',
+        'get_events',
+        'connect_telegram_status',
+        'manage_settings',
+        'pick_users',
+        'render_day_image',
+        'render_week_image',
+        'search_events',
+        'send_invitation',
+        'update_event',
+      ].sort(),
+    );
+    expect(names(allowed)).toEqual(expect.arrayContaining([...HYBRID_ALWAYS_ON_TOOLS]));
+  });
+
+  test('every always-on tool runs on the first round without a discovery call', () => {
+    const s = createToolExposure(allowed, 'hybrid');
+    for (const name of HYBRID_ALWAYS_ON_TOOLS) expect(s.intercept(name, {}, s.snapshot())).toBeUndefined();
+  });
+
+  test('a tool outside the always-on set still needs discovery, and discovery reveals it for the next round', () => {
+    const s = createToolExposure(allowed, 'hybrid');
+    const before = s.snapshot();
+    expect(s.intercept('get_history', {}, before)?.success).toBe(false);
+    expect(s.intercept('discover_tools', { tools: ['get_action_log'] }, s.snapshot())?.success).toBe(true);
+    expect(s.snapshot().has('get_action_log')).toBe(true);
+  });
+
+  test('the index lists only the tools whose schema is not loaded', () => {
+    const s = createToolExposure(allowed, 'hybrid');
+    // Index lines start with the tool name; another tool's description may mention it in passing.
+    for (const name of HYBRID_ALWAYS_ON_TOOLS) expect(s.prompt).not.toMatch(new RegExp(`^${name}: `, 'm'));
+    for (const name of ['get_history', 'set_reaction', 'get_timezone_info', 'get_free_slots']) {
+      expect(s.prompt).toContain(`${name}:`);
+    }
+  });
+
+  test('discovery offers only tools that are not already loaded, but every group', () => {
+    const s = createToolExposure(allowed, 'hybrid');
+    const discovery = s.schemas()[0];
+    if (discovery?.type !== 'function') throw new Error('discover_tools missing');
+    const properties = discovery.function.parameters?.properties as {
+      tools: { items: { enum: string[] } };
+      groups: { items: { enum: string[] } };
+    };
+    expect(properties.tools.items.enum).not.toContain('create_event');
+    expect(properties.tools.items.enum).toContain('get_history');
+    expect(properties.groups.items.enum).toContain('calendar.write');
+  });
+
+  test('discovering a tool or group that is already loaded succeeds and leaves the loaded prefix alone', () => {
+    const s = createToolExposure(allowed, 'hybrid');
+    const before = JSON.stringify(s.schemas());
+    expect(s.intercept('discover_tools', { tools: ['create_event'] }, s.snapshot())?.success).toBe(true);
+    expect(s.intercept('discover_tools', { groups: ['calendar.write'] }, s.snapshot())?.success).toBe(true);
+    // A group reveals its not-yet-loaded members only, appended after the loaded prefix.
+    expect(JSON.stringify(s.schemas()).startsWith(before.slice(0, -1))).toBe(true);
+    expect(names(s.schemas()).filter((name) => name === 'create_event')).toHaveLength(1);
+  });
+
+  test('revealing a tool only appends, so the request prefix of earlier rounds stays identical', () => {
+    const s = createToolExposure(allowed, 'hybrid');
+    const first = JSON.stringify(s.schemas());
+    s.intercept('discover_tools', { tools: ['get_history'] }, s.snapshot());
+    const second = JSON.stringify(s.schemas());
+    expect(second.startsWith(first.slice(0, -1))).toBe(true);
+    expect(names(s.schemas()).at(-1)).toBe('get_history');
+  });
+
+  test('the first-round payload is a fraction of the full catalog and of the lazy index', () => {
+    const hybrid = createToolExposure(allowed, 'hybrid');
+    const lazy = createToolExposure(allowed);
+    const hybridChars = JSON.stringify(hybrid.schemas()).length + hybrid.prompt.length;
+    const fullChars = JSON.stringify(allowed).length;
+    expect(hybridChars).toBeLessThan(fullChars * 0.55);
+    // The always-on tools carry their own schema, so the index has to be shorter than the whole-catalog one.
+    expect(hybrid.prompt.length).toBeLessThan(lazy.prompt.length);
+  });
+
+  test('a catalog without some always-on tools (supplement, live call) simply loads the ones it has', () => {
+    const call = createToolExposure(getToolDefinitions('live_call'), 'hybrid');
+    expect(names(call.schemas())).not.toContain('render_day_image');
+    expect(names(call.schemas())).toContain('create_event');
+    const supplement = createToolExposure(getToolDefinitions('text', true), 'hybrid');
+    expect(supplement.prompt).toContain('supplement_skip:');
+  });
+
+  test('the default stays the lazy catalog: discover_tools and calculate only', () => {
+    expect(names(createToolExposure(allowed).schemas())).toEqual(['discover_tools', 'calculate']);
   });
 });
