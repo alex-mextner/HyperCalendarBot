@@ -98,6 +98,11 @@ class SmokeTargetsOnlyTheStageBot(unittest.TestCase):
         self.assertRegex(STAGE_COMPOSE, r"127\.0\.0\.1:3002:3311")
         self.assertNotIn("ghcr.io", STAGE_COMPOSE)
 
+    def test_stage_compose_sets_no_pids_limit_next_to_the_deploy_limits(self):
+        # compose v5 on the odroid refuses the pair ("can't set distinct values on pids_limit and
+        # deploy.resources.limits.pids"); the first live run of #850 failed on exactly that.
+        self.assertNotRegex(STAGE_COMPOSE, r"(?m)^\s*pids_limit:")
+
     def test_the_stage_image_name_is_spelled_the_same_in_every_place_that_uses_it(self):
         # One load-bearing name: the build tags it, the odroid fetcher checks the archive for it, the run script loads and removes it.
         name = "ghcr.io/alex-mextner/hypercalendarbot-stage"
