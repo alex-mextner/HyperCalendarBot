@@ -1,7 +1,8 @@
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: the workflow contract pins literal GitHub Actions expressions
 // Contract of the per-PR stage QA check (#840): PR code is built on a GitHub-hosted runner and only a
 // workflow_run workflow from the default branch reaches the odroid, carrying a SHA and never code.
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -11,6 +12,9 @@ const WORKFLOWS = resolve(ROOT, '.github/workflows');
 const REPO = 'alex-mextner/HyperCalendarBot';
 const SHA = 'a'.repeat(40);
 
+// A trigger's config is null, an object (types, workflows, branches) or a list; only its presence and a few fields matter.
+const triggerConfig = z.union([z.null(), z.looseObject({}), z.array(z.looseObject({}))]);
+
 const step = z
   .object({
     id: z.string().optional(),
@@ -19,7 +23,7 @@ const step = z
     run: z.string().optional(),
     if: z.string().optional(),
     env: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-    with: z.record(z.string(), z.unknown()).optional(),
+    with: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   })
   .passthrough();
 const job = z
@@ -37,7 +41,7 @@ const job = z
 const workflowSchema = z
   .object({
     name: z.string(),
-    on: z.record(z.string(), z.unknown()),
+    on: z.record(z.string(), triggerConfig),
     concurrency: z.object({ group: z.string(), 'cancel-in-progress': z.boolean() }).optional(),
     permissions: z.record(z.string(), z.string()).optional(),
     jobs: z.record(z.string(), job),
@@ -222,10 +226,15 @@ describe('the self-hosted stage job is the only extra self-hosted job and no wor
     for (const file of readdirSync(WORKFLOWS).filter((name) => /\.ya?ml$/.test(name))) {
       const parsed = z
         .object({
-          on: z.union([z.string(), z.array(z.string()), z.record(z.string(), z.unknown())]),
+          on: z.union([z.string(), z.array(z.string()), z.record(z.string(), triggerConfig)]),
           jobs: z.record(
             z.string(),
-            z.object({ 'runs-on': z.unknown(), steps: z.array(step).optional() }).passthrough(),
+            z
+              .object({
+                'runs-on': z.union([z.string(), z.array(z.string())]).optional(),
+                steps: z.array(step).optional(),
+              })
+              .passthrough(),
           ),
         })
         .passthrough()
@@ -234,7 +243,7 @@ describe('the self-hosted stage job is the only extra self-hosted job and no wor
         typeof parsed.on === 'string' ? [parsed.on] : Array.isArray(parsed.on) ? parsed.on : Object.keys(parsed.on);
       if (!triggers.includes('workflow_run')) continue;
       for (const [id, entry] of Object.entries(parsed.jobs)) {
-        const labels = [entry['runs-on']].flat().map(String);
+        const labels = [entry['runs-on'] ?? []].flat().map(String);
         if (!labels.some((label) => label === 'self-hosted' || label.startsWith('odroid'))) continue;
         const uses = (entry.steps ?? []).map((candidate) => candidate.uses ?? '');
         expect({
@@ -422,12 +431,13 @@ describe('the report step: stage-qa status for the exact head, truthful in every
   });
 
   test('superseded, cancelled and skipped runs post nothing', async () => {
-    for (const env of [
+    const outcomes: Record<string, string>[] = [
       { QA_RESULT: 'failure', QA_RC: '76' },
       { QA_RESULT: 'cancelled', QA_RC: '' },
       { QA_RESULT: 'skipped', QA_RC: '' },
       { BUILD_CONCLUSION: 'cancelled', QA_RESULT: 'skipped', QA_RC: '' },
-    ]) {
+    ];
+    for (const env of outcomes) {
       const { exitCode, posts } = await runReport(env);
       expect({ env, exitCode, posts }).toEqual({ env, exitCode: 0, posts: [] });
     }
