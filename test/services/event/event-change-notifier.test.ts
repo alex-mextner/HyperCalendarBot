@@ -1,6 +1,9 @@
 import { describe, expect, mock, test } from 'bun:test';
 import type { CalendarEvent, EditProposal, EventParticipant } from '../../../src/database/types.ts';
-import { EventChangeNotifier } from '../../../src/services/event/event-change-notifier.ts';
+import {
+  EventChangeNotifier,
+  type EventChangeNotifierDeps,
+} from '../../../src/services/event/event-change-notifier.ts';
 import type { FieldChange } from '../../../src/services/google/change-detection.ts';
 
 function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
@@ -236,7 +239,7 @@ describe('EventChangeNotifier.onEventDeleted', () => {
   test('notifyParticipants=false sends no message but still removes the participants Google copies', async () => {
     const participants = [makeParticipant(200), makeParticipant(300)];
     const { deps, notifyUser, syncQueueAdd, deleteByEvent } = makeDeps({ participants });
-    const notifier = new EventChangeNotifier(deps as never);
+    const notifier = new EventChangeNotifier(deps as unknown as EventChangeNotifierDeps);
     await notifier.onEventDeleted({ event: makeEvent(), source: 'google_sync', notifyParticipants: false });
     expect(notifyUser).not.toHaveBeenCalled();
     expect(deleteByEvent).toHaveBeenCalledWith(1);
@@ -249,7 +252,7 @@ describe('EventChangeNotifier.onEventDeleted', () => {
   test('committed rejects: nothing is sent, queued or unlinked, and the delete is abandoned', async () => {
     const participants = [makeParticipant(200)];
     const { deps, notifyUser, syncQueueAdd, deleteByEvent } = makeDeps({ participants });
-    const notifier = new EventChangeNotifier(deps as never);
+    const notifier = new EventChangeNotifier(deps as unknown as EventChangeNotifierDeps);
     await expect(
       notifier.onEventDeleted({
         event: makeEvent(),
@@ -265,7 +268,7 @@ describe('EventChangeNotifier.onEventDeleted', () => {
   test('committed pending: the participants are read at once, but nothing goes out until it resolves', async () => {
     const participants = [makeParticipant(200)];
     const { deps, notifyUser, syncQueueAdd } = makeDeps({ participants });
-    const notifier = new EventChangeNotifier(deps as never);
+    const notifier = new EventChangeNotifier(deps as unknown as EventChangeNotifierDeps);
     const gate = Promise.withResolvers<void>();
     const done = notifier.onEventDeleted({ event: makeEvent(), source: 'google_sync', committed: gate.promise });
     expect(deps.participantRepo.getByEvent).toHaveBeenCalledTimes(1);
