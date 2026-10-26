@@ -113,6 +113,12 @@ sys.exit(sc.get("rc", 0))
 '''
 
 
+def close_stdin(process):
+    """Close the pipe and drop the handle: Python 3.12's Popen.communicate() flushes a closed stdin and raises ValueError."""
+    process.stdin.close()
+    process.stdin = None
+
+
 def write_exe(path, text):
     path.write_text(text.replace("@PY@", sys.executable))
     path.chmod(0o755)
@@ -218,7 +224,7 @@ class DriverCase(unittest.TestCase):
         process = subprocess.Popen(self.argv(sha, config), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, text=True, env=self.env)
         process.stdin.write(token)
-        process.stdin.close()
+        close_stdin(process)
         return process
 
     def run_driver(self, sha=SHA, token=FAKE_TOKEN + "\n", config=True):
