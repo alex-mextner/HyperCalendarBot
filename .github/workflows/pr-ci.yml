@@ -18,12 +18,30 @@ jobs:
   test:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      # An apt mirror stall held this step for 12+ minutes on 2026-10-27 (normally ~20 s), with no
+      # output. Bound every apt network wait (this file also covers Playwright's own apt calls
+      # below), skip the install when the runner already has a working ffmpeg, and fail loudly
+      # when ffmpeg is still unusable afterwards: the tests need the real binary.
+      - name: Bound apt network waits
+        timeout-minutes: 2
+        run: |
+          printf '%s\n' 'Acquire::Retries "3";' 'Acquire::http::Timeout "30";' 'Acquire::https::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/99-ci-bounded > /dev/null
+      - name: Ensure ffmpeg
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          if ! ffmpeg -version > /dev/null 2>&1; then
+            sudo timeout 300 apt-get update
+            sudo timeout 300 apt-get install -y --no-install-recommends ffmpeg
+          fi
+          command -v ffmpeg
+          ffmpeg -version > /dev/null
       - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
           path: ~/.bun/install/cache
@@ -39,8 +57,10 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package.json') }}
       - run: bunx playwright install --with-deps chromium-headless-shell
+        timeout-minutes: 15
         if: steps.playwright-cache.outputs.cache-hit != 'true'
       - run: bunx playwright install-deps chromium-headless-shell
+        timeout-minutes: 15
         if: steps.playwright-cache.outputs.cache-hit == 'true'
       - run: bun test
       - run: bun run lint
