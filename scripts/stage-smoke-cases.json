@@ -32,7 +32,7 @@
   {
     "name": "validation-search-without-query",
     "send": "/search",
-    "expect": ["/search <(query|запрос)>"],
+    "expect": ["/search\\s+<(query|запрос)>"],
     "forbid": ["Traceback|went wrong|пошло не так|Произошла ошибка"],
     "max_first_reply_s": 20,
     "timeout_s": 40

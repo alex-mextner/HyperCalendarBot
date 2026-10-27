@@ -821,5 +821,47 @@ class ExchangeEdgeCases(unittest.TestCase):
         self.assertEqual(transport.actions, [])
 
 
+class ShippedSearchValidationCase(unittest.TestCase):
+    """The shipped `validation-search-without-query` case judged against how qa-cli renders the bot's usage line.
+
+    Stage QA run 40465541796 (2026-10-27, PR 862) failed this case although the bot answered
+    `Provide search text: /search <query>`: qa-cli reads the rendered Telegram Web text, where the
+    clickable command and the placeholder can be separated by a line break or a non-breaking space,
+    and the case pattern wanted one plain space. The exact rendering of that run was not captured.
+    """
+
+    CASE = next(case for case in json.loads((ROOT / "scripts/stage-smoke-cases.json").read_text())
+                if case["name"] == "validation-search-without-query")
+
+    def judge(self, *texts):
+        return smoke.judge(self.CASE, [(text, 0.1) for text in texts])
+
+    def test_the_usage_line_passes_whatever_whitespace_separates_the_command_from_the_placeholder(self):
+        for separator in (" ", "\n", "\u00a0", " \n ", "\t", "\u2009"):
+            for line in ("Provide search text: /search{}<query>", "Укажите текст для поиска: /search{}<запрос>"):
+                with self.subTest(line=line, separator=repr(separator)):
+                    self.assertEqual(self.judge(line.format(separator)), [])
+
+    def test_an_empty_second_reply_does_not_hide_the_usage_line(self):
+        self.assertEqual(self.judge("Provide search text: /search\n<query>", ""), [])
+
+    def test_a_wrong_command_a_wrong_or_missing_placeholder_or_nonsense_still_fail(self):
+        for text in ("Provide search text: /find <query>", "Provide search text: /search <title>",
+                     "Provide search text: /search", "Provide search text: /search<query>",
+                     "Provide search text: /searching <query>", "Provide search text: <query>",
+                     "Nothing found", "pong", ""):
+            with self.subTest(text=text):
+                self.assertEqual(self.judge(text), ["no reply matched any of the expected patterns"])
+
+    def test_silence_and_an_error_trace_next_to_the_usage_line_still_fail(self):
+        self.assertEqual(self.judge(), ["0 replies, expected at least 1"])
+        self.assertEqual(len(self.judge("Provide search text: /search\n<query>", "Traceback (most recent call last)")), 1)
+
+    def test_a_late_usage_line_still_fails_the_latency_bound(self):
+        late = smoke.judge(self.CASE, [("Provide search text: /search\n<query>", self.CASE["max_first_reply_s"] + 1)])
+        self.assertEqual(len(late), 1)
+        self.assertIn("first reply took", late[0])
+
+
 if __name__ == "__main__":
     unittest.main()
