@@ -9,11 +9,11 @@ stage must live on the deploy path in the activator's release namespace.
 
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 IMAGE = "ghcr.io/alex-mextner/hypercalendarbot"
@@ -49,7 +49,12 @@ class LocalFallbackStagingTests(unittest.TestCase):
         self.git("init", "-q", "--bare", "-b", "main", str(origin), cwd=self.tmp)
         self.git("clone", "-q", str(origin), str(self.checkout), cwd=self.tmp)
         (self.checkout / "scripts").mkdir()
-        for name in ("deploy-local-fallback.sh", "deploy-prebuilt-image.sh", "release-artifact.py", "migration-gate.py"):
+        for name in (
+            "deploy-local-fallback.sh",
+            "deploy-prebuilt-image.sh",
+            "release-artifact.py",
+            "migration-gate.py",
+        ):
             shutil.copy(ROOT / "scripts" / name, self.checkout / "scripts" / name)
         self.git("add", "-A", cwd=self.checkout)
         self.git("commit", "-q", "-m", "fixture", cwd=self.checkout)
@@ -61,7 +66,11 @@ class LocalFallbackStagingTests(unittest.TestCase):
         # The developer's global hooks (review gate, pre-push) do not apply to a fixture repo.
         return subprocess.run(
             ["git", "-c", "core.hooksPath=/dev/null", *args],
-            cwd=cwd, env=self.git_env, check=True, capture_output=True, text=True,
+            cwd=cwd,
+            env=self.git_env,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout
 
     def write_fakes(self):
@@ -74,19 +83,19 @@ class LocalFallbackStagingTests(unittest.TestCase):
             "shift\n"
             f"printf '%s\\n' \"$*\" >> {record}/ssh.log\n"
             "if [[ $1 == bash ]]; then\n"
-            "  stage=\"$4\"\n"
+            '  stage="$4"\n'
             "  python3 -c 'import json,os,stat,sys; s=sys.argv[1]; "
-            "print(json.dumps({\"mode\": stat.S_IMODE(os.lstat(s).st_mode), "
-            "\"entries\": sorted(os.listdir(s))}))' \"$stage\" "
+            'print(json.dumps({"mode": stat.S_IMODE(os.lstat(s).st_mode), '
+            '"entries": sorted(os.listdir(s))}))\' "$stage" '
             f"> {record}/stage.json\n"
             "fi\n"
-            "exec bash -c \"$*\"\n",
+            'exec bash -c "$*"\n',
         )
         exe(
             self.bin / "scp",
             "#!/bin/bash\n"
             "while [[ $1 == -* ]]; do [[ $1 == -q ]] && shift || shift 2; done\n"
-            "cp \"$1\" \"${2#*:}\"\n",
+            'cp "$1" "${2#*:}"\n',
         )
         # A held release lock stops the real activator right after its staging guard.
         exe(self.bin / "flock", "#!/bin/sh\nexit 1\n")
@@ -124,7 +133,13 @@ class LocalFallbackStagingTests(unittest.TestCase):
 
     def run_fallback(self):
         return subprocess.run(
-            ["bash", str(self.checkout / "scripts/deploy-local-fallback.sh"), "--ref", "origin/main", "--skip-tests"],
+            [
+                "bash",
+                str(self.checkout / "scripts/deploy-local-fallback.sh"),
+                "--ref",
+                "origin/main",
+                "--skip-tests",
+            ],
             cwd=self.checkout,
             env=dict(
                 self.git_env,
@@ -138,6 +153,7 @@ class LocalFallbackStagingTests(unittest.TestCase):
             text=True,
             capture_output=True,
             timeout=60,
+            check=False,
         )
 
     def test_stage_is_a_private_release_directory_on_the_deploy_path(self):
@@ -148,7 +164,11 @@ class LocalFallbackStagingTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         built = json.loads((self.record / "build.json").read_text())
         self.assertEqual(built["platform"], "linux/arm64")
-        activations = [line for line in (self.record / "ssh.log").read_text().splitlines() if line.startswith("bash ")]
+        activations = [
+            line
+            for line in (self.record / "ssh.log").read_text().splitlines()
+            if line.startswith("bash ")
+        ]
         self.assertEqual(len(activations), 1)
         _, script, deploy_path, stage, image, sha, archive_sum, config = activations[0].split(" ")
         self.assertEqual((deploy_path, image, sha), (str(self.deploy), IMAGE, self.sha))
@@ -162,7 +182,10 @@ class LocalFallbackStagingTests(unittest.TestCase):
         self.assertIn("image.tar.gz", staged["entries"])
         self.assertIn("scripts", staged["entries"])
         # Nothing is left behind on the host: not on the deploy path, not in /tmp.
-        self.assertEqual(sorted(p.name for p in self.deploy.iterdir() if p.name.startswith(".incoming-")), [])
+        self.assertEqual(
+            sorted(p.name for p in self.deploy.iterdir() if p.name.startswith(".incoming-")),
+            [],
+        )
         self.assertFalse(any(Path("/tmp").glob("hypercal-source-" + self.sha[:12] + "-*")))
 
 

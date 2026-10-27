@@ -1,7 +1,6 @@
 """Two real bash processes contend for the shared odroid deploy lock (#823)."""
 
 import os
-from pathlib import Path
 import shutil
 import signal
 import subprocess
@@ -9,14 +8,16 @@ import sys
 import tempfile
 import time
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCK_LIB = ROOT / "scripts/odroid-deploy-lock.sh"
 
 
-@unittest.skipUnless(shutil.which("flock"), "util-linux flock is required (the odroid and CI have it)")
+@unittest.skipUnless(
+    shutil.which("flock"), "util-linux flock is required (the odroid and CI have it)"
+)
 class DeployLockTests(unittest.TestCase):
-
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -38,14 +39,18 @@ class DeployLockTests(unittest.TestCase):
         """A deploy that takes the lock, records start/end, holds it, and exits."""
         script = (
             f'source "{LOCK_LIB}"\n'
-            f'odroid_deploy_lock_acquire {tag} || exit $?\n'
+            f"odroid_deploy_lock_acquire {tag} || exit $?\n"
             f'echo "{tag} start $(date +%s.%N)" >>"{self.trace}"\n'
             f"sleep {hold_seconds}\n"
             f'echo "{tag} end $(date +%s.%N)" >>"{self.trace}"\n'
         )
         return subprocess.Popen(
-            ["bash", "-c", script], env=self.env(**extra), text=True,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+            ["bash", "-c", script],
+            env=self.env(**extra),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
         )
 
     def intervals(self):
@@ -63,7 +68,9 @@ class DeployLockTests(unittest.TestCase):
         out2 = second.communicate(timeout=30)
         self.assertEqual((first.returncode, second.returncode), (0, 0), (out1, out2))
         spans = self.intervals()
-        self.assertGreaterEqual(spans["esb"]["start"], spans["hcb"]["end"], "the deploys overlapped")
+        self.assertGreaterEqual(
+            spans["esb"]["start"], spans["hcb"]["end"], "the deploys overlapped"
+        )
         self.assertIn("waiting for the host deploy lock, held by: hcb", out2[1])
         self.assertIn("acquired the host deploy lock after", out2[1])
 
@@ -96,7 +103,13 @@ class DeployLockTests(unittest.TestCase):
             f"repo=hcb\npid={os.getpid()}\nstart_ticks=1\nstarted=2026-10-24T20:00:00Z\n"
         )
         script = f'source "{LOCK_LIB}"; _odl_describe_owner'
-        out = subprocess.run(["bash", "-c", script], env=self.env(), capture_output=True, text=True)
+        out = subprocess.run(
+            ["bash", "-c", script],
+            env=self.env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         self.assertIn("stale", out.stdout)
 
     def test_a_dead_holder_releases_the_lock_even_when_killed(self):
@@ -136,13 +149,15 @@ class StartTicksTests(unittest.TestCase):
     def reference(pid):
         """Independent parse: comm may hold spaces and ")", so cut after the LAST ")"."""
         stat = Path(f"/proc/{pid}/stat").read_text()
-        return stat[stat.rindex(")") + 2:].rstrip().split(" ")[19]
+        return stat[stat.rindex(")") + 2 :].rstrip().split(" ")[19]
 
     @staticmethod
     def bash_ticks(pid, prelude=":"):
         return subprocess.run(
             ["bash", "-c", f'source "{LOCK_LIB}"; {prelude}; _odl_start_ticks {pid}'],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
     def test_returns_the_kernel_starttime_of_a_live_process(self):
@@ -159,7 +174,9 @@ class StartTicksTests(unittest.TestCase):
             # Once the copy prints READY it has certainly exec'd, so the kernel reports the odd comm.
             sleeper = subprocess.Popen(
                 [str(binary), "-c", "echo READY; read -r _"],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                text=True,
             )
             try:
                 self.assertEqual(sleeper.stdout.readline().strip(), "READY")
@@ -185,7 +202,7 @@ class StartTicksTests(unittest.TestCase):
             f'source "{LOCK_LIB}"; set -- keep these; _odl_start_ticks {os.getpid()} >/dev/null; '
             "printf '%s|' \"$@\""
         )
-        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=False)
         self.assertEqual(out.stdout, "keep|these|")
 
     def test_fails_with_no_output_for_a_process_that_is_gone(self):

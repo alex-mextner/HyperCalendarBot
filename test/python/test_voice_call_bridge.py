@@ -6,11 +6,11 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import struct
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -122,39 +122,39 @@ class VoiceCallBridgeTests(unittest.IsolatedAsyncioTestCase):
         source = (ROOT / "scripts" / "voice-call-bridge.py").read_text()
         tree = ast.parse(source, filename="voice-call-bridge.py")
         entry = next(
-            n
-            for n in tree.body
-            if isinstance(n, ast.AsyncFunctionDef) and n.name == "main"
+            n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "main"
         )
         bun = Bun()
-        namespace = dict(
-            Client=Client,
-            PyTgCalls=make_calls(caller_frames),
-            StreamFrames=StreamFrames,
-            Direction=Direction,
-            ChatUpdate=ChatUpdate,
-            MediaStream=SimpleNamespace,
-            RecordStream=lambda **kwargs: SimpleNamespace(**kwargs),
-            AudioParameters=lambda *args: args,
-            websockets=SimpleNamespace(connect=lambda url: bun),
-            start_service_session=start_service_session,
-            detect_vad=lambda frame: True,
-            resample_to_16k=lambda pcm: pcm[::3],
-            asyncio=asyncio,
-            json=json,
-            struct=struct,
-            sys=sys,
-            API_ID=123,
-            API_HASH="synthetic",
-            USER_ID=CALLEE_ID,
-            LANGUAGE=language,
-            WS_URL="ws://synthetic/call/session",
-            SAMPLE_RATE=48000,
-            CHUNK_BYTES=4,
-        )
-        exec(
+        namespace = {
+            "Client": Client,
+            "PyTgCalls": make_calls(caller_frames),
+            "StreamFrames": StreamFrames,
+            "Direction": Direction,
+            "ChatUpdate": ChatUpdate,
+            "MediaStream": SimpleNamespace,
+            "RecordStream": lambda **kwargs: SimpleNamespace(**kwargs),
+            "AudioParameters": lambda *args: args,
+            "websockets": SimpleNamespace(connect=lambda url: bun),
+            "start_service_session": start_service_session,
+            "detect_vad": lambda frame: True,
+            "resample_to_16k": lambda pcm: pcm[::3],
+            "asyncio": asyncio,
+            "json": json,
+            "struct": struct,
+            "sys": sys,
+            "API_ID": 123,
+            "API_HASH": "synthetic",
+            "USER_ID": CALLEE_ID,
+            "LANGUAGE": language,
+            "WS_URL": "ws://synthetic/call/session",
+            "SAMPLE_RATE": 48000,
+            "CHUNK_BYTES": 4,
+        }
+        exec(  # noqa: S102 - runs the entry point extracted from the script under test, in a synthetic namespace
             compile(
-                ast.Module(body=[entry], type_ignores=[]), "voice-call-bridge.py", "exec"
+                ast.Module(body=[entry], type_ignores=[]),
+                "voice-call-bridge.py",
+                "exec",
             ),
             namespace,
         )

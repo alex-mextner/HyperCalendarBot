@@ -39,12 +39,16 @@ def text_to_ogg(model, text, output_path, speaker="xenia", sample_rate=48000):
     )
 
     import os
+
     os.unlink(wav_path)
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: silero-tts.py <text> <output_path> [speaker] [sample_rate]", file=sys.stderr)
+        print(
+            "Usage: silero-tts.py <text> <output_path> [speaker] [sample_rate]",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     text = sys.argv[1]

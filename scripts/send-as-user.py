@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Send a Telegram message using a user's Pyrogram session."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import json
 import os
 import sys
 from pathlib import Path
-
-from recipient_identity import RecipientMismatch, send_to_recipient
 
 from pyrogram import Client
 from pyrogram.enums import ParseMode
@@ -19,14 +19,13 @@ from pyrogram.errors import (
     SessionRevoked,
     UserDeactivated,
 )
+from recipient_identity import RecipientMismatch, send_to_recipient
 
 API_ID = int(os.environ.get("MTPROTO_API_ID", "0"))
 API_HASH = os.environ.get("MTPROTO_API_HASH", "")
 
 
-async def send_message(
-    session_path: str, user_id: int, text: str, username: str | None
-) -> None:
+async def send_message(session_path: str, user_id: int, text: str, username: str | None) -> None:
     p = Path(session_path)
     client = Client(
         name=p.with_suffix("").name,
@@ -59,11 +58,7 @@ async def send_message(
         print(json.dumps({"error": "RECIPIENT_MISMATCH", "message": str(e)}))
         sys.exit(1)
     except PeerIdInvalid:
-        print(
-            json.dumps(
-                {"error": "PEER_INVALID", "message": f"Cannot reach user {user_id}"}
-            )
-        )
+        print(json.dumps({"error": "PEER_INVALID", "message": f"Cannot reach user {user_id}"}))
         sys.exit(1)
     except FloodWait as e:
         print(json.dumps({"error": "FLOOD_WAIT", "retry_after": e.value}))
@@ -71,7 +66,7 @@ async def send_message(
     finally:
         try:
             await client.disconnect()
-        except Exception as cleanup_error:
+        except Exception as cleanup_error:  # noqa: BLE001 - cleanup must not mask the real outcome
             print(f"Session cleanup: {type(cleanup_error).__name__}", file=sys.stderr)
 
 

@@ -69,7 +69,10 @@ class OciConversionTests(unittest.TestCase):
             blobs[digest(data)] = data
             return digest(data)
 
-        layers = [layer_tar({"app/one.txt": b"one"}), layer_tar({"app/two.txt": b"two"})]
+        layers = [
+            layer_tar({"app/one.txt": b"one"}),
+            layer_tar({"app/two.txt": b"two"}),
+        ]
         if duplicate_layer:
             layers[1] = layers[0]
         if "gzip" in layer_type:
@@ -86,7 +89,9 @@ class OciConversionTests(unittest.TestCase):
                 "architecture": arch,
                 "os": "linux",
                 "config": {"Labels": {"org.opencontainers.image.revision": self.sha}},
-                "rootfs": rootfs if rootfs is not None else {"type": "layers", "diff_ids": diff_ids},
+                "rootfs": rootfs
+                if rootfs is not None
+                else {"type": "layers", "diff_ids": diff_ids},
             }
         ).encode()
         manifest = json.dumps(
@@ -159,7 +164,10 @@ class OciConversionTests(unittest.TestCase):
             blobs[digest(compressed[0])] = gzip.compress(layers[0] + b"x", mtime=0)
         path = self.dir / "image.oci.tar"
         with tarfile.open(path, "w") as tar:
-            members = [("oci-layout", b'{"imageLayoutVersion":"1.0.0"}'), ("index.json", index)]
+            members = [
+                ("oci-layout", b'{"imageLayoutVersion":"1.0.0"}'),
+                ("index.json", index),
+            ]
             members += [("blobs/sha256/" + d.removeprefix("sha256:"), b) for d, b in blobs.items()]
             if extra_member:
                 members.append(extra_member)
@@ -203,7 +211,10 @@ class OciConversionTests(unittest.TestCase):
                 ["sha256:" + name.rpartition("/")[2] for name in manifest[0]["Layers"]],
             )
             for layer in image_manifest["layers"]:
-                self.assertEqual(tar.getmember("blobs/sha256/" + layer["digest"][7:]).size, layer["size"])
+                self.assertEqual(
+                    tar.getmember("blobs/sha256/" + layer["digest"][7:]).size,
+                    layer["size"],
+                )
 
     def test_uncompressed_oci_and_docker_layer_types_convert_too(self):
         for layer_type in (
@@ -226,7 +237,8 @@ class OciConversionTests(unittest.TestCase):
         self.assertEqual(layers[0], layers[1])
         self.assertEqual(names.count(layers[0]), 1)
         self.assertEqual(
-            self.artifact.inspect_archive(packed, self.sha, self.tag)["config_digest"], config_id
+            self.artifact.inspect_archive(packed, self.sha, self.tag)["config_digest"],
+            config_id,
         )
 
     def test_rejects_wrong_platform_tag_integrity_and_unsupported_layers(self):

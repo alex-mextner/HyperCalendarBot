@@ -3,6 +3,7 @@ Auth script for Pyrogram (voice call bridge).
 Run: cd hypercalendarbot && venv/bin/python scripts/pyrogram-auth.py [phone]
 Env: MTPROTO_API_ID, MTPROTO_API_HASH
 """
+
 import asyncio
 import os
 import sys
@@ -14,6 +15,7 @@ from pyrogram import Client
 
 API_ID = int(os.environ["MTPROTO_API_ID"])
 API_HASH = os.environ["MTPROTO_API_HASH"]
+
 
 async def main():
     phone = sys.argv[1] if len(sys.argv) > 1 else None
@@ -34,5 +36,6 @@ async def main():
     print(f"Success! Logged in as {me.first_name} (@{me.username}), ID: {me.id}")
     print("Session saved to data/voice_caller.session")
     await app.stop()
+
 
 asyncio.run(main())

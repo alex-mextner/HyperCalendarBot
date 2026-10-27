@@ -1,0 +1,15 @@
+# Ruff settings for the Python in this repository (deploy/QA helper scripts in scripts/, their
+# tests in test/python/ and the catalog-managed gates in ci/). Everything else keeps Ruff's
+# defaults; no rule is ignored here.
+
+# The lowest Python these files are written for (`vermin scripts/*.py test/python/*.py` reports
+# 3.9). The deploy helpers run under whatever `python3` the odroid runner, the Stage QA PC and the
+# dev Mac provide (deploy-runbook.md: "needs bash and python3"; no pin anywhere), so Ruff must not
+# assume the 3.12 of the bot's own venv (it would rewrite timezone.utc to datetime.UTC, Optional[X]
+# to X | None, ...). With this floor Ruff also flags PEP 604 unions in annotations that need
+# `from __future__ import annotations` to import on 3.9 (FA102).
+target-version = "py39"
+
+# 100 columns instead of Ruff's default 88, so the long command lines and operator messages in the
+# deploy scripts are not split mechanically; ExpenseSyncBot's ruff.toml uses the same width.
+line-length = 100

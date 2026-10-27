@@ -1,9 +1,13 @@
 """Read public profile fields for an already known numeric Telegram peer."""
 
-import asyncio, json, os, sys
+import asyncio
+import json
+import os
+import sys
+
+from mtproto_lock import session_lock
 from pyrogram import Client
 from service_session import start_service_session
-from mtproto_lock import session_lock
 
 
 async def main(user_id):

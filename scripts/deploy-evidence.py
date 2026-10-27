@@ -22,12 +22,12 @@ import datetime
 import gzip
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 TAIL_LINES = 400
 TAIL_MAX_BYTES = 256 * 1024
@@ -38,12 +38,21 @@ HOST_KEEP = ("RestartPolicy", "Memory", "NanoCpus", "LogConfig")
 SECRET_PATTERNS = [
     # No \b before the digits: in a bot URL they follow the literal "bot" (".../bot123456789:TOKEN/...").
     (re.compile(r"(?<![0-9])\d{6,12}:[A-Za-z0-9_-]{30,}"), "[telegram-token]"),
-    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"), "[jwt]"),
-    (re.compile(r"\b(?:sk|pk|gh[pousr]|glpat|xox[abp])[-_][A-Za-z0-9_-]{16,}\b"), "[api-key]"),
+    (
+        re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
+        "[jwt]",
+    ),
+    (
+        re.compile(r"\b(?:sk|pk|gh[pousr]|glpat|xox[abp])[-_][A-Za-z0-9_-]{16,}\b"),
+        "[api-key]",
+    ),
     (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}"), "Bearer [redacted]"),
-    (re.compile(
-        r"""(?i)(["']?(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|session[_-]?string)["']?\s*[:=]\s*)(["']?)[^\s"',}&]+"""
-    ), r"\1\2[redacted]"),
+    (
+        re.compile(
+            r"""(?i)(["']?(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|session[_-]?string)["']?\s*[:=]\s*)(["']?)[^\s"',}&]+"""
+        ),
+        r"\1\2[redacted]",
+    ),
     (re.compile(r"://([^/\s:@]*):[^/\s@]+@"), r"://\1:[redacted]@"),
 ]
 # Message content must not be copied (ticket #823): blank the value of these JSON string fields.
@@ -86,7 +95,14 @@ def write_private(path, data):
 
 def run(cmd, timeout=60):
     try:
-        done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, errors="replace")
+        done = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            errors="replace",
+            check=False,
+        )
     except (OSError, subprocess.TimeoutExpired) as error:
         return 1, "", f"{type(error).__name__}"
     return done.returncode, done.stdout, done.stderr
@@ -104,7 +120,8 @@ def save_raw_log(container, target):
     try:
         with subprocess.Popen(
             ["docker", "logs", "--timestamps", container],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         ) as proc:
             expired = threading.Event()
 
@@ -116,18 +133,28 @@ def save_raw_log(container, target):
             timer.start()
             try:
                 fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-                with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6) as out:
+                with (
+                    os.fdopen(fd, "wb") as raw,
+                    gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6) as out,
+                ):
                     shutil.copyfileobj(proc.stdout, out, 1024 * 1024)
                 code = proc.wait()
             finally:
                 timer.cancel()
             if code != 0 or expired.is_set():
                 note = Path(target).with_suffix(".note")
-                why = f"stopped after {RAW_LOG_SECONDS}s" if expired.is_set() else f"docker logs exited {code}"
+                why = (
+                    f"stopped after {RAW_LOG_SECONDS}s"
+                    if expired.is_set()
+                    else f"docker logs exited {code}"
+                )
                 write_private(note, f"{why}; the gz may be partial or empty\n")
         return os.path.getsize(target)
     except OSError as error:
-        print(f"deploy-evidence: raw log not saved ({type(error).__name__})", file=sys.stderr)
+        print(
+            f"deploy-evidence: raw log not saved ({type(error).__name__})",
+            file=sys.stderr,
+        )
         return None
 
 
@@ -167,15 +194,23 @@ def inspect_summary(container):
 
 def host_snapshot():
     parts = []
-    for label, path in (("loadavg", "/proc/loadavg"), ("pressure/io", "/proc/pressure/io"),
-                        ("pressure/memory", "/proc/pressure/memory"), ("pressure/cpu", "/proc/pressure/cpu")):
+    for label, path in (
+        ("loadavg", "/proc/loadavg"),
+        ("pressure/io", "/proc/pressure/io"),
+        ("pressure/memory", "/proc/pressure/memory"),
+        ("pressure/cpu", "/proc/pressure/cpu"),
+    ):
         try:
             parts.append(f"## {label}\n{Path(path).read_text()}")
         except OSError:
             parts.append(f"## {label}\n(unavailable)\n")
-    for label, cmd in (("free -m", ["free", "-m"]), ("uptime", ["uptime"]), ("df -h /", ["df", "-h", "/"]),
-                       ("docker ps", ["docker", "ps", "--format", "{{.Names}}\t{{.Status}}"]),
-                       ("iostat/vmstat", ["vmstat", "1", "2"])):
+    for label, cmd in (
+        ("free -m", ["free", "-m"]),
+        ("uptime", ["uptime"]),
+        ("df -h /", ["df", "-h", "/"]),
+        ("docker ps", ["docker", "ps", "--format", "{{.Names}}\t{{.Status}}"]),
+        ("iostat/vmstat", ["vmstat", "1", "2"]),
+    ):
         _, out, err = run(cmd, timeout=20)
         parts.append(f"## {label}\n{out or err}")
     return "\n".join(parts)
@@ -223,19 +258,29 @@ def main(argv=None):
     release = sub.add_parser("release-logs")
     release.add_argument("--container", required=True)
     release.add_argument("--logs-root", required=True)
-    release.add_argument("--label", required=True, help="short revision or image id of the outgoing release")
+    release.add_argument(
+        "--label",
+        required=True,
+        help="short revision or image id of the outgoing release",
+    )
     failed = sub.add_parser("failed")
     failed.add_argument("--container", required=True)
     failed.add_argument("--logs-root", required=True)
     failed.add_argument("--sha", required=True)
     failed.add_argument("--receipt", default="")
     args = parser.parse_args(argv)
-    if not re.fullmatch(r"[A-Za-z0-9._:-]{1,80}", getattr(args, "label", None) or getattr(args, "sha", "") or "x"):
+    if not re.fullmatch(
+        r"[A-Za-z0-9._:-]{1,80}",
+        getattr(args, "label", None) or getattr(args, "sha", "") or "x",
+    ):
         parser.error("label/sha must be a short plain token")
     try:
         {"release-logs": cmd_release_logs, "failed": cmd_failed}[args.command](args)
-    except Exception as error:  # evidence is best effort and must never block a rollback
-        print(f"deploy-evidence: {args.command} failed ({type(error).__name__})", file=sys.stderr)
+    except Exception as error:  # noqa: BLE001 - evidence is best effort and must never block a rollback
+        print(
+            f"deploy-evidence: {args.command} failed ({type(error).__name__})",
+            file=sys.stderr,
+        )
     return 0
 
 
