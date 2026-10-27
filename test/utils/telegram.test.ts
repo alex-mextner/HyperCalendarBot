@@ -194,7 +194,16 @@ describe('splitMessage (HTML mode)', () => {
     const chunks = split(text, 40);
     expect(chunks.length).toBeGreaterThan(1);
     for (const chunk of chunks) expect(chunk.length).toBeLessThanOrEqual(40);
-    const visible = (html: string) => html.replace(/<[^>]+>/g, '');
+    // Strip to a fixpoint (as stripHtml does): one pass can leave a `<script` fragment behind.
+    const visible = (html: string) => {
+      let stripped = html;
+      let prev: string;
+      do {
+        prev = stripped;
+        stripped = stripped.replace(/<[^>]+>/g, '');
+      } while (stripped !== prev);
+      return stripped;
+    };
     expect(chunks.map(visible).join('')).toBe(visible(text));
   });
 
