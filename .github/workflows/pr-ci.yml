@@ -29,9 +29,10 @@ jobs:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
-      - run: bun install
-      # Validate lockfile integrity (same platform — linux/linux)
-      - run: bun install --frozen-lockfile --ignore-scripts
+      # The committed bun.lock must install as-is: a frozen install fails when package.json and
+      # bun.lock disagree. Never run a plain `bun install` first - it rewrites bun.lock in the
+      # runner and the check would then pass on a lockfile nobody committed (GH-870).
+      - run: bun install --frozen-lockfile
       - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         id: playwright-cache
         with:
