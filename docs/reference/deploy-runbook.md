@@ -283,7 +283,7 @@ To roll back: stop the bot on the odroid first. If the odroid wrote anything aft
 
 ## PR CI (full test, lint and typecheck gate)
 
-`.github/workflows/pr-ci.yml` (job `test`) runs on every same-repository pull request to `main` the same gate that `deploy.yml`'s `test` job runs after merge: Bun 1.4.2, ffmpeg, `bun install` plus the frozen-lockfile check, Playwright `chromium-headless-shell`, full `bun test`, `bun run lint` and `tsc --noEmit`. Before this, a PR ran none of them and a red suite surfaced only on the push to `main`, after merge. The workflow has a read-only token, no secrets and no self-hosted runner, skips fork PRs, and cancels the previous run when a PR gets a new push. It replaces the branch-gated GH-359 stub `pr-gh359-validation.yml`, which was always skipped. `test/scripts/bun-version-pin.test.ts` keeps its Bun pin equal to the other pins.
+`.github/workflows/pr-ci.yml` (job `test`) runs on every same-repository pull request to `main` the same gate that `deploy.yml`'s `test` job runs after merge: Bun 1.4.2, ffmpeg, one `bun install --frozen-lockfile` (a `package.json` change without its `bun.lock` change fails here), Playwright `chromium-headless-shell`, full `bun test`, `bun run lint` and `tsc --noEmit`. Before this, a PR ran none of them and a red suite surfaced only on the push to `main`, after merge. The workflow has a read-only token, no secrets and no self-hosted runner, skips fork PRs, and cancels the previous run when a PR gets a new push. It replaces the branch-gated GH-359 stub `pr-gh359-validation.yml`, which was always skipped. `test/scripts/bun-version-pin.test.ts` keeps its Bun pin equal to the other pins, and `test/scripts/ci-lockfile-gate.test.ts` keeps both workflows on the frozen install and proves the command rejects a stale lock (#870).
 
 This is the hosted check only. Agents still validate the exact PR head with the full suite on Runpod (AGENTS.md § Heavy work runs on Runpod), never a full `bun test` on the shared workstation.
 
@@ -338,14 +338,23 @@ scripts/install-stage-qa-pc.sh   # lib dir ~/.local/lib/hypercal-stage-qa, entry
 
 ## bun lockfile and --frozen-lockfile
 
-`--frozen-lockfile` is **cross-platform incompatible**: a macOS arm64 lockfile fails on linux amd64
-even with the same bun version and build hash. Platform-specific optional deps (e.g.
-`@rollup/rollup-darwin-arm64` vs `@rollup/rollup-linux-x64-gnu`) cause the mismatch.
+`bun install --frozen-lockfile` fails when `package.json` and `bun.lock` disagree, and it never
+rewrites the lock. That is the check CI needs, so it must be the **only** install before the suite:
+a plain `bun install` ahead of it rewrites `bun.lock` in the runner's checkout, and the frozen
+install then validates the file the first install just wrote — a stale lock merges unnoticed and
+fails later on the next clean frozen install (#870).
 
-- **CI** (linux): `bun install` -> `bun install --frozen-lockfile` — validates lockfile integrity.
+The 2026-03 note that a macOS arm64 lockfile fails `--frozen-lockfile` on linux amd64 predates the
+Bun 1.4.2 pin. On 2026-10-27 the committed `bun.lock` passed
+`bun install --frozen-lockfile --dry-run --ignore-scripts` on linux x64 with Bun 1.4.2, and
+`test/scripts/ci-lockfile-gate.test.ts` re-checks that on every run. If it ever fails on linux
+again, regenerate `bun.lock` with the pinned Bun and commit it; do not put a plain `bun install`
+back in front of the check, and do not add a fallback to one, because either hides the drift.
+
+- **CI** (linux, `deploy.yml` and `pr-ci.yml`): `bun install --frozen-lockfile` — fails on a stale lock.
 - **Docker** (linux): `bun install --ignore-scripts` — respects lockfile version pins, adjusts
   only platform-specific optional deps.
-- **Local** (macOS): `bun install` — generates/updates lockfile normally.
+- **Local** (macOS): `bun install` — generates/updates the lockfile; commit it with the manifest change.
 
 ## bun install --production in Docker
 

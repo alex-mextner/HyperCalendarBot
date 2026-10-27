@@ -29,8 +29,8 @@ goes to the pod.
 
 ```bash
 # The pod mirrors CI (deploy.yml) as the unprivileged runner user: bun 1.4.2, ffmpeg, a plain
-# `bun install` (the macOS lockfile is not frozen-installable on linux — see
-# docs/reference/deploy-runbook.md), Playwright's chromium-headless-shell for
+# `bun install` (the pod only needs node_modules to run the suite; the stale-lock check is CI's
+# `bun install --frozen-lockfile`, see docs/reference/deploy-runbook.md), Playwright's chromium-headless-shell for
 # test/worker/playwright-pool.test.ts (which refuses skipped browser tests). The apt list is
 # Playwright's own chromium dependency list for Ubuntu 24.04 (playwright-core nativeDeps.js).
 HCB_APT=ffmpeg,libasound2t64,libatk-bridge2.0-0t64,libatk1.0-0t64,libatspi2.0-0t64,libcairo2,libcups2t64,libdbus-1-3,libdrm2,libgbm1,libglib2.0-0t64,libnspr4,libnss3,libpango-1.0-0,libx11-6,libxcb1,libxcomposite1,libxdamage1,libxext6,libxfixes3,libxkbcommon0,libxrandr2
