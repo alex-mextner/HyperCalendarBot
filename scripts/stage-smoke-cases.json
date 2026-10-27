@@ -45,7 +45,7 @@
     "name": "validation-search-without-query",
     "send": "/search",
     "expect": [
-      "/search <(query|запрос)>"
+      "/search\\s+<(query|запрос)>"
     ],
     "forbid": [
       "Traceback|went wrong|пошло не так|Произошла ошибка"
