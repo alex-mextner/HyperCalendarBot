@@ -2,39 +2,46 @@
 // ordering-sensitive side effects that happen before a sub-action is recognised.
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { handleSettingsCallback, pendingDurationInput } from '../../../src/bot/commands/settings.ts';
-import type { User } from '../../../src/database/types.ts';
+import type { NotificationPreferencesRow, User } from '../../../src/database/types.ts';
+import { stub } from '../partial-stub.ts';
+import { makeUserRow, sentMessage } from '../telegram-fixtures.ts';
+
+type TelegramDeps = NonNullable<Parameters<typeof handleSettingsCallback>[7]>;
 
 function makeUser(overrides: Partial<User> = {}): User {
-  return {
-    telegram_id: 100,
-    username: null,
-    first_name: null,
-    language: 'en',
-    timezone: 'Europe/Moscow',
-    country_code: 'RU',
-    google_refresh_token_enc: null,
-    google_calendar_id: null,
-    onboarding_completed: 1,
-    timezone_updated_at: null,
-    voice_response_enabled: null,
-    default_event_duration_minutes: 60,
-    city: null,
-    connect_telegram_dismissed_at: null,
-    created_at: '2026-01-01 00:00:00',
-    updated_at: '2026-01-01 00:00:00',
-    ...overrides,
-  };
+  return makeUserRow({ timezone: 'Europe/Moscow', country_code: 'RU', ...overrides });
 }
+
+// Negative case: a legacy row whose duration column is NULL, which the typed User model no longer admits.
+// JSON.parse is typed `any`, the same way a stored value reaches the code at runtime, so this deliberately
+// bypasses the type that would otherwise forbid the case under test.
+const LEGACY_NULL_DURATION: number = JSON.parse('null');
 
 function makeCtx() {
   return {
-    answer: mock(() => Promise.resolve()),
-    editText: mock(() => Promise.resolve()),
+    answer: mock(() => Promise.resolve(true as const)),
+    editText: mock(() => Promise.resolve(sentMessage())),
   };
 }
 
+// The row `ensureDefaults` creates for a new user (column defaults of notification_preferences).
+const preferencesRow: NotificationPreferencesRow = {
+  user_id: 100,
+  morning_agenda_enabled: 1,
+  morning_agenda_time: '08:00',
+  morning_agenda_format: 'text',
+  default_reminder_intervals: '[30, 0]',
+  evening_review_enabled: 0,
+  evening_review_time: '21:00',
+  evening_review_format: 'text',
+  quiet_hours_enabled: 0,
+  quiet_hours_start: null,
+  quiet_hours_end: null,
+  updated_at: '2026-01-01 00:00:00',
+};
+
 const prefsService = {
-  getOrCreate: mock(() => ({})),
+  getOrCreate: mock(() => preferencesRow),
   toggleMorningAgenda: mock(() => {}),
   toggleEveningReview: mock(() => {}),
   toggleQuietHours: mock(() => {}),
@@ -59,10 +66,10 @@ describe('stg:edit_duration', () => {
     const before = Date.now();
 
     await handleSettingsCallback(
-      ctx as never,
+      stub(ctx),
       makeUser({ default_event_duration_minutes: 90 }),
       'edit_duration',
-      prefsService as never,
+      stub(prefsService),
     );
 
     expect(pendingDurationInput.get(100)).toBeGreaterThanOrEqual(before);
@@ -74,10 +81,10 @@ describe('stg:edit_duration', () => {
     const ctx = makeCtx();
 
     await handleSettingsCallback(
-      ctx as never,
-      makeUser({ default_event_duration_minutes: null as never }),
+      stub(ctx),
+      makeUser({ default_event_duration_minutes: LEGACY_NULL_DURATION }),
       'edit_duration',
-      prefsService as never,
+      stub(prefsService),
     );
 
     expect(editedText(ctx)).toContain('Current: 1h');
@@ -85,10 +92,10 @@ describe('stg:edit_duration', () => {
 });
 
 describe('stg:set_duration', () => {
-  function makeUserRepo(updatedMinutes: number | null) {
+  function makeUserRepo(updatedMinutes: number) {
     return {
       update: mock(() => null),
-      findByTelegramId: mock(() => makeUser({ default_event_duration_minutes: updatedMinutes as never })),
+      findByTelegramId: mock(() => makeUser({ default_event_duration_minutes: updatedMinutes })),
     };
   }
 
@@ -98,13 +105,13 @@ describe('stg:set_duration', () => {
     pendingDurationInput.set(100, 1);
 
     await handleSettingsCallback(
-      ctx as never,
+      stub(ctx),
       makeUser(),
       'set_duration:45',
-      prefsService as never,
+      stub(prefsService),
       undefined,
       undefined,
-      userRepo as never,
+      stub(userRepo),
     );
 
     expect(userRepo.update).toHaveBeenCalledWith(100, { default_event_duration_minutes: 45 });
@@ -118,13 +125,13 @@ describe('stg:set_duration', () => {
     pendingDurationInput.set(100, 1);
 
     await handleSettingsCallback(
-      ctx as never,
+      stub(ctx),
       makeUser(),
       `set_duration:${value}`,
-      prefsService as never,
+      stub(prefsService),
       undefined,
       undefined,
-      userRepo as never,
+      stub(userRepo),
     );
 
     expect(userRepo.update).not.toHaveBeenCalled();
@@ -137,13 +144,13 @@ describe('stg:set_duration', () => {
     const userRepo = makeUserRepo(1440);
 
     await handleSettingsCallback(
-      ctx as never,
+      stub(ctx),
       makeUser(),
       'set_duration:1440',
-      prefsService as never,
+      stub(prefsService),
       undefined,
       undefined,
-      userRepo as never,
+      stub(userRepo),
     );
 
     expect(userRepo.update).toHaveBeenCalledWith(100, { default_event_duration_minutes: 1440 });
@@ -157,13 +164,13 @@ describe('stg:set_duration', () => {
     };
 
     await handleSettingsCallback(
-      ctx as never,
+      stub(ctx),
       makeUser({ language: 'en' }),
       'set_duration:30',
-      prefsService as never,
+      stub(prefsService),
       undefined,
       undefined,
-      userRepo as never,
+      stub(userRepo),
     );
 
     expect(editedText(ctx)).toContain('Текущая: 30 мин');
@@ -172,7 +179,7 @@ describe('stg:set_duration', () => {
   test('without a user repository it only answers', async () => {
     const ctx = makeCtx();
 
-    await handleSettingsCallback(ctx as never, makeUser(), 'set_duration:45', prefsService as never);
+    await handleSettingsCallback(stub(ctx), makeUser(), 'set_duration:45', stub(prefsService));
 
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(ctx.editText).not.toHaveBeenCalled();
@@ -183,7 +190,7 @@ describe('stg:set_lang / stg:set_country without a user repository', () => {
   test('re-renders the general view for the unchanged user', async () => {
     const ctx = makeCtx();
 
-    await handleSettingsCallback(ctx as never, makeUser({ language: 'en' }), 'set_lang:ru', prefsService as never);
+    await handleSettingsCallback(stub(ctx), makeUser({ language: 'en' }), 'set_lang:ru', stub(prefsService));
 
     expect(editedText(ctx)).toContain('General settings');
   });
@@ -191,56 +198,55 @@ describe('stg:set_lang / stg:set_country without a user repository', () => {
 
 describe('stg Telegram account', () => {
   function makeTelegramDeps(masterKey: Buffer | null = null) {
-    return {
-      sessionRepo: {
-        findByUserId: mock(() => null),
-        getActive: mock(() => null),
-        updateStatus: mock(() => {}),
-      },
-      masterKey,
-      enterScene: mock(() => Promise.resolve()),
+    const sessionRepo = {
+      findByUserId: mock(() => null),
+      getActive: mock(() => null),
+      updateStatus: mock(() => {}),
     };
+    const enterScene = mock(() => Promise.resolve());
+    const deps: TelegramDeps = { sessionRepo: stub(sessionRepo), masterKey, enterScene };
+    return { deps, sessionRepo, enterScene };
   }
 
-  async function tap(subAction: string, telegramDeps?: ReturnType<typeof makeTelegramDeps>) {
+  async function tap(subAction: string, telegramDeps?: TelegramDeps) {
     const ctx = makeCtx();
     await handleSettingsCallback(
-      ctx as never,
+      stub(ctx),
       makeUser(),
       subAction,
-      prefsService as never,
+      stub(prefsService),
       undefined,
       undefined,
       undefined,
-      telegramDeps as never,
+      telegramDeps,
     );
     return ctx;
   }
 
   test('stg:telegram shows the account view for the stored session', async () => {
-    const deps = makeTelegramDeps();
-    const ctx = await tap('telegram', deps);
+    const telegram = makeTelegramDeps();
+    const ctx = await tap('telegram', telegram.deps);
 
-    expect(deps.sessionRepo.findByUserId).toHaveBeenCalledWith(100);
+    expect(telegram.sessionRepo.findByUserId).toHaveBeenCalledWith(100);
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(markupJson(ctx)).toContain('stg:tg_connect');
   });
 
   test('stg:tg_connect answers and enters the connect scene without editing', async () => {
-    const deps = makeTelegramDeps();
-    const ctx = await tap('tg_connect', deps);
+    const telegram = makeTelegramDeps();
+    const ctx = await tap('tg_connect', telegram.deps);
 
     expect(ctx.answer).toHaveBeenCalledTimes(1);
-    expect(deps.enterScene).toHaveBeenCalledTimes(1);
+    expect(telegram.enterScene).toHaveBeenCalledTimes(1);
     expect(ctx.editText).not.toHaveBeenCalled();
   });
 
   test('stg:tg_disconnect_confirm without a master key revokes the session locally and offers reconnect', async () => {
-    const deps = makeTelegramDeps(null);
-    const ctx = await tap('tg_disconnect_confirm', deps);
+    const telegram = makeTelegramDeps(null);
+    const ctx = await tap('tg_disconnect_confirm', telegram.deps);
 
-    expect(deps.sessionRepo.getActive).toHaveBeenCalledWith(100);
-    expect(deps.sessionRepo.updateStatus).toHaveBeenCalledWith(100, 'revoked');
+    expect(telegram.sessionRepo.getActive).toHaveBeenCalledWith(100);
+    expect(telegram.sessionRepo.updateStatus).toHaveBeenCalledWith(100, 'revoked');
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(markupJson(ctx)).toContain('stg:tg_connect');
     expect(markupJson(ctx)).toContain('stg:back');
@@ -258,12 +264,12 @@ describe('stg Telegram account', () => {
   });
 
   test('an unknown stg sub-action with Telegram support just answers', async () => {
-    const deps = makeTelegramDeps();
-    const ctx = await tap('nope', deps);
+    const telegram = makeTelegramDeps();
+    const ctx = await tap('nope', telegram.deps);
 
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(ctx.editText).not.toHaveBeenCalled();
-    expect(deps.enterScene).not.toHaveBeenCalled();
+    expect(telegram.enterScene).not.toHaveBeenCalled();
   });
 });
 
@@ -271,7 +277,7 @@ describe('privacy defaults are ensured for every sub-action that reaches the pri
   function makeSharingRepo() {
     return {
       ensureDefaults: mock(() => {}),
-      get: mock(() => undefined),
+      get: mock(() => null),
       update: mock(() => {}),
     };
   }
@@ -280,14 +286,7 @@ describe('privacy defaults are ensured for every sub-action that reaches the pri
     const ctx = makeCtx();
     const sharing = makeSharingRepo();
 
-    await handleSettingsCallback(
-      ctx as never,
-      makeUser(),
-      subAction,
-      prefsService as never,
-      undefined,
-      sharing as never,
-    );
+    await handleSettingsCallback(stub(ctx), makeUser(), subAction, stub(prefsService), undefined, stub(sharing));
 
     expect(sharing.ensureDefaults).toHaveBeenCalledWith(100);
     expect(sharing.update).not.toHaveBeenCalled();
@@ -297,7 +296,7 @@ describe('privacy defaults are ensured for every sub-action that reaches the pri
     const ctx = makeCtx();
     const sharing = makeSharingRepo();
 
-    await handleSettingsCallback(ctx as never, makeUser(), 'back', prefsService as never, undefined, sharing as never);
+    await handleSettingsCallback(stub(ctx), makeUser(), 'back', stub(prefsService), undefined, stub(sharing));
 
     expect(sharing.ensureDefaults).not.toHaveBeenCalled();
   });
@@ -306,14 +305,7 @@ describe('privacy defaults are ensured for every sub-action that reaches the pri
     const ctx = makeCtx();
     const sharing = makeSharingRepo();
 
-    await handleSettingsCallback(
-      ctx as never,
-      makeUser(),
-      'privacy',
-      prefsService as never,
-      undefined,
-      sharing as never,
-    );
+    await handleSettingsCallback(stub(ctx), makeUser(), 'privacy', stub(prefsService), undefined, stub(sharing));
 
     expect(sharing.ensureDefaults).toHaveBeenCalledWith(100);
     expect(ctx.editText).toHaveBeenCalledTimes(1);

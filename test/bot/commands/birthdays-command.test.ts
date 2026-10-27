@@ -15,7 +15,12 @@ function item(title: string, startAt: string, extra: Partial<BirthdayDisplayItem
   };
 }
 
-function makeCtx(overrides: Record<string, unknown> = {}) {
+interface BirthdaysCtxOverrides {
+  dbUser?: { telegram_id: number; language: 'en' | 'ru' };
+  chat?: { type: string; id: number };
+}
+
+function makeCtx(overrides: BirthdaysCtxOverrides = {}) {
   return {
     dbUser: { telegram_id: 100, language: 'en' as const },
     chat: { type: 'private', id: 100 },

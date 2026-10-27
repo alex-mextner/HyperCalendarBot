@@ -1,11 +1,20 @@
 import { describe, expect, mock, test } from 'bun:test';
+import type { VoiceAttachment } from 'gramio';
+import type { MessageHandlerDeps } from '../../../src/bot/handlers/message/types.ts';
 import {
   buildAgentContextFactory,
   createMessageHandler,
   stripJsonFences,
   toEventSummary,
 } from '../../../src/bot/handlers/message.handler.ts';
-import { type MockCtxOverrides, makeCtx, makeDeps } from './message-handler-fixtures.ts';
+import type { UserMemoryRepository } from '../../../src/database/repositories/user-memory.repository.ts';
+import type { Intent } from '../../../src/database/types.ts';
+import type { KokoroTtsService } from '../../../src/services/voice/kokoro-tts-service.ts';
+import type { SileroTtsService } from '../../../src/services/voice/silero-tts-service.ts';
+import type { StressDictionary } from '../../../src/services/voice/stress-dictionary.ts';
+import { stub } from '../partial-stub.ts';
+import { makeUserRow } from '../telegram-fixtures.ts';
+import { makeHandlerDeps, makeMessageCtx } from './message-handler-fixtures.ts';
 
 describe('toEventSummary', () => {
   const BASE_EVENT = {
@@ -96,77 +105,80 @@ describe('toEventSummary', () => {
 describe('voice reply TTS fallback', () => {
   const audioBuffer = Buffer.from('fake-audio');
   const fakeAudioDownload = mock(() => Promise.resolve(Buffer.from('fake-voice-download')));
+  const voiceUser = makeUserRow({ telegram_id: 1, language: 'ru', timezone: 'UTC', voice_response_enabled: 1 });
+  const noStress = stub<StressDictionary>({ lookup: () => null });
 
-  function makeVoiceDeps(overrides: { [key: string]: unknown } = {}) {
-    return makeDeps({
-      agent: { run: mock(() => Promise.resolve({ responseText: 'Ответ бота' })) },
+  function makeVoiceDeps(overrides: Partial<MessageHandlerDeps> = {}) {
+    return makeHandlerDeps({
+      agent: stub({
+        run: mock(() => Promise.resolve({ responseText: 'Ответ бота', toolCalls: [], toolResults: [] })),
+      }),
       sendVoice: mock(() => Promise.resolve()),
       botToken: 'test-token',
-      transcriptionService: { transcribe: mock(() => Promise.resolve('Пользователь говорит')) },
+      transcriptionService: stub({ transcribe: mock(() => Promise.resolve('Пользователь говорит')) }),
       downloadVoiceBuffer: fakeAudioDownload,
       ...overrides,
     });
   }
 
-  function makeVoiceCtx(overrides: MockCtxOverrides = {}) {
-    return makeCtx({
-      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC', voice_response_enabled: 1 },
-      voice: { file_id: 'test-file-id', duration: 5 },
+  function makeVoiceCtx(dbUser = voiceUser) {
+    return makeMessageCtx({
+      dbUser,
+      voice: stub<VoiceAttachment>({ fileId: 'test-file-id', duration: 5 }),
       text: undefined,
-      ...overrides,
     });
   }
 
   test('uses primary sileroTts when available', async () => {
-    const sileroTts = { synthesize: mock(() => Promise.resolve(audioBuffer)) };
+    const synthesize = mock(() => Promise.resolve(audioBuffer));
     const fallbackTts = { synthesize: mock(() => Promise.resolve(audioBuffer)) };
-    const stressDictionary = { lookup: () => undefined } as never;
-    const deps = makeVoiceDeps({ sileroTts, fallbackTts, stressDictionary });
-    const handler = createMessageHandler(deps as never);
-    await handler(makeVoiceCtx() as never);
-    expect(sileroTts.synthesize).toHaveBeenCalledTimes(1);
+    const deps = makeVoiceDeps({ sileroTts: stub({ synthesize }), fallbackTts, stressDictionary: noStress });
+    const handler = createMessageHandler(deps);
+    await handler(makeVoiceCtx());
+    expect(synthesize).toHaveBeenCalledTimes(1);
     expect(fallbackTts.synthesize).toHaveBeenCalledTimes(0);
-    expect((deps as never as { sendVoice: ReturnType<typeof mock> }).sendVoice).toHaveBeenCalledTimes(1);
+    expect(deps.sendVoice).toHaveBeenCalledTimes(1);
   });
 
   test('falls back to fallbackTts when primary sileroTts throws', async () => {
-    const sileroTts = { synthesize: mock(() => Promise.reject(new Error('silero down'))) };
+    const sileroTts = stub<SileroTtsService>({ synthesize: mock(() => Promise.reject(new Error('silero down'))) });
     const fallbackTts = { synthesize: mock(() => Promise.resolve(audioBuffer)) };
-    const stressDictionary = { lookup: () => undefined } as never;
-    const deps = makeVoiceDeps({ sileroTts, fallbackTts, stressDictionary });
-    const handler = createMessageHandler(deps as never);
-    await handler(makeVoiceCtx() as never);
+    const deps = makeVoiceDeps({ sileroTts, fallbackTts, stressDictionary: noStress });
+    const handler = createMessageHandler(deps);
+    await handler(makeVoiceCtx());
     expect(fallbackTts.synthesize).toHaveBeenCalledTimes(1);
-    expect((deps as never as { sendVoice: ReturnType<typeof mock> }).sendVoice).toHaveBeenCalledTimes(1);
+    expect(deps.sendVoice).toHaveBeenCalledTimes(1);
   });
 
   test('uses fallbackTts when no primary TTS configured', async () => {
     const fallbackTts = { synthesize: mock(() => Promise.resolve(audioBuffer)) };
     const deps = makeVoiceDeps({ fallbackTts });
-    const handler = createMessageHandler(deps as never);
-    await handler(makeVoiceCtx() as never);
+    const handler = createMessageHandler(deps);
+    await handler(makeVoiceCtx());
     expect(fallbackTts.synthesize).toHaveBeenCalledTimes(1);
-    expect((deps as never as { sendVoice: ReturnType<typeof mock> }).sendVoice).toHaveBeenCalledTimes(1);
+    expect(deps.sendVoice).toHaveBeenCalledTimes(1);
   });
 
   test('sends no voice when no TTS configured at all', async () => {
     const sendVoice = mock(() => Promise.resolve());
     const deps = makeVoiceDeps({ sendVoice });
-    const handler = createMessageHandler(deps as never);
-    await handler(makeVoiceCtx() as never);
+    const handler = createMessageHandler(deps);
+    const ctx = makeVoiceCtx();
+    await handler(ctx);
     expect(sendVoice).toHaveBeenCalledTimes(0);
+    // The transcription echo is the only chat message: neither the STT error nor the generic error was sent.
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+    expect(ctx.send.mock.calls[0]?.[0]).toContain('Пользователь говорит');
   });
 
   test('uses fallbackTts for EN when kokoroTts throws', async () => {
-    const kokoroTts = { synthesize: mock(() => Promise.reject(new Error('kokoro down'))) };
+    const kokoroTts = stub<KokoroTtsService>({ synthesize: mock(() => Promise.reject(new Error('kokoro down'))) });
     const fallbackTts = { synthesize: mock(() => Promise.resolve(audioBuffer)) };
     const deps = makeVoiceDeps({ kokoroTts, fallbackTts });
-    const handler = createMessageHandler(deps as never);
-    await handler(
-      makeVoiceCtx({ dbUser: { telegram_id: 1, language: 'en', timezone: 'UTC', voice_response_enabled: 1 } }) as never,
-    );
+    const handler = createMessageHandler(deps);
+    await handler(makeVoiceCtx({ ...voiceUser, language: 'en' }));
     expect(fallbackTts.synthesize).toHaveBeenCalledWith(expect.any(String), 'en');
-    expect((deps as never as { sendVoice: ReturnType<typeof mock> }).sendVoice).toHaveBeenCalledTimes(1);
+    expect(deps.sendVoice).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -180,25 +192,17 @@ describe('intent supplement integration', () => {
       }),
     );
 
-    const intentMatcher = {
-      match: mock(() => ({ intentId: 1, captures: {} })),
-      load: mock(() => {}),
-    };
-    const intentRepo = {
-      getById: mock(() => ({
-        id: 1,
-        workflow: JSON.stringify({ steps: [] }),
-        format: 'text',
-        canonical_name: 'test_intent',
-        phrases: '[]',
-        trigger_words: '[]',
-        pattern: null,
-      })),
-      currentRuleFingerprint: mock(() => 'rule-fingerprint'),
-      runnableFingerprint: mock(() => 'rule-fingerprint'),
-    };
-    const intentExecutor = {
-      run: mock(() => Promise.resolve({ success: true, response: 'Вот твои события.' })),
+    const intentRow: Intent = {
+      id: 1,
+      canonical_name: 'test_intent',
+      phrases: '[]',
+      trigger_words: '[]',
+      pattern: null,
+      workflow: JSON.stringify({ steps: [] }),
+      format: 'text',
+      status: 'approved',
+      source_message: null,
+      created_at: '2026-01-01 00:00:00',
     };
     const workflowSessions = {
       get: mock(() => null),
@@ -207,27 +211,35 @@ describe('intent supplement integration', () => {
       deleteByUser: mock(() => {}),
     };
 
-    const deps = makeDeps({
-      agent: {
+    const deps = makeHandlerDeps({
+      agent: stub({
         run: agentRun,
-        getSender: mock(() => ({})),
-      },
-      eventService: {
+        getSender: mock(() => stub({})),
+      }),
+      eventService: stub({
         getEventsInRange: mock(() => []),
         getLatestCreated: mock(() => null),
         getEvent: mock(() => null),
-      },
-      chatHistory: {
-        save: mock(() => {}),
-      },
-      intentMatcher,
-      intentRepo,
-      intentExecutor,
+      }),
+      chatHistory: stub({
+        save: mock(() => 1),
+      }),
+      intentMatcher: stub({
+        match: mock(() => ({ intentId: 1, captures: {} })),
+        load: mock(() => {}),
+      }),
+      intentRepo: stub({
+        getById: mock(() => intentRow),
+        currentRuleFingerprint: mock(() => 'rule-fingerprint'),
+        runnableFingerprint: mock(() => 'rule-fingerprint'),
+      }),
+      intentExecutor: stub({
+        run: mock(() => Promise.resolve({ success: true, response: 'Вот твои события.' })),
+      }),
       workflowSessions,
     });
-
-    const ctx = makeCtx({ text: 'покажи события' });
-    await createMessageHandler(deps as never)(ctx as never);
+    const ctx = makeMessageCtx({ text: 'покажи события' });
+    await createMessageHandler(deps)(ctx);
 
     // auto-response was sent
     expect(ctx.send).toHaveBeenCalledWith('Вот твои события.');
@@ -266,21 +278,21 @@ describe('stripJsonFences', () => {
 });
 
 describe('buildAgentContextFactory', () => {
-  const user = { telegram_id: 1, language: 'ru', timezone: 'UTC' } as never;
+  const user = makeUserRow({ telegram_id: 1, language: 'ru', timezone: 'UTC' });
 
   test('passes userMemoryRepo into AgentContext', () => {
-    const userMemoryRepo = { getAll: mock(() => []), append: mock(() => {}), rewrite: mock(() => {}) };
-    const birthdayService = {} as never;
-    const deps = {
-      ...makeDeps({ userMemoryRepo, birthdayService }),
-      secretaryRepo: undefined,
-    };
-    const ctx = buildAgentContextFactory(deps as never)(user, 1, 'hi');
-    expect(ctx.birthday?.userMemoryRepo).toBe(userMemoryRepo as never);
+    const userMemoryRepo = stub<UserMemoryRepository>({
+      getAll: mock(() => []),
+      append: mock(() => {}),
+      rewrite: mock(() => {}),
+    });
+    const deps = makeHandlerDeps({ userMemoryRepo, birthdayService: stub({}) });
+    const ctx = buildAgentContextFactory(deps)(user, 1, 'hi');
+    expect(ctx.birthday?.userMemoryRepo).toBe(userMemoryRepo);
   });
 
   test('AgentContext.userMemoryRepo is undefined when not provided in deps', () => {
-    const ctx = buildAgentContextFactory(makeDeps() as never)(user, 1, 'hi');
+    const ctx = buildAgentContextFactory(makeHandlerDeps())(user, 1, 'hi');
     expect(ctx.birthday?.userMemoryRepo).toBeUndefined();
   });
 });

@@ -3,15 +3,18 @@
 
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, type Mock, mock, spyOn, test } from 'bun:test';
+import type { AnyBot, MessageContext } from 'gramio';
 import { handleIntentEditInstruction } from '../../../src/bot/handlers/message/intent-edit.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { IntentRepository } from '../../../src/database/repositories/intent.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { StreamRoundResult } from '../../../src/services/ai/streaming.ts';
 import * as streaming from '../../../src/services/ai/streaming.ts';
+import { stub } from '../partial-stub.ts';
+import { sentMessage } from '../telegram-fixtures.ts';
 
 interface FakeCtx {
-  send: Mock<() => Promise<void>>;
+  send: Mock<() => Promise<MessageContext<AnyBot>>>;
 }
 
 function answer(text: string): StreamRoundResult {
@@ -25,11 +28,11 @@ describe('handleIntentEditInstruction', () => {
   let stream: Mock<typeof streaming.aiStreamRound>;
 
   function makeCtx(): FakeCtx {
-    return { send: mock(() => Promise.resolve()) };
+    return { send: mock(() => Promise.resolve(sentMessage())) };
   }
 
   function run(ctx: FakeCtx) {
-    return handleIntentEditInstruction(ctx as never, 'rename the phrases', session(), { intentRepo } as never);
+    return handleIntentEditInstruction(stub(ctx), 'rename the phrases', session(), stub({ intentRepo }));
   }
 
   beforeEach(() => {

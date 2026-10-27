@@ -12,9 +12,18 @@ import { registerInviteRoutes } from '../../../src/bot/handlers/callback/invite-
 import { registerLocationRoutes } from '../../../src/bot/handlers/callback/location-routes';
 import { registerProposalRoutes } from '../../../src/bot/handlers/callback/proposal-routes';
 import { registerSettingsRoutes } from '../../../src/bot/handlers/callback/settings-routes';
-import type { CallbackDispatch, CallbackRouteDeps } from '../../../src/bot/handlers/callback/types';
+import type {
+  CallbackDispatch,
+  CallbackHandlerOpts,
+  CallbackRouteDeps,
+} from '../../../src/bot/handlers/callback/types';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
-import { CB } from '../../../src/config/constants';
+import type { BotCallbackContext } from '../../../src/bot/types.ts';
+import { CB, t } from '../../../src/config/constants';
+import type { User } from '../../../src/database/types.ts';
+import type { EventService } from '../../../src/services/event/event-service.ts';
+import { stub } from '../partial-stub.ts';
+import { makeUserRow, sentMessage, telegramUser } from '../telegram-fixtures.ts';
 
 type Registrar = (dispatch: CallbackDispatch, deps: CallbackRouteDeps) => void;
 
@@ -75,7 +84,13 @@ const ROUTE_GROUPS: Array<{ name: string; register: Registrar; prefixes: string[
 ];
 
 function routeDeps(): CallbackRouteDeps {
-  return { eventService: {}, editValueScene: {}, holidayService: {}, prefsService: {}, opts: {} } as never;
+  return {
+    eventService: stub({}),
+    editValueScene: stub({}),
+    holidayService: stub({}),
+    prefsService: stub({}),
+    opts: {},
+  };
 }
 
 describe('callback prefix table', () => {
@@ -99,29 +114,30 @@ describe('callback prefix table', () => {
   });
 });
 
-function makeCtx(data: string, user: { telegram_id: number; language: string } | undefined) {
+function makeCtx(data: string, user: User | undefined) {
   return {
     data,
     dbUser: user,
-    from: { languageCode: 'ru' },
-    answer: mock(() => Promise.resolve()),
-    editText: mock(() => Promise.resolve()),
-    send: mock(() => Promise.resolve()),
+    from: telegramUser({ id: 1, language_code: 'ru' }),
+    answer: mock<BotCallbackContext['answer']>(() => Promise.resolve(true as const)),
+    editText: mock(() => Promise.resolve(sentMessage())),
+    send: mock(() => Promise.resolve(sentMessage())),
   };
 }
 
-const USER = { telegram_id: 100, language: 'en' };
+const USER = makeUserRow({ telegram_id: 100, language: 'en' });
 
-function makeHandler(opts: Parameters<typeof createCallbackHandler>[4] = {}, eventService: object = {}) {
-  return createCallbackHandler(eventService as never, {} as never, {} as never, {} as never, opts);
+function makeHandler(opts: CallbackHandlerOpts = {}, eventService: Partial<EventService> = {}) {
+  return createCallbackHandler(stub(eventService), stub({}), stub({}), stub({}), opts);
 }
 
 describe('callback router fallbacks', () => {
   test('a prefix match must be exact, not a leading substring of a known prefix', async () => {
     const ctx = makeCtx(`${CB.EVENT_VIEW}_extra:1`, USER);
-    await makeHandler()(ctx as never);
+    await makeHandler()(stub(ctx));
     // Unknown action: acknowledged only, no editText from the event view route.
     expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(ctx.answer.mock.calls[0]).toEqual([]);
     expect(ctx.editText).not.toHaveBeenCalled();
     expect(ctx.send).not.toHaveBeenCalled();
   });
@@ -130,10 +146,10 @@ describe('callback router fallbacks', () => {
     const save = mock(() => Promise.resolve());
     const get = mock(() => Promise.resolve(JSON.stringify({ name: 'timezone', step: 2, state: { city: 'Berlin' } })));
     const handler = makeHandler({
-      scenePauseDeps: { sceneStorage: { get }, scenePauseService: { save } },
-    } as never);
+      scenePauseDeps: { sceneStorage: stub({ get }), scenePauseService: stub({ save }) },
+    });
     const ctx = makeCtx('totally_unknown:1', USER);
-    await handler(ctx as never);
+    await handler(stub(ctx));
 
     expect(get).toHaveBeenCalledWith('@gramio/scenes:100');
     expect(save).toHaveBeenCalledWith(100, { sceneName: 'timezone', step: 2, sceneState: { city: 'Berlin' } });
@@ -143,10 +159,13 @@ describe('callback router fallbacks', () => {
   test('unknown action with an unparseable stored scene still sends the help prompt without pausing', async () => {
     const save = mock(() => Promise.resolve());
     const handler = makeHandler({
-      scenePauseDeps: { sceneStorage: { get: () => Promise.resolve('not json') }, scenePauseService: { save } },
-    } as never);
+      scenePauseDeps: {
+        sceneStorage: stub({ get: () => Promise.resolve('not json') }),
+        scenePauseService: stub({ save }),
+      },
+    });
     const ctx = makeCtx('totally_unknown', USER);
-    await handler(ctx as never);
+    await handler(stub(ctx));
 
     expect(save).not.toHaveBeenCalled();
     expect(ctx.send).toHaveBeenCalledTimes(1);
@@ -154,52 +173,50 @@ describe('callback router fallbacks', () => {
 
   test('unknown action with no stored scene sends nothing beyond the answer', async () => {
     const handler = makeHandler({
-      scenePauseDeps: { sceneStorage: { get: () => Promise.resolve(undefined) }, scenePauseService: { save: mock() } },
-    } as never);
+      scenePauseDeps: {
+        sceneStorage: stub({ get: () => Promise.resolve(undefined) }),
+        scenePauseService: stub({ save: mock(() => Promise.resolve()) }),
+      },
+    });
     const ctx = makeCtx('totally_unknown', USER);
-    await handler(ctx as never);
+    await handler(stub(ctx));
 
     expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(ctx.answer.mock.calls[0]).toEqual([]);
     expect(ctx.send).not.toHaveBeenCalled();
   });
 
   test('no resolved user: a group RSVP tap gets a start hint alert, other taps are dropped', async () => {
     const rsvp = makeCtx(`${CB.GROUP_RSVP}:yes:1`, undefined);
-    await makeHandler()(rsvp as never);
+    await makeHandler()(stub(rsvp));
     expect(rsvp.answer).toHaveBeenCalledTimes(1);
-    const arg = (rsvp.answer.mock.calls[0] as unknown as [{ show_alert: boolean }])[0];
-    expect(arg.show_alert).toBe(true);
+    // No resolved user: the hint language comes from the tapper's Telegram client language ('ru' in makeCtx).
+    expect(rsvp.answer.mock.calls[0]?.[0]).toEqual({ text: t('ru').group_rsvp_start_hint, show_alert: true });
 
     const other = makeCtx(`${CB.EVENT_VIEW}:1`, undefined);
-    await makeHandler()(other as never);
+    await makeHandler()(stub(other));
     expect(other.answer).not.toHaveBeenCalled();
   });
 
   test('a handler failure answers with the generic error text; a duplicate-click failure answers silently', async () => {
     const failing = makeCtx(`${CB.EVENT_VIEW}:1`, USER);
-    const boom = makeHandler(
-      {},
-      {
-        getEvent: () => {
-          throw new Error('db down');
-        },
-      },
-    );
-    await boom(failing as never);
+    const failingLookup = mock(() => {
+      throw new Error('db down');
+    });
+    const boom = makeHandler({}, { getEvent: failingLookup });
+    await boom(stub(failing));
+    expect(failingLookup).toHaveBeenCalledTimes(1);
     expect(failing.answer).toHaveBeenCalledTimes(1);
-    expect((failing.answer.mock.calls[0] as unknown as [{ text: string }])[0].text).toBeTruthy();
+    expect(failing.answer.mock.calls[0]?.[0]).toMatchObject({ text: expect.stringMatching(/\S/) });
 
     const dup = makeCtx(`${CB.EVENT_VIEW}:1`, USER);
-    const notModified = makeHandler(
-      {},
-      {
-        getEvent: () => {
-          throw new Error('Bad Request: message is not modified');
-        },
-      },
-    );
-    await notModified(dup as never);
+    const staleLookup = mock(() => {
+      throw new Error('Bad Request: message is not modified');
+    });
+    const notModified = makeHandler({}, { getEvent: staleLookup });
+    await notModified(stub(dup));
+    expect(staleLookup).toHaveBeenCalledTimes(1);
     expect(dup.answer).toHaveBeenCalledTimes(1);
-    expect(dup.answer.mock.calls[0] as unknown[]).toEqual([]);
+    expect(dup.answer.mock.calls[0]).toEqual([]);
   });
 });
