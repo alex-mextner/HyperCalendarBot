@@ -1,5 +1,5 @@
 import { TZDate } from '@date-fns/tz';
-import { rrulestr } from 'rrule';
+import { type RRule, type RRuleSet, rrulestr } from 'rrule';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import { logger } from '../../utils/logger.ts';
 
@@ -36,74 +36,96 @@ export function expandRecurrence(
   // For timed events with a timezone, extract the template's local time
   // so we can reconstruct the correct UTC for each occurrence's DST offset.
   const adjustDst = !template.all_day && !!template.timezone;
-  let localH = 0;
-  let localM = 0;
-  let localS = 0;
-  if (adjustDst) {
-    const tz = new TZDate(dtstart, template.timezone);
-    localH = tz.getHours();
-    localM = tz.getMinutes();
-    localS = tz.getSeconds();
-  }
 
   const durationMs = template.end_at ? new Date(template.end_at).getTime() - dtstart.getTime() : 0;
+  const exceptionMap = buildExceptionMap(exceptions, adjustDst, template.timezone);
 
-  // Match exceptions by local calendar date when adjusting for DST — handles both
-  // old exceptions (stored with pre-DST UTC) and new ones (stored with post-DST UTC).
-  const exceptionMap = new Map<string, CalendarEvent>();
-  for (const exc of exceptions) {
-    if (exc.original_start_at) {
-      const key = adjustDst
-        ? toLocalDateKey(exc.original_start_at, template.timezone)
-        : new Date(exc.original_start_at).toISOString();
-      exceptionMap.set(key, exc);
-    }
+  const utcDates = expandUtcDates(rule, template, dtstart, new Date(rangeStartUtc), new Date(rangeEndUtc));
+
+  const occurrences: EventOccurrence[] = [];
+  for (const utcDate of utcDates) {
+    const occStart = utcDate.toISOString();
+    const occKey = adjustDst ? toLocalDateKey(occStart, template.timezone) : occStart;
+    const occurrence = buildOccurrence(template, exceptionMap.get(occKey), utcDate, durationMs);
+    if (occurrence) occurrences.push(occurrence);
   }
 
-  const rangeStart = new Date(rangeStartUtc);
-  const rangeEnd = new Date(rangeEndUtc);
+  return occurrences.sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
+}
+
+/** Occurrence instants within [rangeStart, rangeEnd], DST-adjusted to the template's local time for timed zoned events. */
+function expandUtcDates(
+  rule: RRule | RRuleSet,
+  template: CalendarEvent,
+  dtstart: Date,
+  rangeStart: Date,
+  rangeEnd: Date,
+): Date[] {
+  const adjustDst = !template.all_day && !!template.timezone;
+  const local = adjustDst ? templateLocalTime(dtstart, template.timezone) : { h: 0, m: 0, s: 0 };
 
   // Pad range so occurrences that shift across the boundary after DST adjustment
   // aren't lost. Post-filter to the original range after conversion.
   const paddedStart = adjustDst ? new Date(rangeStart.getTime() - DST_PAD_MS) : rangeStart;
   const paddedEnd = adjustDst ? new Date(rangeEnd.getTime() + DST_PAD_MS) : rangeEnd;
-  const dates = rule.between(paddedStart, paddedEnd, true);
 
-  const occurrences: EventOccurrence[] = [];
+  return rule
+    .between(paddedStart, paddedEnd, true)
+    .map((date) => (adjustDst ? adjustOccurrenceForDst(date, template.timezone, local.h, local.m, local.s) : date))
+    .filter((utcDate) => !(utcDate.getTime() < rangeStart.getTime() || utcDate.getTime() > rangeEnd.getTime()));
+}
 
-  for (const date of dates) {
-    const utcDate = adjustDst ? adjustOccurrenceForDst(date, template.timezone, localH, localM, localS) : date;
-    if (utcDate.getTime() < rangeStart.getTime() || utcDate.getTime() > rangeEnd.getTime()) continue;
+/** Local wall-clock time-of-day of the template's first occurrence in its timezone */
+function templateLocalTime(dtstart: Date, timezone: string): { h: number; m: number; s: number } {
+  const tz = new TZDate(dtstart, timezone);
+  return { h: tz.getHours(), m: tz.getMinutes(), s: tz.getSeconds() };
+}
 
-    const occStart = utcDate.toISOString();
-    const occKey = adjustDst ? toLocalDateKey(occStart, template.timezone) : occStart;
-    const exception = exceptionMap.get(occKey);
-
-    if (exception) {
-      if (exception.is_cancelled) {
-        continue;
-      }
-      const occEnd =
-        exception.end_at ??
-        (durationMs ? new Date(new Date(exception.start_at).getTime() + durationMs).toISOString() : null);
-      occurrences.push({
-        event: exception,
-        occurrence_start: exception.start_at,
-        occurrence_end: occEnd,
-        is_exception: true,
-      });
-    } else {
-      const occEnd = durationMs ? new Date(utcDate.getTime() + durationMs).toISOString() : null;
-      occurrences.push({
-        event: template,
-        occurrence_start: occStart,
-        occurrence_end: occEnd,
-        is_exception: false,
-      });
-    }
+/**
+ * Match exceptions by local calendar date when adjusting for DST — handles both
+ * old exceptions (stored with pre-DST UTC) and new ones (stored with post-DST UTC).
+ */
+function buildExceptionMap(
+  exceptions: CalendarEvent[],
+  adjustDst: boolean,
+  timezone: string,
+): Map<string, CalendarEvent> {
+  const exceptionMap = new Map<string, CalendarEvent>();
+  for (const exc of exceptions) {
+    if (!exc.original_start_at) continue;
+    const key = adjustDst
+      ? toLocalDateKey(exc.original_start_at, timezone)
+      : new Date(exc.original_start_at).toISOString();
+    exceptionMap.set(key, exc);
   }
+  return exceptionMap;
+}
 
-  return occurrences.sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
+/** Build the occurrence for one expanded date; null when the matching exception cancels it */
+function buildOccurrence(
+  template: CalendarEvent,
+  exception: CalendarEvent | undefined,
+  utcDate: Date,
+  durationMs: number,
+): EventOccurrence | null {
+  if (!exception) {
+    return {
+      event: template,
+      occurrence_start: utcDate.toISOString(),
+      occurrence_end: durationMs ? new Date(utcDate.getTime() + durationMs).toISOString() : null,
+      is_exception: false,
+    };
+  }
+  if (exception.is_cancelled) return null;
+  const occEnd =
+    exception.end_at ??
+    (durationMs ? new Date(new Date(exception.start_at).getTime() + durationMs).toISOString() : null);
+  return {
+    event: exception,
+    occurrence_start: exception.start_at,
+    occurrence_end: occEnd,
+    is_exception: true,
+  };
 }
 
 /** Format a UTC Date for rrule DTSTART (e.g. `20260301T090000Z`) */

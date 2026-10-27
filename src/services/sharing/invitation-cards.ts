@@ -1,6 +1,7 @@
 // Delivered invitation cards, re-rendered in place when the event's place is confirmed or dropped
 // and whenever its roster changes (someone is invited, answers, or is withdrawn).
 import type { InlineKeyboard } from 'gramio';
+import type { Lang } from '../../config/constants.ts';
 import type { AgendaRepository } from '../../database/repositories/agenda.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
@@ -32,57 +33,65 @@ export interface InvitationCardDeps {
   editMessage: (chatId: number, messageId: number, text: string, options: InvitationEditOptions) => Promise<void>;
 }
 
-async function renderInvitationCard(
-  event: CalendarEvent,
-  inv: Invitation,
-  status: LiveInvitationStatus,
-  chatId: number,
+type CardRoster = ReturnType<typeof readInvitationRoster>;
+type InviterUser = ReturnType<InvitationCardDeps['userRepo']['findByTelegramId']>;
+interface CardContext {
+  event: CalendarEvent;
+  inv: Invitation;
+  inviter: InviterUser;
+  inviterName: string;
+  roster: CardRoster;
+}
+
+/** A group card is written in the inviter's language and carries Going/Not going for every member */
+function renderGroupCard({ event, inv, inviter, inviterName, roster }: CardContext): RenderedInvitationCard {
+  const groupLang = inviter?.language ?? 'en';
+  const text = formatInvitation(
+    event,
+    event.timezone,
+    groupLang,
+    inviterName,
+    inv.inviter_id,
+    inviter?.username,
+    null,
+    false,
+    roster,
+  );
+  return {
+    text,
+    options: { parse_mode: 'HTML', reply_markup: groupRsvpKeyboard(event.id, groupLang, event) },
+  };
+}
+
+function renderPendingCard(
+  { event, inv, inviter, inviterName, roster }: CardContext,
+  invitee: InviterUser,
+  inviteeLang: Lang,
+): RenderedInvitationCard {
+  const text = formatInvitation(
+    event,
+    event.timezone,
+    inviteeLang,
+    inviterName,
+    inv.inviter_id,
+    inviter?.username,
+    invitee?.timezone,
+    invitee?.onboarding_completed === 1,
+    roster,
+  );
+  return {
+    text,
+    options: { parse_mode: 'HTML', reply_markup: invitationRsvpKeyboard(inv.id, inviteeLang, event) },
+  };
+}
+
+async function renderAnsweredCard(
+  { event, inv, roster }: CardContext,
+  status: Exclude<LiveInvitationStatus, 'pending'>,
+  invitee: InviterUser,
+  inviteeLang: Lang,
   deps: InvitationCardDeps,
 ): Promise<RenderedInvitationCard> {
-  const inviter = deps.userRepo.findByTelegramId(inv.inviter_id);
-  const inviterName = inviter?.first_name ?? inviter?.username ?? 'User';
-  const roster = readInvitationRoster(deps.invitationRepo, event.id, chatId);
-
-  if (inv.invitee_id < 0) {
-    const groupLang = inviter?.language ?? 'en';
-    const text = formatInvitation(
-      event,
-      event.timezone,
-      groupLang,
-      inviterName,
-      inv.inviter_id,
-      inviter?.username,
-      null,
-      false,
-      roster,
-    );
-    return {
-      text,
-      options: { parse_mode: 'HTML', reply_markup: groupRsvpKeyboard(event.id, groupLang, event) },
-    };
-  }
-
-  const invitee = deps.userRepo.findByTelegramId(inv.invitee_id);
-  const inviteeLang = invitee?.language ?? 'en';
-
-  if (status === 'pending') {
-    const text = formatInvitation(
-      event,
-      event.timezone,
-      inviteeLang,
-      inviterName,
-      inv.inviter_id,
-      inviter?.username,
-      invitee?.timezone,
-      invitee?.onboarding_completed === 1,
-      roster,
-    );
-    return {
-      text,
-      options: { parse_mode: 'HTML', reply_markup: invitationRsvpKeyboard(inv.id, inviteeLang, event) },
-    };
-  }
-
   // The roster lists the reader's current answer, and an answer given later on a group card of the
   // event outranks this invitation's stored one: the label follows the roster so the card cannot
   // contradict itself. Only an answered label exists here, so a roster "no answer yet" keeps the stored one.
@@ -95,6 +104,33 @@ async function renderInvitationCard(
     roster,
   );
   return { text, options: { parse_mode: 'HTML' } };
+}
+
+async function renderInvitationCard(
+  event: CalendarEvent,
+  inv: Invitation,
+  status: LiveInvitationStatus,
+  chatId: number,
+  deps: InvitationCardDeps,
+): Promise<RenderedInvitationCard> {
+  const inviter = deps.userRepo.findByTelegramId(inv.inviter_id);
+  const inviterName = inviter?.first_name ?? inviter?.username ?? 'User';
+  const roster = readInvitationRoster(deps.invitationRepo, event.id, chatId);
+  const ctx: CardContext = { event, inv, inviter, inviterName, roster };
+
+  if (inv.invitee_id < 0) return renderGroupCard(ctx);
+
+  const invitee = deps.userRepo.findByTelegramId(inv.invitee_id);
+  const inviteeLang = invitee?.language ?? 'en';
+  if (status === 'pending') return renderPendingCard(ctx, invitee, inviteeLang);
+  return renderAnsweredCard(ctx, status, invitee, inviteeLang, deps);
+}
+
+/** Cards the refresh leaves alone: undelivered, being rewritten by their own callback, settled, or replaced by a proposal notice */
+function isRefreshableCard(inv: Invitation, skipInvitationId: number | undefined): boolean {
+  if (inv.id === skipInvitationId || !inv.message_id || !inv.chat_id) return false;
+  if (inv.status === 'cancelled' || inv.status === 'expired') return false;
+  return !(inv.status === 'pending' && inv.proposed_time);
 }
 
 /**
@@ -113,9 +149,9 @@ export async function refreshInvitationCards(
   skipInvitationId?: number,
 ): Promise<void> {
   for (const inv of deps.invitationRepo.getByEvent(event.id)) {
-    if (inv.id === skipInvitationId || !inv.message_id || !inv.chat_id) continue;
-    if (inv.status === 'cancelled' || inv.status === 'expired') continue;
-    if (inv.status === 'pending' && inv.proposed_time) continue;
+    if (!isRefreshableCard(inv, skipInvitationId)) continue;
+    // isRefreshableCard guarantees these; narrowing for the compiler
+    if (!inv.message_id || !inv.chat_id || inv.status === 'cancelled' || inv.status === 'expired') continue;
 
     try {
       const card = await renderInvitationCard(event, inv, inv.status, inv.chat_id, deps);

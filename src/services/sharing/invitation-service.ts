@@ -260,18 +260,7 @@ export class InvitationService {
       return { success: false, error: 'Cannot update — status already changed' };
     }
 
-    if (this.participantRepo) {
-      const existing = this.participantRepo.findByEventAndUser(invitation.event_id, userId);
-      if (newStatus === 'accepted' || newStatus === 'maybe') {
-        if (existing) {
-          this.participantRepo.updateStatus(invitation.event_id, userId, newStatus, null);
-        } else {
-          this.participantRepo.add(invitation.event_id, userId, newStatus);
-        }
-      } else if (newStatus === 'declined' && existing) {
-        this.participantRepo.updateStatus(invitation.event_id, userId, 'declined', null);
-      }
-    }
+    this.recordParticipantAnswer(invitation, userId, newStatus);
 
     const result: InvitationResult = { success: true, invitation: this.invRepo.findById(invitationId)! };
     this.domainEvents?.emit('invitationRoster.changed', {
@@ -279,26 +268,32 @@ export class InvitationService {
       eventId: invitation.event_id,
       answeredInvitationId: invitationId,
     });
-
-    if (this.domainEvents && (newStatus === 'accepted' || newStatus === 'declined')) {
-      const event = this.eventRepo.findById(invitation.event_id, invitation.inviter_id);
-      if (event) {
-        if (newStatus === 'accepted') {
-          this.domainEvents.emit('myInvitations.accepted', {
-            userId: invitation.inviter_id,
-            inviteeId: invitation.invitee_id,
-            event,
-          });
-        } else {
-          this.domainEvents.emit('myInvitations.rejected', {
-            userId: invitation.inviter_id,
-            inviteeId: invitation.invitee_id,
-            event,
-          });
-        }
-      }
-    }
+    this.announceAnswer(invitation, newStatus);
 
     return result;
+  }
+
+  /** Mirrors the answer into event_participants: going/maybe upsert, declined only updates an existing row. */
+  private recordParticipantAnswer(invitation: Invitation, userId: number, newStatus: InvitationStatus): void {
+    if (!this.participantRepo) return;
+    const existing = this.participantRepo.findByEventAndUser(invitation.event_id, userId);
+    if (newStatus === 'accepted' || newStatus === 'maybe') {
+      if (existing) {
+        this.participantRepo.updateStatus(invitation.event_id, userId, newStatus, null);
+      } else {
+        this.participantRepo.add(invitation.event_id, userId, newStatus);
+      }
+    } else if (newStatus === 'declined' && existing) {
+      this.participantRepo.updateStatus(invitation.event_id, userId, 'declined', null);
+    }
+  }
+
+  /** Tells the inviter's "my invitations" view about an accept or a decline; other answers stay silent. */
+  private announceAnswer(invitation: Invitation, newStatus: InvitationStatus): void {
+    if (!this.domainEvents || (newStatus !== 'accepted' && newStatus !== 'declined')) return;
+    const event = this.eventRepo.findById(invitation.event_id, invitation.inviter_id);
+    if (!event) return;
+    const payload = { userId: invitation.inviter_id, inviteeId: invitation.invitee_id, event };
+    this.domainEvents.emit(newStatus === 'accepted' ? 'myInvitations.accepted' : 'myInvitations.rejected', payload);
   }
 }

@@ -14,12 +14,15 @@ import type { EventChangeNotifier } from '../event/event-change-notifier.ts';
 import { expandRecurrence } from '../event/recurrence.ts';
 import { type GoogleCalendarApi, googleGoneStatus } from './calendar-api.ts';
 import { computeEventDiff, snapshotFromCalendarEvent, snapshotFromGoogleLocal } from './change-detection.ts';
-import { type GoogleEvent, googleToLocal, localToGoogle } from './event-mapper.ts';
+import { type GoogleEvent, googleToLocal, type LocalEventFromGoogle, localToGoogle } from './event-mapper.ts';
 import {
   handleParticipantChange,
   handleParticipantDelete,
   type ParticipantHandlerDeps,
 } from './participant-change-handler.ts';
+
+/** Side effect to run after the pull's transaction committed; null when nothing is to be sent. */
+type PendingNotification = (() => Promise<void>) | null;
 
 /** A participant's linked Google copy about to be updated. */
 interface ParticipantCopy {
@@ -142,6 +145,42 @@ function occurrenceOriginalStart(series: CalendarEvent, time: GoogleEvent['origi
     nearby.find((occurrence) => dayOf(occurrence.occurrence_start) === time.date) ??
     nearby.find((occurrence) => occurrence.occurrence_start.slice(0, 10) === time.date);
   return onDay ? new Date(onDay.occurrence_start).toISOString() : null;
+}
+
+/** Why a reconcile must keep a row (counted), or null when the read proves its Google copy gone. */
+function reconcileKeepReason(event: CalendarEvent, readStartedAt: number): 'pending' | 'fresh' | null {
+  if (event.sync_status === 'pending_push') return 'pending';
+  // A margin: stored sync times can be second-precise while the read start is not.
+  if (storedInstantMs(event.last_synced_at ?? event.created_at) > readStartedAt - 5000) return 'fresh';
+  return null;
+}
+
+function countKeptEvent(result: ReconcileResult, reason: 'pending' | 'fresh'): void {
+  if (reason === 'pending') result.skippedPending++;
+  else result.skippedFresh++;
+}
+
+/** Tracked events missing from the full list and not kept; kept ones are counted into `result`. */
+function selectAbsentEvents(
+  tracked: CalendarEvent[],
+  live: ReadonlySet<string>,
+  readStartedAt: number,
+  result: ReconcileResult,
+): CalendarEvent[] {
+  const gone: CalendarEvent[] = [];
+  for (const event of tracked) {
+    if (!event.google_event_id || live.has(event.google_event_id)) continue;
+    const reason = reconcileKeepReason(event, readStartedAt);
+    if (reason) countKeptEvent(result, reason);
+    else gone.push(event);
+  }
+  return gone;
+}
+
+/** An empty list while events are linked, or most of them missing at once, points at a wrong read. */
+function reconcileLooksWrong(listedCount: number, goneCount: number, trackedCount: number): boolean {
+  const emptyRead = listedCount === 0 && goneCount > 0;
+  return emptyRead || (goneCount >= RECONCILE_REFUSE_MIN && goneCount * 2 > trackedCount);
 }
 
 export class SyncService {
@@ -378,12 +417,7 @@ export class SyncService {
     if (occurrence === 'cancelled') stats.occurrencesCancelled++;
 
     if (existing?.parent_event_id) {
-      // An exception row that carries the occurrence's Google id stays, as the cancelled occurrence
-      // (cancelOccurrenceDeletedInGoogle already did that when the series is known).
-      if (occurrence === 'no_series') {
-        if (!existing.is_cancelled) this.cancelExceptionRow(existing);
-        else stats.unmatchedTombstones++;
-      }
+      this.applyTombstoneToExceptionRow(existing, occurrence, stats);
       return;
     }
     if (existing) {
@@ -393,21 +427,46 @@ export class SyncService {
     }
     if (occurrence !== 'no_series') return;
 
+    if (await this.deleteParticipantCopyForTombstone(userId, calendarId, googleEventId, primaryCalendar, stats)) return;
+    stats.unmatchedTombstones++;
+  }
+
+  /**
+   * An exception row that carries the occurrence's Google id stays, as the cancelled occurrence
+   * (cancelOccurrenceDeletedInGoogle already did that when the series is known).
+   */
+  private applyTombstoneToExceptionRow(
+    existing: CalendarEvent,
+    occurrence: 'cancelled' | 'already_cancelled' | 'no_series',
+    stats: PullStats,
+  ): void {
+    if (occurrence !== 'no_series') return;
+    if (!existing.is_cancelled) this.cancelExceptionRow(existing);
+    else stats.unmatchedTombstones++;
+  }
+
+  /** True when the tombstone was the echo of the bot's own removal of a participant's copy and was handled. */
+  private async deleteParticipantCopyForTombstone(
+    userId: number,
+    calendarId: string,
+    googleEventId: string,
+    primaryCalendar: boolean,
+    stats: PullStats,
+  ): Promise<boolean> {
     const participantSync = this.participantSyncRepo?.getByUserAndGoogleEventId(userId, googleEventId);
     if (
-      participantSync &&
-      this.participantHandlerDeps &&
-      this.isCopyInCalendar(participantSync, calendarId, primaryCalendar)
+      !participantSync ||
+      !this.participantHandlerDeps ||
+      !this.isCopyInCalendar(participantSync, calendarId, primaryCalendar)
     ) {
-      // An event the bot itself deleted: its removal of the participant's copy echoes back as this tombstone.
-      const master = this.eventRepo.findByIdUnfiltered(participantSync.event_id);
-      if (master) {
-        await handleParticipantDelete(userId, participantSync, this.participantHandlerDeps);
-        stats.participantCopiesDeleted++;
-        return;
-      }
+      return false;
     }
-    stats.unmatchedTombstones++;
+    // An event the bot itself deleted: its removal of the participant's copy echoes back as this tombstone.
+    const master = this.eventRepo.findByIdUnfiltered(participantSync.event_id);
+    if (!master) return false;
+    await handleParticipantDelete(userId, participantSync, this.participantHandlerDeps);
+    stats.participantCopiesDeleted++;
+    return true;
   }
 
   /**
@@ -574,28 +633,9 @@ export class SyncService {
       refused: false,
     };
 
-    /** Why a row must stay (counted), or null when the read proves its Google copy gone. */
-    const keepReason = (event: CalendarEvent): 'pending' | 'fresh' | null => {
-      if (event.sync_status === 'pending_push') return 'pending';
-      // A margin: stored sync times can be second-precise while the read start is not.
-      if (storedInstantMs(event.last_synced_at ?? event.created_at) > readStartedAt - 5000) return 'fresh';
-      return null;
-    };
-    const count = (reason: 'pending' | 'fresh'): void => {
-      if (reason === 'pending') result.skippedPending++;
-      else result.skippedFresh++;
-    };
+    const gone = selectAbsentEvents(tracked, live, readStartedAt, result);
 
-    const gone: CalendarEvent[] = [];
-    for (const event of tracked) {
-      if (!event.google_event_id || live.has(event.google_event_id)) continue;
-      const reason = keepReason(event);
-      if (reason) count(reason);
-      else gone.push(event);
-    }
-
-    const emptyRead = live.size === 0 && gone.length > 0;
-    if (emptyRead || (gone.length >= RECONCILE_REFUSE_MIN && gone.length * 2 > tracked.length)) {
+    if (reconcileLooksWrong(live.size, gone.length, tracked.length)) {
       result.refused = true;
       syncLogger.error({ ...result, source }, 'Google reconcile refused');
       return result;
@@ -604,9 +644,9 @@ export class SyncService {
       const current = this.eventRepo.findById(stale.id, stale.user_id);
       // Gone, relinked to another Google event, edited or pushed since the list was read: not this read's to remove.
       if (!current || current.google_event_id !== stale.google_event_id) continue;
-      const reason = keepReason(current);
+      const reason = reconcileKeepReason(current, readStartedAt);
       if (reason) {
-        count(reason);
+        countKeptEvent(result, reason);
         continue;
       }
       await this.removeEventGoneFromGoogle(current, 'absent_in_full_list', false);
@@ -619,119 +659,145 @@ export class SyncService {
   private async handleUpdatedOrNewEvent(userId: number, calendarId: string, gEvent: GoogleEvent): Promise<void> {
     const local = googleToLocal(gEvent, userId, calendarId);
 
-    let pendingNotification: (() => Promise<void>) | null = null;
-    const applyUpdate = this.db.transaction(() => {
+    const applyUpdate = this.db.transaction((): PendingNotification => {
       const existing = this.eventRepo.findByGoogleEventId(userId, calendarId, local.google_event_id);
-
-      if (existing) {
-        let conflictNotification: (() => Promise<void>) | null = null;
-
-        if (existing.sync_status === 'pending_push') {
-          const winner = this.resolveConflict(existing, gEvent.updated ?? '');
-          if (winner === 'keep_local') {
-            return;
-          }
-          this.syncRepo.logSync({
-            user_id: userId,
-            event_id: existing.id,
-            google_event_id: local.google_event_id,
-            direction: 'pull',
-            action: 'conflict_resolve',
-            details: JSON.stringify({ winner: 'google' }),
-          });
-          if (this.notifyUser) {
-            const conflictLang = this.getUserLang?.(userId) ?? 'en';
-            conflictNotification = () => this.notifyUser!(userId, t(conflictLang).gcal_conflict(local.title, 'google'));
-          }
-        }
-
-        const snapshot = snapshotFromCalendarEvent(existing);
-
-        this.eventRepo.updateSyncFields(existing.id, {
-          google_etag: local.google_etag ?? undefined,
-          sync_status: 'synced',
-          last_synced_at: new Date().toISOString(),
-        });
-        this.eventRepo.update(existing.id, userId, {
-          title: local.title,
-          description: local.description,
-          start_at: local.start_at,
-          end_at: local.end_at,
-          all_day: local.all_day,
-          timezone: local.timezone,
-          location: local.location,
-          recurrence_rule: local.recurrence_rule,
-        });
-        this.syncRepo.logSync({
-          user_id: userId,
-          event_id: existing.id,
-          google_event_id: local.google_event_id,
-          direction: 'pull',
-          action: 'update',
-        });
-
-        const incoming = snapshotFromGoogleLocal(local);
-        const changes = computeEventDiff(snapshot, incoming);
-
-        if (changes.length > 0 && this.changeNotifier) {
-          const updatedEvent = this.eventRepo.findByGoogleEventId(userId, calendarId, local.google_event_id);
-          if (updatedEvent) {
-            pendingNotification = async () => {
-              if (conflictNotification) await conflictNotification();
-              await this.changeNotifier!.onEventChanged({
-                event: updatedEvent,
-                changes,
-                source: 'google_sync',
-              });
-            };
-          }
-        } else if (conflictNotification) {
-          pendingNotification = conflictNotification;
-        }
-      } else {
-        const participantSync = this.participantSyncRepo?.getByUserAndGoogleEventId(userId, local.google_event_id);
-        if (participantSync) {
-          if (gEvent.recurringEventId) {
-            syncLogger.debug(
-              { userId, googleEventId: local.google_event_id, recurringEventId: gEvent.recurringEventId },
-              'Skipping recurrence exception from participant (not supported in MVP)',
-            );
-            return;
-          }
-          const masterEvent = this.eventRepo.findByIdUnfiltered(participantSync.event_id);
-          if (masterEvent && this.participantHandlerDeps) {
-            pendingNotification = () =>
-              handleParticipantChange(userId, masterEvent, local, this.participantHandlerDeps!);
-          }
-          return;
-        }
-
-        this.eventRepo.insertSyncedEvent({
-          user_id: userId,
-          title: local.title,
-          description: local.description,
-          start_at: local.start_at,
-          end_at: local.end_at,
-          all_day: local.all_day,
-          timezone: local.timezone,
-          location: local.location,
-          recurrence_rule: local.recurrence_rule,
-          google_calendar_id: calendarId,
-          google_event_id: local.google_event_id,
-          google_etag: local.google_etag,
-          is_cancelled: local.is_cancelled ?? false,
-        });
-        this.syncRepo.logSync({
-          user_id: userId,
-          google_event_id: local.google_event_id,
-          direction: 'pull',
-          action: 'create',
-        });
-      }
+      return existing
+        ? this.applyPulledUpdate(existing, userId, calendarId, gEvent, local)
+        : this.applyPulledNewEvent(userId, calendarId, gEvent, local);
     });
-    applyUpdate();
-    const notify = pendingNotification as (() => Promise<void>) | null;
+    const notify = applyUpdate();
     if (notify) await notify();
+  }
+
+  /** Pull-side conflict between a pending local push and a newer Google copy; Google wins unless local is newer. */
+  private resolvePullConflict(
+    existing: CalendarEvent,
+    userId: number,
+    gEvent: GoogleEvent,
+    local: LocalEventFromGoogle,
+  ): { keepLocal: true } | { keepLocal: false; notification: PendingNotification } {
+    const winner = this.resolveConflict(existing, gEvent.updated ?? '');
+    if (winner === 'keep_local') return { keepLocal: true };
+    this.syncRepo.logSync({
+      user_id: userId,
+      event_id: existing.id,
+      google_event_id: local.google_event_id,
+      direction: 'pull',
+      action: 'conflict_resolve',
+      details: JSON.stringify({ winner: 'google' }),
+    });
+    if (!this.notifyUser) return { keepLocal: false, notification: null };
+    const notifyUser = this.notifyUser;
+    const conflictLang = this.getUserLang?.(userId) ?? 'en';
+    return {
+      keepLocal: false,
+      notification: () => notifyUser(userId, t(conflictLang).gcal_conflict(local.title, 'google')),
+    };
+  }
+
+  private applyPulledUpdate(
+    existing: CalendarEvent,
+    userId: number,
+    calendarId: string,
+    gEvent: GoogleEvent,
+    local: LocalEventFromGoogle,
+  ): PendingNotification {
+    let conflictNotification: PendingNotification = null;
+    if (existing.sync_status === 'pending_push') {
+      const conflict = this.resolvePullConflict(existing, userId, gEvent, local);
+      if (conflict.keepLocal) return null;
+      conflictNotification = conflict.notification;
+    }
+
+    const snapshot = snapshotFromCalendarEvent(existing);
+
+    this.eventRepo.updateSyncFields(existing.id, {
+      google_etag: local.google_etag ?? undefined,
+      sync_status: 'synced',
+      last_synced_at: new Date().toISOString(),
+    });
+    this.eventRepo.update(existing.id, userId, {
+      title: local.title,
+      description: local.description,
+      start_at: local.start_at,
+      end_at: local.end_at,
+      all_day: local.all_day,
+      timezone: local.timezone,
+      location: local.location,
+      recurrence_rule: local.recurrence_rule,
+    });
+    this.syncRepo.logSync({
+      user_id: userId,
+      event_id: existing.id,
+      google_event_id: local.google_event_id,
+      direction: 'pull',
+      action: 'update',
+    });
+
+    const changes = computeEventDiff(snapshot, snapshotFromGoogleLocal(local));
+    const changeNotifier = this.changeNotifier;
+    if (changes.length > 0 && changeNotifier) {
+      const updatedEvent = this.eventRepo.findByGoogleEventId(userId, calendarId, local.google_event_id);
+      if (!updatedEvent) return null;
+      return async () => {
+        if (conflictNotification) await conflictNotification();
+        await changeNotifier.onEventChanged({ event: updatedEvent, changes, source: 'google_sync' });
+      };
+    }
+    return conflictNotification;
+  }
+
+  private applyPulledNewEvent(
+    userId: number,
+    calendarId: string,
+    gEvent: GoogleEvent,
+    local: LocalEventFromGoogle,
+  ): PendingNotification {
+    const participantSync = this.participantSyncRepo?.getByUserAndGoogleEventId(userId, local.google_event_id);
+    if (participantSync) return this.notificationForParticipantCopy(userId, gEvent, local, participantSync);
+
+    this.eventRepo.insertSyncedEvent({
+      user_id: userId,
+      title: local.title,
+      description: local.description,
+      start_at: local.start_at,
+      end_at: local.end_at,
+      all_day: local.all_day,
+      timezone: local.timezone,
+      location: local.location,
+      recurrence_rule: local.recurrence_rule,
+      google_calendar_id: calendarId,
+      google_event_id: local.google_event_id,
+      google_etag: local.google_etag,
+      is_cancelled: local.is_cancelled ?? false,
+    });
+    this.syncRepo.logSync({
+      user_id: userId,
+      google_event_id: local.google_event_id,
+      direction: 'pull',
+      action: 'create',
+    });
+    return null;
+  }
+
+  /** The pulled event is a participant's copy of someone else's event: it is never inserted as an own event. */
+  private notificationForParticipantCopy(
+    userId: number,
+    gEvent: GoogleEvent,
+    local: LocalEventFromGoogle,
+    participantSync: ParticipantGoogleSync,
+  ): PendingNotification {
+    if (gEvent.recurringEventId) {
+      syncLogger.debug(
+        { userId, googleEventId: local.google_event_id, recurringEventId: gEvent.recurringEventId },
+        'Skipping recurrence exception from participant (not supported in MVP)',
+      );
+      return null;
+    }
+    const masterEvent = this.eventRepo.findByIdUnfiltered(participantSync.event_id);
+    const deps = this.participantHandlerDeps;
+    if (!masterEvent || !deps) return null;
+    return () => handleParticipantChange(userId, masterEvent, local, deps);
   }
 
   /**
@@ -749,27 +815,7 @@ export class SyncService {
     const participantSyncRepo = participantSyncRepoOverride ?? this.participantSyncRepo;
     if (!participantSyncRepo) throw new Error('participantSyncRepo required for pushParticipantEvent');
     if (action === 'delete') {
-      const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
-      const googleEventId = syncRecord?.google_event_id ?? knownCopy?.googleEventId;
-      if (!googleEventId) {
-        participantSyncRepo.delete(participantUserId, eventId);
-        return;
-      }
-      const calendarId = syncRecord?.google_calendar_id ?? knownCopy?.calendarId ?? 'primary';
-      try {
-        await api.deleteEvent(calendarId, googleEventId);
-      } catch (err) {
-        if (googleGoneStatus(err) === null) throw err;
-      }
-      participantSyncRepo.delete(participantUserId, eventId);
-      this.syncRepo.logSync({
-        user_id: participantUserId,
-        event_id: eventId,
-        google_event_id: googleEventId,
-        direction: 'push',
-        action: 'delete',
-        details: 'participant_sync',
-      });
+      await this.deleteParticipantCopy(api, participantUserId, eventId, participantSyncRepo, knownCopy);
       return;
     }
 
@@ -799,18 +845,61 @@ export class SyncService {
         details: 'participant_sync',
       });
     } else {
-      const link = { user_id: participantUserId, event_id: eventId };
-      await this.insertParticipantCopy(api, participantSyncRepo, link, gcalId, gEvent);
-      this.syncRepo.logSync({
-        user_id: participantUserId,
-        event_id: eventId,
-        direction: 'push',
-        action: 'create',
-        details: 'participant_sync',
-      });
+      await this.createParticipantCopy(api, participantSyncRepo, participantUserId, eventId, gcalId, gEvent);
     }
 
     syncLogger.info({ participantUserId, eventId, action }, 'Participant event synced to Google');
+  }
+
+  /** Deletes the participant's Google copy (tolerating one already gone) and drops the link row. */
+  private async deleteParticipantCopy(
+    api: GoogleCalendarApi,
+    participantUserId: number,
+    eventId: number,
+    participantSyncRepo: ParticipantGoogleSyncRepository,
+    knownCopy?: { googleEventId?: string; calendarId?: string | null },
+  ): Promise<void> {
+    const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
+    const googleEventId = syncRecord?.google_event_id ?? knownCopy?.googleEventId;
+    if (!googleEventId) {
+      participantSyncRepo.delete(participantUserId, eventId);
+      return;
+    }
+    const calendarId = syncRecord?.google_calendar_id ?? knownCopy?.calendarId ?? 'primary';
+    try {
+      await api.deleteEvent(calendarId, googleEventId);
+    } catch (err) {
+      if (googleGoneStatus(err) === null) throw err;
+    }
+    participantSyncRepo.delete(participantUserId, eventId);
+    this.syncRepo.logSync({
+      user_id: participantUserId,
+      event_id: eventId,
+      google_event_id: googleEventId,
+      direction: 'push',
+      action: 'delete',
+      details: 'participant_sync',
+    });
+  }
+
+  /** Inserts a first copy for the participant and records the create in sync_log. */
+  private async createParticipantCopy(
+    api: GoogleCalendarApi,
+    participantSyncRepo: ParticipantGoogleSyncRepository,
+    participantUserId: number,
+    eventId: number,
+    calendarId: string,
+    gEvent: GoogleEvent,
+  ): Promise<void> {
+    const link = { user_id: participantUserId, event_id: eventId };
+    await this.insertParticipantCopy(api, participantSyncRepo, link, calendarId, gEvent);
+    this.syncRepo.logSync({
+      user_id: participantUserId,
+      event_id: eventId,
+      direction: 'push',
+      action: 'create',
+      details: 'participant_sync',
+    });
   }
 
   /** Whether the participant's RSVP is declined; the pull records a copy deleted in Google as one. */

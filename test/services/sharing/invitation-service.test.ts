@@ -621,4 +621,58 @@ describe('InvitationService', () => {
       ]);
     });
   });
+
+  describe('personal answers emit domain events', () => {
+    function setupAnswerBus() {
+      const db = createTestDb();
+      const userRepo = new UserRepository(db);
+      userRepo.create({ telegram_id: INVITER });
+      userRepo.create({ telegram_id: INVITEE });
+      const eventRepo = new EventRepository(db);
+      const invRepo = new InvitationRepository(db);
+      const participantRepo = new ParticipantRepository(db);
+      const bus = new DomainEventBus();
+      const log: string[] = [];
+      bus.on('invitationRoster.changed', (payload) => log.push(`roster:${payload.answeredInvitationId}`));
+      bus.on('myInvitations.accepted', (payload) => log.push(`accepted:${payload.inviteeId}`));
+      bus.on('myInvitations.rejected', (payload) => log.push(`rejected:${payload.inviteeId}`));
+      const service = new InvitationService(
+        invRepo,
+        eventRepo,
+        new SharingSettingsRepository(db),
+        participantRepo,
+        bus,
+      );
+      const event = eventRepo.create({
+        user_id: INVITER,
+        title: 'Answer Party',
+        start_at: '2026-03-15T18:00:00Z',
+        timezone: 'UTC',
+      });
+      const invitation = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      log.length = 0; // sending already announced a roster change
+      return { service, participantRepo, event, invitation, log };
+    }
+
+    test('accept: roster change first, then accepted, and the invitee becomes a participant', () => {
+      const { service, participantRepo, event, invitation, log } = setupAnswerBus();
+      expect(service.acceptInvitation(invitation.id, INVITEE).success).toBe(true);
+      expect(log).toEqual([`roster:${invitation.id}`, `accepted:${INVITEE}`]);
+      expect(participantRepo.findByEventAndUser(event.id, INVITEE)!.status).toBe('accepted');
+    });
+
+    test('maybe: only the roster change is announced', () => {
+      const { service, participantRepo, event, invitation, log } = setupAnswerBus();
+      expect(service.maybeInvitation(invitation.id, INVITEE).success).toBe(true);
+      expect(log).toEqual([`roster:${invitation.id}`]);
+      expect(participantRepo.findByEventAndUser(event.id, INVITEE)!.status).toBe('maybe');
+    });
+
+    test('decline without a participant row: rejected is announced and no row is created', () => {
+      const { service, participantRepo, event, invitation, log } = setupAnswerBus();
+      expect(service.declineInvitation(invitation.id, INVITEE).success).toBe(true);
+      expect(log).toEqual([`roster:${invitation.id}`, `rejected:${INVITEE}`]);
+      expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
+    });
+  });
 });

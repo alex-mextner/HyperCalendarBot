@@ -39,6 +39,28 @@ function readFirst(paths: string[]): string | null {
   return null;
 }
 
+/** zone.tab rows → the zones of each country and the country of each zone. */
+function parseZoneTab(text: string | null, data: TzData): void {
+  for (const line of text?.split('\n') ?? []) {
+    if (line.startsWith('#') || line.trim() === '') continue;
+    const [country, , zone] = line.split('\t');
+    if (!country || !zone) continue;
+    const zones = data.zonesByCountry.get(country);
+    if (zones) zones.push(zone);
+    else data.zonesByCountry.set(country, [zone]);
+    data.countryByZone.set(zone, country);
+  }
+}
+
+/** tzdata.zi `L target alias` rows → alias → target. */
+function parseLinks(text: string | null, data: TzData): void {
+  for (const line of text?.split('\n') ?? []) {
+    if (!line.startsWith('L ')) continue;
+    const [, target, alias] = line.split(' ');
+    if (target && alias) data.linkTargets.set(alias, target);
+  }
+}
+
 /**
  * Read once, on first use. A missing file leaves its maps empty: zones and countries are then
  * unknown, never guessed.
@@ -49,23 +71,11 @@ function loadTzData(): TzData {
 
   const zoneTab = readFirst(['/usr/share/zoneinfo/zone.tab', '/usr/share/lib/zoneinfo/tab/zone_sun.tab']);
   if (zoneTab === null) logger.warn('zone.tab not found: timezone countries are unknown. Install tzdata.');
-  for (const line of zoneTab?.split('\n') ?? []) {
-    if (line.startsWith('#') || line.trim() === '') continue;
-    const [country, , zone] = line.split('\t');
-    if (!country || !zone) continue;
-    const zones = tzData.zonesByCountry.get(country);
-    if (zones) zones.push(zone);
-    else tzData.zonesByCountry.set(country, [zone]);
-    tzData.countryByZone.set(zone, country);
-  }
+  parseZoneTab(zoneTab, tzData);
 
   const links = readFirst(['/usr/share/zoneinfo/tzdata.zi']);
   if (links === null) logger.warn('tzdata.zi not found: renamed timezone names have no country. Install tzdata.');
-  for (const line of links?.split('\n') ?? []) {
-    if (!line.startsWith('L ')) continue;
-    const [, target, alias] = line.split(' ');
-    if (target && alias) tzData.linkTargets.set(alias, target);
-  }
+  parseLinks(links, tzData);
   return tzData;
 }
 

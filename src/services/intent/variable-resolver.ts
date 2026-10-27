@@ -70,6 +70,14 @@ export interface UserContext {
   groupChatId?: number;
 }
 
+/** One path step of `accessPath`: a number indexes an array, a string reads an own, non-forbidden key. */
+function stepInto(current: unknown, seg: string | number): unknown {
+  if (current === null || current === undefined) return undefined;
+  if (typeof seg === 'number') return Array.isArray(current) ? (current as unknown[])[seg] : undefined;
+  if (!Object.hasOwn(current, seg) || FORBIDDEN_WORKFLOW_KEYS.has(seg)) return undefined;
+  return (current as { [key: string]: unknown })[seg];
+}
+
 /**
  * Access a nested path like "results[0].id" or "results.length" in an object.
  * Returns undefined if any segment of the path doesn't exist.
@@ -85,20 +93,59 @@ function accessPath(obj: { [key: string]: unknown }, path: string): unknown {
   }
 
   let current: unknown = obj;
-  for (const seg of segments) {
-    if (current === null || current === undefined) return undefined;
-    if (typeof seg === 'number') {
-      if (!Array.isArray(current)) return undefined;
-      current = (current as unknown[])[seg];
-    } else {
-      if (!Object.hasOwn(current, seg) || FORBIDDEN_WORKFLOW_KEYS.has(seg)) return undefined;
-      current = (current as { [key: string]: unknown })[seg];
-    }
-  }
+  for (const seg of segments) current = stepInto(current, seg);
   return current;
 }
 
-/** i18n dictionary: language code → key → template string */
+/** Built-in variables that need no captures or step results; `now` is the user's local time. */
+const BUILTIN_VARS: Record<string, (now: TZDate, userCtx: UserContext) => unknown> = {
+  'dates.today': (now) => format(now, 'yyyy-MM-dd'),
+  'dates.tomorrow': (now) => format(addDays(now, 1), 'yyyy-MM-dd'),
+  'dates.week_start': (now) => format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+  'dates.week_end': (now) => format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+  'dates.month_start': (now) => format(startOfMonth(now), 'yyyy-MM-dd'),
+  'dates.month_end': (now) => format(endOfMonth(now), 'yyyy-MM-dd'),
+  'dates.next_month_start': (now) => format(startOfMonth(addMonths(now, 1)), 'yyyy-MM-dd'),
+  'dates.yesterday': (now) => format(subDays(now, 1), 'yyyy-MM-dd'),
+  'dates.next_week_start': (now) => format(startOfWeek(addWeeks(now, 1), { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+  'dates.next_week_end': (now) => format(endOfWeek(addWeeks(now, 1), { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+  'dates.now': (now) => format(now, "yyyy-MM-dd'T'HH:mm:ssxxx"),
+  'env.scope': (_now, userCtx) => (userCtx.groupIsGroup ? 'group' : 'personal'),
+  'user.timezone': (_now, userCtx) => userCtx.timezone,
+  'user.language': (_now, userCtx) => userCtx.language,
+  'user.username': (_now, userCtx) => userCtx.username,
+  'user.first_name': (_now, userCtx) => userCtx.firstName,
+  'user.id': (_now, userCtx) => userCtx.userId,
+  'user.utc_offset': (now) => format(now, 'xxx'),
+  'group.is_group': (_now, userCtx) => userCtx.groupIsGroup ?? false,
+  'group.chat_id': (_now, userCtx) => userCtx.groupChatId,
+};
+
+/** `t.*` namespace — lazy i18n lookup of `key` in the user's language (falling back to English). */
+function resolveTranslation(
+  key: string,
+  captures: Record<string, string>,
+  userCtx: UserContext,
+  stepResults: StepResults | undefined,
+  i18n: I18nMap,
+  policy: ResolvePolicy | undefined,
+): unknown {
+  const langDict: { [key: string]: string } = i18n[userCtx.language] ?? i18n.en ?? {};
+  const raw = Object.hasOwn(langDict, key) ? langDict[key] : undefined;
+  if (raw === undefined) return undefined;
+  // Lazy: resolve any {{}} inside the i18n string with current context
+  if (policy?.strict) {
+    if (policy.translations.has(key) || policy.translations.size >= WORKFLOW_LIMITS.translationDepth)
+      throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
+    policy.translations.add(key);
+    try {
+      return resolveInner(raw, captures, userCtx, stepResults, i18n, policy);
+    } finally {
+      policy.translations.delete(key);
+    }
+  }
+  return resolveVariables(raw, captures, userCtx, stepResults, i18n);
+}
 
 /**
  * Resolve a single variable name to its value.
@@ -115,69 +162,9 @@ function resolveVar(
   consumeResolution(policy);
   const now = new TZDate(new Date(), userCtx.timezone);
 
-  switch (name) {
-    case 'dates.today':
-      return format(now, 'yyyy-MM-dd');
-    case 'dates.tomorrow':
-      return format(addDays(now, 1), 'yyyy-MM-dd');
-    case 'dates.week_start':
-      return format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-    case 'dates.week_end':
-      return format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-    case 'dates.month_start':
-      return format(startOfMonth(now), 'yyyy-MM-dd');
-    case 'dates.month_end':
-      return format(endOfMonth(now), 'yyyy-MM-dd');
-    case 'dates.next_month_start':
-      return format(startOfMonth(addMonths(now, 1)), 'yyyy-MM-dd');
-    case 'dates.yesterday':
-      return format(subDays(now, 1), 'yyyy-MM-dd');
-    case 'dates.next_week_start':
-      return format(startOfWeek(addWeeks(now, 1), { weekStartsOn: 1 }), 'yyyy-MM-dd');
-    case 'dates.next_week_end':
-      return format(endOfWeek(addWeeks(now, 1), { weekStartsOn: 1 }), 'yyyy-MM-dd');
-    case 'dates.now':
-      return format(now, "yyyy-MM-dd'T'HH:mm:ssxxx");
-    case 'env.scope':
-      return userCtx.groupIsGroup ? 'group' : 'personal';
-    case 'user.timezone':
-      return userCtx.timezone;
-    case 'user.language':
-      return userCtx.language;
-    case 'user.username':
-      return userCtx.username;
-    case 'user.first_name':
-      return userCtx.firstName;
-    case 'user.id':
-      return userCtx.userId;
-    case 'user.utc_offset':
-      return format(now, 'xxx');
-    case 'group.is_group':
-      return userCtx.groupIsGroup ?? false;
-    case 'group.chat_id':
-      return userCtx.groupChatId;
-    default:
-      // t.* namespace — lazy i18n lookup
-      if (name.startsWith('t.') && i18n) {
-        const key = name.slice(2);
-        const langDict: { [key: string]: string } = i18n[userCtx.language] ?? i18n.en ?? {};
-        const raw = Object.hasOwn(langDict, key) ? langDict[key] : undefined;
-        if (raw === undefined) return undefined;
-        // Lazy: resolve any {{}} inside the i18n string with current context
-        if (policy?.strict) {
-          if (policy.translations.has(key) || policy.translations.size >= WORKFLOW_LIMITS.translationDepth)
-            throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
-          policy.translations.add(key);
-          try {
-            return resolveInner(raw, captures, userCtx, stepResults, i18n, policy);
-          } finally {
-            policy.translations.delete(key);
-          }
-        }
-        return resolveVariables(raw, captures, userCtx, stepResults, i18n);
-      }
-      break;
-  }
+  if (Object.hasOwn(BUILTIN_VARS, name)) return BUILTIN_VARS[name]!(now, userCtx);
+  if (name.startsWith('t.') && i18n)
+    return resolveTranslation(name.slice(2), captures, userCtx, stepResults, i18n, policy);
 
   // Capture groups: $1, $2, etc.
   if (Object.hasOwn(captures, name)) {
@@ -194,10 +181,6 @@ function resolveVar(
   return undefined;
 }
 
-/**
- * Resolve {{...}} variables in a value. Works on strings (template substitution)
- * and objects (recursively resolve all string values).
- */
 /** Output length and cycle depth do not bound empty-string translation fan-out. */
 function consumeResolution(policy?: ResolvePolicy): void {
   if (policy?.strict && ++policy.operations > WORKFLOW_LIMITS.resolutionSteps)
@@ -213,6 +196,77 @@ function accountOutput(value: unknown, policy?: ResolvePolicy): unknown {
   return value;
 }
 
+/** Single-variable template `{{name}}` (no filter): the variable expression, else null. */
+function soleVariableExpr(template: string, matches: RegExpMatchArray[]): string | null {
+  const expr = matches.length === 1 ? matches[0]![1] : undefined;
+  return expr !== undefined && template === `{{${expr}}}` && !expr.includes('|') ? expr : null;
+}
+
+/** Render one `{{name|filter|...}}` expression as text; an unresolvable one stays as written (`match`). */
+function renderExpression(
+  expr: string,
+  match: string,
+  resolveName: (name: string) => unknown,
+  strict: boolean | undefined,
+): string {
+  const pipeIdx = expr.indexOf('|');
+  const varName = (pipeIdx === -1 ? expr : expr.slice(0, pipeIdx)).trim();
+  const filterExpr = pipeIdx === -1 ? '' : expr.slice(pipeIdx + 1);
+
+  const resolved = resolveName(varName);
+
+  if (!filterExpr) {
+    if (resolved === undefined && strict) throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
+    return resolved !== undefined ? String(resolved) : match;
+  }
+
+  let filters: FilterCall[];
+  try {
+    filters = parseFilterChain(filterExpr);
+  } catch {
+    if (strict) throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
+    cmdLogger.warn({ expr }, 'Invalid filter expression in intent template');
+    return match;
+  }
+
+  // default() can produce a value even when resolved is undefined
+  if (resolved === undefined && strict && !filters.some((f) => f.name === 'default' && f.args.length === 1))
+    throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
+  return applyFilters(resolved, filters);
+}
+
+function resolveTemplateString(
+  template: string,
+  captures: Record<string, string>,
+  userCtx: UserContext,
+  stepResults?: StepResults,
+  i18n?: I18nMap,
+  policy?: ResolvePolicy,
+): unknown {
+  const pattern = /\{\{([^}]+)\}\}/g;
+  const matches = [...template.matchAll(pattern)];
+  const resolveName = (name: string) => resolveVar(name, captures, userCtx, stepResults, i18n, policy);
+
+  // If the entire string is a single variable (no filter), return the raw resolved value
+  // (preserves non-string types like numbers)
+  const soleExpr = soleVariableExpr(template, matches);
+  if (soleExpr !== null) {
+    const resolved = resolveName(soleExpr.trim());
+    if (resolved === undefined && policy?.strict) throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
+    return accountOutput(resolved !== undefined ? resolved : template, policy);
+  }
+
+  // Otherwise do text substitution, converting everything to string
+  let outputLength = template.length;
+  const output = template.replace(pattern, (match, expr: string) => {
+    const value = renderExpression(expr, match, resolveName, policy?.strict);
+    outputLength += value.length - match.length;
+    if (policy?.strict && outputLength > WORKFLOW_LIMITS.stringChars) throw new WorkflowInputError('INVALID_INPUT');
+    return value;
+  });
+  return accountOutput(output, policy);
+}
+
 function resolveInner(
   template: unknown,
   captures: Record<string, string>,
@@ -222,54 +276,8 @@ function resolveInner(
   policy?: ResolvePolicy,
 ): unknown {
   consumeResolution(policy);
-  if (typeof template === 'string') {
-    const pattern = /\{\{([^}]+)\}\}/g;
-    const matches = [...template.matchAll(pattern)];
-
-    // If the entire string is a single variable (no filter), return the raw resolved value
-    // (preserves non-string types like numbers)
-    if (matches.length === 1 && template === `{{${matches[0]![1]}}}` && !matches[0]![1]!.includes('|')) {
-      const resolved = resolveVar(matches[0]![1]!.trim(), captures, userCtx, stepResults, i18n, policy);
-      if (resolved === undefined && policy?.strict) throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
-      return accountOutput(resolved !== undefined ? resolved : template, policy);
-    }
-
-    // Otherwise do text substitution, converting everything to string
-    let outputLength = template.length;
-    const replacement = (value: string, originalLength: number): string => {
-      outputLength += value.length - originalLength;
-      if (policy?.strict && outputLength > WORKFLOW_LIMITS.stringChars) throw new WorkflowInputError('INVALID_INPUT');
-      return value;
-    };
-    const output = template.replace(pattern, (match, expr: string) => {
-      const pipeIdx = expr.indexOf('|');
-      const varName = (pipeIdx === -1 ? expr : expr.slice(0, pipeIdx)).trim();
-      const filterExpr = pipeIdx === -1 ? '' : expr.slice(pipeIdx + 1);
-
-      const resolved = resolveVar(varName, captures, userCtx, stepResults, i18n, policy);
-
-      if (!filterExpr) {
-        if (resolved === undefined && policy?.strict) throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
-        return replacement(resolved !== undefined ? String(resolved) : match, match.length);
-      }
-
-      let filters: FilterCall[];
-      try {
-        filters = parseFilterChain(filterExpr);
-      } catch {
-        if (policy?.strict) throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
-        cmdLogger.warn({ expr }, 'Invalid filter expression in intent template');
-        return match;
-      }
-
-      // default() can produce a value even when resolved is undefined
-      if (resolved === undefined && policy?.strict && !filters.some((f) => f.name === 'default' && f.args.length === 1))
-        throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
-      const result = applyFilters(resolved, filters);
-      return replacement(result, match.length);
-    });
-    return accountOutput(output, policy);
-  }
+  if (typeof template === 'string')
+    return resolveTemplateString(template, captures, userCtx, stepResults, i18n, policy);
 
   if (Array.isArray(template)) {
     return template.map((item) => resolveInner(item, captures, userCtx, stepResults, i18n, policy));
@@ -286,7 +294,11 @@ function resolveInner(
   return template;
 }
 
-/** v2 strict mode rejects unresolved authored references, not braces supplied as user data. */
+/**
+ * Resolve {{...}} variables in a value. Works on strings (template substitution)
+ * and objects (recursively resolve all string values).
+ * v2 strict mode rejects unresolved authored references, not braces supplied as user data.
+ */
 export function resolveVariables(
   template: unknown,
   captures: Record<string, string>,

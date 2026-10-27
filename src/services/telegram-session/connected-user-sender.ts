@@ -2,7 +2,7 @@ import type { NotificationLogRepository } from '../../database/repositories/noti
 import type { TelegramSessionRepository } from '../../database/repositories/telegram-session.repository.ts';
 import { logger } from '../../utils/logger.ts';
 import { decryptBlob } from '../crypto/session-crypto.ts';
-import { SessionBridge } from './session-bridge.ts';
+import { type BridgeError, SessionBridge } from './session-bridge.ts';
 import type { DetectionResult } from './timezone-detector.ts';
 
 const senderLogger = logger.child({ module: 'connected-user-sender' });
@@ -80,6 +80,54 @@ export async function checkTimezoneOpportunistically(
 }
 
 export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
+  /** undefined when the stored session cannot be decrypted; it is then marked expired. */
+  function decryptSession(inviterId: number, encryptedSession: Buffer): Buffer | undefined {
+    try {
+      return decryptBlob(Buffer.from(encryptedSession), deps.masterKey);
+    } catch (err) {
+      senderLogger.error({ err, inviterId }, 'Failed to decrypt session — marking expired');
+      if (deps.sessionRepo.expireIfCurrent(inviterId, encryptedSession)) {
+        deps.onSessionExpired?.(inviterId, 'local');
+      }
+      return undefined;
+    }
+  }
+
+  function afterSuccessfulSend(
+    inviterId: number,
+    targetId: number,
+    text: string,
+    sessionData: Buffer,
+    meta: SendMeta | undefined,
+  ): void {
+    if (deps.notifLogRepo && meta?.invitationId !== undefined) {
+      deps.notifLogRepo.insert({
+        user_id: targetId,
+        type: 'invitation_sent',
+        reference_key: `invitation_${meta.invitationId}_${targetId}_mtproto_user`,
+        channel: 'mtproto_user',
+        payload: text,
+      });
+    }
+
+    if (deps.onTimezoneDetected || deps.onTzConsentNeeded) {
+      checkTimezoneOpportunistically(deps, inviterId, sessionData).catch((err) =>
+        senderLogger.warn({ err, inviterId }, 'Opportunistic timezone check failed'),
+      );
+    }
+  }
+
+  function afterFailedSend(inviterId: number, encryptedSession: Buffer, result: BridgeError): void {
+    if (result.error !== 'SESSION_EXPIRED') {
+      senderLogger.warn({ inviterId, error: result.error }, 'sendAsConnectedUser failed');
+      return;
+    }
+    senderLogger.warn({ inviterId }, 'User Telegram session expired — marking');
+    if (deps.sessionRepo.expireIfCurrent(inviterId, encryptedSession)) {
+      deps.onSessionExpired?.(inviterId, result.reason ?? 'expired');
+    }
+  }
+
   return async function sendAsConnectedUser(
     inviterId: number,
     targetId: number,
@@ -95,51 +143,18 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
     const session = deps.sessionRepo.getActive(inviterId);
     if (!session) return false;
 
-    let sessionData: Buffer;
-    try {
-      sessionData = decryptBlob(Buffer.from(session.encrypted_session), deps.masterKey);
-    } catch (err) {
-      senderLogger.error({ err, inviterId }, 'Failed to decrypt session — marking expired');
-      if (deps.sessionRepo.expireIfCurrent(inviterId, session.encrypted_session)) {
-        deps.onSessionExpired?.(inviterId, 'local');
-      }
-      return false;
-    }
+    const sessionData = decryptSession(inviterId, session.encrypted_session);
+    if (!sessionData) return false;
 
     const tempPath = await SessionBridge.createTempSessionFile(inviterId, sessionData);
 
     try {
       const result = await SessionBridge.sendAsUser(tempPath, targetId, text, username);
-
       if (result.success) {
-        if (deps.notifLogRepo && meta?.invitationId !== undefined) {
-          const referenceKey = `invitation_${meta.invitationId}_${targetId}_mtproto_user`;
-          deps.notifLogRepo.insert({
-            user_id: targetId,
-            type: 'invitation_sent',
-            reference_key: referenceKey,
-            channel: 'mtproto_user',
-            payload: text,
-          });
-        }
-
-        if (deps.onTimezoneDetected || deps.onTzConsentNeeded) {
-          checkTimezoneOpportunistically(deps, inviterId, sessionData).catch((err) =>
-            senderLogger.warn({ err, inviterId }, 'Opportunistic timezone check failed'),
-          );
-        }
-
+        afterSuccessfulSend(inviterId, targetId, text, sessionData, meta);
         return true;
       }
-
-      if (result.error === 'SESSION_EXPIRED') {
-        senderLogger.warn({ inviterId }, 'User Telegram session expired — marking');
-        if (deps.sessionRepo.expireIfCurrent(inviterId, session.encrypted_session)) {
-          deps.onSessionExpired?.(inviterId, result.reason ?? 'expired');
-        }
-      } else {
-        senderLogger.warn({ inviterId, error: result.error }, 'sendAsConnectedUser failed');
-      }
+      afterFailedSend(inviterId, session.encrypted_session, result);
       return false;
     } catch (err) {
       senderLogger.error({ err, inviterId }, 'sendAsConnectedUser crashed');
