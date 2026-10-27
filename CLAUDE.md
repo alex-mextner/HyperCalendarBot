@@ -66,6 +66,8 @@ Each layer returns `{ handled: true }` to stop propagation, or `{ handled: false
 ### AI Agent (`src/services/ai/`)
 
 - `agent.ts` — `CalendarBotAgent`: Anthropic SDK streaming, max 15 rounds, 90s timeout, 2 retries.
+- `agent/` — what `agent.ts` composes: `round-loop` (model round → answer or tool calls), `tool-round` (one round's tool calls, dedup, ledger), `response-validation` + `validation-retry` (final-prose check and its one corrective retry), `turn-finish` (evidence guard, history writes, delivery), `measured-stream` (request deadline, late-producer guard, metrics), `failure-notices` / `failure-announcement` / `retry-store` (what the user is told after a failed run and the bounded retry store), `message-sanitizer` / `history-rows` / `conversation` (history repair and parsing).
+- `streaming.ts` — `aiStreamRound`, the public import path of the provider chain; its pieces (types, errors, stream reader, slots, chains, failure handling, round budget) live in `streaming/`.
 - `tools.ts` — 40+ tool definitions (the Claude API schema).
 - `tool-executor.ts` — dispatches tool name → handler function.
 - `tool-handlers/` — one file per domain: `events`, `reminders`, `sharing`, `secretary`, `proposals`, `slots`, `settings`, `meta`, `feedback`, `history`.
@@ -93,6 +95,10 @@ feature tracking map so tip filtering and re-engagement work correctly:
 - `BOT_TIP_FEATURE_MAP` in `src/services/notification/tip-tags.ts` — tip key → `FeatureKey` (54 entries, keys must match `botTips` keys in constants.ts)
 
 If you add a new `FeatureKey`, add it to `FEATURE_KEYS` in `src/database/repositories/feature-usage.repository.ts`.
+
+### Startup (`src/index.ts` + `src/bootstrap/`)
+
+`src/index.ts` is a short orchestration script; each startup phase lives in `src/bootstrap/<phase>.ts` with its ordering invariants in the module header (crash handlers → core/config/DB → startup context + web server → service tier → Google sync → image render → broadcast queue → voice calls → weather → notifications → bot-tasks crons → speech services → event-mention store → domain event bus → location verification → `createBot()` → `patchBotRef` + broadcast worker → scheduled AI → freeze `msgDeps` → command menu → shutdown signals → launch). Shutdown order and the 8 s deadline live in `shutdown.ts`. Add a new startup step as a phase module that takes the `StartupContext` and registers what shutdown must close in `ctx.resources`; do not grow `src/index.ts`.
 
 ### Workers (`src/worker/`)
 
