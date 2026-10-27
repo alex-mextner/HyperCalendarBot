@@ -1,6 +1,6 @@
 // src/bot/commands/invitations.ts
 
-import { t } from '../../config/constants.ts';
+import { type Messages, t } from '../../config/constants.ts';
 import type { CalendarEvent, Invitation, InvitationStatus, User } from '../../database/types.ts';
 import { formatDateShort, formatTime } from '../../utils/date.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
@@ -48,6 +48,54 @@ function getUserName(user: User | null, telegramId: number): string {
   return `#${telegramId}`;
 }
 
+/** Which side of the invitation the viewer is on; decides whose event it is and which person is shown. */
+interface InvitationDirection {
+  /** Owner of the invited event (used to look it up). */
+  eventOwnerId: (inv: Invitation, viewerId: number) => number;
+  /** The other party shown on the line. */
+  counterpartId: (inv: Invitation) => number;
+  personLabel: (messages: Messages, name: string) => string;
+}
+
+const RECEIVED: InvitationDirection = {
+  eventOwnerId: (inv) => inv.inviter_id,
+  counterpartId: (inv) => inv.inviter_id,
+  personLabel: (messages, name) => messages.invitations_from(name),
+};
+
+const SENT: InvitationDirection = {
+  eventOwnerId: (_inv, viewerId) => viewerId,
+  counterpartId: (inv) => inv.invitee_id,
+  personLabel: (messages, name) => messages.invitations_to(name),
+};
+
+interface InvitationLinesScope {
+  eventRepo: EventRepo;
+  userRepo: UserRepo | undefined;
+  viewerId: number;
+  timezone: string;
+  lang: 'en' | 'ru';
+}
+
+function buildInvitationLines(
+  invitations: Invitation[],
+  direction: InvitationDirection,
+  scope: InvitationLinesScope,
+): string[] {
+  const { eventRepo, userRepo, viewerId, timezone, lang } = scope;
+  const messages = t(lang);
+  const lines: string[] = [];
+  for (const inv of invitations) {
+    const event = eventRepo.findById(inv.event_id, direction.eventOwnerId(inv, viewerId));
+    if (!event) continue;
+    const counterpartId = direction.counterpartId(inv);
+    const counterpart = userRepo?.findByTelegramId(counterpartId) ?? null;
+    const personLabel = direction.personLabel(messages, getUserName(counterpart, counterpartId));
+    lines.push(formatInvitationLine(inv, event, personLabel, timezone, lang));
+  }
+  return lines;
+}
+
 export async function handleInvitations(
   ctx: BotCommandContext,
   invRepo: InvitationRepo,
@@ -58,29 +106,13 @@ export async function handleInvitations(
   if (!user) return;
   const userId = user.telegram_id;
   const lang = user.language as 'en' | 'ru';
-  const timezone = user.timezone;
-  const messages = t(lang);
+  const scope: InvitationLinesScope = { eventRepo, userRepo, viewerId: userId, timezone: user.timezone, lang };
 
   const received = invRepo.getByInvitee(userId);
   const sent = invRepo.getByInviter(userId);
 
-  const receivedLines: string[] = [];
-  for (const inv of received) {
-    const event = eventRepo.findById(inv.event_id, inv.inviter_id);
-    if (!event) continue;
-    const inviter = userRepo?.findByTelegramId(inv.inviter_id) ?? null;
-    const personLabel = messages.invitations_from(getUserName(inviter, inv.inviter_id));
-    receivedLines.push(formatInvitationLine(inv, event, personLabel, timezone, lang));
-  }
-
-  const sentLines: string[] = [];
-  for (const inv of sent) {
-    const event = eventRepo.findById(inv.event_id, userId);
-    if (!event) continue;
-    const invitee = userRepo?.findByTelegramId(inv.invitee_id) ?? null;
-    const personLabel = messages.invitations_to(getUserName(invitee, inv.invitee_id));
-    sentLines.push(formatInvitationLine(inv, event, personLabel, timezone, lang));
-  }
+  const receivedLines = buildInvitationLines(received, RECEIVED, scope);
+  const sentLines = buildInvitationLines(sent, SENT, scope);
 
   if (receivedLines.length === 0 && sentLines.length === 0) {
     const emptyMsg = lang === 'ru' ? '📨 Нет приглашений.' : '📨 No invitations.';

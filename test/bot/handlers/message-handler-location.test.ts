@@ -1,0 +1,340 @@
+import { describe, expect, mock, test } from 'bun:test';
+import type { AnyScene } from '@gramio/scenes';
+import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler.ts';
+import { createMessageHandler, type MessageHandlerDeps } from '../../../src/bot/handlers/message.handler.ts';
+import type { BotCallbackContext, BotCommandContext } from '../../../src/bot/types.ts';
+import type { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import type { EventService } from '../../../src/services/event/event-service.ts';
+import type { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import type { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
+import type { PendingGeoStore, SharedLocation } from '../../../src/services/location/pending-geo-store.ts';
+import type { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
+import { makeCtx, makeDeps } from './message-handler-fixtures.ts';
+
+describe('createMessageHandler', () => {
+  describe('location message → timezone confirmation', () => {
+    test('sends confirmation prompt with buttons when timezone differs', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 55.7558,
+        longitude: 37.6173,
+      };
+      await handler(ctx as never);
+
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+      expect(msg).toContain('Europe/Moscow');
+      expect(msg).toContain('UTC');
+      expect(msg).toContain('Обновить часовой пояс?');
+      const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { parse_mode: string; reply_markup: unknown };
+      expect(opts.parse_mode).toBe('HTML');
+      expect(opts.reply_markup).toBeDefined();
+    });
+
+    test('sends same-timezone message when location matches current timezone', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'ru', timezone: 'Europe/Moscow', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 55.7558,
+        longitude: 37.6173,
+      };
+      await handler(ctx as never);
+
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+      expect(msg).toContain('Europe/Moscow');
+      expect(msg).toContain('уже');
+    });
+
+    test('does not route to AI agent after handling location', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 40.7128,
+        longitude: -74.006,
+      };
+      await handler(ctx as never);
+
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+      expect(msg).toContain('Update timezone?');
+    });
+
+    test('ignores location messages in group chats', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC', onboarding_completed: 1 },
+        chat: { type: 'supergroup' },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 55.7558,
+        longitude: 37.6173,
+      };
+      await handler(ctx as never);
+
+      expect(ctx.send).not.toHaveBeenCalled();
+      expect(deps.agent.run).not.toHaveBeenCalled();
+    });
+
+    test('always persists pin to pendingGeoStore even in default timezone path', async () => {
+      const setMock = mock(() => Promise.resolve());
+      const deps = makeDeps({
+        pendingGeoStore: {
+          set: setMock,
+          get: mock(() => Promise.resolve(null)),
+          delete: mock(() => Promise.resolve()),
+        },
+      });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 40.7128,
+        longitude: -74.006,
+      };
+      await handler(ctx as never);
+
+      expect(setMock).toHaveBeenCalledTimes(1);
+      const call = setMock.mock.calls[0] as unknown as [number, SharedLocation];
+      expect(call[0]).toBe(100);
+      expect(call[1]).toEqual({ latitude: 40.7128, longitude: -74.006, venue: null });
+    });
+
+    test('shows event-specific buttons when user has a recent unverified event', async () => {
+      const recentEvent = {
+        id: 42,
+        title: 'Lunch',
+        location: 'Cafe near work',
+        location_verified: 0,
+        created_at: new Date().toISOString(),
+      };
+      const recentSetMock = mock(() => Promise.resolve());
+      const deps = makeDeps({
+        eventService: {
+          getEventsInRange: mock(() => []),
+          getLatestCreated: mock(() => recentEvent),
+        },
+        locationVerification: { verifyEventLocation: mock(() => Promise.resolve()) },
+        pendingGeoStore: {
+          set: recentSetMock,
+          get: mock(() => Promise.resolve(null)),
+          delete: mock(() => Promise.resolve()),
+        },
+      });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 55.7558,
+        longitude: 37.6173,
+      };
+      await handler(ctx as never);
+
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+      expect(msg).toContain('Lunch');
+      const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup: unknown };
+      expect(opts.reply_markup).toBeDefined();
+      // Pin should be persisted for the callback handler
+      expect(recentSetMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('does NOT show event-specific UI when latest event is already verified', async () => {
+      const verifiedEvent = {
+        id: 42,
+        title: 'Lunch',
+        location: 'Cafe',
+        location_verified: 1,
+        created_at: new Date().toISOString(),
+      };
+      const verifiedSetMock = mock(() => Promise.resolve());
+      const deps = makeDeps({
+        eventService: {
+          getEventsInRange: mock(() => []),
+          getLatestCreated: mock(() => verifiedEvent),
+        },
+        locationVerification: { verifyEventLocation: mock(() => Promise.resolve()) },
+        pendingGeoStore: {
+          set: verifiedSetMock,
+          get: mock(() => Promise.resolve(null)),
+          delete: mock(() => Promise.resolve()),
+        },
+      });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 55.7558,
+        longitude: 37.6173,
+      };
+      await handler(ctx as never);
+
+      // Falls through to timezone update flow, but pin still persisted
+      const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+      expect(msg).not.toContain('Lunch');
+      expect(verifiedSetMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('does NOT show event-specific UI when latest event is older than 30 minutes', async () => {
+      const oldEvent = {
+        id: 42,
+        title: 'Lunch',
+        location: 'Cafe',
+        location_verified: 0,
+        created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1 hour ago
+      };
+      const deps = makeDeps({
+        eventService: {
+          getEventsInRange: mock(() => []),
+          getLatestCreated: mock(() => oldEvent),
+        },
+        locationVerification: { verifyEventLocation: mock(() => Promise.resolve()) },
+        pendingGeoStore: {
+          set: mock(() => Promise.resolve()),
+          get: mock(() => Promise.resolve(null)),
+          delete: mock(() => Promise.resolve()),
+        },
+      });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 55.7558,
+        longitude: 37.6173,
+      };
+      await handler(ctx as never);
+
+      const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+      expect(msg).not.toContain('Lunch');
+    });
+  });
+
+  describe('pin prompt for a recent unverified event', () => {
+    const PIN = { latitude: 48.8566, longitude: 2.3522 };
+
+    function makeGeoStore(): PendingGeoStore {
+      const pins = new Map<number, SharedLocation>();
+      return {
+        set: async (userId, data) => {
+          pins.set(userId, data);
+        },
+        get: async (userId) => pins.get(userId) ?? null,
+        delete: async (userId) => {
+          pins.delete(userId);
+        },
+      };
+    }
+
+    function makeLocationVerification(
+      resolveFromSharedLocation: LocationVerificationService['resolveFromSharedLocation'],
+    ): LocationVerificationService {
+      return { resolveFromSharedLocation } as unknown as LocationVerificationService;
+    }
+
+    async function sendPin(title: string, geoStore: PendingGeoStore, verification: LocationVerificationService) {
+      const event = {
+        id: 42,
+        title,
+        location: 'Somewhere downtown',
+        location_verified: 0,
+        created_at: new Date().toISOString(),
+      };
+      const deps = makeDeps({
+        eventService: { getEventsInRange: mock(() => []), getLatestCreated: mock(() => event) },
+        locationVerification: verification,
+        pendingGeoStore: geoStore,
+      }) as unknown as MessageHandlerDeps;
+      const ctx = {
+        ...makeCtx({
+          text: undefined,
+          dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+        }),
+        location: PIN,
+      };
+      await createMessageHandler(deps)(ctx as unknown as BotCommandContext);
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const [text, opts] = ctx.send.mock.calls[0] as unknown as [
+        string,
+        { parse_mode: string; reply_markup: { toJSON(): { inline_keyboard: { callback_data: string }[][] } } },
+      ];
+      return { text, opts };
+    }
+
+    async function pressButton(
+      callbackData: string,
+      geoStore: PendingGeoStore,
+      verification: LocationVerificationService,
+    ) {
+      const handler = createCallbackHandler(
+        {} as unknown as EventService,
+        {} as unknown as AnyScene,
+        {} as unknown as HolidayService,
+        {} as unknown as NotificationPreferencesService,
+        { locationVerification: verification, pendingGeoStore: geoStore, userRepo: {} as unknown as UserRepository },
+      );
+      const ctx = {
+        data: callbackData,
+        chatId: 100,
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC' },
+        answer: mock(() => Promise.resolve()),
+        editText: mock(() => Promise.resolve()),
+        message: { id: 1, text: '', chat: { id: 100, type: 'private' } },
+        from: { id: 100 },
+      };
+      await handler(ctx as unknown as BotCallbackContext);
+    }
+
+    test('HTML-escapes a title containing & and < so Telegram accepts the prompt', async () => {
+      const { text, opts } = await sendPin(
+        'Q&A <meetup>',
+        makeGeoStore(),
+        makeLocationVerification(mock(() => Promise.resolve(false))),
+      );
+      expect(opts.parse_mode).toBe('HTML');
+      expect(text).toContain('Q&amp;A &lt;meetup&gt;');
+      expect(text).not.toContain('Q&A');
+      expect(text).not.toContain('<meetup>');
+    });
+
+    test('shows a plain title unchanged and its confirm button attaches the pin to that event', async () => {
+      const geoStore = makeGeoStore();
+      const resolveFromSharedLocation = mock<LocationVerificationService['resolveFromSharedLocation']>(() =>
+        Promise.resolve(false),
+      );
+      const verification = makeLocationVerification(resolveFromSharedLocation);
+      const { text, opts } = await sendPin('Team lunch', geoStore, verification);
+      expect(text).toBe('📍 Got your location! Is this for the event "Team lunch"?');
+
+      const confirm = opts.reply_markup.toJSON().inline_keyboard[0]?.[0];
+      if (!confirm) throw new Error('prompt has no confirm button');
+      await pressButton(confirm.callback_data, geoStore, verification);
+
+      expect(resolveFromSharedLocation).toHaveBeenCalledTimes(1);
+      expect(resolveFromSharedLocation.mock.calls[0]).toEqual([42, { ...PIN, venue: null }, 100]);
+    });
+  });
+});

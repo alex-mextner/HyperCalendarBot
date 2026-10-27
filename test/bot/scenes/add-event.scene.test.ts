@@ -562,6 +562,16 @@ describe('add_event step handlers', () => {
       });
     });
 
+    test.each([
+      '3.5',
+      '12/25',
+      '5 abc',
+    ])('"count" mode rejects "%s" instead of taking its numeric prefix', async (text) => {
+      const ctx = makeCtx({ stepId: 4, text, state: { recurrenceRule: 'FREQ=WEEKLY', recEndMode: 'count' } });
+      await fns[4]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.update.mock.calls.filter(([patch]) => 'recurrenceRule' in patch)).toHaveLength(0);
+    });
+
     test('bare number without an end mode is clarified instead of guessed as date or count', async () => {
       const ctx = makeCtx({
         stepId: 4,

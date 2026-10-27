@@ -1,7 +1,9 @@
 // src/bot/pipeline/ai-agent-layer.ts
 
 import { t, toLang } from '../../config/constants.ts';
+import type { User } from '../../database/types.ts';
 import { agentGiveUpMessage, type CalendarBotAgent } from '../../services/ai/agent.ts';
+import type { AgentContext } from '../../services/ai/types.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { AiMessageJobData, RetryJobStore } from '../../services/scheduled/types.ts';
@@ -26,20 +28,118 @@ export interface AgentLayerDeps {
   retryJobStore?: RetryJobStore;
 }
 
+interface AgentLayerExtra {
+  feedbackContext?: FeedbackThreadContext;
+  groupContext?: GroupContext;
+  incomingMessageId?: number;
+  supplementMode?: boolean;
+  supplementAutoResponse?: string;
+  wasExplicitInvocation?: boolean;
+  retryAttempt?: number;
+}
+
 export function createAiAgentLayer(deps: AgentLayerDeps) {
-  return async (
+  /** Cancel any pending retry when a fresh user message arrives. */
+  async function cancelPendingRetry(userId: number): Promise<void> {
+    const { retryJobStore, retryQueue } = deps;
+    if (!retryJobStore || !retryQueue) return;
+    try {
+      const pendingJobId = await retryJobStore.get(userId);
+      if (!pendingJobId) return;
+      await retryQueue
+        .removeJobById(pendingJobId)
+        .catch((err: unknown) => cmdLogger.warn({ err, userId }, 'Failed to cancel pending retry job'));
+      await retryJobStore
+        .del(userId)
+        .catch((err: unknown) => cmdLogger.warn({ err, userId }, 'Failed to clear retry job store'));
+    } catch (err: unknown) {
+      cmdLogger.warn({ err, userId }, 'Failed to check pending retry job in store');
+    }
+  }
+
+  function createRetryEnqueue(
+    queue: NonNullable<AgentLayerDeps['retryQueue']>,
     ctx: BotCommandContext,
+    user: User,
+    currentAttempt: number,
+  ): (msg: string) => Promise<boolean> {
+    const jobStore = deps.retryJobStore;
+    const lang = toLang(user.language);
+
+    return async (msg) => {
+      if (currentAttempt >= MAX_RETRY_ATTEMPTS) {
+        // All retries exhausted — close the loop on whatever the bot promised
+        // earlier, then clear Redis state.
+        const giveUp = agentGiveUpMessage(user.telegram_id, lang);
+        if (giveUp) await ctx.send(giveUp);
+        // Best effort: the give-up line is out, so the answer stays "gave up" whatever Redis says.
+        await jobStore?.del(user.telegram_id).catch((err: unknown) => {
+          cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to clear retry job store');
+        });
+        return false;
+      }
+      const delay = BACKOFF_DELAYS_MS[currentAttempt]!;
+      const jobId = await queue.addDelayed(
+        { userId: user.telegram_id, message: msg, source: 'trigger', retryAttempt: currentAttempt + 1 },
+        delay,
+      );
+      // The job is stored and will run: the cancellation pointer is written in the background, so a
+      // slow or lost pointer write can neither hold back nor turn this into "not scheduled".
+      void jobStore?.set(user.telegram_id, jobId).catch((err: unknown) => {
+        cmdLogger.warn(
+          { err, userId: user.telegram_id, jobId },
+          'Retry scheduled but its cancellation pointer was not saved',
+        );
+      });
+      return true;
+    };
+  }
+
+  async function attachScenePause(agentContext: AgentContext, userId: number): Promise<void> {
+    if (!deps.scenePauseService) return;
+    const pauseState = await deps.scenePauseService.get(userId);
+    if (pauseState) {
+      agentContext.scene = {
+        scenePauseState: pauseState,
+        scenePauseService: deps.scenePauseService,
+      };
+    }
+  }
+
+  async function runAgent(
+    agentContext: AgentContext,
+    ctx: BotCommandContext,
+    user: User,
     messageText: string,
-    extra?: {
-      feedbackContext?: FeedbackThreadContext;
-      groupContext?: GroupContext;
-      incomingMessageId?: number;
-      supplementMode?: boolean;
-      supplementAutoResponse?: string;
-      wasExplicitInvocation?: boolean;
-      retryAttempt?: number;
-    },
-  ): Promise<PipelineResult> => {
+    extra: AgentLayerExtra | undefined,
+  ): Promise<void> {
+    try {
+      const result = await deps.agent.run(agentContext);
+
+      if (extra?.supplementMode) {
+        const skipped = result.toolCalls.some((tc) => tc.name === 'supplement_skip');
+        if (!skipped && result.responseText) {
+          await ctx.send(result.responseText, { parse_mode: 'HTML' });
+        }
+        return;
+      }
+
+      if (deps.intentLearner && result.toolCalls.length > 0) {
+        deps.intentLearner.analyze(messageText, result.toolCalls, result.toolResults).catch((err: unknown) => {
+          cmdLogger.error({ err: err }, 'IntentLearner error');
+        });
+      }
+    } catch (error) {
+      if (extra?.supplementMode) {
+        cmdLogger.warn({ err: error, userId: user.telegram_id }, 'AI supplement error (suppressed)');
+        return;
+      }
+      cmdLogger.error({ err: error, userId: user.telegram_id }, 'AI agent error');
+      await ctx.send(t(toLang(user.language)).something_wrong);
+    }
+  }
+
+  return async (ctx: BotCommandContext, messageText: string, extra?: AgentLayerExtra): Promise<PipelineResult> => {
     const user = ctx.dbUser;
     if (!user) return { handled: false };
     const chatId = ctx.chatId;
@@ -47,26 +147,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
 
     const currentAttempt = extra?.retryAttempt ?? 0;
 
-    // Cancel any pending retry when a fresh user message arrives
-    if (currentAttempt === 0 && deps.retryJobStore && deps.retryQueue) {
-      try {
-        const pendingJobId = await deps.retryJobStore.get(user.telegram_id);
-        if (pendingJobId) {
-          await deps.retryQueue
-            .removeJobById(pendingJobId)
-            .catch((err: unknown) =>
-              cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to cancel pending retry job'),
-            );
-          await deps.retryJobStore
-            .del(user.telegram_id)
-            .catch((err: unknown) =>
-              cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to clear retry job store'),
-            );
-        }
-      } catch (err: unknown) {
-        cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to check pending retry job in store');
-      }
-    }
+    if (currentAttempt === 0) await cancelPendingRetry(user.telegram_id);
 
     const agentContext = deps.agentContextBuilder(
       user,
@@ -83,37 +164,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
     agentContext.retryAttempt = currentAttempt;
 
     if (deps.retryQueue) {
-      const queue = deps.retryQueue;
-      const jobStore = deps.retryJobStore;
-      const lang = toLang(user.language);
-
-      agentContext.retryEnqueue = async (msg: string) => {
-        if (currentAttempt >= MAX_RETRY_ATTEMPTS) {
-          // All retries exhausted — close the loop on whatever the bot promised
-          // earlier, then clear Redis state.
-          const giveUp = agentGiveUpMessage(user.telegram_id, lang);
-          if (giveUp) await ctx.send(giveUp);
-          // Best effort: the give-up line is out, so the answer stays "gave up" whatever Redis says.
-          await jobStore?.del(user.telegram_id).catch((err: unknown) => {
-            cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to clear retry job store');
-          });
-          return false;
-        }
-        const delay = BACKOFF_DELAYS_MS[currentAttempt]!;
-        const jobId = await queue.addDelayed(
-          { userId: user.telegram_id, message: msg, source: 'trigger', retryAttempt: currentAttempt + 1 },
-          delay,
-        );
-        // The job is stored and will run: the cancellation pointer is written in the background, so a
-        // slow or lost pointer write can neither hold back nor turn this into "not scheduled".
-        void jobStore?.set(user.telegram_id, jobId).catch((err: unknown) => {
-          cmdLogger.warn(
-            { err, userId: user.telegram_id, jobId },
-            'Retry scheduled but its cancellation pointer was not saved',
-          );
-        });
-        return true;
-      };
+      agentContext.retryEnqueue = createRetryEnqueue(deps.retryQueue, ctx, user, currentAttempt);
     }
 
     if (extra?.supplementMode) {
@@ -123,46 +174,14 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
 
     agentContext.wasExplicitInvocation = extra?.wasExplicitInvocation ?? true;
 
-    if (deps.scenePauseService) {
-      const pauseState = await deps.scenePauseService.get(user.telegram_id);
-      if (pauseState) {
-        agentContext.scene = {
-          scenePauseState: pauseState,
-          scenePauseService: deps.scenePauseService,
-        };
-      }
-    }
+    await attachScenePause(agentContext, user.telegram_id);
 
     cmdLogger.info(
       { userId: user.telegram_id, messageText, ...(extra?.supplementMode && { supplementMode: true }) },
       'Routing to AI agent',
     );
 
-    try {
-      const result = await deps.agent.run(agentContext);
-
-      if (extra?.supplementMode) {
-        const skipped = result.toolCalls.some((tc) => tc.name === 'supplement_skip');
-        if (!skipped && result.responseText) {
-          await ctx.send(result.responseText, { parse_mode: 'HTML' });
-        }
-        return { handled: true };
-      }
-
-      if (deps.intentLearner && result.toolCalls.length > 0) {
-        deps.intentLearner.analyze(messageText, result.toolCalls, result.toolResults).catch((err: unknown) => {
-          cmdLogger.error({ err: err }, 'IntentLearner error');
-        });
-      }
-    } catch (error) {
-      if (extra?.supplementMode) {
-        cmdLogger.warn({ err: error, userId: user.telegram_id }, 'AI supplement error (suppressed)');
-        return { handled: true };
-      }
-      cmdLogger.error({ err: error, userId: user.telegram_id }, 'AI agent error');
-      await ctx.send(t(toLang(user.language)).something_wrong);
-    }
-
+    await runAgent(agentContext, ctx, user, messageText, extra);
     return { handled: true };
   };
 }

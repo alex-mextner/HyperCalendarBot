@@ -2,7 +2,7 @@
 
 import { Scene } from '@gramio/scenes';
 import { InlineKeyboard, Keyboard } from 'gramio';
-import { maskPhone, t } from '../../config/constants.ts';
+import { type Messages, maskPhone, t } from '../../config/constants.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { TelegramSessionRepository } from '../../database/repositories/telegram-session.repository.ts';
@@ -11,7 +11,12 @@ import { decryptString, encryptBlob, encryptString } from '../../services/crypto
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import { buildUserSessionInvitationText } from '../../services/telegram-session/invitation-text.ts';
-import { SessionBridge } from '../../services/telegram-session/session-bridge.ts';
+import {
+  type BridgeError,
+  type BridgeResult,
+  type BridgeSuccess,
+  SessionBridge,
+} from '../../services/telegram-session/session-bridge.ts';
 import { formatDateShort, formatTime } from '../../utils/date.ts';
 import { logger } from '../../utils/logger.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
@@ -131,6 +136,8 @@ export async function abortConnectAuth(userId: number, state: unknown): Promise<
   if (typeof sessionPath === 'string') await SessionBridge.cleanupTempFile(sessionPath);
 }
 
+type ConnectTelegramText = Messages['connectTelegram'];
+
 interface CancelAuthContext {
   answer: () => Promise<unknown>;
   send: (text: string, options?: { reply_markup?: InlineKeyboard | { remove_keyboard: true } }) => Promise<unknown>;
@@ -147,14 +154,73 @@ interface CancelAuthContext {
  * leftover phone-share reply keyboard and exits the scene with a fixed message. Nothing the
  * user typed into the wizard is handed on: any of it may be the phone, the code or the password.
  */
-async function handleCancelAuth(
-  context: CancelAuthContext,
-  ct: ReturnType<typeof t>['connectTelegram'],
-): Promise<void> {
+async function handleCancelAuth(context: CancelAuthContext, ct: ConnectTelegramText): Promise<void> {
   await context.answer();
   await abortConnectAuth(context.from.id, context.scene.state);
   await context.send(ct.authCancelled, { reply_markup: { remove_keyboard: true } });
   await context.scene.exit();
+}
+
+// --- Step contexts ---
+
+interface SendOptions {
+  reply_markup?: InlineKeyboard | { remove_keyboard: true };
+  parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2';
+}
+
+type Send = (text: string, options?: SendOptions) => Promise<unknown>;
+
+/** Collaborators and per-update facts every wizard step needs. */
+interface StepEnv {
+  sessionRepo: TelegramSessionRepository;
+  config: ConnectTelegramConfig;
+  deps: ConnectTelegramDeps | undefined;
+  lang: 'en' | 'ru';
+  userId: number;
+  ct: ConnectTelegramText;
+}
+
+interface WizardSceneAccess {
+  state: ConnectTelegramState;
+  params: ConnectTelegramParams;
+  exit: () => Promise<boolean> | boolean;
+  update: (patch: Partial<ConnectTelegramState>, options?: { step?: number }) => Promise<unknown>;
+  step: { next: () => Promise<void>; go: (stepId: number) => Promise<void> };
+}
+
+/** The part of a step context that can end the wizard with a message. */
+interface WizardExitContext {
+  send: Send;
+  scene: Pick<WizardSceneAccess, 'exit'>;
+}
+
+interface ConsentCallbackContext extends WizardExitContext {
+  data: string | undefined;
+  answer: () => Promise<unknown>;
+  send: (
+    text: string,
+    options?: { reply_markup?: InlineKeyboard | Keyboard | { remove_keyboard: true } },
+  ) => Promise<{ delete(): Promise<unknown> }>;
+  scene: Pick<WizardSceneAccess, 'exit'> & { step: Pick<WizardSceneAccess['step'], 'next'> };
+}
+
+interface AuthCallbackContext extends CancelAuthContext {
+  data: string | undefined;
+}
+
+/** A message update inside a wizard step (callback updates are routed elsewhere). */
+interface WizardMessageContext {
+  from: { id: number };
+  text: string | undefined;
+  contact: { phoneNumber: string } | undefined;
+  send: Send;
+  scene: WizardSceneAccess;
+}
+
+interface PendingInvitationContext extends WizardExitContext {
+  data: string | undefined;
+  answer: () => Promise<unknown>;
+  scene: Pick<WizardSceneAccess, 'exit' | 'params'>;
 }
 
 // --- Scene factory ---
@@ -165,6 +231,11 @@ export function createConnectTelegramScene(
   userComposer: UserResolverComposer,
   deps?: ConnectTelegramDeps,
 ) {
+  const envFor = (lang: 'en' | 'ru' | undefined, userId: number): StepEnv => {
+    const l = lang ?? 'en';
+    return { sessionRepo, config, deps, lang: l, userId, ct: t(l).connectTelegram };
+  };
+
   return (
     new Scene(CONNECT_TELEGRAM_SCENE)
       .state<ConnectTelegramState>()
@@ -174,412 +245,409 @@ export function createConnectTelegramScene(
 
       // Step 0: Consent
       .step(['message', 'callback_query'], async (context) => {
-        const { lang } = context;
-        const l = lang ?? 'en';
-        const userId = context.from.id;
-        const ct = t(l).connectTelegram;
-
+        const env = envFor(context.lang, context.from.id);
         if (context.scene.step.firstTime) {
-          // Check if master key is configured
-          if (!config.TELEGRAM_SESSION_MASTER_KEY) {
-            await context.send(ct.featureUnavailable);
-            await context.scene.exit();
-            return;
-          }
-
-          // Check cooldown
-          if (isConnectCooldownActive(userId)) {
-            const last = connectAttempts.get(userId)!;
-            const remaining = Math.ceil((CONNECT_COOLDOWN_MS - (Date.now() - last)) / 1000);
-            await context.send(ct.cooldown(remaining));
-            await context.scene.exit();
-            return;
-          }
-
-          // Check if already connected — show masked phone and reconnect option
-          const existing = sessionRepo.findByUserId(userId);
-          if (existing?.status === 'active') {
-            const kb = new InlineKeyboard().text(ct.btnReconnect, CB_RECONNECT).text(ct.btnCancel, CB_CANCEL);
-            await context.send(ct.alreadyConnected(existing.phone_masked), { reply_markup: kb });
-            return;
-          }
-
-          // Show consent
-          const kb = new InlineKeyboard().text(ct.btnConnect, CB_CONNECT).text(ct.btnCancel, CB_CANCEL);
-          await context.send(ct.consent, { reply_markup: kb });
-          return;
-        }
-
-        // Handle callbacks
-        if (context.is('callback_query')) {
-          const data = context.data;
-          if (!data) return;
-
-          if (data === CB_CANCEL) {
-            await context.answer();
-            await context.send(ct.cancelled);
-            await context.scene.exit();
-            return;
-          }
-
-          if (data === CB_CONNECT || data === CB_RECONNECT) {
-            registerConnectAttempt(userId);
-            await context.answer();
-            const phoneKb = new Keyboard().requestContact(ct.btnSharePhone).resized().oneTime();
-            // Telegram persists the reply-keyboard at chat level (not per message),
-            // so we install it via a throwaway message and delete that message
-            // immediately. The "📱 Поделиться номером" button stays in the input area.
-            // This frees the visible prompt to carry the inline "Отменить авторизацию"
-            // button instead of shipping it as a separate second message.
-            const kbMsg = await context.send('…', { reply_markup: phoneKb });
-            kbMsg
-              .delete()
-              .catch((err: unknown) =>
-                sceneLogger.warn({ err, userId }, 'failed to delete throwaway reply-keyboard message'),
-              );
-            const cancelKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
-            await context.send(ct.enterPhone, { reply_markup: cancelKb });
-            await context.scene.step.next();
-            return;
-          }
-          return;
+          await showConsent(context, env);
+        } else if (context.is('callback_query')) {
+          await handleConsentCallback(context, env);
         }
         // Text typed before "Connect" goes nowhere; the connect-wizard guard has taken it off the chat.
       })
 
       // Step 1: Phone number
       .step(['message', 'callback_query'], async (context) => {
-        const { lang } = context;
-        const l = lang ?? 'en';
-        const userId = context.from.id;
-        const ct = t(l).connectTelegram;
-
+        const env = envFor(context.lang, context.from.id);
         if (context.is('callback_query')) {
-          if (context.data === CB_CANCEL_AUTH) {
-            await handleCancelAuth(context, ct);
-          }
+          await handleAuthCallback(context, env.ct);
           return;
         }
-
-        const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
-        if (!masterKeyHex) {
-          await context.send(ct.featureUnavailable);
-          await context.scene.exit();
-          return;
-        }
-
-        // Accept phone from shared contact or typed text (the connect-wizard guard took the text off the chat)
-        const raw = context.text?.trim();
-        const sharedPhone = context.contact?.phoneNumber;
-        const phoneInput = sharedPhone ?? raw;
-        const phone = phoneInput ? normalizePhone(phoneInput) : undefined;
-
-        if (!phone || !PHONE_REGEX.test(phone)) {
-          const invalidKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
-          await context.send(ct.invalidPhone, { reply_markup: invalidKb });
-          return;
-        }
-
-        // Check phone_hash uniqueness — another user may have this phone
-        const hash = SessionBridge.phoneHash(phone);
-        const existingByHash = sessionRepo.findByPhoneHash(hash);
-        if (existingByHash && existingByHash.user_id !== userId) {
-          await context.send(ct.phoneAlreadyUsed);
-          await context.scene.exit();
-          return;
-        }
-
-        // Immediate feedback: remove keyboard + show progress
-        await context.send(ct.sendingCode, { reply_markup: { remove_keyboard: true } });
-
-        // Single long-lived process: send_code now, sign_in later via stdin
-        const sessionPath = SessionBridge.reserveEmptySessionPath(userId);
-        const result = await SessionBridge.spawnSendAndSign(phone, sessionPath, userId);
-
-        if (!result.success) {
-          if (result.error === 'FLOOD_WAIT' && result.retryAfter !== undefined) {
-            const minutes = Math.ceil(result.retryAfter / 60);
-            await context.send(ct.floodWait(minutes));
-          } else {
-            sceneLogger.error({ err: new Error(result.message), userId }, 'sendCode failed');
-            await context.send(ct.featureUnavailable);
-          }
-          await SessionBridge.cleanupTempFile(sessionPath);
-          await context.scene.exit();
-          return;
-        }
-
-        if (!result.data || !('phone_code_hash' in result.data)) {
-          sceneLogger.error({ userId }, 'sendCode returned success but no phone_code_hash');
-          await context.send(ct.featureUnavailable);
-          await SessionBridge.cleanupTempFile(sessionPath);
-          await context.scene.exit();
-          return;
-        }
-
-        await context.scene.update(
-          {
-            encryptedPhoneHex: encryptPhoneForState(phone, masterKeyHex),
-            sessionPath,
-            codeAttempts: 0,
-          },
-          { step: undefined },
-        );
-        await context.send(ct.codeSent);
-        pendingStepTransitions.add(userId);
-        await context.scene.step.next();
+        await handlePhoneStep(context, env);
       })
 
       // Step 2: OTP code
       .step(['message', 'callback_query'], async (context) => {
-        const { lang } = context;
-        const l = lang ?? 'en';
-        const userId = context.from.id;
-        const ct = t(l).connectTelegram;
-
+        const env = envFor(context.lang, context.from.id);
         if (context.is('callback_query')) {
-          if (context.data === CB_CANCEL_AUTH) {
-            await handleCancelAuth(context, ct);
-          }
+          await handleAuthCallback(context, env.ct);
           return;
         }
-
-        const guardHit = pendingStepTransitions.delete(context.from.id);
-        // Fallback: contact shares are never OTP codes
-        // onNext in compose() persists the step unconditionally after all middleware runs
-        if (guardHit || context.contact) return;
-
-        const text = context.text?.trim();
-        const { encryptedPhoneHex, sessionPath, codeAttempts } = context.scene.state;
-
-        const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
-        if (!encryptedPhoneHex || !sessionPath || !masterKeyHex) {
-          sceneLogger.warn({ userId }, 'OTP step missing state or master key');
-          await context.send(ct.featureUnavailable);
-          await context.scene.exit();
-          return;
-        }
-
-        // Normalize: user enters "1 2 3 4 5" or "12-345" to avoid Telegram anti-phishing
-        const code = text ? normalizeOtpCode(text) : undefined;
-        if (!code || !CODE_REGEX.test(code)) {
-          const kb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
-          await context.send(ct.invalidCode, { reply_markup: kb });
-          return;
-        }
-
-        const attempts = (codeAttempts ?? 0) + 1;
-        await context.scene.update({ codeAttempts: attempts }, { step: undefined });
-
-        // Use the live auth handle (same MTProto session as send_code)
-        const handle = SessionBridge.getLiveAuthHandle(userId);
-        if (!handle) {
-          sceneLogger.warn({ userId }, 'No live auth handle — session expired, must start over');
-          await context.send(ct.codeExpired);
-          await SessionBridge.cleanupTempFile(sessionPath);
-          await context.scene.exit();
-          return;
-        }
-        const result = await handle.submitCode(code);
-
-        if (!result.success) {
-          if (result.error === 'CODE_EXPIRED') {
-            await context.send(ct.codeExpired);
-            await SessionBridge.cleanupTempFile(sessionPath);
-            await context.scene.exit();
-            return;
-          }
-
-          if (attempts >= MAX_CODE_ATTEMPTS) {
-            await context.send(ct.tooManyAttempts);
-            await SessionBridge.cleanupTempFile(sessionPath);
-            await context.scene.exit();
-            return;
-          }
-
-          if (result.error === 'FLOOD_WAIT' && result.retryAfter !== undefined) {
-            const minutes = Math.ceil(result.retryAfter / 60);
-            await context.send(ct.floodWait(minutes));
-            await SessionBridge.cleanupTempFile(sessionPath);
-            await context.scene.exit();
-            return;
-          }
-
-          const retryKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
-          await context.send(ct.invalidCode, { reply_markup: retryKb });
-          return;
-        }
-
-        if (!result.data || !('status' in result.data)) {
-          sceneLogger.error({ userId }, 'signIn returned success but no status');
-          await context.send(ct.featureUnavailable);
-          await SessionBridge.cleanupTempFile(sessionPath);
-          await context.scene.exit();
-          return;
-        }
-
-        if (result.data.status === '2fa_required') {
-          const enter2faKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
-          await context.send(ct.enter2fa, { reply_markup: enter2faKb });
-          await context.scene.update({ passwordAttempts: 0 }, { step: undefined });
-          pendingStepTransitions.add(userId);
-          await context.scene.step.next();
-          return;
-        }
-
-        // status === 'ok' — finalize
-        const phone = decryptPhoneFromState(encryptedPhoneHex, masterKeyHex);
-        const hasPending = await finalizeSession(context, sessionRepo, config, phone, sessionPath, l, deps);
-        if (hasPending) {
-          await context.scene.step.go(4); // Jump to pending invitation step
-        }
+        await handleCodeStep(context, env);
       })
 
       // Step 3: 2FA password
       .step(['message', 'callback_query'], async (context) => {
-        const { lang } = context;
-        const l = lang ?? 'en';
-        const userId = context.from.id;
-        const ct = t(l).connectTelegram;
-
+        const env = envFor(context.lang, context.from.id);
         if (context.is('callback_query')) {
-          if (context.data === CB_CANCEL_AUTH) {
-            await handleCancelAuth(context, ct);
-          }
+          await handleAuthCallback(context, env.ct);
           return;
         }
-
-        if (pendingStepTransitions.delete(context.from.id)) return;
-        const text = context.text?.trim();
-        // Fallback: if text looks like an OTP code (digits with optional spaces/dashes), it's re-processing
-        const maybeOtp = text ? normalizeOtpCode(text) : undefined;
-        if (maybeOtp && CODE_REGEX.test(maybeOtp)) return;
-
-        const { encryptedPhoneHex, sessionPath, passwordAttempts } = context.scene.state;
-        const cancelKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
-
-        const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
-        if (!encryptedPhoneHex || !sessionPath || !masterKeyHex) {
-          sceneLogger.warn({ userId }, '2FA step missing state or master key');
-          await context.send(ct.featureUnavailable);
-          await context.scene.exit();
-          return;
-        }
-
-        if (!text) {
-          await context.send(ct.invalid2fa, { reply_markup: cancelKb });
-          return;
-        }
-
-        // Use the same live auth handle — same Python process and MTProto connection
-        // that did send_code + sign_in. No new process = no session_empty overwrite.
-        const handle = SessionBridge.getLiveAuthHandle(userId);
-        if (!handle) {
-          sceneLogger.warn({ userId }, 'No live auth handle for 2FA — session expired, must start over');
-          await context.send(ct.codeExpired);
-          await SessionBridge.cleanupTempFile(sessionPath);
-          await context.scene.exit();
-          return;
-        }
-
-        const attempts = (passwordAttempts ?? 0) + 1;
-        await context.scene.update({ passwordAttempts: attempts }, { step: undefined });
-
-        const result = await handle.submitPassword(text);
-
-        if (!result.success) {
-          if (attempts >= MAX_PASSWORD_ATTEMPTS) {
-            await context.send(ct.tooManyAttempts);
-            SessionBridge.removeLiveAuthHandle(userId);
-            await SessionBridge.cleanupTempFile(sessionPath);
-            await context.scene.exit();
-            return;
-          }
-
-          if (result.error === 'FLOOD_WAIT' && result.retryAfter !== undefined) {
-            const minutes = Math.ceil(result.retryAfter / 60);
-            await context.send(ct.floodWait(minutes));
-            SessionBridge.removeLiveAuthHandle(userId);
-            await SessionBridge.cleanupTempFile(sessionPath);
-            await context.scene.exit();
-            return;
-          }
-
-          await context.send(ct.invalid2fa, { reply_markup: cancelKb });
-          return;
-        }
-
-        const phone = decryptPhoneFromState(encryptedPhoneHex, masterKeyHex);
-        const hasPending = await finalizeSession(context, sessionRepo, config, phone, sessionPath, l, deps);
-        if (hasPending) {
-          await context.scene.step.go(4); // Jump to pending invitation step
-        }
+        await handlePasswordStep(context, env);
       })
 
       // Step 4: Pending invitation callback
       .step('callback_query', async (context) => {
-        const { lang } = context;
-        const l = lang ?? 'en';
-        const userId = context.from.id;
-        const ct = t(l).connectTelegram;
-
         if (!context.is('callback_query')) return;
-        const data = context.data;
-        if (!data) return;
-
-        if (data === CB_SKIP_PENDING) {
-          await context.answer();
-          await context.scene.exit();
-          return;
-        }
-
-        // ct:send_all:{eventId} — batch send to all pending invitees
-        if (data.startsWith(`${CB_PREFIX}:send_all:`)) {
-          await context.answer();
-
-          if (!deps) {
-            sceneLogger.warn({ userId }, 'Post-connect deps not available');
-            await context.send(ct.featureUnavailable);
-            await context.scene.exit();
-            return;
-          }
-
-          const eventId = Number.parseInt(data.split(':')[2]!, 10);
-          if (Number.isNaN(eventId)) {
-            sceneLogger.warn({ userId, data }, 'Invalid send_all callback data');
-            await context.scene.exit();
-            return;
-          }
-
-          const pending = context.scene.params;
-          const inviteeIds = pending?.pendingInviteeIds ?? [];
-          let sentCount = 0;
-
-          for (const inviteeId of inviteeIds) {
-            const inviteeUsername = resolveInviteeUsername(deps, userId, inviteeId);
-            const result = deps.invitationService.sendInvitation(eventId, userId, inviteeId, inviteeUsername);
-
-            if (result.success && result.invitation) {
-              sentCount++;
-              deliverPostConnectInvitation(deps, userId, eventId, inviteeId, inviteeUsername, result.invitation.id, l);
-            } else {
-              sceneLogger.warn(
-                { userId, eventId, inviteeId, error: result.error },
-                'Batch invitation failed for invitee',
-              );
-            }
-          }
-
-          sceneLogger.info(
-            { userId, eventId, total: inviteeIds.length, sent: sentCount },
-            'Batch post-connect invitations',
-          );
-          await context.send(ct.pendingSent(sentCount || inviteeIds.length));
-          await context.scene.exit();
-          return;
-        }
+        await handlePendingInvitationStep(context, envFor(context.lang, context.from.id));
       })
   );
+}
+
+// --- Step handlers ---
+
+/** Ends the wizard with `message`, first dropping whatever login state is still alive. */
+async function abortWizardWith(
+  context: WizardExitContext,
+  message: string,
+  cleanup: { sessionPath?: string; dropLiveAuthOf?: number } = {},
+): Promise<void> {
+  await context.send(message);
+  if (cleanup.dropLiveAuthOf !== undefined) SessionBridge.removeLiveAuthHandle(cleanup.dropLiveAuthOf);
+  if (cleanup.sessionPath) await SessionBridge.cleanupTempFile(cleanup.sessionPath);
+  await context.scene.exit();
+}
+
+/** Re-prompts for the same credential, keeping the "Cancel authorization" button on the prompt. */
+async function promptWithCancel(context: WizardExitContext, ct: ConnectTelegramText, text: string): Promise<void> {
+  const kb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+  await context.send(text, { reply_markup: kb });
+}
+
+function floodWaitMinutes(result: BridgeError): number | undefined {
+  return result.error === 'FLOOD_WAIT' && result.retryAfter !== undefined
+    ? Math.ceil(result.retryAfter / 60)
+    : undefined;
+}
+
+async function handleAuthCallback(context: AuthCallbackContext, ct: ConnectTelegramText): Promise<void> {
+  if (context.data === CB_CANCEL_AUTH) await handleCancelAuth(context, ct);
+}
+
+async function showConsent(context: WizardExitContext, env: StepEnv): Promise<void> {
+  const { ct, userId, config, sessionRepo } = env;
+  if (!config.TELEGRAM_SESSION_MASTER_KEY) {
+    await abortWizardWith(context, ct.featureUnavailable);
+    return;
+  }
+  const lastAttempt = connectAttempts.get(userId);
+  if (isConnectCooldownActive(userId) && lastAttempt !== undefined) {
+    const remaining = Math.ceil((CONNECT_COOLDOWN_MS - (Date.now() - lastAttempt)) / 1000);
+    await abortWizardWith(context, ct.cooldown(remaining));
+    return;
+  }
+  // Already connected — show the masked phone and the reconnect option
+  const existing = sessionRepo.findByUserId(userId);
+  if (existing?.status === 'active') {
+    const kb = new InlineKeyboard().text(ct.btnReconnect, CB_RECONNECT).text(ct.btnCancel, CB_CANCEL);
+    await context.send(ct.alreadyConnected(existing.phone_masked), { reply_markup: kb });
+    return;
+  }
+  const kb = new InlineKeyboard().text(ct.btnConnect, CB_CONNECT).text(ct.btnCancel, CB_CANCEL);
+  await context.send(ct.consent, { reply_markup: kb });
+}
+
+async function handleConsentCallback(context: ConsentCallbackContext, env: StepEnv): Promise<void> {
+  const { data } = context;
+  if (data === CB_CANCEL) {
+    await context.answer();
+    await context.send(env.ct.cancelled);
+    await context.scene.exit();
+  } else if (data === CB_CONNECT || data === CB_RECONNECT) {
+    registerConnectAttempt(env.userId);
+    await context.answer();
+    await askForPhone(context, env);
+  }
+}
+
+async function askForPhone(context: ConsentCallbackContext, env: StepEnv): Promise<void> {
+  const { ct, userId } = env;
+  const phoneKb = new Keyboard().requestContact(ct.btnSharePhone).resized().oneTime();
+  // Telegram persists the reply-keyboard at chat level (not per message),
+  // so we install it via a throwaway message and delete that message
+  // immediately. The "📱 Поделиться номером" button stays in the input area.
+  // This frees the visible prompt to carry the inline "Отменить авторизацию"
+  // button instead of shipping it as a separate second message.
+  const kbMsg = await context.send('…', { reply_markup: phoneKb });
+  kbMsg
+    .delete()
+    .catch((err: unknown) => sceneLogger.warn({ err, userId }, 'failed to delete throwaway reply-keyboard message'));
+  const cancelKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+  await context.send(ct.enterPhone, { reply_markup: cancelKb });
+  await context.scene.step.next();
+}
+
+/** A shared contact or typed text, normalised; undefined when it is not a usable phone number. */
+function readPhoneInput(context: WizardMessageContext): string | undefined {
+  const phoneInput = context.contact?.phoneNumber ?? context.text?.trim();
+  const phone = phoneInput ? normalizePhone(phoneInput) : undefined;
+  return phone && PHONE_REGEX.test(phone) ? phone : undefined;
+}
+
+/** The user-facing failure for a send-code attempt, or undefined when the code was sent. */
+function sendCodeFailure(result: BridgeResult, ct: ConnectTelegramText, userId: number): string | undefined {
+  if (!result.success) {
+    const minutes = floodWaitMinutes(result);
+    if (minutes !== undefined) return ct.floodWait(minutes);
+    sceneLogger.error({ err: new Error(result.message), userId }, 'sendCode failed');
+    return ct.featureUnavailable;
+  }
+  if (!result.data || !('phone_code_hash' in result.data)) {
+    sceneLogger.error({ userId }, 'sendCode returned success but no phone_code_hash');
+    return ct.featureUnavailable;
+  }
+  return undefined;
+}
+
+async function handlePhoneStep(context: WizardMessageContext, env: StepEnv): Promise<void> {
+  const { ct, userId, sessionRepo } = env;
+  const masterKeyHex = env.config.TELEGRAM_SESSION_MASTER_KEY;
+  if (!masterKeyHex) {
+    await abortWizardWith(context, ct.featureUnavailable);
+    return;
+  }
+
+  // Accept phone from shared contact or typed text (the connect-wizard guard took the text off the chat)
+  const phone = readPhoneInput(context);
+  if (!phone) {
+    await promptWithCancel(context, ct, ct.invalidPhone);
+    return;
+  }
+
+  // Check phone_hash uniqueness — another user may have this phone
+  const existingByHash = sessionRepo.findByPhoneHash(SessionBridge.phoneHash(phone));
+  if (existingByHash && existingByHash.user_id !== userId) {
+    await abortWizardWith(context, ct.phoneAlreadyUsed);
+    return;
+  }
+
+  // Immediate feedback: remove keyboard + show progress
+  await context.send(ct.sendingCode, { reply_markup: { remove_keyboard: true } });
+
+  // Single long-lived process: send_code now, sign_in later via stdin
+  const sessionPath = SessionBridge.reserveEmptySessionPath(userId);
+  const result = await SessionBridge.spawnSendAndSign(phone, sessionPath, userId);
+  const failure = sendCodeFailure(result, ct, userId);
+  if (failure) {
+    await abortWizardWith(context, failure, { sessionPath });
+    return;
+  }
+
+  await context.scene.update(
+    { encryptedPhoneHex: encryptPhoneForState(phone, masterKeyHex), sessionPath, codeAttempts: 0 },
+    { step: undefined },
+  );
+  await context.send(ct.codeSent);
+  pendingStepTransitions.add(userId);
+  await context.scene.step.next();
+}
+
+/** Decrypts the phone and finishes the login; a pending invitation offer moves the wizard to step 4. */
+async function finishLogin(
+  context: WizardMessageContext,
+  env: StepEnv,
+  stored: { encryptedPhoneHex: string; masterKeyHex: string; sessionPath: string },
+): Promise<void> {
+  const phone = decryptPhoneFromState(stored.encryptedPhoneHex, stored.masterKeyHex);
+  const hasPending = await finalizeSession(
+    context,
+    env.sessionRepo,
+    env.config,
+    phone,
+    stored.sessionPath,
+    env.lang,
+    env.deps,
+  );
+  if (hasPending) {
+    await context.scene.step.go(4); // Jump to pending invitation step
+  }
+}
+
+async function handleCodeRejected(
+  context: WizardMessageContext,
+  env: StepEnv,
+  result: BridgeError,
+  attempts: number,
+  sessionPath: string,
+): Promise<void> {
+  const { ct } = env;
+  const minutes = floodWaitMinutes(result);
+  let abortMessage: string | undefined;
+  if (result.error === 'CODE_EXPIRED') abortMessage = ct.codeExpired;
+  else if (attempts >= MAX_CODE_ATTEMPTS) abortMessage = ct.tooManyAttempts;
+  else if (minutes !== undefined) abortMessage = ct.floodWait(minutes);
+  if (abortMessage === undefined) await promptWithCancel(context, ct, ct.invalidCode);
+  else await abortWizardWith(context, abortMessage, { sessionPath });
+}
+
+async function handleCodeAccepted(
+  context: WizardMessageContext,
+  env: StepEnv,
+  result: BridgeSuccess,
+  stored: { encryptedPhoneHex: string; masterKeyHex: string; sessionPath: string },
+): Promise<void> {
+  const { ct, userId } = env;
+  if (!result.data || !('status' in result.data)) {
+    sceneLogger.error({ userId }, 'signIn returned success but no status');
+    await abortWizardWith(context, ct.featureUnavailable, { sessionPath: stored.sessionPath });
+    return;
+  }
+  if (result.data.status === '2fa_required') {
+    await promptWithCancel(context, ct, ct.enter2fa);
+    await context.scene.update({ passwordAttempts: 0 }, { step: undefined });
+    pendingStepTransitions.add(userId);
+    await context.scene.step.next();
+    return;
+  }
+  // status === 'ok' — finalize
+  await finishLogin(context, env, stored);
+}
+
+async function handleCodeStep(context: WizardMessageContext, env: StepEnv): Promise<void> {
+  const { ct, userId } = env;
+  // Fallback: contact shares are never OTP codes
+  // onNext in compose() persists the step unconditionally after all middleware runs
+  if (pendingStepTransitions.delete(userId) || context.contact) return;
+
+  const { encryptedPhoneHex, sessionPath, codeAttempts } = context.scene.state;
+  const masterKeyHex = env.config.TELEGRAM_SESSION_MASTER_KEY;
+  if (!encryptedPhoneHex || !sessionPath || !masterKeyHex) {
+    sceneLogger.warn({ userId }, 'OTP step missing state or master key');
+    await abortWizardWith(context, ct.featureUnavailable);
+    return;
+  }
+
+  // Normalize: user enters "1 2 3 4 5" or "12-345" to avoid Telegram anti-phishing
+  const text = context.text?.trim();
+  const code = text ? normalizeOtpCode(text) : undefined;
+  if (!code || !CODE_REGEX.test(code)) {
+    await promptWithCancel(context, ct, ct.invalidCode);
+    return;
+  }
+
+  const attempts = (codeAttempts ?? 0) + 1;
+  await context.scene.update({ codeAttempts: attempts }, { step: undefined });
+
+  // Use the live auth handle (same MTProto session as send_code)
+  const handle = SessionBridge.getLiveAuthHandle(userId);
+  if (!handle) {
+    sceneLogger.warn({ userId }, 'No live auth handle — session expired, must start over');
+    await abortWizardWith(context, ct.codeExpired, { sessionPath });
+    return;
+  }
+  const result = await handle.submitCode(code);
+  if (result.success) await handleCodeAccepted(context, env, result, { encryptedPhoneHex, masterKeyHex, sessionPath });
+  else await handleCodeRejected(context, env, result, attempts, sessionPath);
+}
+
+async function handlePasswordRejected(
+  context: WizardMessageContext,
+  env: StepEnv,
+  result: BridgeError,
+  attempts: number,
+  sessionPath: string,
+): Promise<void> {
+  const { ct, userId } = env;
+  const minutes = floodWaitMinutes(result);
+  let abortMessage: string | undefined;
+  if (attempts >= MAX_PASSWORD_ATTEMPTS) abortMessage = ct.tooManyAttempts;
+  else if (minutes !== undefined) abortMessage = ct.floodWait(minutes);
+  if (abortMessage === undefined) await promptWithCancel(context, ct, ct.invalid2fa);
+  else await abortWizardWith(context, abortMessage, { sessionPath, dropLiveAuthOf: userId });
+}
+
+async function handlePasswordStep(context: WizardMessageContext, env: StepEnv): Promise<void> {
+  const { ct, userId } = env;
+  if (pendingStepTransitions.delete(userId)) return;
+  const text = context.text?.trim();
+  // Fallback: if text looks like an OTP code (digits with optional spaces/dashes), it's re-processing
+  const maybeOtp = text ? normalizeOtpCode(text) : undefined;
+  if (maybeOtp && CODE_REGEX.test(maybeOtp)) return;
+
+  const { encryptedPhoneHex, sessionPath, passwordAttempts } = context.scene.state;
+  const masterKeyHex = env.config.TELEGRAM_SESSION_MASTER_KEY;
+  if (!encryptedPhoneHex || !sessionPath || !masterKeyHex) {
+    sceneLogger.warn({ userId }, '2FA step missing state or master key');
+    await abortWizardWith(context, ct.featureUnavailable);
+    return;
+  }
+
+  if (!text) {
+    await promptWithCancel(context, ct, ct.invalid2fa);
+    return;
+  }
+
+  // Use the same live auth handle — same Python process and MTProto connection
+  // that did send_code + sign_in. No new process = no session_empty overwrite.
+  const handle = SessionBridge.getLiveAuthHandle(userId);
+  if (!handle) {
+    sceneLogger.warn({ userId }, 'No live auth handle for 2FA — session expired, must start over');
+    await abortWizardWith(context, ct.codeExpired, { sessionPath });
+    return;
+  }
+
+  const attempts = (passwordAttempts ?? 0) + 1;
+  await context.scene.update({ passwordAttempts: attempts }, { step: undefined });
+
+  const result = await handle.submitPassword(text);
+  if (result.success) await finishLogin(context, env, { encryptedPhoneHex, masterKeyHex, sessionPath });
+  else await handlePasswordRejected(context, env, result, attempts, sessionPath);
+}
+
+/** Sends the pending invitation to every invitee; returns how many were created. */
+function sendPendingInvitations(
+  deps: ConnectTelegramDeps,
+  userId: number,
+  eventId: number,
+  inviteeIds: number[],
+  lang: 'en' | 'ru',
+): number {
+  let sentCount = 0;
+  for (const inviteeId of inviteeIds) {
+    const inviteeUsername = resolveInviteeUsername(deps, userId, inviteeId);
+    const result = deps.invitationService.sendInvitation(eventId, userId, inviteeId, inviteeUsername);
+
+    if (result.success && result.invitation) {
+      sentCount++;
+      deliverPostConnectInvitation(deps, userId, eventId, inviteeId, inviteeUsername, result.invitation.id, lang);
+    } else {
+      sceneLogger.warn({ userId, eventId, inviteeId, error: result.error }, 'Batch invitation failed for invitee');
+    }
+  }
+  return sentCount;
+}
+
+async function handlePendingInvitationStep(context: PendingInvitationContext, env: StepEnv): Promise<void> {
+  const { data } = context;
+  if (!data) return;
+
+  if (data === CB_SKIP_PENDING) {
+    await context.answer();
+    await context.scene.exit();
+    return;
+  }
+
+  // ct:send_all:{eventId} — batch send to all pending invitees
+  if (!data.startsWith(`${CB_PREFIX}:send_all:`)) return;
+  await context.answer();
+
+  const { deps, ct, userId } = env;
+  if (!deps) {
+    sceneLogger.warn({ userId }, 'Post-connect deps not available');
+    await abortWizardWith(context, ct.featureUnavailable);
+    return;
+  }
+
+  const eventId = Number.parseInt(data.split(':')[2]!, 10);
+  if (Number.isNaN(eventId)) {
+    sceneLogger.warn({ userId, data }, 'Invalid send_all callback data');
+    await context.scene.exit();
+    return;
+  }
+
+  const inviteeIds = context.scene.params?.pendingInviteeIds ?? [];
+  const sentCount = sendPendingInvitations(deps, userId, eventId, inviteeIds, env.lang);
+  sceneLogger.info({ userId, eventId, total: inviteeIds.length, sent: sentCount }, 'Batch post-connect invitations');
+  await context.send(ct.pendingSent(sentCount || inviteeIds.length));
+  await context.scene.exit();
 }
 
 // --- Helpers ---
