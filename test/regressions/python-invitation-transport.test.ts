@@ -20,6 +20,7 @@ const TIMEOUT_MS: Record<string, number> = {
   'test_prebuilt_deploy.py': 180_000,
   'test_odroid_stage_qa.py': 180_000,
   'test_stage_fetch_artifact.py': 180_000,
+  'test_stage_qa_gate.py': 180_000,
   'test_stage_qa_pc.py': 180_000,
   'test_stage_smoke.py': 180_000,
 };
