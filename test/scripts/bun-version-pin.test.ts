@@ -9,6 +9,7 @@ const pins = (path: string, pattern: RegExp) => [...read(path).matchAll(pattern)
 test('CI, both images, the release gate and @types/bun pin the same Bun version', () => {
   const found = {
     'deploy.yml': pins('.github/workflows/deploy.yml', /bun-version: (\S+)/g),
+    'pr-ci.yml': pins('.github/workflows/pr-ci.yml', /bun-version: (\S+)/g),
     'dependency-review.yml': pins('.github/workflows/dependency-review.yml', /bun-version: (\S+)/g),
     Dockerfile: pins('Dockerfile', /^ARG BUN_VERSION=(\S+)$/gm),
     'ci.Dockerfile': pins('.github/ci.Dockerfile', /^ARG BUN_VERSION=(\S+)$/gm),
