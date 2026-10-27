@@ -6,6 +6,9 @@ common="$(git rev-parse --path-format=absolute --git-common-dir)"
 canonical="${common%/.git}"
 root="${AGENT_TOOLS_ROOT:-}"
 env_file="${XDG_CONFIG_HOME:-$HOME/.config}/agent-tools/env"
+# The per-user agent-tools env file only lives in the invoking user's config directory (path decided at
+# run time, not in this repository), so there is nothing for shellcheck to follow (SC1090).
+# shellcheck source=/dev/null
 if [[ -f "$env_file" && ! -L "$env_file" ]]; then . "$env_file"; fi
 root="${root:-${AGENT_TOOLS_ROOT:-}}"
 [[ -n "$root" && -x "$root/ci/ship/ship.sh" ]] || { echo 'Shared gh ship unavailable' >&2; exit 127; }
