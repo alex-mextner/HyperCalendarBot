@@ -52,7 +52,8 @@ LEFTOVER_FULLTREE="${LEFTOVER_FULLTREE:-0}"
 # Resolve a base ref or empty (-> full-tree scan).
 base=""
 if [ "$LEFTOVER_FULLTREE" != "1" ]; then
-  if git rev-parse --verify --quiet "$LEFTOVER_BASE" >/dev/null 2>&1; then base="$LEFTOVER_BASE"
+  if git rev-parse --verify --quiet "$LEFTOVER_BASE" >/dev/null 2>&1; then
+    base="$LEFTOVER_BASE"
   elif git rev-parse --verify --quiet main >/dev/null 2>&1; then base="main"; fi
 fi
 
@@ -87,8 +88,14 @@ emit_lines() {
 violations=0
 warnings=0
 report() { # <severity> <file> <lineno> <rule> <text>
-  if [ "$1" = "WARN" ]; then warnings=$((warnings+1)); echo "  warn  [$4] $2:$3  $5" >&2
-  else violations=$((violations+1)); echo "::error file=$2,line=$3::[$4] $5"; echo "  BLOCK [$4] $2:$3  $5" >&2; fi
+  if [ "$1" = "WARN" ]; then
+    warnings=$((warnings + 1))
+    echo "  warn  [$4] $2:$3  $5" >&2
+  else
+    violations=$((violations + 1))
+    echo "::error file=$2,line=$3::[$4] $5"
+    echo "  BLOCK [$4] $2:$3  $5" >&2
+  fi
 }
 
 if [ -n "$base" ]; then echo "[leftover] scanning diff vs ${base} ..." >&2; else echo "[leftover] scanning full tree ..." >&2; fi
@@ -113,7 +120,8 @@ while IFS=$'\t' read -r file ln text; do
     # an anchored pattern like ^scripts/ matches in both.
     if [ -n "$CONSOLE_EXCLUDE" ] && printf '%s' "$file" | grep -qE "$CONSOLE_EXCLUDE"; then
       :
-    elif [ "$ALLOW_CONSOLE" = "1" ]; then report WARN "$file" "$ln" "console" "$text"
+    elif [ "$ALLOW_CONSOLE" = "1" ]; then
+      report WARN "$file" "$ln" "console" "$text"
     else report BLOCK "$file" "$ln" "console" "$text"; fi
   fi
   # TODO/FIXME without a tracker reference
@@ -123,5 +131,8 @@ while IFS=$'\t' read -r file ln text; do
 done < <(emit_lines)
 
 echo "[leftover] $violations blocking, $warnings warning(s)." >&2
-[ "$violations" = "0" ] || { echo "[leftover] FAIL — remove the leftovers above (or reference a ticket on the TODO)." >&2; exit 1; }
+[ "$violations" = "0" ] || {
+  echo "[leftover] FAIL — remove the leftovers above (or reference a ticket on the TODO)." >&2
+  exit 1
+}
 echo "[leftover] PASS."

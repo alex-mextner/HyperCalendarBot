@@ -84,7 +84,7 @@ WORD_START='(^|[^[:alnum:]_])'
 violations=0
 
 report() {
-  violations=$((violations+1))
+  violations=$((violations + 1))
   echo "::error file=$1,line=$2::[$3] $4"
   echo "  BLOCK [$3] $1:$2  $4" >&2
 }
