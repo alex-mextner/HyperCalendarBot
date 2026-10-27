@@ -28,24 +28,24 @@ and stays where it is; everything else that keeps several cores busy for more th
 goes to the pod.
 
 ```bash
-# The pod mirrors CI (deploy.yml) as the unprivileged runner user: bun 1.4.2, ffmpeg, a plain
-# `bun install` (the pod only needs node_modules to run the suite; the stale-lock check is CI's
-# `bun install --frozen-lockfile`, see docs/reference/deploy-runbook.md), Playwright's chromium-headless-shell for
+# The pod mirrors CI (deploy.yml, pr-ci.yml) as the unprivileged runner user: bun 1.4.2, ffmpeg, the
+# same `bun install --frozen-lockfile` (the committed bun.lock installs frozen on linux, so a
+# stale lock fails here too — see docs/reference/deploy-runbook.md), Playwright's chromium-headless-shell for
 # test/worker/playwright-pool.test.ts (which refuses skipped browser tests). The apt list is
 # Playwright's own chromium dependency list for Ubuntu 24.04 (playwright-core nativeDeps.js).
 HCB_APT=ffmpeg,libasound2t64,libatk-bridge2.0-0t64,libatk1.0-0t64,libatspi2.0-0t64,libcairo2,libcups2t64,libdbus-1-3,libdrm2,libgbm1,libglib2.0-0t64,libnspr4,libnss3,libpango-1.0-0,libx11-6,libxcb1,libxcomposite1,libxdamage1,libxext6,libxfixes3,libxkbcommon0,libxrandr2
 HCB_BOOT='curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash -s -- bun-v1.4.2 && chmod -R a+rX /opt/bun'
-runpod-run --apt "$HCB_APT" --bootstrap "$HCB_BOOT" -- bash -c 'bun install && bunx playwright install chromium-headless-shell && bun test'
+runpod-run --apt "$HCB_APT" --bootstrap "$HCB_BOOT" -- bash -c 'bun install --frozen-lockfile && bunx playwright install chromium-headless-shell && bun test'
                                         # full suite on a 4-vCPU CPU pod ($0.16/h on 2026-10-11; --dry-run shows today's), pod deleted when done
-runpod-run --ttl 30 --apt "$HCB_APT" --bootstrap "$HCB_BOOT" -- bash -c 'bun install && bunx playwright install chromium-headless-shell && bun test'
+runpod-run --ttl 30 --apt "$HCB_APT" --bootstrap "$HCB_BOOT" -- bash -c 'bun install --frozen-lockfile && bunx playwright install chromium-headless-shell && bun test'
                                         # same, keeping the pod 30 idle minutes between runs (bootstrap and apt run once per pod)
-runpod-run --ttl 30 --apt "$HCB_APT" --bootstrap "$HCB_BOOT" -- bash -c 'bun install && bunx playwright install chromium-headless-shell && bun test --coverage'
+runpod-run --ttl 30 --apt "$HCB_APT" --bootstrap "$HCB_BOOT" -- bash -c 'bun install --frozen-lockfile && bunx playwright install chromium-headless-shell && bun test --coverage'
                                         # coverage report, same pod
 bun test test/services/intent/intent-learner.test.ts   # local: one file, that's the limit
 ```
 
-`--bootstrap` replaces the lockfile-detected install (a frozen `bun install` that fails on
-linux, plus the `uv.lock` torch stack the suite does not need) with just the bun toolchain;
+`--bootstrap` replaces the lockfile-detected install (which also pulls the `uv.lock` torch stack
+the suite does not need) with just the bun toolchain;
 the install, browser download and tests then run as `runner`, never root — the `postinstall`
 hook and the permission (`EACCES`) tests behave as on CI. `runpod-run --dry-run -- …` prints
 the plan and price. `runpod-run --status` lists every pod on the account; bare

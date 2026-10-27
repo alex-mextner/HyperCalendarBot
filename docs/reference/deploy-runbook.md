@@ -283,7 +283,9 @@ To roll back: stop the bot on the odroid first. If the odroid wrote anything aft
 
 ## PR CI (full test, lint and typecheck gate)
 
-`.github/workflows/pr-ci.yml` (job `test`) runs on every same-repository pull request to `main` the same gate that `deploy.yml`'s `test` job runs after merge: Bun 1.4.2, ffmpeg, one `bun install --frozen-lockfile` (a `package.json` change without its `bun.lock` change fails here), Playwright `chromium-headless-shell`, full `bun test`, `bun run lint` and `tsc --noEmit`. Before this, a PR ran none of them and a red suite surfaced only on the push to `main`, after merge. The workflow has a read-only token, no secrets and no self-hosted runner, skips fork PRs, and cancels the previous run when a PR gets a new push. It replaces the branch-gated GH-359 stub `pr-gh359-validation.yml`, which was always skipped. `test/scripts/bun-version-pin.test.ts` keeps its Bun pin equal to the other pins, and `test/scripts/ci-lockfile-gate.test.ts` keeps both workflows on the frozen install and proves the command rejects a stale lock (#870).
+`.github/workflows/pr-ci.yml` (job `test`) runs on every same-repository pull request to `main` the same gate that `deploy.yml`'s `test` job runs after merge: Bun 1.4.2, ffmpeg, `bun install --frozen-lockfile` as the first and only dependency install (a `package.json` change without the matching `bun.lock` fails the job, GH-870), Playwright `chromium-headless-shell`, full `bun test`, `bun run lint` and `tsc --noEmit`. Before this, a PR ran none of them and a red suite surfaced only on the push to `main`, after merge. The workflow has a read-only token, no secrets and no self-hosted runner, skips fork PRs, and cancels the previous run when a PR gets a new push. It replaces the branch-gated GH-359 stub `pr-gh359-validation.yml`, which was always skipped. `test/scripts/bun-version-pin.test.ts` keeps its Bun pin equal to the other pins; `test/scripts/workflow-install-order.test.ts` keeps this install step identical in `deploy.yml` and `pr-ci.yml`.
+
+Apt is bounded in `pr-ci.yml`. On 2026-10-27 the azure Ubuntu mirror was slow, not down: the unbounded `apt-get update && install ffmpeg` step took 12 minutes 24 seconds in PR CI run 40573146944 (normally about 20 seconds) and was still running after 15 minutes in run 40573388213, with no log output; a first 300-second ceiling (run 40576298443) was exceeded while the log still showed ffmpeg's dependencies downloading one by one (about 14 MB in the last 17 seconds, a 5.8 MB package in 28), so the ceilings now sit above the slow case. The job has `timeout-minutes: 75`, a step writes `Acquire::Retries`/`Timeout` settings into `/etc/apt/apt.conf.d/99-ci-bounded` (which also bounds Playwright's own apt calls, each 25 minutes), ffmpeg is installed only when `ffmpeg -version` fails (`apt-get update` 300 s, install 1200 s, step 25 minutes), and the step then runs `ffmpeg -version` again: an unusable ffmpeg fails the job, tests are never skipped or stubbed. `deploy.yml`'s `test` job still has the old unbounded step because it did not stall.
 
 This is the hosted check only. Agents still validate the exact PR head with the full suite on Runpod (AGENTS.md § Heavy work runs on Runpod), never a full `bun test` on the shared workstation.
 
@@ -340,23 +342,12 @@ scripts/install-stage-qa-pc.sh   # lib dir ~/.local/lib/hypercal-stage-qa, entry
 
 ## bun lockfile and --frozen-lockfile
 
-`bun install --frozen-lockfile` fails when `package.json` and `bun.lock` disagree, and it never
-rewrites the lock. That is the check CI needs, so it must be the **only** install before the suite:
-a plain `bun install` ahead of it rewrites `bun.lock` in the runner's checkout, and the frozen
-install then validates the file the first install just wrote — a stale lock merges unnoticed and
-fails later on the next clean frozen install (#870).
+The committed `bun.lock` is frozen-installable on linux (verified 2026-10-27 with Bun 1.4.2: `bun install --frozen-lockfile` exits 0 and leaves `bun.lock` byte-identical, and the same command exits 1 with `lockfile had changes, but lockfile is frozen` once `package.json` gains a dependency the lock lacks). The earlier note that a macOS arm64 lockfile fails on linux came from platform-specific optional dependencies (`@rollup/rollup-darwin-arm64` vs `@rollup/rollup-linux-x64-gnu`) that the manifest no longer contains. If a new dependency brings back a platform-dependent lock, regenerate `bun.lock` with a normal commit; do not weaken the CI check.
 
-The 2026-03 note that a macOS arm64 lockfile fails `--frozen-lockfile` on linux amd64 predates the
-Bun 1.4.2 pin. On 2026-10-27 the committed `bun.lock` passed
-`bun install --frozen-lockfile --dry-run --ignore-scripts` on linux x64 with Bun 1.4.2, and
-`test/scripts/ci-lockfile-gate.test.ts` re-checks that on every run. If it ever fails on linux
-again, regenerate `bun.lock` with the pinned Bun and commit it; do not put a plain `bun install`
-back in front of the check, and do not add a fallback to one, because either hides the drift.
-
-- **CI** (linux, `deploy.yml` and `pr-ci.yml`): `bun install --frozen-lockfile` — fails on a stale lock.
-- **Docker** (linux): `bun install --ignore-scripts` — respects lockfile version pins, adjusts
-  only platform-specific optional deps.
-- **Local** (macOS): `bun install` — generates/updates the lockfile; commit it with the manifest change.
+- **CI** (linux, `deploy.yml` and `pr-ci.yml`): `bun install --frozen-lockfile` as the first install. Never run a plain `bun install` before it: that rewrites `bun.lock` in the runner and the frozen check then passes on a lockfile nobody committed (GH-870). The install keeps lifecycle scripts, so `scripts/install-git-hooks.sh` runs as on a developer checkout.
+- **Docker** (linux): `bun install --ignore-scripts` with the copied `bun.lock` — respects the lockfile's version pins and skips the lefthook postinstall (no git in the image).
+- **Local**: `bun install --frozen-lockfile` to reproduce CI; a plain `bun install` only when you are deliberately updating `bun.lock`.
+- **Local release fallback** (`scripts/deploy-local-fallback.sh`): `bun install --frozen-lockfile --ignore-scripts` — the same frozen check, without lifecycle scripts because it builds a release, not a developer checkout.
 
 ## bun install --production in Docker
 
