@@ -688,7 +688,7 @@ export class NotificationScheduler {
     const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
     const weather = await fetchDayWeather(this.deps.weatherService, pref.timezone, lang);
     const botTip = this.pickFreeDayTip(pref, lang, agendaEvents.length);
-    // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
+    // TODO(#863): 'image' format requires sendPhoto (architectural change) — render as text for now
     let payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents, { weather, botTip }).text;
     if (clockChange) {
       payload += `\n\n${formatClockChangeNotice(lang, clockChange)}`;
@@ -817,7 +817,7 @@ export class NotificationScheduler {
     const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
     const tomorrowWeather = await fetchTomorrowWeather(this.deps.weatherService, pref.timezone, lang, localTomorrowIso);
     const botTip = this.pickFreeDayTip(pref, lang, agendaEvents.length);
-    // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
+    // TODO(#863): 'image' format requires sendPhoto (architectural change) — render as text for now
     const payload = renderer.renderEveningReview(lang, dateLabel, agendaEvents, {
       weather: tomorrowWeather,
       botTip,

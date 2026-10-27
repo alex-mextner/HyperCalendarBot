@@ -1,4 +1,5 @@
 /** Text building blocks shared by the Markdown and HTML renderers: escaping, code spans and step descriptions. */
+import type { Binding } from '../src/services/intent/workflow-bindings.ts';
 import type { WorkflowInputValue } from '../src/services/intent/workflow-input.ts';
 import { type I18nMap, type Level2Step, WorkflowSchema } from '../src/services/intent/workflow-schema.ts';
 import type { CatalogueEntry } from './intent-doc-catalogue.ts';
@@ -64,7 +65,7 @@ export const htmlOf = (segments: Segment[]): string =>
 // ─── workflow descriptions ──────────────────────────────────────────────────
 
 export interface WorkflowView {
-  bindings: [string, Record<string, unknown>][];
+  bindings: [string, Binding][];
   steps: Level2Step[];
   ru: { [key: string]: string };
 }
@@ -127,10 +128,10 @@ export function describeStep(step: Level2Step, ru: { [key: string]: string }): S
   return step.when ? [say('Если выполняется условие '), lit(step.when), say(', то '), ...stopped] : capitalize(stopped);
 }
 
-export function describeBinding(name: string, binding: Record<string, unknown>): Segment[] {
+export function describeBinding(name: string, binding: Binding): Segment[] {
   const type = String(binding.type);
   const segments = [lit(name), say(` — ${bindingTypeTitles[type] ?? type}`)];
-  for (const [key, value] of Object.entries(binding)) {
+  for (const [key, value] of Object.entries<unknown>(binding)) {
     if (key === 'type') continue;
     if (value !== null && typeof value === 'object')
       segments.push(

@@ -11,11 +11,14 @@ import {
 
 type Call = [string, ...unknown[]];
 
+/** What a raw RESP command can answer in these tests: a member list, a counter, a string or nil. */
+type RawReply = string[] | number | string | null;
+
 /**
  * A Bun.RedisClient stand-in recording every command it receives. `get` answers `getReply`; raw
  * `send` commands answer `sendReplies[command]`.
  */
-function fakeRedis(replies: { get?: string | null; send?: Record<string, unknown> } = {}) {
+function fakeRedis(replies: { get?: string | null; send?: { [command: string]: RawReply } } = {}) {
   const calls: Call[] = [];
   const redis = {
     set: async (...args: unknown[]) => {

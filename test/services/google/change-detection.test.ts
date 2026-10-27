@@ -3,6 +3,8 @@ import type { CalendarEvent } from '../../../src/database/types.ts';
 import {
   computeEventDiff,
   type EventFieldSnapshot,
+  type FieldChange,
+  fieldChangesToUpdate,
   formatChanges,
   getPersonalChanges,
   getSharedChanges,
@@ -279,5 +281,34 @@ describe('formatChanges', () => {
     const lines = result.split('\n');
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain('10:00 → 12:00');
+  });
+});
+
+describe('fieldChangesToUpdate', () => {
+  test('turns tracked field diffs into an event update, all_day staying a boolean', () => {
+    const changes: FieldChange[] = [
+      { field: 'title', oldValue: 'Old', newValue: 'New' },
+      { field: 'all_day', oldValue: false, newValue: true },
+      { field: 'location', oldValue: 'Cafe', newValue: null },
+      { field: 'timezone', oldValue: 'UTC', newValue: 'Europe/Berlin' },
+    ];
+
+    expect(fieldChangesToUpdate(changes)).toEqual({
+      title: 'New',
+      all_day: true,
+      location: null,
+      timezone: 'Europe/Berlin',
+    });
+  });
+
+  test('a value of the wrong type for a non-null column is ignored, not written', () => {
+    const changes: FieldChange[] = [
+      { field: 'title', oldValue: 'Old', newValue: true },
+      { field: 'all_day', oldValue: false, newValue: 'false' },
+      { field: 'start_at', oldValue: '2026-01-01T10:00:00Z', newValue: null },
+      { field: 'end_at', oldValue: null, newValue: '2026-01-01T11:00:00Z' },
+    ];
+
+    expect(fieldChangesToUpdate(changes)).toEqual({ end_at: '2026-01-01T11:00:00Z' });
   });
 });

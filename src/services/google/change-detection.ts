@@ -1,6 +1,6 @@
 import type { Lang } from '../../config/constants.ts';
 import { t } from '../../config/constants.ts';
-import type { CalendarEvent } from '../../database/types.ts';
+import type { CalendarEvent, UpdateEventData } from '../../database/types.ts';
 
 export interface EventFieldSnapshot {
   title: string;
@@ -167,4 +167,33 @@ export function formatChanges(changes: FieldChange[], lang: Lang): string {
     if (line) lines.push(line);
   }
   return lines.join('\n');
+}
+
+/** Applies one tracked-field diff to the update; a value of the wrong type for its column is ignored. */
+function applyFieldChange(updateData: UpdateEventData, { field, newValue }: FieldChange): void {
+  switch (field) {
+    case 'all_day':
+      if (typeof newValue === 'boolean') updateData.all_day = newValue;
+      break;
+    case 'title':
+    case 'timezone':
+    case 'start_at':
+      if (typeof newValue === 'string') updateData[field] = newValue;
+      break;
+    case 'description':
+    case 'end_at':
+    case 'location':
+    case 'recurrence_rule':
+      if (newValue === null || typeof newValue === 'string') updateData[field] = newValue;
+      break;
+    default:
+      field satisfies never;
+  }
+}
+
+/** Google-sync proposals store field diffs; the event repository maps all_day to 0/1 itself. */
+export function fieldChangesToUpdate(changes: FieldChange[]): UpdateEventData {
+  const updateData: UpdateEventData = {};
+  for (const change of changes) applyFieldChange(updateData, change);
+  return updateData;
 }

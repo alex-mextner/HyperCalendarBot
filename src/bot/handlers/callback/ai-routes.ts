@@ -12,7 +12,7 @@ import {
 } from '../../../services/ai/delete-confirmation.ts';
 import { confirmRecipientApproval, finishRecipientApproval } from '../../../services/ai/recipient-confirmation.ts';
 import { executeTool } from '../../../services/ai/tool-executor.ts';
-import type { SceneName } from '../../../services/scene-pause.ts';
+import { pauseStateFromGramioRecord } from '../../../services/scene-pause.ts';
 import { cmdLogger } from '../../../utils/logger.ts';
 import { isGroup } from '../../group-context.ts';
 import type { BotCallbackContext } from '../../types.ts';
@@ -182,21 +182,7 @@ export function registerAiRoutes(dispatch: CallbackDispatch, deps: CallbackRoute
     const rawScene = await scenePauseDeps.sceneStorage.get(`@gramio/scenes:${user.telegram_id}`);
     if (!rawScene) return;
 
-    const KNOWN_SCENES: SceneName[] = ['add_event', 'timezone', 'onboarding', 'edit_value', 'import'];
-    let sceneName: SceneName = 'add_event';
-    let step = 0;
-    let sceneState: Record<string, unknown> = {};
-    try {
-      const parsed = JSON.parse(rawScene as string) as Record<string, unknown>;
-      const parsedName = (parsed.name as string) ?? 'add_event';
-      sceneName = (KNOWN_SCENES.includes(parsedName as SceneName) ? parsedName : 'add_event') as SceneName;
-      step = (parsed.step as number) ?? 0;
-      sceneState = (parsed.state as Record<string, unknown>) ?? {};
-    } catch {
-      // proceed with defaults
-    }
-
-    await scenePauseDeps.scenePauseService.save(user.telegram_id, { sceneName, step, sceneState });
+    await scenePauseDeps.scenePauseService.save(user.telegram_id, pauseStateFromGramioRecord(rawScene));
 
     const lang = user.language as 'en' | 'ru';
     await ctx.send(t(lang).callbackErrors.sceneHelpPrompt);

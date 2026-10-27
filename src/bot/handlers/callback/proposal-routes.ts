@@ -4,7 +4,7 @@
 import type { Lang } from '../../../config/constants.ts';
 import { CB, t } from '../../../config/constants.ts';
 import type { EditProposal, UpdateEventData, User } from '../../../database/types.ts';
-import type { FieldChange } from '../../../services/google/change-detection.ts';
+import { type FieldChange, fieldChangesToUpdate } from '../../../services/google/change-detection.ts';
 import type { BotCallbackContext } from '../../types.ts';
 import {
   handleProposalAccept,
@@ -27,15 +27,6 @@ interface ProposalReview {
 
 function parseFieldChanges(proposal: EditProposal): FieldChange[] {
   return JSON.parse(proposal.changes) as FieldChange[];
-}
-
-/** Google-sync proposals store field diffs; the event row wants all_day as 0/1. */
-function fieldChangesToUpdate(changes: FieldChange[]): UpdateEventData {
-  const updateData: Record<string, unknown> = {};
-  for (const change of changes) {
-    updateData[change.field] = change.field === 'all_day' ? (change.newValue ? 1 : 0) : change.newValue;
-  }
-  return updateData as UpdateEventData;
 }
 
 export function registerProposalRoutes(dispatch: CallbackDispatch, deps: CallbackRouteDeps): void {

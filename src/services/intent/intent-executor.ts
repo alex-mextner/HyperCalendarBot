@@ -510,7 +510,7 @@ async function runToolStep(
   env: Level2Env,
   state: Level2LoopState,
 ): Promise<ExecutorResult | null> {
-  const resolvedInput = resolveStepInput(env, call, step.input ?? {}) as Record<string, unknown>;
+  const resolvedInput = resolveStepInput(env, call, step.input ?? {});
 
   const result = await callTool(env.executeTool, call, resolvedInput, env.evidence);
   if (!result.success) {

@@ -31,10 +31,12 @@ export interface LaunchCollaborators<TBot extends LaunchableBot> {
 
 /** gramio is imported lazily, as before: long-polling deployments never load the webhook adapter. */
 export async function realLaunchCollaborators<TBot extends LaunchableBot>(): Promise<LaunchCollaborators<TBot>> {
-  const { webhookHandler } = await import('gramio');
+  const { Bot, webhookHandler } = await import('gramio');
   return {
-    createWebhookHandler: (bot, secretToken) =>
-      webhookHandler(bot as never, 'Bun.serve', { secretToken }) as (req: Request) => Response,
+    createWebhookHandler: (bot, secretToken) => {
+      if (!(bot instanceof Bot)) throw new TypeError('The webhook adapter needs a GramIO Bot');
+      return webhookHandler(bot, 'Bun.serve', { secretToken }) as (req: Request) => Response;
+    },
     randomSecret: () => crypto.randomUUID(),
   };
 }

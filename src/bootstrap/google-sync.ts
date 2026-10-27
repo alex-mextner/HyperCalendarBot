@@ -121,7 +121,7 @@ function createProposalButtonsSender(ctx: StartupContext) {
       }
       kb.row();
     }
-    const msg = await botRef.sendMessage(userId, text, undefined, kb as never).catch((err) => {
+    const msg = await botRef.sendMessage(userId, text, undefined, kb.toJSON()).catch((err) => {
       botLogger.error({ err, userId }, 'Failed to send proposal with buttons');
       return null;
     });
