@@ -281,6 +281,12 @@ The droplet kept the pre-move state, untouched since the bot stopped there at 20
 
 To roll back: stop the bot on the odroid first. If the odroid wrote anything after 22:27 UTC (it serves all traffic since 22:30), copy the odroid's `/opt/hypercal/data` back to DO before starting there. Then rename the DO compose file back to `docker-compose.yml`, run `docker compose up -d` in `/opt/hypercal`, and point the DO Caddyfile back at `localhost:3001`. DO is amd64: only an amd64 image already on DO, or one built for amd64 by hand, runs there; CI and the local fallback build arm64 only.
 
+## PR CI (full test, lint and typecheck gate)
+
+`.github/workflows/pr-ci.yml` (job `test`) runs on every same-repository pull request to `main` the same gate that `deploy.yml`'s `test` job runs after merge: Bun 1.4.2, ffmpeg, `bun install` plus the frozen-lockfile check, Playwright `chromium-headless-shell`, full `bun test`, `bun run lint` and `tsc --noEmit`. Before this, a PR ran none of them and a red suite surfaced only on the push to `main`, after merge. The workflow has a read-only token, no secrets and no self-hosted runner, skips fork PRs, and cancels the previous run when a PR gets a new push. It replaces the branch-gated GH-359 stub `pr-gh359-validation.yml`, which was always skipped. `test/scripts/bun-version-pin.test.ts` keeps its Bun pin equal to the other pins.
+
+This is the hosted check only. Agents still validate the exact PR head with the full suite on Runpod (AGENTS.md § Heavy work runs on Runpod), never a full `bun test` on the shared workstation.
+
 ## Stage QA (per pull request, #840)
 
 Every same-repository, non-draft PR gets a stage bot, `@HyperCalendarStageBot`, running that PR's exact head, and a QA run that drives it with real Telegram messages through qa-cli. The result is the commit status `stage-qa` on the head SHA. `gh ship` refuses unless it is green for the exact head; after that it simply deploys. Nothing of this sits inside the production deploy (`deploy.yml`, the activator and its wrapper know nothing about the stage). There is no Telethon session and no 2FA step: the QA account is the Telegram Web login qa-cli already holds on the owner's PC (`qa telegram status`).
