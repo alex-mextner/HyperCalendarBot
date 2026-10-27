@@ -680,9 +680,11 @@ class LogReaderTest(unittest.TestCase):
         gh.chmod(0o755)
         gate = load_gate()
         gate.LOG_DEADLINE_SECONDS = 1
-        with mock.patch.dict(os.environ, {"PATH": f"{tmp}:{os.environ['PATH']}"}):
-            with self.assertRaisesRegex(gate.CannotEvaluate, "did not finish within 1s"):
-                gate.read_job_log_head(REPO, JOB)
+        with (
+            mock.patch.dict(os.environ, {"PATH": f"{tmp}:{os.environ['PATH']}"}),
+            self.assertRaisesRegex(gate.CannotEvaluate, "did not finish within 1s"),
+        ):
+            gate.read_job_log_head(REPO, JOB)
 
 
 class WorkflowAssumptionsTest(unittest.TestCase):
@@ -692,12 +694,12 @@ class WorkflowAssumptionsTest(unittest.TestCase):
         text = (ROOT / ".github" / "workflows" / "stage-qa.yml").read_text()
         qa_job = text.split("\n  qa:\n", 1)[1].split("\n  report:\n", 1)[0]
         steps = qa_job.split("\n    steps:\n", 1)[1]
-        self.assertEqual(len(re.findall(r"^      - ", steps, re.M)), 1)
-        self.assertIsNone(re.search(r"^\s*(- )?uses:", qa_job, re.M))
+        self.assertEqual(len(re.findall(r"^      - ", steps, re.MULTILINE)), 1)
+        self.assertIsNone(re.search(r"^\s*(- )?uses:", qa_job, re.MULTILINE))
         self.assertIn("- name: Run the stage QA through qa-cli", steps)
         env = steps.split("        env:\n", 1)[1].split("        run:", 1)[0]
         self.assertEqual(
-            dict(re.findall(r"^          ([A-Z_]+): (.*)$", env, re.M)),
+            dict(re.findall(r"^          ([A-Z_]+): (.*)$", env, re.MULTILINE)),
             {"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}", "HEAD_SHA": "${{ github.event.workflow_run.head_sha }}"},
         )
 

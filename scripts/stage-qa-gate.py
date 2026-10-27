@@ -33,7 +33,7 @@ import re
 import subprocess
 import sys
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 
 QA_WORKFLOW_PATH = ".github/workflows/stage-qa.yml"
 QA_CONTEXT = "stage-qa"
@@ -274,7 +274,7 @@ def job_time(value, what):
     if not isinstance(value, str) or not TIMESTAMP.match(value):
         raise CannotEvaluate(f"{what} has no usable timestamp")
     try:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
     except ValueError as error:
         raise CannotEvaluate(f"{what} has no usable timestamp") from error
 
