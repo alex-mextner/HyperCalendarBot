@@ -76,10 +76,57 @@ async def main():
     # ------- Connect to Bun WebSocket -------
     async with websockets.connect(WS_URL) as ws:
 
+        def cancel_current_play():
+            if play_task and not play_task.done():
+                play_task.cancel()
+
+        async def handle_play(msg):
+            nonlocal play_task, play_done_event
+            file_path = msg.get("file", "")
+            cancel_current_play()
+            play_done_event = asyncio.Event()
+            await calls.play(USER_ID, MediaStream(file_path, video_flags=MediaStream.Flags.IGNORE))
+
+            async def wait_done():
+                await play_done_event.wait()
+                await ws.send(json.dumps({"type": "PLAY_DONE"}))
+
+            play_task = asyncio.create_task(wait_done())
+
+        async def handle_pause():
+            nonlocal paused
+            paused = True
+            try:
+                # skip_stream stops outgoing audio immediately (barge-in).
+                # calls.pause() only "pauses" the track — the remote still
+                # hears buffered audio for several seconds. skip_stream cuts it.
+                await calls.skip_stream(USER_ID)
+            except Exception:
+                try:
+                    await calls.pause(USER_ID)
+                except Exception:
+                    pass
+
+        async def handle_resume():
+            nonlocal paused
+            paused = False
+            try:
+                await calls.resume(USER_ID)
+            except Exception:
+                pass
+
+        async def handle_stop():
+            # STOP cancels current audio playback — does NOT end the call.
+            # Bun sends STOP before every PLAY to interrupt in-progress audio.
+            cancel_current_play()
+            try:
+                # pytgcalls >=3.0: skip_stream cancels current audio without hanging up
+                await calls.skip_stream(USER_ID)
+            except Exception:
+                pass  # older pytgcalls may not have skip_stream; cancel of play_task is enough
+
         async def recv_commands():
             """Receive PLAY/PAUSE/RESUME/STOP from Bun."""
-            nonlocal paused, play_task, play_done_event
-
             async for raw in ws:
                 if isinstance(raw, bytes):
                     continue  # ignore binary from Bun (shouldn't happen)
@@ -90,48 +137,13 @@ async def main():
 
                 cmd = msg.get("type")
                 if cmd == "PLAY":
-                    file_path = msg.get("file", "")
-                    if play_task and not play_task.done():
-                        play_task.cancel()
-                    play_done_event = asyncio.Event()
-                    await calls.play(USER_ID, MediaStream(file_path, video_flags=MediaStream.Flags.IGNORE))
-
-                    async def wait_done():
-                        await play_done_event.wait()
-                        await ws.send(json.dumps({"type": "PLAY_DONE"}))
-
-                    play_task = asyncio.create_task(wait_done())
-
+                    await handle_play(msg)
                 elif cmd == "PAUSE":
-                    paused = True
-                    try:
-                        # skip_stream stops outgoing audio immediately (barge-in).
-                        # calls.pause() only "pauses" the track — the remote still
-                        # hears buffered audio for several seconds. skip_stream cuts it.
-                        await calls.skip_stream(USER_ID)
-                    except Exception:
-                        try:
-                            await calls.pause(USER_ID)
-                        except Exception:
-                            pass
-
+                    await handle_pause()
                 elif cmd == "RESUME":
-                    paused = False
-                    try:
-                        await calls.resume(USER_ID)
-                    except Exception:
-                        pass
-
+                    await handle_resume()
                 elif cmd == "STOP":
-                    # STOP cancels current audio playback — does NOT end the call.
-                    # Bun sends STOP before every PLAY to interrupt in-progress audio.
-                    if play_task and not play_task.done():
-                        play_task.cancel()
-                    try:
-                        # pytgcalls >=3.0: skip_stream cancels current audio without hanging up
-                        await calls.skip_stream(USER_ID)
-                    except Exception:
-                        pass  # older pytgcalls may not have skip_stream; cancel of play_task is enough
+                    await handle_stop()
 
         frames_received = 0
 

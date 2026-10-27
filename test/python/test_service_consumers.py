@@ -29,6 +29,58 @@ def consumer_source(name):
     return source
 
 
+def consumer_script_names():
+    """Python scripts plus the one shell script that embeds a Python consumer."""
+    for path in (ROOT / "scripts").iterdir():
+        if path.suffix == ".py" or path.name == "docker-call-test.sh":
+            yield path.name
+
+
+def creates_voice_caller_client(tree):
+    return any(
+        isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "Client"
+        and any(
+            isinstance(a, ast.Constant) and a.value == "voice_caller"
+            for a in [*n.args, *(k.value for k in n.keywords)]
+        )
+        for n in ast.walk(tree)
+    )
+
+
+def voice_caller_consumers():
+    """(file name, parsed source) of every script that builds the shared `voice_caller` Client."""
+    for name in consumer_script_names():
+        tree = ast.parse(consumer_source(name))
+        if creates_voice_caller_client(tree):
+            yield name, tree
+
+
+def imports_start_service_session(tree):
+    return any(
+        isinstance(n, ast.ImportFrom)
+        and n.module == "service_session"
+        and any(a.name == "start_service_session" for a in n.names)
+        for n in tree.body
+    )
+
+
+def calls_start_service_session(calls):
+    return any(isinstance(n.func, ast.Name) and n.func.id == "start_service_session" for n in calls)
+
+
+def drives_app_lifecycle(calls):
+    """True when the script starts or disconnects `app` itself instead of going through the service session."""
+    return any(
+        isinstance(n.func, ast.Attribute)
+        and isinstance(n.func.value, ast.Name)
+        and n.func.value.id == "app"
+        and n.func.attr in {"start", "disconnect"}
+        for n in calls
+    )
+
+
 class OperationFailure(Exception):
     pass
 
@@ -198,52 +250,33 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
             "get-user-info.py",
         }
         found = set()
-        for path in (ROOT / "scripts").iterdir():
-            if path.suffix not in {".py", ".sh"}:
+        for name, tree in voice_caller_consumers():
+            found.add(name)
+            if name in {"pyrogram-auth.py", "check-session.py"}:
                 continue
-            if path.suffix == ".sh" and path.name != "docker-call-test.sh":
-                continue
-            tree = ast.parse(consumer_source(path.name))
-            if not any(
-                isinstance(n, ast.Call)
-                and isinstance(n.func, ast.Name)
-                and n.func.id == "Client"
-                and any(
-                    isinstance(a, ast.Constant) and a.value == "voice_caller"
-                    for a in [*n.args, *(k.value for k in n.keywords)]
-                )
-                for n in ast.walk(tree)
-            ):
-                continue
-            found.add(path.name)
-            if path.name in {"pyrogram-auth.py", "check-session.py"}:
-                continue
-            self.assertTrue(
-                any(
-                    isinstance(n, ast.ImportFrom)
-                    and n.module == "service_session"
-                    and any(a.name == "start_service_session" for a in n.names)
-                    for n in tree.body
-                ),
-                path.name,
-            )
+            self.assertTrue(imports_start_service_session(tree), name)
             calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
-            self.assertTrue(
-                any(
-                    isinstance(n.func, ast.Name)
-                    and n.func.id == "start_service_session"
-                    for n in calls
-                ),
-                path.name,
-            )
-            self.assertFalse(
-                any(
-                    isinstance(n.func, ast.Attribute)
-                    and isinstance(n.func.value, ast.Name)
-                    and n.func.value.id == "app"
-                    and n.func.attr in {"start", "disconnect"}
-                    for n in calls
-                ),
-                path.name,
-            )
+            self.assertTrue(calls_start_service_session(calls), name)
+            self.assertFalse(drives_app_lifecycle(calls), name)
         self.assertEqual(found, expected)
+
+    def test_consumer_guards_detect_what_they_claim_to_detect(self):
+        def calls_of(tree):
+            return [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+
+        client = ast.parse('app = Client("voice_caller")')
+        keyword = ast.parse('app = Client(name="voice_caller")')
+        other = ast.parse('app = Client("other")\nClient2("voice_caller")')
+        self.assertTrue(creates_voice_caller_client(client))
+        self.assertTrue(creates_voice_caller_client(keyword))
+        self.assertFalse(creates_voice_caller_client(other))
+        imported = ast.parse("from service_session import start_service_session")
+        self.assertTrue(imports_start_service_session(imported))
+        self.assertFalse(imports_start_service_session(ast.parse("from service_session import other")))
+        self.assertFalse(imports_start_service_session(ast.parse("from elsewhere import start_service_session")))
+        self.assertFalse(imports_start_service_session(ast.parse("def f():\n    from service_session import start_service_session")))
+        self.assertTrue(calls_start_service_session(calls_of(ast.parse("start_service_session(app)"))))
+        self.assertFalse(calls_start_service_session(calls_of(ast.parse("app.start_service_session()"))))
+        self.assertTrue(drives_app_lifecycle(calls_of(ast.parse("app.start()"))))
+        self.assertTrue(drives_app_lifecycle(calls_of(ast.parse("app.disconnect()"))))
+        self.assertFalse(drives_app_lifecycle(calls_of(ast.parse("app.get_me()\nother.start()"))))

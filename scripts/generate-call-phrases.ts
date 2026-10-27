@@ -48,6 +48,37 @@ const EN_PHRASES: Record<string, string> = {
   'stt_error.ogg': "Sorry, I couldn't hear you. Please try again.",
 };
 
+/** Synthesizes every phrase whose file is missing in `dir`; one failing phrase is logged and does not stop the rest. */
+export async function generatePhraseSet(
+  label: string,
+  dir: string,
+  phrases: Record<string, string>,
+  synthesize: (text: string) => Promise<Buffer>,
+): Promise<void> {
+  mkdirSync(dir, { recursive: true });
+  for (const [file, text] of Object.entries(phrases)) {
+    const path = `${dir}/${file}`;
+    if (existsSync(path)) {
+      console.log(`Skip: ${path}`);
+      continue;
+    }
+    console.log(`${label}: ${path} — "${text}"`);
+    try {
+      const audio = await synthesize(text);
+      await Bun.write(path, audio);
+      console.log(`  OK (${audio.length} bytes)`);
+    } catch (err) {
+      console.error(`  FAIL: ${err}`);
+    }
+  }
+}
+
+/** Silero reads stressed, spelled-out Russian: the same text preparation as a normal bot voice reply. */
+function prepareRussianSpeech(text: string, stressDict: StressDictionary): string {
+  const plain = fixLineBreaks(stripMarkdown(text));
+  return transliterateEnglish(markStress(numbersToWords(fixDateOrdinals(plain)), stressDict));
+}
+
 async function generate() {
   const pythonPath = process.env.PYTHON_PATH ?? 'venv/bin/python';
   const hfToken = process.env.HF_TOKEN;
@@ -55,55 +86,19 @@ async function generate() {
   // Russian — SileroTts
   const stressDict = await StressDictionary.loadFromFile('data/dictionaries/stress-dict.json');
   const sileroTts = new SileroTtsService(pythonPath);
-
-  const ruDir = 'data/call-phrases/ru';
-  mkdirSync(ruDir, { recursive: true });
-
-  for (const [file, text] of Object.entries(RU_PHRASES)) {
-    const path = `${ruDir}/${file}`;
-    if (existsSync(path)) {
-      console.log(`Skip: ${path}`);
-      continue;
-    }
-    console.log(`RU: ${path} — "${text}"`);
-    try {
-      const plain = fixLineBreaks(stripMarkdown(text));
-      const stressed = transliterateEnglish(markStress(numbersToWords(fixDateOrdinals(plain)), stressDict));
-      const audio = await sileroTts.synthesize(stressed);
-      await Bun.write(path, audio);
-      console.log(`  OK (${audio.length} bytes)`);
-    } catch (err) {
-      console.error(`  FAIL: ${err}`);
-    }
-  }
+  await generatePhraseSet('RU', 'data/call-phrases/ru', RU_PHRASES, (text) =>
+    sileroTts.synthesize(prepareRussianSpeech(text, stressDict)),
+  );
 
   // English — KokoroTts
   if (!hfToken) {
     console.warn('HF_TOKEN not set — skipping EN phrases');
   } else {
     const kokoroTts = new KokoroTtsService(hfToken);
-
-    const enDir = 'data/call-phrases/en';
-    mkdirSync(enDir, { recursive: true });
-
-    for (const [file, text] of Object.entries(EN_PHRASES)) {
-      const path = `${enDir}/${file}`;
-      if (existsSync(path)) {
-        console.log(`Skip: ${path}`);
-        continue;
-      }
-      console.log(`EN: ${path} — "${text}"`);
-      try {
-        const audio = await kokoroTts.synthesize(text);
-        await Bun.write(path, audio);
-        console.log(`  OK (${audio.length} bytes)`);
-      } catch (err) {
-        console.error(`  FAIL: ${err}`);
-      }
-    }
+    await generatePhraseSet('EN', 'data/call-phrases/en', EN_PHRASES, (text) => kokoroTts.synthesize(text));
   }
 
   console.log('Done.');
 }
 
-await generate();
+if (import.meta.main) await generate();

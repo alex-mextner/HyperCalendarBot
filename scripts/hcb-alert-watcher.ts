@@ -371,77 +371,100 @@ async function tellOwner(deps: WatcherDeps, text: string): Promise<boolean> {
   }
 }
 
-async function checkReadiness(cfg: WatcherConfig, deps: WatcherDeps, store: Store): Promise<void> {
-  const probe = await probeReady(cfg, deps);
-  const state = store.readState(deps.log);
-  if (probe.kind === 'unresolvable') {
-    // Not a failed probe and not a healthy one: the run of failures is broken (an outage has to be
-    // consecutive to count), and a PC that cannot resolve the host says so once instead of raising a
-    // false outage.
-    const blind = state.unresolvableProbes + 1;
-    const notify = blind >= DNS_NOTICE_AFTER && !state.unresolvableNoticeSent;
-    deps.log(`readiness probe cannot resolve ${cfg.baseUrl}: ${probe.detail}`);
-    store.writeState({
-      ...state,
-      consecutiveProbeFailures: 0,
-      firstProbeFailureAt: null,
-      // One resolver hiccup must not split an outage in two, but a blind period long enough to be announced
-      // may have hidden a recovery: the next outage after it must be a new incident.
-      downIncidentKey: blind >= DNS_NOTICE_AFTER ? null : state.downIncidentKey,
-      unresolvableProbes: blind,
-      unresolvableNoticeSent: state.unresolvableNoticeSent || notify,
-    });
-    if (notify) {
-      const delivered = await tellOwner(
-        deps,
-        `HCB alert watcher: этот ПК не может разрешить имя ${cfg.baseUrl} (${probe.detail}) уже ${blind} проверок подряд, поэтому доступность бота не проверяется и падение бота не запустит расследование. Либо это сбой DNS на самом ПК (resolvectl query -t A ${new URL(cfg.baseUrl).hostname}), либо имя пропало у всех, тогда бот недоступен для пользователей: проверьте с другого устройства.`,
-      );
-      if (!delivered) store.writeState({ ...store.readState(deps.log), unresolvableNoticeSent: false });
-    }
-    return;
+/**
+ * Not a failed probe and not a healthy one: the run of failures is broken (an outage has to be consecutive to
+ * count), and a PC that cannot resolve the host says so once instead of raising a false outage.
+ */
+async function recordUnresolvableProbe(
+  cfg: WatcherConfig,
+  deps: WatcherDeps,
+  store: Store,
+  state: WatcherState,
+  detail: string,
+): Promise<void> {
+  const blind = state.unresolvableProbes + 1;
+  const notify = blind >= DNS_NOTICE_AFTER && !state.unresolvableNoticeSent;
+  deps.log(`readiness probe cannot resolve ${cfg.baseUrl}: ${detail}`);
+  store.writeState({
+    ...state,
+    consecutiveProbeFailures: 0,
+    firstProbeFailureAt: null,
+    // One resolver hiccup must not split an outage in two, but a blind period long enough to be announced
+    // may have hidden a recovery: the next outage after it must be a new incident.
+    downIncidentKey: blind >= DNS_NOTICE_AFTER ? null : state.downIncidentKey,
+    unresolvableProbes: blind,
+    unresolvableNoticeSent: state.unresolvableNoticeSent || notify,
+  });
+  if (!notify) return;
+  const delivered = await tellOwner(
+    deps,
+    `HCB alert watcher: этот ПК не может разрешить имя ${cfg.baseUrl} (${detail}) уже ${blind} проверок подряд, поэтому доступность бота не проверяется и падение бота не запустит расследование. Либо это сбой DNS на самом ПК (resolvectl query -t A ${new URL(cfg.baseUrl).hostname}), либо имя пропало у всех, тогда бот недоступен для пользователей: проверьте с другого устройства.`,
+  );
+  if (!delivered) store.writeState({ ...store.readState(deps.log), unresolvableNoticeSent: false });
+}
+
+function recordHealthyProbe(deps: WatcherDeps, store: Store, state: WatcherState): void {
+  if (state.downIncidentKey) deps.log(`${state.downIncidentKey}: readiness is back, outage over`);
+  // Not launched yet (rate limit, broken launcher, or its key lost in a blind period)? An outage that is
+  // over before anyone looked is not an incident to chase.
+  for (const key of store.pendingKeys('down-')) {
+    store.removePending(key);
+    deps.log(`${key}: outage over before a session started, not investigated`);
   }
-  if (probe.kind === 'healthy') {
-    if (state.downIncidentKey) deps.log(`${state.downIncidentKey}: readiness is back, outage over`);
-    // Not launched yet (rate limit, broken launcher, or its key lost in a blind period)? An outage that is
-    // over before anyone looked is not an incident to chase.
-    for (const key of store.pendingKeys('down-')) {
-      store.removePending(key);
-      deps.log(`${key}: outage over before a session started, not investigated`);
-    }
-    store.writeState({
-      ...state,
-      consecutiveProbeFailures: 0,
-      firstProbeFailureAt: null,
-      downIncidentKey: null,
-      unresolvableProbes: 0,
-      unresolvableNoticeSent: false,
-    });
-    return;
-  }
-  const failure = probe.detail;
-  const now = deps.now();
-  // Failures far apart are not an outage: the PC may have been asleep, or the service stopped, in between.
-  const continuing =
+  store.writeState({
+    ...state,
+    consecutiveProbeFailures: 0,
+    firstProbeFailureAt: null,
+    downIncidentKey: null,
+    unresolvableProbes: 0,
+    unresolvableNoticeSent: false,
+  });
+}
+
+/** Failures far apart are not an outage: the PC may have been asleep, or the service stopped, in between. */
+function continuesFailureRun(cfg: WatcherConfig, state: WatcherState, now: number): boolean {
+  return (
     state.lastProbeFailureAt !== null &&
-    now - state.lastProbeFailureAt <=
-      PROBE_RUN_WINDOW_CYCLES * (cfg.pollSeconds + cfg.commandTimeoutSeconds * 3) * 1000;
+    now - state.lastProbeFailureAt <= PROBE_RUN_WINDOW_CYCLES * (cfg.pollSeconds + cfg.commandTimeoutSeconds * 3) * 1000
+  );
+}
+
+function raiseDownIncident(
+  cfg: WatcherConfig,
+  deps: WatcherDeps,
+  store: Store,
+  run: { failures: number; first: number; now: number; failure: string },
+): string {
+  const { failures, first, now, failure } = run;
+  const incident = `down-${Math.floor(first / 1000)}`;
+  // A new incident supersedes any earlier one still waiting in the spool: same outage or not, one session covers it.
+  for (const stale of store.pendingKeys('down-')) store.removePending(stale);
+  store.addPending({
+    key: incident,
+    source: 'watcher-probe',
+    text: `Readiness probe ${cfg.baseUrl}/ready failed ${failures} consecutive times since ${new Date(first).toISOString()}. Last result: ${failure}.`,
+    createdAt: first,
+    receivedAt: now,
+  });
+  deps.log(`${incident}: ${failures} failed readiness probes in a row (${failure}) — incident raised`);
+  return incident;
+}
+
+function recordFailedProbe(
+  cfg: WatcherConfig,
+  deps: WatcherDeps,
+  store: Store,
+  state: WatcherState,
+  failure: string,
+): void {
+  const now = deps.now();
+  const continuing = continuesFailureRun(cfg, state, now);
   const failures = continuing ? state.consecutiveProbeFailures + 1 : 1;
   const first = continuing ? (state.firstProbeFailureAt ?? now) : now;
   // After a gap the earlier outage's key means nothing: the bot may have recovered and failed again unseen.
   let incident = continuing ? state.downIncidentKey : null;
-  if (failures >= cfg.downProbes && !incident) {
-    incident = `down-${Math.floor(first / 1000)}`;
-    // A new incident supersedes any earlier one still waiting in the spool: same outage or not, one session covers it.
-    for (const stale of store.pendingKeys('down-')) store.removePending(stale);
-    store.addPending({
-      key: incident,
-      source: 'watcher-probe',
-      text: `Readiness probe ${cfg.baseUrl}/ready failed ${failures} consecutive times since ${new Date(first).toISOString()}. Last result: ${failure}.`,
-      createdAt: first,
-      receivedAt: now,
-    });
-    deps.log(`${incident}: ${failures} failed readiness probes in a row (${failure}) — incident raised`);
-  }
+  if (failures >= cfg.downProbes && !incident)
+    incident = raiseDownIncident(cfg, deps, store, { failures, first, now, failure });
   store.writeState({
     ...state,
     consecutiveProbeFailures: failures,
@@ -451,6 +474,14 @@ async function checkReadiness(cfg: WatcherConfig, deps: WatcherDeps, store: Stor
     unresolvableProbes: 0,
     unresolvableNoticeSent: false,
   });
+}
+
+async function checkReadiness(cfg: WatcherConfig, deps: WatcherDeps, store: Store): Promise<void> {
+  const probe = await probeReady(cfg, deps);
+  const state = store.readState(deps.log);
+  if (probe.kind === 'unresolvable') await recordUnresolvableProbe(cfg, deps, store, state, probe.detail);
+  else if (probe.kind === 'healthy') recordHealthyProbe(deps, store, state);
+  else recordFailedProbe(cfg, deps, store, state, probe.detail);
 }
 
 /** 401/403/404 on the queue mean the consumer is silently blind (token rotated, endpoint disabled); 5xx and network errors are the readiness probe's business. */
@@ -492,77 +523,103 @@ async function trackQueueAnswer(status: QueueAnswer, deps: WatcherDeps, store: S
   }
 }
 
+/**
+ * Polls the queue once. Null when the host answered with a redirect: the token is never sent on, and the
+ * cycle's drain stops there.
+ */
+async function fetchNextAlert(cfg: WatcherConfig, deps: WatcherDeps, store: Store): Promise<Response | null> {
+  try {
+    return await deps.fetch(`${cfg.baseUrl}/admin/alerts/next`, {
+      headers: { Authorization: `Bearer ${cfg.token}` },
+      signal: AbortSignal.timeout(cfg.probeTimeoutSeconds * 1000),
+      // The bearer must go to the configured host and nowhere else; a redirect on this path is a misconfiguration.
+      redirect: 'error',
+    });
+  } catch (err) {
+    if (err instanceof Error && 'code' in err && err.code === 'UnexpectedRedirect') {
+      await trackQueueAnswer('redirect', deps, store);
+      deps.log('alert queue poll refused: the host redirects /admin/alerts/next, the token is not sent on');
+      return null;
+    }
+    throw err;
+  }
+}
+
+/** The body of a 200, or null when it could not be read (then it is recorded: the pop consumed the alert). */
+async function readAlertBody(res: Response, deps: WatcherDeps, store: Store): Promise<string | null> {
+  try {
+    return await res.text();
+  } catch (err) {
+    // The server's pop already consumed the alert; say that it existed even though its text did not arrive.
+    const savedAs = store.saveUnreadable(
+      `unreadable body (HTTP 200): ${err instanceof Error ? err.message : 'unknown error'}`,
+      deps.now(),
+    );
+    deps.log(`alert queue body could not be read, recorded in ${savedAs}`);
+    return null;
+  }
+}
+
+type QueuedAlert = z.infer<typeof alertSchema>;
+
+function parseAlert(raw: string): QueuedAlert | null {
+  try {
+    const parsed = alertSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Dedupes a popped alert against what was already handled, drops a stale one, spools the rest. */
+function ingestAlert(cfg: WatcherConfig, deps: WatcherDeps, store: Store, alert: QueuedAlert): void {
+  const now = deps.now();
+  const createdAt = sqliteUtcToMs(alert.created_at, now);
+  // The key is the row id plus its creation stamp. `alerts.id` is AUTOINCREMENT and a pop only sets
+  // consumed = 1, so within one database file an id is never reused; a restore from backup rewinds the
+  // sequence and hands old ids out again, and the stamp keeps those new alerts from looking like duplicates.
+  const key = `alert-${alert.id}-${alert.created_at.replace(/\D/g, '')}`;
+  if (store.isLaunched(key)) {
+    deps.log(`${key}: duplicate delivery, already handled`);
+  } else if (now - createdAt > cfg.staleSeconds * 1000) {
+    store.markLaunched(key, null, now, true);
+    deps.log(`${key}: stale (created ${alert.created_at} UTC, source ${alert.source}) — consumed, not investigated`);
+  } else if (store.addPending({ key, source: alert.source, text: alert.text, createdAt, receivedAt: now })) {
+    deps.log(`${key}: queued from ${alert.source}`);
+  } else {
+    deps.log(`${key}: duplicate delivery, already pending`);
+  }
+}
+
+/** One pop of the queue; true when the drain may pop again. */
+async function popOneAlert(cfg: WatcherConfig, deps: WatcherDeps, store: Store): Promise<boolean> {
+  const res = await fetchNextAlert(cfg, deps, store);
+  if (!res) return false;
+  if (res.status !== 200) await trackQueueAnswer(res.status, deps, store);
+  if (res.status === 204) return false;
+  if (res.status !== 200) {
+    deps.log(`alert queue poll: unexpected HTTP ${res.status}`);
+    return false;
+  }
+  const raw = await readAlertBody(res, deps, store);
+  if (raw === null) return false;
+  const alert = parseAlert(raw);
+  if (!alert) {
+    const savedAs = store.saveUnreadable(raw, deps.now());
+    deps.log(`alert queue returned an unreadable alert, saved to ${savedAs}: ${singleLine(raw)}`);
+    // A queue that answers 200 with a page is as blind as one that answers 401: count it toward the notice.
+    await trackQueueAnswer('unreadable', deps, store);
+    // Not `continue`: a proxy page that answers 200 for every poll would otherwise be saved 50 times a cycle.
+    return false;
+  }
+  await trackQueueAnswer(200, deps, store);
+  ingestAlert(cfg, deps, store, alert);
+  return true;
+}
+
 async function drainQueue(cfg: WatcherConfig, deps: WatcherDeps, store: Store): Promise<void> {
   for (let popped = 0; popped < MAX_POPS_PER_CYCLE; popped++) {
-    let res: Response;
-    try {
-      res = await deps.fetch(`${cfg.baseUrl}/admin/alerts/next`, {
-        headers: { Authorization: `Bearer ${cfg.token}` },
-        signal: AbortSignal.timeout(cfg.probeTimeoutSeconds * 1000),
-        // The bearer must go to the configured host and nowhere else; a redirect on this path is a misconfiguration.
-        redirect: 'error',
-      });
-    } catch (err) {
-      if (err instanceof Error && 'code' in err && err.code === 'UnexpectedRedirect') {
-        await trackQueueAnswer('redirect', deps, store);
-        deps.log('alert queue poll refused: the host redirects /admin/alerts/next, the token is not sent on');
-        return;
-      }
-      throw err;
-    }
-    if (res.status !== 200) await trackQueueAnswer(res.status, deps, store);
-    if (res.status === 204) return;
-    if (res.status !== 200) {
-      deps.log(`alert queue poll: unexpected HTTP ${res.status}`);
-      return;
-    }
-    let raw: string;
-    try {
-      raw = await res.text();
-    } catch (err) {
-      // The server's pop already consumed the alert; say that it existed even though its text did not arrive.
-      const savedAs = store.saveUnreadable(
-        `unreadable body (HTTP 200): ${err instanceof Error ? err.message : 'unknown error'}`,
-        deps.now(),
-      );
-      deps.log(`alert queue body could not be read, recorded in ${savedAs}`);
-      return;
-    }
-    let parsed: z.ZodSafeParseResult<z.infer<typeof alertSchema>>;
-    try {
-      parsed = alertSchema.safeParse(JSON.parse(raw));
-    } catch {
-      parsed = alertSchema.safeParse(undefined);
-    }
-    if (!parsed.success) {
-      const savedAs = store.saveUnreadable(raw, deps.now());
-      deps.log(`alert queue returned an unreadable alert, saved to ${savedAs}: ${singleLine(raw)}`);
-      // A queue that answers 200 with a page is as blind as one that answers 401: count it toward the notice.
-      await trackQueueAnswer('unreadable', deps, store);
-      // Not `continue`: a proxy page that answers 200 for every poll would otherwise be saved 50 times a cycle.
-      return;
-    }
-    await trackQueueAnswer(200, deps, store);
-    const now = deps.now();
-    const createdAt = sqliteUtcToMs(parsed.data.created_at, now);
-    // The key is the row id plus its creation stamp. `alerts.id` is AUTOINCREMENT and a pop only sets
-    // consumed = 1, so within one database file an id is never reused; a restore from backup rewinds the
-    // sequence and hands old ids out again, and the stamp keeps those new alerts from looking like duplicates.
-    const key = `alert-${parsed.data.id}-${parsed.data.created_at.replace(/\D/g, '')}`;
-    if (store.isLaunched(key)) {
-      deps.log(`${key}: duplicate delivery, already handled`);
-    } else if (now - createdAt > cfg.staleSeconds * 1000) {
-      store.markLaunched(key, null, now, true);
-      deps.log(
-        `${key}: stale (created ${parsed.data.created_at} UTC, source ${parsed.data.source}) — consumed, not investigated`,
-      );
-    } else if (
-      store.addPending({ key, source: parsed.data.source, text: parsed.data.text, createdAt, receivedAt: now })
-    ) {
-      deps.log(`${key}: queued from ${parsed.data.source}`);
-    } else {
-      deps.log(`${key}: duplicate delivery, already pending`);
-    }
+    if (!(await popOneAlert(cfg, deps, store))) return;
   }
 }
 
@@ -683,34 +740,41 @@ function confirmStartedClaims(
   });
 }
 
-async function launchPending(cfg: WatcherConfig, deps: WatcherDeps, store: Store): Promise<void> {
-  const now = deps.now();
-  const items = confirmStartedClaims(
-    cfg,
-    deps,
-    store,
-    dropStalePending(cfg, deps, store, store.readPending(deps.log), now),
-    now,
-  );
-  if (items.length === 0) return;
-  const state = store.readState(deps.log);
-  const sinceLast = now - state.lastLaunchAt;
-  // A launcher that just failed is left alone for a minute (the owner has been told once).
-  if (now < state.launchRetryAt) return;
-  // A claim the previous process died holding is replayed at once: its own claim used the rate-limit slot.
-  const replaying = items.some((item) => store.isUnconfirmedClaim(item.key));
-  if (!replaying && sinceLast < cfg.rateLimitSeconds * 1000) {
-    const waiting = items.map((item) => item.key).join(', ');
-    if (state.rateLimitLoggedFor !== waiting) {
-      deps.log(
-        `${waiting} waiting: rate limit, next session in ${Math.ceil((cfg.rateLimitSeconds * 1000 - sinceLast) / 1000)}s`,
-      );
-      store.writeState({ ...state, rateLimitLoggedFor: waiting });
-    }
-    return;
-  }
+/** What one launch attempt works on: the claimed alerts, their session and the rate-limit slot they used. */
+interface LaunchAttempt {
+  session: string;
+  briefPath: string;
+  items: PendingAlert[];
+  now: number;
+  /** The attempt re-runs a claim a dead process left behind, so it is exempt from the rate limit. */
+  replaying: boolean;
+  /** State as read before the claim; every state write of the attempt builds on it. */
+  state: WatcherState;
+}
 
-  const session = `hcb-alert-${stamp(now)}`;
+/** Logs once per distinct waiting set that the alerts wait out the rate limit; true when they must wait. */
+function holdForRateLimit(
+  cfg: WatcherConfig,
+  deps: WatcherDeps,
+  store: Store,
+  state: WatcherState,
+  items: PendingAlert[],
+  now: number,
+  replaying: boolean,
+): boolean {
+  const sinceLast = now - state.lastLaunchAt;
+  if (replaying || sinceLast >= cfg.rateLimitSeconds * 1000) return false;
+  const waiting = items.map((item) => item.key).join(', ');
+  if (state.rateLimitLoggedFor !== waiting) {
+    deps.log(
+      `${waiting} waiting: rate limit, next session in ${Math.ceil((cfg.rateLimitSeconds * 1000 - sinceLast) / 1000)}s`,
+    );
+    store.writeState({ ...state, rateLimitLoggedFor: waiting });
+  }
+  return true;
+}
+
+function writeBrief(cfg: WatcherConfig, store: Store, session: string, items: PendingAlert[], now: number): string {
   const briefPath = join(store.briefDir, `${session}.md`);
   writeFileSync(
     briefPath,
@@ -724,53 +788,65 @@ async function launchPending(cfg: WatcherConfig, deps: WatcherDeps, store: Store
     }),
     { mode: 0o600 },
   );
+  return briefPath;
+}
 
-  // At most once, except for a crash in the window: claim the keys and the rate-limit slot before
-  // launching, so a failure after the launch can never start a second session. A process that dies
-  // between the claim and the launch leaves an unconfirmed claim, which the next start replays.
-  for (const item of items) store.markLaunched(item.key, session, now, false);
-  store.writeState({ ...state, lastLaunchAt: now });
-  let launched: LaunchedSession;
-  try {
-    launched = await deps.launch(session, briefPath);
-  } catch (err) {
-    if (err instanceof CommandTimeoutError) {
-      // The launcher was killed at its deadline, perhaps after it had already detached the session:
-      // releasing the claim here would start another session on the next poll. Keep it, say so once.
-      for (const item of items) store.confirmLaunched(item.key);
-      for (const item of items) store.removePending(item.key);
-      const keys = items.map((item) => item.key).join(', ');
-      deps.log(`launch of ${session} timed out; the session may have started, so ${keys} are not retried`);
-      await deps
-        .notifyOwner(
-          `HCB alert watcher: запуск сессии ${session} не уложился в срок. Сессия могла стартовать (tmux, ${join(cfg.agentLogDir, `${session}.log`)}), повторно алерты ${keys} не запускаются. Если сессии нет, разберите их вручную.`,
-        )
-        .catch((notifyErr: Error) => deps.log(`owner notice failed: ${notifyErr.message}`));
-      return;
-    }
-    for (const item of items) store.unmarkLaunched(item.key);
-    rmSync(briefPath, { force: true });
-    const keys = items.map((item) => item.key).join(', ');
-    const reason = singleLine(err instanceof Error ? err.message : 'unknown error');
-    deps.log(`launch of ${session} failed: ${reason}; ${keys} stay pending`);
-    const notified = state.launchFailureNoticeFor === keys;
-    store.writeState({
-      ...state,
-      // A replay's own claim set lastLaunchAt; a failed replay must not leave its alerts waiting out that slot.
-      lastLaunchAt: replaying ? 0 : state.lastLaunchAt,
-      launchFailureNoticeFor: keys,
-      launchRetryAt: now + LAUNCH_RETRY_DELAY_MS,
-    });
-    if (!notified) {
-      const delivered = await tellOwner(
-        deps,
-        `HCB alert watcher: не удалось запустить сессию omp для расследования (${reason}). Алерты ждут в очереди: ${keys}. Проверьте systemctl --user status hcb-alert-watcher.`,
-      );
-      // A notice that did not get through is not "sent": the next failed attempt tries again.
-      if (!delivered) store.writeState({ ...store.readState(deps.log), launchFailureNoticeFor: null });
-    }
-    return;
-  }
+/**
+ * The launcher was killed at its deadline, perhaps after it had already detached the session: releasing the
+ * claim here would start another session on the next poll. Keep it, say so once.
+ */
+async function keepClaimAfterLaunchTimeout(
+  cfg: WatcherConfig,
+  deps: WatcherDeps,
+  store: Store,
+  { items, session }: LaunchAttempt,
+): Promise<void> {
+  for (const item of items) store.confirmLaunched(item.key);
+  for (const item of items) store.removePending(item.key);
+  const keys = items.map((item) => item.key).join(', ');
+  deps.log(`launch of ${session} timed out; the session may have started, so ${keys} are not retried`);
+  await deps
+    .notifyOwner(
+      `HCB alert watcher: запуск сессии ${session} не уложился в срок. Сессия могла стартовать (tmux, ${join(cfg.agentLogDir, `${session}.log`)}), повторно алерты ${keys} не запускаются. Если сессии нет, разберите их вручную.`,
+    )
+    .catch((notifyErr: Error) => deps.log(`owner notice failed: ${notifyErr.message}`));
+}
+
+/** The launcher failed outright: release the claim, back off for a minute and tell the owner once per alert set. */
+async function releaseClaimAfterLaunchFailure(
+  deps: WatcherDeps,
+  store: Store,
+  { items, session, briefPath, now, replaying, state }: LaunchAttempt,
+  err: unknown,
+): Promise<void> {
+  for (const item of items) store.unmarkLaunched(item.key);
+  rmSync(briefPath, { force: true });
+  const keys = items.map((item) => item.key).join(', ');
+  const reason = singleLine(err instanceof Error ? err.message : 'unknown error');
+  deps.log(`launch of ${session} failed: ${reason}; ${keys} stay pending`);
+  const notified = state.launchFailureNoticeFor === keys;
+  store.writeState({
+    ...state,
+    // A replay's own claim set lastLaunchAt; a failed replay must not leave its alerts waiting out that slot.
+    lastLaunchAt: replaying ? 0 : state.lastLaunchAt,
+    launchFailureNoticeFor: keys,
+    launchRetryAt: now + LAUNCH_RETRY_DELAY_MS,
+  });
+  if (notified) return;
+  const delivered = await tellOwner(
+    deps,
+    `HCB alert watcher: не удалось запустить сессию omp для расследования (${reason}). Алерты ждут в очереди: ${keys}. Проверьте systemctl --user status hcb-alert-watcher.`,
+  );
+  // A notice that did not get through is not "sent": the next failed attempt tries again.
+  if (!delivered) store.writeState({ ...store.readState(deps.log), launchFailureNoticeFor: null });
+}
+
+async function recordLaunchSuccess(
+  deps: WatcherDeps,
+  store: Store,
+  { items, session, now, state }: LaunchAttempt,
+  launched: LaunchedSession,
+): Promise<void> {
   // Confirm every claim before removing any spool file: a crash in between must not replay an alert the session already covers.
   for (const item of items) store.confirmLaunched(item.key);
   for (const item of items) store.removePending(item.key);
@@ -787,6 +863,49 @@ async function launchPending(cfg: WatcherConfig, deps: WatcherDeps, store: Store
   } catch (err) {
     deps.log(`tmux window for ${session} not opened: ${err instanceof Error ? err.message : 'unknown error'}`);
   }
+}
+
+async function launchPending(cfg: WatcherConfig, deps: WatcherDeps, store: Store): Promise<void> {
+  const now = deps.now();
+  const items = confirmStartedClaims(
+    cfg,
+    deps,
+    store,
+    dropStalePending(cfg, deps, store, store.readPending(deps.log), now),
+    now,
+  );
+  if (items.length === 0) return;
+  const state = store.readState(deps.log);
+  // A launcher that just failed is left alone for a minute (the owner has been told once).
+  if (now < state.launchRetryAt) return;
+  // A claim the previous process died holding is replayed at once: its own claim used the rate-limit slot.
+  const replaying = items.some((item) => store.isUnconfirmedClaim(item.key));
+  if (holdForRateLimit(cfg, deps, store, state, items, now, replaying)) return;
+
+  const session = `hcb-alert-${stamp(now)}`;
+  const attempt: LaunchAttempt = {
+    session,
+    briefPath: writeBrief(cfg, store, session, items, now),
+    items,
+    now,
+    replaying,
+    state,
+  };
+
+  // At most once, except for a crash in the window: claim the keys and the rate-limit slot before
+  // launching, so a failure after the launch can never start a second session. A process that dies
+  // between the claim and the launch leaves an unconfirmed claim, which the next start replays.
+  for (const item of items) store.markLaunched(item.key, session, now, false);
+  store.writeState({ ...state, lastLaunchAt: now });
+  let launched: LaunchedSession;
+  try {
+    launched = await deps.launch(session, attempt.briefPath);
+  } catch (err) {
+    if (err instanceof CommandTimeoutError) await keepClaimAfterLaunchTimeout(cfg, deps, store, attempt);
+    else await releaseClaimAfterLaunchFailure(deps, store, attempt, err);
+    return;
+  }
+  await recordLaunchSuccess(deps, store, attempt, launched);
 }
 
 async function guarded(step: string, deps: WatcherDeps, run: () => Promise<void>): Promise<void> {

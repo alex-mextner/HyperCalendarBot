@@ -79,7 +79,8 @@ def full_name(value):
     return value.get("full_name") if isinstance(value, dict) else None
 
 
-def evaluate(repo, pr):
+def open_pr_head(repo, pr):
+    """The head sha of PR `pr`, which must be an open, non-draft PR from this repository."""
     info = gh_json(
         "pr", "view", str(pr), "--repo", repo,
         "--json", "state,isDraft,headRefOid,isCrossRepository",
@@ -93,8 +94,11 @@ def evaluate(repo, pr):
         raise NotGreen(f"PR #{pr} is a draft. Mark it ready for review, then wait for Stage QA on the new head.")
     if info.get("isCrossRepository"):
         raise NotGreen(f"PR #{pr} comes from a fork. Stage QA never runs fork code; push the branch to {repo} instead.")
+    return head
 
-    status = newest_qa_status(repo, head)
+
+def require_success_status(status, head):
+    """The newest stage-qa status of the head must exist and be `success`."""
     short = head[:12]
     if status is None:
         raise NotGreen(
@@ -108,6 +112,9 @@ def evaluate(repo, pr):
     if state != "success":
         raise NotGreen(f"`{QA_CONTEXT}` is {state} on head {short} ({url}). Fix the failure and push a new commit; Stage QA reruns on the new head.")
 
+
+def bind_status_to_run(status, repo):
+    """The status must come from the Actions bot and point at its own QA run; return (cases, run_id, run_url)."""
     creator = (status.get("creator") or {}).get("login")
     if creator != BOT_LOGIN:
         raise NotGreen(f"`{QA_CONTEXT}` was posted by {creator!r}, not {BOT_LOGIN}: it is not trusted. Let the Stage QA workflow post it by re-running it.")
@@ -118,8 +125,11 @@ def evaluate(repo, pr):
     expected_url = f"https://github.com/{repo}/actions/runs/{run_id}"
     if status.get("target_url") != expected_url:
         raise NotGreen(f"`{QA_CONTEXT}` target_url {status.get('target_url')!r} is not {expected_url}: the status is not bound to its QA run; re-run Stage QA.")
+    return int(match.group(1)), run_id, expected_url
 
-    run = gh_json("api", f"repos/{repo}/actions/runs/{run_id}")
+
+def run_problems(run, head, repo):
+    """Every way the run differs from a completed, successful QA workflow_run on this head and repository."""
     problems = []
     if run.get("path") != QA_WORKFLOW_PATH:
         problems.append(f"workflow path is {run.get('path')!r}, expected {QA_WORKFLOW_PATH}")
@@ -128,21 +138,38 @@ def evaluate(repo, pr):
     if run.get("status") != "completed" or run.get("conclusion") != "success":
         problems.append(f"run is {run.get('status')}/{run.get('conclusion')}, expected completed/success")
     if run.get("head_sha") != head:
-        problems.append(f"run head_sha {str(run.get('head_sha'))[:12]} differs from PR head {short}")
+        problems.append(f"run head_sha {str(run.get('head_sha'))[:12]} differs from PR head {head[:12]}")
     for key in ("repository", "head_repository"):
         if full_name(run.get(key)) != repo:
             problems.append(f"{key} is {full_name(run.get(key))!r}, expected {repo}")
+    return problems
+
+
+def require_trusted_run(repo, run_id, head):
+    run = gh_json("api", f"repos/{repo}/actions/runs/{run_id}")
+    problems = run_problems(run, head, repo)
     if problems:
         raise NotGreen(f"`{QA_CONTEXT}` run {run_id} is not a trusted QA run: " + "; ".join(problems) + ". Re-run Stage QA from the PR.")
 
+
+def require_qa_job_success(repo, run_id, run_url):
     jobs = gh_json("api", f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100")
     job_list = jobs.get("jobs") if isinstance(jobs, dict) else None
     if not isinstance(job_list, list):
         raise CannotEvaluate("jobs response has no jobs list")
     qa_jobs = [j for j in job_list if isinstance(j, dict) and j.get("name") == QA_JOB_NAME]
     if not qa_jobs or any(j.get("conclusion") != "success" for j in qa_jobs):
-        raise NotGreen(f"Run {run_id} has no successful `{QA_JOB_NAME}` job ({expected_url}); re-run Stage QA.")
-    return head, int(match.group(1)), run_id
+        raise NotGreen(f"Run {run_id} has no successful `{QA_JOB_NAME}` job ({run_url}); re-run Stage QA.")
+
+
+def evaluate(repo, pr):
+    head = open_pr_head(repo, pr)
+    status = newest_qa_status(repo, head)
+    require_success_status(status, head)
+    cases, run_id, run_url = bind_status_to_run(status, repo)
+    require_trusted_run(repo, run_id, head)
+    require_qa_job_success(repo, run_id, run_url)
+    return head, cases, run_id
 
 
 def main(argv):

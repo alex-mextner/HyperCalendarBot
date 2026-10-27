@@ -250,8 +250,8 @@ def _string_list(raw, key, allow_empty):
     return tuple(value)
 
 
-def load_config(path):
-    path = os.path.expanduser(path)
+def _check_config_file(path):
+    """The config must be a regular file owned by us with no group/world access."""
     try:
         info = os.stat(path)
     except FileNotFoundError:
@@ -264,6 +264,10 @@ def load_config(path):
         raise _bad(f"{path} is not owned by the current user")
     if stat.S_IMODE(info.st_mode) & 0o077:
         raise _bad(f"{path} has mode {stat.S_IMODE(info.st_mode):04o}; it must be 0600")
+
+
+def _read_config_values(path):
+    """The file's JSON object with the optional keys defaulted; unknown or missing keys are refused."""
     try:
         with open(path, encoding="utf-8") as handle:
             raw = json.load(handle)
@@ -277,14 +281,26 @@ def load_config(path):
     for key in REQUIRED_KEYS:
         if key not in raw:
             raise _bad(f"missing required key {key}")
-    merged = {**DEFAULTS, **raw}
+    return {**DEFAULTS, **raw}
+
+
+def _bot_username(merged):
+    """The configured stage bot username: a Telegram bot name marked stage/stg."""
+    username = _text(merged, "username")
+    if not USERNAME_PATTERN.fullmatch(username) or not has_stage_marker(username):
+        raise _bad("username must be a Telegram bot username containing stage or stg")
+    return username
+
+
+def load_config(path):
+    path = os.path.expanduser(path)
+    _check_config_file(path)
+    merged = _read_config_values(path)
 
     target = _text(merged, "ssh_target")
     if not TARGET_PATTERN.fullmatch(target):
         raise _bad("ssh_target must look like user@host")
-    username = _text(merged, "username")
-    if not USERNAME_PATTERN.fullmatch(username) or not has_stage_marker(username):
-        raise _bad("username must be a Telegram bot username containing stage or stg")
+    username = _bot_username(merged)
     deny = _string_list(merged, "deny_usernames", allow_empty=True)
     if normalized_username(username) in {normalized_username(name) for name in deny}:
         raise _bad("username is in deny_usernames")
@@ -293,7 +309,7 @@ def load_config(path):
         raise _bad("min_cases must be an integer >= 1")
     known_hosts = _path(merged, "ssh_known_hosts") if "ssh_known_hosts" in merged else None
 
-    config = Config(
+    return Config(
         ssh_target=target,
         ssh_key=_path(merged, "ssh_key"),
         ssh_known_hosts=known_hosts,
@@ -310,7 +326,6 @@ def load_config(path):
         ready_timeout=_number(merged, "ready_timeout", 0, False),
         done_timeout=_number(merged, "done_timeout", 0, False),
     )
-    return config
 
 
 def check_provisioned(config):
@@ -438,7 +453,7 @@ class Ready(NamedTuple):
     peer: str
 
 
-def validate_ready(payload_text, config, sha):
+def _ready_object(payload_text, sha):
     try:
         data = json.loads(payload_text)
     except ValueError:
@@ -447,16 +462,20 @@ def validate_ready(payload_text, config, sha):
         raise Refused("STAGE_READY payload is not an object")
     if data.get("sha") != sha:
         raise Refused("STAGE_READY names another commit than the one requested")
-    username = data.get("username")
+    return data
+
+
+def _check_ready_bot(username, config):
     if type(username) is not str or normalized_username(username) != normalized_username(config.username):
         raise Refused("STAGE_READY names another bot than the configured stage bot")
     if normalized_username(username) in {normalized_username(name) for name in config.deny_usernames}:
         raise Refused("STAGE_READY names a denied (production) bot")
     if not has_stage_marker(username):
         raise Refused("STAGE_READY bot username does not contain stage or stg")
-    peer = data.get("peer")
-    if type(peer) is not str or not PEER_PATTERN.fullmatch(peer):
-        raise Refused("STAGE_READY peer is not a numeric bot id")
+
+
+def _ready_cases(data):
+    """The READY case list and its (unique) case names."""
     cases = data.get("cases")
     if type(cases) is not list or not cases:
         raise Refused("STAGE_READY carries no cases")
@@ -467,12 +486,26 @@ def validate_ready(payload_text, config, sha):
         names.append(case["name"])
     if len(set(names)) != len(names):
         raise Refused("STAGE_READY has duplicate case names")
-    base = data.get("base_cases")
-    if type(base) is not int or not 1 <= base <= len(cases):
+    return cases, names
+
+
+def _ready_base_count(base, case_count, min_cases):
+    if type(base) is not int or not 1 <= base <= case_count:
         raise Refused("STAGE_READY base_cases is not a valid count")
     # The floor is enforced here, not trusted from the odroid: extras (replay) never satisfy it.
-    if base < config.min_cases:
-        raise Refused(f"only {base} base cases; at least {config.min_cases} are required")
+    if base < min_cases:
+        raise Refused(f"only {base} base cases; at least {min_cases} are required")
+    return base
+
+
+def validate_ready(payload_text, config, sha):
+    data = _ready_object(payload_text, sha)
+    _check_ready_bot(data.get("username"), config)
+    peer = data.get("peer")
+    if type(peer) is not str or not PEER_PATTERN.fullmatch(peer):
+        raise Refused("STAGE_READY peer is not a numeric bot id")
+    cases, names = _ready_cases(data)
+    base = _ready_base_count(data.get("base_cases"), len(cases), config.min_cases)
     missing = [name for name in config.required_cases if name not in names[:base]]
     if missing:
         raise Refused(f"required base case(s) missing: {', '.join(missing)}")

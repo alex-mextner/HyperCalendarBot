@@ -111,92 +111,146 @@ def result(code, verdict, health, ready, reason, started):
     return code
 
 
-def wait(args):
-    base = args.url.rstrip("/")
-    started = time.monotonic()
-    state, baseline_restarts = container_state(args.container)
-    if not isinstance(state, dict):
-        baseline_restarts = 0
-    # /ready is waived only when it was KNOWINGLY worse before the deploy (an answered 5xx such as "ai
-    # chain down"). An empty baseline means the probe itself failed, which proves nothing: require it.
-    waived = bool(args.baseline_ready) and args.baseline_ready not in READY_OK
-    ready_required = args.mode != "health" and not waived
-    if args.mode != "health" and waived:
-        print(f"HEALTH ready not required: it was '{sanitize(args.baseline_ready)}' before this deploy")
-    unknown_streak = 0
-    health = ready = ""
-    last_marker = None
-    last_code_shape = None
-    last_progress = started
-    ok_since = None
-    last_report = 0.0
-    seen_restarts = baseline_restarts
-    started_at = ""
-    while True:
-        now = time.monotonic()
-        elapsed = now - started
+class HealthWait:
+    """One `wait` run: the mutable poll state plus one method per phase of a poll.
+
+    Every phase returns the process exit code once it reaches a verdict, or None to keep polling.
+    """
+
+    def __init__(self, args):
+        self.args = args
+        self.base = args.url.rstrip("/")
+        self.started = time.monotonic()
         state, restarts = container_state(args.container)
-        if state is MISSING:
-            return result(3, "dead", health, ready, "container does not exist", started)
+        self.baseline_restarts = restarts if isinstance(state, dict) else 0
+        self.ready_required = self._ready_required()
+        self.unknown_streak = 0
+        self.health = self.ready = ""
+        self.last_marker = None
+        self.last_code_shape = None
+        self.last_progress = self.started
+        self.ok_since = None
+        self.last_report = 0.0
+        self.seen_restarts = self.baseline_restarts
+        self.started_at = ""
+
+    def _ready_required(self):
+        # /ready is waived only when it was KNOWINGLY worse before the deploy (an answered 5xx such as "ai
+        # chain down"). An empty baseline means the probe itself failed, which proves nothing: require it.
+        if self.args.mode == "health":
+            return False
+        baseline = self.args.baseline_ready
+        if bool(baseline) and baseline not in READY_OK:
+            print(f"HEALTH ready not required: it was '{sanitize(baseline)}' before this deploy")
+            return False
+        return True
+
+    def finish(self, code, verdict, reason):
+        return result(code, verdict, self.health, self.ready, reason, self.started)
+
+    def run(self):
+        while True:
+            code = self.poll_once()
+            if code is not None:
+                return code
+            time.sleep(self.args.poll)
+
+    def poll_once(self):
+        now = time.monotonic()
+        elapsed = now - self.started
+        state, restarts = container_state(self.args.container)
         if state is UNKNOWN:
-            # The Docker daemon or API hiccuped: that says nothing about the container. Keep polling;
-            # only a persistent failure to read it is a verdict.
-            unknown_streak += 1
-            if unknown_streak >= UNKNOWN_LIMIT:
-                return result(4, "unhealthy", health, ready, f"docker inspect failed {unknown_streak} times in a row", started)
-            time.sleep(args.poll)
-            continue
-        unknown_streak = 0
-        started_at = state.get("StartedAt", started_at)
+            return self._unreadable_container()
+        self.unknown_streak = 0
+        code = self._container_verdict(state, restarts)
+        if code is not None:
+            return code
+        if restarts != self.seen_restarts:
+            self.ok_since = None  # a single restart is not yet a loop, but it restarts the stability window
+            self.seen_restarts = restarts
+        self._probe_endpoints(state, now)
+        if self._is_healthy():
+            return self._stable_verdict(now)
+        self.ok_since = None
+        if elapsed >= self.args.base_budget:
+            code = self._past_budget_verdict(now, elapsed)
+            if code is not None:
+                return code
+        self._report_progress(elapsed, restarts)
+        return None
+
+    def _unreadable_container(self):
+        # The Docker daemon or API hiccuped: that says nothing about the container. Keep polling;
+        # only a persistent failure to read it is a verdict.
+        self.unknown_streak += 1
+        if self.unknown_streak >= UNKNOWN_LIMIT:
+            return self.finish(4, "unhealthy", f"docker inspect failed {self.unknown_streak} times in a row")
+        return None
+
+    def _container_verdict(self, state, restarts):
+        if state is MISSING:
+            return self.finish(3, "dead", "container does not exist")
+        self.started_at = state.get("StartedAt", self.started_at)
         if state.get("OOMKilled"):
-            return result(3, "dead", health, ready, "container was OOM-killed", started)
-        if state.get("Restarting") or (restarts - baseline_restarts) >= 2:
-            return result(3, "dead", health, ready, f"crash loop (restart count {baseline_restarts}->{restarts})", started)
+            return self.finish(3, "dead", "container was OOM-killed")
+        if state.get("Restarting") or (restarts - self.baseline_restarts) >= 2:
+            return self.finish(3, "dead", f"crash loop (restart count {self.baseline_restarts}->{restarts})")
         if state and not state.get("Running"):
-            return result(3, "dead", health, ready,
-                          f"container is {state.get('Status', 'not running')} exit_code={state.get('ExitCode', '?')}", started)
-        if restarts != seen_restarts:
-            ok_since = None  # a single restart is not yet a loop, but it restarts the stability window
-            seen_restarts = restarts
+            return self.finish(
+                3, "dead", f"container is {state.get('Status', 'not running')} exit_code={state.get('ExitCode', '?')}")
+        return None
 
-        health = probe(f"{base}/health")
-        ready = probe(f"{base}/ready") if args.mode != "health" else ready
-        marker = log_marker(args.container)
-        shape = (bool(health), bool(ready), state.get("Health", {}).get("Status") if isinstance(state.get("Health"), dict) else None)
-        if marker != last_marker or shape != last_code_shape:
-            last_progress = now
-        last_marker, last_code_shape = marker, shape
+    def _probe_endpoints(self, state, now):
+        self.health = probe(f"{self.base}/health")
+        base = self.base
+        self.ready = probe(f"{base}/ready") if self.args.mode != "health" else self.ready
+        marker = log_marker(self.args.container)
+        docker_health = state.get("Health", {}).get("Status") if isinstance(state.get("Health"), dict) else None
+        shape = (bool(self.health), bool(self.ready), docker_health)
+        if marker != self.last_marker or shape != self.last_code_shape:
+            self.last_progress = now
+        self.last_marker, self.last_code_shape = marker, shape
 
-        healthy = health == "ok" and (not ready_required or ready in READY_OK)
-        if healthy:
-            ok_since = ok_since if ok_since is not None else now
-            if now - ok_since >= args.stable:
-                errors, fatal = fresh_error_counts(args.container, started_at)
-                if fatal:
-                    return result(3, "dead", health, ready, f"{fatal} fatal (level>=60) log lines since start", started)
-                if errors > args.max_error_logs:
-                    return result(4, "unhealthy", health, ready,
-                                  f"{errors} level>=50 log lines since start (limit {args.max_error_logs})", started)
-                note = f"{errors} level>=50 log lines since start" if errors else "no level>=50 log lines"
-                return result(0, "ok", health, ready, f"stable for {args.stable}s, {note}", started)
-        else:
-            ok_since = None
-            if elapsed >= args.base_budget:
-                saturated = host_saturated(args.proc_dir, args.io_psi_threshold, args.load_factor)
-                progressing = (now - last_progress) <= args.stall
-                if elapsed >= args.hard_cap:
-                    return result(4, "unhealthy", health, ready, f"hard cap {args.hard_cap}s reached", started)
-                if not (saturated and progressing):
-                    why = "host not saturated" if not saturated else f"no progress for {int(now - last_progress)}s"
-                    return result(4, "unhealthy", health, ready,
-                                  f"not healthy after {int(elapsed)}s of {args.base_budget}s budget ({why})", started)
-                if elapsed - last_report >= 20 or last_report == 0:
-                    print(f"HEALTH extended past the {args.base_budget}s budget at {int(elapsed)}s: host saturated, container alive and progressing")
-                    last_report = elapsed
-        if elapsed - last_report >= 20 and not healthy:
-            print(f"HEALTH t={int(elapsed)}s health={sanitize(health)} ready={sanitize(ready)} restarts={restarts}")
-            last_report = elapsed
-        time.sleep(args.poll)
+    def _is_healthy(self):
+        return self.health == "ok" and (not self.ready_required or self.ready in READY_OK)
+
+    def _stable_verdict(self, now):
+        self.ok_since = self.ok_since if self.ok_since is not None else now
+        if now - self.ok_since < self.args.stable:
+            return None
+        errors, fatal = fresh_error_counts(self.args.container, self.started_at)
+        if fatal:
+            return self.finish(3, "dead", f"{fatal} fatal (level>=60) log lines since start")
+        if errors > self.args.max_error_logs:
+            return self.finish(
+                4, "unhealthy", f"{errors} level>=50 log lines since start (limit {self.args.max_error_logs})")
+        note = f"{errors} level>=50 log lines since start" if errors else "no level>=50 log lines"
+        return self.finish(0, "ok", f"stable for {self.args.stable}s, {note}")
+
+    def _past_budget_verdict(self, now, elapsed):
+        """Not healthy and past --base-budget: fail, or announce the extension while the host justifies it."""
+        args = self.args
+        saturated = host_saturated(args.proc_dir, args.io_psi_threshold, args.load_factor)
+        progressing = (now - self.last_progress) <= args.stall
+        if elapsed >= args.hard_cap:
+            return self.finish(4, "unhealthy", f"hard cap {args.hard_cap}s reached")
+        if not (saturated and progressing):
+            why = "host not saturated" if not saturated else f"no progress for {int(now - self.last_progress)}s"
+            return self.finish(
+                4, "unhealthy", f"not healthy after {int(elapsed)}s of {args.base_budget}s budget ({why})")
+        if elapsed - self.last_report >= 20 or self.last_report == 0:
+            print(f"HEALTH extended past the {args.base_budget}s budget at {int(elapsed)}s: host saturated, container alive and progressing")
+            self.last_report = elapsed
+        return None
+
+    def _report_progress(self, elapsed, restarts):
+        if elapsed - self.last_report >= 20:
+            print(f"HEALTH t={int(elapsed)}s health={sanitize(self.health)} ready={sanitize(self.ready)} restarts={restarts}")
+            self.last_report = elapsed
+
+
+def wait(args):
+    return HealthWait(args).run()
 
 
 def main(argv=None):

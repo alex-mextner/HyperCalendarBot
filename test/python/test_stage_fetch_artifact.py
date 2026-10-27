@@ -392,6 +392,46 @@ class StageFetchArtifactTests(unittest.TestCase):
                     shutil.rmtree(self.out)
                 self.assertRefused(self.run_script())
 
+    def test_bad_zip_members_are_refused_with_the_specific_reason(self):
+        oversized = b" " * (8 * 1024 * 1024 + 1)
+        cases = {
+            "duplicate image": (self.good_members() + [("image.tar.gz", self.image)], "member appears twice in artifact: image.tar.gz"),
+            "directory member": ([("image.tar.gz/", b""), ("stage-smoke-cases.json", CASES)], "member is not a regular file: image.tar.gz"),
+            "optional is a directory": (
+                self.good_members() + [("stage-smoke-cases.replay.json/", b"")],
+                "member is not a regular file: stage-smoke-cases.replay.json",
+            ),
+            "missing image": ([("stage-smoke-cases.json", CASES)], "required member missing from artifact: image.tar.gz"),
+            "missing cases": ([("image.tar.gz", self.image)], "required member missing from artifact: stage-smoke-cases.json"),
+            "oversized cases": (
+                self.good_members(**{"stage-smoke-cases.json": oversized}),
+                "member is larger than 8388608 bytes: stage-smoke-cases.json",
+            ),
+            "oversized replay": (
+                self.good_members(**{"stage-smoke-cases.replay.json": oversized}),
+                "member is larger than 8388608 bytes: stage-smoke-cases.replay.json",
+            ),
+        }
+        for label, (members, message) in cases.items():
+            with self.subTest(label):
+                self.github = FakeGitHub()
+                self.addCleanup(self.github.close)
+                self.github.publish(make_zip(members))
+                if self.out.exists():
+                    shutil.rmtree(self.out)
+                self.assertRefused(self.run_script(), message)
+
+    def test_a_corrupt_member_is_refused_as_an_unreadable_zip(self):
+        raw = bytearray(make_zip(self.good_members()))
+        # Members are stored uncompressed: flip a cases payload byte so the CRC check fails on read.
+        raw[raw.index(CASES) + 1] ^= 0xFF
+        self.github.publish(bytes(raw))
+        self.assertRefused(self.run_script(), "artifact zip is unreadable (BadZipFile)")
+
+    def test_a_non_zip_artifact_is_refused_before_it_is_parsed(self):
+        self.github.publish(b"this is not a zip file")
+        self.assertRefused(self.run_script(), "no end-of-central-directory record")
+
     def test_image_that_does_not_match_the_sha_is_refused(self):
         wrong = {
             "label": image_archive(revision=OTHER_SHA)[0],

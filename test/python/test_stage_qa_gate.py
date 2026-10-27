@@ -244,6 +244,47 @@ class GateTest(unittest.TestCase):
         log = Path(str(self.routes_file) + ".log").read_text()
         self.assertIn("page=2", log)
 
+    def test_green_output_names_head_cases_and_run(self):
+        done = self.gate(good_routes())
+        self.assertEqual(done.stdout, f"stage-qa gate: green for {HEAD[:12]} cases=12 run={RUN}\n")
+
+    def test_state_and_refusal_messages_are_specific(self):
+        url = f"https://github.com/{REPO}/actions/runs/{RUN}"
+        cases = {
+            "merged": (PR_KEY, {"state": "MERGED", "isDraft": False, "headRefOid": HEAD, "isCrossRepository": False}, "PR #7 is MERGED, not open"),
+            "failure with no url": (statuses_key(), [good_status(state="error", target_url=None)], "is error on head " + HEAD[:12] + " ((no run URL))"),
+            "creator": (statuses_key(), [good_status(creator=None)], "was posted by None, not github-actions[bot]"),
+            "description": (statuses_key(), [good_status(description=None)], "description None is not"),
+            "url": (statuses_key(), [good_status(target_url="https://x/y")], f"target_url 'https://x/y' is not {url}"),
+        }
+        for name, (key, body, message) in cases.items():
+            routes = good_routes()
+            routes[key] = {"body": body}
+            with self.subTest(name):
+                done = self.assertNotGreen(routes)
+                self.assertIn(message, done.stderr)
+
+    def test_every_run_problem_is_reported_together(self):
+        routes = good_routes()
+        routes[RUN_KEY] = {"body": good_run(event="push", head_sha=OLD, repository=None, status="queued", conclusion=None)}
+        done = self.assertNotGreen(routes, "not a trusted QA run")
+        self.assertIn("event is 'push', expected workflow_run; run is queued/None, expected completed/success; ", done.stderr)
+        self.assertIn(f"run head_sha {OLD[:12]} differs from PR head {HEAD[:12]}; repository is None, expected {REPO}", done.stderr)
+        self.assertIn("Re-run Stage QA from the PR.", done.stderr)
+
+    def test_unusable_responses_are_exit_2_with_a_reason(self):
+        cases = {
+            "head sha missing": ({**good_routes(), PR_KEY: {"body": {"state": "OPEN", "headRefOid": "nope"}}}, "PR head sha missing"),
+            "statuses not a list": ({**good_routes(), statuses_key(): {"body": {"a": 1}}}, "statuses response is not a list"),
+            "jobs not a list": ({**good_routes(), JOBS_KEY: {"body": {"jobs": "x"}}}, "jobs response has no jobs list"),
+            "jobs not an object": ({**good_routes(), JOBS_KEY: {"body": []}}, "jobs response has no jobs list"),
+        }
+        for name, (routes, message) in cases.items():
+            with self.subTest(name):
+                done = self.gate(routes)
+                self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
+                self.assertIn(message, done.stderr)
+
 
 class PrShipTest(unittest.TestCase):
     def setUp(self):

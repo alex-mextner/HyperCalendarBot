@@ -76,33 +76,50 @@ def bot_id(token):
     return head
 
 
+NUMBER_KEYS = ("min_replies", "timeout_s", "settle_s", "max_first_reply_s")
+PATTERN_KEYS = ("expect", "forbid")
+
+
+def check_case_numbers(case):
+    for key in NUMBER_KEYS:
+        if key in case and (isinstance(case[key], bool) or not isinstance(case[key], (int, float))):
+            raise Refused(f"case {case['name']}: {key} must be a number")
+
+
+def check_case_patterns(case):
+    """expect/forbid are lists of non-empty patterns that compile; a string would be iterated per character."""
+    for key in PATTERN_KEYS:
+        patterns = case.get(key, [])
+        if not isinstance(patterns, list) or not all(isinstance(pattern, str) and pattern for pattern in patterns):
+            raise Refused(f"case {case['name']}: {key} must be a list of non-empty patterns")
+    if case.get("min_replies", 1) < 1:
+        # Even with a `forbid`, a case that passes on silence lets a dead bot go green.
+        raise Refused(f"case {case['name']} asserts nothing: min_replies must be at least 1")
+    for key in PATTERN_KEYS:
+        for pattern in case.get(key, []):
+            try:
+                re.compile(pattern)
+            except re.error as error:
+                raise Refused(f"case {case['name']}: bad {key} pattern ({error})") from None
+
+
+def validate_case(case, index, seen):
+    if not isinstance(case, dict) or not case.get("name") or not isinstance(case.get("send"), str) or not case["send"]:
+        raise Refused(f"case #{index} needs a name and a send text")
+    if case["name"] in seen:
+        raise Refused(f"duplicate case name '{case['name']}'")
+    seen.add(case["name"])
+    require_one_line(case["send"], case["name"])
+    check_case_numbers(case)
+    check_case_patterns(case)
+
+
 def validate_cases(cases, label, what="smoke"):
     if not isinstance(cases, list) or not cases:
         raise Refused(f"{label} has no {what} cases; an empty list must never pass a check")
     seen = set()
     for index, case in enumerate(cases):
-        if not isinstance(case, dict) or not case.get("name") or not isinstance(case.get("send"), str) or not case["send"]:
-            raise Refused(f"case #{index} needs a name and a send text")
-        if case["name"] in seen:
-            raise Refused(f"duplicate case name '{case['name']}'")
-        seen.add(case["name"])
-        require_one_line(case["send"], case["name"])
-        for key in ("min_replies", "timeout_s", "settle_s", "max_first_reply_s"):
-            if key in case and (isinstance(case[key], bool) or not isinstance(case[key], (int, float))):
-                raise Refused(f"case {case['name']}: {key} must be a number")
-        for key in ("expect", "forbid"):
-            patterns = case.get(key, [])
-            if not isinstance(patterns, list) or not all(isinstance(pattern, str) and pattern for pattern in patterns):
-                raise Refused(f"case {case['name']}: {key} must be a list of non-empty patterns")
-        if case.get("min_replies", 1) < 1:
-            # Even with a `forbid`, a case that passes on silence lets a dead bot go green.
-            raise Refused(f"case {case['name']} asserts nothing: min_replies must be at least 1")
-        for key in ("expect", "forbid"):
-            for pattern in case.get(key, []):
-                try:
-                    re.compile(pattern)
-                except re.error as error:
-                    raise Refused(f"case {case['name']}: bad {key} pattern ({error})") from None
+        validate_case(case, index, seen)
     return cases
 
 
@@ -220,15 +237,27 @@ class QaCliTransport:
         # argparse takes a value starting with "-" for an option only in the "--text=VALUE" form.
         return [f"--text={text}"] if text.startswith("-") else ["--text", text]
 
+    @staticmethod
+    def sent_message_id(code, sent):
+        """The id of the message qa confirmed sending; anything else fails closed."""
+        message = sent.get("message") if code == 0 and sent.get("ok") else None
+        if not isinstance(message, dict) or "id" not in message:
+            raise ConnectionError(f"qa send failed: {sent.get('error', 'no confirmed message')}")
+        return message["id"]
+
+    @staticmethod
+    def record_incoming(messages, texts, latencies, sent_at):
+        for item in messages:
+            if item.get("out") is False:  # latest text per id wins, so edited answers replace their first draft
+                texts[item["id"]] = item.get("text") or ""
+                latencies.setdefault(item["id"], time.monotonic() - sent_at)
+
     async def exchange(self, text, timeout, settle):
         """Send text; return [(reply text, seconds after send)] once `settle` seconds pass quietly or on timeout."""
         require_one_line(text, "exchange")
         started = time.monotonic()
         code, sent = await asyncio.to_thread(self.qa, "send", *self.text_flag(text), timeout=timeout)
-        message = sent.get("message") if code == 0 and sent.get("ok") else None
-        if not isinstance(message, dict) or "id" not in message:
-            raise ConnectionError(f"qa send failed: {sent.get('error', 'no confirmed message')}")
-        sent_id = message["id"]
+        sent_id = self.sent_message_id(code, sent)
         sent_at = time.monotonic()
         code, first = await asyncio.to_thread(
             self.qa, "wait", "--after", str(sent_id), "--from", "peer", "--timeout", f"{timeout:g}", timeout=timeout)
@@ -246,10 +275,7 @@ class QaCliTransport:
             code, read = await asyncio.to_thread(self.qa, "read", "--after", str(sent_id), timeout=timeout)
             if code != 0 or not read.get("ok"):
                 continue  # a flaky read must not turn a good answer into a failure; the next poll retries
-            for item in read.get("messages", []):
-                if item.get("out") is False:  # latest text per id wins, so edited answers replace their first draft
-                    texts[item["id"]] = item.get("text") or ""
-                    latencies.setdefault(item["id"], time.monotonic() - sent_at)
+            self.record_incoming(read.get("messages", []), texts, latencies, sent_at)
             current = frozenset(texts.items())
             if current != snapshot:
                 snapshot = current

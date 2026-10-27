@@ -703,5 +703,123 @@ class QaCliTransportTests(Base):
         self.assertIn("STAGE_SMOKE_UNAVAILABLE", err)
 
 
+class ValidateCasesMessages(unittest.TestCase):
+    """validate_cases called directly: each rule keeps its own refusal text."""
+
+    def refused(self, cases, message):
+        with self.assertRaises(smoke.Refused) as caught:
+            smoke.validate_cases(cases, "list.json")
+        self.assertEqual(str(caught.exception), message)
+
+    def test_a_good_list_is_returned_as_is(self):
+        cases = [{"name": "a", "send": "hi", "expect": ["x"], "forbid": ["y"], "min_replies": 2, "timeout_s": 1.5}, {"name": "b", "send": "yo"}]
+        self.assertIs(smoke.validate_cases(cases, "list.json"), cases)
+
+    def test_empty_or_non_list_input_is_refused(self):
+        for cases in ([], None, {"a": 1}, "x"):
+            with self.subTest(cases=cases):
+                self.refused(cases, "list.json has no smoke cases; an empty list must never pass a check")
+        with self.assertRaises(smoke.Refused) as caught:
+            smoke.validate_cases([], "replay.json", "replay")
+        self.assertEqual(str(caught.exception), "replay.json has no replay cases; an empty list must never pass a check")
+
+    def test_each_rule_has_a_specific_message(self):
+        ok = {"name": "a", "send": "hi"}
+        cases = {
+            "not an object": ([ok, "x"], "case #1 needs a name and a send text"),
+            "no name": ([{"send": "hi"}], "case #0 needs a name and a send text"),
+            "send not a string": ([{"name": "a", "send": 5}], "case #0 needs a name and a send text"),
+            "empty send": ([{"name": "a", "send": ""}], "case #0 needs a name and a send text"),
+            "duplicate": ([ok, dict(ok)], "duplicate case name 'a'"),
+            "newline": ([{"name": "a", "send": "x\ny"}], "case a: the send text must be one line"),
+            "carriage return": ([{"name": "a", "send": "x\ry"}], "case a: the send text must be one line"),
+            "string number": ([{**ok, "min_replies": "2"}], "case a: min_replies must be a number"),
+            "bool number": ([{**ok, "timeout_s": True}], "case a: timeout_s must be a number"),
+            "none number": ([{**ok, "settle_s": None}], "case a: settle_s must be a number"),
+            "latency": ([{**ok, "max_first_reply_s": "1"}], "case a: max_first_reply_s must be a number"),
+            "expect string": ([{**ok, "expect": "pong"}], "case a: expect must be a list of non-empty patterns"),
+            "forbid empty pattern": ([{**ok, "forbid": [""]}], "case a: forbid must be a list of non-empty patterns"),
+            "expect non-string": ([{**ok, "expect": [5]}], "case a: expect must be a list of non-empty patterns"),
+            "asserts nothing": ([{**ok, "min_replies": 0}], "case a asserts nothing: min_replies must be at least 1"),
+            "negative replies": ([{**ok, "min_replies": -1}], "case a asserts nothing: min_replies must be at least 1"),
+        }
+        for label, (cases_list, message) in cases.items():
+            with self.subTest(label):
+                self.refused(cases_list, message)
+
+    def test_a_bad_pattern_is_refused_with_the_regex_error(self):
+        for key in ("expect", "forbid"):
+            with self.subTest(key):
+                self.refused([{"name": "a", "send": "hi", key: ["ok", "("]}], f"case a: bad {key} pattern (missing ), unterminated subpattern at position 0)")
+
+    def test_the_first_broken_rule_of_a_case_wins(self):
+        broken = {"name": "a", "send": "x\ny", "min_replies": "0", "expect": "z"}
+        self.refused([broken], "case a: the send text must be one line")
+        self.refused([{**broken, "send": "x"}], "case a: min_replies must be a number")
+        self.refused([{**broken, "send": "x", "min_replies": 0}], "case a: expect must be a list of non-empty patterns")
+
+
+class ScriptedTransport(smoke.QaCliTransport):
+    """QaCliTransport whose qa() replays scripted (code, payload) answers per action instead of spawning a process."""
+
+    def __init__(self, script):
+        super().__init__("qa", STAGE_PEER, "HyperCalendarStageBot")
+        self.poll_interval = 0
+        self.script = {action: list(answers) for action, answers in script.items()}
+        self.actions = []
+
+    def qa(self, action, *flags, timeout):
+        self.actions.append(action)
+        answers = self.script[action]
+        return answers.pop(0) if len(answers) > 1 else answers[0]
+
+
+class ExchangeEdgeCases(unittest.TestCase):
+    def exchange(self, script, settle=0.05, timeout=5):
+        transport = ScriptedTransport(script)
+        return transport, asyncio.run(transport.exchange("q", timeout, settle))
+
+    def test_a_send_without_a_confirmed_message_id_fails_closed(self):
+        cases = {
+            "no message": ((0, {"ok": True}), "qa send failed: no confirmed message"),
+            "message without id": ((0, {"ok": True, "message": {"text": "q"}}), "qa send failed: no confirmed message"),
+            "not ok": ((0, {"ok": False, "error": "composer gone"}), "qa send failed: composer gone"),
+            "exit 1": ((1, {"ok": True, "message": {"id": 1}, "error": "late"}), "qa send failed: late"),
+        }
+        for label, (answer, message) in cases.items():
+            with self.subTest(label):
+                with self.assertRaisesRegex(ConnectionError, message):
+                    self.exchange({"send": [answer]})
+
+    def test_a_wait_that_fails_means_no_replies_and_no_reads(self):
+        send = (0, {"ok": True, "message": {"id": 7}})
+        for wait in ((1, {"ok": False}), (0, {"ok": False})):
+            with self.subTest(wait=wait):
+                transport, replies = self.exchange({"send": [send], "wait": [wait]})
+                self.assertEqual((replies, transport.actions), ([], ["send", "wait"]))
+
+    def test_a_failing_or_ignored_read_never_turns_a_good_answer_into_a_failure(self):
+        send = (0, {"ok": True, "message": {"id": 7}})
+        first = (0, {"ok": True, "message": {"id": 8}})
+        ignored = (0, {"ok": True, "messages": [{"id": 9, "text": "no out flag"}, {"id": 10, "out": True, "text": "mine"}]})
+        transport, replies = self.exchange({"send": [send], "wait": [first], "read": [(1, {"ok": False}), (0, {"ok": False}), ignored]}, settle=0.1)
+        self.assertEqual([text for text, _ in replies], [""])
+        self.assertEqual(transport.actions[:2], ["send", "wait"])
+        self.assertEqual(set(transport.actions[2:]), {"read"})
+
+    def test_a_reply_without_text_counts_as_an_empty_reply_and_edits_replace_it(self):
+        send = (0, {"ok": True, "message": {"id": 7}})
+        first = (0, {"ok": True, "message": {"id": 8, "text": None}})
+        read = (0, {"ok": True, "messages": [{"id": 8, "out": False, "text": "edited"}, {"id": 9, "out": False}]})
+        _, replies = self.exchange({"send": [send], "wait": [first], "read": [read]})
+        self.assertEqual([text for text, _ in replies], ["edited", ""])
+
+    def test_a_newline_in_the_text_is_refused_before_anything_is_sent(self):
+        transport = ScriptedTransport({})
+        with self.assertRaisesRegex(smoke.Refused, "case exchange: the send text must be one line"):
+            asyncio.run(transport.exchange("a\nb", 5, 0.05))
+        self.assertEqual(transport.actions, [])
+
+
 if __name__ == "__main__":
     unittest.main()
