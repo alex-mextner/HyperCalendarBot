@@ -27,9 +27,13 @@ readonly ODROID_ENTRY=/usr/local/sbin/hypercal-stage-qa
 readonly KEY_COMMENT=hypercal-stage-qa-pc
 export PATH="$SAFE_PATH"
 
-fail() { local code="${2:-2}"; echo "install-stage-qa-pc: $1" >&2; exit "$code"; }
+fail() {
+  local code="${2:-2}"
+  echo "install-stage-qa-pc: $1" >&2
+  exit "$code"
+}
 
-(( EUID != FORBIDDEN_EUID )) || fail 'run as the normal user, not root (the files belong to the runner user'"'"'s home)'
+((EUID != FORBIDDEN_EUID)) || fail 'run as the normal user, not root (the files belong to the runner user'"'"'s home)'
 [[ "${HOME:-}" == /* && -d "$HOME" ]] || fail 'HOME is not set to an existing absolute directory'
 
 readonly LIB_DIR="$HOME/.local/lib/hypercal-stage-qa"
@@ -53,7 +57,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-(( $# <= 1 )) || fail 'usage: install-stage-qa-pc.sh [<checkout>]'
+(($# <= 1)) || fail 'usage: install-stage-qa-pc.sh [<checkout>]'
 SRC="$(cd "${1:-$PWD}" && pwd -P)" || fail 'checkout directory not found'
 
 for rel in "${LIB_SOURCES[@]}"; do
@@ -82,7 +86,10 @@ fi
 # Hold the PC qa lock while swapping: a QA run (this or the ESB driver) holds it for its whole life,
 # so the install waits instead of swapping stage-smoke.py under a running driver.
 mkdir -p -m 0700 -- "$(dirname "$PC_LOCK_FILE")"
-( umask 0; : >>"$PC_LOCK_FILE" )
+(
+  umask 0
+  : >>"$PC_LOCK_FILE"
+)
 exec {LOCK_FD}<"$PC_LOCK_FILE"
 flock -w "$PC_LOCK_WAIT" "$LOCK_FD" \
   || fail "a QA run holds $PC_LOCK_FILE; nothing was changed, retry when it ends" 75
@@ -159,7 +166,7 @@ mv -f -- "$NEW_ENTRY" "$ENTRY_PATH"
 NEW_ENTRY=""
 
 printf 'installed PC stage QA from %s (%s) into %s and %s\n' "$HEAD_SHA" "${BRANCH:-detached}" "$LIB_DIR" "$ENTRY_PATH"
-if (( CONFIG_CREATED )); then
+if ((CONFIG_CREATED)); then
   printf 'created %s (review it; it is never overwritten)\n' "$CONFIG_PATH"
 else
   printf 'kept the existing %s\n' "$CONFIG_PATH"

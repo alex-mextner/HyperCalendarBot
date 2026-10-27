@@ -38,15 +38,24 @@ SHORT_SHA="${SHA:0:12}"
 STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
 trap 'rm -rf "$REMOTE_SRC"' EXIT
 exec 9>"$DEPLOY_PATH/.release.lock"
-flock -n 9 || { echo 'Another release owns this service' >&2; exit 1; }
+flock -n 9 || {
+  echo 'Another release owns this service' >&2
+  exit 1
+}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for helper in odroid-deploy-lock.sh deploy-health.py deploy-evidence.py log-retention.py; do
-  [[ -f "$SCRIPT_DIR/$helper" ]] || { echo "Release is missing scripts/$helper; the build must ship it (docs/reference/deploy-runbook.md, Release files)" >&2; exit 1; }
+  [[ -f "$SCRIPT_DIR/$helper" ]] || {
+    echo "Release is missing scripts/$helper; the build must ship it (docs/reference/deploy-runbook.md, Release files)" >&2
+    exit 1
+  }
 done
 # shellcheck source=odroid-deploy-lock.sh
 source "$SCRIPT_DIR/odroid-deploy-lock.sh"
-[[ "$(sha256sum "$REMOTE_SRC/image.tar.gz" | cut -d ' ' -f1)" == "$ARCHIVE_SUM" ]] || { echo 'Archive checksum mismatch' >&2; exit 1; }
-python3 "$REMOTE_SRC/scripts/release-artifact.py" "$REMOTE_SRC/image.tar.gz" "$SHA" "$IMAGE:$SHA" > "$REMOTE_SRC/artifact.json"
+[[ "$(sha256sum "$REMOTE_SRC/image.tar.gz" | cut -d ' ' -f1)" == "$ARCHIVE_SUM" ]] || {
+  echo 'Archive checksum mismatch' >&2
+  exit 1
+}
+python3 "$REMOTE_SRC/scripts/release-artifact.py" "$REMOTE_SRC/image.tar.gz" "$SHA" "$IMAGE:$SHA" >"$REMOTE_SRC/artifact.json"
 [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$REMOTE_SRC/artifact.json")" == "$CONFIG_ID" ]] || exit 1
 # Both repositories deploy to this one box: serialize with the other one's image load and swap (#823).
 odroid_deploy_lock_acquire hcb || exit $?
@@ -56,8 +65,11 @@ odroid_deploy_lock_acquire hcb || exit $?
 IMAGE_BYTES="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image_bytes"])' "$REMOTE_SRC/artifact.json")"
 DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}')"
 FREE_KIB="$(df -Pk "$DOCKER_ROOT" | awk 'NR == 2 {print $4}')"
-[[ "$FREE_KIB" =~ ^[0-9]+$ ]] || { echo "Cannot read free space on $DOCKER_ROOT" >&2; exit 1; }
-if (( FREE_KIB * 1024 < 2 * IMAGE_BYTES )); then
+[[ "$FREE_KIB" =~ ^[0-9]+$ ]] || {
+  echo "Cannot read free space on $DOCKER_ROOT" >&2
+  exit 1
+}
+if ((FREE_KIB * 1024 < 2 * IMAGE_BYTES)); then
   echo "Not enough disk to load the release: $((FREE_KIB * 1024)) bytes free on $DOCKER_ROOT, need $((2 * IMAGE_BYTES)) (twice the $IMAGE_BYTES-byte image). Remove superseded $IMAGE tags first (docs/reference/deploy-runbook.md, Disk space)." >&2
   exit 1
 fi
@@ -67,18 +79,28 @@ fi
 # digest there refused the first odroid release (run 38018033717, #784). release-artifact.py read
 # both digests from the verified archive; compare against the one this daemon uses.
 DRIVER_STATUS="$(docker info --format '{{json .DriverStatus}}')"
-EXPECTED_IMAGE_ID="$(python3 - "$DRIVER_STATUS" "$REMOTE_SRC/artifact.json" <<'STORE'
+EXPECTED_IMAGE_ID="$(
+  python3 - "$DRIVER_STATUS" "$REMOTE_SRC/artifact.json" <<'STORE'
 import json,sys
 status,artifact=sys.argv[1:]
 containerd=["driver-type","io.containerd.snapshotter.v1"] in (json.loads(status) or [])
 print(json.load(open(artifact))["manifest_digest" if containerd else "config_digest"])
 STORE
 )"
-[[ "$EXPECTED_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Release image identity is not a sha256 digest: $EXPECTED_IMAGE_ID" >&2; exit 1; }
+[[ "$EXPECTED_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  echo "Release image identity is not a sha256 digest: $EXPECTED_IMAGE_ID" >&2
+  exit 1
+}
 docker load -i "$REMOTE_SRC/image.tar.gz"
 LOADED_ID="$(docker image inspect "$IMAGE:$SHA" --format '{{.Id}}')"
-[[ "$LOADED_ID" == "$EXPECTED_IMAGE_ID" ]] || { echo "Loaded image identity mismatch: loaded=$LOADED_ID expected=$EXPECTED_IMAGE_ID" >&2; exit 1; }
-CURRENT_IMAGE_ID="$(docker inspect hypercal-bot --format '{{.Image}}' 2>/dev/null)" || { echo 'Existing HyperCalendar container is required; use a reviewed first-install procedure' >&2; exit 1; }
+[[ "$LOADED_ID" == "$EXPECTED_IMAGE_ID" ]] || {
+  echo "Loaded image identity mismatch: loaded=$LOADED_ID expected=$EXPECTED_IMAGE_ID" >&2
+  exit 1
+}
+CURRENT_IMAGE_ID="$(docker inspect hypercal-bot --format '{{.Image}}' 2>/dev/null)" || {
+  echo 'Existing HyperCalendar container is required; use a reviewed first-install procedure' >&2
+  exit 1
+}
 ROLLBACK_TAG="$IMAGE:rollback-$STAMP"
 docker tag "$CURRENT_IMAGE_ID" "$ROLLBACK_TAG"
 # Generic image rollback is safe only while the old image still works on the database the release
@@ -90,7 +112,10 @@ docker tag "$CURRENT_IMAGE_ID" "$ROLLBACK_TAG"
 GATE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/migration-gate.py"
 ROLLBACK_GUARD="$REMOTE_SRC/rollback-guard"
 python3 "$GATE" check hypercal-bot "$IMAGE:$SHA" "${HYPERCAL_REVIEWED_SCHEMA_TRANSITION:-}" "$ROLLBACK_GUARD" \
-  || { echo 'Schema-changing release requires reviewed migration procedure' >&2; exit 1; }
+  || {
+    echo 'Schema-changing release requires reviewed migration procedure' >&2
+    exit 1
+  }
 CONFIG_BACKUP="$DEPLOY_PATH/releases/config-$SHA-$STAMP"
 mkdir -p "$CONFIG_BACKUP/scripts"
 cp "$DEPLOY_PATH/docker-compose.yml" "$DEPLOY_PATH/Caddyfile" "$CONFIG_BACKUP/"
@@ -117,7 +142,7 @@ VERDICT_REASON=""
 # dropped) is only used for one informational public probe after verification.
 HEALTH_URL=http://127.0.0.1:3001
 PUBLIC_DOMAIN_VALUE="$(sed -n 's/^PUBLIC_DOMAIN=//p' "$DEPLOY_PATH/.env" 2>/dev/null | tail -n 1 | sed 's/[[:space:]]#.*$//' | tr -d "\"' \r" || true)"
-ready_acceptable() { case "$1" in ok|"ok (unverified)") return 0 ;; *) return 1 ;; esac; }
+ready_acceptable() { case "$1" in ok | "ok (unverified)") return 0 ;; *) return 1 ;; esac }
 # The multi-signal verdict lives in scripts/deploy-health.py (container state, restart count,
 # /health, /ready against its pre-deploy value, fresh error logs, load-aware budget); a slow start
 # is not a failure, a dead or crash-looping container is. $1 = "health" skips /ready (rollback).
@@ -131,9 +156,12 @@ wait_for_bot() {
     --stall "${HYPERCAL_HEALTH_STALL:-120}" | tee "$out" >&2
   rc="${PIPESTATUS[0]}"
   line="$(sed -n 's/^RESULT //p' "$out" | tail -n 1)"
-  HEALTH=""; READY=""; VERDICT_REASON="${line#*reason=}"
+  HEALTH=""
+  READY=""
+  VERDICT_REASON="${line#*reason=}"
   if [[ "$line" =~ health=(.*)\ ready=(.*)\ elapsed= ]]; then
-    HEALTH="${BASH_REMATCH[1]}"; READY="${BASH_REMATCH[2]}"
+    HEALTH="${BASH_REMATCH[1]}"
+    READY="${BASH_REMATCH[2]}"
     [[ "$HEALTH" != '<none>' ]] || HEALTH=""
     [[ "$READY" != '<none>' ]] || READY=""
   fi
@@ -144,7 +172,7 @@ wait_for_bot() {
 # an AI provider outage fails it for every image. CURRENT_IMAGE_ID and the restored container's
 # .Image both come from this daemon, so they are the same kind of ID on either image store.
 restore_image() {
-  printf 'services:\n  bot:\n    image: "%s"\n' "$CURRENT_IMAGE_ID" > "$REMOTE_SRC/rollback.yml"
+  printf 'services:\n  bot:\n    image: "%s"\n' "$CURRENT_IMAGE_ID" >"$REMOTE_SRC/rollback.yml"
   (cd "$DEPLOY_PATH" && docker compose -f docker-compose.yml -f "$REMOTE_SRC/rollback.yml" up -d --no-deps --no-build --pull never --force-recreate bot) || return 1
   restored="$(docker inspect hypercal-bot --format '{{.Image}}' 2>/dev/null)"
   wait_for_bot health
@@ -230,7 +258,7 @@ timeout 300 python3 "$SCRIPT_DIR/deploy-evidence.py" release-logs --container hy
   --label "${CURRENT_REVISION:-${CURRENT_IMAGE_ID:7:12}}" >&2 || true
 
 # Pin the runtime selector, independent of environment or stale :latest aliases.
-printf 'services:\n  bot:\n    image: "%s"\n' "$IMAGE:$SHA" > "$REMOTE_SRC/image.yml"
+printf 'services:\n  bot:\n    image: "%s"\n' "$IMAGE:$SHA" >"$REMOTE_SRC/image.yml"
 cd "$DEPLOY_PATH"
 docker compose -f docker-compose.yml -f "$REMOTE_SRC/image.yml" up -d --no-deps --no-build --pull never --force-recreate bot
 # Do not reload the shared server proxy: this release changes no proxy routing.

@@ -37,10 +37,23 @@ EOF
 
 while (($#)); do
   case "$1" in
-    --ref) REF="${2:?--ref requires a git ref}"; shift 2 ;;
-    --skip-tests) SKIP_TESTS=true; shift ;;
-    -h|--help) usage; exit 0 ;;
-    *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
+    --ref)
+      REF="${2:?--ref requires a git ref}"
+      shift 2
+      ;;
+    --skip-tests)
+      SKIP_TESTS=true
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
   esac
 done
 ROOT="$(git rev-parse --show-toplevel)"
@@ -50,9 +63,15 @@ if [[ "$REF" == origin/* ]]; then
   git fetch origin "${REF#origin/}"
 fi
 SHA="$(git rev-parse "${REF}^{commit}")"
-[[ "$SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'Expected exact SHA' >&2; exit 2; }
+[[ "$SHA" =~ ^[a-f0-9]{40}$ ]] || {
+  echo 'Expected exact SHA' >&2
+  exit 2
+}
 git merge-base --is-ancestor "$SHA" origin/main
-[[ "$(git rev-parse origin/main)" == "$SHA" ]] || { echo 'Ref is not current origin/main' >&2; exit 2; }
+[[ "$(git rev-parse origin/main)" == "$SHA" ]] || {
+  echo 'Ref is not current origin/main' >&2
+  exit 2
+}
 [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_/-]+$ && "$DEPLOY_PATH" != / && "$DEPLOY_PATH" != *..* ]] || exit 2
 [[ "$HOST" =~ ^[a-zA-Z0-9_@.-]+$ ]] || exit 2
 [[ "$IMAGE" =~ ^[a-z0-9][a-z0-9./_-]*$ ]] || exit 2
@@ -76,16 +95,31 @@ if [[ "$BUILD_BACKEND" == auto ]]; then
 fi
 case "$BUILD_BACKEND" in
   container)
-    command -v "$CONTAINER" >/dev/null 2>&1 || { echo "Apple container CLI not found: $CONTAINER" >&2; exit 2; }
-    "$CONTAINER" system status >/dev/null 2>&1 || { echo 'Apple container services are stopped: run `container system start` (do not install Colima or another Docker VM)' >&2; exit 2; }
+    command -v "$CONTAINER" >/dev/null 2>&1 || {
+      echo "Apple container CLI not found: $CONTAINER" >&2
+      exit 2
+    }
+    "$CONTAINER" system status >/dev/null 2>&1 || {
+      echo 'Apple container services are stopped: run `container system start` (do not install Colima or another Docker VM)' >&2
+      exit 2
+    }
     ;;
   docker)
     DOCKER_CONTEXT="${DOCKER_CONTEXT:-default}"
     endpoint="$("$DOCKER" context inspect "$DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
-    [[ "$endpoint" == unix://* ]] || { echo "Local Unix-socket Docker context required (context '$DOCKER_CONTEXT' via $DOCKER); $NO_VM" >&2; exit 2; }
-    "$DOCKER" --context "$DOCKER_CONTEXT" version >/dev/null 2>&1 || { echo "No Docker Engine answers on $endpoint; $NO_VM" >&2; exit 2; }
+    [[ "$endpoint" == unix://* ]] || {
+      echo "Local Unix-socket Docker context required (context '$DOCKER_CONTEXT' via $DOCKER); $NO_VM" >&2
+      exit 2
+    }
+    "$DOCKER" --context "$DOCKER_CONTEXT" version >/dev/null 2>&1 || {
+      echo "No Docker Engine answers on $endpoint; $NO_VM" >&2
+      exit 2
+    }
     ;;
-  *) echo 'HYPERCAL_BUILD_BACKEND must be auto, container or docker' >&2; exit 2 ;;
+  *)
+    echo 'HYPERCAL_BUILD_BACKEND must be auto, container or docker' >&2
+    exit 2
+    ;;
 esac
 docker_local() { "$DOCKER" --context "$DOCKER_CONTEXT" "$@"; }
 git archive "$SHA" | tar -xf - -C "$LOCAL_SRC"
@@ -93,7 +127,10 @@ git archive "$SHA" | tar -xf - -C "$LOCAL_SRC"
 if [[ "$SKIP_TESTS" == false ]]; then
   echo "== Local verification for $SHA =="
   # Verify the exact source, never a dirty current working tree.
-  [[ "$("$BUN" --version)" == 1.4.2 ]] || { echo 'Use the pinned Bun 1.4.2' >&2; exit 2; }
+  [[ "$("$BUN" --version)" == 1.4.2 ]] || {
+    echo 'Use the pinned Bun 1.4.2' >&2
+    exit 2
+  }
   (cd "$LOCAL_SRC" && "$BUN" install --frozen-lockfile --ignore-scripts && "$BUN" --no-env-file test ./test/ && "$BUN" run lint && "$BUN" node_modules/typescript/bin/tsc --noEmit)
 fi
 
@@ -118,25 +155,34 @@ if [[ "$BUILD_BACKEND" == container ]]; then
   # The archive is the release artifact; don't keep one local image per release,
   # and don't strand a multi-GB image when the export fails either.
   "$CONTAINER" image delete "$IMAGE:$SHA" >/dev/null 2>&1 || echo "warning: could not delete local image $IMAGE:$SHA; remove it with \`container image delete\`" >&2
-  [[ "$export_status" == 0 ]] || { echo "Image export failed (exit $export_status)" >&2; exit "$export_status"; }
+  [[ "$export_status" == 0 ]] || {
+    echo "Image export failed (exit $export_status)" >&2
+    exit "$export_status"
+  }
 else
   docker_local build --platform linux/arm64 --label "org.opencontainers.image.revision=$SHA" -t "$IMAGE:$SHA" "$LOCAL_SRC"
-  docker_local save "$IMAGE:$SHA" | gzip -1 > "$LOCAL_SRC/image.tar.gz"
+  docker_local save "$IMAGE:$SHA" | gzip -1 >"$LOCAL_SRC/image.tar.gz"
 fi
-python3 "$LOCAL_SRC/scripts/release-artifact.py" "$LOCAL_SRC/image.tar.gz" "$SHA" "$IMAGE:$SHA" > "$LOCAL_SRC/artifact.json"
+python3 "$LOCAL_SRC/scripts/release-artifact.py" "$LOCAL_SRC/image.tar.gz" "$SHA" "$IMAGE:$SHA" >"$LOCAL_SRC/artifact.json"
 ARCHIVE_SUM="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive_sha256"])' "$LOCAL_SRC/artifact.json")"
 CONFIG_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$LOCAL_SRC/artifact.json")"
 
 # A later merge must not be overwritten after a long local build.
 git fetch origin main
-[[ "$(git rev-parse origin/main)" == "$SHA" ]] || { echo 'Release superseded during local build' >&2; exit 2; }
+[[ "$(git rev-parse origin/main)" == "$SHA" ]] || {
+  echo 'Release superseded during local build' >&2
+  exit 2
+}
 ssh -o BatchMode=yes "$HOST" "mkdir -m 0700 '$REMOTE_SRC'"
 echo "== Uploading exact git archive $SHA =="
 git archive "$SHA" | ssh -o BatchMode=yes "$HOST" "tar -xf - -C '$REMOTE_SRC'"
 
 scp -q -o BatchMode=yes "$LOCAL_SRC/image.tar.gz" "$HOST:$REMOTE_SRC/image.tar.gz"
 git fetch origin main
-[[ "$(git rev-parse origin/main)" == "$SHA" ]] || { echo 'Release superseded during upload' >&2; exit 2; }
+[[ "$(git rev-parse origin/main)" == "$SHA" ]] || {
+  echo 'Release superseded during upload' >&2
+  exit 2
+}
 echo "== Loading and deploying verified prebuilt $SHA on $HOST =="
 ssh -o BatchMode=yes "$HOST" bash "$REMOTE_SRC/scripts/deploy-prebuilt-image.sh" "$DEPLOY_PATH" "$REMOTE_SRC" "$IMAGE" "$SHA" "$ARCHIVE_SUM" "$CONFIG_ID"
 

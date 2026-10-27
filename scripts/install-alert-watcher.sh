@@ -75,8 +75,8 @@ if [[ -n "${HCB_REPO_DIR:-}" ]]; then
   repo="$HCB_REPO_DIR"
 else
   script_dir="$(cd "$(dirname "$0")" && pwd -P)"
-  common="$(git -C "$script_dir" rev-parse --path-format=absolute --git-common-dir)" ||
-    die "cannot find the repository from $script_dir; set HCB_REPO_DIR"
+  common="$(git -C "$script_dir" rev-parse --path-format=absolute --git-common-dir)" \
+    || die "cannot find the repository from $script_dir; set HCB_REPO_DIR"
   repo="$(dirname "$common")"
 fi
 watcher="$repo/scripts/hcb-alert-watcher.ts"
@@ -90,8 +90,8 @@ keychain_bin="$(command -v keychain)" || die "keychain is not on PATH"
 # shell can find would make `tg report`, `ctmux ensure` or `gh` fail at 3 a.m., so check against that PATH.
 unit_search_path="$HOME/.local/bin:$HOME/.bun/bin:/usr/local/bin:/usr/bin:/bin"
 for tool in omp gh ssh tmux ctmux systemd-run; do
-  PATH="$unit_search_path" command -v "$tool" >/dev/null 2>&1 ||
-    echo "warning: $tool not found on the unit's PATH ($unit_search_path): sessions needing it will fail" >&2
+  PATH="$unit_search_path" command -v "$tool" >/dev/null 2>&1 \
+    || echo "warning: $tool not found on the unit's PATH ($unit_search_path): sessions needing it will fail" >&2
 done
 # The unit's PATH is fixed, so notices must not depend on finding tg there: pin the absolute path.
 tg_line=""
@@ -110,8 +110,8 @@ if ! "$keychain_bin" exists --caller "$CALLER" "$SECRET_REF"; then
   else
     # The value only ever sits in this shell variable and the pipe into keychain's stdin.
     # `|| true` runs on the remote side, so ssh's own exit status means only "could not connect or run".
-    line="$(ssh -o BatchMode=yes "$fetch_host" "grep -m1 '^ADMIN_ALERT_TOKEN=' $REMOTE_ENV_FILE || true")" ||
-      die "ssh to $fetch_host failed (see the message above); nothing was stored"
+    line="$(ssh -o BatchMode=yes "$fetch_host" "grep -m1 '^ADMIN_ALERT_TOKEN=' $REMOTE_ENV_FILE || true")" \
+      || die "ssh to $fetch_host failed (see the message above); nothing was stored"
     value="${line#ADMIN_ALERT_TOKEN=}"
     value="${value//\"/}"
     value="${value//\'/}"

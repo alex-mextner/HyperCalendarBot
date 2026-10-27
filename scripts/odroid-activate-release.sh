@@ -31,9 +31,12 @@ readonly IMAGE=ghcr.io/alex-mextner/hypercalendarbot
 readonly SAFE_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH="$SAFE_PATH"
 
-fail() { echo "hypercal-activate-release: $*" >&2; exit 2; }
+fail() {
+  echo "hypercal-activate-release: $*" >&2
+  exit 2
+}
 
-(( $# == 1 )) || fail 'usage: printf "%s\n" "$GITHUB_TOKEN" | hypercal-activate-release <sha40>'
+(($# == 1)) || fail 'usage: printf "%s\n" "$GITHUB_TOKEN" | hypercal-activate-release <sha40>'
 SHA="$1"
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || fail 'revision must be a full 40-character lowercase commit SHA'
 
@@ -43,7 +46,8 @@ mkdir -m 0700 "$STAGE"
 trap 'rm -rf "$STAGE"' EXIT
 
 # The Python program comes in on fd 3 so that stdin stays the token pipe.
-RESULT="$(python3 /dev/fd/3 "$API" "$REPO" "$WORKFLOW_PATH" "$IMAGE" "$SHA" "$STAGE" 3<<'PY'
+RESULT="$(
+  python3 /dev/fd/3 "$API" "$REPO" "$WORKFLOW_PATH" "$IMAGE" "$SHA" "$STAGE" 3<<'PY'
 import hashlib
 import json
 import os
