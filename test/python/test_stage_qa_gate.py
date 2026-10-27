@@ -358,6 +358,8 @@ class GateTest(GateHarness):
         self.assertIn("page=2", log)
 
 
+
+
 class LogBindingTest(GateHarness):
     """The tested head is bound through the runner's step header in the QA job log (synthetic logs only)."""
 
