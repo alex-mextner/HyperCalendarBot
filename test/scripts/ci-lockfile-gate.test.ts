@@ -25,13 +25,18 @@ function testJobRuns(file: string): string[] {
 // command really fails on a stale lock.
 const FROZEN_INSTALL = 'bun install --frozen-lockfile';
 
-test.each(WORKFLOWS)('%s runs the frozen install before any step that uses node_modules', (file) => {
-  const runs = testJobRuns(file);
-  const installAt = runs.indexOf(FROZEN_INSTALL);
-  const firstConsumer = runs.findIndex((run) => /^(bunx playwright|bun test|bun run lint|\.\/node_modules)/.test(run));
-  expect(installAt).toBeGreaterThanOrEqual(0);
-  expect(firstConsumer).toBeGreaterThan(installAt);
-});
+// A loop, not test.each: tsc rejects test.each over a readonly tuple of strings (TS2769).
+for (const file of WORKFLOWS) {
+  test(`${file} runs the frozen install before any step that uses node_modules`, () => {
+    const runs = testJobRuns(file);
+    const installAt = runs.indexOf(FROZEN_INSTALL);
+    const firstConsumer = runs.findIndex((run) =>
+      /^(bunx playwright|bun test|bun run lint|\.\/node_modules)/.test(run),
+    );
+    expect(installAt).toBeGreaterThanOrEqual(0);
+    expect(firstConsumer).toBeGreaterThan(installAt);
+  });
+}
 
 test('deploy.yml and pr-ci.yml run the same checks from the frozen install on', () => {
   // pr-ci.yml is the pre-merge copy of deploy.yml's `test` job (docs/reference/deploy-runbook.md).
