@@ -86,6 +86,7 @@ fail() {
 # Called as an ssh forced command (the PC driver, scripts/stage-qa-pc.py) it has no arguments and
 # the client's command line, which sshd leaves in SSH_ORIGINAL_COMMAND, must be exactly the SHA.
 # With one argument (the sudo path) the environment is ignored.
+# shellcheck disable=SC2016 # $GITHUB_TOKEN is literal text in the usage line
 case "$#" in
   0) CANDIDATE="${SSH_ORIGINAL_COMMAND-}" ;;
   1) CANDIDATE="$1" ;;

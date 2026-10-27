@@ -36,6 +36,7 @@ fail() {
   exit 2
 }
 
+# shellcheck disable=SC2016 # $GITHUB_TOKEN is literal text in the usage line
 (($# == 1)) || fail 'usage: printf "%s\n" "$GITHUB_TOKEN" | hypercal-activate-release <sha40>'
 SHA="$1"
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || fail 'revision must be a full 40-character lowercase commit SHA'

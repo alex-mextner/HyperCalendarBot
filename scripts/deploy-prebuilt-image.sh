@@ -34,7 +34,6 @@ local = (stage.parent == Path("/tmp").resolve()
 if not (hosted or local):
     raise SystemExit("Staging is outside the owned release namespaces; no cleanup armed")
 PYGUARD
-SHORT_SHA="${SHA:0:12}"
 STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
 trap 'rm -rf "$REMOTE_SRC"' EXIT
 exec 9>"$DEPLOY_PATH/.release.lock"

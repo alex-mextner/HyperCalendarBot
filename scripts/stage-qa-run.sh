@@ -16,6 +16,7 @@
 # to stderr.
 # Exit: 0 passed (DONE/EOF after READY), 1 failed (health/timeout), 2 refused (guard), 3 not
 # provisioned, 75 host lock wait timed out, 76 superseded. The verdict on the cases is the PC's.
+# shellcheck disable=SC2329 # the functions below are reached only through traps and step(), which shellcheck cannot see
 set -euo pipefail
 umask 077
 

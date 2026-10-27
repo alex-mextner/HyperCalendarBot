@@ -84,6 +84,7 @@ trap 'rm -rf "$LOCAL_SRC"' EXIT
 # disk kept growing) and must not come back for this: on macOS the default is
 # Apple's native `container` CLI. A real Docker Engine is still accepted, but only
 # on a local Unix socket: a remote Docker context is not a local build.
+# shellcheck disable=SC2016 # the backticks are literal text in the message
 NO_VM='on the dev Mac build with Apple `container` (`container system start`); do not install Colima or another Docker VM'
 if [[ "$BUILD_BACKEND" == auto ]]; then
   if [[ -z "$DOCKER_CONTEXT" ]] && command -v "$CONTAINER" >/dev/null 2>&1; then
@@ -100,6 +101,7 @@ case "$BUILD_BACKEND" in
       exit 2
     }
     "$CONTAINER" system status >/dev/null 2>&1 || {
+      # shellcheck disable=SC2016 # the backticks are literal text in the message
       echo 'Apple container services are stopped: run `container system start` (do not install Colima or another Docker VM)' >&2
       exit 2
     }
