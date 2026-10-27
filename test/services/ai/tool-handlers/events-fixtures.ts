@@ -10,6 +10,7 @@ import { HolidayRepository } from '../../../../src/database/repositories/holiday
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import { ConversationLogger } from '../../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 
@@ -47,7 +48,7 @@ export function createEventToolFixture(): EventToolFixture {
     chatHistory: chatHistoryRepo,
     userRepo,
     eventReminderRepo,
-    conversationLogger: null as never,
+    conversationLogger: new ConversationLogger(chatHistoryRepo),
   };
   return { db, ctx };
 }

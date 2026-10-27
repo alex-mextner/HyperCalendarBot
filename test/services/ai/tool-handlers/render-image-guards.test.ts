@@ -3,6 +3,7 @@
 // unexpected render failures reported with the localized fallback text.
 import { describe, expect, mock, test } from 'bun:test';
 import { t } from '../../../../src/config/constants.ts';
+import type { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import {
   handleRenderDayImage,
   handleRenderMonthImage,
@@ -11,6 +12,7 @@ import {
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { AgendaImageError } from '../../../../src/utils/agenda-image.ts';
 import { png } from '../../../fixtures/png.ts';
+import { partialOf } from '../partial-stubs.ts';
 
 const meta = t('en').aiTools.meta;
 
@@ -29,7 +31,7 @@ function makeCtx(renderDirect: () => Promise<Uint8Array> = () => Promise.resolve
       getEventsInRange: mock(() => []),
       getEventsInRangeForGroup: mock(() => []),
     },
-    userRepo: {} as never,
+    userRepo: partialOf<UserRepository>('userRepo'),
     holidayService: undefined,
     ...overrides,
   } as unknown as AgentContext;

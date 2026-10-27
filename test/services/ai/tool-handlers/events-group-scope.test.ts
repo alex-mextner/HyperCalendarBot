@@ -18,6 +18,7 @@ import {
 } from '../../../../src/services/ai/tool-handlers/events.ts';
 import type { AgentContext, GroupCapability } from '../../../../src/services/ai/types.ts';
 import type { GroupMemberService } from '../../../../src/services/group/member-service.ts';
+import { partialOf, type Supplied } from '../partial-stubs.ts';
 import { createEventToolFixture, type EventToolFixture, USER_ID } from './events-fixtures.ts';
 
 describe('event tool handlers', () => {
@@ -30,6 +31,12 @@ describe('event tool handlers', () => {
 
   describe('group scope', () => {
     const GROUP_CHAT_ID = -100999;
+
+    // The group fanout paths touch only a few GroupCapability members; any other member the handler
+    // reaches for throws, so a test supplies exactly what the path under test needs.
+    function groupCapability(members: Supplied<GroupCapability>): GroupCapability {
+      return partialOf<GroupCapability>('group', members);
+    }
 
     function makeGroupCtx(): AgentContext {
       return {
@@ -219,12 +226,7 @@ describe('event tool handlers', () => {
 
       const gCtx: AgentContext = {
         ...makeGroupCtx(),
-        group: {
-          groupChatRepo,
-          groupMemberRepo: undefined as never,
-          groupMemberService: undefined as never,
-          checkGroupMembership: undefined as never,
-        },
+        group: groupCapability({ groupChatRepo }),
       };
       const result = await handleGetEvents(gCtx, {
         start_date: '2026-03-15T00:00:00Z',
@@ -245,12 +247,7 @@ describe('event tool handlers', () => {
 
       const gCtx: AgentContext = {
         ...makeGroupCtx(),
-        group: {
-          groupChatRepo,
-          groupMemberRepo: undefined as never,
-          groupMemberService: undefined as never,
-          checkGroupMembership: undefined as never,
-        },
+        group: groupCapability({ groupChatRepo }),
       };
       const result = await handleGetEvent(gCtx, { event_id: event.id, scope: 'group' });
 
@@ -261,7 +258,7 @@ describe('event tool handlers', () => {
     });
 
     function makeMemberService(memberIds: number[]): GroupMemberService {
-      return { getRegisteredMembers: mock(async () => memberIds) } as Partial<GroupMemberService> as GroupMemberService;
+      return partialOf<GroupMemberService>('groupMemberService', { getRegisteredMembers: async () => memberIds });
     }
 
     // Collect enqueued broadcast jobs via a shared captor. Each test that
@@ -296,15 +293,9 @@ describe('event tool handlers', () => {
       const groupMemberService = makeMemberService([USER_ID, MEMBER_ID]);
       const { captured, broadcast } = makeCapturingBroadcast();
 
-      const mockGroupChatRepo = { findByChatId: () => null } as never;
       const gCtx: AgentContext = {
         ...makeGroupCtx(),
-        group: {
-          groupChatRepo: mockGroupChatRepo,
-          groupMemberRepo: undefined as never,
-          groupMemberService,
-          checkGroupMembership: undefined as never,
-        },
+        group: groupCapability({ groupChatRepo: new GroupChatRepository(db), groupMemberService }),
         broadcast,
       };
       const result = await handleCreateEvent(gCtx, {
@@ -335,14 +326,9 @@ describe('event tool handlers', () => {
       await handleCreateEvent(
         {
           ...makeGroupCtx(),
-          group: {
-            groupChatRepo: { findByChatId: () => null } as never,
-            groupMemberRepo: undefined as never,
-            groupMemberService,
-            checkGroupMembership: undefined as never,
-          },
+          group: groupCapability({ groupChatRepo: new GroupChatRepository(db), groupMemberService }),
           broadcast,
-        } as AgentContext,
+        },
         {
           title: 'Встреча',
           start_at: '2026-03-20T10:00:00Z',
@@ -366,14 +352,9 @@ describe('event tool handlers', () => {
       const result = await handleUpdateEvent(
         {
           ...makeGroupCtx(),
-          group: {
-            groupChatRepo: { findByChatId: () => null } as never,
-            groupMemberRepo: undefined as never,
-            groupMemberService,
-            checkGroupMembership: undefined as never,
-          },
+          group: groupCapability({ groupChatRepo: new GroupChatRepository(db), groupMemberService }),
           broadcast,
-        } as AgentContext,
+        },
         {
           event_id: event.id,
           title: 'Sprint Planning Updated',
@@ -390,13 +371,6 @@ describe('event tool handlers', () => {
       expect(captured.every((j) => j.parseMode === 'HTML')).toBe(true);
       expect(captured.every((j) => j.origin.startsWith('group_event_updated:'))).toBe(true);
     });
-
-    // Centralized partial-mock factory: the Google fanout path only touches
-    // groupMemberRepo, so the other GroupCapability members are supplied as a
-    // partial mock per the test-only cast exception in CLAUDE.md.
-    function makeGroupCapability(overrides: Partial<GroupCapability>): GroupCapability {
-      return overrides as unknown as GroupCapability;
-    }
 
     test('handleUpdateEvent (group) skips declined members in Google fanout, pushes undecided members', async () => {
       const DECLINED_MEMBER = 501;
@@ -427,7 +401,11 @@ describe('event tool handlers', () => {
       const gCtx: AgentContext = {
         ...makeGroupCtx(),
         participantRepo,
-        group: makeGroupCapability({ groupMemberRepo }),
+        // No broadcast is wired, so the notification path returns before touching the member service.
+        group: groupCapability({
+          groupMemberRepo,
+          groupMemberService: partialOf<GroupMemberService>('groupMemberService'),
+        }),
         google: { googleCalendarRepo: new GoogleCalendarRepository(db), scheduleParticipantPush },
       };
 
@@ -459,12 +437,7 @@ describe('event tool handlers', () => {
 
       const gCtx: AgentContext = {
         ...makeGroupCtx(),
-        group: {
-          groupChatRepo,
-          groupMemberRepo: undefined as never,
-          groupMemberService,
-          checkGroupMembership: undefined as never,
-        },
+        group: groupCapability({ groupChatRepo, groupMemberService }),
         broadcast,
       };
       await handleCreateEvent(gCtx, {

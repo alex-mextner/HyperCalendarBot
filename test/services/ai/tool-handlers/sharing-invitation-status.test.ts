@@ -27,14 +27,11 @@ describe('sharing tool handlers', () => {
   let userRepo: SharingFixture['userRepo'];
   let eventRepo: SharingFixture['eventRepo'];
   let eventService: SharingFixture['eventService'];
-  let sharedEventRepo: SharingFixture['sharedEventRepo'];
   let invitationRepo: SharingFixture['invitationRepo'];
   let sharingSettingsRepo: SharingFixture['sharingSettingsRepo'];
-  let invitationService: SharingFixture['invitationService'];
-  let sharingService: SharingFixture['sharingService'];
-  let privacyService: SharingFixture['privacyService'];
   let deepLinkService: SharingFixture['deepLinkService'];
   let makeCtx: SharingFixture['makeCtx'];
+  let sharingWithout: SharingFixture['sharingWithout'];
 
   beforeEach(() => {
     ({
@@ -42,14 +39,11 @@ describe('sharing tool handlers', () => {
       userRepo,
       eventRepo,
       eventService,
-      sharedEventRepo,
       invitationRepo,
       sharingSettingsRepo,
-      invitationService,
-      sharingService,
-      privacyService,
       deepLinkService,
       makeCtx,
+      sharingWithout,
     } = createSharingFixture());
   });
 
@@ -180,17 +174,7 @@ describe('sharing tool handlers', () => {
 
   describe('handleGetInvitationStatus', () => {
     test('returns error when invitationRepo is missing', async () => {
-      const ctx = makeCtx({
-        sharing: {
-          sharedEventRepo,
-          invitationRepo: undefined as never,
-          invitationService,
-          sharingSettingsRepo,
-          sharingService,
-          privacyService: privacyService,
-          editProposalRepo: undefined as never,
-        },
-      });
+      const ctx = makeCtx({ sharing: sharingWithout('invitationRepo') });
       const result = handleGetInvitationStatus(ctx, { event_id: 1 });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Invitations are not configured.');

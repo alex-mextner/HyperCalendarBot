@@ -21,6 +21,7 @@ describe('sharing tool handlers', () => {
   let sharingService: SharingFixture['sharingService'];
   let privacyService: SharingFixture['privacyService'];
   let makeCtx: SharingFixture['makeCtx'];
+  let sharingWithout: SharingFixture['sharingWithout'];
 
   beforeEach(() => {
     ({
@@ -34,6 +35,7 @@ describe('sharing tool handlers', () => {
       sharingService,
       privacyService,
       makeCtx,
+      sharingWithout,
     } = createSharingFixture());
   });
 
@@ -41,17 +43,7 @@ describe('sharing tool handlers', () => {
 
   describe('manage_settings privacy category', () => {
     test('returns error when sharingSettingsRepo is missing', async () => {
-      const ctx = makeCtx({
-        sharing: {
-          sharedEventRepo,
-          invitationRepo,
-          invitationService,
-          sharingSettingsRepo: undefined as never,
-          sharingService,
-          privacyService: privacyService,
-          editProposalRepo: undefined as never,
-        },
-      });
+      const ctx = makeCtx({ sharing: sharingWithout('sharingSettingsRepo') });
       const result = handleManageSettings(ctx, {
         action: 'update',
         category: 'privacy',
@@ -269,17 +261,7 @@ describe('sharing tool handlers', () => {
 
   describe('handleSetEventVisibility', () => {
     test('returns error when sharingSettingsRepo is missing', async () => {
-      const ctx = makeCtx({
-        sharing: {
-          sharedEventRepo,
-          invitationRepo,
-          invitationService,
-          sharingSettingsRepo: undefined as never,
-          sharingService,
-          privacyService: privacyService,
-          editProposalRepo: undefined as never,
-        },
-      });
+      const ctx = makeCtx({ sharing: sharingWithout('sharingSettingsRepo') });
       const result = handleSetEventVisibility(ctx, { event_id: 1, visibility: 'full' });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Sharing settings are not configured.');
@@ -372,17 +354,7 @@ describe('sharing tool handlers', () => {
 
   describe('handleProposeEdit', () => {
     test('returns error when editProposalRepo is missing', async () => {
-      const ctx = makeCtx({
-        sharing: {
-          sharedEventRepo,
-          invitationRepo,
-          invitationService,
-          sharingSettingsRepo,
-          sharingService,
-          privacyService,
-          editProposalRepo: undefined as never,
-        },
-      });
+      const ctx = makeCtx({ sharing: sharingWithout('editProposalRepo') });
       const result = await handleProposeEdit(ctx, { event_id: 1, changes: { title: 'New' } });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not configured');

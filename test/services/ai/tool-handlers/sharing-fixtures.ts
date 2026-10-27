@@ -5,6 +5,7 @@ import { Database } from 'bun:sqlite';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { DeepLinkRepository } from '../../../../src/database/repositories/deep-link.repository.ts';
+import { EditProposalRepository } from '../../../../src/database/repositories/edit-proposal.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
@@ -13,7 +14,8 @@ import { SharedEventRepository } from '../../../../src/database/repositories/sha
 import { SharingSettingsRepository } from '../../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
-import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import type { AgentContext, SharingCapability } from '../../../../src/services/ai/types.ts';
+import { ConversationLogger } from '../../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 import { DeepLinkService } from '../../../../src/services/sharing/deep-link-service.ts';
@@ -56,7 +58,29 @@ export function createSharingFixture(): SharingFixture {
   userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
   userRepo.create({ telegram_id: OTHER_USER_ID, timezone: 'UTC' });
 
+  const sharing: SharingCapability = {
+    sharedEventRepo,
+    invitationRepo,
+    invitationService,
+    sharingSettingsRepo,
+    sharingService,
+    privacyService,
+    editProposalRepo: new EditProposalRepository(db),
+  };
+
+  /**
+   * The sharing capability as wired when one dependency is missing. Production handlers guard
+   * `!ctx.sharing?.<member>` although SharingCapability declares every member present, and the type
+   * cannot express "one member absent"; the assertion below is confined to this function so the
+   * "not configured" tests stay explicit about the only malformed thing they feed in.
+   */
+  function sharingWithout(member: keyof SharingCapability): SharingCapability {
+    const present = Object.fromEntries(Object.entries(sharing).filter(([name]) => name !== member));
+    return present as SharingCapability;
+  }
+
   function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
+    const chatHistory = new ChatHistoryRepository(db);
     return {
       user: userRepo.findByTelegramId(USER_ID)!,
       chatId: USER_ID,
@@ -65,19 +89,11 @@ export function createSharingFixture(): SharingFixture {
       isGroup: false,
       eventService,
       holidayService: new HolidayService(new HolidayRepository(db)),
-      chatHistory: new ChatHistoryRepository(db),
+      chatHistory,
       userRepo,
       eventReminderRepo,
-      sharing: {
-        sharedEventRepo,
-        invitationRepo,
-        invitationService,
-        sharingSettingsRepo,
-        sharingService,
-        privacyService,
-        editProposalRepo: undefined as never,
-      },
-      conversationLogger: null as never,
+      sharing: { ...sharing },
+      conversationLogger: new ConversationLogger(chatHistory),
       ...overrides,
     };
   }
@@ -96,6 +112,7 @@ export function createSharingFixture(): SharingFixture {
     privacyService,
     deepLinkService,
     makeCtx,
+    sharingWithout,
   };
 }
 
@@ -113,4 +130,5 @@ export interface SharingFixture {
   privacyService: PrivacyService;
   deepLinkService: DeepLinkService;
   makeCtx: (overrides?: Partial<AgentContext>) => AgentContext;
+  sharingWithout: (member: keyof SharingCapability) => SharingCapability;
 }
