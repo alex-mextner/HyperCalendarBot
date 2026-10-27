@@ -5,9 +5,9 @@ import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
 const ctx = { timezone: 'UTC', language: 'en', userId: 1 };
 const event = { id: 5, title: 'Standup', date: '2026-03-05', time: '10:00', all_day: false };
 
-type Result = { success: boolean; output?: string; error?: string; data?: unknown; [key: string]: unknown };
-const run = (workflow: unknown, tool: (name: string, input: unknown) => Result, captures = {}, resume?: unknown) =>
-  new IntentExecutor().run(workflow as Workflow, captures, ctx, tool as never, resume as never);
+type RunParams = Parameters<IntentExecutor['run']>;
+const run = (workflow: unknown, tool: RunParams[3], captures: RunParams[1] = {}, resume?: RunParams[4]) =>
+  new IntentExecutor().run(workflow as Workflow, captures, ctx, tool, resume);
 
 describe('Level 2 step contract (legacy)', () => {
   test('an event in a tool result becomes last_mentioned_event and is reported for persistence', async () => {

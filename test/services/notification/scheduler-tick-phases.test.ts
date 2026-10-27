@@ -26,6 +26,7 @@ import {
   type TipContext,
 } from '../../../src/services/notification/scheduler.ts';
 import { BOT_TIP_FEATURE_MAP } from '../../../src/services/notification/tip-tags.ts';
+import { WeatherService } from '../../../src/services/weather/weather-service.ts';
 
 function setupDb(): Database {
   const db = new Database(':memory:');
@@ -61,7 +62,23 @@ interface Harness {
   logRepo: NotificationLogRepository;
 }
 
-function makeHarness(options: { weatherService?: unknown; withCalls?: boolean } = {}): Harness {
+type WeatherServiceMethods = Pick<WeatherService, 'getDayWeather' | 'getWeekWeather' | 'getForecastAt'>;
+
+const unexpectedWeatherCall = (method: string) => () => {
+  throw new Error(`unexpected WeatherService.${method} call`);
+};
+
+/** A real WeatherService whose every public method is replaced, so an unstubbed call fails loudly instead of fetching. */
+function makeWeatherService(stubs: Partial<WeatherServiceMethods>): WeatherService {
+  return Object.assign(new WeatherService({ apiKey: 'test' }), {
+    getDayWeather: unexpectedWeatherCall('getDayWeather'),
+    getWeekWeather: unexpectedWeatherCall('getWeekWeather'),
+    getForecastAt: unexpectedWeatherCall('getForecastAt'),
+    ...stubs,
+  });
+}
+
+function makeHarness(options: { weatherService?: Partial<WeatherServiceMethods>; withCalls?: boolean } = {}): Harness {
   const db = setupDb();
   const enqueued: Enqueued[] = [];
   const calls: EnqueueCallData[] = [];
@@ -85,7 +102,7 @@ function makeHarness(options: { weatherService?: unknown; withCalls?: boolean } 
       enqueued.push({ type, userId, logId, payload });
     },
     ...callDeps,
-    ...(options.weatherService ? { weatherService: options.weatherService as never } : {}),
+    ...(options.weatherService ? { weatherService: makeWeatherService(options.weatherService) } : {}),
   });
   return { db, scheduler, enqueued, calls, logRepo };
 }

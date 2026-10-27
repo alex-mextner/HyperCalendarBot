@@ -210,11 +210,11 @@ describe('resolveVariables: built-ins and translations', () => {
 
   test('inherited property names are not variables', () => {
     expect(resolveVariables('{{toString}}', {}, user)).toBe('{{toString}}');
-    expect(resolveVariables('{{constructor}}', {}, user, { constructor: 1 } as never)).toBe('{{constructor}}');
+    expect(resolveVariables('{{constructor}}', {}, user, { constructor: 1 })).toBe('{{constructor}}');
   });
 
   test('step-result paths: indices, own keys only', () => {
-    const steps = { arr: [{ id: 1 }, { id: 2 }], o: { a: { b: 'deep' } }, s: 'str' } as never;
+    const steps = { arr: [{ id: 1 }, { id: 2 }], o: { a: { b: 'deep' } }, s: 'str' };
     expect(resolveVariables('{{arr[1].id}}', {}, user, steps)).toBe(2);
     expect(resolveVariables('{{o.a.b}}', {}, user, steps)).toBe('deep');
     expect(resolveVariables('{{s.length}}', {}, user, steps)).toBe(3);
