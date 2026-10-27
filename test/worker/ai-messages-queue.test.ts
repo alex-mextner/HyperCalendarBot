@@ -4,6 +4,7 @@ import { aiFailureNotices } from '../../src/services/ai/agent.ts';
 import type { AgentContext } from '../../src/services/ai/types.ts';
 import type { AiMessageJobData } from '../../src/services/scheduled/types.ts';
 import { SyntheticPipelineRunner } from '../../src/worker/ai-messages-queue.ts';
+import { mockBullmq } from '../helpers/mock-bullmq.ts';
 
 // ─── BullMQ mock setup (must come before dynamic import) ──────────────────────
 
@@ -25,7 +26,7 @@ const mockWorkerOn = mock((_event: string, handler: FailedHandler) => {
   capturedFailedHandler = handler;
 });
 
-mock.module('bullmq', () => ({
+mockBullmq({
   Queue: class MockQueue {
     name: string;
     constructor(name: string, opts: Record<string, unknown>) {
@@ -46,7 +47,7 @@ mock.module('bullmq', () => ({
     }
     on = mockWorkerOn;
   },
-}));
+});
 
 const { createAiMessagesQueue, createAiMessagesWorker } = await import('../../src/worker/ai-messages-queue.ts');
 

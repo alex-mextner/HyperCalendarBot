@@ -5,6 +5,7 @@ import { migrations } from '../../src/database/migrations.ts';
 import { CallLogRepository } from '../../src/database/repositories/call-log.repository.ts';
 import { runMigrations } from '../../src/database/schema.ts';
 import type { CallReminderJobData } from '../../src/services/voice/types.ts';
+import { mockBullmq } from '../helpers/mock-bullmq.ts';
 
 type JobProcessor = (job: { id: string; data: CallReminderJobData }) => Promise<void>;
 type FailedHandler = (job: { id?: string } | undefined, err: Error) => void;
@@ -20,7 +21,7 @@ const mockWorkerOn = mock((_event: string, handler: FailedHandler) => {
   capturedFailedHandler = handler;
 });
 
-mock.module('bullmq', () => ({
+mockBullmq({
   Queue: class MockQueue {
     name: string;
     constructor(name: string) {
@@ -37,7 +38,7 @@ mock.module('bullmq', () => ({
     }
     on = mockWorkerOn;
   },
-}));
+});
 
 const { createCallQueue, createCallWorker } = await import('../../src/worker/call-queue.ts');
 

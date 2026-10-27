@@ -150,6 +150,73 @@ describe('splitMessage', () => {
   });
 });
 
+describe('splitMessage (HTML mode)', () => {
+  const split = (text: string, maxLen: number) => splitMessage(text, maxLen, 'HTML');
+
+  test('returns text within the limit unchanged, even with unbalanced tags', () => {
+    expect(split('<b>open', 100)).toEqual(['<b>open']);
+    expect(split('', 5)).toEqual(['']);
+  });
+
+  test('hard-splits plain text at exactly maxLen', () => {
+    expect(split('a'.repeat(10), 4)).toEqual(['aaaa', 'aaaa', 'aa']);
+  });
+
+  test('does not break an escaped entity across chunks', () => {
+    expect(split('aaa&amp;bbb', 6)).toEqual(['aaa', '&amp;b', 'bb']);
+    expect(split('aa&#1234;bb', 8)).toEqual(['aa', '&#1234;b', 'b']);
+    expect(split('aa&#x1F600;bb', 10)).toEqual(['aa', '&#x1F600;b', 'b']);
+  });
+
+  test('does not break a Unicode code point across chunks', () => {
+    expect(split('😀😀😀', 4)).toEqual(['😀😀', '😀']);
+  });
+
+  test('treats a stray "<" or "&" as a literal character', () => {
+    expect(split('a < b & c', 5)).toEqual(['a < b', ' & c']);
+  });
+
+  test('closes open tags at a cut and reopens them in the next chunk', () => {
+    expect(split('<b>aaaaaa</b>', 10)).toEqual(['<b>aaa</b>', '<b>aaa</b>']);
+  });
+
+  test('reopens a tag with its original attributes', () => {
+    expect(split('<a href="u">aaaaaaaa</a>', 20)).toEqual(['<a href="u">aaaa</a>', '<a href="u">aaaa</a>']);
+  });
+
+  test('reopens nested tags outermost-first and closes them innermost-first', () => {
+    const chunks = split('<b><i>xxxxxxxxxx</i></b>', 16);
+    expect(chunks).toEqual(Array.from({ length: 5 }, () => '<b><i>xx</i></b>'));
+  });
+
+  test('every chunk fits maxLen and the visible text is preserved', () => {
+    const text = `<b>${'bold '.repeat(30)}</b> plain &lt;tag&gt; <i>${'ital '.repeat(30)}</i> 😀 tail`;
+    const chunks = split(text, 40);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) expect(chunk.length).toBeLessThanOrEqual(40);
+    const visible = (html: string) => html.replace(/<[^>]+>/g, '');
+    expect(chunks.map(visible).join('')).toBe(visible(text));
+  });
+
+  test('a closing tag without an opening tag costs nothing and is kept', () => {
+    expect(split('</i>abcdef', 6)).toEqual(['</i>ab', 'cdef']);
+  });
+
+  test('throws when an open tag cannot fit with its closing tag in a chunk', () => {
+    expect(() => split('<b>xxxxxxxx</b>', 6)).toThrow('HTML tag exceeds message chunk capacity');
+  });
+
+  test('throws when a single tag is longer than maxLen', () => {
+    expect(() => split('<a href="https://example.com/very/long">x</a>', 20)).toThrow(
+      'HTML tag exceeds message chunk capacity',
+    );
+  });
+
+  test('throws when reopened tags leave no room for the next token', () => {
+    expect(() => split('<b><i>xxxxxxxx</i></b>', 11)).toThrow('HTML tag exceeds message chunk capacity');
+  });
+});
+
 describe('markdownToHtml', () => {
   test('converts **bold** to <b>', () => {
     expect(markdownToHtml('**hello**')).toBe('<b>hello</b>');
