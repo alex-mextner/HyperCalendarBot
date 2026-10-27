@@ -307,6 +307,7 @@ describe('tick – evening review phase', () => {
           { date: '2026-03-15', ...tomorrowWeather, description: 'wrong day' },
           { date: '2026-03-16', ...tomorrowWeather },
         ],
+        hours: [],
       }),
     );
     const h = makeHarness({ weatherService: { getWeekWeather } });
@@ -330,7 +331,9 @@ describe('tick – evening review phase', () => {
   });
 
   test('evening review without a matching forecast day carries no weather', async () => {
-    const getWeekWeather = mock(() => Promise.resolve({ days: [{ date: '2030-01-01', ...tomorrowWeather }] }));
+    const getWeekWeather = mock(() =>
+      Promise.resolve({ days: [{ date: '2030-01-01', ...tomorrowWeather }], hours: [] }),
+    );
     const h = makeHarness({ weatherService: { getWeekWeather } });
     addUser(h.db, 42);
     h.db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
@@ -373,7 +376,7 @@ describe('tick – weekly digest phase', () => {
   const SUNDAY_21H = new Date('2026-03-22T21:00:30Z');
 
   test('digest includes week weather by date and enqueues a digest voice call', async () => {
-    const getWeekWeather = mock(() => Promise.resolve({ days: [week('2026-03-23', 'clear')] }));
+    const getWeekWeather = mock(() => Promise.resolve({ days: [week('2026-03-23', 'clear')], hours: [] }));
     const h = makeHarness({ weatherService: { getWeekWeather }, withCalls: true });
     addUser(h.db, 42, 'UTC', 'en');
     enableCalls(h.db, 42);
