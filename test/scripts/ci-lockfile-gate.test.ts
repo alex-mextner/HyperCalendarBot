@@ -20,19 +20,27 @@ function testJobRuns(file: string): string[] {
   return parsed.jobs.test.steps.flatMap((step) => (step.run === undefined ? [] : [step.run.trim()]));
 }
 
-test.each(WORKFLOWS)('%s installs once, frozen, before Playwright and the suite run', (file) => {
+// workflow-install-order.test.ts pins that each workflow installs once, frozen. This file pins
+// what that test cannot: where the install sits, that the two jobs gate alike, and that the
+// command really fails on a stale lock.
+const FROZEN_INSTALL = 'bun install --frozen-lockfile';
+
+test.each(WORKFLOWS)('%s runs the frozen install before any step that uses node_modules', (file) => {
   const runs = testJobRuns(file);
-  const installs = runs.filter((run) => /\bbun install\b/.test(run));
-  expect(installs).toEqual(['bun install --frozen-lockfile']);
-  const installAt = runs.indexOf('bun install --frozen-lockfile');
+  const installAt = runs.indexOf(FROZEN_INSTALL);
   const firstConsumer = runs.findIndex((run) => /^(bunx playwright|bun test|bun run lint|\.\/node_modules)/.test(run));
+  expect(installAt).toBeGreaterThanOrEqual(0);
   expect(firstConsumer).toBeGreaterThan(installAt);
 });
 
-test('deploy.yml and pr-ci.yml run the same lockfile gate before the same checks', () => {
-  const [deploy, prCi] = WORKFLOWS.map((file) => testJobRuns(file));
-  // pr-ci.yml is the pre-merge copy of deploy.yml's `test` job (docs/reference/deploy-runbook.md):
-  // every `run` step, install order included, is the same.
+test('deploy.yml and pr-ci.yml run the same checks from the frozen install on', () => {
+  // pr-ci.yml is the pre-merge copy of deploy.yml's `test` job (docs/reference/deploy-runbook.md).
+  // The runner setup before the install (apt bounds, ffmpeg) may differ; the gate after it may not.
+  const [deploy, prCi] = WORKFLOWS.map((file) => {
+    const runs = testJobRuns(file);
+    expect({ file, hasFrozenInstall: runs.includes(FROZEN_INSTALL) }).toEqual({ file, hasFrozenInstall: true });
+    return runs.slice(runs.indexOf(FROZEN_INSTALL));
+  });
   expect(prCi).toEqual(deploy);
 });
 
