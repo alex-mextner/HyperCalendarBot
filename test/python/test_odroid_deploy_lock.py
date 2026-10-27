@@ -126,5 +126,73 @@ class DeployLockTests(unittest.TestCase):
         holder.wait(timeout=10)
 
 
+@unittest.skipUnless(os.path.exists("/proc/self/stat"), "/proc/<pid>/stat is Linux-only")
+class StartTicksTests(unittest.TestCase):
+    """`_odl_start_ticks` tells a live lock holder from a recycled pid, so it must return the kernel's
+    own starttime (field 22 of /proc/<pid>/stat) whatever the process is called and whatever the
+    caller's shell state is (ExpenseSyncBot carries the same cases, Refs #221 there)."""
+
+    @staticmethod
+    def reference(pid):
+        """Independent parse: comm may hold spaces and ")", so cut after the LAST ")"."""
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        return stat[stat.rindex(")") + 2:].rstrip().split(" ")[19]
+
+    @staticmethod
+    def bash_ticks(pid, prelude=":"):
+        return subprocess.run(
+            ["bash", "-c", f'source "{LOCK_LIB}"; {prelude}; _odl_start_ticks {pid}'],
+            capture_output=True, text=True,
+        )
+
+    def test_returns_the_kernel_starttime_of_a_live_process(self):
+        out = self.bash_ticks(os.getpid())
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertRegex(out.stdout, r"^[0-9]+$")
+        self.assertEqual(out.stdout, self.reference(os.getpid()))
+
+    def test_is_not_thrown_off_by_a_comm_holding_spaces_and_parentheses(self):
+        comm = "a) b (c d) 9"
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / comm
+            shutil.copy(shutil.which("bash"), binary)
+            # Once the copy prints READY it has certainly exec'd, so the kernel reports the odd comm.
+            sleeper = subprocess.Popen(
+                [str(binary), "-c", "echo READY; read -r _"],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+            )
+            try:
+                self.assertEqual(sleeper.stdout.readline().strip(), "READY")
+                self.assertIn(f"({comm})", Path(f"/proc/{sleeper.pid}/stat").read_text())
+                out = self.bash_ticks(sleeper.pid)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertEqual(out.stdout, self.reference(sleeper.pid))
+            finally:
+                sleeper.kill()
+                sleeper.wait(timeout=10)
+                sleeper.stdin.close()
+                sleeper.stdout.close()
+
+    def test_does_not_depend_on_the_caller_ifs_or_glob_settings(self):
+        expected = self.reference(os.getpid())
+        for prelude in ("IFS=''", "IFS=':'", "IFS=$'\\n'", "set -f"):
+            with self.subTest(prelude=prelude):
+                out = self.bash_ticks(os.getpid(), prelude)
+                self.assertEqual((out.returncode, out.stdout), (0, expected), out.stderr)
+
+    def test_does_not_clobber_the_callers_positional_parameters(self):
+        script = (
+            f'source "{LOCK_LIB}"; set -- keep these; _odl_start_ticks {os.getpid()} >/dev/null; '
+            "printf '%s|' \"$@\""
+        )
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        self.assertEqual(out.stdout, "keep|these|")
+
+    def test_fails_with_no_output_for_a_process_that_is_gone(self):
+        out = self.bash_ticks(999_999_999)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertEqual(out.stdout, "")
+
+
 if __name__ == "__main__":
     sys.exit(unittest.main())
