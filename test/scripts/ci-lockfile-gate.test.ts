@@ -69,9 +69,10 @@ test('the frozen install rejects a manifest the committed lock does not match an
 
     const stale = frozen();
     expect(stale.exitCode).not.toBe(0);
+    // The wording is Bun 1.4.2's; the pin test keeps the version, so a pin bump may need this line.
     expect(stale.stderr.toString()).toContain('lockfile had changes, but lockfile is frozen');
     expect(readFileSync(join(box, 'bun.lock'), 'utf8')).toBe(committedLock);
   } finally {
     rmSync(box, { recursive: true, force: true });
   }
-});
+}, 30_000);
