@@ -96,53 +96,58 @@ export function handleManageSettings(ctx: AgentContext, input: ManageSettingsInp
   }
 }
 
+function generalSettings(ctx: AgentContext): GeneralSettingsResult {
+  return {
+    timezone: ctx.user.timezone,
+    language: ctx.user.language,
+    username: ctx.user.username ?? 'not set',
+    first_name: ctx.user.first_name ?? 'not set',
+    country_code: ctx.user.country_code ?? 'not set',
+    default_event_duration_minutes: ctx.user.default_event_duration_minutes ?? 60,
+  };
+}
+
+function notificationSettings(ctx: AgentContext): NotificationPreferencesRow | undefined {
+  const prefs = ctx.notifications?.notificationPrefs;
+  if (!prefs) return undefined;
+  prefs.ensureDefaults(ctx.user.telegram_id);
+  return prefs.getPrefs(ctx.user.telegram_id);
+}
+
+function callSettings(ctx: AgentContext): CallSettingsResult | undefined {
+  if (!ctx.calls) return undefined;
+  ctx.calls.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
+  const settings = ctx.calls.callSettingsRepo.get(ctx.user.telegram_id);
+  if (!settings) return undefined;
+  const { user_id: _uid, updated_at: _uat, ...rest } = settings;
+  return rest;
+}
+
+function privacySettings(ctx: AgentContext): PrivacySettingsResult | undefined {
+  const repo = ctx.sharing?.sharingSettingsRepo;
+  if (!repo) return undefined;
+  repo.ensureDefaults(ctx.user.telegram_id);
+  const settings = repo.get(ctx.user.telegram_id);
+  if (!settings) return undefined;
+  const { user_id: _uid, updated_at: _uat, ...rest } = settings;
+  return rest;
+}
+
+function voiceSettings(ctx: AgentContext): VoiceSettingsResult {
+  return { voice_response_enabled: ctx.user.voice_response_enabled ?? null };
+}
+
 function handleGet(ctx: AgentContext, category?: SettingsCategory): ToolResult {
-  const result: AllSettingsResult = {};
-
-  if (!category || category === 'general') {
-    result.general = {
-      timezone: ctx.user.timezone,
-      language: ctx.user.language,
-      username: ctx.user.username ?? 'not set',
-      first_name: ctx.user.first_name ?? 'not set',
-      country_code: ctx.user.country_code ?? 'not set',
-      default_event_duration_minutes: ctx.user.default_event_duration_minutes ?? 60,
-    };
-  }
-
-  if (!category || category === 'notifications') {
-    if (ctx.notifications?.notificationPrefs) {
-      ctx.notifications?.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
-      result.notifications = ctx.notifications?.notificationPrefs.getPrefs(ctx.user.telegram_id);
-    }
-  }
-
   if (category === 'calls' && !ctx.calls) return callsUnavailable(ctx);
-  if ((!category || category === 'calls') && ctx.calls) {
-    ctx.calls.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
-    const settings = ctx.calls.callSettingsRepo.get(ctx.user.telegram_id);
-    if (settings) {
-      const { user_id: _uid, updated_at: _uat, ...rest } = settings;
-      result.calls = rest;
-    }
-  }
 
-  if (!category || category === 'privacy') {
-    if (ctx.sharing?.sharingSettingsRepo) {
-      ctx.sharing?.sharingSettingsRepo.ensureDefaults(ctx.user.telegram_id);
-      const settings = ctx.sharing?.sharingSettingsRepo.get(ctx.user.telegram_id);
-      if (settings) {
-        const { user_id: _uid, updated_at: _uat, ...rest } = settings;
-        result.privacy = rest;
-      }
-    }
-  }
-
-  if (!category || category === 'voice') {
-    result.voice = {
-      voice_response_enabled: ctx.user.voice_response_enabled ?? null,
-    };
-  }
+  // No category = every section; a section's key is absent when its backing repo is unavailable.
+  const wants = (name: SettingsCategory): boolean => !category || category === name;
+  const result: AllSettingsResult = {};
+  if (wants('general')) result.general = generalSettings(ctx);
+  if (wants('notifications')) result.notifications = notificationSettings(ctx);
+  if (wants('calls')) result.calls = callSettings(ctx);
+  if (wants('privacy')) result.privacy = privacySettings(ctx);
+  if (wants('voice')) result.voice = voiceSettings(ctx);
 
   if (category) {
     const resultCategory: ResultCategory = category;
@@ -209,10 +214,8 @@ function updateGeneral(ctx: AgentContext, updates: GeneralUpdates): ToolResult {
   return { success: true, output };
 }
 
-function updateNotifications(ctx: AgentContext, updates: NotificationUpdates): ToolResult {
-  if (!ctx.notifications?.notificationPrefs) return { success: false, error: 'Notification settings not configured.' };
-  ctx.notifications?.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
-
+/** Notification tool fields → DB patch: booleans become 0/1, reminder minutes are stored as a JSON string. */
+function buildNotificationPatch(updates: NotificationUpdates): NotificationPreferencesUpdate {
   const patch: NotificationPreferencesUpdate = {};
   if (updates.morning_agenda_enabled !== undefined)
     patch.morning_agenda_enabled = updates.morning_agenda_enabled ? 1 : 0;
@@ -226,9 +229,17 @@ function updateNotifications(ctx: AgentContext, updates: NotificationUpdates): T
   if (updates.default_reminder_minutes !== undefined) {
     patch.default_reminder_intervals = JSON.stringify(updates.default_reminder_minutes);
   }
+  return patch;
+}
 
+function updateNotifications(ctx: AgentContext, updates: NotificationUpdates): ToolResult {
+  const prefs = ctx.notifications?.notificationPrefs;
+  if (!prefs) return { success: false, error: 'Notification settings not configured.' };
+  prefs.ensureDefaults(ctx.user.telegram_id);
+
+  const patch = buildNotificationPatch(updates);
   if (Object.keys(patch).length === 0) return { success: false, error: 'No notification settings provided.' };
-  ctx.notifications?.notificationPrefs.update(ctx.user.telegram_id, patch);
+  prefs.update(ctx.user.telegram_id, patch);
   return {
     success: true,
     output: t(ctx.user.language).aiTools.settings.notificationsUpdated(Object.keys(patch).join(', ')),

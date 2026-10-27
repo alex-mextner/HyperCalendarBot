@@ -1,0 +1,843 @@
+// sharing tool handlers: resend_invitation and get_invitation_status.
+import { beforeEach, describe, expect, test } from 'bun:test';
+import { GroupChatRepository } from '../../../../src/database/repositories/group-chat.repository.ts';
+import { GroupMemberRepository } from '../../../../src/database/repositories/group-member.repository.ts';
+import { ParticipantRepository } from '../../../../src/database/repositories/participant.repository.ts';
+import {
+  handleGetInvitationStatus,
+  handleResendInvitation,
+} from '../../../../src/services/ai/tool-handlers/sharing.ts';
+import type { AgentContext, InvitationKeyboardVariant } from '../../../../src/services/ai/types.ts';
+import { GroupMemberService } from '../../../../src/services/group/member-service.ts';
+import { InvitationService } from '../../../../src/services/sharing/invitation-service.ts';
+import { flushPromises } from '../../../helpers/mock-context.ts';
+import { addAsPre064Image, ageAnswers, answerAsPre064Image } from '../../../helpers/pre-064-image.ts';
+import { disabledServiceTier } from '../../../helpers/service-tier.ts';
+import {
+  createSharingFixture,
+  futureStartAt,
+  GROUP_CHAT_ID,
+  OTHER_USER_ID,
+  type SharingFixture,
+  USER_ID,
+} from './sharing-fixtures.ts';
+
+describe('sharing tool handlers', () => {
+  let db: SharingFixture['db'];
+  let userRepo: SharingFixture['userRepo'];
+  let eventRepo: SharingFixture['eventRepo'];
+  let eventService: SharingFixture['eventService'];
+  let sharedEventRepo: SharingFixture['sharedEventRepo'];
+  let invitationRepo: SharingFixture['invitationRepo'];
+  let sharingSettingsRepo: SharingFixture['sharingSettingsRepo'];
+  let invitationService: SharingFixture['invitationService'];
+  let sharingService: SharingFixture['sharingService'];
+  let privacyService: SharingFixture['privacyService'];
+  let deepLinkService: SharingFixture['deepLinkService'];
+  let makeCtx: SharingFixture['makeCtx'];
+
+  beforeEach(() => {
+    ({
+      db,
+      userRepo,
+      eventRepo,
+      eventService,
+      sharedEventRepo,
+      invitationRepo,
+      sharingSettingsRepo,
+      invitationService,
+      sharingService,
+      privacyService,
+      deepLinkService,
+      makeCtx,
+    } = createSharingFixture());
+  });
+
+  // ── handleResendInvitation ──
+
+  describe('handleResendInvitation', () => {
+    test('deep-link fallback goes to inviter private chat, never the group chatId (security #94)', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Resend Party',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      const sentMessages: { chatId: number; text: string }[] = [];
+      const ctx = makeCtx({
+        chatId: GROUP_CHAT_ID,
+        sender: {
+          sendMessage: async (chatId, text) => {
+            sentMessages.push({ chatId, text });
+            return { message_id: 1 };
+          },
+          editMessageText: async () => {},
+          sendInvitation: async () => null,
+        },
+        deepLinkService,
+        botUsername: 'TestBot',
+      });
+      const result = await handleResendInvitation(ctx, { invitation_id: inv.id });
+      expect(result.success).toBe(true);
+
+      await flushPromises();
+
+      const fallback = sentMessages.find((m) => m.text.includes('t.me/TestBot'));
+      expect(fallback).toBeDefined();
+      expect(fallback!.chatId).toBe(USER_ID);
+      expect(sentMessages.some((m) => m.chatId === GROUP_CHAT_ID)).toBe(false);
+    });
+
+    test('returns error when delivery (sender) is not available', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'No Sender Resend',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      const ctx = makeCtx({ sender: undefined });
+      const result = await handleResendInvitation(ctx, { invitation_id: inv.id });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('delivery');
+    });
+
+    test("resending a pending GROUP invitation uses the group RSVP keyboard and skips the inviter's account", async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Resend',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // A group invitation stores the (negative) group chat id as invitee_id.
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      let variant: InvitationKeyboardVariant | undefined;
+      let groupRecipient: number | undefined;
+      let sessionCalled = false;
+      const sentToInviter: number[] = [];
+      const ctx = makeCtx({
+        isGroup: true,
+        chatId: GROUP_CHAT_ID,
+        groupChatId: GROUP_CHAT_ID,
+        sender: {
+          sendMessage: async (chatId) => {
+            sentToInviter.push(chatId);
+            return { message_id: 1 };
+          },
+          editMessageText: async () => {},
+          sendInvitation: async (inviteeId, _text, _invId, _lang, v) => {
+            groupRecipient = inviteeId;
+            variant = v;
+            return null; // bot API delivery fails so the fallback path is exercised too
+          },
+          sendAsConnectedUser: async () => {
+            sessionCalled = true;
+            return true;
+          },
+        },
+        deepLinkService,
+        botUsername: 'TestBot',
+      });
+      const result = await handleResendInvitation(ctx, { invitation_id: inv.id });
+      expect(result.success).toBe(true);
+
+      await flushPromises();
+
+      // The group RSVP keyboard variant is delivered to the group so members can respond for
+      // themselves — never the personal inv: keyboard (which authorizes a single invitee).
+      expect(groupRecipient).toBe(GROUP_CHAT_ID);
+      expect(variant).toEqual({ kind: 'group', eventId: event.id, place: expect.objectContaining({ id: event.id }) });
+      // allowInviterSession:false → the inviter's account never sends for a group, and the deep-link forward
+      // fallback is suppressed (a forward link can't be accepted on behalf of a group).
+      expect(sessionCalled).toBe(false);
+      expect(sentToInviter).toHaveLength(0);
+    });
+
+    test('sender without sendInvitation capability → succeeds but reports delivery failed (consistent guard)', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'No Capability Resend',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      // A sender object is present but lacks sendInvitation — deliverInvitation tolerates this and
+      // reports non-delivery, mirroring handleSendInvitation's `if (ctx.sender)` guard.
+      const ctx = makeCtx({
+        sender: {
+          sendMessage: async () => ({ message_id: 1 }),
+          editMessageText: async () => {},
+        },
+      });
+      const result = await handleResendInvitation(ctx, { invitation_id: inv.id });
+      expect(result.success).toBe(true);
+      expect(result.agentHint).toContain('failed');
+    });
+  });
+
+  // ── handleGetInvitationStatus ──
+
+  describe('handleGetInvitationStatus', () => {
+    test('returns error when invitationRepo is missing', async () => {
+      const ctx = makeCtx({
+        sharing: {
+          sharedEventRepo,
+          invitationRepo: undefined as never,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService: privacyService,
+          editProposalRepo: undefined as never,
+        },
+      });
+      const result = handleGetInvitationStatus(ctx, { event_id: 1 });
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Invitations are not configured.');
+    });
+
+    test('returns error when event not found', async () => {
+      const ctx = makeCtx();
+      const result = handleGetInvitationStatus(ctx, { event_id: 9999 });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('9999');
+      expect(result.error).toContain('not found');
+    });
+
+    test('returns error when event belongs to another user', async () => {
+      const event = eventService.createEvent({
+        user_id: OTHER_USER_ID,
+        title: 'Not Mine',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const ctx = makeCtx();
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+
+    test('returns no invitations when none exist', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Lonely Event',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const ctx = makeCtx();
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('No invitations');
+      expect(result.output).toContain('Lonely Event');
+    });
+
+    test('returns pending invitations', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'With Guests',
+        start_at: '2026-03-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      const ctx = makeCtx();
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('With Guests');
+      expect(result.output).toContain(`${OTHER_USER_ID}`);
+      expect(result.output).toContain('pending');
+    });
+
+    test('returns accepted invitations', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Confirmed',
+        start_at: '2026-03-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(inv.id, 'accepted', 'pending');
+      const ctx = makeCtx();
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('accepted');
+      expect(result.output).toContain(`${OTHER_USER_ID}`);
+    });
+
+    test('group invitation reflects per-member RSVP state instead of a stale "pending"', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Group invite: invitee_id is the negative group chat id; the row stays "pending" forever.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      // Two members RSVP'd via grsvp → recorded per-member in event_participants.
+      participantRepo.add(event.id, 301, 'accepted');
+      participantRepo.add(event.id, 302, 'declined');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('301');
+      expect(result.output).toContain('accepted');
+      expect(result.output).toContain('302');
+      expect(result.output).toContain('declined');
+      // The negative group chat id must NOT be shown as a stale per-invitee line.
+      expect(result.output).not.toContain(`invitee: ${GROUP_CHAT_ID}`);
+    });
+
+    test("a member's answer in a withdrawn group is not reported next to a group invited later", async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const groupA = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT_ID);
+      invitationRepo.updateStatus(groupA.id, 'cancelled', 'pending');
+      const groupB = -1007777;
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: groupB });
+      participantRepo.add(event.id, 302, 'accepted', 'attendee', groupB);
+
+      for (const ctx of [
+        makeCtx({ participantRepo }),
+        makeCtx({ participantRepo, isGroup: true, groupChatId: groupB, chatId: groupB }),
+      ]) {
+        const output = handleGetInvitationStatus(ctx, { event_id: event.id }).output ?? '';
+        expect(output).toContain('302');
+        expect(output).not.toContain('301');
+      }
+    });
+
+    test('an answer given on an image without origins is not reported in the group recorded before it', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const groupB = -1007777;
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: groupB });
+      participantRepo.add(event.id, 301, 'accepted', 'attendee', GROUP_CHAT_ID);
+      ageAnswers(db, event.id);
+      // Rolled back to an image from before migration 064, member 301 answers on group B's card.
+      answerAsPre064Image(db, event.id, 301, 'declined');
+
+      for (const groupChatId of [GROUP_CHAT_ID, groupB]) {
+        const ctx = makeCtx({ participantRepo, isGroup: true, groupChatId, chatId: groupChatId });
+        expect(handleGetInvitationStatus(ctx, { event_id: event.id }).output).not.toContain('301');
+      }
+    });
+
+    test('group invitation with no responses yet notes per-member RSVP, not a stale pending line', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Empty Group',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('no member RSVPs yet');
+      expect(result.output).not.toContain(`invitee: ${GROUP_CHAT_ID}`);
+    });
+
+    test('a personal invitee with a participant row is not double-listed as a group member', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Mixed Group',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Personal accepted invite (also creates an event_participants row for OTHER_USER_ID).
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      participantRepo.add(event.id, OTHER_USER_ID, 'accepted');
+      // Group invite + a distinct group member.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, 303, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // The distinct group member appears under the group breakdown.
+      expect(result.output).toContain('303');
+      // The personal invitee appears exactly once (its own invitee line), never also as a group member.
+      const occurrences = result.output!.split(String(OTHER_USER_ID)).length - 1;
+      expect(occurrences).toBe(1);
+    });
+
+    test('an accept-then-decline personal invitee is not mislabeled as a group member', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Dual Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Personal invite that was accepted and then declined: its invitation row ends as 'declined',
+      // so it is no longer in the accepted/pending sets, but the participant row remains.
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      invitationRepo.updateStatus(personalInv.id, 'declined', 'accepted');
+      participantRepo.add(event.id, OTHER_USER_ID, 'declined');
+      // Group invite + a distinct genuine group member.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, 304, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // The genuine group member is still shown.
+      expect(result.output).toContain('member: 304');
+      // The declined personal invitee must NOT appear as a group member.
+      expect(result.output).not.toContain(`member: ${OTHER_USER_ID}`);
+    });
+
+    test('#105: a declined-personal invitee who RSVPd going via the group appears once, going, counted', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Reunion',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Personal invite that the user DECLINED.
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'declined', 'pending');
+      // ...then they RSVP'd "going" via the GROUP invite → participant row = accepted (source of truth).
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, OTHER_USER_ID, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // Appears EXACTLY once across the whole output (no vanish, no double-list).
+      const occurrences = result.output!.split(String(OTHER_USER_ID)).length - 1;
+      expect(occurrences).toBe(1);
+      // Authoritative status is the participant row (accepted/going), annotated with the contradicting invite.
+      expect(result.output).toContain('status: accepted');
+      expect(result.output).toContain('(personal invite: declined)');
+      // Not duplicated as a bare group member line.
+      expect(result.output).not.toContain(`member: ${OTHER_USER_ID}`);
+      // Counted in the attending total (computed in code, not parsed from prose).
+      expect(result.output).toContain('attending (going): 1');
+    });
+
+    test('#104 (B-narrow): an accept-then-decline personal invitee shows as declined, not going', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Standup',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      invitationRepo.updateStatus(personalInv.id, 'declined', 'accepted');
+      participantRepo.add(event.id, OTHER_USER_ID, 'declined');
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // The authoritative participant status (declined) is what's shown — no phantom "going".
+      expect(result.output).toContain('status: declined');
+      // Invite status equals participant status here, so there is no contradicting annotation.
+      expect(result.output).not.toContain('(personal invite:');
+      // Not counted as attending.
+      expect(result.output).toContain('attending (going): 0');
+    });
+
+    test('#110 (B-narrow): a user with both a personal invite and a participant row is counted once', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const distinctMember = 308;
+      userRepo.create({ telegram_id: distinctMember, timezone: 'UTC' });
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Workshop',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // OTHER accepted a personal invite AND has a participant row (also in the group).
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      participantRepo.add(event.id, OTHER_USER_ID, 'accepted');
+      // Group invite + a distinct genuine group member who is going.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, distinctMember, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // OTHER appears exactly once (not double-counted across personal + group sections).
+      const occurrences = result.output!.split(String(OTHER_USER_ID)).length - 1;
+      expect(occurrences).toBe(1);
+      // Two distinct attendees, not three.
+      expect(result.output).toContain('attending (going): 2');
+      expect(result.output).toContain(`member: ${distinctMember}`);
+    });
+
+    test('group invitation degrades safely when the participant repository is absent', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'No Registry',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // A group invite exists, but the context has no participant repository injected.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      const ctx = makeCtx();
+      expect(ctx.participantRepo).toBeUndefined();
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      // No throw, sensible degraded output, and no stale group-chat invitee/member lines.
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('participant registry unavailable');
+      expect(result.output).not.toContain(`invitee: ${GROUP_CHAT_ID}`);
+      expect(result.output).not.toContain('member:');
+    });
+
+    test('P1-bug1: re-invited user with stale declined participant row shows as pending', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Reinvite Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Invitation is currently pending (re-invite), but there is a stale participant row
+      // with status 'declined' from a prior RSVP cycle.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      participantRepo.add(event.id, OTHER_USER_ID, 'declined');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // Pending invitation wins over stale participant row.
+      expect(result.output).toContain('status: pending');
+      expect(result.output).not.toContain('status: declined');
+      // No misleading "(personal invite: pending)" note while the invite itself is the primary.
+      expect(result.output).not.toContain('(personal invite:');
+      // pending is not "going"
+      expect(result.output).toContain('attending (going): 0');
+    });
+
+    test('P1-bug2: maybe RSVP is not counted in attending (going)', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Maybe Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, OTHER_USER_ID, 'maybe');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('maybe');
+      // maybe is tentative, not "going"
+      expect(result.output).toContain('attending (going): 0');
+      expect(result.output).not.toContain('attending (going): 1');
+    });
+
+    test('P1-review: pending personal invite does not mask a confirmed group RSVP (accepted participant row wins)', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Dual Channel Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Pending personal invite + group invite where the user accepted via group.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, OTHER_USER_ID, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // The positive group RSVP is authoritative — must not be masked by the pending personal invite.
+      expect(result.output).toContain('status: accepted');
+      expect(result.output).not.toContain('status: pending');
+      // Must be counted as attending.
+      expect(result.output).toContain('attending (going): 1');
+      // No spurious note about a pending invite when the confirmed RSVP is primary.
+      expect(result.output).not.toContain('(personal invite:');
+    });
+
+    test('P1-bug-b: group section omits "no RSVPs yet" when all group respondents are deduped to personal section', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Dedup Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // OTHER_USER_ID has a personal invite (accepted) AND a group RSVP row.
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, OTHER_USER_ID, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // OTHER_USER_ID RSVP'd — the "no member RSVPs yet" message must not appear.
+      expect(result.output).not.toContain('no member RSVPs yet');
+      // The user is still listed once in the personal section.
+      expect(result.output).toContain(`${OTHER_USER_ID}`);
+      expect(result.output).toContain('attending (going): 1');
+    });
+
+    test('P1-fix1: personal invitation with status maybe is shown but not counted as going', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Tentative Party',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Personal invite accepted as 'maybe' (tentative) — no participant row.
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(inv.id, 'maybe', 'pending');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // Status appears as maybe, not as going.
+      expect(result.output).toContain('status: maybe');
+      // maybe is tentative — must not be included in the attending count.
+      expect(result.output).toContain('attending (going): 0');
+      expect(result.output).not.toContain('attending (going): 1');
+    });
+
+    test('P1-fix2: pending invitation does not override a positive (maybe) participant row', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Maybe Wins Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Pending personal invitation exists, but the participant row carries a confirmed
+      // tentative signal (maybe) from a prior group RSVP cycle. The positive participant
+      // status must win over the pending invitation — not be masked by it.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      participantRepo.add(event.id, OTHER_USER_ID, 'maybe');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // The positive participant row (maybe) is authoritative — pending invitation must not override it.
+      expect(result.output).toContain('status: maybe');
+      expect(result.output).not.toContain('status: pending');
+      // No spurious annotation when the invitation is still pending (not a final negative response).
+      expect(result.output).not.toContain('(personal invite:');
+      // maybe is tentative, not going.
+      expect(result.output).toContain('attending (going): 0');
+    });
+
+    test('P1-bug3: degraded mode with personal accepted invite does not render misleading attending count', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Degraded Count Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Personal invite is accepted — would show attending: 1 incorrectly (misses group RSVPs).
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      // Group invite exists but no participantRepo → degraded mode.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      const ctx = makeCtx(); // no participantRepo
+      expect(ctx.participantRepo).toBeUndefined();
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // Attending line must be suppressed when group RSVPs are invisible.
+      expect(result.output).not.toContain('attending (going):');
+      // The unavailability notice must still be present.
+      expect(result.output).toContain('participant registry unavailable');
+    });
+
+    test('returns mixed pending and accepted', async () => {
+      const thirdUser = 300;
+      userRepo.create({ telegram_id: thirdUser, timezone: 'UTC' });
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Mixed',
+        start_at: '2026-03-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const inv1 = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(inv1.id, 'accepted', 'pending');
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: thirdUser });
+      const ctx = makeCtx();
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('accepted');
+      expect(result.output).toContain('pending');
+    });
+
+    // The prompt answers "who takes part" only from this tool, so invitees must be able to call it
+    // on the owner's event; people outside the invitation must not.
+    describe('invitee access', () => {
+      const THIRD_USER_ID = 300;
+      const STRANGER_ID = 400;
+      let participantRepo: ParticipantRepository;
+      let groupMemberRepo: GroupMemberRepository;
+      let invitations: InvitationService;
+
+      function ctxFor(userId: number, groupChatId?: number): AgentContext {
+        return makeCtx({
+          user: userRepo.findByTelegramId(userId)!,
+          chatId: groupChatId ?? userId,
+          isGroup: groupChatId !== undefined,
+          groupChatId,
+          participantRepo,
+          group: {
+            groupMemberRepo,
+            checkGroupMembership: () => Promise.resolve(false),
+            groupChatRepo: new GroupChatRepository(db),
+            groupMemberService: new GroupMemberService(groupMemberRepo, userRepo, disabledServiceTier),
+          },
+        });
+      }
+
+      function rosterLines(output: string): string[] {
+        return output.split('\n').filter((line) => line.startsWith('invitee: ') || line.startsWith('attending'));
+      }
+
+      function createDinner() {
+        const event = eventService.createEvent({
+          user_id: USER_ID,
+          title: 'Team Dinner',
+          description: 'owner-only note',
+          start_at: futureStartAt(),
+          timezone: 'UTC',
+        });
+        const accepted = invitations.sendInvitation(event.id, USER_ID, OTHER_USER_ID).invitation!;
+        invitations.acceptInvitation(accepted.id, OTHER_USER_ID);
+        const pending = invitations.sendInvitation(event.id, USER_ID, THIRD_USER_ID).invitation!;
+        return { event, pending };
+      }
+
+      beforeEach(() => {
+        participantRepo = new ParticipantRepository(db);
+        groupMemberRepo = new GroupMemberRepository(db);
+        invitations = new InvitationService(invitationRepo, eventRepo, sharingSettingsRepo, participantRepo);
+        userRepo.create({ telegram_id: THIRD_USER_ID, timezone: 'UTC' });
+        userRepo.create({ telegram_id: STRANGER_ID, timezone: 'UTC' });
+      });
+
+      test('accepted invitee sees the roster the owner sees, plus who organizes it', () => {
+        const { event } = createDinner();
+        const owner = handleGetInvitationStatus(ctxFor(USER_ID), { event_id: event.id });
+        const invitee = handleGetInvitationStatus(ctxFor(OTHER_USER_ID), { event_id: event.id });
+
+        expect(owner.success).toBe(true);
+        expect(rosterLines(owner.output!)).toEqual([
+          'attending (going): 1',
+          `invitee: ${OTHER_USER_ID}, status: accepted`,
+          `invitee: ${THIRD_USER_ID}, status: pending`,
+        ]);
+        expect(owner.output).not.toContain('organizer');
+
+        expect(invitee.success).toBe(true);
+        expect(invitee.output).toContain('Team Dinner');
+        expect(rosterLines(invitee.output!)).toEqual(
+          rosterLines(owner.output!).map((line) => line.replace(`invitee: ${OTHER_USER_ID},`, 'invitee: you,')),
+        );
+        expect(invitee.output).toContain(`organizer: ${USER_ID}`);
+        expect(invitee.output).not.toContain('owner-only note');
+      });
+
+      test('pending invitee and current members of an invited group can see the roster', () => {
+        const { event } = createDinner();
+        invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+        groupMemberRepo.upsert(GROUP_CHAT_ID, STRANGER_ID);
+
+        expect(handleGetInvitationStatus(ctxFor(THIRD_USER_ID), { event_id: event.id }).success).toBe(true);
+        // Invited through the group before answering, like a pending personal invitee.
+        expect(handleGetInvitationStatus(ctxFor(STRANGER_ID), { event_id: event.id }).success).toBe(true);
+        invitations.recordGroupAttendance(event.id, STRANGER_ID, 'accepted', GROUP_CHAT_ID);
+        const member = handleGetInvitationStatus(ctxFor(STRANGER_ID), { event_id: event.id });
+        expect(member.success).toBe(true);
+        expect(member.output).toContain('member: you, status: accepted');
+
+        // Leaving the group ends access even though the RSVP row stays behind.
+        groupMemberRepo.leave(GROUP_CHAT_ID, STRANGER_ID);
+        expect(handleGetInvitationStatus(ctxFor(STRANGER_ID), { event_id: event.id }).success).toBe(false);
+      });
+
+      test('stranger without an invitation is rejected', () => {
+        const { event } = createDinner();
+        const result = handleGetInvitationStatus(ctxFor(STRANGER_ID), { event_id: event.id });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+        expect(result.output).toBeUndefined();
+      });
+
+      test('an invitee asking in a group chat gets the roster only in a chat the owner invited', () => {
+        const { event } = createDinner();
+        const OTHER_GROUP_CHAT_ID = -1008888;
+        // Refused for the chat, not for the person: the model must not tell an invitee they are not invited.
+        const elsewhere = handleGetInvitationStatus(ctxFor(OTHER_USER_ID, OTHER_GROUP_CHAT_ID), { event_id: event.id });
+        expect(elsewhere.success).toBe(false);
+        expect(elsewhere.error).toBe(
+          `Event ${event.id}: its roster can only be read in a private chat or in a group invited to it.`,
+        );
+        expect(elsewhere.output).toBeUndefined();
+        const stranger = handleGetInvitationStatus(ctxFor(STRANGER_ID, OTHER_GROUP_CHAT_ID), { event_id: event.id });
+        expect(stranger.error).toContain('not found');
+
+        invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+        expect(handleGetInvitationStatus(ctxFor(OTHER_USER_ID, GROUP_CHAT_ID), { event_id: event.id }).success).toBe(
+          true,
+        );
+      });
+
+      test('cancelled invitee is rejected even with a leftover RSVP row; declined invitee is still admitted', () => {
+        const { event, pending } = createDinner();
+        // OTHER accepted (participant row "accepted"), then the owner withdrew the invitation. OTHER is
+        // not in the group invited to the same event, so that leftover row must not readmit them.
+        invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+        const accepted = invitationRepo.findActiveByEventAndInvitee(event.id, OTHER_USER_ID)!;
+        expect(invitations.cancelInvitation(accepted.id, USER_ID).success).toBe(true);
+        const cancelled = handleGetInvitationStatus(ctxFor(OTHER_USER_ID), { event_id: event.id });
+        expect(cancelled.success).toBe(false);
+        expect(cancelled.error).toContain('not found');
+
+        // Same rule as propose_edit: a declined invitee was invited and keeps read access.
+        invitations.declineInvitation(pending.id, THIRD_USER_ID);
+        const declined = handleGetInvitationStatus(ctxFor(THIRD_USER_ID), { event_id: event.id });
+        expect(declined.success).toBe(true);
+        expect(declined.output).toContain(`organizer: ${USER_ID}`);
+      });
+
+      test('an invitee reads group answers from live groups only, never answers of unknown origin', () => {
+        const { event } = createDinner();
+        const WITHDRAWN_GROUP_CHAT_ID = -1008888;
+        invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+        const withdrawn = invitationRepo.create({
+          event_id: event.id,
+          inviter_id: USER_ID,
+          invitee_id: WITHDRAWN_GROUP_CHAT_ID,
+        });
+        invitationRepo.updateStatus(withdrawn.id, 'cancelled', 'pending');
+        participantRepo.add(event.id, 501, 'accepted', 'attendee', GROUP_CHAT_ID);
+        participantRepo.add(event.id, 502, 'accepted', 'attendee', WITHDRAWN_GROUP_CHAT_ID);
+        // An answer recorded before migration 064: its group is unknown.
+        addAsPre064Image(db, event.id, 503, 'accepted');
+
+        const invitee = handleGetInvitationStatus(ctxFor(THIRD_USER_ID), { event_id: event.id }).output ?? '';
+        // A personal answer (no group origin either) stays in the invitee section.
+        expect(invitee).toContain(`invitee: ${OTHER_USER_ID}, status: accepted`);
+        expect(invitee).toContain('member: 501, status: accepted');
+        expect(invitee).not.toContain('502');
+        expect(invitee).not.toContain('503');
+        // The organizer's own view in a private chat keeps every answer of unknown origin.
+        expect(handleGetInvitationStatus(ctxFor(USER_ID), { event_id: event.id }).output).toContain('member: 503');
+      });
+    });
+  });
+});

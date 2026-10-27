@@ -3,35 +3,14 @@ import type { FeatureKey } from '../../database/repositories/feature-usage.repos
 import { logger } from '../../utils/logger.ts';
 import { checkDayReferences, checkQuestionWeekdays } from './day-reference-guard.ts';
 import { extractEventSummaries } from './event-summaries.ts';
+import { dispatchTool } from './tool-dispatch.ts';
 import { handleGetActionLog } from './tool-handlers/action-log.ts';
-import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
 import { handleCalculate } from './tool-handlers/calculate.ts';
-import {
-  handleAddContact,
-  handleDeleteContact,
-  handleFindContact,
-  handleGetContacts,
-  handleGetUserInfo,
-  handleUpdateContact,
-} from './tool-handlers/contacts.ts';
-import {
-  handleAttachPendingLocationToEvent,
-  handleCreateEvent,
-  handleDeleteEvent,
-  handleGetEvent,
-  handleGetEvents,
-  handleGetUpcoming,
-  handleNotifyParticipants,
-  handleSearchEvents,
-  handleSnoozeEvent,
-  handleUpdateEvent,
-} from './tool-handlers/events.ts';
-import { handleSendFeedback } from './tool-handlers/feedback.ts';
+import { handleFindContact, handleGetContacts, handleGetUserInfo } from './tool-handlers/contacts.ts';
+import { handleGetEvent, handleGetEvents, handleGetUpcoming, handleSearchEvents } from './tool-handlers/events.ts';
 import { handleGetHistory } from './tool-handlers/history.ts';
-import { handleRememberUserFact, handleSetReaction } from './tool-handlers/memory.ts';
 import {
   handleAskUser,
-  handleEndCall,
   handleEndConversation,
   handleFindUser,
   handleGetBotInfo,
@@ -39,12 +18,10 @@ import {
   handleGetHolidays,
   handleListGoogleCalendars,
   handleLookupStress,
-  handleMakeCall,
   handlePickUsers,
 } from './tool-handlers/meta.ts';
 import type { ProposeInput } from './tool-handlers/proposals.ts';
-import { handleProposeCalendarChange } from './tool-handlers/proposals.ts';
-import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
+import { handleGetReminders } from './tool-handlers/reminders.ts';
 import {
   handleRenderDayImage,
   handleRenderMonthImage,
@@ -53,36 +30,19 @@ import {
 } from './tool-handlers/render.ts';
 import { handleCancelScene, handleResumeScene } from './tool-handlers/scenes.ts';
 import {
-  handleAddTrigger,
   handleListTriggers,
-  handleRemoveTrigger,
-  handleScheduleAiCall,
-  handleScheduleAiCallCancel,
   handleScheduleAiCallsList,
   type ScheduleAiCallInput,
   type TriggerIdInput,
   type TriggerInput,
 } from './tool-handlers/scheduled.ts';
-import { handleListCalendarAccess, handleManageSecretaries } from './tool-handlers/secretary.ts';
+import { handleListCalendarAccess } from './tool-handlers/secretary.ts';
 import type { ManageSettingsInput } from './tool-handlers/settings.ts';
-import {
-  handleConnectTelegramStatus,
-  handleDismissConnectTelegramPrompt,
-  handleManageSettings,
-} from './tool-handlers/settings.ts';
-import {
-  handleCancelInvitation,
-  handleGetInvitationStatus,
-  handleProposeEdit,
-  handleResendInvitation,
-  handleSendInvitation,
-  handleSetEventVisibility,
-  handleShareAgenda,
-  handleShareEvent,
-} from './tool-handlers/sharing.ts';
+import { handleConnectTelegramStatus, handleDismissConnectTelegramPrompt } from './tool-handlers/settings.ts';
+import { handleGetInvitationStatus } from './tool-handlers/sharing.ts';
 import { handleGetFreeSlots } from './tool-handlers/slots.ts';
 import { handleConvertToTimezone, handleGetTimezoneInfoWithCityFallback } from './tool-handlers/timezone.ts';
-import { makeCallSchema, toolSchemas } from './tool-schemas.ts';
+import { toolSchemas } from './tool-schemas.ts';
 import { withSchemaExcerpt } from './tools.ts';
 import type { AgentContext, ToolResult } from './types.ts';
 
@@ -412,121 +372,157 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
 export type ExecutorDisposition = 'executed' | 'failed' | 'skipped' | 'waiting';
 export type ExecutedToolResult = ToolResult & { disposition: ExecutorDisposition };
 
-export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ExecutedToolResult> {
-  aiLogger.debug({ tool: toolName, input }, 'Executing tool');
-
-  let validationError: ToolResult | undefined;
+/**
+ * Parse the raw model arguments against the tool's schema and run the day-reference guards.
+ * Returns the (possibly coerced) input and, when the call must not run, the failure to report.
+ */
+function validateToolCall(
+  ctx: AgentContext,
+  toolName: string,
+  rawInput: unknown,
+): { input: unknown; error: ToolResult | undefined } {
+  let input = rawInput;
+  let error: ToolResult | undefined;
   const schema = toolSchemas[toolName as ToolName];
   if (schema) {
     const result = schema.safeParse(input);
-    if (!result.success) {
-      validationError = {
+    if (result.success) {
+      input = result.data;
+    } else {
+      error = {
         success: false,
         mutationState: 'not_applied',
         error: `Invalid input: ${describeIssues(toolName, result.error.issues)}`,
       };
-    } else {
-      input = result.data;
     }
   }
   // A date-bearing call for a day the user did not name is rejected before any write,
   // and a question pairing a weekday with a date on another weekday is never sent.
-  validationError ??= checkDayReferences(ctx, toolName, input) ?? checkQuestionWeekdays(ctx, toolName, input);
+  error ??= checkDayReferences(ctx, toolName, input) ?? checkQuestionWeekdays(ctx, toolName, input);
+  return { input, error };
+}
 
-  // Time throttle: identical tool call within THROTTLE_TTL_MS returns a synthetic
-  // THROTTLED result without invoking the handler. Prevents rapid cross-run
-  // repeats (the in-run dedup in CalendarBotAgent handles within-run loops).
-  // Only applied to tools with side-effects — purely read-only tools are exempt
-  // so legitimate repeated queries within 5s don't get stale answers.
-  // Build the throttle key before dispatch — used both for the pre-check and
-  // the post-success write.
-  let throttleKey: string | null = null;
-  if (!validationError && !THROTTLE_EXEMPT.has(toolName)) {
-    const now = Date.now();
-    throttleKey = buildThrottleKey(ctx.chatId, toolName, input);
-    const lastCalledAt = throttleMap.get(throttleKey);
-    if (lastCalledAt !== undefined && now - lastCalledAt < THROTTLE_TTL_MS) {
-      aiLogger.warn(
-        { tool: toolName, chatId: ctx.chatId, sinceMs: now - lastCalledAt },
-        'Tool call throttled (identical within 5s)',
-      );
-      return { success: true, output: THROTTLE_MARKER, disposition: 'skipped' };
-    }
+/**
+ * Time throttle: identical tool call within THROTTLE_TTL_MS returns a synthetic
+ * THROTTLED result without invoking the handler. Prevents rapid cross-run
+ * repeats (the in-run dedup in CalendarBotAgent handles within-run loops).
+ * Only applied to tools with side-effects — purely read-only tools are exempt
+ * so legitimate repeated queries within 5s don't get stale answers.
+ * Returns the key used for the pre-check and the post-success write, or null when
+ * the call is not subject to throttling.
+ */
+function throttleKeyFor(ctx: AgentContext, toolName: string, input: unknown): string | null {
+  if (THROTTLE_EXEMPT.has(toolName)) return null;
+  return buildThrottleKey(ctx.chatId, toolName, input);
+}
+
+function isThrottled(ctx: AgentContext, toolName: string, throttleKey: string): boolean {
+  const now = Date.now();
+  const lastCalledAt = throttleMap.get(throttleKey);
+  if (lastCalledAt === undefined || now - lastCalledAt >= THROTTLE_TTL_MS) return false;
+  aiLogger.warn(
+    { tool: toolName, chatId: ctx.chatId, sinceMs: now - lastCalledAt },
+    'Tool call throttled (identical within 5s)',
+  );
+  return true;
+}
+
+/** Record throttle entry only after a successful execution — failed calls must not poison the window. */
+function recordThrottleEntry(throttleKey: string): void {
+  const now = Date.now();
+  evictStaleThrottleEntries(now);
+  throttleMap.set(throttleKey, now);
+}
+
+/**
+ * Track which event was touched, for last_mentioned_event resolution in intents,
+ * and every event the model was shown, as evidence for the reply-time guard.
+ */
+function trackSurfacedEvents(ctx: AgentContext, input: ToolInputMap[ToolName], result: ToolResult): void {
+  const eventId = extractEventId(input, result);
+  if (eventId !== undefined) ctx.onEventMentioned?.(eventId);
+  const surfaced = extractEventSummaries(result.data);
+  if (surfaced) ctx.surfacedEvents = [...(ctx.surfacedEvents ?? []), ...surfaced];
+}
+
+/** Track feature usage for tip personalization. */
+function recordFeatureUsage(ctx: AgentContext, toolName: string): void {
+  const featureKey = TOOL_FEATURE_MAP[toolName];
+  if (!ctx.featureUsageRepo || !featureKey) return;
+  try {
+    ctx.featureUsageRepo.record(ctx.user.telegram_id, featureKey);
+  } catch (fuErr) {
+    aiLogger.warn({ err: fuErr, tool: toolName }, 'Failed to record feature usage');
+  }
+}
+
+/** Log mutating tool calls to user_action_log. */
+function logToolAction(ctx: AgentContext, toolName: string, input: ToolInputMap[ToolName], result: ToolResult): void {
+  if (!ctx.actionLogRepo || SKIP_ACTION_LOG.has(toolName)) return;
+  try {
+    ctx.actionLogRepo.insert({
+      user_id: ctx.user.telegram_id,
+      chat_id: ctx.chatId,
+      action_type: 'ai_tool',
+      action_name: toolName,
+      message_id: ctx.incomingMessageId,
+      chat_history_id: ctx.chatHistoryId,
+      input_summary: summarizeInput(toolName, input),
+      result_summary: result.output?.slice(0, 500) ?? result.error?.slice(0, 500),
+      metadata: JSON.stringify({
+        ...input,
+        ...(ctx.inputMode && { _inputMode: ctx.inputMode }),
+        ...(ctx.voiceFileId && { _voiceFileId: ctx.voiceFileId }),
+      }),
+      target_event_id: extractEventId(input, result),
+      target_user_id: extractTargetUserId(input),
+      success: result.success,
+    });
+  } catch (logErr) {
+    aiLogger.warn({ err: logErr, tool: toolName }, 'Failed to log action');
+  }
+}
+
+function resolveMutationState(
+  toolName: string,
+  input: unknown,
+  result: ToolResult,
+): NonNullable<ToolResult['mutationState']> {
+  if (result.mutationState) return result.mutationState;
+  if (result.awaitingInput || !isMutationTool(toolName, input)) return 'not_applied';
+  return result.success ? 'confirmed' : 'uncertain';
+}
+
+function resolveDisposition(result: ToolResult): ExecutorDisposition {
+  if (!result.success) return 'failed';
+  return result.awaitingInput ? 'waiting' : 'executed';
+}
+
+export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ExecutedToolResult> {
+  aiLogger.debug({ tool: toolName, input }, 'Executing tool');
+
+  const validated = validateToolCall(ctx, toolName, input);
+  input = validated.input;
+
+  const throttleKey = validated.error ? null : throttleKeyFor(ctx, toolName, input);
+  if (throttleKey && isThrottled(ctx, toolName, throttleKey)) {
+    return { success: true, output: THROTTLE_MARKER, disposition: 'skipped' };
   }
 
   try {
-    const result = validationError ?? (await dispatchTool(ctx, toolName as ToolName, input as ToolInputMap[ToolName]));
+    const result = validated.error ?? (await dispatchTool(ctx, toolName as ToolName, input as ToolInputMap[ToolName]));
 
-    // Record throttle entry only after a successful execution — failed calls
-    // must not poison the throttle window so retries get a real attempt.
-    if (result.success && throttleKey) {
-      const now = Date.now();
-      evictStaleThrottleEntries(now);
-      throttleMap.set(throttleKey, now);
-    }
-
-    // Track which event was touched, for last_mentioned_event resolution in intents,
-    // and every event the model was shown, as evidence for the reply-time guard.
     if (result.success) {
-      const eventId = extractEventId(input as ToolInputMap[ToolName], result);
-      if (eventId !== undefined) ctx.onEventMentioned?.(eventId);
-      const surfaced = extractEventSummaries(result.data);
-      if (surfaced) ctx.surfacedEvents = [...(ctx.surfacedEvents ?? []), ...surfaced];
+      if (throttleKey) recordThrottleEntry(throttleKey);
+      trackSurfacedEvents(ctx, input as ToolInputMap[ToolName], result);
+      recordFeatureUsage(ctx, toolName);
     }
-
-    // Track feature usage for tip personalization
-    if (result.success && ctx.featureUsageRepo) {
-      const featureKey = TOOL_FEATURE_MAP[toolName];
-      if (featureKey) {
-        try {
-          ctx.featureUsageRepo.record(ctx.user.telegram_id, featureKey);
-        } catch (fuErr) {
-          aiLogger.warn({ err: fuErr, tool: toolName }, 'Failed to record feature usage');
-        }
-      }
-    }
-
-    // Log mutating tool calls to user_action_log
-    if (ctx.actionLogRepo && !SKIP_ACTION_LOG.has(toolName)) {
-      try {
-        const inputObj = input as ToolInputMap[ToolName];
-        const eventId = extractEventId(inputObj, result);
-        const targetUserId = extractTargetUserId(inputObj);
-        ctx.actionLogRepo.insert({
-          user_id: ctx.user.telegram_id,
-          chat_id: ctx.chatId,
-          action_type: 'ai_tool',
-          action_name: toolName,
-          message_id: ctx.incomingMessageId,
-          chat_history_id: ctx.chatHistoryId,
-          input_summary: summarizeInput(toolName, inputObj),
-          result_summary: result.output?.slice(0, 500) ?? result.error?.slice(0, 500),
-          metadata: JSON.stringify({
-            ...inputObj,
-            ...(ctx.inputMode && { _inputMode: ctx.inputMode }),
-            ...(ctx.voiceFileId && { _voiceFileId: ctx.voiceFileId }),
-          }),
-          target_event_id: eventId,
-          target_user_id: targetUserId,
-          success: result.success,
-        });
-      } catch (logErr) {
-        aiLogger.warn({ err: logErr, tool: toolName }, 'Failed to log action');
-      }
-    }
+    logToolAction(ctx, toolName, input as ToolInputMap[ToolName], result);
 
     return {
       ...result,
-      mutationState:
-        result.mutationState ??
-        (result.awaitingInput
-          ? 'not_applied'
-          : isMutationTool(toolName, input)
-            ? result.success
-              ? 'confirmed'
-              : 'uncertain'
-            : 'not_applied'),
-      disposition: !result.success ? 'failed' : result.awaitingInput ? 'waiting' : 'executed',
+      mutationState: resolveMutationState(toolName, input, result),
+      disposition: resolveDisposition(result),
     };
   } catch (outerError) {
     aiLogger.error({ tool: toolName, err: outerError }, 'Tool execution error');
@@ -600,212 +596,4 @@ function describeIssues(toolName: string, issues: readonly z.core.$ZodIssue[]): 
       return withSchemaExcerpt(base, toolName, [root]);
     })
     .join(', ');
-}
-
-async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolInputMap[ToolName]): Promise<ToolResult> {
-  try {
-    switch (toolName) {
-      case 'supplement_skip':
-        return { success: true, stopLoop: true };
-
-      case 'end_conversation':
-        return handleEndConversation();
-
-      case 'get_events':
-        return handleGetEvents(ctx, input as ToolInputMap['get_events']);
-
-      case 'create_event':
-        return handleCreateEvent(ctx, input as ToolInputMap['create_event']);
-
-      case 'update_event':
-        return handleUpdateEvent(ctx, input as ToolInputMap['update_event']);
-
-      case 'attach_pending_location_to_event':
-        return handleAttachPendingLocationToEvent(ctx, input as ToolInputMap['attach_pending_location_to_event']);
-
-      case 'delete_event':
-        return handleDeleteEvent(ctx, input as ToolInputMap['delete_event']);
-
-      case 'get_free_slots':
-        return handleGetFreeSlots(ctx, input as ToolInputMap['get_free_slots']);
-
-      case 'search_events':
-        return handleSearchEvents(ctx, input as ToolInputMap['search_events']);
-
-      case 'create_birthday_event':
-        return handleCreateBirthdayEvent(ctx, input as ToolInputMap['create_birthday_event']);
-
-      case 'get_upcoming':
-        return handleGetUpcoming(ctx, input as ToolInputMap['get_upcoming']);
-
-      case 'snooze_event':
-        return handleSnoozeEvent(ctx, input as ToolInputMap['snooze_event']);
-
-      case 'get_event':
-        return handleGetEvent(ctx, input as ToolInputMap['get_event']);
-
-      case 'notify_participants':
-        return handleNotifyParticipants(ctx, input as ToolInputMap['notify_participants']);
-
-      case 'get_reminders':
-        return handleGetReminders(ctx, input as ToolInputMap['get_reminders']);
-
-      case 'set_reminder':
-        return handleSetReminder(ctx, input as ToolInputMap['set_reminder']);
-
-      case 'find_user':
-        return handleFindUser(ctx, input as ToolInputMap['find_user']);
-
-      case 'ask_user':
-        return handleAskUser(ctx, input as ToolInputMap['ask_user']);
-
-      case 'pick_users':
-        return handlePickUsers(ctx, input as ToolInputMap['pick_users']);
-
-      case 'get_user_info':
-        return handleGetUserInfo(ctx, input as ToolInputMap['get_user_info']);
-
-      case 'get_contacts':
-        return handleGetContacts(ctx, input as ToolInputMap['get_contacts']);
-
-      case 'add_contact':
-        return handleAddContact(ctx, input as ToolInputMap['add_contact']);
-
-      case 'find_contact':
-        return handleFindContact(ctx, input as ToolInputMap['find_contact']);
-
-      case 'update_contact':
-        return handleUpdateContact(ctx, input as ToolInputMap['update_contact']);
-
-      case 'delete_contact':
-        if ('contact_id' in input && typeof input.contact_id === 'number') {
-          return handleDeleteContact(ctx, { contact_id: input.contact_id });
-        }
-        return { success: false, error: 'A contact_id from your address book is required.' };
-
-      case 'render_day_image':
-        return handleRenderDayImage(ctx, input as ToolInputMap['render_day_image']);
-
-      case 'render_week_image':
-        return handleRenderWeekImage(ctx, input as ToolInputMap['render_week_image']);
-
-      case 'render_month_image':
-        return handleRenderMonthImage(ctx, input as ToolInputMap['render_month_image']);
-
-      case 'render_table':
-        return handleRenderTable(ctx, input as ToolInputMap['render_table']);
-
-      case 'end_call':
-        return handleEndCall(ctx);
-
-      case 'make_call':
-        return handleMakeCall(ctx, makeCallSchema.parse(input));
-
-      case 'get_holidays':
-        return handleGetHolidays(ctx, input as ToolInputMap['get_holidays']);
-
-      case 'manage_settings':
-        return handleManageSettings(ctx, input as ToolInputMap['manage_settings']);
-
-      case 'connect_telegram_status':
-        return handleConnectTelegramStatus(ctx);
-
-      case 'dismiss_connect_telegram_prompt':
-        return handleDismissConnectTelegramPrompt(ctx);
-
-      case 'share_event':
-        return handleShareEvent(ctx, input as ToolInputMap['share_event']);
-
-      case 'send_invitation':
-        return handleSendInvitation(ctx, input as ToolInputMap['send_invitation']);
-
-      case 'get_invitation_status':
-        return handleGetInvitationStatus(ctx, input as ToolInputMap['get_invitation_status']);
-
-      case 'share_agenda':
-        return handleShareAgenda(ctx, input as ToolInputMap['share_agenda']);
-
-      case 'set_event_visibility':
-        return handleSetEventVisibility(ctx, input as ToolInputMap['set_event_visibility']);
-
-      case 'propose_edit':
-        return handleProposeEdit(ctx, input as ToolInputMap['propose_edit']);
-
-      case 'cancel_invitation':
-        return handleCancelInvitation(ctx, input as ToolInputMap['cancel_invitation']);
-
-      case 'resend_invitation':
-        return handleResendInvitation(ctx, input as ToolInputMap['resend_invitation']);
-
-      case 'get_google_calendar_status':
-        return handleGetGoogleCalendarStatus(ctx);
-
-      case 'list_google_calendars':
-        return handleListGoogleCalendars(ctx);
-
-      case 'lookup_stress':
-        return handleLookupStress(ctx, input as ToolInputMap['lookup_stress']);
-
-      case 'send_feedback':
-        return handleSendFeedback(ctx, input as ToolInputMap['send_feedback']);
-
-      case 'get_bot_info':
-        return handleGetBotInfo();
-
-      case 'calculate':
-        return handleCalculate(input as ToolInputMap['calculate']);
-
-      case 'get_timezone_info':
-        return handleGetTimezoneInfoWithCityFallback(input as ToolInputMap['get_timezone_info']);
-
-      case 'convert_to_timezone':
-        return handleConvertToTimezone(input as ToolInputMap['convert_to_timezone']);
-
-      case 'list_calendar_access':
-        return handleListCalendarAccess(ctx);
-
-      case 'manage_secretaries':
-        return handleManageSecretaries(ctx, input as ToolInputMap['manage_secretaries']);
-
-      case 'propose_calendar_change':
-        return handleProposeCalendarChange(ctx, input as ToolInputMap['propose_calendar_change']);
-
-      case 'get_history':
-        return handleGetHistory(ctx, input as ToolInputMap['get_history']);
-
-      case 'get_action_log':
-        return handleGetActionLog(ctx, input as ToolInputMap['get_action_log']);
-
-      case 'schedule_ai_call':
-        return handleScheduleAiCall(ctx, input as ToolInputMap['schedule_ai_call']);
-      case 'schedule_ai_calls_list':
-        return handleScheduleAiCallsList(ctx);
-      case 'schedule_ai_call_cancel':
-        return handleScheduleAiCallCancel(ctx, input as ToolInputMap['schedule_ai_call_cancel']);
-      case 'add_trigger':
-        return handleAddTrigger(ctx, input as ToolInputMap['add_trigger']);
-      case 'list_triggers':
-        return handleListTriggers(ctx);
-      case 'remove_trigger':
-        return handleRemoveTrigger(ctx, input as ToolInputMap['remove_trigger']);
-      case 'set_reaction':
-        return handleSetReaction(ctx, input as ToolInputMap['set_reaction']);
-      case 'remember_user_fact':
-        return handleRememberUserFact(ctx, input as ToolInputMap['remember_user_fact']);
-
-      case 'resume_scene':
-        if (!ctx.scene?.scenePauseService) return { success: false, error: 'Scene pause not available' };
-        return handleResumeScene(ctx, ctx.scene?.scenePauseService);
-
-      case 'cancel_scene':
-        if (!ctx.scene?.scenePauseService) return { success: false, error: 'Scene pause not available' };
-        return handleCancelScene(ctx, ctx.scene?.scenePauseService);
-
-      default:
-        return { success: false, error: `Unknown tool: ${toolName}` };
-    }
-  } catch (error) {
-    aiLogger.error({ tool: toolName, err: error }, 'Tool execution error');
-    return { success: false, error: `Tool execution failed: ${String(error)}` };
-  }
 }

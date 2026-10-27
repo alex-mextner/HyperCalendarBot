@@ -1,6 +1,7 @@
 import { t } from '../../../config/constants.ts';
 import type { ContactRepository } from '../../../database/repositories/contact.repository.ts';
 import type { Contact } from '../../../database/types.ts';
+import type { TelegramProfile } from '../../telegram-session/service-tier.ts';
 import { canResolveRecipientUsername } from '../recipient-identity.ts';
 import { inspectRecipientProfile } from '../recipient-profile.ts';
 import type { AgentContext, ContactMatch, ToolHandlerMeta, ToolResult, UserInspection } from '../types.ts';
@@ -160,16 +161,29 @@ export function handleFindContact(ctx: AgentContext, input: { name: string }): T
 }
 handleFindContact.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
-export function handleUpdateContact(
-  ctx: AgentContext,
-  input: { search: string; name?: string; preferred_name?: string; username?: string },
-): ToolResult {
-  if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
-  const userId = ctx.user.telegram_id;
-  const ranked = searchContactsRanked(ctx.contactRepo, userId, input.search);
+interface UpdateContactInput {
+  search: string;
+  name?: string;
+  preferred_name?: string;
+  username?: string;
+}
+
+interface ContactPatch {
+  name?: string;
+  preferred_name?: string;
+  username?: string;
+  telegram_id?: number;
+}
+
+/** Outcome of one validation phase: the value to carry forward, or the tool result to return immediately. */
+type Phase<T> = { ok: true; value: T } | { ok: false; result: ToolResult };
+
+/** The single unambiguous contact matching `search`; no match or a tie/fuzzy runner-up ends the update. */
+function resolveUpdateTarget(contactRepo: ContactRepository, userId: number, search: string): Phase<Contact> {
+  const ranked = searchContactsRanked(contactRepo, userId, search);
 
   if (ranked.length === 0) {
-    return { success: false, error: `No contact named "${input.search}" in address book.` };
+    return { ok: false, result: { success: false, error: `No contact named "${search}" in address book.` } };
   }
 
   const top = ranked[0]!;
@@ -180,38 +194,58 @@ export function handleUpdateContact(
       .map(({ contact, confidence }) => formatContactMatchLine(toContactMatch(contact, confidence)))
       .join('\n');
     return {
-      success: false,
-      error: `Multiple contacts match "${input.search}". Ask the user which one to update:\n${lines}`,
+      ok: false,
+      result: {
+        success: false,
+        error: `Multiple contacts match "${search}". Ask the user which one to update:\n${lines}`,
+      },
     };
   }
+  return { ok: true, value: top.contact };
+}
 
+/** A literal "null" field is a deletion request in disguise: route it to delete_contact instead of storing it. */
+function rejectNullFieldAsDeletion(ctx: AgentContext, input: UpdateContactInput, contact: Contact): ToolResult | null {
   const requestedFields = [input.name, input.preferred_name, input.username].filter((value) => value !== undefined);
-  if (requestedFields.length > 0 && requestedFields.some((value) => value.trim().toLowerCase() === 'null')) {
-    return {
-      success: false,
-      error: t(ctx.user.language).aiTools.meta.contactDeleteRequiresTool,
-      agentHint: `Use delete_contact with contact_id ${top.contact.id} for the explicit deletion request.`,
-    };
-  }
+  if (!requestedFields.some((value) => value.trim().toLowerCase() === 'null')) return null;
+  return {
+    success: false,
+    error: t(ctx.user.language).aiTools.meta.contactDeleteRequiresTool,
+    agentHint: `Use delete_contact with contact_id ${contact.id} for the explicit deletion request.`,
+  };
+}
 
+/** Translate the requested fields into a repository patch; a new username may bind the cached Telegram ID. */
+function buildContactPatch(ctx: AgentContext, input: UpdateContactInput, contact: Contact): Phase<ContactPatch> {
+  const tr = t(ctx.user.language).aiTools.meta;
   if (input.username && !canResolveRecipientUsername(ctx, input.username)) {
-    return { success: false, error: t(ctx.user.language).aiTools.meta.recipientUsernameUnconfirmed };
+    return { ok: false, result: { success: false, error: tr.recipientUsernameUnconfirmed } };
   }
 
-  const patch: { name?: string; preferred_name?: string; username?: string; telegram_id?: number } = {};
+  const patch: ContactPatch = {};
   if (input.name !== undefined) patch.name = input.name;
   if (input.preferred_name !== undefined) patch.preferred_name = input.preferred_name;
   if (input.username !== undefined) {
     patch.username = input.username.trim().replace(/^@/, '');
     const cachedUser = ctx.userRepo.findByUsername(patch.username);
-    if (cachedUser && top.contact.telegram_id !== null && cachedUser.telegram_id !== top.contact.telegram_id) {
-      return { success: false, error: t(ctx.user.language).aiTools.meta.recipientIdentityConflict };
+    if (cachedUser && contact.telegram_id !== null && cachedUser.telegram_id !== contact.telegram_id) {
+      return { ok: false, result: { success: false, error: tr.recipientIdentityConflict } };
     }
-    if (cachedUser && top.contact.telegram_id === null) patch.telegram_id = cachedUser.telegram_id;
+    if (cachedUser && contact.telegram_id === null) patch.telegram_id = cachedUser.telegram_id;
   }
-  if (Object.keys(patch).length === 0) return { success: false, error: 'No fields to update provided.' };
+  return { ok: true, value: patch };
+}
+
+/** Persist the patch; the repository's identity-conflict error becomes a not_applied result, anything else throws. */
+function applyContactPatch(
+  ctx: AgentContext,
+  contactRepo: ContactRepository,
+  contactId: number,
+  patch: ContactPatch,
+): ToolResult | null {
   try {
-    ctx.contactRepo.update(top.contact.id, patch);
+    contactRepo.update(contactId, patch);
+    return null;
   } catch (error) {
     // The repository checks identity conflicts before its transactional UPDATE.
     if (error instanceof Error && error.message.startsWith('CONTACT_IDENTITY_CONFLICT:')) {
@@ -223,9 +257,30 @@ export function handleUpdateContact(
     }
     throw error;
   }
-  const updatedName = patch.name ?? top.contact.name;
-  const updated = ctx.contactRepo.findById(userId, top.contact.id);
-  const displayName = updated?.preferred_name ?? updated?.name ?? updatedName;
+}
+
+export function handleUpdateContact(ctx: AgentContext, input: UpdateContactInput): ToolResult {
+  const contactRepo = ctx.contactRepo;
+  if (!contactRepo) return { success: false, error: 'Contacts not configured.' };
+  const userId = ctx.user.telegram_id;
+
+  const target = resolveUpdateTarget(contactRepo, userId, input.search);
+  if (!target.ok) return target.result;
+  const contact = target.value;
+
+  const deletionRedirect = rejectNullFieldAsDeletion(ctx, input, contact);
+  if (deletionRedirect) return deletionRedirect;
+
+  const built = buildContactPatch(ctx, input, contact);
+  if (!built.ok) return built.result;
+  const patch = built.value;
+  if (Object.keys(patch).length === 0) return { success: false, error: 'No fields to update provided.' };
+
+  const failure = applyContactPatch(ctx, contactRepo, contact.id, patch);
+  if (failure) return failure;
+
+  const updated = contactRepo.findById(userId, contact.id);
+  const displayName = updated?.preferred_name ?? updated?.name ?? patch.name ?? contact.name;
   const updatedLabel = `"${displayName}"${updated?.username ? ` (@${updated.username})` : ''}`;
   return { success: true, output: t(ctx.user.language).aiTools.meta.contactUpdated(updatedLabel) };
 }
@@ -242,22 +297,22 @@ export function handleDeleteContact(ctx: AgentContext, input: { contact_id: numb
   };
 }
 
-export async function handleGetUserInfo(ctx: AgentContext, input: { telegram_id: number }): Promise<ToolResult> {
-  const tr = t(ctx.user.language).aiTools.meta;
-  if (ctx.isGroup || !ctx.contactRepo) return { success: false, error: tr.contactsPrivateOnly };
-  const contact = ctx.contactRepo.findByTelegramId(ctx.user.telegram_id, input.telegram_id);
-  const explicit = (ctx.messageText.match(/\b\d+\b/g) ?? []).some((value) => value === String(input.telegram_id));
-  if (!contact && input.telegram_id !== ctx.user.telegram_id && !explicit)
-    return { success: false, error: tr.recipientUnverified };
-  const profile = await inspectRecipientProfile(ctx, input.telegram_id);
-  if (profile && profile.id !== input.telegram_id) return { success: false, error: tr.recipientIdentityConflict };
-  if (profile && !profile.deleted)
-    ctx.contactRepo.refreshProfile(ctx.user.telegram_id, input.telegram_id, {
-      username: profile.username ?? null,
-      firstName: profile.firstName,
-    });
-  const info: UserInspection = {
-    telegram_id: input.telegram_id,
+/** A saved contact or the caller's own ID is always inspectable; any other ID must be typed by the user. */
+function isInspectionTargetVerified(ctx: AgentContext, telegramId: number, contact: Contact | null): boolean {
+  if (contact || telegramId === ctx.user.telegram_id) return true;
+  return (ctx.messageText.match(/\b\d+\b/g) ?? []).some((value) => value === String(telegramId));
+}
+
+/** Live Telegram profile as returned by the request-scoped inspection (stamped with the check time). */
+type InspectedProfile = TelegramProfile & { checkedAt: string };
+
+function buildUserInspection(
+  telegramId: number,
+  contact: Contact | null,
+  profile: InspectedProfile | null,
+): UserInspection {
+  return {
+    telegram_id: telegramId,
     display_name: profile?.firstName ?? contact?.name ?? null,
     preferred_name: contact?.preferred_name ?? null,
     username: profile ? (profile.username ?? null) : (contact?.username ?? null),
@@ -266,6 +321,22 @@ export async function handleGetUserInfo(ctx: AgentContext, input: { telegram_id:
     profile_source: profile ? 'telegram' : 'cached',
     deleted: profile?.deleted ?? null,
   };
+}
+
+export async function handleGetUserInfo(ctx: AgentContext, input: { telegram_id: number }): Promise<ToolResult> {
+  const tr = t(ctx.user.language).aiTools.meta;
+  if (ctx.isGroup || !ctx.contactRepo) return { success: false, error: tr.contactsPrivateOnly };
+  const contact = ctx.contactRepo.findByTelegramId(ctx.user.telegram_id, input.telegram_id);
+  if (!isInspectionTargetVerified(ctx, input.telegram_id, contact))
+    return { success: false, error: tr.recipientUnverified };
+  const profile = await inspectRecipientProfile(ctx, input.telegram_id);
+  if (profile && profile.id !== input.telegram_id) return { success: false, error: tr.recipientIdentityConflict };
+  if (profile && !profile.deleted)
+    ctx.contactRepo.refreshProfile(ctx.user.telegram_id, input.telegram_id, {
+      username: profile.username ?? null,
+      firstName: profile.firstName,
+    });
+  const info = buildUserInspection(input.telegram_id, contact, profile);
   return {
     success: true,
     data: info,

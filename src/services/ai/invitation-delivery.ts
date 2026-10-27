@@ -61,29 +61,135 @@ export interface InvitationDeliveryResult {
   viaBotApi: boolean;
 }
 
-export async function deliverInvitation(params: DeliverInvitationParams): Promise<InvitationDeliveryResult> {
-  const {
-    invitationId,
-    eventId,
-    inviteeId,
-    inviteeUsername,
-    inviteeName,
-    inviterId,
-    inviterName,
-    inviterUsername,
-    inviterTimezone,
+type InviteeRecord = ReturnType<UserRepository['findByTelegramId']>;
+
+const NOT_DELIVERED: InvitationDeliveryResult = { delivered: false, viaDeepLink: false, viaBotApi: false };
+
+function buildInvitationText(params: DeliverInvitationParams, invitee: InviteeRecord, eventTitle: string): string {
+  const { event, lang, inviterName, inviterId, inviterUsername, inviteeId, deps } = params;
+  if (!event) return t(lang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
+  return formatInvitation(
     event,
+    event.timezone,
     lang,
-    inviterLang,
-    fallbackChatId,
-    allowInviterSession = true,
-    isGroupTarget = false,
-    deps,
-  } = params;
-  const { sender, invitationRepo, userRepo, deepLinkService: deepLinkSvc, botUsername } = deps;
-  if (!sender.sendInvitation) {
-    return { delivered: false, viaDeepLink: false, viaBotApi: false };
+    inviterName,
+    inviterId,
+    inviterUsername,
+    invitee?.timezone ?? null,
+    !!invitee?.onboarding_completed,
+    readInvitationRoster(deps.invitationRepo, event.id, inviteeId),
+  );
+}
+
+/** Creates the invitation deep link URL; a creation failure degrades to no link instead of blocking the Bot API send. */
+function createFallbackUrl(params: DeliverInvitationParams): string | null {
+  const { invitationId, eventId, inviterId, inviteeId } = params;
+  const { deepLinkService: deepLinkSvc, botUsername } = params.deps;
+  try {
+    const link = deepLinkSvc && botUsername ? deepLinkSvc.createInvitationLink(invitationId, eventId, inviterId) : null;
+    return link && deepLinkSvc && botUsername ? deepLinkSvc.generateUrl(link.code, botUsername) : null;
+  } catch (err) {
+    // The deep link is only used by the user-session/fallback path. A creation failure must not
+    // block the primary Bot API send to a reachable invitee — degrade to no-link (Bot API still
+    // runs; the inviter fallback becomes the no-link variant; the user session, which needs the
+    // link, is skipped).
+    deliveryLogger.warn(
+      { invitationId, inviteeId, err: describeDeliveryError(err) },
+      'deep-link creation failed; continuing without link',
+    );
+    return null;
   }
+}
+
+/** Identify the invitee in the fallback message: a batch sends one fallback per failed invitee
+ *  to the same inviter chat, concurrently — without a label the inviter can't tell which
+ *  deep-link belongs to whom (could forward the wrong person's invite). */
+function inviteeFallbackLabel(params: DeliverInvitationParams, invitee: InviteeRecord): string {
+  const { inviteeName, inviteeUsername, inviteeId } = params;
+  return (
+    inviteeName ??
+    invitee?.first_name ??
+    (inviteeUsername ? `@${inviteeUsername}` : invitee?.username ? `@${invitee.username}` : `#${inviteeId}`)
+  );
+}
+
+/** The inviter's own connected Telegram account sends a first-person invitation with the link. */
+function buildUserSessionSend(
+  params: DeliverInvitationParams,
+  url: string | null,
+): DeliverMessageParams['userSessionSend'] {
+  const { event, inviterTimezone, lang, inviterId, invitationId, allowInviterSession = true } = params;
+  const sendAsConnected = params.deps.sender.sendAsConnectedUser;
+  if (!allowInviterSession || !event || !url || !sendAsConnected) return undefined;
+  const userFirstPersonText = buildUserSessionInvitationText({ event, inviterTimezone, deepLink: url, lang });
+  return async (targetId, _text, username) =>
+    sendAsConnected(inviterId, targetId, userFirstPersonText, username, { invitationId });
+}
+
+function buildBotSend(params: DeliverInvitationParams): DeliverMessageParams['botSend'] {
+  const { inviteeId, event, isGroupTarget = false, invitationId, eventId, lang } = params;
+  const { sender } = params.deps;
+  return async (recipientId, msgText) => {
+    if (recipientId !== inviteeId) return sender.sendMessage(recipientId, msgText);
+    if (!sender.sendInvitation) throw new Error('sendInvitation not available');
+    // A group target carries the per-member RSVP keyboard (grsvp:<eventId>:going|notgoing)
+    // so any member can respond for themselves; a personal target keeps the inv: keyboard.
+    // Both offer the Map button when the event's place is confirmed.
+    const place = event ?? null;
+    const sent = isGroupTarget
+      ? await sender.sendInvitation(recipientId, msgText, invitationId, lang, { kind: 'group', eventId, place })
+      : await sender.sendInvitation(recipientId, msgText, invitationId, lang, { kind: 'personal', place });
+    if (!sent) throw new Error('Bot API delivery failed');
+    return sent;
+  };
+}
+
+function persistMessageInfo(params: DeliverInvitationParams, messageId: number): void {
+  const { invitationId, inviteeId } = params;
+  try {
+    params.deps.invitationRepo.setMessageInfo(invitationId, messageId, inviteeId);
+  } catch (err) {
+    // The invitation was already delivered via Bot API; only persisting the message_id
+    // (a DB UPDATE) failed. A lost message_id is a degraded-but-acceptable state. Reporting
+    // non-delivery here would make the inviter retry → the invitee gets a DUPLICATE invitation.
+    deliveryLogger.warn(
+      { invitationId, inviteeId, err: describeDeliveryError(err) },
+      'delivered but failed to persist message info',
+    );
+  }
+}
+
+type DeliveryOutcome = Awaited<ReturnType<typeof deliverMessage>>;
+
+function reportDeliveryOutcome(
+  params: DeliverInvitationParams,
+  result: DeliveryOutcome,
+  url: string | null,
+): InvitationDeliveryResult {
+  const { invitationId, inviteeId, fallbackChatId } = params;
+  if (result.delivered && result.messageId !== undefined) {
+    deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via bot API');
+    persistMessageInfo(params, result.messageId);
+    return { delivered: true, viaDeepLink: false, viaBotApi: true };
+  }
+  if (result.delivered) {
+    deliveryLogger.info({ invitationId, inviteeId }, "Delivered via the inviter's own Telegram account");
+    return { delivered: true, viaDeepLink: false, viaBotApi: false };
+  }
+  // Only claim "link sent to inviter" when a real link existed AND the fallback
+  // message actually reached the inviter. Otherwise report honest non-delivery.
+  const linkSent = url !== null && result.fallbackSent === true;
+  deliveryLogger.info(
+    { invitationId, fallbackChatId, linkSent, hadLink: url !== null, fallbackSent: result.fallbackSent === true },
+    'Bot API + inviter session failed — deep-link fallback attempted',
+  );
+  return { delivered: false, viaDeepLink: linkSent, viaBotApi: false };
+}
+
+export async function deliverInvitation(params: DeliverInvitationParams): Promise<InvitationDeliveryResult> {
+  const { invitationId, eventId, inviteeId, inviteeUsername, event, inviterLang, fallbackChatId, deps } = params;
+  const { sender, userRepo, deepLinkService: deepLinkSvc, botUsername } = deps;
+  if (!sender.sendInvitation) return { ...NOT_DELIVERED };
 
   // The outer try guards every setup step after the invitation row was created, so nothing
   // propagates out of the handler. Two failure modes differ:
@@ -100,19 +206,7 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
     );
 
     const invitee = userRepo.findByTelegramId(inviteeId);
-    const text = event
-      ? formatInvitation(
-          event,
-          event.timezone,
-          lang,
-          inviterName,
-          inviterId,
-          inviterUsername,
-          invitee?.timezone ?? null,
-          !!invitee?.onboarding_completed,
-          readInvitationRoster(invitationRepo, event.id, inviteeId),
-        )
-      : t(lang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
+    const text = buildInvitationText(params, invitee, eventTitle);
 
     if (!deepLinkSvc || !botUsername) {
       deliveryLogger.warn(
@@ -121,45 +215,15 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
       );
     }
 
-    let url: string | null = null;
-    try {
-      const link =
-        deepLinkSvc && botUsername ? deepLinkSvc.createInvitationLink(invitationId, eventId, inviterId) : null;
-      url = link && deepLinkSvc && botUsername ? deepLinkSvc.generateUrl(link.code, botUsername) : null;
-    } catch (err) {
-      // The deep link is only used by the user-session/fallback path. A creation failure must not
-      // block the primary Bot API send to a reachable invitee — degrade to no-link (Bot API still
-      // runs; the inviter fallback becomes the no-link variant; the user session, which needs the
-      // link, is skipped).
-      deliveryLogger.warn(
-        { invitationId, inviteeId, err: describeDeliveryError(err) },
-        'deep-link creation failed; continuing without link',
-      );
-      url = null;
-    }
+    const url = createFallbackUrl(params);
     // The fallback/forwarding message is sent to the INVITER, so it uses the inviter's language —
     // not the invitee's (`lang`), which drives the invitee-facing invitation text.
     const inviterTr = t(inviterLang).aiTools.sharing;
-    // Identify the invitee in the fallback message: a batch sends one fallback per failed invitee
-    // to the same inviter chat, concurrently — without a label the inviter can't tell which
-    // deep-link belongs to whom (could forward the wrong person's invite).
-    const inviteeLabel =
-      inviteeName ??
-      invitee?.first_name ??
-      (inviteeUsername ? `@${inviteeUsername}` : invitee?.username ? `@${invitee.username}` : `#${inviteeId}`);
+    const inviteeLabel = inviteeFallbackLabel(params, invitee);
     const fallbackMsg =
       url !== null
         ? inviterTr.deliveryFallbackWithLink(eventTitle, inviteeLabel, url)
         : inviterTr.deliveryFallbackNoLink(eventTitle, inviteeLabel);
-
-    // The inviter's own connected Telegram account sends a first-person invitation with the link.
-    const sendAsConnected = sender.sendAsConnectedUser;
-    let userSessionSend: DeliverMessageParams['userSessionSend'];
-    if (event && url && sendAsConnected) {
-      const userFirstPersonText = buildUserSessionInvitationText({ event, inviterTimezone, deepLink: url, lang });
-      userSessionSend = async (targetId, _text, username) =>
-        sendAsConnected(inviterId, targetId, userFirstPersonText, username, { invitationId });
-    }
 
     const result = await deliverMessage({
       targetId: inviteeId,
@@ -167,57 +231,16 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
       text,
       fallbackRecipientId: fallbackChatId,
       fallbackText: fallbackMsg,
-      botSend: async (recipientId, msgText) => {
-        if (recipientId === inviteeId) {
-          if (!sender.sendInvitation) throw new Error('sendInvitation not available');
-          // A group target carries the per-member RSVP keyboard (grsvp:<eventId>:going|notgoing)
-          // so any member can respond for themselves; a personal target keeps the inv: keyboard.
-          // Both offer the Map button when the event's place is confirmed.
-          const place = event ?? null;
-          const sent = isGroupTarget
-            ? await sender.sendInvitation(recipientId, msgText, invitationId, lang, { kind: 'group', eventId, place })
-            : await sender.sendInvitation(recipientId, msgText, invitationId, lang, { kind: 'personal', place });
-          if (!sent) throw new Error('Bot API delivery failed');
-          return sent;
-        }
-        return sender.sendMessage(recipientId, msgText);
-      },
-      userSessionSend: allowInviterSession ? userSessionSend : undefined,
-      suppressFallback: isGroupTarget,
+      botSend: buildBotSend(params),
+      userSessionSend: buildUserSessionSend(params, url),
+      suppressFallback: params.isGroupTarget ?? false,
     });
-
-    if (result.delivered && result.messageId !== undefined) {
-      deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via bot API');
-      try {
-        invitationRepo.setMessageInfo(invitationId, result.messageId, inviteeId);
-      } catch (err) {
-        // The invitation was already delivered via Bot API; only persisting the message_id
-        // (a DB UPDATE) failed. A lost message_id is a degraded-but-acceptable state. Reporting
-        // non-delivery here would make the inviter retry → the invitee gets a DUPLICATE invitation.
-        deliveryLogger.warn(
-          { invitationId, inviteeId, err: describeDeliveryError(err) },
-          'delivered but failed to persist message info',
-        );
-      }
-      return { delivered: true, viaDeepLink: false, viaBotApi: true };
-    }
-    if (result.delivered) {
-      deliveryLogger.info({ invitationId, inviteeId }, "Delivered via the inviter's own Telegram account");
-      return { delivered: true, viaDeepLink: false, viaBotApi: false };
-    }
-    // Only claim "link sent to inviter" when a real link existed AND the fallback
-    // message actually reached the inviter. Otherwise report honest non-delivery.
-    const linkSent = url !== null && result.fallbackSent === true;
-    deliveryLogger.info(
-      { invitationId, fallbackChatId, linkSent, hadLink: url !== null, fallbackSent: result.fallbackSent === true },
-      'Bot API + inviter session failed — deep-link fallback attempted',
-    );
-    return { delivered: false, viaDeepLink: linkSent, viaBotApi: false };
+    return reportDeliveryOutcome(params, result, url);
   } catch (error) {
     // Sanitize: a thrown Telegram/API error can attach the full request body (incl. the deep
     // link) as enumerable props; describeDeliveryError reads only safe scalar fields.
     deliveryLogger.error({ invitationId, inviteeId, err: describeDeliveryError(error) }, 'Delivery chain failed');
-    return { delivered: false, viaDeepLink: false, viaBotApi: false };
+    return { ...NOT_DELIVERED };
   }
 }
 

@@ -91,103 +91,142 @@ type RecipientResolution =
       candidate?: { id: number; firstName?: string; username?: string };
     };
 
-export async function resolveInvitationRecipient(
-  ctx: AgentContext,
-  input: { invitee_id?: number; invitee_username?: string; force?: boolean; event_id?: number },
-  establishedInvitationRecipientId?: number,
-): Promise<RecipientResolution> {
+type RecipientInput = { invitee_id?: number; invitee_username?: string; force?: boolean; event_id?: number };
+type Unverified = { ok: false; reason: 'unverified' };
+
+const UNVERIFIED: Unverified = { ok: false, reason: 'unverified' };
+
+/** The Telegram ID the caller means: an explicit invitee_id, else the ID of a saved contact named by @username. */
+function candidateRecipientId(ctx: AgentContext, input: RecipientInput): number | undefined {
   const savedByHint =
     input.invitee_username && !hasExplicitUsername(ctx.messageText, input.invitee_username)
       ? ctx.contactRepo?.findByUsername(ctx.user.telegram_id, input.invitee_username)
       : null;
-  const id =
+  return (
     input.invitee_id ??
-    (savedByHint && !/^User \d+$/.test(savedByHint.name) ? (savedByHint.telegram_id ?? undefined) : undefined);
-  if (id !== undefined && (!Number.isSafeInteger(id) || id === 0)) return { ok: false, reason: 'unverified' };
-  if (id !== undefined && id < 0) {
-    if (input.invitee_username) return { ok: false, reason: 'conflict' };
-    let known =
-      establishedInvitationRecipientId === id ||
-      ctx.verifiedRecipientIds?.has(id) === true ||
-      (ctx.isGroup && ctx.groupChatId === id);
-    // Intent evidence and current membership are separate requirements.
-    if (!known) return { ok: false, reason: 'unverified' };
-    if (!(ctx.isGroup && ctx.groupChatId === id)) {
-      if (!ctx.group) return { ok: false, reason: 'unverified' };
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        known = await Promise.race([
-          ctx.group.checkGroupMembership(id, ctx.user.telegram_id),
-          new Promise<boolean>((resolve) => {
-            timer = setTimeout(() => resolve(false), 3000);
-          }),
-        ]);
-      } catch {
-        return { ok: false, reason: 'unverified' };
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
-    }
-    return known ? { ok: true, id, isGroup: true } : { ok: false, reason: 'unverified' };
+    (savedByHint && !/^User \d+$/.test(savedByHint.name) ? (savedByHint.telegram_id ?? undefined) : undefined)
+  );
+}
+
+/** Current membership of the user in the group, bounded by a 3s timeout; any failure counts as not a member. */
+async function isCurrentGroupMember(ctx: AgentContext, groupId: number): Promise<boolean> {
+  if (!ctx.group) return false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      ctx.group.checkGroupMembership(groupId, ctx.user.telegram_id),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), 3000);
+      }),
+    ]);
+  } catch {
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  // An explicit invitee_id that is an owned address-book row ID is ambiguous recipient evidence even when a saved
-  // contact has that Telegram ID: only an ID verified in this conversation (picker, username) or the invitation's
-  // own recipient overrides it. An ID derived from a saved @username is that contact's Telegram ID, not a row ID.
-  const addressBookRow =
-    input.invitee_id !== undefined &&
-    input.invitee_id !== establishedInvitationRecipientId &&
-    !ctx.verifiedRecipientIds?.has(input.invitee_id)
-      ? ctx.contactRepo?.findById(ctx.user.telegram_id, input.invitee_id)
-      : null;
-  if (addressBookRow && addressBookRow.telegram_id !== id)
-    return { ok: false, reason: 'contact_row_id', contact: addressBookRow };
-  if (input.force && id !== undefined && id > 0 && input.event_id !== undefined) {
-    if (!consumeRecipientApproval(ctx.user.telegram_id, input.event_id, id)) return { ok: false, reason: 'unverified' };
-    return { ok: true, id, isGroup: false };
-  }
+}
+
+/** Negative IDs name group chats: they need intent evidence and, unless it is the current chat, current membership. */
+async function resolveGroupRecipient(
+  ctx: AgentContext,
+  input: RecipientInput,
+  id: number,
+  establishedInvitationRecipientId?: number,
+): Promise<RecipientResolution> {
+  if (input.invitee_username) return { ok: false, reason: 'conflict' };
+  const inCurrentGroup = ctx.isGroup && ctx.groupChatId === id;
+  const hasIntent =
+    establishedInvitationRecipientId === id || ctx.verifiedRecipientIds?.has(id) === true || inCurrentGroup;
+  // Intent evidence and current membership are separate requirements.
+  if (!hasIntent) return UNVERIFIED;
+  if (!inCurrentGroup && !(await isCurrentGroupMember(ctx, id))) return UNVERIFIED;
+  return { ok: true, id, isGroup: true };
+}
+
+/** An explicit invitee_id that is an owned address-book row ID is ambiguous recipient evidence even when a saved
+ *  contact has that Telegram ID: only an ID verified in this conversation (picker, username) or the invitation's
+ *  own recipient overrides it. An ID derived from a saved @username is that contact's Telegram ID, not a row ID. */
+function findAmbiguousContactRow(
+  ctx: AgentContext,
+  input: RecipientInput,
+  id: number | undefined,
+  establishedInvitationRecipientId?: number,
+): Contact | null {
+  if (
+    input.invitee_id === undefined ||
+    input.invitee_id === establishedInvitationRecipientId ||
+    ctx.verifiedRecipientIds?.has(input.invitee_id)
+  )
+    return null;
+  const row = ctx.contactRepo?.findById(ctx.user.telegram_id, input.invitee_id);
+  return row && row.telegram_id !== id ? row : null;
+}
+
+/** True when a saved contact already pins this ID's @username metadata and the message does not restate it. */
+function isPinnedContactMetadata(ctx: AgentContext, input: RecipientInput, id: number | undefined): boolean {
   const owned = id === undefined ? null : ctx.contactRepo?.findByTelegramId(ctx.user.telegram_id, id);
   const hint = input.invitee_username ? normalizeRecipientUsername(input.invitee_username) : '';
-  const pinnedMetadata = !!(
+  return !!(
     owned &&
     !/^User \d+$/.test(owned.name) &&
     hint &&
     normalizeRecipientUsername(owned.username ?? '') === hint &&
     !hasExplicitUsername(ctx.messageText, hint)
   );
-  if (input.invitee_username && !pinnedMetadata) {
-    const username = normalizeRecipientUsername(input.invitee_username);
-    if (!canResolveRecipientUsername(ctx, username)) {
-      return { ok: false, reason: 'unverified' };
-    }
-    const lookup = await lookUpUsername(ctx, username);
-    if (lookup.status === 'not_found' || lookup.status === 'unavailable')
-      return { ok: false, reason: lookup.status, username };
-    if (lookup.status === 'unverified') return { ok: false, reason: 'unverified' };
-    const resolved = lookup.user;
-    if (id !== undefined && id !== resolved.id) return { ok: false, reason: 'conflict', candidate: resolved };
-    markVerifiedRecipient(ctx, resolved.id);
-    return { ok: true, ...resolved, isGroup: false };
-  }
-  if (id === undefined || (id !== establishedInvitationRecipientId && !isKnownRecipient(ctx, id)))
-    return { ok: false, reason: 'unverified' };
-  if (ctx.lookupTelegramUser) {
-    const profile = cachedRecipientProfile(ctx, id);
-    if (profile) {
-      if (profile.id !== id || profile.deleted) return { ok: false, reason: 'conflict' };
-      ctx.contactRepo?.refreshProfile(ctx.user.telegram_id, id, {
-        username: profile.username ?? null,
-        firstName: profile.firstName,
-      });
-      return {
-        ok: true,
-        id,
-        username: profile.username,
-        firstName: profile.firstName,
-        isGroup: false,
-      };
-    }
+}
+
+async function resolveRecipientByUsername(
+  ctx: AgentContext,
+  invitee_username: string,
+  id: number | undefined,
+): Promise<RecipientResolution> {
+  const username = normalizeRecipientUsername(invitee_username);
+  if (!canResolveRecipientUsername(ctx, username)) return UNVERIFIED;
+  const lookup = await lookUpUsername(ctx, username);
+  if (lookup.status === 'not_found' || lookup.status === 'unavailable')
+    return { ok: false, reason: lookup.status, username };
+  if (lookup.status === 'unverified') return UNVERIFIED;
+  const resolved = lookup.user;
+  if (id !== undefined && id !== resolved.id) return { ok: false, reason: 'conflict', candidate: resolved };
+  markVerifiedRecipient(ctx, resolved.id);
+  return { ok: true, ...resolved, isGroup: false };
+}
+
+function resolveRecipientByKnownId(
+  ctx: AgentContext,
+  id: number | undefined,
+  establishedInvitationRecipientId?: number,
+): RecipientResolution {
+  if (id === undefined || (id !== establishedInvitationRecipientId && !isKnownRecipient(ctx, id))) return UNVERIFIED;
+  const profile = ctx.lookupTelegramUser ? cachedRecipientProfile(ctx, id) : null;
+  if (profile) {
+    if (profile.id !== id || profile.deleted) return { ok: false, reason: 'conflict' };
+    ctx.contactRepo?.refreshProfile(ctx.user.telegram_id, id, {
+      username: profile.username ?? null,
+      firstName: profile.firstName,
+    });
+    return { ok: true, id, username: profile.username, firstName: profile.firstName, isGroup: false };
   }
   // An unavailable profile lookup cannot invalidate a previously established ID.
   // Do not reuse stale username metadata as an alternative delivery destination.
   return { ok: true, id, isGroup: false };
+}
+
+export async function resolveInvitationRecipient(
+  ctx: AgentContext,
+  input: RecipientInput,
+  establishedInvitationRecipientId?: number,
+): Promise<RecipientResolution> {
+  const id = candidateRecipientId(ctx, input);
+  if (id !== undefined && (!Number.isSafeInteger(id) || id === 0)) return UNVERIFIED;
+  if (id !== undefined && id < 0) return resolveGroupRecipient(ctx, input, id, establishedInvitationRecipientId);
+  const contactRow = findAmbiguousContactRow(ctx, input, id, establishedInvitationRecipientId);
+  if (contactRow) return { ok: false, reason: 'contact_row_id', contact: contactRow };
+  if (input.force && id !== undefined && id > 0 && input.event_id !== undefined) {
+    if (!consumeRecipientApproval(ctx.user.telegram_id, input.event_id, id)) return UNVERIFIED;
+    return { ok: true, id, isGroup: false };
+  }
+  if (input.invitee_username && !isPinnedContactMetadata(ctx, input, id))
+    return resolveRecipientByUsername(ctx, input.invitee_username, id);
+  return resolveRecipientByKnownId(ctx, id, establishedInvitationRecipientId);
 }
