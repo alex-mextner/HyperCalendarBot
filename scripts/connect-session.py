@@ -51,6 +51,49 @@ def make_client(session_path: str) -> Client:
     )
 
 
+def flood_wait_json(error: FloodWait) -> str:
+    return error_json(
+        "FLOOD_WAIT", f"Rate limited for {error.value}s", {"retry_after": error.value}
+    )
+
+
+async def relay_two_factor_passwords(client: Client) -> None:
+    """Stay alive after 2fa_required: each stdin line is a password attempt, the result goes to stdout."""
+    for line in sys.stdin:
+        password = line.rstrip("\n")
+        if not password:
+            continue
+        try:
+            await client.check_password(password)
+            print(json.dumps({"status": "ok"}))
+            break
+        except PasswordHashInvalid:
+            print(error_json("PASSWORD_INVALID", "Wrong 2FA password"))
+            sys.stdout.flush()
+        except FloodWait as e:
+            print(flood_wait_json(e))
+            break
+
+
+async def sign_in_with_code(
+    client: Client, phone: str, phone_code_hash: str, code: str
+) -> None:
+    try:
+        await client.sign_in(phone, phone_code_hash, code)
+        print(json.dumps({"status": "ok"}))
+    except SessionPasswordNeeded:
+        print(json.dumps({"status": "2fa_required"}))
+        sys.stdout.flush()
+        # Handle 2FA in the same process/connection.
+        await relay_two_factor_passwords(client)
+    except PhoneCodeInvalid:
+        print(error_json("CODE_INVALID", "Invalid verification code"))
+        sys.exit(1)
+    except PhoneCodeExpired:
+        print(error_json("CODE_EXPIRED", "Verification code expired"))
+        sys.exit(1)
+
+
 async def cmd_send_and_sign(args: argparse.Namespace) -> None:
     """Single process: send_code, wait for code on stdin, then sign_in.
 
@@ -77,49 +120,12 @@ async def cmd_send_and_sign(args: argparse.Namespace) -> None:
             print(error_json("NO_CODE", "No code received on stdin"))
             sys.exit(1)
 
-        try:
-            await client.sign_in(args.phone, sent.phone_code_hash, code)
-            print(json.dumps({"status": "ok"}))
-        except SessionPasswordNeeded:
-            print(json.dumps({"status": "2fa_required"}))
-            sys.stdout.flush()
-            # Stay alive — handle 2FA in the same process/connection.
-            # Each stdin line is a password attempt; result goes to stdout.
-            for line in sys.stdin:
-                password = line.rstrip("\n")
-                if not password:
-                    continue
-                try:
-                    await client.check_password(password)
-                    print(json.dumps({"status": "ok"}))
-                    break
-                except PasswordHashInvalid:
-                    print(error_json("PASSWORD_INVALID", "Wrong 2FA password"))
-                    sys.stdout.flush()
-                except FloodWait as e:
-                    print(
-                        error_json(
-                            "FLOOD_WAIT",
-                            f"Rate limited for {e.value}s",
-                            {"retry_after": e.value},
-                        )
-                    )
-                    break
-        except PhoneCodeInvalid:
-            print(error_json("CODE_INVALID", "Invalid verification code"))
-            sys.exit(1)
-        except PhoneCodeExpired:
-            print(error_json("CODE_EXPIRED", "Verification code expired"))
-            sys.exit(1)
+        await sign_in_with_code(client, args.phone, sent.phone_code_hash, code)
     except PhoneNumberInvalid:
         print(error_json("PHONE_INVALID", "Invalid phone number"))
         sys.exit(1)
     except FloodWait as e:
-        print(
-            error_json(
-                "FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}
-            )
-        )
+        print(flood_wait_json(e))
         sys.exit(1)
     finally:
         await client.storage.save()
@@ -137,11 +143,7 @@ async def cmd_check_password(args: argparse.Namespace) -> None:
         print(error_json("PASSWORD_INVALID", "Wrong 2FA password"))
         sys.exit(1)
     except FloodWait as e:
-        print(
-            error_json(
-                "FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}
-            )
-        )
+        print(flood_wait_json(e))
         sys.exit(1)
     finally:
         await client.storage.save()
@@ -162,6 +164,66 @@ async def cmd_log_out(args: argparse.Namespace) -> None:
         await client.disconnect()
 
 
+# Telegram error IDs meaning the stored session can never work again; the keepalive reports these as
+# SESSION_EXPIRED so the bot drops the session, anything else is a retryable AUTH_QUERY_FAILED.
+FATAL_SESSION_ERRORS = {
+    "SESSION_REVOKED",
+    "SESSION_EXPIRED",
+    "AUTH_KEY_UNREGISTERED",
+    "AUTH_KEY_INVALID",
+    "USER_DEACTIVATED",
+    "USER_DEACTIVATED_BAN",
+    "AUTH_KEY_DUPLICATED",
+}
+
+
+def authorization_entry(auth) -> dict:
+    return {
+        "hash": auth.hash,
+        "device_model": auth.device_model,
+        "platform": auth.platform,
+        "system_version": auth.system_version,
+        "app_name": auth.app_name,
+        "country": auth.country,
+        "region": auth.region,
+        "ip": auth.ip,
+        "date_active": auth.date_active,
+        "current": bool(auth.current),
+    }
+
+
+def fatal_session_reason(reason: str) -> str:
+    """Who is to blame for a fatal session error: the user (revoked/expired), their account, or this host."""
+    if reason == "SESSION_REVOKED":
+        return "revoked"
+    if reason.startswith("USER_DEACTIVATED"):
+        return "account_unavailable"
+    if reason == "AUTH_KEY_DUPLICATED":
+        return "local"
+    return "expired"
+
+
+def authorization_failure_json(error: Exception) -> str:
+    reason = getattr(error, "ID", "")
+    if reason not in FATAL_SESSION_ERRORS:
+        return error_json("AUTH_QUERY_FAILED", type(error).__name__)
+    return error_json(
+        "SESSION_EXPIRED",
+        type(error).__name__,
+        {"reason": fatal_session_reason(reason)},
+    )
+
+
+async def disconnect_quietly(client: Client) -> None:
+    try:
+        await client.disconnect()
+    except Exception as cleanup_error:
+        print(
+            f"Session query cleanup: {type(cleanup_error).__name__}",
+            file=sys.stderr,
+        )
+
+
 async def cmd_get_authorizations(args: argparse.Namespace) -> None:
     from pyrogram.raw.functions.account import GetAuthorizations
 
@@ -169,59 +231,13 @@ async def cmd_get_authorizations(args: argparse.Namespace) -> None:
     try:
         await client.connect()
         auths = await client.invoke(GetAuthorizations())
-        result = [
-            {
-                "hash": a.hash,
-                "device_model": a.device_model,
-                "platform": a.platform,
-                "system_version": a.system_version,
-                "app_name": a.app_name,
-                "country": a.country,
-                "region": a.region,
-                "ip": a.ip,
-                "date_active": a.date_active,
-                "current": bool(a.current),
-            }
-            for a in auths.authorizations
-        ]
+        result = [authorization_entry(a) for a in auths.authorizations]
         print(json.dumps({"authorizations": result}))
     except Exception as e:
-        reason = getattr(e, "ID", "")
-        fatal = reason in {
-            "SESSION_REVOKED",
-            "SESSION_EXPIRED",
-            "AUTH_KEY_UNREGISTERED",
-            "AUTH_KEY_INVALID",
-            "USER_DEACTIVATED",
-            "USER_DEACTIVATED_BAN",
-            "AUTH_KEY_DUPLICATED",
-        }
-        print(
-            error_json(
-                "SESSION_EXPIRED" if fatal else "AUTH_QUERY_FAILED",
-                type(e).__name__,
-                {
-                    "reason": "revoked"
-                    if reason == "SESSION_REVOKED"
-                    else "account_unavailable"
-                    if reason.startswith("USER_DEACTIVATED")
-                    else "local"
-                    if reason == "AUTH_KEY_DUPLICATED"
-                    else "expired"
-                }
-                if fatal
-                else None,
-            )
-        )
+        print(authorization_failure_json(e))
         sys.exit(1)
     finally:
-        try:
-            await client.disconnect()
-        except Exception as cleanup_error:
-            print(
-                f"Session query cleanup: {type(cleanup_error).__name__}",
-                file=sys.stderr,
-            )
+        await disconnect_quietly(client)
 
 
 def main() -> None:

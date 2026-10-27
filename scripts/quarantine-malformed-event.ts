@@ -41,6 +41,38 @@ export function eventFingerprint(event: CalendarEvent): string {
   return createHash('sha256').update(JSON.stringify(event, fields)).digest('hex');
 }
 
+function requireOwnedPlainRow(row: CalendarEvent, ownerId: number): void {
+  if (row.user_id !== ownerId || row.owner_type !== 'user' || row.group_id !== null) {
+    throw new Error('Owner/scope mismatch; group or cross-owner quarantine is forbidden');
+  }
+  if (row.is_cancelled || row.recurrence_rule || row.parent_event_id) {
+    throw new Error('Cancelled/recurring/exception rows require separate reconciliation');
+  }
+}
+
+function requireMalformedCandidate(candidate: CalendarEvent): void {
+  if (eventTimestampSchema.safeParse(candidate.start_at).success || Number.isFinite(Date.parse(candidate.start_at))) {
+    throw new Error('Candidate timestamp is valid or parseable; legacy normalization requires separate review');
+  }
+}
+
+function requireActiveReplacement(replacement: CalendarEvent): void {
+  if (replacement.is_deleted || eventTimestampError(replacement))
+    throw new Error('Replacement is not a valid active event');
+}
+
+function requireBoundedRepairWindow(candidate: CalendarEvent, replacement: CalendarEvent): void {
+  const age = createdAtMillis(replacement.created_at) - createdAtMillis(candidate.created_at);
+  if (!Number.isFinite(age) || age < 0 || age > MAX_REPAIR_WINDOW_MS)
+    throw new Error('Rows are not from one bounded repair window');
+}
+
+function requireNoGoogleEvidence(candidate: CalendarEvent): void {
+  if (candidate.google_event_id || candidate.google_calendar_id || candidate.last_synced_at) {
+    throw new Error('Candidate has Google synchronization evidence; reconcile externally first');
+  }
+}
+
 function requireSafePair(db: Database, ids: PairIds) {
   idsSchema.parse(ids);
   if (ids.candidateId === ids.replacementId) throw new Error('Candidate and replacement must differ');
@@ -48,25 +80,12 @@ function requireSafePair(db: Database, ids: PairIds) {
   const candidate = select.get(ids.candidateId);
   const replacement = select.get(ids.replacementId);
   if (!candidate || !replacement) throw new Error('Expected rows not found');
-  for (const row of [candidate, replacement]) {
-    if (row.user_id !== ids.ownerId || row.owner_type !== 'user' || row.group_id !== null) {
-      throw new Error('Owner/scope mismatch; group or cross-owner quarantine is forbidden');
-    }
-    if (row.is_cancelled || row.recurrence_rule || row.parent_event_id) {
-      throw new Error('Cancelled/recurring/exception rows require separate reconciliation');
-    }
-  }
-  if (eventTimestampSchema.safeParse(candidate.start_at).success || Number.isFinite(Date.parse(candidate.start_at))) {
-    throw new Error('Candidate timestamp is valid or parseable; legacy normalization requires separate review');
-  }
-  if (replacement.is_deleted || eventTimestampError(replacement))
-    throw new Error('Replacement is not a valid active event');
-  const age = createdAtMillis(replacement.created_at) - createdAtMillis(candidate.created_at);
-  if (!Number.isFinite(age) || age < 0 || age > MAX_REPAIR_WINDOW_MS)
-    throw new Error('Rows are not from one bounded repair window');
-  if (candidate.google_event_id || candidate.google_calendar_id || candidate.last_synced_at) {
-    throw new Error('Candidate has Google synchronization evidence; reconcile externally first');
-  }
+  requireOwnedPlainRow(candidate, ids.ownerId);
+  requireOwnedPlainRow(replacement, ids.ownerId);
+  requireMalformedCandidate(candidate);
+  requireActiveReplacement(replacement);
+  requireBoundedRepairWindow(candidate, replacement);
+  requireNoGoogleEvidence(candidate);
   return { candidate, replacement };
 }
 

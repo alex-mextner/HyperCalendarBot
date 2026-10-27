@@ -94,22 +94,67 @@ function budget(value: number | undefined, fallback: number, minimum: number, ma
   return n;
 }
 
+/** One optional request field: absent, or an array of at most `max` strings each at most 96 chars. */
+function rawNameListIsBounded(values: unknown, max: number): boolean {
+  if (values === undefined) return true;
+  if (!Array.isArray(values) || values.length > max) return false;
+  for (const value of values) {
+    if (typeof value !== 'string' || value.length > 96) return false;
+  }
+  return true;
+}
+
 /** Bound raw arrays/strings before Zod traverses or trims their contents. */
 function rawRequestIsBounded(input: unknown): boolean {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
   if (!Object.hasOwn(input, 'groups') && !Object.hasOwn(input, 'tools')) return false;
-  for (const [key, max] of [
-    ['groups', 8],
-    ['tools', 24],
-  ] as const) {
-    const values: unknown = Reflect.get(input, key);
-    if (values === undefined) continue;
-    if (!Array.isArray(values) || values.length > max) return false;
-    for (const value of values) {
-      if (typeof value !== 'string' || value.length > 96) return false;
-    }
+  return rawNameListIsBounded(Reflect.get(input, 'groups'), 8) && rawNameListIsBounded(Reflect.get(input, 'tools'), 24);
+}
+
+/**
+ * Explicit names precede domain expansion: a large domain cannot starve
+ * the particular function the caller asked for. Both arrays are bounded.
+ * Groups with no members are recorded in `unavailable`.
+ */
+function expandRequestedNames(
+  byGroup: ReadonlyMap<string, readonly string[]>,
+  request: { groups: readonly string[]; tools: readonly string[] },
+  unavailable: Set<string>,
+): Set<string> {
+  const requested = new Set(request.tools);
+  for (const group of request.groups) {
+    const members = byGroup.get(group);
+    if (!members) unavailable.add(`group:${group}`);
+    else for (const name of members) requested.add(name);
   }
-  return true;
+  return requested;
+}
+
+/** Takes requested tools in order while they fit; unknown names go to `unavailable`, overflow to `deferred`. */
+function fitWithinBudget(
+  byName: ReadonlyMap<string, OpenAI.ChatCompletionFunctionTool>,
+  requested: ReadonlySet<string>,
+  unavailable: Set<string>,
+  limits: { maxTools: number; maxSchemaChars: number },
+): { tools: OpenAI.ChatCompletionTool[]; deferred: string[]; schemaChars: number } {
+  const tools: OpenAI.ChatCompletionTool[] = [];
+  const deferred: string[] = [];
+  let schemaChars = 2; // JSON array brackets, including the empty case.
+  for (const name of requested) {
+    const tool = byName.get(name);
+    if (!tool) {
+      unavailable.add(name);
+      continue;
+    }
+    const cost = JSON.stringify(tool).length + (tools.length ? 1 : 0);
+    if (tools.length >= limits.maxTools || schemaChars + cost > limits.maxSchemaChars) {
+      deferred.push(name);
+      continue; // A later, smaller schema may still fit.
+    }
+    tools.push(structuredClone(tool));
+    schemaChars += cost;
+  }
+  return { tools, deferred, schemaChars };
 }
 
 /**
@@ -159,32 +204,12 @@ export function createToolCatalog(allowed: readonly OpenAI.ChatCompletionTool[],
       if (!rawRequestIsBounded(input)) return { ok: false, error: 'INVALID_CATALOG_REQUEST' };
       const parsed = requestSchema.safeParse(input);
       if (!parsed.success) return { ok: false, error: 'INVALID_CATALOG_REQUEST' };
-      // Explicit names precede domain expansion: a large domain cannot starve
-      // the particular function the caller asked for. Both arrays are bounded.
-      const requested = new Set(parsed.data.tools);
       const unavailable = new Set<string>();
-      for (const group of parsed.data.groups) {
-        const members = byGroup.get(group);
-        if (!members) unavailable.add(`group:${group}`);
-        else for (const name of members) requested.add(name);
-      }
-      const tools: OpenAI.ChatCompletionTool[] = [];
-      const deferred: string[] = [];
-      let schemaChars = 2; // JSON array brackets, including the empty case.
-      for (const name of requested) {
-        const tool = byName.get(name);
-        if (!tool) {
-          unavailable.add(name);
-          continue;
-        }
-        const cost = JSON.stringify(tool).length + (tools.length ? 1 : 0);
-        if (tools.length >= maxTools || schemaChars + cost > maxSchemaChars) {
-          deferred.push(name);
-          continue; // A later, smaller schema may still fit.
-        }
-        tools.push(structuredClone(tool));
-        schemaChars += cost;
-      }
+      const requested = expandRequestedNames(byGroup, parsed.data, unavailable);
+      const { tools, deferred, schemaChars } = fitWithinBudget(byName, requested, unavailable, {
+        maxTools,
+        maxSchemaChars,
+      });
       return { ok: true, tools, unavailable: [...unavailable], deferred, schemaChars };
     },
   };

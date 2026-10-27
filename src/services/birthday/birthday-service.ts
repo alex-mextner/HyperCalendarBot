@@ -13,6 +13,14 @@ const birthdayLogger = logger.child({ module: 'birthday-service' });
 export const BIRTHDAY_SYNC_THROTTLE_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_ALL_DAY_TIME = '09:00';
 
+/** Next UTC occurrence (YYYY-MM-DD) of month/day: this year if not yet past `now`, otherwise next year. */
+function nextBirthdayDateStr(month: number, day: number, now: Date): string {
+  let year = now.getUTCFullYear();
+  const thisYearDate = new Date(Date.UTC(year, month - 1, day));
+  if (thisYearDate < now) year += 1;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 export interface UpsertBirthdayParams {
   ownerId: number;
   celebrantId: number | null;
@@ -70,47 +78,10 @@ export class BirthdayService {
   }
 
   upsertBirthdayEvent(params: UpsertBirthdayParams): void {
-    const titlePrefix = params.lang === 'ru' ? '\u0414/\u0440 ' : 'Bday ';
-    const title = titlePrefix + params.celebrantName;
-
-    const now = new Date();
-    let year = now.getUTCFullYear();
-    const thisYearDate = new Date(Date.UTC(year, params.month - 1, params.day));
-    if (thisYearDate < now) year += 1;
-
-    const startDateStr = `${year}-${String(params.month).padStart(2, '0')}-${String(params.day).padStart(2, '0')}`;
+    const startDateStr = nextBirthdayDateStr(params.month, params.day, new Date());
     const startAt = `${startDateStr}T00:00:00Z`;
 
-    const existing = params.celebrantId
-      ? params.groupId
-        ? this.metaRepo.findByCelebrantAndGroup(params.celebrantId, params.groupId)
-        : this.metaRepo.findByCelebrantAndOwner(params.celebrantId, params.ownerId)
-      : null;
-
-    let eventId: number;
-    let remindersNeedUpdate = !existing;
-
-    if (existing) {
-      if (existing.start_at !== startAt) {
-        this.eventRepo.update(existing.event_id, params.ownerId, { start_at: startAt });
-        birthdayLogger.info({ eventId: existing.event_id }, 'Birthday date updated');
-        remindersNeedUpdate = true;
-      }
-      eventId = existing.event_id;
-    } else {
-      const event = this.eventRepo.create({
-        user_id: params.ownerId,
-        title,
-        start_at: startAt,
-        all_day: true,
-        timezone: params.timezone,
-        recurrence_rule: 'FREQ=YEARLY',
-        event_type: 'birthday',
-        owner_type: params.groupId ? 'group' : 'user',
-        group_id: params.groupId ?? undefined,
-      });
-      eventId = event.id;
-    }
+    const { eventId, remindersNeedUpdate } = this.upsertEventRow(params, startAt);
 
     this.metaRepo.upsertMetadata({
       event_id: eventId,
@@ -123,6 +94,39 @@ export class BirthdayService {
       this.reminderRepo.deleteForEvent(eventId);
       this.createBirthdayReminders(eventId, params.ownerId, startDateStr, params.timezone);
     }
+  }
+
+  /** Moves the celebrant's existing birthday event to `startAt`, or creates it; reports whether reminders must be rebuilt. */
+  private upsertEventRow(
+    params: UpsertBirthdayParams,
+    startAt: string,
+  ): { eventId: number; remindersNeedUpdate: boolean } {
+    const existing = params.celebrantId
+      ? params.groupId
+        ? this.metaRepo.findByCelebrantAndGroup(params.celebrantId, params.groupId)
+        : this.metaRepo.findByCelebrantAndOwner(params.celebrantId, params.ownerId)
+      : null;
+
+    if (!existing) {
+      const titlePrefix = params.lang === 'ru' ? '\u0414/\u0440 ' : 'Bday ';
+      const event = this.eventRepo.create({
+        user_id: params.ownerId,
+        title: titlePrefix + params.celebrantName,
+        start_at: startAt,
+        all_day: true,
+        timezone: params.timezone,
+        recurrence_rule: 'FREQ=YEARLY',
+        event_type: 'birthday',
+        owner_type: params.groupId ? 'group' : 'user',
+        group_id: params.groupId ?? undefined,
+      });
+      return { eventId: event.id, remindersNeedUpdate: true };
+    }
+
+    if (existing.start_at === startAt) return { eventId: existing.event_id, remindersNeedUpdate: false };
+    this.eventRepo.update(existing.event_id, params.ownerId, { start_at: startAt });
+    birthdayLogger.info({ eventId: existing.event_id }, 'Birthday date updated');
+    return { eventId: existing.event_id, remindersNeedUpdate: true };
   }
 
   private createBirthdayReminders(eventId: number, userId: number, startDateStr: string, timezone: string): void {

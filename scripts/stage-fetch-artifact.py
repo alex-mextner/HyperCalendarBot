@@ -254,6 +254,24 @@ def refuse_oversized_directory(zip_path):
         refuse(f"artifact zip has more than {MAX_ZIP_ENTRIES} members")
 
 
+def find_member(infos, name, required):
+    """The one zip entry for a fixed member name (None when an optional member is absent); refuse anything odd."""
+    # A trailing slash is a directory entry for the same name: counted so it is refused.
+    matches = [info for info in infos if info.filename.rstrip("/") == name]
+    if not matches:
+        if required:
+            refuse(f"required member missing from artifact: {name}")
+        return None
+    if len(matches) > 1:
+        refuse(f"member appears twice in artifact: {name}")
+    info = matches[0]
+    if info.is_dir():
+        refuse(f"member is not a regular file: {name}")
+    if name.endswith(".json") and info.file_size > MAX_CASES_BYTES:
+        refuse(f"member is larger than {MAX_CASES_BYTES} bytes: {name}")
+    return info
+
+
 def extract_known_files(zip_path, out):
     """Copy only the fixed member names; member names never build a path. Return each file's sha256."""
     wanted = [(name, True) for name in REQUIRED] + [(name, False) for name in OPTIONAL]
@@ -263,19 +281,9 @@ def extract_known_files(zip_path, out):
         with zipfile.ZipFile(zip_path) as archive:
             infos = archive.infolist()
             for name, required in wanted:
-                # A trailing slash is a directory entry for the same name: counted so it is refused.
-                matches = [info for info in infos if info.filename.rstrip("/") == name]
-                if not matches:
-                    if required:
-                        refuse(f"required member missing from artifact: {name}")
+                info = find_member(infos, name, required)
+                if info is None:
                     continue
-                if len(matches) > 1:
-                    refuse(f"member appears twice in artifact: {name}")
-                info = matches[0]
-                if info.is_dir():
-                    refuse(f"member is not a regular file: {name}")
-                if name.endswith(".json") and info.file_size > MAX_CASES_BYTES:
-                    refuse(f"member is larger than {MAX_CASES_BYTES} bytes: {name}")
                 with archive.open(info) as source:
                     sums[name] = write_new(os.path.join(out, name), source, f"member {name}")
     except (zipfile.BadZipFile, EOFError, zlib.error) as error:

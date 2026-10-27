@@ -114,6 +114,59 @@ function yearOf(instant: Date, timezone: string): number {
   return new TZDate(instant.getTime(), timezone).getFullYear();
 }
 
+type EmptyAgendaMessages = Messages['aiTools']['events']['emptyAgenda'];
+
+/** What the wording of one empty answer is built from, resolved once per call. */
+interface AgendaWording {
+  messages: EmptyAgendaMessages;
+  calendar: string;
+  relative: string | null;
+  formatDate: (instant: Date) => string;
+}
+
+/** A read that is not whole days: names the times, and the dates too when it spans several days. */
+function windowMessage(
+  wording: AgendaWording,
+  interval: AgendaInterval,
+  start: LocalMoment,
+  end: LocalMoment,
+  sameDay: boolean,
+  past: boolean,
+): string {
+  const { messages, calendar, relative, formatDate } = wording;
+  const firstDate = formatDate(interval.start);
+  if (sameDay) {
+    const template = past ? messages.windowPast : messages.window;
+    return template(relative, firstDate, timeLabel(start), timeLabel(end), calendar);
+  }
+  const template = past ? messages.windowSpanPast : messages.windowSpan;
+  return template(
+    messages.dateTime(firstDate, timeLabel(start)),
+    messages.dateTime(formatDate(interval.end), timeLabel(end)),
+    calendar,
+  );
+}
+
+/** A read of whole local days: one day, or a range that is past, upcoming or running now. */
+function daysMessage(
+  wording: AgendaWording,
+  firstInstant: Date,
+  shape: Extract<Shape, { kind: 'days' }>,
+  today: number,
+): string {
+  const { messages, calendar, relative, formatDate } = wording;
+  const firstDate = formatDate(firstInstant);
+  if (shape.firstDay === shape.lastDay) {
+    return shape.firstDay < today
+      ? messages.dayPast(relative, firstDate, calendar)
+      : messages.dayUpcoming(relative, firstDate, calendar);
+  }
+  const lastDate = formatDate(shape.lastInstant);
+  if (shape.lastDay < today) return messages.rangePast(firstDate, lastDate, calendar);
+  if (shape.firstDay >= today) return messages.rangeUpcoming(firstDate, lastDate, calendar);
+  return messages.rangeCurrent(firstDate, lastDate, calendar);
+}
+
 export function formatEmptyAgenda(input: EmptyAgendaInput): string {
   const { interval, timezone, language, scope } = input;
   if (!(interval.start.getTime() < interval.end.getTime())) throw new RangeError('Invalid calendar interval');
@@ -123,33 +176,16 @@ export function formatEmptyAgenda(input: EmptyAgendaInput): string {
   const shape = classify(interval, start, end);
   const lastInstant = shape.kind === 'days' ? shape.lastInstant : interval.end;
   const years = new Set([interval.start, lastInstant, now].map((instant) => yearOf(instant, timezone)));
-  const formatDate = dateFormatter(language, timezone, years.size > 1);
-  const today = toLocal(now, timezone).dayIndex;
   const messages = t(language).aiTools.events.emptyAgenda;
-  const calendar = messages.calendar[scope];
-  const relative = relativeDayWord(messages.relativeDay, start.dayIndex - today);
-  const firstDate = formatDate(interval.start);
-
+  const wording: AgendaWording = {
+    messages,
+    calendar: messages.calendar[scope],
+    relative: relativeDayWord(messages.relativeDay, start.dayIndex - toLocal(now, timezone).dayIndex),
+    formatDate: dateFormatter(language, timezone, years.size > 1),
+  };
   if (shape.kind === 'window') {
     const past = interval.end.getTime() <= now.getTime();
-    if (shape.sameDay) {
-      const template = past ? messages.windowPast : messages.window;
-      return template(relative, firstDate, timeLabel(start), timeLabel(end), calendar);
-    }
-    const template = past ? messages.windowSpanPast : messages.windowSpan;
-    return template(
-      messages.dateTime(firstDate, timeLabel(start)),
-      messages.dateTime(formatDate(interval.end), timeLabel(end)),
-      calendar,
-    );
+    return windowMessage(wording, interval, start, end, shape.sameDay, past);
   }
-  if (shape.firstDay === shape.lastDay) {
-    return shape.firstDay < today
-      ? messages.dayPast(relative, firstDate, calendar)
-      : messages.dayUpcoming(relative, firstDate, calendar);
-  }
-  const lastDate = formatDate(lastInstant);
-  if (shape.lastDay < today) return messages.rangePast(firstDate, lastDate, calendar);
-  if (shape.firstDay >= today) return messages.rangeUpcoming(firstDate, lastDate, calendar);
-  return messages.rangeCurrent(firstDate, lastDate, calendar);
+  return daysMessage(wording, interval.start, shape, toLocal(now, timezone).dayIndex);
 }

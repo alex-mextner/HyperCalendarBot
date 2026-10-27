@@ -6,6 +6,7 @@ import { TZDate } from '@date-fns/tz';
 import { startOfWeek } from 'date-fns';
 import { t } from '../../config/constants.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
+import type { EventOccurrence, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatWeekAgenda } from '../../services/event/formatters.ts';
 import type { HolidayEntry, HolidayService } from '../../services/holiday/holiday-service.ts';
@@ -18,6 +19,93 @@ import { imageLogger } from '../../utils/logger.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
 import { sendAgendaText } from './agenda-text.ts';
+
+/** Holidays per local calendar day of the week starting at `start`; undefined when holidays are not configured. */
+function collectWeekHolidays(
+  holidayService: HolidayService | undefined,
+  userId: number,
+  start: string,
+  timezone: string,
+): Map<string, HolidayEntry[]> | undefined {
+  if (!holidayService) return undefined;
+  const holidaysByDate = new Map<string, HolidayEntry[]>();
+  for (const dayKey of localCalendarWeekDays(start, timezone)) {
+    const holidays = holidayService.getHolidaysForDate(userId, dayKey);
+    if (holidays.length > 0) {
+      holidaysByDate.set(dayKey, holidays);
+    }
+  }
+  return holidaysByDate;
+}
+
+async function handleGroupWeek(
+  ctx: BotCommandContext,
+  user: User,
+  lang: 'en' | 'ru',
+  eventService: EventService,
+  holidayService?: HolidayService,
+  groupRepo?: GroupChatRepository,
+  weatherService?: WeatherService,
+): Promise<void> {
+  const groupId = getGroupId(ctx);
+  if (groupId === null) return;
+  const timezone = groupRepo?.getTimezone(groupId) ?? null;
+  if (!timezone) {
+    await ctx.send(
+      lang === 'ru'
+        ? '⚙️ Сначала задайте таймзону группы через /settings'
+        : '⚙️ Set the group timezone first via /settings',
+    );
+    return;
+  }
+  const now = new Date();
+  const { start, end } = getWeekRangeUtc(now, timezone);
+  const occurrences = enrichAgenda(
+    eventService.getEventsInRangeForGroup(groupId, start, end),
+    { userId: user.telegram_id, language: lang, groupId },
+    eventService.agendaRepository,
+  );
+
+  const groupHolidaysByDate = collectWeekHolidays(holidayService, user.telegram_id, start, timezone);
+  const weatherByDate = await fetchWeekWeatherByDate(weatherService, timezone, lang);
+  const text = formatWeekAgenda(occurrences, start, end, timezone, lang, groupHolidaysByDate, weatherByDate);
+  await sendAgendaText(ctx, text);
+}
+
+interface WeekImageInput {
+  renderService: ImageRenderer;
+  occurrences: EventOccurrence[];
+  now: Date;
+  weatherByDate: { [date: string]: DayWeather } | undefined;
+  user: User;
+  lang: 'en' | 'ru';
+}
+
+/** Render the week agenda as an image and send it; render failures are reported to the user. */
+async function sendWeekImage(ctx: BotCommandContext, input: WeekImageInput): Promise<void> {
+  const { renderService, occurrences, now, weatherByDate, user, lang } = input;
+  try {
+    const weekStartIso = startOfWeek(new TZDate(now, user.timezone), { weekStartsOn: 1 }).toISOString().slice(0, 10);
+    const buffer = await renderWeekImage(
+      renderService,
+      occurrences,
+      weekStartIso,
+      user.timezone,
+      user.language as 'ru' | 'en',
+      user.telegram_id,
+      weatherByDate,
+    );
+    const file = new File([buffer], 'week.png', { type: 'image/png' });
+    await sendAgendaImage(file, {
+      language: user.language,
+      sendPhoto: (photo) => ctx.sendPhoto(photo),
+      sendDocument: (document, options) => ctx.sendDocument(document, options),
+    });
+  } catch (err) {
+    imageLogger.error({ err }, 'Render failed');
+    await ctx.send(agendaImageErrorMessage(err) ?? t(lang).callbackErrors.imageGenerationFailed);
+  }
+}
 
 export async function handleWeek(
   ctx: BotCommandContext,
@@ -32,39 +120,7 @@ export async function handleWeek(
   const lang = user.language as 'en' | 'ru';
 
   if (isGroup(ctx)) {
-    const groupId = getGroupId(ctx);
-    if (groupId === null) return;
-    const timezone = groupRepo?.getTimezone(groupId) ?? null;
-    if (!timezone) {
-      await ctx.send(
-        lang === 'ru'
-          ? '⚙️ Сначала задайте таймзону группы через /settings'
-          : '⚙️ Set the group timezone first via /settings',
-      );
-      return;
-    }
-    const now = new Date();
-    const { start, end } = getWeekRangeUtc(now, timezone);
-    const occurrences = enrichAgenda(
-      eventService.getEventsInRangeForGroup(groupId, start, end),
-      { userId: user.telegram_id, language: lang, groupId },
-      eventService.agendaRepository,
-    );
-
-    let groupHolidaysByDate: Map<string, HolidayEntry[]> | undefined;
-    if (holidayService) {
-      groupHolidaysByDate = new Map();
-      for (const dayKey of localCalendarWeekDays(start, timezone)) {
-        const holidays = holidayService.getHolidaysForDate(user.telegram_id, dayKey);
-        if (holidays.length > 0) {
-          groupHolidaysByDate.set(dayKey, holidays);
-        }
-      }
-    }
-
-    const weatherByDate = await fetchWeekWeatherByDate(weatherService, timezone, lang);
-    const text = formatWeekAgenda(occurrences, start, end, timezone, lang, groupHolidaysByDate, weatherByDate);
-    await sendAgendaText(ctx, text);
+    await handleGroupWeek(ctx, user, lang, eventService, holidayService, groupRepo, weatherService);
     return;
   }
 
@@ -76,43 +132,13 @@ export async function handleWeek(
     eventService.agendaRepository,
   );
 
-  let holidaysByDate: Map<string, HolidayEntry[]> | undefined;
-  if (holidayService) {
-    holidaysByDate = new Map();
-    for (const dayKey of localCalendarWeekDays(start, user.timezone)) {
-      const holidays = holidayService.getHolidaysForDate(user.telegram_id, dayKey);
-      if (holidays.length > 0) {
-        holidaysByDate.set(dayKey, holidays);
-      }
-    }
-  }
-
+  const holidaysByDate = collectWeekHolidays(holidayService, user.telegram_id, start, user.timezone);
   const weatherByDate = await fetchWeekWeatherByDate(weatherService, user.timezone, lang);
   const text = formatWeekAgenda(occurrences, start, end, user.timezone, user.language, holidaysByDate, weatherByDate);
   await sendAgendaText(ctx, text);
 
   if (renderService) {
-    try {
-      const weekStartIso = startOfWeek(new TZDate(now, user.timezone), { weekStartsOn: 1 }).toISOString().slice(0, 10);
-      const buffer = await renderWeekImage(
-        renderService,
-        occurrences,
-        weekStartIso,
-        user.timezone,
-        user.language as 'ru' | 'en',
-        user.telegram_id,
-        weatherByDate,
-      );
-      const file = new File([buffer], 'week.png', { type: 'image/png' });
-      await sendAgendaImage(file, {
-        language: user.language,
-        sendPhoto: (photo) => ctx.sendPhoto(photo),
-        sendDocument: (document, options) => ctx.sendDocument(document, options),
-      });
-    } catch (err) {
-      imageLogger.error({ err }, 'Render failed');
-      await ctx.send(agendaImageErrorMessage(err) ?? t(lang).callbackErrors.imageGenerationFailed);
-    }
+    await sendWeekImage(ctx, { renderService, occurrences, now, weatherByDate, user, lang });
   }
 }
 

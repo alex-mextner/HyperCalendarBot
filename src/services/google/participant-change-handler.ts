@@ -24,7 +24,7 @@ type UnfilteredEvent = Pick<
 >;
 
 import { syncLogger } from '../../utils/logger.ts';
-import type { LocalEventFromGoogleSnapshot } from './change-detection.ts';
+import type { FieldChange, LocalEventFromGoogleSnapshot } from './change-detection.ts';
 import {
   computeEventDiff,
   formatChanges,
@@ -73,66 +73,88 @@ export async function handleParticipantChange(
   const sharedChanges = getSharedChanges(allChanges);
 
   if (sharedChanges.length > 0) {
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    const originalValues = JSON.stringify(Object.fromEntries(sharedChanges.map((c) => [c.field, c.oldValue])));
-    const changesJson = JSON.stringify(sharedChanges);
-
-    const existing = deps.editProposalRepo.getPendingByProposerAndEvent(participantUserId, masterEvent.id);
-    if (existing) {
-      deps.editProposalRepo.updateChanges(existing.id, changesJson, originalValues, expiresAt);
-      syncLogger.info(
-        { proposalId: existing.id, participantUserId, eventId: masterEvent.id },
-        'Updated existing edit proposal',
-      );
-    } else {
-      const proposal = deps.editProposalRepo.create({
-        event_id: masterEvent.id,
-        proposer_id: participantUserId,
-        changes: changesJson,
-        original_values: originalValues,
-        expires_at: expiresAt,
-        source: 'google_sync',
-      });
-
-      const participantName = deps.getUserName(participantUserId);
-      const orgLang = deps.getUserLang(masterEvent.user_id);
-      const changesText = formatChanges(sharedChanges, orgLang);
-      const text = t(orgLang).sync.changeProposed(participantName, masterEvent.title, changesText);
-
-      if (deps.sendMessageWithButtons) {
-        const buttons = [
-          [
-            { text: t(orgLang).sync.acceptBtn, callbackData: `epr:accept:${proposal.id}` },
-            { text: t(orgLang).sync.rejectBtn, callbackData: `epr:reject:${proposal.id}` },
-          ],
-        ];
-        const result = await deps.sendMessageWithButtons(masterEvent.user_id, text, buttons).catch((err) => {
-          syncLogger.error({ err, proposalId: proposal.id }, 'Failed to send proposal with buttons');
-          return null;
-        });
-        if (result) {
-          deps.editProposalRepo.setMessageInfo(proposal.id, {
-            organizer_message_id: result.messageId,
-            organizer_chat_id: result.chatId,
-          });
-        }
-      } else {
-        await deps.notifyUser(masterEvent.user_id, text).catch((err) => {
-          syncLogger.error({ err, proposalId: proposal.id }, 'Failed to notify organizer about proposal');
-        });
-      }
-
-      syncLogger.info(
-        { proposalId: proposal.id, participantUserId, eventId: masterEvent.id },
-        'Created edit proposal from participant GCal change',
-      );
-    }
+    await recordSharedChanges(participantUserId, masterEvent, sharedChanges, deps);
   }
 
   deps.participantSyncRepo.updateSyncFields(participantUserId, masterEvent.id, {
     google_etag: incomingLocal.google_etag ?? undefined,
     last_synced_at: new Date().toISOString(),
   });
+}
+
+/** Update the participant's pending edit proposal, or create one and notify the organizer. */
+async function recordSharedChanges(
+  participantUserId: number,
+  masterEvent: UnfilteredEvent,
+  sharedChanges: FieldChange[],
+  deps: ParticipantHandlerDeps,
+): Promise<void> {
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const originalValues = JSON.stringify(Object.fromEntries(sharedChanges.map((c) => [c.field, c.oldValue])));
+  const changesJson = JSON.stringify(sharedChanges);
+
+  const existing = deps.editProposalRepo.getPendingByProposerAndEvent(participantUserId, masterEvent.id);
+  if (existing) {
+    deps.editProposalRepo.updateChanges(existing.id, changesJson, originalValues, expiresAt);
+    syncLogger.info(
+      { proposalId: existing.id, participantUserId, eventId: masterEvent.id },
+      'Updated existing edit proposal',
+    );
+    return;
+  }
+
+  const proposal = deps.editProposalRepo.create({
+    event_id: masterEvent.id,
+    proposer_id: participantUserId,
+    changes: changesJson,
+    original_values: originalValues,
+    expires_at: expiresAt,
+    source: 'google_sync',
+  });
+
+  const participantName = deps.getUserName(participantUserId);
+  const orgLang = deps.getUserLang(masterEvent.user_id);
+  const changesText = formatChanges(sharedChanges, orgLang);
+  const text = t(orgLang).sync.changeProposed(participantName, masterEvent.title, changesText);
+
+  await notifyOrganizerOfProposal(proposal.id, masterEvent.user_id, orgLang, text, deps);
+
+  syncLogger.info(
+    { proposalId: proposal.id, participantUserId, eventId: masterEvent.id },
+    'Created edit proposal from participant GCal change',
+  );
+}
+
+async function notifyOrganizerOfProposal(
+  proposalId: number,
+  organizerId: number,
+  orgLang: Lang,
+  text: string,
+  deps: ParticipantHandlerDeps,
+): Promise<void> {
+  if (!deps.sendMessageWithButtons) {
+    await deps.notifyUser(organizerId, text).catch((err) => {
+      syncLogger.error({ err, proposalId }, 'Failed to notify organizer about proposal');
+    });
+    return;
+  }
+
+  const buttons = [
+    [
+      { text: t(orgLang).sync.acceptBtn, callbackData: `epr:accept:${proposalId}` },
+      { text: t(orgLang).sync.rejectBtn, callbackData: `epr:reject:${proposalId}` },
+    ],
+  ];
+  const result = await deps.sendMessageWithButtons(organizerId, text, buttons).catch((err) => {
+    syncLogger.error({ err, proposalId }, 'Failed to send proposal with buttons');
+    return null;
+  });
+  if (result) {
+    deps.editProposalRepo.setMessageInfo(proposalId, {
+      organizer_message_id: result.messageId,
+      organizer_chat_id: result.chatId,
+    });
+  }
 }
 
 export async function handleParticipantDelete(

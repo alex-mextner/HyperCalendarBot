@@ -166,6 +166,45 @@ export function isQuotaExhausted(status: number | undefined, message: string): b
   return status === 402 || status === 429 || saysWithoutStatus(status, message, /rate limit|limit exhausted/i);
 }
 
+/** A spent quota or rate limit: as long as the provider says, else a guess sized by what the status implies. */
+function quotaBlock(status: number | undefined, message: string, headers: unknown, now: number): Block {
+  const stated = retryAfterMs(headers, now) ?? statedResetMs(message, now);
+  if (stated !== null) {
+    return {
+      untilMs: now + Math.min(stated, MAX_EXPLICIT_BLOCK_MS),
+      scope: 'all',
+      reason: 'quota spent until the stated reset',
+    };
+  }
+  if (status === 402) {
+    return { untilMs: now + BALANCE_EXHAUSTED_BLOCK_MS, scope: 'all', reason: 'balance exhausted, no stated reset' };
+  }
+  return { untilMs: now + VAGUE_BLOCK_MS, scope: 'all', reason: 'rate limited, no stated reset' };
+}
+
+/** The block a failure calls for, or null when it says nothing durable. */
+function blockImpliedBy(
+  hasTools: boolean,
+  status: number | undefined,
+  message: string,
+  headers: unknown,
+  now: number,
+): Block | null {
+  // Only a request carrying the catalog earns a size block. The catalog is a
+  // fixed floor that no retry shrinks; a request that was too large without it
+  // was too large because of its history, and the next one may not be.
+  if (isRequestTooLarge(status, message)) {
+    if (!hasTools) return null;
+    return {
+      untilMs: now + TOO_LARGE_BLOCK_MS,
+      scope: 'with-tools',
+      reason: 'the tool catalog does not fit this tier',
+    };
+  }
+  if (isQuotaExhausted(status, message)) return quotaBlock(status, message, headers, now);
+  return null;
+}
+
 /**
  * Records what a failure implies about the provider's near future. Returns the
  * block it created, or null when the failure says nothing durable — a 500, a
@@ -180,38 +219,7 @@ export function noteFailureForEligibility(
   headers: unknown,
   now: number = Date.now(),
 ): Block | null {
-  let block: Block | null = null;
-
-  // Only a request carrying the catalog earns a size block. The catalog is a
-  // fixed floor that no retry shrinks; a request that was too large without it
-  // was too large because of its history, and the next one may not be.
-  if (isRequestTooLarge(status, message)) {
-    if (!hasTools) return null;
-    block = {
-      untilMs: now + TOO_LARGE_BLOCK_MS,
-      scope: 'with-tools',
-      reason: 'the tool catalog does not fit this tier',
-    };
-  } else if (isQuotaExhausted(status, message)) {
-    const stated = retryAfterMs(headers, now) ?? statedResetMs(message, now);
-    const duration =
-      stated !== null
-        ? Math.min(stated, MAX_EXPLICIT_BLOCK_MS)
-        : status === 402
-          ? BALANCE_EXHAUSTED_BLOCK_MS
-          : VAGUE_BLOCK_MS;
-    block = {
-      untilMs: now + duration,
-      scope: 'all',
-      reason:
-        stated !== null
-          ? 'quota spent until the stated reset'
-          : status === 402
-            ? 'balance exhausted, no stated reset'
-            : 'rate limited, no stated reset',
-    };
-  }
-
+  const block = blockImpliedBy(hasTools, status, message, headers, now);
   if (!block) return null;
   const key = blockKey(provider, chain);
   const existing = blocks.get(key) ?? {};

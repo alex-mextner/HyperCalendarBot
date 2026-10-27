@@ -189,6 +189,59 @@ describe('handleParticipantChange', () => {
     const proposals = editProposalRepo.getPendingForEvent(event.id);
     expect(proposals).toHaveLength(0);
   });
+
+  test('with sendMessageWithButtons: sends accept/reject buttons and stores message info', async () => {
+    const event = createSharedEvent();
+    const masterEvent = eventRepo.findByIdUnfiltered(event.id)!;
+    const sendMessageWithButtons = mock(async () => ({ messageId: 7, chatId: 8 }));
+    deps.sendMessageWithButtons = sendMessageWithButtons;
+
+    await handleParticipantChange(PARTICIPANT, masterEvent, makeIncoming({ title: 'Daily Sync' }), deps);
+
+    const [proposal] = editProposalRepo.getPendingForEvent(event.id);
+    expect(notifyUser).not.toHaveBeenCalled();
+    expect(sendMessageWithButtons).toHaveBeenCalledTimes(1);
+    const [userId, , buttons] = sendMessageWithButtons.mock.calls[0] as unknown as [
+      number,
+      string,
+      { text: string; callbackData: string }[][],
+    ];
+    expect(userId).toBe(ORGANIZER);
+    expect(buttons[0]!.map((b) => b.callbackData)).toEqual([
+      `epr:accept:${proposal!.id}`,
+      `epr:reject:${proposal!.id}`,
+    ]);
+    expect(proposal!.organizer_message_id).toBe(7);
+    expect(proposal!.organizer_chat_id).toBe(8);
+  });
+
+  test('with sendMessageWithButtons failing: proposal kept, no message info, no plain notification', async () => {
+    const event = createSharedEvent();
+    const masterEvent = eventRepo.findByIdUnfiltered(event.id)!;
+    deps.sendMessageWithButtons = mock(async () => {
+      throw new Error('telegram down');
+    });
+
+    await handleParticipantChange(PARTICIPANT, masterEvent, makeIncoming({ title: 'Daily Sync' }), deps);
+
+    const [proposal] = editProposalRepo.getPendingForEvent(event.id);
+    expect(proposal).toBeDefined();
+    expect(proposal!.organizer_message_id).toBeNull();
+    expect(notifyUser).not.toHaveBeenCalled();
+  });
+
+  test('notifyUser failure does not fail the sync and the etag is still stored', async () => {
+    const event = createSharedEvent();
+    const masterEvent = eventRepo.findByIdUnfiltered(event.id)!;
+    notifyUser.mockImplementation(async () => {
+      throw new Error('telegram down');
+    });
+
+    await handleParticipantChange(PARTICIPANT, masterEvent, makeIncoming({ title: 'Daily Sync' }), deps);
+
+    expect(editProposalRepo.getPendingForEvent(event.id)).toHaveLength(1);
+    expect(participantSyncRepo.getByUserAndEvent(PARTICIPANT, event.id)?.google_etag).toBe('new-etag');
+  });
 });
 
 describe('handleParticipantDelete', () => {

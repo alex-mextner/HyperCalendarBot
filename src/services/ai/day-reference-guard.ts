@@ -49,39 +49,70 @@ const ActivityCodec = jsonCodec(z.object({ kind: z.string() }));
 /** A bot message sent outside the model (a scene, a rule's response), as the logger saves it. */
 const BotMessageCodec = jsonCodec(z.object({ kind: z.enum(['bot', 'bot_edit']), text: z.string() }));
 
+interface AskedQuestion {
+  text: string;
+  options: string[];
+  askedAt: string;
+}
+
+/**
+ * What an assistant row asked through ask_user: `{ asked: null }` for a turn without that call,
+ * null for a row that is not an assistant tool-call turn at all.
+ */
+function askedQuestionOf(row: ChatHistoryMessage): { asked: AskedQuestion | null } | null {
+  const turn = AssistantToolCallsCodec.safeParse(row.content);
+  if (!turn.success) return null;
+  const ask = turn.data.tool_calls?.find((call) => call.function.name === 'ask_user');
+  if (!ask) return { asked: null };
+  const args = AskUserArgsCodec.safeParse(ask.function.arguments);
+  const options = args.success ? (args.data.options ?? []) : [];
+  const text = args.success ? [args.data.question ?? '', ...options].join('\n') : '';
+  return { asked: { text, options, askedAt: row.created_at } };
+}
+
+/**
+ * Index of the current message among the saved rows, or -1 when the newest user row is some
+ * other message. Bot edits of the question may follow the message.
+ */
+function currentMessageIndex(messageText: string, history: ChatHistoryMessage[]): number {
+  let index = history.length - 1;
+  while (index >= 0 && history[index]!.role !== 'user') index--;
+  return index >= 0 && history[index]!.content.trim() === messageText.trim() ? index : -1;
+}
+
+interface PendingQuestion {
+  origin: ChatHistoryMessage;
+  question: string;
+  options: string[];
+  askedAt: string;
+}
+
+/** The pending question once the user row that led to it is reached; none without a question or for an activity row. */
+function pendingFrom(origin: ChatHistoryMessage, question: AskedQuestion | null): PendingQuestion | null {
+  if (question === null || ActivityCodec.safeParse(origin.content).success) return null;
+  return { origin, question: question.text, options: question.options, askedAt: question.askedAt };
+}
+
 /**
  * The ask_user question the current message answers, with the user message that led to
  * it and when the question was asked — or null when the turn before this message did not
  * end in ask_user, or when the newest saved user message is not this one (a live-call
  * transcript is never saved).
  */
-function pendingQuestion(
-  messageText: string,
-  history: ChatHistoryMessage[],
-): { origin: ChatHistoryMessage; question: string; options: string[]; askedAt: string } | null {
-  let index = history.length - 1;
-  // The current message is the newest user row; bot edits of the question may follow it.
-  while (index >= 0 && history[index]!.role !== 'user') index--;
-  if (index < 0 || history[index]!.content.trim() !== messageText.trim()) return null;
-  index--;
-  let question: { text: string; options: string[]; askedAt: string } | null = null;
-  for (; index >= 0; index--) {
+function pendingQuestion(messageText: string, history: ChatHistoryMessage[]): PendingQuestion | null {
+  let index = currentMessageIndex(messageText, history);
+  if (index < 0) return null;
+  let question: AskedQuestion | null = null;
+  for (index--; index >= 0; index--) {
     const row = history[index]!;
     if (row.role === 'tool') continue;
-    if (row.role === 'user') {
-      if (question === null || ActivityCodec.safeParse(row.content).success) return null;
-      return { origin: row, question: question.text, options: question.options, askedAt: question.askedAt };
-    }
+    if (row.role === 'user') return pendingFrom(row, question);
     if (ActivityCodec.safeParse(row.content).success) continue;
-    const turn = AssistantToolCallsCodec.safeParse(row.content);
-    if (!turn.success) return null;
-    const ask = turn.data.tool_calls?.find((call) => call.function.name === 'ask_user');
+    const turn = askedQuestionOf(row);
+    if (turn === null) return null;
     if (question === null) {
-      if (!ask) return null;
-      const args = AskUserArgsCodec.safeParse(ask.function.arguments);
-      const options = args.success ? (args.data.options ?? []) : [];
-      const text = args.success ? [args.data.question ?? '', ...options].join('\n') : '';
-      question = { text, options, askedAt: row.created_at };
+      if (turn.asked === null) return null;
+      question = turn.asked;
     }
   }
   return null;
@@ -132,9 +163,8 @@ function assistantText(content: string): string {
  * question counts, a closing "Что-то ещё?" too: the time-only rule then imposes nothing.
  */
 function answersPlainQuestion(messageText: string, history: ChatHistoryMessage[]): boolean {
-  let index = history.length - 1;
-  while (index >= 0 && history[index]!.role !== 'user') index--;
-  if (index < 0 || history[index]!.content.trim() !== messageText.trim()) return false;
+  let index = currentMessageIndex(messageText, history);
+  if (index < 0) return false;
   for (index--; index >= 0; index--) {
     const row = history[index]!;
     if (row.role === 'tool') continue;
@@ -280,77 +310,93 @@ function rangeTarget(first: string, last: string, redo: (day: string) => string)
   return { what: `This call reads ${first}..${last}`, first, last, redo };
 }
 
-function targetOf(ctx: AgentContext, toolName: string, input: unknown): Target | null {
-  const timezone = ctx.user.timezone;
-  switch (toolName) {
-    case 'create_event': {
-      const parsed = StartInput.safeParse(input);
-      if (!parsed.success || parsed.data.start_at === undefined) return null;
-      return startTarget('This event starts', parsed.data.start_at, timezone);
-    }
-    case 'update_event': {
-      // A move must land on a named day (it may leave any day); any other edit must be of an
-      // event on a named day.
-      const parsed = StartInput.safeParse(input);
-      if (parsed.success && parsed.data.start_at !== undefined) {
-        return startTarget('The new start', parsed.data.start_at, timezone);
-      }
-      return eventTarget(ctx, input, 'edit');
-    }
-    case 'delete_event':
-      return eventTarget(ctx, input, 'delete');
-    case 'get_events': {
-      const parsed = RangeInput.safeParse(input);
-      if (!parsed.success) return null;
-      // The days the handler reads: a UTC day-edge pair is those local days (#550).
-      const bounds = localDaysForUtcDayEdges(parsed.data, timezone);
-      const days = [
-        ...daysOfArgument(bounds.start_date, timezone),
-        ...daysOfArgument(bounds.end_date, timezone),
-      ].sort();
-      if (days.length === 0) return null;
-      return rangeTarget(
-        days[0]!,
-        days.at(-1)!,
-        (named) => `get_events with start_date "${named}" and end_date "${named}"`,
-      );
-    }
-    case 'get_free_slots':
-    case 'render_day_image': {
-      const parsed = DayInput.safeParse(input);
-      if (!parsed.success) return null;
-      const days = daysOfArgument(parsed.data.date, timezone).sort();
-      if (days.length === 0) return null;
-      return {
-        what: `This call is for ${describeDay(days[0]!)}`,
-        first: days[0]!,
-        last: days.at(-1)!,
-        redo: (named) => `${toolName} with date "${named}"`,
-      };
-    }
-    case 'render_week_image': {
-      // The picture is the Monday–Sunday week that contains week_start.
-      const parsed = WeekInput.safeParse(input);
-      const day = parsed.success ? /^\d{4}-\d{2}-\d{2}$/.exec(parsed.data.week_start)?.[0] : undefined;
-      if (!day) return null;
-      const monday = shiftDay(day, -weekdayOf(day));
-      return rangeTarget(monday, shiftDay(monday, 6), (named) => `render_week_image with week_start "${named}"`);
-    }
-    case 'render_month_image': {
-      const parsed = MonthInput.safeParse(input);
-      const match = parsed.success ? /^(\d{4})-(\d{2})/.exec(parsed.data.month) : null;
-      if (!match) return null;
-      const [year, month] = [Number(match[1]), Number(match[2])];
-      const last = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
-      return rangeTarget(
-        `${match[1]}-${match[2]}-01`,
-        last,
-        (named) => `render_month_image with month "${named.slice(0, 7)}"`,
-      );
-    }
-    default:
-      return null;
+interface ToolCall {
+  ctx: AgentContext;
+  toolName: string;
+  input: unknown;
+}
+
+type TargetReader = (call: ToolCall) => Target | null;
+
+function createEventTarget({ ctx, input }: ToolCall): Target | null {
+  const parsed = StartInput.safeParse(input);
+  if (!parsed.success || parsed.data.start_at === undefined) return null;
+  return startTarget('This event starts', parsed.data.start_at, ctx.user.timezone);
+}
+
+function updateEventTarget({ ctx, input }: ToolCall): Target | null {
+  // A move must land on a named day (it may leave any day); any other edit must be of an
+  // event on a named day.
+  const parsed = StartInput.safeParse(input);
+  if (parsed.success && parsed.data.start_at !== undefined) {
+    return startTarget('The new start', parsed.data.start_at, ctx.user.timezone);
   }
+  return eventTarget(ctx, input, 'edit');
+}
+
+function getEventsTarget({ ctx, input }: ToolCall): Target | null {
+  const timezone = ctx.user.timezone;
+  const parsed = RangeInput.safeParse(input);
+  if (!parsed.success) return null;
+  // The days the handler reads: a UTC day-edge pair is those local days (#550).
+  const bounds = localDaysForUtcDayEdges(parsed.data, timezone);
+  const days = [...daysOfArgument(bounds.start_date, timezone), ...daysOfArgument(bounds.end_date, timezone)].sort();
+  if (days.length === 0) return null;
+  return rangeTarget(
+    days[0]!,
+    days.at(-1)!,
+    (named) => `get_events with start_date "${named}" and end_date "${named}"`,
+  );
+}
+
+function singleDayReadTarget({ ctx, toolName, input }: ToolCall): Target | null {
+  const parsed = DayInput.safeParse(input);
+  if (!parsed.success) return null;
+  const days = daysOfArgument(parsed.data.date, ctx.user.timezone).sort();
+  if (days.length === 0) return null;
+  return {
+    what: `This call is for ${describeDay(days[0]!)}`,
+    first: days[0]!,
+    last: days.at(-1)!,
+    redo: (named) => `${toolName} with date "${named}"`,
+  };
+}
+
+function weekImageTarget({ input }: ToolCall): Target | null {
+  // The picture is the Monday–Sunday week that contains week_start.
+  const parsed = WeekInput.safeParse(input);
+  const day = parsed.success ? /^\d{4}-\d{2}-\d{2}$/.exec(parsed.data.week_start)?.[0] : undefined;
+  if (!day) return null;
+  const monday = shiftDay(day, -weekdayOf(day));
+  return rangeTarget(monday, shiftDay(monday, 6), (named) => `render_week_image with week_start "${named}"`);
+}
+
+function monthImageTarget({ input }: ToolCall): Target | null {
+  const parsed = MonthInput.safeParse(input);
+  const match = parsed.success ? /^(\d{4})-(\d{2})/.exec(parsed.data.month) : null;
+  if (!match) return null;
+  const [year, month] = [Number(match[1]), Number(match[2])];
+  const last = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+  return rangeTarget(
+    `${match[1]}-${match[2]}-01`,
+    last,
+    (named) => `render_month_image with month "${named.slice(0, 7)}"`,
+  );
+}
+
+const TARGET_READERS: Record<string, TargetReader> = {
+  create_event: createEventTarget,
+  update_event: updateEventTarget,
+  delete_event: ({ ctx, input }) => eventTarget(ctx, input, 'delete'),
+  get_events: getEventsTarget,
+  get_free_slots: singleDayReadTarget,
+  render_day_image: singleDayReadTarget,
+  render_week_image: weekImageTarget,
+  render_month_image: monthImageTarget,
+};
+
+function targetOf(ctx: AgentContext, toolName: string, input: unknown): Target | null {
+  return Object.hasOwn(TARGET_READERS, toolName) ? TARGET_READERS[toolName]!({ ctx, toolName, input }) : null;
 }
 
 /**

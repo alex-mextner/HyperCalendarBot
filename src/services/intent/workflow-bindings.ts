@@ -283,15 +283,27 @@ function parseDate(
   return validDay(day) ? isoDay(day) : fail();
 }
 
+const inHourRange = (hour: number, min: number, max: number) => hour >= min && hour <= max;
+
+/** 12-hour clock: 12 is the first hour after midnight/noon, so `% 12` maps it to 0. */
+const clockHour = (hour: number, offset: number): number | null =>
+  inHourRange(hour, 1, 12) ? (hour % 12) + offset : null;
+
+/** Hour of day for a spoken hour plus its am/pm or Russian day-part suffix; null when the pair is impossible. */
+const HOUR_FROM_SUFFIX: { [suffix: string]: (hour: number) => number | null } = {
+  am: (hour) => clockHour(hour, 0),
+  'a m': (hour) => clockHour(hour, 0),
+  pm: (hour) => clockHour(hour, 12),
+  'p m': (hour) => clockHour(hour, 12),
+  утра: (hour) => (inHourRange(hour, 4, 11) ? hour : null),
+  дня: (hour) => (hour === 12 ? 12 : inHourRange(hour, 1, 6) ? hour + 12 : null),
+  вечера: (hour) => (inHourRange(hour, 4, 11) ? hour + 12 : null),
+  ночи: (hour) => (hour === 12 ? 0 : inHourRange(hour, 1, 5) ? hour : inHourRange(hour, 9, 11) ? hour + 12 : null),
+};
+
 function hourFromSuffix(hour: number, suffix: string): number {
-  if (suffix === 'am' || suffix === 'a m') return hour >= 1 && hour <= 12 ? hour % 12 : fail();
-  if (suffix === 'pm' || suffix === 'p m') return hour >= 1 && hour <= 12 ? (hour % 12) + 12 : fail();
-  if (suffix === 'утра') return hour >= 4 && hour <= 11 ? hour : fail();
-  if (suffix === 'дня') return hour === 12 ? 12 : hour >= 1 && hour <= 6 ? hour + 12 : fail();
-  if (suffix === 'вечера') return hour >= 4 && hour <= 11 ? hour + 12 : fail();
-  if (suffix === 'ночи')
-    return hour === 12 ? 0 : hour >= 1 && hour <= 5 ? hour : hour >= 9 && hour <= 11 ? hour + 12 : fail();
-  return fail();
+  const resolved = Object.hasOwn(HOUR_FROM_SUFFIX, suffix) ? HOUR_FROM_SUFFIX[suffix]!(hour) : null;
+  return resolved ?? fail();
 }
 
 /** A bare hour from 1 to 12 is ambiguous between morning and evening and is never guessed. */
@@ -524,6 +536,54 @@ function isBlank(raw: string): boolean {
   return raw.trim() === '';
 }
 
+function relativeInstant(
+  binding: Extract<Binding, { type: 'relative_instant' }>,
+  bound: BindValues,
+  now: Date,
+): string {
+  const duration = bound[binding.duration];
+  if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0 || duration > 10080) return fail();
+  return new Date(now.getTime() + duration * 60000).toISOString();
+}
+
+/** Binding types that an `optional` flag may replace with their declared default when the input is blank. */
+type DefaultableBinding = Extract<Binding, { type: 'integer' | 'enum' | 'text' | 'date' | 'time' | 'period' }>;
+
+/** A blank optional input takes the binding's declared default (a missing default is a failure); otherwise it is parsed. */
+function orDefault<T>(useDefault: boolean | undefined, fallback: T | undefined, parse: () => T): T {
+  return useDefault ? (fallback ?? fail()) : parse();
+}
+
+function evaluateDefaultable(
+  binding: DefaultableBinding,
+  raw: string,
+  evaluation: Evaluation,
+  dayBefore: boolean,
+): WorkflowInputValue {
+  const { userCtx, now } = evaluation;
+  const optionalDefault = 'optional' in binding && binding.optional && isBlank(raw);
+  switch (binding.type) {
+    case 'integer':
+      return orDefault(optionalDefault, binding.default, () => parseInteger(raw, binding));
+    case 'enum':
+      return orDefault(optionalDefault, binding.default, () => lookup(binding.values, raw));
+    case 'text':
+      return orDefault(optionalDefault, binding.default, () => parseText(raw, binding.max ?? 200));
+    case 'date':
+      return optionalDefault
+        ? isoDay(addDays(today(now, userCtx.timezone), DAY_WORD_OFFSETS[binding.default ?? fail()]))
+        : parseDate(raw, binding, now, userCtx.timezone, dayBefore);
+    case 'time':
+      return orDefault(optionalDefault, binding.default, () => parseTime(raw));
+    case 'period':
+      return buildPeriod(
+        orDefault(optionalDefault, binding.default, () => periodKey(binding.values, raw)),
+        now,
+        userCtx.timezone,
+      );
+  }
+}
+
 function evaluateOne(
   binding: Binding,
   bound: BindValues,
@@ -532,32 +592,9 @@ function evaluateOne(
 ): WorkflowInputValue {
   const { userCtx, now } = evaluation;
   if (binding.type === 'datetime') return buildDatetime(binding, bound, now, userCtx.timezone);
-  if (binding.type === 'relative_instant') {
-    const duration = bound[binding.duration];
-    if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0 || duration > 10080) return fail();
-    return new Date(now.getTime() + duration * 60000).toISOString();
-  }
+  if (binding.type === 'relative_instant') return relativeInstant(binding, bound, now);
   const raw = resolveFrom(binding.from, evaluation);
-  const optionalDefault = 'optional' in binding && binding.optional && isBlank(raw);
   switch (binding.type) {
-    case 'integer':
-      return optionalDefault ? (binding.default ?? fail()) : parseInteger(raw, binding);
-    case 'enum':
-      return optionalDefault ? (binding.default ?? fail()) : lookup(binding.values, raw);
-    case 'text':
-      return optionalDefault ? (binding.default ?? fail()) : parseText(raw, binding.max ?? 200);
-    case 'date':
-      return optionalDefault
-        ? isoDay(addDays(today(now, userCtx.timezone), DAY_WORD_OFFSETS[binding.default ?? fail()]))
-        : parseDate(raw, binding, now, userCtx.timezone, dayBefore);
-    case 'time':
-      return optionalDefault ? (binding.default ?? fail()) : parseTime(raw);
-    case 'period':
-      return buildPeriod(
-        optionalDefault ? (binding.default ?? fail()) : periodKey(binding.values, raw),
-        now,
-        userCtx.timezone,
-      );
     case 'duration':
       return parseDuration(raw, resolveFrom(binding.unit, evaluation), binding);
     case 'timezone':
@@ -566,6 +603,8 @@ function evaluateOne(
       return parseEventRef(raw, binding.reject);
     case 'recipient':
       return parseRecipient(raw);
+    default:
+      return evaluateDefaultable(binding, raw, evaluation, dayBefore);
   }
 }
 

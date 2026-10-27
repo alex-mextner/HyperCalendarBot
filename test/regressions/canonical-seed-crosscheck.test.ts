@@ -33,42 +33,48 @@ afterAll(() => {
   setSystemTime();
 });
 afterEach(() => setSystemTime());
-const tools = async (name: string, input: unknown): Promise<ToolResult> => {
-  const value = input as { event_id?: number; query?: string; name?: string };
-  if (name === 'convert_to_timezone') {
-    if (!input || typeof input !== 'object') throw new Error('Expected conversion inputs');
-    const datetime = Reflect.get(input, 'datetime'),
-      timezone = Reflect.get(input, 'timezone');
-    if (typeof datetime !== 'string' || typeof timezone !== 'string') throw new Error('Expected typed date/timezone');
-    return handleConvertToTimezone({ datetime, timezone });
-  }
-  const event = {
-    id: value.event_id ?? 17,
-    title: value.query ?? 'Synthetic event',
-    date: '2026-10-05',
-    time: '10:00',
-    all_day: false,
-  };
-  if (name === 'search_events') return { success: true, output: 'Found one event', data: [event] };
-  if (name === 'get_event') return { success: true, output: 'Event details', data: event };
-  if (name === 'get_events') return { success: true, output: 'No events', data: [] };
-  if (name === 'find_contact')
-    return {
-      success: true,
-      output: 'One owned contact',
-      data: {
-        matches: [
-          {
-            id: 3,
-            name: value.name ?? 'Anna',
-            preferred_name: null,
-            username: 'anna_test',
-            telegram_id: 123456,
-            confidence: 1,
-          },
-        ],
+type ToolInput = { event_id?: number; query?: string; name?: string };
+
+const convertToTimezone = (input: unknown): ToolResult => {
+  if (!input || typeof input !== 'object') throw new Error('Expected conversion inputs');
+  const datetime = Reflect.get(input, 'datetime'),
+    timezone = Reflect.get(input, 'timezone');
+  if (typeof datetime !== 'string' || typeof timezone !== 'string') throw new Error('Expected typed date/timezone');
+  return handleConvertToTimezone({ datetime, timezone });
+};
+
+const syntheticEvent = (value: ToolInput) => ({
+  id: value.event_id ?? 17,
+  title: value.query ?? 'Synthetic event',
+  date: '2026-10-05',
+  time: '10:00',
+  all_day: false,
+});
+
+const findContactResult = (value: ToolInput): ToolResult => ({
+  success: true,
+  output: 'One owned contact',
+  data: {
+    matches: [
+      {
+        id: 3,
+        name: value.name ?? 'Anna',
+        preferred_name: null,
+        username: 'anna_test',
+        telegram_id: 123456,
+        confidence: 1,
       },
-    };
+    ],
+  },
+});
+
+const tools = async (name: string, input: unknown): Promise<ToolResult> => {
+  if (name === 'convert_to_timezone') return convertToTimezone(input);
+  const value = input as ToolInput;
+  if (name === 'search_events') return { success: true, output: 'Found one event', data: [syntheticEvent(value)] };
+  if (name === 'get_event') return { success: true, output: 'Event details', data: syntheticEvent(value) };
+  if (name === 'get_events') return { success: true, output: 'No events', data: [] };
+  if (name === 'find_contact') return findContactResult(value);
   return {
     success: true,
     output: 'Synthetic tool result',

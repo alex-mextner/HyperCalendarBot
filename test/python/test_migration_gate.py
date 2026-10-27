@@ -372,6 +372,67 @@ class GateDecisionTests(unittest.TestCase):
                 decision = self.gate.decide(running, release, ["001_x"], ["001_x", "002_y"], {}, reviewed)
                 self.assertFalse(decision.accepted)
 
+    def test_every_refusal_path_yields_the_exact_refusals_mode_and_migrations(self):
+        # Characterization of decide(): the full refusal text, order, finality and the migrations it
+        # collected for each input shape, with and without the reviewed transition pair.
+        risky = doc(rollback="no", deletion="yes", body="## Rollback\n\nx\n")
+        outside = RELEASE.replace(b"export const", b"x=1;\nexport const")
+        doc_dir = "docs/reference/migrations"
+        missing_doc = f"migration 002_y has no reviewed doc: {doc_dir}/002_y.md"
+        utf8 = "the release migrations.ts cannot be parsed: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
+        no_docs = f"the release image's {doc_dir} could not be read"
+        no_applied = "the database's applied migrations could not be read through the running container"
+        good_docs = {"002_y.md": doc()}
+        both = ["001_x", "002_y"]
+        new_y = [("002_y", False, True)]
+        edited = (HEAD + SHIPPED.replace("id INTEGER", "id TEXT") + ADDED + TAIL).encode()
+        # label: (running, release, applied, exported, docs, mode plain, mode with pair, final, migrations, refusals)
+        cases = {
+            "running unreadable": (None, RELEASE, ["001_x"], both, {}, "refused", "refused", True, [], ["migrations.ts could not be read in the running container"]),
+            "release empty": (RUNNING, b"", ["001_x"], both, {}, "refused", "refused", True, [], ["migrations.ts is empty in the release image"]),
+            "running unparseable": (b"garbage", RELEASE, ["001_x"], both, good_docs, "refused", "refused", True, [], ["the running migrations.ts cannot be parsed: no migration entry found"]),
+            "release not utf8": (RUNNING, b"\xff\xfe", ["001_x"], None, None, "refused", "refused", True, [], [utf8, no_docs]),
+            "everything unreadable": (RUNNING, b"\xff", None, None, None, "refused", "refused", True, [], [utf8, no_applied, no_docs]),
+            "exports unreadable": (RUNNING, RELEASE, ["001_x"], None, good_docs, "refused", "refused", True, new_y, ["the release image's exported migration list could not be read"]),
+            "exports differ": (RUNNING, RELEASE, ["001_x"], ["001_x", "003"], good_docs, "refused", "refused", True, new_y, ["the release exports migrations ['001_x', '003'] but its source entries are ['001_x', '002_y']"]),
+            "reordered": (RUNNING, (HEAD + ADDED + SHIPPED + TAIL).encode(), ["001_x"], ["002_y", "001_x"], good_docs, "refused", "refused", True, new_y, ["new migrations must follow the shipped ones; the release order is ['002_y', '001_x']"]),
+            "shipped removed": (RUNNING, (HEAD + ADDED + TAIL).encode(), ["001_x"], ["002_y"], good_docs, "refused", "refused", True, new_y, ["migration 001_x is missing from the release; a shipped migration is never renamed or removed"]),
+            "shipped edited": (RUNNING, edited, ["001_x"], both, good_docs, "refused", "refused", True, new_y, ["migration 001_x changed after it shipped; the runner never re-runs an applied migration"]),
+            "edit without a new entry": (RUNNING, (HEAD + SHIPPED.replace("INTEGER", "INTEGER ") + TAIL).encode(), ["001_x"], ["001_x"], {}, "refused", "refused", True, [], ["migration 001_x changed after it shipped; the runner never re-runs an applied migration"]),
+            "code outside the entries": (RUNNING, outside, ["001_x"], both, good_docs, "refused", "reviewed-override", False, new_y, ["migrations.ts code outside the migration entries changed; no migration doc can vouch for it"]),
+            "applied ahead without a doc": (
+                RUNNING, RELEASE, both, both, {}, "refused", "refused", True, [("002_y", True, False)],
+                [
+                    "migration 002_y is already applied in the database but the running image does not carry it (an image rollback?); the runner will not run the release's version",
+                    missing_doc,
+                ],
+            ),
+            "invalid doc": (
+                RUNNING, RELEASE, ["001_x"], both, {"002_y.md": doc(name="001_x")}, "refused", "refused", True, [("002_y", False, False)],
+                [
+                    f"migration 002_y: {doc_dir}/002_y.md is not a valid migration doc: the doc must start with the front matter lines "
+                    "'---', 'migration: 002_y', 'rollback-compatible: yes|no', 'data-deletion: yes|no', '---'"
+                ],
+            ),
+            "missing doc": (RUNNING, RELEASE, ["001_x"], both, {}, "refused", "refused", True, [("002_y", False, False)], [missing_doc]),
+            "rollback and deletion declared": (
+                RUNNING, RELEASE, ["001_x"], both, {"002_y.md": risky}, "refused", "reviewed-override", False, new_y,
+                [
+                    "migration 002_y declares rollback-compatible: no; the old image cannot run on its result",
+                    "migration 002_y declares data-deletion: yes",
+                ],
+            ),
+            "safe new migration": (RUNNING, RELEASE, ["001_x"], both, good_docs, "automatic", "automatic", False, new_y, []),
+        }
+        for label, (running, release, applied, exported, docs, plain, reviewed, final, migrations, refusals) in cases.items():
+            for mode, pair in ((plain, ""), (reviewed, sha(running or b"") + ":" + sha(release or b""))):
+                with self.subTest(label, reviewed=bool(pair)):
+                    decision = self.gate.decide(running, release, applied, exported, docs, pair)
+                    self.assertEqual(decision.mode, mode)
+                    self.assertEqual(decision.final, final)
+                    self.assertEqual([(m.name, m.applied, m.doc is not None) for m in decision.migrations], migrations)
+                    self.assertEqual(decision.refusals, refusals)
+
 
 if __name__ == "__main__":
     unittest.main()

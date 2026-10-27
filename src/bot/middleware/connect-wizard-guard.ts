@@ -12,6 +12,7 @@ import { logger } from '../../utils/logger.ts';
 import { runWithChatId } from '../scenes/chat-scoped-storage.ts';
 import {
   assertSync,
+  type ConnectWizardTrace,
   type ConnectWizardTraces,
   connectWizardRowKey,
   connectWizardStep,
@@ -87,27 +88,45 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
     );
     const trace = traces.read(rowKey);
     const now = Date.now();
+    if (step !== undefined) return inspectOpenWizard(update, rowKey, step, trace, now);
+    return inspectClosedWizard(update, rowKey, trace, now);
+  }
+
+  /** The scene row is present: record the typed text in the trace and judge the update. */
+  function inspectOpenWizard(
+    update: TelegramUpdate,
+    rowKey: string,
+    step: number,
+    trace: ConnectWizardTrace | undefined,
+    now: number,
+  ): Verdict {
+    const message = update.message;
+    traces.write(rowKey, {
+      typed: [
+        ...(trace?.typed ?? []),
+        ...(message?.text !== undefined ? [{ messageId: message.message_id, at: now }] : []),
+      ],
+      open: true,
+      step,
+      lastOpenUpdateId: Math.max(trace?.lastOpenUpdateId ?? 0, update.update_id),
+      lastOpenAt: now,
+    });
+    if (message?.text !== undefined) {
+      return { kind: 'typed', removeFromChat: step <= LAST_TYPING_STEP && message.text.trim() !== '' };
+    }
+    return update.edited_message?.text !== undefined ? { kind: 'redact' } : NONE;
+  }
+
+  /** No scene row: only the trace can show that this update belongs to a wizard that has closed. */
+  function inspectClosedWizard(
+    update: TelegramUpdate,
+    rowKey: string,
+    trace: ConnectWizardTrace | undefined,
+    now: number,
+  ): Verdict {
+    if (trace === undefined) return NONE;
     const message = update.message;
     const edited = update.edited_message;
-
-    if (step !== undefined) {
-      traces.write(rowKey, {
-        typed: [
-          ...(trace?.typed ?? []),
-          ...(message?.text !== undefined ? [{ messageId: message.message_id, at: now }] : []),
-        ],
-        open: true,
-        step,
-        lastOpenUpdateId: Math.max(trace?.lastOpenUpdateId ?? 0, update.update_id),
-        lastOpenAt: now,
-      });
-      if (message?.text !== undefined) {
-        return { kind: 'typed', removeFromChat: step <= LAST_TYPING_STEP && message.text.trim() !== '' };
-      }
-      return edited?.text !== undefined ? { kind: 'redact' } : NONE;
-    }
-
-    if (trace === undefined) return NONE;
     // An edit of a message typed into the wizard — its deletion failed, or it was dropped by the rate limiter.
     if (edited?.text !== undefined) {
       const typedIntoWizard = trace.typed.some((entry) => entry.messageId === edited.message_id);
@@ -140,23 +159,25 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
 
   async function middleware(context: GuardContext, next: Next) {
     const update = context.update;
-    const message = update?.message;
-    const edited = update?.edited_message;
-    const callback = update?.callback_query;
-    const chatId = message?.chat.id ?? edited?.chat.id ?? callback?.message?.chat.id;
-    const userId = message?.from?.id ?? edited?.from?.id ?? callback?.from.id;
-    if (update === undefined || chatId === undefined || userId === undefined) return next();
+    const ids = resolveUpdateIds(update);
+    if (update === undefined || ids === undefined) return next();
 
     let verdict: Verdict;
     try {
-      verdict = inspect(update, userId, chatId);
+      verdict = inspect(update, ids.userId, ids.chatId);
     } catch (err) {
       // A redacted turn loses less than a logged password.
-      guardLogger.warn({ err, userId }, 'connect-wizard state unreadable — logging the text as wizard input');
-      if (message?.text !== undefined || edited?.text !== undefined) marks.set(context, 'redact');
+      guardLogger.warn(
+        { err, userId: ids.userId },
+        'connect-wizard state unreadable — logging the text as wizard input',
+      );
+      if (update.message?.text !== undefined || update.edited_message?.text !== undefined) marks.set(context, 'redact');
       return next();
     }
+    return applyVerdict(context, verdict, ids.userId, next);
+  }
 
+  async function applyVerdict(context: GuardContext, verdict: Verdict, userId: number, next: Next) {
     switch (verdict.kind) {
       case 'none':
         return next();
@@ -195,6 +216,15 @@ export function createConnectWizardGuard(deps: ConnectWizardGuardDeps): ConnectW
       );
     },
   };
+}
+
+function resolveUpdateIds(update: TelegramUpdate | undefined): { chatId: number; userId: number } | undefined {
+  const message = update?.message;
+  const edited = update?.edited_message;
+  const callback = update?.callback_query;
+  const chatId = message?.chat.id ?? edited?.chat.id ?? callback?.message?.chat.id;
+  const userId = message?.from?.id ?? edited?.from?.id ?? callback?.from.id;
+  return chatId === undefined || userId === undefined ? undefined : { chatId, userId };
 }
 
 /**

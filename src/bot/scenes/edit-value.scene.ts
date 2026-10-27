@@ -1,10 +1,10 @@
 // src/bot/scenes/edit-value.scene.ts
 import { Scene } from '@gramio/scenes';
 import { addMinutes } from 'date-fns';
-import { t } from '../../config/constants.ts';
+import { type Lang, t } from '../../config/constants.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import { CLEARED_LOCATION } from '../../database/repositories/event.repository.ts';
-import type { UpdateEventData } from '../../database/types.ts';
+import type { CalendarEvent, UpdateEventData, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import { withMapButton } from '../../services/location/event-venue.ts';
@@ -38,6 +38,60 @@ const EDIT_PROMPTS: Record<string, Record<string, string>> = {
   },
 };
 
+type EditOutcome =
+  | { kind: 'ok'; data: UpdateEventData }
+  | { kind: 'reject'; message: string }
+  | { kind: 'missing_event' };
+
+const accept = (data: UpdateEventData): EditOutcome => ({ kind: 'ok', data });
+const reject = (message: string): EditOutcome => ({ kind: 'reject', message });
+
+function timeEdit(text: string, timezone: string, lang: Lang): EditOutcome {
+  const parsed = parseSimpleDate(text, timezone);
+  if (!parsed) return reject(lang === 'ru' ? 'Не могу разобрать дату.' : "Can't parse that date.");
+  return accept({ start_at: parsed.toISOString() });
+}
+
+function durationEdit(text: string, loadEvent: () => CalendarEvent | null, lang: Lang): EditOutcome {
+  if (text.toLowerCase() === 'clear') return accept({ end_at: null });
+  const mins = parseDuration(text);
+  if (!mins) {
+    return reject(
+      lang === 'ru' ? 'Не могу разобрать. Примеры: 1ч, 30м, 1ч 30м' : "Can't parse. Examples: 1h, 30m, 1h 30m",
+    );
+  }
+  const event = loadEvent();
+  if (!event) return { kind: 'missing_event' };
+  return accept({ end_at: addMinutes(new Date(event.start_at), mins).toISOString() });
+}
+
+function locationEdit(text: string): UpdateEventData {
+  return text.toLowerCase() === 'clear' ? { ...CLEARED_LOCATION } : { location: text };
+}
+
+function resolveEdit(
+  field: string,
+  text: string,
+  user: User,
+  lang: Lang,
+  event: () => CalendarEvent | null,
+): EditOutcome {
+  switch (field) {
+    case 'title':
+      return accept({ title: text });
+    case 'time':
+      return timeEdit(text, user.timezone, lang);
+    case 'duration':
+      return durationEdit(text, event, lang);
+    case 'description':
+      return accept({ description: text.toLowerCase() === 'clear' ? null : text });
+    case 'location':
+      return accept(locationEdit(text));
+    default:
+      return accept({});
+  }
+}
+
 export function createEditValueScene(
   eventService: EventService,
   userComposer: UserResolverComposer,
@@ -63,59 +117,25 @@ export function createEditValueScene(
           return;
         }
 
-        const { eventId, field } = context.scene.params;
+        const { eventId, field, chatId, messageId } = context.scene.params;
         const text = context.text;
         if (!text) return;
 
-        const updateData: UpdateEventData = {};
-
-        if (field === 'title') {
-          updateData.title = text;
-        } else if (field === 'time') {
-          const parsed = parseSimpleDate(text, user.timezone);
-          if (!parsed) {
-            await context.send(lang === 'ru' ? 'Не могу разобрать дату.' : "Can't parse that date.", {
-              reply_markup: sceneHelpKeyboard(lang),
-            });
-            return;
-          }
-          updateData.start_at = parsed.toISOString();
-        } else if (field === 'duration') {
-          if (text.toLowerCase() === 'clear') {
-            updateData.end_at = null;
-          } else {
-            const mins = parseDuration(text);
-            if (!mins) {
-              await context.send(
-                lang === 'ru'
-                  ? 'Не могу разобрать. Примеры: 1ч, 30м, 1ч 30м'
-                  : "Can't parse. Examples: 1h, 30m, 1h 30m",
-                { reply_markup: sceneHelpKeyboard(lang) },
-              );
-              return;
-            }
-            const event = eventService.getEvent(eventId, user.telegram_id);
-            if (!event) {
-              await context.scene.exit();
-              await context.send(t(lang).something_wrong);
-              return;
-            }
-            updateData.end_at = addMinutes(new Date(event.start_at), mins).toISOString();
-          }
-        } else if (field === 'description') {
-          updateData.description = text.toLowerCase() === 'clear' ? null : text;
-        } else if (field === 'location') {
-          if (text.toLowerCase() === 'clear') {
-            Object.assign(updateData, CLEARED_LOCATION);
-          } else {
-            updateData.location = text;
-          }
+        const outcome = resolveEdit(field, text, user, lang, () => eventService.getEvent(eventId, user.telegram_id));
+        if (outcome.kind === 'reject') {
+          await context.send(outcome.message, { reply_markup: sceneHelpKeyboard(lang) });
+          return;
         }
+        if (outcome.kind === 'missing_event') {
+          await context.scene.exit();
+          await context.send(t(lang).something_wrong);
+          return;
+        }
+        const updateData = outcome.data;
 
         // Delivered invitation cards show the location as it was before this edit
         const before = field === 'location' ? eventService.getEvent(eventId, user.telegram_id) : null;
         const updated = eventService.updateEvent(eventId, user.telegram_id, updateData);
-        const { chatId, messageId } = context.scene.params;
 
         actionLogRepo?.insert({
           user_id: user.telegram_id,

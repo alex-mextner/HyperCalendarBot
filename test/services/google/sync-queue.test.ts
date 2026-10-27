@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import type { EnvConfig } from '../../../src/config/env.ts';
+import { mockBullmq } from '../../helpers/mock-bullmq.ts';
 import { flushPromises } from '../../helpers/mock-context.ts';
 
 // ─── BullMQ mock setup (must come before dynamic import) ──────────────────────
@@ -34,7 +35,7 @@ const mockWorkerOn = mock((_event: string, handler: FailedHandler) => {
   capturedFailedHandler = handler;
 });
 
-mock.module('bullmq', () => ({
+mockBullmq({
   Queue: class MockQueue {
     name: string;
     constructor(name: string, opts: Record<string, unknown>) {
@@ -52,7 +53,7 @@ mock.module('bullmq', () => ({
     }
     on = mockWorkerOn;
   },
-}));
+});
 
 // ─── SyncService stub (injected as dependency, not via mock.module) ──────────
 

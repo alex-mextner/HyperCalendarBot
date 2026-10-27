@@ -1,0 +1,51 @@
+// src/config/constants/messages/ru/callback-errors.ts
+// Callback-query error and stale-button messages.
+
+export const ruCallbackErrors = {
+  callbackErrors: {
+    notFound: 'Не найдено',
+    error: 'Ошибка',
+    notAuthorized: 'Нет доступа',
+    notConfigured: 'Не настроено',
+    couldNotSendImage: '⚠️ Не удалось отправить изображение',
+    renderFailed: '⚠️ Ошибка генерации',
+    imageGenerationFailed: '⚠️ Не удалось сгенерировать изображение. Смотри текстовую версию выше.',
+    proposalNotFound: 'Предложение не найдено',
+    threadNotFound: 'Тред не найден',
+    threadClosed: 'Тред закрыт',
+    sendReplyMessage: 'Напиши ответное сообщение',
+    intentApproved: '✅ Интент одобрен',
+    intentRejected: '❌ Интент отклонён',
+    sendEditInstructions: 'Напиши инструкции для редактирования...',
+    notYourQuestion: 'Не твой вопрос',
+    unavailable: 'Недоступно',
+    closed: '❌ Закрыто',
+    editCancelled: '❌ Редактирование отменено',
+    deletionCancelled: '❌ Удаление отменено',
+    disconnectCancelled: '❌ Отключение отменено',
+    cancelled: '❌ Отменено',
+    invitationCancelled: '❌ Приглашение отменено',
+    sentBelow: '✅ Отправлено ниже',
+    forwardHint: '↗️ Перешлите это сообщение',
+    sceneHelpPrompt: 'AI поможет. Просто напиши — что затрудняет?',
+    invitePickContact: (title: string) => `📨 ${title}\nВыберите контакт:`,
+    inviteSelectUser: '👤 Выбрать пользователя',
+    inviteSelectGroup: '👥 Выбрать группу',
+    inviteTapButton: 'Нажмите кнопку ниже:',
+    inviteSending: '⏳ Отправляем приглашения...',
+    proposalAccepted: (title: string) => `✅ Предложение принято. Событие «${title}» обновлено.`,
+    proposalAcceptedNoEvent: '✅ Предложение принято.',
+    proposalRejected: '❌ Предложение отклонено.',
+    proposalAcceptedNotification: (title: string) => `✅ «${title}» — правка принята`,
+    proposalRejectedNotification: (title: string) => `❌ «${title}» — правка отклонена`,
+    feedbackThreadResolved: (subject: string) => `✅ «${subject}» — решено`,
+    adminReplyHeader: (subject: string) => `💬 Ответ разработчика (${subject}):`,
+    adminReplySent: 'Ответ отправлен.',
+    adminReplyDeliveredToGroup: 'Доставлено в группу (пользователь не начал чат с ботом).',
+    adminReplyFailed: '⚠️ Не удалось доставить — пользователь не начал чат с ботом.',
+    proposalAlreadyProcessed: (status: string) => {
+      const map: Record<string, string> = { pending: 'в ожидании', accepted: 'принято', rejected: 'отклонено' };
+      return `Уже ${map[status] ?? status}`;
+    },
+  },
+} as const;

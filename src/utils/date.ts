@@ -137,191 +137,210 @@ function isValidClock(hour: number, minute: number): boolean {
   return Number.isInteger(hour) && Number.isInteger(minute) && hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
 }
 
-export function parseSimpleDate(input: string, timezone: string, refDate?: Date): Date | null {
-  const ref = refDate ? new TZDate(refDate.getTime(), timezone) : TZDate.tz(timezone);
-  const trimmed = input.trim().toLowerCase();
+/**
+ * Per-format outcome: `undefined` = the text is not in this format (try the next one);
+ * `null` = it is, but the value is invalid (final); a Date = parsed.
+ */
+type FormatResult = Date | null | undefined;
 
+interface SimpleDateContext {
+  trimmed: string;
+  ref: TZDate;
+  timezone: string;
+}
+
+/** The given clock time (hour and minute default to 0) on the local day of `day`; null when not a real clock time. */
+function clockOnDay(day: Date, h: string | undefined, m: string | undefined): Date | null {
+  const hour = Number(h ?? 0);
+  const minute = Number(m ?? 0);
+  if (!isValidClock(hour, minute)) return null;
+  const result = addMinutes(startOfDay(day), hour * 60 + minute);
+  return new Date(result.toISOString());
+}
+
+/**
+ * Formats naming a day relative to today plus a clock time. `hourGroup` is the capture group of the hour
+ * (the minutes follow it); the keyword group before it is not needed.
+ */
+const RELATIVE_DAY_RULES: readonly { pattern: RegExp; dayOffset: number; hourGroup: number }[] = [
   // Bare time: "15:30", "в 19:00", "at 8" → today
-  const bareTimeMatch = trimmed.match(/^(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/);
-  if (bareTimeMatch) {
-    const [, h, m] = bareTimeMatch;
-    const hour = Number(h);
-    const minute = Number(m ?? 0);
-    if (!isValidClock(hour, minute)) return null;
-    const d = startOfDay(ref);
-    const result = addMinutes(d, hour * 60 + minute);
-    return new Date(result.toISOString());
-  }
-
-  const todayMatch = trimmed.match(/^(today|сегодня)\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/);
-  if (todayMatch) {
-    const [, , h, m] = todayMatch;
-    const hour = Number(h);
-    const minute = Number(m ?? 0);
-    if (!isValidClock(hour, minute)) return null;
-    const d = startOfDay(ref);
-    const result = addMinutes(d, hour * 60 + minute);
-    return new Date(result.toISOString());
-  }
-
-  const tomorrowMatch = trimmed.match(/^(tomorrow|завтра)(?:\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?)?$/);
-  if (tomorrowMatch) {
-    const [, , h, m] = tomorrowMatch;
-    const hour = Number(h ?? 0);
-    const minute = Number(m ?? 0);
-    if (!isValidClock(hour, minute)) return null;
-    const d = startOfDay(addDays(ref, 1));
-    const result = addMinutes(d, hour * 60 + minute);
-    return new Date(result.toISOString());
-  }
-
+  { pattern: /^(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/, dayOffset: 0, hourGroup: 1 },
+  { pattern: /^(today|сегодня)\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/, dayOffset: 0, hourGroup: 2 },
+  {
+    pattern: /^(tomorrow|завтра)(?:\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?)?$/,
+    dayOffset: 1,
+    hourGroup: 2,
+  },
   // "послезавтра" / "day after tomorrow" — with optional time
-  const dayAfterMatch = trimmed.match(
-    /^(послезавтра|day after tomorrow)(?:\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?)?$/,
-  );
-  if (dayAfterMatch) {
-    const [, , h, m] = dayAfterMatch;
-    const hour = Number(h ?? 0);
-    const minute = Number(m ?? 0);
-    if (!isValidClock(hour, minute)) return null;
-    const d = startOfDay(addDays(ref, 2));
-    const result = addMinutes(d, hour * 60 + minute);
-    return new Date(result.toISOString());
-  }
+  {
+    pattern: /^(послезавтра|day after tomorrow)(?:\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?)?$/,
+    dayOffset: 2,
+    hourGroup: 2,
+  },
+];
 
-  const dayNames: Record<string, number> = {
-    mon: 1,
-    tue: 2,
-    wed: 3,
-    thu: 4,
-    fri: 5,
-    sat: 6,
-    sun: 0,
-    monday: 1,
-    tuesday: 2,
-    wednesday: 3,
-    thursday: 4,
-    friday: 5,
-    saturday: 6,
-    sunday: 0,
-    пн: 1,
-    вт: 2,
-    ср: 3,
-    чт: 4,
-    пт: 5,
-    сб: 6,
-    вс: 0,
-    понедельник: 1,
-    вторник: 2,
-    среда: 3,
-    четверг: 4,
-    пятница: 5,
-    суббота: 6,
-    воскресенье: 0,
+function parseRelativeDay({ trimmed, ref }: SimpleDateContext): FormatResult {
+  for (const { pattern, dayOffset, hourGroup } of RELATIVE_DAY_RULES) {
+    const match = trimmed.match(pattern);
+    if (match) return clockOnDay(addDays(ref, dayOffset), match[hourGroup], match[hourGroup + 1]);
+  }
+  return undefined;
+}
+
+const DAY_NAMES: Record<string, number> = {
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6,
+  sun: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+  sunday: 0,
+  пн: 1,
+  вт: 2,
+  ср: 3,
+  чт: 4,
+  пт: 5,
+  сб: 6,
+  вс: 0,
+  понедельник: 1,
+  вторник: 2,
+  среда: 3,
+  четверг: 4,
+  пятница: 5,
+  суббота: 6,
+  воскресенье: 0,
+};
+
+const WEEKDAY_CLOCK = /^(?:next\s+)?([a-zа-яё]+)\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/;
+
+/** "пн 10:00", "next friday at 9": the next such weekday, strictly after today. */
+function parseWeekdayClock({ trimmed, ref }: SimpleDateContext): FormatResult {
+  const match = trimmed.match(WEEKDAY_CLOCK);
+  if (!match) return undefined;
+  const [, dayStr, h, m] = match;
+  const targetDay = DAY_NAMES[dayStr!];
+  if (targetDay === undefined) return undefined;
+  let daysToAdd = targetDay - ref.getDay();
+  if (daysToAdd <= 0) daysToAdd += 7;
+  return clockOnDay(addDays(ref, daysToAdd), h, m);
+}
+
+const MONTHS: Record<string, number> = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11,
+  january: 0,
+  february: 1,
+  march: 2,
+  april: 3,
+  june: 5,
+  july: 6,
+  august: 7,
+  september: 8,
+  october: 9,
+  november: 10,
+  december: 11,
+  янв: 0,
+  фев: 1,
+  мар: 2,
+  апр: 3,
+  май: 4,
+  июн: 5,
+  июл: 6,
+  авг: 7,
+  сен: 8,
+  окт: 9,
+  ноя: 10,
+  дек: 11,
+  // Full Russian — nominative
+  январь: 0,
+  февраль: 1,
+  март: 2,
+  апрель: 3,
+  июнь: 5,
+  июль: 6,
+  август: 7,
+  сентябрь: 8,
+  октябрь: 9,
+  ноябрь: 10,
+  декабрь: 11,
+  // Full Russian — genitive
+  января: 0,
+  февраля: 1,
+  марта: 2,
+  апреля: 3,
+  мая: 4,
+  июня: 5,
+  июля: 6,
+  августа: 7,
+  сентября: 8,
+  октября: 9,
+  ноября: 10,
+  декабря: 11,
+};
+
+// Both "mar 15 19:30" and "15 mar 19:30" (day-first); month-first is tried first.
+const MONTH_FIRST_DATE = /^([a-zа-яё]+)\s+(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?$/;
+const DAY_FIRST_DATE = /^(\d{1,2})\s+([a-zа-яё]+)(?:\s+(\d{1,2}):(\d{2}))?$/;
+
+/** A wall-clock moment in `timezone`; null for an invalid clock or a day missing from that month (no rolling over). */
+function exactLocalMoment(
+  year: number,
+  month: number,
+  day: number,
+  h: string | undefined,
+  m: string | undefined,
+  timezone: string,
+): Date | null {
+  const hour = h ? Number(h) : 0;
+  const min = m ? Number(m) : 0;
+  if (!isValidClock(hour, min)) return null;
+  const d = new TZDate(year, month, day, hour, min, 0, 0, timezone);
+  if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) return null;
+  return new Date(d.toISOString());
+}
+
+/** "mar 15 19:30" / "15 мар 19:30": the date in the reference's year. */
+function parseMonthDay({ trimmed, ref, timezone }: SimpleDateContext): FormatResult {
+  const match = trimmed.match(MONTH_FIRST_DATE) ?? trimmed.match(DAY_FIRST_DATE);
+  if (!match) return undefined;
+  const [, first, second, h, m] = match;
+  const dayFirst = /^\d+$/.test(first!) && !/^\d+$/.test(second!);
+  const [monthName, dayText] = dayFirst ? [second!, first!] : [first!, second!];
+  const month = MONTHS[monthName];
+  if (month === undefined) return undefined;
+  return exactLocalMoment(ref.getFullYear(), month, Number(dayText), h, m, timezone);
+}
+
+// Order is significant: the first format that recognises the text decides.
+const SIMPLE_DATE_FORMATS = [parseRelativeDay, parseWeekdayClock, parseMonthDay];
+
+export function parseSimpleDate(input: string, timezone: string, refDate?: Date): Date | null {
+  const context: SimpleDateContext = {
+    ref: refDate ? new TZDate(refDate.getTime(), timezone) : TZDate.tz(timezone),
+    trimmed: input.trim().toLowerCase(),
+    timezone,
   };
-
-  const nextDayMatch = trimmed.match(/^(?:next\s+)?([a-zа-яё]+)\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/);
-  if (nextDayMatch) {
-    const [, dayStr, h, m] = nextDayMatch;
-    const targetDay = dayNames[dayStr!];
-    if (targetDay !== undefined) {
-      const currentDay = ref.getDay();
-      let daysToAdd = targetDay - currentDay;
-      if (daysToAdd <= 0) daysToAdd += 7;
-      const hour = Number(h);
-      const minute = Number(m ?? 0);
-      if (!isValidClock(hour, minute)) return null;
-      const d = startOfDay(addDays(ref, daysToAdd));
-      const result = addMinutes(d, hour * 60 + minute);
-      return new Date(result.toISOString());
-    }
+  for (const parseFormat of SIMPLE_DATE_FORMATS) {
+    const result = parseFormat(context);
+    if (result !== undefined) return result;
   }
-
-  // Match both "mar 15 19:30" and "15 mar 19:30" (day-first)
-  const monthDateMatch =
-    trimmed.match(/^([a-zа-яё]+)\s+(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?$/) ??
-    trimmed.match(/^(\d{1,2})\s+([a-zа-яё]+)(?:\s+(\d{1,2}):(\d{2}))?$/);
-  if (monthDateMatch) {
-    let [, part1, part2, h, m] = monthDateMatch;
-    // Swap if day-first format (part1 is digits, part2 is month name)
-    if (/^\d+$/.test(part1!) && !/^\d+$/.test(part2!)) {
-      [part1, part2] = [part2, part1];
-    }
-    const months: Record<string, number> = {
-      jan: 0,
-      feb: 1,
-      mar: 2,
-      apr: 3,
-      may: 4,
-      jun: 5,
-      jul: 6,
-      aug: 7,
-      sep: 8,
-      oct: 9,
-      nov: 10,
-      dec: 11,
-      january: 0,
-      february: 1,
-      march: 2,
-      april: 3,
-      june: 5,
-      july: 6,
-      august: 7,
-      september: 8,
-      october: 9,
-      november: 10,
-      december: 11,
-      янв: 0,
-      фев: 1,
-      мар: 2,
-      апр: 3,
-      май: 4,
-      июн: 5,
-      июл: 6,
-      авг: 7,
-      сен: 8,
-      окт: 9,
-      ноя: 10,
-      дек: 11,
-      // Full Russian — nominative
-      январь: 0,
-      февраль: 1,
-      март: 2,
-      апрель: 3,
-      июнь: 5,
-      июль: 6,
-      август: 7,
-      сентябрь: 8,
-      октябрь: 9,
-      ноябрь: 10,
-      декабрь: 11,
-      // Full Russian — genitive
-      января: 0,
-      февраля: 1,
-      марта: 2,
-      апреля: 3,
-      мая: 4,
-      июня: 5,
-      июля: 6,
-      августа: 7,
-      сентября: 8,
-      октября: 9,
-      ноября: 10,
-      декабря: 11,
-    };
-    const monthNum = months[part1!];
-    if (monthNum !== undefined) {
-      const year = ref.getFullYear();
-      const day = Number(part2);
-      const hour = h ? Number(h) : 0;
-      const min = m ? Number(m) : 0;
-      if (!isValidClock(hour, min)) return null;
-      const d = new TZDate(year, monthNum, day, hour, min, 0, 0, timezone);
-      if (d.getFullYear() !== year || d.getMonth() !== monthNum || d.getDate() !== day) return null;
-      return new Date(d.toISOString());
-    }
-  }
-
   return null;
 }
 
@@ -362,38 +381,62 @@ export function formatDuration(startUtc: string, endUtc: string, lang: string): 
   return lang === 'ru' ? `${hours}ч ${minutes}мин` : `${hours}h ${minutes}m`;
 }
 
+/** Idioms that no numeric format expresses. */
+const SPECIAL_DURATIONS: Record<string, number> = {
+  полчаса: 30,
+  'half an hour': 30,
+  'half hour': 30,
+  'полтора часа': 90,
+};
+
+const COLON_DURATION = /^(\d+):(\d{2})$/;
+const PLAIN_DURATION = /^(\d+)$/;
+
+// Suffix format with full-word support: "1h 30m", "2 часа 15 мин", "45 minutes".
+const HOUR_UNIT = '(?:hours?|hr|час(?:а|ов)?|[hч])';
+const MINUTE_UNIT = '(?:minutes?|min|минут[аыу]?|мин|[mм])';
+const SUFFIX_DURATION = new RegExp(`^(?:(\\d+)\\s*${HOUR_UNIT})?\\s*(?:(\\d+)\\s*${MINUTE_UNIT})?$`);
+
+/** Per-format result: `undefined` = not this format (try the next); a number or null = final answer. */
+type DurationResult = number | null | undefined;
+
+/** "1:30", "0:45", "10:30" */
+function parseColonDuration(trimmed: string): DurationResult {
+  const match = trimmed.match(COLON_DURATION);
+  if (!match) return undefined;
+  const total = Number(match[1]) * 60 + Number(match[2]);
+  return total > 0 ? total : null;
+}
+
+function parseSuffixDuration(trimmed: string): DurationResult {
+  const match = trimmed.match(SUFFIX_DURATION);
+  if (!match || !(match[1] || match[2])) return undefined;
+  const hours = match[1] ? Number(match[1]) : 0;
+  const mins = match[2] ? Number(match[2]) : 0;
+  return hours * 60 + mins || null;
+}
+
+/** A bare number is minutes. */
+function parsePlainDuration(trimmed: string): DurationResult {
+  const match = trimmed.match(PLAIN_DURATION);
+  if (!match) return undefined;
+  const mins = Number(match[1]);
+  return mins > 0 ? mins : null;
+}
+
+// First format that recognises the text decides, in this order.
+const DURATION_FORMATS = [parseColonDuration, parseSuffixDuration, parsePlainDuration];
+
 export function parseDuration(input: string): number | null {
   const trimmed = input.trim().toLowerCase();
 
-  // Special forms (check before regex)
-  if (trimmed === 'полчаса' || trimmed === 'half an hour' || trimmed === 'half hour') return 30;
-  if (trimmed === 'полтора часа') return 90;
+  // Special forms are checked before the regex formats; own keys only, so "constructor" is no idiom.
+  if (Object.hasOwn(SPECIAL_DURATIONS, trimmed)) return SPECIAL_DURATIONS[trimmed]!;
 
-  // Colon format: "1:30", "0:45", "10:30"
-  const colonMatch = trimmed.match(/^(\d+):(\d{2})$/);
-  if (colonMatch) {
-    const total = Number(colonMatch[1]) * 60 + Number(colonMatch[2]);
-    return total > 0 ? total : null;
+  for (const parseFormat of DURATION_FORMATS) {
+    const minutes = parseFormat(trimmed);
+    if (minutes !== undefined) return minutes;
   }
-
-  // Suffix format with full-word support
-  const hourPattern = '(?:hours?|hr|час(?:а|ов)?|[hч])';
-  const minPattern = '(?:minutes?|min|минут[аыу]?|мин|[mм])';
-  const suffixRegex = new RegExp(`^(?:(\\d+)\\s*${hourPattern})?\\s*(?:(\\d+)\\s*${minPattern})?$`);
-  const suffixMatch = trimmed.match(suffixRegex);
-  if (suffixMatch && (suffixMatch[1] || suffixMatch[2])) {
-    const hours = suffixMatch[1] ? Number(suffixMatch[1]) : 0;
-    const mins = suffixMatch[2] ? Number(suffixMatch[2]) : 0;
-    return hours * 60 + mins || null;
-  }
-
-  // Plain number: treat as minutes
-  const plainMatch = trimmed.match(/^(\d+)$/);
-  if (plainMatch) {
-    const mins = Number(plainMatch[1]);
-    return mins > 0 ? mins : null;
-  }
-
   return null;
 }
 
@@ -402,11 +445,9 @@ export interface RecurrenceParsed {
   interval: number;
 }
 
-export function parseRecurrence(input: string): RecurrenceParsed | null {
-  const trimmed = input.trim().toLowerCase();
-  if (!trimmed) return null;
-
-  const simple: Record<string, RecurrenceParsed> = {
+/** Fixed phrases. Built per call, exactly as the inline table it replaces, so callers never share an object. */
+function fixedRecurrences(): Record<string, RecurrenceParsed> {
+  return {
     daily: { freq: 'DAILY', interval: 1 },
     'every day': { freq: 'DAILY', interval: 1 },
     'каждый день': { freq: 'DAILY', interval: 1 },
@@ -425,34 +466,53 @@ export function parseRecurrence(input: string): RecurrenceParsed | null {
     ежегодно: { freq: 'YEARLY', interval: 1 },
     'через неделю': { freq: 'WEEKLY', interval: 2 },
   };
+}
 
-  if (simple[trimmed]) return simple[trimmed];
+type RecurrenceFreq = RecurrenceParsed['freq'];
 
-  // "every N <unit>" pattern
-  const everyN = trimmed.match(/^every\s+(\d+)\s+(days?|weeks?|months?|years?)$/);
-  if (everyN) {
-    const n = Number(everyN[1]);
-    const unit = everyN[2]!;
-    if (unit.startsWith('day')) return { freq: 'DAILY', interval: n };
-    if (unit.startsWith('week')) return { freq: 'WEEKLY', interval: n };
-    if (unit.startsWith('month')) return { freq: 'MONTHLY', interval: n };
-    if (unit.startsWith('year')) return { freq: 'YEARLY', interval: n };
-  }
+/** "every N <unit>": the unit's frequency is decided by its leading letters (singular or plural). */
+const EVERY_N_PATTERN = /^every\s+(\d+)\s+(days?|weeks?|months?|years?)$/;
+const EVERY_N_UNITS: readonly (readonly [string, RecurrenceFreq])[] = [
+  ['day', 'DAILY'],
+  ['week', 'WEEKLY'],
+  ['month', 'MONTHLY'],
+  ['year', 'YEARLY'],
+];
 
-  // "каждые N <unit>" pattern
-  const kazhdyeN = trimmed.match(
-    /^кажд(?:ый|ую|ые|ое)\s+(\d+)\s+(дн(?:я|ей|и)|день|недел[юиь]|месяц(?:а|ев)?|год[аов]?)$/,
+/** "каждые N <unit>" in every agreeing gender/case form of the verb and the unit. */
+const KAZHDYE_N_PATTERN = /^кажд(?:ый|ую|ые|ое)\s+(\d+)\s+(дн(?:я|ей|и)|день|недел[юиь]|месяц(?:а|ев)?|год[аов]?)$/;
+const KAZHDYE_N_UNITS: readonly (readonly [string, RecurrenceFreq])[] = [
+  ['дн', 'DAILY'],
+  ['день', 'DAILY'],
+  ['недел', 'WEEKLY'],
+  ['месяц', 'MONTHLY'],
+  ['год', 'YEARLY'],
+];
+
+/** Matches "<every> N <unit>"; null when the text does not match or the unit maps to no frequency. */
+function parseIntervalPhrase(
+  trimmed: string,
+  pattern: RegExp,
+  units: readonly (readonly [string, RecurrenceFreq])[],
+): RecurrenceParsed | null {
+  const match = trimmed.match(pattern);
+  if (!match) return null;
+  const unit = match[2]!;
+  const entry = units.find(([prefix]) => unit.startsWith(prefix));
+  return entry ? { freq: entry[1], interval: Number(match[1]) } : null;
+}
+
+export function parseRecurrence(input: string): RecurrenceParsed | null {
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) return null;
+
+  const simple = fixedRecurrences();
+  if (Object.hasOwn(simple, trimmed)) return simple[trimmed] ?? null;
+
+  return (
+    parseIntervalPhrase(trimmed, EVERY_N_PATTERN, EVERY_N_UNITS) ??
+    parseIntervalPhrase(trimmed, KAZHDYE_N_PATTERN, KAZHDYE_N_UNITS)
   );
-  if (kazhdyeN) {
-    const n = Number(kazhdyeN[1]);
-    const unit = kazhdyeN[2]!;
-    if (unit.startsWith('дн') || unit === 'день') return { freq: 'DAILY', interval: n };
-    if (unit.startsWith('недел')) return { freq: 'WEEKLY', interval: n };
-    if (unit.startsWith('месяц')) return { freq: 'MONTHLY', interval: n };
-    if (unit.startsWith('год')) return { freq: 'YEARLY', interval: n };
-  }
-
-  return null;
 }
 
 /** Construct a calendar date in its own zone, without shifting it through UTC. */

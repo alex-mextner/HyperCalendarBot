@@ -379,6 +379,59 @@ for (const [name, timezone] of CITIES) {
   }
 }
 
+/** First entry (dictionary order) satisfying `predicate`, across every first-letter bucket. */
+function findEntry(predicate: (entry: CityEntry) => boolean): CityEntry | null {
+  for (const entries of cityIndex.values()) {
+    for (const entry of entries) {
+      if (predicate(entry)) return entry;
+    }
+  }
+  return null;
+}
+
+/** Levenshtein distance when it is within the typo threshold, else null. */
+function fuzzyDistance(a: string, b: string): number | null {
+  const dist = levenshtein(a, b);
+  // Threshold: max 30% of the longer string's length, minimum 2
+  const maxDist = Math.max(2, Math.floor(Math.max(a.length, b.length) * 0.3));
+  return dist <= maxDist ? dist : null;
+}
+
+/** Closest entry among `entries` by stem distance; the first one wins ties. */
+function closestByStem(stemmed: string, entries: CityEntry[]): CityEntry | null {
+  let bestMatch: CityEntry | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const entry of entries) {
+    const dist = fuzzyDistance(stemmed, entry.stemmed);
+    if (dist !== null && dist < bestDistance) {
+      bestDistance = dist;
+      bestMatch = entry;
+    }
+  }
+  return bestMatch;
+}
+
+/**
+ * Single-word fallback: compare the word with every word of every stemmed entry, across ALL
+ * buckets (not just first-letter), so a partial name still finds its city.
+ */
+function closestByAnyWord(word: string): CityEntry | null {
+  let bestMatch: CityEntry | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const entries of cityIndex.values()) {
+    for (const entry of entries) {
+      for (const entryWord of entry.stemmed.split(/\s+/)) {
+        const dist = fuzzyDistance(word, entryWord);
+        if (dist !== null && dist < bestDistance) {
+          bestDistance = dist;
+          bestMatch = entry;
+        }
+      }
+    }
+  }
+  return bestMatch;
+}
+
 /**
  * Match a Russian city name (any grammatical case) against the dictionary.
  * Uses stemming + Levenshtein fuzzy matching.
@@ -394,57 +447,22 @@ export function matchCity(input: string): string | null {
   const stemmed = stemRussian(normalized);
 
   // 1. Try exact stemmed match across all entries
-  for (const entries of cityIndex.values()) {
-    for (const entry of entries) {
-      if (entry.stemmed === stemmed) return entry.timezone;
-    }
-  }
+  const exactStem = findEntry((entry) => entry.stemmed === stemmed);
+  if (exactStem) return exactStem.timezone;
 
   // 2. Exact match on original name (for abbreviations like мск, спб)
-  for (const entries of cityIndex.values()) {
-    for (const entry of entries) {
-      if (entry.name === normalized) return entry.timezone;
-    }
-  }
+  const exactName = findEntry((entry) => entry.name === normalized);
+  if (exactName) return exactName.timezone;
 
   // 3. Fuzzy match — check candidates by first letter
-  const firstChar = normalized[0]!;
-  const candidates = cityIndex.get(firstChar) ?? [];
-
-  let bestMatch: CityEntry | null = null;
-  let bestDistance = Number.POSITIVE_INFINITY;
-
-  for (const entry of candidates) {
-    const dist = levenshtein(stemmed, entry.stemmed);
-    // Threshold: max 30% of the longer string's length, minimum 2
-    const maxDist = Math.max(2, Math.floor(Math.max(stemmed.length, entry.stemmed.length) * 0.3));
-    if (dist < bestDistance && dist <= maxDist) {
-      bestDistance = dist;
-      bestMatch = entry;
-    }
-  }
-
-  if (bestMatch) return bestMatch.timezone;
+  const fuzzy = closestByStem(stemmed, cityIndex.get(normalized[0]!) ?? []);
+  if (fuzzy) return fuzzy.timezone;
 
   // 4. Single-word fallback: search ALL buckets (not just first-letter) for partial matches
   const words = stemmed.split(/\s+/);
   if (words.length === 1 && words[0]!.length >= 4) {
-    // Single word — search ALL entries for fuzzy match (not just first-letter)
-    for (const entries of cityIndex.values()) {
-      for (const entry of entries) {
-        // Check if stemmed entry contains the word or vice versa
-        const entryWords = entry.stemmed.split(/\s+/);
-        for (const ew of entryWords) {
-          const dist = levenshtein(words[0]!, ew);
-          const maxDist = Math.max(2, Math.floor(Math.max(words[0]!.length, ew.length) * 0.3));
-          if (dist < bestDistance && dist <= maxDist) {
-            bestDistance = dist;
-            bestMatch = entry;
-          }
-        }
-      }
-    }
-    if (bestMatch) return bestMatch.timezone;
+    const partial = closestByAnyWord(words[0]!);
+    if (partial) return partial.timezone;
   }
 
   return null;

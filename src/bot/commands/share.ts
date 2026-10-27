@@ -19,6 +19,28 @@ function isPeriod(value: string): value is Period {
   return VALID_PERIODS.has(value as Period);
 }
 
+async function showGroupShareNavigator(
+  ctx: BotCommandContext,
+  eventService: EventService,
+  groupRepo: GroupChatRepository | undefined,
+  lang: 'en' | 'ru',
+): Promise<void> {
+  const groupId = getGroupId(ctx);
+  if (groupId === null) return;
+  const timezone = groupRepo?.getTimezone(groupId) ?? 'UTC';
+  const occurrences = eventService.getUpcomingForGroup(groupId, 10);
+  if (occurrences.length === 0) {
+    await ctx.send(lang === 'ru' ? '📭 Нет событий в группе' : '📭 No group events');
+    return;
+  }
+  const kb = new InlineKeyboard();
+  for (const occ of occurrences) {
+    const time = formatTime(occ.occurrence_start, timezone);
+    kb.text(`${time} ${occ.event.title.slice(0, 20)}`, `${CB.SHARE_EVENT}:evt:${occ.event.id}`).row();
+  }
+  const header = lang === 'ru' ? '📤 <b>Поделиться</b>\n\nВыберите событие:' : '📤 <b>Share</b>\n\nSelect an event:';
+  await ctx.send(header, { parse_mode: 'HTML', reply_markup: kb });
+}
 export async function handleShare(
   ctx: BotCommandContext,
   eventService: EventService,
@@ -33,21 +55,7 @@ export async function handleShare(
   const userId = user.telegram_id;
 
   if (isGroup(ctx)) {
-    const groupId = getGroupId(ctx);
-    if (groupId === null) return;
-    const timezone = groupRepo?.getTimezone(groupId) ?? 'UTC';
-    const occurrences = eventService.getUpcomingForGroup(groupId, 10);
-    if (occurrences.length === 0) {
-      await ctx.send(lang === 'ru' ? '📭 Нет событий в группе' : '📭 No group events');
-      return;
-    }
-    const kb = new InlineKeyboard();
-    for (const occ of occurrences) {
-      const time = formatTime(occ.occurrence_start, timezone);
-      kb.text(`${time} ${occ.event.title.slice(0, 20)}`, `${CB.SHARE_EVENT}:evt:${occ.event.id}`).row();
-    }
-    const header = lang === 'ru' ? '📤 <b>Поделиться</b>\n\nВыберите событие:' : '📤 <b>Share</b>\n\nSelect an event:';
-    await ctx.send(header, { parse_mode: 'HTML', reply_markup: kb });
+    await showGroupShareNavigator(ctx, eventService, groupRepo, lang);
     return;
   }
 

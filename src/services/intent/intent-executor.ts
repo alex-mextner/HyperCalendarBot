@@ -300,20 +300,36 @@ function extractMentionedEvent(result: ToolResult, strict: boolean): EventSummar
   return extractEventSummary(result.data);
 }
 
-/**
- * Execute a Level 2 workflow: { steps: [...] }
- */
-async function runLevel2(
-  steps: Level2Step[],
+/** Everything a Level 2 step handler reads; `stepResults` is the one mutable accumulator. */
+interface Level2Env {
+  captures: Record<string, string>;
+  userCtx: ExecutorUserContext;
+  executeTool: ToolExecutorFn;
+  evidence: EvidenceTracker;
+  i18n: I18nMap | undefined;
+  strict: boolean;
+  stepResults: RuntimeStepResults;
+}
+
+/** Values the step loop carries from one executed tool step to the next and into the final result. */
+interface Level2LoopState {
+  mentionedEventId: number | undefined;
+  lastToolOutput: string | undefined;
+  lastToolData: ToolResultData | undefined;
+  completeResponse: boolean;
+}
+
+function resolveStepInput(env: Level2Env, name: string, template: unknown, strict = env.strict): unknown {
+  return resolveInput(name, template, env.captures, env.userCtx, env.stepResults, env.i18n, strict);
+}
+
+/** Initial Level 2 step results: event context, resumed state, bind values, tool_outputs namespace, captures. */
+function seedLevel2StepResults(
   captures: Record<string, string>,
   userCtx: ExecutorUserContext,
-  executeTool: ToolExecutorFn,
-  evidence: EvidenceTracker,
   bind: BindValues | undefined,
-  resumeState?: ResumeState,
-  i18n?: I18nMap,
-  strict = false,
-): Promise<ExecutorResult> {
+  resumeState: ResumeState | undefined,
+): RuntimeStepResults {
   const stepResults: RuntimeStepResults = {
     ...buildEventStepResults(userCtx),
     ...(resumeState?.stepResults ?? {}),
@@ -330,68 +346,261 @@ async function runLevel2(
     const num = Number(v);
     stepResults[k] = Number.isNaN(num) ? v : num;
   }
+  return stepResults;
+}
+
+type StrictAnswer = { answer: string } | { reprompt: ExecutorResult };
+
+/** Typed workflows only accept one of the prompt's options; anything else re-asks the same question. */
+function checkStrictAnswer(
+  env: Level2Env,
+  suspendedStep: Level2Step | undefined,
+  resumeState: ResumeState,
+): StrictAnswer {
+  const answer = resumeState.userAnswer;
+  const prompt = resolveStepInput(env, 'ask_user', suspendedStep?.input ?? {}, true) as {
+    question: string;
+    options?: string[];
+  };
+  const chosen = prompt.options?.find((option) => option.toLowerCase() === answer.trim().toLowerCase());
+  if (chosen !== undefined) return { answer: chosen };
+  if (prompt.options) {
+    return {
+      reprompt: {
+        success: false,
+        suspended: true,
+        suspendedAt: resumeState.stepIndex,
+        stepResults: { ...env.stepResults },
+        response: prompt.question,
+        responseOptions: prompt.options,
+      },
+    };
+  }
+  return { answer };
+}
+
+function recordResumeAnswer(stepResults: RuntimeStepResults, suspendedStep: Level2Step | undefined, answer: string) {
+  // Determine filtered value (apply `as` filter if present, else raw answer).
+  // applyAsFilter returns unknown; narrow to string | number since user answers are always text
+  // and applyFilters always returns string.
+  const rawAnswer = suspendedStep?.as ? applyAsFilter(suspendedStep.as, answer).value : answer;
+  const filteredAnswer: string | number = typeof rawAnswer === 'number' ? rawAnswer : String(rawAnswer);
+
+  // Auto-accumulate every ask_user answer into choices[]
+  if (!Array.isArray(stepResults.choices)) stepResults.choices = [];
+  stepResults.choices.push(filteredAnswer);
+
+  // Store under ask.* namespace and tool_outputs.*
+  if (suspendedStep?.as) {
+    const { name } = applyAsFilter(suspendedStep.as, answer);
+    if (!stepResults.ask || typeof stepResults.ask !== 'object') stepResults.ask = {};
+    stepResults.ask[name] = filteredAnswer;
+    if (stepResults.tool_outputs) stepResults.tool_outputs[name] = filteredAnswer;
+  }
+}
+
+/**
+ * Store the answer to the suspended `ask_user` step. Returns a result only when a typed
+ * workflow must re-ask because the answer is not one of the offered options.
+ */
+function applyResumeAnswer(steps: Level2Step[], resumeState: ResumeState, env: Level2Env): ExecutorResult | null {
+  if (
+    env.strict &&
+    (!Number.isInteger(resumeState.stepIndex) ||
+      resumeState.stepIndex < 0 ||
+      steps[resumeState.stepIndex]?.call !== 'ask_user')
+  )
+    throw new WorkflowInputError('INVALID_RESUME');
+  const suspendedStep = steps[resumeState.stepIndex];
+  let answer = resumeState.userAnswer;
+  if (env.strict) {
+    const checked = checkStrictAnswer(env, suspendedStep, resumeState);
+    if ('reprompt' in checked) return checked.reprompt;
+    answer = checked.answer;
+  }
+  recordResumeAnswer(env.stepResults, suspendedStep, answer);
+  return null;
+}
+
+/** `respond:` field — answer with text and stop. */
+function respondWithText(template: string, env: Level2Env, mentionedEventId: number | undefined): ExecutorResult {
+  const text = resolveVariables(template, env.captures, env.userCtx, env.stepResults, env.i18n, {
+    strict: env.strict,
+  });
+  if (env.strict && typeof text !== 'string') throw new WorkflowInputError('INVALID_INPUT');
+  return { success: true, response: text as string, mentionedEventId };
+}
+
+/** Respond with text from input.message and stop — same as respond: field but explicit call form. */
+function respondWithMessageInput(
+  step: Level2Step,
+  stepIndex: number,
+  env: Level2Env,
+  mentionedEventId: number | undefined,
+): ExecutorResult {
+  if (env.strict) {
+    const value = resolveStepInput(env, 'respond', step.input ?? {}, true) as { message: string };
+    return { success: true, response: value.message, mentionedEventId };
+  }
+  if (!step.input?.message) {
+    cmdLogger.warn({ stepIndex }, 'Intent executor: call: respond missing input.message');
+    return { success: true, response: undefined, mentionedEventId };
+  }
+  const text = resolveVariables(step.input.message, env.captures, env.userCtx, env.stepResults, env.i18n, {
+    strict: env.strict,
+  }) as string;
+  return { success: true, response: text, mentionedEventId };
+}
+
+/** Suspend for user input — resolve question text if provided. */
+function suspendForAnswer(step: Level2Step, stepIndex: number, env: Level2Env): ExecutorResult {
+  if (env.evidence.state !== 'none') env.stepResults.__mutationEvidence = env.evidence.state;
+  if (env.strict) {
+    const checked = resolveStepInput(env, 'ask_user', step.input ?? {}, true) as {
+      question: string;
+      options?: string[];
+    };
+    return {
+      success: false,
+      suspended: true,
+      suspendedAt: stepIndex,
+      stepResults: { ...env.stepResults },
+      response: checked.question,
+      responseOptions: checked.options,
+    };
+  }
+  const questionTemplate = step.input?.question;
+  const question =
+    questionTemplate !== undefined
+      ? (resolveVariables(questionTemplate as string, env.captures, env.userCtx, env.stepResults, env.i18n) as string)
+      : undefined;
+  return {
+    suspended: true,
+    suspendedAt: stepIndex,
+    stepResults: { ...env.stepResults },
+    success: false,
+    response: question,
+  };
+}
+
+/** Store a tool result under the step's `as` name, in `tool_outputs`, and (typed workflows) its text companion. */
+function storeStepOutput(as: string, result: ToolResult, env: Level2Env): void {
+  const { stepResults } = env;
+  const valueToStore =
+    result.data !== undefined ? result.data : result.output !== undefined ? parseToolOutput(result.output) : undefined;
+  storeResult(as, valueToStore, stepResults);
+  // Also store in tool_outputs namespace for {{tool_outputs.name.*}} access
+  const { name: outputName, value: outputValue } = applyAsFilter(as, valueToStore);
+  if (stepResults.tool_outputs && outputValue !== undefined) {
+    stepResults.tool_outputs[outputName] = outputValue;
+  }
+  // Typed workflows can show the tool's own text next to the structured value.
+  if (env.strict && stepResults.tool_outputs && result.output !== undefined) {
+    stepResults.tool_outputs[`${outputName}_text`] = result.output.slice(0, MAX_TEXT_COMPANION_CHARS);
+  }
+}
+
+/**
+ * Execute one tool step. Returns a final result when the workflow must stop (tool failure or
+ * hand-off); otherwise records the output in `state`/`stepResults` and returns null.
+ */
+async function runToolStep(
+  step: Level2Step,
+  call: string,
+  env: Level2Env,
+  state: Level2LoopState,
+): Promise<ExecutorResult | null> {
+  const resolvedInput = resolveStepInput(env, call, step.input ?? {});
+
+  const result = await callTool(env.executeTool, call, resolvedInput, env.evidence);
+  if (!result.success) {
+    cmdLogger.warn({ step: call, error: result.error }, 'Intent L2 tool step failed');
+    return { success: false, response: result.error };
+  }
+
+  if (result.stopLoop) {
+    // The tool handed control to something outside this workflow (e.g. a Telegram user
+    // picker) instead of completing the requested action. Report exactly what happened
+    // and stop — running a later `respond` step would misreport an unfinished action as done.
+    return {
+      success: true,
+      response: result.output,
+      responseEvents: extractEventSummaries(result.data),
+      mentionedEventId: state.mentionedEventId,
+    };
+  }
+
+  state.lastToolOutput = result.output;
+  state.lastToolData = result.data;
+  state.completeResponse = result.completeResponse === true;
+
+  // If result carries structured event data, update last_mentioned_event in-workflow
+  // and track the ID for cross-request persistence via mentionedEventId.
+  const eventSource = extractMentionedEvent(result, env.strict);
+  if (eventSource !== null) {
+    env.stepResults.last_mentioned_event = eventSource;
+    state.mentionedEventId = eventSource.id;
+  }
+
+  if (step.as !== undefined) storeStepOutput(step.as, result, env);
+  return null;
+}
+
+/**
+ * Run one step of the loop. Returns a final result when this step ends the workflow
+ * (respond / suspend / failure / hand-off), or null to continue with the next step.
+ */
+async function runLevel2Step(
+  step: Level2Step,
+  stepIndex: number,
+  env: Level2Env,
+  state: Level2LoopState,
+): Promise<ExecutorResult | null> {
+  // Evaluate `when` condition — skip step if false
+  if (step.when !== undefined && !evaluate(step.when, env.stepResults)) return null;
+
+  // Respond with text and optionally stop
+  if (step.respond !== undefined) return respondWithText(step.respond, env, state.mentionedEventId);
+
+  // No call — nothing to execute in this step
+  if (step.call === undefined) return null;
+
+  if (step.call === 'respond') return respondWithMessageInput(step, stepIndex, env, state.mentionedEventId);
+  if (step.call === 'ask_user') return suspendForAnswer(step, stepIndex, env);
+  return runToolStep(step, step.call, env, state);
+}
+
+/**
+ * Execute a Level 2 workflow: { steps: [...] }
+ */
+async function runLevel2(
+  steps: Level2Step[],
+  captures: Record<string, string>,
+  userCtx: ExecutorUserContext,
+  executeTool: ToolExecutorFn,
+  evidence: EvidenceTracker,
+  bind: BindValues | undefined,
+  resumeState?: ResumeState,
+  i18n?: I18nMap,
+  strict = false,
+): Promise<ExecutorResult> {
+  const stepResults = seedLevel2StepResults(captures, userCtx, bind, resumeState);
+  const env: Level2Env = { captures, userCtx, executeTool, evidence, i18n, strict, stepResults };
 
   // When resuming, store the user answer and auto-accumulate to choices[]
   let startIndex = 0;
   if (resumeState !== undefined) {
-    if (
-      strict &&
-      (!Number.isInteger(resumeState.stepIndex) ||
-        resumeState.stepIndex < 0 ||
-        steps[resumeState.stepIndex]?.call !== 'ask_user')
-    )
-      throw new WorkflowInputError('INVALID_RESUME');
-    const suspendedStep = steps[resumeState.stepIndex];
-    let answer = resumeState.userAnswer;
-    if (strict) {
-      const prompt = resolveInput(
-        'ask_user',
-        suspendedStep?.input ?? {},
-        captures,
-        userCtx,
-        stepResults,
-        i18n,
-        true,
-      ) as { question: string; options?: string[] };
-      const chosen = prompt.options?.find((option) => option.toLowerCase() === answer.trim().toLowerCase());
-      if (chosen !== undefined) answer = chosen;
-      if (prompt.options && chosen === undefined) {
-        return {
-          success: false,
-          suspended: true,
-          suspendedAt: resumeState.stepIndex,
-          stepResults: { ...stepResults },
-          response: prompt.question,
-          responseOptions: prompt.options,
-        };
-      }
-    }
-
-    // Determine filtered value (apply `as` filter if present, else raw answer).
-    // applyAsFilter returns unknown; narrow to string | number since user answers are always text
-    // and applyFilters always returns string.
-    const rawAnswer = suspendedStep?.as ? applyAsFilter(suspendedStep.as, answer).value : answer;
-    const filteredAnswer: string | number = typeof rawAnswer === 'number' ? rawAnswer : String(rawAnswer);
-
-    // Auto-accumulate every ask_user answer into choices[]
-    if (!Array.isArray(stepResults.choices)) stepResults.choices = [];
-    stepResults.choices.push(filteredAnswer);
-
-    // Store under ask.* namespace and tool_outputs.*
-    if (suspendedStep?.as) {
-      const { name } = applyAsFilter(suspendedStep.as, answer);
-      if (!stepResults.ask || typeof stepResults.ask !== 'object') stepResults.ask = {};
-      stepResults.ask[name] = filteredAnswer;
-      if (stepResults.tool_outputs) stepResults.tool_outputs[name] = filteredAnswer;
-    }
-
+    const reprompt = applyResumeAnswer(steps, resumeState, env);
+    if (reprompt !== null) return reprompt;
     startIndex = resumeState.stepIndex + 1;
   }
 
-  let mentionedEventId: number | undefined;
-  let lastToolOutput: string | undefined;
-  let lastToolData: ToolResultData | undefined;
-  let completeResponse = false;
+  const state: Level2LoopState = {
+    mentionedEventId: undefined,
+    lastToolOutput: undefined,
+    lastToolData: undefined,
+    completeResponse: false,
+  };
 
   for (let i = startIndex; i < steps.length; i++) {
     const step = steps[i];
@@ -399,138 +608,17 @@ async function runLevel2(
       cmdLogger.warn({ stepIndex: i }, 'Intent executor: undefined step in dense array, skipping');
       continue;
     }
-
-    // Evaluate `when` condition — skip step if false
-    if (step.when !== undefined) {
-      const conditionMet = evaluate(step.when, stepResults);
-      if (!conditionMet) continue;
-    }
-
-    // Respond with text and optionally stop
-    if (step.respond !== undefined) {
-      const text = resolveVariables(step.respond, captures, userCtx, stepResults, i18n, { strict });
-      if (strict && typeof text !== 'string') throw new WorkflowInputError('INVALID_INPUT');
-      return { success: true, response: text as string, mentionedEventId };
-    }
-
-    // No call — nothing to execute in this step
-    if (step.call === undefined) continue;
-
-    // Respond with text from input.message and stop — same as respond: field but explicit call form
-    if (step.call === 'respond') {
-      if (strict) {
-        const value = resolveInput('respond', step.input ?? {}, captures, userCtx, stepResults, i18n, true) as {
-          message: string;
-        };
-        return { success: true, response: value.message, mentionedEventId };
-      }
-      if (!step.input?.message) {
-        cmdLogger.warn({ stepIndex: i }, 'Intent executor: call: respond missing input.message');
-        return { success: true, response: undefined, mentionedEventId };
-      }
-      const text = resolveVariables(step.input.message, captures, userCtx, stepResults, i18n, { strict }) as string;
-      return { success: true, response: text, mentionedEventId };
-    }
-
-    // Suspend for user input — resolve question text if provided
-    if (step.call === 'ask_user') {
-      if (evidence.state !== 'none') stepResults.__mutationEvidence = evidence.state;
-      if (strict) {
-        const checked = resolveInput('ask_user', step.input ?? {}, captures, userCtx, stepResults, i18n, true) as {
-          question: string;
-          options?: string[];
-        };
-        return {
-          success: false,
-          suspended: true,
-          suspendedAt: i,
-          stepResults: { ...stepResults },
-          response: checked.question,
-          responseOptions: checked.options,
-        };
-      }
-      const questionTemplate = step.input?.question;
-      const question =
-        questionTemplate !== undefined
-          ? (resolveVariables(questionTemplate as string, captures, userCtx, stepResults, i18n) as string)
-          : undefined;
-      return {
-        suspended: true,
-        suspendedAt: i,
-        stepResults: { ...stepResults },
-        success: false,
-        response: question,
-      };
-    }
-
-    // Execute tool
-    const resolvedInput = resolveInput(
-      step.call,
-      step.input ?? {},
-      captures,
-      userCtx,
-      stepResults,
-      i18n,
-      strict,
-    ) as Record<string, unknown>;
-
-    const result = await callTool(executeTool, step.call, resolvedInput, evidence);
-    if (!result.success) {
-      cmdLogger.warn({ step: step.call, error: result.error }, 'Intent L2 tool step failed');
-      return { success: false, response: result.error };
-    }
-
-    if (result.stopLoop) {
-      // The tool handed control to something outside this workflow (e.g. a Telegram user
-      // picker) instead of completing the requested action. Report exactly what happened
-      // and stop — running a later `respond` step would misreport an unfinished action as done.
-      return {
-        success: true,
-        response: result.output,
-        responseEvents: extractEventSummaries(result.data),
-        mentionedEventId,
-      };
-    }
-
-    lastToolOutput = result.output;
-    lastToolData = result.data;
-    completeResponse = result.completeResponse === true;
-
-    // If result carries structured event data, update last_mentioned_event in-workflow
-    // and track the ID for cross-request persistence via mentionedEventId.
-    const eventSource = extractMentionedEvent(result, strict);
-    if (eventSource !== null) {
-      stepResults.last_mentioned_event = eventSource;
-      mentionedEventId = eventSource.id;
-    }
-
-    if (step.as !== undefined) {
-      const valueToStore =
-        result.data !== undefined
-          ? result.data
-          : result.output !== undefined
-            ? parseToolOutput(result.output)
-            : undefined;
-      storeResult(step.as, valueToStore, stepResults);
-      // Also store in tool_outputs namespace for {{tool_outputs.name.*}} access
-      const { name: outputName, value: outputValue } = applyAsFilter(step.as, valueToStore);
-      if (stepResults.tool_outputs && outputValue !== undefined) {
-        stepResults.tool_outputs[outputName] = outputValue;
-      }
-      // Typed workflows can show the tool's own text next to the structured value.
-      if (strict && stepResults.tool_outputs && result.output !== undefined) {
-        stepResults.tool_outputs[`${outputName}_text`] = result.output.slice(0, MAX_TEXT_COMPANION_CHARS);
-      }
-    }
+    const finished = await runLevel2Step(step, i, env, state);
+    if (finished !== null) return finished;
   }
 
   return {
     success: true,
-    response: lastToolOutput,
-    ...(completeResponse && evidence.state === 'none' ? { completeResponse: true } : {}),
-    responseEvents: extractEventSummaries(lastToolData),
+    response: state.lastToolOutput,
+    ...(state.completeResponse && evidence.state === 'none' ? { completeResponse: true } : {}),
+    responseEvents: extractEventSummaries(state.lastToolData),
     stepResults,
-    mentionedEventId,
+    mentionedEventId: state.mentionedEventId,
   };
 }
 

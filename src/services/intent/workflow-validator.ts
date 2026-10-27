@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { toolSchemas } from '../ai/tool-schemas.ts';
 import { type FilterCall, KNOWN_FILTERS, parseFilterChain } from './filter-parser.ts';
 import { normalize } from './normalizer.ts';
+import type { Binding } from './workflow-bindings.ts';
 import type { Workflow } from './workflow-schema.ts';
 
 /** Tool schemas keyed by plain string, so an unknown step name is a lookup miss, not a type error. */
@@ -219,21 +220,21 @@ function acceptsCapturedString(schema: z.core.$ZodType): boolean {
   return schema instanceof z.ZodString || schema instanceof z.ZodEnum;
 }
 
-function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
-  // Free-form schemas (assistant passthrough tools) accept any argument.
-  if (!(schema instanceof z.ZodObject)) return [];
-
+/** Required parameters (those that reject `undefined`) the step does not supply. */
+function checkRequiredParams(call: StepCall, shape: Record<string, z.ZodType>, paramNames: string[]): string[] {
   const errors: string[] = [];
-  const shape = schema.shape;
-  const paramNames = Object.keys(call.input);
-
   for (const [field, fieldSchema] of Object.entries(shape)) {
     const isOptional = fieldSchema.safeParse(undefined).success;
     if (!isOptional && !paramNames.includes(field)) {
       errors.push(`step "${call.tool}": required parameter "${field}" is missing`);
     }
   }
+  return errors;
+}
 
+/** Supplied parameters the tool does not know, and literal values that do not match the field's type. */
+function checkSuppliedParams(call: StepCall, shape: Record<string, z.ZodType>, paramNames: string[]): string[] {
+  const errors: string[] = [];
   for (const field of paramNames) {
     const fieldSchema = getOwn(shape, field);
     if (!fieldSchema) {
@@ -251,7 +252,11 @@ function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
       errors.push(`step "${call.tool}": parameter "${field}" value "${value}" does not match the expected type`);
     }
   }
+  return errors;
+}
 
+function checkRequiredAnyOf(call: StepCall, paramNames: string[]): string[] {
+  const errors: string[] = [];
   for (const group of getOwn(REQUIRED_ANY_OF, call.tool) ?? []) {
     if (!group.some((field) => paramNames.includes(field))) {
       errors.push(
@@ -259,8 +264,20 @@ function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
       );
     }
   }
-
   return errors;
+}
+
+function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
+  // Free-form schemas (assistant passthrough tools) accept any argument.
+  if (!(schema instanceof z.ZodObject)) return [];
+
+  const shape = schema.shape;
+  const paramNames = Object.keys(call.input);
+  return [
+    ...checkRequiredParams(call, shape, paramNames),
+    ...checkSuppliedParams(call, shape, paramNames),
+    ...checkRequiredAnyOf(call, paramNames),
+  ];
 }
 
 /**
@@ -306,6 +323,38 @@ function bindingNameOf(varName: string): string {
   return varName.slice('bind.'.length).split(/[.[]/)[0]!;
 }
 
+/** Datetime bindings read earlier date/time bindings; an optional binding needs a default and a defaulted capture. */
+function checkBindingReferences(name: string, binding: Binding, seen: Map<string, string>): string[] {
+  const errors: string[] = [];
+  if (binding.type === 'datetime') {
+    if (seen.get(binding.date) !== 'date')
+      errors.push(`binding "${name}": date must reference an earlier date binding`);
+    if (seen.get(binding.time) !== 'time')
+      errors.push(`binding "${name}": time must reference an earlier time binding`);
+  }
+  if ('optional' in binding && binding.optional) {
+    if (binding.default === undefined) errors.push(`binding "${name}": an optional binding needs a default`);
+    // A bare capture reference makes the matcher require the group; only a defaulted one may be absent.
+    if (!/\{\{\s*\$\d+\s*\|\s*default\(/.test(binding.from))
+      errors.push(`binding "${name}": an optional binding must read its capture with default(...)`);
+  }
+  return errors;
+}
+
+function checkNormalizedKeys(name: string, binding: Binding): string[] {
+  const errors: string[] = [];
+  for (const table of [
+    'values' in binding ? binding.values : undefined,
+    'words' in binding ? binding.words : undefined,
+    'units' in binding ? binding.units : undefined,
+  ]) {
+    for (const key of Object.keys(table ?? {})) {
+      if (normalize(key) !== key) errors.push(`binding "${name}": key "${key}" is not in normalized form`);
+    }
+  }
+  return errors;
+}
+
 /** Binding-to-binding references must point backwards, at the type they consume. */
 export function validateWorkflowBindings(workflow: Workflow): string[] {
   const bindings = 'bindings' in workflow ? workflow.bindings : undefined;
@@ -314,27 +363,7 @@ export function validateWorkflowBindings(workflow: Workflow): string[] {
   const seen = new Map<string, string>();
   const markedAfterMidnight: string[] = [];
   for (const [name, binding] of Object.entries(bindings)) {
-    if (binding.type === 'datetime') {
-      if (seen.get(binding.date) !== 'date')
-        errors.push(`binding "${name}": date must reference an earlier date binding`);
-      if (seen.get(binding.time) !== 'time')
-        errors.push(`binding "${name}": time must reference an earlier time binding`);
-    }
-    if ('optional' in binding && binding.optional) {
-      if (binding.default === undefined) errors.push(`binding "${name}": an optional binding needs a default`);
-      // A bare capture reference makes the matcher require the group; only a defaulted one may be absent.
-      if (!/\{\{\s*\$\d+\s*\|\s*default\(/.test(binding.from))
-        errors.push(`binding "${name}": an optional binding must read its capture with default(...)`);
-    }
-    for (const table of [
-      'values' in binding ? binding.values : undefined,
-      'words' in binding ? binding.words : undefined,
-      'units' in binding ? binding.units : undefined,
-    ]) {
-      for (const key of Object.keys(table ?? {})) {
-        if (normalize(key) !== key) errors.push(`binding "${name}": key "${key}" is not in normalized form`);
-      }
-    }
+    errors.push(...checkBindingReferences(name, binding, seen), ...checkNormalizedKeys(name, binding));
     seen.set(name, binding.type);
     if (binding.type === 'date' && binding.after_midnight === 'both') markedAfterMidnight.push(name);
   }
@@ -344,35 +373,122 @@ export function validateWorkflowBindings(workflow: Workflow): string[] {
   return errors;
 }
 
+/** What a `{{...}}` variable name may refer to in this workflow. */
+interface VariableScope {
+  capGroups: number;
+  askUserNames: Set<string>;
+  stepOutputNames: Set<string>;
+  bindingNames: Set<string>;
+}
+
+function checkCaptureRef(captureIndex: string, expr: string, loc: string, capGroups: number): string | null {
+  const n = Number.parseInt(captureIndex, 10);
+  if (n >= 1 && n <= capGroups) return null;
+  return `${loc}{{${expr}}} — capture group $${n} does not exist in pattern (pattern has ${capGroups} capturing group${capGroups === 1 ? '' : 's'})`;
+}
+
+/** {{tool_outputs.name}} or {{tool_outputs.name.field}} — step/ask_user output namespace. */
+function checkToolOutputRef(varName: string, expr: string, loc: string, scope: VariableScope): string | null {
+  const afterPrefix = varName.slice('tool_outputs.'.length);
+  const outputName = afterPrefix.split(/[.[]/)[0]!;
+  const allOutputNames = new Set([...scope.stepOutputNames, ...scope.askUserNames]);
+  const textOf = outputName.endsWith('_text') ? outputName.slice(0, -'_text'.length) : outputName;
+  if (allOutputNames.has(outputName) || allOutputNames.has(textOf)) return null;
+  return `${loc}{{${expr}}} — tool_outputs.${outputName} is not defined; no step with as: "${outputName}" found`;
+}
+
+/** Variables outside the event/i18n/conditional/ask namespaces: captures, bindings, step outputs, built-ins. */
+function checkScopedVariable(varName: string, expr: string, loc: string, scope: VariableScope): string | null {
+  const captureMatch = CAPTURE_VAR_RE.exec(varName);
+  if (captureMatch) return checkCaptureRef(captureMatch[1]!, expr, loc, scope.capGroups);
+  if (varName.startsWith('bind.')) {
+    const name = bindingNameOf(varName);
+    return scope.bindingNames.has(name) ? null : `${loc}{{${expr}}} — bind.${name} is not declared in bindings`;
+  }
+  if (varName.startsWith('tool_outputs.')) return checkToolOutputRef(varName, expr, loc, scope);
+  if (ALLOWED_VARS.has(varName)) return null;
+  return (
+    `${loc}{{${expr}}} — unknown variable "${varName}"; allowed: ${[...ALLOWED_VARS].join(', ')}, ` +
+    `or $1..$N from pattern capture groups, ` +
+    `or tool_outputs.<name> for step outputs (as: "name" on any step)`
+  );
+}
+
+/** Validate a variable name; the error text, or null when it is resolvable. */
+function checkVariableName(varName: string, expr: string, loc: string, scope: VariableScope): string | null {
+  // event context and i18n keys — always valid
+  if (
+    varName.startsWith('last_added_event.') ||
+    varName.startsWith('last_mentioned_event.') ||
+    varName.startsWith('t.')
+  )
+    return null;
+  if (isConditionalExpr(varName)) {
+    // Identify the variable portion before any operator for a helpful hint
+    const hintVar = varName.split(/\s*(?:==|!=|\?|&&|\|\|)/)[0]?.trim() ?? varName;
+    return (
+      `${loc}{{${expr}}} — conditional expressions are not supported; ` +
+      `for equality: {{${hintVar}|eq("match","if_match","if_no_match")}}, ` +
+      `for truthy/falsy: {{${hintVar}|ternary("if_true","if_false")}}`
+    );
+  }
+  if (varName.startsWith('ask.')) {
+    const askKey = varName.slice('ask.'.length);
+    return scope.askUserNames.has(askKey)
+      ? null
+      : `${loc}{{${expr}}} — ask.${askKey} is not defined, no ask_user step with as: "${askKey}" found`;
+  }
+  return checkScopedVariable(varName, expr, loc, scope);
+}
+
+/** Filter names in a parsed chain that the renderer does not know. */
+function unknownFilterNames(filters: FilterCall[]): string[] {
+  return filters.map((f) => f.name).filter((name) => !KNOWN_FILTERS.has(name));
+}
+
+/** Validate the filter chain of an `as: "name|filter"` field. */
+function checkAsFilterChain(asValue: string): string[] {
+  const pipeIdx = asValue.indexOf('|');
+  if (pipeIdx === -1) return [];
+  let filters: FilterCall[];
+  try {
+    filters = parseFilterChain(asValue.slice(pipeIdx + 1));
+  } catch (e) {
+    return [`as "${asValue}": invalid filter syntax — ${String(e)}`];
+  }
+  return unknownFilterNames(filters).map(
+    (name) => `as "${asValue}": unknown filter "${name}" — known filters: ${[...KNOWN_FILTERS].join(', ')}`,
+  );
+}
+
+/** Validate filter chain syntax and known filter names of a `{{var|filter...}}` expression. */
+function checkExprFilterChain(filterExpr: string, expr: string, loc: string): string[] {
+  let filters: FilterCall[];
+  try {
+    filters = parseFilterChain(filterExpr);
+  } catch (e) {
+    return [`${loc}{{${expr}}} — invalid filter syntax — ${String(e)}`];
+  }
+  return unknownFilterNames(filters).map(
+    (name) => `${loc}{{${expr}}} — unknown filter "${name}" — known filters: ${[...KNOWN_FILTERS].join(', ')}`,
+  );
+}
+
 /**
  * Validate that all {{expr}} references in a workflow are resolvable.
  * Returns a list of human-readable error strings (empty = valid).
  */
 export function validateWorkflowVariables(workflow: Workflow, pattern: string | null | undefined): string[] {
   const errors: string[] = [];
-  const capGroups = pattern ? countCapturingGroups(pattern) : 0;
-  const askUserNames = extractAskUserNames(workflow);
-  const stepOutputNames = extractStepOutputNames(workflow);
-  const bindingNames = new Set('bindings' in workflow ? Object.keys(workflow.bindings ?? {}) : []);
+  const scope: VariableScope = {
+    capGroups: pattern ? countCapturingGroups(pattern) : 0,
+    askUserNames: extractAskUserNames(workflow),
+    stepOutputNames: extractStepOutputNames(workflow),
+    bindingNames: new Set('bindings' in workflow ? Object.keys(workflow.bindings ?? {}) : []),
+  };
 
   // Validate filter chains in "as" fields (e.g. "choice|lower")
-  for (const asValue of extractAsFields(workflow)) {
-    const pipeIdx = asValue.indexOf('|');
-    if (pipeIdx === -1) continue;
-    const filterExpr = asValue.slice(pipeIdx + 1);
-    let filters: FilterCall[];
-    try {
-      filters = parseFilterChain(filterExpr);
-    } catch (e) {
-      errors.push(`as "${asValue}": invalid filter syntax — ${String(e)}`);
-      continue;
-    }
-    for (const f of filters) {
-      if (!KNOWN_FILTERS.has(f.name)) {
-        errors.push(`as "${asValue}": unknown filter "${f.name}" — known filters: ${[...KNOWN_FILTERS].join(', ')}`);
-      }
-    }
-  }
+  for (const asValue of extractAsFields(workflow)) errors.push(...checkAsFilterChain(asValue));
 
   for (const { expr, path } of extractExprs(workflow)) {
     const loc = path ? `${path}: ` : '';
@@ -382,76 +498,9 @@ export function validateWorkflowVariables(workflow: Workflow, pattern: string | 
     const varName = (pipeIdx === -1 ? expr : expr.slice(0, pipeIdx)).trim();
     const filterExpr = pipeIdx === -1 ? '' : expr.slice(pipeIdx + 1);
 
-    // Validate variable name
-    if (
-      varName.startsWith('last_added_event.') ||
-      varName.startsWith('last_mentioned_event.') ||
-      varName.startsWith('t.')
-    ) {
-      // event context and i18n keys — always valid
-    } else if (isConditionalExpr(varName)) {
-      // Identify the variable portion before any operator for a helpful hint
-      const hintVar = varName.split(/\s*(?:==|!=|\?|&&|\|\|)/)[0]?.trim() ?? varName;
-      errors.push(
-        `${loc}{{${expr}}} — conditional expressions are not supported; ` +
-          `for equality: {{${hintVar}|eq("match","if_match","if_no_match")}}, ` +
-          `for truthy/falsy: {{${hintVar}|ternary("if_true","if_false")}}`,
-      );
-    } else if (varName.startsWith('ask.')) {
-      const askKey = varName.slice('ask.'.length);
-      if (!askUserNames.has(askKey)) {
-        errors.push(`${loc}{{${expr}}} — ask.${askKey} is not defined, no ask_user step with as: "${askKey}" found`);
-      }
-    } else {
-      const captureMatch = CAPTURE_VAR_RE.exec(varName);
-      if (captureMatch) {
-        const n = Number.parseInt(captureMatch[1]!, 10);
-        if (n < 1 || n > capGroups) {
-          errors.push(
-            `${loc}{{${expr}}} — capture group $${n} does not exist in pattern (pattern has ${capGroups} capturing group${capGroups === 1 ? '' : 's'})`,
-          );
-        }
-      } else if (varName.startsWith('bind.')) {
-        const name = bindingNameOf(varName);
-        if (!bindingNames.has(name)) errors.push(`${loc}{{${expr}}} — bind.${name} is not declared in bindings`);
-      } else if (varName.startsWith('tool_outputs.')) {
-        // {{tool_outputs.name}} or {{tool_outputs.name.field}} — step/ask_user output namespace
-        const afterPrefix = varName.slice('tool_outputs.'.length);
-        const outputName = afterPrefix.split(/[.[]/)[0]!;
-        const allOutputNames = new Set([...stepOutputNames, ...askUserNames]);
-        const textOf = outputName.endsWith('_text') ? outputName.slice(0, -'_text'.length) : outputName;
-        if (!allOutputNames.has(outputName) && !allOutputNames.has(textOf)) {
-          errors.push(
-            `${loc}{{${expr}}} — tool_outputs.${outputName} is not defined; ` +
-              `no step with as: "${outputName}" found`,
-          );
-        }
-      } else if (!ALLOWED_VARS.has(varName)) {
-        errors.push(
-          `${loc}{{${expr}}} — unknown variable "${varName}"; allowed: ${[...ALLOWED_VARS].join(', ')}, ` +
-            `or $1..$N from pattern capture groups, ` +
-            `or tool_outputs.<name> for step outputs (as: "name" on any step)`,
-        );
-      }
-    }
-
-    // Validate filter chain syntax and known filter names
-    if (filterExpr) {
-      let filters: FilterCall[];
-      try {
-        filters = parseFilterChain(filterExpr);
-      } catch (e) {
-        errors.push(`${loc}{{${expr}}} — invalid filter syntax — ${String(e)}`);
-        continue;
-      }
-      for (const f of filters) {
-        if (!KNOWN_FILTERS.has(f.name)) {
-          errors.push(
-            `${loc}{{${expr}}} — unknown filter "${f.name}" — known filters: ${[...KNOWN_FILTERS].join(', ')}`,
-          );
-        }
-      }
-    }
+    const nameError = checkVariableName(varName, expr, loc, scope);
+    if (nameError) errors.push(nameError);
+    if (filterExpr) errors.push(...checkExprFilterChain(filterExpr, expr, loc));
   }
 
   return errors;

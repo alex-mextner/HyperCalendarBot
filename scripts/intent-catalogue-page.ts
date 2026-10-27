@@ -25,29 +25,35 @@ const cardSummary = (name: string) => {
   const m = metadata.get(name);
   return m ? `${categoryTitles[m.category] ?? m.category} · ${riskTitles[m.risk] ?? m.risk}` : '';
 };
+type SeedCard = IntentSnapshot['seeds'][number];
+/** What is wrong with a seed's contract, else the limits of what its passing checks prove. */
+const seedWarning = (a: SeedCard['audit']) => {
+  if (!a.schemaValid) return 'Workflow не проходит текущую схему.';
+  if (a.contractErrors) return `Ошибок контракта: ${a.contractErrors}.`;
+  if (a.examplesMissingCaptures) return `${a.examplesMissingCaptures} примера выбирают интент, но теряют параметры.`;
+  return 'Схема и собственные примеры проходят ограниченную проверку; end-to-end успех не установлен.';
+};
+const definitionLabel = (seed: SeedCard) => {
+  if (seed.definition === 'same') return 'Совпадает';
+  if (seed.definition === 'absent') return 'Нет записи';
+  return `Изменено: ${escapeHtml(seed.changedFields.join(', '))}`;
+};
+const renderSeedCard = (seed: SeedCard) => {
+  const a = seed.audit;
+  const issue = !a.schemaValid || a.contractErrors > 0 || a.examplesMissingCaptures > 0;
+  const hits = seed.recordedMatches === null ? 'нет данных' : String(seed.recordedMatches);
+  const warning = seedWarning(a);
+  return `<article class="seed" data-search="${escapeHtml(seedSearchText(seed.name))}" data-kind="seed"><div class="card-head"><code>${escapeHtml(seed.name)}</code><span class="badge ${issue ? 'warn' : 'ok'}">${issue ? 'Нужна доработка' : 'Контракт проверен'}</span></div><h3>${escapeHtml(seedTitle(seed.name))}</h3><p>${escapeHtml(cardSummary(seed.name))}</p><div class="examples">${seed.examples
+    .slice(0, 3)
+    .map((e) => `<div>«${escapeHtml(e)}»</div>`)
+    .join(
+      '',
+    )}</div><p class="diagnosis">${escapeHtml(warning)}</p><dl><div><dt>В production-БД</dt><dd>${seed.present ? escapeHtml(states[seed.status ?? ''] ?? seed.status) : 'Отсутствует'}</dd></div><div><dt>Определение vs main</dt><dd>${definitionLabel(seed)}</dd></div><div><dt>Записано совпадений</dt><dd>${hits}</dd></div><div><dt>Повторное сопоставление</dt><dd>${escapeHtml(seed.replayMatches)}</dd></div></dl><div class="tools">${seed.tools.map((t) => `<code>${escapeHtml(t)}</code>`).join(' → ')}</div><details><summary>Точный workflow из сида</summary><pre>${escapeHtml(JSON.stringify(seed.workflow, null, 2))}</pre></details></article>`;
+};
 export function renderIntentCatalogue(s: IntentSnapshot, synthetic = false): string {
   const revision = /^[a-z0-9-]{1,64}$/i.test(s.sourceRevision) ? s.sourceRevision : 'unverified';
   const totalHits = s.statistics.recordedMatches;
-  const cards = s.seeds
-    .map((seed) => {
-      const a = seed.audit;
-      const issue = !a.schemaValid || a.contractErrors > 0 || a.examplesMissingCaptures > 0;
-      const hits = seed.recordedMatches === null ? 'нет данных' : String(seed.recordedMatches);
-      const warning = !a.schemaValid
-        ? 'Workflow не проходит текущую схему.'
-        : a.contractErrors
-          ? `Ошибок контракта: ${a.contractErrors}.`
-          : a.examplesMissingCaptures
-            ? `${a.examplesMissingCaptures} примера выбирают интент, но теряют параметры.`
-            : 'Схема и собственные примеры проходят ограниченную проверку; end-to-end успех не установлен.';
-      return `<article class="seed" data-search="${escapeHtml(seedSearchText(seed.name))}" data-kind="seed"><div class="card-head"><code>${escapeHtml(seed.name)}</code><span class="badge ${issue ? 'warn' : 'ok'}">${issue ? 'Нужна доработка' : 'Контракт проверен'}</span></div><h3>${escapeHtml(seedTitle(seed.name))}</h3><p>${escapeHtml(cardSummary(seed.name))}</p><div class="examples">${seed.examples
-        .slice(0, 3)
-        .map((e) => `<div>«${escapeHtml(e)}»</div>`)
-        .join(
-          '',
-        )}</div><p class="diagnosis">${escapeHtml(warning)}</p><dl><div><dt>В production-БД</dt><dd>${seed.present ? escapeHtml(states[seed.status ?? ''] ?? seed.status) : 'Отсутствует'}</dd></div><div><dt>Определение vs main</dt><dd>${seed.definition === 'same' ? 'Совпадает' : seed.definition === 'absent' ? 'Нет записи' : `Изменено: ${escapeHtml(seed.changedFields.join(', '))}`}</dd></div><div><dt>Записано совпадений</dt><dd>${hits}</dd></div><div><dt>Повторное сопоставление</dt><dd>${escapeHtml(seed.replayMatches)}</dd></div></dl><div class="tools">${seed.tools.map((t) => `<code>${escapeHtml(t)}</code>`).join(' → ')}</div><details><summary>Точный workflow из сида</summary><pre>${escapeHtml(JSON.stringify(seed.workflow, null, 2))}</pre></details></article>`;
-    })
-    .join('');
+  const cards = s.seeds.map(renderSeedCard).join('');
   const rows = s.database
     .map(
       (r) =>

@@ -30,13 +30,10 @@ class FloodWait(Exception):
 
 
 def load_function(script, name, namespace):
+    """Exec every top-level function of `script` (the module itself runs main() on import) and return `name`."""
     tree = ast.parse((SCRIPTS / script).read_text(), filename=script)
-    entry = next(
-        n
-        for n in tree.body
-        if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name == name
-    )
-    exec(compile(ast.Module(body=[entry], type_ignores=[]), script, "exec"), namespace)
+    functions = [n for n in tree.body if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))]
+    exec(compile(ast.Module(body=functions, type_ignores=[]), script, "exec"), namespace)
     return namespace[name]
 
 

@@ -148,7 +148,7 @@ function buildMessages(testCase: DryRunCase): OpenAI.ChatCompletionMessageParam[
   return [...turns, { role: 'user', content: tagTurn(testCase.message, 'user', testCase.group === true, 0) }];
 }
 
-interface CaseOutcome {
+export interface CaseOutcome {
   id: string;
   provider: string;
   /** What was actually requested, so two saved runs can be compared or reproduced. */
@@ -178,7 +178,7 @@ const SILENT_TOOLS = ['set_reaction', 'remember_user_fact', 'send_feedback'];
  */
 const DESTRUCTIVE_TOOLS = ['delete_event', 'cancel_invitation', 'remove_trigger'];
 
-function verdict(testCase: DryRunCase, tools: string[], text: string): boolean {
+export function verdict(testCase: DryRunCase, tools: string[], text: string): boolean {
   if (testCase.expectSilence) {
     return text.trim() === '[SKIP]' && tools.every((name) => SILENT_TOOLS.includes(name));
   }
@@ -191,118 +191,219 @@ function verdict(testCase: DryRunCase, tools: string[], text: string): boolean {
   return tools.some((name) => expected.includes(name));
 }
 
-async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<CaseOutcome> {
+type FunctionCall = OpenAI.ChatCompletionMessageFunctionToolCall;
+
+/** The part of the run's tool exposure a case needs: the schemas a request carries and how a discovery call is answered. */
+interface RunExposure {
+  schemas(): OpenAI.ChatCompletionTool[];
+  snapshot(): ReadonlySet<string>;
+  intercept(
+    name: string,
+    input: unknown,
+    exposedThisRound: ReadonlySet<string>,
+  ): { output?: string; error?: string } | undefined;
+}
+
+/** Everything one case's rounds share: the growing conversation, the catalog it draws on and the discovery tally. */
+interface CaseRun {
+  provider: ProviderSpec;
+  testCase: DryRunCase;
+  allowed: OpenAI.ChatCompletionTool[];
+  exposure: RunExposure | undefined;
+  messages: OpenAI.ChatCompletionMessageParam[];
+  /** What was actually requested, so two saved runs can be compared or reproduced. */
+  settings: { model: string; temperature: number | null; maxTokens: number };
+  discoverRounds: number;
+  blindCalls: number;
+  firstPromptTokens: number | null;
+}
+
+/** What a model round asked for, split into the tools that count as its first move and the ones that do not. */
+export interface TurnClassification {
+  discovered: boolean;
+  /** Real tools called without a schema in the request. */
+  blind: string[];
+  firstMoves: string[];
+  needsAnotherRound: boolean;
+}
+
+export function classifyTurn(tools: string[], exposed: ReadonlySet<string> | undefined): TurnClassification {
+  const discovered = tools.includes(DISCOVERY_TOOL);
+  const blind = exposed ? tools.filter((name) => name !== DISCOVERY_TOOL && !exposed.has(name)) : [];
+  // A batch that already holds a real tool the request carried is the model's first move: production runs it in this round.
+  const firstMoves = tools.filter((name) => name !== DISCOVERY_TOOL && !blind.includes(name));
+  const needsAnotherRound = firstMoves.length === 0 && (blind.length > 0 || discovered);
+  return { discovered, blind, firstMoves, needsAnotherRound };
+}
+
+interface Turn extends TurnClassification {
+  message: OpenAI.ChatCompletionMessage | undefined;
+  calls: FunctionCall[];
+  text: string;
+  finishReason: string | null;
+}
+
+function readTurn(res: OpenAI.ChatCompletion, exposed: ReadonlySet<string> | undefined): Turn {
+  const message = res.choices[0]?.message;
+  const calls = (message?.tool_calls ?? []).flatMap((call) => ('function' in call ? [call] : []));
+  const tools = calls.map((call) => call.function.name);
+  return {
+    message,
+    calls,
+    text: message?.content ?? '',
+    finishReason: res.choices[0]?.finish_reason ?? null,
+    ...classifyTurn(tools, exposed),
+  };
+}
+
+function prepareRun(provider: ProviderSpec, testCase: DryRunCase): CaseRun {
   const mode = toolMode();
   const ctx = buildContext(testCase);
   const allowed = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
   const exposure = mode === 'full' ? undefined : createToolExposure(allowed, mode);
-  const messages: OpenAI.ChatCompletionMessageParam[] = [
-    { role: 'system', content: assembleSystemPrompt(buildSystemPromptParts(ctx), exposure?.prompt) },
-    ...buildMessages(testCase),
-  ];
-  const maxTokens = provider.name === 'claude' ? CLAUDE_MAX_OUTPUT_TOKENS : MAX_COMPLETION_TOKENS;
-  const temperature = acceptsSamplingTemperature(provider.name) ? 0 : null;
-  const settings = { model: provider.model, temperature, maxTokens };
-  let discoverRounds = 0;
-  let blindCalls = 0;
-  let firstPromptTokens: number | null = null;
-  try {
-    for (let round = 0; round < MAX_ROUNDS; round++) {
-      const exposed = exposure?.snapshot();
-      const res = await provider.client().chat.completions.create(
-        {
-          model: provider.model,
-          messages,
-          tools: exposure ? exposure.schemas() : allowed,
-          max_tokens: maxTokens,
-          ...(temperature === null ? {} : { temperature }),
-        },
-        { timeout: REQUEST_TIMEOUT_MS, maxRetries: RATE_LIMIT_RETRIES },
-      );
-      if (round === 0) firstPromptTokens = res.usage?.prompt_tokens ?? null;
-      const message = res.choices[0]?.message;
-      const calls = (message?.tool_calls ?? []).flatMap((call) => ('function' in call ? [call] : []));
-      const tools = calls.map((call) => call.function.name);
-      const text = message?.content ?? '';
-      const discovered = tools.includes(DISCOVERY_TOOL);
-      const blind = exposed ? tools.filter((name) => name !== DISCOVERY_TOOL && !exposed.has(name)) : [];
-      // A batch that already holds a real tool the request carried is the model's first move: production runs it in this round.
-      const carried = tools.filter((name) => name !== DISCOVERY_TOOL && !blind.includes(name));
-      const needsAnotherRound = carried.length === 0 && (blind.length > 0 || discovered);
-      if (discovered) discoverRounds++;
-      blindCalls += blind.length;
-      if (exposure && exposed && message && needsAnotherRound && round < MAX_ROUNDS - 1) {
-        messages.push({ role: 'assistant', content: message.content, tool_calls: calls });
-        for (const call of calls) {
-          let input: unknown = {};
-          try {
-            input = JSON.parse(call.function.arguments || '{}');
-          } catch {
-            // Malformed arguments are the model's miss; the exposure answers the call as it would in production.
-          }
-          const result = exposure.intercept(call.function.name, input, exposed);
-          // Real tools are not executed in a dry run: the first move is what is judged.
-          messages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            content: result ? (result.output ?? result.error ?? '') : '{"dry_run":"not executed"}',
-          });
-        }
-        continue;
-      }
-      // Production cuts Claude's visible output at the caller budget on the stream; this
-      // non-streaming replay cannot, so an answer past the budget scores as that cut.
-      const visible = text + calls.map((call) => call.function.name + call.function.arguments).join('');
-      const cut = provider.name === 'claude' && estimateTokens(visible) > MAX_COMPLETION_TOKENS;
-      const firstMoves = tools.filter((name) => name !== DISCOVERY_TOOL && !blind.includes(name));
-      return {
-        id: testCase.id,
-        provider: provider.name,
-        ...settings,
-        tools: firstMoves,
-        text,
-        promptTokens: firstPromptTokens,
-        finishReason: cut ? 'length' : (res.choices[0]?.finish_reason ?? null),
-        error: null,
-        discoverRounds,
-        blindCalls,
-        // A request still discovering on the last round has not chosen a first move.
-        ok: !cut && !needsAnotherRound && verdict(testCase, firstMoves, text),
-      };
+  return {
+    provider,
+    testCase,
+    allowed,
+    exposure,
+    messages: [
+      { role: 'system', content: assembleSystemPrompt(buildSystemPromptParts(ctx), exposure?.prompt) },
+      ...buildMessages(testCase),
+    ],
+    settings: {
+      model: provider.model,
+      temperature: acceptsSamplingTemperature(provider.name) ? 0 : null,
+      maxTokens: provider.name === 'claude' ? CLAUDE_MAX_OUTPUT_TOKENS : MAX_COMPLETION_TOKENS,
+    },
+    discoverRounds: 0,
+    blindCalls: 0,
+    firstPromptTokens: null,
+  };
+}
+
+function requestRound(run: CaseRun): Promise<OpenAI.ChatCompletion> {
+  const { provider, exposure, allowed, messages, settings } = run;
+  return provider.client().chat.completions.create(
+    {
+      model: provider.model,
+      messages,
+      tools: exposure ? exposure.schemas() : allowed,
+      max_tokens: settings.maxTokens,
+      ...(settings.temperature === null ? {} : { temperature: settings.temperature }),
+    },
+    { timeout: REQUEST_TIMEOUT_MS, maxRetries: RATE_LIMIT_RETRIES },
+  );
+}
+
+/** Answers a discovery round the way production would, so the next round can use what it revealed. */
+function answerDiscoveryRound(
+  run: CaseRun,
+  exposure: RunExposure,
+  exposed: ReadonlySet<string>,
+  message: OpenAI.ChatCompletionMessage,
+  calls: FunctionCall[],
+): void {
+  run.messages.push({ role: 'assistant', content: message.content, tool_calls: calls });
+  for (const call of calls) {
+    let input: unknown = {};
+    try {
+      input = JSON.parse(call.function.arguments || '{}');
+    } catch {
+      // Malformed arguments are the model's miss; the exposure answers the call as it would in production.
     }
-    throw new Error('the last round always returns');
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      id: testCase.id,
-      provider: provider.name,
-      ...settings,
-      tools: [],
-      text: '',
-      promptTokens: null,
-      finishReason: null,
-      error: message.slice(0, 160).replace(/\s+/g, ' '),
-      discoverRounds,
-      blindCalls,
-      ok: false,
-    };
+    const result = exposure.intercept(call.function.name, input, exposed);
+    // Real tools are not executed in a dry run: the first move is what is judged.
+    run.messages.push({
+      role: 'tool',
+      tool_call_id: call.id,
+      content: result ? (result.output ?? result.error ?? '') : '{"dry_run":"not executed"}',
+    });
   }
 }
 
-function report(outcomes: CaseOutcome[]): void {
-  for (const o of outcomes) {
-    const mark = o.ok ? 'ok  ' : 'FAIL';
-    const reason = o.finishReason && o.finishReason !== 'tool_calls' ? ` [${o.finishReason}]` : '';
-    const said = o.tools.length === 0 ? `"${o.text.trim().slice(0, 40)}"` : '';
-    const detail = o.error ? `ERROR ${o.error}` : `${o.tools.join(',') || said || '(no tool calls)'}${reason}`;
-    const discovery =
-      o.discoverRounds + o.blindCalls > 0 ? ` (discover rounds ${o.discoverRounds}, blind ${o.blindCalls})` : '';
-    console.log(`${mark} ${o.provider.padEnd(7)} ${o.id.padEnd(22)} ${detail}${discovery}`);
+/** The outcome of the round that settled the case (no further discovery round to follow). */
+function settledOutcome(run: CaseRun, turn: Turn): CaseOutcome {
+  const { provider, testCase, settings } = run;
+  // Production cuts Claude's visible output at the caller budget on the stream; this
+  // non-streaming replay cannot, so an answer past the budget scores as that cut.
+  const visible = turn.text + turn.calls.map((call) => call.function.name + call.function.arguments).join('');
+  const cut = provider.name === 'claude' && estimateTokens(visible) > MAX_COMPLETION_TOKENS;
+  return {
+    id: testCase.id,
+    provider: provider.name,
+    ...settings,
+    tools: turn.firstMoves,
+    text: turn.text,
+    promptTokens: run.firstPromptTokens,
+    finishReason: cut ? 'length' : turn.finishReason,
+    error: null,
+    discoverRounds: run.discoverRounds,
+    blindCalls: run.blindCalls,
+    // A request still discovering on the last round has not chosen a first move.
+    ok: !cut && !turn.needsAnotherRound && verdict(testCase, turn.firstMoves, turn.text),
+  };
+}
+
+function failedOutcome(run: CaseRun, err: unknown): CaseOutcome {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    id: run.testCase.id,
+    provider: run.provider.name,
+    ...run.settings,
+    tools: [],
+    text: '',
+    promptTokens: null,
+    finishReason: null,
+    error: message.slice(0, 160).replace(/\s+/g, ' '),
+    discoverRounds: run.discoverRounds,
+    blindCalls: run.blindCalls,
+    ok: false,
+  };
+}
+
+async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<CaseOutcome> {
+  const run = prepareRun(provider, testCase);
+  try {
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const exposed = run.exposure?.snapshot();
+      const res = await requestRound(run);
+      if (round === 0) run.firstPromptTokens = res.usage?.prompt_tokens ?? null;
+      const turn = readTurn(res, exposed);
+      if (turn.discovered) run.discoverRounds++;
+      run.blindCalls += turn.blind.length;
+      if (run.exposure && exposed && turn.message && turn.needsAnotherRound && round < MAX_ROUNDS - 1) {
+        answerDiscoveryRound(run, run.exposure, exposed, turn.message, turn.calls);
+        continue;
+      }
+      return settledOutcome(run, turn);
+    }
+    throw new Error('the last round always returns');
+  } catch (err) {
+    return failedOutcome(run, err);
   }
-  const byProvider = new Map<
-    string,
-    { pass: number; total: number; tokens: number[]; rounds: number; blind: number }
-  >();
+}
+
+/** One result line: pass mark, provider, case id and what the model chose (or why there is no choice). */
+export function formatOutcomeRow(o: CaseOutcome): string {
+  const mark = o.ok ? 'ok  ' : 'FAIL';
+  const reason = o.finishReason && o.finishReason !== 'tool_calls' ? ` [${o.finishReason}]` : '';
+  const said = o.tools.length === 0 ? `"${o.text.trim().slice(0, 40)}"` : '';
+  const detail = o.error ? `ERROR ${o.error}` : `${o.tools.join(',') || said || '(no tool calls)'}${reason}`;
+  const discovery =
+    o.discoverRounds + o.blindCalls > 0 ? ` (discover rounds ${o.discoverRounds}, blind ${o.blindCalls})` : '';
+  return `${mark} ${o.provider.padEnd(7)} ${o.id.padEnd(22)} ${detail}${discovery}`;
+}
+
+interface ProviderTotals {
+  pass: number;
+  total: number;
+  tokens: number[];
+  rounds: number;
+  blind: number;
+}
+
+export function totalsByProvider(outcomes: CaseOutcome[]): Map<string, ProviderTotals> {
+  const byProvider = new Map<string, ProviderTotals>();
   for (const o of outcomes) {
     const agg = byProvider.get(o.provider) ?? { pass: 0, total: 0, tokens: [], rounds: 0, blind: 0 };
     agg.total++;
@@ -312,8 +413,13 @@ function report(outcomes: CaseOutcome[]): void {
     agg.blind += o.blindCalls;
     byProvider.set(o.provider, agg);
   }
+  return byProvider;
+}
+
+function report(outcomes: CaseOutcome[]): void {
+  for (const o of outcomes) console.log(formatOutcomeRow(o));
   console.log('');
-  for (const [name, agg] of byProvider) {
+  for (const [name, agg] of totalsByProvider(outcomes)) {
     const avg = agg.tokens.length > 0 ? Math.round(agg.tokens.reduce((a, b) => a + b, 0) / agg.tokens.length) : null;
     console.log(
       `${name}: ${agg.pass}/${agg.total} cases matched; first-request prompt_tokens avg ${avg ?? 'n/a'}; ` +
@@ -392,4 +498,4 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+if (import.meta.main) await main();

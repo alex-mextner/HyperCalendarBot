@@ -1,19 +1,21 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildCatalogue,
+  type Catalogue,
   checkGeneratedFiles,
   currentSource,
   generatedFiles,
   renderHtml,
-  renderMarkdown,
 } from '../../../scripts/generate-intent-docs.ts';
+import { renderMarkdownFiles } from '../../../scripts/intent-doc-markdown.ts';
 import { seedFingerprint } from '../../../src/services/intent/rule-fingerprint.ts';
 import { canonicalMetadata, legacyDisposition, seedIntents } from '../../../src/services/intent/seed-catalog.ts';
 
+const allMarkdown = (c: Catalogue): string => Object.values(renderMarkdownFiles(c)).join('\n');
 const docsDirectory = fileURLToPath(new URL('../../../docs/intents/', import.meta.url));
 const generatorPath = fileURLToPath(new URL('../../../scripts/generate-intent-docs.ts', import.meta.url));
 
@@ -75,9 +77,9 @@ test('source build is deterministic and does not invent database statistics', ()
   expect(first['index.html']).not.toContain('source_message');
 });
 
-test('every rule is readable in Markdown and has an HTML anchor and its full workflow JSON', () => {
+test('every rule is readable in Markdown with its workflow JSON, and has an HTML anchor', () => {
   const c = buildCatalogue();
-  const md = renderMarkdown(c);
+  const md = allMarkdown(c);
   const html = renderHtml(c);
   for (const e of c.entries) {
     expect(md).toContain(`<a id="${e.name}"></a>`);
@@ -100,7 +102,7 @@ test('HTML and Markdown escape authored text instead of interpreting markup', ()
   c.entries[0]!.examples = ['<script>alert(1)</script>', '[click](javascript:alert(1))', '```', '| a | b |'];
   c.entries[0]!.notes = '<img src=x onerror=alert(1)>';
   const html = renderHtml(c);
-  const md = renderMarkdown(c);
+  const md = allMarkdown(c);
   expect(html).not.toContain('<script>alert(1)</script>');
   expect(html).not.toContain('<img src=x');
   expect(html).toContain('&lt;script&gt;');
@@ -142,7 +144,10 @@ test('freshness check rejects a stale or missing generated artifact', () => {
   try {
     expect(() => checkGeneratedFiles(dir)).toThrow();
     const files = generatedFiles();
-    for (const [name, data] of Object.entries(files)) writeFileSync(join(dir, name), data);
+    for (const [name, data] of Object.entries(files)) {
+      mkdirSync(dirname(join(dir, name)), { recursive: true });
+      writeFileSync(join(dir, name), data);
+    }
     expect(() => checkGeneratedFiles(dir)).not.toThrow();
     writeFileSync(join(dir, 'README.md'), `${files['README.md']}stale`);
     expect(() => checkGeneratedFiles(dir)).toThrow('stale');
@@ -163,6 +168,9 @@ test('every relative link in the docs resolves to a file in the repository', () 
     join(docsDirectory, 'index.html'),
     join(docsDirectory, 'engine.md'),
     resolve(docsDirectory, '../intent-catalogue.md'),
+    ...readdirSync(join(docsDirectory, 'rules'))
+      .filter((name) => name.endsWith('.md'))
+      .map((name) => join(docsDirectory, 'rules', name)),
   ];
   for (const file of files)
     for (const target of relativeLinks(file))

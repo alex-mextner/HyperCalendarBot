@@ -370,6 +370,26 @@ describe('formatWeekAgenda', () => {
     expect(lunchLine).toContain('12:00');
   });
 
+  test('birthday and recurring events get 🎁 + age and 🔁 markers in the week list', () => {
+    const events = [
+      makeOccurrence('Anna', '2026-03-09T00:00:00Z', null, {
+        event_type: 'birthday',
+        birth_year: 1990,
+        recurrence_rule: 'FREQ=YEARLY',
+        all_day: 1,
+      }),
+      makeOccurrence('Standup', '2026-03-09T09:00:00Z', null, { recurrence_rule: 'FREQ=DAILY' }),
+      makeOccurrence('Instance', '2026-03-09T10:00:00Z', null, { parent_event_id: 5 }),
+    ];
+    const result = formatWeekAgenda(events, '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'en');
+    const lines = result.split('\n');
+    const birthdayLine = lines.find((l) => l.includes('Anna'));
+    expect(birthdayLine).toContain('🎁 Anna');
+    expect(birthdayLine).not.toContain('🔁');
+    expect(lines.find((l) => l.includes('Standup'))).toContain('Standup 🔁');
+    expect(lines.find((l) => l.includes('Instance'))).toContain('Instance 🔁');
+  });
+
   test('renders single event day with singular "событие" in Russian', () => {
     const events = [makeOccurrence('Обед', '2026-03-09T12:00:00Z', '2026-03-09T13:00:00Z')];
     const result = formatWeekAgenda(events, '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'ru');

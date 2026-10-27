@@ -39,6 +39,24 @@ export interface BotTasksQueueDeps {
   onSessionKeepalive?: () => Promise<void>;
 }
 
+/** The configured hook for each cron job type; undefined when the deployment does not enable that task. */
+function botTaskHandlers(deps: BotTasksQueueDeps): Record<BotTaskJobType, (() => void | Promise<void>) | undefined> {
+  return {
+    'cron-secretary-expiry': deps.onSecretaryExpiry,
+    'cron-sharing-cleanup': deps.onSharingCleanup,
+    'cron-proposal-expiry': deps.onProposalExpiry,
+    'cron-edit-proposal-expiry': deps.onEditProposalExpiry,
+    'cron-session-cleanup': deps.onSessionCleanup,
+    'cron-birthday-sync': deps.onBirthdaySync,
+    'cron-chat-history-cleanup': deps.onChatHistoryCleanup,
+    'cron-sqlite-backup': deps.onSqliteBackup,
+    'cron-recurring-reminders': deps.onRecurringReminders,
+    'cron-action-log-cleanup': deps.onActionLogCleanup,
+    'cron-ai-usage-cleanup': deps.onAiUsageCleanup,
+    'cron-session-keepalive': deps.onSessionKeepalive,
+  };
+}
+
 export function createBotTasksQueue(deps: BotTasksQueueDeps) {
   const connection = parseRedisUrl(deps.redisUrl);
 
@@ -52,57 +70,13 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
     },
   });
 
+  const handlers = botTaskHandlers(deps);
   const worker = new Worker<BotTaskJobData>(
     'bot-tasks',
     async (job) => {
-      if (job.data.type === 'cron-secretary-expiry') {
-        if (deps.onSecretaryExpiry) await deps.onSecretaryExpiry();
-        return;
-      }
-      if (job.data.type === 'cron-sharing-cleanup') {
-        deps.onSharingCleanup?.();
-        return;
-      }
-      if (job.data.type === 'cron-proposal-expiry') {
-        if (deps.onProposalExpiry) await deps.onProposalExpiry();
-        return;
-      }
-      if (job.data.type === 'cron-edit-proposal-expiry') {
-        if (deps.onEditProposalExpiry) await deps.onEditProposalExpiry();
-        return;
-      }
-      if (job.data.type === 'cron-session-cleanup') {
-        deps.onSessionCleanup?.();
-        return;
-      }
-      if (job.data.type === 'cron-birthday-sync') {
-        if (deps.onBirthdaySync) await deps.onBirthdaySync();
-        return;
-      }
-      if (job.data.type === 'cron-chat-history-cleanup') {
-        deps.onChatHistoryCleanup?.();
-        return;
-      }
-      if (job.data.type === 'cron-sqlite-backup') {
-        if (deps.onSqliteBackup) await deps.onSqliteBackup();
-        return;
-      }
-      if (job.data.type === 'cron-recurring-reminders') {
-        deps.onRecurringReminders?.();
-        return;
-      }
-      if (job.data.type === 'cron-action-log-cleanup') {
-        deps.onActionLogCleanup?.();
-        return;
-      }
-      if (job.data.type === 'cron-ai-usage-cleanup') {
-        deps.onAiUsageCleanup?.();
-        return;
-      }
-      if (job.data.type === 'cron-session-keepalive') {
-        if (deps.onSessionKeepalive) await deps.onSessionKeepalive();
-        return;
-      }
+      const { type } = job.data;
+      // Own keys only: a stale job named like an Object.prototype member must stay a no-op.
+      await (Object.hasOwn(handlers, type) ? handlers[type] : undefined)?.();
     },
     { connection, concurrency: 1 },
   );

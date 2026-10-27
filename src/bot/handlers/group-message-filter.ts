@@ -81,6 +81,19 @@ const NORMALIZED_KEYWORDS = CALENDAR_KEYWORDS.map((kw) => {
   return { normalized: parts.map(phoneticNormalize) };
 });
 
+/** True when `inputNorm` is within the allowed edit distance of the normalized keyword word. */
+function wordFuzzyEquals(inputNorm: string, kwNorm: string): boolean {
+  return levenshtein(inputNorm, kwNorm) <= maxEditDistance(kwNorm.length);
+}
+
+/** Multi-word keyword (e.g. "во сколько") — all parts must appear in sequence. */
+function matchesKeywordSequence(normalizedInput: string[], kwParts: string[]): boolean {
+  for (let i = 0; i <= normalizedInput.length - kwParts.length; i++) {
+    if (kwParts.every((kwNorm, j) => wordFuzzyEquals(normalizedInput[i + j]!, kwNorm))) return true;
+  }
+  return false;
+}
+
 /** Check if text contains any calendar keyword (fuzzy phonetic match). */
 export function matchesKeywordFuzzy(text: string): boolean {
   const inputWords = text
@@ -89,31 +102,13 @@ export function matchesKeywordFuzzy(text: string): boolean {
     .filter((w) => w.length > 0);
   const normalizedInput = inputWords.map(phoneticNormalize);
 
-  for (const kw of NORMALIZED_KEYWORDS) {
+  return NORMALIZED_KEYWORDS.some((kw) => {
     if (kw.normalized.length === 1) {
       const kwNorm = kw.normalized[0]!;
-      for (const inputNorm of normalizedInput) {
-        const maxDist = maxEditDistance(kwNorm.length);
-        if (levenshtein(inputNorm, kwNorm) <= maxDist) return true;
-      }
-    } else {
-      // Multi-word keyword (e.g. "во сколько") — all parts must appear in sequence
-      for (let i = 0; i <= normalizedInput.length - kw.normalized.length; i++) {
-        let allMatch = true;
-        for (let j = 0; j < kw.normalized.length; j++) {
-          const inputNorm = normalizedInput[i + j]!;
-          const kwNorm = kw.normalized[j]!;
-          const maxDist = maxEditDistance(kwNorm.length);
-          if (levenshtein(inputNorm, kwNorm) > maxDist) {
-            allMatch = false;
-            break;
-          }
-        }
-        if (allMatch) return true;
-      }
+      return normalizedInput.some((inputNorm) => wordFuzzyEquals(inputNorm, kwNorm));
     }
-  }
-  return false;
+    return matchesKeywordSequence(normalizedInput, kw.normalized);
+  });
 }
 
 const ADDRESS_TARGETS = ['календарь', 'calendar'];

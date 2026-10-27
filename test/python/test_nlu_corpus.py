@@ -728,12 +728,14 @@ class ConnectWizardExportTests(unittest.TestCase):
         self.assertEqual(MODULE.quarantined_indices(rows), {0, 1, 2, 3})
 
     def test_every_credential_prompt_of_the_wizard_opens_the_window_in_both_languages(self):
-        constants = (ROOT / 'src' / 'config' / 'constants.ts').read_text(encoding='utf-8')
-        blocks = re.findall(r'^    connectTelegram: \{\n(.*?)^    \},$', constants, re.M | re.S)
+        blocks = []
+        for lang in ('en', 'ru'):
+            module = (ROOT / 'src' / 'config' / 'constants' / 'messages' / lang / 'connect-telegram.ts').read_text(encoding='utf-8')
+            blocks += re.findall(r'^  connectTelegram: \{\n(.*?)^  \},$', module, re.M | re.S)
         self.assertEqual(len(blocks), 2, 'expected the English and Russian connectTelegram strings')
         for block in blocks:
             for prompt in ('enterPhone', 'invalidPhone', 'codeSent', 'invalidCode', 'enter2fa', 'invalid2fa'):
-                text = re.search(r"^      " + prompt + r":\s*'((?:[^'\\]|\\.)*)'", block, re.M)
+                text = re.search(r"^    " + prompt + r":\s*'((?:[^'\\]|\\.)*)'", block, re.M)
                 self.assertIsNotNone(text, f'{prompt} is no longer a plain string; update this test')
                 self.assertTrue(MODULE.opens_auth_window(text[1]), f'the {prompt} prompt must open the auth window')
 

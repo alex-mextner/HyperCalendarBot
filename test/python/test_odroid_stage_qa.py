@@ -80,6 +80,12 @@ def rewrite(text, replacements):
     return text
 
 
+def close_stdin(process):
+    """Close the pipe and drop the handle: Python 3.12's Popen.communicate() flushes a closed stdin and raises ValueError."""
+    process.stdin.close()
+    process.stdin = None
+
+
 def wait_for(predicate, what, seconds=30):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -308,7 +314,7 @@ class StageWorld(unittest.TestCase):
             process.stdin.write("DONE\n")
         process.stdin.flush()
         if done or token is None:
-            process.stdin.close()
+            close_stdin(process)
         return process
 
     def run_entry(self, sha=SHA, token=FAKE_TOKEN, **kwargs):
@@ -411,7 +417,7 @@ class RunOutcomes(StageWorld):
         self.assertFalse(lock_is_free(self.stage_lock))
         self.assertFalse(lock_is_free(self.host_lock))
         process.stdin.write("DONE\n")
-        process.stdin.close()
+        close_stdin(process)
         result = self.finish(process)
         self.assertOutcome(result, 0, "passed")
         self.assertTornDown()
@@ -486,7 +492,7 @@ class RunOutcomes(StageWorld):
                 process = self.popen(**kwargs)
                 self.ready(process)
                 if kwargs:
-                    process.stdin.close()
+                    close_stdin(process)
                 self.assertOutcome(self.finish(process), 0, "passed")
                 self.assertTornDown()
 
@@ -499,7 +505,7 @@ class RunOutcomes(StageWorld):
         self.assertIsNone(process.poll())
         self.assertFalse(self.has_event("compose-down"))
         process.stdin.write("DONE\n")
-        process.stdin.close()
+        close_stdin(process)
         self.assertOutcome(self.finish(process), 0, "passed")
 
     def test_unhealthy_stage_is_a_failure_with_evidence_and_teardown(self):
@@ -814,7 +820,7 @@ class Hardening(StageWorld):
         out = process.stdout.read()
         process.wait(timeout=60)
         process.stdout.close()
-        process.stdin.close()
+        close_stdin(process)
         self.assertRegex(out.strip().splitlines()[-1], r"^STAGE_QA_RESULT status=failed sha=" + SHA)
         self.assertTrue(self.has_event("evidence release-logs"), self.events())
         self.assertTornDown()

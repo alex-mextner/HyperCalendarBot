@@ -120,11 +120,63 @@ export class PlaywrightPool {
     if (this.dead) throw new Error('PlaywrightPool is permanently disabled after repeated init failures');
   }
 
+  /** Creates a page and leases it, discarding it if the pool stopped or switched browsers meanwhile. */
+  private async leaseNewPage(): Promise<Page> {
+    const { page, browser } = await this.createPage();
+    try {
+      this.assertRunning();
+      if (this.browser !== browser) throw new Error('PlaywrightPool browser changed during page creation');
+    } catch (error) {
+      await page
+        .context()
+        .close()
+        .catch(() => {});
+      this.pageUseCount.delete(page);
+      this.pageCreatedAt.delete(page);
+      throw error;
+    }
+    this.busyPages.add(page);
+    return page;
+  }
+
+  /**
+   * Decides whether a page-creation failure was a lost browser generation worth retrying.
+   * Throws when the recovery budget or deadline is exhausted; ordinary page errors are never retried.
+   */
+  private shouldRetryAfterGenerationLoss(
+    requestedBrowser: Browser | null,
+    error: unknown,
+    deadline: number,
+    recoveries: { count: number },
+  ): boolean {
+    if (!requestedBrowser || (this.browser === requestedBrowser && requestedBrowser.isConnected())) return false;
+    if (++recoveries.count > this.maxReinitAttempts) {
+      throw new Error('acquire failed: browser recovery limit reached', { cause: error });
+    }
+    if (this.browser === requestedBrowser) this.handleBrowserDisconnect(requestedBrowser);
+    if (performance.now() >= deadline)
+      throw new Error('acquire timeout: browser recovery did not complete', { cause: error });
+    return true;
+  }
+
+  /** Leases a freshly created page, or returns undefined when the browser generation was lost and acquire should retry. */
+  private async acquireNewPage(deadline: number, recoveries: { count: number }): Promise<Page | undefined> {
+    const requestedBrowser = this.browser;
+    try {
+      return await this.leaseNewPage();
+    } catch (error) {
+      this.assertRunning();
+      // Retry observed browser-generation loss, never ordinary page errors.
+      if (this.shouldRetryAfterGenerationLoss(requestedBrowser, error, deadline, recoveries)) return undefined;
+      throw error;
+    }
+  }
+
   async acquire(timeoutMs = 10_000): Promise<Page> {
     this.assertRunning();
 
     const deadline = performance.now() + timeoutMs;
-    let generationRecoveries = 0;
+    const recoveries = { count: 0 };
 
     while (true) {
       if (this.browser && !this.browser.isConnected()) this.handleBrowserDisconnect(this.browser);
@@ -135,46 +187,18 @@ export class PlaywrightPool {
       this.assertRunning();
 
       // Return a free page if available
-      if (this.freePages.length > 0) {
-        const page = this.freePages.pop()!;
-        this.busyPages.add(page);
-        return page;
+      const freePage = this.freePages.pop();
+      if (freePage) {
+        this.busyPages.add(freePage);
+        return freePage;
       }
 
       // Create a new page if under limit
       const totalPages = this.freePages.length + this.busyPages.size;
       if (totalPages < this.maxPages) {
-        const requestedBrowser = this.browser;
-        try {
-          const { page, browser } = await this.createPage();
-          try {
-            this.assertRunning();
-            if (this.browser !== browser) throw new Error('PlaywrightPool browser changed during page creation');
-          } catch (error) {
-            await page
-              .context()
-              .close()
-              .catch(() => {});
-            this.pageUseCount.delete(page);
-            this.pageCreatedAt.delete(page);
-            throw error;
-          }
-          this.busyPages.add(page);
-          return page;
-        } catch (error) {
-          this.assertRunning();
-          // Retry observed browser-generation loss, never ordinary page errors.
-          if (requestedBrowser && (this.browser !== requestedBrowser || !requestedBrowser.isConnected())) {
-            if (++generationRecoveries > this.maxReinitAttempts) {
-              throw new Error('acquire failed: browser recovery limit reached', { cause: error });
-            }
-            if (this.browser === requestedBrowser) this.handleBrowserDisconnect(requestedBrowser);
-            if (performance.now() >= deadline)
-              throw new Error('acquire timeout: browser recovery did not complete', { cause: error });
-            continue;
-          }
-          throw error;
-        }
+        const page = await this.acquireNewPage(deadline, recoveries);
+        if (page) return page;
+        continue;
       }
 
       // Wait or timeout

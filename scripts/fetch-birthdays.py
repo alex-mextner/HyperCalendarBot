@@ -19,9 +19,40 @@ API_HASH = os.environ["MTPROTO_API_HASH"]
 FLOOD_WAIT_MAX = 30
 
 
+def birthday_entry(user) -> dict | None:
+    """None = checked, no visible birthday; otherwise day/month (+ year unless the user hid it)."""
+    bd = getattr(user, 'birthday', None)
+    if bd is None:
+        return None
+    entry: dict = {"day": bd.day, "month": bd.month}
+    if getattr(bd, 'year', None):
+        entry["year"] = bd.year
+    return entry
+
+
+async def check_user_birthday(app, uid: int, results: dict) -> None:
+    """Record results[str(uid)]; leave it absent when the lookup failed (the caller retries it later).
+
+    One retry after a FloodWait within the limit; a longer FloodWait is a hard failure (exit 1).
+    """
+    from pyrogram.errors import FloodWait
+
+    for _ in range(2):
+        try:
+            results[str(uid)] = birthday_entry(await app.get_users(uid))
+            return
+        except FloodWait as e:
+            if e.value > FLOOD_WAIT_MAX:
+                print(f"FloodWait {e.value}s exceeds limit", file=sys.stderr)
+                sys.exit(1)
+            await asyncio.sleep(e.value)
+        except Exception as e:
+            print(f"skip uid={uid}: {e}", file=sys.stderr)
+            return  # omit unresolvable users
+
+
 async def fetch(user_ids: list[int]) -> dict:
     from pyrogram import Client
-    from pyrogram.errors import FloodWait
     from mtproto_lock import session_lock
 
     results = {}
@@ -30,26 +61,7 @@ async def fetch(user_ids: list[int]) -> dict:
         await start_service_session(app)
         try:
             for uid in user_ids:
-                for attempt in range(2):
-                    try:
-                        user = await app.get_users(uid)
-                        bd = getattr(user, 'birthday', None)
-                        if bd is None:
-                            results[str(uid)] = None
-                        else:
-                            entry: dict = {"day": bd.day, "month": bd.month}
-                            if getattr(bd, 'year', None):
-                                entry["year"] = bd.year
-                            results[str(uid)] = entry
-                        break
-                    except FloodWait as e:
-                        if e.value > FLOOD_WAIT_MAX:
-                            print(f"FloodWait {e.value}s exceeds limit", file=sys.stderr)
-                            sys.exit(1)
-                        await asyncio.sleep(e.value)
-                    except Exception as e:
-                        print(f"skip uid={uid}: {e}", file=sys.stderr)
-                        break  # omit unresolvable users
+                await check_user_birthday(app, uid, results)
         finally:
             await app.stop()
     return results

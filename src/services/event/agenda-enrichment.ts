@@ -1,5 +1,5 @@
 // Explicit presentation boundary: copies authorized events and never alters calendar visibility.
-import type { AgendaRepository, AgendaViewer } from '../../database/repositories/agenda.repository.ts';
+import type { AgendaRepository, AgendaRoster, AgendaViewer } from '../../database/repositories/agenda.repository.ts';
 import type { CalendarEvent, EventOccurrence, InvitationStatus } from '../../database/types.ts';
 
 const symbols: Record<InvitationStatus, string> = {
@@ -29,6 +29,54 @@ const russian: Record<InvitationStatus, string> = {
 function safeName(value: string | null | undefined): string | undefined {
   return value?.replace(/[\p{Cc}\p{Cf}]/gu, '').trim() || undefined;
 }
+type StatusLabeler = (value: InvitationStatus) => string;
+
+function groupStatus(roster: AgendaRoster, ru: boolean, status: StatusLabeler): string {
+  const counts = new Map<InvitationStatus, number>();
+  for (const row of roster.rows) counts.set(row.status, (counts.get(row.status) ?? 0) + 1);
+  let invitationStatus = `${ru ? 'Участники' : 'Participants'}: ${roster.rows.length}`;
+  if (counts.size)
+    invitationStatus += ` (${[...counts].map(([state, count]) => `${status(state)} ${count}`).join(', ')})`;
+  return invitationStatus;
+}
+
+function ownerStatus(roster: AgendaRoster, ru: boolean, status: StatusLabeler): string {
+  if (!roster.rows.length) return ru ? 'Нет приглашений' : 'No invitations';
+  return roster.rows
+    .map(
+      (row) => `${safeName(row.name) ?? safeName(row.username) ?? (ru ? 'Гость' : 'Invitee')}: ${status(row.status)}`,
+    )
+    .join('; ');
+}
+
+/** The viewer's own row; undefined when the viewer has none, so the event carries no invitation status. */
+function inviteeStatus(
+  roster: AgendaRoster,
+  viewer: AgendaViewer,
+  ru: boolean,
+  status: StatusLabeler,
+): string | undefined {
+  const row = roster.rows.find((row) => row.user_id === viewer.userId);
+  if (!row) return undefined;
+  const incomingLabel = row.invitation
+    ? ru
+      ? 'Ваше приглашение'
+      : 'Your invitation'
+    : ru
+      ? 'Ваше участие'
+      : 'Your participation';
+  return `${incomingLabel}: ${status(row.status)}; ${ru ? 'Организатор' : 'Organizer'}: ${safeName(row.organizer) ?? (ru ? 'Организатор' : 'Organizer')}`;
+}
+
+function invitationStatusFor(roster: AgendaRoster, viewer: AgendaViewer): string | undefined {
+  const ru = viewer.language === 'ru';
+  const labels = ru ? russian : english;
+  const status: StatusLabeler = (value) => `${symbols[value]} ${labels[value]}`;
+  if (roster.group) return groupStatus(roster, ru, status);
+  if (roster.owner) return ownerStatus(roster, ru, status);
+  return inviteeStatus(roster, viewer, ru, status);
+}
+
 export function enrichAgendaEvents(
   events: CalendarEvent[],
   viewer: AgendaViewer,
@@ -39,40 +87,8 @@ export function enrichAgendaEvents(
     const copy = { ...event, displayMetadata: undefined };
     const roster = rosters?.get(event.id);
     if (!roster) return copy;
-    const ru = viewer.language === 'ru';
-    const labels = ru ? russian : english;
-    const status = (value: InvitationStatus) => `${symbols[value]} ${labels[value]}`;
-    let invitationStatus: string;
-    if (roster.group) {
-      const counts = new Map<InvitationStatus, number>();
-      for (const row of roster.rows) counts.set(row.status, (counts.get(row.status) ?? 0) + 1);
-      invitationStatus = `${ru ? 'Участники' : 'Participants'}: ${roster.rows.length}`;
-      if (counts.size)
-        invitationStatus += ` (${[...counts].map(([state, count]) => `${status(state)} ${count}`).join(', ')})`;
-    } else if (roster.owner) {
-      invitationStatus = roster.rows.length
-        ? roster.rows
-            .map(
-              (row) =>
-                `${safeName(row.name) ?? safeName(row.username) ?? (ru ? 'Гость' : 'Invitee')}: ${status(row.status)}`,
-            )
-            .join('; ')
-        : ru
-          ? 'Нет приглашений'
-          : 'No invitations';
-    } else {
-      const row = roster.rows.find((row) => row.user_id === viewer.userId);
-      if (!row) return copy;
-      const incomingLabel = row.invitation
-        ? ru
-          ? 'Ваше приглашение'
-          : 'Your invitation'
-        : ru
-          ? 'Ваше участие'
-          : 'Your participation';
-      invitationStatus = `${incomingLabel}: ${status(row.status)}; ${ru ? 'Организатор' : 'Organizer'}: ${safeName(row.organizer) ?? (ru ? 'Организатор' : 'Organizer')}`;
-    }
-    return { ...copy, displayMetadata: { invitationStatus } };
+    const invitationStatus = invitationStatusFor(roster, viewer);
+    return invitationStatus === undefined ? copy : { ...copy, displayMetadata: { invitationStatus } };
   });
 }
 export function enrichAgenda(

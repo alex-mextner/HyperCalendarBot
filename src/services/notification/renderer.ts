@@ -1,4 +1,4 @@
-import type { Lang } from '../../config/constants.ts';
+import type { Lang, Messages } from '../../config/constants.ts';
 import { t } from '../../config/constants.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import { formatLocationHtml } from '../location/format-location.ts';
@@ -214,35 +214,13 @@ export class NotificationRenderer {
     const formattedForecasts = items.map((item) =>
       item.forecast ? formatEventWeatherLine(langKey, item.forecast) : null,
     );
-    const allHaveForecast = formattedForecasts.every(Boolean);
-    const uniqueNonNull = new Set(formattedForecasts.filter(Boolean));
-    const sharedWeather = allHaveForecast && uniqueNonNull.size === 1 ? [...uniqueNonNull][0]! : null;
+    const sharedWeather = sharedForecastLine(formattedForecasts);
 
     lines.push('');
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i]!;
-      const localized = localizeInterval(lang, item.intervalLabel);
-      let intervalText: string;
-      if (item.intervalLabel === 'at start') {
-        intervalText = l.startingNow;
-      } else if (item.isAllDay) {
-        intervalText = localized;
-      } else {
-        intervalText = `${l.inLabel} ${localized}`;
-      }
-      const timeInfo = item.isAllDay ? l.allDay : item.startTime;
-      const safeTitle = escapeHtml(item.title);
-      let line = `• ${safeTitle} — ${timeInfo} (${intervalText})`;
-      const place = locationLink(item);
-      if (place) {
-        line += `\n  📍 ${place}`;
-      }
+    items.forEach((item, i) => {
       // Per-item weather only when forecasts differ across items
-      if (!sharedWeather && formattedForecasts[i]) {
-        line += `\n  ${formattedForecasts[i]}`;
-      }
-      lines.push(line);
-    }
+      lines.push(batchItemLine(lang, l, item, sharedWeather ? null : (formattedForecasts[i] ?? null)));
+    });
     if (sharedWeather) {
       lines.push('', sharedWeather);
     }
@@ -303,4 +281,38 @@ export class NotificationRenderer {
       botTip: opts?.botTip,
     });
   }
+}
+
+/** The forecast line when every item has one and they are all identical; otherwise null. */
+function sharedForecastLine(formattedForecasts: (string | null)[]): string | null {
+  const allHaveForecast = formattedForecasts.every(Boolean);
+  const uniqueNonNull = new Set(formattedForecasts.filter(Boolean));
+  return allHaveForecast && uniqueNonNull.size === 1 ? [...uniqueNonNull][0]! : null;
+}
+
+function batchItemLine(
+  lang: string,
+  l: Messages['notifications'],
+  item: BatchReminderItem,
+  ownWeather: string | null,
+): string {
+  const localized = localizeInterval(lang, item.intervalLabel);
+  let intervalText: string;
+  if (item.intervalLabel === 'at start') {
+    intervalText = l.startingNow;
+  } else if (item.isAllDay) {
+    intervalText = localized;
+  } else {
+    intervalText = `${l.inLabel} ${localized}`;
+  }
+  const timeInfo = item.isAllDay ? l.allDay : item.startTime;
+  let line = `• ${escapeHtml(item.title)} — ${timeInfo} (${intervalText})`;
+  const place = locationLink(item);
+  if (place) {
+    line += `\n  📍 ${place}`;
+  }
+  if (ownWeather) {
+    line += `\n  ${ownWeather}`;
+  }
+  return line;
 }

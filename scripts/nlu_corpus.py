@@ -31,7 +31,7 @@ import re
 import sqlite3
 import stat
 import tempfile
-from typing import Literal, TypedDict
+from typing import Literal, NamedTuple, TypedDict
 
 SCHEMA_VERSION = 2
 SESSION_GAP_SECONDS = 1800  # single source of truth for the auth-quarantine window, session boundary and stale-attachment cutoff
@@ -43,7 +43,7 @@ QUARANTINED_AUTH_MARKER = '[QUARANTINED_AUTH]'  # single source of truth: redact
 CONNECT_WIZARD_REDACTION = '[redacted: connect wizard input]'
 
 # The last alternatives match the connect wizard's phone and code prompts that name no credential term
-# (connectTelegram in src/config/constants.ts; a test checks every credential prompt in both languages).
+# (connectTelegram in src/config/constants/messages/{en,ru}/connect-telegram.ts; a test checks every credential prompt in both languages).
 AUTH = re.compile(r'connect_telegram|one.?time.?code|2fa|otp|two.factor|password|парол|код.{0,35}(?:вход|telegram|телеграм)|(?:telegram|телеграм).{0,35}код|session_string|api[_ -]?key|Bearer\s+[A-Za-z0-9]|verification code|invalid code|неверный код|international format|международн\w* формат', re.I)
 COMMANDS = {'add':'event.create','edit':'event.update','delete':'event.delete','search':'event.search', 'today':'calendar.read','tomorrow':'calendar.read','week':'calendar.read','month':'calendar.read', 'free':'availability.read','invite':'invitation.send','invitations':'invitation.status', 'contacts':'contacts.manage','places':'places.manage','settings':'settings.manage', 'help':'help','start':'onboarding','log':'history.read','history':'history.read', 'cancel':'dialogue.cancel','import':'calendar.import','holidays':'calendar.holidays','birthdays':'calendar.birthdays','ping':'diagnostics','connect_google':'integration.manage','disconnect_google':'integration.manage','connect_telegram':'auth.sensitive'}
 RULES = [
@@ -235,6 +235,16 @@ def place_rows(rows: list[dict]) -> tuple[list[dict], int]:
     placed.sort(key=lambda row:(row['scope'], row['at'],row.get('id',0)))
     return placed, unplaced
 
+def _export_safe_row(row: dict, key: bytes, lexicon: dict[str, str]) -> dict:
+    """The structure fields of a row with the export shape, and its free text redacted like candidate text."""
+    safe = {field: row[field] for field in EXPORT_STRUCTURE_FIELDS if field in row}
+    for field in EXPORT_TEXT_FIELDS:
+        if isinstance(row.get(field), str):
+            safe[field] = redact_candidate(row[field], key, lexicon)
+        elif field in row:
+            safe[field] = None
+    return safe
+
 def raw_export(rows: list[dict], key: bytes, lexicon: dict[str, str]) -> tuple[list[dict], dict[str, int]]:
     """The rows selected.private.json may hold, and how many were kept out (GH-721).
 
@@ -253,13 +263,7 @@ def raw_export(rows: list[dict], key: bytes, lexicon: dict[str, str]) -> tuple[l
         if not _has_export_shape(row):
             misshapen += 1
             continue
-        safe = {field: row[field] for field in EXPORT_STRUCTURE_FIELDS if field in row}
-        for field in EXPORT_TEXT_FIELDS:
-            if isinstance(row.get(field), str):
-                safe[field] = redact_candidate(row[field], key, lexicon)
-            elif field in row:
-                safe[field] = None
-        exported.append(safe)
+        exported.append(_export_safe_row(row, key, lexicon))
     return exported, {'raw_export_quarantined_rows': len(blocked), 'raw_export_omitted_rows': unplaced + misshapen}
 
 GOLD_REVIEW_DIMENSIONS = ('privacy', 'intent', 'slots', 'expected_outcome')
@@ -301,6 +305,37 @@ class CandidateRecord(TypedDict, total=False):
     historical_state: str
     observed_responses: list[object]
 
+def _is_non_empty_str(value: object) -> bool:
+    return isinstance(value, str) and bool(value)
+
+def _validate_gold_intent(intent: object) -> None:
+    if not _is_non_empty_str(intent):
+        raise ValueError('gold record intent must be a non-empty string, never inferred or left unset')
+    if not SINGLE_INTENT_RE.fullmatch(intent):
+        raise ValueError(f'gold record intent {intent!r} is not a single supported intent label; a compound/multi-operation request must be rejected as unsupported in this bounded scope, never squeezed into one label')
+
+def _validate_gold_slots(slots: object) -> None:
+    if not isinstance(slots, dict):
+        raise ValueError('gold record slots must be a mapping')
+    for slot_key, slot_value in slots.items():
+        if not isinstance(slot_key, str) or not isinstance(slot_value, str):
+            raise ValueError(f'gold record slots must be a str-to-str mapping, got key {slot_key!r} -> value {slot_value!r}')
+
+def _validate_gold_review(dimension: str, review: object) -> None:
+    if not isinstance(review, dict) or not _is_non_empty_str(review.get('reviewer_id')):
+        raise ValueError(f'gold record {dimension} review needs a non-empty reviewer_id')
+    if review.get('status') not in GOLD_REVIEW_STATUSES:
+        raise ValueError(f'gold record {dimension} review has an unknown status: {review.get("status")!r}')
+
+def _validate_gold_reviews(reviews: object) -> None:
+    if not isinstance(reviews, dict):
+        raise ValueError('gold record reviews must be a mapping')
+    missing_dimensions = set(GOLD_REVIEW_DIMENSIONS) - reviews.keys()
+    if missing_dimensions:
+        raise ValueError(f'gold record missing independent review dimensions: {sorted(missing_dimensions)}')
+    for dimension in GOLD_REVIEW_DIMENSIONS:
+        _validate_gold_review(dimension, reviews[dimension])
+
 def validate_gold_record(record: dict) -> None:
     """Reject anything but an independently adjudicated, corpus-bound gold row.
 
@@ -311,35 +346,50 @@ def validate_gold_record(record: dict) -> None:
     missing = GOLD_REQUIRED_FIELDS - record.keys()
     if missing:
         raise ValueError(f'gold record missing required fields: {sorted(missing)}')
-    if not isinstance(record.get('source_ref'), str) or not record['source_ref']:
+    if not _is_non_empty_str(record.get('source_ref')):
         raise ValueError('gold record source_ref must be a non-empty string')
     corpus_sha256 = record.get('corpus_candidate_sha256')
     if not isinstance(corpus_sha256, str) or not re.fullmatch(r'[0-9a-f]{64}', corpus_sha256):
         raise ValueError('gold record corpus_candidate_sha256 must be a 64-character hex sha256 digest')
-    if not isinstance(record.get('intent'), str) or not record['intent']:
-        raise ValueError('gold record intent must be a non-empty string, never inferred or left unset')
-    if not SINGLE_INTENT_RE.fullmatch(record['intent']):
-        raise ValueError(f'gold record intent {record["intent"]!r} is not a single supported intent label; a compound/multi-operation request must be rejected as unsupported in this bounded scope, never squeezed into one label')
-    slots = record.get('slots')
-    if not isinstance(slots, dict):
-        raise ValueError('gold record slots must be a mapping')
-    for slot_key, slot_value in slots.items():
-        if not isinstance(slot_key, str) or not isinstance(slot_value, str):
-            raise ValueError(f'gold record slots must be a str-to-str mapping, got key {slot_key!r} -> value {slot_value!r}')
-    if not isinstance(record.get('expected_outcome'), str) or not record['expected_outcome']:
+    _validate_gold_intent(record.get('intent'))
+    _validate_gold_slots(record.get('slots'))
+    if not _is_non_empty_str(record.get('expected_outcome')):
         raise ValueError('gold record expected_outcome must be a non-empty string, never inferred from bot prose')
-    reviews = record.get('reviews')
-    if not isinstance(reviews, dict):
-        raise ValueError('gold record reviews must be a mapping')
-    missing_dimensions = set(GOLD_REVIEW_DIMENSIONS) - reviews.keys()
-    if missing_dimensions:
-        raise ValueError(f'gold record missing independent review dimensions: {sorted(missing_dimensions)}')
-    for dimension in GOLD_REVIEW_DIMENSIONS:
-        review = reviews[dimension]
-        if not isinstance(review, dict) or not isinstance(review.get('reviewer_id'), str) or not review['reviewer_id']:
-            raise ValueError(f'gold record {dimension} review needs a non-empty reviewer_id')
-        if review.get('status') not in GOLD_REVIEW_STATUSES:
-            raise ValueError(f'gold record {dimension} review has an unknown status: {review.get("status")!r}')
+    _validate_gold_reviews(record.get('reviews'))
+
+# The apply_gold_import report keys, in report order; each imported record lands in exactly one.
+GOLD_IMPORT_COUNTERS = ('gold_fully_approved', 'gold_partial_or_rejected_recorded', 'gold_rejected_unknown_source', 'gold_rejected_corpus_mismatch', 'gold_rejected_source_quarantined')
+
+def _is_quarantined_candidate(candidate: dict) -> bool:
+    return candidate.get('privacy_status') == 'quarantined' or candidate.get('text_candidate') == QUARANTINED_AUTH_MARKER
+
+def _reject_quarantined_source(candidate: dict) -> None:
+    candidate['label_status'] = 'gold_rejected_source_quarantined'
+    candidate['gold_adjudication'] = None
+    candidate['gold'] = None
+    candidate['train_eligible'] = False
+
+def _bind_gold(candidate: dict, record: dict) -> bool:
+    """Record the adjudication on the candidate; True when every review dimension is approved."""
+    all_approved = all(record['reviews'][dimension]['status'] == 'approved' for dimension in GOLD_REVIEW_DIMENSIONS)
+    adjudication = {'intent': record['intent'], 'slots': record['slots'], 'expected_outcome': record['expected_outcome'], 'reviews': record['reviews']}
+    candidate['gold_adjudication'] = adjudication
+    candidate['gold'] = adjudication if all_approved else None
+    candidate['label_status'] = 'gold_approved' if all_approved else 'gold_partial_or_rejected'
+    candidate['train_eligible'] = all_approved
+    return all_approved
+
+def _import_gold_record(by_ref: dict, record: dict, expected_corpus_sha256: str) -> str:
+    """Apply one validated gold record and name the GOLD_IMPORT_COUNTERS entry it counts under."""
+    if record['corpus_candidate_sha256'] != expected_corpus_sha256:
+        return 'gold_rejected_corpus_mismatch'
+    candidate = by_ref.get(record['source_ref'])
+    if candidate is None:
+        return 'gold_rejected_unknown_source'
+    if _is_quarantined_candidate(candidate):
+        _reject_quarantined_source(candidate)
+        return 'gold_rejected_source_quarantined'
+    return 'gold_fully_approved' if _bind_gold(candidate, record) else 'gold_partial_or_rejected_recorded'
 
 def apply_gold_import(candidates: list[dict], gold_records: list[dict], expected_corpus_sha256: str) -> tuple[list[dict], dict]:
     """Bind independently adjudicated gold onto matching candidates. Never fabricates a label.
@@ -353,38 +403,11 @@ def apply_gold_import(candidates: list[dict], gold_records: list[dict], expected
     quarantine, so it can never override it.
     """
     by_ref = {candidate.get('source_ref'): candidate for candidate in candidates}
-    fully_approved = 0
-    partial_or_rejected = 0
-    rejected_unknown_source = 0
-    rejected_corpus_mismatch = 0
-    rejected_source_quarantined = 0
+    report = dict.fromkeys(GOLD_IMPORT_COUNTERS, 0)
     for record in gold_records:
         validate_gold_record(record)
-        if record['corpus_candidate_sha256'] != expected_corpus_sha256:
-            rejected_corpus_mismatch += 1
-            continue
-        candidate = by_ref.get(record['source_ref'])
-        if candidate is None:
-            rejected_unknown_source += 1
-            continue
-        if candidate.get('privacy_status') == 'quarantined' or candidate.get('text_candidate') == QUARANTINED_AUTH_MARKER:
-            rejected_source_quarantined += 1
-            candidate['label_status'] = 'gold_rejected_source_quarantined'
-            candidate['gold_adjudication'] = None
-            candidate['gold'] = None
-            candidate['train_eligible'] = False
-            continue
-        all_approved = all(record['reviews'][dimension]['status'] == 'approved' for dimension in GOLD_REVIEW_DIMENSIONS)
-        adjudication = {'intent': record['intent'], 'slots': record['slots'], 'expected_outcome': record['expected_outcome'], 'reviews': record['reviews']}
-        candidate['gold_adjudication'] = adjudication
-        candidate['gold'] = adjudication if all_approved else None
-        candidate['label_status'] = 'gold_approved' if all_approved else 'gold_partial_or_rejected'
-        candidate['train_eligible'] = all_approved
-        if all_approved:
-            fully_approved += 1
-        else:
-            partial_or_rejected += 1
-    return candidates, {'gold_fully_approved': fully_approved, 'gold_partial_or_rejected_recorded': partial_or_rejected, 'gold_rejected_unknown_source': rejected_unknown_source, 'gold_rejected_corpus_mismatch': rejected_corpus_mismatch, 'gold_rejected_source_quarantined': rejected_source_quarantined}
+        report[_import_gold_record(by_ref, record, expected_corpus_sha256)] += 1
+    return candidates, report
 
 def suggest_labels(text: str) -> list[str]:
     text = text.strip()
@@ -422,22 +445,34 @@ def parse_debug_runs(text: str) -> list[dict]:
                      'auth_context':opens_auth_window(block)})  # the logged history may hold a wizard prompt the message answered
     return runs
 
+# (table, column, lexicon kind): known names that must never survive redaction.
+LEXICON_SOURCES = (('users', 'first_name', 'PERSON'), ('contacts', 'name', 'PERSON'), ('contacts', 'preferred_name', 'PERSON'), ('events', 'location', 'PLACE'))
+CHAT_HISTORY_REQUIRED_COLUMNS = {'id', 'user_id', 'role', 'content', 'created_at'}
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}
+
+def _database_lexicon(conn: sqlite3.Connection) -> dict[str, str]:
+    lexicon = {}
+    for table, column, kind in LEXICON_SOURCES:
+        if column not in _table_columns(conn, table):
+            continue
+        for row in conn.execute(f'SELECT DISTINCT {column} FROM {table} WHERE {column} IS NOT NULL'):
+            if isinstance(row[0], str) and len(row[0].strip()) >= 2:
+                lexicon[row[0]] = kind
+    return lexicon
+
 def read_database(path: Path) -> tuple[list[dict], dict[str,str]]:
     conn = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA query_only=ON'); conn.execute('BEGIN')
     try:
-        cols = {row[1] for row in conn.execute('PRAGMA table_info(chat_history)')}
-        if not {'id','user_id','role','content','created_at'} <= cols:
+        cols = _table_columns(conn, 'chat_history')
+        if not CHAT_HISTORY_REQUIRED_COLUMNS <= cols:
             return [], {}
         chat = 'chat_id' if 'chat_id' in cols else 'NULL AS chat_id'
         rows = [dict(row) for row in conn.execute('SELECT id,user_id,role,content,created_at,' + chat + ' FROM chat_history ORDER BY id')]
-        lexicon = {}
-        for table, column, kind in [('users','first_name','PERSON'),('contacts','name','PERSON'),('contacts','preferred_name','PERSON'),('events','location','PLACE')]:
-            if column in {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}:
-                for row in conn.execute(f'SELECT DISTINCT {column} FROM {table} WHERE {column} IS NOT NULL'):
-                    if isinstance(row[0],str) and len(row[0].strip()) >= 2: lexicon[row[0]] = kind
-        return rows, lexicon
+        return rows, _database_lexicon(conn)
     finally:
         conn.rollback(); conn.close()
 
@@ -494,80 +529,102 @@ def _is_wal_sidecar(path: Path) -> bool:
     (see "Input bounds" in docs/reference/nlu-corpus-methodology.md)."""
     return path.name.endswith(('-wal', '-shm', '-journal'))
 
-def collect(root: Path) -> tuple[list[dict], list[dict], dict[str,str]]:
-    rows: dict[str,dict] = {}; sources = []; lexicon = {}
+def _database_paths(root: Path) -> list[Path]:
     data = root / 'data'
-    databases = sorted(
+    return sorted(
         path for path in (set(data.glob('*.db')) | set(data.glob('*.db.pre-*')) | set((data/'backups').glob('*.db')) | set((data/'backups').glob('*.db.gz')))
         if not _is_wal_sidecar(path)
     )
-    for path in databases:
-        source = {'kind':'sqlite','name':str(path.relative_to(root))}
-        if not is_safe_source_file(path, root):
-            source.update(status='skipped_unsafe_path', rows=0)
-            sources.append(source)
-            continue
+
+def _read_gzipped_database(fd: int) -> tuple[list[dict], dict[str,str]]:
+    """Stream the gzip behind `fd` into a temporary database, bounded by MAX_DATABASE_BYTES decompressed, and read it."""
+    with os.fdopen(fd, 'rb') as raw_stream, tempfile.NamedTemporaryFile(suffix='.db') as temporary:
+        opener = gzip.GzipFile(fileobj=raw_stream)
+        total = 0
+        while chunk := opener.read(1024*1024):
+            total += len(chunk)
+            if total > MAX_DATABASE_BYTES: raise ValueError('oversized_database')
+            temporary.write(chunk)
+        temporary.flush()
+        return read_database(Path(temporary.name))
+
+def _read_plain_database(path: Path, fd: int) -> tuple[list[dict], dict[str,str]]:
+    # fd already proved (O_NOFOLLOW+fstat) this path was a
+    # bounded regular file, not a symlink. SQLite must reopen by
+    # path to locate sibling -wal/-shm files, so it can combine
+    # committed-but-uncheckpointed WAL rows correctly without a
+    # checkpoint/write against a read-only source; this narrows
+    # the no-follow guarantee to a standard path-based open, and
+    # bounds the -wal/-shm siblings the same way before SQLite
+    # reads them. See docs/reference/nlu-corpus-methodology.md
+    # ("Input bounds") for the full rationale.
+    os.close(fd)
+    for sidecar_suffix in ('-wal', '-shm'):
         try:
-            fd = open_regular_bounded(path, MAX_DATABASE_BYTES)
-            if _is_gzip_source(path):
-                with os.fdopen(fd, 'rb') as raw_stream, tempfile.NamedTemporaryFile(suffix='.db') as temporary:
-                    opener = gzip.GzipFile(fileobj=raw_stream)
-                    total = 0
-                    while chunk := opener.read(1024*1024):
-                        total += len(chunk)
-                        if total > MAX_DATABASE_BYTES: raise ValueError('oversized_database')
-                        temporary.write(chunk)
-                    temporary.flush()
-                    extracted, names = read_database(Path(temporary.name))
-            else:
-                # fd above already proved (O_NOFOLLOW+fstat) this path was a
-                # bounded regular file, not a symlink. SQLite must reopen by
-                # path to locate sibling -wal/-shm files, so it can combine
-                # committed-but-uncheckpointed WAL rows correctly without a
-                # checkpoint/write against a read-only source; this narrows
-                # the no-follow guarantee to a standard path-based open, and
-                # bounds the -wal/-shm siblings the same way before SQLite
-                # reads them. See docs/reference/nlu-corpus-methodology.md
-                # ("Input bounds") for the full rationale.
-                os.close(fd)
-                for sidecar_suffix in ('-wal', '-shm'):
-                    try:
-                        sidecar_fd = open_regular_bounded(path.with_name(path.name + sidecar_suffix), MAX_DATABASE_BYTES)
-                        os.close(sidecar_fd)
-                    except FileNotFoundError:
-                        pass
-                extracted, names = read_database(path)
-            lexicon.update(names)
-            digests = [row_key(row) for row in extracted]
-            logical_sha256 = hashlib.sha256(''.join(digests).encode()).hexdigest()
-            lineage_ref = f"{source['name']}#{logical_sha256}"  # hash-qualified so two snapshots that share a path never look like one lineage
-            for row, digest in zip(extracted, digests):
-                rows.setdefault(digest,dict(row, source_refs=[]))['source_refs'].append(lineage_ref)
-            source.update(status='read',rows=len(extracted),logical_sha256=logical_sha256)
-        except (OSError, sqlite3.Error, ValueError) as error:
-            source.update(status='unreadable',error=type(error).__name__)
-        sources.append(source)
-    for path in sorted((root/'logs').rglob('*')):
-        if not path.is_file() or not (path.name.endswith('.log') or path.name.endswith('.log.gz')): continue
-        source = {'kind':'debug_log','name':str(path.relative_to(root))}
-        if not is_safe_source_file(path, root):
-            source.update(status='skipped_unsafe_path', rows=0)
-            sources.append(source)
-            continue
-        try:
-            fd = open_regular_bounded(path, MAX_LOG_BYTES)
-            with os.fdopen(fd, 'rb') as raw_stream:
-                stream = gzip.GzipFile(fileobj=raw_stream) if _is_gzip_source(path) else raw_stream
-                raw = stream.read(MAX_LOG_BYTES+1)
-            if len(raw)>MAX_LOG_BYTES: raise ValueError('oversized_log')
-            runs = parse_debug_runs(raw.decode('utf-8', errors='replace'))
-            source.update(status='read' if runs else 'no_direct_dialogues',rows=len(runs),sha256=hashlib.sha256(raw).hexdigest())
-            for index, row in enumerate(runs):
-                key = 'log:'+row_key(row)
-                rows.setdefault(key,dict(row,source_refs=[]))['source_refs'].append(source['name']+':'+str(index))
-        except (OSError,ValueError,EOFError) as error:
-            source.update(status='unreadable',error=type(error).__name__)
-        sources.append(source)
+            sidecar_fd = open_regular_bounded(path.with_name(path.name + sidecar_suffix), MAX_DATABASE_BYTES)
+            os.close(sidecar_fd)
+        except FileNotFoundError:
+            pass
+    return read_database(path)
+
+def _read_sqlite_source(path: Path) -> tuple[list[dict], dict[str,str]]:
+    fd = open_regular_bounded(path, MAX_DATABASE_BYTES)
+    if _is_gzip_source(path):
+        return _read_gzipped_database(fd)
+    return _read_plain_database(path, fd)
+
+def _merge_database_rows(rows: dict[str,dict], source: dict, extracted: list[dict]) -> None:
+    digests = [row_key(row) for row in extracted]
+    logical_sha256 = hashlib.sha256(''.join(digests).encode()).hexdigest()
+    lineage_ref = f"{source['name']}#{logical_sha256}"  # hash-qualified so two snapshots that share a path never look like one lineage
+    for row, digest in zip(extracted, digests):
+        rows.setdefault(digest,dict(row, source_refs=[]))['source_refs'].append(lineage_ref)
+    source.update(status='read',rows=len(extracted),logical_sha256=logical_sha256)
+
+def _collect_database(root: Path, path: Path, rows: dict[str,dict], lexicon: dict[str,str]) -> dict:
+    source = {'kind':'sqlite','name':str(path.relative_to(root))}
+    if not is_safe_source_file(path, root):
+        source.update(status='skipped_unsafe_path', rows=0)
+        return source
+    try:
+        extracted, names = _read_sqlite_source(path)
+        lexicon.update(names)
+        _merge_database_rows(rows, source, extracted)
+    except (OSError, sqlite3.Error, ValueError) as error:
+        source.update(status='unreadable',error=type(error).__name__)
+    return source
+
+def _log_paths(root: Path) -> list[Path]:
+    return [path for path in sorted((root/'logs').rglob('*')) if path.is_file() and path.name.endswith(('.log', '.log.gz'))]
+
+def _read_log_bytes(path: Path) -> bytes:
+    fd = open_regular_bounded(path, MAX_LOG_BYTES)
+    with os.fdopen(fd, 'rb') as raw_stream:
+        stream = gzip.GzipFile(fileobj=raw_stream) if _is_gzip_source(path) else raw_stream
+        raw = stream.read(MAX_LOG_BYTES+1)
+    if len(raw)>MAX_LOG_BYTES: raise ValueError('oversized_log')
+    return raw
+
+def _collect_log(root: Path, path: Path, rows: dict[str,dict]) -> dict:
+    source = {'kind':'debug_log','name':str(path.relative_to(root))}
+    if not is_safe_source_file(path, root):
+        source.update(status='skipped_unsafe_path', rows=0)
+        return source
+    try:
+        raw = _read_log_bytes(path)
+        runs = parse_debug_runs(raw.decode('utf-8', errors='replace'))
+        source.update(status='read' if runs else 'no_direct_dialogues',rows=len(runs),sha256=hashlib.sha256(raw).hexdigest())
+        for index, row in enumerate(runs):
+            key = 'log:'+row_key(row)
+            rows.setdefault(key,dict(row,source_refs=[]))['source_refs'].append(source['name']+':'+str(index))
+    except (OSError,ValueError,EOFError) as error:
+        source.update(status='unreadable',error=type(error).__name__)
+    return source
+
+def collect(root: Path) -> tuple[list[dict], list[dict], dict[str,str]]:
+    rows: dict[str,dict] = {}; lexicon: dict[str,str] = {}
+    sources = [_collect_database(root, path, rows, lexicon) for path in _database_paths(root)]
+    sources.extend(_collect_log(root, path, rows) for path in _log_paths(root))
     return list(rows.values()), sources, lexicon
 
 def user_text(content: str) -> tuple[str,str]:
@@ -580,6 +637,13 @@ def user_text(content: str) -> tuple[str,str]:
         if isinstance(parsed.get('text'),str): return parsed['text'], str(kind)
     return content, 'structured_unknown'
 
+def _tool_call_names(value: dict) -> list[object]:
+    """The tool names one JSON object declares, as an OpenAI `function` call or an Anthropic `tool_use` block."""
+    names = []
+    if value.get('type')=='function' and isinstance(value.get('function'),dict): names.append(value['function'].get('name',''))
+    if value.get('type')=='tool_use': names.append(value.get('name',''))
+    return names
+
 def observed_tools(content: str) -> list[str]:
     try: parsed = json.loads(content)
     except (ValueError,TypeError): return []
@@ -588,51 +652,88 @@ def observed_tools(content: str) -> list[str]:
         value=stack.pop()
         if isinstance(value,list): stack.extend(value)
         elif isinstance(value,dict):
-            if value.get('type')=='function' and isinstance(value.get('function'),dict): names.append(value['function'].get('name',''))
-            if value.get('type')=='tool_use': names.append(value.get('name',''))
+            names.extend(_tool_call_names(value))
             stack.extend(v for v in value.values() if isinstance(v,(dict,list)))
     return [name for name in names if _is_name(name)]
 
+AUDIT_LIMITATIONS = (
+    'Candidate labels are unvalidated hypotheses, not accuracy or gold.',
+    'Privacy transformation is pseudonymization; every free-text record still needs review.',
+    'Database and debug user records may overlap; source counts are not unique Telegram updates.',
+    'Historical permissions, entity state and timezone are not reconstructed.',
+    'Auth-window quarantine is conservative and not a substitute for fixing the ingress logging issue.',
+    'Assistant/tool rows attach to a candidate only when they share a recorded source-file lineage with the triggering request and arrive within 1800s of that exact request (not a chained series of short gaps); everything else is counted separately instead of being stitched across snapshots or stale windows.',
+)
+
+class _OpenRequest(NamedTuple):
+    """The user candidate a conversation is still collecting assistant/tool rows for."""
+    candidate: CandidateRecord
+    lineage: frozenset[str]
+    since: float  # anchored to this exact request, never pushed forward by later non-user rows
+
+class _AuditPass:
+    """One chronological walk over the placed rows: user rows become candidates, later assistant/tool rows
+    of the same conversation attach as evidence, and everything that must not attach is counted instead."""
+
+    def __init__(self, key: bytes, lexicon: dict[str,str], blocked: set[int]) -> None:
+        self.key = key
+        self.lexicon = lexicon
+        self.blocked = blocked
+        self.candidates: list[CandidateRecord] = []
+        self.open_requests: dict[str, _OpenRequest] = {}
+        self.sessions: dict[str, str] = {}
+        self.turn_times: dict[str, float] = {}
+        self.detached_unknown_provenance = 0
+        self.detached_stale_session = 0
+
+    def feed(self, index: int, row: dict) -> None:
+        scope = row['scope']
+        if row['at']-self.turn_times.get(scope, float('-inf')) > SESSION_GAP_SECONDS:
+            self.sessions[scope] = row_key(row)
+            self.open_requests.pop(scope, None)  # a new session must never inherit a stale open request
+        self.turn_times[scope] = row['at']
+        if index in self.blocked:
+            self.open_requests.pop(scope, None)
+            return
+        lineage = frozenset(row.get('source_refs') or [])
+        if row['role'] == 'user':
+            self._add_user_row(scope, row, lineage)
+        elif scope in self.open_requests and row.get('record_kind') != 'debug_run':
+            self._attach_assistant_row(scope, row, lineage)
+
+    def _add_user_row(self, scope: str, row: dict, lineage: frozenset[str]) -> None:
+        text, kind = user_text(row['content'])
+        candidate = candidate_record(text, row.get('tools', []), self.key, self.lexicon)
+        candidate.update(source_kind=row.get('record_kind', 'database'), input_kind=kind, source_ref=pseudonym(row_key(row), self.key, 'ROW'), actor_scope=pseudonym(scope, self.key, 'SCOPE'), conversation_id=pseudonym(self.sessions[scope], self.key, 'CONVERSATION'), source_refs=[pseudonym(ref, self.key, 'SOURCE') for ref in row.get('source_refs', [])], timestamp=row['created_at'], historical_state='not_reconstructed', observed_responses=[])
+        if kind == 'button': candidate['intent_candidates'] = ['dialogue.answer']
+        self.candidates.append(candidate)
+        if row.get('record_kind') != 'debug_run':
+            self.open_requests[scope] = _OpenRequest(candidate, lineage, row['at'])
+        elif row.get('response'): candidate['observed_responses'].append(redact_candidate(row['response'], self.key, self.lexicon))
+
+    def _attach_assistant_row(self, scope: str, row: dict, lineage: frozenset[str]) -> None:
+        request = self.open_requests[scope]
+        if row['at'] - request.since > SESSION_GAP_SECONDS:
+            self.detached_stale_session += 1
+            del self.open_requests[scope]  # a chain of short gaps must never bridge past 1800s from the actual triggering request
+            return
+        if not (request.lineage & lineage):
+            self.detached_unknown_provenance += 1  # different or unrecorded snapshot lineage: never stitch it into this candidate's causal turn
+            return
+        candidate = request.candidate
+        candidate['observed_tools'] = list(dict.fromkeys(candidate['observed_tools']+observed_tools(row['content'])))
+        candidate['observed_responses'].append({'role':row['role'],'content_candidate':redact_candidate(row['content'], self.key, self.lexicon)})
+
+    def summary(self, retained_rows: int, invalid_timestamp_rows: int) -> dict:
+        counts = collections.Counter(label for row in self.candidates for label in row['intent_candidates'])
+        return {'retained_rows':retained_rows, 'invalid_timestamp_rows':invalid_timestamp_rows, 'quarantined_auth_rows':len(self.blocked), 'evidence_detached_unknown_provenance_rows':self.detached_unknown_provenance, 'evidence_detached_stale_session_rows':self.detached_stale_session, 'user_candidates':len(self.candidates), 'candidates_by_source':dict(collections.Counter(row['source_kind'] for row in self.candidates)), 'candidate_label_counts':dict(counts.most_common()), 'observed_tool_counts':dict(collections.Counter(tool for row in self.candidates for tool in row['observed_tools']).most_common()), 'gold_count':0, 'train_eligible':0, 'raw_content_published':False, 'limitations':list(AUDIT_LIMITATIONS)}
+
 def audit(rows: list[dict], key: bytes, lexicon: dict[str,str]) -> tuple[list[dict],dict]:
     normalized, bad_time = place_rows(rows)
-    blocked = quarantined_indices(normalized)
-    candidates = []; active = {}; active_lineage: dict[str, frozenset[str]] = {}; active_since: dict[str, float] = {}; sessions = {}; turn_times = {}
-    detached_unknown_provenance = 0
-    detached_stale_session = 0
+    walk = _AuditPass(key, lexicon, quarantined_indices(normalized))
     for index, row in enumerate(normalized):
-        scope=row['scope']
-        if row['at']-turn_times.get(scope, float('-inf')) > SESSION_GAP_SECONDS:
-            sessions[scope]=row_key(row)
-            active.pop(scope,None); active_lineage.pop(scope,None); active_since.pop(scope,None)  # a new session must never inherit a stale open request
-        turn_times[scope]=row['at']
-        if index in blocked:
-            active.pop(scope,None); active_lineage.pop(scope,None); active_since.pop(scope,None); continue
-        lineage = frozenset(row.get('source_refs') or [])
-        if row['role']=='user':
-            text,kind=user_text(row['content'])
-            candidate=candidate_record(text,row.get('tools',[]),key,lexicon)
-            candidate.update(source_kind=row.get('record_kind','database'), input_kind=kind, source_ref=pseudonym(row_key(row),key,'ROW'), actor_scope=pseudonym(scope,key,'SCOPE'), conversation_id=pseudonym(sessions[scope],key,'CONVERSATION'), source_refs=[pseudonym(ref,key,'SOURCE') for ref in row.get('source_refs',[])], timestamp=row['created_at'], historical_state='not_reconstructed', observed_responses=[])
-            if kind=='button': candidate['intent_candidates']=['dialogue.answer']
-            candidates.append(candidate)
-            if row.get('record_kind')!='debug_run':
-                active[scope]=candidate
-                active_lineage[scope]=lineage
-                active_since[scope]=row['at']  # anchored to this exact request, never pushed forward by later non-user rows
-            elif row.get('response'): candidate['observed_responses'].append(redact_candidate(row['response'],key,lexicon))
-        elif scope in active and row.get('record_kind')!='debug_run':
-            if row['at'] - active_since.get(scope, float('-inf')) > SESSION_GAP_SECONDS:
-                detached_stale_session += 1
-                active.pop(scope,None); active_lineage.pop(scope,None); active_since.pop(scope,None)
-                continue  # a chain of short gaps must never bridge past 1800s from the actual triggering request
-            if not (active_lineage.get(scope, frozenset()) & lineage):
-                detached_unknown_provenance += 1
-                continue  # different or unrecorded snapshot lineage: never stitch it into this candidate's causal turn
-            candidate=active[scope]
-            candidate['observed_tools']=list(dict.fromkeys(candidate['observed_tools']+observed_tools(row['content'])))
-            candidate['observed_responses'].append({'role':row['role'],'content_candidate':redact_candidate(row['content'],key,lexicon)})
-    counts = collections.Counter(label for row in candidates for label in row['intent_candidates'])
-    summary = {'retained_rows':len(rows), 'invalid_timestamp_rows':bad_time, 'quarantined_auth_rows':len(blocked), 'evidence_detached_unknown_provenance_rows':detached_unknown_provenance, 'evidence_detached_stale_session_rows':detached_stale_session, 'user_candidates':len(candidates), 'candidates_by_source':dict(collections.Counter(row['source_kind'] for row in candidates)), 'candidate_label_counts':dict(counts.most_common()), 'observed_tool_counts':dict(collections.Counter(tool for row in candidates for tool in row['observed_tools']).most_common()), 'gold_count':0, 'train_eligible':0, 'raw_content_published':False, 'limitations':['Candidate labels are unvalidated hypotheses, not accuracy or gold.', 'Privacy transformation is pseudonymization; every free-text record still needs review.', 'Database and debug user records may overlap; source counts are not unique Telegram updates.', 'Historical permissions, entity state and timezone are not reconstructed.', 'Auth-window quarantine is conservative and not a substitute for fixing the ingress logging issue.', 'Assistant/tool rows attach to a candidate only when they share a recorded source-file lineage with the triggering request and arrive within 1800s of that exact request (not a chained series of short gaps); everything else is counted separately instead of being stitched across snapshots or stale windows.']}
-    return candidates, summary
+        walk.feed(index, row)
+    return walk.candidates, walk.summary(len(rows), bad_time)
 
 def _restricted_stream(path: Path, binary: bool):
     """Create-with-mode in one syscall: never a window where the file has wider-than-owner bits."""

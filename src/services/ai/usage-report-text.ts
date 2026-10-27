@@ -59,9 +59,22 @@ function providerLine(provider: ProviderUsage, labels: Labels): string {
   return `${provider.provider}: ${parts.join(' · ')}`;
 }
 
+/** Token and cost lines of a group that sent at least one request. */
+function tokenAndCostLines({ tokens, cost }: UsageStats, labels: Labels): string[] {
+  const lines = [`  ${labels.tokens(formatTokens(tokens.prompt, labels), formatTokens(tokens.completion, labels))}`];
+  if (tokens.reasoning.reportedRows > 0 || tokens.cached.reportedRows > 0) {
+    lines.push(`  ${labels.tokensExtra(formatTokens(tokens.reasoning, labels), formatTokens(tokens.cached, labels))}`);
+  }
+  const unanswered = Math.max(tokens.prompt.unknownRows, tokens.completion.unknownRows);
+  if (unanswered > 0) lines.push(`  ${labels.tokensUnknown(unanswered)}`);
+  lines.push(`  ${labels.cost(formatCost(cost, labels))}`);
+  // Only a partial sum needs the caveat: a group with no known cost already shows a dash.
+  if (cost.sumMicroUsd !== null && cost.unknownRows > 0) lines.push(`  ${labels.costUnknown(cost.unknownRows)}`);
+  return lines;
+}
+
 /** The lines under a group's heading: counts, errors, tokens, cost, latency, answer range. */
 function statsBlock(heading: string, stats: UsageStats, labels: Labels): string[] {
-  const { tokens, cost } = stats;
   const lines = [
     heading,
     `  ${labels.counts(stats.ok, stats.errors, stats.skipped, formatRate(stats.successRate, labels))}`,
@@ -70,19 +83,7 @@ function statsBlock(heading: string, stats: UsageStats, labels: Labels): string[
   if (skipped) lines.push(`  ${labels.skippedBy(skipped)}`);
   const errors = formatCounts(stats.errorsByClass);
   if (errors) lines.push(`  ${labels.errorsBy(errors)}`);
-  if (stats.ok + stats.errors > 0) {
-    lines.push(`  ${labels.tokens(formatTokens(tokens.prompt, labels), formatTokens(tokens.completion, labels))}`);
-    if (tokens.reasoning.reportedRows > 0 || tokens.cached.reportedRows > 0) {
-      lines.push(
-        `  ${labels.tokensExtra(formatTokens(tokens.reasoning, labels), formatTokens(tokens.cached, labels))}`,
-      );
-    }
-    const unanswered = Math.max(tokens.prompt.unknownRows, tokens.completion.unknownRows);
-    if (unanswered > 0) lines.push(`  ${labels.tokensUnknown(unanswered)}`);
-    lines.push(`  ${labels.cost(formatCost(cost, labels))}`);
-    // Only a partial sum needs the caveat: a group with no known cost already shows a dash.
-    if (cost.sumMicroUsd !== null && cost.unknownRows > 0) lines.push(`  ${labels.costUnknown(cost.unknownRows)}`);
-  }
+  if (stats.ok + stats.errors > 0) lines.push(...tokenAndCostLines(stats, labels));
   if (stats.p50DurationMs !== null && stats.p95DurationMs !== null) {
     lines.push(`  ${labels.latency(stats.p50DurationMs, stats.p95DurationMs)}`);
   }

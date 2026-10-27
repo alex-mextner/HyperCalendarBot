@@ -1,6 +1,7 @@
 """Artifact identity tests use real tar archives and synthetic Docker configs."""
 
 import gzip
+import hashlib
 import importlib.util
 import io
 import json
@@ -191,6 +192,165 @@ class ArtifactTests(unittest.TestCase):
             tar.addfile(info)
         with self.assertRaises(ValueError):
             self.module.inspect_archive(archive, self.sha, self.tag)
+
+    def write_archive(self, members):
+        """A gzip tar of (name, bytes) members, appended verbatim (no layout fix-ups)."""
+        target = Path(self.tmp.name) / "image.tar.gz"
+        with tarfile.open(target, "w:gz") as tar:
+            add_members(tar, members)
+        return target
+
+    def config_archive(self, config):
+        """A docker-save archive whose config blob is exactly `config` (any JSON value)."""
+        raw = json.dumps(config).encode()
+        members, _ = docker_save_members(self.tag, raw)
+        return self.write_archive(members)
+
+    def test_reports_archive_hash_and_unpacked_size(self):
+        archive, _, _ = self.archive()
+        result = self.module.inspect_archive(archive, self.sha, self.tag)
+        self.assertEqual(result["archive_sha256"], hashlib.sha256(archive.read_bytes()).hexdigest())
+        self.assertEqual(result["image_ref"], self.tag)
+        self.assertEqual(result["os"], "linux")
+        with tarfile.open(archive) as tar:
+            self.assertEqual(result["image_bytes"], sum(m.size for m in tar.getmembers() if m.isfile()))
+
+    def test_rejects_malformed_docker_manifest_for_its_own_reason(self):
+        tag = self.tag
+        cases = {
+            "not a list": ({"Config": "x"}, "Exactly one image"),
+            "two images": ([{}, {}], "Exactly one image"),
+            "entry not an object": (["x"], "Artifact tag mismatch"),
+            "other tag": ([{"RepoTags": ["other"], "Config": "x"}], "Artifact tag mismatch"),
+            "two tags": ([{"RepoTags": [tag, tag], "Config": "x"}], "Artifact tag mismatch"),
+            "no config path": ([{"RepoTags": [tag]}], "Missing config path"),
+            "config path not a string": ([{"RepoTags": [tag], "Config": 7}], "Missing config path"),
+            "config path absolute": ([{"RepoTags": [tag], "Config": "/etc/passwd"}], "Unsafe artifact member path"),
+            "config path escapes": ([{"RepoTags": [tag], "Config": "../x"}], "Unsafe artifact member path"),
+            "config member missing": ([{"RepoTags": [tag], "Config": "blobs/none"}], "Missing artifact member"),
+        }
+        for label, (manifest, reason) in cases.items():
+            with self.subTest(label):
+                archive = self.write_archive([("manifest.json", json.dumps(manifest).encode())])
+                with self.assertRaisesRegex(ValueError, reason):
+                    self.module.inspect_archive(archive, self.sha, self.tag)
+
+    def test_rejects_json_members_that_are_not_small_regular_files(self):
+        config_path = "blobs/sha256/" + digest(b"{}")[7:]
+        manifest = ("manifest.json", json.dumps([{"Config": config_path, "RepoTags": [self.tag]}]).encode())
+        oversized = b" " * (self.module.MAX_JSON_BYTES + 1)
+        cases = {
+            "empty config": [manifest, (config_path, b"")],
+            "oversized config": [manifest, (config_path, oversized)],
+            "empty manifest": [("manifest.json", b"")],
+            "oversized manifest": [("manifest.json", oversized)],
+        }
+        for label, listing in cases.items():
+            with self.subTest(label):
+                archive = self.write_archive(listing)
+                with self.assertRaisesRegex(ValueError, "Invalid JSON member"):
+                    self.module.inspect_archive(archive, self.sha, self.tag)
+        with self.subTest("directory config"):
+            target = Path(self.tmp.name) / "image.tar.gz"
+            with tarfile.open(target, "w:gz") as tar:
+                add_members(tar, [manifest])
+                info = tarfile.TarInfo(config_path)
+                info.type = tarfile.DIRTYPE
+                tar.addfile(info)
+            with self.assertRaisesRegex(ValueError, "Invalid JSON member"):
+                self.module.inspect_archive(target, self.sha, self.tag)
+
+    def test_rejects_unparseable_json_member(self):
+        archive = self.write_archive([("manifest.json", b"{not json")])
+        with self.assertRaises(ValueError):
+            self.module.inspect_archive(archive, self.sha, self.tag)
+
+    def test_rejects_config_that_is_not_a_linux_arm64_object_with_this_revision(self):
+        label = {"Labels": {"org.opencontainers.image.revision": self.sha}}
+        base = {"architecture": "arm64", "os": "linux"}
+        cases = {
+            "config is a list": ([], "Expected a Linux arm64 artifact"),
+            "other os": ({"architecture": "arm64", "os": "windows", "config": label}, "Expected a Linux arm64 artifact"),
+            "no os": ({"architecture": "arm64", "config": label}, "Expected a Linux arm64 artifact"),
+            "runtime absent": (base, "Artifact revision mismatch"),
+            "runtime null": ({**base, "config": None}, "Artifact revision mismatch"),
+            "runtime not an object": ({**base, "config": 5}, "Artifact revision mismatch"),
+            "labels null": ({**base, "config": {"Labels": None}}, "Artifact revision mismatch"),
+            "labels without revision": ({**base, "config": {"Labels": {}}}, "Artifact revision mismatch"),
+        }
+        for name, (config, reason) in cases.items():
+            with self.subTest(name):
+                archive = self.config_archive(config)
+                with self.assertRaisesRegex(ValueError, reason):
+                    self.module.inspect_archive(archive, self.sha, self.tag)
+
+    def test_rejects_config_blob_whose_name_is_not_its_digest(self):
+        archive, _, _ = self.archive(bad_digest=True)
+        with self.assertRaisesRegex(ValueError, "Image config digest mismatch"):
+            self.module.inspect_archive(archive, self.sha, self.tag)
+
+    def test_rejects_malformed_index_descriptors_and_layout(self):
+        def rewrite(name, change):
+            def edit(members):
+                return [(n, change(d) if n == name else d) for n, d in members]
+
+            return edit
+
+        def index_with(change):
+            def apply(data):
+                index = json.loads(data)
+                return json.dumps(change(index)).encode()
+
+            return apply
+
+        def descriptor(change):
+            def apply(index):
+                change(index["manifests"][0])
+                return index
+
+            return apply
+
+        def set_digest(value):
+            return lambda d: d.update(digest=value)
+
+        cases = {
+            "layout version": (rewrite("oci-layout", lambda _: b'{"imageLayoutVersion": "2.0.0"}'), "Missing OCI image layout"),
+            "layout not an object": (rewrite("oci-layout", lambda _: b"[]"), "Missing OCI image layout"),
+            "index not an object": (rewrite("index.json", lambda _: b"[]"), "Exactly one indexed image"),
+            "manifests not a list": (rewrite("index.json", index_with(lambda i: {"manifests": {}})), "Exactly one indexed image"),
+            "descriptor not an object": (rewrite("index.json", index_with(lambda i: {"manifests": ["x"]})), "Invalid index descriptor"),
+            "annotations not an object": (rewrite("index.json", index_with(descriptor(lambda d: d.update(annotations=[])))), "Indexed image tag mismatch"),
+            "no media type": (rewrite("index.json", index_with(descriptor(lambda d: d.pop("mediaType")))), "single image manifest"),
+            "digest not a string": (rewrite("index.json", index_with(descriptor(set_digest(5)))), "Invalid manifest digest"),
+            "digest malformed": (rewrite("index.json", index_with(descriptor(set_digest("sha256:abc")))), "Invalid manifest digest"),
+            "digest uppercase": (rewrite("index.json", index_with(descriptor(set_digest("sha256:" + "A" * 64)))), "Invalid manifest digest"),
+        }
+        for label, (edit, reason) in cases.items():
+            with self.subTest(label):
+                archive, _, _ = self.archive(edit=edit)
+                with self.assertRaisesRegex(ValueError, reason):
+                    self.module.inspect_archive(archive, self.sha, self.tag)
+
+    def test_rejects_image_manifest_that_is_not_an_object_with_a_config(self):
+        def swap_manifest(raw_manifest):
+            def edit(members):
+                index_at = next(i for i, m in enumerate(members) if m[0] == "index.json")
+                index = json.loads(members[index_at][1])
+                index["manifests"][0].update(digest=digest(raw_manifest), size=len(raw_manifest))
+                members[index_at] = ("index.json", json.dumps(index).encode())
+                return members + [("blobs/sha256/" + digest(raw_manifest)[7:], raw_manifest)]
+
+            return edit
+
+        for label, raw_manifest in {
+            "list": b"[]",
+            "no config": b'{"schemaVersion": 2}',
+            "config not an object": b'{"config": "x"}',
+        }.items():
+            with self.subTest(label):
+                archive, _, _ = self.archive(edit=swap_manifest(raw_manifest))
+                with self.assertRaisesRegex(ValueError, "does not describe the image config"):
+                    self.module.inspect_archive(archive, self.sha, self.tag)
 
 
 if __name__ == "__main__":

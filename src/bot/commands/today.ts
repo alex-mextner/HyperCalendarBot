@@ -6,18 +6,117 @@ import { TZDate } from '@date-fns/tz';
 import { t } from '../../config/constants.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
+import type { EventOccurrence, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatDayAgenda } from '../../services/event/formatters.ts';
 import { googleCalendarColorEmoji } from '../../services/google/calendar-colors.ts';
-import type { HolidayService } from '../../services/holiday/holiday-service.ts';
+import type { HolidayEntry, HolidayService } from '../../services/holiday/holiday-service.ts';
 import { renderDayImage } from '../../services/image/render-day.ts';
 import type { ImageRenderer } from '../../services/image/render-service.ts';
+import type { DayWeather } from '../../services/weather/types.ts';
 import type { WeatherService } from '../../services/weather/weather-service.ts';
 import { autoPin } from '../../utils/auto-pin.ts';
 import { imageLogger } from '../../utils/logger.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
 import { sendAgendaText } from './agenda-text.ts';
+
+async function fetchTodayWeather(
+  weatherService: WeatherService | undefined,
+  timezone: string,
+  lang: 'en' | 'ru',
+): Promise<DayWeather | null> {
+  if (!weatherService) return null;
+  return weatherService.getDayWeather(timezone, lang === 'ru' ? 'ru' : 'en');
+}
+
+async function handleGroupToday(
+  ctx: BotCommandContext,
+  user: User,
+  lang: 'en' | 'ru',
+  eventService: EventService,
+  holidayService?: HolidayService,
+  groupRepo?: GroupChatRepository,
+  weatherService?: WeatherService,
+): Promise<void> {
+  const groupId = getGroupId(ctx);
+  if (groupId === null) return;
+  const timezone = groupRepo?.getTimezone(groupId) ?? null;
+  if (!timezone) {
+    await ctx.send(
+      lang === 'ru'
+        ? '⚙️ Сначала задайте таймзону группы через /settings'
+        : '⚙️ Set the group timezone first via /settings',
+    );
+    return;
+  }
+  const now = new Date();
+  const tzNow = new TZDate(now, timezone);
+  const dayStart = new TZDate(new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate(), 0, 0, 0), timezone);
+  const dayEnd = new TZDate(
+    new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate(), 23, 59, 59, 999),
+    timezone,
+  );
+  const occurrences = enrichAgenda(
+    eventService.getEventsInRangeForGroup(groupId, dayStart.toISOString(), dayEnd.toISOString()),
+    { userId: user.telegram_id, language: lang, groupId },
+    eventService.agendaRepository,
+  );
+  const holidays = holidayService?.getHolidaysForDate(user.telegram_id, tzNow.toISOString().slice(0, 10)) ?? [];
+  const dayWeather = await fetchTodayWeather(weatherService, timezone, lang);
+  const text = formatDayAgenda(occurrences, now.toISOString(), timezone, lang, holidays, undefined, dayWeather);
+  await sendAgendaText(ctx, text);
+}
+
+interface TodayImageInput {
+  renderService: ImageRenderer;
+  occurrences: EventOccurrence[];
+  dateIso: string;
+  holidays: HolidayEntry[];
+  user: User;
+  groupRepo: GroupChatRepository | undefined;
+  lang: 'en' | 'ru';
+}
+
+/** Render today's agenda as an image, send it and pin it; render failures are reported to the user. */
+async function sendTodayImage(ctx: BotCommandContext, input: TodayImageInput): Promise<void> {
+  const { renderService, occurrences, dateIso, holidays, user, groupRepo, lang } = input;
+  try {
+    const buffer = await renderDayImage(
+      renderService,
+      occurrences,
+      dateIso,
+      user.timezone,
+      user.language as 'ru' | 'en',
+      user.telegram_id,
+      holidays,
+    );
+    const file = new File([buffer], 'today.png', { type: 'image/png' });
+    const sent = await sendAgendaImage(file, {
+      language: user.language,
+      sendPhoto: (photo) => ctx.sendPhoto(photo),
+      sendDocument: (document, options) => ctx.sendDocument(document, options),
+    });
+    autoPin(user.telegram_id, sent.id, {
+      pinChatMessage: (chatId, messageId, options) =>
+        ctx.bot.api.pinChatMessage({
+          chat_id: chatId,
+          message_id: messageId,
+          disable_notification: options.disable_notification,
+        }),
+      sendMessage: async (chatId, text) => {
+        await ctx.bot.api.sendMessage({ chat_id: chatId, text });
+      },
+      isGroupChat: false,
+      groupChatRepo: groupRepo,
+    }).catch((err) => {
+      imageLogger.error({ err }, 'autoPin failed');
+    });
+  } catch (err) {
+    imageLogger.error({ err }, 'Render failed');
+    await ctx.send(agendaImageErrorMessage(err) ?? t(lang).callbackErrors.imageGenerationFailed);
+  }
+}
 
 export async function handleToday(
   ctx: BotCommandContext,
@@ -33,35 +132,7 @@ export async function handleToday(
   const lang = user.language as 'en' | 'ru';
 
   if (isGroup(ctx)) {
-    const groupId = getGroupId(ctx);
-    if (groupId === null) return;
-    const timezone = groupRepo?.getTimezone(groupId) ?? null;
-    if (!timezone) {
-      await ctx.send(
-        lang === 'ru'
-          ? '⚙️ Сначала задайте таймзону группы через /settings'
-          : '⚙️ Set the group timezone first via /settings',
-      );
-      return;
-    }
-    const now = new Date();
-    const tzNow = new TZDate(now, timezone);
-    const dayStart = new TZDate(new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate(), 0, 0, 0), timezone);
-    const dayEnd = new TZDate(
-      new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate(), 23, 59, 59, 999),
-      timezone,
-    );
-    const occurrences = enrichAgenda(
-      eventService.getEventsInRangeForGroup(groupId, dayStart.toISOString(), dayEnd.toISOString()),
-      { userId: user.telegram_id, language: lang, groupId },
-      eventService.agendaRepository,
-    );
-    const holidays = holidayService?.getHolidaysForDate(user.telegram_id, tzNow.toISOString().slice(0, 10)) ?? [];
-    const dayWeather = weatherService
-      ? await weatherService.getDayWeather(timezone, lang === 'ru' ? 'ru' : 'en')
-      : null;
-    const text = formatDayAgenda(occurrences, now.toISOString(), timezone, lang, holidays, undefined, dayWeather);
-    await sendAgendaText(ctx, text);
+    await handleGroupToday(ctx, user, lang, eventService, holidayService, groupRepo, weatherService);
     return;
   }
 
@@ -74,9 +145,7 @@ export async function handleToday(
   const dateIso = new TZDate(now, user.timezone).toISOString().slice(0, 10);
   const holidays = holidayService?.getHolidaysForDate(user.telegram_id, dateIso) ?? [];
   const calendarColors = buildCalendarColorMap(googleCalendarRepo, user.telegram_id);
-  const dayWeather = weatherService
-    ? await weatherService.getDayWeather(user.timezone, lang === 'ru' ? 'ru' : 'en')
-    : null;
+  const dayWeather = await fetchTodayWeather(weatherService, user.timezone, lang);
   const text = formatDayAgenda(
     occurrences,
     now.toISOString(),
@@ -90,41 +159,7 @@ export async function handleToday(
   await sendAgendaText(ctx, text);
 
   if (renderService) {
-    try {
-      const buffer = await renderDayImage(
-        renderService,
-        occurrences,
-        dateIso,
-        user.timezone,
-        user.language as 'ru' | 'en',
-        user.telegram_id,
-        holidays,
-      );
-      const file = new File([buffer], 'today.png', { type: 'image/png' });
-      const sent = await sendAgendaImage(file, {
-        language: user.language,
-        sendPhoto: (photo) => ctx.sendPhoto(photo),
-        sendDocument: (document, options) => ctx.sendDocument(document, options),
-      });
-      autoPin(user.telegram_id, sent.id, {
-        pinChatMessage: (chatId, messageId, options) =>
-          ctx.bot.api.pinChatMessage({
-            chat_id: chatId,
-            message_id: messageId,
-            disable_notification: options.disable_notification,
-          }),
-        sendMessage: async (chatId, text) => {
-          await ctx.bot.api.sendMessage({ chat_id: chatId, text });
-        },
-        isGroupChat: false,
-        groupChatRepo: groupRepo,
-      }).catch((err) => {
-        imageLogger.error({ err }, 'autoPin failed');
-      });
-    } catch (err) {
-      imageLogger.error({ err }, 'Render failed');
-      await ctx.send(agendaImageErrorMessage(err) ?? t(lang).callbackErrors.imageGenerationFailed);
-    }
+    await sendTodayImage(ctx, { renderService, occurrences, dateIso, holidays, user, groupRepo, lang });
   }
 }
 
