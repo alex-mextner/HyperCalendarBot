@@ -404,10 +404,11 @@ describe('runner labels: only an explicitly allowed job may leave the GitHub-hos
   });
 
   test('exactly one job names qa-pc (the stage QA job) and exactly one names odroid-hcb (the deploy job)', () => {
-    for (const [label, expected] of [
-      ['qa-pc', ['stage-qa.yml#qa']],
-      ['odroid-hcb', ['deploy.yml#deploy']],
-    ] as const) {
+    const owners: Record<string, string[]> = {
+      'qa-pc': ['stage-qa.yml#qa'],
+      'odroid-hcb': ['deploy.yml#deploy'],
+    };
+    for (const [label, expected] of Object.entries(owners)) {
       const namers = readdirSync(WORKFLOWS)
         .filter((name) => /\.ya?ml$/.test(name))
         .flatMap((name) =>
