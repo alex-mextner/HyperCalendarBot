@@ -1,6 +1,6 @@
 """Corpus inputs: the fixed paths, vocabulary, secret and mapping files, the source databases and chat logs, and the
-raw rows read from them. Everything here only reads the odroid-local inputs; nothing is written except the 0600
-mapping and source index under PRIVATE."""
+raw rows read from them. The inputs are only read; the one write is the 0600 mapping and source index under
+PRIVATE, and a gzipped source is unpacked to a private temp file that is removed on close."""
 
 from __future__ import annotations
 
@@ -167,15 +167,21 @@ class OpenedDb:
         self.path = path
         self.temp: str | None = None
         target = path
-        if path.endswith(".gz"):
-            with tempfile.NamedTemporaryFile(
-                prefix="rh-", suffix=".db", dir="/tmp", delete=False
-            ) as handle:
-                os.chmod(handle.name, 0o600)
-                with gzip.open(path, "rb") as source:
-                    shutil.copyfileobj(source, handle)
-            self.temp = target = handle.name
-        self.db = sqlite3.connect(f"file:{target}?mode=ro&immutable=1", uri=True)
+        try:
+            if path.endswith(".gz"):
+                with tempfile.NamedTemporaryFile(
+                    prefix="rh-", suffix=".db", dir="/tmp", delete=False
+                ) as handle:
+                    self.temp = target = handle.name
+                    os.chmod(handle.name, 0o600)
+                    with gzip.open(path, "rb") as source:
+                        shutil.copyfileobj(source, handle)
+            self.db = sqlite3.connect(f"file:{target}?mode=ro&immutable=1", uri=True)
+        except BaseException:
+            # A corrupt archive or an unreadable copy must not leave the unpacked private data in /tmp.
+            if self.temp:
+                os.unlink(self.temp)
+            raise
 
     def close(self) -> None:
         self.db.close()
