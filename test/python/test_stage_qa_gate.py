@@ -26,6 +26,7 @@ REPORT_JOB = 9002
 QA_PATH = ".github/workflows/stage-qa.yml"
 QA_JOB = "Stage QA run"
 QA_STEP = "Run the stage QA through qa-cli"
+REPORT_STEP = "Post the stage-qa status"
 
 # Fake gh: serves fixtures keyed by the joined argv; unknown requests fail loudly. A route is
 #   {"body": json}                         a JSON API answer
@@ -110,10 +111,10 @@ def good_run(**over):
     return run
 
 
-def good_steps(**qa_over):
+def good_steps(*, step=QA_STEP, **qa_over):
     return [
         {"number": 1, "name": "Set up job", "status": "completed", "conclusion": "success"},
-        {"number": 2, "name": QA_STEP, "status": "completed", "conclusion": "success", **qa_over},
+        {"number": 2, "name": step, "status": "completed", "conclusion": "success", **qa_over},
         {"number": 3, "name": "Complete job", "status": "completed", "conclusion": "success"},
     ]
 
@@ -129,7 +130,7 @@ def good_job(**over):
 
 def report_job(**over):
     times = {"started_at": "2026-10-27T08:37:15Z", "completed_at": "2026-10-27T08:37:18Z"}
-    return good_job(**{"id": REPORT_JOB, "name": "Post stage-qa", **times, **over})
+    return good_job(**{"id": REPORT_JOB, "name": "Post stage-qa", "steps": good_steps(step=REPORT_STEP), **times, **over})
 
 
 # A synthetic job log in the shape the runner writes it (BOM, a timestamp per line, the step header
@@ -153,6 +154,28 @@ def header_lines(sha=HEAD, *, env=None, script=SCRIPT_LINES, shell="shell: /usr/
     return [*lines, *env_lines, "##[endgroup]"]
 
 
+# The report step's own header: the workflow's inputs of the verdict, rendered by the runner.
+GOOD_REPORT_ENV = {
+    "REPO": REPO, "HEAD_SHA": HEAD, "RUN_ID": str(RUN), "BUILD_CONCLUSION": "success",
+    "QA_RESULT": "success", "QA_RC": "0", "QA_CASES": "12",
+}
+
+
+def report_header(**over):
+    """`over` replaces a value; a None value drops the line; a list value prints the line once per item."""
+    env = {**GOOD_REPORT_ENV, **over}
+    env_lines = ["  GH_TOKEN: ***"]
+    for name, value in env.items():
+        for item in value if isinstance(value, list) else [value]:
+            if item is not None:
+                env_lines.append(f"  {name}: {item}")
+    return header_lines(env=env_lines, script=["\x1b[36;1mset -euo pipefail\x1b[0m"])
+
+
+def report_log(**over):
+    return stamped([*SETUP_LINES, *report_header(**over), "Evaluate and set job outputs"])
+
+
 def stamped(lines, newline="\n", bom=True):
     body = newline.join(f"2026-10-27T08:23:24.{i:07d}Z {line}" for i, line in enumerate(lines)) + newline
     return ("\ufeff" if bom else "") + body
@@ -172,6 +195,7 @@ def good_routes():
         REPO_KEY: {"body": {"default_branch": "main"}},
         JOBS_KEY: {"body": {"jobs": [good_job(), report_job()]}},
         LOG_KEY: {"text": qa_log()},
+        REPORT_LOG_KEY: {"text": report_log()},
     }
 
 
@@ -366,7 +390,7 @@ class LogBindingTest(GateHarness):
         routes[LOG_KEY] = route if text is None else {"text": text, **route}
         return routes
 
-    def test_green_reads_the_log_of_the_qa_job_only_once(self):
+    def test_green_reads_the_log_of_the_qa_and_report_jobs_only_once(self):
         # The run's own head_sha is the default branch commit: it is not what binds the tested head.
         self.assertNotEqual(good_run()["head_sha"], HEAD)
         done = self.gate(good_routes())
@@ -374,7 +398,7 @@ class LogBindingTest(GateHarness):
         self.assertEqual(done.stdout, f"stage-qa gate: green for {HEAD[:12]} cases=12 run={RUN}\n")
         self.assertEqual(done.stderr, "")
         self.assertEqual(self.fetched().count(LOG_KEY), 1)
-        self.assertNotIn(REPORT_LOG_KEY, self.fetched())
+        self.assertEqual(self.fetched().count(REPORT_LOG_KEY), 1)
 
     def test_line_endings_and_bom_do_not_matter(self):
         for newline in ("\n", "\r\n"):
@@ -586,6 +610,80 @@ class LogBindingTest(GateHarness):
         (receipts / f"{HEAD}.json").write_text(json.dumps({"sha": HEAD, "status": "passed"}))
         done = self.gate(self.with_log(qa_log(OLD)), HOME=str(self.tmp))
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+
+
+class ReportVerdictTest(GateHarness):
+    """The status is only the workflow's verdict when the report step's own header says so.
+
+    A forged status can land inside the report job's time window, so the window proves nothing; the
+    runner-written header of `Post the stage-qa status` carries what the trusted workflow decided.
+    """
+
+    def with_report(self, **over):
+        routes = good_routes()
+        routes[REPORT_LOG_KEY] = {"text": report_log(**over)}
+        return routes
+
+    def test_a_forged_success_inside_the_report_window_fails_when_the_workflow_ran_no_case(self):
+        # The QA driver exited 0 with zero cases: the report step posted `error`, a forger posted `success`.
+        routes = self.with_report(QA_CASES="0")
+        self.assertEqual(routes[statuses_key()]["body"][0]["created_at"], "2026-10-27T08:37:17Z")  # inside the window
+        self.assertNotGreen(routes, "did not report a pass", "QA_CASES")
+
+    def test_a_status_reporting_other_cases_than_the_workflow_counted_fails(self):
+        for cases in ("11", "13", "012", ""):
+            with self.subTest(cases=cases):
+                self.assertNotGreen(self.with_report(QA_CASES=cases), "QA_CASES")
+
+    def test_every_input_of_the_verdict_must_say_pass(self):
+        wrong = {
+            "HEAD_SHA": OLD, "RUN_ID": str(RUN + 1), "BUILD_CONCLUSION": "failure", "QA_RESULT": "failure", "QA_RC": "1",
+        }
+        for name, value in wrong.items():
+            with self.subTest(name=name):
+                self.assertNotGreen(self.with_report(**{name: value}), "did not report a pass", name)
+
+    def test_a_missing_or_duplicated_input_is_refused(self):
+        for name in ("HEAD_SHA", "RUN_ID", "BUILD_CONCLUSION", "QA_RESULT", "QA_RC", "QA_CASES"):
+            with self.subTest(name=name, case="missing"):
+                self.assertNotGreen(self.with_report(**{name: None}), f"declares {name} 0 times")
+            with self.subTest(name=name, case="duplicate"):
+                value = GOOD_REPORT_ENV[name]
+                self.assertNotGreen(self.with_report(**{name: [value, value]}), f"declares {name} 2 times")
+            with self.subTest(name=name, case="duplicate with a forged value"):
+                self.assertNotGreen(self.with_report(**{name: [GOOD_REPORT_ENV[name], "0"]}), f"declares {name} 2 times")
+
+    def test_a_report_log_without_an_env_block_is_refused(self):
+        routes = good_routes()
+        routes[REPORT_LOG_KEY] = {"text": stamped([*SETUP_LINES, *header_lines(env_open=None)])}
+        self.assertNotGreen(routes, "no env block")
+
+    def test_the_report_step_must_be_the_exact_trusted_one(self):
+        for name, steps in {
+            "renamed": good_steps(step="Post something else"),
+            "failed": good_steps(step=REPORT_STEP, conclusion="failure"),
+            "one step": good_steps(step=REPORT_STEP)[:1],
+        }.items():
+            routes = good_routes()
+            routes[JOBS_KEY] = {"body": {"jobs": [good_job(), report_job(steps=steps)]}}
+            with self.subTest(name):
+                self.assertNotGreen(routes, "Post stage-qa")
+                self.assertNotIn(REPORT_LOG_KEY, self.fetched())
+
+    def test_an_unreadable_report_log_cannot_be_evaluated(self):
+        routes = good_routes()
+        routes[REPORT_LOG_KEY] = {"error": "HTTP 404"}
+        self.assertCannotEvaluate(routes, "cannot read the log")
+
+    def test_the_real_workflow_report_step_declares_exactly_the_inputs_the_gate_reads(self):
+        text = (ROOT / ".github" / "workflows" / "stage-qa.yml").read_text()
+        report = text.split("\n  report:\n", 1)[1]
+        self.assertEqual(len(re.findall(r"^      - ", report.split("\n    steps:\n", 1)[1], re.MULTILINE)), 1)
+        self.assertIn("- name: Post the stage-qa status", report)
+        env = report.split("        env:\n", 1)[1].split("        run:", 1)[0]
+        declared = re.findall(r"^          ([A-Z_]+): ", env, re.MULTILINE)
+        for name in ("HEAD_SHA", "RUN_ID", "BUILD_CONCLUSION", "QA_RESULT", "QA_RC", "QA_CASES"):
+            self.assertEqual(declared.count(name), 1, name)
 
 
 class StatusFromReportJobTest(GateHarness):

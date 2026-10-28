@@ -19,7 +19,12 @@ not read. Only the head of the log is read (LOG_HEAD_LIMIT) and it stays in memo
 never contain log lines, only fixed words and a validated short SHA.
 
 The verdict itself is also tied to the run: any PR workflow can post a status as github-actions[bot],
-so the status must have been created while the run's own `Post stage-qa` job was executing. The
+so the status must have been created while the run's own `Post stage-qa` job was executing - and
+that window is only corroboration, since a forged status can land inside it. The authority is the
+step header of the report job's first trusted step, `Post the stage-qa status`, read the same way:
+its env block carries the workflow's own inputs of the verdict (HEAD_SHA, RUN_ID, BUILD_CONCLUSION,
+QA_RESULT, QA_RC, QA_CASES), and the gate requires them to say "this run passed this head with
+exactly the case count the status reports". A forged status cannot change that header. The
 log read needs a gh that knows `--allow-escape-sequences` (the log carries ANSI colour); an older
 gh fails the read and the gate refuses with exit 2. The binding assumes the workflow passes the
 QA step no PR-controlled text in its env (today only GH_TOKEN and HEAD_SHA, pinned by a test).
@@ -40,6 +45,7 @@ QA_CONTEXT = "stage-qa"
 QA_JOB_NAME = "Stage QA run"
 SETUP_STEP_NAME = "Set up job"
 QA_STEP_NAME = "Run the stage QA through qa-cli"
+REPORT_STEP_NAME = "Post the stage-qa status"
 REPORT_JOB_NAME = "Post stage-qa"
 BOT_LOGIN = "github-actions[bot]"
 PAGE_SIZE = 100
@@ -57,6 +63,8 @@ HEADER_START = "##[group]Run "
 GROUP_END = "##[endgroup]"
 HEAD_SHA_DECLARATION = re.compile(r"^\s*HEAD_SHA\s*:")
 HEAD_SHA_ENV_LINE = re.compile(r"^  HEAD_SHA: ([0-9a-f]{40})$")
+ENV_LINE = re.compile(r"^  ([A-Z][A-Z0-9_]*): (.*)$")
+VERDICT_ENV_NAMES = ("HEAD_SHA", "RUN_ID", "BUILD_CONCLUSION", "QA_RESULT", "QA_RC", "QA_CASES")
 
 
 class NotGreen(Exception):
@@ -206,8 +214,16 @@ def require_trusted_run(repo, run_id):
     return run
 
 
-def step_problems(job):
-    """The steps the log binding relies on: the runner's `Set up job`, then the exact trusted QA step."""
+def qa_step_problems(job):
+    return step_problems(job, QA_STEP_NAME)
+
+
+def report_step_problems(job):
+    return step_problems(job, REPORT_STEP_NAME)
+
+
+def step_problems(job, step_name):
+    """The steps the log binding relies on: the runner's `Set up job`, then the exact trusted step."""
     steps = job.get("steps")
     if not isinstance(steps, list) or len(steps) < 2:
         return ["the job lists fewer than two steps"]
@@ -217,8 +233,8 @@ def step_problems(job):
     problems = []
     if (setup.get("number"), setup.get("name")) != (1, SETUP_STEP_NAME):
         problems.append(f"step 1 is not `{SETUP_STEP_NAME}`")
-    if (qa.get("number"), qa.get("name")) != (2, QA_STEP_NAME):
-        problems.append(f"step 2 is not `{QA_STEP_NAME}`")
+    if (qa.get("number"), qa.get("name")) != (2, step_name):
+        problems.append(f"step 2 is not `{step_name}`")
     if qa.get("status") != "completed" or qa.get("conclusion") != "success":
         problems.append(f"step 2 is {qa.get('status')}/{qa.get('conclusion')}, expected completed/success")
     return problems
@@ -265,8 +281,8 @@ def require_run_jobs(repo, run, run_url):
     job_list = jobs.get("jobs") if isinstance(jobs, dict) else None
     if not isinstance(job_list, list):
         raise CannotEvaluate("jobs response has no jobs list")
-    qa_job = require_one_successful_job(job_list, QA_JOB_NAME, run, run_url, step_problems)
-    report_job = require_one_successful_job(job_list, REPORT_JOB_NAME, run, run_url, lambda job: [])
+    qa_job = require_one_successful_job(job_list, QA_JOB_NAME, run, run_url, qa_step_problems)
+    report_job = require_one_successful_job(job_list, REPORT_JOB_NAME, run, run_url, report_step_problems)
     return qa_job, report_job
 
 
@@ -384,11 +400,31 @@ def header_head_sha(header):
     return match.group(1)
 
 
-def tested_head_sha(repo, job_id):
+def job_step_header(repo, job_id):
     prefix, capped = read_job_log_head(repo, job_id)
     if not prefix.strip():
         raise CannotEvaluate(f"the log of job {job_id} is empty")
-    return header_head_sha(first_step_header(log_texts(prefix), capped))
+    return first_step_header(log_texts(prefix), capped)
+
+
+def tested_head_sha(repo, job_id):
+    return header_head_sha(job_step_header(repo, job_id))
+
+
+def header_env(header, names):
+    """The value of each of `names` printed once in the env block of the step header."""
+    shell = next((i for i, text in enumerate(header) if text.startswith("shell: ")), None)
+    if shell is None or header[shell + 1:shell + 2] != ["env:"]:
+        raise NotGreen("the step header has no env block")
+    declared = {}
+    for text in header[shell + 2:]:
+        match = ENV_LINE.match(text)
+        if match is not None:
+            declared.setdefault(match.group(1), []).append(match.group(2))
+    for name in names:
+        if len(declared.get(name, [])) != 1:
+            raise NotGreen(f"the step header declares {name} {len(declared.get(name, []))} times, expected exactly once in its env block")
+    return {name: declared[name][0] for name in names}
 
 
 def require_log_binds_head(repo, job, head, run_url):
@@ -398,6 +434,25 @@ def require_log_binds_head(repo, job, head, run_url):
         raise NotGreen(
             f"Stage QA ({run_url}) tested {tested[:12]}, not the PR head {head[:12]}: "
             f"the result belongs to another commit; re-run Stage QA from the PR."
+        )
+
+
+def require_report_says_passed(repo, report_job, head, run_id, cases, run_url):
+    """The report step must have been started by the runner with inputs that make `passed cases=N` the verdict."""
+    env = header_env(job_step_header(repo, report_job["id"]), VERDICT_ENV_NAMES)
+    expected = {
+        "HEAD_SHA": head,
+        "RUN_ID": str(run_id),
+        "BUILD_CONCLUSION": "success",
+        "QA_RESULT": "success",
+        "QA_RC": "0",
+        "QA_CASES": str(cases),
+    }
+    wrong = sorted(name for name in VERDICT_ENV_NAMES if env[name] != expected[name])
+    if wrong:
+        raise NotGreen(
+            f"The `{REPORT_JOB_NAME}` job of {run_url} did not report a pass of this head with {cases} cases "
+            f"(its {', '.join(wrong)} disagree): the status was not the workflow's verdict; re-run Stage QA."
         )
 
 
@@ -416,6 +471,7 @@ def evaluate(repo, pr):
     qa_job, report_job = require_run_jobs(repo, run, run_url)
     require_status_from_report_job(status, report_job, run_url)
     require_log_binds_head(repo, qa_job, head, run_url)
+    require_report_says_passed(repo, report_job, head, run_id, cases, run_url)
     require_head_unmoved(repo, pr, head)
     return head, cases, run_id
 
