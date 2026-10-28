@@ -15,27 +15,27 @@ their result status, and the scrubbed replies. `--audit` prints aggregate counts
 from __future__ import annotations
 
 import argparse
-import gzip
-import shutil
-import tempfile
 import collections
 import datetime as dt
+import gzip
 import hashlib
 import json
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import sys
+import tempfile
 import zoneinfo
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import scrub as scrub_module  # noqa: E402
-from credentials import redact_history  # noqa: E402
-from scrub import Scrubber, norm  # noqa: E402
+import scrub as scrub_module
+from credentials import redact_history
+from scrub import Scrubber, norm
 
 DATA = "/opt/hypercal/data"
 DB_PATH = f"{DATA}/calendar.db"
@@ -185,13 +185,12 @@ class OpenedDb:
         self.temp: str | None = None
         target = path
         if path.endswith(".gz"):
-            handle = tempfile.NamedTemporaryFile(
+            with tempfile.NamedTemporaryFile(
                 prefix="rh-", suffix=".db", dir="/tmp", delete=False
-            )
-            os.chmod(handle.name, 0o600)
-            with gzip.open(path, "rb") as source:
-                shutil.copyfileobj(source, handle)
-            handle.close()
+            ) as handle:
+                os.chmod(handle.name, 0o600)
+                with gzip.open(path, "rb") as source:
+                    shutil.copyfileobj(source, handle)
             self.temp = target = handle.name
         self.db = sqlite3.connect(f"file:{target}?mode=ro&immutable=1", uri=True)
 
@@ -305,7 +304,11 @@ def scan_sources(find_files: list[str], private: str) -> None:
 
 def load_sources(private: str) -> list[dict]:
     path = os.path.join(private, "sources.json")
-    listed = json.load(open(path, encoding="utf-8"))["databases"] if os.path.exists(path) else []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as sources_file:
+            listed = json.load(sources_file)["databases"]
+    else:
+        listed = []
     known = {item["path"] for item in listed}
     if DB_PATH not in known:
         listed.insert(
@@ -404,7 +407,7 @@ class _RowCollector:
             lambda: {"found": 0, "new": 0}
         )
 
-    def add(self, source: str, user_id, role, content, created_at, chat_id, row_id) -> None:  # noqa: ANN001
+    def add(self, source: str, user_id, role, content, created_at, chat_id, row_id) -> None:
         if not isinstance(content, str) or not isinstance(created_at, str):
             return
         self.stats[source]["found"] += 1
@@ -446,7 +449,7 @@ def _collect_database(collector: _RowCollector, item: dict) -> None:
         opened.close()
 
 
-def _collect_blob(collector: _RowCollector, source: str, blob) -> None:  # noqa: ANN001
+def _collect_blob(collector: _RowCollector, source: str, blob) -> None:
     items = blob["rows"] if isinstance(blob, dict) else [entry.get("row", entry) for entry in blob]
     for entry in items:
         collector.add(
@@ -518,7 +521,7 @@ class _EntityAdder:
         self.scrubber = scrubber
         self.counts: collections.Counter = collections.Counter()
 
-    def __call__(self, surface, kind: str) -> None:  # noqa: ANN001
+    def __call__(self, surface, kind: str) -> None:
         if not isinstance(surface, str) or not surface.strip():
             return
         self.scrubber.add_entity(surface, kind)
@@ -630,7 +633,7 @@ def local_clock(created_at: str, tz_name: str) -> tuple[str, dict[str, str], str
 # ─── turns ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def parse_json(text: str):  # noqa: ANN201
+def parse_json(text: str):
     try:
         return json.loads(text)
     except (json.JSONDecodeError, ValueError):
@@ -687,7 +690,7 @@ def _replies_of(payload: dict) -> list[str]:
     return replies
 
 
-def _tool_results(payload) -> dict[str, str]:  # noqa: ANN001
+def _tool_results(payload) -> dict[str, str]:
     entries = payload if isinstance(payload, list) else [payload]
     return {
         entry.get("tool_call_id", ""): entry["content"]
@@ -716,7 +719,7 @@ def _executed_after(items: list[dict], index: int) -> tuple[list[dict], list[str
     return calls, replies
 
 
-def _assistant_said(payload, raw: str):  # noqa: ANN001, ANN202
+def _assistant_said(payload, raw: str):
     if not isinstance(payload, dict):
         return raw
     return payload.get("text") or payload.get("content")
@@ -798,7 +801,7 @@ def normal_key(text: str) -> str:
 # ─── gates ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def walk(value, path: str = ""):  # noqa: ANN001, ANN201
+def walk(value, path: str = ""):
     if isinstance(value, str):
         yield path, value
     elif isinstance(value, list):
@@ -868,7 +871,7 @@ def _verify_fields(record: dict) -> dict:
     return free
 
 
-def verify_corpus(path: str, scrubber: "Scrubber", fingerprint: str) -> int:
+def verify_corpus(path: str, scrubber: Scrubber, fingerprint: str) -> int:
     """Run the output gates again on a written corpus against the live entity registry (odroid only)."""
     entity_leaks = 0
     regex_total: dict[str, int] = {}

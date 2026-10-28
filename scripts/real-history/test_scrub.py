@@ -6,15 +6,65 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from scrub import Scrubber, norm  # noqa: E402
+from scrub import Scrubber, norm
 
 VOCAB = {
     norm(w)
-    for w in (
-        "завтра встреча встречу встречей с со на в к для у от про удали перенеси напомни позвони пригласи что "
-        "когда где во сколько часа утра вечера день недели понедельник стендап врач врачем зуб кофе в офисе дома "
-        "через минут час ровно создай событие мне и за не нет да привет спасибо москве сегодня"
-    ).split()
+    for w in [
+        "завтра",
+        "встреча",
+        "встречу",
+        "встречей",
+        "с",
+        "со",
+        "на",
+        "в",
+        "к",
+        "для",
+        "у",
+        "от",
+        "про",
+        "удали",
+        "перенеси",
+        "напомни",
+        "позвони",
+        "пригласи",
+        "что",
+        "когда",
+        "где",
+        "во",
+        "сколько",
+        "часа",
+        "утра",
+        "вечера",
+        "день",
+        "недели",
+        "понедельник",
+        "стендап",
+        "врач",
+        "врачем",
+        "зуб",
+        "кофе",
+        "в",
+        "офисе",
+        "дома",
+        "через",
+        "минут",
+        "час",
+        "ровно",
+        "создай",
+        "событие",
+        "мне",
+        "и",
+        "за",
+        "не",
+        "нет",
+        "да",
+        "привет",
+        "спасибо",
+        "москве",
+        "сегодня",
+    ]
 }
 PROPER = {norm("Москва")}
 
@@ -55,7 +105,14 @@ class ScrubTest(unittest.TestCase):
         s = make()
         text = "пиши на a.b@mail.com или +7 (916) 555-12-34, @someone_real, https://t.me/secretchat 12345678901"
         out = s.scrub(text)
-        for leaked in ("a.b@mail.com", "916", "555-12-34", "someone_real", "secretchat", "12345678901"):
+        for leaked in (
+            "a.b@mail.com",
+            "916",
+            "555-12-34",
+            "someone_real",
+            "secretchat",
+            "12345678901",
+        ):
             self.assertNotIn(leaked, out)
         self.assertIn("@px_", out)
         self.assertIn("example.org", out)
@@ -99,7 +156,12 @@ class ScrubTest(unittest.TestCase):
     def test_mapping_roundtrip_is_stable(self):
         s = make([("Игорь", "first")])
         first = s.scrub("Игорь")
-        again = Scrubber(vocab=set(VOCAB), proper=set(PROPER), secret=b"other-secret-that-differs-xxxxxxx", mapping=s.export_mapping())
+        again = Scrubber(
+            vocab=set(VOCAB),
+            proper=set(PROPER),
+            secret=b"other-secret-that-differs-xxxxxxx",
+            mapping=s.export_mapping(),
+        )
         again.add_entity("Игорь", "first")
         self.assertEqual(again.scrub("Игорь"), first)
 
