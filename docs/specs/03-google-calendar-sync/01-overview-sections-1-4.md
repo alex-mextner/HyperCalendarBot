@@ -676,6 +676,8 @@ The sketch above is the shape; `SyncService.pushEvent`, `pushParticipantEvent` a
 - **What the row says decides, not the queued action.** A row with a Google id is updated even when its job says create (a second create never inserts a second copy); a row without one gets its copy created even when its job says update. Only a delete is taken as asked. Known gap, tracked separately: a delete that arrives between a lost insert answer and its retry finds no id and leaves the unlinked copy in Google ([#877](https://github.com/alex-mextner/HyperCalendarBot/issues/877)).
 - **Counters.** Every link logs `Google copy linked` (`eventId`, `googleEventId`, `origin`, `duplicates`); several marked copies log it at warning level.
 
+Rows that already lack the id (a copy created before this change whose answer was lost, or whose link `clearGoogleSync` cleared) are relinked by `scripts/backfill-google-event-ids.ts` (`docs/reference/deploy-runbook.md`, "Google event id backfill"). It compares summaries and times to match, but never writes to Google, never changes event text and prints no text.
+
 ### 4.5. Sync Frequency
 
 | Mechanism                | Frequency            | Purpose                               |

@@ -380,6 +380,23 @@ chown -R 999:999 /opt/hypercal/data/
 
 `scripts/backup-db.sh` (root cron `0 3 * * *` and every deploy) and the bot's own daily backup write full calendar-database copies into `/opt/hypercal/data/backups/`. Each copy holds every user's private data, so files are `0600` and the directory `0700`, owned by the container user `999`, which must keep write access. The cron script writes the copy inside the container with umask `077`, then enforces and checks both modes on the host; a copy it cannot restrict is deleted and the script exits non-zero, which also stops a deploy. Each run also restricts older copies left `0644` by earlier versions. A deploy runs the previously installed script, so the backup taken by the deploy that first ships a change to it follows the old rules until the next run. Inspect backups with `stat` only; never open their contents on a shared host.
 
+## Google event id backfill (#875)
+
+`scripts/backfill-google-event-ids.ts` relinks bot rows (`events`, `participant_google_sync`) that have no Google event id although their Google copy exists: a lost insert answer, or a link a disconnect cleared. It lists the user's primary calendar, then matches a copy to a row only when the match is the single candidate on both sides: first through the `hypercalendarbot_event_id` marker the copy carries, then, for rows that claim a copy (not `local_only`) and found none, through (summary, start, end) on copies that carry no marker of a live row. It never writes to Google, never changes event text and prints counts only (no titles, ids or user ids).
+
+```bash
+# Dry run: database opened read-only, nothing written (a refreshed Google access token is not saved either).
+ssh root@odroidn2 'docker exec hypercal-bot bun run scripts/backfill-google-event-ids.ts'
+# Apply: first a verified backup, then only the missing ids and one sync_log row per link; run the dry run first and keep its output.
+ssh root@odroidn2 'docker exec hypercal-bot bun run scripts/backfill-google-event-ids.ts --apply'
+```
+
+The apply writes `/opt/hypercal/data/backups/google-id-backfill-<UTC stamp>.db` (`VACUUM INTO`, `quick_check`, mode `0600`, never overwrites a file; `--backup PATH` names another) before the first write, then one transaction per user that sets `google_event_id` where it is still empty and no row of any user points at that copy (two users can share one Google calendar), and logs a `sync_log` row (`direction = pull`, `action = update`, `details` `{ "reason": "google_id_backfill", "via": "marker" | "slot", "kind": "owner" | "participant" }`). A row that changed between the read and the write is counted in `skippedChanged` and left alone. It is idempotent: linked rows are no longer candidates, and the output ends with the counts that remain.
+
+Output lines (`label` = `dry-run`, or `before`, `backup`, `apply`, `after`): `googleListed`, `googleBotCopies`, `alreadyLinked`, `looseCopies`, `unlinkedRows`, `linkableByMarker`, `linkableBySlot`, `ambiguous` (more than one candidate: left alone), `copiesWithoutRow` (a copy of an event that is deleted in the bot or not this user's), `extraCopiesOfLinkedEvent` (a duplicate copy in Google of an event whose row points at another copy; the bot never deletes it, remove it by hand in Google Calendar), `rowsWithoutCopy`.
+
+A user whose Google read fails (revoked token, API error) is reported on stderr as `{"label":"user-failed","user":N,"error":"<error class>"}` and skipped, and the exit code is 1; a dry run still prints the others, but `--apply` then writes nothing (`refused`), because a user who could not be read cannot claim their copies. A copy two users' plans both match, or one plan found ambiguous (two users on one Google calendar), is linked to neither and counted in `ambiguous` (rows and copies are counted, so one contested slot can add 2). A copy is matched by summary and time only when it carries no bot marker at all, and such a match is only reported (`linkableBySlot`): `--apply` writes it only with `--include-slot-matches`, because an unmarked event may be one the user made in Google themselves and linking it would let the bot edit or delete it. `--backup PATH` is used as given: the script creates and restricts (`0700`) only the default `backups/` directory, never one the operator named, and the parent of a named path must exist.
+
 ## Migration renumbering hazard
 
 If a migration is renumbered (e.g. `042_foo` -> `043_foo`), the existing production DB has the old
