@@ -335,7 +335,7 @@ wheels = [
 
 [[package]]
 name = "hypercalendarbot"
-version = "0.2.120"
+version = "0.2.121"
 source = { virtual = "." }
 dependencies = [
     { name = "numpy" },
