@@ -34,8 +34,6 @@ export interface Counts {
   exceptions: number;
   /** Correct answers with no hard rubric finding. */
   rubricClean: number;
-  /** Correct answers after which no AI supplement turn is needed. */
-  aiTurnAvoided: number;
   /** Labels the frozen clock contradicted (past time, DST gap, same weekday) and the oracle re-labelled AI-correct. */
   relabelled: number;
 }
@@ -53,8 +51,6 @@ export interface Kpis {
   rubricPass: number | null;
   /** (correct and rubric-clean) / inScope */
   qualityCoverage: number | null;
-  /** aiTurnAvoided / correct */
-  aiTurnAvoidedRate: number | null;
   /** (correct + falseNegativeOnAi) ... the share of AI-correct messages that correctly stayed with the AI */
   aiFallbackCorrect: number | null;
   /** In the TZ/DST matrix: correct / answered-by-a-rule among in-scope messages. */
@@ -76,7 +72,6 @@ export interface Intervals {
   precision: Interval;
   rubricPass: Interval;
   execution: Interval;
-  aiTurnAvoided: Interval;
 }
 
 export interface Slice extends Counts, Kpis {
@@ -103,7 +98,6 @@ export function intervalsOf(c: Counts): Intervals {
     precision: wilson(c.correct, c.correct + c.wrong + c.falseMatch),
     rubricPass: wilson(c.rubricClean, c.correct),
     execution: wilson(c.correct, c.correct + c.wrong),
-    aiTurnAvoided: wilson(c.aiTurnAvoided, c.correct),
   };
 }
 
@@ -120,7 +114,6 @@ const emptyCounts = (): Counts => ({
   unconfirmedWrites: 0,
   exceptions: 0,
   rubricClean: 0,
-  aiTurnAvoided: 0,
   relabelled: 0,
 });
 
@@ -140,7 +133,6 @@ function tally(counts: Counts, result: RunResult): void {
     case 'correct':
       counts.correct++;
       if (hardFindings(result.findings).length === 0) counts.rubricClean++;
-      if (result.aiTurnAvoided) counts.aiTurnAvoided++;
       break;
     case 'wrong':
       counts.wrong++;
@@ -165,7 +157,6 @@ function kpisOf(c: Counts): Kpis {
     intentLikeCoverage: ratio(c.correct, c.inScope + c.aiIntentLike),
     rubricPass: ratio(c.rubricClean, c.correct),
     qualityCoverage: ratio(c.rubricClean, c.inScope),
-    aiTurnAvoidedRate: ratio(c.aiTurnAvoided, c.correct),
     aiFallbackCorrect: ratio(aiExpected - c.falseMatch, aiExpected),
     execution: ratio(c.correct, c.correct + c.wrong),
   };

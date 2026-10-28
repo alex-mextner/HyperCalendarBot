@@ -7,7 +7,7 @@ Topic: docs/plans/2026-10-25-intent-seed-v6-brief.md. The panel saw aggregates o
 
 | Panel recommendation | Decision |
 |---|---|
-| Fix answer quality with recognition; suppress needless AI supplement | done: response renderer, `completeResponse` for whole answers |
+| Fix answer quality with recognition | done: response renderer (the AI turn after a rule answer stays, owner tg#25314) |
 | Cheapest gains first (day reads, punctuation, weekday names, trailing "в календаре") | done in canonicalization and seed-calendar |
 | Zero dangerous false matches per write family as a separate hard gate | done: `unconfirmedWrites`, `harmfulFalseMatch`, per-write-family `wrong` all must be 0 in `test/services/intent/intent-kpi-gate.test.ts` |
 | Activation: automated, idempotent, digest-bound, persisted rollback | done as boot-time gated activation (no human in the loop, as the owner demanded): gate file bound to seed fingerprint, engine digest and history checksum; a fingerprint that was ever activated is never re-activated automatically, so a rollback persists across restarts; backup first; one log line |
@@ -26,8 +26,8 @@ The brief itself was not in this prompt. This synthesis comes from the transcrip
 ## Best ideas (ranked)
 
 1. **Fix answer quality alongside recognition.**
-   - 56% of answers fail the rubric, and nearly every read triggers an AI supplement.
-   - Fix rendering, and suppress supplements when the answer is demonstrably complete.
+   - 56% of answers fail the rubric.
+   - Fix rendering; the AI supplement turn stays by design (owner tg#25314).
    - Otherwise routing gains don't help users.
 
 2. **Ship the cheapest gain first.**

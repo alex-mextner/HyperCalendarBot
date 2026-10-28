@@ -40,7 +40,6 @@ describe('interval denominators', () => {
       unconfirmedWrites: 0,
       exceptions: 0,
       rubricClean: 19,
-      aiTurnAvoided: 18,
       relabelled: 0,
     };
     const intervals = intervalsOf(counts);

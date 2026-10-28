@@ -7,8 +7,6 @@
 // - Events become an agenda only for READ tools. A write (create/update/delete) is confirmed in a sentence that names
 //   the exact event, never by listing it as if it were a result of a read.
 // - An unknown JSON shape is said to be unknown in the user's language; JSON is never shown.
-// - `complete` means the text is the whole answer to a read (no AI supplement needed); partial, approximate and
-//   ambiguous answers are not complete.
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import { z } from 'zod';
@@ -42,30 +40,9 @@ export interface RenderContext extends HumanTimeContext {
 
 export interface RenderedAnswer {
   text: string;
-  complete: boolean;
 }
 
-const incomplete = (text: string): RenderedAnswer => ({ text, complete: false });
-const completeAnswer = (text: string): RenderedAnswer => ({ text, complete: true });
-
-/** Reads whose own text, or the rendering of their data, is the whole answer. */
-const WHOLE_ANSWER_READS: { [tool: string]: true } = {
-  get_events: true,
-  get_upcoming: true,
-  search_events: true,
-  get_event: true,
-  get_free_slots: true,
-  get_holidays: true,
-  get_contacts: true,
-  get_timezone_info: true,
-  convert_to_timezone: true,
-  get_bot_info: true,
-  get_reminders: true,
-  calculate: true,
-  get_google_calendar_status: true,
-  list_google_calendars: true,
-  list_calendar_access: true,
-};
+const rendered = (text: string): RenderedAnswer => ({ text });
 
 /** Tools whose result is a list of calendar events to show as an agenda. */
 const EVENT_READS: { [tool: string]: true } = {
@@ -148,12 +125,12 @@ function renderEvents(answer: ToolAnswer, context: RenderContext): RenderedAnswe
   if (events === undefined) {
     // An empty read keeps the tool's own sentence: it names the checked day or window and the calendar.
     return Array.isArray(answer.data) && answer.data.length === 0 && !JSON_LIKE.test(answer.output)
-      ? completeAnswer(answer.output)
+      ? rendered(answer.output)
       : null;
   }
   if (answer.tool === 'get_event' && events.length === 1)
-    return completeAnswer(renderEventCard(events[0]!, context, kind));
-  return completeAnswer(renderAgenda(events, context, kind));
+    return rendered(renderEventCard(events[0]!, context, kind));
+  return rendered(renderAgenda(events, context, kind));
 }
 
 /** The exact target of a confirmed write, in words: «Ревью дизайна» — послезавтра, пт 9 октября, 14:00–15:00. */
@@ -164,7 +141,7 @@ function renderConfirmation(answer: ToolAnswer, context: RenderContext): Rendere
   const write: ConfirmedWrite =
     answer.tool === 'create_event' ? 'created' : answer.tool === 'update_event' ? 'updated' : 'deleted';
   const when = `${humanDay(event.date, context)}, ${eventTimeLabel(event, context, words)}`;
-  return incomplete(words.confirmed(write, event.title, when));
+  return rendered(words.confirmed(write, event.title, when));
 }
 
 /** One line per event for a sentence that asks the user to choose: the id is what they can type back. */
@@ -215,8 +192,8 @@ function renderFreeSlots(answer: ToolAnswer, context: RenderContext): RenderedAn
   const parts = day === null ? null : humanDayParts(day, context);
   if (parts === null) return null;
   const { slots } = answer.data;
-  if (slots.length === 0) return completeAnswer(words.freeNowhere(parts, words.inCalendar(calendarKind(answer.input))));
-  return completeAnswer(words.freeWindows(parts, freeWindowsText(slots, context, words)));
+  if (slots.length === 0) return rendered(words.freeNowhere(parts, words.inCalendar(calendarKind(answer.input))));
+  return rendered(words.freeWindows(parts, freeWindowsText(slots, context, words)));
 }
 
 // ---- time ----
@@ -274,7 +251,7 @@ function renderTimezoneInfo(answer: ToolAnswer, context: RenderContext): Rendere
       { place, atInstant },
       context,
     );
-    return text === null ? null : completeAnswer(text);
+    return text === null ? null : rendered(text);
   }
   const many = ZonesCodec.safeParse(answer.output);
   if (!many.success) return null;
@@ -289,7 +266,7 @@ function renderTimezoneInfo(answer: ToolAnswer, context: RenderContext): Rendere
     lines.push(line);
   }
   const gap = many.data.timezones.length === 2 && many.data.difference_hours !== undefined;
-  return completeAnswer([...lines, ...(gap ? [words.timeDifference(many.data.difference_hours!)] : [])].join('\n'));
+  return rendered([...lines, ...(gap ? [words.timeDifference(many.data.difference_hours!)] : [])].join('\n'));
 }
 
 function renderConverted(answer: ToolAnswer, context: RenderContext): RenderedAnswer | null {
@@ -300,7 +277,7 @@ function renderConverted(answer: ToolAnswer, context: RenderContext): RenderedAn
     { place: wordingFor(context.language).timeInZone(converted.data.timezone), atInstant: true },
     context,
   );
-  return text === null ? null : completeAnswer(text);
+  return text === null ? null : rendered(text);
 }
 
 // ---- settings ----
@@ -420,7 +397,7 @@ export function renderSettingsOutput(output: string, category: unknown, context:
 function renderSettings(answer: ToolAnswer, context: RenderContext): RenderedAnswer | null {
   if (answer.input.action !== 'get') return null;
   const text = renderSettingsOutput(answer.output, answer.input.category, context);
-  return text === null ? null : completeAnswer(text);
+  return text === null ? null : rendered(text);
 }
 
 // ---- contacts, holidays, bot info, access ----
@@ -439,7 +416,7 @@ function contactLine(line: string): string | null {
 function renderContactList(answer: ToolAnswer, context: RenderContext): RenderedAnswer | null {
   const lines = answer.output.split('\n').flatMap((line) => contactLine(line) ?? []);
   if (lines.length === 0) return null;
-  return completeAnswer([wordingFor(context.language).contactsHeading(lines.length), ...lines].join('\n'));
+  return rendered([wordingFor(context.language).contactsHeading(lines.length), ...lines].join('\n'));
 }
 
 function matchLabel(match: ContactMatch): string {
@@ -454,11 +431,10 @@ function renderContactMatches(answer: ToolAnswer, context: RenderContext): Rende
   const words = wordingFor(context.language);
   const only = matches.length === 1 ? matches[0] : undefined;
   if (only) {
-    const exact = only.confidence >= 1;
-    const text = `${exact ? words.contactFound : words.contactApproximate} ${matchLabel(only)}`;
-    return exact ? completeAnswer(text) : incomplete(text);
+    const lead = only.confidence >= 1 ? words.contactFound : words.contactApproximate;
+    return rendered(`${lead} ${matchLabel(only)}`);
   }
-  return matches.length === 0 ? null : incomplete([words.contactsFound, ...matches.map(matchLabel)].join('\n'));
+  return matches.length === 0 ? null : rendered([words.contactsFound, ...matches.map(matchLabel)].join('\n'));
 }
 
 /** A holiday line of get_holidays: "2026-11-04: День народного единства (Россия)". */
@@ -470,12 +446,12 @@ function renderHolidays(answer: ToolAnswer, context: RenderContext): RenderedAns
     converted++;
     return `${humanDay(match[1]!, context)} — ${match[2]}`;
   });
-  return converted === 0 ? null : completeAnswer(lines.join('\n'));
+  return converted === 0 ? null : rendered(lines.join('\n'));
 }
 
 function renderBotInfo(answer: ToolAnswer, context: RenderContext): RenderedAnswer {
   const developer = /^\W*Developer:\s*(@\w+)/im.exec(answer.output)?.[1] ?? null;
-  return completeAnswer(wordingFor(context.language).botInfo(developer));
+  return rendered(wordingFor(context.language).botInfo(developer));
 }
 
 const AccessPerson = z.object({
@@ -503,19 +479,19 @@ function renderAccessList(answer: ToolAnswer, context: RenderContext): RenderedA
     ...(parsed.data.my_secretaries.length > 0 ? [[secretary.mine, ...parsed.data.my_secretaries.map(line)]] : []),
     ...(parsed.data.secretary_for.length > 0 ? [[secretary.forOthers, ...parsed.data.secretary_for.map(line)]] : []),
   ];
-  if (sections.length === 0) return completeAnswer(secretary.none);
-  return completeAnswer(sections.map((section) => section.join('\n')).join('\n\n'));
+  if (sections.length === 0) return rendered(secretary.none);
+  return rendered(sections.map((section) => section.join('\n')).join('\n\n'));
 }
 
 function renderSecretaryAction(answer: ToolAnswer, context: RenderContext): RenderedAnswer | null {
   const { secretary } = wordingFor(context.language);
   const status = SecretaryStatusCodec.safeParse(answer.output);
   if (status.success) {
-    if (status.data.status === 'awaiting_confirmation') return incomplete(secretary.invited);
-    if (status.data.status === 'delivery_failed') return incomplete(secretary.deliveryFailed);
+    if (status.data.status === 'awaiting_confirmation') return rendered(secretary.invited);
+    if (status.data.status === 'delivery_failed') return rendered(secretary.deliveryFailed);
     return null;
   }
-  return OkCodec.safeParse(answer.output).success ? incomplete(secretary.done) : null;
+  return OkCodec.safeParse(answer.output).success ? rendered(secretary.done) : null;
 }
 
 // ---- generic text ----
@@ -524,26 +500,21 @@ const TextMapCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.numbe
 
 /**
  * A tool's own text. Most tools write for the user directly; a JSON object carrying a text field gives that field,
- * and any other JSON is an unknown shape (`opaque`) that is named as such instead of being dumped.
+ * and any other JSON is an unknown shape that is named as such instead of being dumped.
  */
-export function plainAnswer(output: string, language: string): { text: string; opaque: boolean } {
+export function plainAnswer(output: string, language: string): { text: string } {
   const trimmed = output.trim();
-  if (!JSON_LIKE.test(trimmed) || trimmed.length < 3) return { text: output, opaque: false };
+  if (!JSON_LIKE.test(trimmed) || trimmed.length < 3) return { text: output };
   const parsed = TextMapCodec.safeParse(trimmed);
   if (parsed.success) {
     for (const key of ['output', 'message', 'text', 'result']) {
       const value = parsed.data[key];
-      if (typeof value === 'string') return { text: value, opaque: false };
+      if (typeof value === 'string') return { text: value };
     }
     if (parsed.data.ok === true && Object.keys(parsed.data).length === 1)
-      return { text: wordingFor(language).done, opaque: false };
+      return { text: wordingFor(language).done };
   }
-  return { text: wordingFor(language).unknownShape, opaque: true };
-}
-
-function isWholeAnswerRead(answer: ToolAnswer): boolean {
-  if (answer.tool === 'manage_settings') return answer.input.action === 'get';
-  return WHOLE_ANSWER_READS[answer.tool] === true;
+  return { text: wordingFor(language).unknownShape };
 }
 
 function renderKnown(answer: ToolAnswer, context: RenderContext): RenderedAnswer | null {
@@ -590,7 +561,7 @@ export function renderToolAnswer(answer: ToolAnswer, context: RenderContext): Re
   const known = renderKnown(answer, context);
   if (known) return known;
   const plain = plainAnswer(answer.output, context.language);
-  return { text: plain.text, complete: isWholeAnswerRead(answer) && !plain.opaque };
+  return { text: plain.text };
 }
 
 /**

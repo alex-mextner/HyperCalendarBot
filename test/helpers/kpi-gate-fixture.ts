@@ -21,13 +21,14 @@ export function passingGate(fingerprint: string): KpiGate {
     rule: 'real-history-point-estimate',
     thresholds: { ...KPI_FLOORS },
     real: {
-      heldout: { ...heldCounts, ...splitRatios(heldCounts), rubric: 1 },
-      dev: { ...devCounts, ...splitRatios(devCounts), rubric: 1 },
+      heldout: { ...heldCounts, ...splitRatios(heldCounts), rubricClean: heldCounts.correct, rubric: 1 },
+      dev: { ...devCounts, ...splitRatios(devCounts), rubricClean: devCounts.correct, rubric: 1 },
       pooled: {
         inScope: heldCounts.inScope + devCounts.inScope,
         correct: pooledCorrect,
         coverage: pooledCorrect / (heldCounts.inScope + devCounts.inScope),
         precision: 1,
+        rubric: 1,
         strictPrecision: pooledCorrect / (pooledCorrect + heldCounts.relabelledFalseMatches),
         strictPrecisionAllRelabelled:
           pooledCorrect / (pooledCorrect + heldCounts.relabelledFalseMatches + devCounts.relabelledFalseMatches),

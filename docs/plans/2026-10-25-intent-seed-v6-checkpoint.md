@@ -11,7 +11,6 @@ Worktree `.worktrees/intent-seed-v6` (branch `intent-seed-v6`, base origin/main 
 | held-out rubric pass | 45.0% | 45.0% | 100% |
 | dev coverage / precision | 18.7% / 83.8% | 18.7% / 83.8% | 94.4% / 100% |
 | TZ/DST matrix (3192 cells) execution | 79.2% | 79.2% | 100% (precision 98.1%: two weekday-equals-today messages still matched in some cells) |
-| AI turn avoided after a correct answer | 19.5% | 19.5% | 99.0% |
 | unconfirmed writes / exceptions / harmful false matches | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
 
 Baselines: `docs/intents/benchmarks/2026*baseline-*.json` (old engine on main 06a32c61). Seed 6 numbers come from `bun --no-env-file scripts/benchmark-intents.ts --matrix 10`.

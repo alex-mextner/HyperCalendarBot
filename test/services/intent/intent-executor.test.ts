@@ -791,46 +791,6 @@ describe('IntentExecutor', () => {
     });
   });
 
-  describe('a rule sentence closes the exchange unless it leaves the question open', () => {
-    const sentence = (key: string, steps: Array<{ call: string; input: { [name: string]: string } }> = []) =>
-      executor.run(
-        {
-          steps: [...steps, { respond: `{{t.${key}}}` }],
-          i18n: { ru: { [key]: 'Текст правила' }, en: { [key]: 'Rule text' } },
-        },
-        {},
-        userCtx,
-        () => ({ success: true, output: 'unused', mutationState: 'confirmed' }),
-      );
-
-    test.each(['not_found', 'ambiguous', 'not_unique', 'clarify', 'needs_end'])('%s keeps the AI turn', async (key) => {
-      const result = await sentence(key);
-      expect(result.success).toBe(true);
-      expect(result.completeResponse).not.toBe(true);
-    });
-
-    test.each(['cancelled', 'private_only', 'done', 'count'])('%s is the whole answer', async (key) => {
-      expect((await sentence(key)).completeResponse).toBe(true);
-    });
-
-    test('a confirmation after a confirmed write is the whole answer', async () => {
-      const result = await sentence('done', [{ call: 'create_event', input: { title: 'x' } }]);
-      expect(result.mutationEvidence).toBe('applied');
-      expect(result.completeResponse).toBe(true);
-    });
-
-    test('a write whose outcome is unknown never claims to be final', async () => {
-      const result = await executor.run(
-        { steps: [{ call: 'create_event', input: { title: 'x' } }, { respond: 'Готово' }] },
-        {},
-        userCtx,
-        () => ({ success: true, output: 'unused', mutationState: 'uncertain' }),
-      );
-      expect(result.mutationEvidence).toBe('unknown');
-      expect(result.completeResponse).not.toBe(true);
-    });
-  });
-
   describe('stopLoop', () => {
     // A tool like pick_users hands control to something outside the workflow (a Telegram
     // picker) instead of completing the requested action. The executor must report exactly
@@ -931,7 +891,7 @@ describe('IntentExecutor', () => {
       expect(result.response).toBe(
         'Сегодня, пн 14 сентября:\n10:00  Стендап\n\nЗавтра, вт 15 сентября:\n10:00  Стендап',
       );
-      expect(result.completeResponse).toBe(true);
+      expect(result.completeResponse).not.toBe(true);
     });
 
     test('a rule whose step shows something (a picture) runs once, for the literal day', async () => {

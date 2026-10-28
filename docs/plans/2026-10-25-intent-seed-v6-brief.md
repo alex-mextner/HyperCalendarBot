@@ -23,7 +23,7 @@ activates it on production. This brief contains aggregates only; no user text.
 - Execution: 98.18% over 20,896 runs (6 zones incl. DST, after-midnight, personal/group, ru/en); 0 DB writes before
   confirmation; but 56% of answers break `docs/intents/response-quality.md` (raw ISO dates, confirmation never says
   "done", raw JSON, English in ru chats, Cyrillic title search case-sensitive) and nearly every read answer is
-  followed by a full AI supplement turn.
+  followed by a full AI supplement turn (by design; owner tg#25314).
 - Existing corpora: none labelled for the rule engine. 667 unified-dialogue parser cases (design contracts, branch
   docs/dialogue-spec-20260928), 32 anonymised tool-contract scenarios (PR #429), a private NLU candidate corpus
   (weak regex labels, not gold), the audit's 7,460 synthetic probes. #565 (labelled replay corpus) is not built.
@@ -40,8 +40,8 @@ activates it on production. This brief contains aggregates only; no user text.
    coverage 80%, precision 99%, rubric 95%.
 3. Engine: normalizer (trailing punctuation, typos, ё, spacing), paraphrase tolerance, a deterministic slot parser for
    free-form create (date words, weekdays, "через N", times in any position, durations, invitees) as a typed binding,
-   create+invite compounds, delete without the noun, rubric fixes in response rendering, skip the AI supplement when
-   the rule answer is complete.
+   create+invite compounds, delete without the noun, rubric fixes in response rendering. (The AI turn after a rule
+   answer stays by design; owner tg#25314.)
 4. Seed revision 6 = revision 5 content (#607/#618 fixes) + new families until the held-out bar is met.
 5. Activation: gated auto-activation at bot start (KPI gate file committed in the repo, DB backup first, ledger
    row, idempotent, one-command rollback to revision 3), because the owner wants the merge to activate it.

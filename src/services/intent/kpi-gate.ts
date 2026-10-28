@@ -20,7 +20,7 @@ export const KPI_FLOORS = {
   precision: 0.99,
   /** Pooled precision with the held-out answers that were relabelled after measuring counted as false matches. */
   strictPrecision: 0.975,
-  /** Correct answers with no hard rubric finding, real held-out. */
+  /** Correct rule answers with no hard rubric finding (docs/intents/response-quality.md), real dev and held-out pooled. */
   rubric: 0.95,
   /** Correct / executed across the TZ/DST matrix on real messages. */
   execution: 0.99,
@@ -47,6 +47,8 @@ const RealSplit = z
     coverage: Ratio,
     precision: Ratio,
     strictPrecision: Ratio,
+    /** Correct answers with no hard rubric finding; `rubric` is this over `correct`. */
+    rubricClean: Count,
     rubric: Ratio,
   })
   .strict();
@@ -70,6 +72,8 @@ const KpiGateSchema = z
             correct: Count,
             coverage: Ratio,
             precision: Ratio,
+            /** Rubric-clean over correct answers on both real splits together; the figure the rubric floor decides on. */
+            rubric: Ratio,
             /** Counts the held-out relabelled answers only: dev rows were relabelled while developing on dev. */
             strictPrecision: Ratio,
             /** Informational: every relabelled answer, dev and held-out, counted. */
@@ -186,6 +190,20 @@ export function splitRatios(
   };
 }
 
+/** What a recorded real split claims against what its own counts say. */
+function splitConsistency(name: string, split: RealSplitMeasurement): string[] {
+  const reasons: string[] = [];
+  if (split.correct > split.inScope) reasons.push(`${name}: correct exceeds the in-scope count`);
+  if (split.rubricClean > split.correct) reasons.push(`${name}: rubric-clean exceeds the correct count`);
+  if (Math.abs(share(split.rubricClean, split.correct) - split.rubric) > RATIO_TOLERANCE)
+    reasons.push(`${name}: recorded rubric ${split.rubric} does not follow from its counts`);
+  const recomputed = splitRatios(split);
+  for (const key of ['coverage', 'precision', 'strictPrecision'] as const)
+    if (Math.abs(recomputed[key] - split[key]) > RATIO_TOLERANCE)
+      reasons.push(`${name}: recorded ${key} ${split[key]} does not follow from its counts (${recomputed[key]})`);
+  return reasons;
+}
+
 /** Every reason is collected so the boot log names all of them at once. */
 export function gatePasses(gate: KpiGate, fingerprint: string): GateVerdict {
   const reasons: string[] = [];
@@ -195,16 +213,7 @@ export function gatePasses(gate: KpiGate, fingerprint: string): GateVerdict {
   if (heldout.inScope === 0) reasons.push('the held-out in-scope set is empty');
   if (gate.synthetic.inScope === 0) reasons.push('the synthetic held-out in-scope set is empty');
   if (gate.real.matrixCells === 0) reasons.push('the TZ/DST matrix did not run (zero cells)');
-  for (const [name, split] of [
-    ['held-out', heldout],
-    ['dev', dev],
-  ] as const) {
-    if (split.correct > split.inScope) reasons.push(`${name}: correct exceeds the in-scope count`);
-    const recomputed = splitRatios(split);
-    for (const key of ['coverage', 'precision', 'strictPrecision'] as const)
-      if (Math.abs(recomputed[key] - split[key]) > RATIO_TOLERANCE)
-        reasons.push(`${name}: recorded ${key} ${split[key]} does not follow from its counts (${recomputed[key]})`);
-  }
+  reasons.push(...splitConsistency('held-out', heldout), ...splitConsistency('dev', dev));
   const pooledInScope = heldout.inScope + dev.inScope;
   const pooledCorrect = heldout.correct + dev.correct;
   const pooledAnswered = pooledCorrect + heldout.wrong + dev.wrong + heldout.falseMatches + dev.falseMatches;
@@ -212,6 +221,7 @@ export function gatePasses(gate: KpiGate, fingerprint: string): GateVerdict {
     reasons.push('pooled counts are not the sum of the two splits');
   const pooledFigures = {
     coverage: share(pooledCorrect, pooledInScope),
+    rubric: share(heldout.rubricClean + dev.rubricClean, pooledCorrect),
     precision: share(pooledCorrect, pooledAnswered),
     strictPrecision: share(pooledCorrect, pooledAnswered + heldout.relabelledFalseMatches),
     strictPrecisionAllRelabelled: share(
@@ -235,7 +245,7 @@ export function gatePasses(gate: KpiGate, fingerprint: string): GateVerdict {
     pooledCoverage: pooledFigures.coverage,
     precision: Math.min(splitRatios(heldout).precision, splitRatios(dev).precision),
     strictPrecision: pooledFigures.strictPrecision,
-    rubric: heldout.rubric,
+    rubric: pooledFigures.rubric,
     execution: gate.real.execution,
     syntheticCoverage: share(gate.synthetic.correct, gate.synthetic.inScope),
     syntheticPrecision: gate.synthetic.precision,

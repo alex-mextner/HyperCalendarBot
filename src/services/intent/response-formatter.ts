@@ -61,11 +61,11 @@ export function renderAnswer(
 ): RenderedAnswer {
   try {
     if (answer) return renderToolAnswer(answer, context);
-    // A sentence the rule itself wrote is not a read result; whether it ends the conversation is the executor's call.
-    return { text: renderLegacy(legacyFormat, response, context), complete: false };
+    // A sentence the rule itself wrote is not a read result.
+    return { text: renderLegacy(legacyFormat, response, context) };
   } catch (error) {
     cmdLogger.warn({ err: error, tool: answer?.tool }, 'Intent answer could not be rendered, showing the tool text');
-    return { text: plainAnswer(answer?.output ?? response, context.language).text, complete: false };
+    return { text: plainAnswer(answer?.output ?? response, context.language).text };
   }
 }
 
@@ -87,10 +87,10 @@ export function formatDayAnswers(answers: DayAnswer[], context: HumanTimeContext
     // The heading names the day, so the day's own lines carry no heading of their own.
     const body = answer
       ? renderToolAnswer(answer, { ...context, headings: false })
-      : { text: plainAnswer(response ?? '', context.language).text, complete: false };
-    return { text: `${humanDayHeading(day, context)}:\n${body.text}`, complete: body.complete };
+      : { text: plainAnswer(response ?? '', context.language).text };
+    return `${humanDayHeading(day, context)}:\n${body.text}`;
   });
-  return { text: bodies.map((body) => body.text).join('\n\n'), complete: bodies.every((body) => body.complete) };
+  return { text: bodies.join('\n\n') };
 }
 
 function renderLegacy(legacyFormat: string, response: string, context: RenderContext): string {

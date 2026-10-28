@@ -333,10 +333,7 @@ export function createIntentMatcherLayer(
       // the supplement agent reads the text from supplementAutoResponse, not from history.
       if (workflow.version === 2) await deliverResponse(ctx, rendered.text);
       else await ctx.send(rendered.text);
-      // A whole read, or a sentence the rule wrote to close the exchange, leaves nothing for the AI to add. A read
-      // that came after a write is not a read-only answer, so it keeps the supplement.
-      if (result.completeResponse === true || (rendered.complete && result.mutationEvidence === 'none'))
-        return { handled: true };
+      if (result.completeResponse) return { handled: true };
       return { handled: true, needsSupplement: true, supplementAutoResponse: rendered.text };
     }
 

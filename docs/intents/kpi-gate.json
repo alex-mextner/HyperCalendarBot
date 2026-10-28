@@ -23,6 +23,7 @@
       "coverage": 0.8947368421052632,
       "precision": 1,
       "strictPrecision": 0.9714285714285714,
+      "rubricClean": 34,
       "rubric": 1
     },
     "dev": {
@@ -34,6 +35,7 @@
       "coverage": 0.8378378378378378,
       "precision": 1,
       "strictPrecision": 0.9393939393939394,
+      "rubricClean": 62,
       "rubric": 1
     },
     "pooled": {
@@ -41,6 +43,7 @@
       "correct": 96,
       "coverage": 0.8571428571428571,
       "precision": 1,
+      "rubric": 1,
       "strictPrecision": 0.9896907216494846,
       "strictPrecisionAllRelabelled": 0.9504950495049505
     },
@@ -59,7 +62,7 @@
       "version": "1",
       "checksum": "98447f88cd71fa57404321b1da6fad4df63a2784d8ace86de0aa3eb84d1f64f8"
     },
-    "benchmarkResult": "docs/intents/benchmarks/20261026T090347Z-synthetic-seed6.json"
+    "benchmarkResult": "docs/intents/benchmarks/20261028T014150Z-synthetic-current.json"
   },
   "informational": {
     "intervals95": {
@@ -97,7 +100,7 @@
     "labelsChecksum": "19ee899c60362252cd89a08b71fc5621f417f2ece970dbf58222792ffff05f7e",
     "splitChecksum": "310707bb8c752d46692ceb9b50cc86bda217b681ac54867263ca3e8dda8354f0"
   },
-  "engineDigest": "2b7a68f96cee3649524b4d37578531ee4cff8f6770f86eea82242ec1126fefd1",
-  "benchmarkResult": "docs/intents/benchmarks/20261026T085905Z-real-seed6.json",
+  "engineDigest": "5e64d1f3e045bdff1a87b4d8f963dfb1f7b8c0703533468f9a9f97b27f8eaaef",
+  "benchmarkResult": "docs/intents/benchmarks/20261028T013709Z-real-current.json",
   "autoActivate": true
 }

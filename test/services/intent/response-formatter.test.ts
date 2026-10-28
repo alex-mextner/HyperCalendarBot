@@ -53,9 +53,8 @@ afterEach(() => setSystemTime());
 describe('agenda of a read', () => {
   test('heads the day relative to today and lists start–end times, never ISO dates', () => {
     const events = [event(1, 'Стендап', 1, '10:00'), event(2, 'Созвон', 1, '15:30', 60)];
-    const { text, complete } = render(answer('get_events', { scope: 'personal' }, 'id: 1, title: Стендап', events));
+    const { text } = render(answer('get_events', { scope: 'personal' }, 'id: 1, title: Стендап', events));
     expect(text).toBe('Завтра, ср 7 октября:\n10:00–10:30  Стендап\n15:30–16:30  Созвон');
-    expect(complete).toBe(true);
     expect(text).not.toMatch(/\d{4}-\d{2}-\d{2}/);
   });
 
@@ -107,7 +106,7 @@ describe('agenda of a read', () => {
   test('an empty read keeps the tool’s sentence that names the checked day and calendar', () => {
     const sentence = 'На завтра, 7 октября, в твоём календаре пока нет событий, которые начинаются в этот день.';
     const rendered = render(answer('get_events', {}, sentence, []));
-    expect(rendered).toEqual({ text: sentence, complete: true });
+    expect(rendered).toEqual({ text: sentence });
   });
 
   test('a single event is a card with its day, time, place and notes', () => {
@@ -150,7 +149,6 @@ describe('a write is confirmed, never listed as a read result', () => {
       effect: { kind: 'event_deleted' },
     });
     expect(rendered.text).toBe('Событие удалено: «Ревью дизайна» — пт 9 октября, 14:00–15:00.');
-    expect(rendered.complete).toBe(false);
   });
 
   test('create and update confirm in the user’s language', () => {
@@ -179,7 +177,7 @@ describe('free windows', () => {
   test('lists the windows of the asked day', () => {
     const data = { slots: [window('10:30', '12:00'), window('14:00', '16:00')] };
     const rendered = render(answer('get_free_slots', { date: day(1) }, 'raw', data));
-    expect(rendered).toEqual({ text: 'Свободно завтра, ср 7 октября: 10:30–12:00, 14:00–16:00.', complete: true });
+    expect(rendered).toEqual({ text: 'Свободно завтра, ср 7 октября: 10:30–12:00, 14:00–16:00.' });
     expect(render(answer('get_free_slots', { date: day(1) }, 'raw', data), en).text).toBe(
       'Free tomorrow, Wed Oct 7: 10:30–12:00, 14:00–16:00.',
     );
@@ -239,7 +237,6 @@ describe('time', () => {
     const output = zoneJson('Asia/Tokyo', '+09:00', '2026-10-06T17:00:00+09:00');
     expect(render(answer('get_timezone_info', { timezone: 'Токио' }, output))).toEqual({
       text: 'Сейчас в Токио 17:00, вт 6 октября (UTC+9).',
-      complete: true,
     });
     expect(render(answer('get_timezone_info', { timezone: 'tokyo' }, output), en).text).toBe(
       "Right now in Tokyo it's 17:00, Tue Oct 6 (UTC+9).",
@@ -285,7 +282,6 @@ describe('time', () => {
   test('no JSON ever reaches the user, even for a shape nobody rendered', () => {
     const rendered = render(answer('get_timezone_info', { timezone: 'x' }, '{"zone":"x","t":1}'));
     expect(rendered.text).toBe('Данные получил, но показать их в читаемом виде не смог.');
-    expect(rendered.complete).toBe(false);
     expect(render(answer('some_tool', {}, '[1,2]'), en).text).toBe(
       'I got the data but could not show it in a readable form.',
     );
@@ -317,7 +313,6 @@ describe('settings', () => {
 
   test('a short labelled list in the user’s language', () => {
     const rendered = render(answer('manage_settings', { action: 'get' }, all));
-    expect(rendered.complete).toBe(true);
     expect(rendered.text).toBe(
       [
         'Твои настройки:',
@@ -354,10 +349,9 @@ describe('settings', () => {
     );
   });
 
-  test('an unknown shape is said to be unknown, an update is not a whole-read answer', () => {
-    expect(render(answer('manage_settings', { action: 'get' }, '{"x":{"y":1}}')).complete).toBe(false);
+  test('an update passes its text through', () => {
     const update = render(answer('manage_settings', { action: 'update' }, 'Часовой пояс обновлён.'));
-    expect(update).toEqual({ text: 'Часовой пояс обновлён.', complete: false });
+    expect(update).toEqual({ text: 'Часовой пояс обновлён.' });
   });
 });
 
@@ -371,11 +365,9 @@ describe('contacts, holidays, bot info, access', () => {
     ].join('\n');
     expect(render(answer('get_contacts', {}, output))).toEqual({
       text: 'Контакты (3):\nАнна — @anna_smith\nЛена\nВаня (Иван) — @ivan_petrov',
-      complete: true,
     });
     expect(render(answer('get_contacts', {}, 'Адресная книга пуста.'))).toEqual({
       text: 'Адресная книга пуста.',
-      complete: true,
     });
   });
 
@@ -390,14 +382,12 @@ describe('contacts, holidays, bot info, access', () => {
     });
     expect(render(answer('find_contact', {}, 'raw', { matches: [match(1, 'Иван', 'ivan_petrov', 1)] }))).toEqual({
       text: 'Нашёл контакт: Иван — @ivan_petrov',
-      complete: true,
     });
-    expect(render(answer('find_contact', {}, 'raw', { matches: [match(1, 'Иван', null, 0.8)] })).complete).toBe(false);
     const several = render(
       answer('find_contact', {}, 'raw', { matches: [match(1, 'Иван', 'a_b', 1), match(2, 'Ивана', null, 1)] }),
       en,
     );
-    expect(several).toEqual({ text: 'Found several contacts:\nИван — @a_b\nИвана', complete: false });
+    expect(several).toEqual({ text: 'Found several contacts:\nИван — @a_b\nИвана' });
   });
 
   test('holiday dates become days', () => {
@@ -431,8 +421,8 @@ describe('contacts, holidays, bot info, access', () => {
 
 describe('plain text and legacy formats', () => {
   test('a rule’s own sentence and a tool’s plain text pass through', () => {
-    expect(renderAnswer('text', 'hello world', undefined, en)).toEqual({ text: 'hello world', complete: false });
-    expect(render(answer('calculate', {}, '63'))).toEqual({ text: '63', complete: true });
+    expect(renderAnswer('text', 'hello world', undefined, en)).toEqual({ text: 'hello world' });
+    expect(render(answer('calculate', {}, '63'))).toEqual({ text: '63' });
   });
 
   test('a JSON object with a text field gives that field', () => {
@@ -492,8 +482,6 @@ describe('answers for two possible days (just after midnight)', () => {
     expect(rendered.text).toBe(
       'Сегодня, вт 6 октября:\n10:00–10:30  Стендап\n\nЗавтра, ср 7 октября:\nНа завтра, 7 октября, в твоём календаре пока нет событий.',
     );
-    expect(rendered.complete).toBe(true);
-    expect(formatDayAnswers([{ day: day(0), response: 'Готово' }], ru).complete).toBe(false);
   });
 });
 

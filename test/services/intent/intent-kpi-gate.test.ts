@@ -74,8 +74,11 @@ describe('intent KPI gate on the real history (the claim)', () => {
     expect(correct / (answered + unclear.heldout.falseMatch)).toBeGreaterThanOrEqual(KPI_FLOORS.strictPrecision);
   });
 
-  test('rubric pass on the real held-out split clears the floor', () => {
-    expect(realConfirmed().held.rubricPass ?? 0).toBeGreaterThanOrEqual(KPI_FLOORS.rubric);
+  test('rubric pass of the correct rule answers on the real dev and held-out splits pooled clears the floor', () => {
+    const { held, dev } = realConfirmed();
+    expect((held.rubricClean + dev.rubricClean) / (held.correct + dev.correct)).toBeGreaterThanOrEqual(
+      KPI_FLOORS.rubric,
+    );
   });
 
   test('execution across zones, DST transitions and the night after midnight clears the floor on real messages', () => {
@@ -175,6 +178,8 @@ describe('committed activation gate', () => {
     const syntheticHeld = synthetic.report.heldout.overall;
     expect(gate.synthetic.inScope).toBe(syntheticHeld.inScope);
     expect(gate.synthetic.correct).toBe(syntheticHeld.correct);
-    expect(gate.real.heldout.rubric).toBeCloseTo(held.rubricPass ?? 0, 6);
+    expect(gate.real.heldout).toMatchObject({ rubricClean: held.rubricClean });
+    expect(gate.real.dev).toMatchObject({ rubricClean: dev.rubricClean });
+    expect(gate.real.pooled.rubric).toBeCloseTo((held.rubricClean + dev.rubricClean) / (held.correct + dev.correct), 6);
   });
 });

@@ -20,8 +20,6 @@ export interface RunResult {
   verdict: Verdict;
   turns: TurnObservation[];
   findings: Finding[];
-  /** The first turn was answered by a rule and no AI turn follows it. */
-  aiTurnAvoided: boolean;
   ruleName: string | undefined;
 }
 
@@ -93,7 +91,6 @@ export async function runConversation(
       verdict,
       turns,
       findings,
-      aiTurnAvoided: first.handled === true && !first.needsSupplement,
       ruleName: first.ruleName,
     };
   } finally {

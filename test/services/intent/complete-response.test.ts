@@ -25,29 +25,14 @@ test('a later ordinary tool clears response completeness', async () => {
   expect(result.completeResponse).not.toBe(true);
 });
 
-test('a rule sentence that closes the exchange is complete by itself, not by inheriting the prior tool', async () => {
-  // Intentional change: a rule's own closing sentence is a whole answer; it used to be never complete.
+test('an explicit workflow response does not inherit a prior tool completeness claim', async () => {
   const result = await new IntentExecutor().run(
-    { steps: [{ call: 'get_contacts', input: {} }, { respond: 'Different response' }] },
-    {},
-    ctx,
-    () => ({ success: true, output: 'More information' }),
-  );
-  expect(result.response).toBe('Different response');
-  expect(result.completeResponse).toBe(true);
-});
-
-test('an open-question sentence does not inherit a prior tool completeness claim', async () => {
-  const result = await new IntentExecutor().run(
-    {
-      steps: [roster, { respond: '{{t.ambiguous}}' }],
-      i18n: { en: { ambiguous: 'Several match' }, ru: { ambiguous: 'Подходит несколько' } },
-    },
+    { steps: [roster, { respond: 'Different response' }] },
     {},
     ctx,
     complete,
   );
-  expect(result.response).toBe('Several match');
+  expect(result.response).toBe('Different response');
   expect(result.completeResponse).not.toBe(true);
 });
 

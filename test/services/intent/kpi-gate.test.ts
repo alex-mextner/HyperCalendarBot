@@ -24,7 +24,9 @@ type Split = KpiGate['real']['heldout'];
 /** Change a split's counts and keep every recorded ratio consistent with them, as a real measurement would. */
 function withSplit(gate: KpiGate, which: 'heldout' | 'dev', change: Partial<Split>): KpiGate {
   const split = { ...gate.real[which], ...change };
-  const counts = { ...split, ...splitRatios(split) };
+  // A split's rubric-clean count follows its correct answers unless the test sets it.
+  const rubricClean = change.rubricClean ?? Math.min(split.rubricClean, split.correct);
+  const counts = { ...split, ...splitRatios(split), rubricClean, rubric: rubricClean / split.correct };
   const real = { ...gate.real, [which]: counts };
   const held = real.heldout;
   const dev = real.dev;
@@ -35,6 +37,7 @@ function withSplit(gate: KpiGate, which: 'heldout' | 'dev', change: Partial<Spli
     correct,
     coverage: correct / (held.inScope + dev.inScope),
     precision: correct / answered,
+    rubric: (held.rubricClean + dev.rubricClean) / correct,
     strictPrecision: correct / (answered + held.relabelledFalseMatches),
     strictPrecisionAllRelabelled: correct / (answered + held.relabelledFalseMatches + dev.relabelledFalseMatches),
   };
@@ -144,12 +147,26 @@ describe('gatePasses', () => {
   });
 
   test('rubric and execution below their floors fail', () => {
-    const gate = passingGate();
-    gate.real.heldout.rubric = 0.9;
+    const gate = withSplit(passingGate(), 'heldout', { rubricClean: 20 });
     gate.real.execution = 0.98;
     const reasons = reasonsOf(gate);
     expect(reasons).toContain('rubric');
     expect(reasons).toContain('execution');
+  });
+
+  test('the rubric floor decides on the real dev and held-out answers pooled', () => {
+    // Held-out 34/34 clean, dev 55/62 clean: pooled 89/96 = 92.7% is below 95% although the held-out split is perfect.
+    const gate = withSplit(passingGate(), 'dev', { rubricClean: 55 });
+    expect(gate.real.heldout.rubric).toBe(1);
+    expect(reasonsOf(gate)).toContain('rubric 0.927');
+    // 93/96 = 96.9% clears it with one split below 95%.
+    expect(gatePasses(withSplit(passingGate(), 'dev', { rubricClean: 59 }), FINGERPRINT)).toEqual({ ok: true });
+  });
+
+  test('a recorded rubric that does not follow from its counts fails', () => {
+    const gate = passingGate();
+    gate.real.dev.rubric = 0.5;
+    expect(reasonsOf(gate)).toContain('recorded rubric');
   });
 
   test('the synthetic audit must hold too', () => {
@@ -190,9 +207,8 @@ describe('gatePasses', () => {
   });
 
   test('every failing reason is reported, not only the first', () => {
-    const gate = passingGate();
+    const gate = withSplit(passingGate(), 'dev', { rubricClean: 0 });
     gate.real.execution = 0.1;
-    gate.real.heldout.rubric = 0.1;
     const result = gatePasses(gate, FINGERPRINT);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reasons.length).toBe(2);

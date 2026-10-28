@@ -127,10 +127,7 @@ function buildEventStepResults(userCtx: ExecutorUserContext): RuntimeStepResults
 
 interface ExecutorResult {
   success: boolean;
-  /**
-   * The answer needs no AI supplement: a tool that declared its read complete, or a rule's own sentence that closes
-   * the exchange. Never a handoff, a suspension or a sentence that leaves a question open (not found, ambiguous).
-   */
+  /** Only a direct final tool answer can carry this; never a handoff or custom response. */
   completeResponse?: boolean;
   response?: string;
   /**
@@ -202,18 +199,6 @@ function toolAnswer(tool: string, input: unknown, result: ToolResult): ToolAnswe
     ...(result.data !== undefined ? { data: result.data } : {}),
     ...(result.effect !== undefined ? { effect: result.effect } : {}),
   };
-}
-
-/**
- * Rule sentences that leave the question open: nothing was found, several things matched, or the rule needs more from
- * the person. The AI agent may still help there, so they keep the supplement turn; every other sentence the rule
- * writes (a result, a confirmation, a cancellation, a refusal in a group) is the whole answer.
- */
-const OPEN_QUESTION_SENTENCE = /\{\{\s*t\.(?:not_found|ambiguous|not_unique|clarify|needs_end)\s*\}\}/;
-
-/** A write whose outcome is unknown never claims to be the final word. */
-function closesExchange(sentence: unknown, evidence: EvidenceTracker): boolean {
-  return typeof sentence === 'string' && evidence.state !== 'unknown' && !OPEN_QUESTION_SENTENCE.test(sentence);
 }
 
 interface ResumeState {
@@ -444,12 +429,7 @@ async function runLevel2(
     if (step.respond !== undefined) {
       const text = resolveVariables(step.respond, captures, userCtx, stepResults, i18n, { strict });
       if (strict && typeof text !== 'string') throw new WorkflowInputError('INVALID_INPUT');
-      return {
-        success: true,
-        response: text as string,
-        mentionedEventId,
-        ...(closesExchange(step.respond, evidence) ? { completeResponse: true } : {}),
-      };
+      return { success: true, response: text as string, mentionedEventId };
     }
 
     // No call — nothing to execute in this step
@@ -461,24 +441,14 @@ async function runLevel2(
         const value = resolveInput('respond', step.input ?? {}, captures, userCtx, stepResults, i18n, true) as {
           message: string;
         };
-        return {
-          success: true,
-          response: value.message,
-          mentionedEventId,
-          ...(closesExchange(step.input?.message, evidence) ? { completeResponse: true } : {}),
-        };
+        return { success: true, response: value.message, mentionedEventId };
       }
       if (!step.input?.message) {
         cmdLogger.warn({ stepIndex: i }, 'Intent executor: call: respond missing input.message');
         return { success: true, response: undefined, mentionedEventId };
       }
       const text = resolveVariables(step.input.message, captures, userCtx, stepResults, i18n, { strict }) as string;
-      return {
-        success: true,
-        response: text,
-        mentionedEventId,
-        ...(closesExchange(step.input.message, evidence) ? { completeResponse: true } : {}),
-      };
+      return { success: true, response: text, mentionedEventId };
     }
 
     // Suspend for user input — resolve question text if provided
@@ -690,10 +660,6 @@ export class IntentExecutor {
       answers.push({ day, response: result.response, answer: result.answer });
     }
     const combined = formatDayAnswers(answers, { now, timezone: userCtx.timezone, language: userCtx.language });
-    return {
-      success: true,
-      response: combined.text,
-      ...(combined.complete && evidence.state === 'none' ? { completeResponse: true } : {}),
-    };
+    return { success: true, response: combined.text };
   }
 }

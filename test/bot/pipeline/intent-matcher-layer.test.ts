@@ -536,7 +536,7 @@ describe('needsSupplement', () => {
     expect(ctx.send).toHaveBeenCalledWith('Готово!');
   });
 
-  describe('a whole answer needs no AI turn', () => {
+  describe('a rule answer is rendered for the person and keeps the AI turn', () => {
     // Wednesday 2026-06-03, 10:00 in Belgrade.
     const NOW = new Date('2026-06-03T08:00:00Z');
     const user = makeUser({ timezone: 'Europe/Belgrade', language: 'ru' });
@@ -562,7 +562,7 @@ describe('needsSupplement', () => {
       return { reply: await layer(ctx, 'что завтра'), ctx };
     };
 
-    test('a complete read is rendered as a headed agenda and ends the exchange', async () => {
+    test('a read is rendered as a headed agenda and the AI turn still follows', async () => {
       const { reply, ctx } = await run({
         success: true,
         response: agenda.output,
@@ -570,42 +570,14 @@ describe('needsSupplement', () => {
         mutationEvidence: 'none',
       });
       expect(ctx.send).toHaveBeenCalledWith('Завтра, чт 4 июня:\n12:30  Английский');
-      expect(reply).toEqual({ handled: true });
-    });
-
-    test('a read that came after a write keeps the AI turn', async () => {
-      const { reply } = await run({
-        success: true,
-        response: agenda.output,
-        answer: agenda,
-        mutationEvidence: 'applied',
-      });
-      expect(reply).toMatchObject({
+      expect(reply).toEqual({
+        handled: true,
         needsSupplement: true,
         supplementAutoResponse: 'Завтра, чт 4 июня:\n12:30  Английский',
       });
     });
 
-    test('an answer that is not a whole read keeps the AI turn', async () => {
-      const approximate = {
-        tool: 'find_contact',
-        input: {},
-        output: 'raw',
-        data: {
-          matches: [{ id: 1, name: 'Иван', preferred_name: null, username: null, telegram_id: null, confidence: 0.7 }],
-        },
-      };
-      const { reply, ctx } = await run({
-        success: true,
-        response: 'raw',
-        answer: approximate,
-        mutationEvidence: 'none',
-      });
-      expect(ctx.send).toHaveBeenCalledWith('Нашёл похожий контакт: Иван');
-      expect(reply).toMatchObject({ needsSupplement: true });
-    });
-
-    test('a rule sentence that closes the exchange ends it', async () => {
+    test('a tool-declared complete read ends the exchange', async () => {
       const { reply } = await run({
         success: true,
         response: 'Отменено.',

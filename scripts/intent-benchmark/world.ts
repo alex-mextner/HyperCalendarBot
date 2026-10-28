@@ -122,7 +122,6 @@ export interface TurnObservation {
   said: string;
   /** What the intent layer reported; null when it threw. */
   handled: boolean | null;
-  needsSupplement: boolean;
   threw: string | undefined;
   messages: BotMessage[];
   tools: ToolRecord[];
@@ -323,7 +322,6 @@ export function buildFixture(
       } as unknown as BotCommandContext;
       const started = performance.now();
       let handled: boolean | null = null;
-      let needsSupplement = false;
       let threw: string | undefined;
       try {
         const result = await layer(
@@ -332,7 +330,6 @@ export function buildFixture(
           group ? { groupContext: { isGroup: true, groupChatId: chat } } : undefined,
         );
         handled = result.handled;
-        needsSupplement = 'needsSupplement' in result;
       } catch (error) {
         threw = String(error instanceof Error ? error.message : error).slice(0, 300);
       }
@@ -345,7 +342,6 @@ export function buildFixture(
       return {
         said: text,
         handled,
-        needsSupplement,
         threw,
         messages: [...state.messages],
         tools: [...state.calls],

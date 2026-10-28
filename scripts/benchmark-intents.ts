@@ -52,7 +52,7 @@ const git = (...args: string[]): string => {
 };
 const pct = (value: number | null): string => (value === null ? '   n/a' : `${(value * 100).toFixed(1).padStart(5)}%`);
 const row = (name: string, slice: Slice): string =>
-  `${name.padEnd(28)} n=${String(slice.conversations).padStart(4)} cov ${pct(slice.coverage)} prec ${pct(slice.precision)} rub ${pct(slice.rubricPass)} exec ${pct(slice.execution)} aiAvoid ${pct(slice.aiTurnAvoidedRate)}`;
+  `${name.padEnd(28)} n=${String(slice.conversations).padStart(4)} cov ${pct(slice.coverage)} prec ${pct(slice.precision)} rub ${pct(slice.rubricPass)} exec ${pct(slice.execution)}`;
 const ci = (name: string, interval: Interval): string =>
   `${name} ${interval.k}/${interval.n} = ${pct(interval.rate)} [95% CI ${pct(interval.low)} .. ${pct(interval.high)}]`;
 
@@ -108,7 +108,6 @@ function print(kind: 'real' | 'synthetic', report: BenchmarkRun['report']): void
         `  ${ci('strict precision        ', wilson(confirmed.correct, confirmed.correct + confirmed.wrong + confirmed.falseMatch + relabelled))} (${relabelled} relabelled-unclear false matches counted)`,
       );
       console.log(`  ${ci('rubric pass             ', confirmed.intervals.rubricPass)}`);
-      console.log(`  ${ci('AI turn avoided         ', confirmed.intervals.aiTurnAvoided)}`);
     }
     if (report.matrix) console.log(`  ${ci('execution (matrix)      ', report.matrix.overall.intervals.execution)}`);
   }
@@ -191,7 +190,12 @@ function splitOf(confirmed: Slice, relabelledFalseMatches: number): RealSplitMea
     falseMatches: confirmed.falseMatch,
     relabelledFalseMatches,
   };
-  return { ...counts, ...splitRatios(counts), rubric: confirmed.rubricPass ?? 0 };
+  return {
+    ...counts,
+    ...splitRatios(counts),
+    rubricClean: confirmed.rubricClean,
+    rubric: confirmed.correct === 0 ? 0 : confirmed.rubricClean / confirmed.correct,
+  };
 }
 
 const interval = (value: Interval): { low: number; high: number } => ({ low: value.low ?? 0, high: value.high ?? 0 });
@@ -226,6 +230,7 @@ function buildGate(real: Measurement, synthetic: Measurement, realFile: string, 
         correct: pooledCorrect,
         coverage: pooledCorrect / pooledInScope,
         precision: pooledCorrect / pooledAnswered,
+        rubric: pooledCorrect === 0 ? 0 : (heldout.rubricClean + devSplit.rubricClean) / pooledCorrect,
         strictPrecision: pooledCorrect / (pooledAnswered + heldRelabelled),
         strictPrecisionAllRelabelled: pooledCorrect / (pooledAnswered + heldRelabelled + devRelabelled),
       },
