@@ -45,7 +45,7 @@ Default to using Bun instead of Node.js.
 ```sh
 bun run src/index.ts                        # start the bot
 bun test test/services/intent/intent-learner.test.ts  # run a single test file (the local limit)
-# ALL tests / coverage: on a Runpod pod, never locally — the exact runpod-run line is in AGENTS.md § Heavy work runs on Runpod
+# ALL tests / coverage: on the server (server-run), never locally — the exact line is in AGENTS.md § Heavy work runs on the server
 bun run lint                                # check linting
 bun run lint:fix                            # auto-fix lint issues
 bun run format                              # format with Biome
@@ -552,7 +552,7 @@ Optional features that depend on an env var must deactivate gracefully when the 
   - `tsc --noEmit` — zero type errors
   - `bun run lint` — zero lint errors AND zero warnings
   - `bun test` — all tests green: one file locally when the change is truly local; the full
-    suite on Runpod (AGENTS.md § Heavy work runs on Runpod) before the final commit of a
+    suite on the server (AGENTS.md § Heavy work runs on the server) before the final commit of a
     multi-commit series
   If any of these are red, fix the root cause before committing. Never commit on top of a broken tree
   with a "will fix in next commit" note.
@@ -729,8 +729,8 @@ Plans live in `docs/plans/`. Do NOT use `docs/superpowers/plans/`.
 /loop 20 min — check ralphex progress
 ```
 In the loop, check: `git log --oneline -5`, `git diff --stat`, and the test file(s) the
-current task touches (`bun test test/<one>.test.ts`; the full suite only on Runpod,
-AGENTS.md § Heavy work runs on Runpod).
+current task touches (`bun test test/<one>.test.ts`; the full suite only on the server,
+AGENTS.md § Heavy work runs on the server).
 
 **Important:** ralphex manages its own Claude sessions. Don't run it while actively editing the same
 files in another terminal. Use `--worktree` if you need isolation.
