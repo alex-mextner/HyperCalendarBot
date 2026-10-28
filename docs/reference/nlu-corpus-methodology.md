@@ -10,6 +10,11 @@ classifier. It supports GH-565 (source-safe historical replay) without
 duplicating that ticket's larger model-log/dialogue-replay engine, which is
 owned jointly with #554/#559/#562 (see "Relationship to GH-565" below).
 
+`scripts/nlu_corpus.py` stays the single entrypoint and public surface; its
+implementation is split by responsibility into the sibling modules
+`scripts/nlu_corpus_{rows,redaction,export,gold,candidates,audit}.py`, all of
+whose names it re-exports.
+
 ## What it produces
 
 For one `--root` (a bot data directory containing `data/*.db` and `logs/`),

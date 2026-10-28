@@ -1,15 +1,31 @@
 import { expect, test } from 'bun:test';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runWithDeadline } from '../helpers/run-with-deadline.ts';
 
 const root = resolve(import.meta.dir, '../..');
-const suites = readdirSync(resolve(root, 'test/python'))
+const pythonFiles = readdirSync(resolve(root, 'test/python'))
   .filter((file) => /^test_[a-zA-Z0-9_]+\.py$/.test(file))
   .sort();
 
+// Entrypoints that only load the topic modules named in their TOPICS tuple, so `unittest discover`
+// finds no test in them. Another test runs each one directly. The test below proves every topic
+// module they name is itself a suite here, so no case goes unrun.
+const COMPATIBILITY_ENTRYPOINTS = ['test_post_ship_deploy.py'];
+const suites = pythonFiles.filter((file) => !COMPATIBILITY_ENTRYPOINTS.includes(file));
+
 test('Python regression suite discovery is nonempty', () => {
   expect(suites.length).toBeGreaterThan(0);
+});
+
+test('every compatibility entrypoint exists and its topic modules are discovered suites', () => {
+  expect(COMPATIBILITY_ENTRYPOINTS.filter((file) => !pythonFiles.includes(file))).toEqual([]);
+  for (const entrypoint of COMPATIBILITY_ENTRYPOINTS) {
+    const source = readFileSync(resolve(root, 'test/python', entrypoint), 'utf8');
+    const topics = [...source.matchAll(/^\s+"(test_[a-zA-Z0-9_]+)",$/gm)].map((match) => `${match[1]}.py`);
+    expect(topics.length).toBeGreaterThan(0);
+    expect(topics.filter((topic) => !suites.includes(topic))).toEqual([]);
+  }
 });
 
 // A module keeps the 30-second limit unless TIMEOUT_MS below gives it its own. Release/OCI suites
@@ -24,6 +40,9 @@ test('Python regression suite discovery is nonempty', () => {
 const TIMEOUT_MS: Record<string, number> = {
   'test_prebuilt_deploy.py': 180_000,
   'test_odroid_stage_qa.py': 180_000,
+  'test_odroid_stage_qa_installer.py': 180_000,
+  'test_odroid_stage_qa_refusals_locks.py': 180_000,
+  'test_odroid_stage_qa_teardown.py': 180_000,
   'test_stage_fetch_artifact.py': 180_000,
   'test_stage_qa_gate.py': 120_000,
   'test_stage_qa_pc.py': 180_000,
