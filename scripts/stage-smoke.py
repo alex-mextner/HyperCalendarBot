@@ -290,6 +290,21 @@ class QaCliTransport:
                 texts[item["id"]] = item.get("text") or ""
                 latencies.setdefault(item["id"], time.monotonic() - send_started_at)
 
+    async def send_confirmed(self, text, timeout):
+        """The id of the confirmed sent message; a send that failed before anything was typed is retried."""
+        for attempt in range(1, self.send_attempts + 1):
+            code, sent = await asyncio.to_thread(
+                self.qa, "send", *self.text_flag(text), timeout=timeout
+            )
+            try:
+                return self.sent_message_id(code, sent)
+            except ConnectionError:
+                # Only a timeout BEFORE the message is typed is retried: the first call of a run starts a cold
+                # headless browser on a busy host, and nothing was sent. Any other failure may have delivered it.
+                if attempt == self.send_attempts or not COLD_START_TIMEOUT.search(str(sent.get("error", ""))):
+                    raise
+            await asyncio.sleep(self.retry_delay)
+
     async def exchange(self, text, timeout, settle):
         """Send text; return [(reply text, seconds since the send began)] after `settle` quiet seconds or on timeout.
 
@@ -300,19 +315,7 @@ class QaCliTransport:
         """
         require_one_line(text, "exchange")
         send_started_at = time.monotonic()
-        for attempt in range(1, self.send_attempts + 1):
-            code, sent = await asyncio.to_thread(
-                self.qa, "send", *self.text_flag(text), timeout=timeout
-            )
-            try:
-                sent_id = self.sent_message_id(code, sent)
-                break
-            except ConnectionError:
-                # Only a timeout BEFORE the message is typed is retried: the first call of a run starts a cold
-                # headless browser on a busy host, and nothing was sent. Any other failure may have delivered it.
-                if attempt == self.send_attempts or not COLD_START_TIMEOUT.search(str(sent.get("error", ""))):
-                    raise
-            await asyncio.sleep(self.retry_delay)
+        sent_id = await self.send_confirmed(text, timeout)
         sent_at = time.monotonic()
         code, first = await asyncio.to_thread(
             self.qa,
@@ -376,6 +379,12 @@ def judge(case, replies):
 REPLY_PREVIEW_CHARS = 200
 
 
+def print_replies(name, replies):
+    for index, (text, _) in enumerate(replies, 1):
+        shown = " ".join((text or "").split())[:REPLY_PREVIEW_CHARS]
+        print(f"SMOKE REPLY {name} #{index}: {shown}")
+
+
 async def run_cases(cases, transport, scale):
     results = []
     for case in cases:
@@ -402,9 +411,7 @@ async def run_cases(cases, transport, scale):
         if problems:
             # Only for a failed case: the stage bot's own reply to a fixed test phrase (no user data lives on stage),
             # one line each and cut short, so a red check can be diagnosed from the job log alone.
-            for index, (text, _) in enumerate(replies, 1):
-                shown = " ".join((text or "").split())[:REPLY_PREVIEW_CHARS]
-                print(f"SMOKE REPLY {case['name']} #{index}: {shown}")
+            print_replies(case["name"], replies)
     return results
 
 
