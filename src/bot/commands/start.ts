@@ -4,6 +4,7 @@ import type { AnyScene } from '@gramio/scenes';
 import { t } from '../../config/constants.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
+import type { Invitation, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail, formatInvitation } from '../../services/event/formatters.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
@@ -20,96 +21,160 @@ export interface StartDeps {
   userRepo?: UserRepository;
 }
 
+/** Who is running /start: the DB user and their language. */
+interface StartScope {
+  ctx: BotCommandContext;
+  user: User;
+  lang: 'en' | 'ru';
+  onboardingScene: AnyScene;
+}
+
+const DEEP_LINK_PREFIXES = ['s_', 'i_', 'g_'];
+
+/** Shows the shared event card; false when the event is gone so /start continues normally. */
+async function showSharedEvent(
+  scope: StartScope,
+  eventService: EventService,
+  eventId: number,
+  createdBy: number,
+): Promise<boolean> {
+  const { ctx, user, lang, onboardingScene } = scope;
+  const event = eventService.getEvent(eventId, createdBy);
+  if (!event) return false;
+  const card = formatEventDetail(event, event.timezone, lang);
+  await ctx.send(card, { parse_mode: 'HTML' });
+  if (!user.onboarding_completed) await ctx.scene.enter(onboardingScene);
+  return true;
+}
+
+/** An invitation link only works for the invitee it was issued to, for that event, from that inviter. */
+function invitationBindingMismatch(
+  invitation: Invitation,
+  userId: number,
+  eventId: number,
+  inviterId: number,
+): boolean {
+  return invitation.invitee_id !== userId || invitation.event_id !== eventId || invitation.inviter_id !== inviterId;
+}
+
+async function sendPendingInvitation(
+  scope: StartScope,
+  deps: InvitationDeepLinkDeps,
+  invitation: Invitation,
+  eventId: number,
+  createdBy: number,
+): Promise<void> {
+  const { ctx, user, lang } = scope;
+  const event = deps.eventService.getEvent(eventId, createdBy);
+  const inviter = deps.userRepo?.findByTelegramId(invitation.inviter_id);
+  const inviterName = inviter?.first_name ?? inviter?.username ?? `User ${invitation.inviter_id}`;
+
+  const text = event
+    ? formatInvitation(
+        event,
+        event.timezone,
+        lang,
+        inviterName,
+        invitation.inviter_id,
+        inviter?.username,
+        user.timezone,
+        !!user.onboarding_completed,
+        readInvitationRoster(deps.invitationRepo, event.id, user.telegram_id),
+      )
+    : `📨 ${inviterName} ${lang === 'ru' ? 'приглашает вас на событие' : 'invites you to an event'}`;
+  await ctx.send(text, {
+    parse_mode: 'HTML',
+    reply_markup: invitationRsvpKeyboard(invitation.id, lang, event),
+  });
+}
+
+interface InvitationDeepLinkDeps {
+  invitationRepo: InvitationRepository;
+  eventService: EventService;
+  userRepo: UserRepository | undefined;
+}
+
+/** Handles an `i_` deep link; always consumes /start (the link resolved to an invitation). */
+async function handleInvitationDeepLink(
+  scope: StartScope,
+  deps: InvitationDeepLinkDeps,
+  payload: { invitation_id: number; event_id: number },
+  createdBy: number,
+): Promise<void> {
+  const { ctx, user, lang, onboardingScene } = scope;
+  const invitation = deps.invitationRepo.findById(payload.invitation_id);
+  if (invitation && invitationBindingMismatch(invitation, user.telegram_id, payload.event_id, createdBy)) {
+    cmdLogger.warn(
+      { invitationId: invitation.id, userId: user.telegram_id },
+      'Invitation link recipient or binding mismatch',
+    );
+    await ctx.send(t(lang).aiTools.meta.invitationLinkUnavailable);
+    return;
+  }
+
+  const pending = invitation && invitation.status === 'pending' ? invitation : null;
+  if (pending) {
+    await sendPendingInvitation(scope, deps, pending, payload.event_id, createdBy);
+  } else {
+    await ctx.send(lang === 'ru' ? '📨 Приглашение уже недействительно.' : '📨 This invitation is no longer valid.');
+  }
+
+  if (!user.onboarding_completed) {
+    cmdLogger.info({ userId: user.telegram_id }, 'Starting onboarding after invitation deep link');
+    await ctx.scene.enter(
+      onboardingScene,
+      pending
+        ? {
+            pendingInvitationId: pending.id,
+            pendingEventId: payload.event_id,
+            pendingInviterTelegramId: pending.inviter_id,
+          }
+        : {},
+    );
+  }
+}
+
+/** Handles /start deep links (s_ = shared event, i_ = invitation, g_ = group context); true when /start is consumed. */
+async function tryHandleDeepLink(
+  scope: StartScope,
+  deps: StartDeps,
+  deepLinkService: DeepLinkService,
+  arg: string,
+): Promise<boolean> {
+  if (!DEEP_LINK_PREFIXES.some((prefix) => arg.startsWith(prefix))) return false;
+  const resolved = deepLinkService.resolve(arg);
+  // Invalid deep link — fall through to normal /start behavior
+  if (!resolved) return false;
+
+  if (resolved.type === 'shared_event' && deps.eventService) {
+    return showSharedEvent(scope, deps.eventService, resolved.payload.event_id, resolved.createdBy);
+  }
+
+  if (resolved.type === 'invitation' && deps.invitationRepo && deps.eventService) {
+    const invitationDeps = {
+      invitationRepo: deps.invitationRepo,
+      eventService: deps.eventService,
+      userRepo: deps.userRepo,
+    };
+    await handleInvitationDeepLink(scope, invitationDeps, resolved.payload, resolved.createdBy);
+    return true;
+  }
+
+  if (resolved.type === 'group_context') {
+    await scope.ctx.send(scope.lang === 'ru' ? '\u{1f465} Группа подключена' : '\u{1f465} Group connected');
+    return true;
+  }
+  return false;
+}
+
 export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Promise<void> {
   const user = ctx.dbUser;
   if (!user) return;
   const lang = user.language as 'en' | 'ru';
+  const scope: StartScope = { ctx, user, lang, onboardingScene: deps.onboardingScene };
 
-  // Handle deep links (s_ = shared event, i_ = invitation, g_ = group context)
   if (ctx.args && deps.deepLinkService) {
-    const arg = ctx.args.trim();
-
-    if (arg.startsWith('s_') || arg.startsWith('i_') || arg.startsWith('g_')) {
-      const resolved = deps.deepLinkService.resolve(arg);
-      if (resolved) {
-        if (resolved.type === 'shared_event' && deps.eventService) {
-          const eventId = resolved.payload.event_id;
-          const event = deps.eventService.getEvent(eventId, resolved.createdBy);
-          if (event) {
-            const card = formatEventDetail(event, event.timezone, lang);
-            await ctx.send(card, { parse_mode: 'HTML' });
-            if (!user.onboarding_completed) await ctx.scene.enter(deps.onboardingScene);
-            return;
-          }
-        }
-
-        if (resolved.type === 'invitation' && deps.invitationRepo && deps.eventService) {
-          const invitation = deps.invitationRepo.findById(resolved.payload.invitation_id);
-          if (
-            invitation &&
-            (invitation.invitee_id !== user.telegram_id ||
-              invitation.event_id !== resolved.payload.event_id ||
-              invitation.inviter_id !== resolved.createdBy)
-          ) {
-            cmdLogger.warn(
-              { invitationId: invitation.id, userId: user.telegram_id },
-              'Invitation link recipient or binding mismatch',
-            );
-            await ctx.send(t(lang).aiTools.meta.invitationLinkUnavailable);
-            return;
-          }
-
-          if (invitation && invitation.status === 'pending') {
-            const event = deps.eventService.getEvent(resolved.payload.event_id, resolved.createdBy);
-            const inviter = deps.userRepo?.findByTelegramId(invitation.inviter_id);
-            const inviterName = inviter?.first_name ?? inviter?.username ?? `User ${invitation.inviter_id}`;
-
-            const text = event
-              ? formatInvitation(
-                  event,
-                  event.timezone,
-                  lang,
-                  inviterName,
-                  invitation.inviter_id,
-                  inviter?.username,
-                  user.timezone,
-                  !!user.onboarding_completed,
-                  readInvitationRoster(deps.invitationRepo, event.id, user.telegram_id),
-                )
-              : `📨 ${inviterName} ${lang === 'ru' ? 'приглашает вас на событие' : 'invites you to an event'}`;
-            await ctx.send(text, {
-              parse_mode: 'HTML',
-              reply_markup: invitationRsvpKeyboard(invitation.id, lang, event),
-            });
-          } else {
-            await ctx.send(
-              lang === 'ru' ? '📨 Приглашение уже недействительно.' : '📨 This invitation is no longer valid.',
-            );
-          }
-
-          if (!user.onboarding_completed) {
-            cmdLogger.info({ userId: user.telegram_id }, 'Starting onboarding after invitation deep link');
-            await ctx.scene.enter(
-              deps.onboardingScene,
-              invitation && invitation.status === 'pending'
-                ? {
-                    pendingInvitationId: invitation.id,
-                    pendingEventId: resolved.payload.event_id,
-                    pendingInviterTelegramId: invitation.inviter_id,
-                  }
-                : {},
-            );
-          }
-          return;
-        }
-
-        if (resolved.type === 'group_context') {
-          await ctx.send(lang === 'ru' ? '\u{1f465} Группа подключена' : '\u{1f465} Group connected');
-          return;
-        }
-      }
-      // Invalid deep link — fall through to normal /start behavior
-    }
+    if (await tryHandleDeepLink(scope, deps, deps.deepLinkService, ctx.args.trim())) return;
   }
 
   if (user.onboarding_completed) {

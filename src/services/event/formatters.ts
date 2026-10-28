@@ -1,7 +1,7 @@
 // src/services/event/formatters.ts
 
 import { TZDate } from '@date-fns/tz';
-import { type Lang, t, toLang } from '../../config/constants.ts';
+import { type Lang, type Messages, t, toLang } from '../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import {
   formatDateHeader,
@@ -90,6 +90,29 @@ export function formatWeekAgenda(
   weatherByDate?: { [date: string]: DayWeather },
 ): string {
   const l = t(lang as Lang).eventCard;
+  const byDay = groupOccurrencesByLocalDay(occurrences, timezone);
+
+  const days = localCalendarWeekDays(startDateIso, timezone);
+  const lines: string[] = [];
+
+  for (const dayKey of days) {
+    const dayLabel = formatDateShort(localCalendarDate(dayKey, timezone).toISOString(), timezone, lang);
+    const dayW = weatherByDate?.[dayKey];
+    const wSuffix = dayW ? `  ${formatWeekWeatherLine(lang as Lang, dayW)}` : '';
+    lines.push(
+      ...weekDayLines(dayLabel, wSuffix, byDay.get(dayKey) ?? [], holidaysByDate?.get(dayKey) ?? [], timezone, l),
+    );
+    lines.push('');
+  }
+
+  const headerStart = formatDateShort(startDateIso, timezone, lang);
+  const headerEnd = formatDateShort(endDateIso, timezone, lang);
+  return `📅 ${l.weekHeader} ${headerStart}–${headerEnd}\n\n${lines.join('\n').trim()}`;
+}
+
+type EventCardMessages = Messages['eventCard'];
+
+function groupOccurrencesByLocalDay(occurrences: EventOccurrence[], timezone: string): Map<string, EventOccurrence[]> {
   const byDay = new Map<string, EventOccurrence[]>();
   for (const occ of occurrences) {
     const dayKey = new TZDate(new Date(occ.occurrence_start), timezone).toISOString().slice(0, 10);
@@ -97,49 +120,46 @@ export function formatWeekAgenda(
     arr.push(occ);
     byDay.set(dayKey, arr);
   }
+  return byDay;
+}
 
-  const days = localCalendarWeekDays(startDateIso, timezone);
+/** Lines of one week-agenda day: holidays first, then either the empty marker or the event count plus event lines. */
+function weekDayLines(
+  dayLabel: string,
+  wSuffix: string,
+  dayEvents: EventOccurrence[],
+  dayHolidays: HolidayEntry[],
+  timezone: string,
+  l: EventCardMessages,
+): string[] {
   const lines: string[] = [];
+  // Weather rides on the first holiday line only when the day has no event-count line to carry it.
+  dayHolidays.forEach((h, hi) => {
+    const suffix = hi === 0 && dayEvents.length === 0 ? wSuffix : '';
+    lines.push(`${dayLabel}${suffix}  🎉 ${escapeHtml(h.name)}`);
+  });
 
-  for (const dayKey of days) {
-    const dayLabel = formatDateShort(localCalendarDate(dayKey, timezone).toISOString(), timezone, lang);
-    const dayEvents = byDay.get(dayKey) ?? [];
-    const dayHolidays = holidaysByDate?.get(dayKey) ?? [];
-    const dayW = weatherByDate?.[dayKey];
-    const wSuffix = dayW ? `  ${formatWeekWeatherLine(lang as Lang, dayW)}` : '';
-
-    if (dayHolidays.length > 0) {
-      for (let hi = 0; hi < dayHolidays.length; hi++) {
-        const h = dayHolidays[hi]!;
-        const suffix = hi === 0 && dayEvents.length === 0 ? wSuffix : '';
-        lines.push(`${dayLabel}${suffix}  🎉 ${escapeHtml(h.name)}`);
-      }
-    }
-
-    if (dayEvents.length === 0 && dayHolidays.length === 0) {
-      lines.push(`${dayLabel}${wSuffix}  ${l.weekAgendaDayEmpty}`);
-    } else if (dayEvents.length > 0) {
-      lines.push(`${dayLabel}${wSuffix}  ▪ ${dayEvents.length} ${l.eventsWord(dayEvents.length)}`);
-      for (const occ of dayEvents) {
-        const isAllDay = occ.event.all_day === 1;
-        const time = isAllDay ? l.allDayInline : formatTime(occ.occurrence_start, timezone);
-        const isBirthday = occ.event.event_type === 'birthday';
-        const isRecurring = !isBirthday && !!(occ.event.recurrence_rule || occ.event.parent_event_id);
-        let title = escapeHtml(occ.event.title);
-        if (isBirthday) {
-          const age = birthdayAge(occ.event.birth_year, occ.occurrence_start);
-          const suffix = age !== null ? l.birthdayAgeSuffix(age) : '';
-          title = `🎁 ${title}${escapeHtml(suffix)}`;
-        }
-        lines.push(`  ${time} ${title}${isRecurring ? ' 🔁' : ''}${formatDisplayDetails(occ.event)}`);
-      }
-    }
-    lines.push('');
+  if (dayEvents.length === 0 && dayHolidays.length === 0) {
+    lines.push(`${dayLabel}${wSuffix}  ${l.weekAgendaDayEmpty}`);
+  } else if (dayEvents.length > 0) {
+    lines.push(`${dayLabel}${wSuffix}  ▪ ${dayEvents.length} ${l.eventsWord(dayEvents.length)}`);
+    for (const occ of dayEvents) lines.push(weekEventLine(occ, timezone, l));
   }
+  return lines;
+}
 
-  const headerStart = formatDateShort(startDateIso, timezone, lang);
-  const headerEnd = formatDateShort(endDateIso, timezone, lang);
-  return `📅 ${l.weekHeader} ${headerStart}–${headerEnd}\n\n${lines.join('\n').trim()}`;
+function weekEventLine(occ: EventOccurrence, timezone: string, l: EventCardMessages): string {
+  const isAllDay = occ.event.all_day === 1;
+  const time = isAllDay ? l.allDayInline : formatTime(occ.occurrence_start, timezone);
+  const isBirthday = occ.event.event_type === 'birthday';
+  const isRecurring = !isBirthday && !!(occ.event.recurrence_rule || occ.event.parent_event_id);
+  let title = escapeHtml(occ.event.title);
+  if (isBirthday) {
+    const age = birthdayAge(occ.event.birth_year, occ.occurrence_start);
+    const suffix = age !== null ? l.birthdayAgeSuffix(age) : '';
+    title = `🎁 ${title}${escapeHtml(suffix)}`;
+  }
+  return `  ${time} ${title}${isRecurring ? ' 🔁' : ''}${formatDisplayDetails(occ.event)}`;
 }
 
 export function formatEventDetail(
@@ -154,28 +174,8 @@ export function formatEventDetail(
   const lines: string[] = [];
   const isBirthday = event.event_type === 'birthday';
 
-  if (includeTitle) {
-    if (isBirthday) {
-      const age = birthdayAge(event.birth_year, event.start_at);
-      const ageSuffix = age !== null ? l.birthdayAgeSuffix(age) : '';
-      lines.push(`🎁 <b>${escapeHtml(event.title)}${escapeHtml(ageSuffix)}</b>`);
-    } else {
-      lines.push(`📌 <b>${escapeHtml(event.title)}</b>`);
-    }
-  }
-
-  const dateStr = formatDateShort(event.start_at, timezone, lang);
-  if (event.all_day) {
-    lines.push(`📅 ${dateStr}, ${l.allDayInline}`);
-  } else {
-    const time = formatTimeRange(event.start_at, event.end_at, timezone);
-    if (event.end_at) {
-      const duration = formatDuration(event.start_at, event.end_at, lang);
-      lines.push(`🕐 ${dateStr}, ${time} (${duration})`);
-    } else {
-      lines.push(`🕐 ${dateStr}, ${time}`);
-    }
-  }
+  if (includeTitle) lines.push(detailTitleLine(event, isBirthday, l));
+  lines.push(detailDateLine(event, timezone, lang, l));
 
   const details = formatDisplayDetails(event);
   if (details) lines.push(details.slice(1));
@@ -190,6 +190,22 @@ export function formatEventDetail(
   }
 
   return lines.join('\n');
+}
+
+function detailTitleLine(event: CalendarEvent, isBirthday: boolean, l: EventCardMessages): string {
+  if (!isBirthday) return `📌 <b>${escapeHtml(event.title)}</b>`;
+  const age = birthdayAge(event.birth_year, event.start_at);
+  const ageSuffix = age !== null ? l.birthdayAgeSuffix(age) : '';
+  return `🎁 <b>${escapeHtml(event.title)}${escapeHtml(ageSuffix)}</b>`;
+}
+
+function detailDateLine(event: CalendarEvent, timezone: string, lang: string, l: EventCardMessages): string {
+  const dateStr = formatDateShort(event.start_at, timezone, lang);
+  if (event.all_day) return `📅 ${dateStr}, ${l.allDayInline}`;
+  const time = formatTimeRange(event.start_at, event.end_at, timezone);
+  if (!event.end_at) return `🕐 ${dateStr}, ${time}`;
+  const duration = formatDuration(event.start_at, event.end_at, lang);
+  return `🕐 ${dateStr}, ${time} (${duration})`;
 }
 
 function formatRoster(roster: InvitationRoster, lang: Lang, shown: number): string {

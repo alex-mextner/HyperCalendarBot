@@ -249,10 +249,7 @@ export class TelegramStreamWriter {
       this.intermediateChunks.push({ kind: 'reasoning', text: escapeHtml(this.text.trim()) });
     }
     // Collect completed tool lines into intermediate
-    if (this.toolLines.length > 0) {
-      this.intermediateChunks.push({ kind: 'tools', text: this.toolLines.join('\n') });
-      this.toolLines = [];
-    }
+    this.commitToolLines();
     this.dropDraftText();
   }
 
@@ -281,33 +278,43 @@ export class TelegramStreamWriter {
 
     if (!this.messageId) {
       if (!this.noPlaceholder) return;
-      // Deduplicate: reuse the in-flight promise if another flush (or finalize)
-      // is already creating the placeholder. Without this, concurrent
-      // fire-and-forget flushes each create their own ⏳ → multiple messages.
-      if (!this.placeholderPromise) {
-        this.placeholderPromise = this.sender
-          .sendMessage(this.chatId, '⏳')
-          .then((result) => {
-            this.messageId = result.message_id;
-            // discard() ran while we were creating — delete the message and bail
-            if (this.discarded) {
-              this.sender.deleteMessage?.(this.chatId, this.messageId).catch((err) => {
-                aiLogger.warn({ err, chatId: this.chatId, messageId: this.messageId }, 'Post-discard cleanup failed');
-              });
-            }
-          })
-          .catch((err) => {
-            aiLogger.warn({ err, chatId: this.chatId }, 'Failed to create placeholder message');
-          })
-          .finally(() => {
-            this.placeholderPromise = null;
-          });
-      }
-      await this.placeholderPromise;
+      await this.ensureLazyPlaceholder();
       if (!this.messageId || this.discarded) return;
     }
 
-    const flushedLength = visibleText.length;
+    await this.editStreamMessage(this.messageId, visibleText);
+  }
+
+  /**
+   * Deduplicate: reuse the in-flight promise if another flush (or finalize)
+   * is already creating the placeholder. Without this, concurrent
+   * fire-and-forget flushes each create their own ⏳ → multiple messages.
+   */
+  private async ensureLazyPlaceholder(): Promise<void> {
+    if (!this.placeholderPromise) {
+      this.placeholderPromise = this.sender
+        .sendMessage(this.chatId, '⏳')
+        .then((result) => {
+          this.messageId = result.message_id;
+          // discard() ran while we were creating — delete the message and bail
+          if (this.discarded) {
+            this.sender.deleteMessage?.(this.chatId, this.messageId).catch((err) => {
+              aiLogger.warn({ err, chatId: this.chatId, messageId: this.messageId }, 'Post-discard cleanup failed');
+            });
+          }
+        })
+        .catch((err) => {
+          aiLogger.warn({ err, chatId: this.chatId }, 'Failed to create placeholder message');
+        })
+        .finally(() => {
+          this.placeholderPromise = null;
+        });
+    }
+    await this.placeholderPromise;
+  }
+
+  /** Streaming preview: the visible draft with a trailing "..." and the active tool label, capped to one message. */
+  private buildStreamDisplayText(visibleText: string): string {
     let displayText = markdownToHtml(visibleText) || '⏳';
     // Append "..." while still generating — removed on finalize
     if (displayText !== '⏳') {
@@ -324,33 +331,63 @@ export class TelegramStreamWriter {
       const safeCut = Math.max(slice.lastIndexOf('\n'), slice.lastIndexOf('>'));
       displayText = safeCut > 0 ? `${displayText.slice(0, safeCut + 1)}...` : `${slice}...`;
     }
+    return displayText;
+  }
 
+  private async editStreamMessage(messageId: number, visibleText: string): Promise<void> {
+    const flushedLength = visibleText.length;
+    const displayText = this.buildStreamDisplayText(visibleText);
     try {
-      await this.sender.editMessageText(this.chatId, this.messageId, displayText, 'HTML');
+      await this.sender.editMessageText(this.chatId, messageId, displayText, 'HTML');
       this.lastFlushedLength = flushedLength;
       this.lastFlushTime = Date.now();
     } catch (error) {
-      const errStr = String(error);
-      if (isTelegramRateLimit(error)) {
-        const retryAfterMs = telegramRetryAfterMs(error) ?? 1000;
-        this.rateLimitedUntil = Math.max(this.rateLimitedUntil, Date.now() + retryAfterMs);
-        this.streamRateLimited = true;
-        this.lastFlushTime = Date.now();
-        aiLogger.warn(
-          { err: error, retryAfterMs },
-          'Telegram rate limit hit during stream edit, deferring to final edit',
-        );
-        return;
-      }
-      if (errStr.includes('message is not modified')) {
-        return;
-      }
-      aiLogger.error({ err: error }, 'Failed to edit stream message');
+      this.handleStreamEditError(error);
     }
+  }
+
+  private handleStreamEditError(error: unknown): void {
+    if (isTelegramRateLimit(error)) {
+      const retryAfterMs = telegramRetryAfterMs(error) ?? 1000;
+      this.rateLimitedUntil = Math.max(this.rateLimitedUntil, Date.now() + retryAfterMs);
+      this.streamRateLimited = true;
+      this.lastFlushTime = Date.now();
+      aiLogger.warn(
+        { err: error, retryAfterMs },
+        'Telegram rate limit hit during stream edit, deferring to final edit',
+      );
+      return;
+    }
+    if (String(error).includes('message is not modified')) return;
+    aiLogger.error({ err: error }, 'Failed to edit stream message');
   }
 
   async finalize(): Promise<void> {
     this.stopTypingLoop();
+    await this.settleInFlightWork();
+    this.toolLabel = null;
+    this.plainResponseText = this.text.trim();
+
+    // Collect any remaining tool lines from the last round
+    this.commitToolLines();
+
+    const finalResponse = this.plainResponseText ? markdownToHtml(this.text) : '...';
+    const joinedIntermediate = this.intermediateChunks.map((c) => c.text).join('\n');
+    const finalText =
+      this.userTranscript !== undefined
+        ? this.buildLiveCallFinalText(this.userTranscript, finalResponse, joinedIntermediate)
+        : this.buildExecutionLogFinalText(finalResponse, joinedIntermediate);
+
+    const chunks = splitMessage(finalText, MAX_MESSAGE_LENGTH);
+    this.text = chunks[0]!;
+    this.lastFlushedLength = 0;
+
+    await this.deliverFirstChunk();
+    await this.deliverOverflowChunks(chunks);
+  }
+
+  /** Waits for in-flight flushes, placeholder creation and any Telegram flood-wait before the final edit. */
+  private async settleInFlightWork(): Promise<void> {
     if (this.flushTail) await this.flushTail;
     // Wait for any in-flight placeholder creation from a concurrent flush
     if (this.placeholderPromise) await this.placeholderPromise;
@@ -359,57 +396,53 @@ export class TelegramStreamWriter {
       aiLogger.warn({ retryAfterMs: rateLimitDelayMs }, 'Waiting for Telegram rate limit before final edit');
       await sleep(rateLimitDelayMs);
     }
-    this.toolLabel = null;
-    this.plainResponseText = this.text.trim();
+  }
 
-    // Collect any remaining tool lines from the last round
-    if (this.toolLines.length > 0) {
-      this.intermediateChunks.push({ kind: 'tools', text: this.toolLines.join('\n') });
-      this.toolLines = [];
+  /** Moves completed tool lines into the intermediate execution log. */
+  private commitToolLines(): void {
+    if (this.toolLines.length === 0) return;
+    this.intermediateChunks.push({ kind: 'tools', text: this.toolLines.join('\n') });
+    this.toolLines = [];
+  }
+
+  /** Live call: everything in one collapsed blockquote (transcript + tools + bot reply). */
+  private buildLiveCallFinalText(transcript: string, finalResponse: string, joinedIntermediate: string): string {
+    const toolsBlock = this.intermediateChunks.length > 0 ? `\n${joinedIntermediate}` : '';
+    const botReply = finalResponse && finalResponse !== '...' ? `\n🤖 ${finalResponse}` : '';
+    return `<blockquote>📞\n👤 ${escapeHtml(transcript || '…')}${toolsBlock}${botReply}</blockquote>`;
+  }
+
+  /**
+   * Build expandable blockquote with ALL intermediate reasoning + tools.
+   * Cap execution log so the total message fits in one Telegram message —
+   * splitting into multiple messages confuses users and can break HTML tags.
+   */
+  private buildExecutionLogFinalText(finalResponse: string, joinedIntermediate: string): string {
+    if (this.intermediateChunks.length === 0) return finalResponse;
+    const header = this.lang === 'ru' ? '⚙️ <b>Ход выполнения</b>' : '⚙️ <b>Execution log</b>';
+    // blockquote wrapper + header + separators ≈ 60 chars overhead
+    const overhead = `<blockquote expandable>${header}\n</blockquote>\n\n`.length;
+    const maxBodyLen = MAX_MESSAGE_LENGTH - finalResponse.length - overhead;
+    // If maxBodyLen <= 0, response alone fills the message — skip blockquote entirely
+    if (maxBodyLen <= 0) return finalResponse;
+    let body = joinedIntermediate;
+    if (body.length > maxBodyLen) {
+      // Truncate at a line boundary to avoid breaking HTML tags (<i>...</i>).
+      // A naive body.slice() can cut inside a tag, making Telegram reject the message.
+      const truncSlice = body.slice(0, maxBodyLen);
+      const lastNewline = truncSlice.lastIndexOf('\n');
+      body = lastNewline > 0 ? `${body.slice(0, lastNewline)}\n…` : `${truncSlice.slice(0, maxBodyLen - 1)}…`;
     }
+    return `<blockquote expandable>${header}\n${body}</blockquote>\n\n${finalResponse}`;
+  }
 
-    const finalResponse = this.plainResponseText ? markdownToHtml(this.text) : '...';
-    const joinedIntermediate = this.intermediateChunks.map((c) => c.text).join('\n');
-
-    let finalText: string;
-    if (this.userTranscript !== undefined) {
-      // Live call: everything in one collapsed blockquote (transcript + tools + bot reply)
-      const toolsBlock = this.intermediateChunks.length > 0 ? `\n${joinedIntermediate}` : '';
-      const botReply = finalResponse && finalResponse !== '...' ? `\n🤖 ${finalResponse}` : '';
-      finalText = `<blockquote>📞\n👤 ${escapeHtml(this.userTranscript || '…')}${toolsBlock}${botReply}</blockquote>`;
-    } else {
-      // Build expandable blockquote with ALL intermediate reasoning + tools.
-      // Cap execution log so the total message fits in one Telegram message —
-      // splitting into multiple messages confuses users and can break HTML tags.
-      finalText = finalResponse;
-      if (this.intermediateChunks.length > 0) {
-        const header = this.lang === 'ru' ? '⚙️ <b>Ход выполнения</b>' : '⚙️ <b>Execution log</b>';
-        let body = joinedIntermediate;
-        // blockquote wrapper + header + separators ≈ 60 chars overhead
-        const overhead = `<blockquote expandable>${header}\n</blockquote>\n\n`.length;
-        const maxBodyLen = MAX_MESSAGE_LENGTH - finalResponse.length - overhead;
-        if (maxBodyLen > 0 && body.length > maxBodyLen) {
-          // Truncate at a line boundary to avoid breaking HTML tags (<i>...</i>).
-          // A naive body.slice() can cut inside a tag, making Telegram reject the message.
-          const truncSlice = body.slice(0, maxBodyLen);
-          const lastNewline = truncSlice.lastIndexOf('\n');
-          body = lastNewline > 0 ? `${body.slice(0, lastNewline)}\n…` : `${truncSlice.slice(0, maxBodyLen - 1)}…`;
-        }
-        if (maxBodyLen > 0) {
-          finalText = `<blockquote expandable>${header}\n${body}</blockquote>\n\n${finalResponse}`;
-        }
-        // If maxBodyLen <= 0, response alone fills the message — skip blockquote entirely
-      }
-    }
-
-    const chunks = splitMessage(finalText, MAX_MESSAGE_LENGTH);
-    this.text = chunks[0]!;
-    this.lastFlushedLength = 0;
-
-    // First chunk: edit existing placeholder or send fresh message.
-    // ALWAYS use parse_mode: 'HTML' — our HTML is well-formed. If Telegram
-    // rejects it (rate limit, transient error), log and move on. Never
-    // downgrade to no parse_mode — that shows raw tags to the user.
+  /**
+   * First chunk: edit existing placeholder or send fresh message.
+   * ALWAYS use parse_mode: 'HTML' — our HTML is well-formed. If Telegram
+   * rejects it (rate limit, transient error), log and move on. Never
+   * downgrade to no parse_mode — that shows raw tags to the user.
+   */
+  private async deliverFirstChunk(): Promise<void> {
     if (this.messageId) {
       const messageId = this.messageId;
       try {
@@ -431,8 +464,10 @@ export class TelegramStreamWriter {
         aiLogger.error({ err }, 'Finalize send failed');
       }
     }
+  }
 
-    // Remaining chunks: send as new messages
+  /** Remaining chunks: send as new messages. */
+  private async deliverOverflowChunks(chunks: readonly string[]): Promise<void> {
     for (let i = 1; i < chunks.length; i++) {
       try {
         await withTelegramRateLimitRetry(

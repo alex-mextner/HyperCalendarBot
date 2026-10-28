@@ -74,14 +74,15 @@ function displayName(row: InvitationRosterRow): string | null {
   return plainName(row.first_name) ?? (username ? `@${username}` : null);
 }
 
-function buildRoster(rows: InvitationRosterRow[], chatId: number): InvitationRoster | null {
-  const organizerRow = rows.find((row) => row.source === 'organizer');
-  if (!organizerRow) return null;
+interface RosterAnswers {
+  participantAnswers: Map<number, ParticipantStatus>;
+  liveGroupChats: Set<number>;
+}
 
+/** First pass: each participant's recorded answer, and the groups that still hold a live invitation. */
+function collectAnswers(rows: InvitationRosterRow[]): RosterAnswers {
   const participantAnswers = new Map<number, ParticipantStatus>();
   const liveGroupChats = new Set<number>();
-  const invitees: RosterInvitee[] = [];
-  const listed = new Set<number>([organizerRow.user_id]);
   for (const row of rows) {
     const answer = answerOf(row.status);
     if (row.source === 'participant' && answer) participantAnswers.set(row.user_id, answer);
@@ -89,8 +90,16 @@ function buildRoster(rows: InvitationRosterRow[], chatId: number): InvitationRos
       liveGroupChats.add(row.user_id);
     }
   }
+  return { participantAnswers, liveGroupChats };
+}
 
-  // Personal invitees: the latest invitation per person, unless withdrawn or expired.
+/** Personal invitees: the latest invitation per person, unless withdrawn or expired. */
+function listPersonalInvitees(
+  rows: InvitationRosterRow[],
+  participantAnswers: Map<number, ParticipantStatus>,
+  listed: Set<number>,
+  invitees: RosterInvitee[],
+): void {
   for (const row of rows) {
     const invitation = answerOf(row.status);
     if (row.source !== 'invitation' || row.user_id < 0 || !invitation || listed.has(row.user_id)) continue;
@@ -99,10 +108,20 @@ function buildRoster(rows: InvitationRosterRow[], chatId: number): InvitationRos
     invitees.push({ userId: row.user_id, name: displayName(row), answer });
     listed.add(row.user_id);
   }
+}
 
-  // Group members answer through event_participants. An answer is listed only while the group whose
-  // card carried it holds a live invitation, and a group chat sees only its own members' answers; an
-  // answer of unknown origin (personal, or recorded before origins were kept) is never listed here.
+/**
+ * Group members answer through event_participants. An answer is listed only while the group whose
+ * card carried it holds a live invitation, and a group chat sees only its own members' answers; an
+ * answer of unknown origin (personal, or recorded before origins were kept) is never listed here.
+ */
+function listGroupMembers(
+  rows: InvitationRosterRow[],
+  chatId: number,
+  liveGroupChats: Set<number>,
+  listed: Set<number>,
+  invitees: RosterInvitee[],
+): void {
   for (const row of rows) {
     const answer = answerOf(row.status);
     const origin = row.source_group_id;
@@ -111,6 +130,17 @@ function buildRoster(rows: InvitationRosterRow[], chatId: number): InvitationRos
     invitees.push({ userId: row.user_id, name: displayName(row), answer });
     listed.add(row.user_id);
   }
+}
+
+function buildRoster(rows: InvitationRosterRow[], chatId: number): InvitationRoster | null {
+  const organizerRow = rows.find((row) => row.source === 'organizer');
+  if (!organizerRow) return null;
+
+  const { participantAnswers, liveGroupChats } = collectAnswers(rows);
+  const invitees: RosterInvitee[] = [];
+  const listed = new Set<number>([organizerRow.user_id]);
+  listPersonalInvitees(rows, participantAnswers, listed, invitees);
+  listGroupMembers(rows, chatId, liveGroupChats, listed, invitees);
 
   // The roster is the organizer's to share: a group chat must hold a live invitation to the event, and
   // a private reader must be on the roster (fail closed for anyone else).

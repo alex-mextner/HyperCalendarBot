@@ -14,8 +14,11 @@
 # stdin after the token line is the client's channel: DONE or EOF ends the wait.
 # stdout carries only the STAGE_READY line and the last line STAGE_QA_RESULT ...; all progress goes
 # to stderr.
-# Exit: 0 passed (DONE/EOF after READY), 1 failed (health/timeout), 2 refused (guard), 3 not
-# provisioned, 75 host lock wait timed out, 76 superseded. The verdict on the cases is the PC's.
+# Exit: 0 passed (DONE/EOF after READY), 1 failed (health/timeout: the PR is wrong), 2 refused (guard),
+# 3 not provisioned, 4 stage could not run (docker load / compose up failed: the cause may be
+# infrastructure or image startup, and there is no test verdict; the report posts `error`), 75 host
+# lock wait timed out, 76 superseded. The verdict on the cases is the PC's.
+# shellcheck disable=SC2329 # the functions below are reached only through traps and step(), which shellcheck cannot see
 set -euo pipefail
 umask 077
 
@@ -64,6 +67,7 @@ result_status() {
     0) echo passed ;;
     2) echo refused ;;
     3) echo not-provisioned ;;
+    4) echo infra-error ;;
     75) echo lock-timeout ;;
     76) echo superseded ;;
     *) echo failed ;;
@@ -80,7 +84,7 @@ save_evidence() {
   local rc="$1"
   timeout 300 python3 "$LIB/deploy-evidence.py" release-logs --container "$CONTAINER" \
     --logs-root "$STAGE_DIR/evidence" --label "stage-${SHA:0:12}" || echo 'evidence: release-logs failed' >&2
-  if (( rc != 0 )); then
+  if ((rc != 0)); then
     timeout 300 python3 "$LIB/deploy-evidence.py" failed --container "$CONTAINER" \
       --logs-root "$STAGE_DIR/evidence" --sha "$SHA" || echo 'evidence: failed bundle failed' >&2
   fi
@@ -94,12 +98,12 @@ finish() {
   trap - EXIT
   set +e
   [[ -z "$WATCHDOG_PID" ]] || kill "$WATCHDOG_PID" 2>/dev/null
-  if (( STACK_TOUCHED )); then
+  if ((STACK_TOUCHED)); then
     save_evidence "$rc"
     compose down --timeout 10 || echo 'teardown: compose down failed; the stage may still be up' >&2
   fi
-  if (( LOADED )); then timeout 120 docker rmi "$IMAGE_REPO:$SHA" || true; fi
-  if (( WORK_OWNED )); then rm -rf -- "$WORK"; fi
+  if ((LOADED)); then timeout 120 docker rmi "$IMAGE_REPO:$SHA" || true; fi
+  if ((WORK_OWNED)); then rm -rf -- "$WORK"; fi
   printf 'STAGE_QA_RESULT status=%s sha=%s cases=0 failed=0\n' "$(result_status "$rc")" "${SHA:--}" >&4
   exit "$rc"
 }
@@ -128,13 +132,21 @@ step() {
   return "$rc"
 }
 
-die() { local rc="$1"; shift; echo "stage-qa-run: $*" >&2 || true; exit "$rc"; }
-not_provisioned() { echo "STAGE_QA_NOT_PROVISIONED: $*" >&2 || true; exit 3; }
+die() {
+  local rc="$1"
+  shift
+  echo "stage-qa-run: $*" >&2 || true
+  exit "$rc"
+}
+not_provisioned() {
+  echo "STAGE_QA_NOT_PROVISIONED: $*" >&2 || true
+  exit 3
+}
 
 # Validate ownership of the work dir BEFORE it can be removed by the exit trap.
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || die 2 'revision must be a full 40-character lowercase commit SHA'
-[[ -n "$WORK" && -d "$WORK" && ! -L "$WORK" && "$(dirname -- "$WORK")" == "$DEPLOY_PATH" \
-   && "$(basename -- "$WORK")" =~ ^\.stage-incoming-$SHA-[0-9]+-[0-9]+$ ]] \
+[[ -n "$WORK" && -d "$WORK" && ! -L "$WORK" && "$(dirname -- "$WORK")" == "$DEPLOY_PATH" &&
+"$(basename -- "$WORK")" =~ ^\.stage-incoming-$SHA-[0-9]+-[0-9]+$ ]] \
   || die 2 'work dir is outside the owned .stage-incoming-<sha>-<n>-<n> namespace'
 WORK_OWNED=1
 { IFS= read -r -u 3 TOKEN; } 2>/dev/null || true
@@ -172,7 +184,10 @@ RUN_STARTED=$SECONDS
 (
   deadline=$((RUN_STARTED + RUN_TIMEOUT))
   while kill -0 "$$" 2>/dev/null; do
-    if (( SECONDS >= deadline )); then kill -USR1 "$$" 2>/dev/null; exit 0; fi
+    if ((SECONDS >= deadline)); then
+      kill -USR1 "$$" 2>/dev/null
+      exit 0
+    fi
     sleep 1
   done
 ) &
@@ -205,10 +220,11 @@ IMAGE_BYTES="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["
 DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}')"
 FREE_KIB="$(df -Pk "$DOCKER_ROOT" | awk 'NR == 2 {print $4}')"
 [[ "$FREE_KIB" =~ ^[0-9]+$ ]] || die 2 "cannot read free space on $DOCKER_ROOT"
-(( FREE_KIB * 1024 >= 2 * IMAGE_BYTES )) \
+((FREE_KIB * 1024 >= 2 * IMAGE_BYTES)) \
   || die 2 "not enough disk to load the stage image: $((FREE_KIB * 1024)) bytes free on $DOCKER_ROOT, need $((2 * IMAGE_BYTES))"
 DRIVER_STATUS="$(docker info --format '{{json .DriverStatus}}')"
-EXPECTED_IMAGE_ID="$(python3 - "$DRIVER_STATUS" "$WORK/artifact.json" <<'STORE'
+EXPECTED_IMAGE_ID="$(
+  python3 - "$DRIVER_STATUS" "$WORK/artifact.json" <<'STORE'
 import json,sys
 status,artifact=sys.argv[1:]
 containerd=["driver-type","io.containerd.snapshotter.v1"] in (json.loads(status) or [])
@@ -219,7 +235,7 @@ STORE
 
 load_image() { gzip -dc "$WORK/image.tar.gz" | docker load; }
 LOADED=1
-step load_image || die 1 'docker load failed'
+step load_image || die 4 'docker load failed'
 LOADED_ID="$(docker image inspect "$IMAGE_REPO:$SHA" --format '{{.Id}}')"
 [[ "$LOADED_ID" == "$EXPECTED_IMAGE_ID" ]] || die 2 'loaded stage image identity does not match the verified artifact'
 
@@ -243,7 +259,7 @@ bash "$LIB/prepare-runtime-dirs.sh" "$STAGE_DIR"
 
 printf 'services:\n  bot-stage:\n    image: "%s"\n' "$IMAGE_REPO:$SHA" >"$WORK/image.yml"
 STACK_TOUCHED=1
-step compose up -d --no-build --pull never --force-recreate || die 1 'compose up failed'
+step compose up -d --no-build --pull never --force-recreate || die 4 'compose up failed'
 
 step python3 "$LIB/deploy-health.py" wait --container "$CONTAINER" --url "$HEALTH_URL" --mode health \
   --base-budget "$HEALTH_BASE_BUDGET" --hard-cap "$HEALTH_HARD_CAP" --poll "$HEALTH_POLL" \
@@ -264,10 +280,11 @@ run_guard() {
 }
 guard_rc=0
 step run_guard || guard_rc=$?
-(( guard_rc == 0 )) || die 2 "the stage guard refused the run (exit $guard_rc)"
+((guard_rc == 0)) || die 2 "the stage guard refused the run (exit $guard_rc)"
 
 # Only the validated fields go to the client, as one compact line.
-READY_LINE="$(python3 - "$SHA" "$WORK/guard.out" <<'READY'
+READY_LINE="$(
+  python3 - "$SHA" "$WORK/guard.out" <<'READY'
 import json, re, sys
 sha, path = sys.argv[1:]
 lines = [l for l in open(path, encoding="utf-8").read().splitlines() if l.startswith("STAGE_GUARD ")]
@@ -294,14 +311,14 @@ printf 'STAGE_READY %s\n' "$READY_LINE" >&4
 # host lock. read runs in this shell (not a child) so DONE is consumed from the real stdin.
 while :; do
   remaining=$((RUN_STARTED + RUN_TIMEOUT - SECONDS))
-  (( remaining >= 1 )) || die 1 "stage QA run timed out after ${RUN_TIMEOUT}s waiting for the client to finish"
+  ((remaining >= 1)) || die 1 "stage QA run timed out after ${RUN_TIMEOUT}s waiting for the client to finish"
   read_rc=0
   # One-second slices: bash runs a trapped signal's handler only after read returns, so a long
   # read would delay the teardown of a cancelled job until the budget ends.
   IFS= read -r -t 1 client_line || read_rc=$?
-  if (( read_rc == 0 )); then
+  if ((read_rc == 0)); then
     [[ "$client_line" != DONE ]] || break
-  elif (( read_rc > 128 )); then
+  elif ((read_rc > 128)); then
     continue
   else
     break

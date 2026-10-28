@@ -1,0 +1,6 @@
+# shellcheck reads this file from the repository root.
+# The scripts source their sibling odroid-deploy-lock.sh by a run-time path ($LIB or $SCRIPT_DIR) and
+# say where it lives with `# shellcheck source=odroid-deploy-lock.sh`; these two settings make
+# shellcheck follow that directive without needing -x on every invocation (Rig runs it without -x).
+external-sources=true
+source-path=SCRIPTDIR

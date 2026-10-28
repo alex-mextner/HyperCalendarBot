@@ -114,25 +114,114 @@ export function parseFilterChain(input: string): FilterCall[] {
 // Public API: apply
 // ---------------------------------------------------------------------------
 
-const KNOWN_FILTERS = new Set([
-  'pad',
-  'upper',
-  'lower',
-  'trim',
-  'truncate',
-  'default',
-  'replace',
-  'date',
-  'ternary',
-  'eq',
-  'add',
-  'sub',
-  'mul',
-  'div',
-  'human_day',
-  'human_when',
-  'human_duration',
-]);
+type FilterArgs = FilterCall['args'];
+type FilterImpl = (current: unknown, args: FilterArgs, context: HumanTimeContext | undefined) => unknown;
+
+/** null/undefined render as the empty string; everything else is stringified. */
+function textOf(value: unknown): string {
+  return value === undefined || value === null ? '' : String(value);
+}
+
+function numericArg(filterName: string, args: FilterArgs): number {
+  const n = args[0];
+  if (typeof n !== 'number') throw new Error(`${filterName}() requires a numeric argument`);
+  return n;
+}
+
+/**
+ * Offset (minutes east of UTC) written in an ISO string, `0` for a `Z` suffix,
+ * or `null` when the string carries no explicit timezone.
+ */
+function explicitOffsetMinutes(isoStr: string): number | null {
+  const offsetMatch = isoStr.match(/([+-])(\d{2}):(\d{2})$/);
+  if (offsetMatch) return (offsetMatch[1] === '+' ? 1 : -1) * (Number(offsetMatch[2]) * 60 + Number(offsetMatch[3]));
+  return isoStr.endsWith('Z') ? 0 : null;
+}
+
+function dateFilter(current: unknown, args: FilterArgs): string {
+  const fmt = String(args[0] ?? 'yyyy-MM-dd');
+  if (current === undefined || current === null) return '';
+  try {
+    const isoStr = String(current);
+    const parsed = parseISO(isoStr);
+    // When the ISO string has an explicit timezone offset (e.g. +03:00),
+    // parseISO normalizes to UTC and format() uses system timezone.
+    // Adjust so formatting shows the original local wall-clock time.
+    const targetOffsetMinutes = explicitOffsetMinutes(isoStr);
+    if (targetOffsetMinutes === null) return dateFnsFormat(parsed, fmt);
+    const adjusted = new Date(parsed.getTime() + (targetOffsetMinutes + parsed.getTimezoneOffset()) * 60000);
+    return dateFnsFormat(adjusted, fmt);
+  } catch {
+    return String(current);
+  }
+}
+
+function arithmeticFilter(name: string, apply: (left: number, n: number) => number): FilterImpl {
+  return (current, args) => {
+    const n = numericArg(name, args);
+    return apply(Number(current ?? 0), n);
+  };
+}
+
+const FILTER_IMPLS: Record<string, FilterImpl> = {
+  pad: (current, args) => {
+    const width = numericArg('pad', args);
+    return textOf(current).padStart(width, '0');
+  },
+  upper: (current) => textOf(current).toUpperCase(),
+  lower: (current) => textOf(current).toLowerCase(),
+  trim: (current) => textOf(current).trim(),
+  truncate: (current, args) => {
+    const max = numericArg('truncate', args);
+    const str = textOf(current);
+    return str.length > max ? `${str.slice(0, max)}…` : str;
+  },
+  default: (current, args) => {
+    const fallback = String(args[0] ?? '');
+    return current === undefined || current === null ? fallback : current;
+  },
+  replace: (current, args) => {
+    const from = String(args[0] ?? '');
+    const to = String(args[1] ?? '');
+    return current === undefined || current === null ? '' : String(current).replaceAll(from, to);
+  },
+  date: dateFilter,
+  ternary: (current, args) => {
+    const ifTrue = String(args[0] ?? '');
+    const ifFalse = String(args[1] ?? '');
+    return current ? ifTrue : ifFalse;
+  },
+  eq: (current, args) => {
+    const match = String(args[0] ?? '');
+    const ifMatch = String(args[1] ?? '');
+    const ifNoMatch = String(args[2] ?? '');
+    return String(current) === match ? ifMatch : ifNoMatch;
+  },
+  add: arithmeticFilter('add', (left, n) => left + n),
+  sub: arithmeticFilter('sub', (left, n) => left - n),
+  mul: arithmeticFilter('mul', (left, n) => left * n),
+  div: (current, args) => {
+    const n = numericArg('div', args);
+    if (n === 0) throw new Error('div() by zero');
+    return Math.floor(Number(current ?? 0) / n);
+  },
+  human_day: (current, _args, context) => {
+    if (!context) throw new Error("human_day() needs the user's language and zone");
+    return humanDay(textOf(current), context);
+  },
+  human_when: (current, _args, context) => {
+    if (!context) throw new Error("human_when() needs the user's language and zone");
+    return humanWhen(textOf(current), context);
+  },
+  human_duration: (current, _args, context) => {
+    const minutes = Number(current);
+    if (!context) throw new Error("human_duration() needs the user's language");
+    if (!Number.isFinite(minutes)) throw new Error('human_duration() needs a number of minutes');
+    return humanDuration(minutes, context.language);
+  },
+};
+
+const KNOWN_FILTERS = new Set(Object.keys(FILTER_IMPLS));
 
 /** `context` carries the reader's language, zone and clock for the wording filters (human_day, human_when). */
 export function applyFilters(value: unknown, filters: FilterCall[], context?: HumanTimeContext): string {
@@ -142,126 +231,10 @@ export function applyFilters(value: unknown, filters: FilterCall[], context?: Hu
     if (!KNOWN_FILTERS.has(filter.name)) {
       throw new Error(`Unknown filter: ${filter.name}`);
     }
-
-    switch (filter.name) {
-      case 'pad': {
-        const width = filter.args[0];
-        if (typeof width !== 'number') throw new Error('pad() requires a numeric argument');
-        const str = current === undefined || current === null ? '' : String(current);
-        current = str.padStart(width, '0');
-        break;
-      }
-      case 'upper':
-        current = current === undefined || current === null ? '' : String(current).toUpperCase();
-        break;
-      case 'lower':
-        current = current === undefined || current === null ? '' : String(current).toLowerCase();
-        break;
-      case 'trim':
-        current = current === undefined || current === null ? '' : String(current).trim();
-        break;
-      case 'truncate': {
-        const max = filter.args[0];
-        if (typeof max !== 'number') throw new Error('truncate() requires a numeric argument');
-        const str = current === undefined || current === null ? '' : String(current);
-        current = str.length > max ? `${str.slice(0, max)}…` : str;
-        break;
-      }
-      case 'default': {
-        const fallback = String(filter.args[0] ?? '');
-        if (current === undefined || current === null) current = fallback;
-        break;
-      }
-      case 'replace': {
-        const from = String(filter.args[0] ?? '');
-        const to = String(filter.args[1] ?? '');
-        current = current === undefined || current === null ? '' : String(current).replaceAll(from, to);
-        break;
-      }
-      case 'date': {
-        const fmt = String(filter.args[0] ?? 'yyyy-MM-dd');
-        if (current === undefined || current === null) {
-          current = '';
-        } else {
-          try {
-            const isoStr = String(current);
-            const parsed = parseISO(isoStr);
-            // When the ISO string has an explicit timezone offset (e.g. +03:00),
-            // parseISO normalizes to UTC and format() uses system timezone.
-            // Adjust so formatting shows the original local wall-clock time.
-            const offsetMatch = isoStr.match(/([+-])(\d{2}):(\d{2})$/);
-            const isUtcSuffix = !offsetMatch && isoStr.endsWith('Z');
-            if (offsetMatch || isUtcSuffix) {
-              const targetOffsetMinutes = offsetMatch
-                ? (offsetMatch[1] === '+' ? 1 : -1) * (Number(offsetMatch[2]) * 60 + Number(offsetMatch[3]))
-                : 0;
-              const adjusted = new Date(parsed.getTime() + (targetOffsetMinutes + parsed.getTimezoneOffset()) * 60000);
-              current = dateFnsFormat(adjusted, fmt);
-            } else {
-              current = dateFnsFormat(parsed, fmt);
-            }
-          } catch {
-            current = String(current);
-          }
-        }
-        break;
-      }
-      case 'human_day':
-      case 'human_when': {
-        const text = current === undefined || current === null ? '' : String(current);
-        if (!context) throw new Error(`${filter.name}() needs the user's language and zone`);
-        current = filter.name === 'human_day' ? humanDay(text, context) : humanWhen(text, context);
-        break;
-      }
-      case 'human_duration': {
-        const minutes = Number(current);
-        if (!context) throw new Error("human_duration() needs the user's language");
-        if (!Number.isFinite(minutes)) throw new Error('human_duration() needs a number of minutes');
-        current = humanDuration(minutes, context.language);
-        break;
-      }
-      case 'ternary': {
-        const ifTrue = String(filter.args[0] ?? '');
-        const ifFalse = String(filter.args[1] ?? '');
-        current = current ? ifTrue : ifFalse;
-        break;
-      }
-      case 'eq': {
-        const match = String(filter.args[0] ?? '');
-        const ifMatch = String(filter.args[1] ?? '');
-        const ifNoMatch = String(filter.args[2] ?? '');
-        current = String(current) === match ? ifMatch : ifNoMatch;
-        break;
-      }
-      case 'add': {
-        const n = filter.args[0];
-        if (typeof n !== 'number') throw new Error('add() requires a numeric argument');
-        current = Number(current ?? 0) + n;
-        break;
-      }
-      case 'sub': {
-        const n = filter.args[0];
-        if (typeof n !== 'number') throw new Error('sub() requires a numeric argument');
-        current = Number(current ?? 0) - n;
-        break;
-      }
-      case 'mul': {
-        const n = filter.args[0];
-        if (typeof n !== 'number') throw new Error('mul() requires a numeric argument');
-        current = Number(current ?? 0) * n;
-        break;
-      }
-      case 'div': {
-        const n = filter.args[0];
-        if (typeof n !== 'number') throw new Error('div() requires a numeric argument');
-        if (n === 0) throw new Error('div() by zero');
-        current = Math.floor(Number(current ?? 0) / n);
-        break;
-      }
-    }
+    current = FILTER_IMPLS[filter.name]!(current, filter.args, context);
   }
 
-  return current === undefined || current === null ? '' : String(current);
+  return textOf(current);
 }
 
 // ---------------------------------------------------------------------------

@@ -224,6 +224,41 @@ export function correctAskedQuestion(
   };
 }
 
+type SurfacedSummary = NonNullable<AgentContext['surfacedEvents']>[number];
+type WindowOccurrence = NonNullable<AgentContext['recentEventsWindow']>[number];
+
+/** The clock of an event a tool result showed, or null for an all-day or malformed row. */
+function surfacedClock(summary: SurfacedSummary, timezone: string): EventClock | null {
+  if (summary.all_day || !summary.time) return null;
+  const [year, month, day] = summary.date.split('-').map(Number);
+  const [hour, minute] = summary.time.split(':').map(Number);
+  // The summary keeps the local wall clock; on a DST fold this picks the first instant.
+  const start = TZDate.tz(timezone, year!, month! - 1, day!, hour!, minute!);
+  // A malformed row must degrade to "no correction", never crash the reply after the run.
+  if (Number.isNaN(start.getTime()) || (summary.end_at && Number.isNaN(Date.parse(summary.end_at)))) return null;
+  return {
+    id: summary.id,
+    title: summary.title,
+    startUtc: new Date(start.getTime()).toISOString(),
+    endUtc: summary.end_at ?? null,
+    fromTool: true,
+  };
+}
+
+/** The clock of a preloaded window occurrence, or null for an all-day or malformed one. */
+function windowClock(occurrence: WindowOccurrence): EventClock | null {
+  if (occurrence.event.all_day) return null;
+  if (Number.isNaN(Date.parse(occurrence.occurrence_start))) return null;
+  if (occurrence.occurrence_end && Number.isNaN(Date.parse(occurrence.occurrence_end))) return null;
+  return {
+    id: occurrence.event.id,
+    title: occurrence.event.title,
+    startUtc: occurrence.occurrence_start,
+    endUtc: occurrence.occurrence_end ?? null,
+    fromTool: false,
+  };
+}
+
 /**
  * Events this run could have described: every event a tool result showed the model,
  * plus the preloaded schedule window. A tool result is fresher than the window snapshot
@@ -235,33 +270,15 @@ export function eventClocksForRun(
   const clocks: EventClock[] = [];
   const surfacedIds = new Set<number>();
   for (const summary of ctx.surfacedEvents ?? []) {
-    if (summary.all_day || !summary.time) continue;
-    const [year, month, day] = summary.date.split('-').map(Number);
-    const [hour, minute] = summary.time.split(':').map(Number);
-    // The summary keeps the local wall clock; on a DST fold this picks the first instant.
-    const start = TZDate.tz(ctx.user.timezone, year!, month! - 1, day!, hour!, minute!);
-    // A malformed row must degrade to "no correction", never crash the reply after the run.
-    if (Number.isNaN(start.getTime()) || (summary.end_at && Number.isNaN(Date.parse(summary.end_at)))) continue;
+    const clock = surfacedClock(summary, ctx.user.timezone);
+    if (!clock) continue;
     surfacedIds.add(summary.id);
-    clocks.push({
-      id: summary.id,
-      title: summary.title,
-      startUtc: new Date(start.getTime()).toISOString(),
-      endUtc: summary.end_at ?? null,
-      fromTool: true,
-    });
+    clocks.push(clock);
   }
   for (const occurrence of ctx.recentEventsWindow ?? []) {
-    if (occurrence.event.all_day || surfacedIds.has(occurrence.event.id)) continue;
-    if (Number.isNaN(Date.parse(occurrence.occurrence_start))) continue;
-    if (occurrence.occurrence_end && Number.isNaN(Date.parse(occurrence.occurrence_end))) continue;
-    clocks.push({
-      id: occurrence.event.id,
-      title: occurrence.event.title,
-      startUtc: occurrence.occurrence_start,
-      endUtc: occurrence.occurrence_end ?? null,
-      fromTool: false,
-    });
+    if (surfacedIds.has(occurrence.event.id)) continue;
+    const clock = windowClock(occurrence);
+    if (clock) clocks.push(clock);
   }
   return clocks;
 }

@@ -1,4 +1,5 @@
 import { InlineKeyboard } from 'gramio';
+import type { SecretaryRepository } from '../../../database/repositories/secretary.repository.ts';
 import type { CalendarSecretary } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
 import { deliverMessage } from '../deliver-message.ts';
@@ -6,11 +7,20 @@ import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 
 const secretaryLogger = botLogger.child({ module: 'secretary' });
 
+const MAX_ACTIVE_SECRETARIES = 10;
+
 interface ManageSecretariesInput {
   action: 'invite' | 'revoke' | 'self_remove';
   secretary_telegram_id?: number;
   permission?: 'read' | 'write';
   secretary_access_id?: number;
+}
+
+/** "Name (@handle)" label of the calling user as shown in secretary messages. */
+function describeCaller(ctx: AgentContext): string {
+  const name = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
+  const handle = ctx.user.username ? ` (@${ctx.user.username})` : '';
+  return `${name}${handle}`;
 }
 
 async function sendSecretaryInvite(
@@ -20,11 +30,9 @@ async function sendSecretaryInvite(
 ): Promise<void> {
   if (!ctx.sender) return;
 
-  const ownerName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
-  const ownerHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
   const permLabel = record.permission === 'write' ? 'читать и редактировать' : 'только просматривать';
   const text =
-    `${ownerName}${ownerHandle} хочет добавить тебя секретарём своего календаря.\n` +
+    `${describeCaller(ctx)} хочет добавить тебя секретарём своего календаря.\n` +
     `Права доступа: ${permLabel}.\n\n` +
     `Принять приглашение?`;
 
@@ -67,96 +75,112 @@ async function sendSecretaryNotification(ctx: AgentContext, targetId: number, te
   });
 }
 
-export async function handleManageSecretaries(ctx: AgentContext, input: ManageSecretariesInput): Promise<ToolResult> {
-  if (!ctx.secretary || !ctx.userRepo) return { success: false, error: 'Secretary feature not configured.' };
+/** Notify `targetId` about an already-committed status change; delivery failures are logged, never surfaced. */
+async function notifyAfterCommit(ctx: AgentContext, targetId: number, text: string, failureLog: string): Promise<void> {
+  const targetUser = ctx.userRepo.findByTelegramId(targetId);
+  if (!targetUser || !ctx.sender) return;
+  try {
+    await sendSecretaryNotification(ctx, targetId, text);
+  } catch (err) {
+    secretaryLogger.error({ err }, failureLog);
+  }
+}
 
-  if (input.action === 'invite') {
-    const { secretary_telegram_id, permission } = input;
-    if (!secretary_telegram_id || !permission)
-      return { success: false, error: 'secretary_telegram_id and permission required for invite.' };
+async function inviteSecretary(
+  ctx: AgentContext,
+  secretaryRepo: SecretaryRepository,
+  input: ManageSecretariesInput,
+): Promise<ToolResult> {
+  const { secretary_telegram_id, permission } = input;
+  if (!secretary_telegram_id || !permission)
+    return { success: false, error: 'secretary_telegram_id and permission required for invite.' };
 
-    const secretaryUser = ctx.userRepo.findByTelegramId(secretary_telegram_id);
-    if (!secretaryUser) return { success: false, error: 'SECRETARY_NOT_FOUND' };
+  const secretaryUser = ctx.userRepo.findByTelegramId(secretary_telegram_id);
+  if (!secretaryUser) return { success: false, error: 'SECRETARY_NOT_FOUND' };
 
-    if (ctx.secretary!.secretaryRepo.countActive(ctx.user.telegram_id) >= 10)
-      return { success: false, error: 'SECRETARY_LIMIT_REACHED' };
+  if (secretaryRepo.countActive(ctx.user.telegram_id) >= MAX_ACTIVE_SECRETARIES)
+    return { success: false, error: 'SECRETARY_LIMIT_REACHED' };
 
-    const record = ctx.secretary!.secretaryRepo.upsert({
-      owner_id: ctx.user.telegram_id,
-      secretary_id: secretary_telegram_id,
-      permission,
-    });
+  const record = secretaryRepo.upsert({
+    owner_id: ctx.user.telegram_id,
+    secretary_id: secretary_telegram_id,
+    permission,
+  });
 
-    try {
-      await sendSecretaryInvite(ctx, record, secretaryUser);
-    } catch (err) {
-      secretaryLogger.error({ err, recordId: record.id }, 'Failed to send secretary invite');
-      return {
-        success: false,
-        error: 'SECRETARY_INVITE_DELIVERY_FAILED',
-        output: JSON.stringify({ status: 'delivery_failed', secretary_access_id: record.id }),
-      };
-    }
-
+  try {
+    await sendSecretaryInvite(ctx, record, secretaryUser);
+  } catch (err) {
+    secretaryLogger.error({ err, recordId: record.id }, 'Failed to send secretary invite');
     return {
-      success: true,
-      output: JSON.stringify({ status: 'awaiting_confirmation', secretary_access_id: record.id }),
+      success: false,
+      error: 'SECRETARY_INVITE_DELIVERY_FAILED',
+      output: JSON.stringify({ status: 'delivery_failed', secretary_access_id: record.id }),
     };
   }
 
-  if (input.action === 'revoke') {
-    if (!input.secretary_access_id) return { success: false, error: 'secretary_access_id required for revoke.' };
-    const record = ctx.secretary!.secretaryRepo.findById(input.secretary_access_id);
-    if (!record || record.owner_id !== ctx.user.telegram_id)
-      return { success: false, error: 'SECRETARY_ACCESS_DENIED' };
+  return {
+    success: true,
+    output: JSON.stringify({ status: 'awaiting_confirmation', secretary_access_id: record.id }),
+  };
+}
 
-    ctx.secretary!.secretaryRepo.updateStatus(record.id, 'revoked');
+async function revokeSecretary(
+  ctx: AgentContext,
+  secretaryRepo: SecretaryRepository,
+  input: ManageSecretariesInput,
+): Promise<ToolResult> {
+  if (!input.secretary_access_id) return { success: false, error: 'secretary_access_id required for revoke.' };
+  const record = secretaryRepo.findById(input.secretary_access_id);
+  if (!record || record.owner_id !== ctx.user.telegram_id) return { success: false, error: 'SECRETARY_ACCESS_DENIED' };
 
-    const secUser = ctx.userRepo!.findByTelegramId(record.secretary_id);
-    if (secUser && ctx.sender) {
-      const ownerName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
-      const ownerHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
-      try {
-        await sendSecretaryNotification(
-          ctx,
-          record.secretary_id,
-          `Твой доступ к календарю ${ownerName}${ownerHandle} был отозван.`,
-        );
-      } catch (err) {
-        // Revocation is already committed — notification failure is logged, not surfaced.
-        secretaryLogger.error({ err }, 'failed to send revoke notification');
-      }
-    }
-    return { success: true, output: JSON.stringify({ ok: true }) };
+  secretaryRepo.updateStatus(record.id, 'revoked');
+
+  await notifyAfterCommit(
+    ctx,
+    record.secretary_id,
+    `Твой доступ к календарю ${describeCaller(ctx)} был отозван.`,
+    'failed to send revoke notification',
+  );
+  return { success: true, output: JSON.stringify({ ok: true }) };
+}
+
+async function selfRemoveSecretary(
+  ctx: AgentContext,
+  secretaryRepo: SecretaryRepository,
+  input: ManageSecretariesInput,
+): Promise<ToolResult> {
+  if (!input.secretary_access_id) return { success: false, error: 'secretary_access_id required for self_remove.' };
+  const record = secretaryRepo.findById(input.secretary_access_id);
+  if (!record || record.secretary_id !== ctx.user.telegram_id)
+    return { success: false, error: 'SECRETARY_ACCESS_DENIED' };
+
+  secretaryRepo.updateStatus(record.id, 'revoked');
+
+  await notifyAfterCommit(
+    ctx,
+    record.owner_id,
+    `${describeCaller(ctx)} добровольно покинул роль секретаря твоего календаря.`,
+    'failed to send self_remove notification',
+  );
+  return { success: true, output: JSON.stringify({ ok: true }) };
+}
+
+export async function handleManageSecretaries(ctx: AgentContext, input: ManageSecretariesInput): Promise<ToolResult> {
+  if (!ctx.secretary || !ctx.userRepo) return { success: false, error: 'Secretary feature not configured.' };
+  const { secretaryRepo } = ctx.secretary;
+  // Widened up front: the tool schema is model-supplied, so an out-of-union action must still be reported by name.
+  const action: string = input.action;
+
+  switch (input.action) {
+    case 'invite':
+      return inviteSecretary(ctx, secretaryRepo, input);
+    case 'revoke':
+      return revokeSecretary(ctx, secretaryRepo, input);
+    case 'self_remove':
+      return selfRemoveSecretary(ctx, secretaryRepo, input);
+    default:
+      return { success: false, error: `Unknown action: ${action}` };
   }
-
-  if (input.action === 'self_remove') {
-    if (!input.secretary_access_id) return { success: false, error: 'secretary_access_id required for self_remove.' };
-    const record = ctx.secretary!.secretaryRepo.findById(input.secretary_access_id);
-    if (!record) return { success: false, error: 'SECRETARY_ACCESS_DENIED' };
-    if (record.secretary_id !== ctx.user.telegram_id) return { success: false, error: 'SECRETARY_ACCESS_DENIED' };
-
-    ctx.secretary!.secretaryRepo.updateStatus(record.id, 'revoked');
-
-    const secName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
-    const secHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
-    const ownerUser = ctx.userRepo!.findByTelegramId(record.owner_id);
-    if (ownerUser && ctx.sender) {
-      try {
-        await sendSecretaryNotification(
-          ctx,
-          record.owner_id,
-          `${secName}${secHandle} добровольно покинул роль секретаря твоего календаря.`,
-        );
-      } catch (err) {
-        // Self-removal is already committed — notification failure is logged, not surfaced.
-        secretaryLogger.error({ err }, 'failed to send self_remove notification');
-      }
-    }
-    return { success: true, output: JSON.stringify({ ok: true }) };
-  }
-
-  return { success: false, error: `Unknown action: ${(input as { action: string }).action}` };
 }
 
 export function handleListCalendarAccess(ctx: AgentContext): ToolResult {

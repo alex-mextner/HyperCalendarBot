@@ -182,56 +182,103 @@ function instantFact(match: RegExpExecArray, timezone: string): Fact {
   };
 }
 
-/** Every concrete, checkable fact in a piece of text. */
-function extractFacts(source: string, timezone: string): Fact[] {
-  const facts: Fact[] = [];
-  let text = source;
+/** The prose being scanned: facts found so far, and the text with every matched span blanked. */
+interface FactScan {
+  facts: Fact[];
+  text: string;
+}
 
+function consume(scan: FactScan, match: RegExpExecArray): void {
+  scan.text = blank(scan.text, match.index, match[0].length);
+}
+
+function scanIsoDatetimes(scan: FactScan, source: string, timezone: string): void {
   for (const match of source.matchAll(ISO_DATETIME)) {
-    facts.push(instantFact(match, timezone));
-    text = blank(text, match.index, match[0].length);
+    scan.facts.push(instantFact(match, timezone));
+    consume(scan, match);
   }
+}
+
+function noteMonthNameDay(
+  scan: FactScan,
+  match: RegExpExecArray,
+  monthName: string | undefined,
+  day: string | undefined,
+): void {
+  const key = dayKey(monthIndex(monthName ?? ''), Number(day));
+  if (key) scan.facts.push({ kind: 'day', token: match[0], value: key });
+  consume(scan, match);
+}
+
+/** "29 сентября", "29th Sept", "September 29": day-first spellings before the month-first one. */
+function scanMonthNameDays(scan: FactScan): void {
   for (const pattern of [RU_DAY_MONTH, EN_DAY_MONTH]) {
-    for (const match of text.matchAll(pattern)) {
-      const key = dayKey(monthIndex(match[2] ?? ''), Number(match[1]));
-      if (key) facts.push({ kind: 'day', token: match[0], value: key });
-      text = blank(text, match.index, match[0].length);
-    }
+    for (const match of scan.text.matchAll(pattern)) noteMonthNameDay(scan, match, match[2], match[1]);
   }
-  for (const match of text.matchAll(EN_MONTH_DAY)) {
-    const key = dayKey(monthIndex(match[1] ?? ''), Number(match[2]));
-    if (key) facts.push({ kind: 'day', token: match[0], value: key });
-    text = blank(text, match.index, match[0].length);
+  for (const match of scan.text.matchAll(EN_MONTH_DAY)) noteMonthNameDay(scan, match, match[1], match[2]);
+}
+
+/** A 24-hour clock time, or a 12-hour one with its a.m./p.m. marker folded in. */
+function clockTimeFact(match: RegExpExecArray, text: string): Fact {
+  const end = match.index + match[0].length;
+  const meridiem = /^\s?([ap])\.?\s?m\b/i.exec(text.slice(end, end + 6))?.[1]?.toLowerCase();
+  const hour = Number(match[1]);
+  const hour24 = meridiem && hour >= 1 && hour <= 12 ? (hour % 12) + (meridiem === 'p' ? 12 : 0) : hour;
+  const value = `${pad2(hour24)}:${match[2]}`;
+  return { kind: 'time', token: match[0], value, utc: isUtcLabelled(text, match.index, end) };
+}
+
+function scanClockTimes(scan: FactScan): void {
+  for (const match of scan.text.matchAll(COLON_TIME)) {
+    scan.facts.push(clockTimeFact(match, scan.text));
+    consume(scan, match);
   }
-  for (const match of text.matchAll(COLON_TIME)) {
-    const end = match.index + match[0].length;
-    const meridiem = /^\s?([ap])\.?\s?m\b/i.exec(text.slice(end, end + 6))?.[1]?.toLowerCase();
-    const hour = Number(match[1]);
-    const hour24 = meridiem && hour >= 1 && hour <= 12 ? (hour % 12) + (meridiem === 'p' ? 12 : 0) : hour;
-    const value = `${pad2(hour24)}:${match[2]}`;
-    facts.push({ kind: 'time', token: match[0], value, utc: isUtcLabelled(text, match.index, end) });
-    text = blank(text, match.index, match[0].length);
+}
+
+/** "12.11" may be a day or a time; "12.11.2026" is a day; a number that is neither is no fact. */
+function dottedFact(match: RegExpExecArray): Fact | null {
+  const first = Number(match[1]);
+  const second = Number(match[2]);
+  const day = dayKey(second, first);
+  if (match[3] !== undefined) return day ? { kind: 'day', token: match[0], value: day } : null;
+  const time = first <= 23 && second <= 59 ? `${pad2(first)}:${match[2]}` : null;
+  return day || time ? { kind: 'dayOrTime', token: match[0], day, time } : null;
+}
+
+function scanDottedNumbers(scan: FactScan): void {
+  for (const match of scan.text.matchAll(DOTTED)) {
+    const fact = dottedFact(match);
+    if (fact) scan.facts.push(fact);
   }
-  for (const match of text.matchAll(DOTTED)) {
-    const first = Number(match[1]);
-    const second = Number(match[2]);
-    const day = dayKey(second, first);
-    if (match[3] !== undefined) {
-      if (day) facts.push({ kind: 'day', token: match[0], value: day });
-      continue;
-    }
-    const time = first <= 23 && second <= 59 ? `${pad2(first)}:${match[2]}` : null;
-    if (day || time) facts.push({ kind: 'dayOrTime', token: match[0], day, time });
-  }
+}
+
+function quoteFacts(source: string): Fact[] {
+  const facts: Fact[] = [];
   for (const match of source.matchAll(QUOTED)) {
     const quoted = match[1] ?? match[2] ?? match[3] ?? match[4] ?? '';
     const value = normalizeText(quoted).replace(/^[\s.,!?;:—-]+|[\s.,!?;:—-]+$/g, '');
     if (value) facts.push({ kind: 'quote', token: match[0], value });
   }
-  for (const match of source.matchAll(EVENT_ID)) {
-    facts.push({ kind: 'id', token: match[0], value: Number(match[1]) });
-  }
   return facts;
+}
+
+function idFacts(source: string): Fact[] {
+  return [...source.matchAll(EVENT_ID)].map(
+    (match): Fact => ({ kind: 'id', token: match[0], value: Number(match[1]) }),
+  );
+}
+
+/**
+ * Every concrete, checkable fact in a piece of text. Each date or time pattern blanks what it matched,
+ * so a later, looser pattern cannot re-read the same digits; quotes and ids read the untouched source.
+ */
+function extractFacts(source: string, timezone: string): Fact[] {
+  const scan: FactScan = { facts: [], text: source };
+  scanIsoDatetimes(scan, source, timezone);
+  scanMonthNameDays(scan);
+  scanClockTimes(scan);
+  scanDottedNumbers(scan);
+  return [...scan.facts, ...quoteFacts(source), ...idFacts(source)];
 }
 
 function isEventSummary(value: unknown): value is EventSummary {
@@ -299,14 +346,29 @@ function addReadRange(index: EvidenceIndex, start: unknown, end: unknown, timezo
   }
 }
 
+function newEvidenceIndex(): EvidenceIndex {
+  return { localTimes: new Set(), utcTimes: new Set(), days: new Set(), ids: new Set(), text: '' };
+}
+
+/** What one schedule event backs: its id, day, start clock, end instant; its words go to `texts`. */
+function indexEvent(index: EvidenceIndex, texts: string[], event: EventSummary, timezone: string): void {
+  index.ids.add(event.id);
+  index.days.add(event.date.slice(5));
+  if (event.time) index.localTimes.add(event.time);
+  if (event.end_at) {
+    for (const fact of extractFacts(event.end_at, timezone)) addFact(index, fact);
+  }
+  texts.push(event.title, event.description ?? '', event.location ?? '');
+}
+
+/** The day range a successful read covered, from the arguments the model gave it. */
+function indexReadRange(index: EvidenceIndex, tool: ToolEvidence, timezone: string): void {
+  if (tool.name === 'get_events') addReadRange(index, tool.input.start_date, tool.input.end_date, timezone);
+  if (tool.name === 'get_free_slots') addReadRange(index, tool.input.date, tool.input.date, timezone);
+}
+
 function indexEvidence(tools: readonly ToolEvidence[], timezone: string): EvidenceIndex {
-  const index: EvidenceIndex = {
-    localTimes: new Set(),
-    utcTimes: new Set(),
-    days: new Set(),
-    ids: new Set(),
-    text: '',
-  };
+  const index = newEvidenceIndex();
   const texts: string[] = [];
 
   for (const tool of tools) {
@@ -318,17 +380,8 @@ function indexEvidence(tools: readonly ToolEvidence[], timezone: string): Eviden
         for (const fact of extractFacts(tool.output, timezone)) addFact(index, fact);
       }
     }
-    for (const event of eventSummaries(tool.data)) {
-      index.ids.add(event.id);
-      index.days.add(event.date.slice(5));
-      if (event.time) index.localTimes.add(event.time);
-      if (event.end_at) {
-        for (const fact of extractFacts(event.end_at, timezone)) addFact(index, fact);
-      }
-      texts.push(event.title, event.description ?? '', event.location ?? '');
-    }
-    if (tool.name === 'get_events') addReadRange(index, tool.input.start_date, tool.input.end_date, timezone);
-    if (tool.name === 'get_free_slots') addReadRange(index, tool.input.date, tool.input.date, timezone);
+    for (const event of eventSummaries(tool.data)) indexEvent(index, texts, event, timezone);
+    indexReadRange(index, tool, timezone);
   }
   index.text = normalizeText(texts.join('\n'));
   return index;

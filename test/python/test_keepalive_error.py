@@ -1,4 +1,10 @@
-import contextlib, importlib.util, io, json, sys, types, unittest
+import contextlib
+import importlib.util
+import io
+import json
+import sys
+import types
+import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -66,21 +72,21 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         client.disconnect.assert_awaited_once()
 
     async def test_revoked_during_query_is_reported_to_keepalive(self):
-        result, client = await self.run_failure(Revoked(), "invoke")
+        result, _client = await self.run_failure(Revoked(), "invoke")
         self.assertEqual(result["error"], "SESSION_EXPIRED")
 
     async def test_network_failure_does_not_invalidate_credentials(self):
-        result, client = await self.run_failure(ConnectionError("offline"), "invoke")
+        result, _client = await self.run_failure(ConnectionError("offline"), "invoke")
         self.assertEqual(result["error"], "AUTH_QUERY_FAILED")
         self.assertNotIn("reason", result)
 
     async def test_flood_wait_is_not_a_session_revocation(self):
-        result, client = await self.run_failure(Flood(), "invoke")
+        result, _client = await self.run_failure(Flood(), "invoke")
         self.assertEqual(result["error"], "AUTH_QUERY_FAILED")
         self.assertNotIn("reason", result)
 
     async def test_cleanup_failure_preserves_structured_original_failure(self):
-        result, client = await self.run_failure(
+        result, _client = await self.run_failure(
             Revoked(), "connect", ConnectionError("already disconnected")
         )
         self.assertEqual(result["error"], "SESSION_EXPIRED")
@@ -92,14 +98,14 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         class Deactivated(Exception):
             ID = "USER_DEACTIVATED"
 
-        result, client = await self.run_failure(Deactivated(), "invoke")
+        result, _client = await self.run_failure(Deactivated(), "invoke")
         self.assertEqual(result["reason"], "account_unavailable")
 
     async def test_duplicated_key_is_not_blame_for_user_revocation(self):
         class Duplicated(Exception):
             ID = "AUTH_KEY_DUPLICATED"
 
-        result, client = await self.run_failure(Duplicated(), "invoke")
+        result, _client = await self.run_failure(Duplicated(), "invoke")
         self.assertEqual(result["error"], "SESSION_EXPIRED")
         self.assertEqual(result["reason"], "local")
 

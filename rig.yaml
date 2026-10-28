@@ -36,3 +36,20 @@ ci:
       enabled: true
       install_to: ~/bin
       gh_alias: true
+
+# cccc complexity + file-length gate (`rig lint check`). Explicit here so the repo's thresholds
+# are visible; they equal the global defaults. Only .json is exempt from the line limit, so the
+# generated uv.lock (1343 lines) stays a standing warning by design: do not exempt `lock`.
+lint_checks:
+  enabled: true
+  complexity:
+    enabled: true
+    max_cognitive: 15
+    max_cyclomatic: 20
+  file_lines:
+    enabled: true
+    warn_above: 1200
+    error_above: 2400
+    exempt_extensions: [json]
+  ci:
+    rig_source: git+https://git.hyperide.ai/ultrabricks/rig-cli@a71eb0a52e206aa2ee6bf824acfb7b8285c50ac9

@@ -51,6 +51,31 @@ const ScenePauseSchema = z.discriminatedUnion('sceneName', [
   z.object({ sceneName: z.literal('import'), step: z.number(), sceneState: EmptyStateSchema }),
 ]);
 
+const SCENE_NAMES: readonly SceneName[] = ['add_event', 'timezone', 'onboarding', 'edit_value', 'import'];
+
+/**
+ * GramIO's own storage record for a running scene: a JSON string from some storage adapters, an already parsed
+ * object from others. The wizard state stays the loose object GramIO wrote: its shape depends on the scene, and
+ * `ScenePauseService.get` re-validates it against the scene's schema on restore.
+ */
+const GramioSceneRecordSchema = z.object({
+  name: z.string().optional().catch(undefined),
+  step: z.number().optional().catch(undefined),
+  state: z.looseObject({}).optional().catch(undefined),
+});
+const GramioSceneRecordCodec = jsonCodec(GramioSceneRecordSchema);
+
+/** Pause state for GramIO's stored scene record; an unknown scene name or unreadable record becomes add_event. */
+export function pauseStateFromGramioRecord(rawRecord: unknown): ScenePauseState {
+  const parsed =
+    typeof rawRecord === 'string'
+      ? GramioSceneRecordCodec.safeParse(rawRecord)
+      : GramioSceneRecordSchema.safeParse(rawRecord);
+  const record = parsed.success ? parsed.data : {};
+  const sceneName = SCENE_NAMES.find((name) => name === record.name) ?? 'add_event';
+  return { sceneName, step: record.step ?? 0, sceneState: record.state ?? {} };
+}
+
 type KvStorage = {
   get(key: string): Promise<unknown>;
   set(key: string, value: unknown): Promise<void>;

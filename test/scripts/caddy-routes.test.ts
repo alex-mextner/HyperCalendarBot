@@ -9,7 +9,8 @@
 // These tests tie the three files together, so moving any one of them without
 // the others fails here instead of in production.
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WebServerDeps } from '../../src/web/server.ts';
 import { READINESS_BODY, startWebServer } from '../../src/web/server.ts';
@@ -37,7 +38,7 @@ function watchdogUrl(): string {
 
 /** The path the cron watchdog polls, taken from its own HEALTH_URL. */
 function watchdogPath(): string {
-  return new URL(watchdogUrl().replace('${PUBLIC_DOMAIN}', 'bot.example.com')).pathname;
+  return new URL(watchdogUrl().replace(/\$\{PUBLIC_DOMAIN\}/, 'bot.example.com')).pathname;
 }
 
 /** The bodies a shell `case` branch accepts, unquoted and sorted. */
@@ -65,6 +66,60 @@ function deployProbeTimeoutSeconds(): number {
   const value = verdict.match(/\["curl", "-fsS", "--max-time", "(\d+)", url\]/)?.[1];
   if (!value) throw new Error('The deploy health verdict has no readiness probe');
   return Number(value);
+}
+
+const FAKE_DOCKER = `#!/bin/sh
+if [ "$1" = inspect ]; then
+  echo '{"Status":"running","Running":true,"Restarting":false,"OOMKilled":false,"ExitCode":0,"StartedAt":"2026-10-25T00:00:00Z"}|0'
+fi
+`;
+
+const FAKE_CURL = `#!/bin/sh
+for url; do :; done
+echo "$url" >> "$REQUEST_LOG"
+printf ok
+`;
+
+/**
+ * Runs the real deploy health verdict against fake docker/curl binaries that log every URL it
+ * requests, and returns the path it asked for on /ready. This is what the deploy actually polls,
+ * independent of how scripts/deploy-health.py spells the URL.
+ */
+function deployReadinessPath(): string {
+  const base = 'http://127.0.0.1:3001';
+  const dir = mkdtempSync(join(tmpdir(), 'deploy-health-'));
+  try {
+    const bin = join(dir, 'bin');
+    const proc = join(dir, 'proc');
+    mkdirSync(bin);
+    mkdirSync(join(proc, 'pressure'), { recursive: true });
+    writeFileSync(join(proc, 'loadavg'), '0.1 0.1 0.1 1/100 1\n');
+    writeFileSync(join(proc, 'pressure/io'), 'some avg10=0.00 avg60=0.00 avg300=0.00 total=0\n');
+    writeFileSync(join(bin, 'docker'), FAKE_DOCKER, { mode: 0o755 });
+    writeFileSync(join(bin, 'curl'), FAKE_CURL, { mode: 0o755 });
+    const log = join(dir, 'requests.log');
+    const done = Bun.spawnSync(
+      [
+        'python3',
+        join(ROOT, 'scripts/deploy-health.py'),
+        ...['wait', '--container', 'hypercal-bot', '--url', base, '--mode', 'ready'],
+        ...['--poll', '0.02', '--stable', '0.1', '--base-budget', '5', '--hard-cap', '10'],
+        ...['--stall', '5', '--proc-dir', proc],
+      ],
+      { env: { PATH: `${bin}:${process.env.PATH ?? ''}`, REQUEST_LOG: log }, stdout: 'pipe', stderr: 'pipe' },
+    );
+    if (done.exitCode !== 0) throw new Error(`deploy-health.py failed: ${done.stdout}${done.stderr}`);
+    const paths = readFileSync(log, 'utf8')
+      .split('\n')
+      .filter((url) => url.startsWith(base))
+      .map((url) => url.slice(base.length));
+    expect(paths).toContain('/health');
+    const ready = paths.find((path) => path !== '/health');
+    if (ready === undefined) throw new Error('deploy-health.py never polled a readiness URL');
+    return ready;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 function deployCopiedFiles(): Set<string> {
@@ -150,9 +205,8 @@ describe('Caddy routing', () => {
     // on the container's own port (the public host is not what the release controls).
     expect(deployActivator).toContain('deploy-health.py');
     expect(deployActivator).toContain('HEALTH_URL=http://127.0.0.1:3001');
-    const verdict = readFileSync(join(ROOT, 'scripts/deploy-health.py'), 'utf8');
-    expect(verdict).toContain(`f"{base}${watchdogPath()}"`);
-    expect(watchdogUrl()).toStartWith('https://${PUBLIC_DOMAIN}/');
+    expect(deployReadinessPath()).toBe(watchdogPath());
+    expect(watchdogUrl()).toMatch(/^https:\/\/\$\{PUBLIC_DOMAIN\}\//);
   });
 
   test('no deploy or watchdog script names a retired host', () => {

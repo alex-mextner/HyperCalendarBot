@@ -282,58 +282,141 @@ function tokens(text: string): Token[] {
   return [...text.matchAll(/[\p{L}]+/gu)].map((match, index) => ({ word: match[0], index }));
 }
 
-/** Read the day words of one message relative to `now` in `timezone`. */
-export function readDayContent(text: string, now: Date, timezone: string): DayContent {
-  // "the day after tomorrow" names one day; read as a whole so "after" does not open it.
-  const normalized = text
+/** A day word with where it points and the word before it, which may open or close a range. */
+type ReadReference = DayReference & { base: string; before: string | undefined };
+
+/** The reading's flags that shape which dates a weekday word can mean. */
+interface WeekdayContext {
+  today: string;
+  nextMarked: boolean;
+  pastMarked: boolean;
+  thisMarked: boolean;
+}
+
+/** "the day after tomorrow" names one day; read as a whole so "after" does not open it. */
+function normalizeDayText(text: string): string {
+  return text
     .toLowerCase()
     .replaceAll('ё', 'е')
     .replace(/\b(?:the\s+)?day\s+after\s+tomorrow\b/g, 'послезавтра');
+}
+
+/** "завтра", "сегодня", "послезавтра": a word that is an offset from today. */
+function relativeReference(
+  token: Token,
+  before: string | undefined,
+  today: string,
+  night: boolean,
+): ReadReference | null {
+  const relative =
+    RELATIVE_WORDS.get(token.word) ??
+    RELATIVE_WORDS.get(RELATIVE_STEMS.find(([prefix]) => token.word.startsWith(prefix))?.[1] ?? '');
+  if (!relative) return null;
+  const base = shiftDay(today, relative.offset);
+  return {
+    phrase: token.word,
+    label: relative.label,
+    // Just after midnight "завтра" often still means the day that has just begun.
+    dates: night ? [base, shiftDay(base, -1)] : [base],
+    base,
+    before,
+  };
+}
+
+/** A weekday word's reference; 'open' for a plural or ordinal weekday, null when it is no weekday. */
+function weekdayReference(
+  token: Token,
+  before: string | undefined,
+  context: WeekdayContext,
+): ReadReference | 'open' | null {
+  const form = WEEKDAY_FORMS.get(token.word);
+  if (!form) return null;
+  if (form.plural || (before !== undefined && ORDINAL_WORD.test(before))) return 'open';
+  const { today, nextMarked, pastMarked, thisMarked } = context;
+  const base = shiftDay(today, (form.weekday - weekdayOf(today) + 7) % 7);
+  const dates = [base];
+  if (base === today || nextMarked) dates.push(shiftDay(base, 7));
+  // "эту среду" is this calendar week's Wednesday or the coming one — never last week's.
+  const previous = shiftDay(base, -7);
+  const thisMonday = shiftDay(today, -weekdayOf(today));
+  if (pastMarked || (thisMarked && previous >= thisMonday)) dates.push(previous);
+  return { phrase: token.word, label: WEEKDAY_NAMES[form.weekday]!, dates, base, before };
+}
+
+/** Every relative-day and weekday word in order, and whether one of them made the reading open. */
+function readReferences(
+  words: Token[],
+  context: WeekdayContext,
+  night: boolean,
+): { references: ReadReference[]; open: boolean } {
+  const references: ReadReference[] = [];
+  let open = false;
+  for (const token of words) {
+    const before = words[token.index - 1]?.word;
+    const relative = relativeReference(token, before, context.today, night);
+    if (relative) {
+      references.push(relative);
+      continue;
+    }
+    const weekday = weekdayReference(token, before, context);
+    if (weekday === 'open') open = true;
+    else if (weekday) references.push(weekday);
+  }
+  return { references, open };
+}
+
+/** The days a "до среды" / "с понедельника по среду" reference adds between its bounds. */
+function rangeDatesOf(reference: ReadReference, today: string, rangeStart: string | undefined): string[] {
+  const { before, base } = reference;
+  if (before === undefined) return [];
+  const dates: string[] = [];
+  if (UNTIL_WORDS.has(before)) dates.push(...daysBetween(today, base));
+  if (TO_WORDS.has(before) && rangeStart !== undefined) {
+    const end = base >= rangeStart ? base : shiftDay(base, 7);
+    dates.push(...daysBetween(rangeStart, end));
+  }
+  return dates;
+}
+
+/** The dates a message's references allow: their own, a neighbouring day for another zone, and ranges. */
+function allowedDatesOf(
+  references: ReadReference[],
+  statedDates: string[],
+  today: string,
+  otherZone: boolean,
+): Set<string> {
+  const allowed = new Set<string>(statedDates);
+  let rangeStart: string | undefined;
+  for (const reference of references) {
+    for (const date of reference.dates) {
+      allowed.add(date);
+      if (otherZone) for (const neighbour of [shiftDay(date, -1), shiftDay(date, 1)]) allowed.add(neighbour);
+    }
+    for (const date of rangeDatesOf(reference, today, rangeStart)) allowed.add(date);
+    if (reference.before !== undefined && FROM_WORDS.has(reference.before)) rangeStart = reference.base;
+  }
+  return allowed;
+}
+
+/** Read the day words of one message relative to `now` in `timezone`. */
+export function readDayContent(text: string, now: Date, timezone: string): DayContent {
+  const normalized = normalizeDayText(text);
   const { today, hour } = localToday(now, timezone);
   const explicit = explicitDates(normalized, today);
   const words = tokens(explicit.rest);
   const has = (pattern: RegExp) => words.some((token) => pattern.test(token.word));
 
-  const nextMarked = has(NEXT_MARKER);
-  const pastMarked = has(PAST_MARKER);
-  const thisMarked = has(THIS_MARKER);
-  const thisMonday = shiftDay(today, -weekdayOf(today));
-  // Just after midnight "завтра" often still means the day that has just begun.
-  const night = hour < 5;
-
+  const context: WeekdayContext = {
+    today,
+    nextMarked: has(NEXT_MARKER),
+    pastMarked: has(PAST_MARKER),
+    thisMarked: has(THIS_MARKER),
+  };
+  const read = readReferences(words, context, hour < 5);
+  const { references } = read;
   // A month without a day ("в октябре") cannot be pinned; "may" is left out as the English verb.
-  let open = has(OPEN_WORD) || words.some((token) => token.word !== 'may' && monthIndex(token.word) >= 0);
-  const references: (DayReference & { base: string; before: string | undefined })[] = [];
-  for (const token of words) {
-    const before = words[token.index - 1]?.word;
-    const relative =
-      RELATIVE_WORDS.get(token.word) ??
-      RELATIVE_WORDS.get(RELATIVE_STEMS.find(([prefix]) => token.word.startsWith(prefix))?.[1] ?? '');
-    if (relative) {
-      const base = shiftDay(today, relative.offset);
-      references.push({
-        phrase: token.word,
-        label: relative.label,
-        dates: night ? [base, shiftDay(base, -1)] : [base],
-        base,
-        before,
-      });
-      continue;
-    }
-    const form = WEEKDAY_FORMS.get(token.word);
-    if (!form) continue;
-    if (form.plural || (before !== undefined && ORDINAL_WORD.test(before))) {
-      open = true;
-      continue;
-    }
-    const base = shiftDay(today, (form.weekday - weekdayOf(today) + 7) % 7);
-    const dates = [base];
-    if (base === today || nextMarked) dates.push(shiftDay(base, 7));
-    // "эту среду" is this calendar week's Wednesday or the coming one — never last week's.
-    const previous = shiftDay(base, -7);
-    if (pastMarked || (thisMarked && previous >= thisMonday)) dates.push(previous);
-    references.push({ phrase: token.word, label: WEEKDAY_NAMES[form.weekday]!, dates, base, before });
-  }
+  const open =
+    read.open || has(OPEN_WORD) || words.some((token) => token.word !== 'may' && monthIndex(token.word) >= 0);
 
   if (open) return { kind: 'open' };
   if (references.length === 0) {
@@ -345,30 +428,14 @@ export function readDayContent(text: string, now: Date, timezone: string): DayCo
   const weekdayNamed = references.some((reference) => WEEKDAY_NAMES.some((name) => name === reference.label));
   if (!weekdayNamed && has(PERIOD_WORD)) return { kind: 'open' };
 
-  const allowed = new Set<string>(explicit.dates);
   // "завтра в 3 по Токио" is a day earlier in Belgrade: a day named in another zone may
   // land on the neighbouring day of the user's own calendar.
-  const otherZone = mentionsOtherZone(text);
-  let rangeStart: string | undefined;
-  for (const reference of references) {
-    for (const date of reference.dates) {
-      allowed.add(date);
-      if (otherZone) for (const neighbour of [shiftDay(date, -1), shiftDay(date, 1)]) allowed.add(neighbour);
-    }
-    if (reference.before !== undefined && UNTIL_WORDS.has(reference.before)) {
-      for (const date of daysBetween(today, reference.base)) allowed.add(date);
-    }
-    if (reference.before !== undefined && FROM_WORDS.has(reference.before)) rangeStart = reference.base;
-    if (reference.before !== undefined && TO_WORDS.has(reference.before) && rangeStart !== undefined) {
-      const end = reference.base >= rangeStart ? reference.base : shiftDay(reference.base, 7);
-      for (const date of daysBetween(rangeStart, end)) allowed.add(date);
-    }
-  }
+  const allowedDates = allowedDatesOf(references, explicit.dates, today, mentionsOtherZone(text));
   return {
     kind: 'named',
     set: {
       references: references.map(({ phrase, label, dates }) => ({ phrase, label, dates })),
-      allowedDates: allowed,
+      allowedDates,
     },
   };
 }
@@ -584,70 +651,126 @@ export function mentionsWeekday(text: string): boolean {
  */
 const QUOTED = /«[^«»\n]*»|“[^“”\n]*”|"[^"\n]*"/g;
 
-/** Every weekday name in `text` written next to a date that falls on another weekday. */
-export function findWeekdayDateMismatches(text: string, now: Date, timezone: string): WeekdayDateMismatch[] {
-  // Case folding only the letters day words use, "ё", every Unicode space made a plain one, the
-  // heading line breaks turned into spaces and quoted spans masked char for char keep every
-  // offset, so a match in `normalized` slices the same pair out of `text`.
-  const normalized = text
+/**
+ * Case folding only the letters day words use, "ё", every Unicode space made a plain one, the
+ * heading line breaks turned into spaces and quoted spans masked char for char keep every
+ * offset, so a match in the result slices the same pair out of `text`.
+ */
+function normalizeForPairs(text: string): string {
+  return text
     .replace(/[A-ZА-ЯЁ]/g, (letter) => letter.toLowerCase())
     .replaceAll('ё', 'е')
     .replace(/(?! )\p{Zs}/gu, ' ')
     .replace(QUOTED, (quoted) => '#'.repeat(quoted.length))
     .replace(WEEKDAY_HEADING, (heading) => heading.replace(/[\r\n]/g, ' '));
+}
+
+/** A matched pair with where it sits in the text. */
+interface PairMatch {
+  parts: PairParts;
+  matched: string;
+  at: number;
+  end: number;
+}
+
+/** Whether a pair is no weekday-and-date claim by its shape: a dotted number that is a time or quantity, the verb "may", another sentence. */
+function isNotDatePair(pair: PairMatch, text: string, normalized: string, datesDotted: boolean): boolean {
+  const { parts, matched, at, end } = pair;
+  if (parts.dotted) {
+    const after = normalized.slice(end);
+    if (UNIT_AFTER.test(after)) return true;
+    if (parts.y === undefined && Number(parts.d) <= 23 && (!datesDotted || RANGE_AFTER.test(after))) return true;
+  }
+  if (parts.month === 5 && MAY_VERB.test(text.slice(at, end))) return true;
+  return crossesSentence(matched, parts.weekday);
+}
+
+/** Whether the weekday of a pair is an ordinary word ("Sat") or one item of a weekday list. */
+function isNotPairedWeekday(pair: PairMatch, text: string, normalized: string): boolean {
+  const { parts, matched, at, end } = pair;
+  const weekdayAt = matched.startsWith(parts.weekday) ? at : end - parts.weekday.length;
+  if (ENGLISH_ABBREVIATION.test(parts.weekday) && !/[A-Z]/.test(text.charAt(weekdayAt))) return true;
+  const weekdayEnd = weekdayAt + parts.weekday.length;
+  return LISTED_AFTER.test(normalized.slice(0, weekdayAt)) || LISTED_BEFORE.test(normalized.slice(weekdayEnd));
+}
+
+/** The calendar date a pair writes, or null when there is none. */
+function pairDate(parts: PairParts, today: string): string | null {
+  return parts.y === undefined
+    ? nearestDate(parts.month, Number(parts.d), today)
+    : validDayKey(Number(parts.y), parts.month, Number(parts.d));
+}
+
+/** The mismatch of a weekday written next to a date on another weekday. */
+function mismatchOf(phrase: string, date: string, weekday: number): WeekdayDateMismatch {
+  // Step at most three days either way from the date to reach the named weekday.
+  const forward = (weekday - weekdayOf(date) + 7) % 7;
+  return {
+    phrase: phrase.replace(/\s+/gu, ' ').replace(/[\s,:*_().–—-]+$/u, ''),
+    date,
+    said: WEEKDAY_NAMES[weekday]!,
+    actual: WEEKDAY_NAMES[weekdayOf(date)]!,
+    nearest: shiftDay(date, forward <= 3 ? forward : forward - 7),
+  };
+}
+
+interface MismatchCandidate {
+  at: number;
+  end: number;
+  key: string;
+  mismatch: WeekdayDateMismatch;
+}
+
+/** What one matched pair is: no claim at all, a weekday that agrees with its date, or a mismatch. */
+function classifyPair(
+  pair: PairMatch,
+  text: string,
+  normalized: string,
+  datesDotted: boolean,
+  today: string,
+): 'ignored' | 'agreed' | MismatchCandidate {
+  if (isNotDatePair(pair, text, normalized, datesDotted) || isNotPairedWeekday(pair, text, normalized))
+    return 'ignored';
+  const weekday = PAIR_WEEKDAYS.get(pair.parts.weekday);
+  const date = pairDate(pair.parts, today);
+  if (weekday === undefined || date === null) return 'ignored';
+  if (weekdayOf(date) === weekday) return 'agreed';
+  return {
+    at: pair.at,
+    end: pair.end,
+    key: `${date}|${weekday}`,
+    mismatch: mismatchOf(text.slice(pair.at, pair.end), date, weekday),
+  };
+}
+
+/** Every pair in the text: the spans whose weekday agrees with the date, and the ones that do not. */
+function collectPairs(
+  text: string,
+  normalized: string,
+  today: string,
+): { agreed: { at: number; end: number }[]; candidates: MismatchCandidate[] } {
   const datesDotted = COLON_CLOCK.test(normalized) || DOTTED_DATE.test(normalized);
+  const agreed: { at: number; end: number }[] = [];
+  const candidates: MismatchCandidate[] = [];
+  for (const [pattern, read] of PAIR_PATTERNS) {
+    for (const match of normalized.matchAll(pattern)) {
+      const at = match.index ?? 0;
+      const pair: PairMatch = { parts: read(match), matched: match[0], at, end: at + match[0].length };
+      const outcome = classifyPair(pair, text, normalized, datesDotted, today);
+      if (outcome === 'agreed') agreed.push({ at, end: pair.end });
+      else if (outcome !== 'ignored') candidates.push(outcome);
+    }
+  }
+  return { agreed, candidates };
+}
+
+/** Every weekday name in `text` written next to a date that falls on another weekday. */
+export function findWeekdayDateMismatches(text: string, now: Date, timezone: string): WeekdayDateMismatch[] {
+  const normalized = normalizeForPairs(text);
   const { today } = localToday(now, timezone);
   // "Среда, 30 сентября, пятница, 2 октября" also reads as "30 сентября, пятница": a pair
   // that overlaps one whose weekday agrees with its date is that pair's neighbour, not a claim.
-  const agreed: { at: number; end: number }[] = [];
-  const candidates: { at: number; end: number; key: string; mismatch: WeekdayDateMismatch }[] = [];
-  for (const [pattern, read] of PAIR_PATTERNS) {
-    for (const match of normalized.matchAll(pattern)) {
-      const parts = read(match);
-      const at = match.index ?? 0;
-      const end = at + match[0].length;
-      if (
-        parts.dotted &&
-        (UNIT_AFTER.test(normalized.slice(end)) ||
-          (parts.y === undefined && Number(parts.d) <= 23 && (!datesDotted || RANGE_AFTER.test(normalized.slice(end)))))
-      )
-        continue;
-      if (parts.month === 5 && MAY_VERB.test(text.slice(at, end))) continue;
-      if (crossesSentence(match[0], parts.weekday)) continue;
-      const weekdayAt = match[0].startsWith(parts.weekday) ? at : end - parts.weekday.length;
-      if (ENGLISH_ABBREVIATION.test(parts.weekday) && !/[A-Z]/.test(text.charAt(weekdayAt))) continue;
-      const weekdayEnd = weekdayAt + parts.weekday.length;
-      if (LISTED_AFTER.test(normalized.slice(0, weekdayAt)) || LISTED_BEFORE.test(normalized.slice(weekdayEnd)))
-        continue;
-      const weekday = PAIR_WEEKDAYS.get(parts.weekday);
-      const date =
-        parts.y === undefined
-          ? nearestDate(parts.month, Number(parts.d), today)
-          : validDayKey(Number(parts.y), parts.month, Number(parts.d));
-      if (weekday === undefined || date === null) continue;
-      if (weekdayOf(date) === weekday) {
-        agreed.push({ at, end });
-        continue;
-      }
-      // Step at most three days either way from the date to reach the named weekday.
-      const forward = (weekday - weekdayOf(date) + 7) % 7;
-      candidates.push({
-        at,
-        end,
-        key: `${date}|${weekday}`,
-        mismatch: {
-          phrase: text
-            .slice(at, end)
-            .replace(/\s+/gu, ' ')
-            .replace(/[\s,:*_().–—-]+$/u, ''),
-          date,
-          said: WEEKDAY_NAMES[weekday]!,
-          actual: WEEKDAY_NAMES[weekdayOf(date)]!,
-          nearest: shiftDay(date, forward <= 3 ? forward : forward - 7),
-        },
-      });
-    }
-  }
+  const { agreed, candidates } = collectPairs(text, normalized, today);
   const found = new Map<string, { at: number; mismatch: WeekdayDateMismatch }>();
   for (const { at, end, key, mismatch } of candidates)
     if (!agreed.some((pair) => pair.at < end && at < pair.end)) found.set(key, { at, mismatch });
@@ -707,6 +830,43 @@ const PLACE_TIME = /\d\s+(?:[\p{L}.-]+\s+){1,3}time(?!\p{L})/iu;
 /** "13/06", "9/13": a slashed day and month, which this rule does not read. */
 const SLASHED_DATE = /(?<![\d/])\d{1,2}\/\d{1,2}(?!\d)/;
 
+interface TimeMention {
+  phrase: string;
+  /** Minutes after local midnight. */
+  at: number;
+}
+
+/** The "18:30"-style times of `normalized`, or null when one is midnight or may be a date. */
+function clockMinutes(normalized: string): TimeMention[] | null {
+  const minutes: TimeMention[] = [];
+  for (const match of normalized.matchAll(CLOCK_TIMES)) {
+    // "в 12.05" may equally be 12 May, "12-10" 12 October: a time that can also be a date says
+    // nothing about today.
+    if (match[2] !== ':' && Number(match[3]) >= 1 && Number(match[3]) <= 12) return null;
+    const hour = clockHour(Number(match[1]), match[4]);
+    if (hour === null) return null;
+    minutes.push({ phrase: match[0], at: hour * 60 + Number(match[3]) });
+  }
+  return minutes;
+}
+
+/** The "в 7 вечера"-style hours of `normalized`, or null when one is midnight. */
+function bareHourMinutes(normalized: string): TimeMention[] | null {
+  const minutes: TimeMention[] = [];
+  for (const match of normalized.matchAll(BARE_HOUR)) {
+    const start = match.index ?? 0;
+    const before = normalized.slice(0, start);
+    const after = normalized.slice(start + match[0].length);
+    // A bare "в 7" before a numbered place names the place; "в 7 часов"/"в 7 утра" is an hour.
+    const place = /\d$/.test(match[0]) && NUMBERED_PLACE.test(after);
+    if (COUNT_BEFORE.test(before) || COUNT_AFTER.test(after) || place) continue;
+    const hour = clockHour(Number(match[1]), match[2]);
+    if (hour === null) return null;
+    minutes.push({ phrase: match[0], at: hour * 60 });
+  }
+  return minutes;
+}
+
 /**
  * A message that states clock times but no day at all ("18:30 помочь Соне с кошкой")
  * means today — as long as every time it names is still ahead today. On 2026-09-16 at
@@ -725,26 +885,10 @@ export function timeOnlyToday(text: string, now: Date, timezone: string): DayRef
     return null;
   // "17:00-18:00" is two times: the dash between them is a space for the time pattern.
   const normalized = text.toLowerCase().replace(/(\d[:.]\d\d)-(?=\d{1,2}[:.]\d\d)/g, '$1 ');
-  const minutes: { phrase: string; at: number }[] = [];
-  for (const match of normalized.matchAll(CLOCK_TIMES)) {
-    // "в 12.05" may equally be 12 May, "12-10" 12 October: a time that can also be a date says
-    // nothing about today.
-    if (match[2] !== ':' && Number(match[3]) >= 1 && Number(match[3]) <= 12) return null;
-    const hour = clockHour(Number(match[1]), match[4]);
-    if (hour === null) return null;
-    minutes.push({ phrase: match[0], at: hour * 60 + Number(match[3]) });
-  }
-  for (const match of normalized.matchAll(BARE_HOUR)) {
-    const start = match.index ?? 0;
-    const before = normalized.slice(0, start);
-    const after = normalized.slice(start + match[0].length);
-    // A bare "в 7" before a numbered place names the place; "в 7 часов"/"в 7 утра" is an hour.
-    const place = /\d$/.test(match[0]) && NUMBERED_PLACE.test(after);
-    if (COUNT_BEFORE.test(before) || COUNT_AFTER.test(after) || place) continue;
-    const hour = clockHour(Number(match[1]), match[2]);
-    if (hour === null) return null;
-    minutes.push({ phrase: match[0], at: hour * 60 });
-  }
+  const clock = clockMinutes(normalized);
+  const bare = clock === null ? null : bareHourMinutes(normalized);
+  if (clock === null || bare === null) return null;
+  const minutes = [...clock, ...bare];
   if (minutes.length === 0) return null;
   const local = new TZDate(now.getTime(), timezone);
   const nowMinutes = local.getHours() * 60 + local.getMinutes();

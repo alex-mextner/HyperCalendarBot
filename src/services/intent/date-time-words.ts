@@ -233,15 +233,27 @@ export function parseDate(raw: string, options: DateOptions, now: Date, timezone
   return validDay(day) ? isoDay(day) : fail();
 }
 
+const inHourRange = (hour: number, min: number, max: number) => hour >= min && hour <= max;
+
+/** 12-hour clock: 12 is the first hour after midnight/noon, so `% 12` maps it to 0. */
+const clockHour = (hour: number, offset: number): number | null =>
+  inHourRange(hour, 1, 12) ? (hour % 12) + offset : null;
+
+/** Hour of day for a spoken hour plus its am/pm or Russian day-part suffix; null when the pair is impossible. */
+const HOUR_FROM_SUFFIX: { [suffix: string]: (hour: number) => number | null } = {
+  am: (hour) => clockHour(hour, 0),
+  'a m': (hour) => clockHour(hour, 0),
+  pm: (hour) => clockHour(hour, 12),
+  'p m': (hour) => clockHour(hour, 12),
+  утра: (hour) => (inHourRange(hour, 4, 11) ? hour : null),
+  дня: (hour) => (hour === 12 ? 12 : inHourRange(hour, 1, 6) ? hour + 12 : null),
+  вечера: (hour) => (inHourRange(hour, 4, 11) ? hour + 12 : null),
+  ночи: (hour) => (hour === 12 ? 0 : inHourRange(hour, 1, 5) ? hour : inHourRange(hour, 9, 11) ? hour + 12 : null),
+};
+
 function hourFromSuffix(hour: number, suffix: string): number {
-  if (suffix === 'am' || suffix === 'a m') return hour >= 1 && hour <= 12 ? hour % 12 : fail();
-  if (suffix === 'pm' || suffix === 'p m') return hour >= 1 && hour <= 12 ? (hour % 12) + 12 : fail();
-  if (suffix === 'утра') return hour >= 4 && hour <= 11 ? hour : fail();
-  if (suffix === 'дня') return hour === 12 ? 12 : hour >= 1 && hour <= 6 ? hour + 12 : fail();
-  if (suffix === 'вечера') return hour >= 4 && hour <= 11 ? hour + 12 : fail();
-  if (suffix === 'ночи')
-    return hour === 12 ? 0 : hour >= 1 && hour <= 5 ? hour : hour >= 9 && hour <= 11 ? hour + 12 : fail();
-  return fail();
+  const resolved = Object.hasOwn(HOUR_FROM_SUFFIX, suffix) ? HOUR_FROM_SUFFIX[suffix]!(hour) : null;
+  return resolved ?? fail();
 }
 
 /** A bare hour from 1 to 12 is ambiguous between morning and evening and is never guessed. */

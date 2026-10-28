@@ -1,9 +1,11 @@
 // src/bot/scenes/import.scene.ts
 import { Scene } from '@gramio/scenes';
+import type { Lang } from '../../config/constants.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
+import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { ruPlural } from '../../services/event/formatters.ts';
-import { parseIcs } from '../../services/ics/parser.ts';
+import { type IcsEvent, parseIcs } from '../../services/ics/parser.ts';
 import { botLogger } from '../../utils/logger.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 import type { GramIOFileContext } from '../types.ts';
@@ -11,6 +13,40 @@ import type { GramIOFileContext } from '../types.ts';
 interface ImportParams {
   groupId?: number;
   groupTimezone?: string;
+}
+
+async function readIcsEvents(file: GramIOFileContext, botToken: string): Promise<IcsEvent[]> {
+  const { file_path } = await file.getFile();
+  const response = await fetch(`https://api.telegram.org/file/bot${botToken}/${file_path}`);
+  return parseIcs(await response.text());
+}
+
+function importEvents(eventService: EventService, user: User, params: ImportParams, parsed: IcsEvent[]): number {
+  const timezone = params.groupTimezone ?? user.timezone;
+  const groupFields =
+    params.groupId !== undefined
+      ? { owner_type: 'group' as const, group_id: params.groupId, created_by: user.telegram_id }
+      : {};
+  for (const icsEvent of parsed) {
+    eventService.createEvent({
+      user_id: user.telegram_id,
+      title: icsEvent.title,
+      start_at: icsEvent.start_at,
+      end_at: icsEvent.end_at,
+      description: icsEvent.description,
+      location: icsEvent.location,
+      timezone,
+      recurrence_rule: icsEvent.recurrence_rule,
+      ...groupFields,
+    });
+  }
+  return parsed.length;
+}
+
+function importedMessage(lang: Lang, imported: number): string {
+  return lang === 'ru'
+    ? `✅ Импортировано ${imported} ${ruPlural(imported, 'событие', 'события', 'событий')}.`
+    : `✅ Imported ${imported} ${imported === 1 ? 'event' : 'events'}.`;
 }
 
 export function createImportScene(
@@ -48,10 +84,7 @@ export function createImportScene(
         }
 
         try {
-          const file = await ctx.getFile();
-          const response = await fetch(`https://api.telegram.org/file/bot${botToken}/${file.file_path}`);
-          const content = await response.text();
-          const parsed = parseIcs(content);
+          const parsed = await readIcsEvents(ctx, botToken);
 
           if (parsed.length === 0) {
             await context.send(lang === 'ru' ? 'Не найдено событий в файле.' : 'No events found in file.');
@@ -59,29 +92,7 @@ export function createImportScene(
             return;
           }
 
-          const params = context.scene.params ?? {};
-          const { groupId, groupTimezone } = params;
-          const timezone = groupTimezone ?? user.timezone;
-          const groupFields =
-            groupId !== undefined
-              ? { owner_type: 'group' as const, group_id: groupId, created_by: user.telegram_id }
-              : {};
-
-          let imported = 0;
-          for (const icsEvent of parsed) {
-            eventService.createEvent({
-              user_id: user.telegram_id,
-              title: icsEvent.title,
-              start_at: icsEvent.start_at,
-              end_at: icsEvent.end_at,
-              description: icsEvent.description,
-              location: icsEvent.location,
-              timezone,
-              recurrence_rule: icsEvent.recurrence_rule,
-              ...groupFields,
-            });
-            imported++;
-          }
+          const imported = importEvents(eventService, user, context.scene.params ?? {}, parsed);
 
           actionLogRepo?.insert({
             user_id: user.telegram_id,
@@ -93,11 +104,7 @@ export function createImportScene(
             result_summary: `imported ${imported}`,
           });
 
-          await context.send(
-            lang === 'ru'
-              ? `✅ Импортировано ${imported} ${ruPlural(imported, 'событие', 'события', 'событий')}.`
-              : `✅ Imported ${imported} ${imported === 1 ? 'event' : 'events'}.`,
-          );
+          await context.send(importedMessage(lang, imported));
         } catch (err: unknown) {
           botLogger.warn({ err }, 'import scene: failed to read ICS file');
           await context.send(lang === 'ru' ? 'Не удалось прочитать файл.' : 'Failed to read file.');

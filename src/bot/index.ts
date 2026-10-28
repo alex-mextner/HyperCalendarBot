@@ -2,7 +2,6 @@
 
 import { Bot, InlineKeyboard } from 'gramio';
 import { CB, RATE_LIMIT, t } from '../config/constants.ts';
-import type { EnvConfig } from '../config/env.ts';
 import type { DatabaseService } from '../database/index.ts';
 import { AgendaRepository } from '../database/repositories/agenda.repository.ts';
 import { CalendarProposalRepository } from '../database/repositories/calendar-proposal.repository.ts';
@@ -16,6 +15,7 @@ import { createTelegramSender } from '../services/ai/telegram-sender.ts';
 import type { AgentConfig } from '../services/ai/types.ts';
 import { BirthdayService } from '../services/birthday/birthday-service.ts';
 import { ConversationLogger } from '../services/conversation-logger.ts';
+import type { EventChangeNotifier } from '../services/event/event-change-notifier.ts';
 import { EventService } from '../services/event/event-service.ts';
 import { findMostRecentEventWithExternalParticipants } from '../services/event/recent-external-events.ts';
 import { callbackPrefix, trackFeatureUsage } from '../services/feature-tracking.ts';
@@ -25,14 +25,18 @@ import { GroupMemberService } from '../services/group/member-service.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
 import type { RenderService } from '../services/image/render-service.ts';
 import { databaseDirectory } from '../services/intent/db-backup.ts';
+import type { AdminEditSession } from '../services/intent/admin-edit-session.ts';
 import type { EventMentionStore } from '../services/intent/event-mention-store.ts';
 import { IntentExecutor } from '../services/intent/intent-executor.ts';
-import { IntentLearner } from '../services/intent/intent-learner.ts';
 import { IntentMatcher } from '../services/intent/intent-matcher.ts';
 import { readKpiGate } from '../services/intent/kpi-gate.ts';
 import { IntentRevisionService } from '../services/intent/revision-service.ts';
 import { activateGatedSeed } from '../services/intent/seed-activation.ts';
 import { seedIntents } from '../services/intent/seed-catalog.ts';
+import type { AddressCache } from '../services/location/address-cache.ts';
+import type { LocationVerificationService } from '../services/location/location-verification-service.ts';
+import type { PendingGeoStore } from '../services/location/pending-geo-store.ts';
+import type { NliClassifier } from '../services/nli/nli-classifier.ts';
 import { ReminderMaterializer } from '../services/notification/materializer.ts';
 import { NotificationPreferencesService } from '../services/notification/preferences.ts';
 import { ScenePauseService } from '../services/scene-pause.ts';
@@ -45,15 +49,26 @@ import { InlineService } from '../services/sharing/inline-service.ts';
 import { InvitationService } from '../services/sharing/invitation-service.ts';
 import { PrivacyService } from '../services/sharing/privacy-service.ts';
 import { SharingService } from '../services/sharing/sharing-service.ts';
-import { createConnectedUserSender } from '../services/telegram-session/connected-user-sender.ts';
 import type { ServiceTier } from '../services/telegram-session/service-tier.ts';
-import { formatSessionLoss } from '../services/telegram-session/session-loss.ts';
 import type { SileroTtsService } from '../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
+import type { WeatherService } from '../services/weather/weather-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import type { ParseMode } from '../utils/telegram.ts';
+import type { BroadcastEnqueuer } from '../worker/broadcast-queue.ts';
 import type { CallRequest } from '../worker/call-queue.ts';
+import {
+  type BotEnvConfig,
+  buildCallQueueAdapter,
+  buildChatMessageSender,
+  buildConnectedUserSender,
+  buildIntentLearner,
+  buildReplyVoiceSender,
+  resolveServiceTierLookups,
+  resolveTelegramMasterKey,
+  setupInlineQueries,
+} from './bot-wiring.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
 import { handleAiStats } from './commands/ai-stats.ts';
@@ -83,7 +98,6 @@ import { isGroup } from './group-context.ts';
 import { continueWithAgent } from './handlers/agent-continuation.ts';
 import { createCallbackHandler } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
-import { createInlineHandler } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps } from './handlers/message.handler.ts';
 import {
   buildPickerResultMessage,
@@ -134,22 +148,19 @@ export interface CreateBotOpts {
   serviceTier: ServiceTier;
   stressDictionary?: StressDictionary;
   sileroTts?: SileroTtsService;
-  kokoroTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['kokoroTts'];
-  fallbackTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['fallbackTts'];
+  kokoroTts?: MessageHandlerDeps['kokoroTts'];
+  fallbackTts?: MessageHandlerDeps['fallbackTts'];
   eventMentionStore?: EventMentionStore;
   domainEventBus?: DomainEventBus;
   pushAiMessage?: (data: AiMessageJobData) => Promise<void>;
-  nliClassifier?: import('../services/nli/nli-classifier.ts').NliClassifier;
-  locationVerification?: import('../services/location/location-verification-service.ts').LocationVerificationService;
-  addressCache?: import('../services/location/address-cache.ts').AddressCache;
-  pendingGeoStore?: import('../services/location/pending-geo-store.ts').PendingGeoStore;
-  envConfig?: Pick<
-    EnvConfig,
-    'BOT_ADMIN_ID' | 'INTENT_LEARNER_DAILY_LIMIT' | 'BOT_USERNAME' | 'INLINE_BOT_TOKEN' | 'TELEGRAM_SESSION_MASTER_KEY'
-  >;
-  weatherService?: import('../services/weather/weather-service.ts').WeatherService;
-  broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
-  changeNotifier?: import('../services/event/event-change-notifier.ts').EventChangeNotifier;
+  nliClassifier?: NliClassifier;
+  locationVerification?: LocationVerificationService;
+  addressCache?: AddressCache;
+  pendingGeoStore?: PendingGeoStore;
+  envConfig?: BotEnvConfig;
+  weatherService?: WeatherService;
+  broadcastEnqueuer?: BroadcastEnqueuer;
+  changeNotifier?: EventChangeNotifier;
 }
 
 export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts) {
@@ -174,6 +185,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     broadcastEnqueuer,
     changeNotifier,
   } = opts;
+  const env: Partial<BotEnvConfig> = envConfig ?? {};
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const eventService = new EventService({
     eventRepo: db.events,
@@ -230,7 +242,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const scenePauseService = new ScenePauseService(kvStorage);
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
-  const adminEditSessions = new Map<number, import('../services/intent/admin-edit-session.ts').AdminEditSession>();
+  const adminEditSessions = new Map<number, AdminEditSession>();
   const adminReplySession = new Map<
     number,
     { threadId: number; userId: number; chatId?: number; topicThreadId?: number }
@@ -278,52 +290,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     }
   };
 
-  const telegramMasterKey = envConfig?.TELEGRAM_SESSION_MASTER_KEY
-    ? Buffer.from(envConfig.TELEGRAM_SESSION_MASTER_KEY, 'hex')
-    : null;
-
-  const sendAsConnectedUser = telegramMasterKey
-    ? createConnectedUserSender({
-        sessionRepo: db.telegramSessions,
-        masterKey: telegramMasterKey,
-        notifLogRepo: db.notificationLog,
-        getUserTimezone: (userId) => db.users.findByTelegramId(userId)?.timezone ?? 'UTC',
-        onTimezoneDetected: (userId, detection) => {
-          const lang = db.users.findByTelegramId(userId)?.language ?? 'en';
-          const s = t(lang).connectTelegram;
-          const kb = new InlineKeyboard()
-            .text('\u2705', `${CB.CT_TZ_UPDATE}:${detection.detectedTimezone}`)
-            .text('\u274c', CB.CT_TZ_SKIP);
-          bot.api
-            .sendMessage({
-              chat_id: userId,
-              text: s.tzDetected(detection.region, detection.detectedTimezone),
-              reply_markup: kb as Parameters<typeof bot.api.sendMessage>[0]['reply_markup'],
-            })
-            .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send tz update prompt'));
-        },
-        onTzConsentNeeded: (userId) => {
-          const lang = db.users.findByTelegramId(userId)?.language ?? 'en';
-          const s = t(lang).connectTelegram;
-          const kb = new InlineKeyboard()
-            .text(s.tzConsentYes, CB.CT_TZ_CONSENT_YES)
-            .text(s.tzConsentNo, CB.CT_TZ_CONSENT_NO);
-          bot.api
-            .sendMessage({
-              chat_id: userId,
-              text: s.tzConsentPrompt,
-              reply_markup: kb as Parameters<typeof bot.api.sendMessage>[0]['reply_markup'],
-            })
-            .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send tz consent prompt'));
-        },
-        onSessionExpired: (userId, reason) => {
-          const lang = db.users.findByTelegramId(userId)?.language ?? 'en';
-          bot.api
-            .sendMessage({ chat_id: userId, text: formatSessionLoss(lang, reason) })
-            .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send session expired notification'));
-        },
-      })
-    : undefined;
+  const telegramMasterKey = resolveTelegramMasterKey(env.TELEGRAM_SESSION_MASTER_KEY);
+  const sendAsConnectedUser = buildConnectedUserSender(bot, db, telegramMasterKey);
 
   const telegramSender = createTelegramSender(bot, { sendAsConnectedUser });
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
@@ -337,7 +305,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     invitationRepo: db.invitations,
     userRepo: db.users,
     deepLinkService,
-    botUsername: envConfig?.BOT_USERNAME,
+    botUsername: env.BOT_USERNAME,
     contactRepo: db.contacts,
   };
 
@@ -345,23 +313,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const scheduleRepo = new ScheduledAiCallRepository(db.db);
   const groupMemberService = new GroupMemberService(db.groupMembers, db.users, serviceTier);
 
-  const botAdminId = envConfig?.BOT_ADMIN_ID;
-  const intentLearnerDailyLimit = envConfig?.INTENT_LEARNER_DAILY_LIMIT ?? 100;
-
-  const intentLearner =
-    botAdminId && !Number.isNaN(botAdminId) && !intentRepo.isManagedBasis()
-      ? new IntentLearner(intentRepo, {
-          dailyLimit: intentLearnerDailyLimit,
-          adminId: botAdminId,
-          sendToAdmin: async (text, replyMarkup) => {
-            await bot.api.sendMessage({
-              chat_id: botAdminId,
-              text,
-              reply_markup: replyMarkup,
-            });
-          },
-        })
-      : undefined;
+  const botAdminId = env.BOT_ADMIN_ID;
+  const intentLearner = buildIntentLearner(bot, intentRepo, env);
 
   // Map user telegram_id → last chat_history row ID for action log linkage.
   // Written in logging middleware, read in buildAgentContextFactory.
@@ -389,27 +342,18 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     privacyService,
     renderService,
     callSettingsRepo: db.callSettings,
-    callQueue: callQueue
-      ? {
-          enqueue: (userId: number, text: string) =>
-            callQueue.enqueue({
-              userId,
-              ttsText: text,
-              language: db.users.findByTelegramId(userId)?.language ?? 'en',
-            }),
-        }
-      : undefined,
+    callQueue: buildCallQueueAdapter(callQueue, db),
     notificationPrefs: {
       getPrefs: (userId: number) => prefsService.getOrCreate(userId),
       update: db.notificationPreferences.update.bind(db.notificationPreferences),
       ensureDefaults: (userId: number) => db.notificationPreferences.ensureDefaults(userId),
     },
     googleCalendarRepo: googleDeps?.calendarRepo,
-    googleSchedulePush: googleDeps?.schedulePush,
+    googleSchedulePush,
     googleScheduleParticipantPush: googleDeps?.scheduleParticipantPush,
     deepLinkService,
     sceneStorage: scopedStorage,
-    botUsername: envConfig?.BOT_USERNAME,
+    botUsername: env.BOT_USERNAME,
     botId: Number(token.split(':')[0]),
     groupSessions,
     groupMemberRepo: db.groupMembers,
@@ -419,18 +363,11 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     botToken: token,
     stressDictionary,
     // Set only when the service tier is on: without them find_user uses the users table and says so.
-    resolveUsername: serviceTier.enabled ? serviceTier.resolveUsername : undefined,
-    lookupTelegramUser: serviceTier.enabled ? serviceTier.lookupUser : undefined,
+    ...resolveServiceTierLookups(serviceTier),
     sileroTts,
     kokoroTts,
     fallbackTts,
-    sendVoice:
-      sileroTts || kokoroTts || fallbackTts
-        ? async (chatId: number, audio: Buffer) => {
-            const file = new File([audio], 'reply.ogg', { type: 'audio/ogg' });
-            await bot.api.sendVoice({ chat_id: chatId, voice: file });
-          }
-        : undefined,
+    sendVoice: buildReplyVoiceSender(bot, Boolean(sileroTts || kokoroTts || fallbackTts)),
     intentMatcher,
     intentRepo,
     intentExecutor,
@@ -445,22 +382,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     sendMessageToUser: async (chatId: number, text: string) => {
       await bot.api.sendMessage({ chat_id: chatId, text });
     },
-    sendMessageToChat: async (
-      chatId: number,
-      text: string,
-      options?: {
-        reply_markup?: InlineKeyboard | import('gramio').TelegramInlineKeyboardMarkup;
-        message_thread_id?: number;
-      },
-    ) => {
-      const result = await bot.api.sendMessage({
-        chat_id: chatId,
-        text,
-        ...(options?.reply_markup ? { reply_markup: options.reply_markup } : {}),
-        ...(options?.message_thread_id ? { message_thread_id: options.message_thread_id } : {}),
-      });
-      return result;
-    },
+    sendMessageToChat: buildChatMessageSender(bot),
     proposeTimeSessions,
     birthdayService,
     userMemoryRepo: db.userMemory,
@@ -521,7 +443,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     eventService,
     token,
     userComposer,
-    { TELEGRAM_SESSION_MASTER_KEY: envConfig?.TELEGRAM_SESSION_MASTER_KEY },
+    { TELEGRAM_SESSION_MASTER_KEY: env.TELEGRAM_SESSION_MASTER_KEY },
     scopedStorage,
     !!googleDeps,
     prefsService,
@@ -531,7 +453,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       invitationService,
       sendAsConnectedUser,
       deepLinkService,
-      botUsername: envConfig?.BOT_USERNAME,
+      botUsername: env.BOT_USERNAME,
     },
     locationVerification,
   );
@@ -1086,20 +1008,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       }
     });
   // Inline bot: separate bot instance for inline queries (or fallback to main bot)
-  const inlineBotToken = envConfig?.INLINE_BOT_TOKEN;
-  let inlineBot: Bot | undefined;
-  if (inlineBotToken) {
-    inlineBot = new Bot(inlineBotToken);
-    inlineBot
-      .derive(createUserResolver(db))
-      .on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx))
-      .onError(({ error }) => {
-        botLogger.error({ err: error }, 'Inline bot error');
-      });
-  } else {
-    // No separate inline bot — register on main bot
-    bot.on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx));
-  }
+  const inlineBot = setupInlineQueries(bot, env.INLINE_BOT_TOKEN, db, inlineService);
 
   return {
     bot,

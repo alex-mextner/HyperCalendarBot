@@ -35,115 +35,89 @@ export interface ChatLoggingDeps {
   isConnectWizardInput: ConnectWizardGuard['isConnectWizardInput'];
 }
 
+interface LoggingTurn {
+  userId: number;
+  /** Telegram chat id for group chats; undefined in private chats. */
+  logChatId: number | undefined;
+  /** Chat id for the action log, falling back to the user's private chat. */
+  actionChatId: number;
+}
+
 export function createChatLogging(deps: ChatLoggingDeps) {
   const { conversationLogger, actionLog, chatHistoryIds, isConnectWizardInput } = deps;
-  return async (context: ChatLoggingContext, next: Next) => {
-    const user = context.dbUser;
-    if (!user) return next();
 
-    const chatId = context.update?.message?.chat?.id ?? context.update?.callback_query?.message?.chat?.id;
-    const isPrivate = !chatId || chatId === user.telegram_id;
-    const logChatId = isPrivate ? undefined : chatId;
+  function saveUserTurn(turn: LoggingTurn, text: string): void {
+    chatHistoryIds.set(turn.userId, conversationLogger.logUserMessage(turn.userId, text, turn.logChatId));
+  }
 
-    // Incoming text message (regular or command)
-    const incomingText = context.update?.message?.text;
-    const incomingMsgId = context.update?.message?.message_id;
-    const editedMessage = context.update?.edited_message;
-    const inConnectWizard = isConnectWizardInput(context);
-    if (incomingText) {
-      if (inConnectWizard) {
-        // A phone number, login code or 2FA password: keep the turn, never its text. Slash text is
-        // not logged as a command either — a password may start with '/'.
-        chatHistoryIds.set(
-          user.telegram_id,
-          conversationLogger.logUserMessage(user.telegram_id, CONNECT_WIZARD_REDACTION, logChatId),
-        );
-      } else if (incomingText.match(/^\/cal(\s|$)/)) {
-        // /cal is an AI command — save args as plain user message, not a command event.
-        // In groups, bare /cal means "look at the recent context above"; save the literal
-        // "/cal" so the agent has a new user turn to respond to. In DMs, bare /cal just
-        // prints usage help, so there's nothing to save.
-        const calArgs = incomingText.replace(/^\/cal\s*/, '').trim();
-        const savedText = calArgs || (logChatId ? '/cal' : '');
-        if (savedText) {
-          chatHistoryIds.set(
-            user.telegram_id,
-            conversationLogger.logUserMessage(user.telegram_id, savedText, logChatId),
-          );
-        }
-      } else if (incomingText.startsWith('/')) {
-        const spaceIdx = incomingText.indexOf(' ');
-        const cmdName = spaceIdx >= 0 ? incomingText.slice(0, spaceIdx) : incomingText;
-        const cmdArgs = spaceIdx >= 0 ? incomingText.slice(spaceIdx + 1).trim() : undefined;
-        conversationLogger.logCommand(user.telegram_id, cmdName, cmdArgs || undefined, logChatId);
-        // Log command to action log
-        actionLog.insert({
-          user_id: user.telegram_id,
-          chat_id: chatId ?? user.telegram_id,
-          action_type: 'command',
-          action_name: cmdName,
-          message_id: incomingMsgId,
-          input_summary: cmdArgs,
-        });
-      } else {
-        chatHistoryIds.set(
-          user.telegram_id,
-          conversationLogger.logUserMessage(user.telegram_id, incomingText, logChatId),
-        );
-      }
+  function logIncomingText(turn: LoggingTurn, text: string, messageId: number | undefined, inConnectWizard: boolean) {
+    if (inConnectWizard) {
+      // A phone number, login code or 2FA password: keep the turn, never its text. Slash text is
+      // not logged as a command either — a password may start with '/'.
+      saveUserTurn(turn, CONNECT_WIZARD_REDACTION);
+    } else if (text.match(/^\/cal(\s|$)/)) {
+      // /cal is an AI command — save args as plain user message, not a command event.
+      // In groups, bare /cal means "look at the recent context above"; save the literal
+      // "/cal" so the agent has a new user turn to respond to. In DMs, bare /cal just
+      // prints usage help, so there's nothing to save.
+      const calArgs = text.replace(/^\/cal\s*/, '').trim();
+      const savedText = calArgs || (turn.logChatId ? '/cal' : '');
+      if (savedText) saveUserTurn(turn, savedText);
+    } else if (text.startsWith('/')) {
+      logCommand(turn, text, messageId);
+    } else {
+      saveUserTurn(turn, text);
     }
+  }
 
-    // Edited message
-    const editedText = editedMessage?.text;
-    if (editedText) {
-      conversationLogger.logEditedMessage(
-        user.telegram_id,
-        inConnectWizard ? CONNECT_WIZARD_REDACTION : editedText,
-        logChatId,
-      );
+  function logCommand(turn: LoggingTurn, text: string, messageId: number | undefined) {
+    const spaceIdx = text.indexOf(' ');
+    const cmdName = spaceIdx >= 0 ? text.slice(0, spaceIdx) : text;
+    const cmdArgs = spaceIdx >= 0 ? text.slice(spaceIdx + 1).trim() : undefined;
+    conversationLogger.logCommand(turn.userId, cmdName, cmdArgs || undefined, turn.logChatId);
+    actionLog.insert({
+      user_id: turn.userId,
+      chat_id: turn.actionChatId,
+      action_type: 'command',
+      action_name: cmdName,
+      message_id: messageId,
+      input_summary: cmdArgs,
+    });
+  }
+
+  function logCallback(turn: LoggingTurn, callbackQuery: NonNullable<TelegramUpdate['callback_query']>, data: string) {
+    const firstColon = data.indexOf(':');
+    const action = firstColon >= 0 ? data.slice(0, firstColon) : data;
+    const payload = firstColon >= 0 ? data.slice(firstColon + 1) : '';
+    const callbackMessage = callbackQuery.message;
+
+    if (action === 'ai_btn') {
+      const chatType = callbackMessage?.chat?.type;
+      const isGroupCallback = chatType === 'group' || chatType === 'supergroup';
+      saveUserTurn(turn, parseAiBtnPayload(payload, isGroupCallback).answerText);
+      return;
     }
+    const replyMarkup = callbackMessage && 'reply_markup' in callbackMessage ? callbackMessage.reply_markup : undefined;
+    const buttonLabel = resolveCallbackButtonLabel(replyMarkup, data, action);
+    conversationLogger.logButtonPress(turn.userId, buttonLabel, payload || undefined, turn.logChatId);
+    actionLog.insert({
+      user_id: turn.userId,
+      chat_id: turn.actionChatId,
+      action_type: 'callback',
+      action_name: action,
+      message_id: callbackMessage?.message_id,
+      input_summary: payload || undefined,
+    });
+  }
 
-    // Callback query (button press or ai_btn answer) — universal, no per-handler logging needed
-    const callbackData = context.update?.callback_query?.data;
-    if (callbackData) {
-      const firstColon = callbackData.indexOf(':');
-      const action = firstColon >= 0 ? callbackData.slice(0, firstColon) : callbackData;
-      const payload = firstColon >= 0 ? callbackData.slice(firstColon + 1) : '';
-
-      if (action === 'ai_btn') {
-        const callbackChatType = context.update?.callback_query?.message?.chat?.type;
-        const isGroupCallback = callbackChatType === 'group' || callbackChatType === 'supergroup';
-        const { answerText } = parseAiBtnPayload(payload, isGroupCallback);
-        chatHistoryIds.set(
-          user.telegram_id,
-          conversationLogger.logUserMessage(user.telegram_id, answerText, logChatId),
-        );
-      } else {
-        const callbackMessage = context.update?.callback_query?.message;
-        const replyMarkup =
-          callbackMessage && 'reply_markup' in callbackMessage ? callbackMessage.reply_markup : undefined;
-        const buttonLabel = resolveCallbackButtonLabel(replyMarkup, callbackData, action);
-        conversationLogger.logButtonPress(user.telegram_id, buttonLabel, payload || undefined, logChatId);
-        // Log callback to action log
-        const cbMsgId = context.update?.callback_query?.message?.message_id;
-        actionLog.insert({
-          user_id: user.telegram_id,
-          chat_id: chatId ?? user.telegram_id,
-          action_type: 'callback',
-          action_name: action,
-          message_id: cbMsgId,
-          input_summary: payload || undefined,
-        });
-      }
-    }
-
-    // Wrap send and editText — logs every bot response (intent matcher, scenes, commands, callbacks)
+  /** Wrap send and editText — logs every bot response (intent matcher, scenes, commands, callbacks). */
+  function wrapBotReplies(context: ChatLoggingContext, turn: LoggingTurn) {
     // Note: AI agent uses TelegramSender.sendMessage() directly; those are logged via logAiTurn
     const originalSend = context.send?.bind(context);
     if (originalSend) {
       context.send = async (text, opts) => {
         const result = await originalSend(text, opts);
-        conversationLogger.logBotResponse(user.telegram_id, text, logChatId);
+        conversationLogger.logBotResponse(turn.userId, text, turn.logChatId);
         return result;
       };
     }
@@ -152,11 +126,46 @@ export function createChatLogging(deps: ChatLoggingDeps) {
     if (originalEditText) {
       context.editText = async (text, opts) => {
         const result = await originalEditText(text, opts);
-        conversationLogger.logBotEdit(user.telegram_id, text, logChatId);
+        conversationLogger.logBotEdit(turn.userId, text, turn.logChatId);
         return result;
       };
     }
+  }
 
+  /** Saves what the user sent in this update: text or command, an edit, or a button press. */
+  function logIncomingUpdate(update: TelegramUpdate | undefined, turn: LoggingTurn, inConnectWizard: boolean) {
+    const incomingText = update?.message?.text;
+    if (incomingText) logIncomingText(turn, incomingText, update?.message?.message_id, inConnectWizard);
+
+    const editedText = update?.edited_message?.text;
+    if (editedText) {
+      conversationLogger.logEditedMessage(
+        turn.userId,
+        inConnectWizard ? CONNECT_WIZARD_REDACTION : editedText,
+        turn.logChatId,
+      );
+    }
+
+    // Callback query (button press or ai_btn answer) — universal, no per-handler logging needed
+    const callbackQuery = update?.callback_query;
+    if (callbackQuery?.data) logCallback(turn, callbackQuery, callbackQuery.data);
+  }
+
+  return async (context: ChatLoggingContext, next: Next) => {
+    const user = context.dbUser;
+    if (!user) return next();
+
+    const update = context.update;
+    const chatId = update?.message?.chat?.id ?? update?.callback_query?.message?.chat?.id;
+    const isPrivate = !chatId || chatId === user.telegram_id;
+    const turn: LoggingTurn = {
+      userId: user.telegram_id,
+      logChatId: isPrivate ? undefined : chatId,
+      actionChatId: chatId ?? user.telegram_id,
+    };
+
+    logIncomingUpdate(update, turn, isConnectWizardInput(context));
+    wrapBotReplies(context, turn);
     return next();
   };
 }

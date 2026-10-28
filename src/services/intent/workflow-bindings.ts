@@ -449,6 +449,60 @@ function isBlank(raw: string): boolean {
   return raw.trim() === '';
 }
 
+function relativeInstant(
+  binding: Extract<Binding, { type: 'relative_instant' }>,
+  bound: BindValues,
+  now: Date,
+  timezone: string,
+): string {
+  const duration = bound[binding.duration];
+  if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0 || duration > 10080) return fail();
+  // A calendar entry starts on a whole minute; the nearest one keeps it within half a minute of the asked delay.
+  const wholeMinute = Math.round((now.getTime() + duration * 60000) / 60000) * 60000;
+  return formatLocalInstant(wholeMinute, timezone);
+}
+
+/** Binding types that an `optional` flag may replace with their declared default when the input is blank. */
+type DefaultableBinding = Extract<Binding, { type: 'integer' | 'enum' | 'text' | 'date' | 'time' | 'period' }>;
+
+/** A blank optional input takes the binding's declared default (a missing default is a failure); otherwise it is parsed. */
+function orDefault<T>(useDefault: boolean | undefined, fallback: T | undefined, parse: () => T): T {
+  return useDefault ? (fallback ?? fail()) : parse();
+}
+
+function evaluateDefaultable(
+  binding: DefaultableBinding,
+  raw: string,
+  evaluation: Evaluation,
+  dayBefore: boolean,
+): WorkflowInputValue {
+  const { userCtx, now } = evaluation;
+  const optionalDefault = 'optional' in binding && binding.optional && isBlank(raw);
+  switch (binding.type) {
+    case 'integer':
+      return orDefault(optionalDefault, binding.default, () => parseInteger(raw, binding));
+    case 'enum':
+      return orDefault(optionalDefault, binding.default, () => lookup(binding.values, raw));
+    case 'text':
+      return orDefault(optionalDefault, binding.default, () => {
+        const text = parseText(raw, binding.max ?? 200);
+        return binding.capitalize ? capitalizeFirst(text) : text;
+      });
+    case 'date':
+      return optionalDefault
+        ? isoDay(addDays(today(now, userCtx.timezone), DAY_WORD_OFFSETS[binding.default ?? fail()]))
+        : parseDate(raw, binding, now, userCtx.timezone, dayBefore);
+    case 'time':
+      return orDefault(optionalDefault, binding.default, () => parseTime(raw));
+    case 'period':
+      return buildPeriod(
+        orDefault(optionalDefault, binding.default, () => periodKey(binding.values, raw)),
+        now,
+        userCtx.timezone,
+      );
+  }
+}
+
 function evaluateOne(
   binding: Binding,
   bound: BindValues,
@@ -457,38 +511,9 @@ function evaluateOne(
 ): WorkflowInputValue {
   const { userCtx, now } = evaluation;
   if (binding.type === 'datetime') return buildDatetime(binding, bound, now, userCtx.timezone);
-  if (binding.type === 'relative_instant') {
-    const duration = bound[binding.duration];
-    if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0 || duration > 10080) return fail();
-    // A calendar entry starts on a whole minute; the nearest one keeps it within half a minute of the asked delay.
-    const wholeMinute = Math.round((now.getTime() + duration * 60000) / 60000) * 60000;
-    return formatLocalInstant(wholeMinute, userCtx.timezone);
-  }
+  if (binding.type === 'relative_instant') return relativeInstant(binding, bound, now, userCtx.timezone);
   const raw = resolveFrom(binding.from, evaluation);
-  const optionalDefault = 'optional' in binding && binding.optional && isBlank(raw);
   switch (binding.type) {
-    case 'integer':
-      return optionalDefault ? (binding.default ?? fail()) : parseInteger(raw, binding);
-    case 'enum':
-      return optionalDefault ? (binding.default ?? fail()) : lookup(binding.values, raw);
-    case 'text':
-      return optionalDefault
-        ? (binding.default ?? fail())
-        : binding.capitalize
-          ? capitalizeFirst(parseText(raw, binding.max ?? 200))
-          : parseText(raw, binding.max ?? 200);
-    case 'date':
-      return optionalDefault
-        ? isoDay(addDays(today(now, userCtx.timezone), DAY_WORD_OFFSETS[binding.default ?? fail()]))
-        : parseDate(raw, binding, now, userCtx.timezone, dayBefore);
-    case 'time':
-      return optionalDefault ? (binding.default ?? fail()) : parseTime(raw);
-    case 'period':
-      return buildPeriod(
-        optionalDefault ? (binding.default ?? fail()) : periodKey(binding.values, raw),
-        now,
-        userCtx.timezone,
-      );
     case 'duration':
       return parseDuration(raw, resolveFrom(binding.unit, evaluation), binding);
     case 'timezone':
@@ -499,6 +524,8 @@ function evaluateOne(
       return buildEventPhrase(binding, raw, evaluation);
     case 'recipient':
       return parseRecipient(raw);
+    default:
+      return evaluateDefaultable(binding, raw, evaluation, dayBefore);
   }
 }
 

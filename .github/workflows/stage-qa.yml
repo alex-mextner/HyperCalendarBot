@@ -119,8 +119,10 @@ jobs:
             failure:1) post failure "failed run=$RUN_ID" "$RUN_URL" ;;
             failure:2) post error "could not run: refused run=$RUN_ID" "$RUN_URL" ;;
             failure:3) post error "could not run: not provisioned run=$RUN_ID" "$RUN_URL" ;;
+            failure:4) post error "could not run: stage infrastructure failed (image load or compose up) run=$RUN_ID" "$RUN_URL" ;;
             failure:70) post error "could not run: no result from the wrapper run=$RUN_ID" "$RUN_URL" ;;
             failure:75) post error "could not run: lock wait timed out run=$RUN_ID" "$RUN_URL" ;;
-            # Superseded (76), cancelled by a newer run, or qa skipped: no verdict for this head.
+            # Superseded (76), an exit code this workflow does not know (a driver newer than main's copy), a run
+            # cancelled by a newer one, or qa skipped: no verdict for this head, and never a guessed one.
             *) echo "stage QA ended '$QA_RESULT' rc='$QA_RC'; nothing to report for $HEAD_SHA" ;;
           esac

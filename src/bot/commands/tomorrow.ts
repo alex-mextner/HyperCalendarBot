@@ -7,10 +7,11 @@ import { addDays } from 'date-fns';
 import { t } from '../../config/constants.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
+import type { EventOccurrence, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatDayAgenda } from '../../services/event/formatters.ts';
 import { googleCalendarColorEmoji } from '../../services/google/calendar-colors.ts';
-import type { HolidayService } from '../../services/holiday/holiday-service.ts';
+import type { HolidayEntry, HolidayService } from '../../services/holiday/holiday-service.ts';
 import { renderDayImage } from '../../services/image/render-day.ts';
 import type { ImageRenderer } from '../../services/image/render-service.ts';
 import type { DayWeather } from '../../services/weather/types.ts';
@@ -19,6 +20,81 @@ import { imageLogger } from '../../utils/logger.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
 import { sendAgendaText } from './agenda-text.ts';
+
+async function handleGroupTomorrow(
+  ctx: BotCommandContext,
+  user: User,
+  lang: 'en' | 'ru',
+  eventService: EventService,
+  holidayService?: HolidayService,
+  groupRepo?: GroupChatRepository,
+  weatherService?: WeatherService,
+): Promise<void> {
+  const groupId = getGroupId(ctx);
+  if (groupId === null) return;
+  const timezone = groupRepo?.getTimezone(groupId) ?? null;
+  if (!timezone) {
+    await ctx.send(
+      lang === 'ru'
+        ? '⚙️ Сначала задайте таймзону группы через /settings'
+        : '⚙️ Set the group timezone first via /settings',
+    );
+    return;
+  }
+  const tzNow = new TZDate(new Date(), timezone);
+  const tzTomorrow = addDays(tzNow, 1);
+  const dayStart = new TZDate(
+    new Date(tzTomorrow.getFullYear(), tzTomorrow.getMonth(), tzTomorrow.getDate(), 0, 0, 0),
+    timezone,
+  );
+  const dayEnd = new TZDate(
+    new Date(tzTomorrow.getFullYear(), tzTomorrow.getMonth(), tzTomorrow.getDate(), 23, 59, 59, 999),
+    timezone,
+  );
+  const occurrences = enrichAgenda(
+    eventService.getEventsInRangeForGroup(groupId, dayStart.toISOString(), dayEnd.toISOString()),
+    { userId: user.telegram_id, language: lang, groupId },
+    eventService.agendaRepository,
+  );
+  const holidays = holidayService?.getHolidaysForDate(user.telegram_id, dayStart.toISOString().slice(0, 10)) ?? [];
+  const dayWeather = await fetchDayForecast(weatherService, timezone, dayStart.toISOString().slice(0, 10), lang);
+  const text = formatDayAgenda(occurrences, dayStart.toISOString(), timezone, lang, holidays, undefined, dayWeather);
+  await sendAgendaText(ctx, text);
+}
+
+interface TomorrowImageInput {
+  renderService: ImageRenderer;
+  occurrences: EventOccurrence[];
+  dateIso: string;
+  holidays: HolidayEntry[];
+  user: User;
+  lang: 'en' | 'ru';
+}
+
+/** Render tomorrow's agenda as an image and send it; render failures are reported to the user. */
+async function sendTomorrowImage(ctx: BotCommandContext, input: TomorrowImageInput): Promise<void> {
+  const { renderService, occurrences, dateIso, holidays, user, lang } = input;
+  try {
+    const buffer = await renderDayImage(
+      renderService,
+      occurrences,
+      dateIso,
+      user.timezone,
+      user.language as 'ru' | 'en',
+      user.telegram_id,
+      holidays,
+    );
+    const file = new File([buffer], 'tomorrow.png', { type: 'image/png' });
+    await sendAgendaImage(file, {
+      language: user.language,
+      sendPhoto: (photo) => ctx.sendPhoto(photo),
+      sendDocument: (document, options) => ctx.sendDocument(document, options),
+    });
+  } catch (err) {
+    imageLogger.error({ err }, 'Render failed');
+    await ctx.send(agendaImageErrorMessage(err) ?? t(lang).callbackErrors.imageGenerationFailed);
+  }
+}
 
 export async function handleTomorrow(
   ctx: BotCommandContext,
@@ -34,36 +110,7 @@ export async function handleTomorrow(
   const lang = user.language as 'en' | 'ru';
 
   if (isGroup(ctx)) {
-    const groupId = getGroupId(ctx);
-    if (groupId === null) return;
-    const timezone = groupRepo?.getTimezone(groupId) ?? null;
-    if (!timezone) {
-      await ctx.send(
-        lang === 'ru'
-          ? '⚙️ Сначала задайте таймзону группы через /settings'
-          : '⚙️ Set the group timezone first via /settings',
-      );
-      return;
-    }
-    const tzNow = new TZDate(new Date(), timezone);
-    const tzTomorrow = addDays(tzNow, 1);
-    const dayStart = new TZDate(
-      new Date(tzTomorrow.getFullYear(), tzTomorrow.getMonth(), tzTomorrow.getDate(), 0, 0, 0),
-      timezone,
-    );
-    const dayEnd = new TZDate(
-      new Date(tzTomorrow.getFullYear(), tzTomorrow.getMonth(), tzTomorrow.getDate(), 23, 59, 59, 999),
-      timezone,
-    );
-    const occurrences = enrichAgenda(
-      eventService.getEventsInRangeForGroup(groupId, dayStart.toISOString(), dayEnd.toISOString()),
-      { userId: user.telegram_id, language: lang, groupId },
-      eventService.agendaRepository,
-    );
-    const holidays = holidayService?.getHolidaysForDate(user.telegram_id, dayStart.toISOString().slice(0, 10)) ?? [];
-    const dayWeather = await fetchDayForecast(weatherService, timezone, dayStart.toISOString().slice(0, 10), lang);
-    const text = formatDayAgenda(occurrences, dayStart.toISOString(), timezone, lang, holidays, undefined, dayWeather);
-    await sendAgendaText(ctx, text);
+    await handleGroupTomorrow(ctx, user, lang, eventService, holidayService, groupRepo, weatherService);
     return;
   }
 
@@ -90,26 +137,7 @@ export async function handleTomorrow(
   await sendAgendaText(ctx, text);
 
   if (renderService) {
-    try {
-      const buffer = await renderDayImage(
-        renderService,
-        occurrences,
-        dateIso,
-        user.timezone,
-        user.language as 'ru' | 'en',
-        user.telegram_id,
-        holidays,
-      );
-      const file = new File([buffer], 'tomorrow.png', { type: 'image/png' });
-      await sendAgendaImage(file, {
-        language: user.language,
-        sendPhoto: (photo) => ctx.sendPhoto(photo),
-        sendDocument: (document, options) => ctx.sendDocument(document, options),
-      });
-    } catch (err) {
-      imageLogger.error({ err }, 'Render failed');
-      await ctx.send(agendaImageErrorMessage(err) ?? t(lang).callbackErrors.imageGenerationFailed);
-    }
+    await sendTomorrowImage(ctx, { renderService, occurrences, dateIso, holidays, user, lang });
   }
 }
 

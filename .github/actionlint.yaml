@@ -1,0 +1,12 @@
+# actionlint config: custom labels of this repository's self-hosted runners. Without them actionlint
+# rejects `runs-on: [self-hosted, <label>]` as an unknown label (it only knows GitHub-hosted ones).
+#
+# Both labels were read from the runners registered on the repository on 2026-10-27
+# (`gh api repos/alex-mextner/HyperCalendarBot/actions/runners`); add a label here only when a
+# registered runner actually carries it:
+#   odroid-hcb  label of the runner named `odroid-hcb` (Linux ARM64), the home ODROID-N2+ — deploy.yml
+#   qa-pc       label of the runner named `pc-qa` (Linux X64), the Stage QA PC — stage-qa.yml
+self-hosted-runner:
+  labels:
+    - odroid-hcb
+    - qa-pc

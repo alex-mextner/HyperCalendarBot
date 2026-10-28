@@ -437,19 +437,26 @@ export class EventRepository {
       }
     }
 
-    // Every write path funnels through here, so a changed location can never keep the
-    // previous venue, address and map link. The reset happens in the same UPDATE:
-    // SQLite evaluates `location IS ?` against the pre-update row, so an unchanged
-    // text keeps its resolution. A caller that supplies a resolved column wins.
-    if (data.location !== undefined) {
-      for (const column of RESOLVED_PLACE_COLUMNS) {
-        if (data[column] !== undefined) continue;
-        fields.push(`${column} = CASE WHEN location IS ? THEN ${column} ELSE ? END`);
-        values.push(data.location, UNRESOLVED_PLACE[column]);
-      }
-    }
+    if (data.location !== undefined) this.appendResolvedPlaceReset(data, data.location, fields, values);
 
     return { fields, values };
+  }
+
+  // Every write path funnels through buildUpdateQuery, so a changed location can never keep the
+  // previous venue, address and map link. The reset happens in the same UPDATE:
+  // SQLite evaluates `location IS ?` against the pre-update row, so an unchanged
+  // text keeps its resolution. A caller that supplies a resolved column wins.
+  private appendResolvedPlaceReset(
+    data: UpdateEventData,
+    location: SQLQueryBindings,
+    fields: string[],
+    values: SQLQueryBindings[],
+  ): void {
+    for (const column of RESOLVED_PLACE_COLUMNS) {
+      if (data[column] !== undefined) continue;
+      fields.push(`${column} = CASE WHEN location IS ? THEN ${column} ELSE ? END`);
+      values.push(location, UNRESOLVED_PLACE[column]);
+    }
   }
 
   update(id: number, userId: number, data: UpdateEventData): CalendarEvent | null {

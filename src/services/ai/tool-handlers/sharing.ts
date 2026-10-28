@@ -1,26 +1,32 @@
-import { InlineKeyboard } from 'gramio';
-import { type Lang, t, toLang } from '../../../config/constants.ts';
+import { t, toLang } from '../../../config/constants.ts';
 import { UNRESOLVED_PLACE } from '../../../database/repositories/event.repository.ts';
-import type {
-  Contact,
-  EventParticipant,
-  Invitation,
-  InvitationStatus,
-  ParticipantStatus,
-  Visibility,
-} from '../../../database/types.ts';
-import { botLogger } from '../../../utils/logger.ts';
-import { escapeHtml } from '../../../utils/telegram.ts';
-import { effectiveRsvpStatus } from '../../sharing/invitation-roster.ts';
-import { deliverInvitation, type InvitationDeliveryResult } from '../invitation-delivery.ts';
-import { issueRecipientApproval } from '../recipient-confirmation.ts';
+import type { Invitation, Visibility } from '../../../database/types.ts';
+import type { InvitationDeliveryResult } from '../invitation-delivery.ts';
 import { resolveInvitationRecipient } from '../recipient-identity.ts';
-import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
-import { handlePickUsers } from './meta.ts';
+import type { AgentContext, SharingCapability, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
-import { takeConnectTelegramSuggestion } from './settings.ts';
-
-const deliveryLogger = botLogger.child({ module: 'invitation-delivery' });
+import {
+  connectSuggestionAfterDelivery,
+  type DeliveryState,
+  deliverInvitationFromContext,
+  deliveryLogger,
+  deliveryState,
+  hintWithConnectSuggestion,
+} from './sharing-invitation-delivery.ts';
+import {
+  type ResolvedRecipient,
+  rejectUnresolvedRecipient,
+  type UnresolvedRecipient,
+} from './sharing-recipient-rejection.ts';
+import {
+  buildGroupRosterSection,
+  buildPersonalRsvpLines,
+  collectInvitationRows,
+  participantStatusByUser,
+  resolveRosterEvent,
+  rosterDisplayName,
+  rosterLabel,
+} from './sharing-roster.ts';
 
 interface ShareEventInput {
   event_id: number;
@@ -80,6 +86,63 @@ export function handleShareEvent(ctx: AgentContext, input: ShareEventInput): Too
   };
 }
 
+const SEND_DELIVERY_HINTS: Record<DeliveryState, string> = {
+  delivered:
+    "The invitation was delivered to the invitee via bot API or the inviter's own Telegram account. Tell the user it is sent.",
+  manual_forward:
+    'Bot-API delivery failed. A deep-link fallback was sent to the inviter to forward manually. Tell the user to share the link.',
+  failed: 'Invitation delivery failed entirely. Tell the user there was a delivery problem.',
+};
+
+const SEND_OUTCOME_KEYS = {
+  delivered: 'invitationDelivered',
+  manual_forward: 'invitationManual',
+  failed: 'invitationFailed',
+} as const satisfies Record<DeliveryState, string>;
+
+/** Resolve and verify the recipient, or the ToolResult explaining why no invitation may be sent. */
+async function resolveSendRecipient(
+  ctx: AgentContext,
+  input: SendInvitationInput,
+): Promise<{ recipient: ResolvedRecipient } | { denied: ToolResult }> {
+  let recipient: ResolvedRecipient | UnresolvedRecipient;
+  try {
+    recipient = await resolveInvitationRecipient(ctx, input);
+  } catch (err) {
+    deliveryLogger.warn(
+      { errorName: err instanceof Error ? err.name : 'UnknownError' },
+      'Recipient verification failed',
+    );
+    return {
+      denied: {
+        success: false,
+        mutationState: 'not_applied',
+        error: input.invitee_username
+          ? t(ctx.user.language).aiTools.meta.recipientLookupFailed(input.invitee_username.replace(/^@/, ''))
+          : t(ctx.user.language).aiTools.meta.recipientUnverified,
+      },
+    };
+  }
+  if (!recipient.ok) return { denied: await rejectUnresolvedRecipient(ctx, input, recipient) };
+  return { recipient };
+}
+
+/** Auto-add the invitee to the inviter's contacts. */
+function addInviteeToContacts(ctx: AgentContext, invitationId: number, recipient: ResolvedRecipient): void {
+  if (!ctx.contactRepo || recipient.isGroup || ctx.contactRepo.findByTelegramId(ctx.user.telegram_id, recipient.id)) {
+    return;
+  }
+  const invitee = ctx.userRepo.findByTelegramId(recipient.id);
+  const contactName =
+    recipient.firstName ?? invitee?.first_name ?? recipient.username ?? invitee?.username ?? `User ${recipient.id}`;
+  try {
+    ctx.contactRepo.upsert(ctx.user.telegram_id, contactName, recipient.username, recipient.id);
+  } catch (err) {
+    // The invitation already exists; an address-book conflict must not cancel its delivery.
+    deliveryLogger.warn({ err, invitationId }, 'Invitation recipient was not added to contacts');
+  }
+}
+
 export async function handleSendInvitation(ctx: AgentContext, input: SendInvitationInput): Promise<ToolResult> {
   if (!ctx.sharing?.invitationService) {
     return { success: false, mutationState: 'not_applied', error: 'Invitations are not configured.' };
@@ -92,104 +155,16 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
   if (!ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id))
     return { success: false, mutationState: 'not_applied', error: 'Event not found' };
 
-  let recipient: Awaited<ReturnType<typeof resolveInvitationRecipient>>;
-  try {
-    recipient = await resolveInvitationRecipient(ctx, input);
-  } catch (err) {
-    deliveryLogger.warn(
-      { errorName: err instanceof Error ? err.name : 'UnknownError' },
-      'Recipient verification failed',
-    );
-    return {
-      success: false,
-      mutationState: 'not_applied',
-      error: input.invitee_username
-        ? t(ctx.user.language).aiTools.meta.recipientLookupFailed(input.invitee_username.replace(/^@/, ''))
-        : t(ctx.user.language).aiTools.meta.recipientUnverified,
-    };
-  }
-  if (!recipient.ok) {
-    if (recipient.reason === 'contact_row_id') {
-      const { contact } = recipient;
-      const tr = t(ctx.user.language).aiTools.meta;
-      const name = contact.preferred_name ?? contact.name;
-      if (contact.telegram_id) {
-        return {
-          success: false,
-          mutationState: 'not_applied',
-          error: tr.recipientContactRowId,
-          agentHint: `${contact.id} is the contact_id of "${name}", not a Telegram ID. For "${name}" retry with invitee_id ${contact.telegram_id}; for anyone else use pick_users.`,
-        };
-      }
-      const usernameRoute = contact.username ? `invitee_username ${contact.username} or ` : '';
-      return {
-        success: false,
-        mutationState: 'not_applied',
-        error: tr.recipientContactWithoutTelegram(name),
-        agentHint: `${contact.id} is the contact_id of "${name}", who has no Telegram ID. Use ${usernameRoute}pick_users with event_id ${input.event_id}.`,
-      };
-    }
-    if (
-      !input.force &&
-      !ctx.isGroup &&
-      input.invitee_id !== undefined &&
-      input.invitee_id > 0 &&
-      ctx.sender?.sendMessageWithKeyboard
-    ) {
-      const token = issueRecipientApproval(ctx.user.telegram_id, input.event_id, input.invitee_id);
-      const tr = t(ctx.user.language).aiTools.meta;
-      const saved = ctx.contactRepo?.findByTelegramId(ctx.user.telegram_id, input.invitee_id);
-      const details = [tr.recipientConfirmDetails(input.invitee_id, escapeHtml(input.invitee_username ?? '—'))];
-      if (saved)
-        details.push(tr.recipientSavedProfile(escapeHtml(saved.preferred_name ?? saved.name), input.invitee_id));
-      if (recipient.candidate) {
-        const candidate = recipient.candidate;
-        details.push(
-          tr.recipientResolvedProfile(escapeHtml(candidate.firstName ?? candidate.username ?? '—'), candidate.id),
-        );
-      }
-      const text = details.join('\n');
-      await ctx.sender.sendMessageWithKeyboard(
-        ctx.user.telegram_id,
-        text,
-        new InlineKeyboard().text(tr.recipientConfirmButton, `ric:${token}`),
-      );
-      return {
-        success: true,
-        awaitingInput: { kind: 'chat' },
-        mutationState: 'not_applied',
-        stopLoop: true,
-        output: tr.recipientConfirmationSent,
-        agentHint:
-          'Wait for the actual confirmation callback or use pick_users. force=true alone cannot bypass identity confirmation; it never changes the numeric recipient.',
-      };
-    }
-    if ((recipient.reason === 'not_found' || recipient.reason === 'unavailable') && recipient.username) {
-      const prompt =
-        recipient.reason === 'not_found'
-          ? t(ctx.user.language).invite_resolve_not_found(recipient.username)
-          : t(ctx.user.language).invite_resolve_unavailable(recipient.username);
-      return handlePickUsers({ ...ctx, chatId: ctx.user.telegram_id }, { event_id: input.event_id, prompt });
-    }
-    const tr = t(ctx.user.language).aiTools.meta;
-    return {
-      success: false,
-      mutationState: 'not_applied',
-      error: recipient.reason === 'conflict' ? tr.recipientIdentityConflict : tr.recipientUnverified,
-      agentHint:
-        'Use find_contact, an exact user-provided @username, or pick_users. Do not guess or reuse an unverified recipient ID.',
-    };
-  }
-  const inviteeId = recipient.id;
-  const inviteeUsername = recipient.username;
-  const resolvedFirstName = recipient.firstName;
+  const resolved = await resolveSendRecipient(ctx, input);
+  if ('denied' in resolved) return resolved.denied;
+  const { recipient } = resolved;
   const isGroupTarget = recipient.isGroup;
 
   const result = ctx.sharing.invitationService.sendInvitation(
     input.event_id,
     ctx.user.telegram_id,
-    inviteeId,
-    inviteeUsername,
+    recipient.id,
+    recipient.username,
   );
 
   if (!result.success) {
@@ -197,101 +172,36 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
   }
 
   const invitation = result.invitation!;
-
-  // Auto-add invitee to inviter's contacts
-  if (ctx.contactRepo && !isGroupTarget && !ctx.contactRepo.findByTelegramId(ctx.user.telegram_id, inviteeId)) {
-    const invitee = ctx.userRepo.findByTelegramId(inviteeId);
-    const contactName =
-      resolvedFirstName ?? invitee?.first_name ?? inviteeUsername ?? invitee?.username ?? `User ${inviteeId}`;
-    try {
-      ctx.contactRepo.upsert(ctx.user.telegram_id, contactName, inviteeUsername, inviteeId);
-    } catch (err) {
-      // The invitation already exists; an address-book conflict must not cancel its delivery.
-      deliveryLogger.warn({ err, invitationId: invitation.id }, 'Invitation recipient was not added to contacts');
-    }
-  }
+  addInviteeToContacts(ctx, invitation.id, recipient);
 
   const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
-  let delivery: InvitationDeliveryResult = { delivered: false, viaDeepLink: false, viaBotApi: false };
-  if (ctx.sender) {
-    delivery = await deliverInvitation({
-      invitationId: invitation.id,
-      eventId: input.event_id,
-      inviteeId,
-      inviteeUsername,
-      inviterId: ctx.user.telegram_id,
-      inviterName: ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`,
-      inviterUsername: ctx.user.username ?? undefined,
-      inviterTimezone: ctx.user.timezone,
-      event,
-      lang: (ctx.user.language ?? 'en') as 'en' | 'ru',
-      inviterLang: (ctx.user.language ?? 'en') as 'en' | 'ru',
-      // The deep-link fallback is a PRIVATE invite link — it must reach the inviter's
-      // private chat, never ctx.chatId (which may be a group the bot was invoked from,
-      // leaking the invitee's personal invitation to every member).
-      fallbackChatId: ctx.user.telegram_id,
-      allowInviterSession: !isGroupTarget,
-      isGroupTarget,
-      deps: {
-        sender: ctx.sender,
-        invitationRepo: ctx.sharing.invitationRepo,
-        userRepo: ctx.userRepo,
-        deepLinkService: ctx.deepLinkService,
-        botUsername: ctx.botUsername,
-        contactRepo: ctx.contactRepo,
-      },
-    });
-  }
+  const delivery: InvitationDeliveryResult = ctx.sender
+    ? await deliverInvitationFromContext(ctx, ctx.sharing, ctx.sender, {
+        invitationId: invitation.id,
+        eventId: input.event_id,
+        inviteeId: recipient.id,
+        inviteeUsername: recipient.username,
+        event,
+        isGroupTarget,
+      })
+    : { delivered: false, viaDeepLink: false, viaBotApi: false };
 
   const connectSuggestion = connectSuggestionAfterDelivery(ctx, delivery, isGroupTarget, invitation.id);
-  const deliveryHint = delivery.delivered
-    ? "The invitation was delivered to the invitee via bot API or the inviter's own Telegram account. Tell the user it is sent."
-    : delivery.viaDeepLink
-      ? 'Bot-API delivery failed. A deep-link fallback was sent to the inviter to forward manually. Tell the user to share the link.'
-      : 'Invitation delivery failed entirely. Tell the user there was a delivery problem.';
+  const state = deliveryState(delivery);
 
   return {
     success: true,
     mutationState: 'confirmed',
-    effect: {
-      kind: 'invitation',
-      delivery: delivery.delivered ? 'delivered' : delivery.viaDeepLink ? 'manual_forward' : 'failed',
-    },
+    effect: { kind: 'invitation', delivery: state },
     output: [
       ...(ctx.isGroup
         ? []
-        : [t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, inviteeId)]),
-      delivery.delivered
-        ? t(toLang(ctx.user.language)).writeOutcomes.invitationDelivered
-        : delivery.viaDeepLink
-          ? t(toLang(ctx.user.language)).writeOutcomes.invitationManual
-          : t(toLang(ctx.user.language)).writeOutcomes.invitationFailed,
+        : [t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, recipient.id)]),
+      t(toLang(ctx.user.language)).writeOutcomes[SEND_OUTCOME_KEYS[state]],
       ...(connectSuggestion ? [connectSuggestion] : []),
     ].join('\n'),
-    agentHint: connectSuggestion ? `${deliveryHint} ${CONNECT_SUGGESTION_HINT}` : deliveryHint,
+    agentHint: hintWithConnectSuggestion(SEND_DELIVERY_HINTS[state], connectSuggestion),
   };
-}
-
-const CONNECT_SUGGESTION_HINT =
-  'The bot could not reach the invitee directly: end your reply with the /connect_telegram line above, verbatim.';
-
-/**
- * Decided here, not by the model: a prompt step asking it to check connect_telegram_status first
- * made weak models call that tool on plain event creation (#511).
- */
-function connectSuggestionAfterDelivery(
-  ctx: AgentContext,
-  delivery: InvitationDeliveryResult,
-  isGroupTarget: boolean,
-  invitationId: number,
-): string | null {
-  try {
-    return takeConnectTelegramSuggestion(ctx, delivery, isGroupTarget);
-  } catch (err) {
-    // The invitation is already sent; an optional hint must not turn it into a failed write.
-    deliveryLogger.warn({ err, invitationId }, 'Connect-Telegram suggestion failed');
-    return null;
-  }
 }
 
 export function handleCancelInvitation(ctx: AgentContext, input: { invitation_id: number }): ToolResult {
@@ -308,6 +218,28 @@ export function handleCancelInvitation(ctx: AgentContext, input: { invitation_id
   };
 }
 
+/** The owned pending invitation a resend may act on, or the reason it may not. */
+function findResendableInvitation(
+  ctx: AgentContext,
+  invitationRepo: SharingCapability['invitationRepo'],
+  invitationId: number,
+): { invitation: Invitation } | { denied: ToolResult } {
+  const invitation = invitationRepo.findById(invitationId);
+  if (!invitation) return { denied: { success: false, error: 'Invitation not found.' } };
+  if (invitation.inviter_id !== ctx.user.telegram_id)
+    return { denied: { success: false, error: 'Not your invitation.' } };
+  if (invitation.status !== 'pending') {
+    return { denied: { success: false, error: `Cannot resend — status is "${invitation.status}".` } };
+  }
+  return { invitation };
+}
+
+const RESEND_DELIVERY_HINTS: Record<DeliveryState, string> = {
+  delivered: 'The invitation reminder was delivered to the invitee. Tell the user it is sent.',
+  manual_forward: 'Bot-API reminder failed. Deep-link fallback sent to the inviter.',
+  failed: 'Reminder delivery failed entirely. Tell the user there was a delivery problem.',
+};
+
 export async function handleResendInvitation(
   ctx: AgentContext,
   input: { invitation_id: number; invitee_username?: string },
@@ -315,16 +247,9 @@ export async function handleResendInvitation(
   if (!ctx.sharing) {
     return { success: false, error: 'Invitations are not configured.' };
   }
-  const invitation = ctx.sharing.invitationRepo.findById(input.invitation_id);
-  if (!invitation) {
-    return { success: false, error: 'Invitation not found.' };
-  }
-  if (invitation.inviter_id !== ctx.user.telegram_id) {
-    return { success: false, error: 'Not your invitation.' };
-  }
-  if (invitation.status !== 'pending') {
-    return { success: false, error: `Cannot resend — status is "${invitation.status}".` };
-  }
+  const found = findResendableInvitation(ctx, ctx.sharing.invitationRepo, input.invitation_id);
+  if ('denied' in found) return found.denied;
+  const { invitation } = found;
 
   // The owned pending invitation establishes intent; its historical username is only metadata.
   const recipient = await resolveInvitationRecipient(
@@ -345,186 +270,34 @@ export async function handleResendInvitation(
 
   // Guard on the sender object (mirrors handleSendInvitation); deliverInvitation itself
   // reports non-delivery when the sender lacks the sendInvitation capability.
-  if (ctx.sender) {
-    const event = ctx.eventService.getEvent(invitation.event_id, ctx.user.telegram_id);
-    // A group invitation stores the (negative) group chat id as invitee_id. Resending it must use
-    // the group delivery mode (per-member RSVP keyboard, no user-session send, no deep-link forward) — exactly
-    // what the chat_shared picker does. Without this it would deliver the personal inv: keyboard
-    // (authorizes a single invitee, unusable in a group).
-    const isGroupTarget = invitation.invitee_id < 0;
-    const delivery = await deliverInvitation({
-      invitationId: invitation.id,
-      eventId: invitation.event_id,
-      inviteeId: invitation.invitee_id,
-      // This is only a peer-cache hint. Python transport rechecks the resolved
-      // peer against inviteeId and always sends to that numeric ID.
-      inviteeUsername: isGroupTarget ? undefined : (recipient.username ?? invitation.invitee_username ?? undefined),
-      inviterId: ctx.user.telegram_id,
-      inviterName: ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`,
-      inviterUsername: ctx.user.username ?? undefined,
-      inviterTimezone: ctx.user.timezone,
-      event,
-      lang: (ctx.user.language ?? 'en') as 'en' | 'ru',
-      inviterLang: (ctx.user.language ?? 'en') as 'en' | 'ru',
-      // The deep-link fallback is a PRIVATE invite link — it must reach the inviter's
-      // private chat, never ctx.chatId (which may be a group the bot was invoked from,
-      // leaking the invitee's personal invitation to every member).
-      fallbackChatId: ctx.user.telegram_id,
-      allowInviterSession: !isGroupTarget,
-      isGroupTarget,
-      deps: {
-        sender: ctx.sender,
-        invitationRepo: ctx.sharing.invitationRepo,
-        userRepo: ctx.userRepo,
-        deepLinkService: ctx.deepLinkService,
-        botUsername: ctx.botUsername,
-        contactRepo: ctx.contactRepo,
-      },
-    });
-    const connectSuggestion = connectSuggestionAfterDelivery(ctx, delivery, isGroupTarget, invitation.id);
-    const deliveryHint = delivery.delivered
-      ? 'The invitation reminder was delivered to the invitee. Tell the user it is sent.'
-      : delivery.viaDeepLink
-        ? 'Bot-API reminder failed. Deep-link fallback sent to the inviter.'
-        : 'Reminder delivery failed entirely. Tell the user there was a delivery problem.';
-    return {
-      success: true,
-      effect: {
-        kind: 'invitation',
-        delivery: delivery.delivered ? 'delivered' : delivery.viaDeepLink ? 'manual_forward' : 'failed',
-      },
-      output: [
-        t(ctx.user.language).aiTools.sharing.invitationReminderQueued(invitation.invitee_id),
-        ...(connectSuggestion ? [connectSuggestion] : []),
-      ].join('\n'),
-      agentHint: connectSuggestion ? `${deliveryHint} ${CONNECT_SUGGESTION_HINT}` : deliveryHint,
-    };
-  }
+  if (!ctx.sender) return { success: false, error: 'Message delivery not available.' };
 
-  return { success: false, error: 'Message delivery not available.' };
-}
-
-function isRsvpAttending(status: ParticipantStatus | InvitationStatus): boolean {
-  return status === 'accepted';
-}
-
-interface PersonalRsvpResult {
-  lines: string[];
-  listedUserIds: Set<number>;
-  attending: number;
-}
-
-/** Plain labels cannot introduce new roster lines or split a Unicode code point. */
-function rosterLabel(value: string | null | undefined, limit = 120): string | undefined {
-  const cleaned = value
-    ?.replace(/[\p{Cc}\p{Cf}]/gu, ' ')
-    .replace(/\s+/gu, ' ')
-    .trim();
-  return cleaned ? [...cleaned].slice(0, limit).join('') : undefined;
-}
-
-/** Resolve only an authorized roster; never read private contact aliases for a group reply. */
-function rosterDisplayName(ctx: AgentContext, ids: number[]): (userId: number) => string {
-  const profiles = ctx.userRepo.findManyByTelegramIds(ids);
-  const allowed = new Set(ids);
-  const contacts = new Map<number, Contact>();
-  if (!ctx.isGroup && ctx.contactRepo) {
-    for (const contact of ctx.contactRepo.list(ctx.user.telegram_id)) {
-      if (contact.telegram_id !== null && allowed.has(contact.telegram_id) && !contacts.has(contact.telegram_id))
-        contacts.set(contact.telegram_id, contact);
-    }
-  }
-  return (userId) => {
-    if (!ctx.isGroup && userId === ctx.user.telegram_id) return t(ctx.user.language).aiTools.sharing.rsvpSelf;
-    const contact = contacts.get(userId);
-    const profile = profiles.get(userId);
-    // Tool text stays plain; the v2 delivery boundary escapes it exactly once.
-    return (
-      rosterLabel(contact?.preferred_name) ??
-      rosterLabel(contact?.name) ??
-      rosterLabel(profile?.first_name) ??
-      rosterLabel(profile?.username ? `@${profile.username}` : undefined) ??
-      String(userId)
-    );
-  };
-}
-
-/**
- * One line per personally-invited user. Status priority:
- * 1. Positive participant RSVP (accepted/maybe) is always authoritative — it reflects a confirmed
- *    response from any channel (personal or group) and must not be masked by a pending invite.
- * 2. A pending invitation takes priority over stale negative/neutral participant rows (declined,
- *    pending), treating them as superseded by a fresh re-invite.
- * 3. Otherwise the event_participants row is authoritative, falling back to the invitation status.
- * When participant and invitation statuses conflict, the invite is shown as a note on the same
- * line. A dead personal invite (declined/cancelled/expired) with no participant row is skipped.
- */
-function buildPersonalRsvpLines(
-  lang: Lang,
-  personalInvByUser: Map<number, Invitation>,
-  participantByUser: Map<number, ParticipantStatus>,
-  displayName: (userId: number) => string,
-): PersonalRsvpResult {
-  const lines: string[] = [];
-  const listedUserIds = new Set<number>();
-  let attending = 0;
-  for (const [userId, inv] of personalInvByUser) {
-    const participantStatus = participantByUser.get(userId);
-    const inviteIsLive = inv.status === 'pending' || inv.status === 'accepted' || inv.status === 'maybe';
-    if (participantStatus === undefined && !inviteIsLive) continue;
-    const status = effectiveRsvpStatus(inv.status, participantStatus);
-    const note =
-      participantStatus !== undefined && participantStatus !== inv.status && inv.status !== 'pending'
-        ? t(lang).aiTools.sharing.rsvpPersonalInviteNote(t(lang).aiTools.sharing.rsvpStatuses[inv.status])
-        : '';
-    lines.push(
-      t(lang).aiTools.sharing.rsvpInviteeLine(displayName(userId), t(lang).aiTools.sharing.rsvpStatuses[status], note),
-    );
-    listedUserIds.add(userId);
-    if (isRsvpAttending(status)) attending++;
-  }
-  return { lines, listedUserIds, attending };
-}
-
-interface GroupRsvpResult {
-  lines: string[];
-  members: EventParticipant[];
-}
-
-/**
- * Per-member RSVP breakdown for an event with a group invitation. The shared group invitation row
- * stays "pending" forever, so the real responses live in event_participants. Members already shown
- * in the personal-invite section (listedUserIds) are excluded so each (event, user) appears exactly
- * once across the whole output. `participantRows` is null when the participant registry is
- * unavailable (degraded), versus [] when present but empty. The caller passes only the answers the
- * reader may see (by the group chat each came through); they are reported as one breakdown.
- */
-function describeGroupRsvp(
-  lang: Lang,
-  participantRows: EventParticipant[] | null,
-  listedUserIds: Set<number>,
-  displayName: (userId: number) => string,
-): GroupRsvpResult {
-  if (participantRows === null) {
-    return { lines: [t(lang).aiTools.sharing.groupRsvpUnavailable], members: [] };
-  }
-  const members = participantRows.filter((p) => !listedUserIds.has(p.user_id));
-  if (members.length === 0) {
-    // Only show "no RSVPs yet" when there are genuinely none. If all responders appear in
-    // the personal-invite section above (deduped), the group breakdown adds nothing.
-    if (participantRows.length === 0) {
-      return { lines: [t(lang).aiTools.sharing.groupRsvpNone], members: [] };
-    }
-    return { lines: [], members: [] };
-  }
+  const event = ctx.eventService.getEvent(invitation.event_id, ctx.user.telegram_id);
+  // A group invitation stores the (negative) group chat id as invitee_id. Resending it must use
+  // the group delivery mode (per-member RSVP keyboard, no user-session send, no deep-link forward) — exactly
+  // what the chat_shared picker does. Without this it would deliver the personal inv: keyboard
+  // (authorizes a single invitee, unusable in a group).
+  const isGroupTarget = invitation.invitee_id < 0;
+  const delivery = await deliverInvitationFromContext(ctx, ctx.sharing, ctx.sender, {
+    invitationId: invitation.id,
+    eventId: invitation.event_id,
+    inviteeId: invitation.invitee_id,
+    // This is only a peer-cache hint. Python transport rechecks the resolved
+    // peer against inviteeId and always sends to that numeric ID.
+    inviteeUsername: isGroupTarget ? undefined : (recipient.username ?? invitation.invitee_username ?? undefined),
+    event,
+    isGroupTarget,
+  });
+  const connectSuggestion = connectSuggestionAfterDelivery(ctx, delivery, isGroupTarget, invitation.id);
+  const state = deliveryState(delivery);
   return {
-    lines: [
-      t(lang).aiTools.sharing.groupRsvpHeader,
-      ...members.map((p) =>
-        t(lang).aiTools.sharing.rsvpMemberLine(displayName(p.user_id), t(lang).aiTools.sharing.rsvpStatuses[p.status]),
-      ),
-    ],
-    members,
+    success: true,
+    effect: { kind: 'invitation', delivery: state },
+    output: [
+      t(ctx.user.language).aiTools.sharing.invitationReminderQueued(invitation.invitee_id),
+      ...(connectSuggestion ? [connectSuggestion] : []),
+    ].join('\n'),
+    agentHint: hintWithConnectSuggestion(RESEND_DELIVERY_HINTS[state], connectSuggestion),
   };
 }
 
@@ -542,60 +315,19 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
 
   const lang = ctx.user.language;
   const requesterId = ctx.user.telegram_id;
-  let event = ctx.eventService.getEvent(input.event_id, requesterId);
 
-  // One authoritative row per (event, user). A group invitation stores the (negative) group chat id
-  // as invitee_id and never leaves "pending"; members RSVP per-member into event_participants. Build
-  // a per-user view from the personal invitation rows plus the participant rows (the source of truth
-  // synced to Google), deduping so every user appears exactly once across both sections.
-  const personalInvByUser = new Map<number, Invitation>();
-  const liveGroupChatIds: number[] = [];
-  for (const inv of ctx.sharing.invitationRepo.getByEvent(input.event_id)) {
-    if (inv.invitee_id < 0) {
-      if (inv.status === 'pending' || inv.status === 'accepted' || inv.status === 'maybe') {
-        liveGroupChatIds.push(inv.invitee_id);
-      }
-      continue;
-    }
-    personalInvByUser.set(inv.invitee_id, inv);
-  }
-  const hasGroupInvite = liveGroupChatIds.length > 0;
-
+  // One authoritative row per (event, user): build a per-user view from the personal invitation rows
+  // plus the participant rows (the source of truth synced to Google), deduping so every user appears
+  // exactly once across both sections.
+  const { personalInvByUser, liveGroupChatIds } = collectInvitationRows(
+    ctx.sharing.invitationRepo.getByEvent(input.event_id),
+  );
   const participantRows = ctx.participantRepo ? ctx.participantRepo.getByEvent(input.event_id) : null;
-  const participantByUser = new Map<number, ParticipantStatus>();
-  if (participantRows) {
-    for (const p of participantRows) participantByUser.set(p.user_id, p.status);
-  }
+  const participantByUser = participantStatusByUser(participantRows);
 
-  let organizerId: number | null = null;
-  if (!event) {
-    const ownerId = ctx.eventService.getEventOwnerId(input.event_id);
-    // Same rule as propose_edit: the latest personal invitation, unless cancelled or expired.
-    const hasPersonalInvitation =
-      ctx.sharing.invitationRepo.findActiveOrRespondedByEventAndInvitee(input.event_id, requesterId) !== null;
-    // A group invitation invites every current member, whether or not they answered yet.
-    const isInvitedGroupMember = liveGroupChatIds.some(
-      (chatId) => ctx.group?.groupMemberRepo.getMembership(chatId, requesterId)?.left_at === null,
-    );
-    const isInvited = hasPersonalInvitation || isInvitedGroupMember;
-    if (ownerId !== null && isInvited) {
-      // The roster is the owner's to share: never post it into a group chat the owner did not invite.
-      // Say why, so the model sends the invitee to a private chat instead of calling them uninvited.
-      const isAllowedChat =
-        !ctx.isGroup || (ctx.groupChatId !== undefined && liveGroupChatIds.includes(ctx.groupChatId));
-      if (!isAllowedChat) {
-        return {
-          success: false,
-          error: `Event ${input.event_id}: its roster can only be read in a private chat or in a group invited to it.`,
-        };
-      }
-      event = ctx.eventService.getEvent(input.event_id, ownerId);
-      organizerId = ownerId;
-    }
-  }
-  if (!event) {
-    return { success: false, error: `Event ${input.event_id} not found or you are not invited to it.` };
-  }
+  const lookup = resolveRosterEvent(ctx, ctx.sharing.invitationRepo, input.event_id, requesterId, liveGroupChatIds);
+  if ('denied' in lookup) return lookup.denied;
+  const { event, organizerId } = lookup;
 
   const identityIds = [
     ...new Set([
@@ -610,35 +342,28 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
   let attending = personal.attending;
   let listedCount = personal.listedUserIds.size;
   const listedIds = [...personal.listedUserIds];
-  // Group invite with no participant registry means group RSVPs are invisible; the
-  // attending count would be misleadingly low (personal invitees only).
   let isGroupDegraded = false;
 
-  if (hasGroupInvite) {
-    if (participantRows === null) {
-      isGroupDegraded = true;
-      botLogger.warn({ eventId: input.event_id }, 'group rsvp: participant repo absent, attending count suppressed');
-    }
-    // A member's answer counts while the group whose card carried it is still invited; in a group chat
-    // only that chat's own answers are shown. Like the invitation card, an invitee never sees an answer
-    // of unknown origin; only a reader who sees the event itself does, and only outside group chats.
+  if (liveGroupChatIds.length > 0) {
     // organizerId is set only when the reader got here as an invitee.
-    const readerSeesEvent = organizerId === null;
-    const groupRows =
-      participantRows?.filter((p) =>
-        p.source_group_id === null
-          ? !ctx.isGroup && readerSeesEvent
-          : liveGroupChatIds.includes(p.source_group_id) && (!ctx.isGroup || p.source_group_id === ctx.groupChatId),
-      ) ?? null;
-    const group = describeGroupRsvp(lang, groupRows, personal.listedUserIds, displayName);
+    const group = buildGroupRosterSection(
+      ctx,
+      lang,
+      input.event_id,
+      participantRows,
+      liveGroupChatIds,
+      organizerId === null,
+      personal.listedUserIds,
+      displayName,
+    );
     lines.push(...group.lines);
-    for (const member of group.members) {
-      if (isRsvpAttending(member.status)) attending++;
-    }
-    listedCount += group.members.length;
-    listedIds.push(...group.members.map((member) => member.user_id));
+    attending += group.attending;
+    listedCount += group.memberIds.length;
+    listedIds.push(...group.memberIds);
+    isGroupDegraded = group.degraded;
   }
 
+  // The attending count would be misleadingly low (personal invitees only) when group RSVPs are invisible.
   if (listedCount > 0 && !isGroupDegraded) {
     lines.unshift(t(lang).aiTools.sharing.rsvpAttending(attending));
   }
@@ -754,6 +479,40 @@ interface ProposeEditInput {
   reason?: string;
 }
 
+/** Verification-state fields are never proposed: only the verification service sets them. */
+function editableChanges(changes: Record<string, string | null>): Record<string, string | null> {
+  // The owner's Accept applies these verbatim, so a place the model claims would become confirmed
+  // without a tap (#620); only the verification service sets it
+  return Object.fromEntries(Object.entries(changes).filter(([field]) => !Object.hasOwn(UNRESOLVED_PLACE, field)));
+}
+
+function formatEditProposalText(ctx: AgentContext, changes: Record<string, string | null>, reason?: string): string {
+  const proposerName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
+  const changeLines = Object.entries(changes)
+    .map(([k, v]) => `  ${k}: ${v ?? '(remove)'}`)
+    .join('\n');
+  return `📝 <b>Edit proposal</b> from ${proposerName}:\n${changeLines}${reason ? `\n\nReason: ${reason}` : ''}`;
+}
+
+/** True when the owner was actually reached; a missing sender capability or a send error is false. */
+async function notifyOwnerOfEditProposal(
+  ctx: AgentContext,
+  input: ProposeEditInput,
+  changes: Record<string, string | null>,
+  proposalId: number,
+): Promise<boolean> {
+  if (!ctx.sender?.sendEditProposal) return false;
+  const ownerId = ctx.eventService.getEventOwnerId(input.event_id);
+  if (!ownerId) return false;
+  try {
+    await ctx.sender.sendEditProposal(ownerId, formatEditProposalText(ctx, changes, input.reason), proposalId);
+    return true;
+  } catch (err) {
+    deliveryLogger.error({ err, proposalId, ownerId }, 'Failed to notify event owner of edit proposal');
+    return false;
+  }
+}
+
 export async function handleProposeEdit(ctx: AgentContext, input: ProposeEditInput): Promise<ToolResult> {
   if (!ctx.sharing?.editProposalRepo) {
     return { success: false, error: 'Edit proposals are not configured.' };
@@ -773,11 +532,7 @@ export async function handleProposeEdit(ctx: AgentContext, input: ProposeEditInp
     return { success: false, error: 'You are not invited to this event.' };
   }
 
-  // The owner's Accept applies these verbatim, so a place the model claims would become confirmed
-  // without a tap (#620); only the verification service sets it
-  const changes = Object.fromEntries(
-    Object.entries(input.changes).filter(([field]) => !Object.hasOwn(UNRESOLVED_PLACE, field)),
-  );
+  const changes = editableChanges(input.changes);
   if (Object.keys(changes).length === 0) {
     return {
       success: false,
@@ -794,30 +549,7 @@ export async function handleProposeEdit(ctx: AgentContext, input: ProposeEditInp
     reason: input.reason,
   });
 
-  let ownerNotified = true;
-  if (ctx.sender?.sendEditProposal) {
-    const ownerId = ctx.eventService.getEventOwnerId(input.event_id);
-    if (ownerId) {
-      const proposerName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
-      const changeLines = Object.entries(changes)
-        .map(([k, v]) => `  ${k}: ${v ?? '(remove)'}`)
-        .join('\n');
-      const text = `📝 <b>Edit proposal</b> from ${proposerName}:\n${changeLines}${input.reason ? `\n\nReason: ${input.reason}` : ''}`;
-      try {
-        await ctx.sender.sendEditProposal(ownerId, text, proposal.id);
-      } catch (err) {
-        deliveryLogger.error(
-          { err, proposalId: proposal.id, ownerId },
-          'Failed to notify event owner of edit proposal',
-        );
-        ownerNotified = false;
-      }
-    } else {
-      ownerNotified = false;
-    }
-  } else {
-    ownerNotified = false;
-  }
+  const ownerNotified = await notifyOwnerOfEditProposal(ctx, input, changes, proposal.id);
 
   return {
     success: true,

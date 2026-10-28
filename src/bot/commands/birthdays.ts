@@ -1,6 +1,6 @@
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
-import type { BirthdayService } from '../../services/birthday/birthday-service.ts';
+import type { BirthdayDisplayItem, BirthdayService } from '../../services/birthday/birthday-service.ts';
 import { ruPlural } from '../../services/event/formatters.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
@@ -44,6 +44,47 @@ export function formatBirthdayLine(params: FormatBirthdayLineParams): string {
   return `🎁 ${nameStr}${ageSuffix} (${dateStr})`;
 }
 
+interface GroupCalendarRef {
+  groupId: number;
+  title: string;
+}
+
+/** Group calendars whose birthdays are shown: the current group in a group chat, else the user's groups. */
+function resolveGroupCalendars(
+  ctx: BotCommandContext,
+  userId: number,
+  groupChatRepo?: GroupChatRepository,
+  groupMemberRepo?: GroupMemberRepository,
+): GroupCalendarRef[] | null {
+  if (isGroup(ctx)) {
+    const groupId = getGroupId(ctx);
+    if (groupId === null) return null;
+    const group = groupChatRepo?.findByChatId(groupId) ?? null;
+    return group ? [{ groupId, title: group.title ?? String(groupId) }] : [];
+  }
+  return (groupMemberRepo?.getGroupsForUser(userId) ?? []).map((g) => ({
+    groupId: g.chat_id,
+    title: g.title ?? String(g.chat_id),
+  }));
+}
+
+function pushBirthdayItems(lines: string[], items: BirthdayDisplayItem[], lang: 'en' | 'ru'): void {
+  for (const item of items) {
+    const eventDate = new Date(item.event.start_at);
+    lines.push(
+      '• ' +
+        formatBirthdayLine({
+          title: item.event.title,
+          celebrantId: item.celebrantId,
+          birthYear: item.birthYear,
+          username: item.username,
+          eventDate,
+          lang,
+        }),
+    );
+  }
+}
+
 export async function handleBirthdays(
   ctx: BotCommandContext,
   birthdayService: BirthdayService,
@@ -54,18 +95,8 @@ export async function handleBirthdays(
   if (!user) return;
   const lang = user.language as 'en' | 'ru';
 
-  let groupCalendars: { groupId: number; title: string }[] = [];
-  if (isGroup(ctx)) {
-    const groupId = getGroupId(ctx);
-    if (groupId === null) return;
-    const group = groupChatRepo?.findByChatId(groupId) ?? null;
-    groupCalendars = group ? [{ groupId, title: group.title ?? String(groupId) }] : [];
-  } else {
-    groupCalendars = (groupMemberRepo?.getGroupsForUser(user.telegram_id) ?? []).map((g) => ({
-      groupId: g.chat_id,
-      title: g.title ?? String(g.chat_id),
-    }));
-  }
+  const groupCalendars = resolveGroupCalendars(ctx, user.telegram_id, groupChatRepo, groupMemberRepo);
+  if (groupCalendars === null) return;
 
   const { personal, groups } = birthdayService.getBirthdaysForDisplay(user.telegram_id, groupCalendars);
 
@@ -78,40 +109,14 @@ export async function handleBirthdays(
 
   if (personal.length > 0) {
     lines.push(lang === 'ru' ? '👤 <b>Личный календарь</b>' : '👤 <b>Personal calendar</b>');
-    for (const item of personal) {
-      const eventDate = new Date(item.event.start_at);
-      lines.push(
-        '• ' +
-          formatBirthdayLine({
-            title: item.event.title,
-            celebrantId: item.celebrantId,
-            birthYear: item.birthYear,
-            username: item.username,
-            eventDate,
-            lang,
-          }),
-      );
-    }
+    pushBirthdayItems(lines, personal, lang);
   }
 
   for (const group of groups) {
     if (group.items.length === 0) continue;
     lines.push('');
     lines.push(`👥 <b>${escapeHtml(group.title)}</b>`);
-    for (const item of group.items) {
-      const eventDate = new Date(item.event.start_at);
-      lines.push(
-        '• ' +
-          formatBirthdayLine({
-            title: item.event.title,
-            celebrantId: item.celebrantId,
-            birthYear: item.birthYear,
-            username: item.username,
-            eventDate,
-            lang,
-          }),
-      );
-    }
+    pushBirthdayItems(lines, group.items, lang);
   }
 
   await ctx.send(lines.join('\n'), { parse_mode: 'HTML' });

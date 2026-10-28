@@ -55,6 +55,51 @@ const INITIAL = 'There are two invented events today.';
 /** A scripted verdict, or one computed from what the validator was shown. */
 type Verdict = string | Error | ((validatorInput: string) => string);
 
+/** The validator's reply for the next scripted verdict, computed from what it was shown when scripted so. */
+function validatorResult(
+  scriptedVerdict: Verdict | undefined,
+  shown: StreamRoundOptions['messages'][number]['content'] | undefined,
+): StreamRoundResult {
+  if (scriptedVerdict instanceof Error) throw scriptedVerdict;
+  if (scriptedVerdict === undefined) throw new Error('Missing scripted verdict');
+  const verdict =
+    typeof scriptedVerdict === 'function' ? scriptedVerdict(typeof shown === 'string' ? shown : '') : scriptedVerdict;
+  return {
+    text: verdict,
+    toolCalls: [],
+    finishReason: 'stop',
+    assistantMessage: { role: 'assistant', content: verdict },
+    providerUsed: 'synthetic-validator',
+  };
+}
+
+/** The agent model's reply for one scripted round; `roundNumber` is 1-based. */
+function agentRoundResult(round: Round, roundNumber: number, callbacks: StreamCallbacks): StreamRoundResult {
+  const toolCalls = round.tool
+    ? [{ id: `call-${roundNumber}`, name: round.tool.name, arguments: JSON.stringify(round.tool.input) }]
+    : [];
+  if (round.tool) callbacks.onToolCallStart?.(round.tool.name);
+  return {
+    text: round.text,
+    toolCalls,
+    finishReason: round.tool ? 'tool_calls' : 'stop',
+    assistantMessage: {
+      role: 'assistant',
+      content: round.text || null,
+      ...(toolCalls.length
+        ? {
+            tool_calls: toolCalls.map((call) => ({
+              id: call.id,
+              type: 'function' as const,
+              function: { name: call.name, arguments: call.arguments },
+            })),
+          }
+        : {}),
+    },
+    providerUsed: 'synthetic-agent',
+  };
+}
+
 function scripted(rounds: Round[], verdicts: Verdict[]) {
   let roundIndex = 0;
   let verdictIndex = 0;
@@ -63,50 +108,14 @@ function scripted(rounds: Round[], verdicts: Verdict[]) {
     const system = options.messages[0];
     if (typeof system?.content === 'string' && system.content.includes('strict QA validator')) {
       counts.validator++;
-      const scriptedVerdict = verdicts[verdictIndex++];
-      if (scriptedVerdict instanceof Error) throw scriptedVerdict;
-      if (scriptedVerdict === undefined) throw new Error('Missing scripted verdict');
-      const shown = options.messages[1]?.content;
-      const verdict =
-        typeof scriptedVerdict === 'function'
-          ? scriptedVerdict(typeof shown === 'string' ? shown : '')
-          : scriptedVerdict;
-      return {
-        text: verdict,
-        toolCalls: [],
-        finishReason: 'stop',
-        assistantMessage: { role: 'assistant', content: verdict },
-        providerUsed: 'synthetic-validator',
-      };
+      return validatorResult(verdicts[verdictIndex++], options.messages[1]?.content);
     }
     counts.model++;
     const round = rounds[roundIndex++];
     if (!round) throw new Error('Missing scripted round');
     callbacks.onTextDelta?.(round.text);
     if (round.error) throw round.error;
-    const toolCalls = round.tool
-      ? [{ id: `call-${roundIndex}`, name: round.tool.name, arguments: JSON.stringify(round.tool.input) }]
-      : [];
-    if (round.tool) callbacks.onToolCallStart?.(round.tool.name);
-    return {
-      text: round.text,
-      toolCalls,
-      finishReason: round.tool ? 'tool_calls' : 'stop',
-      assistantMessage: {
-        role: 'assistant',
-        content: round.text || null,
-        ...(toolCalls.length
-          ? {
-              tool_calls: toolCalls.map((call) => ({
-                id: call.id,
-                type: 'function' as const,
-                function: { name: call.name, arguments: call.arguments },
-              })),
-            }
-          : {}),
-      },
-      providerUsed: 'synthetic-agent',
-    };
+    return agentRoundResult(round, roundIndex, callbacks);
   };
   return { impl, counts };
 }

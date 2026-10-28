@@ -39,25 +39,35 @@ function classifyStatus(status: number, message: string): AiErrorClass {
  * fired can only be the per-provider deadline, which is a timeout of that provider.
  */
 export function classifyProviderError(error: unknown, callerAborted: boolean): ProviderErrorClassification {
+  if (error instanceof OpenAI.APIError) return classifySdkError(error, callerAborted);
+  if (error instanceof Error) return classifyPlainError(error, callerAborted);
+  return { errorClass: 'other', httpStatus: null };
+}
+
+/** An error the OpenAI SDK raised: a transport fault, an abort, or an HTTP answer. */
+function classifySdkError(
+  error: InstanceType<typeof OpenAI.APIError>,
+  callerAborted: boolean,
+): ProviderErrorClassification {
   if (error instanceof OpenAI.APIConnectionTimeoutError) return { errorClass: 'timeout', httpStatus: null };
   if (error instanceof OpenAI.APIUserAbortError) {
     return { errorClass: callerAborted ? 'aborted' : 'timeout', httpStatus: null };
   }
   if (error instanceof OpenAI.APIConnectionError) return { errorClass: 'server', httpStatus: null };
-  if (error instanceof OpenAI.APIError) {
-    if (typeof error.status === 'number') {
-      return { errorClass: classifyStatus(error.status, error.message), httpStatus: error.status };
-    }
-    return { errorClass: 'other', httpStatus: null };
+  if (typeof error.status === 'number') {
+    return { errorClass: classifyStatus(error.status, error.message), httpStatus: error.status };
   }
-  if (error instanceof Error) {
-    if (error.name === 'TimeoutError') return { errorClass: 'timeout', httpStatus: null };
-    if (error.name === 'AbortError') return { errorClass: callerAborted ? 'aborted' : 'timeout', httpStatus: null };
-    if (error.message.includes('timed out')) return { errorClass: 'timeout', httpStatus: null };
-    const code = 'code' in error ? error.code : undefined;
-    if (typeof code === 'string' && CONNECTION_FAULT_CODES.includes(code)) {
-      return { errorClass: 'server', httpStatus: null };
-    }
+  return { errorClass: 'other', httpStatus: null };
+}
+
+/** A non-SDK error: a deadline or abort from the runtime, or a socket-level fault carrying an errno code. */
+function classifyPlainError(error: Error, callerAborted: boolean): ProviderErrorClassification {
+  if (error.name === 'TimeoutError') return { errorClass: 'timeout', httpStatus: null };
+  if (error.name === 'AbortError') return { errorClass: callerAborted ? 'aborted' : 'timeout', httpStatus: null };
+  if (error.message.includes('timed out')) return { errorClass: 'timeout', httpStatus: null };
+  const code = 'code' in error ? error.code : undefined;
+  if (typeof code === 'string' && CONNECTION_FAULT_CODES.includes(code)) {
+    return { errorClass: 'server', httpStatus: null };
   }
   return { errorClass: 'other', httpStatus: null };
 }

@@ -63,7 +63,8 @@ SITE_PACKAGES=$("$VENV/bin/python" -c "import site; print(site.getsitepackages()
 cp "$SO_FILE" "$SITE_PACKAGES/"
 echo ""
 echo "=== SUCCESS ==="
-echo "Installed: $SITE_PACKAGES/$(basename $SO_FILE)"
-echo "Size: $(ls -lh "$SITE_PACKAGES/$(basename $SO_FILE)" | awk '{print $5}')"
+echo "Installed: $SITE_PACKAGES/$(basename "$SO_FILE")"
+# shellcheck disable=SC2012 # one named file, only its human-readable size is printed
+echo "Size: $(ls -lh "$SITE_PACKAGES/$(basename "$SO_FILE")" | awk '{print $5}')"
 echo ""
 echo "You can now test: venv/bin/python scripts/debug-call.py <user_id>"

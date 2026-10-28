@@ -38,6 +38,27 @@ interface NormalizedText {
   spans: { start: number; end: number }[];
 }
 
+/** A `{{$n|default(x)}}` reference with an explicit one-argument default does not require a capture. */
+function hasDefaultFilter(filterExpr: string | undefined): boolean {
+  if (!filterExpr) return false;
+  try {
+    return parseFilterChain(filterExpr).some((filter) => filter.name === 'default' && filter.args.length === 1);
+  } catch {
+    /* Invalid filters do not relax capture requirements. */
+    return false;
+  }
+}
+
+/** Adds each `{{$n}}` reference in `value` to `required` (unless defaulted); true when the string has any. */
+function collectCaptureReferences(value: string, required: Set<string>): boolean {
+  let found = false;
+  for (const match of value.matchAll(/\{\{\s*(\$\d+)\s*(?:\|([^}]*))?\}\}/g)) {
+    found = true;
+    if (!hasDefaultFilter(match[2])) required.add(match[1]!);
+  }
+  return found;
+}
+
 function captureRequirements(workflow: string): { required: string[]; parameterized: boolean } | null {
   if (workflow.length > MAX_WORKFLOW_CHARS) return null;
   const required = new Set<string>();
@@ -52,23 +73,37 @@ function captureRequirements(workflow: string): { required: string[]; parameteri
   for (let visited = 0; pending.length && visited < MAX_WORKFLOW_NODES; visited++) {
     const value = pending.pop();
     if (typeof value === 'string') {
-      for (const match of value.matchAll(/\{\{\s*(\$\d+)\s*(?:\|([^}]*))?\}\}/g)) {
-        parameterized = true;
-        let hasDefault = false;
-        if (match[2]) {
-          try {
-            hasDefault = parseFilterChain(match[2]).some(
-              (filter) => filter.name === 'default' && filter.args.length === 1,
-            );
-          } catch {
-            /* Invalid filters do not relax capture requirements. */
-          }
-        }
-        if (!hasDefault) required.add(match[1]!);
-      }
+      if (collectCaptureReferences(value, required)) parameterized = true;
     } else if (value && typeof value === 'object') pending.push(...Object.values(value));
   }
   return pending.length ? null : { required: [...required], parameterized };
+}
+
+/** The match only when it spans the whole text. */
+function wholeTextMatch(pattern: RegExp, text: string): RegExpExecArray | null {
+  const match = pattern.exec(text);
+  return match && match.index === 0 && match[0].length === text.length ? match : null;
+}
+
+/**
+ * Capture group `i` as the user typed it. With `offsets` the match ran on normalized text, so the
+ * group is mapped back to the raw span (or, after a typo repair, rebuilt from the repaired words); `undefined`
+ * when the mapping is unavailable.
+ */
+function captureAt(
+  match: RegExpExecArray,
+  i: number,
+  raw: string,
+  offsets: NormalizedText | undefined,
+  repaired: CanonicalText | null,
+): string | undefined {
+  if (!offsets) return match[i]!;
+  const range = match.indices?.[i];
+  if (!range || range[1] <= range[0]) return '';
+  const first = offsets.spans[range[0]],
+    last = offsets.spans[range[1] - 1];
+  if (!first || !last) return undefined;
+  return repaired?.replaced ? rebuildCapture(repaired, raw, range[0], range[1]) : raw.slice(first.start, last.end);
 }
 
 function rebuildCapture(canon: CanonicalText, raw: string, from: number, to: number): string {
@@ -88,35 +123,44 @@ function extract(entry: IntentEntry, input: MatchInput, pass: Pass = 'plain'): M
   // The plain pass is the whole message; the repaired pass runs only for rules that did not match it.
   const strictText = entry.strictStructure ? (pass === 'plain' ? input.canonical() : input.repaired()) : null;
   if (entry.strictStructure && !strictText) return null;
-  let match = entry.pattern.exec(strictText ? strictText.text : raw);
+  let match = wholeTextMatch(entry.pattern, strictText ? strictText.text : raw);
   let offsets: NormalizedText | undefined = strictText ?? undefined;
-  const covers = (text: string) => match !== null && match.index === 0 && match[0].length === text.length;
-  if (!covers(strictText ? strictText.text : raw)) {
+  if (!match) {
     if (entry.strictStructure) return null;
     offsets = input.normalized();
-    match = entry.pattern.exec(offsets.text);
-    if (!covers(offsets.text)) return null;
+    match = wholeTextMatch(entry.pattern, offsets.text);
+    if (!match) return null;
   }
   if (!match) return null;
   const captures: Record<string, string> = {};
   for (let i = 1; i < match.length; i++) {
     if (match[i] === undefined) continue;
-    const range = match.indices?.[i];
-    if (!offsets) captures[`$${i}`] = match[i]!;
-    else if (range && range[1] > range[0]) {
-      const first = offsets.spans[range[0]],
-        last = offsets.spans[range[1] - 1];
-      if (first && last)
-        // After a typo repair the binding reads the repaired words ("завтро" → "завтра"); the rest stays as typed.
-        captures[`$${i}`] =
-          strictText?.replaced && pass === 'repaired'
-            ? rebuildCapture(strictText, raw, range[0], range[1])
-            : raw.slice(first.start, last.end);
-    } else captures[`$${i}`] = '';
+    // After a typo repair the binding reads the repaired words ("завтро" → "завтра"); the rest stays as typed.
+    const value = captureAt(match, i, raw, offsets, pass === 'repaired' ? strictText : null);
+    if (value !== undefined) captures[`$${i}`] = value;
   }
   return entry.required.some((key) => captures[key] === undefined || captures[key] === '')
     ? null
     : { intentId: entry.intentId, captures };
+}
+
+function compilePattern(intent: Intent): RegExp | undefined {
+  if (!intent.pattern) return undefined;
+  try {
+    return new RegExp(intent.pattern, 'di');
+  } catch {
+    cmdLogger.warn({ intentId: intent.id }, 'Intent pattern is invalid; argument extraction unavailable');
+    return undefined;
+  }
+}
+
+function addToIndex(index: Map<string, IntentEntry[]>, keys: string[], entry: IntentEntry): void {
+  for (const key of new Set(keys.map(normalize))) {
+    if (!key) continue;
+    const rows = index.get(key) ?? [];
+    rows.push(entry);
+    index.set(key, rows);
+  }
 }
 
 export class IntentMatcher {
@@ -129,46 +173,32 @@ export class IntentMatcher {
     this.phraseMap.clear();
     this.triggerIndex.clear();
     for (const intent of intents) {
-      if (intent.status !== 'approved') continue;
-      const requirements = captureRequirements(intent.workflow);
-      if (!requirements) {
-        cmdLogger.warn({ intentId: intent.id }, 'Intent workflow exceeds inspection bound; not indexed');
-        continue;
-      }
-      const entry: IntentEntry = {
-        intentId: intent.id,
-        ...requirements,
-        strictStructure: intent.canonical_name.startsWith('basis.'),
-      };
-      if (intent.pattern) {
-        try {
-          entry.pattern = new RegExp(intent.pattern, 'di');
-        } catch {
-          cmdLogger.warn({ intentId: intent.id }, 'Intent pattern is invalid; argument extraction unavailable');
-        }
-      }
-      const phrases = StringArrayCodec.safeParse(intent.phrases);
-      if (!phrases.success) cmdLogger.error({ intentId: intent.id }, 'Intent has invalid phrases JSON');
-      else
-        for (const key of new Set(phrases.data.map(normalize))) {
-          if (!key) continue;
-          const rows = this.phraseMap.get(key) ?? [];
-          rows.push(entry);
-          this.phraseMap.set(key, rows);
-        }
-      const triggers = StringArrayCodec.safeParse(intent.trigger_words);
-      if (!triggers.success) {
-        cmdLogger.error({ intentId: intent.id }, 'Intent has invalid trigger_words JSON');
-        continue;
-      }
-      if (entry.pattern)
-        for (const key of new Set(triggers.data.map(normalize))) {
-          if (!key) continue;
-          const rows = this.triggerIndex.get(key) ?? [];
-          rows.push(entry);
-          this.triggerIndex.set(key, rows);
-        }
+      if (intent.status === 'approved') this.indexIntent(intent);
     }
+  }
+
+  private indexIntent(intent: Intent): void {
+    const requirements = captureRequirements(intent.workflow);
+    if (!requirements) {
+      cmdLogger.warn({ intentId: intent.id }, 'Intent workflow exceeds inspection bound; not indexed');
+      return;
+    }
+    const entry: IntentEntry = {
+      intentId: intent.id,
+      ...requirements,
+      strictStructure: intent.canonical_name.startsWith('basis.'),
+    };
+    const pattern = compilePattern(intent);
+    if (pattern) entry.pattern = pattern;
+    const phrases = StringArrayCodec.safeParse(intent.phrases);
+    if (!phrases.success) cmdLogger.error({ intentId: intent.id }, 'Intent has invalid phrases JSON');
+    else addToIndex(this.phraseMap, phrases.data, entry);
+    const triggers = StringArrayCodec.safeParse(intent.trigger_words);
+    if (!triggers.success) {
+      cmdLogger.error({ intentId: intent.id }, 'Intent has invalid trigger_words JSON');
+      return;
+    }
+    if (entry.pattern) addToIndex(this.triggerIndex, triggers.data, entry);
   }
 
   /** Compatible convenience API. Ambiguity is not permission to choose the first write. */
@@ -194,18 +224,11 @@ export class IntentMatcher {
       },
     };
     const exact = this.phraseMap.get(normalize(text));
-    if (exact?.length) {
-      if (exact.length !== 1)
-        return { kind: 'abstain', reason: 'ambiguous', candidates: exact.map((e) => e.intentId).sort((a, b) => a - b) };
-      const entry = exact[0]!;
-      const result =
-        entry.parameterized || entry.strictStructure
-          ? extract(entry, input)
-          : { intentId: entry.intentId, captures: {} };
-      return result
-        ? { kind: 'matched', strategy: 'exact', result }
-        : { kind: 'abstain', reason: 'missing_capture', candidates: [entry.intentId] };
-    }
+    if (exact?.length) return explainExactPhrase(exact, input);
+    return this.explainByTriggers(text, input);
+  }
+
+  private explainByTriggers(text: string, input: MatchInput): MatchDecision {
     const candidates = new Map<number, IntentEntry>();
     for (const word of tokenize(text))
       for (const entry of this.triggerIndex.get(word) ?? []) candidates.set(entry.intentId, entry);
@@ -234,4 +257,16 @@ export class IntentMatcher {
       candidates: results.map((r) => r.intentId).sort((a, b) => a - b),
     };
   }
+}
+
+/** The input is exactly a registered example phrase: one rule wins, several are ambiguous. */
+function explainExactPhrase(exact: IntentEntry[], input: MatchInput): MatchDecision {
+  if (exact.length !== 1)
+    return { kind: 'abstain', reason: 'ambiguous', candidates: exact.map((e) => e.intentId).sort((a, b) => a - b) };
+  const entry = exact[0]!;
+  const result =
+    entry.parameterized || entry.strictStructure ? extract(entry, input) : { intentId: entry.intentId, captures: {} };
+  return result
+    ? { kind: 'matched', strategy: 'exact', result }
+    : { kind: 'abstain', reason: 'missing_capture', candidates: [entry.intentId] };
 }

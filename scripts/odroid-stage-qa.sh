@@ -23,7 +23,8 @@
 # runs queue here) -> verify + download -> exec LIB/stage-qa-run.sh, which takes the host deploy
 # lock and runs the stage. The stage lock fd stays open across the exec, so it is held until the
 # run ends. Exit codes and the last stdout line (STAGE_QA_RESULT ...) follow the stage QA contract:
-# 0 passed, 1 failed, 2 refused, 3 not provisioned, 75 lock wait timed out, 76 superseded.
+# 0 passed, 1 failed, 2 refused, 3 not provisioned, 4 stage infrastructure could not run (emitted by
+# the exec'd run script: docker load / compose up failed), 75 lock wait timed out, 76 superseded.
 set -euo pipefail
 umask 077
 
@@ -78,11 +79,15 @@ trap 'on_signal 143' TERM
 trap 'on_signal 130' INT
 trap 'on_signal 129' HUP
 
-fail() { echo "hypercal-stage-qa: $*" >&2 || true; exit 2; }
+fail() {
+  echo "hypercal-stage-qa: $*" >&2 || true
+  exit 2
+}
 
 # Called as an ssh forced command (the PC driver, scripts/stage-qa-pc.py) it has no arguments and
 # the client's command line, which sshd leaves in SSH_ORIGINAL_COMMAND, must be exactly the SHA.
 # With one argument (the sudo path) the environment is ignored.
+# shellcheck disable=SC2016 # $GITHUB_TOKEN is literal text in the usage line
 case "$#" in
   0) CANDIDATE="${SSH_ORIGINAL_COMMAND-}" ;;
   1) CANDIDATE="$1" ;;

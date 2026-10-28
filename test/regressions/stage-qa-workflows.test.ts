@@ -263,6 +263,164 @@ describe('the self-hosted stage job is the only extra self-hosted job and no wor
   });
 });
 
+// #858: the runner on the owner's PC (labels self-hosted, Linux, X64 and qa-pc) holds the qa-cli Telegram Web session.
+// It must take only the stage QA job, so no workflow may name the generic self-hosted label (or the default OS and
+// architecture labels, or an expression/runner group nobody can resolve statically) outside a job listed here.
+describe('runner labels: only an explicitly allowed job may leave the GitHub-hosted runners', () => {
+  const GITHUB_HOSTED_LABEL = /^(?:ubuntu|macos|windows)-[a-z0-9.-]+$/i;
+  // `<file>#<job id>` -> the exact runs-on labels. qa-pc exists only on the owner PC, odroid-hcb only on the odroid.
+  const ALLOWED_SELF_HOSTED: Record<string, readonly string[]> = {
+    'deploy.yml#deploy': ['self-hosted', 'odroid-hcb'],
+    'stage-qa.yml#qa': ['self-hosted', 'qa-pc'],
+  };
+  const runsOn = z.union([
+    z.string(),
+    z.array(z.string()),
+    z.object({ group: z.string().optional(), labels: z.union([z.string(), z.array(z.string())]).optional() }),
+  ]);
+  const scannedWorkflow = z
+    .object({
+      jobs: z.record(z.string(), z.object({ 'runs-on': runsOn.optional(), uses: z.string().optional() }).passthrough()),
+    })
+    .passthrough();
+
+  type ScannedJob = z.infer<typeof scannedWorkflow>['jobs'][string];
+
+  // The first reason a job may not run where it asks to, or undefined when it may.
+  function jobViolation(where: string, entry: ScannedJob): string | undefined {
+    const raw = entry['runs-on'];
+    // No runs-on: a call of a reusable workflow. A local one is scanned as its own file; an external one can pick
+    // any runner of this repository from outside, so it is refused.
+    if (raw === undefined) {
+      return entry.uses === undefined || entry.uses.startsWith('./')
+        ? undefined
+        : `${where}: calls the external reusable workflow ${entry.uses}, whose runs-on is not scanned`;
+    }
+    if (typeof raw === 'object' && !Array.isArray(raw)) {
+      return `${where}: runs-on as a group/labels object cannot be proven to stay off the self-hosted runners`;
+    }
+    const labels = [raw].flat();
+    if (labels.some((label) => label.includes('${{'))) {
+      return `${where}: runs-on holds an expression (${labels.join(', ')}) that is not statically a hosted runner`;
+    }
+    const allowed = ALLOWED_SELF_HOSTED[where];
+    if (allowed) {
+      return [...labels].sort().join(',') === [...allowed].sort().join(',')
+        ? undefined
+        : `${where}: must name exactly [${allowed.join(', ')}], names [${labels.join(', ')}]`;
+    }
+    return labels.every((label) => GITHUB_HOSTED_LABEL.test(label))
+      ? undefined
+      : `${where}: names [${labels.join(', ')}] but only a GitHub-hosted image is allowed here (no self-hosted label alone)`;
+  }
+
+  function runnerViolations(directory: string): string[] {
+    const violations: string[] = [];
+    for (const file of readdirSync(directory).filter((name) => /\.ya?ml$/.test(name))) {
+      const parsed = scannedWorkflow.parse(Bun.YAML.parse(readFileSync(resolve(directory, file), 'utf8')));
+      for (const [id, entry] of Object.entries(parsed.jobs)) {
+        const violation = jobViolation(`${file}#${id}`, entry);
+        if (violation) violations.push(violation);
+      }
+    }
+    return violations.sort();
+  }
+
+  const WORKFLOW_HEAD = 'name: x\non: push\njobs:\n  stray:\n';
+  const withWorkflow = (file: string, body: string, check: (violations: string[]) => void) => {
+    const copy = mkdtempSync(join(tmpdir(), 'hcb-runner-labels-'));
+    try {
+      for (const name of readdirSync(WORKFLOWS))
+        writeFileSync(join(copy, name), readFileSync(resolve(WORKFLOWS, name)));
+      writeFileSync(join(copy, file), `${WORKFLOW_HEAD}${body}    steps:\n      - run: echo hi\n`);
+      check(runnerViolations(copy));
+    } finally {
+      rmSync(copy, { recursive: true, force: true });
+    }
+  };
+
+  test('the repository workflows leave the GitHub-hosted runners only for the odroid deploy and the PC stage QA job', () => {
+    expect(runnerViolations(WORKFLOWS)).toEqual([]);
+  });
+
+  test('a job on the generic self-hosted label fails the contract, in every spelling of runs-on', () => {
+    for (const body of [
+      '    runs-on: self-hosted\n',
+      '    runs-on: [self-hosted]\n',
+      '    runs-on: [self-hosted, linux, x64]\n',
+      '    runs-on: [Self-Hosted]\n',
+      '    runs-on:\n      - self-hosted\n',
+      '    runs-on: [linux]\n',
+      '    runs-on: { group: owner-pc, labels: [self-hosted] }\n',
+      '    runs-on: ${{ matrix.runner }}\n',
+      '    runs-on: ${{ fromJSON(\'["self-hosted"]\') }}\n',
+      '    runs-on: [ubuntu-latest, self-hosted]\n',
+    ]) {
+      withWorkflow('stray.yml', body, (violations) => {
+        expect({ body, violations: violations.filter((line) => line.startsWith('stray.yml#stray')) }).toEqual({
+          body,
+          violations: [expect.stringContaining('stray.yml#stray')],
+        });
+      });
+    }
+  });
+
+  test('the qa-pc and odroid-hcb labels are not enough outside their own job', () => {
+    for (const [file, body] of [
+      ['stray.yml', '    runs-on: [self-hosted, qa-pc]\n'],
+      ['stray.yml', '    runs-on: qa-pc\n'],
+      ['stray.yml', '    runs-on: [self-hosted, odroid-hcb]\n'],
+    ] as const) {
+      withWorkflow(file, body, (violations) => {
+        expect(violations.filter((line) => line.startsWith('stray.yml#stray'))).toHaveLength(1);
+      });
+    }
+    // The allowed jobs themselves must keep both labels: dropping the specific one leaves the generic label alone.
+    withWorkflow('deploy.yml', '    runs-on: [self-hosted]\n', (violations) => {
+      expect(violations).toEqual([expect.stringContaining('deploy.yml#stray')]);
+    });
+  });
+
+  test('GitHub-hosted runners stay valid', () => {
+    for (const body of [
+      '    runs-on: ubuntu-latest\n',
+      '    runs-on: [ubuntu-24.04-arm]\n',
+      '    runs-on: macos-14\n',
+    ]) {
+      withWorkflow('stray.yml', body, (violations) => {
+        expect(violations).toEqual([]);
+      });
+    }
+  });
+
+  // An external reusable workflow chooses its own runs-on; the caller's self-hosted runners would serve it.
+  test('an external reusable workflow call is refused, a local one is scanned as its own file', () => {
+    withWorkflow('stray.yml', '    uses: someone/else/.github/workflows/job.yml@main\n', (violations) => {
+      expect(violations).toEqual([expect.stringContaining('stray.yml#stray: calls the external reusable workflow')]);
+    });
+    withWorkflow('stray.yml', '    uses: ./.github/workflows/pr-ci.yml\n', (violations) => {
+      expect(violations).toEqual([]);
+    });
+  });
+
+  test('exactly one job names qa-pc (the stage QA job) and exactly one names odroid-hcb (the deploy job)', () => {
+    const owners: Record<string, string[]> = {
+      'qa-pc': ['stage-qa.yml#qa'],
+      'odroid-hcb': ['deploy.yml#deploy'],
+    };
+    for (const [label, expected] of Object.entries(owners)) {
+      const namers = readdirSync(WORKFLOWS)
+        .filter((name) => /\.ya?ml$/.test(name))
+        .flatMap((name) =>
+          Object.entries(load(name).jobs)
+            .filter(([, entry]) => [entry['runs-on']].flat().includes(label))
+            .map(([id]) => `${name}#${id}`),
+        );
+      expect(namers).toEqual(expected);
+    }
+  });
+});
+
 describe('the qa step: runs the PC driver and reports its exit code and case count', () => {
   const run = getStep('stage-qa.yml', 'qa', 'Run the stage QA through qa-cli');
 
@@ -325,6 +483,13 @@ describe('the qa step: runs the PC driver and reports its exit code and case cou
     expect(result.outputs).toEqual({ rc: '1', cases: '6' });
   });
 
+  // #858: the PC driver exits 4 when the odroid could not load the image or start compose.
+  test('an infrastructure failure of the stage host publishes rc 4, the case count and the exit code', async () => {
+    const result = await runQa(4, `STAGE_QA_RESULT status=infra-error sha=${SHA} cases=0 failed=0`);
+    expect(result.exitCode).toBe(4);
+    expect(result.outputs).toEqual({ rc: '4', cases: '0' });
+  });
+
   test('a wrapper that printed no result line is reported as rc 70, never as a pass or a plain failure', async () => {
     const result = await runQa(1, 'hypercal-stage-qa-pc: command not found');
     expect(result.exitCode).toBe(70);
@@ -341,8 +506,7 @@ describe('the qa step: runs the PC driver and reports its exit code and case cou
 describe('the report step: stage-qa status for the exact head, truthful in every outcome', () => {
   const reportStep = getStep('stage-qa.yml', 'report', 'Post the stage-qa status');
 
-  async function runReport(env: Record<string, string>) {
-    const script = reportStep.run;
+  async function runReport(env: Record<string, string>, script = reportStep.run) {
     if (!script) throw new Error('the report step has no script');
     const work = mkdtempSync(join(tmpdir(), 'hcb-stage-report-'));
     try {
@@ -424,6 +588,53 @@ describe('the report step: stage-qa status for the exact head, truthful in every
         ['error', `could not run: ${reason} run=777`],
       ]);
     }
+  });
+
+  // #858: an image-load or compose-up failure on the odroid is the stage host's fault, not the pull request's.
+  test('a stage infrastructure failure (image load, compose up) posts error with a could-not-run description, not failure', async () => {
+    const { exitCode, posts } = await runReport({ QA_RESULT: 'failure', QA_RC: '4', QA_CASES: '0' });
+    expect(exitCode).toBe(0);
+    expect(posts.map((post) => [field(post, 'state'), field(post, 'description'), field(post, 'target_url')])).toEqual([
+      [
+        'error',
+        'could not run: stage infrastructure failed (image load or compose up) run=777',
+        `https://github.com/${REPO}/actions/runs/777`,
+      ],
+    ]);
+  });
+
+  // Data contract for mixed versions: an installed driver or wrapper that predates exit 4 still ends a failed
+  // image load with exit 1, which stays a failure until the installed files are updated; the verdicts that
+  // really are the pull request's stay failures whatever the case count.
+  test('exit 1 (health failed, a case failed, or an older installed driver) still posts failure, never error', async () => {
+    for (const cases of ['0', '3', '6']) {
+      const { posts } = await runReport({ QA_RESULT: 'failure', QA_RC: '1', QA_CASES: cases });
+      expect(posts.map((post) => [field(post, 'state'), field(post, 'description')])).toEqual([
+        ['failure', 'failed run=777'],
+      ]);
+    }
+  });
+
+  test('an exit code no layer maps (a newer driver than this workflow) posts nothing instead of guessing', async () => {
+    for (const rc of ['5', '6', '77', '99', '137', '143']) {
+      const { exitCode, posts } = await runReport({ QA_RESULT: 'failure', QA_RC: rc, QA_CASES: '0' });
+      expect({ rc, exitCode, posts }).toEqual({ rc, exitCode: 0, posts: [] });
+    }
+  });
+
+  // The workflow on main stays the OLD copy until this change merges, while an updated driver may already end with 4.
+  // The old copy is this script without the rc 4 arm: it must fail closed (no status at all), never post success.
+  test('the workflow from before exit 4 (old copy on main) posts no success and no wrong verdict for rc 4, and still failure for rc 1', async () => {
+    const current = reportStep.run ?? '';
+    const old = current
+      .split('\n')
+      .filter((line) => !line.includes('failure:4)'))
+      .join('\n');
+    expect(old).not.toEqual(current);
+    const four = await runReport({ QA_RESULT: 'failure', QA_RC: '4', QA_CASES: '0' }, old);
+    expect(four).toEqual({ exitCode: 0, posts: [] });
+    const one = await runReport({ QA_RESULT: 'failure', QA_RC: '1', QA_CASES: '0' }, old);
+    expect(one.posts.map((post) => field(post, 'state'))).toEqual(['failure']);
   });
 
   test('a passed exit without a positive case count is an error, never a success', async () => {

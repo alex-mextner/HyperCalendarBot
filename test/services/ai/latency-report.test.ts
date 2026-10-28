@@ -132,3 +132,34 @@ test('preflight skips are separate from actual provider failures', () => {
   expect(summary.byProvider['zai:failed']).toMatchObject({ n: 0, failures: 1, skippedBeforeRequest: 0 });
   expect(summary.byProvider['claude:winner']).toMatchObject({ p50: 30, failures: 0, skippedBeforeRequest: 0 });
 });
+
+test('routing decisions are grouped per tier with their fallbacks', () => {
+  const summary = summarizeAiLogs([
+    { msg: 'Routing decision', tier: 'fast', durationMs: 40 },
+    { msg: 'Routing decision', tier: 'fast', durationMs: 60 },
+    { msg: 'Routing decision fallback', tier: 'fast', fallback: true },
+    { msg: 'Routing decision', tier: 'smart', durationMs: 200, fallback: true },
+    { msg: 'Routing decision', durationMs: 999 },
+  ]);
+  expect(summary.byTier).toEqual({
+    fast: { n: 2, p50: 40, p90: 60, p95: 60, fallbacks: 1 },
+    smart: { n: 1, p50: 200, p90: 200, p95: 200, fallbacks: 1 },
+  });
+  expect(summary.requests).toBe(0);
+});
+
+test('rows without a request id or a usable duration contribute nothing they should not', () => {
+  const summary = summarizeAiLogs([
+    { msg: 'AI request metric', elapsedMs: 10, deliveryOutcome: 'delivered' },
+    { msg: 'AI model call metric', provider: 'hf', model: 'qwen', providerDurationMs: 5 },
+    { msg: 'AI model call metric', requestId: 'a', provider: 'hf', model: 'qwen', providerDurationMs: null },
+    { msg: 'AI model call metric', requestId: 'b', provider: 'hf', providerDurationMs: 7 },
+    { msg: 'something else', requestId: 'c', tier: 'fast', durationMs: 1 },
+    { msg: 'AI request metric', requestId: 'd', deliveryOutcome: 'delivered', termination: 'normal' },
+  ]);
+  expect(summary.requests).toBe(1);
+  expect(summary.outcomes).toEqual({ delivered: 1 });
+  expect(summary.terminations).toEqual({ normal: 1 });
+  expect(summary.byProvider).toEqual({});
+  expect(summary.byTier).toEqual({});
+});

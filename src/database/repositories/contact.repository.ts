@@ -21,6 +21,36 @@ function normalizeUsername(username: string): string {
   return username.trim().replace(/^@/, '');
 }
 
+/** Throws when the contact found by name or username is provably someone else than the incoming identity. */
+function assertSameIdentity(existing: Contact, normalizedUsername: string | undefined, telegramId: number | undefined) {
+  if (telegramId && existing.telegram_id && telegramId !== existing.telegram_id) {
+    throw new Error('CONTACT_IDENTITY_CONFLICT: matching name or username has a different Telegram ID');
+  }
+  const sameId = telegramId !== undefined && telegramId === existing.telegram_id;
+  if (
+    normalizedUsername &&
+    existing.username &&
+    normalizeUsername(existing.username).toLowerCase() !== normalizedUsername.toLowerCase() &&
+    !sameId
+  ) {
+    throw new Error('CONTACT_IDENTITY_CONFLICT: matching name has a different username');
+  }
+}
+
+/** The fields an incoming identity adds to an existing contact; never overwrites a stored preferred name. */
+function upsertPatch(
+  existing: Contact,
+  normalizedUsername: string | undefined,
+  telegramId: number | undefined,
+  preferredName: string | undefined,
+): { username?: string; telegram_id?: number; preferred_name?: string } {
+  const patch: { username?: string; telegram_id?: number; preferred_name?: string } = {};
+  if (normalizedUsername && normalizedUsername !== existing.username) patch.username = normalizedUsername;
+  if (telegramId) patch.telegram_id = telegramId;
+  if (preferredName && !existing.preferred_name) patch.preferred_name = preferredName;
+  return patch;
+}
+
 export class ContactRepository {
   constructor(private db: Database) {}
 
@@ -110,22 +140,8 @@ export class ContactRepository {
       }
       const existing = byId ?? byUsername ?? this.findByNameStrict(userId, name);
       if (!existing) return this.add(userId, name, normalized, telegramId, preferredName);
-      if (telegramId && existing.telegram_id && telegramId !== existing.telegram_id) {
-        throw new Error('CONTACT_IDENTITY_CONFLICT: matching name or username has a different Telegram ID');
-      }
-      const sameId = telegramId !== undefined && telegramId === existing.telegram_id;
-      if (
-        normalized &&
-        existing.username &&
-        normalizeUsername(existing.username).toLowerCase() !== normalized.toLowerCase() &&
-        !sameId
-      ) {
-        throw new Error('CONTACT_IDENTITY_CONFLICT: matching name has a different username');
-      }
-      const patch: { username?: string; telegram_id?: number; preferred_name?: string } = {};
-      if (normalized && normalized !== existing.username) patch.username = normalized;
-      if (telegramId) patch.telegram_id = telegramId;
-      if (preferredName && !existing.preferred_name) patch.preferred_name = preferredName;
+      assertSameIdentity(existing, normalized, telegramId);
+      const patch = upsertPatch(existing, normalized, telegramId, preferredName);
       if (Object.keys(patch).length > 0) this.update(existing.id, patch);
       return this.findById(userId, existing.id) ?? existing;
     })();

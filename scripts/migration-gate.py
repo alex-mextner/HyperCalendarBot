@@ -35,13 +35,15 @@ Usage: migration-gate.py check <container> <release image> <reviewed transition>
        migration-gate.py unapplied <old image> <data dir> <guard file>
 """
 
-from dataclasses import dataclass, field
+from __future__ import annotations
+
 import hashlib
 import io
 import re
 import subprocess
 import sys
 import tarfile
+from dataclasses import dataclass, field
 
 MIGRATIONS_PATH = "/app/src/database/migrations.ts"
 DOCS_DIR = "docs/reference/migrations"
@@ -121,7 +123,9 @@ def parse_migrations(text: str) -> ParsedMigrations:
             f"parsed {len(digests)} migration entries but found {expected} objects starting with a "
             "name key; the file's shape has drifted from what this parser expects"
         )
-    return ParsedMigrations(tuple(digests), digests, sha256(preamble.encode() + b"\0" + trailer.encode()))
+    return ParsedMigrations(
+        tuple(digests), digests, sha256(preamble.encode() + b"\0" + trailer.encode())
+    )
 
 
 @dataclass(frozen=True)
@@ -197,12 +201,18 @@ class Decision:
     @property
     def rollback_guard(self) -> list[str]:
         """Accepted new migrations the old image is not declared to survive (it already runs on applied ones)."""
-        return [m.name for m in self.migrations if not m.applied and (m.doc is None or not m.doc.rollback_compatible)]
+        return [
+            m.name
+            for m in self.migrations
+            if not m.applied and (m.doc is None or not m.doc.rollback_compatible)
+        ]
 
     def audit_line(self) -> str:
         if self.mode == "unchanged":
             return f"SCHEMA_GATE decision=unchanged migrations_sha256={self.release_sha256}"
-        line = f"SCHEMA_GATE decision={self.mode} from={self.running_sha256} to={self.release_sha256}"
+        line = (
+            f"SCHEMA_GATE decision={self.mode} from={self.running_sha256} to={self.release_sha256}"
+        )
         for migration in self.migrations:
             doc = migration.doc
             line += f" migration={migration.name} doc={migration.doc_path}"
@@ -215,53 +225,108 @@ class Decision:
         return line
 
 
-def decide(
-    running: bytes | None,
-    release: bytes | None,
-    applied: list[str] | None,
-    exported: list[str] | None,
-    docs: dict[str, bytes] | None,
-    reviewed_transition: str,
-) -> Decision:
+def _unreadable_migrations(running: bytes | None, release: bytes | None) -> Decision | None:
+    """A final refusal when either image's migrations.ts is missing or empty, None when both have content."""
     for side, raw in (("running container", running), ("release image", release)):
         if not raw:
             decision = Decision("", "")
-            decision.refuse(f"migrations.ts {'could not be read' if raw is None else 'is empty'} in the {side}")
+            decision.refuse(
+                f"migrations.ts {'could not be read' if raw is None else 'is empty'} in the {side}"
+            )
             return decision
-    decision = Decision(sha256(running), sha256(release))
-    if decision.running_sha256 == decision.release_sha256:
-        decision.mode = "unchanged"
-        return decision
+    return None
 
-    def parse(side: str, raw: bytes) -> ParsedMigrations | None:
-        try:
-            return parse_migrations(raw.decode("utf-8"))
-        except (UnicodeDecodeError, ValueError) as error:
-            decision.refuse(f"the {side} migrations.ts cannot be parsed: {error}")
-            return None
 
-    old, new = parse("running", running), parse("release", release)
+def _parse_side(decision: Decision, side: str, raw: bytes) -> ParsedMigrations | None:
+    try:
+        return parse_migrations(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as error:
+        decision.refuse(f"the {side} migrations.ts cannot be parsed: {error}")
+        return None
+
+
+def _refuse_unusable_inputs(
+    decision: Decision,
+    new: ParsedMigrations | None,
+    applied: list[str] | None,
+    exported: list[str] | None,
+    docs: dict[str, bytes] | None,
+) -> None:
+    """Refuse for every input the gate could not read or that contradicts the release's own export."""
     if new is not None and exported is None:
         decision.refuse("the release image's exported migration list could not be read")
     elif new is not None and list(new.names) != exported:
-        decision.refuse(f"the release exports migrations {exported} but its source entries are {list(new.names)}")
+        decision.refuse(
+            f"the release exports migrations {exported} but its source entries are {list(new.names)}"
+        )
     if applied is None:
-        decision.refuse("the database's applied migrations could not be read through the running container")
+        decision.refuse(
+            "the database's applied migrations could not be read through the running container"
+        )
     if docs is None:
         decision.refuse(f"the release image's {DOCS_DIR} could not be read")
-    if old is None or new is None or applied is None or docs is None:
-        return finish(decision, reviewed_transition)
 
+
+def _check_shipped_migrations(
+    decision: Decision, old: ParsedMigrations, new: ParsedMigrations
+) -> None:
+    """Shipped entries must survive byte for byte, in order, and the code around them must not change."""
     if old.outside != new.outside:
-        decision.require_review("migrations.ts code outside the migration entries changed; no migration doc can vouch for it")
+        decision.require_review(
+            "migrations.ts code outside the migration entries changed; no migration doc can vouch for it"
+        )
     missing = [name for name in old.names if name not in new.digests]
     for name in missing:
-        decision.refuse(f"migration {name} is missing from the release; a shipped migration is never renamed or removed")
+        decision.refuse(
+            f"migration {name} is missing from the release; a shipped migration is never renamed or removed"
+        )
     for name in old.names:
         if name in new.digests and old.digests[name] != new.digests[name]:
-            decision.refuse(f"migration {name} changed after it shipped; the runner never re-runs an applied migration")
+            decision.refuse(
+                f"migration {name} changed after it shipped; the runner never re-runs an applied migration"
+            )
     if not missing and new.names[: len(old.names)] != old.names:
-        decision.refuse(f"new migrations must follow the shipped ones; the release order is {list(new.names)}")
+        decision.refuse(
+            f"new migrations must follow the shipped ones; the release order is {list(new.names)}"
+        )
+
+
+def _load_new_migration(
+    decision: Decision, name: str, raw: bytes | None, applied_already: bool
+) -> NewMigration:
+    """The new migration with its parsed doc; a missing or invalid doc is a final refusal."""
+    migration = NewMigration(name, None, applied_already)
+    if raw is None:
+        decision.refuse(f"migration {name} has no reviewed doc: {migration.doc_path}")
+        return migration
+    try:
+        return NewMigration(name, parse_doc(raw, name), applied_already)
+    except ValueError as error:
+        decision.refuse(
+            f"migration {name}: {migration.doc_path} is not a valid migration doc: {error}"
+        )
+        return migration
+
+
+def _require_review_for_declarations(decision: Decision, migration: NewMigration) -> None:
+    if migration.doc is None:
+        return
+    if not migration.doc.rollback_compatible:
+        decision.require_review(
+            f"migration {migration.name} declares rollback-compatible: no; the old image cannot run on its result"
+        )
+    if migration.doc.data_deletion:
+        decision.require_review(f"migration {migration.name} declares data-deletion: yes")
+
+
+def _collect_new_migrations(
+    decision: Decision,
+    old: ParsedMigrations,
+    new: ParsedMigrations,
+    applied: list[str],
+    docs: dict[str, bytes],
+) -> None:
+    """Judge every release entry the running image lacks by its doc and by whether the database has it already."""
     recorded = set(applied)
     for name in new.names:
         applied_already = name in recorded
@@ -272,20 +337,34 @@ def decide(
                 f"migration {name} is already applied in the database but the running image does not "
                 "carry it (an image rollback?); the runner will not run the release's version"
             )
-        raw = docs.get(f"{name}.md")
-        migration = NewMigration(name, None, applied_already)
-        if raw is None:
-            decision.refuse(f"migration {name} has no reviewed doc: {migration.doc_path}")
-        else:
-            try:
-                migration = NewMigration(name, parse_doc(raw, name), applied_already)
-            except ValueError as error:
-                decision.refuse(f"migration {name}: {migration.doc_path} is not a valid migration doc: {error}")
-        if migration.doc is not None and not migration.doc.rollback_compatible:
-            decision.require_review(f"migration {name} declares rollback-compatible: no; the old image cannot run on its result")
-        if migration.doc is not None and migration.doc.data_deletion:
-            decision.require_review(f"migration {name} declares data-deletion: yes")
+        migration = _load_new_migration(decision, name, docs.get(f"{name}.md"), applied_already)
+        _require_review_for_declarations(decision, migration)
         decision.migrations.append(migration)
+
+
+def decide(
+    running: bytes | None,
+    release: bytes | None,
+    applied: list[str] | None,
+    exported: list[str] | None,
+    docs: dict[str, bytes] | None,
+    reviewed_transition: str,
+) -> Decision:
+    unreadable = _unreadable_migrations(running, release)
+    if unreadable is not None:
+        return unreadable
+    decision = Decision(sha256(running), sha256(release))
+    if decision.running_sha256 == decision.release_sha256:
+        decision.mode = "unchanged"
+        return decision
+
+    old, new = _parse_side(decision, "running", running), _parse_side(decision, "release", release)
+    _refuse_unusable_inputs(decision, new, applied, exported, docs)
+    if old is None or new is None or applied is None or docs is None:
+        return finish(decision, reviewed_transition)
+
+    _check_shipped_migrations(decision, old, new)
+    _collect_new_migrations(decision, old, new, applied, docs)
     if not decision.refusals and not decision.migrations:
         # The split is lossless, so a byte difference always lands in a check above; stay closed if not.
         decision.refuse("migrations.ts changed but no new migration entry could be identified")
@@ -295,7 +374,10 @@ def decide(
 def finish(decision: Decision, reviewed_transition: str) -> Decision:
     if not decision.refusals:
         decision.mode = "automatic"
-    elif not decision.final and reviewed_transition == f"{decision.running_sha256}:{decision.release_sha256}":
+    elif (
+        not decision.final
+        and reviewed_transition == f"{decision.running_sha256}:{decision.release_sha256}"
+    ):
         decision.mode = "reviewed-override"
     return decision
 
@@ -303,7 +385,9 @@ def finish(decision: Decision, reviewed_transition: str) -> Decision:
 def read(args: list[str]) -> bytes | None:
     """Stdout of a successful command, None otherwise; the command's stderr goes to the deploy log."""
     try:
-        result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, timeout=300, check=False)
+        result = subprocess.run(
+            args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, timeout=300, check=False
+        )
     except (OSError, subprocess.TimeoutExpired) as error:
         print(f"schema gate: {args[:3]} failed: {error}", file=sys.stderr)
         return None
@@ -311,7 +395,11 @@ def read(args: list[str]) -> bytes | None:
 
 
 def lines(raw: bytes | None) -> list[str] | None:
-    return None if raw is None else [line for line in raw.decode("utf-8", "replace").splitlines() if line]
+    return (
+        None
+        if raw is None
+        else [line for line in raw.decode("utf-8", "replace").splitlines() if line]
+    )
 
 
 def read_docs(raw: bytes | None) -> dict[str, bytes] | None:
@@ -344,7 +432,12 @@ def check(container: str, image: str, reviewed_transition: str, guard_path: str)
             release,
             lines(read(["docker", "exec", container, "bun", "-e", APPLIED_MIGRATIONS_JS])),
             lines(read(in_release + ["bun", image, "-e", EXPORTED_MIGRATIONS_JS])),
-            read_docs(read(in_release + ["tar", image, "-C", "/app/docs/reference", "-cf", "-", "migrations"])),
+            read_docs(
+                read(
+                    in_release
+                    + ["tar", image, "-C", "/app/docs/reference", "-cf", "-", "migrations"]
+                )
+            ),
             reviewed_transition,
         )
     out = sys.stdout if decision.accepted else sys.stderr

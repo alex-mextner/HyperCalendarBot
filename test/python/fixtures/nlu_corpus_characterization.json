@@ -1,0 +1,440 @@
+{
+  "audit": {
+    "candidates": [
+      {
+        "actor_scope": "[SCOPE_e86a15d3f4b2642e]",
+        "conversation_id": "[CONVERSATION_fafc74a36dabb97c]",
+        "gold": null,
+        "gold_adjudication": null,
+        "historical_state": "not_reconstructed",
+        "input_kind": "text",
+        "intent_candidates": ["event.create"],
+        "label_status": "needs_adjudication",
+        "observed_responses": [
+          {
+            "content_candidate": "[{\"type\": \"function\", \"function\": {\"name\": \"create_event\"}}]",
+            "role": "assistant"
+          }
+        ],
+        "observed_tools": ["create_event"],
+        "outcome_status": "not_inferred_from_prose",
+        "privacy_status": "pseudonymized_candidate_needs_review",
+        "schema_version": 2,
+        "source_kind": "database",
+        "source_ref": "[ROW_7c824da1f8271bda]",
+        "source_refs": ["[SOURCE_f6e3a47a433096ee]"],
+        "text_candidate": "Создай встречу завтра",
+        "timestamp": "2026-01-01T10:00:00Z",
+        "train_eligible": false
+      },
+      {
+        "actor_scope": "[SCOPE_e86a15d3f4b2642e]",
+        "conversation_id": "[CONVERSATION_6a2289061c1fea6f]",
+        "gold": null,
+        "gold_adjudication": null,
+        "historical_state": "not_reconstructed",
+        "input_kind": "button",
+        "intent_candidates": ["dialogue.answer"],
+        "label_status": "needs_adjudication",
+        "observed_responses": [
+          {
+            "content_candidate": "{\"type\": \"tool_use\", \"name\": \"confirm_it\"}",
+            "role": "assistant"
+          }
+        ],
+        "observed_tools": ["confirm_it"],
+        "outcome_status": "not_inferred_from_prose",
+        "privacy_status": "pseudonymized_candidate_needs_review",
+        "schema_version": 2,
+        "source_kind": "database",
+        "source_ref": "[ROW_fd93573ab20a359d]",
+        "source_refs": ["[SOURCE_f6e3a47a433096ee]"],
+        "text_candidate": "Да",
+        "timestamp": "2026-01-01T10:46:00Z",
+        "train_eligible": false
+      },
+      {
+        "actor_scope": "[SCOPE_e86a15d3f4b2642e]",
+        "conversation_id": "[CONVERSATION_6a2289061c1fea6f]",
+        "gold": null,
+        "gold_adjudication": null,
+        "historical_state": "not_reconstructed",
+        "input_kind": "command",
+        "intent_candidates": ["calendar.read"],
+        "label_status": "needs_adjudication",
+        "observed_responses": [],
+        "observed_tools": [],
+        "outcome_status": "not_inferred_from_prose",
+        "privacy_status": "pseudonymized_candidate_needs_review",
+        "schema_version": 2,
+        "source_kind": "database",
+        "source_ref": "[ROW_9c2bcda569df7248]",
+        "source_refs": ["[SOURCE_f6e3a47a433096ee]"],
+        "text_candidate": "/today ",
+        "timestamp": "2026-01-01T10:47:00Z",
+        "train_eligible": false
+      },
+      {
+        "actor_scope": "[SCOPE_e86a15d3f4b2642e]",
+        "conversation_id": "[CONVERSATION_f58e78da4d758436]",
+        "gold": null,
+        "gold_adjudication": null,
+        "historical_state": "not_reconstructed",
+        "input_kind": "text",
+        "intent_candidates": ["invitation.send"],
+        "label_status": "needs_adjudication",
+        "observed_responses": ["Отправил Ивану"],
+        "observed_tools": ["find_x"],
+        "outcome_status": "not_inferred_from_prose",
+        "privacy_status": "pseudonymized_candidate_needs_review",
+        "schema_version": 2,
+        "source_kind": "debug_run",
+        "source_ref": "[ROW_125d279411467edd]",
+        "source_refs": ["[SOURCE_5ee13f50343b13ab]"],
+        "text_candidate": "Пригласи [PERSON_16f97a1b22409224]",
+        "timestamp": "2026-01-01T15:00:30Z",
+        "train_eligible": false
+      },
+      {
+        "actor_scope": "[SCOPE_e86a15d3f4b2642e]",
+        "conversation_id": "[CONVERSATION_f58e78da4d758436]",
+        "gold": null,
+        "gold_adjudication": null,
+        "historical_state": "not_reconstructed",
+        "input_kind": "text",
+        "intent_candidates": ["unknown"],
+        "label_status": "needs_adjudication",
+        "observed_responses": [],
+        "observed_tools": [],
+        "outcome_status": "not_inferred_from_prose",
+        "privacy_status": "pseudonymized_candidate_needs_review",
+        "schema_version": 2,
+        "source_kind": "debug_run",
+        "source_ref": "[ROW_d8821ebab3b6d617]",
+        "source_refs": ["[SOURCE_5ee13f50343b13ab]"],
+        "text_candidate": "Что нового",
+        "timestamp": "2026-01-01T15:01:00Z",
+        "train_eligible": false
+      },
+      {
+        "actor_scope": "[SCOPE_e86a15d3f4b2642e]",
+        "conversation_id": "[CONVERSATION_dce2901da6ed1e5e]",
+        "gold": null,
+        "gold_adjudication": null,
+        "historical_state": "not_reconstructed",
+        "input_kind": "text",
+        "intent_candidates": ["event.delete"],
+        "label_status": "needs_adjudication",
+        "observed_responses": [],
+        "observed_tools": [],
+        "outcome_status": "not_inferred_from_prose",
+        "privacy_status": "pseudonymized_candidate_needs_review",
+        "schema_version": 2,
+        "source_kind": "database",
+        "source_ref": "[ROW_9d2ae160ac7b57be]",
+        "source_refs": [],
+        "text_candidate": "Удали встречу",
+        "timestamp": "2026-01-01T16:00:00Z",
+        "train_eligible": false
+      },
+      {
+        "actor_scope": "[SCOPE_e86a15d3f4b2642e]",
+        "conversation_id": "[CONVERSATION_c8c707ec3d5928e4]",
+        "gold": null,
+        "gold_adjudication": null,
+        "historical_state": "not_reconstructed",
+        "input_kind": "text",
+        "intent_candidates": ["event.search"],
+        "label_status": "needs_adjudication",
+        "observed_responses": [
+          {
+            "content_candidate": "step one",
+            "role": "assistant"
+          }
+        ],
+        "observed_tools": [],
+        "outcome_status": "not_inferred_from_prose",
+        "privacy_status": "pseudonymized_candidate_needs_review",
+        "schema_version": 2,
+        "source_kind": "database",
+        "source_ref": "[ROW_e280289f832fcfde]",
+        "source_refs": ["[SOURCE_f6e3a47a433096ee]"],
+        "text_candidate": "Найди событие",
+        "timestamp": "2026-01-02T09:00:00Z",
+        "train_eligible": false
+      },
+      {
+        "actor_scope": "[SCOPE_e86a15d3f4b2642e]",
+        "conversation_id": "[CONVERSATION_c8c707ec3d5928e4]",
+        "gold": null,
+        "gold_adjudication": null,
+        "historical_state": "not_reconstructed",
+        "input_kind": "text",
+        "intent_candidates": ["smalltalk"],
+        "label_status": "needs_adjudication",
+        "observed_responses": [
+          {
+            "content_candidate": "{\"type\": \"function\", \"function\": {\"name\": \"greet_back\"}}",
+            "role": "assistant"
+          }
+        ],
+        "observed_tools": ["greet_back"],
+        "outcome_status": "not_inferred_from_prose",
+        "privacy_status": "pseudonymized_candidate_needs_review",
+        "schema_version": 2,
+        "source_kind": "database",
+        "source_ref": "[ROW_9b12e0edf7fb9965]",
+        "source_refs": ["[SOURCE_f6e3a47a433096ee]"],
+        "text_candidate": "Привет",
+        "timestamp": "2026-01-02T09:41:00Z",
+        "train_eligible": false
+      },
+      {
+        "actor_scope": "[SCOPE_d4500c1c0e1f1ac4]",
+        "conversation_id": "[CONVERSATION_e8a296cb09ce66b9]",
+        "gold": null,
+        "gold_adjudication": null,
+        "historical_state": "not_reconstructed",
+        "input_kind": "text",
+        "intent_candidates": ["smalltalk"],
+        "label_status": "needs_adjudication",
+        "observed_responses": [
+          {
+            "content_candidate": "Hi there [EMAIL_f6e0d53d7dc22d31]",
+            "role": "assistant"
+          }
+        ],
+        "observed_tools": [],
+        "outcome_status": "not_inferred_from_prose",
+        "privacy_status": "pseudonymized_candidate_needs_review",
+        "schema_version": 2,
+        "source_kind": "database",
+        "source_ref": "[ROW_854fe1373d1212fd]",
+        "source_refs": ["[SOURCE_f6e3a47a433096ee]"],
+        "text_candidate": "Hello",
+        "timestamp": "2026-01-01T10:00:00Z",
+        "train_eligible": false
+      }
+    ],
+    "summary": {
+      "candidate_label_counts": {
+        "calendar.read": 1,
+        "dialogue.answer": 1,
+        "event.create": 1,
+        "event.delete": 1,
+        "event.search": 1,
+        "invitation.send": 1,
+        "smalltalk": 2,
+        "unknown": 1
+      },
+      "candidates_by_source": {
+        "database": 7,
+        "debug_run": 2
+      },
+      "evidence_detached_stale_session_rows": 1,
+      "evidence_detached_unknown_provenance_rows": 2,
+      "gold_count": 0,
+      "invalid_timestamp_rows": 1,
+      "limitations": [
+        "Candidate labels are unvalidated hypotheses, not accuracy or gold.",
+        "Privacy transformation is pseudonymization; every free-text record still needs review.",
+        "Database and debug user records may overlap; source counts are not unique Telegram updates.",
+        "Historical permissions, entity state and timezone are not reconstructed.",
+        "Auth-window quarantine is conservative and not a substitute for fixing the ingress logging issue.",
+        "Assistant/tool rows attach to a candidate only when they share a recorded source-file lineage with the triggering request and arrive within 1800s of that exact request (not a chained series of short gaps); everything else is counted separately instead of being stitched across snapshots or stale windows."
+      ],
+      "observed_tool_counts": {
+        "confirm_it": 1,
+        "create_event": 1,
+        "find_x": 1,
+        "greet_back": 1
+      },
+      "quarantined_auth_rows": 3,
+      "raw_content_published": false,
+      "retained_rows": 23,
+      "train_eligible": 0,
+      "user_candidates": 9
+    }
+  },
+  "collect": {
+    "lexicon": {
+      "Иван": "PLACE",
+      "Мария": "PERSON",
+      "Парк Горького": "PLACE"
+    },
+    "rows": [
+      {
+        "chat_id": 5,
+        "content": "Создай встречу завтра у Ивана",
+        "created_at": "2026-01-01 10:00:00",
+        "id": 1,
+        "role": "user",
+        "source_refs": [
+          "data/backups/snap.db.gz#da5a7ba3d52315306c6e54ab2bc8721f55847ac3878c7149da78a364f1625b08",
+          "data/main.db#da5a7ba3d52315306c6e54ab2bc8721f55847ac3878c7149da78a364f1625b08",
+          "data/old.db.pre-migrate#d1a8d4d6a4a657ba3928abe143eacbad32ac836d59cd71424f0f882e2fb4e2be"
+        ],
+        "user_id": 5
+      },
+      {
+        "chat_id": 5,
+        "content": "Готово",
+        "created_at": "2026-01-01 10:00:05",
+        "id": 2,
+        "role": "assistant",
+        "source_refs": [
+          "data/backups/snap.db.gz#da5a7ba3d52315306c6e54ab2bc8721f55847ac3878c7149da78a364f1625b08",
+          "data/main.db#da5a7ba3d52315306c6e54ab2bc8721f55847ac3878c7149da78a364f1625b08",
+          "data/old.db.pre-migrate#d1a8d4d6a4a657ba3928abe143eacbad32ac836d59cd71424f0f882e2fb4e2be"
+        ],
+        "user_id": 5
+      },
+      {
+        "chat_id": null,
+        "content": "Привет",
+        "created_at": "2026-01-03 10:00:00",
+        "id": 1,
+        "role": "user",
+        "source_refs": ["data/nochat.db#9d7882539a8f1559ad05b6dab56d9e0517c0f87979b5370876de1e035c5b55e1"],
+        "user_id": 7
+      },
+      {
+        "chat_id": 5,
+        "content": "Что нового",
+        "created_at": "2026-01-01 11:00:00",
+        "id": 3,
+        "role": "user",
+        "source_refs": ["data/old.db.pre-migrate#d1a8d4d6a4a657ba3928abe143eacbad32ac836d59cd71424f0f882e2fb4e2be"],
+        "user_id": 5
+      },
+      {
+        "auth_context": false,
+        "chat_id": 5,
+        "content": "Покажи расписание\nTOOL CALL: read_calendar\nTOOL RESULT: read_calendar → OK\nResponse (3 chars):\nВот",
+        "created_at": "2026-01-02 09:00:00",
+        "partial": true,
+        "record_kind": "debug_run",
+        "response": "Вот",
+        "role": "user",
+        "source_refs": ["logs/a.log:0"],
+        "tool_results": [["read_calendar", "OK"]],
+        "tools": ["read_calendar"],
+        "user_id": 5
+      },
+      {
+        "auth_context": false,
+        "chat_id": -100,
+        "content": "Удали встречу\nResponse (6 chars):\nУдалил",
+        "created_at": "2026-01-02 09:02:00",
+        "partial": true,
+        "record_kind": "debug_run",
+        "response": "Удалил",
+        "role": "user",
+        "source_refs": ["logs/sub/b.log.gz:0"],
+        "tool_results": [],
+        "tools": [],
+        "user_id": 6
+      }
+    ],
+    "sources": [
+      {
+        "error": "DatabaseError",
+        "kind": "sqlite",
+        "name": "data/backups/corrupt.db",
+        "status": "unreadable"
+      },
+      {
+        "error": "ValueError",
+        "kind": "sqlite",
+        "name": "data/backups/huge.db.gz",
+        "status": "unreadable"
+      },
+      {
+        "kind": "sqlite",
+        "logical_sha256": "da5a7ba3d52315306c6e54ab2bc8721f55847ac3878c7149da78a364f1625b08",
+        "name": "data/backups/snap.db.gz",
+        "rows": 2,
+        "status": "read"
+      },
+      {
+        "kind": "sqlite",
+        "logical_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "name": "data/empty.db",
+        "rows": 0,
+        "status": "read"
+      },
+      {
+        "kind": "sqlite",
+        "name": "data/link.db",
+        "rows": 0,
+        "status": "skipped_unsafe_path"
+      },
+      {
+        "kind": "sqlite",
+        "logical_sha256": "da5a7ba3d52315306c6e54ab2bc8721f55847ac3878c7149da78a364f1625b08",
+        "name": "data/main.db",
+        "rows": 2,
+        "status": "read"
+      },
+      {
+        "kind": "sqlite",
+        "logical_sha256": "9d7882539a8f1559ad05b6dab56d9e0517c0f87979b5370876de1e035c5b55e1",
+        "name": "data/nochat.db",
+        "rows": 1,
+        "status": "read"
+      },
+      {
+        "kind": "sqlite",
+        "logical_sha256": "d1a8d4d6a4a657ba3928abe143eacbad32ac836d59cd71424f0f882e2fb4e2be",
+        "name": "data/old.db.pre-migrate",
+        "rows": 3,
+        "status": "read"
+      },
+      {
+        "kind": "debug_log",
+        "name": "logs/a.log",
+        "rows": 1,
+        "sha256": "6b462dc3d466a92cbaa617da793759d6bf7762d451185dcde9f1d877a08c3fee",
+        "status": "read"
+      },
+      {
+        "error": "BadGzipFile",
+        "kind": "debug_log",
+        "name": "logs/bad.log.gz",
+        "status": "unreadable"
+      },
+      {
+        "error": "ValueError",
+        "kind": "debug_log",
+        "name": "logs/big.log",
+        "status": "unreadable"
+      },
+      {
+        "kind": "debug_log",
+        "name": "logs/empty.log",
+        "rows": 0,
+        "sha256": "355ac5af669c577d0d913d85b46833ff5f9e55c88bded485f99cc7fab45b2dc9",
+        "status": "no_direct_dialogues"
+      },
+      {
+        "kind": "debug_log",
+        "name": "logs/link.log",
+        "rows": 0,
+        "status": "skipped_unsafe_path"
+      },
+      {
+        "kind": "debug_log",
+        "name": "logs/sub/b.log.gz",
+        "rows": 1,
+        "sha256": "b25e1a87c3adc1ffdb11482814b6fb2b752eb3e0485d7745b432d30ff8cb5954",
+        "status": "read"
+      },
+      {
+        "error": "EOFError",
+        "kind": "debug_log",
+        "name": "logs/trunc.log.gz",
+        "status": "unreadable"
+      }
+    ]
+  }
+}

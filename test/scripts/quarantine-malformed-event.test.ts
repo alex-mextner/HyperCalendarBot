@@ -198,4 +198,89 @@ describe('explicit malformed-event quarantine', () => {
     expect(() => applyQuarantine(db, plan)).toThrow('dependent rows in events');
     expect(raw(ids.candidateId)?.is_deleted).toBe(0);
   });
+
+  describe('pair safety preconditions', () => {
+    const setCandidate = (column: string, value: string | number | null) =>
+      db.run(`UPDATE events SET ${column}=? WHERE id=?`, [value, ids.candidateId]);
+    const setReplacement = (column: string, value: string | number | null) =>
+      db.run(`UPDATE events SET ${column}=? WHERE id=?`, [value, ids.replacementId]);
+
+    test('candidate and replacement must be different rows', () => {
+      expect(() => inspectMalformedPair(db, { ...ids, replacementId: ids.candidateId })).toThrow(
+        'Candidate and replacement must differ',
+      );
+    });
+
+    test('missing candidate or replacement row is rejected', () => {
+      expect(() => inspectMalformedPair(db, { ...ids, candidateId: 99_999 })).toThrow('Expected rows not found');
+      expect(() => inspectMalformedPair(db, { ...ids, replacementId: 99_999 })).toThrow('Expected rows not found');
+    });
+
+    test('non-positive or non-integer ids fail schema validation', () => {
+      expect(() => inspectMalformedPair(db, { ...ids, candidateId: 0 })).toThrow();
+      expect(() => inspectMalformedPair(db, { ...ids, replacementId: 1.5 })).toThrow();
+    });
+
+    test('the replacement row must also belong to the owner', () => {
+      setReplacement('user_id', 1002);
+      expect(() => inspectMalformedPair(db, ids)).toThrow('Owner/scope mismatch');
+    });
+
+    test('non-user-owned rows are rejected as a scope mismatch', () => {
+      setCandidate('owner_type', 'group');
+      expect(() => inspectMalformedPair(db, ids)).toThrow('Owner/scope mismatch');
+    });
+
+    test.each([
+      ['is_cancelled', 1],
+      ['recurrence_rule', 'FREQ=DAILY'],
+    ] as const)('candidate with %s requires separate reconciliation', (column, value) => {
+      setCandidate(column, value);
+      expect(() => inspectMalformedPair(db, ids)).toThrow('Cancelled/recurring/exception rows');
+    });
+
+    test('replacement with an exception parent requires separate reconciliation', () => {
+      setReplacement('parent_event_id', ids.candidateId);
+      expect(() => inspectMalformedPair(db, ids)).toThrow('Cancelled/recurring/exception rows');
+    });
+
+    test('candidate row problems are reported before replacement row problems', () => {
+      setCandidate('is_cancelled', 1);
+      setReplacement('user_id', 1002);
+      expect(() => inspectMalformedPair(db, ids)).toThrow('Cancelled/recurring/exception rows');
+    });
+
+    test('a deleted or malformed replacement is not a valid active event', () => {
+      setReplacement('is_deleted', 1);
+      expect(() => inspectMalformedPair(db, ids)).toThrow('Replacement is not a valid active event');
+      setReplacement('is_deleted', 0);
+      setReplacement('start_at', INVALID);
+      expect(() => inspectMalformedPair(db, ids)).toThrow('Replacement is not a valid active event');
+    });
+
+    test.each([
+      ['replacement created before candidate', '2035-01-01 00:00:00', '2034-12-31 23:59:59'],
+      ['replacement created more than five minutes later', '2035-01-01 00:00:00', '2035-01-01 00:05:01'],
+      ['unparseable replacement created_at', '2035-01-01 00:00:00', 'not a date'],
+      ['unparseable candidate created_at', 'not a date', '2035-01-01 00:00:00'],
+    ])('%s is outside one bounded repair window', (_label, candidateAt, replacementAt) => {
+      setCandidate('created_at', candidateAt);
+      setReplacement('created_at', replacementAt);
+      expect(() => inspectMalformedPair(db, ids)).toThrow('Rows are not from one bounded repair window');
+    });
+
+    test('replacement created exactly five minutes later is within the window', () => {
+      setCandidate('created_at', '2035-01-01 00:00:00');
+      setReplacement('created_at', '2035-01-01 00:05:00');
+      expect(inspectMalformedPair(db, ids).ownerId).toBe(1001);
+    });
+
+    test.each([
+      ['google_calendar_id', 'synthetic-calendar'],
+      ['last_synced_at', '2035-01-01 00:00:00'],
+    ] as const)('candidate with %s counts as Google synchronization evidence', (column, value) => {
+      setCandidate(column, value);
+      expect(() => inspectMalformedPair(db, ids)).toThrow('Google synchronization evidence');
+    });
+  });
 });

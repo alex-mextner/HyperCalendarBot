@@ -4,13 +4,13 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import shutil
 import sqlite3
 import subprocess
 import tarfile
 import tempfile
 import unittest
+from pathlib import Path
 
 from docker_save_fixture import add_members, docker_save_members
 
@@ -20,17 +20,25 @@ TAG = "repo/image:" + SHA
 
 
 MIGRATIONS = "export const migrations = [\n  {\n    name: '001_x',\n    up(db){},\n  },\n];\n"
-NEW_MIGRATION_ADDED = MIGRATIONS.removesuffix("];\n") + "  {\n    name: '002_new_thing',\n    up(db){},\n  },\n];\n"
+NEW_MIGRATION_ADDED = (
+    MIGRATIONS.removesuffix("];\n") + "  {\n    name: '002_new_thing',\n    up(db){},\n  },\n];\n"
+)
 EXISTING_MIGRATION_EDITED = "export const migrations = [\n  {\n    name: '001_x',\n    up(db){ doSomethingElse(); },\n  },\n];\n"
 
 
 def migration_doc(name, rollback="yes", deletion="no", body="Creates a table.\n"):
-    front = f"---\nmigration: {name}\nrollback-compatible: {rollback}\ndata-deletion: {deletion}\n---\n"
+    front = (
+        f"---\nmigration: {name}\nrollback-compatible: {rollback}\ndata-deletion: {deletion}\n---\n"
+    )
     return f"{front}\n# Migration {name}\n\n{body}"
 
 
 SAFE_DOC = migration_doc("002_new_thing")
-RISKY_DOC = migration_doc("002_new_thing", rollback="no", body="Drops a column.\n\n## Rollback\n\nRestore the backup.\n")
+RISKY_DOC = migration_doc(
+    "002_new_thing",
+    rollback="no",
+    body="Drops a column.\n\n## Rollback\n\nRestore the backup.\n",
+)
 DELETING_DOC = migration_doc("002_new_thing", deletion="yes", body="Deletes rows.\n")
 
 
@@ -46,7 +54,6 @@ REVIEWED_PAIR = sha(MIGRATIONS) + ":" + sha(NEW_MIGRATION_ADDED)
 
 
 class DeployTests(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls):
         # The fakes are stateless (all fixture state comes from env and the cwd), so write them
@@ -70,7 +77,7 @@ class DeployTests(unittest.TestCase):
         cls.exe(
             cls.bin / "df",
             "#!/bin/sh\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n"
-            "/dev/fixture 999999999 0 %s 1%% /\\n' \"${DF_AVAIL_KIB:-999999999}\"\n",
+            '/dev/fixture 999999999 0 %s 1%% /\\n\' "${DF_AVAIL_KIB:-999999999}"\n',
         )
         cls.exe(
             cls.bin / "sha256sum",
@@ -197,7 +204,9 @@ print(body,end='')
         c = sqlite3.connect(self.db)
         c.execute("CREATE TABLE evidence(value TEXT)")
         c.execute("INSERT INTO evidence VALUES ('before')")
-        c.execute("CREATE TABLE migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE)")
+        c.execute(
+            "CREATE TABLE migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE)"
+        )
         c.execute("INSERT INTO migrations(name) VALUES ('001_x')")
         c.commit()
         c.close()
@@ -223,9 +232,7 @@ print(body,end='')
             add_members(tar, members)
         with tarfile.open(self.src / "image.tar.gz") as tar:
             self.image_bytes = sum(m.size for m in tar.getmembers() if m.isfile())
-        self.digest = hashlib.sha256(
-            (self.src / "image.tar.gz").read_bytes()
-        ).hexdigest()
+        self.digest = hashlib.sha256((self.src / "image.tar.gz").read_bytes()).hexdigest()
         (self.dep / "current").write_text("sha256:old")
         self.log = self.path / "calls.jsonl"
         self.remote = ROOT / "scripts/deploy-prebuilt-image.sh"
@@ -233,9 +240,7 @@ print(body,end='')
         if baseline:
             text = Path(baseline).read_text()
             self.remote = self.path / "baseline-remote.sh"
-            self.remote.write_text(
-                text.split("<<'REMOTE'\n", 1)[1].split("\nREMOTE\n", 1)[0]
-            )
+            self.remote.write_text(text.split("<<'REMOTE'\n", 1)[1].split("\nREMOTE\n", 1)[0])
 
     @staticmethod
     def exe(path, body):
@@ -275,6 +280,7 @@ print(body,end='')
             text=True,
             capture_output=True,
             timeout=15,
+            check=False,
         )
 
     def record(self, *names):
@@ -363,13 +369,24 @@ print(body,end='')
         self.assertEqual(receipt["image_id"], self.manifest_id)
         self.assertIn("DEPLOYED sha=" + SHA + " image=" + self.manifest_id, result.stdout)
         # scripts/post-ship-deploy.py recognizes this receipt next to the live container's .Image.
-        spec = importlib.util.spec_from_file_location("post_ship_deploy", ROOT / "scripts/post-ship-deploy.py")
+        spec = importlib.util.spec_from_file_location(
+            "post_ship_deploy", ROOT / "scripts/post-ship-deploy.py"
+        )
         post_ship = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(post_ship)
-        live = {"receipt": receipt, "image": self.manifest_id, "running": True, "revision": SHA, "health": "ok", "ready": "ok"}
+        live = {
+            "receipt": receipt,
+            "image": self.manifest_id,
+            "running": True,
+            "revision": SHA,
+            "health": "ok",
+            "ready": "ok",
+        }
         self.assertTrue(post_ship.runtime_matches(live, SHA))
 
-    def test_loaded_image_that_is_not_the_archive_for_this_store_is_refused_before_any_change(self):
+    def test_loaded_image_that_is_not_the_archive_for_this_store_is_refused_before_any_change(
+        self,
+    ):
         unrelated = "sha256:" + "e" * 64
         cases = {
             "classic, unrelated ID": ("classic", unrelated),
@@ -384,16 +401,26 @@ print(body,end='')
                 result = self.run_deploy(FIXTURE_STORE=store, FIXTURE_ID=loaded)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Loaded image identity mismatch: loaded=" + loaded, result.stderr)
-                self.assertFalse((self.dep / "data/before.db").exists(), "backup-db.sh ran after a bad load")
+                self.assertFalse(
+                    (self.dep / "data/before.db").exists(),
+                    "backup-db.sh ran after a bad load",
+                )
                 self.assertEqual((self.dep / "current").read_text(), "sha256:old")
                 self.assertEqual(self.rows(), ["before"])
                 self.assertNotIn('"compose"', self.log.read_text())
                 self.assertFalse((self.dep / "releases/current.json").exists())
 
     def test_containerd_store_container_running_another_image_is_rolled_back(self):
-        result = self.run_deploy(FIXTURE_STORE="containerd", FIXTURE_ID=self.manifest_id, FIXTURE_RUNNING_ID=self.config_id)
+        result = self.run_deploy(
+            FIXTURE_STORE="containerd",
+            FIXTURE_ID=self.manifest_id,
+            FIXTURE_RUNNING_ID=self.config_id,
+        )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn(f"Container image mismatch: running={self.config_id} expected={self.manifest_id}", result.stderr)
+        self.assertIn(
+            f"Container image mismatch: running={self.config_id} expected={self.manifest_id}",
+            result.stderr,
+        )
         self.assertIn("ROLLBACK image=sha256:old health=ok", result.stderr)
         self.assertEqual((self.dep / "current").read_text(), "sha256:old")
         self.assertFalse((self.dep / "releases/current.json").exists())
@@ -413,16 +440,25 @@ print(body,end='')
 
     def assert_refused_before_backup_or_restart(self, result):
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Schema-changing release requires reviewed migration procedure", result.stderr)
+        self.assertIn(
+            "Schema-changing release requires reviewed migration procedure",
+            result.stderr,
+        )
         self.assertNotIn("SCHEMA_GATE decision=", result.stdout)
-        self.assertFalse((self.dep / "data/before.db").exists(), "backup-db.sh ran before the gate refused")
+        self.assertFalse(
+            (self.dep / "data/before.db").exists(),
+            "backup-db.sh ran before the gate refused",
+        )
         self.assertEqual(self.rows(), ["before"])
         self.assertNotIn('"compose"', self.log.read_text())
 
     def test_unchanged_migrations_log_the_gate_decision(self):
         result = self.run_deploy(HYPERCAL_REVIEWED_SCHEMA_TRANSITION="junk")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("SCHEMA_GATE decision=unchanged migrations_sha256=" + sha(MIGRATIONS), result.stdout)
+        self.assertIn(
+            "SCHEMA_GATE decision=unchanged migrations_sha256=" + sha(MIGRATIONS),
+            result.stdout,
+        )
 
     def test_new_migration_without_a_doc_is_refused_before_any_backup_or_restart(self):
         result = self.run_deploy(NEW_MIGRATION_CONTENT=NEW_MIGRATION_ADDED)
@@ -434,11 +470,16 @@ print(body,end='')
         # can vouch for it, alone or riding along with a documented new migration.
         for content, doc in [
             ("// updated comment\n" + MIGRATIONS, {}),
-            ("globalThis.probe = 1;\n" + NEW_MIGRATION_ADDED, {"002_new_thing": SAFE_DOC}),
+            (
+                "globalThis.probe = 1;\n" + NEW_MIGRATION_ADDED,
+                {"002_new_thing": SAFE_DOC},
+            ),
         ]:
             with self.subTest(content=content):
                 self.setUp()
-                result = self.run_deploy(NEW_MIGRATION_CONTENT=content, NEW_MIGRATION_DOCS=docs(**doc))
+                result = self.run_deploy(
+                    NEW_MIGRATION_CONTENT=content, NEW_MIGRATION_DOCS=docs(**doc)
+                )
                 self.assert_refused_before_backup_or_restart(result)
                 self.assertIn("outside the migration entries", result.stderr)
 
@@ -458,7 +499,11 @@ print(body,end='')
         self.assertLess(result.stdout.index("SCHEMA_GATE"), result.stdout.index("DEPLOYED"))
 
     def test_empty_or_undeclared_doc_is_refused(self):
-        for doc in ["", "# Migration 002\n\nAdds a table.\n", "rollback-compatible: yes\n"]:
+        for doc in [
+            "",
+            "# Migration 002\n\nAdds a table.\n",
+            "rollback-compatible: yes\n",
+        ]:
             with self.subTest(doc=doc):
                 self.setUp()
                 result = self.run_deploy(
@@ -475,7 +520,9 @@ print(body,end='')
         for doc, reviewed in [(RISKY_DOC, None), (DELETING_DOC, reversed_pair)]:
             with self.subTest(doc=doc, reviewed=reviewed):
                 self.setUp()
-                changes = {} if reviewed is None else {"HYPERCAL_REVIEWED_SCHEMA_TRANSITION": reviewed}
+                changes = (
+                    {} if reviewed is None else {"HYPERCAL_REVIEWED_SCHEMA_TRANSITION": reviewed}
+                )
                 result = self.run_deploy(
                     NEW_MIGRATION_CONTENT=NEW_MIGRATION_ADDED,
                     NEW_MIGRATION_DOCS=docs(**{"002_new_thing": doc}),
@@ -500,7 +547,9 @@ print(body,end='')
         self.assertTrue((self.dep / "data/before.db").exists(), "backup-db.sh did not run")
         self.assertEqual(self.rows(), ["before", "after-start"])
         calls = [json.loads(line) for line in self.log.read_text().splitlines()]
-        rollback_tag = next(i for i, c in enumerate(calls) if c[0] == "tag" and "rollback-" in c[-1])
+        rollback_tag = next(
+            i for i, c in enumerate(calls) if c[0] == "tag" and "rollback-" in c[-1]
+        )
         switch = next(i for i, c in enumerate(calls) if c[0] == "compose" and "up" in c)
         self.assertLess(rollback_tag, switch)
 
@@ -516,7 +565,9 @@ print(body,end='')
         self.assert_refused_before_backup_or_restart(result)
         self.assertRegex(result.stderr, "002_new_thing.*applied")
 
-    def test_database_records_unknown_to_both_images_do_not_block_a_documented_migration(self):
+    def test_database_records_unknown_to_both_images_do_not_block_a_documented_migration(
+        self,
+    ):
         # Production records two names from a renumbering long ago that no image carries.
         self.record("000_renumbered_long_ago")
         result = self.run_deploy(
@@ -533,8 +584,13 @@ print(body,end='')
         )
         self.assert_refused_before_backup_or_restart(result)
 
-    def test_concatenated_migration_name_is_refused_even_with_a_doc_for_its_prefix(self):
-        content = MIGRATIONS.removesuffix("];\n") + "  {\n    name: '002' + '_drop_data',\n    up(db){},\n  },\n];\n"
+    def test_concatenated_migration_name_is_refused_even_with_a_doc_for_its_prefix(
+        self,
+    ):
+        content = (
+            MIGRATIONS.removesuffix("];\n")
+            + "  {\n    name: '002' + '_drop_data',\n    up(db){},\n  },\n];\n"
+        )
         result = self.run_deploy(
             NEW_MIGRATION_CONTENT=content,
             NEW_MIGRATION_DOCS=docs(**{"002": migration_doc("002")}),
@@ -557,7 +613,9 @@ print(body,end='')
         self.assert_refused_before_backup_or_restart(result)
         self.assertIn("001_x", result.stderr)
 
-    def test_documented_new_migration_does_not_vouch_for_a_silent_edit_riding_along(self):
+    def test_documented_new_migration_does_not_vouch_for_a_silent_edit_riding_along(
+        self,
+    ):
         content = EXISTING_MIGRATION_EDITED.removesuffix("];\n") + (
             "  {\n    name: '002_new_thing',\n    up(db){},\n  },\n];\n"
         )
@@ -583,7 +641,9 @@ print(body,end='')
 
     def test_deleting_an_already_shipped_migration_outright_is_rejected(self):
         self.record("002_new_thing")
-        result = self.run_deploy(OLD_MIGRATION_CONTENT=NEW_MIGRATION_ADDED, NEW_MIGRATION_CONTENT=MIGRATIONS)
+        result = self.run_deploy(
+            OLD_MIGRATION_CONTENT=NEW_MIGRATION_ADDED, NEW_MIGRATION_CONTENT=MIGRATIONS
+        )
         self.assert_refused_before_backup_or_restart(result)
         self.assertIn("002_new_thing", result.stderr)
 
@@ -632,14 +692,18 @@ print(body,end='')
         calls = [json.loads(line) for line in self.log.read_text().splitlines()]
         self.assertEqual([c[0] for c in calls if c[0] in ("stop", "start")], ["stop", "start"])
 
-    def test_failed_release_that_does_not_start_again_is_reported_as_a_failed_rollback(self):
+    def test_failed_release_that_does_not_start_again_is_reported_as_a_failed_rollback(
+        self,
+    ):
         # ROLLBACK_SKIPPED leaves the release to the operator; if it does not start, nothing runs.
         result = self.run_failing_release(RISKY_DOC, START_FAILURE="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ROLLBACK_SKIPPED", result.stderr)
         self.assertIn("ROLLBACK FAILED", result.stderr)
 
-    def test_failed_release_whose_incompatible_migration_did_not_commit_restores_the_old_image(self):
+    def test_failed_release_whose_incompatible_migration_did_not_commit_restores_the_old_image(
+        self,
+    ):
         result = self.run_failing_release(RISKY_DOC, RELEASE_MIGRATION_FAILS="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("002_new_thing", self.recorded())
@@ -653,9 +717,13 @@ print(body,end='')
         self.assertIn("ROLLBACK image=sha256:old health=ok", result.stderr)
         self.assertEqual((self.dep / "current").read_text(), "sha256:old")
 
-    def test_failed_release_that_cannot_be_stopped_is_left_in_place_without_reading_the_database(self):
+    def test_failed_release_that_cannot_be_stopped_is_left_in_place_without_reading_the_database(
+        self,
+    ):
         # A release that still runs could record its migration after any read of the database.
-        result = self.run_failing_release(RISKY_DOC, RELEASE_MIGRATION_FAILS="1", STOP_FAILURE="1", STILL_RUNNING="1")
+        result = self.run_failing_release(
+            RISKY_DOC, RELEASE_MIGRATION_FAILS="1", STOP_FAILURE="1", STILL_RUNNING="1"
+        )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ROLLBACK_SKIPPED", result.stderr)
         self.assertEqual((self.dep / "current").read_text(), self.config_id)
@@ -663,7 +731,9 @@ print(body,end='')
         self.assertEqual([c for c in calls if c[0] == "run" and "-v" in c], [])
 
     def test_failed_release_is_left_in_place_when_the_database_cannot_be_read(self):
-        result = self.run_failing_release(RISKY_DOC, RELEASE_MIGRATION_FAILS="1", RECORDED_READ_FAILURE="1")
+        result = self.run_failing_release(
+            RISKY_DOC, RELEASE_MIGRATION_FAILS="1", RECORDED_READ_FAILURE="1"
+        )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ROLLBACK_SKIPPED", result.stderr)
         self.assertEqual((self.dep / "current").read_text(), self.config_id)
@@ -703,7 +773,11 @@ print(body,end='')
         self.assertNotIn('"compose"', self.log.read_text())
 
     def calls(self):
-        return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+        return (
+            [json.loads(line) for line in self.log.read_text().splitlines()]
+            if self.log.exists()
+            else []
+        )
 
     def test_release_that_does_not_fit_twice_on_disk_is_refused_before_load(self):
         # docker load unpacks the whole archive before it registers the layers.
@@ -737,20 +811,31 @@ print(body,end='')
         path.write_text(json.dumps(tags))
         return tags, path
 
-    def test_verified_release_keeps_five_newest_rollbacks_and_the_current_and_previous_images(self):
+    def test_verified_release_keeps_five_newest_rollbacks_and_the_current_and_previous_images(
+        self,
+    ):
         before, store = self.image_store()
         result = self.run_deploy(FIXTURE_IMAGES=str(store))
         self.assertEqual(result.returncode, 0, result.stderr)
         left = json.loads(store.read_text())
         new_rollback = [t for t in left if ":rollback-" in t and t not in before]
         self.assertEqual(len(new_rollback), 1)
-        kept = {t: before[t] for t in [
-            "repo/image:" + "d" * 40,
-            "repo/image:" + "b" * 40,
-            "other/app:latest",
-            *[f"repo/image:rollback-2020-01-0{i}_00-00-00" for i in range(3, 7)],
-        ]}
-        kept.update({new_rollback[0]: "sha256:old", "repo/image:latest": self.config_id, TAG: self.config_id})
+        kept = {
+            t: before[t]
+            for t in [
+                "repo/image:" + "d" * 40,
+                "repo/image:" + "b" * 40,
+                "other/app:latest",
+                *[f"repo/image:rollback-2020-01-0{i}_00-00-00" for i in range(3, 7)],
+            ]
+        }
+        kept.update(
+            {
+                new_rollback[0]: "sha256:old",
+                "repo/image:latest": self.config_id,
+                TAG: self.config_id,
+            }
+        )
         self.assertEqual(left, kept)
         removals = [c for c in self.calls() if c[:2] == ["image", "rm"]]
         self.assertTrue(removals)
@@ -762,7 +847,10 @@ print(body,end='')
         result = self.run_deploy(FIXTURE_IMAGES=str(store), RM_FAILURE="1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.dep / "current").read_text(), self.config_id)
-        self.assertEqual(json.loads((self.dep / "releases/current.json").read_text())["revision"], SHA)
+        self.assertEqual(
+            json.loads((self.dep / "releases/current.json").read_text())["revision"],
+            SHA,
+        )
         self.assertNotIn("ROLLBACK", result.stderr)
 
     # --- #823: evidence, log retention, the shared host lock and the multi-signal verdict ---
@@ -771,12 +859,19 @@ print(body,end='')
         return self.dep / "logs"
 
     def evidence_dirs(self, prefix):
-        return sorted(p for p in self.logs_dir().iterdir() if p.name.startswith(prefix)) if self.logs_dir().exists() else []
+        return (
+            sorted(p for p in self.logs_dir().iterdir() if p.name.startswith(prefix))
+            if self.logs_dir().exists()
+            else []
+        )
 
     def seed_old_logs(self):
         old = self.logs_dir()
         old.mkdir(exist_ok=True)
-        names = ["healthcheck_2026-04-10_23-42-26.log.gz", "backup_2026-09-23_21-25-29.log.gz"]
+        names = [
+            "healthcheck_2026-04-10_23-42-26.log.gz",
+            "backup_2026-09-23_21-25-29.log.gz",
+        ]
         for name in names:
             (old / name).write_bytes(b"old log")
         (old / "chats").mkdir(exist_ok=True)
@@ -788,7 +883,9 @@ print(body,end='')
             self.assertTrue((self.logs_dir() / name).exists(), f"{name} was deleted by the deploy")
         self.assertEqual((self.logs_dir() / "chats/1.log").read_text(), "chat debug log")
 
-    def test_successful_deploy_copies_the_outgoing_containers_log_and_deletes_nothing(self):
+    def test_successful_deploy_copies_the_outgoing_containers_log_and_deletes_nothing(
+        self,
+    ):
         names = self.seed_old_logs()
         result = self.run_deploy()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -804,15 +901,35 @@ print(body,end='')
         self.assertNotEqual(result.returncode, 0)
         (failed,) = self.evidence_dirs("failed-" + SHA[:12])
         self.assertIn(f"FAILED_EVIDENCE {failed}", result.stderr)
-        for name in ["container.log.gz", "container.tail.redacted.log", "inspect.json", "state.txt", "host-load.txt"]:
+        for name in [
+            "container.log.gz",
+            "container.tail.redacted.log",
+            "inspect.json",
+            "state.txt",
+            "host-load.txt",
+        ]:
             self.assertTrue((failed / name).exists(), name)
-        text = "".join((failed / n).read_text() for n in ["inspect.json", "state.txt", "host-load.txt", "container.tail.redacted.log"])
+        text = "".join(
+            (failed / n).read_text()
+            for n in [
+                "inspect.json",
+                "state.txt",
+                "host-load.txt",
+                "container.tail.redacted.log",
+            ]
+        )
         self.assertNotIn("ABCDEFGHIJKLMNOPQRSTUVWXYZ", text, "a token reached the evidence bundle")
         self.assertNotIn("Env", text)
         # The evidence was taken before the force-recreate of the rollback.
         calls = self.calls()
-        first_log = next(i for i, c in enumerate(calls) if c[:1] == ["logs"] and "--timestamps" in c and "--tail" not in c)
-        recreate = [i for i, c in enumerate(calls) if c[:1] == ["compose"] and "--force-recreate" in c]
+        first_log = next(
+            i
+            for i, c in enumerate(calls)
+            if c[:1] == ["logs"] and "--timestamps" in c and "--tail" not in c
+        )
+        recreate = [
+            i for i, c in enumerate(calls) if c[:1] == ["compose"] and "--force-recreate" in c
+        ]
         self.assertLess(first_log, recreate[-1])
         self.assert_old_logs_kept(names)
         self.assertEqual(len(self.evidence_dirs("release-")), 1)
@@ -832,7 +949,9 @@ print(body,end='')
         self.assertIn("Readiness path is not returning a bot response", result.stderr)
         self.assertEqual((self.dep / "current").read_text(), "sha256:old")
 
-    def test_unreadable_readiness_before_the_deploy_does_not_roll_back_a_healthy_release(self):
+    def test_unreadable_readiness_before_the_deploy_does_not_roll_back_a_healthy_release(
+        self,
+    ):
         # An AI outage fails /ready for every image: the release is not at fault.
         result = self.run_deploy(READY_BODY="ai chain down", RESTORED_READY_BODY="ai chain down")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -856,10 +975,29 @@ print(body,end='')
         shutil.copytree(ROOT / "scripts", broken)
         (broken / "deploy-health.py").unlink()
         result = subprocess.run(
-            ["bash", str(broken / "deploy-prebuilt-image.sh"), str(self.dep), str(self.src), "repo/image", SHA, self.digest, self.config_id],
-            cwd=self.dep, text=True, capture_output=True, timeout=15,
-            env=dict(os.environ, PATH=str(self.bin) + ":" + os.environ["PATH"], FIXTURE_DEP=str(self.dep), FIXTURE_LOG=str(self.log),
-                     FIXTURE_ID=self.config_id, FIXTURE_SHA=SHA),
+            [
+                "bash",
+                str(broken / "deploy-prebuilt-image.sh"),
+                str(self.dep),
+                str(self.src),
+                "repo/image",
+                SHA,
+                self.digest,
+                self.config_id,
+            ],
+            cwd=self.dep,
+            text=True,
+            capture_output=True,
+            timeout=15,
+            env=dict(
+                os.environ,
+                PATH=str(self.bin) + ":" + os.environ["PATH"],
+                FIXTURE_DEP=str(self.dep),
+                FIXTURE_LOG=str(self.log),
+                FIXTURE_ID=self.config_id,
+                FIXTURE_SHA=SHA,
+            ),
+            check=False,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing scripts/deploy-health.py", result.stderr)

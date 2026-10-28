@@ -1,12 +1,14 @@
 """deploy-evidence.py keeps logs but never copies secrets or message content (#823)."""
 
 import importlib.util
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("deploy_evidence", ROOT / "scripts/deploy-evidence.py")
+SPEC = importlib.util.spec_from_file_location(
+    "deploy_evidence", ROOT / "scripts/deploy-evidence.py"
+)
 evidence = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(evidence)
 
@@ -19,7 +21,6 @@ FAKE_URL_PASSWORD = "u" * 10
 
 
 class RedactionTests(unittest.TestCase):
-
     def test_telegram_tokens_keys_and_passwords_are_removed(self):
         text = (
             f"url=https://api.telegram.org/bot{FAKE_BOT}/sendMessage "
@@ -39,7 +40,10 @@ class RedactionTests(unittest.TestCase):
         self.assertIn('"level":50', out)
 
     def test_state_line_reports_exit_code_oom_and_error_count(self):
-        summary = {"State": {"Status": "exited", "ExitCode": 137, "OOMKilled": True}, "RestartCount": 2}
+        summary = {
+            "State": {"Status": "exited", "ExitCode": 137, "OOMKilled": True},
+            "RestartCount": 2,
+        }
         line = evidence.state_line(summary, '{"level":50}\n{"level":30}\n{"level":60}\n')
         self.assertIn("exit_code=137", line)
         self.assertIn("oom_killed=True", line)
@@ -47,8 +51,9 @@ class RedactionTests(unittest.TestCase):
 
 
 class DirectoryNameTests(unittest.TestCase):
-
-    def test_two_evidence_directories_requested_in_the_same_second_do_not_share_a_directory(self):
+    def test_two_evidence_directories_requested_in_the_same_second_do_not_share_a_directory(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmp:
             first = evidence.make_dir(tmp, "failed-abc-2026-10-25_00-00-00")
             (first / "state.txt").write_text("first attempt")
