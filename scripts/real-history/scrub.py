@@ -17,8 +17,8 @@ import bisect
 import hashlib
 import hmac
 import re
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field, replace
-from typing import Iterable, Iterator
 
 import pools
 
@@ -828,7 +828,7 @@ class Scrubber:
         out.append(self._word_pass(text[cursor:]))
         return "".join(out)
 
-    def scrub_json(self, value):  # noqa: ANN001, ANN201
+    def scrub_json(self, value):
         if isinstance(value, str):
             return self.scrub(value)
         if isinstance(value, list):
