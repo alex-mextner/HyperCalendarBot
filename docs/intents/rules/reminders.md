@@ -4,59 +4,63 @@
 
 [← События &#40;часть 2 из 2&#41;](events-2.md) · [Каталог правил](../README.md) · [Приглашения →](invitations.md) · [Как читать описание шагов](../README.md#как-читать-описание-шагов) · [Описание движка](../engine.md)
 
-Отпечаток целевого сида: `6d0ed91ddf04de2ca3b9561433dbfa313fe89b7aab2ef16c3758b2fea0fab5cb`
+Отпечаток целевого сида: `77224e790a7503b776e6d5650325890439081b0ba34c5aca99b9bd93afe6d007`
 
 <a id="basis.reminder.set"></a>
 ### Напомнить до события
 
 ` basis.reminder.set ` · Напоминания · Изменение данных · инструменты: ` get_event `, ` search_events `, ` ask_user `, ` set_reminder `
 
-> Пометка из исходника (по-английски): Reminders attach to a real event through set&#95;reminder. Free-standing reminders have no tool and are not faked with events.
+> Пометка из исходника (по-английски): Reminders attach to a real event through set&#95;reminder, replacing its earlier ones. A free-standing reminder after a delay is basis.reminder.after.
 
 **Примеры фраз.**
 
-- напомни за 15 минут до встречи с Иваном
-- напомни мне за 1 час до события &#35;12
-- напомни за 30 мин до стендапа
-- remind me 10 minutes before the meeting standup
-- remind me 2 hours before event &#35;7
+- напомни за 15 минут до стендапа
+- напомни мне за час до события &#35;12
+- за день до дня рождения Ани напомни
+- поставь напоминание за час до стоматолога
+- remind me 30 minutes before the dentist
+- напоминай за 10 минут до ретро
 
 **Не запускают правило (уходят к AI):**
 
 - напомни через 10 минут позвонить маме
 - напомни завтра в 10 купить молоко
 - remind me to call mom
+- напомни за 15 минут
+- напомни за 15 минут до всех событий
 
 **Шаблон принимает, но привязка отвергает до вызова инструментов:**
 
-- напомни за 0 минут до встречи с Иваном
-- напомни за 15 минут до всех событий
+- напомни за 0 минут до стендапа
+- напомни за 30 дней до стендапа
 
 **Что делает правило по шагам.**
 
 1. Если выполняется условие ` bind.ref.kind == 'id' `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{bind.ref.id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 2. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` search_events ` с параметрами: ` query ` = ` {{bind.ref.query}} `; ` scope ` = ` {{env.scope}} `; ` event_type ` = ` regular `; результат сохранить как ` found `
-3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == "name" `, то ответить пользователю: «Не нашёл такое событие. Назови точное название или номер, например &#35;12.»
-4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
+3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == 'name' `, то вызвать инструмент `  `
+4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько подходящих событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
 5. Если выполняется условие ` count(found) == 1 `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{tool_outputs.found[0].id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
-6. Спросить пользователя: «Напомнить за {{bind.dur}} мин до {{t.target}}? Прежние напоминания этого события будут заменены.»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
+6. Спросить пользователя: «Напомнить за {{bind.dur&#124;human&#95;duration}} до {{t.target}}? Прежние напоминания этого события заменятся.»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
 7. Если выполняется условие ` ask.confirm != 'да' && ask.confirm != 'yes' `, то ответить пользователю: «Отменено, ничего не изменилось.»
 8. Вызвать инструмент ` set_reminder ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `; ` minutes_before ` = ` ["{{bind.dur}}"] `; ` scope ` = ` {{env.scope}} `
+9. Ответить пользователю: «Готово: напомню за {{bind.dur&#124;human&#95;duration}} до «{{tool&#95;outputs.target.title}}».»
 
 **Что читается из сообщения (привязки).**
 
-- ` dur ` — длительность в минутах из числа и единицы; ` from = {{$1}} `; ` unit = {{$2}} `; таблица «units»: 17 значений; ` min = 1 `; ` max = 10080 `
-- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$3}} `; таблица «reject»: 8 значений
+- ` dur ` — длительность в минутах из числа и единицы; ` from = {{$1|default("")}}{{$5|default("")}}{{$9|default("")}} `; ` unit = {{$2|default("")}}{{$6|default("")}}{{$10|default("")}}{{$3|default("")}}{{$7|default("")}}{{$11|default("")}} `; таблица «units»: 31 значений; ` min = 1 `; ` max = 10080 `; ` default_amount = 1 `
+- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$4|default("")}}{{$8|default("")}}{{$12|default("")}} `; таблица «reject»: 16 значений; ` stem = true `
 
 **Заменяет прежние правила:** ` remind_hours_before_event ` (Напомнить за несколько часов до события; переписано заново), ` remind_minutes_before_event ` (Напомнить за несколько минут до события; переписано заново).
 
-**Проверка при сборке.** Все 5 положительных примеров ведут в это правило, все 3 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
+**Проверка при сборке.** Все 6 положительных примеров ведут в это правило, все 5 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
 
 <details>
 <summary>Регулярное выражение и полный workflow (JSON)</summary>
 
 ```text
-^(?:\u043D\u0430\u043F\u043E\u043C\u043D\u0438(?:\s+\u043C\u043D\u0435)?\s+\u0437\u0430|remind\s+me)\s+(\d{1,3})\s*((?:minutes|минуту|минуты|minute|минут|часов|hours|mins|часа|hour|мин|min|час|hrs|hr|ч|h))\s+(?:\u0434\u043E|before)\s+(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u044F\u0435]|\u0432\u0441\u0442\u0440\u0435\u0447\u0438|the\s+event|the\s+meeting|event|meeting)\s+)?([^;\n]{1,120})$
+^(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:everything|каждое|каждую|каждый|every|любое|любую|любой|всех|each|both|все|всё|all|оба|обе)(?![A-Za-zА-Яа-яЁё0-9_]))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|\u0432\u0447\u0435\u0440\u0430|today|tomorrow|yesterday|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:-?\u0433\u043E)?\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|(?<![A-Za-zА-Яа-яЁё0-9_])(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+\d{1,2}|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}[./]\d{1,2}(?:[./]\d{4})?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{4}[-./]\d{1,2}[-./]\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0447\u0435\u0440\u0435\u0437|in)\s+(?:\d{1,3}|\u043E\u0434\u043D\u0443)\s+(?:\u0434\u043D|\u0434\u0435\u043D\u044C|\u043D\u0435\u0434\u0435\u043B|day|week))))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}:\d{2}|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0432|\u043A|at)\s+\d{1,2}(?:[.:]\d{2})?(?:\s?(?:am|pm|\u0443\u0442\u0440\u0430|\u0434\u043D\u044F|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438))?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}\.\d{2}(?![./]\d)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441|from)\s+\d{1,2}\s+(?:\u0434\u043E|to|until)\s+\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|today|tomorrow|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}[./]\d{1,2})[,.]?\s+(?:1[3-9]|2[0-3])(?![A-Za-zА-Яа-яЁё0-9_]))))(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:контакт[а-я]*|contacts?|секретар[а-я]*|secretar[a-z]*)(?![A-Za-zА-Яа-яЁё0-9_]))(?:(?:(?:\u0449\u0430\u0441|\u0441\u0435\u0439\u0447\u0430\u0441|now)\s+)?(?:\u043D\u0430\u043F\u043E\u043C\u043D\u0438(?:\s+\u043C\u043D\u0435)?|\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u0439(?:\s+\u043C\u043D\u0435)?|\u043F\u043E\u0441\u0442\u0430\u0432\u044C\s+\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u0435|\u0434\u043E\u0431\u0430\u0432\u044C\s+\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u0435|\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\s+\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u0435|\u0441\u0434\u0435\u043B\u0430\u0439\s+\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u0435|\u0432\u043A\u043B\u044E\u0447\u0438\s+\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u0435)(?:\s*,)?(?:\s+(?:\u043F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430|\u043F\u043B\u0438\u0437|\u043F\u043B\u0437|please|pls))?(?:\s*,)?\s+\u0437\u0430\s+(?:(\d{1,4})\s*((?:minutes|минуту|минуты|minute|минут|часов|hours|mins|часа|hour|день|дней|days|мин|min|час|hrs|дня|day|hr|ч|h))|((?:half\s+an\s+hour|one\s+minute|half\s+hour|a\s+minute|one\s+hour|an\s+hour|полчаса|one\s+day|минуту|a\s+day|день|час)))\s+\u0434\u043E\s+(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?)|\u0437\u0430\s+(?:(\d{1,4})\s*((?:minutes|минуту|минуты|minute|минут|часов|hours|mins|часа|hour|день|дней|days|мин|min|час|hrs|дня|day|hr|ч|h))|((?:half\s+an\s+hour|one\s+minute|half\s+hour|a\s+minute|one\s+hour|an\s+hour|полчаса|one\s+day|минуту|a\s+day|день|час)))\s+\u0434\u043E\s+(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?)\s+(?:\u043D\u0430\u043F\u043E\u043C\u043D\u0438|\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u0439)(?:\s+\u043C\u043D\u0435)?|(?:(?:\u0449\u0430\u0441|\u0441\u0435\u0439\u0447\u0430\u0441|now)\s+)?(?:remind\s+me|set\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder|ping\s+me|notify\s+me)(?:\s*,)?(?:\s+(?:\u043F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430|\u043F\u043B\u0438\u0437|\u043F\u043B\u0437|please|pls))?(?:\s*,)?\s+(?:(\d{1,4})\s*((?:minutes|минуту|минуты|minute|минут|часов|hours|mins|часа|hour|день|дней|days|мин|min|час|hrs|дня|day|hr|ч|h))|((?:half\s+an\s+hour|one\s+minute|half\s+hour|a\s+minute|one\s+hour|an\s+hour|полчаса|one\s+day|минуту|a\s+day|день|час)))\s+(?:before|ahead\s+of|prior\s+to)\s+(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?))$
 ```
 
 ```json
@@ -65,8 +69,8 @@
   "bindings": {
     "dur": {
       "type": "duration",
-      "from": "{{$1}}",
-      "unit": "{{$2}}",
+      "from": "{{$1|default(\"\")}}{{$5|default(\"\")}}{{$9|default(\"\")}}",
+      "unit": "{{$2|default(\"\")}}{{$6|default(\"\")}}{{$10|default(\"\")}}{{$3|default(\"\")}}{{$7|default(\"\")}}{{$11|default(\"\")}}",
       "units": {
         "минуту": 1,
         "минуты": 1,
@@ -84,14 +88,29 @@
         "hours": 60,
         "hr": 60,
         "hrs": 60,
-        "h": 60
+        "h": 60,
+        "день": 1440,
+        "дня": 1440,
+        "дней": 1440,
+        "day": 1440,
+        "days": 1440,
+        "a minute": 1,
+        "one minute": 1,
+        "an hour": 60,
+        "one hour": 60,
+        "полчаса": 30,
+        "half an hour": 30,
+        "half hour": 30,
+        "a day": 1440,
+        "one day": 1440
       },
+      "default_amount": 1,
       "min": 1,
       "max": 10080
     },
     "ref": {
       "type": "eventref",
-      "from": "{{$3}}",
+      "from": "{{$4|default(\"\")}}{{$8|default(\"\")}}{{$12|default(\"\")}}",
       "reject": [
         "все",
         "всё",
@@ -100,8 +119,17 @@
         "every",
         "everything",
         "любое",
-        "любую"
-      ]
+        "любую",
+        "любой",
+        "каждое",
+        "каждую",
+        "каждый",
+        "each",
+        "both",
+        "оба",
+        "обе"
+      ],
+      "stem": true
     }
   },
   "steps": [
@@ -125,8 +153,8 @@
       "as": "found"
     },
     {
-      "when": "count(found) == 0 && bind.ref.kind == \"name\"",
-      "respond": "{{t.not_found}}"
+      "when": "count(found) == 0 && bind.ref.kind == 'name'",
+      "abstain": true
     },
     {
       "when": "count(found) > 1",
@@ -165,26 +193,29 @@
         ],
         "scope": "{{env.scope}}"
       }
+    },
+    {
+      "respond": "{{t.done}}"
     }
   ],
   "i18n": {
     "ru": {
-      "not_found": "Не нашёл такое событие. Назови точное название или номер, например #12.",
-      "ambiguous": "Нашёл несколько событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
+      "ambiguous": "Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
       "cancelled": "Отменено, ничего не изменилось.",
       "ok": "Да",
       "cancel": "Отмена",
-      "target": "«{{tool_outputs.target.title}}» (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Напомнить за {{bind.dur}} мин до {{t.target}}? Прежние напоминания этого события будут заменены."
+      "target": "«{{tool_outputs.target.title}}» ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\"\")|ternary(\" в \", \"\")}}{{tool_outputs.target.time|default(\"\")}})",
+      "q": "Напомнить за {{bind.dur|human_duration}} до {{t.target}}? Прежние напоминания этого события заменятся.",
+      "done": "Готово: напомню за {{bind.dur|human_duration}} до «{{tool_outputs.target.title}}»."
     },
     "en": {
-      "not_found": "I couldn't find that event. Give the exact title or its number, like #12.",
       "ambiguous": "Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}",
       "cancelled": "Cancelled, nothing was changed.",
       "ok": "Yes",
       "cancel": "Cancel",
-      "target": "“{{tool_outputs.target.title}}” (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Remind {{bind.dur}} min before {{t.target}}? Its existing reminders will be replaced."
+      "target": "“{{tool_outputs.target.title}}” ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\"\")|ternary(\" at \", \"\")}}{{tool_outputs.target.time|default(\"\")}})",
+      "q": "Remind you {{bind.dur|human_duration}} before {{t.target}}? Its existing reminders will be replaced.",
+      "done": "Done: I will remind you {{bind.dur|human_duration}} before “{{tool_outputs.target.title}}”."
     }
   }
 }
@@ -201,8 +232,10 @@
 
 **Примеры фраз.**
 
-- какие напоминания у события &#35;12
+- какие напоминания у стендапа
 - напоминания для встречи с Иваном
+- какие напоминания у события &#35;12
+- what reminders does the dentist have
 - show reminders for event &#35;7
 - reminders for standup
 
@@ -210,29 +243,35 @@
 
 - напомни мне позвонить
 - напоминания
+- какие напоминания
+- покажи все напоминания
+
+**Шаблон принимает, но привязка отвергает до вызова инструментов:**
+
+- какие напоминания у события
 
 **Что делает правило по шагам.**
 
 1. Если выполняется условие ` bind.ref.kind == 'id' `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{bind.ref.id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 2. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` search_events ` с параметрами: ` query ` = ` {{bind.ref.query}} `; ` scope ` = ` {{env.scope}} `; ` event_type ` = ` regular `; результат сохранить как ` found `
-3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == "name" `, то ответить пользователю: «Не нашёл такое событие. Назови точное название или номер, например &#35;12.»
-4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
+3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == 'name' `, то вызвать инструмент `  `
+4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько подходящих событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
 5. Если выполняется условие ` count(found) == 1 `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{tool_outputs.found[0].id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 6. Вызвать инструмент ` get_reminders ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `; ` scope ` = ` {{env.scope}} `
 
 **Что читается из сообщения (привязки).**
 
-- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$1}} `; таблица «reject»: 8 значений
+- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$1|default("")}}{{$2|default("")}} `; таблица «reject»: 16 значений; ` stem = true `
 
 **Заменяет прежние правила:** ` reminders_for_event ` (Напоминания для указанного события; переписано заново).
 
-**Проверка при сборке.** Все 4 положительных примеров ведут в это правило, все 2 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
+**Проверка при сборке.** Все 6 положительных примеров ведут в это правило, все 4 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
 
 <details>
 <summary>Регулярное выражение и полный workflow (JSON)</summary>
 
 ```text
-^(?:\u043A\u0430\u043A\u0438\u0435\s+\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u044F\s+(?:\u0443|\u0434\u043B\u044F|\u043F\u0435\u0440\u0435\u0434)|\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u044F\s+(?:\u0434\u043B\u044F|\u0443|\u043F\u0435\u0440\u0435\u0434)|show\s+reminders\s+for|reminders\s+for)\s+(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u044F\u0435]|\u0432\u0441\u0442\u0440\u0435\u0447\u0438|event|meeting)\s+)?([^;\n]{1,120})$
+^(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:everything|каждое|каждую|каждый|every|любое|любую|любой|всех|each|both|все|всё|all|оба|обе)(?![A-Za-zА-Яа-яЁё0-9_]))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|\u0432\u0447\u0435\u0440\u0430|today|tomorrow|yesterday|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:-?\u0433\u043E)?\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|(?<![A-Za-zА-Яа-яЁё0-9_])(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+\d{1,2}|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}[./]\d{1,2}(?:[./]\d{4})?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{4}[-./]\d{1,2}[-./]\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0447\u0435\u0440\u0435\u0437|in)\s+(?:\d{1,3}|\u043E\u0434\u043D\u0443)\s+(?:\u0434\u043D|\u0434\u0435\u043D\u044C|\u043D\u0435\u0434\u0435\u043B|day|week))))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}:\d{2}|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0432|\u043A|at)\s+\d{1,2}(?:[.:]\d{2})?(?:\s?(?:am|pm|\u0443\u0442\u0440\u0430|\u0434\u043D\u044F|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438))?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}\.\d{2}(?![./]\d)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441|from)\s+\d{1,2}\s+(?:\u0434\u043E|to|until)\s+\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|today|tomorrow|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}[./]\d{1,2})[,.]?\s+(?:1[3-9]|2[0-3])(?![A-Za-zА-Яа-яЁё0-9_]))))(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:контакт[а-я]*|contacts?|секретар[а-я]*|secretar[a-z]*)(?![A-Za-zА-Яа-яЁё0-9_]))(?:(?:\u043A\u0430\u043A\u0438\u0435\s+(?:\u0435\u0441\u0442\u044C\s+)?\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u044F\s+(?:\u0443|\u0434\u043B\u044F|\u043D\u0430|\u043F\u0435\u0440\u0435\u0434|\u043A|\u0441\u0442\u043E\u044F\u0442\s+(?:\u0443|\u043D\u0430|\u0434\u043B\u044F))|(?:\u043F\u043E\u043A\u0430\u0436\u0438|\u0441\u043A\u0430\u0436\u0438|\u0432\u044B\u0432\u0435\u0434\u0438|\u0434\u0430\u0439|\u043E\u0442\u043A\u0440\u043E\u0439)(?:\s+\u043C\u043D\u0435)?\s+(?:\u0432\u0441\u0435\s+)?\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u044F\s+(?:\u0443|\u0434\u043B\u044F|\u043D\u0430|\u043F\u0435\u0440\u0435\u0434|\u043A)|\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u044F\s+(?:\u0434\u043B\u044F|\u0443|\u043D\u0430|\u043F\u0435\u0440\u0435\u0434|\u043A)|\u0435\u0441\u0442\u044C\s+\u043B\u0438\s+\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u044F\s+(?:\u0443|\u0434\u043B\u044F|\u043D\u0430|\u043F\u0435\u0440\u0435\u0434))\s+(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?)|(?:(?:what|which)\s+reminders\s+(?:does|do|are\s+(?:set\s+)?(?:on|for)|is\s+set\s+(?:on|for))|(?:show|list|get|tell)(?:\s+me)?\s+(?:the\s+|all\s+)?reminders\s+(?:for|of|on)|reminders\s+(?:for|of|on)|do\s+i\s+have\s+(?:any\s+)?reminders\s+(?:for|on))\s+(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?)(?:\s+(?:have|has))?)$
 ```
 
 ```json
@@ -241,7 +280,7 @@
   "bindings": {
     "ref": {
       "type": "eventref",
-      "from": "{{$1}}",
+      "from": "{{$1|default(\"\")}}{{$2|default(\"\")}}",
       "reject": [
         "все",
         "всё",
@@ -250,8 +289,17 @@
         "every",
         "everything",
         "любое",
-        "любую"
-      ]
+        "любую",
+        "любой",
+        "каждое",
+        "каждую",
+        "каждый",
+        "each",
+        "both",
+        "оба",
+        "обе"
+      ],
+      "stem": true
     }
   },
   "steps": [
@@ -275,8 +323,8 @@
       "as": "found"
     },
     {
-      "when": "count(found) == 0 && bind.ref.kind == \"name\"",
-      "respond": "{{t.not_found}}"
+      "when": "count(found) == 0 && bind.ref.kind == 'name'",
+      "abstain": true
     },
     {
       "when": "count(found) > 1",
@@ -301,11 +349,9 @@
   ],
   "i18n": {
     "ru": {
-      "not_found": "Не нашёл такое событие. Назови точное название или номер, например #12.",
-      "ambiguous": "Нашёл несколько событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}"
+      "ambiguous": "Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}"
     },
     "en": {
-      "not_found": "I couldn't find that event. Give the exact title or its number, like #12.",
       "ambiguous": "Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}"
     }
   }
@@ -323,43 +369,48 @@
 
 **Примеры фраз.**
 
+- убери напоминания у йоги
 - отмени напоминания для события &#35;12
-- убери напоминания у встречи с Иваном
+- remove reminders from gym
 - clear reminders for event &#35;7
+- удали напоминание у встречи с Иваном
 
 **Не запускают правило (уходят к AI):**
 
 - отмени все напоминания
 - отмени напоминание
+- убери напоминания на завтра
+- удали напоминания у стендапа и ретро
 
 **Шаблон принимает, но привязка отвергает до вызова инструментов:**
 
-- отмени напоминания у всех событий
+- отмени напоминания у события
 
 **Что делает правило по шагам.**
 
 1. Если выполняется условие ` bind.ref.kind == 'id' `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{bind.ref.id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 2. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` search_events ` с параметрами: ` query ` = ` {{bind.ref.query}} `; ` scope ` = ` {{env.scope}} `; ` event_type ` = ` regular `; результат сохранить как ` found `
-3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == "name" `, то ответить пользователю: «Не нашёл такое событие. Назови точное название или номер, например &#35;12.»
-4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
+3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == 'name' `, то вызвать инструмент `  `
+4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько подходящих событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
 5. Если выполняется условие ` count(found) == 1 `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{tool_outputs.found[0].id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 6. Спросить пользователя: «Убрать все напоминания у {{t.target}}?»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
 7. Если выполняется условие ` ask.confirm != 'да' && ask.confirm != 'yes' `, то ответить пользователю: «Отменено, ничего не изменилось.»
 8. Вызвать инструмент ` set_reminder ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `; ` minutes_before ` = ` [] `; ` scope ` = ` {{env.scope}} `
+9. Ответить пользователю: «Готово: убрал напоминания у «{{tool&#95;outputs.target.title}}».»
 
 **Что читается из сообщения (привязки).**
 
-- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$1}} `; таблица «reject»: 8 значений
+- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$1|default("")}} `; таблица «reject»: 16 значений; ` stem = true `
 
 **Заменяет прежние правила:** ` cancel_reminder ` (Отменить напоминание; переписано заново).
 
-**Проверка при сборке.** Все 3 положительных примеров ведут в это правило, все 2 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
+**Проверка при сборке.** Все 5 положительных примеров ведут в это правило, все 4 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
 
 <details>
 <summary>Регулярное выражение и полный workflow (JSON)</summary>
 
 ```text
-^(?:\u043E\u0442\u043C\u0435\u043D\u0438|\u0443\u0431\u0435\u0440\u0438|\u0443\u0434\u0430\u043B\u0438|cancel|remove|clear)\s+(?:\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438[\u044F\u0435]|reminders?)\s+(?:(?:\u0434\u043B\u044F|\u0443|for)\s+)?(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438\u044F|\u0432\u0441\u0442\u0440\u0435\u0447\u0438|event|meeting)\s+)?([^;\n]{1,120})$
+^(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:everything|каждое|каждую|каждый|every|любое|любую|любой|всех|each|both|все|всё|all|оба|обе)(?![A-Za-zА-Яа-яЁё0-9_]))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|\u0432\u0447\u0435\u0440\u0430|today|tomorrow|yesterday|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:-?\u0433\u043E)?\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|(?<![A-Za-zА-Яа-яЁё0-9_])(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+\d{1,2}|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}[./]\d{1,2}(?:[./]\d{4})?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{4}[-./]\d{1,2}[-./]\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0447\u0435\u0440\u0435\u0437|in)\s+(?:\d{1,3}|\u043E\u0434\u043D\u0443)\s+(?:\u0434\u043D|\u0434\u0435\u043D\u044C|\u043D\u0435\u0434\u0435\u043B|day|week))))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}:\d{2}|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0432|\u043A|at)\s+\d{1,2}(?:[.:]\d{2})?(?:\s?(?:am|pm|\u0443\u0442\u0440\u0430|\u0434\u043D\u044F|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438))?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}\.\d{2}(?![./]\d)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441|from)\s+\d{1,2}\s+(?:\u0434\u043E|to|until)\s+\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|today|tomorrow|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}[./]\d{1,2})[,.]?\s+(?:1[3-9]|2[0-3])(?![A-Za-zА-Яа-яЁё0-9_]))))(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:контакт[а-я]*|contacts?|секретар[а-я]*|secretar[a-z]*)(?![A-Za-zА-Яа-яЁё0-9_]))(?:(?:(?:\u0449\u0430\u0441|\u0441\u0435\u0439\u0447\u0430\u0441|now)\s+)?(?:\u043E\u0442\u043C\u0435\u043D\u0438|\u0443\u0431\u0435\u0440\u0438|\u0443\u0434\u0430\u043B\u0438|\u0441\u043D\u0438\u043C\u0438|\u043E\u0447\u0438\u0441\u0442\u0438|\u0441\u043E\u0442\u0440\u0438|\u043E\u0442\u043A\u043B\u044E\u0447\u0438|cancel|remove|clear|delete|turn\s+off|disable)(?:\s*,)?(?:\s+(?:\u043F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430|\u043F\u043B\u0438\u0437|\u043F\u043B\u0437|please|pls))?(?:\s*,)?\s+(?:\u0432\u0441\u0435\s+|all\s+)?(?:\u043C\u043E\u0438\s+|my\s+|the\s+)?(?:\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438[\u044F\u0435\u0439\u044E]|reminders?)\s+(?:(?:\u0434\u043B\u044F|\u0443|\u043D\u0430|\u0441\u043E|\u0441|\u043A|for|from|on|of)\s+)?(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?))$
 ```
 
 ```json
@@ -368,7 +419,7 @@
   "bindings": {
     "ref": {
       "type": "eventref",
-      "from": "{{$1}}",
+      "from": "{{$1|default(\"\")}}",
       "reject": [
         "все",
         "всё",
@@ -377,8 +428,17 @@
         "every",
         "everything",
         "любое",
-        "любую"
-      ]
+        "любую",
+        "любой",
+        "каждое",
+        "каждую",
+        "каждый",
+        "each",
+        "both",
+        "оба",
+        "обе"
+      ],
+      "stem": true
     }
   },
   "steps": [
@@ -402,8 +462,8 @@
       "as": "found"
     },
     {
-      "when": "count(found) == 0 && bind.ref.kind == \"name\"",
-      "respond": "{{t.not_found}}"
+      "when": "count(found) == 0 && bind.ref.kind == 'name'",
+      "abstain": true
     },
     {
       "when": "count(found) > 1",
@@ -440,26 +500,29 @@
         "minutes_before": [],
         "scope": "{{env.scope}}"
       }
+    },
+    {
+      "respond": "{{t.done}}"
     }
   ],
   "i18n": {
     "ru": {
-      "not_found": "Не нашёл такое событие. Назови точное название или номер, например #12.",
-      "ambiguous": "Нашёл несколько событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
+      "ambiguous": "Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
       "cancelled": "Отменено, ничего не изменилось.",
       "ok": "Да",
       "cancel": "Отмена",
-      "target": "«{{tool_outputs.target.title}}» (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Убрать все напоминания у {{t.target}}?"
+      "target": "«{{tool_outputs.target.title}}» ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\"\")|ternary(\" в \", \"\")}}{{tool_outputs.target.time|default(\"\")}})",
+      "q": "Убрать все напоминания у {{t.target}}?",
+      "done": "Готово: убрал напоминания у «{{tool_outputs.target.title}}»."
     },
     "en": {
-      "not_found": "I couldn't find that event. Give the exact title or its number, like #12.",
       "ambiguous": "Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}",
       "cancelled": "Cancelled, nothing was changed.",
       "ok": "Yes",
       "cancel": "Cancel",
-      "target": "“{{tool_outputs.target.title}}” (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Remove all reminders from {{t.target}}?"
+      "target": "“{{tool_outputs.target.title}}” ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\"\")|ternary(\" at \", \"\")}}{{tool_outputs.target.time|default(\"\")}})",
+      "q": "Remove all reminders from {{t.target}}?",
+      "done": "Done: removed the reminders of “{{tool_outputs.target.title}}”."
     }
   }
 }
@@ -474,18 +537,26 @@
 
 ` basis.reminder.after ` · Напоминания · Изменение данных · инструменты: ` ask_user `, ` create_event `
 
-> Пометка из исходника (по-английски): A standalone requested reminder is explicitly stored as one calendar reminder event; changing reminders of an existing event instead uses basis.reminder.set and never duplicates that event.
+> Пометка из исходника (по-английски): A standalone requested reminder is explicitly stored as one calendar reminder event; changing reminders of an existing event instead uses basis.reminder.set and never duplicates that event. Days, clock times and dates in the text go to the AI.
 
 **Примеры фраз.**
 
-- напомни через 15 минут выключить духовку
-- напомни мне через 2 часа отправить отчёт
-- remind me in 10 minutes take a break
+- напомни через 20 минут позвонить маме
+- напомни мне через 2 часа забрать детей
+- через час напомни, пожалуйста, проверить почту
+- напомни через полчаса выключить плиту
+- remind me in 2 hours to take out the trash
+- ping me in 10 minutes to stretch
+- через 5 минут напомни про чай
+- поставь напоминание через час позвонить в банк
 
 **Не запускают правило (уходят к AI):**
 
 - напомни завтра
 - напомни через 15 минут
+- напомни позвонить маме
+- напомни через час в 18:00 позвонить врачу
+- remind me to buy milk
 
 **Шаблон принимает, но привязка отвергает до вызова инструментов:**
 
@@ -493,26 +564,27 @@
 
 **Что делает правило по шагам.**
 
-1. Если выполняется условие ` group.is_group == true `, то ответить пользователю: «Это личные данные — работаю с ними только в личке с ботом.»
-2. Спросить пользователя: «Создать запись-напоминание «{{bind.title}}» через {{bind.delay}} мин. с уведомлением в момент начала?»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
+1. Если выполняется условие ` group.is_group == true `, то вызвать инструмент `  `
+2. Спросить пользователя: «Напомнить «{{bind.title}}» через {{bind.delay&#124;human&#95;duration}}, в {{bind.at&#124;date&#40;"HH:mm"&#41;}}?»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
 3. Если выполняется условие ` ask.confirm != 'да' && ask.confirm != 'yes' `, то ответить пользователю: «Отменено, ничего не изменилось.»
 4. Вызвать инструмент ` create_event ` с параметрами: ` title ` = ` {{bind.title}} `; ` start_at ` = ` {{bind.at}} `; ` reminder_minutes ` = ` [0] `; ` scope ` = ` personal `
+5. Ответить пользователю: «Готово: напомню «{{bind.title}}» через {{bind.delay&#124;human&#95;duration}}, в {{bind.at&#124;date&#40;"HH:mm"&#41;}}.»
 
 **Что читается из сообщения (привязки).**
 
-- ` delay ` — длительность в минутах из числа и единицы; ` from = {{$1}} `; ` unit = {{$2}} `; таблица «units»: 12 значений; ` min = 1 `; ` max = 10080 `
-- ` title ` — очищенный текст ограниченной длины; ` from = {{$3}} `; ` max = 120 `
+- ` delay ` — длительность в минутах из числа и единицы; ` from = {{$1|default("")}}{{$5|default("")}}{{$9|default("")}}{{$13|default("")}} `; ` unit = {{$2|default("")}}{{$6|default("")}}{{$10|default("")}}{{$14|default("")}}{{$3|default("")}}{{$7|default("")}}{{$11|default("")}}{{$15|default("")}} `; таблица «units»: 24 значений; ` min = 1 `; ` max = 10080 `; ` default_amount = 1 `
+- ` title ` — очищенный текст ограниченной длины; ` from = {{$4|default("")}}{{$8|default("")}}{{$12|default("")}}{{$16|default("")}} `; ` max = 120 `; ` capitalize = true `
 - ` at ` — момент через заданную длительность от текущего; ` duration = delay `
 
 **Заменяет прежние правила:** ` remind_relative_hours ` (Создать напоминание через несколько часов; переписано заново), ` remind_relative_minutes ` (Создать напоминание через несколько минут; переписано заново).
 
-**Проверка при сборке.** Все 3 положительных примеров ведут в это правило, все 2 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
+**Проверка при сборке.** Все 8 положительных примеров ведут в это правило, все 5 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
 
 <details>
 <summary>Регулярное выражение и полный workflow (JSON)</summary>
 
 ```text
-^(?:\u043D\u0430\u043F\u043E\u043C\u043D\u0438(?:\s+\u043C\u043D\u0435)?\s+\u0447\u0435\u0440\u0435\u0437|remind\s+me\s+in)\s+(\d{1,4})\s+(\u043C\u0438\u043D\u0443\u0442(?:\u0443|\u044B)?|\u043C\u0438\u043D|\u0447\u0430\u0441(?:\u0430|\u043E\u0432)?|minutes?|hours?)\s+(.{1,120})$
+^(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|\u0432\u0447\u0435\u0440\u0430|today|tomorrow|yesterday|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:-?\u0433\u043E)?\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|(?<![A-Za-zА-Яа-яЁё0-9_])(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+\d{1,2}|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}[./]\d{1,2}(?:[./]\d{4})?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{4}[-./]\d{1,2}[-./]\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0447\u0435\u0440\u0435\u0437|in)\s+(?:\d{1,3}|\u043E\u0434\u043D\u0443)\s+(?:\u0434\u043D|\u0434\u0435\u043D\u044C|\u043D\u0435\u0434\u0435\u043B|day|week))))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}:\d{2}|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0432|\u043A|at)\s+\d{1,2}(?:[.:]\d{2})?(?:\s?(?:am|pm|\u0443\u0442\u0440\u0430|\u0434\u043D\u044F|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438))?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}\.\d{2}(?![./]\d)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441|from)\s+\d{1,2}\s+(?:\u0434\u043E|to|until)\s+\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|today|tomorrow|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}[./]\d{1,2})[,.]?\s+(?:1[3-9]|2[0-3])(?![A-Za-zА-Яа-яЁё0-9_]))))(?:(?:\u043D\u0430\u043F\u043E\u043C\u043D\u0438(?:\u0442\u0435)?|\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u0439|\u043F\u043E\u0441\u0442\u0430\u0432\u044C\s+\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u0435|\u0434\u043E\u0431\u0430\u0432\u044C\s+\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u0435|\u0441\u043E\u0437\u0434\u0430\u0439\s+\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u0435)(?:\s+\u043C\u043D\u0435)?(?:\s*,)?(?:\s+(?:\u043F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430|\u043F\u043B\u0438\u0437|\u043F\u043B\u0437|please|pls))?(?:\s*,)?\s+(?:\u0447\u0435\u0440\u0435\u0437|\u0447\u0440\u0435\u0437)\s+(?:(\d{1,4})\s*((?:minutes|минуту|минуты|minute|минут|часов|hours|mins|часа|hour|мин|min|час|hrs|hr|ч|h))|((?:half\s+an\s+hour|one\s+minute|half\s+hour|a\s+minute|one\s+hour|an\s+hour|полчаса|минуту|час)))(?:\s*,)?(?:\s+(?:\u043F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430|\u043F\u043B\u0438\u0437|\u043F\u043B\u0437|please|pls))?(?:\s*,)?\s+(?:(?:\u0447\u0442\u043E|\u0447\u0442\u043E\u0431\u044B|\u043E\s+\u0442\u043E\u043C\s+\u0447\u0442\u043E|\u043F\u0440\u043E)\s+)?(?:(?:\u043D\u0430\u0434\u043E|\u043D\u0443\u0436\u043D\u043E|\u043D\u0435\s+\u0437\u0430\u0431\u044B\u0442\u044C|\u043F\u043E\u0440\u0430)\s+)?(?!(?:что|чтобы|to|that)$)(?!\d)([^;\n]{1,120})|(?:\u0447\u0435\u0440\u0435\u0437|\u0447\u0440\u0435\u0437)\s+(?:(\d{1,4})\s*((?:minutes|минуту|минуты|minute|минут|часов|hours|mins|часа|hour|мин|min|час|hrs|hr|ч|h))|((?:half\s+an\s+hour|one\s+minute|half\s+hour|a\s+minute|one\s+hour|an\s+hour|полчаса|минуту|час)))\s+(?:\u043D\u0430\u043F\u043E\u043C\u043D\u0438(?:\u0442\u0435)?|\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u0439)(?:\s+\u043C\u043D\u0435)?(?:\s*,)?(?:\s+(?:\u043F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430|\u043F\u043B\u0438\u0437|\u043F\u043B\u0437|please|pls))?(?:\s*,)?\s+(?:(?:\u0447\u0442\u043E|\u0447\u0442\u043E\u0431\u044B|\u043E\s+\u0442\u043E\u043C\s+\u0447\u0442\u043E|\u043F\u0440\u043E)\s+)?(?:(?:\u043D\u0430\u0434\u043E|\u043D\u0443\u0436\u043D\u043E|\u043D\u0435\s+\u0437\u0430\u0431\u044B\u0442\u044C|\u043F\u043E\u0440\u0430)\s+)?(?!(?:что|чтобы|to|that)$)(?!\d)([^;\n]{1,120})|(?:remind\s+me|ping\s+me|notify\s+me|set\s+(?:a\s+)?reminder)\s+in\s+(?:(\d{1,4})\s*((?:minutes|минуту|минуты|minute|минут|часов|hours|mins|часа|hour|мин|min|час|hrs|hr|ч|h))|((?:half\s+an\s+hour|one\s+minute|half\s+hour|a\s+minute|one\s+hour|an\s+hour|полчаса|минуту|час)))\s+(?:(?:to|that|about)\s+)?(?:(?:i\s+(?:need|have|should|must)\s+to|don['\u2019]t\s+forget\s+to)\s+)?(?!(?:что|чтобы|to|that)$)(?!\d)([^;\n]{1,120})|in\s+(?:(\d{1,4})\s*((?:minutes|минуту|минуты|minute|минут|часов|hours|mins|часа|hour|мин|min|час|hrs|hr|ч|h))|((?:half\s+an\s+hour|one\s+minute|half\s+hour|a\s+minute|one\s+hour|an\s+hour|полчаса|минуту|час)))\s+(?:remind\s+me|ping\s+me)\s+(?:(?:to|that|about)\s+)?(?:(?:i\s+(?:need|have|should|must)\s+to|don['\u2019]t\s+forget\s+to)\s+)?(?!(?:что|чтобы|to|that)$)(?!\d)([^;\n]{1,120}))$
 ```
 
 ```json
@@ -521,29 +593,43 @@
   "bindings": {
     "delay": {
       "type": "duration",
-      "from": "{{$1}}",
-      "unit": "{{$2}}",
+      "from": "{{$1|default(\"\")}}{{$5|default(\"\")}}{{$9|default(\"\")}}{{$13|default(\"\")}}",
+      "unit": "{{$2|default(\"\")}}{{$6|default(\"\")}}{{$10|default(\"\")}}{{$14|default(\"\")}}{{$3|default(\"\")}}{{$7|default(\"\")}}{{$11|default(\"\")}}{{$15|default(\"\")}}",
       "units": {
-        "минута": 1,
         "минуту": 1,
         "минуты": 1,
         "минут": 1,
         "мин": 1,
+        "minute": 1,
+        "minutes": 1,
+        "min": 1,
+        "mins": 1,
         "час": 60,
         "часа": 60,
         "часов": 60,
-        "minute": 1,
-        "minutes": 1,
+        "ч": 60,
         "hour": 60,
-        "hours": 60
+        "hours": 60,
+        "hr": 60,
+        "hrs": 60,
+        "h": 60,
+        "a minute": 1,
+        "one minute": 1,
+        "an hour": 60,
+        "one hour": 60,
+        "полчаса": 30,
+        "half an hour": 30,
+        "half hour": 30
       },
+      "default_amount": 1,
       "min": 1,
       "max": 10080
     },
     "title": {
       "type": "text",
-      "from": "{{$3}}",
-      "max": 120
+      "from": "{{$4|default(\"\")}}{{$8|default(\"\")}}{{$12|default(\"\")}}{{$16|default(\"\")}}",
+      "max": 120,
+      "capitalize": true
     },
     "at": {
       "type": "relative_instant",
@@ -553,7 +639,7 @@
   "steps": [
     {
       "when": "group.is_group == true",
-      "respond": "{{t.private_only}}"
+      "abstain": true
     },
     {
       "call": "ask_user",
@@ -580,22 +666,25 @@
         ],
         "scope": "personal"
       }
+    },
+    {
+      "respond": "{{t.done}}"
     }
   ],
   "i18n": {
     "ru": {
-      "private_only": "Это личные данные — работаю с ними только в личке с ботом.",
       "cancelled": "Отменено, ничего не изменилось.",
       "ok": "Да",
       "cancel": "Отмена",
-      "question": "Создать запись-напоминание «{{bind.title}}» через {{bind.delay}} мин. с уведомлением в момент начала?"
+      "question": "Напомнить «{{bind.title}}» через {{bind.delay|human_duration}}, в {{bind.at|date(\"HH:mm\")}}?",
+      "done": "Готово: напомню «{{bind.title}}» через {{bind.delay|human_duration}}, в {{bind.at|date(\"HH:mm\")}}."
     },
     "en": {
-      "private_only": "This is private data — I only handle it in a private chat with the bot.",
       "cancelled": "Cancelled, nothing was changed.",
       "ok": "Yes",
       "cancel": "Cancel",
-      "question": "Create reminder event “{{bind.title}}” in {{bind.delay}} minutes, with a notification at its start?"
+      "question": "Remind you “{{bind.title}}” in {{bind.delay|human_duration}}, at {{bind.at|date(\"HH:mm\")}}?",
+      "done": "Done: I will remind you “{{bind.title}}” in {{bind.delay|human_duration}}, at {{bind.at|date(\"HH:mm\")}}."
     }
   }
 }

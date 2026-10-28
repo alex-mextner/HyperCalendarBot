@@ -1,5 +1,5 @@
 // src/database/repositories/event.repository.ts
-import type { Database, SQLQueryBindings } from 'bun:sqlite';
+import type { Database, SQLQueryBindings, Statement } from 'bun:sqlite';
 import { assertValidEventTimestamps } from '../../utils/event-timestamps.ts';
 import type { CalendarEvent, CreateEventData, UpdateEventData } from '../types.ts';
 
@@ -49,6 +49,34 @@ function overlapCandidateSql(alias: string): string {
 // Expects 2 bind params (googleCalendarId, 1 for the user's primary calendar else 0).
 const GOOGLE_CALENDAR_OWNS_SQL = `(google_calendar_id = ?
   OR (? = 1 AND (google_calendar_id IS NULL OR google_calendar_id = 'primary')))`;
+
+/**
+ * Title substring search over rows the caller's SQL already restricted to what the user may see.
+ * SQLite LIKE folds case only for ASCII, so "встреча" never found "Встреча"; the match runs here
+ * with Unicode case folding while the rows stream, and reading stops at `limit` matches.
+ * The statement is finalized afterwards: bun:sqlite leaves a statement abandoned mid-iteration
+ * running, which blocks VACUUM (backups) and WAL checkpoints on the shared connection.
+ */
+function takeTitleMatches<Params extends SQLQueryBindings[]>(
+  statement: Statement<CalendarEvent, Params>,
+  params: Params,
+  query: string,
+  limit = Number.POSITIVE_INFINITY,
+): CalendarEvent[] {
+  const matches: CalendarEvent[] = [];
+  const needle = query.normalize('NFKC').toLowerCase();
+  try {
+    if (limit <= 0) return matches;
+    for (const row of statement.iterate(...params)) {
+      if (!row.title.normalize('NFKC').toLowerCase().includes(needle)) continue;
+      matches.push(row);
+      if (matches.length >= limit) break;
+    }
+    return matches;
+  } finally {
+    statement.finalize();
+  }
+}
 
 export const EVENT_UPDATE_FIELDS = [
   'title',
@@ -552,15 +580,10 @@ export class EventRepository {
     return row != null;
   }
 
-  private escapeLike(query: string): string {
-    return query.replace(/[%_\\]/g, '\\$&');
-  }
-
   search(userId: number, query: string, limit = 20): CalendarEvent[] {
-    return this.db
-      .prepare(`
+    const statement = this.db.prepare<CalendarEvent, [number, number, number]>(`
       SELECT * FROM events
-      WHERE title LIKE ? ESCAPE '\\' AND is_cancelled = 0 AND is_deleted = 0
+      WHERE is_cancelled = 0 AND is_deleted = 0
         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
           OR ${groupVisibleSql('')}
           OR id IN (
@@ -568,9 +591,8 @@ export class EventRepository {
             WHERE user_id = ? AND status = 'accepted'
           ))
       ORDER BY julianday(start_at), id
-      LIMIT ?
-    `)
-      .all(`%${this.escapeLike(query)}%`, userId, userId, userId, limit) as CalendarEvent[];
+    `);
+    return takeTitleMatches(statement, [userId, userId, userId], query, limit);
   }
 
   getUpcoming(userId: number, limit = 10, now?: Date): CalendarEvent[] {
@@ -887,14 +909,12 @@ export class EventRepository {
   }
 
   searchForGroup(groupId: number, query: string, limit = 20): CalendarEvent[] {
-    return this.db
-      .prepare(`
+    const statement = this.db.prepare<CalendarEvent, [number]>(`
       SELECT * FROM events
-      WHERE owner_type = 'group' AND group_id = ? AND title LIKE ? ESCAPE '\\' AND is_cancelled = 0 AND is_deleted = 0
+      WHERE owner_type = 'group' AND group_id = ? AND is_cancelled = 0 AND is_deleted = 0
       ORDER BY julianday(start_at), id
-      LIMIT ?
-    `)
-      .all(groupId, `%${this.escapeLike(query)}%`, limit) as CalendarEvent[];
+    `);
+    return takeTitleMatches(statement, [groupId], query, limit);
   }
 
   getUpcomingForGroup(groupId: number, limit = 10, now?: Date): CalendarEvent[] {
@@ -978,10 +998,6 @@ export class EventRepository {
     ];
     const params: (string | number | null)[] = [userId, userId, userId];
 
-    if (query) {
-      conditions.push('e.title LIKE ?');
-      params.push(`%${this.escapeLike(query)}%`);
-    }
     if (eventType) {
       if (eventType === 'regular') {
         conditions.push('e.event_type IS NULL');
@@ -991,13 +1007,12 @@ export class EventRepository {
       }
     }
 
-    return this.db
-      .prepare(
-        `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
+    const statement = this.db.prepare<CalendarEvent, SQLQueryBindings[]>(
+      `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
          LEFT JOIN birth_event_metadata m ON m.event_id = e.id
          WHERE ${conditions.join(' AND ')} ORDER BY julianday(e.start_at), e.id`,
-      )
-      .all(...params) as CalendarEvent[];
+    );
+    return query ? takeTitleMatches(statement, params, query) : statement.all(...params);
   }
 
   getAllRecurringTemplates(): CalendarEvent[] {

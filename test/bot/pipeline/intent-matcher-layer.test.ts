@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from 'bun:test';
 import { createIntentMatcherLayer } from '../../../src/bot/pipeline/intent-matcher-layer.ts';
 import type { WorkflowSession, WorkflowSessionStore } from '../../../src/bot/pipeline/types.ts';
 import type { BotCommandContext } from '../../../src/bot/types.ts';
 import { t } from '../../../src/config/constants.ts';
 import type { Intent, User } from '../../../src/database/types.ts';
 import type { ToolResult } from '../../../src/services/ai/types.ts';
+import type { ToolAnswer } from '../../../src/services/intent/answer-renderers.ts';
 import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
 
 const TTL_MS = 5 * 60 * 1000;
@@ -43,7 +44,9 @@ function makeWorkflowStore(): WorkflowSessionStore & { has(chatId: number, userI
 interface ExecutorResult {
   success: boolean;
   response?: string;
-  responseEvents?: { id: number; title: string; date: string; time?: string; all_day: boolean }[];
+  answer?: ToolAnswer;
+  completeResponse?: boolean;
+  mutationEvidence?: 'none' | 'applied' | 'unknown';
   suspended?: boolean;
   suspendedAt?: number;
   stepResults?: { [key: string]: unknown };
@@ -296,13 +299,19 @@ describe('createIntentMatcherLayer', () => {
     expect(executor.run).not.toHaveBeenCalled();
   });
 
-  test('formats structured events when a resumed workflow ends in get_events', async () => {
+  test('renders the structured events when a resumed workflow ends in get_events', async () => {
+    setSystemTime(new Date('2026-06-01T08:00:00Z'));
     const userId = 71;
     const workflow = { steps: [{ call: 'ask_user', as: 'answer' }, { call: 'get_events' }] };
     const executor = makeExecutor({
       success: true,
       response: 'id: 239, title: Английский, start: 2026-06-01T10:30:00.000Z, created_by: @someone',
-      responseEvents: [{ id: 239, title: 'Английский', date: '2026-06-01', time: '12:30', all_day: false }],
+      answer: {
+        tool: 'get_events',
+        input: {},
+        output: 'id: 239, title: Английский, start: 2026-06-01T10:30:00.000Z, created_by: @someone',
+        data: [{ id: 239, title: 'Английский', date: '2026-06-01', time: '12:30', all_day: false }],
+      },
     });
     const ctx = makeCtx(makeUser({ telegram_id: userId }));
 
@@ -324,8 +333,9 @@ describe('createIntentMatcherLayer', () => {
       workflowSessions,
     );
     await layer(ctx, 'да');
+    setSystemTime();
 
-    expect(ctx.send).toHaveBeenCalledWith('2026-06-01 12:30  Английский');
+    expect(ctx.send).toHaveBeenCalledWith('Сегодня, пн 1 июня:\n12:30  Английский');
   });
 
   test('ignores expired workflow session and falls through to matcher', async () => {
@@ -524,6 +534,81 @@ describe('needsSupplement', () => {
     // The supplement agent reads the auto-response from here, not from chat history.
     expect(result).toMatchObject({ needsSupplement: true, supplementAutoResponse: 'Готово!' });
     expect(ctx.send).toHaveBeenCalledWith('Готово!');
+  });
+
+  describe('a rule answer is rendered for the person and keeps the AI turn', () => {
+    // Wednesday 2026-06-03, 10:00 in Belgrade.
+    const NOW = new Date('2026-06-03T08:00:00Z');
+    const user = makeUser({ timezone: 'Europe/Belgrade', language: 'ru' });
+    const agenda = {
+      tool: 'get_events',
+      input: {},
+      output: 'id: 239, title: Английский, start_utc: 2026-06-03T10:30:00.000Z',
+      data: [{ id: 239, title: 'Английский', date: '2026-06-04', time: '12:30', all_day: false }],
+    };
+
+    beforeEach(() => setSystemTime(NOW));
+    afterEach(() => setSystemTime());
+
+    const run = async (result: ExecutorResult) => {
+      const ctx = makeCtx(user);
+      const layer = callLayer(
+        makeMatcher({ intentId: 1, captures: {} }),
+        makeIntentRepo({ id: 1, workflow: '{"steps":[]}', format: 'text', canonical_name: 'test' }),
+        makeExecutor(result),
+        makeToolExecutor(),
+        makeWorkflowStore(),
+      );
+      return { reply: await layer(ctx, 'что завтра'), ctx };
+    };
+
+    test('a read is rendered as a headed agenda and the AI turn still follows', async () => {
+      const { reply, ctx } = await run({
+        success: true,
+        response: agenda.output,
+        answer: agenda,
+        mutationEvidence: 'none',
+      });
+      expect(ctx.send).toHaveBeenCalledWith('Завтра, чт 4 июня:\n12:30  Английский');
+      expect(reply).toEqual({
+        handled: true,
+        needsSupplement: true,
+        supplementAutoResponse: 'Завтра, чт 4 июня:\n12:30  Английский',
+      });
+    });
+
+    test('a tool-declared complete read ends the exchange', async () => {
+      const { reply } = await run({
+        success: true,
+        response: 'Отменено.',
+        completeResponse: true,
+        mutationEvidence: 'none',
+      });
+      expect(reply).toEqual({ handled: true });
+    });
+
+    test('a failed read is never answered, let alone as an empty calendar', async () => {
+      const { reply, ctx } = await run({ success: false, response: 'Read unavailable', mutationEvidence: 'none' });
+      expect(reply).toEqual({ handled: false });
+      expect(ctx.send).not.toHaveBeenCalled();
+    });
+
+    test('a delete is confirmed with its exact target, not listed as an event row', async () => {
+      const deleted = {
+        tool: 'delete_event',
+        input: {},
+        output: 'Событие «Английский» (id: 239) удалено.',
+        data: agenda.data[0],
+        effect: { kind: 'event_deleted' as const },
+      };
+      const { ctx } = await run({
+        success: true,
+        response: deleted.output,
+        answer: deleted,
+        mutationEvidence: 'applied',
+      });
+      expect(ctx.send).toHaveBeenCalledWith('Событие удалено: «Английский» — завтра, чт 4 июня, 12:30.');
+    });
   });
 
   test('suspended intent (ask_user) does NOT return needsSupplement', async () => {

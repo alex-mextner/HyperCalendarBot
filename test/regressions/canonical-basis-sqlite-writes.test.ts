@@ -46,12 +46,14 @@ describe('reminders against real SQLite', () => {
     f.addEvent('Existing unrelated event');
     await f.say('напомни через 10 минут позвонить маме');
     expect(f.eventRows()).toHaveLength(1);
-    expect(f.lastText()).toContain('reminder event');
+    expect(f.lastText()).toContain('Позвонить маме');
+    expect(f.lastText()).toContain('10:10');
     await f.no();
     expect(f.eventRows()).toHaveLength(1);
     await f.say('remind me in 10 minutes take a break');
     await f.yes();
-    const added = f.eventRows().find((row) => row.title === 'take a break');
+    // Seed 6 capitalises the first letter of a title, as it does for "Standup".
+    const added = f.eventRows().find((row) => row.title === 'Take a break');
     expect(added).toBeDefined();
     expect(Date.parse(added!.start_at)).toBe(NOW.getTime() + 600000);
     expect(JSON.parse(added!.reminder_overrides!)).toEqual([0]);

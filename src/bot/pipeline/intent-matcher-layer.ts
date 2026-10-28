@@ -6,7 +6,7 @@ import type { Intent, User } from '../../database/types.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
 import type { IntentExecutor, MutationEvidence } from '../../services/intent/intent-executor.ts';
 import type { IntentMatcher, MatchResult } from '../../services/intent/intent-matcher.ts';
-import { formatResponse } from '../../services/intent/response-formatter.ts';
+import { renderAnswer } from '../../services/intent/response-formatter.ts';
 import { evidenceMessage, guardRuleTools, type RunTools } from '../../services/intent/rule-run-guard.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
@@ -67,7 +67,7 @@ export function createIntentMatcherLayer(
     ruleFingerprint: string;
   };
   async function deliverResponse(ctx: BotCommandContext, plainText: string, removeKeyboard = false): Promise<void> {
-    // formatResponse returns display text, not a trusted Telegram HTML document.
+    // renderAnswer returns display text, not a trusted Telegram HTML document.
     const chunks = splitMessage(escapeHtml(plainText), 4000, 'HTML');
     for (const [index, chunk] of chunks.entries())
       await ctx.send(chunk, {
@@ -205,9 +205,13 @@ export function createIntentMatcherLayer(
       return;
     }
     if (result.response) {
-      // Same formatting as a first-pass match: a resumed workflow can end in a tool
+      // Same rendering as a first-pass match: a resumed workflow can end in a tool
       // whose text output is written for the AI agent, not for the user.
-      const text = formatResponse(format, result.response, user.timezone, user.language, result.responseEvents);
+      const { text } = renderAnswer(format, result.response, result.answer, {
+        now: new Date(),
+        timezone: user.timezone,
+        language: user.language,
+      });
       if (session.workflow.version === 2) {
         await deliverResponse(ctx, text, true);
       } else await ctx.send(text);
@@ -256,19 +260,17 @@ export function createIntentMatcherLayer(
   async function respondToRun(turn: Turn, rule: MatchedRule, result: Result): Promise<PipelineResult> {
     const { ctx, user } = turn;
     if (!result.response) return { handled: true };
-    const formatted = formatResponse(
-      rule.intent.format,
-      result.response,
-      user.timezone,
-      user.language,
-      result.responseEvents,
-    );
+    const rendered = renderAnswer(rule.intent.format, result.response, result.answer, {
+      now: new Date(),
+      timezone: user.timezone,
+      language: user.language,
+    });
     // ctx.send is wrapped in bot/index.ts and already writes this to chat history;
     // the supplement agent reads the text from supplementAutoResponse, not from history.
-    if (rule.workflow.version === 2) await deliverResponse(ctx, formatted);
-    else await ctx.send(formatted);
+    if (rule.workflow.version === 2) await deliverResponse(ctx, rendered.text);
+    else await ctx.send(rendered.text);
     if (result.completeResponse) return { handled: true };
-    return { handled: true, needsSupplement: true, supplementAutoResponse: formatted };
+    return { handled: true, needsSupplement: true, supplementAutoResponse: rendered.text };
   }
   async function runMatchedRule(turn: Turn, rule: MatchedRule): Promise<PipelineResult> {
     const { ctx, user, chatId, userId, groupCtx, messageText } = turn;
@@ -315,6 +317,11 @@ export function createIntentMatcherLayer(
       );
       return { handled: true };
     }
+
+    // A rule that read the command but could not read its slots safely (or abstained) is not a failure: no admin
+    // alert carrying the user's text, the AI agent answers.
+    if ((result.errorCode === 'ABSTAIN' || result.errorCode === 'INVALID_INPUT') && result.mutationEvidence === 'none')
+      return { handled: false };
 
     if (!result.success) return handleFailedRun(turn, rule, result);
 

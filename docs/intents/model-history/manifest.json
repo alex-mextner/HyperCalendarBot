@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "version": 1,
+  "generator": "scripts/intent-benchmark/build-history.ts",
+  "note": "Synthetic, anonymised conversations authored independently of the rule seed (see README.md). dev is for developing rules; heldout is never used to write a rule and is measured at checkpoints.",
+  "files": {
+    "dev": {
+      "sha256": "6b65465053972861f983bda5f97d1e6cd0502d75e2cd01fb8bf5ca13d139b643",
+      "conversations": 508
+    },
+    "heldout": {
+      "sha256": "cdf9be325480fdd4dafca483568e66fc79795f3c1648ef99eaf83015780ac958",
+      "conversations": 247
+    }
+  },
+  "sources": {
+    "dev-audit-negatives.jsonl": {
+      "sha256": "e799fd502f3641775ab08bc73665ec60a948b9abb2b22e2963078dfe0698a487",
+      "conversations": 29
+    },
+    "dev-extra.jsonl": {
+      "sha256": "a961a675c41a1fd4c14d2878ea7fe0cefe17302305da5443b0657b30bf2690b6",
+      "conversations": 80
+    },
+    "dev-reads.jsonl": {
+      "sha256": "fff41f627d94bf2603eb6bde7cf41ca3bd6b2ba23ddf20114bf355a930f9e606",
+      "conversations": 175
+    },
+    "dev-writes.jsonl": {
+      "sha256": "0c826e9ff10a920b04b979a3e11651c028da1e2585d0bbaf6d1d4f60b0083b43",
+      "conversations": 231
+    },
+    "heldout-extra.jsonl": {
+      "sha256": "4929f51e4f62c21ffd8713bb81cbabe9295ca867e3e579637406fcccda35f8a6",
+      "conversations": 75
+    },
+    "heldout-reads.jsonl": {
+      "sha256": "45e619a61f571430da150b96d8bcaaa69f896c0a13e2ebaa1f441c746f3d0b4f",
+      "conversations": 86
+    },
+    "heldout-writes.jsonl": {
+      "sha256": "aed6721edc225e9452f82e07b5496cbfcaec6424d2b19bc5c911407916885229",
+      "conversations": 133
+    }
+  },
+  "droppedDuplicates": {
+    "dev": 7,
+    "heldout": 47
+  },
+  "total": 755,
+  "heldoutShare": 0.3271523178807947,
+  "checksum": "98447f88cd71fa57404321b1da6fad4df63a2784d8ace86de0aa3eb84d1f64f8"
+}

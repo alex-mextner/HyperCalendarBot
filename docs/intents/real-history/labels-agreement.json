@@ -1,0 +1,137 @@
+{
+  "note": "Round 1 labelled a preliminary 366-row cut (341 labels carry over to the final snapshot by identical text, date and clock); round 2 labelled the remaining 211 rows. Each round: two independent annotators per chunk; disagreements adjudicated by a stated rule; any unclear mark makes the label unclear.",
+  "round1Preliminary": {
+    "records": 366,
+    "agreedBeforeAdjudication": 355,
+    "adjudicated": 11,
+    "rawAgreementRate": 0.9699453551912568,
+    "annotators": "two independent annotators per chunk; every disagreement settled by a stated rule or a person; any unclear mark makes the label unclear (excluded from precision claims, kept for coverage analysis)",
+    "agreementOverall": {
+      "pairs": 366,
+      "kappaRoute": 0.863560111835974,
+      "routeAgreement": 0.9453551912568307,
+      "bothRule": 82,
+      "sameFamily": 82,
+      "sameSlots": 79
+    },
+    "agreementPerChunk": [
+      {
+        "pairs": 92,
+        "kappaRoute": 0.8370857576524159,
+        "routeAgreement": 0.9239130434782609,
+        "bothRule": 28,
+        "sameFamily": 28,
+        "sameSlots": 27
+      },
+      {
+        "pairs": 92,
+        "kappaRoute": 0.8836915297092288,
+        "routeAgreement": 0.9456521739130435,
+        "bothRule": 24,
+        "sameFamily": 24,
+        "sameSlots": 23
+      },
+      {
+        "pairs": 92,
+        "kappaRoute": 0.8288902665840051,
+        "routeAgreement": 0.9347826086956522,
+        "bothRule": 18,
+        "sameFamily": 18,
+        "sameSlots": 18
+      },
+      {
+        "pairs": 90,
+        "kappaRoute": 0.909090909090909,
+        "routeAgreement": 0.9777777777777777,
+        "bothRule": 12,
+        "sameFamily": 12,
+        "sameSlots": 11
+      }
+    ],
+    "unclear": 23
+  },
+  "round2Final": {
+    "records": 211,
+    "agreedBeforeAdjudication": 207,
+    "adjudicated": 4,
+    "rawAgreementRate": 0.981042654028436,
+    "annotators": "two independent annotators per chunk; every disagreement settled by a stated rule or a person; any unclear mark makes the label unclear (excluded from precision claims, kept for coverage analysis)",
+    "agreementOverall": {
+      "pairs": 211,
+      "kappaRoute": 0.827942375645556,
+      "routeAgreement": 0.9289099526066351,
+      "bothRule": 49,
+      "sameFamily": 49,
+      "sameSlots": 47
+    },
+    "agreementPerChunk": [
+      {
+        "pairs": 106,
+        "kappaRoute": 0.7579406269462322,
+        "routeAgreement": 0.8962264150943396,
+        "bothRule": 24,
+        "sameFamily": 24,
+        "sameSlots": 24
+      },
+      {
+        "pairs": 105,
+        "kappaRoute": 0.9040438656614119,
+        "routeAgreement": 0.9619047619047619,
+        "bothRule": 25,
+        "sameFamily": 25,
+        "sameSlots": 23
+      }
+    ],
+    "unclear": 18
+  },
+  "postAdjudication": {
+    "note": "Rows 0113, 0289, 0531, 0010, 0103, 0104, 0217 are dev rows decided while developing on dev; 0109 is held-out and was decided by the same policy after a class-level (text-free) report.",
+    "changes": [
+      {
+        "id": "rh-0113",
+        "change": "rule -> ai/unsupported",
+        "reason": "zone phrase; the round-1 adjudication rule applied mechanically to every row whose text matches it (2 rows, both dev, none held-out)"
+      },
+      {
+        "id": "rh-0289",
+        "change": "rule -> ai/unsupported",
+        "reason": "zone phrase; the round-1 adjudication rule applied mechanically to every row whose text matches it (2 rows, both dev, none held-out)"
+      },
+      {
+        "id": "rh-0531",
+        "change": "titleAlt added",
+        "reason": "the label kept the preposition of the destination in the title; the bare name is an accepted variant"
+      },
+      {
+        "id": "rh-0103",
+        "change": "status -> unclear",
+        "reason": "supported by an existing rule outside the benchmark family set"
+      },
+      {
+        "id": "rh-0104",
+        "change": "status -> unclear",
+        "reason": "supported by an existing rule outside the benchmark family set"
+      },
+      {
+        "id": "rh-0010",
+        "change": "status -> unclear",
+        "reason": "supported by an existing approved rule outside the benchmark family set"
+      },
+      {
+        "id": "rh-0217",
+        "change": "status -> unclear",
+        "reason": "supported by an existing approved rule outside the benchmark family set"
+      },
+      {
+        "id": "rh-0109",
+        "change": "status -> unclear",
+        "reason": "same policy as the four dev rows: an existing approved rule outside the benchmark family set answers it. Applied to this held-out row after a class-level report (no text) showed it was the same case; counted as a false match in the strict report."
+      },
+      {
+        "id": "rh-0374",
+        "change": "titleAlt added",
+        "reason": "a name written next to the @handle is part of the title in the bot reading; accepted as a variant (dev row)"
+      }
+    ]
+  }
+}

@@ -4,7 +4,172 @@
 
 [← Напоминания](reminders.md) · [Каталог правил](../README.md) · [Контакты →](contacts.md) · [Как читать описание шагов](../README.md#как-читать-описание-шагов) · [Описание движка](../engine.md)
 
-Отпечаток целевого сида: `6d0ed91ddf04de2ca3b9561433dbfa313fe89b7aab2ef16c3758b2fea0fab5cb`
+Отпечаток целевого сида: `77224e790a7503b776e6d5650325890439081b0ba34c5aca99b9bd93afe6d007`
+
+<a id="basis.event.create_invite"></a>
+### Создать событие и пригласить @username
+
+` basis.event.create_invite ` · Приглашения · Изменение данных · инструменты: ` get_free_slots `, ` ask_user `, ` create_event `, ` send_invitation `
+
+> Пометка из исходника (по-английски): Two effects behind one confirmation: the event, then the invitation to an exact @username. If the invitation fails after the event exists, the executor reports the applied write instead of retrying.
+
+**Примеры фраз.**
+
+- создай встречу завтра в 15:00 и пригласи @ivan&#95;petrov
+- запланируй ретро в пятницу в 16:00, пригласи @anna&#95;smith
+- schedule sync tomorrow at 3pm and invite @mark&#95;t1
+- @anna&#95;smith завтра в 15:00 созвон
+- ретро в пятницу в 16:00 с @anna&#95;smith
+
+**Не запускают правило (уходят к AI):**
+
+- пригласи @ivan&#95;petrov на событие &#35;12
+- создай встречу завтра в 15:00 и пригласи Ивана
+- не приглашай @ivan&#95;petrov на встречу завтра в 15:00
+- создай встречу завтра и пригласи @ivan&#95;petrov
+
+**Шаблон принимает, но привязка отвергает до вызова инструментов:**
+
+- создай встречу завтра в 10 и пригласи @ivan&#95;petrov
+
+**Что делает правило по шагам.**
+
+1. Если выполняется условие ` group.is_group == true `, то ответить пользователю: «Это личные данные — работаю с ними только в личке с ботом.»
+2. Вызвать инструмент ` get_free_slots ` с параметрами: ` date ` = ` {{bind.ev.date}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` availability `
+3. Если выполняется условие ` fits(availability, bind.ev.start, bind.ev.end) `, то спросить пользователя: «Создать «{{bind.ev.title}}» {{bind.ev.when&#95;text}} и пригласить @{{bind.ev.invitee}}?»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
+4. Если выполняется условие ` fits(availability, bind.ev.start, bind.ev.end) == false `, то спросить пользователя: «Создать «{{bind.ev.title}}» {{bind.ev.when&#95;text}} и пригласить @{{bind.ev.invitee}}? В это время уже что-то есть. Свободные окна дня:<br>{{tool&#95;outputs.availability&#95;text}}»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
+5. Если выполняется условие ` ask.confirm != 'да' && ask.confirm != 'yes' `, то ответить пользователю: «Отменено, ничего не изменилось.»
+6. Если выполняется условие ` bind.ev.has_end == false `, то вызвать инструмент ` create_event ` с параметрами: ` title ` = ` {{bind.ev.title}} `; ` start_at ` = ` {{bind.ev.start}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` created `
+7. Если выполняется условие ` bind.ev.has_end == true `, то вызвать инструмент ` create_event ` с параметрами: ` title ` = ` {{bind.ev.title}} `; ` start_at ` = ` {{bind.ev.start}} `; ` end_at ` = ` {{bind.ev.end}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` created `
+8. Вызвать инструмент ` send_invitation ` с параметрами: ` event_id ` = ` {{tool_outputs.created.id}} `; ` invitee_username ` = ` {{bind.ev.invitee}} `
+9. Ответить пользователю: «Готово: создал «{{bind.ev.title}}» — {{bind.ev.when&#95;text}} — и отправил приглашение @{{bind.ev.invitee}}.»
+
+**Что читается из сообщения (привязки).**
+
+- ` ev ` — event&#95;phrase; ` from = {{$1}} `; ` date = require `; ` time = require `; ` span = allow `; ` invitee = require `; ` future = true `
+
+**Проверка при сборке.** Все 5 положительных примеров ведут в это правило, все 4 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
+
+<details>
+<summary>Регулярное выражение и полный workflow (JSON)</summary>
+
+```text
+^(?!(?:не|нет|что|как|когда|где|кто|зачем|почему|сколько|какой|какая|какие|покажи|скажи|найди|поищи|удали|отмени|убери|перенеси|передвинь|сдвинь|перекинь|переименуй|пригласи|позови|what|when|where|who|why|how|show|find|delete|cancel|remove|move|reschedule|rename|invite|do|does|did|is|are|can|could|will|would|don|dont|свободен|свободна|свободно|свободные|есть|расписание|планы|события|мои|мой|окна|ближайшие|календарь|agenda|schedule for|my|free|я\s+свободен|я\s+свободна|am\s+i|events?|anything|something|tell|give|send|display|list|check|open|скинь|глянь|посмотри|расскажи|подскажи|дай|пришли|выведи|открой|нарисуй|сделай(?!\s+(?:встреч|событи|напомин|event|meeting|reminder))|во\s+сколько|подвинь|подвинуть|переставь|отложи|скрой|спрячь|снеси|назови|измени|поменяй|push|shift|bump|snooze|postpone|hide|отправь)(?![A-Za-zА-Яа-яЁё0-9_]))(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|\u0432\u0447\u0435\u0440\u0430|today|tomorrow|yesterday|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:-?\u0433\u043E)?\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|(?<![A-Za-zА-Яа-яЁё0-9_])(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+\d{1,2}|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}[./]\d{1,2}(?:[./]\d{4})?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{4}[-./]\d{1,2}[-./]\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0447\u0435\u0440\u0435\u0437|in)\s+(?:\d{1,3}|\u043E\u0434\u043D\u0443)\s+(?:\u0434\u043D|\u0434\u0435\u043D\u044C|\u043D\u0435\u0434\u0435\u043B|day|week)))(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}:\d{2}|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0432|\u043A|at)\s+\d{1,2}(?:[.:]\d{2})?(?:\s?(?:am|pm|\u0443\u0442\u0440\u0430|\u0434\u043D\u044F|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438))?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}\.\d{2}(?![./]\d)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441|from)\s+\d{1,2}\s+(?:\u0434\u043E|to|until)\s+\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|today|tomorrow|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}[./]\d{1,2})[,.]?\s+(?:1[3-9]|2[0-3])(?![A-Za-zА-Яа-яЁё0-9_])))(?!.*(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0443\u0434\u0430\u043B\u0438\w*|\u043E\u0442\u043C\u0435\u043D\u0438\w*|\u0443\u0431\u0435\u0440\u0438\w*|\u043F\u0435\u0440\u0435\u043D\u0435\u0441\u0438\w*|\u043F\u0435\u0440\u0435\u0434\u0432\u0438\u043D\u044C|\u0441\u0434\u0432\u0438\u043D\u044C|delete|cancel|remove|reschedule)(?![A-Za-zА-Яа-яЁё0-9_]))(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u0440\u0438\u0433\u043B\u0430\u0441\u0438\w*|\u043F\u043E\u0437\u043E\u0432\u0438|invite)\s+(?:(?:\u0442\u0443\u0434\u0430|\u0435\u0433\u043E|\u0435\u0451|\u0435\u0435|them|him|her)\s+)?@|^@|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441|with)\s+@))(?:(?:(?:запланировать|запланируйте|запланируй|поставьте|поставить|организуй|назначить|создайте|добавьте|добавить|запишите|записать|schedule|создать|поставь|назначь|создай|добавь|запиши|закинь|create|внеси|book|plan|add|put))\s+(?:(?:\u043C\u043D\u0435|\u0441\u0435\u0431\u0435|\u043D\u0430\u043C|\u0432\s+(?:\u043C\u043E\u0439\s+)?(?:\u043A\u0430\u043B\u0435\u043D\u0434\u0430\u0440\u044C|\u0440\u0430\u0441\u043F\u0438\u0441\u0430\u043D\u0438\u0435)|(?:to|into|in|on)\s+(?:my\s+)?calendar|a|an|new|on|for)\s+){0,4})?(.{3,300})$
+```
+
+```json
+{
+  "version": 2,
+  "bindings": {
+    "ev": {
+      "type": "event_phrase",
+      "from": "{{$1}}",
+      "date": "require",
+      "time": "require",
+      "span": "allow",
+      "invitee": "require",
+      "future": true
+    }
+  },
+  "steps": [
+    {
+      "when": "group.is_group == true",
+      "respond": "{{t.private_only}}"
+    },
+    {
+      "call": "get_free_slots",
+      "input": {
+        "date": "{{bind.ev.date}}",
+        "scope": "{{env.scope}}"
+      },
+      "as": "availability"
+    },
+    {
+      "when": "fits(availability, bind.ev.start, bind.ev.end)",
+      "call": "ask_user",
+      "input": {
+        "question": "{{t.q_free}}",
+        "options": [
+          "{{t.ok}}",
+          "{{t.cancel}}"
+        ]
+      },
+      "as": "confirm|lower"
+    },
+    {
+      "when": "fits(availability, bind.ev.start, bind.ev.end) == false",
+      "call": "ask_user",
+      "input": {
+        "question": "{{t.q_clash}}",
+        "options": [
+          "{{t.ok}}",
+          "{{t.cancel}}"
+        ]
+      },
+      "as": "confirm|lower"
+    },
+    {
+      "when": "ask.confirm != 'да' && ask.confirm != 'yes'",
+      "respond": "{{t.cancelled}}"
+    },
+    {
+      "when": "bind.ev.has_end == false",
+      "call": "create_event",
+      "input": {
+        "title": "{{bind.ev.title}}",
+        "start_at": "{{bind.ev.start}}",
+        "scope": "{{env.scope}}"
+      },
+      "as": "created"
+    },
+    {
+      "when": "bind.ev.has_end == true",
+      "call": "create_event",
+      "input": {
+        "title": "{{bind.ev.title}}",
+        "start_at": "{{bind.ev.start}}",
+        "end_at": "{{bind.ev.end}}",
+        "scope": "{{env.scope}}"
+      },
+      "as": "created"
+    },
+    {
+      "call": "send_invitation",
+      "input": {
+        "event_id": "{{tool_outputs.created.id}}",
+        "invitee_username": "{{bind.ev.invitee}}"
+      }
+    },
+    {
+      "respond": "{{t.done}}"
+    }
+  ],
+  "i18n": {
+    "ru": {
+      "private_only": "Это личные данные — работаю с ними только в личке с ботом.",
+      "cancelled": "Отменено, ничего не изменилось.",
+      "ok": "Да",
+      "cancel": "Отмена",
+      "q_free": "Создать «{{bind.ev.title}}» {{bind.ev.when_text}} и пригласить @{{bind.ev.invitee}}?",
+      "q_clash": "Создать «{{bind.ev.title}}» {{bind.ev.when_text}} и пригласить @{{bind.ev.invitee}}? В это время уже что-то есть. Свободные окна дня:\n{{tool_outputs.availability_text}}",
+      "done": "Готово: создал «{{bind.ev.title}}» — {{bind.ev.when_text}} — и отправил приглашение @{{bind.ev.invitee}}."
+    },
+    "en": {
+      "private_only": "This is private data — I only handle it in a private chat with the bot.",
+      "cancelled": "Cancelled, nothing was changed.",
+      "ok": "Yes",
+      "cancel": "Cancel",
+      "q_free": "Create “{{bind.ev.title}}” {{bind.ev.when_text}} and invite @{{bind.ev.invitee}}?",
+      "q_clash": "Create “{{bind.ev.title}}” {{bind.ev.when_text}} and invite @{{bind.ev.invitee}}? Something else is scheduled then. Free windows that day:\n{{tool_outputs.availability_text}}",
+      "done": "Done: created “{{bind.ev.title}}” — {{bind.ev.when_text}} — and sent an invitation to @{{bind.ev.invitee}}."
+    }
+  }
+}
+```
+
+</details>
+
+---
 
 <a id="basis.invite.send"></a>
 ### Пригласить человека на своё событие
@@ -15,48 +180,57 @@
 
 **Примеры фраз.**
 
-- пригласи @ivan&#95;petrov на событие &#35;12
+- пригласи @ivan&#95;petrov на ретро
+- позови @anna&#95;smith на ужин с родителями
+- кинь инвайт @mark&#95;t1 на обед с Иваном
+- добавь @ivan&#95;petrov в йогу
+- отправь приглашение на планирование спринта @mark&#95;t1
+- invite @mark&#95;t1 to the retro
+- send an invitation to @ivan&#95;petrov for the design review
 - пригласи 123456789 на встречу «Стендап»
-- invite @anna&#95;smith to event &#35;7
-- invite 987654321 to meeting Retro
 
 **Не запускают правило (уходят к AI):**
 
 - пригласи Ивана на событие &#35;12
 - пригласи @ivan на событие &#35;12
 - не приглашай @ivan&#95;petrov на событие &#35;12
+- пригласи @ivan&#95;petrov
+- пригласи @ivan&#95;petrov на ретро завтра в 15:00
+- пригласи @ivan&#95;petrov и @anna&#95;smith на ретро
 
 **Шаблон принимает, но привязка отвергает до вызова инструментов:**
 
-- пригласи @ivan&#95;petrov на событие все
+- пригласи @ivan&#95;petrov на событие
+- invite @ivan&#95;petrov to the meeting
 
 **Что делает правило по шагам.**
 
-1. Если выполняется условие ` group.is_group == true `, то ответить пользователю: «Это личные данные — работаю с ними только в личке с ботом.»
+1. Если выполняется условие ` group.is_group == true `, то вызвать инструмент `  `
 2. Если выполняется условие ` bind.ref.kind == 'id' `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{bind.ref.id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 3. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` search_events ` с параметрами: ` query ` = ` {{bind.ref.query}} `; ` scope ` = ` {{env.scope}} `; ` event_type ` = ` regular `; результат сохранить как ` found `
-4. Если выполняется условие ` count(found) == 0 && bind.ref.kind == "name" `, то ответить пользователю: «Не нашёл такое событие. Назови точное название или номер, например &#35;12.»
-5. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
+4. Если выполняется условие ` count(found) == 0 && bind.ref.kind == 'name' `, то вызвать инструмент `  `
+5. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько подходящих событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
 6. Если выполняется условие ` count(found) == 1 `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{tool_outputs.found[0].id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 7. Спросить пользователя: «Отправить приглашение {{bind.who.label}} на {{t.target}}?»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
 8. Если выполняется условие ` ask.confirm != 'да' && ask.confirm != 'yes' `, то ответить пользователю: «Отменено, ничего не изменилось.»
 9. Если выполняется условие ` bind.who.kind == 'username' `, то вызвать инструмент ` send_invitation ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `; ` invitee_username ` = ` {{bind.who.username}} `
 10. Если выполняется условие ` bind.who.kind == 'id' `, то вызвать инструмент ` send_invitation ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `; ` invitee_id ` = ` {{bind.who.id}} `
+11. Ответить пользователю: «Готово: отправил приглашение {{bind.who.label}} на «{{tool&#95;outputs.target.title}}».»
 
 **Что читается из сообщения (привязки).**
 
-- ` who ` — один адресат: числовой ID или проверяемый username; ` from = {{$1}} `
-- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$2}} `; таблица «reject»: 8 значений
+- ` who ` — один адресат: числовой ID или проверяемый username; ` from = {{$1|default("")}}{{$3|default("")}}{{$6|default("")}} `
+- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$2|default("")}}{{$4|default("")}}{{$5|default("")}} `; таблица «reject»: 16 значений; ` stem = true `
 
 **Заменяет прежние правила:** ` add_participant_to_event ` (Пригласить участника в событие; переписано заново).
 
-**Проверка при сборке.** Все 4 положительных примеров ведут в это правило, все 3 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
+**Проверка при сборке.** Все 8 положительных примеров ведут в это правило, все 6 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
 
 <details>
 <summary>Регулярное выражение и полный workflow (JSON)</summary>
 
 ```text
-^(?:\u043F\u0440\u0438\u0433\u043B\u0430\u0441\u0438|invite)\s+(@[A-Za-z][A-Za-z0-9_]{4,31}|\d{5,15})\s+(?:\u043D\u0430|to)\s+(?:событие|встречу|meeting|event)\s+([^;\n]{1,120})$
+^(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:everything|каждое|каждую|каждый|every|любое|любую|любой|всех|each|both|все|всё|all|оба|обе)(?![A-Za-zА-Яа-яЁё0-9_]))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|\u0432\u0447\u0435\u0440\u0430|today|tomorrow|yesterday|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:-?\u0433\u043E)?\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|(?<![A-Za-zА-Яа-яЁё0-9_])(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+\d{1,2}|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}[./]\d{1,2}(?:[./]\d{4})?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{4}[-./]\d{1,2}[-./]\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0447\u0435\u0440\u0435\u0437|in)\s+(?:\d{1,3}|\u043E\u0434\u043D\u0443)\s+(?:\u0434\u043D|\u0434\u0435\u043D\u044C|\u043D\u0435\u0434\u0435\u043B|day|week))))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}:\d{2}|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0432|\u043A|at)\s+\d{1,2}(?:[.:]\d{2})?(?:\s?(?:am|pm|\u0443\u0442\u0440\u0430|\u0434\u043D\u044F|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438))?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}\.\d{2}(?![./]\d)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441|from)\s+\d{1,2}\s+(?:\u0434\u043E|to|until)\s+\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|today|tomorrow|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}[./]\d{1,2})[,.]?\s+(?:1[3-9]|2[0-3])(?![A-Za-zА-Яа-яЁё0-9_]))))(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:контакт[а-я]*|contacts?|секретар[а-я]*|secretar[a-z]*)(?![A-Za-zА-Яа-яЁё0-9_]))(?:(?:(?:\u0449\u0430\u0441|\u0441\u0435\u0439\u0447\u0430\u0441|now)\s+)?(?:\u043F\u0440\u0438\u0433\u043B\u0430\u0441\u0438|\u043F\u0440\u0438\u0433\u043B\u0430\u0441\u0438\u0442\u044C|\u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0430\u0439|\u043F\u043E\u0437\u043E\u0432\u0438|\u043F\u043E\u0437\u0432\u0430\u0442\u044C|\u0434\u043E\u0431\u0430\u0432\u044C|\u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C|\u0438\u043D\u0432\u0430\u0439\u0442\u043D\u0438|invite|add)(?:\s*,)?(?:\s+(?:\u043F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430|\u043F\u043B\u0438\u0437|\u043F\u043B\u0437|please|pls))?(?:\s*,)?\s+(@[A-Za-z][A-Za-z0-9_]{4,31}|\d{5,15})\s+(?:\u043D\u0430|\u0432|to|for|in|into)\s+(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?)|(?:(?:\u0449\u0430\u0441|\u0441\u0435\u0439\u0447\u0430\u0441|now)\s+)?(?:\u043A\u0438\u043D\u044C|\u0441\u043A\u0438\u043D\u044C|\u043E\u0442\u043F\u0440\u0430\u0432\u044C|\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C|\u043F\u043E\u0448\u043B\u0438|\u043F\u043E\u0441\u043B\u0430\u0442\u044C|\u0448\u043B\u0438|send)\s+(?:an?\s+)?(?:\u0438\u043D\u0432\u0430\u0439\u0442|\u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u0435|invitation|invite)\s+(?:to\s+)?(@[A-Za-z][A-Za-z0-9_]{4,31}|\d{5,15})\s+(?:(?:\u043D\u0430|\u0432|to|for)\s+)?(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?)|(?:(?:\u0449\u0430\u0441|\u0441\u0435\u0439\u0447\u0430\u0441|now)\s+)?(?:\u043A\u0438\u043D\u044C|\u0441\u043A\u0438\u043D\u044C|\u043E\u0442\u043F\u0440\u0430\u0432\u044C|\u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C|\u043F\u043E\u0448\u043B\u0438|\u043F\u043E\u0441\u043B\u0430\u0442\u044C|\u0448\u043B\u0438|send)\s+(?:\u0438\u043D\u0432\u0430\u0439\u0442|\u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u0435|invitation|invite)\s+(?:\u043D\u0430|\u0432|to|for)\s+(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?)\s+(@[A-Za-z][A-Za-z0-9_]{4,31}|\d{5,15}))$
 ```
 
 ```json
@@ -65,11 +239,11 @@
   "bindings": {
     "who": {
       "type": "recipient",
-      "from": "{{$1}}"
+      "from": "{{$1|default(\"\")}}{{$3|default(\"\")}}{{$6|default(\"\")}}"
     },
     "ref": {
       "type": "eventref",
-      "from": "{{$2}}",
+      "from": "{{$2|default(\"\")}}{{$4|default(\"\")}}{{$5|default(\"\")}}",
       "reject": [
         "все",
         "всё",
@@ -78,14 +252,23 @@
         "every",
         "everything",
         "любое",
-        "любую"
-      ]
+        "любую",
+        "любой",
+        "каждое",
+        "каждую",
+        "каждый",
+        "each",
+        "both",
+        "оба",
+        "обе"
+      ],
+      "stem": true
     }
   },
   "steps": [
     {
       "when": "group.is_group == true",
-      "respond": "{{t.private_only}}"
+      "abstain": true
     },
     {
       "when": "bind.ref.kind == 'id'",
@@ -107,8 +290,8 @@
       "as": "found"
     },
     {
-      "when": "count(found) == 0 && bind.ref.kind == \"name\"",
-      "respond": "{{t.not_found}}"
+      "when": "count(found) == 0 && bind.ref.kind == 'name'",
+      "abstain": true
     },
     {
       "when": "count(found) > 1",
@@ -153,28 +336,29 @@
         "event_id": "{{tool_outputs.target.id}}",
         "invitee_id": "{{bind.who.id}}"
       }
+    },
+    {
+      "respond": "{{t.done}}"
     }
   ],
   "i18n": {
     "ru": {
-      "private_only": "Это личные данные — работаю с ними только в личке с ботом.",
-      "not_found": "Не нашёл такое событие. Назови точное название или номер, например #12.",
-      "ambiguous": "Нашёл несколько событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
+      "ambiguous": "Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
       "cancelled": "Отменено, ничего не изменилось.",
       "ok": "Да",
       "cancel": "Отмена",
-      "target": "«{{tool_outputs.target.title}}» (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Отправить приглашение {{bind.who.label}} на {{t.target}}?"
+      "target": "«{{tool_outputs.target.title}}» ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\"\")|ternary(\" в \", \"\")}}{{tool_outputs.target.time|default(\"\")}})",
+      "q": "Отправить приглашение {{bind.who.label}} на {{t.target}}?",
+      "done": "Готово: отправил приглашение {{bind.who.label}} на «{{tool_outputs.target.title}}»."
     },
     "en": {
-      "private_only": "This is private data — I only handle it in a private chat with the bot.",
-      "not_found": "I couldn't find that event. Give the exact title or its number, like #12.",
       "ambiguous": "Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}",
       "cancelled": "Cancelled, nothing was changed.",
       "ok": "Yes",
       "cancel": "Cancel",
-      "target": "“{{tool_outputs.target.title}}” (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Send an invitation to {{bind.who.label}} for {{t.target}}?"
+      "target": "“{{tool_outputs.target.title}}” ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\"\")|ternary(\" at \", \"\")}}{{tool_outputs.target.time|default(\"\")}})",
+      "q": "Send an invitation to {{bind.who.label}} for {{t.target}}?",
+      "done": "Done: sent {{bind.who.label}} an invitation to “{{tool_outputs.target.title}}”."
     }
   }
 }
@@ -191,37 +375,45 @@
 
 **Примеры фраз.**
 
+- статус приглашений на стендап
 - кто приглашен на событие &#35;12
-- статус приглашений на встречу с Иваном
-- invitation status for event &#35;7
+- кто ответил на приглашение на день рождения Ани
+- кто приглашён на ужин с родителями
+- has anyone answered the invite for the retro
 - who is invited to standup
+- invitation status for event &#35;7
 
 **Не запускают правило (уходят к AI):**
 
 - кто приглашен
 - статус приглашений
+- кто приглашен на все встречи
+
+**Шаблон принимает, но привязка отвергает до вызова инструментов:**
+
+- кто приглашен на событие
 
 **Что делает правило по шагам.**
 
-1. Если выполняется условие ` group.is_group == true `, то ответить пользователю: «Это личные данные — работаю с ними только в личке с ботом.»
+1. Если выполняется условие ` group.is_group == true `, то вызвать инструмент `  `
 2. Если выполняется условие ` bind.ref.kind == 'id' `, то вызвать инструмент ` get_invitation_status ` с параметрами: ` event_id ` = ` {{bind.ref.id}} `
 3. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` search_events ` с параметрами: ` query ` = ` {{bind.ref.query}} `; ` scope ` = ` {{env.scope}} `; ` event_type ` = ` regular `; результат сохранить как ` found `
-4. Если выполняется условие ` count(found) == 0 && bind.ref.kind == "name" `, то ответить пользователю: «Не нашёл такое событие. Назови точное название или номер, например &#35;12.»
-5. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
+4. Если выполняется условие ` count(found) == 0 && bind.ref.kind == 'name' `, то вызвать инструмент `  `
+5. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько подходящих событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
 6. Если выполняется условие ` count(found) == 1 `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{tool_outputs.found[0].id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 7. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` get_invitation_status ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `
 
 **Что читается из сообщения (привязки).**
 
-- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$1}} `; таблица «reject»: 8 значений
+- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$1|default("")}}{{$2|default("")}} `; таблица «reject»: 16 значений; ` stem = true `
 
-**Проверка при сборке.** Все 4 положительных примеров ведут в это правило, все 2 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
+**Проверка при сборке.** Все 7 положительных примеров ведут в это правило, все 3 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
 
 <details>
 <summary>Регулярное выражение и полный workflow (JSON)</summary>
 
 ```text
-^(?:\u043A\u0442\u043E\s+\u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D|\u043A\u0442\u043E\s+\u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0451\u043D|\u0441\u0442\u0430\u0442\u0443\u0441\s+\u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u0439|invitation\s+status|who\s+is\s+invited)\s+(?:\u043D\u0430|to|for)\s+(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438\u0435|\u0432\u0441\u0442\u0440\u0435\u0447\u0443|event|meeting)\s+)?([^;\n]{1,120})$
+^(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:everything|каждое|каждую|каждый|every|любое|любую|любой|всех|each|both|все|всё|all|оба|обе)(?![A-Za-zА-Яа-яЁё0-9_]))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|\u0432\u0447\u0435\u0440\u0430|today|tomorrow|yesterday|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:-?\u0433\u043E)?\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|(?<![A-Za-zА-Яа-яЁё0-9_])(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+\d{1,2}|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}[./]\d{1,2}(?:[./]\d{4})?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{4}[-./]\d{1,2}[-./]\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0447\u0435\u0440\u0435\u0437|in)\s+(?:\d{1,3}|\u043E\u0434\u043D\u0443)\s+(?:\u0434\u043D|\u0434\u0435\u043D\u044C|\u043D\u0435\u0434\u0435\u043B|day|week))))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}:\d{2}|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0432|\u043A|at)\s+\d{1,2}(?:[.:]\d{2})?(?:\s?(?:am|pm|\u0443\u0442\u0440\u0430|\u0434\u043D\u044F|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438))?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}\.\d{2}(?![./]\d)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441|from)\s+\d{1,2}\s+(?:\u0434\u043E|to|until)\s+\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|today|tomorrow|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}[./]\d{1,2})[,.]?\s+(?:1[3-9]|2[0-3])(?![A-Za-zА-Яа-яЁё0-9_]))))(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:контакт[а-я]*|contacts?|секретар[а-я]*|secretar[a-z]*)(?![A-Za-zА-Яа-яЁё0-9_]))(?:(?:\u043A\u0442\u043E\s+(?:\u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\S*|\u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0430\u043B\S*|\u043E\u0442\u0432\u0435\u0442\u0438\u043B\S*|\u043F\u0440\u0438\u043D\u044F\u043B\S*|\u043F\u0440\u0438\u0434\u0435\u0442|\u043F\u043E\u0439\u0434\u0435\u0442|\u0438\u0434\u0435\u0442|\u0431\u0443\u0434\u0435\u0442)|(?:\u043A\u0430\u043A\u043E\u0439\s+)?\u0441\u0442\u0430\u0442\u0443\u0441\s+\u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\S+|\u043A\u0430\u043A\s+(?:\u0434\u0435\u043B\u0430|\u0443\u0441\u043F\u0435\u0445\u0438)\s+\u0441\s+\u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\S+)\s+(?:(?:\u043D\u0430|\u0432|\u0434\u043B\u044F|\u043F\u043E|\u043A)\s+)?(?:\u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\S+\s+(?:\u043D\u0430|\u0432|\u0434\u043B\u044F)\s+)?(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?)|(?:who\s+(?:is|was|are|has\s+been)\s+invited|who\s+(?:is\s+)?(?:coming|going|attending)|who\s+(?:answered|accepted|replied\s+to|responded\s+to)|has\s+anyone\s+(?:answered|accepted|replied\s+to|responded\s+to)|(?:invitation|invite)\s+status|status\s+of\s+(?:the\s+)?(?:invitations?|invites?))\s+(?:(?:to|for|on|at|of)\s+)?(?:(?:the\s+)?(?:invitations?|invites?)\s+(?:to|for|on)\s+)?(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?))$
 ```
 
 ```json
@@ -230,7 +422,7 @@
   "bindings": {
     "ref": {
       "type": "eventref",
-      "from": "{{$1}}",
+      "from": "{{$1|default(\"\")}}{{$2|default(\"\")}}",
       "reject": [
         "все",
         "всё",
@@ -239,14 +431,23 @@
         "every",
         "everything",
         "любое",
-        "любую"
-      ]
+        "любую",
+        "любой",
+        "каждое",
+        "каждую",
+        "каждый",
+        "each",
+        "both",
+        "оба",
+        "обе"
+      ],
+      "stem": true
     }
   },
   "steps": [
     {
       "when": "group.is_group == true",
-      "respond": "{{t.private_only}}"
+      "abstain": true
     },
     {
       "when": "bind.ref.kind == 'id'",
@@ -266,8 +467,8 @@
       "as": "found"
     },
     {
-      "when": "count(found) == 0 && bind.ref.kind == \"name\"",
-      "respond": "{{t.not_found}}"
+      "when": "count(found) == 0 && bind.ref.kind == 'name'",
+      "abstain": true
     },
     {
       "when": "count(found) > 1",
@@ -292,13 +493,9 @@
   ],
   "i18n": {
     "ru": {
-      "private_only": "Это личные данные — работаю с ними только в личке с ботом.",
-      "not_found": "Не нашёл такое событие. Назови точное название или номер, например #12.",
-      "ambiguous": "Нашёл несколько событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}"
+      "ambiguous": "Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}"
     },
     "en": {
-      "private_only": "This is private data — I only handle it in a private chat with the bot.",
-      "not_found": "I couldn't find that event. Give the exact title or its number, like #12.",
       "ambiguous": "Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}"
     }
   }

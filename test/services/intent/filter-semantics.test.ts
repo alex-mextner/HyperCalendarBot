@@ -20,6 +20,9 @@ describe('applyFilters: every filter', () => {
       'sub',
       'mul',
       'div',
+      'human_day',
+      'human_when',
+      'human_duration',
     ]);
   });
 

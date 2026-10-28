@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "note": "Calendar state every conversation starts from (world \"rich\"); world \"empty\" has the same users and contacts but no events. dayOffset counts local days after the clock's today; all titles are invented.",
+  "events": [
+    { "id": 1, "dayOffset": 1, "at": "10:00", "durationMin": 30, "title": { "ru": "Стендап", "en": "Standup" } },
+    { "id": 2, "dayOffset": 0, "at": "13:00", "durationMin": 60, "title": { "ru": "Обед с Иваном", "en": "Lunch with Ivan" } },
+    { "id": 3, "dayOffset": 2, "at": "09:15", "durationMin": 45, "title": { "ru": "Стоматолог", "en": "Dentist" } },
+    { "id": 4, "dayOffset": 3, "at": "16:00", "durationMin": 60, "title": { "ru": "Ретро", "en": "Retro" } },
+    { "id": 5, "dayOffset": 4, "at": "11:00", "durationMin": 90, "title": { "ru": "Планирование спринта", "en": "Sprint planning" } },
+    { "id": 6, "dayOffset": 1, "at": "15:30", "durationMin": 60, "title": { "ru": "Созвон с клиентом", "en": "Client call" } },
+    { "id": 7, "dayOffset": 0, "at": "19:00", "durationMin": 60, "title": { "ru": "Йога", "en": "Yoga" } },
+    { "id": 8, "dayOffset": 5, "at": "19:00", "durationMin": 120, "title": { "ru": "День рождения Ани", "en": "Anna's birthday" } },
+    { "id": 9, "dayOffset": 1, "at": "18:30", "durationMin": 60, "title": { "ru": "Тренировка", "en": "Gym" } },
+    { "id": 10, "dayOffset": 2, "at": "14:00", "durationMin": 60, "title": { "ru": "Ревью дизайна", "en": "Design review" } },
+    { "id": 11, "dayOffset": 6, "at": "07:30", "durationMin": 120, "title": { "ru": "Поездка в аэропорт", "en": "Airport trip" } },
+    { "id": 12, "dayOffset": 5, "at": "20:00", "durationMin": 90, "title": { "ru": "Ужин с родителями", "en": "Dinner with parents" } }
+  ],
+  "contacts": [
+    { "name": "Иван", "username": "ivan_petrov", "telegramId": 123456789 },
+    { "name": "Анна", "username": "anna_smith", "telegramId": 987654321 },
+    { "name": "Марк", "username": "mark_t1", "telegramId": 555000111 },
+    { "name": "Лена", "username": null, "telegramId": null }
+  ],
+  "clocks": {
+    "note": "A conversation's clock is a weekday and a local wall time in the conversation's zone. The runner anchors it to a fixed past week, so relative words (завтра, в пятницу) are checked against a known weekday.",
+    "weekdays": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+  },
+  "zones": ["UTC", "Europe/Belgrade", "America/New_York", "Pacific/Auckland", "Asia/Kolkata", "Pacific/Kiritimati"]
+}

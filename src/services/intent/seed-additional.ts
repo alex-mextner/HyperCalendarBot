@@ -1,56 +1,15 @@
 import {
-  ANY_DAY_RX,
+  abstainInGroup,
+  COURTESY,
   confirmStep,
-  DAY_WORDS,
+  DATE_SIGNAL,
   type FamilyDefinition,
   guardPrivate,
-  SCOPE,
-  TIME_RX,
+  slotForms,
+  spanVocabulary,
+  TIME_SIGNAL,
 } from './seed-fragments.ts';
 
-const createRange: FamilyDefinition = {
-  name: 'basis.event.create_range',
-  title: 'Create an event with an explicit start and end',
-  category: 'events',
-  risk: 'write',
-  pattern: String.raw`^(?:создай|добавь|запланируй|create|add|schedule)\s+(.{1,120}?)\s+(${ANY_DAY_RX})\s+(?:с|from)\s+(${TIME_RX})\s+(?:до|to)\s+(${TIME_RX})$`,
-  triggers: ['создай', 'добавь', 'запланируй', 'create', 'add', 'schedule'],
-  bindings: {
-    title: { type: 'text', from: '{{$1}}', max: 120 },
-    day: { type: 'date', from: '{{$2}}', words: DAY_WORDS },
-    first: { type: 'time', from: '{{$3}}' },
-    last: { type: 'time', from: '{{$4}}' },
-    start: { type: 'datetime', date: 'day', time: 'first', future: true },
-    end: { type: 'datetime', date: 'day', time: 'last' },
-  },
-  steps: [
-    { when: 'bind.end <= bind.start', respond: '{{t.invalid_range}}' },
-    ...confirmStep('question'),
-    {
-      call: 'create_event',
-      input: { title: '{{bind.title}}', start_at: '{{bind.start}}', end_at: '{{bind.end}}', scope: SCOPE },
-    },
-  ],
-  strings: {
-    ru: {
-      invalid_range: 'Конец должен быть позже начала в тот же день. Уточните диапазон.',
-      question: 'Добавить «{{bind.title}}» {{bind.day}} с {{bind.first}} до {{bind.last}}?',
-    },
-    en: {
-      invalid_range: 'The end must be later on the same day. Specify the interval.',
-      question: 'Add “{{bind.title}}” on {{bind.day}} from {{bind.first}} to {{bind.last}}?',
-    },
-  },
-  examples: [
-    'создай стендап завтра с 10:00 до 11:00',
-    'добавь встречу 2026-10-05 с 15:00 до 16:30',
-    'create planning tomorrow from 10am to 11am',
-  ],
-  negatives: ['создай стендап с 10:00 до 11:00', 'не создай стендап завтра с 10:00 до 11:00'],
-  invalidInputs: ['создай стендап завтра с 3 до 5', 'create standup tomorrow from 25:00 to 26:00'],
-  notes:
-    'Replaces the stored today/tomorrow timerange recipes with one typed, confirmed interval. Cross-midnight requires an explicit different request, never a guessed end date.',
-};
 const telegramStatus: FamilyDefinition = {
   name: 'basis.telegram.status',
   title: 'Inspect the current personal Telegram connection',
@@ -108,62 +67,109 @@ const callStart: FamilyDefinition = {
   notes:
     'Replaces stored DB7 with actor-scoped explicit intent and confirmation. Unsupported call capabilities fail without inventing success.',
 };
+const AFTER_SPAN = spanVocabulary(false);
+/** The reminder text is not just a connector word ("напомни через час что"), and does not start with a number ("через 1 час 30 минут ...": a longer span this rule does not read). */
+const TEXT_GUARD = '(?!(?:что|чтобы|to|that)$)(?!\\d)';
+/** The message names neither a day nor a clock time: "через час в 18:00 ..." is something else. */
+const NO_WHEN = `(?!${DATE_SIGNAL})(?!${TIME_SIGNAL})`;
+const AFTER_SLOTS = {
+  amount: String.raw`\d{1,4}`,
+  unit: AFTER_SPAN.unit,
+  bare: AFTER_SPAN.bare,
+  text: String.raw`[^;\n]{1,120}`,
+};
+/** "20 минут", "2 часа", "полчаса": an amount with a unit, or a unit that stands for one. */
+const afterSpan = (slot: (name: string) => string): string =>
+  String.raw`(?:${slot('amount')}\s*${slot('unit')}|${slot('bare')})`;
+/** Words that only lead into what to do: "напомни через час, что надо позвонить", "remind me in 5 minutes that I need to call". */
+const RU_LINK = String.raw`(?:(?:что|чтобы|о\s+том\s+что|про)\s+)?(?:(?:надо|нужно|не\s+забыть|пора)\s+)?`;
+const EN_LINK = String.raw`(?:(?:to|that|about)\s+)?(?:(?:i\s+(?:need|have|should|must)\s+to|don['’]t\s+forget\s+to)\s+)?`;
+const remindForms = slotForms(
+  [
+    (s) =>
+      String.raw`(?:напомни(?:те)?|напоминай|поставь\s+напоминание|добавь\s+напоминание|создай\s+напоминание)(?:\s+мне)?${COURTESY}\s+(?:через|чрез)\s+${afterSpan(s)}${COURTESY}\s+${RU_LINK}${TEXT_GUARD}${s('text')}`,
+    (s) =>
+      String.raw`(?:через|чрез)\s+${afterSpan(s)}\s+(?:напомни(?:те)?|напоминай)(?:\s+мне)?${COURTESY}\s+${RU_LINK}${TEXT_GUARD}${s('text')}`,
+    (s) =>
+      String.raw`(?:remind\s+me|ping\s+me|notify\s+me|set\s+(?:a\s+)?reminder)\s+in\s+${afterSpan(s)}\s+${EN_LINK}${TEXT_GUARD}${s('text')}`,
+    (s) => String.raw`in\s+${afterSpan(s)}\s+(?:remind\s+me|ping\s+me)\s+${EN_LINK}${TEXT_GUARD}${s('text')}`,
+  ],
+  AFTER_SLOTS,
+  NO_WHEN,
+);
+
 const remindAfter: FamilyDefinition = {
   name: 'basis.reminder.after',
   title: 'Create an explicit reminder after a duration',
   category: 'reminders',
   risk: 'write',
-  pattern: String.raw`^(?:напомни(?:\s+мне)?\s+через|remind\s+me\s+in)\s+(\d{1,4})\s+(минут(?:у|ы)?|мин|час(?:а|ов)?|minutes?|hours?)\s+(.{1,120})$`,
-  triggers: ['напомни', 'remind'],
+  pattern: remindForms.pattern,
+  triggers: [
+    'напомни',
+    'напомните',
+    'напоминай',
+    'поставь',
+    'добавь',
+    'создай',
+    'через',
+    'чрез',
+    'remind',
+    'ping',
+    'notify',
+    'set',
+    'in',
+  ],
   bindings: {
     delay: {
       type: 'duration',
-      from: '{{$1}}',
-      unit: '{{$2}}',
-      units: {
-        минута: 1,
-        минуту: 1,
-        минуты: 1,
-        минут: 1,
-        мин: 1,
-        час: 60,
-        часа: 60,
-        часов: 60,
-        minute: 1,
-        minutes: 1,
-        hour: 60,
-        hours: 60,
-      },
+      from: remindForms.read('amount'),
+      unit: `${remindForms.read('unit')}${remindForms.read('bare')}`,
+      units: AFTER_SPAN.table,
+      default_amount: 1,
       min: 1,
       max: 10080,
     },
-    title: { type: 'text', from: '{{$3}}', max: 120 },
+    title: { type: 'text', from: remindForms.read('text'), max: 120, capitalize: true },
     at: { type: 'relative_instant', duration: 'delay' },
   },
   steps: [
-    guardPrivate(),
+    abstainInGroup(),
     ...confirmStep('question'),
     {
       call: 'create_event',
       input: { title: '{{bind.title}}', start_at: '{{bind.at}}', reminder_minutes: [0], scope: 'personal' },
     },
+    { respond: '{{t.done}}' },
   ],
   strings: {
     ru: {
-      question: 'Создать запись-напоминание «{{bind.title}}» через {{bind.delay}} мин. с уведомлением в момент начала?',
+      question: 'Напомнить «{{bind.title}}» через {{bind.delay|human_duration}}, в {{bind.at|date("HH:mm")}}?',
+      done: 'Готово: напомню «{{bind.title}}» через {{bind.delay|human_duration}}, в {{bind.at|date("HH:mm")}}.',
     },
     en: {
-      question: 'Create reminder event “{{bind.title}}” in {{bind.delay}} minutes, with a notification at its start?',
+      question: 'Remind you “{{bind.title}}” in {{bind.delay|human_duration}}, at {{bind.at|date("HH:mm")}}?',
+      done: 'Done: I will remind you “{{bind.title}}” in {{bind.delay|human_duration}}, at {{bind.at|date("HH:mm")}}.',
     },
   },
   examples: [
-    'напомни через 15 минут выключить духовку',
-    'напомни мне через 2 часа отправить отчёт',
-    'remind me in 10 minutes take a break',
+    'напомни через 20 минут позвонить маме',
+    'напомни мне через 2 часа забрать детей',
+    'через час напомни, пожалуйста, проверить почту',
+    'напомни через полчаса выключить плиту',
+    'remind me in 2 hours to take out the trash',
+    'ping me in 10 minutes to stretch',
+    'через 5 минут напомни про чай',
+    'поставь напоминание через час позвонить в банк',
   ],
-  negatives: ['напомни завтра', 'напомни через 15 минут'],
+  negatives: [
+    'напомни завтра',
+    'напомни через 15 минут',
+    'напомни позвонить маме',
+    'напомни через час в 18:00 позвонить врачу',
+    'remind me to buy milk',
+  ],
   invalidInputs: ['напомни через 0 минут тест'],
   notes:
-    'A standalone requested reminder is explicitly stored as one calendar reminder event; changing reminders of an existing event instead uses basis.reminder.set and never duplicates that event.',
+    'A standalone requested reminder is explicitly stored as one calendar reminder event; changing reminders of an existing event instead uses basis.reminder.set and never duplicates that event. Days, clock times and dates in the text go to the AI.',
 };
-export const additionalFamilies: FamilyDefinition[] = [createRange, telegramStatus, callStart, remindAfter];
+export const additionalFamilies: FamilyDefinition[] = [telegramStatus, callStart, remindAfter];

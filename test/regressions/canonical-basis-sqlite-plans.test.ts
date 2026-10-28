@@ -68,8 +68,8 @@ describe('a day plan just after midnight against real SQLite', () => {
     ]);
     const [monday, tuesday, ...rest] = sections(f);
     expect(rest).toEqual([]);
-    expect(monday).toBe(['Сегодня, пн 14.09:', ...MONDAY_ROWS].join('\n'));
-    expect(tuesday?.split('\n')[0]).toBe('Завтра, вт 15.09:');
+    expect(monday).toBe(['Сегодня, пн 14 сентября:', ...MONDAY_ROWS].join('\n'));
+    expect(tuesday?.split('\n')[0]).toBe('Завтра, вт 15 сентября:');
     expect(tuesday).toContain('15 сентября');
     expect(tuesday).not.toContain('Стендап');
   });
@@ -83,9 +83,9 @@ describe('a day plan just after midnight against real SQLite', () => {
     expect(daysRead(f)).toEqual(['2026-09-13', '2026-09-14']);
     const [sunday, monday, ...rest] = sections(f);
     expect(rest).toEqual([]);
-    expect(sunday?.split('\n')[0]).toBe('Вчера, вс 13.09:');
+    expect(sunday?.split('\n')[0]).toBe('Вчера, вс 13 сентября:');
     expect(sunday).toContain('13 сентября');
-    expect(monday).toBe(['Сегодня, пн 14.09:', ...MONDAY_ROWS].join('\n'));
+    expect(monday).toBe(['Сегодня, пн 14 сентября:', ...MONDAY_ROWS].join('\n'));
   });
 
   test("'План на завтра' at 10:00 reads only Tuesday and answers without day labels", async () => {
@@ -125,8 +125,8 @@ describe('a day plan just after midnight against real SQLite', () => {
     await f.say("what's tomorrow");
 
     const [monday, tuesday] = sections(f);
-    expect(monday?.split('\n')[0]).toBe('Today, Mon 09/14:');
-    expect(tuesday?.split('\n')[0]).toBe('Tomorrow, Tue 09/15:');
+    expect(monday?.split('\n')[0]).toBe('Today, Mon Sep 14:');
+    expect(tuesday?.split('\n')[0]).toBe('Tomorrow, Tue Sep 15:');
   });
 
   test('a date or another day word is never doubled after midnight', async () => {
@@ -156,7 +156,7 @@ describe('creating an event against real SQLite', () => {
     await f.yes();
     const rows = f.eventRows();
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.title).toBe('standup');
+    expect(rows[0]!.title).toBe('Standup');
     expect(Date.parse(rows[0]!.start_at)).toBe(Date.parse('2026-09-20T10:30:00+02:00'));
     expect(f.store.get(USER, USER)).toBeNull();
     const again = await f.say('Yes');
@@ -247,7 +247,8 @@ describe('a week plan against real SQLite', () => {
       { start_date: '2026-09-27', end_date: '2026-10-03', scope: 'personal' },
     ]);
     const text = f.lastText();
-    expect(text).toContain('2026-09-28 12:30  Lesson');
+    expect(text).toContain('Mon Sep 28');
+    expect(text).toContain('12:30  Lesson');
     expect(text).toContain('Vet');
     expect(text).not.toContain('Concert');
     expect(text).not.toContain('Next Sunday');
@@ -376,10 +377,13 @@ describe('deleting by title or number against real SQLite', () => {
     expect(mutationCalls(f)).toEqual([]);
   });
 
-  test('renaming needs a number or quoted title and asks first', async () => {
+  test('renaming asks first, by title or by number', async () => {
     const f = fixture();
     const id = f.addEvent('Retro');
-    expect((await f.say('rename event Retro to Planning')).handled).toBe(false);
+    expect((await f.say('rename event Retro to Planning')).handled).toBe(true);
+    expect(f.eventRows()[0]!.title).toBe('Retro');
+    await f.no();
+    expect(f.eventRows()[0]!.title).toBe('Retro');
     await f.say(`rename event #${id} to Planning`);
     expect(f.eventRows()[0]!.title).toBe('Retro');
     await f.yes();

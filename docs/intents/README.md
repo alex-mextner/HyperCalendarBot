@@ -2,9 +2,9 @@
 
 # Правила интентов HyperCalendar: единый сид
 
-**Это целевой сид из исходного кода: правил — 52.** Документ строится из исходников и **не утверждает, что сид уже установлен**: сборка не открывает базу и не видит сервер. Установку подтверждает отдельная проверка живой базы: отпечаток ниже должен совпасть со значением в таблице `intent_basis_manifest` (подробности в [описании движка](engine.md#что-здесь-утверждается-а-что-нет)).
+**Это целевой сид из исходного кода: правил — 54.** Документ строится из исходников и **не утверждает, что сид уже установлен**: сборка не открывает базу и не видит сервер. Установку подтверждает отдельная проверка живой базы: отпечаток ниже должен совпасть со значением в таблице `intent_basis_manifest` (подробности в [описании движка](engine.md#что-здесь-утверждается-а-что-нет)).
 
-Отпечаток целевого сида: `6d0ed91ddf04de2ca3b9561433dbfa313fe89b7aab2ef16c3758b2fea0fab5cb`
+Отпечаток целевого сида: `77224e790a7503b776e6d5650325890439081b0ba34c5aca99b9bd93afe6d007`
 
 Навигация: [правила по категориям](#правила-по-категориям) · [описание движка и правил безопасности](engine.md) · [HTML-страница с поиском и фильтрами](index.html) · [машиночитаемый каталог](catalogue.json) · [заметки по каталогу и приватному отчёту](../intent-catalogue.md) · [план перестройки](../plans/2026-09-18-intent-redesign.md)
 
@@ -14,12 +14,12 @@
 
 | Показатель | Значение |
 |---|---|
-| Правил в целевом сиде | 52 |
-| Категория: Расписание | 7 |
+| Правил в целевом сиде | 54 |
+| Категория: Расписание | 9 |
 | Категория: Свободное время | 3 |
-| Категория: События | 9 |
+| Категория: События | 8 |
+| Категория: Приглашения | 3 |
 | Категория: Напоминания | 4 |
-| Категория: Приглашения | 2 |
 | Категория: Контакты | 7 |
 | Категория: Настройки | 6 |
 | Категория: История и журнал | 2 |
@@ -28,7 +28,7 @@
 | Категория: Google Календарь | 4 |
 | Категория: Доступ помощников | 3 |
 | Категория: О боте и подключениях | 1 |
-| Риск: Чтение своего календаря | 18 |
+| Риск: Чтение своего календаря | 20 |
 | Риск: Изменение данных | 23 |
 | Риск: Чтение личных данных | 10 |
 | Риск: Изменение доступа или личности | 1 |
@@ -53,22 +53,25 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 
 | Правило | Категория | Риск | Проверка при сборке |
 |---|---|---|---|
-| [События на один день](rules/calendar.md#basis.calendar.day) | Расписание | Чтение своего календаря | маршрутизация проверена |
-| [События недели, месяца или выходных](rules/calendar.md#basis.calendar.period) | Расписание | Чтение своего календаря | маршрутизация проверена |
-| [Ближайшие события](rules/calendar.md#basis.calendar.upcoming) | Расписание | Чтение своего календаря | маршрутизация проверена |
-| [Поиск событий по названию](rules/calendar.md#basis.calendar.search) | Расписание | Чтение своего календаря | маршрутизация проверена |
-| [Сколько событий за период](rules/calendar.md#basis.calendar.count) | Расписание | Чтение своего календаря | маршрутизация проверена |
-| [Календарь картинкой](rules/calendar.md#basis.calendar.image) | Расписание | Чтение своего календаря | маршрутизация проверена |
+| [События на один день](rules/calendar-1.md#basis.calendar.day) | Расписание | Чтение своего календаря | маршрутизация проверена |
+| [События недели, месяца или выходных](rules/calendar-1.md#basis.calendar.period) | Расписание | Чтение своего календаря | маршрутизация проверена |
+| [Ближайшие события](rules/calendar-1.md#basis.calendar.upcoming) | Расписание | Чтение своего календаря | маршрутизация проверена |
+| [Одно ближайшее событие](rules/calendar-1.md#basis.calendar.next) | Расписание | Чтение своего календаря | маршрутизация проверена |
+| [Поиск событий по названию](rules/calendar-1.md#basis.calendar.search) | Расписание | Чтение своего календаря | маршрутизация проверена |
+| [Когда или во сколько событие](rules/calendar-1.md#basis.calendar.when) | Расписание | Чтение своего календаря | маршрутизация проверена |
+| [Сколько событий за период](rules/calendar-1.md#basis.calendar.count) | Расписание | Чтение своего календаря | маршрутизация проверена |
+| [Календарь картинкой](rules/calendar-1.md#basis.calendar.image) | Расписание | Чтение своего календаря | маршрутизация проверена |
 | [Свободное время в один день](rules/slots.md#basis.slots.day) | Свободное время | Чтение своего календаря | маршрутизация проверена |
 | [Свободное время по дням недели](rules/slots.md#basis.slots.week) | Свободное время | Чтение своего календаря | маршрутизация проверена |
 | [Свободен ли я в указанное время](rules/slots.md#basis.slots.check_time) | Свободное время | Чтение своего календаря | маршрутизация проверена |
-| [Ближайшие праздники](rules/calendar.md#basis.holidays.upcoming) | Расписание | Чтение своего календаря | маршрутизация проверена |
+| [Ближайшие праздники](rules/calendar-2.md#basis.holidays.upcoming) | Расписание | Чтение своего календаря | маршрутизация проверена |
 | [Создать событие с названием, днём и временем](rules/events-1.md#basis.event.create) | События | Изменение данных | маршрутизация проверена |
+| [Создать событие и пригласить @username](rules/invitations.md#basis.event.create_invite) | Приглашения | Изменение данных | маршрутизация проверена |
 | [Показать одно событие по номеру или точному названию](rules/events-1.md#basis.event.show) | События | Чтение своего календаря | маршрутизация проверена |
 | [Перенести событие на явный день и время](rules/events-1.md#basis.event.reschedule) | События | Изменение данных | маршрутизация проверена |
 | [Переименовать событие](rules/events-1.md#basis.event.rename) | События | Изменение данных | маршрутизация проверена |
 | [Изменить место или описание события](rules/events-1.md#basis.event.set_detail) | События | Изменение данных | маршрутизация проверена |
-| [Удалить одно событие после подтверждения](rules/events-1.md#basis.event.delete) | События | Изменение данных | маршрутизация проверена |
+| [Удалить одно событие после подтверждения](rules/events-2.md#basis.event.delete) | События | Изменение данных | маршрутизация проверена |
 | [Сдвинуть событие позже на минуты или часы](rules/events-2.md#basis.event.snooze) | События | Изменение данных | маршрутизация проверена |
 | [Сделать событие приватным](rules/events-2.md#basis.event.hide) | События | Изменение данных | маршрутизация проверена |
 | [Напомнить до события](rules/reminders.md#basis.reminder.set) | Напоминания | Изменение данных | маршрутизация проверена |
@@ -101,7 +104,6 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 | [Дать доступ по числовому Telegram ID](rules/secretary.md#basis.secretary.invite) | Доступ помощников | Изменение доступа или личности | маршрутизация проверена |
 | [Запросить числовой ID вместо доступа по @username](rules/secretary.md#basis.secretary.clarify) | Доступ помощников | Чтение своего календаря | маршрутизация проверена |
 | [Что умеет бот и как связаться с разработчиком](rules/bot.md#basis.bot.info) | О боте и подключениях | Чтение своего календаря | маршрутизация проверена |
-| [Создать событие с явным началом и концом](rules/events-2.md#basis.event.create_range) | События | Изменение данных | маршрутизация проверена |
 | [Статус подключённого личного Telegram](rules/google.md#basis.telegram.status) | Google Календарь | Чтение личных данных | маршрутизация проверена |
 | [Позвонить на запросившую учётную запись](rules/contacts.md#basis.call.start) | Контакты | Изменение данных | маршрутизация проверена |
 | [Напоминание через заданное время](rules/reminders.md#basis.reminder.after) | Напоминания | Изменение данных | маршрутизация проверена |
@@ -110,11 +112,11 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 
 Карточки правил лежат на отдельных страницах: у каждой категории своя, длинные категории продолжаются на следующей странице.
 
-- [Расписание](rules/calendar.md) — правил: 7
+- Расписание — правил: 9; [часть 1](rules/calendar-1.md) · [часть 2](rules/calendar-2.md)
 - [Свободное время](rules/slots.md) — правил: 3
-- События — правил: 9; [часть 1](rules/events-1.md) · [часть 2](rules/events-2.md)
+- События — правил: 8; [часть 1](rules/events-1.md) · [часть 2](rules/events-2.md)
 - [Напоминания](rules/reminders.md) — правил: 4
-- [Приглашения](rules/invitations.md) — правил: 2
+- [Приглашения](rules/invitations.md) — правил: 3
 - [Контакты](rules/contacts.md) — правил: 7
 - [Настройки](rules/settings.md) — правил: 6
 - [История и журнал](rules/history.md) — правил: 2
@@ -137,9 +139,9 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 | ` bot_capabilities_overview ` | Обзор возможностей бота | Слито в общее правило | [Что умеет бот и как связаться с разработчиком](rules/bot.md#basis.bot.info) | Same answer from the bot information tool. |
 | ` bot_developer_contact ` | Контакт разработчика | Слито в общее правило | [Что умеет бот и как связаться с разработчиком](rules/bot.md#basis.bot.info) | The bot information tool includes the developer contact. |
 | ` bot_hidden_features ` | Дополнительные возможности бота | Слито в общее правило | [Что умеет бот и как связаться с разработчиком](rules/bot.md#basis.bot.info) | Same answer from the bot information tool. |
-| ` count_events_month ` | Количество событий за месяц | Слито в общее правило | [Сколько событий за период](rules/calendar.md#basis.calendar.count) | Same request, now one parameterized rule with typed day/period parsing. |
-| ` count_events_today ` | Количество событий сегодня | Слито в общее правило | [Сколько событий за период](rules/calendar.md#basis.calendar.count) | Same request, now one parameterized rule with typed day/period parsing. |
-| ` count_events_week ` | Количество событий за неделю | Слито в общее правило | [Сколько событий за период](rules/calendar.md#basis.calendar.count) | Same request, now one parameterized rule with typed day/period parsing. |
+| ` count_events_month ` | Количество событий за месяц | Слито в общее правило | [Сколько событий за период](rules/calendar-1.md#basis.calendar.count) | Same request, now one parameterized rule with typed day/period parsing. |
+| ` count_events_today ` | Количество событий сегодня | Слито в общее правило | [Сколько событий за период](rules/calendar-1.md#basis.calendar.count) | Same request, now one parameterized rule with typed day/period parsing. |
+| ` count_events_week ` | Количество событий за неделю | Слито в общее правило | [Сколько событий за период](rules/calendar-1.md#basis.calendar.count) | Same request, now one parameterized rule with typed day/period parsing. |
 | ` current_time_in_city ` | Текущее время в городе | Слито в общее правило | [Текущее время здесь или в городе](rules/utility.md#basis.time.now) | Same read-only intent, consolidated with parameterized variants in the new basis. |
 | ` disable_evening_review ` | Выключить вечерний обзор | Слито в общее правило | [Включить или выключить уведомление или голос](rules/settings.md#basis.settings.toggle) | One toggle rule for the four supported switches. |
 | ` disable_morning_agenda ` | Выключить утреннее расписание | Слито в общее правило | [Включить или выключить уведомление или голос](rules/settings.md#basis.settings.toggle) | One toggle rule for the four supported switches. |
@@ -152,26 +154,26 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 | ` free_slots_on_date ` | Свободное время в указанную дату | Слито в общее правило | [Свободное время в один день](rules/slots.md#basis.slots.day) | Same request; absolute dates parsed and validated. |
 | ` free_slots_today ` | Свободное время сегодня | Слито в общее правило | [Свободное время в один день](rules/slots.md#basis.slots.day) | Same request, now one parameterized rule with typed day/period parsing. |
 | ` free_slots_tomorrow ` | Свободное время завтра | Слито в общее правило | [Свободное время в один день](rules/slots.md#basis.slots.day) | Same request, now one parameterized rule with typed day/period parsing. |
-| ` get_upcoming_next ` | Показать ближайшее событие | Слито в общее правило | [Ближайшие события](rules/calendar.md#basis.calendar.upcoming) | Same request with an optional count. |
+| ` get_upcoming_next ` | Показать ближайшее событие | Слито в общее правило | [Ближайшие события](rules/calendar-1.md#basis.calendar.upcoming) | Same request with an optional count. |
 | ` google_calendar_connect_howto ` | Инструкция подключения Google Calendar | Слито в общее правило | [Как подключить, переподключить или отключить Google Календарь](rules/google.md#basis.google.connect_help) | Same explicit connection instructions, without pretending to change Google authorization. |
 | ` google_calendar_connection_status ` | Проверить подключение Google Calendar | Слито в общее правило | [Подключён ли Google Календарь](rules/google.md#basis.google.status) | Same request; private chat only. |
 | ` google_calendar_list ` | Список подключённых Google-календарей | Слито в общее правило | [Список моих календарей Google](rules/google.md#basis.google.calendars) | Same request; private chat only. |
 | ` google_calendar_reconnect ` | Повторно подключить Google Calendar | Слито в общее правило | [Как подключить, переподключить или отключить Google Календарь](rules/google.md#basis.google.connect_help) | Same explicit connection instructions, without pretending to change Google authorization. |
 | ` google_calendar_sync_status ` | Проверить состояние синхронизации | Слито в общее правило | [Подключён ли Google Календарь](rules/google.md#basis.google.status) | Same verified connection status from the actual Google status tool. |
 | ` list_contacts ` | Список личных контактов | Слито в общее правило | [Список моих контактов](rules/contacts.md#basis.contacts.list) | Same request; refuses in a group before reading and never forces. |
-| ` search_events_by_query ` | Поиск по словам | Слито в общее правило | [Поиск событий по названию](rules/calendar.md#basis.calendar.search) | Same search; a connector word is now required so a date is not searched as a title. |
+| ` search_events_by_query ` | Поиск по словам | Слито в общее правило | [Поиск событий по названию](rules/calendar-1.md#basis.calendar.search) | Same search; a connector word is now required so a date is not searched as a title. |
 | ` set_default_duration_15 ` | Длительность события по умолчанию — 15 минут | Слито в общее правило | [Длительность события по умолчанию](rules/settings.md#basis.settings.duration) | Any duration in minutes or hours instead of one rule per value. |
 | ` set_default_duration_30 ` | Длительность события по умолчанию — 30 минут | Слито в общее правило | [Длительность события по умолчанию](rules/settings.md#basis.settings.duration) | Any duration in minutes or hours instead of one rule per value. |
-| ` show_day_after_tomorrow ` | Расписание послезавтра | Слито в общее правило | [События на один день](rules/calendar.md#basis.calendar.day) | Same request, now one parameterized rule with typed day/period parsing. |
-| ` show_next_month ` | Расписание следующего месяца | Слито в общее правило | [События недели, месяца или выходных](rules/calendar.md#basis.calendar.period) | Same request, now one parameterized rule with typed day/period parsing. |
-| ` show_next_public_holiday ` | Следующий официальный праздник | Слито в общее правило | [Ближайшие праздники](rules/calendar.md#basis.holidays.upcoming) | Same request with a limit of one. |
-| ` show_specific_date ` | Расписание на указанную дату | Слито в общее правило | [События на один день](rules/calendar.md#basis.calendar.day) | Same request; absolute dates are parsed and impossible ones rejected. |
-| ` show_this_month ` | Расписание текущего месяца | Слито в общее правило | [События недели, месяца или выходных](rules/calendar.md#basis.calendar.period) | Same request, now one parameterized rule with typed day/period parsing. |
-| ` show_today ` | Расписание сегодня | Слито в общее правило | [События на один день](rules/calendar.md#basis.calendar.day) | Same request, now one parameterized rule with typed day/period parsing. |
-| ` show_tomorrow ` | Расписание завтра | Слито в общее правило | [События на один день](rules/calendar.md#basis.calendar.day) | Same request, now one parameterized rule with typed day/period parsing. |
-| ` show_upcoming_holidays ` | Ближайшие праздники | Слито в общее правило | [Ближайшие праздники](rules/calendar.md#basis.holidays.upcoming) | Same read-only intent, consolidated with parameterized variants in the new basis. |
-| ` show_week ` | Расписание недели | Слито в общее правило | [События недели, месяца или выходных](rules/calendar.md#basis.calendar.period) | Same request, now one parameterized rule with typed day/period parsing. |
-| ` show_weekend ` | Расписание на выходные | Слито в общее правило | [События недели, месяца или выходных](rules/calendar.md#basis.calendar.period) | Same request, now one parameterized rule with typed day/period parsing. |
+| ` show_day_after_tomorrow ` | Расписание послезавтра | Слито в общее правило | [События на один день](rules/calendar-1.md#basis.calendar.day) | Same request, now one parameterized rule with typed day/period parsing. |
+| ` show_next_month ` | Расписание следующего месяца | Слито в общее правило | [События недели, месяца или выходных](rules/calendar-1.md#basis.calendar.period) | Same request, now one parameterized rule with typed day/period parsing. |
+| ` show_next_public_holiday ` | Следующий официальный праздник | Слито в общее правило | [Ближайшие праздники](rules/calendar-2.md#basis.holidays.upcoming) | Same request with a limit of one. |
+| ` show_specific_date ` | Расписание на указанную дату | Слито в общее правило | [События на один день](rules/calendar-1.md#basis.calendar.day) | Same request; absolute dates are parsed and impossible ones rejected. |
+| ` show_this_month ` | Расписание текущего месяца | Слито в общее правило | [События недели, месяца или выходных](rules/calendar-1.md#basis.calendar.period) | Same request, now one parameterized rule with typed day/period parsing. |
+| ` show_today ` | Расписание сегодня | Слито в общее правило | [События на один день](rules/calendar-1.md#basis.calendar.day) | Same request, now one parameterized rule with typed day/period parsing. |
+| ` show_tomorrow ` | Расписание завтра | Слито в общее правило | [События на один день](rules/calendar-1.md#basis.calendar.day) | Same request, now one parameterized rule with typed day/period parsing. |
+| ` show_upcoming_holidays ` | Ближайшие праздники | Слито в общее правило | [Ближайшие праздники](rules/calendar-2.md#basis.holidays.upcoming) | Same read-only intent, consolidated with parameterized variants in the new basis. |
+| ` show_week ` | Расписание недели | Слито в общее правило | [События недели, месяца или выходных](rules/calendar-1.md#basis.calendar.period) | Same request, now one parameterized rule with typed day/period parsing. |
+| ` show_weekend ` | Расписание на выходные | Слито в общее правило | [События недели, месяца или выходных](rules/calendar-1.md#basis.calendar.period) | Same request, now one parameterized rule with typed day/period parsing. |
 | ` time_now_own_timezone ` | Текущее время в своём часовом поясе | Слито в общее правило | [Текущее время здесь или в городе](rules/utility.md#basis.time.now) | Same read-only intent, consolidated with parameterized variants in the new basis. |
 | ` view_settings_summary ` | Показать текущие настройки | Слито в общее правило | [Показать мои настройки](rules/settings.md#basis.settings.view) | Same request with an optional category. |
 | ` add_event_description ` | Добавить или заменить описание | Переписано заново | [Изменить место или описание события](rules/events-1.md#basis.event.set_detail) | Now names the event explicitly and asks first. |
@@ -182,7 +184,7 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 | ` change_event_location ` | Изменить место события | Переписано заново | [Изменить место или описание события](rules/events-1.md#basis.event.set_detail) | Now names the event explicitly and asks first. |
 | ` convert_my_time_to_city ` | Перевести своё время в часовой пояс города | Переписано заново | [Перевести моё время сегодня в другой часовой пояс](rules/utility.md#basis.time.convert) | Now an IANA zone and a zone-aware instant for today; a skipped or repeated local time is rejected. |
 | ` create_event_named_tomorrow ` | Создать завтра с подтверждением | Переписано заново | [Создать событие с названием, днём и временем](rules/events-1.md#basis.event.create) | Used the current UTC offset &#40;wrong across clock changes&#41; and only tomorrow at a bare hour; now any day, an IANA-zone instant, and an explicit confirmation with conflicts. |
-| ` delete_event_by_name ` | Удалить событие по названию | Переписано заново | [Удалить одно событие после подтверждения](rules/events-1.md#basis.event.delete) | Now requires exactly one title match or a number, and confirmation. |
+| ` delete_event_by_name ` | Удалить событие по названию | Переписано заново | [Удалить одно событие после подтверждения](rules/events-2.md#basis.event.delete) | Now requires exactly one title match or a number, and confirmation. |
 | ` free_slots_next_week ` | Свободное время на следующей неделе | Переписано заново | [Свободное время по дням недели](rules/slots.md#basis.slots.week) | Queried only Monday and Sunday; now all seven days of the week. |
 | ` free_slots_week ` | Свободное время на этой неделе | Переписано заново | [Свободное время по дням недели](rules/slots.md#basis.slots.week) | Rendered a calendar image instead of calculating availability; now queries every day of the week. |
 | ` google_calendar_disconnect ` | Отключить Google Calendar | Переписано заново | [Как подключить, переподключить или отключить Google Календарь](rules/google.md#basis.google.connect_help) | Pretended to disconnect from a chat phrase; now answers with the real /disconnect&#95;google command only. |
@@ -278,13 +280,13 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 | 28 | ` get_event_time_by_query ` | pending | Слито в общее правило | ` basis.calendar.search ` | search&#95;events | Поиск времени события объединён с поиском события по запросу. |
 | 29 | ` delete_last_mentioned_duplicate ` | pending | Выведено без замены | нет замены | delete&#95;event, render&#95;day&#95;image | Удаление последнего упомянутого дубля небезопасно без однозначного выбора; нужен явный номер события. |
 | 30 | ` create_event_tomorrow_at_time_with_title ` | pending | Переписано заново | ` basis.event.create ` | create&#95;event, render&#95;day&#95;image | Вариант порядка названия, даты и времени заменён общим созданием. |
-| 31 | ` create_event_today_time_range ` | pending | Переписано заново | ` basis.event.create_range ` | create&#95;event, render&#95;day&#95;image | Начало и конец задаются явно в одном проверенном диапазоне, после подтверждения. |
+| 31 | ` create_event_today_time_range ` | pending | Переписано заново | ` basis.event.create ` | create&#95;event, render&#95;day&#95;image | Начало и конец &#40;или длительность&#41; теперь читает общее правило создания, после подтверждения. |
 | 32 | ` mark_me_upcoming ` | pending | Выведено без замены | нет замены | get&#95;upcoming | Фраза отметь меня неоднозначна: участие, напоминание и создание не отождествляются. |
 | 33 | ` invite_user ` | pending | Переписано заново | ` basis.invite.send ` | find&#95;user, send&#95;invitation | Общее приглашение с явной целью и проверенным получателем вместо узкого обученного рецепта. |
 | 34 | ` create_event_tomorrow ` | pending | Переписано заново | ` basis.event.create ` | create&#95;event, render&#95;day&#95;image | Завтра и название — параметры общего сценария создания. |
 | 35 | ` invite_to_event ` | pending | Переписано заново | ` basis.invite.send ` | find&#95;contact, send&#95;invitation | Приглашение объединено с единым подтверждаемым сценарием отправки. |
 | 36 | ` create_event_tomorrow_at_time ` | pending | Переписано заново | ` basis.event.create ` | create&#95;event, render&#95;day&#95;image | Дата и время типизированы; конкретный шаблон завтра не сохраняется отдельно. |
-| 37 | ` create_event_tomorrow_timerange ` | pending | Переписано заново | ` basis.event.create_range ` | create&#95;event, render&#95;day&#95;image | Вариант завтра с диапазоном объединён с общим началом и концом. |
+| 37 | ` create_event_tomorrow_timerange ` | pending | Переписано заново | ` basis.event.create ` | create&#95;event, render&#95;day&#95;image | Вариант «завтра» с диапазоном объединён с общим правилом создания с концом или длительностью. |
 | 38 | ` create_veterinary_event ` | rejected | Слито в общее правило | ` basis.event.create ` | create&#95;event, render&#95;day&#95;image | Ветеринар — название обычного события, а не отдельная функция. |
 | 39 | ` check_telegram_connection ` | approved | Переписано заново | ` basis.telegram.status ` | connect&#95;telegram&#95;status | Приватная проверка состояния подключённого Telegram без авторизации другого человека. |
 | 40 | ` remember_user_location ` | rejected | Переписано заново | ` basis.memory.remember ` | remember&#95;user&#95;fact | Место пользователя сохраняется как факт только по явной просьбе, без автоперезаписи памяти. |

@@ -2,6 +2,7 @@
 import { normalize } from './normalizer.ts';
 import { additionalFamilies } from './seed-additional.ts';
 import { calendarFamilies } from './seed-calendar.ts';
+import { createFamilies } from './seed-create.ts';
 import { eventFamilies } from './seed-events.ts';
 import {
   COMMON_STRINGS,
@@ -21,6 +22,7 @@ export const CANONICAL_NAMESPACE = 'basis.';
 
 const families: FamilyDefinition[] = [
   ...calendarFamilies,
+  ...createFamilies,
   ...eventFamilies,
   ...personalFamilies,
   ...additionalFamilies,

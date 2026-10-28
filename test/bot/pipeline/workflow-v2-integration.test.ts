@@ -192,8 +192,13 @@ test('v2 terminal text escapes literal user markup and splits without losing con
 test('first-pass v2 response also escapes and splits before the supplement', async () => {
   const { layer, ctx, send, call } = setup();
   const payload = '<Long&Title>'.repeat(600);
+  // A rule's own closing sentence is a whole answer now; only an open question ("not found") still gets an AI turn.
   db.query('UPDATE intents SET workflow=? WHERE canonical_name=?').run(
-    JSON.stringify({ version: 2, steps: [{ respond: payload }] }),
+    JSON.stringify({
+      version: 2,
+      steps: [{ respond: '{{t.not_found}}' }],
+      i18n: { en: { not_found: payload }, ru: { not_found: payload } },
+    }),
     'synthetic_version2',
   );
   expect(await layer(ctx, 'configure duration')).toMatchObject({

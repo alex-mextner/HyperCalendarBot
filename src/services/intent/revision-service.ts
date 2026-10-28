@@ -28,26 +28,35 @@ import { digestsByName, type RuleDefinition, RuleListCodec, seedFingerprint } fr
 import type { CanonicalSeed } from './seed-replacement.ts';
 
 export interface AdminPrincipal {
-  readonly via: 'telegram' | 'operator_cli';
+  readonly via: 'telegram' | 'operator_cli' | 'deploy_gate';
 }
-/** Principals minted by this module; a structurally identical object from anywhere else is refused. */
-const minted = new WeakSet<AdminPrincipal>();
-function mint(via: AdminPrincipal['via']): AdminPrincipal {
+/** Principals minted by this module, each with the `decided_by` it is recorded under; a structurally identical object from anywhere else is refused. */
+const minted = new WeakMap<AdminPrincipal, string>();
+function mint(via: AdminPrincipal['via'], decidedBy: string): AdminPrincipal {
   const principal = Object.freeze({ via });
-  minted.add(principal);
+  minted.set(principal, decidedBy);
   return principal;
 }
 /** The configured bot administrator only; no configured administrator means nobody. */
 export function adminFromTelegram(fromId: number, configuredAdminId: number | undefined): AdminPrincipal | null {
   if (configuredAdminId === undefined || !Number.isSafeInteger(configuredAdminId) || configuredAdminId <= 0)
     return null;
-  return fromId === configuredAdminId ? mint('telegram') : null;
+  return fromId === configuredAdminId ? mint('telegram', 'telegram:admin') : null;
 }
 /** For operator scripts run on the server with direct database access. */
 export function adminFromOperatorCli(): AdminPrincipal {
-  return mint('operator_cli');
+  return mint('operator_cli', 'operator_cli');
 }
-const decidedByOf = (principal: AdminPrincipal) => (principal.via === 'telegram' ? 'telegram:admin' : 'operator_cli');
+/**
+ * For the deploy-time activation of a seed whose KPI gate passed (`seed-activation.ts`). It may only
+ * approve: it cannot draft, revise or reject, and it is recorded against the seed it activated.
+ */
+export function adminFromDeployGate(gate: { seedVersion: number; seedFingerprint: string }): AdminPrincipal {
+  return mint('deploy_gate', `deploy_gate:${gate.seedVersion}:${gate.seedFingerprint.slice(0, 8)}`);
+}
+const decidedByOf = (principal: AdminPrincipal) => minted.get(principal) ?? 'unknown';
+/** A person at the keyboard (Telegram or the operator script): the only principals that may draft. */
+const isPerson = (principal: AdminPrincipal) => minted.has(principal) && principal.via !== 'deploy_gate';
 
 export interface IntentRevision {
   id: number;
@@ -87,6 +96,17 @@ export type RejectResult = { status: 'rejected'; revision: IntentRevision } | Re
 export type ApproveResult =
   | { status: 'active'; revisionId: number; targetFingerprint: string; removed: string[]; inserted: string[] }
   | Refusal;
+export interface ApprovalPreview {
+  status: 'would_approve';
+  targetFingerprint: string;
+  removed: string[];
+  inserted: string[];
+}
+interface CheckedApproval {
+  row: IntentRevisionRow;
+  outcome: Extract<RevisionOutcome, { ok: true }>;
+  integrity: Extract<RegistryIntegrity, { state: 'intact' }>;
+}
 export type ProposalSource = { kind: 'manual'; principal: AdminPrincipal } | { kind: 'learned'; jobId: string };
 export interface ApprovalRequest {
   id: number;
@@ -135,7 +155,7 @@ function integrityRefusal(state: Exclude<RegistryIntegrity['state'], 'intact'>):
 
 function authorOf(source: ProposalSource): string | Refusal {
   if (source.kind === 'learned') return JOB_ID.test(source.jobId) ? `learner:${source.jobId}` : refused('invalid');
-  return minted.has(source.principal) ? 'admin' : refused('unauthorized');
+  return isPerson(source.principal) ? 'admin' : refused('unauthorized');
 }
 
 /** Manual and learned revisions are operation batches; a whole-catalogue body is source-only. */
@@ -223,7 +243,7 @@ export class IntentRevisionService {
 
   /** A new immutable draft replaces an open one; the predecessor becomes superseded. */
   revise(principal: AdminPrincipal, id: number, input: RevisionBodyInput): RevisionResult {
-    if (!minted.has(principal)) return refused('unauthorized');
+    if (!isPerson(principal)) return refused('unauthorized');
     const body = parseOperations(input);
     if (!body) return refused('invalid');
     return this.db
@@ -239,7 +259,7 @@ export class IntentRevisionService {
   }
 
   reject(principal: AdminPrincipal, id: number, reason: string): RejectResult {
-    if (!minted.has(principal)) return refused('unauthorized');
+    if (!isPerson(principal)) return refused('unauthorized');
     if (!reason.trim() || reason.length > 2000) return refused('invalid');
     return this.db
       .transaction((): RejectResult => {
@@ -295,7 +315,65 @@ export class IntentRevisionService {
     return this.db.transaction(() => this.approveLocked(principal, request)).immediate();
   }
 
+  /**
+   * A new draft that re-activates the rules stored on an earlier activation (a rollback). It is an
+   * ordinary whole-catalogue revision: validated like any other, approved by exact id and hash, and
+   * the ledger only ever grows.
+   */
+  proposeRestore(principal: AdminPrincipal, revisionId: number): RevisionResult {
+    if (!isPerson(principal)) return refused('unauthorized');
+    const body = this.restoreBody(revisionId);
+    if ('status' in body) return body;
+    // The parent is the activation being restored, so the operator tool can tell a rollback from a forward step.
+    return this.db
+      .transaction(() => this.insertDraft({ body, kind: 'manual', author: 'admin', parentId: revisionId }))
+      .immediate();
+  }
+
+  /** What a restore would do to the active catalogue, validated like the real draft; writes nothing. */
+  previewRestore(revisionId: number): RevisionOutcome | Refusal {
+    const body = this.restoreBody(revisionId);
+    if ('status' in body) return body;
+    const integrity = this.integrity();
+    if (integrity.state !== 'intact') return integrityRefusal(integrity.state);
+    return validateRevision(body, this.view(integrity.rules));
+  }
+
+  /** Only an activation that really ran, and whose stored rules still hash to its fingerprint, can be restored. */
+  private restoreBody(revisionId: number): RevisionBody | Refusal {
+    const row = this.revisions.get(revisionId);
+    if (!row) return refused('not_found');
+    const ran = row.decided_at !== null && (row.status === 'active' || row.status === 'superseded');
+    const rules = RuleListCodec.safeParse(row.target_rules ?? '');
+    const fingerprint = row.target_fingerprint;
+    if (!ran || fingerprint === null || !rules.success || seedFingerprint(rules.data) !== fingerprint)
+      return refused('invalid');
+    const body = RevisionBodySchema.safeParse({
+      type: 'replace_all',
+      summary: `Restore revision ${row.id} (${fingerprint.slice(0, 16)})`,
+      rules: rules.data,
+    });
+    return body.success ? body.data : refused('invalid');
+  }
+
+  /** Exactly the checks `approve` makes, without activating; for dry runs of the operator tool. */
+  previewApproval(request: ApprovalRequest): ApprovalPreview | Refusal {
+    const checked = this.checkApproval(request);
+    if ('status' in checked) return checked;
+    const { targetFingerprint, removed, inserted } = checked.outcome;
+    return { status: 'would_approve', targetFingerprint, removed, inserted };
+  }
+
   private approveLocked(principal: AdminPrincipal, request: ApprovalRequest): ApproveResult {
+    const checked = this.checkApproval(request);
+    if ('status' in checked) return checked;
+    const { row, outcome, integrity } = checked;
+    this.activate(row, outcome, integrity.active, integrity.rules, principal);
+    const { targetFingerprint, removed, inserted } = outcome;
+    return { status: 'active', revisionId: row.id, targetFingerprint, removed, inserted };
+  }
+
+  private checkApproval(request: ApprovalRequest): Refusal | CheckedApproval {
     const integrity = this.integrity();
     if (integrity.state !== 'intact') return integrityRefusal(integrity.state);
     const row = this.revisions.get(request.id);
@@ -305,9 +383,7 @@ export class IntentRevisionService {
     if (!outcome.ok) return refused('invalid');
     const guard = this.sessionGuard(integrity.rules, outcome.removed);
     if (guard) return refused(guard);
-    this.activate(row, outcome, integrity.active, integrity.rules, principal);
-    const { targetFingerprint, removed, inserted } = outcome;
-    return { status: 'active', revisionId: row.id, targetFingerprint, removed, inserted };
+    return { row, outcome, integrity };
   }
 
   private integrity(): RegistryIntegrity {

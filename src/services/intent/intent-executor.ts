@@ -3,11 +3,14 @@ import { z } from 'zod';
 import type { StepResults } from '../../database/repositories/workflow-session.repository.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
-import { extractEventSummaries, isEventSummary } from '../ai/event-summaries.ts';
+import { isEventSummary } from '../ai/event-summaries.ts';
 import { isMutationTool, isReadOnlyCall } from '../ai/tool-executor.ts';
 import type { ToolResult, ToolResultData } from '../ai/types.ts';
+import { quotableText, type ToolAnswer } from './answer-renderers.ts';
+import { confirmationChoice } from './confirm-words.ts';
 import { evaluate } from './expression-evaluator.ts';
 import { applyFilters, parseFilterChain } from './filter-parser.ts';
+import { planMove } from './move-plan.ts';
 import { type DayAnswer, formatDayAnswers } from './response-formatter.ts';
 import { type EventSummary, type UserContext as ExecutorUserContext, resolveVariables } from './variable-resolver.ts';
 import { type BindValues, evaluateBindingReadings } from './workflow-bindings.ts';
@@ -128,11 +131,10 @@ interface ExecutorResult {
   completeResponse?: boolean;
   response?: string;
   /**
-   * Structured events behind `response`, when the last tool returned any. The
-   * formatter renders these instead of `response`, whose text form is written for
-   * the AI agent and would otherwise reach the user verbatim.
+   * The last tool's structured result behind `response`. The formatter renders this instead of `response`,
+   * whose text form is written for the AI agent and would otherwise reach the user verbatim.
    */
-  responseEvents?: EventSummary[];
+  answer?: ToolAnswer;
   suspended?: boolean;
   suspendedAt?: number;
   /** v2 choices, already resolved and validated; transport decides how to render. */
@@ -185,6 +187,18 @@ async function callTool(
     evidence.recordThrown(tool, input);
     throw error;
   }
+}
+
+/** The last tool's result as the formatter needs it; a tool that returned no text has nothing to show. */
+function toolAnswer(tool: string, input: unknown, result: ToolResult): ToolAnswer | undefined {
+  if (result.output === undefined) return undefined;
+  return {
+    tool,
+    input: typeof input === 'object' && input !== null && !Array.isArray(input) ? { ...input } : {},
+    output: result.output,
+    ...(result.data !== undefined ? { data: result.data } : {}),
+    ...(result.effect !== undefined ? { effect: result.effect } : {}),
+  };
 }
 
 interface ResumeState {
@@ -250,7 +264,7 @@ async function runLevel1(
   strict = false,
 ): Promise<ExecutorResult> {
   let lastOutput: string | undefined;
-  let lastData: ToolResultData | undefined;
+  let lastAnswer: ToolAnswer | undefined;
   let completeResponse = false;
 
   const eventCtx = buildEventStepResults(userCtx);
@@ -267,17 +281,17 @@ async function runLevel1(
       // The tool handed control to something outside this workflow (e.g. a Telegram user
       // picker) instead of completing the requested action. Report exactly what happened
       // and stop — running the remaining tools would misreport an unfinished action as done.
-      return { success: true, response: result.output, responseEvents: extractEventSummaries(result.data) };
+      return { success: true, response: result.output };
     }
     lastOutput = result.output;
-    lastData = result.data;
+    lastAnswer = toolAnswer(tool.name, resolvedInput, result);
     completeResponse = result.completeResponse === true;
   }
 
   return {
     success: true,
     response: lastOutput,
-    responseEvents: extractEventSummaries(lastData),
+    answer: lastAnswer,
     ...(completeResponse && evidence.state === 'none' ? { completeResponse: true } : {}),
   };
 }
@@ -315,7 +329,7 @@ interface Level2Env {
 interface Level2LoopState {
   mentionedEventId: number | undefined;
   lastToolOutput: string | undefined;
-  lastToolData: ToolResultData | undefined;
+  lastAnswer: ToolAnswer | undefined;
   completeResponse: boolean;
 }
 
@@ -362,7 +376,9 @@ function checkStrictAnswer(
     question: string;
     options?: string[];
   };
-  const chosen = prompt.options?.find((option) => option.toLowerCase() === answer.trim().toLowerCase());
+  const chosen =
+    prompt.options?.find((option) => option.toLowerCase() === answer.trim().toLowerCase()) ??
+    (prompt.options ? confirmationChoice(answer, prompt.options) : undefined);
   if (chosen !== undefined) return { answer: chosen };
   if (prompt.options) {
     return {
@@ -452,6 +468,19 @@ function respondWithMessageInput(
   return { success: true, response: text, mentionedEventId };
 }
 
+/**
+ * A pure computation on values already read (no tool): the moved event's new start and end. Anything it cannot
+ * work out safely hands the message to the AI before the confirmation question exists.
+ */
+function planMoveStep(step: Level2Step, env: Level2Env): null {
+  const input = resolveStepInput(env, 'plan_move', step.input ?? {});
+  const plan = planMove(input, { now: new Date(), timezone: env.userCtx.timezone, language: env.userCtx.language });
+  if (step.as !== undefined) storeResult(step.as, plan, env.stepResults);
+  if (step.as !== undefined && env.stepResults.tool_outputs)
+    env.stepResults.tool_outputs[applyAsFilter(step.as, plan).name] = plan;
+  return null;
+}
+
 /** Suspend for user input — resolve question text if provided. */
 function suspendForAnswer(step: Level2Step, stepIndex: number, env: Level2Env): ExecutorResult {
   if (env.evidence.state !== 'none') env.stepResults.__mutationEvidence = env.evidence.state;
@@ -484,7 +513,7 @@ function suspendForAnswer(step: Level2Step, stepIndex: number, env: Level2Env): 
 }
 
 /** Store a tool result under the step's `as` name, in `tool_outputs`, and (typed workflows) its text companion. */
-function storeStepOutput(as: string, result: ToolResult, env: Level2Env): void {
+function storeStepOutput(as: string, result: ToolResult, answer: ToolAnswer | undefined, env: Level2Env): void {
   const { stepResults } = env;
   const valueToStore =
     result.data !== undefined ? result.data : result.output !== undefined ? parseToolOutput(result.output) : undefined;
@@ -494,9 +523,14 @@ function storeStepOutput(as: string, result: ToolResult, env: Level2Env): void {
   if (stepResults.tool_outputs && outputValue !== undefined) {
     stepResults.tool_outputs[outputName] = outputValue;
   }
-  // Typed workflows can show the tool's own text next to the structured value.
-  if (env.strict && stepResults.tool_outputs && result.output !== undefined) {
-    stepResults.tool_outputs[`${outputName}_text`] = result.output.slice(0, MAX_TEXT_COMPANION_CHARS);
+  // Typed workflows can quote the tool's result in a sentence of their own, in words fit for the user.
+  if (env.strict && stepResults.tool_outputs && answer !== undefined) {
+    const text = quotableText(answer, {
+      now: new Date(),
+      timezone: env.userCtx.timezone,
+      language: env.userCtx.language,
+    });
+    stepResults.tool_outputs[`${outputName}_text`] = text.slice(0, MAX_TEXT_COMPANION_CHARS);
   }
 }
 
@@ -525,13 +559,13 @@ async function runToolStep(
     return {
       success: true,
       response: result.output,
-      responseEvents: extractEventSummaries(result.data),
       mentionedEventId: state.mentionedEventId,
     };
   }
 
   state.lastToolOutput = result.output;
-  state.lastToolData = result.data;
+  const answer = toolAnswer(call, resolvedInput, result);
+  state.lastAnswer = answer;
   state.completeResponse = result.completeResponse === true;
 
   // If result carries structured event data, update last_mentioned_event in-workflow
@@ -542,7 +576,7 @@ async function runToolStep(
     state.mentionedEventId = eventSource.id;
   }
 
-  if (step.as !== undefined) storeStepOutput(step.as, result, env);
+  if (step.as !== undefined) storeStepOutput(step.as, result, answer, env);
   return null;
 }
 
@@ -559,6 +593,9 @@ async function runLevel2Step(
   // Evaluate `when` condition — skip step if false
   if (step.when !== undefined && !evaluate(step.when, env.stepResults)) return null;
 
+  // The rule recognised the command but this wording is not one it may act on: the AI agent takes the message.
+  if (step.abstain === true) return { success: false, errorCode: 'ABSTAIN' };
+
   // Respond with text and optionally stop
   if (step.respond !== undefined) return respondWithText(step.respond, env, state.mentionedEventId);
 
@@ -567,6 +604,7 @@ async function runLevel2Step(
 
   if (step.call === 'respond') return respondWithMessageInput(step, stepIndex, env, state.mentionedEventId);
   if (step.call === 'ask_user') return suspendForAnswer(step, stepIndex, env);
+  if (step.call === 'plan_move') return planMoveStep(step, env);
   return runToolStep(step, step.call, env, state);
 }
 
@@ -598,7 +636,7 @@ async function runLevel2(
   const state: Level2LoopState = {
     mentionedEventId: undefined,
     lastToolOutput: undefined,
-    lastToolData: undefined,
+    lastAnswer: undefined,
     completeResponse: false,
   };
 
@@ -616,7 +654,7 @@ async function runLevel2(
     success: true,
     response: state.lastToolOutput,
     ...(state.completeResponse && evidence.state === 'none' ? { completeResponse: true } : {}),
-    responseEvents: extractEventSummaries(state.lastToolData),
+    answer: state.lastAnswer,
     stepResults,
     mentionedEventId: state.mentionedEventId,
   };
@@ -714,8 +752,9 @@ export class IntentExecutor {
     for (const { day, bind } of afterMidnight) {
       const result = await run(bind);
       if (!result.success || result.suspended) return result;
-      answers.push({ day, response: result.response, events: result.responseEvents });
+      answers.push({ day, response: result.response, answer: result.answer });
     }
-    return { success: true, response: formatDayAnswers(answers, userCtx.timezone, userCtx.language, now) };
+    const combined = formatDayAnswers(answers, { now, timezone: userCtx.timezone, language: userCtx.language });
+    return { success: true, response: combined.text };
   }
 }

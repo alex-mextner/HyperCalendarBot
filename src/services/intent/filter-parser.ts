@@ -1,6 +1,7 @@
 // src/services/intent/filter-parser.ts
 
 import { format as dateFnsFormat, parseISO } from 'date-fns';
+import { type HumanTimeContext, humanDay, humanDuration, humanWhen } from './human-time.ts';
 import { type Token, tokenize } from './lexer.ts';
 
 // ---------------------------------------------------------------------------
@@ -114,7 +115,7 @@ export function parseFilterChain(input: string): FilterCall[] {
 // ---------------------------------------------------------------------------
 
 type FilterArgs = FilterCall['args'];
-type FilterImpl = (current: unknown, args: FilterArgs) => unknown;
+type FilterImpl = (current: unknown, args: FilterArgs, context: HumanTimeContext | undefined) => unknown;
 
 /** null/undefined render as the empty string; everything else is stringified. */
 function textOf(value: unknown): string {
@@ -204,18 +205,33 @@ const FILTER_IMPLS: Record<string, FilterImpl> = {
     if (n === 0) throw new Error('div() by zero');
     return Math.floor(Number(current ?? 0) / n);
   },
+  human_day: (current, _args, context) => {
+    if (!context) throw new Error("human_day() needs the user's language and zone");
+    return humanDay(textOf(current), context);
+  },
+  human_when: (current, _args, context) => {
+    if (!context) throw new Error("human_when() needs the user's language and zone");
+    return humanWhen(textOf(current), context);
+  },
+  human_duration: (current, _args, context) => {
+    const minutes = Number(current);
+    if (!context) throw new Error("human_duration() needs the user's language");
+    if (!Number.isFinite(minutes)) throw new Error('human_duration() needs a number of minutes');
+    return humanDuration(minutes, context.language);
+  },
 };
 
 const KNOWN_FILTERS = new Set(Object.keys(FILTER_IMPLS));
 
-export function applyFilters(value: unknown, filters: FilterCall[]): string {
+/** `context` carries the reader's language, zone and clock for the wording filters (human_day, human_when). */
+export function applyFilters(value: unknown, filters: FilterCall[], context?: HumanTimeContext): string {
   let current: unknown = value;
 
   for (const filter of filters) {
     if (!KNOWN_FILTERS.has(filter.name)) {
       throw new Error(`Unknown filter: ${filter.name}`);
     }
-    current = FILTER_IMPLS[filter.name]!(current, filter.args);
+    current = FILTER_IMPLS[filter.name]!(current, filter.args, context);
   }
 
   return textOf(current);

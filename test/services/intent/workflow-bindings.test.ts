@@ -211,9 +211,45 @@ describe('remaining binding types', () => {
       bind({ ref: { type: 'eventref', from: '{{$1}}', reject: ['все', 'all'] } }, { $1: raw }).ref;
     expect(ref('#12')).toEqual({ kind: 'id', id: 12 });
     expect(ref('№7')).toEqual({ kind: 'id', id: 7 });
-    expect(ref('«Стендап»')).toEqual({ kind: 'name', query: 'Стендап' });
-    expect(ref('встреча с Иваном')).toEqual({ kind: 'name', query: 'встреча с Иваном' });
+    expect(ref('«Стендап»')).toEqual({ kind: 'name', query: 'Стендап', label: 'Стендап' });
+    expect(ref('встреча с Иваном')).toEqual({ kind: 'name', query: 'встреча с Иваном', label: 'встреча с Иваном' });
     for (const raw of ['все', 'all my events', '#0', '']) expect(() => ref(raw)).toThrow(WorkflowInputError);
+  });
+
+  test('a stemmed reference finds an inflected mention by the word of the title that identifies it', () => {
+    const ref = (raw: string) =>
+      bind({ ref: { type: 'eventref', from: '{{$1}}', reject: ['все'], stem: true } }, { $1: raw }).ref;
+    expect(ref('йогу')).toMatchObject({ kind: 'name', query: 'йог' });
+    expect(ref('встречу с Иваном')).toMatchObject({ kind: 'name', query: 'иван' });
+    expect(ref('my dentist appointment')).toMatchObject({ kind: 'name', query: 'dentist' });
+    expect(ref('#12')).toEqual({ kind: 'id', id: 12 });
+    // Nothing but filler words: there is no event to look for, so the message is the AI's.
+    for (const raw of ['событие', 'my meeting', 'все встречи']) expect(() => ref(raw)).toThrow(WorkflowInputError);
+  });
+
+  test('a reference phrase is the event plus an optional day and time, and refuses a leftover bare hour', () => {
+    const phrase = (raw: string) =>
+      bind({ ev: { type: 'event_phrase', from: '{{$1}}', reference: true, reject: ['все'] } }, { $1: raw }).ev;
+    expect(phrase('стендап на пятницу')).toMatchObject({ ref: { kind: 'name', query: 'стендап' }, date: '2026-09-25' });
+    expect(phrase('ревью дизайна на 8 вечера')).toMatchObject({ ref: { query: 'дизайн' }, time: '20:00' });
+    expect(phrase('standup to friday 4pm')).toMatchObject({ date: '2026-09-25', time: '16:00' });
+    for (const raw of ['стендап на 11', 'retro to 4', 'все встречи на завтра']) expect(() => phrase(raw)).toThrow();
+  });
+
+  test('capitalized text starts with an upper-case letter', () => {
+    const title = bind({ t: { type: 'text', from: '{{$1}}', max: 30, capitalize: true } }, { $1: 'растяжка' }).t;
+    expect(title).toBe('Растяжка');
+  });
+
+  test('a relative instant is an offset-carrying local instant on a whole minute', () => {
+    const at = bind(
+      {
+        delay: { type: 'duration', from: '{{$1}}', unit: '{{$2}}', units: { мин: 1 } },
+        at: { type: 'relative_instant', duration: 'delay' },
+      },
+      { $1: '20', $2: 'мин' },
+    ).at;
+    expect(at).toBe('2026-09-19T10:20:00+02:00');
   });
 
   test('recipient is an exact @username or a numeric ID', () => {

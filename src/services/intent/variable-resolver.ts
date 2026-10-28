@@ -13,6 +13,7 @@ import {
 import type { StepResults } from '../../database/repositories/workflow-session.repository.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { applyFilters, type FilterCall, parseFilterChain } from './filter-parser.ts';
+import type { HumanTimeContext } from './human-time.ts';
 import { FORBIDDEN_WORKFLOW_KEYS, WORKFLOW_LIMITS, WorkflowInputError } from './workflow-input.ts';
 import type { I18nMap } from './workflow-schema.ts';
 
@@ -158,6 +159,8 @@ function resolveVar(
   stepResults?: StepResults,
   i18n?: I18nMap,
   policy?: ResolvePolicy,
+  /** The template gives this variable a default(), so its absence is expected, not worth a warning. */
+  hasDefault = false,
 ): unknown {
   consumeResolution(policy);
   const now = new TZDate(new Date(), userCtx.timezone);
@@ -177,7 +180,7 @@ function resolveVar(
     if (value !== undefined) return value;
   }
 
-  cmdLogger.warn({ varName: name }, 'Intent template variable could not be resolved');
+  if (!hasDefault) cmdLogger.warn({ varName: name }, 'Intent template variable could not be resolved');
   return undefined;
 }
 
@@ -206,14 +209,15 @@ function soleVariableExpr(template: string, matches: RegExpMatchArray[]): string
 function renderExpression(
   expr: string,
   match: string,
-  resolveName: (name: string) => unknown,
+  resolveName: (name: string, hasDefault: boolean) => unknown,
   strict: boolean | undefined,
+  context: HumanTimeContext,
 ): string {
   const pipeIdx = expr.indexOf('|');
   const varName = (pipeIdx === -1 ? expr : expr.slice(0, pipeIdx)).trim();
   const filterExpr = pipeIdx === -1 ? '' : expr.slice(pipeIdx + 1);
 
-  const resolved = resolveName(varName);
+  const resolved = resolveName(varName, /\bdefault\(/.test(filterExpr));
 
   if (!filterExpr) {
     if (resolved === undefined && strict) throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
@@ -232,7 +236,7 @@ function renderExpression(
   // default() can produce a value even when resolved is undefined
   if (resolved === undefined && strict && !filters.some((f) => f.name === 'default' && f.args.length === 1))
     throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
-  return applyFilters(resolved, filters);
+  return applyFilters(resolved, filters, context);
 }
 
 function resolveTemplateString(
@@ -245,7 +249,8 @@ function resolveTemplateString(
 ): unknown {
   const pattern = /\{\{([^}]+)\}\}/g;
   const matches = [...template.matchAll(pattern)];
-  const resolveName = (name: string) => resolveVar(name, captures, userCtx, stepResults, i18n, policy);
+  const resolveName = (name: string, hasDefault = false) =>
+    resolveVar(name, captures, userCtx, stepResults, i18n, policy, hasDefault);
 
   // If the entire string is a single variable (no filter), return the raw resolved value
   // (preserves non-string types like numbers)
@@ -259,7 +264,11 @@ function resolveTemplateString(
   // Otherwise do text substitution, converting everything to string
   let outputLength = template.length;
   const output = template.replace(pattern, (match, expr: string) => {
-    const value = renderExpression(expr, match, resolveName, policy?.strict);
+    const value = renderExpression(expr, match, resolveName, policy?.strict, {
+      now: new Date(),
+      timezone: userCtx.timezone,
+      language: userCtx.language,
+    });
     outputLength += value.length - match.length;
     if (policy?.strict && outputLength > WORKFLOW_LIMITS.stringChars) throw new WorkflowInputError('INVALID_INPUT');
     return value;

@@ -71,6 +71,13 @@ const findContactResult = (value: ToolInput): ToolResult => ({
 const tools = async (name: string, input: unknown): Promise<ToolResult> => {
   if (name === 'convert_to_timezone') return convertToTimezone(input);
   const value = input as ToolInput;
+  if (name === 'create_event')
+    return {
+      success: true,
+      output: 'Created',
+      data: { ...syntheticEvent(value), id: 21, title: 'Created event' },
+      mutationState: 'confirmed',
+    };
   if (name === 'search_events') return { success: true, output: 'Found one event', data: [syntheticEvent(value)] };
   if (name === 'get_event') return { success: true, output: 'Event details', data: syntheticEvent(value) };
   if (name === 'get_events') return { success: true, output: 'No events', data: [] };
@@ -82,27 +89,37 @@ const tools = async (name: string, input: unknown): Promise<ToolResult> => {
   };
 };
 
+/** Seven consecutive days: a weekday named in an example is "today" on exactly one of them. */
+const CLOCKS = Array.from({ length: 7 }, (_, day) => new Date(Date.UTC(2026, 8, 14 + day, 10)));
+
 describe('every canonical family is executable, not just listed in a catalogue', () => {
   for (const [index, meta] of canonicalMetadata.entries()) {
     test(`${meta.name}: typed schema, contracts and all declared examples`, async () => {
-      setSystemTime(new Date('2026-09-19T10:00:00Z'));
       const definition = seedIntents[index]!;
       const workflow = WorkflowSchema.parse(definition.workflow);
       expect(validateWorkflow(workflow, definition.pattern)).toEqual([]);
       for (const example of meta.examples.synthetic) {
         const match = matcher.match(example);
         expect(match?.intentId, example).toBe(index + 1);
-        const executor = new IntentExecutor();
-        let result = await executor.run(workflow, match!.captures, context, tools);
-        for (let steps = 0; result.suspended && steps < 6; steps++) {
-          result = await executor.run(workflow, match!.captures, context, tools, {
-            stepIndex: result.suspendedAt!,
-            stepResults: result.stepResults!,
-            userAnswer: 'yes',
-          });
+        const refused: string[] = [];
+        for (const clock of CLOCKS) {
+          setSystemTime(clock);
+          const executor = new IntentExecutor();
+          let result = await executor.run(workflow, match!.captures, context, tools);
+          for (let steps = 0; result.suspended && steps < 6; steps++) {
+            result = await executor.run(workflow, match!.captures, context, tools, {
+              stepIndex: result.suspendedAt!,
+              stepResults: result.stepResults!,
+              userAnswer: 'yes',
+            });
+          }
+          expect(result.suspended, `${meta.name}: ${example}`).not.toBe(true);
+          if (result.success) continue;
+          // The only refusal an example may meet is "the named weekday is today": the rule hands that to the AI.
+          expect(result.errorCode, `${meta.name}: ${example} -> ${result.response}`).toBe('INVALID_INPUT');
+          refused.push(clock.toISOString());
         }
-        expect(result.success, `${meta.name}: ${example} -> ${result.errorCode ?? result.response}`).toBe(true);
-        expect(result.suspended).not.toBe(true);
+        expect(refused.length, `${meta.name}: ${example} is refused on ${refused.join(', ')}`).toBeLessThanOrEqual(1);
       }
     });
     test(`${meta.name}: negated or unrelated phrasing is not this rule`, () => {

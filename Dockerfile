@@ -51,6 +51,9 @@ RUN ./node_modules/.bin/playwright install --with-deps chromium-headless-shell
 COPY src ./src
 COPY scripts ./scripts
 COPY docs/reference/migrations ./docs/reference/migrations
+# The KPI gate decides at boot whether the seed activates itself. The [e] keeps this a wildcard, so a
+# build before a gate is committed still succeeds (BuildKit accepts a wildcard that matches nothing).
+COPY docs/intents/kpi-gat[e].json ./docs/intents/
 COPY tsconfig.json bunfig.toml package.json ./
 
 RUN groupadd -r botuser && useradd -r -g botuser botuser && \

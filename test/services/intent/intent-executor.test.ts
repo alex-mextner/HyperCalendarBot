@@ -622,7 +622,7 @@ describe('IntentExecutor', () => {
     expect(result.success).toBe(true);
   });
 
-  describe('responseEvents', () => {
+  describe('answer', () => {
     // get_events writes its text output for the AI agent; the intent path shows the
     // result to the user directly, so the structured data has to survive the executor.
     const eventData = [
@@ -630,11 +630,11 @@ describe('IntentExecutor', () => {
       { id: 440, title: 'Созвон', date: '2026-06-01', time: '16:00', all_day: false },
     ];
 
-    test('carries structured events from the last Level 2 step', async () => {
+    test('carries the last Level 2 tool with its resolved input and structured data', async () => {
       const workflow: Workflow = {
         steps: [
           { call: 'render_day_image', input: { date: '{{dates.today}}' } },
-          { call: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } },
+          { call: 'get_events', input: { start_date: '2026-06-01', end_date: '2026-06-01' } },
         ],
       };
       const mockExecutor = (name: string) =>
@@ -643,27 +643,38 @@ describe('IntentExecutor', () => {
           : { success: true, output: 'image sent' };
 
       const result = await executor.run(workflow, {}, userCtx, mockExecutor);
-      expect(result.responseEvents).toEqual(eventData);
+      expect(result.answer).toEqual({
+        tool: 'get_events',
+        input: { start_date: '2026-06-01', end_date: '2026-06-01' },
+        output: 'id: 239, title: Английский',
+        data: eventData,
+      });
     });
 
-    test('carries structured events from the last Level 1 tool', async () => {
+    test('carries the last Level 1 tool', async () => {
       const workflow: Workflow = {
-        tools: [{ name: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } }],
+        tools: [{ name: 'get_events', input: { start_date: '2026-06-01', end_date: '2026-06-01' } }],
       };
       const mockExecutor = () => ({ success: true, output: 'id: 239, title: Английский', data: eventData });
 
       const result = await executor.run(workflow, {}, userCtx, mockExecutor);
-      expect(result.responseEvents).toEqual(eventData);
+      expect(result.answer?.tool).toBe('get_events');
+      expect(result.answer?.data).toEqual(eventData);
     });
 
-    test('is undefined when the last tool returns no event list', async () => {
-      const workflow: Workflow = {
-        steps: [{ call: 'manage_settings', input: { action: 'get', category: 'timezone' } }],
-      };
+    test('has no data when the last tool returns only text, and no answer after a respond sentence', async () => {
+      const text: Workflow = { steps: [{ call: 'manage_settings', input: { action: 'get', category: 'general' } }] };
       const mockExecutor = () => ({ success: true, output: 'Часовой пояс: Europe/Moscow' });
 
-      const result = await executor.run(workflow, {}, userCtx, mockExecutor);
-      expect(result.responseEvents).toBeUndefined();
+      const result = await executor.run(text, {}, userCtx, mockExecutor);
+      expect(result.answer).toEqual({
+        tool: 'manage_settings',
+        input: { action: 'get', category: 'general' },
+        output: 'Часовой пояс: Europe/Moscow',
+      });
+
+      const sentence: Workflow = { steps: [{ call: 'get_events', input: {} }, { respond: 'Готово' }] };
+      expect((await executor.run(sentence, {}, userCtx, mockExecutor)).answer).toBeUndefined();
     });
 
     test('carries a single event from get_event, which returns one summary rather than a list', async () => {
@@ -674,8 +685,109 @@ describe('IntentExecutor', () => {
       };
       const mockExecutor = () => ({ success: true, output: 'id: 239, title: Английский', data: singleEvent });
 
-      const result = await executor.run(workflow, {}, userCtx, mockExecutor);
-      expect(result.responseEvents).toEqual([singleEvent]);
+      const result = await executor.run(workflow, { $1: '239' }, userCtx, mockExecutor);
+      expect(result.answer?.data).toEqual(singleEvent);
+    });
+
+    test('the effect of a delete travels with the answer', async () => {
+      const workflow: Workflow = { steps: [{ call: 'delete_event', input: { event_id: '239' } }] };
+      const result = await executor.run(workflow, {}, userCtx, () => ({
+        success: true,
+        output: 'deleted',
+        effect: { kind: 'event_deleted' },
+        mutationState: 'confirmed',
+      }));
+      expect(result.answer?.effect).toEqual({ kind: 'event_deleted' });
+    });
+  });
+
+  describe('the text a later step may quote (typed workflows)', () => {
+    afterEach(() => jest.setSystemTime());
+
+    test('events come with ids and human days, free windows as bare intervals', async () => {
+      jest.setSystemTime(new Date('2026-06-01T08:00:00Z'));
+      const events = [
+        { id: 12, title: 'Стендап', date: '2026-06-02', time: '10:00', all_day: false },
+        { id: 13, title: 'Стендап', date: '2026-06-04', time: '10:00', all_day: false },
+      ];
+      const workflow: Workflow = {
+        version: 2,
+        steps: [
+          { call: 'search_events', input: { query: 'стендап' }, as: 'found' },
+          { call: 'get_free_slots', input: { date: '2026-06-02' }, as: 'free' },
+          { respond: '{{tool_outputs.found_text}}\n{{tool_outputs.free_text}}' },
+        ],
+      };
+      const result = await executor.run(workflow, {}, { timezone: 'UTC', language: 'ru' }, (name) =>
+        name === 'search_events'
+          ? { success: true, output: 'id: 12, title: Стендап, local: raw, start_utc: raw', data: events }
+          : {
+              success: true,
+              output: 'Свободные слоты: raw',
+              data: { slots: [{ start: '2026-06-02T10:30:00Z', end: '2026-06-02T12:00:00Z', durationMinutes: 90 }] },
+            },
+      );
+      expect(result.response).toBe(
+        '#12  Стендап — завтра, вт 2 июня, 10:00\n#13  Стендап — чт 4 июня, 10:00\n10:30–12:00',
+      );
+    });
+  });
+
+  describe('steps that decide without a tool', () => {
+    afterEach(() => jest.setSystemTime());
+
+    test('an abstain step hands the message to the AI before any tool runs', async () => {
+      const workflow: Workflow = {
+        version: 2,
+        steps: [{ abstain: true }, { call: 'delete_event', input: { event_id: 1 } }],
+      };
+      const result = await executor.run(workflow, {}, userCtx, () => {
+        throw new Error('no tool may run');
+      });
+      expect(result).toMatchObject({ success: false, errorCode: 'ABSTAIN', mutationEvidence: 'none' });
+    });
+
+    const move = (day: string, at: string): Workflow => ({
+      version: 2,
+      steps: [
+        { call: 'get_event', input: { event_id: 3 }, as: 'target' },
+        {
+          call: 'plan_move',
+          input: {
+            date: '{{tool_outputs.target.date}}',
+            time: '{{tool_outputs.target.time}}',
+            end_at: '{{tool_outputs.target.end_at|default("")}}',
+            day,
+            at,
+          },
+          as: 'plan',
+        },
+        { respond: '{{tool_outputs.plan.when_text}}|{{tool_outputs.plan.start}}|{{tool_outputs.plan.end}}' },
+      ],
+    });
+    const read = () => ({
+      success: true,
+      output: 'raw',
+      data: {
+        id: 3,
+        title: 'Стендап',
+        date: '2026-09-21',
+        time: '10:00',
+        end_at: '2026-09-21T10:30:00.000Z',
+        all_day: false,
+      },
+    });
+
+    test('plan_move combines the event just read with the day the user asked for', async () => {
+      jest.setSystemTime(new Date('2026-09-19T08:00:00Z'));
+      const result = await executor.run(move('2026-09-25', ''), {}, { timezone: 'UTC', language: 'ru' }, read);
+      expect(result.response).toBe('пт 25 сентября в 10:00|2026-09-25T10:00:00+00:00|2026-09-25T10:30:00+00:00');
+    });
+
+    test('plan_move refuses a move to the past before anything is asked', async () => {
+      jest.setSystemTime(new Date('2026-09-19T08:00:00Z'));
+      const result = await executor.run(move('2026-09-18', ''), {}, { timezone: 'UTC', language: 'ru' }, read);
+      expect(result).toMatchObject({ success: false, errorCode: 'INVALID_INPUT', mutationEvidence: 'none' });
     });
   });
 
@@ -751,6 +863,35 @@ describe('IntentExecutor', () => {
       expect(calls).toEqual([
         { name: 'create_event', input: { title: 'Standup', start_at: '2026-09-15T10:00:00+02:00' } },
       ]);
+    });
+
+    test('a read-only rule answers for both possible days, each headed, and the combined answer is whole', async () => {
+      jest.setSystemTime(new Date('2026-09-13T23:22:00Z')); // Mon 2026-09-14 01:22 in Belgrade
+      const workflow: Workflow = {
+        version: 2,
+        bindings: { day: { type: 'date', from: '{{$1}}', words: { завтра: 'tomorrow' }, after_midnight: 'both' } },
+        steps: [{ call: 'get_events', input: { start_date: '{{bind.day}}', end_date: '{{bind.day}}' } }],
+      };
+
+      const result = await executor.run(
+        workflow,
+        { $1: 'завтра' },
+        { timezone: 'Europe/Belgrade', language: 'ru' },
+        (_name, input) => {
+          const date =
+            typeof input === 'object' && input !== null && 'start_date' in input ? String(input.start_date) : '';
+          return {
+            success: true,
+            output: 'raw',
+            data: [{ id: 1, title: 'Стендап', date, time: '10:00', all_day: false }],
+          };
+        },
+      );
+
+      expect(result.response).toBe(
+        'Сегодня, пн 14 сентября:\n10:00  Стендап\n\nЗавтра, вт 15 сентября:\n10:00  Стендап',
+      );
+      expect(result.completeResponse).not.toBe(true);
     });
 
     test('a rule whose step shows something (a picture) runs once, for the literal day', async () => {

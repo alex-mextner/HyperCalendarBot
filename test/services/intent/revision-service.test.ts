@@ -10,6 +10,7 @@ import {
 import type { RevisionBodyInput, RevisionOperationInput } from '../../../src/services/intent/revision-body.ts';
 import {
   type AdminPrincipal,
+  adminFromDeployGate,
   adminFromOperatorCli,
   adminFromTelegram,
   IntentRevisionService,
@@ -338,6 +339,7 @@ describe('validation', () => {
     '^(?<w>пинг) бота\\k<w>*$',
     '^(?:пинг|пингпинг){1,8000} бота$',
     '^(?:(?:пинг){1,2}){1,2000} бота$',
+    '^(?:пинг\\s){1,5}бота$',
     `^(?<${'n'.repeat(80)}>пинг) бота\\k<${'n'.repeat(80)}>*$`,
   ])('a group or backreference repeated without bound is refused: %s', (pattern) => {
     const draft = proposeManual(pingWith(pattern));
@@ -785,5 +787,102 @@ describe('source baseline', () => {
     const draft = service.ensureSourceBaselineDraft(source)!;
     expect(approveRevision(draft.id, adminFromOperatorCli()).status).toBe('active');
     expect(names()).toEqual(['basis.bot.info', 'basis.help', 'basis.time.now']);
+  });
+});
+
+describe('deploy gate principal', () => {
+  const botInfo = seedIntents.find((rule) => rule.canonical_name === 'basis.bot.info')!;
+  const gatePrincipal = () => adminFromDeployGate({ seedVersion: 6, seedFingerprint: 'ab12cd34'.repeat(8) });
+
+  test('approves a source baseline and is recorded against the seed it activated', () => {
+    const draft = service.ensureSourceBaselineDraft([help, timeNow, botInfo])!;
+    expect(approveRevision(draft.id, gatePrincipal()).status).toBe('active');
+    expect(service.get(draft.id)?.decidedBy).toBe('deploy_gate:6:ab12cd34');
+  });
+
+  test('cannot draft, revise or reject', () => {
+    const gate = gatePrincipal();
+    expect(service.propose(createPing, { kind: 'manual', principal: gate })).toEqual({
+      status: 'refused',
+      code: 'unauthorized',
+    });
+    const draft = proposeManual(createPing);
+    expect(service.revise(gate, draft.id, createPing)).toEqual({ status: 'refused', code: 'unauthorized' });
+    expect(service.reject(gate, draft.id, 'no')).toEqual({ status: 'refused', code: 'unauthorized' });
+    expect(service.proposeRestore(gate, service.activeRevisionId()!)).toEqual({
+      status: 'refused',
+      code: 'unauthorized',
+    });
+  });
+
+  test('a look-alike object is refused', () => {
+    const draft = service.ensureSourceBaselineDraft([help, timeNow, botInfo])!;
+    expect(approveRevision(draft.id, { via: 'deploy_gate' })).toEqual({ status: 'refused', code: 'unauthorized' });
+  });
+});
+
+describe('restoring an earlier revision', () => {
+  const botInfo = seedIntents.find((rule) => rule.canonical_name === 'basis.bot.info')!;
+  const activateNewSeed = () => {
+    const draft = service.ensureSourceBaselineDraft([helpWithSpravka, timeNow, botInfo])!;
+    expect(approveRevision(draft.id, adminFromOperatorCli()).status).toBe('active');
+    return draft;
+  };
+  const operator = adminFromOperatorCli();
+
+  test('re-activates the stored rules of the earlier revision as a new revision, deleting no ledger row', () => {
+    const first = service.activeRevisionId()!;
+    const firstFingerprint = service.get(first)!.targetFingerprint;
+    const newer = activateNewSeed();
+    const rowsBefore = db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM intent_revisions').get()!.n;
+
+    const restore = service.proposeRestore(operator, first);
+    if (restore.status !== 'created') throw new Error(restore.code);
+    expect(restore.revision).toMatchObject({
+      kind: 'manual',
+      status: 'validated',
+      targetFingerprint: firstFingerprint,
+      parentId: first,
+    });
+    expect(approveRevision(restore.revision.id, operator)).toMatchObject({ status: 'active' });
+
+    expect(names()).toEqual(['basis.help', 'basis.time.now']);
+    expect(manifest()).toBe(firstFingerprint!);
+    expect(service.get(newer.id)?.status).toBe('superseded');
+    expect(service.get(first)?.status).toBe('superseded');
+    expect(db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM intent_revisions').get()!.n).toBe(rowsBefore + 1);
+  });
+
+  test('previewing writes nothing and names what would change', () => {
+    const first = service.activeRevisionId()!;
+    activateNewSeed();
+    const before = registrySnapshot(db);
+    const preview = service.previewRestore(first);
+    expect(preview).toMatchObject({ ok: true, removed: ['basis.bot.info', 'basis.help'], inserted: ['basis.help'] });
+    expect(registrySnapshot(db)).toBe(before);
+  });
+
+  test('a revision that was never active cannot be restored', () => {
+    const draft = service.ensureSourceBaselineDraft([help, timeNow, botInfo])!;
+    expect(service.proposeRestore(operator, draft.id)).toEqual({ status: 'refused', code: 'invalid' });
+    expect(service.proposeRestore(operator, 9999)).toEqual({ status: 'refused', code: 'not_found' });
+  });
+
+  test('a restore of rules whose stored fingerprint does not verify is refused', () => {
+    const first = service.activeRevisionId()!;
+    activateNewSeed();
+    db.run("UPDATE intent_revisions SET target_rules = '[]' WHERE id = ?", [first]);
+    expect(service.proposeRestore(operator, first)).toEqual({ status: 'refused', code: 'invalid' });
+  });
+
+  test('a restore the live-session guard blocks is deferred, not applied', () => {
+    const first = service.activeRevisionId()!;
+    activateNewSeed();
+    liveSession(idOf('basis.bot.info'), NOW);
+    const restore = service.proposeRestore(operator, first);
+    if (restore.status !== 'created') throw new Error(restore.code);
+    const before = registrySnapshot(db);
+    expect(approveRevision(restore.revision.id, operator)).toEqual({ status: 'refused', code: 'session_active' });
+    expect(registrySnapshot(db)).toBe(before);
   });
 });

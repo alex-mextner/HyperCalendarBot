@@ -4,14 +4,14 @@
 
 [← Свободное время](slots.md) · [Каталог правил](../README.md) · [События &#40;часть 2 из 2&#41; →](events-2.md) · [Как читать описание шагов](../README.md#как-читать-описание-шагов) · [Описание движка](../engine.md)
 
-Отпечаток целевого сида: `6d0ed91ddf04de2ca3b9561433dbfa313fe89b7aab2ef16c3758b2fea0fab5cb`
+Отпечаток целевого сида: `77224e790a7503b776e6d5650325890439081b0ba34c5aca99b9bd93afe6d007`
 
 <a id="basis.event.create"></a>
 ### Создать событие с названием, днём и временем
 
 ` basis.event.create ` · События · Изменение данных · инструменты: ` get_free_slots `, ` ask_user `, ` create_event `
 
-> Пометка из исходника (по-английски): Actual free intervals determine the conflict warning inside the confirmation question; nothing is written before the user answers yes.
+> Пометка из исходника (по-английски): One rule for explicit-verb, reminder-phrased and verb-less creates, with an optional end time or duration. Day, time and title must each appear exactly once; a bare hour, a next-weekday, a day part or a clock time that a DST change skips go to the AI.
 
 **Примеры фраз.**
 
@@ -19,101 +19,87 @@
 - запланируй встречу с Иваном послезавтра в 15:00
 - добавь событие Зубной 2026-10-05 в 9:15
 - поставь ретро 5 октября в 7 вечера
+- завтра в 15:00 стоматолог
+- пятница 16:00 урок с Лилей
+- 12 июня 13:45 окрашивание
+- завтра 13 нотариус
+- среда с 13 до 15 обед
+- созвон с Пашей в пятницу в 18:30 на час
+- напомни завтра в 10:00 позвонить врачу
 - create standup tomorrow at 10:30
 - schedule meeting with Anna 05.10.2026 at 3pm
+- dentist tomorrow at 3pm
 
 **Не запускают правило (уходят к AI):**
 
 - создай стендап завтра
 - создай встречу
 - не создавай стендап завтра в 10:30
+- что у меня завтра в 15:00
+- покажи события завтра в 15:00
+- удали стендап завтра в 10:30
+- напомни через 10 минут позвонить маме
 
 **Шаблон принимает, но привязка отвергает до вызова инструментов:**
 
+- завтра 13 человек придёт
+- среда с 13 до 15 человек в зале
 - создай стендап завтра в 10
 - создай стендап 31 февраля в 10:30
 - создай стендап вчера в 10:30
 - create standup tomorrow at 99:00
+- создай стендап в следующую пятницу в 10:30
+- стендап завтра вечером в 19:00
 
 **Что делает правило по шагам.**
 
-1. Вызвать инструмент ` get_free_slots ` с параметрами: ` date ` = ` {{bind.d}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` availability `
-2. Если выполняется условие ` fits(availability, bind.start, bind.until) `, то спросить пользователя: «Создать «{{bind.title}}» {{bind.d}} в {{bind.at}}?»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
-3. Если выполняется условие ` fits(availability, bind.start, bind.until) == false `, то спросить пользователя: «Создать «{{bind.title}}» {{bind.d}} в {{bind.at}}? Не весь следующий час свободен. Проверенные окна:<br>{{tool&#95;outputs.availability&#95;text}}»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
+1. Вызвать инструмент ` get_free_slots ` с параметрами: ` date ` = ` {{bind.ev.date}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` availability `
+2. Если выполняется условие ` fits(availability, bind.ev.start, bind.ev.end) `, то спросить пользователя: «Создать «{{bind.ev.title}}» {{bind.ev.when&#95;text}}{{bind.ev.end&#95;suffix&#124;default&#40;""&#41;}}?»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
+3. Если выполняется условие ` fits(availability, bind.ev.start, bind.ev.end) == false `, то спросить пользователя: «Создать «{{bind.ev.title}}» {{bind.ev.when&#95;text}}{{bind.ev.end&#95;suffix&#124;default&#40;""&#41;}}? В это время уже что-то есть. Свободные окна дня:<br>{{tool&#95;outputs.availability&#95;text}}»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
 4. Если выполняется условие ` ask.confirm != 'да' && ask.confirm != 'yes' `, то ответить пользователю: «Отменено, ничего не изменилось.»
-5. Вызвать инструмент ` create_event ` с параметрами: ` title ` = ` {{bind.title}} `; ` start_at ` = ` {{bind.start}} `; ` scope ` = ` {{env.scope}} `
+5. Если выполняется условие ` bind.ev.has_end == false `, то вызвать инструмент ` create_event ` с параметрами: ` title ` = ` {{bind.ev.title}} `; ` start_at ` = ` {{bind.ev.start}} `; ` scope ` = ` {{env.scope}} `
+6. Если выполняется условие ` bind.ev.has_end == true `, то вызвать инструмент ` create_event ` с параметрами: ` title ` = ` {{bind.ev.title}} `; ` start_at ` = ` {{bind.ev.start}} `; ` end_at ` = ` {{bind.ev.end}} `; ` scope ` = ` {{env.scope}} `
+7. Ответить пользователю: «Готово: создал «{{bind.ev.title}}» — {{bind.ev.when&#95;text}}{{bind.ev.end&#95;suffix&#124;default&#40;""&#41;}}.»
 
 **Что читается из сообщения (привязки).**
 
-- ` title ` — очищенный текст ограниченной длины; ` from = {{$1}} `; ` max = 200 `
-- ` d ` — календарный день: слово или полная дата; ` from = {{$2}} `; таблица «words»: 8 значений; ` future = true `
-- ` at ` — время суток в формате ЧЧ:ММ; ` from = {{$3}} `
-- ` start ` — один момент времени из дня и времени в часовом поясе пользователя; ` date = d `; ` time = at `; ` future = true `
-- ` until ` — один момент времени из дня и времени в часовом поясе пользователя; ` date = d `; ` time = at `; ` plus_minutes = 60 `
+- ` ev ` — event&#95;phrase; ` from = {{$1}} `; ` date = require `; ` time = require `; ` span = allow `; ` future = true `
 
 **Заменяет прежние правила:** ` create_event_named_tomorrow ` (Создать завтра с подтверждением; переписано заново).
 
-**Проверка при сборке.** Все 6 положительных примеров ведут в это правило, все 3 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
+**Проверка при сборке.** Все 14 положительных примеров ведут в это правило, все 7 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
 
 <details>
 <summary>Регулярное выражение и полный workflow (JSON)</summary>
 
 ```text
-^(?:\u0441\u043E\u0437\u0434\u0430\u0439|\u0434\u043E\u0431\u0430\u0432\u044C|\u0437\u0430\u043F\u043B\u0430\u043D\u0438\u0440\u0443\u0439|\u043F\u043E\u0441\u0442\u0430\u0432\u044C|create|add|schedule)\s+(?:(?:\u043D\u043E\u0432\u043E\u0435\s+)?(?:\u0441\u043E\u0431\u044B\u0442\u0438\u0435|\u0432\u0441\u0442\u0440\u0435\u0447\u0443)\s+|(?:a\s+|an\s+|new\s+)?(?:event|meeting)\s+)?(.{1,200}?)\s+((?:(?:day\s+after\s+tomorrow|послезавтра|yesterday|tomorrow|сегодня|завтра|today|вчера)|\d{4}[-./\s]\d{1,2}[-./\s]\d{1,2}|\d{1,2}[-./\s]\d{1,2}(?:[-./\s]\d{4})?|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\s+\d{4})?|(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{4})?))\s+(?:\u0432|\u043D\u0430|at)\s+((?:\d{1,2}(?:[:.\s]\d{2})?(?:\s?(?:am|pm|a\s?m|p\s?m|утра|дня|вечера|ночи))?|\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight))$
+^(?!(?:не|нет|что|как|когда|где|кто|зачем|почему|сколько|какой|какая|какие|покажи|скажи|найди|поищи|удали|отмени|убери|перенеси|передвинь|сдвинь|перекинь|переименуй|пригласи|позови|what|when|where|who|why|how|show|find|delete|cancel|remove|move|reschedule|rename|invite|do|does|did|is|are|can|could|will|would|don|dont|свободен|свободна|свободно|свободные|есть|расписание|планы|события|мои|мой|окна|ближайшие|календарь|agenda|schedule for|my|free|я\s+свободен|я\s+свободна|am\s+i|events?|anything|something|tell|give|send|display|list|check|open|скинь|глянь|посмотри|расскажи|подскажи|дай|пришли|выведи|открой|нарисуй|сделай(?!\s+(?:встреч|событи|напомин|event|meeting|reminder))|во\s+сколько|подвинь|подвинуть|переставь|отложи|скрой|спрячь|снеси|назови|измени|поменяй|push|shift|bump|snooze|postpone|hide|отправь)(?![A-Za-zА-Яа-яЁё0-9_]))(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|\u0432\u0447\u0435\u0440\u0430|today|tomorrow|yesterday|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:-?\u0433\u043E)?\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|(?<![A-Za-zА-Яа-яЁё0-9_])(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+\d{1,2}|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}[./]\d{1,2}(?:[./]\d{4})?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{4}[-./]\d{1,2}[-./]\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0447\u0435\u0440\u0435\u0437|in)\s+(?:\d{1,3}|\u043E\u0434\u043D\u0443)\s+(?:\u0434\u043D|\u0434\u0435\u043D\u044C|\u043D\u0435\u0434\u0435\u043B|day|week)))(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}:\d{2}|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0432|\u043A|at)\s+\d{1,2}(?:[.:]\d{2})?(?:\s?(?:am|pm|\u0443\u0442\u0440\u0430|\u0434\u043D\u044F|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438))?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}\.\d{2}(?![./]\d)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441|from)\s+\d{1,2}\s+(?:\u0434\u043E|to|until)\s+\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|today|tomorrow|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}[./]\d{1,2})[,.]?\s+(?:1[3-9]|2[0-3])(?![A-Za-zА-Яа-яЁё0-9_])))(?!(?:\u043D\u0430\u043F\u043E\u043C\u043D\u0438(?:\u0442\u0435)?|remind\s+me)\s+(?:\u043C\u043D\u0435\s+)?(?:\u0447\u0435\u0440\u0435\u0437|\u0437\u0430|in)\s)(?!.*(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u0440\u0438\u0433\u043B\u0430\u0441\u0438\w*|\u043F\u043E\u0437\u043E\u0432\u0438|invite)(?![A-Za-zА-Яа-яЁё0-9_]))(?!.*@[A-Za-z])(?!.*(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0443\u0434\u0430\u043B\u0438\w*|\u043E\u0442\u043C\u0435\u043D\u0438\w*|\u0443\u0431\u0435\u0440\u0438\w*|\u043F\u0435\u0440\u0435\u043D\u0435\u0441\u0438\w*|\u043F\u0435\u0440\u0435\u0434\u0432\u0438\u043D\u044C|\u0441\u0434\u0432\u0438\u043D\u044C|delete|cancel|remove|reschedule)(?![A-Za-zА-Яа-яЁё0-9_]))(?:(?:(?:запланировать|запланируйте|запланируй|поставьте|поставить|организуй|назначить|создайте|добавьте|добавить|запишите|записать|schedule|создать|поставь|назначь|создай|добавь|запиши|закинь|create|внеси|book|plan|add|put)|(?:\u043D\u0430\u043F\u043E\u043C\u043D\u0438(?:\u0442\u0435)?|remind\s+me))\s+(?:(?:\u043C\u043D\u0435|\u0441\u0435\u0431\u0435|\u043D\u0430\u043C|\u0432\s+(?:\u043C\u043E\u0439\s+)?(?:\u043A\u0430\u043B\u0435\u043D\u0434\u0430\u0440\u044C|\u0440\u0430\u0441\u043F\u0438\u0441\u0430\u043D\u0438\u0435)|(?:to|into|in|on)\s+(?:my\s+)?calendar|a|an|new|on|for)\s+){0,4}(?:(?:\u0447\u0442\u043E|\u0447\u0442\u043E\u0431\u044B|to|that)\s+)?)?(.{3,300})$
 ```
 
 ```json
 {
   "version": 2,
   "bindings": {
-    "title": {
-      "type": "text",
+    "ev": {
+      "type": "event_phrase",
       "from": "{{$1}}",
-      "max": 200
-    },
-    "d": {
-      "type": "date",
-      "from": "{{$2}}",
-      "words": {
-        "сегодня": "today",
-        "today": "today",
-        "завтра": "tomorrow",
-        "tomorrow": "tomorrow",
-        "послезавтра": "day_after_tomorrow",
-        "day after tomorrow": "day_after_tomorrow",
-        "вчера": "yesterday",
-        "yesterday": "yesterday"
-      },
+      "date": "require",
+      "time": "require",
+      "span": "allow",
       "future": true
-    },
-    "at": {
-      "type": "time",
-      "from": "{{$3}}"
-    },
-    "start": {
-      "type": "datetime",
-      "date": "d",
-      "time": "at",
-      "future": true
-    },
-    "until": {
-      "type": "datetime",
-      "date": "d",
-      "time": "at",
-      "plus_minutes": 60
     }
   },
   "steps": [
     {
       "call": "get_free_slots",
       "input": {
-        "date": "{{bind.d}}",
+        "date": "{{bind.ev.date}}",
         "scope": "{{env.scope}}"
       },
       "as": "availability"
     },
     {
-      "when": "fits(availability, bind.start, bind.until)",
+      "when": "fits(availability, bind.ev.start, bind.ev.end)",
       "call": "ask_user",
       "input": {
         "question": "{{t.q_free}}",
@@ -125,7 +111,7 @@
       "as": "confirm|lower"
     },
     {
-      "when": "fits(availability, bind.start, bind.until) == false",
+      "when": "fits(availability, bind.ev.start, bind.ev.end) == false",
       "call": "ask_user",
       "input": {
         "question": "{{t.q_clash}}",
@@ -141,12 +127,26 @@
       "respond": "{{t.cancelled}}"
     },
     {
+      "when": "bind.ev.has_end == false",
       "call": "create_event",
       "input": {
-        "title": "{{bind.title}}",
-        "start_at": "{{bind.start}}",
+        "title": "{{bind.ev.title}}",
+        "start_at": "{{bind.ev.start}}",
         "scope": "{{env.scope}}"
       }
+    },
+    {
+      "when": "bind.ev.has_end == true",
+      "call": "create_event",
+      "input": {
+        "title": "{{bind.ev.title}}",
+        "start_at": "{{bind.ev.start}}",
+        "end_at": "{{bind.ev.end}}",
+        "scope": "{{env.scope}}"
+      }
+    },
+    {
+      "respond": "{{t.done}}"
     }
   ],
   "i18n": {
@@ -154,15 +154,17 @@
       "cancelled": "Отменено, ничего не изменилось.",
       "ok": "Да",
       "cancel": "Отмена",
-      "q_free": "Создать «{{bind.title}}» {{bind.d}} в {{bind.at}}?",
-      "q_clash": "Создать «{{bind.title}}» {{bind.d}} в {{bind.at}}? Не весь следующий час свободен. Проверенные окна:\n{{tool_outputs.availability_text}}"
+      "q_free": "Создать «{{bind.ev.title}}» {{bind.ev.when_text}}{{bind.ev.end_suffix|default(\"\")}}?",
+      "q_clash": "Создать «{{bind.ev.title}}» {{bind.ev.when_text}}{{bind.ev.end_suffix|default(\"\")}}? В это время уже что-то есть. Свободные окна дня:\n{{tool_outputs.availability_text}}",
+      "done": "Готово: создал «{{bind.ev.title}}» — {{bind.ev.when_text}}{{bind.ev.end_suffix|default(\"\")}}."
     },
     "en": {
       "cancelled": "Cancelled, nothing was changed.",
       "ok": "Yes",
       "cancel": "Cancel",
-      "q_free": "Create “{{bind.title}}” on {{bind.d}} at {{bind.at}}?",
-      "q_clash": "Create “{{bind.title}}” on {{bind.d}} at {{bind.at}}? The complete following hour is not free. Verified intervals:\n{{tool_outputs.availability_text}}"
+      "q_free": "Create “{{bind.ev.title}}” {{bind.ev.when_text}}{{bind.ev.end_suffix|default(\"\")}}?",
+      "q_clash": "Create “{{bind.ev.title}}” {{bind.ev.when_text}}{{bind.ev.end_suffix|default(\"\")}}? Something else is scheduled then. Free windows that day:\n{{tool_outputs.availability_text}}",
+      "done": "Done: created “{{bind.ev.title}}” — {{bind.ev.when_text}}{{bind.ev.end_suffix|default(\"\")}}."
     }
   }
 }
@@ -183,32 +185,39 @@
 - открой встречу «Стендап»
 - show event &#35;7
 - open meeting "Retro"
+- покажи событие Стоматолог
 
 **Не запускают правило (уходят к AI):**
 
 - покажи событие про стендап
 - покажи событие
 - покажи события &#35;12
+- покажи событие завтра
+- покажи событие все
+
+**Шаблон принимает, но привязка отвергает до вызова инструментов:**
+
+- покажи событие встреча
 
 **Что делает правило по шагам.**
 
 1. Если выполняется условие ` bind.ref.kind == 'id' `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{bind.ref.id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 2. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` search_events ` с параметрами: ` query ` = ` {{bind.ref.query}} `; ` scope ` = ` {{env.scope}} `; ` event_type ` = ` regular `; результат сохранить как ` found `
-3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == "name" `, то ответить пользователю: «Не нашёл такое событие. Назови точное название или номер, например &#35;12.»
-4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
+3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == 'name' `, то вызвать инструмент `  `
+4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько подходящих событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
 5. Если выполняется условие ` count(found) == 1 `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{tool_outputs.found[0].id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 
 **Что читается из сообщения (привязки).**
 
-- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$1}} `; таблица «reject»: 8 значений
+- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$1|default("")}} `; таблица «reject»: 16 значений; ` stem = true `
 
-**Проверка при сборке.** Все 4 положительных примеров ведут в это правило, все 3 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
+**Проверка при сборке.** Все 5 положительных примеров ведут в это правило, все 5 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
 
 <details>
 <summary>Регулярное выражение и полный workflow (JSON)</summary>
 
 ```text
-^(?:\u043F\u043E\u043A\u0430\u0436\u0438|\u043E\u0442\u043A\u0440\u043E\u0439|show|open)\s+(?:событие|встречу|meeting|event)\s+((?:#|\u2116)\d{1,9}|\u00AB[^\u00BB\n]{1,120}\u00BB|"[^"\n]{1,120}"|\u201C[^\u201D\n]{1,120}\u201D)$
+^(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:everything|каждое|каждую|каждый|every|любое|любую|любой|всех|each|both|все|всё|all|оба|обе)(?![A-Za-zА-Яа-яЁё0-9_]))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|\u0432\u0447\u0435\u0440\u0430|today|tomorrow|yesterday|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:-?\u0433\u043E)?\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|(?<![A-Za-zА-Яа-яЁё0-9_])(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+\d{1,2}|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}[./]\d{1,2}(?:[./]\d{4})?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{4}[-./]\d{1,2}[-./]\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0447\u0435\u0440\u0435\u0437|in)\s+(?:\d{1,3}|\u043E\u0434\u043D\u0443)\s+(?:\u0434\u043D|\u0434\u0435\u043D\u044C|\u043D\u0435\u0434\u0435\u043B|day|week))))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}:\d{2}|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0432|\u043A|at)\s+\d{1,2}(?:[.:]\d{2})?(?:\s?(?:am|pm|\u0443\u0442\u0440\u0430|\u0434\u043D\u044F|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438))?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}\.\d{2}(?![./]\d)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441|from)\s+\d{1,2}\s+(?:\u0434\u043E|to|until)\s+\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|today|tomorrow|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}[./]\d{1,2})[,.]?\s+(?:1[3-9]|2[0-3])(?![A-Za-zА-Яа-яЁё0-9_]))))(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:контакт[а-я]*|contacts?|секретар[а-я]*|secretar[a-z]*)(?![A-Za-zА-Яа-яЁё0-9_]))(?:(?:\u043F\u043E\u043A\u0430\u0436\u0438|\u043E\u0442\u043A\u0440\u043E\u0439|\u0432\u044B\u0432\u0435\u0434\u0438|\u0434\u0430\u0439|show|open)(?:\s+(?:\u043C\u043D\u0435|me))?\s+(?:\u0441\u043E\u0431\u044B\u0442\u0438\u0435|\u0432\u0441\u0442\u0440\u0435\u0447\u0443|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438\u0435|(?:the\s+)?event|(?:the\s+)?meeting)\s+(?!(?:\u043F\u0440\u043E|\u043E|\u043E\u0431|about|with|\u0441)\s)(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))([^;\n.?!,]{1,120}?))$
 ```
 
 ```json
@@ -217,7 +226,7 @@
   "bindings": {
     "ref": {
       "type": "eventref",
-      "from": "{{$1}}",
+      "from": "{{$1|default(\"\")}}",
       "reject": [
         "все",
         "всё",
@@ -226,8 +235,17 @@
         "every",
         "everything",
         "любое",
-        "любую"
-      ]
+        "любую",
+        "любой",
+        "каждое",
+        "каждую",
+        "каждый",
+        "each",
+        "both",
+        "оба",
+        "обе"
+      ],
+      "stem": true
     }
   },
   "steps": [
@@ -251,8 +269,8 @@
       "as": "found"
     },
     {
-      "when": "count(found) == 0 && bind.ref.kind == \"name\"",
-      "respond": "{{t.not_found}}"
+      "when": "count(found) == 0 && bind.ref.kind == 'name'",
+      "abstain": true
     },
     {
       "when": "count(found) > 1",
@@ -270,11 +288,9 @@
   ],
   "i18n": {
     "ru": {
-      "not_found": "Не нашёл такое событие. Назови точное название или номер, например #12.",
-      "ambiguous": "Нашёл несколько событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}"
+      "ambiguous": "Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}"
     },
     "en": {
-      "not_found": "I couldn't find that event. Give the exact title or its number, like #12.",
       "ambiguous": "Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}"
     }
   }
@@ -288,65 +304,75 @@
 <a id="basis.event.reschedule"></a>
 ### Перенести событие на явный день и время
 
-` basis.event.reschedule ` · События · Изменение данных · инструменты: ` get_event `, ` search_events `, ` ask_user `, ` update_event `
+` basis.event.reschedule ` · События · Изменение данных · инструменты: ` get_event `, ` search_events `, ` plan_move `, ` ask_user `, ` update_event `
 
-> Пометка из исходника (по-английски): Events with an explicit end time are refused rather than silently corrupted; a relative shift is the snooze family.
+> Пометка из исходника (по-английски): A day alone keeps the event’s time, a time alone keeps its day; an event with an end keeps its length. Bare hours, the weekday of today, a past time, a skipped or repeated wall time and all-day events go to the AI.
 
 **Примеры фраз.**
 
-- перенеси событие стендап на завтра в 11:00
+- перенеси стендап на пятницу
+- перенеси стендап на 11:00
+- перекинь ретро на завтра в 16:00
+- move standup to 3pm
 - передвинь встречу &#35;12 на 2026-10-05 в 15:30
-- перенеси событие «Ретро» на послезавтра в 7 вечера
-- reschedule event &#35;12 to tomorrow at 3pm
-- move meeting standup to 05.10.2026 at 10:30
+- перенеси ужин с родителями на субботу в 19:30
+- reschedule the dentist to Friday
+- перенеси ревью на 8 вечера
 
 **Не запускают правило (уходят к AI):**
 
-- перенеси событие стендап
 - перенеси все события на завтра в 10:30
+- перенеси стендап
+- перенеси стендап на 15 минут
+- не переноси стендап на пятницу
+- перенеси стендап на пятницу и удали ретро
+- перенеси стендап на час позже
+- move retro 30 minutes earlier
 
 **Шаблон принимает, но привязка отвергает до вызова инструментов:**
 
-- перенеси событие все на завтра в 10:30
-- перенеси событие стендап на завтра в 3
+- перенеси стендап на пятницу в 10
+- перенеси стендап на завтра в 3
+- перенеси стендап на следующую пятницу
+- move retro to friday at 99:00
 
 **Что делает правило по шагам.**
 
-1. Если выполняется условие ` bind.ref.kind == 'id' `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{bind.ref.id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
-2. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` search_events ` с параметрами: ` query ` = ` {{bind.ref.query}} `; ` scope ` = ` {{env.scope}} `; ` event_type ` = ` regular `; результат сохранить как ` found `
-3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == "name" `, то ответить пользователю: «Не нашёл такое событие. Назови точное название или номер, например &#35;12.»
-4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
+1. Если выполняется условие ` bind.ev.ref.kind == 'id' `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{bind.ev.ref.id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
+2. Если выполняется условие ` bind.ev.ref.kind == 'name' `, то вызвать инструмент ` search_events ` с параметрами: ` query ` = ` {{bind.ev.ref.query}} `; ` scope ` = ` {{env.scope}} `; ` event_type ` = ` regular `; результат сохранить как ` found `
+3. Если выполняется условие ` count(found) == 0 && bind.ev.ref.kind == 'name' `, то вызвать инструмент `  `
+4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько подходящих событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
 5. Если выполняется условие ` count(found) == 1 `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{tool_outputs.found[0].id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
-6. Если выполняется условие ` has(tool_outputs.target.end_at) `, то ответить пользователю: «У этого события задана длительность, и сдвиг только начала её испортит. Напиши новое время начала и конца целиком, например «перенеси событие &#35;{{tool&#95;outputs.target.id}} на завтра с 10:00 до 11:00».»
-7. Спросить пользователя: «Перенести {{t.target}} на {{bind.d}} в {{bind.at}}?»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
+6. Вызвать инструмент ` plan_move ` с параметрами: ` date ` = ` {{tool_outputs.target.date|default("")}} `; ` time ` = ` {{tool_outputs.target.time|default("")}} `; ` end_at ` = ` {{tool_outputs.target.end_at|default("")}} `; ` day ` = ` {{bind.ev.date|default("")}} `; ` at ` = ` {{bind.ev.time|default("")}} `; результат сохранить как ` plan `
+7. Спросить пользователя: «Перенести {{t.target}} на {{tool&#95;outputs.plan.when&#95;text}}?»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
 8. Если выполняется условие ` ask.confirm != 'да' && ask.confirm != 'yes' `, то ответить пользователю: «Отменено, ничего не изменилось.»
-9. Вызвать инструмент ` update_event ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `; ` start_at ` = ` {{bind.start}} `; ` scope ` = ` {{env.scope}} `
+9. Если выполняется условие ` has(tool_outputs.plan.end) `, то вызвать инструмент ` update_event ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `; ` start_at ` = ` {{tool_outputs.plan.start}} `; ` end_at ` = ` {{tool_outputs.plan.end}} `; ` scope ` = ` {{env.scope}} `
+10. Если выполняется условие ` has(tool_outputs.plan.end) == false `, то вызвать инструмент ` update_event ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `; ` start_at ` = ` {{tool_outputs.plan.start}} `; ` scope ` = ` {{env.scope}} `
+11. Ответить пользователю: «Готово: перенёс «{{tool&#95;outputs.target.title}}» на {{tool&#95;outputs.plan.when&#95;text}}.»
 
 **Что читается из сообщения (привязки).**
 
-- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$1}} `; таблица «reject»: 8 значений
-- ` d ` — календарный день: слово или полная дата; ` from = {{$2}} `; таблица «words»: 8 значений; ` future = true `
-- ` at ` — время суток в формате ЧЧ:ММ; ` from = {{$3}} `
-- ` start ` — один момент времени из дня и времени в часовом поясе пользователя; ` date = d `; ` time = at `; ` future = true `
+- ` ev ` — event&#95;phrase; ` from = {{$1|default("")}} `; ` reference = true `; таблица «reject»: 16 значений
 
 **Заменяет прежние правила:** ` reschedule_event_to_tomorrow_at_time ` (Перенести на завтра в указанное время; переписано заново).
 
-**Проверка при сборке.** Все 5 положительных примеров ведут в это правило, все 2 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
+**Проверка при сборке.** Все 8 положительных примеров ведут в это правило, все 7 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
 
 <details>
 <summary>Регулярное выражение и полный workflow (JSON)</summary>
 
 ```text
-^(?:\u043F\u0435\u0440\u0435\u043D\u0435\u0441\u0438|\u043F\u0435\u0440\u0435\u0434\u0432\u0438\u043D\u044C|reschedule|move)\s+(?:событие|встречу|meeting|event)\s+(.{1,120}?)\s+(?:\u043D\u0430|to)\s+((?:(?:day\s+after\s+tomorrow|послезавтра|yesterday|tomorrow|сегодня|завтра|today|вчера)|\d{4}[-./\s]\d{1,2}[-./\s]\d{1,2}|\d{1,2}[-./\s]\d{1,2}(?:[-./\s]\d{4})?|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\s+\d{4})?|(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{4})?))\s+(?:\u0432|\u043D\u0430|at)\s+((?:\d{1,2}(?:[:.\s]\d{2})?(?:\s?(?:am|pm|a\s?m|p\s?m|утра|дня|вечера|ночи))?|\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight))$
+^(?:(?:(?:\u0449\u0430\u0441|\u0441\u0435\u0439\u0447\u0430\u0441|now)\s+)?(?:передвинуть|перекинуть|reschedule|перенести|передвинь|подвинуть|переставь|перенеси|перекинь|сдвинуть|подвинь|сдвинь|shift|move|push|bump)(?:\s*,)?(?:\s+(?:\u043F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430|\u043F\u043B\u0438\u0437|\u043F\u043B\u0437|please|pls))?(?:\s*,)?\s+(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:everything|каждое|каждую|каждый|every|любое|любую|любой|всех|each|both|все|всё|all|оба|обе)(?![A-Za-zА-Яа-яЁё0-9_]))(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043D\u0430|by|for)\s+(?:\d{1,4}\s*(?:\u043C\u0438\u043D\u0443\u0442[\u0430-\u044F]*|\u043C\u0438\u043D|\u0447\u0430\u0441[\u0430-\u044F]*|\u0447|min[a-z]*|hours?|hrs?|h)(?!\s*(?:\u0434\u043D\u044F|\u0443\u0442\u0440\u0430|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438|am|pm))(?![A-Za-zА-Яа-яЁё0-9_])|\u0447\u0430\u0441(?![A-Za-zА-Яа-яЁё0-9_])|\u043F\u043E\u043B\u0447\u0430\u0441\u0430|an?\s+hour|half\s+an?\s+hour))(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:позже|раньше|позднее|пораньше|later|earlier|sooner)(?![A-Za-zА-Яа-яЁё0-9_]))(?:(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|\u0432\u0447\u0435\u0440\u0430|today|tomorrow|yesterday|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:-?\u0433\u043E)?\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|(?<![A-Za-zА-Яа-яЁё0-9_])(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+\d{1,2}|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}[./]\d{1,2}(?:[./]\d{4})?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{4}[-./]\d{1,2}[-./]\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0447\u0435\u0440\u0435\u0437|in)\s+(?:\d{1,3}|\u043E\u0434\u043D\u0443)\s+(?:\u0434\u043D|\u0434\u0435\u043D\u044C|\u043D\u0435\u0434\u0435\u043B|day|week)))|(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}:\d{2}|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0432|\u043A|at)\s+\d{1,2}(?:[.:]\d{2})?(?:\s?(?:am|pm|\u0443\u0442\u0440\u0430|\u0434\u043D\u044F|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438))?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}\.\d{2}(?![./]\d)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441|from)\s+\d{1,2}\s+(?:\u0434\u043E|to|until)\s+\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|today|tomorrow|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}[./]\d{1,2})[,.]?\s+(?:1[3-9]|2[0-3])(?![A-Za-zА-Яа-яЁё0-9_])))|(?=.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?::\d{2})?\s*(?:am|pm|\u0443\u0442\u0440\u0430|\u0434\u043D\u044F|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438)(?![A-Za-zА-Яа-яЁё0-9_])))(?!.{0,200}(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:потом|затем|также|then|also|plus|нет|ещё|еще|and|but|not|не|и|а)(?![A-Za-zА-Яа-яЁё0-9_])|[,;]))(.{1,160}))$
 ```
 
 ```json
 {
   "version": 2,
   "bindings": {
-    "ref": {
-      "type": "eventref",
-      "from": "{{$1}}",
+    "ev": {
+      "type": "event_phrase",
+      "from": "{{$1|default(\"\")}}",
+      "reference": true,
       "reject": [
         "все",
         "всё",
@@ -355,58 +381,41 @@
         "every",
         "everything",
         "любое",
-        "любую"
+        "любую",
+        "любой",
+        "каждое",
+        "каждую",
+        "каждый",
+        "each",
+        "both",
+        "оба",
+        "обе"
       ]
-    },
-    "d": {
-      "type": "date",
-      "from": "{{$2}}",
-      "words": {
-        "сегодня": "today",
-        "today": "today",
-        "завтра": "tomorrow",
-        "tomorrow": "tomorrow",
-        "послезавтра": "day_after_tomorrow",
-        "day after tomorrow": "day_after_tomorrow",
-        "вчера": "yesterday",
-        "yesterday": "yesterday"
-      },
-      "future": true
-    },
-    "at": {
-      "type": "time",
-      "from": "{{$3}}"
-    },
-    "start": {
-      "type": "datetime",
-      "date": "d",
-      "time": "at",
-      "future": true
     }
   },
   "steps": [
     {
-      "when": "bind.ref.kind == 'id'",
+      "when": "bind.ev.ref.kind == 'id'",
       "call": "get_event",
       "input": {
-        "event_id": "{{bind.ref.id}}",
+        "event_id": "{{bind.ev.ref.id}}",
         "scope": "{{env.scope}}"
       },
       "as": "target"
     },
     {
-      "when": "bind.ref.kind == 'name'",
+      "when": "bind.ev.ref.kind == 'name'",
       "call": "search_events",
       "input": {
-        "query": "{{bind.ref.query}}",
+        "query": "{{bind.ev.ref.query}}",
         "scope": "{{env.scope}}",
         "event_type": "regular"
       },
       "as": "found"
     },
     {
-      "when": "count(found) == 0 && bind.ref.kind == \"name\"",
-      "respond": "{{t.not_found}}"
+      "when": "count(found) == 0 && bind.ev.ref.kind == 'name'",
+      "abstain": true
     },
     {
       "when": "count(found) > 1",
@@ -422,8 +431,15 @@
       "as": "target"
     },
     {
-      "when": "has(tool_outputs.target.end_at)",
-      "respond": "{{t.needs_end}}"
+      "call": "plan_move",
+      "input": {
+        "date": "{{tool_outputs.target.date|default(\"\")}}",
+        "time": "{{tool_outputs.target.time|default(\"\")}}",
+        "end_at": "{{tool_outputs.target.end_at|default(\"\")}}",
+        "day": "{{bind.ev.date|default(\"\")}}",
+        "at": "{{bind.ev.time|default(\"\")}}"
+      },
+      "as": "plan"
     },
     {
       "call": "ask_user",
@@ -441,34 +457,46 @@
       "respond": "{{t.cancelled}}"
     },
     {
+      "when": "has(tool_outputs.plan.end)",
       "call": "update_event",
       "input": {
         "event_id": "{{tool_outputs.target.id}}",
-        "start_at": "{{bind.start}}",
+        "start_at": "{{tool_outputs.plan.start}}",
+        "end_at": "{{tool_outputs.plan.end}}",
         "scope": "{{env.scope}}"
       }
+    },
+    {
+      "when": "has(tool_outputs.plan.end) == false",
+      "call": "update_event",
+      "input": {
+        "event_id": "{{tool_outputs.target.id}}",
+        "start_at": "{{tool_outputs.plan.start}}",
+        "scope": "{{env.scope}}"
+      }
+    },
+    {
+      "respond": "{{t.done}}"
     }
   ],
   "i18n": {
     "ru": {
-      "not_found": "Не нашёл такое событие. Назови точное название или номер, например #12.",
-      "ambiguous": "Нашёл несколько событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
+      "ambiguous": "Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
       "cancelled": "Отменено, ничего не изменилось.",
       "ok": "Да",
       "cancel": "Отмена",
-      "target": "«{{tool_outputs.target.title}}» (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Перенести {{t.target}} на {{bind.d}} в {{bind.at}}?",
-      "needs_end": "У этого события задана длительность, и сдвиг только начала её испортит. Напиши новое время начала и конца целиком, например «перенеси событие #{{tool_outputs.target.id}} на завтра с 10:00 до 11:00»."
+      "target": "«{{tool_outputs.target.title}}» ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\"\")|ternary(\" в \", \"\")}}{{tool_outputs.target.time|default(\"\")}})",
+      "q": "Перенести {{t.target}} на {{tool_outputs.plan.when_text}}?",
+      "done": "Готово: перенёс «{{tool_outputs.target.title}}» на {{tool_outputs.plan.when_text}}."
     },
     "en": {
-      "not_found": "I couldn't find that event. Give the exact title or its number, like #12.",
       "ambiguous": "Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}",
       "cancelled": "Cancelled, nothing was changed.",
       "ok": "Yes",
       "cancel": "Cancel",
-      "target": "“{{tool_outputs.target.title}}” (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Move {{t.target}} to {{bind.d}} at {{bind.at}}?",
-      "needs_end": "This event has an end time, and moving only its start would corrupt it. Send the new start and end together, for example “move event #{{tool_outputs.target.id}} tomorrow from 10:00 to 11:00”."
+      "target": "“{{tool_outputs.target.title}}” ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\"\")|ternary(\" at \", \"\")}}{{tool_outputs.target.time|default(\"\")}})",
+      "q": "Move {{t.target}} to {{tool_outputs.plan.when_text}}?",
+      "done": "Done: moved “{{tool_outputs.target.title}}” to {{tool_outputs.plan.when_text}}."
     }
   }
 }
@@ -485,41 +513,50 @@
 
 **Примеры фраз.**
 
+- переименуй стендап в утренний синк
 - переименуй событие &#35;12 в Ретро
 - переименуй встречу «Стендап» в «Планёрка»
-- rename event &#35;7 to Retro
-- rename meeting "Sync" as Planning
+- rename yoga to evening stretch
+- назови ретро «ретроспектива спринта»
 
 **Не запускают правило (уходят к AI):**
 
-- переименуй событие стендап в обед
+- переименуй стендап
 - переименуй событие &#35;12
+- переименуй йогу в пилатес и перенеси на завтра
+- не переименовывай стендап в обед
+
+**Шаблон принимает, но привязка отвергает до вызова инструментов:**
+
+- переименуй событие в обед
+- переименуй встречу в обед
 
 **Что делает правило по шагам.**
 
 1. Если выполняется условие ` bind.ref.kind == 'id' `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{bind.ref.id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 2. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` search_events ` с параметрами: ` query ` = ` {{bind.ref.query}} `; ` scope ` = ` {{env.scope}} `; ` event_type ` = ` regular `; результат сохранить как ` found `
-3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == "name" `, то ответить пользователю: «Не нашёл такое событие. Назови точное название или номер, например &#35;12.»
-4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
+3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == 'name' `, то вызвать инструмент `  `
+4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько подходящих событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
 5. Если выполняется условие ` count(found) == 1 `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{tool_outputs.found[0].id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 6. Спросить пользователя: «Переименовать {{t.target}} в «{{bind.title}}»?»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
 7. Если выполняется условие ` ask.confirm != 'да' && ask.confirm != 'yes' `, то ответить пользователю: «Отменено, ничего не изменилось.»
 8. Вызвать инструмент ` update_event ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `; ` title ` = ` {{bind.title}} `; ` scope ` = ` {{env.scope}} `
+9. Ответить пользователю: «Готово: переименовал «{{tool&#95;outputs.target.title}}» в «{{bind.title}}».»
 
 **Что читается из сообщения (привязки).**
 
-- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$1}} `; таблица «reject»: 8 значений
-- ` title ` — очищенный текст ограниченной длины; ` from = {{$2}} `; ` max = 200 `
+- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$1|default("")}}{{$3|default("")}} `; таблица «reject»: 16 значений; ` stem = true `
+- ` title ` — очищенный текст ограниченной длины; ` from = {{$2|default("")}}{{$4|default("")}} `; ` max = 200 `; ` capitalize = true `
 
 **Заменяет прежние правила:** ` rename_event ` (Переименовать событие; переписано заново).
 
-**Проверка при сборке.** Все 4 положительных примеров ведут в это правило, все 2 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
+**Проверка при сборке.** Все 5 положительных примеров ведут в это правило, все 4 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
 
 <details>
 <summary>Регулярное выражение и полный workflow (JSON)</summary>
 
 ```text
-^(?:\u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u0443\u0439|rename)\s+(?:событие|встречу|meeting|event)\s+((?:#|\u2116)\d{1,9}|\u00AB[^\u00BB\n]{1,120}\u00BB|"[^"\n]{1,120}"|\u201C[^\u201D\n]{1,120}\u201D)\s+(?:\u0432|\u043D\u0430|to|as)\s+(.{1,200})$
+^(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:everything|каждое|каждую|каждый|every|любое|любую|любой|всех|each|both|все|всё|all|оба|обе)(?![A-Za-zА-Яа-яЁё0-9_]))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|\u0432\u0447\u0435\u0440\u0430|today|tomorrow|yesterday|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:-?\u0433\u043E)?\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|(?<![A-Za-zА-Яа-яЁё0-9_])(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+\d{1,2}|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}[./]\d{1,2}(?:[./]\d{4})?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{4}[-./]\d{1,2}[-./]\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0447\u0435\u0440\u0435\u0437|in)\s+(?:\d{1,3}|\u043E\u0434\u043D\u0443)\s+(?:\u0434\u043D|\u0434\u0435\u043D\u044C|\u043D\u0435\u0434\u0435\u043B|day|week))))(?!(?=.*(?:(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}:\d{2}|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0432|\u043A|at)\s+\d{1,2}(?:[.:]\d{2})?(?:\s?(?:am|pm|\u0443\u0442\u0440\u0430|\u0434\u043D\u044F|\u0432\u0435\u0447\u0435\u0440\u0430|\u043D\u043E\u0447\u0438))?(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u043F\u043E\u043B\u0434\u0435\u043D\u044C|\u043F\u043E\u043B\u043D\u043E\u0447\u044C|noon|midnight)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])\d{1,2}\.\d{2}(?![./]\d)(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441|from)\s+\d{1,2}\s+(?:\u0434\u043E|to|until)\s+\d{1,2}(?![A-Za-zА-Яа-яЁё0-9_])|(?<![A-Za-zА-Яа-яЁё0-9_])(?:\u0441\u0435\u0433\u043E\u0434\u043D\u044F|\u0437\u0430\u0432\u0442\u0440\u0430|\u043F\u043E\u0441\u043B\u0435\u0437\u0430\u0432\u0442\u0440\u0430|today|tomorrow|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tues|thurs|thur|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}[./]\d{1,2})[,.]?\s+(?:1[3-9]|2[0-3])(?![A-Za-zА-Яа-яЁё0-9_]))))(?!.{0,200}(?<![A-Za-zА-Яа-яЁё0-9_])(?:контакт[а-я]*|contacts?|секретар[а-я]*|secretar[a-z]*)(?![A-Za-zА-Яа-яЁё0-9_]))(?:(?:(?:\u0449\u0430\u0441|\u0441\u0435\u0439\u0447\u0430\u0441|now)\s+)?(?:\u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u0443\u0439|\u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u0442\u044C|rename)(?:\s*,)?(?:\s+(?:\u043F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430|\u043F\u043B\u0438\u0437|\u043F\u043B\u0437|please|pls))?(?:\s*,)?\s+(?!.{0,200}\s(?:\u0432|\u043D\u0430|to|as)\s.{0,200}\s(?:\u0432|\u043D\u0430|to|as)\s)(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?)\s+(?:\u0432|\u043D\u0430|to|as)\s+([^;\n]{1,200})|(?:(?:\u0449\u0430\u0441|\u0441\u0435\u0439\u0447\u0430\u0441|now)\s+)?(?:\u043D\u0430\u0437\u043E\u0432\u0438|\u043D\u0430\u0437\u0432\u0430\u0442\u044C)(?:\s*,)?(?:\s+(?:\u043F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430|\u043F\u043B\u0438\u0437|\u043F\u043B\u0437|please|pls))?(?:\s*,)?\s+(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438[\u0435\u044F\u044E]|\u0432\u0441\u0442\u0440\u0435\u0447[\u0443\u0430\u0438\u0435]|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438[\u0435\u044F\u044E]|event|meeting|appointment)\s+)?([^;\n.?!,]{1,120}?)\s+(\u00AB[^\u00BB\n]{1,200}\u00BB|"[^"\n]{1,200}"|\u201C[^\u201D\n]{1,200}\u201D))$
 ```
 
 ```json
@@ -528,7 +565,7 @@
   "bindings": {
     "ref": {
       "type": "eventref",
-      "from": "{{$1}}",
+      "from": "{{$1|default(\"\")}}{{$3|default(\"\")}}",
       "reject": [
         "все",
         "всё",
@@ -537,13 +574,23 @@
         "every",
         "everything",
         "любое",
-        "любую"
-      ]
+        "любую",
+        "любой",
+        "каждое",
+        "каждую",
+        "каждый",
+        "each",
+        "both",
+        "оба",
+        "обе"
+      ],
+      "stem": true
     },
     "title": {
       "type": "text",
-      "from": "{{$2}}",
-      "max": 200
+      "from": "{{$2|default(\"\")}}{{$4|default(\"\")}}",
+      "max": 200,
+      "capitalize": true
     }
   },
   "steps": [
@@ -567,8 +614,8 @@
       "as": "found"
     },
     {
-      "when": "count(found) == 0 && bind.ref.kind == \"name\"",
-      "respond": "{{t.not_found}}"
+      "when": "count(found) == 0 && bind.ref.kind == 'name'",
+      "abstain": true
     },
     {
       "when": "count(found) > 1",
@@ -605,26 +652,29 @@
         "title": "{{bind.title}}",
         "scope": "{{env.scope}}"
       }
+    },
+    {
+      "respond": "{{t.done}}"
     }
   ],
   "i18n": {
     "ru": {
-      "not_found": "Не нашёл такое событие. Назови точное название или номер, например #12.",
-      "ambiguous": "Нашёл несколько событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
+      "ambiguous": "Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
       "cancelled": "Отменено, ничего не изменилось.",
       "ok": "Да",
       "cancel": "Отмена",
-      "target": "«{{tool_outputs.target.title}}» (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Переименовать {{t.target}} в «{{bind.title}}»?"
+      "target": "«{{tool_outputs.target.title}}» ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\"\")|ternary(\" в \", \"\")}}{{tool_outputs.target.time|default(\"\")}})",
+      "q": "Переименовать {{t.target}} в «{{bind.title}}»?",
+      "done": "Готово: переименовал «{{tool_outputs.target.title}}» в «{{bind.title}}»."
     },
     "en": {
-      "not_found": "I couldn't find that event. Give the exact title or its number, like #12.",
       "ambiguous": "Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}",
       "cancelled": "Cancelled, nothing was changed.",
       "ok": "Yes",
       "cancel": "Cancel",
-      "target": "“{{tool_outputs.target.title}}” (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Rename {{t.target}} to “{{bind.title}}”?"
+      "target": "“{{tool_outputs.target.title}}” ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\"\")|ternary(\" at \", \"\")}}{{tool_outputs.target.time|default(\"\")}})",
+      "q": "Rename {{t.target}} to “{{bind.title}}”?",
+      "done": "Done: renamed “{{tool_outputs.target.title}}” to “{{bind.title}}”."
     }
   }
 }
@@ -641,43 +691,47 @@
 
 **Примеры фраз.**
 
-- измени место события &#35;12 на Переговорка 3
-- укажи описание встречи «Стендап» на Обсудить релиз
-- set location of event &#35;7 to Room 4
-- change description event "Retro" to Bring notes
+- поставь место для ужина с родителями: ресторан Дунав
+- добавь описание к ретро: обсудить релиз и баги
+- измени место события стендап на переговорка 3
+- set the location of the dentist to Oak Street 12
+- change description of the retro to Bring notes
 
 **Не запускают правило (уходят к AI):**
 
-- измени место события стендап на офис
-- измени место события &#35;12
+- измени место события
+- поставь место для стендапа
+- поставь место: офис
+- измени описание
 
 **Что делает правило по шагам.**
 
 1. Если выполняется условие ` bind.ref.kind == 'id' `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{bind.ref.id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
 2. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` search_events ` с параметрами: ` query ` = ` {{bind.ref.query}} `; ` scope ` = ` {{env.scope}} `; ` event_type ` = ` regular `; результат сохранить как ` found `
-3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == "name" `, то ответить пользователю: «Не нашёл такое событие. Назови точное название или номер, например &#35;12.»
-4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
+3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == 'name' `, то вызвать инструмент `  `
+4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько подходящих событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
 5. Если выполняется условие ` count(found) == 1 `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{tool_outputs.found[0].id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
-6. Спросить пользователя: «Изменить {{bind.field}} у {{t.target}} на «{{bind.value}}»?»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
+6. Спросить пользователя: «Поставить {{bind.field&#124;eq&#40;"location","место","описание"&#41;}} у {{t.target}}: «{{bind.value}}»?»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
 7. Если выполняется условие ` ask.confirm != 'да' && ask.confirm != 'yes' `, то ответить пользователю: «Отменено, ничего не изменилось.»
 8. Если выполняется условие ` bind.field == 'location' `, то вызвать инструмент ` update_event ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `; ` location ` = ` {{bind.value}} `; ` scope ` = ` {{env.scope}} `
 9. Если выполняется условие ` bind.field == 'description' `, то вызвать инструмент ` update_event ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `; ` description ` = ` {{bind.value}} `; ` scope ` = ` {{env.scope}} `
+10. Ответить пользователю: «Готово: у «{{tool&#95;outputs.target.title}}» теперь {{bind.field&#124;eq&#40;"location","место","описание"&#41;}}: «{{bind.value}}».»
 
 **Что читается из сообщения (привязки).**
 
-- ` field ` — выбор из закрытого списка слов; ` from = {{$1}} `; таблица «values»: 5 значений
-- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$2}} `; таблица «reject»: 8 значений
-- ` value ` — очищенный текст ограниченной длины; ` from = {{$3}} `; ` max = 300 `
+- ` field ` — выбор из закрытого списка слов; ` from = {{$1|default("")}}{{$4|default("")}}{{$8|default("")}} `; таблица «values»: 10 значений
+- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$2|default("")}}{{$5|default("")}}{{$7|default("")}} `; таблица «reject»: 16 значений; ` stem = true `
+- ` value ` — очищенный текст ограниченной длины; ` from = {{$3|default("")}}{{$6|default("")}}{{$9|default("")}} `; ` max = 300 `
 
 **Заменяет прежние правила:** ` add_event_description ` (Добавить или заменить описание; переписано заново), ` change_event_location ` (Изменить место события; переписано заново).
 
-**Проверка при сборке.** Все 4 положительных примеров ведут в это правило, все 2 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
+**Проверка при сборке.** Все 5 положительных примеров ведут в это правило, все 4 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
 
 <details>
 <summary>Регулярное выражение и полный workflow (JSON)</summary>
 
 ```text
-^(?:\u0438\u0437\u043C\u0435\u043D\u0438|\u043F\u043E\u043C\u0435\u043D\u044F\u0439|\u0443\u043A\u0430\u0436\u0438|\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438|set|change|update)\s+(\u043C\u0435\u0441\u0442\u043E|\u043B\u043E\u043A\u0430\u0446\u0438\u044E|\u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435|location|description)\s+(?:of\s+)?(?:\u0441\u043E\u0431\u044B\u0442\u0438\u044F|\u0432\u0441\u0442\u0440\u0435\u0447\u0438|event|meeting)\s+((?:#|\u2116)\d{1,9}|\u00AB[^\u00BB\n]{1,120}\u00BB|"[^"\n]{1,120}"|\u201C[^\u201D\n]{1,120}\u201D)\s+(?:\u043D\u0430|to)\s+(.{1,300})$
+^(?:(?:(?:\u0449\u0430\u0441|\u0441\u0435\u0439\u0447\u0430\u0441|now)\s+)?(?:\u043F\u043E\u0441\u0442\u0430\u0432\u044C|\u0443\u043A\u0430\u0436\u0438|\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438|\u0437\u0430\u0434\u0430\u0439|\u0434\u043E\u0431\u0430\u0432\u044C|\u0438\u0437\u043C\u0435\u043D\u0438|\u043F\u043E\u043C\u0435\u043D\u044F\u0439|\u0441\u0434\u0435\u043B\u0430\u0439|\u0437\u0430\u043F\u0438\u0448\u0438)(?:\s*,)?(?:\s+(?:\u043F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430|\u043F\u043B\u0438\u0437|\u043F\u043B\u0437|please|pls))?(?:\s*,)?\s+((?:описание|локацию|локация|место|адрес)|(?:description|location|address|place|venue))\s+(?:(?:\u0434\u043B\u044F|\u0443|\u043A|\u043D\u0430|\u0432|\u043E\u0442)\s+)?(?:(?:\u0441\u043E\u0431\u044B\u0442\u0438\u044F|\u0432\u0441\u0442\u0440\u0435\u0447\u0438|\u043C\u0435\u0440\u043E\u043F\u0440\u0438\u044F\u0442\u0438\u044F)\s+)?(?!.{0,300}(?<![A-Za-zА-Яа-яЁё0-9_])(?:переименуй|перенеси|пригласи|напомни|создай|delete|create|rename|invite|remind|удали|move)(?![A-Za-zА-Яа-яЁё0-9_]))([^;\n:\u2014\u2013]{1,120}?)(?:\s*[:\u2014\u2013-]\s+|\s+(?:\u043D\u0430|to)\s+)([^;\n]{1,300})|(?:(?:\u0449\u0430\u0441|\u0441\u0435\u0439\u0447\u0430\u0441|now)\s+)?(?:set|change|update|add|put|edit)\s+(?:the\s+)?((?:описание|локацию|локация|место|адрес)|(?:description|location|address|place|venue))\s+(?:of|for|on|to)\s+(?:the\s+)?(?!.{0,300}(?<![A-Za-zА-Яа-яЁё0-9_])(?:переименуй|перенеси|пригласи|напомни|создай|delete|create|rename|invite|remind|удали|move)(?![A-Za-zА-Яа-яЁё0-9_]))([^;\n:\u2014\u2013]{1,120}?)(?:\s*:\s+|\s+(?:to|as)\s+)([^;\n]{1,300})|(?:(?:\u0449\u0430\u0441|\u0441\u0435\u0439\u0447\u0430\u0441|now)\s+)?(?:set|change|update)\s+(?:the\s+)?(?!.{0,300}(?<![A-Za-zА-Яа-яЁё0-9_])(?:переименуй|перенеси|пригласи|напомни|создай|delete|create|rename|invite|remind|удали|move)(?![A-Za-zА-Яа-яЁё0-9_]))([^;\n:\u2014\u2013]{1,120}?)\s+((?:описание|локацию|локация|место|адрес)|(?:description|location|address|place|venue))\s+(?:to|as)\s+([^;\n]{1,300}))$
 ```
 
 ```json
@@ -686,18 +740,23 @@
   "bindings": {
     "field": {
       "type": "enum",
-      "from": "{{$1}}",
+      "from": "{{$1|default(\"\")}}{{$4|default(\"\")}}{{$8|default(\"\")}}",
       "values": {
         "место": "location",
         "локацию": "location",
-        "location": "location",
+        "локация": "location",
+        "адрес": "location",
         "описание": "description",
+        "location": "location",
+        "place": "location",
+        "address": "location",
+        "venue": "location",
         "description": "description"
       }
     },
     "ref": {
       "type": "eventref",
-      "from": "{{$2}}",
+      "from": "{{$2|default(\"\")}}{{$5|default(\"\")}}{{$7|default(\"\")}}",
       "reject": [
         "все",
         "всё",
@@ -706,12 +765,21 @@
         "every",
         "everything",
         "любое",
-        "любую"
-      ]
+        "любую",
+        "любой",
+        "каждое",
+        "каждую",
+        "каждый",
+        "each",
+        "both",
+        "оба",
+        "обе"
+      ],
+      "stem": true
     },
     "value": {
       "type": "text",
-      "from": "{{$3}}",
+      "from": "{{$3|default(\"\")}}{{$6|default(\"\")}}{{$9|default(\"\")}}",
       "max": 300
     }
   },
@@ -736,8 +804,8 @@
       "as": "found"
     },
     {
-      "when": "count(found) == 0 && bind.ref.kind == \"name\"",
-      "respond": "{{t.not_found}}"
+      "when": "count(found) == 0 && bind.ref.kind == 'name'",
+      "abstain": true
     },
     {
       "when": "count(found) > 1",
@@ -784,185 +852,29 @@
         "description": "{{bind.value}}",
         "scope": "{{env.scope}}"
       }
+    },
+    {
+      "respond": "{{t.done}}"
     }
   ],
   "i18n": {
     "ru": {
-      "not_found": "Не нашёл такое событие. Назови точное название или номер, например #12.",
-      "ambiguous": "Нашёл несколько событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
+      "ambiguous": "Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
       "cancelled": "Отменено, ничего не изменилось.",
       "ok": "Да",
       "cancel": "Отмена",
-      "target": "«{{tool_outputs.target.title}}» (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Изменить {{bind.field}} у {{t.target}} на «{{bind.value}}»?"
+      "target": "«{{tool_outputs.target.title}}» ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\"\")|ternary(\" в \", \"\")}}{{tool_outputs.target.time|default(\"\")}})",
+      "q": "Поставить {{bind.field|eq(\"location\",\"место\",\"описание\")}} у {{t.target}}: «{{bind.value}}»?",
+      "done": "Готово: у «{{tool_outputs.target.title}}» теперь {{bind.field|eq(\"location\",\"место\",\"описание\")}}: «{{bind.value}}»."
     },
     "en": {
-      "not_found": "I couldn't find that event. Give the exact title or its number, like #12.",
       "ambiguous": "Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}",
       "cancelled": "Cancelled, nothing was changed.",
       "ok": "Yes",
       "cancel": "Cancel",
-      "target": "“{{tool_outputs.target.title}}” (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Change {{bind.field}} of {{t.target}} to “{{bind.value}}”?"
-    }
-  }
-}
-```
-
-</details>
-
----
-
-<a id="basis.event.delete"></a>
-### Удалить одно событие после подтверждения
-
-` basis.event.delete ` · События · Изменение данных · инструменты: ` get_event `, ` search_events `, ` ask_user `, ` delete_event `
-
-> Пометка из исходника (по-английски): Bulk words are rejected, a title must match exactly one event, and removal always asks first.
-
-**Примеры фраз.**
-
-- удали событие &#35;12
-- отмени встречу с Иваном
-- удали событие «Стендап»
-- delete event &#35;7
-- cancel meeting with Anna
-- remove event Retro
-
-**Не запускают правило (уходят к AI):**
-
-- удали все события
-- удали все встречи сегодня
-- не удаляй событие &#35;12
-- удали событие
-
-**Шаблон принимает, но привязка отвергает до вызова инструментов:**
-
-- удали событие все
-
-**Что делает правило по шагам.**
-
-1. Если выполняется условие ` bind.ref.kind == 'id' `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{bind.ref.id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
-2. Если выполняется условие ` bind.ref.kind == 'name' `, то вызвать инструмент ` search_events ` с параметрами: ` query ` = ` {{bind.ref.query}} `; ` scope ` = ` {{env.scope}} `; ` event_type ` = ` regular `; результат сохранить как ` found `
-3. Если выполняется условие ` count(found) == 0 && bind.ref.kind == "name" `, то ответить пользователю: «Не нашёл такое событие. Назови точное название или номер, например &#35;12.»
-4. Если выполняется условие ` count(found) > 1 `, то ответить пользователю: «Нашёл несколько событий. Повтори команду с номером &#40;&#35;id&#41;:<br>{{tool&#95;outputs.found&#95;text}}»
-5. Если выполняется условие ` count(found) == 1 `, то вызвать инструмент ` get_event ` с параметрами: ` event_id ` = ` {{tool_outputs.found[0].id}} `; ` scope ` = ` {{env.scope}} `; результат сохранить как ` target `
-6. Спросить пользователя: «Удалить {{t.target}}? Это нельзя отменить.»; варианты ответа: «Да», «Отмена»; результат сохранить как ` confirm|lower `
-7. Если выполняется условие ` ask.confirm != 'да' && ask.confirm != 'yes' `, то ответить пользователю: «Отменено, ничего не изменилось.»
-8. Вызвать инструмент ` delete_event ` с параметрами: ` event_id ` = ` {{tool_outputs.target.id}} `; ` scope ` = ` {{env.scope}} `
-
-**Что читается из сообщения (привязки).**
-
-- ` ref ` — ссылка на одно событие: номер или точное название; ` from = {{$1}} `; таблица «reject»: 8 значений
-
-**Заменяет прежние правила:** ` delete_event_by_name ` (Удалить событие по названию; переписано заново).
-
-**Проверка при сборке.** Все 6 положительных примеров ведут в это правило, все 4 отрицательных уходят к AI. Это проверка маршрутизации при сборке, а не приёмка на живом боте.
-
-<details>
-<summary>Регулярное выражение и полный workflow (JSON)</summary>
-
-```text
-^(?:\u0443\u0434\u0430\u043B\u0438|\u043E\u0442\u043C\u0435\u043D\u0438|delete|cancel|remove)\s+(?:событие|встречу|meeting|event)\s+([^;\n]{1,120})$
-```
-
-```json
-{
-  "version": 2,
-  "bindings": {
-    "ref": {
-      "type": "eventref",
-      "from": "{{$1}}",
-      "reject": [
-        "все",
-        "всё",
-        "всех",
-        "all",
-        "every",
-        "everything",
-        "любое",
-        "любую"
-      ]
-    }
-  },
-  "steps": [
-    {
-      "when": "bind.ref.kind == 'id'",
-      "call": "get_event",
-      "input": {
-        "event_id": "{{bind.ref.id}}",
-        "scope": "{{env.scope}}"
-      },
-      "as": "target"
-    },
-    {
-      "when": "bind.ref.kind == 'name'",
-      "call": "search_events",
-      "input": {
-        "query": "{{bind.ref.query}}",
-        "scope": "{{env.scope}}",
-        "event_type": "regular"
-      },
-      "as": "found"
-    },
-    {
-      "when": "count(found) == 0 && bind.ref.kind == \"name\"",
-      "respond": "{{t.not_found}}"
-    },
-    {
-      "when": "count(found) > 1",
-      "respond": "{{t.ambiguous}}"
-    },
-    {
-      "when": "count(found) == 1",
-      "call": "get_event",
-      "input": {
-        "event_id": "{{tool_outputs.found[0].id}}",
-        "scope": "{{env.scope}}"
-      },
-      "as": "target"
-    },
-    {
-      "call": "ask_user",
-      "input": {
-        "question": "{{t.q}}",
-        "options": [
-          "{{t.ok}}",
-          "{{t.cancel}}"
-        ]
-      },
-      "as": "confirm|lower"
-    },
-    {
-      "when": "ask.confirm != 'да' && ask.confirm != 'yes'",
-      "respond": "{{t.cancelled}}"
-    },
-    {
-      "call": "delete_event",
-      "input": {
-        "event_id": "{{tool_outputs.target.id}}",
-        "scope": "{{env.scope}}"
-      }
-    }
-  ],
-  "i18n": {
-    "ru": {
-      "not_found": "Не нашёл такое событие. Назови точное название или номер, например #12.",
-      "ambiguous": "Нашёл несколько событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}",
-      "cancelled": "Отменено, ничего не изменилось.",
-      "ok": "Да",
-      "cancel": "Отмена",
-      "target": "«{{tool_outputs.target.title}}» (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Удалить {{t.target}}? Это нельзя отменить."
-    },
-    "en": {
-      "not_found": "I couldn't find that event. Give the exact title or its number, like #12.",
-      "ambiguous": "Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}",
-      "cancelled": "Cancelled, nothing was changed.",
-      "ok": "Yes",
-      "cancel": "Cancel",
-      "target": "“{{tool_outputs.target.title}}” (#{{tool_outputs.target.id}}, {{tool_outputs.target.date}} {{tool_outputs.target.time|default(\"\")}})",
-      "q": "Delete {{t.target}}? This cannot be undone."
+      "target": "“{{tool_outputs.target.title}}” ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\"\")|ternary(\" at \", \"\")}}{{tool_outputs.target.time|default(\"\")}})",
+      "q": "Set the {{bind.field}} of {{t.target}} to “{{bind.value}}”?",
+      "done": "Done: the {{bind.field}} of “{{tool_outputs.target.title}}” is now “{{bind.value}}”."
     }
   }
 }

@@ -201,9 +201,10 @@ test('an invitee naming the event by title searches only their own calendar', as
   const f = fixture();
   f.accept(INVITEE);
   const result = await f.say(`who is invited to ${TITLE}`, { as: INVITEE });
-  expect(result.handled).toBe(true);
+  // A title that matches nothing in the invitee's own calendar is handed to the AI, which knows more than a rule.
+  expect(result.handled).toBe(false);
   expect(f.calls.map((c) => c.name)).toEqual(['search_events']);
-  expect(f.reply()).toContain("couldn't find that event");
+  expect(f.send).not.toHaveBeenCalled();
 });
 
 test('the owner naming the event by title gets the roster', async () => {
@@ -234,14 +235,14 @@ test('a title matching several events asks for the number and reads no roster', 
   expect(f.reply()).toContain('Several events match');
 });
 
-test('in a group chat the intent refuses before reading anything', async () => {
+test('in a group chat the intent steps aside before reading anything', async () => {
   const f = fixture();
   f.accept(INVITEE);
   for (const as of [OWNER, INVITEE]) {
     const result = await f.say(`who is invited to event #${f.event.id}`, { as, group: true });
-    expect(result.handled).toBe(true);
+    expect(result.handled).toBe(false);
     expect(f.calls).toHaveLength(0);
-    expect(f.reply()).toContain('private chat');
+    expect(f.send).not.toHaveBeenCalled();
   }
 });
 
