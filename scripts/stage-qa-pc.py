@@ -19,7 +19,8 @@ Streams: only the final STAGE_QA_RESULT line is written to stdout; everything fo
 SMOKE lines, our own messages) goes to stderr.
 
 Exit codes (same table as odroid-stage-qa.sh): 0 passed, 1 failed, 2 refused, 3 not provisioned,
-75 lock wait timed out, 76 superseded; a signal exits 128+signal.
+4 stage infrastructure could not run (the odroid's docker load / compose up failed), 75 lock wait timed
+out, 76 superseded; a signal exits 128+signal. A wrapper code this driver does not know is a failure.
 """
 
 from __future__ import annotations
@@ -67,13 +68,14 @@ SMOKE_SUMMARY = re.compile(
 READY_PREFIX = "STAGE_READY "
 RESULT_PREFIX = "STAGE_QA_RESULT"
 
-EXIT_PASSED, EXIT_FAILED, EXIT_REFUSED, EXIT_NOT_PROVISIONED = 0, 1, 2, 3
+EXIT_PASSED, EXIT_FAILED, EXIT_REFUSED, EXIT_NOT_PROVISIONED, EXIT_INFRA = 0, 1, 2, 3, 4
 EXIT_LOCK_TIMEOUT, EXIT_SUPERSEDED = 75, 76
 SMOKE_REFUSED, SMOKE_UNAVAILABLE = 64, 69
 WRAPPER_CODES = (
     EXIT_FAILED,
     EXIT_REFUSED,
     EXIT_NOT_PROVISIONED,
+    EXIT_INFRA,
     EXIT_LOCK_TIMEOUT,
     EXIT_SUPERSEDED,
 )
@@ -81,6 +83,7 @@ STATUS_BY_CODE = {
     EXIT_PASSED: "passed",
     EXIT_REFUSED: "refused",
     EXIT_NOT_PROVISIONED: "not-provisioned",
+    EXIT_INFRA: "infra-error",
     EXIT_LOCK_TIMEOUT: "lock-timeout",
     EXIT_SUPERSEDED: "superseded",
 }
