@@ -128,8 +128,7 @@ function renderEvents(answer: ToolAnswer, context: RenderContext): RenderedAnswe
       ? rendered(answer.output)
       : null;
   }
-  if (answer.tool === 'get_event' && events.length === 1)
-    return rendered(renderEventCard(events[0]!, context, kind));
+  if (answer.tool === 'get_event' && events.length === 1) return rendered(renderEventCard(events[0]!, context, kind));
   return rendered(renderAgenda(events, context, kind));
 }
 
@@ -511,8 +510,7 @@ export function plainAnswer(output: string, language: string): { text: string } 
       const value = parsed.data[key];
       if (typeof value === 'string') return { text: value };
     }
-    if (parsed.data.ok === true && Object.keys(parsed.data).length === 1)
-      return { text: wordingFor(language).done };
+    if (parsed.data.ok === true && Object.keys(parsed.data).length === 1) return { text: wordingFor(language).done };
   }
   return { text: wordingFor(language).unknownShape };
 }
