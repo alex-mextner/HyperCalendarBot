@@ -9,7 +9,11 @@ test_stage_qa_gate.py (the ship gate), test/regressions/stage-qa-workflows.test.
 """
 
 import json
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -147,6 +151,84 @@ class SmokeTargetsOnlyTheStageBot(unittest.TestCase):
     def test_prod_compose_is_not_the_stage_compose(self):
         self.assertNotEqual(PROD_COMPOSE, STAGE_COMPOSE)
         self.assertIn("container_name: hypercal-bot\n", PROD_COMPOSE)
+
+
+IN_CI = bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+
+
+def compose_version():
+    """`docker compose version` output, or None when the plugin is absent or does not answer."""
+    if shutil.which("docker") is None:
+        return None
+    try:
+        probe = subprocess.run(
+            ["docker", "compose", "version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=8,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    return probe.stdout.strip() if probe.returncode == 0 else None
+
+
+class TheStageComposeIsAValidProjectForTheRealCompose(unittest.TestCase):
+    """Text checks do not see what Compose itself refuses (#885: Compose v5 on the odroid rejected
+    `pids_limit` next to `deploy.resources.limits` without a matching `limits.pids`, after the whole
+    artifact was already loaded). `config` only parses and renders: no daemon, no image pull, no container.
+    Skipped outside CI when there is no compose plugin; in CI a missing plugin fails.
+    """
+
+    def setUp(self):
+        self.compose_version = compose_version()
+        if self.compose_version is None:
+            if IN_CI:
+                self.fail(
+                    "CI must have the docker compose plugin: this test is the real-engine check"
+                )
+            self.skipTest("no docker compose plugin on this host (CI runs it)")
+
+    def render_bot_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "stage").mkdir()
+            (Path(tmp) / "stage" / "bot.env").write_text("")
+            done = subprocess.run(
+                [
+                    "docker",
+                    "compose",
+                    "-p",
+                    "hypercalstage",
+                    "--project-directory",
+                    tmp,
+                    "-f",
+                    str(ROOT / "docker-compose.stage.yml"),
+                    "config",
+                    "--format",
+                    "json",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=8,
+                env={**os.environ, "STAGE_REDIS_PASSWORD": "dummy"},
+            )
+        self.assertEqual(done.returncode, 0, f"{self.compose_version}: {done.stderr}")
+        return json.loads(done.stdout)["services"]["bot-stage"]
+
+    def test_the_engine_accepts_the_stage_file_and_the_bot_keeps_its_caps(self):
+        bot = self.render_bot_stage()
+        limits = bot["deploy"]["resources"]["limits"]
+        self.assertEqual(bot["pids_limit"], 512, self.compose_version)
+        self.assertEqual(limits["pids"], 512, self.compose_version)
+        # Compose spells these differently across versions (bytes or "768m"; 1 or "1.0"); the value is what counts.
+        self.assertIn(str(limits["memory"]), ("768m", str(768 * 1024 * 1024)))
+        self.assertEqual(float(limits["cpus"]), 1.0)
+        self.assertEqual(bot["security_opt"], ["no-new-privileges:true"])
+        (port,) = bot["ports"]
+        self.assertEqual(
+            (port["host_ip"], str(port["published"]), port["target"]), ("127.0.0.1", "3002", 3311)
+        )
 
 
 class TheQaRunsThroughQaCliOnThePc(unittest.TestCase):

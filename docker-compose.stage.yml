@@ -72,7 +72,10 @@ services:
       - ./stage/logs:/app/logs
     # The image is a pull request's build: it gets no new privileges and a bounded process count on top
     # of the limits. The shared odroid is memory-bound: stage lives only while the run holds its locks
-    # and gets less than prod.
+    # and gets less than prod. The process bound is spelled twice with the same number: Compose v5 (the
+    # odroid's) refuses pids_limit next to deploy.resources.limits unless limits.pids is set to the same
+    # value ("can't set distinct values ... 512 vs unset"). Both keys are checked by
+    # test/regressions/stage-compose-pids.test.ts.
     security_opt:
       - no-new-privileges:true
     pids_limit: 512
@@ -81,6 +84,7 @@ services:
         limits:
           memory: 768m
           cpus: "1.0"
+          pids: 512
     logging:
       driver: "json-file"
       options:
