@@ -127,6 +127,7 @@ describe('participant push when the Google copy is gone', () => {
     api.updateEvent = updateEvent;
     api.insertEvent = insertEvent;
     api.getEvent = getEvent;
+    api.findBotEventCopies = () => Promise.resolve([]);
   });
 
   function pushLog(): PushLogRow[] {

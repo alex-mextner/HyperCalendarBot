@@ -161,6 +161,7 @@ function setup(options: { ownerSynced?: boolean; groupEvent?: boolean } = {}) {
         writes.push({ copy: googleEventId, location: body.location });
         return { id: googleEventId, etag: '"e"' };
       },
+      findBotEventCopies: async () => [],
     };
     const google = api as unknown as GoogleCalendarApi;
     for (const job of jobs.splice(0)) {

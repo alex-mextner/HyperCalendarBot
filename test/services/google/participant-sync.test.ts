@@ -14,6 +14,7 @@ function createMockApi() {
     insertEvent: mock(() => Promise.resolve({ id: 'g-participant-1', etag: '"etag-p1"' })),
     updateEvent: mock((_calId: string, eventId: string) => Promise.resolve({ id: eventId, etag: '"etag-upd"' })),
     deleteEvent: mock(() => Promise.resolve()),
+    findBotEventCopies: mock(() => Promise.resolve([])),
   };
 }
 
