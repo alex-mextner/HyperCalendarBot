@@ -116,32 +116,59 @@ function rebuildCapture(canon: CanonicalText, raw: string, from: number, to: num
   return out;
 }
 
-function extract(entry: IntentEntry, input: MatchInput, pass: Pass = 'plain'): MatchResult | null {
-  if (!entry.pattern) return entry.parameterized ? null : { intentId: entry.intentId, captures: {} };
-  const raw = input.raw;
-  // Strict rules match the canonical text and read every capture back from the raw message.
-  // The plain pass is the whole message; the repaired pass runs only for rules that did not match it.
-  const strictText = entry.strictStructure ? (pass === 'plain' ? input.canonical() : input.repaired()) : null;
-  if (entry.strictStructure && !strictText) return null;
-  let match = wholeTextMatch(entry.pattern, strictText ? strictText.text : raw);
-  let offsets: NormalizedText | undefined = strictText ?? undefined;
-  if (!match) {
-    if (entry.strictStructure) return null;
-    offsets = input.normalized();
-    match = wholeTextMatch(entry.pattern, offsets.text);
-    if (!match) return null;
-  }
-  if (!match) return null;
+function collectCaptures(
+  match: RegExpExecArray,
+  raw: string,
+  offsets: NormalizedText | undefined,
+  repaired: CanonicalText | null,
+): Record<string, string> {
   const captures: Record<string, string> = {};
   for (let i = 1; i < match.length; i++) {
     if (match[i] === undefined) continue;
     // After a typo repair the binding reads the repaired words ("завтро" → "завтра"); the rest stays as typed.
-    const value = captureAt(match, i, raw, offsets, pass === 'repaired' ? strictText : null);
+    const value = captureAt(match, i, raw, offsets, repaired);
     if (value !== undefined) captures[`$${i}`] = value;
   }
+  return captures;
+}
+
+function captureResult(
+  entry: IntentEntry,
+  match: RegExpExecArray,
+  raw: string,
+  offsets: NormalizedText | undefined,
+  repaired: CanonicalText | null,
+): MatchResult | null {
+  const captures = collectCaptures(match, raw, offsets, repaired);
   return entry.required.some((key) => captures[key] === undefined || captures[key] === '')
     ? null
     : { intentId: entry.intentId, captures };
+}
+
+/**
+ * Strict rules match the canonical text and read every capture back from the raw message.
+ * The plain pass is the whole message; the repaired pass runs only for rules that did not match it.
+ */
+function extractStrict(entry: IntentEntry, pattern: RegExp, input: MatchInput, pass: Pass): MatchResult | null {
+  const strictText = pass === 'plain' ? input.canonical() : input.repaired();
+  if (!strictText) return null;
+  const match = wholeTextMatch(pattern, strictText.text);
+  return match ? captureResult(entry, match, input.raw, strictText, pass === 'repaired' ? strictText : null) : null;
+}
+
+function extractLoose(entry: IntentEntry, pattern: RegExp, input: MatchInput): MatchResult | null {
+  const match = wholeTextMatch(pattern, input.raw);
+  if (match) return captureResult(entry, match, input.raw, undefined, null);
+  const offsets = input.normalized();
+  const normalizedMatch = wholeTextMatch(pattern, offsets.text);
+  return normalizedMatch ? captureResult(entry, normalizedMatch, input.raw, offsets, null) : null;
+}
+
+function extract(entry: IntentEntry, input: MatchInput, pass: Pass = 'plain'): MatchResult | null {
+  if (!entry.pattern) return entry.parameterized ? null : { intentId: entry.intentId, captures: {} };
+  return entry.strictStructure
+    ? extractStrict(entry, entry.pattern, input, pass)
+    : extractLoose(entry, entry.pattern, input);
 }
 
 function compilePattern(intent: Intent): RegExp | undefined {
@@ -228,26 +255,21 @@ export class IntentMatcher {
     return this.explainByTriggers(text, input);
   }
 
-  private explainByTriggers(text: string, input: MatchInput): MatchDecision {
-    const candidates = new Map<number, IntentEntry>();
+  private addCandidates(candidates: Map<number, IntentEntry>, text: string): void {
     for (const word of tokenize(text))
       for (const entry of this.triggerIndex.get(word) ?? []) candidates.set(entry.intentId, entry);
-    const gather = (pass: Pass, pool: Map<number, IntentEntry>): MatchResult[] => {
-      const found: MatchResult[] = [];
-      for (const entry of pool.values()) {
-        const result = extract(entry, input, pass);
-        if (result) found.push(result);
-      }
-      return found;
-    };
-    let results = gather('plain', candidates);
+  }
+
+  private explainByTriggers(text: string, input: MatchInput): MatchDecision {
+    const candidates = new Map<number, IntentEntry>();
+    this.addCandidates(candidates, text);
+    let results = gatherMatches(candidates, input, 'plain');
     if (results.length === 0) {
       // Nothing matched the message as written: retry once with the command words' single-letter typos repaired.
       const repaired = input.repaired();
       if (repaired) {
-        for (const word of tokenize(repaired.text))
-          for (const entry of this.triggerIndex.get(word) ?? []) candidates.set(entry.intentId, entry);
-        results = gather('repaired', candidates);
+        this.addCandidates(candidates, repaired.text);
+        results = gatherMatches(candidates, input, 'repaired');
       }
     }
     if (results.length === 1) return { kind: 'matched', strategy: 'pattern', result: results[0]! };
@@ -257,6 +279,15 @@ export class IntentMatcher {
       candidates: results.map((r) => r.intentId).sort((a, b) => a - b),
     };
   }
+}
+
+function gatherMatches(pool: Map<number, IntentEntry>, input: MatchInput, pass: Pass): MatchResult[] {
+  const found: MatchResult[] = [];
+  for (const entry of pool.values()) {
+    const result = extract(entry, input, pass);
+    if (result) found.push(result);
+  }
+  return found;
 }
 
 /** The input is exactly a registered example phrase: one rule wins, several are ambiguous. */

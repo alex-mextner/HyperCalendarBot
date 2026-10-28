@@ -17,12 +17,17 @@ interface Built {
   files: { [name: string]: string };
 }
 
-export function build(): Built {
+interface SourceStat {
+  sha256: string;
+  conversations: number;
+}
+
+function readSources(): { splits: { dev: string[]; heldout: string[] }; sources: { [name: string]: SourceStat } } {
   const sourceNames = readdirSync(fileURLToPath(SOURCES))
     .filter((name) => name.endsWith('.jsonl'))
     .sort();
   const splits: { dev: string[]; heldout: string[] } = { dev: [], heldout: [] };
-  const sources: { [name: string]: { sha256: string; conversations: number } } = {};
+  const sources: { [name: string]: SourceStat } = {};
   for (const name of sourceNames) {
     const text = readFileSync(new URL(name, SOURCES), 'utf8');
     const lines = text.split('\n').filter((line) => line.trim().length > 0);
@@ -31,32 +36,49 @@ export function build(): Built {
     if (!split) throw new Error(`source ${name} must start with dev- or heldout-`);
     splits[split].push(...lines);
   }
+  return { splits, sources };
+}
+
+/** Numbers one split's conversations; a message already kept (dev is built first) is dropped and counted. */
+function buildSplit(
+  split: 'dev' | 'heldout',
+  lines: readonly string[],
+  seen: Set<string>,
+): { out: string[]; dropped: number } {
+  const prefix = split === 'dev' ? 'dev' : 'ho';
+  // A stable pseudo-shuffle keeps the families of one author from clustering in the file.
+  const ordered = [...lines].sort((a, b) => sha256(a).localeCompare(sha256(b)));
+  const out: string[] = [];
+  let dropped = 0;
+  for (const line of ordered) {
+    const parsed = ConversationSchema.parse(JSON.parse(line));
+    const key = `${parsed.lang}|${parsed.say.toLowerCase()}`;
+    // dev is built first, so a message both splits contain stays in dev and the held-out copy is dropped.
+    if (seen.has(key)) {
+      dropped++;
+      continue;
+    }
+    seen.add(key);
+    const conversation = { ...parsed, id: `${prefix}-${String(out.length + 1).padStart(4, '0')}` };
+    const problems = problemsOf(conversation as Parameters<typeof problemsOf>[0]);
+    if (problems.length > 0) throw new Error(`${conversation.id}: ${problems.join('; ')}`);
+    out.push(JSON.stringify(conversation));
+  }
+  return { out, dropped };
+}
+
+export function build(): Built {
+  const { splits, sources } = readSources();
   const files: Built['files'] = {};
-  const checksums: { [split: string]: { sha256: string; conversations: number } } = {};
+  const checksums: { [split: string]: SourceStat } = {};
   const seen = new Set<string>();
   const dropped = { dev: 0, heldout: 0 };
   for (const split of ['dev', 'heldout'] as const) {
-    const prefix = split === 'dev' ? 'dev' : 'ho';
-    // A stable pseudo-shuffle keeps the families of one author from clustering in the file.
-    const ordered = [...splits[split]].sort((a, b) => sha256(a).localeCompare(sha256(b)));
-    const out: string[] = [];
-    for (const line of ordered) {
-      const parsed = ConversationSchema.parse(JSON.parse(line));
-      const key = `${parsed.lang}|${parsed.say.toLowerCase()}`;
-      // dev is built first, so a message both splits contain stays in dev and the held-out copy is dropped.
-      if (seen.has(key)) {
-        dropped[split]++;
-        continue;
-      }
-      seen.add(key);
-      const conversation = { ...parsed, id: `${prefix}-${String(out.length + 1).padStart(4, '0')}` };
-      const problems = problemsOf(conversation as Parameters<typeof problemsOf>[0]);
-      if (problems.length > 0) throw new Error(`${conversation.id}: ${problems.join('; ')}`);
-      out.push(JSON.stringify(conversation));
-    }
-    const body = `${out.join('\n')}\n`;
+    const built = buildSplit(split, splits[split], seen);
+    dropped[split] = built.dropped;
+    const body = `${built.out.join('\n')}\n`;
     files[`conversations.${split}.jsonl`] = body;
-    checksums[split] = { sha256: sha256(body), conversations: out.length };
+    checksums[split] = { sha256: sha256(body), conversations: built.out.length };
   }
   const manifest = {
     schemaVersion: 1,

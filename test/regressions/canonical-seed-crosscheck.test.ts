@@ -71,6 +71,13 @@ const findContactResult = (value: ToolInput): ToolResult => ({
 const tools = async (name: string, input: unknown): Promise<ToolResult> => {
   if (name === 'convert_to_timezone') return convertToTimezone(input);
   const value = input as ToolInput;
+  if (name === 'create_event')
+    return {
+      success: true,
+      output: 'Created',
+      data: { ...syntheticEvent(value), id: 21, title: 'Created event' },
+      mutationState: 'confirmed',
+    };
   if (name === 'search_events') return { success: true, output: 'Found one event', data: [syntheticEvent(value)] };
   if (name === 'get_event') return { success: true, output: 'Event details', data: syntheticEvent(value) };
   if (name === 'get_events') return { success: true, output: 'No events', data: [] };

@@ -260,92 +260,101 @@ function durationOf(match: RegExpExecArray): number {
   return minutes >= 5 && minutes <= 1440 ? minutes : fail();
 }
 
-/** Parses a phrase; throws WorkflowInputError when any slot is ambiguous or the remainder is not a plain title. */
-export function parseEventPhrase(text: string, options: PhraseOptions): EventPhrase {
-  // A line break separates two lines of a pasted block; it must stay visible so two filled lines are never one title.
-  let rest = ` ${text.trim().replace(/\s*[\r\n\u2028\u2029]+\s*/gu, ' ; ')} `;
-  let invitee: string | null = null;
-  let time: string | null = null;
-  let endTime: string | null = null;
-  let duration: number | null = null;
-  let date: string | null = null;
+interface PhraseCursor {
+  rest: string;
+  time: string | null;
+  endTime: string | null;
+}
 
-  const invited = cutOne(rest, INVITE);
-  rest = invited.rest;
-  if (invited.value) invitee = invited.value[1]!;
-  else {
-    // A capitalised word right after a leading handle is a name or a title: which one is not for a rule to guess.
-    if (/^\s*@\S+\s+\p{Lu}/u.test(text)) return fail();
-    const implicit = cutOne(rest, INVITE_IMPLICIT);
-    rest = implicit.rest;
-    if (implicit.value) invitee = implicit.value[1]!;
-  }
+function takeInvitee(cursor: PhraseCursor, text: string): string | null {
+  const invited = cutOne(cursor.rest, INVITE);
+  cursor.rest = invited.rest;
+  if (invited.value) return invited.value[1]!;
+  // A capitalised word right after a leading handle is a name or a title: which one is not for a rule to guess.
+  if (/^\s*@\S+\s+\p{Lu}/u.test(text)) return fail();
+  const implicit = cutOne(cursor.rest, INVITE_IMPLICIT);
+  cursor.rest = implicit.rest;
+  return implicit.value ? implicit.value[1]! : null;
+}
 
-  const range = cutOne(rest, RANGE);
-  if (range.value) {
-    const [, h1, m1, s1, h2, m2, s2] = range.value;
-    // A bare "5-7" is more likely days or a score than hours: a dash range needs a clock mark on a side.
-    const dash = /[-–—]/.test(range.value[0]);
-    if (dash && m1 === undefined && m2 === undefined && !s1 && !s2) return fail();
-    rest = range.rest;
-    time = clock(h1!, m1, s1);
-    endTime = clock(h2!, m2, s2);
-  }
-  const takeTime = (pattern: RegExp, read: (m: RegExpExecArray) => string) => {
-    const cut = cutOne(rest, pattern);
-    if (!cut.value) return;
-    if (time !== null) return fail();
-    rest = cut.rest;
-    time = read(cut.value);
-  };
-  takeTime(TIME_WITH_MINUTES, (m) => clock(m[1] ?? m[3]!, m[2] ?? m[4], m[5]));
-  takeTime(TIME_DOTTED, (m) => clock(m[1]!, m[2], undefined));
-  takeTime(TIME_HOUR, (m) => clock(m[1]!, undefined, m[2]));
-  takeTime(TIME_DAY_PART, (m) => clock(m[1]!, m[2], m[3]));
-  takeTime(TIME_WORD, (m) => parseTime(m[1]!));
-  if (time === null) {
-    const bare = BARE_HOUR_AFTER_DAY.exec(rest);
-    if (bare) {
-      rest = `${rest.slice(0, bare.index)}${bare[1]} ${rest.slice(bare.index + bare[0].length)}`;
-      time = clock(bare[2]!, undefined, undefined);
-    }
-  }
-  if (endTime !== null && time !== null && endTime <= time) return fail();
+function takeRange(cursor: PhraseCursor): void {
+  const range = cutOne(cursor.rest, RANGE);
+  if (!range.value) return;
+  const [, h1, m1, s1, h2, m2, s2] = range.value;
+  // A bare "5-7" is more likely days or a score than hours: a dash range needs a clock mark on a side.
+  const dash = /[-–—]/.test(range.value[0]);
+  if (dash && m1 === undefined && m2 === undefined && !s1 && !s2) fail();
+  cursor.rest = range.rest;
+  cursor.time = clock(h1!, m1, s1);
+  cursor.endTime = clock(h2!, m2, s2);
+}
 
+function takeTime(cursor: PhraseCursor, pattern: RegExp, read: (m: RegExpExecArray) => string): void {
+  const cut = cutOne(cursor.rest, pattern);
+  if (!cut.value) return;
+  if (cursor.time !== null) fail();
+  cursor.rest = cut.rest;
+  cursor.time = read(cut.value);
+}
+
+function takeBareHour(cursor: PhraseCursor): void {
+  const bare = BARE_HOUR_AFTER_DAY.exec(cursor.rest);
+  if (!bare) return;
+  cursor.rest = `${cursor.rest.slice(0, bare.index)}${bare[1]} ${cursor.rest.slice(bare.index + bare[0].length)}`;
+  cursor.time = clock(bare[2]!, undefined, undefined);
+}
+
+function takeTimes(cursor: PhraseCursor): void {
+  takeRange(cursor);
+  takeTime(cursor, TIME_WITH_MINUTES, (m) => clock(m[1] ?? m[3]!, m[2] ?? m[4], m[5]));
+  takeTime(cursor, TIME_DOTTED, (m) => clock(m[1]!, m[2], undefined));
+  takeTime(cursor, TIME_HOUR, (m) => clock(m[1]!, undefined, m[2]));
+  takeTime(cursor, TIME_DAY_PART, (m) => clock(m[1]!, m[2], m[3]));
+  takeTime(cursor, TIME_WORD, (m) => parseTime(m[1]!));
+  if (cursor.time === null) takeBareHour(cursor);
+  if (cursor.endTime !== null && cursor.time !== null && cursor.endTime <= cursor.time) fail();
+}
+
+const isRelativeWeekday = (part: string | undefined): boolean => Boolean(part && /следующ|будущ|next/i.test(part));
+
+function takeDatePart(
+  cursor: PhraseCursor,
+  dates: string[],
+  pattern: RegExp,
+  read: (m: RegExpExecArray) => string,
+): void {
+  const cut = cutOne(cursor.rest, pattern);
+  if (!cut.value) return;
+  cursor.rest = cut.rest;
+  dates.push(read(cut.value));
+}
+
+function takeDate(cursor: PhraseCursor, options: PhraseOptions): string | null {
   const dates: string[] = [];
-  const takeDate = (pattern: RegExp, read: (m: RegExpExecArray) => string) => {
-    const cut = cutOne(rest, pattern);
-    if (!cut.value) return;
-    rest = cut.rest;
-    dates.push(read(cut.value));
-  };
   const reading = (raw: string) => parseDate(raw, { future: true, words: WORDS }, options.now, options.timezone, false);
-  takeDate(DAY_WORD, (m) => reading(m[1]!.toLowerCase()));
-  takeDate(THROUGH, (m) => reading(`${m[1]!.toLowerCase()} ${m[2] === 'одну' ? '1' : m[2]} ${m[3]!.toLowerCase()}`));
-  takeDate(THROUGH_WEEK, () => reading('через неделю'));
-  takeDate(WEEKDAY, (m) => {
+  const take = (pattern: RegExp, read: (m: RegExpExecArray) => string) => takeDatePart(cursor, dates, pattern, read);
+  take(DAY_WORD, (m) => reading(m[1]!.toLowerCase()));
+  take(THROUGH, (m) => reading(`${m[1]!.toLowerCase()} ${m[2] === 'одну' ? '1' : m[2]} ${m[3]!.toLowerCase()}`));
+  take(THROUGH_WEEK, () => reading('через неделю'));
+  take(WEEKDAY, (m) => {
     // "next Friday" and "в следующую пятницу" are ambiguous between this week's and next week's: never guessed.
-    if ((m[1] && /следующ|будущ|next/i.test(m[1])) || (m[2] && /следующ|будущ|next/i.test(m[2]))) return fail();
+    if (isRelativeWeekday(m[1]) || isRelativeWeekday(m[2])) return fail();
     return reading(m[3]!.toLowerCase());
   });
-  takeDate(ISO_DATE, (m) => reading(m[1]!));
-  takeDate(RU_DATE, (m) => reading(`${m[1]} ${m[2]!.toLowerCase()}${m[3] ? ` ${m[3]}` : ''}`));
-  takeDate(EN_DATE, (m) => reading(`${m[1]!.toLowerCase()} ${m[2]}${m[3] ? ` ${m[3]}` : ''}`));
-  takeDate(EN_DATE_DAY_FIRST, (m) => reading(`${m[1]} ${m[2]!.toLowerCase()}${m[3] ? ` ${m[3]}` : ''}`));
-  takeDate(NUMERIC_DATE, (m) => reading(m[1]!));
+  take(ISO_DATE, (m) => reading(m[1]!));
+  take(RU_DATE, (m) => reading(`${m[1]} ${m[2]!.toLowerCase()}${m[3] ? ` ${m[3]}` : ''}`));
+  take(EN_DATE, (m) => reading(`${m[1]!.toLowerCase()} ${m[2]}${m[3] ? ` ${m[3]}` : ''}`));
+  take(EN_DATE_DAY_FIRST, (m) => reading(`${m[1]} ${m[2]!.toLowerCase()}${m[3] ? ` ${m[3]}` : ''}`));
+  take(NUMERIC_DATE, (m) => reading(m[1]!));
   // "завтра в четверг": a weekday that only repeats the day word names the same date and is not a second day.
   if (new Set(dates).size > 1) return fail();
-  date = dates[0] ?? null;
+  return dates[0] ?? null;
+}
 
-  const lasting = cutOne(rest, DURATION);
-  if (lasting.value) {
-    rest = lasting.rest;
-    duration = durationOf(lasting.value);
-  }
-  if (endTime !== null && duration !== null) return fail();
-
-  if (/@|https?:\/\/|www\./i.test(rest)) return fail();
-  if (NOT_A_TITLE.test(rest)) return fail();
+/** Refuses a remainder that holds something the rules do not read as part of a plain title. */
+function assertPlainRemainder(rest: string): void {
+  if (/@|https?:\/\/|www\./i.test(rest)) fail();
+  if (NOT_A_TITLE.test(rest)) fail();
   // A time in another place's zone ("по Полюсу", "GMT+4"), a description clause and a list of people are separate
   // requests the rules do not read: the AI takes them.
   if (
@@ -356,16 +365,50 @@ export function parseEventPhrase(text: string, options: PhraseOptions): EventPhr
     PARTICIPANT_PRONOUN.test(rest) ||
     LETTER_DIGIT_MIX.test(rest)
   )
-    return fail();
+    fail();
   // Two filled lines are two requests: a title that still has text on both sides of a line break is refused.
-  if (rest.split(';').filter((part) => /\p{L}/u.test(part)).length > 1) return fail();
+  if (rest.split(';').filter((part) => /\p{L}/u.test(part)).length > 1) fail();
+}
+
+function validTitle(rest: string, options: PhraseOptions): string {
   const title = cleanTitle(rest);
   if (title.length > MAX_TITLE_CHARS || title.split(' ').length > MAX_TITLE_WORDS) return fail();
   if (options.requireTitle && (title.length === 0 || !/\p{L}/u.test(title))) return fail();
   // A leftover digit group next to a time word is a time the grammar did not read: refuse rather than keep it in the title.
   if (/(?:^|\s)(?:в|к|at)\s+\d{1,2}(?:[:.]\d{2})?(?=\s|$)/iu.test(title)) return fail();
+  return title;
+}
 
-  return { title: capitalize(title), date, time, endTime, durationMinutes: duration, invitee };
+/** Parses a phrase; throws WorkflowInputError when any slot is ambiguous or the remainder is not a plain title. */
+export function parseEventPhrase(text: string, options: PhraseOptions): EventPhrase {
+  // A line break separates two lines of a pasted block; it must stay visible so two filled lines are never one title.
+  const cursor: PhraseCursor = {
+    rest: ` ${text.trim().replace(/\s*[\r\n\u2028\u2029]+\s*/gu, ' ; ')} `,
+    time: null,
+    endTime: null,
+  };
+  const invitee = takeInvitee(cursor, text);
+  takeTimes(cursor);
+  const date = takeDate(cursor, options);
+
+  let duration: number | null = null;
+  const lasting = cutOne(cursor.rest, DURATION);
+  if (lasting.value) {
+    cursor.rest = lasting.rest;
+    duration = durationOf(lasting.value);
+  }
+  if (cursor.endTime !== null && duration !== null) return fail();
+
+  assertPlainRemainder(cursor.rest);
+  const title = validTitle(cursor.rest, options);
+  return {
+    title: capitalize(title),
+    date,
+    time: cursor.time,
+    endTime: cursor.endTime,
+    durationMinutes: duration,
+    invitee,
+  };
 }
 
 const WORDS = {

@@ -323,43 +323,51 @@ function safeJson(text: string): unknown {
   }
 }
 
+type SettingFormatter = (
+  value: SettingsValueType,
+  values: { [key: string]: SettingsValueType },
+  words: AnswerWording,
+) => string | null;
+
+const isOn = (value: SettingsValueType): boolean => value === 1 || value === true;
+
+const flagText = (value: SettingsValueType, words: AnswerWording): string =>
+  isOn(value) ? words.settings.yes : words.settings.no;
+
+const stringOrNull = (value: SettingsValueType): string | null => (typeof value === 'string' ? value : null);
+
+const timedFlag =
+  (timeKey: string): SettingFormatter =>
+  (value, values, words) => {
+    const time = hhmm(values[timeKey]);
+    return isOn(value) && time !== null ? words.settings.at(time) : flagText(value, words);
+  };
+
+const SETTING_FORMATTERS: { [key: string]: SettingFormatter } = {
+  timezone: stringOrNull,
+  country_code: (value) => (typeof value === 'string' && value !== 'not set' ? value : null),
+  language: (value, _values, words) => (typeof value === 'string' ? (words.settings.language[value] ?? value) : null),
+  default_event_duration_minutes: (value, _values, words) =>
+    typeof value === 'number' ? words.settings.durationShort(value) : null,
+  morning_agenda_enabled: timedFlag('morning_agenda_time'),
+  evening_review_enabled: timedFlag('evening_review_time'),
+  quiet_hours_enabled: (value, values, words) => {
+    const from = hhmm(values.quiet_hours_start);
+    const to = hhmm(values.quiet_hours_end);
+    return isOn(value) && from !== null && to !== null ? words.settings.quietRange(from, to) : flagText(value, words);
+  },
+  default_reminder_intervals: (value, _values, words) => reminderList(value, words),
+  max_daily_calls: (value) => (typeof value === 'number' ? String(value) : null),
+  default_visibility: (value, _values, words) =>
+    typeof value === 'string' ? (words.settings.visibility[value] ?? value) : null,
+  voice_response_enabled: (value, _values, words) => (value === null ? words.settings.unset : flagText(value, words)),
+};
+
 function settingText(key: string, values: { [key: string]: SettingsValueType }, words: AnswerWording): string | null {
-  const labels = words.settings;
   const value = values[key];
   if (value === undefined) return null;
-  const flag = (on: SettingsValueType): string => (on === 1 || on === true ? labels.yes : labels.no);
-  switch (key) {
-    case 'timezone':
-      return typeof value === 'string' ? value : null;
-    case 'country_code':
-      return typeof value === 'string' && value !== 'not set' ? value : null;
-    case 'language':
-      return typeof value === 'string' ? (labels.language[value] ?? value) : null;
-    case 'default_event_duration_minutes':
-      return typeof value === 'number' ? labels.durationShort(value) : null;
-    case 'morning_agenda_enabled':
-    case 'evening_review_enabled': {
-      const time = hhmm(values[key === 'morning_agenda_enabled' ? 'morning_agenda_time' : 'evening_review_time']);
-      return (value === 1 || value === true) && time !== null ? labels.at(time) : flag(value);
-    }
-    case 'quiet_hours_enabled': {
-      const from = hhmm(values.quiet_hours_start);
-      const to = hhmm(values.quiet_hours_end);
-      return (value === 1 || value === true) && from !== null && to !== null
-        ? labels.quietRange(from, to)
-        : flag(value);
-    }
-    case 'default_reminder_intervals':
-      return reminderList(value, words);
-    case 'max_daily_calls':
-      return typeof value === 'number' ? String(value) : null;
-    case 'default_visibility':
-      return typeof value === 'string' ? (labels.visibility[value] ?? value) : null;
-    case 'voice_response_enabled':
-      return value === null ? labels.unset : flag(value);
-    default:
-      return flag(value);
-  }
+  const format = Object.hasOwn(SETTING_FORMATTERS, key) ? SETTING_FORMATTERS[key] : undefined;
+  return format ? format(value, values, words) : flagText(value, words);
 }
 
 function settingsLines(category: SettingsCategory, raw: unknown, words: AnswerWording): string[] {

@@ -123,14 +123,14 @@ describe('derived bindings', () => {
     expect(read(bindings, { $1: 'завтра', $2: '09:30' }).dt).toBe('2026-03-05T10:00:00+03:00');
   });
 
-  test('relative_instant adds a bounded duration to now', () => {
+  test('relative_instant adds a bounded duration to now, as a local instant on a whole minute', () => {
     const bindings = {
       n: { type: 'integer', from: '{{$1}}', min: -5, max: 99999 },
       r: { type: 'relative_instant', duration: 'n' },
     } as Bindings;
-    expect(read(bindings, { $1: '5' }).r).toBe('2026-03-04T09:05:00.000Z');
+    expect(read(bindings, { $1: '5' }).r).toBe('2026-03-04T12:05:00+03:00');
     for (const raw of ['0', '-1', '10081']) expect(() => read(bindings, { $1: raw })).toThrow(WorkflowInputError);
-    expect(read(bindings, { $1: '10080' }).r).toBe('2026-03-11T09:00:00.000Z');
+    expect(read(bindings, { $1: '10080' }).r).toBe('2026-03-11T12:00:00+03:00');
   });
 
   test('duration, timezone, event reference and recipient', () => {
@@ -143,7 +143,11 @@ describe('derived bindings', () => {
     expect(run({ type: 'timezone' }, { $1: 'Europe/Berlin' })).toBe('Europe/Berlin');
     expect(() => run({ type: 'timezone' }, { $1: 'Nope/Zone' })).toThrow(WorkflowInputError);
     expect(run({ type: 'eventref' }, { $1: '#5' })).toEqual({ kind: 'id', id: 5 });
-    expect(run({ type: 'eventref', reject: ['next'] }, { $1: 'встреча' })).toEqual({ kind: 'name', query: 'встреча' });
+    expect(run({ type: 'eventref', reject: ['next'] }, { $1: 'встреча' })).toEqual({
+      kind: 'name',
+      query: 'встреча',
+      label: 'встреча',
+    });
     expect(() => run({ type: 'eventref', reject: ['next'] }, { $1: 'next meeting' })).toThrow(WorkflowInputError);
     expect(run({ type: 'recipient' }, { $1: '@abcde' })).toEqual({
       kind: 'username',

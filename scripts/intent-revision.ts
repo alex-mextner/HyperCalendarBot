@@ -314,6 +314,55 @@ function defaultRollbackTarget(active: IntentRevision): number | null {
   return isRestore ? active.parentId : active.baseRevisionId;
 }
 
+interface RollbackApplication {
+  plan: object;
+  targetId: number;
+  changes: object;
+  active: { id: number; fingerprint: string };
+}
+
+function applyRollback(
+  db: Database,
+  service: IntentRevisionService,
+  args: Args,
+  io: CliIo,
+  { plan, targetId, changes, active }: RollbackApplication,
+): ExitCode {
+  const operator = adminFromOperatorCli();
+  const backup = takeBackup(db, args, io, 'rollback', active.fingerprint);
+  const proposed = service.proposeRestore(operator, targetId);
+  if (proposed.status === 'refused')
+    return refuse(
+      io,
+      refusalExit(proposed.code),
+      { status: 'refused', code: proposed.code },
+      `cannot draft the restore of revision ${targetId}`,
+    );
+  const { revision } = proposed;
+  const approved = service.approve(operator, {
+    id: revision.id,
+    bodyHash: revision.bodyHash,
+    baseRevisionId: active.id,
+  });
+  if (approved.status === 'refused')
+    return refuse(
+      io,
+      refusalExit(approved.code),
+      { status: 'refused', code: approved.code },
+      `cannot approve the restore of revision ${targetId}`,
+    );
+  emit(io, {
+    ...plan,
+    mode: 'apply',
+    status: 'restored',
+    revisionId: revision.id,
+    ...changes,
+    backup,
+    restartRequired: true,
+  });
+  return EXIT_CODES.ok;
+}
+
 function rollback(db: Database, service: IntentRevisionService, args: Args, io: CliIo): ExitCode {
   const integrity = registryIntegrity(new IntentRevisionRepository(db));
   if (integrity.state !== 'intact')
@@ -373,39 +422,12 @@ function rollback(db: Database, service: IntentRevisionService, args: Args, io: 
     emit(io, { ...plan, mode: 'dry-run', status: 'would_restore', ...changes, restartRequired: false });
     return EXIT_CODES.ok;
   }
-  const operator = adminFromOperatorCli();
-  const backup = takeBackup(db, args, io, 'rollback', integrity.fingerprint);
-  const proposed = service.proposeRestore(operator, targetId);
-  if (proposed.status === 'refused')
-    return refuse(
-      io,
-      refusalExit(proposed.code),
-      { status: 'refused', code: proposed.code },
-      `cannot draft the restore of revision ${targetId}`,
-    );
-  const { revision } = proposed;
-  const approved = service.approve(operator, {
-    id: revision.id,
-    bodyHash: revision.bodyHash,
-    baseRevisionId: integrity.active.id,
+  return applyRollback(db, service, args, io, {
+    plan,
+    targetId,
+    changes,
+    active: { id: integrity.active.id, fingerprint: integrity.fingerprint },
   });
-  if (approved.status === 'refused')
-    return refuse(
-      io,
-      refusalExit(approved.code),
-      { status: 'refused', code: approved.code },
-      `cannot approve the restore of revision ${targetId}`,
-    );
-  emit(io, {
-    ...plan,
-    mode: 'apply',
-    status: 'restored',
-    revisionId: revision.id,
-    ...changes,
-    backup,
-    restartRequired: true,
-  });
-  return EXIT_CODES.ok;
 }
 
 function execute(args: Args, io: CliIo): ExitCode {

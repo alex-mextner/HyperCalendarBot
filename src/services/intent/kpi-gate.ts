@@ -204,55 +204,110 @@ function splitConsistency(name: string, split: RealSplitMeasurement): string[] {
   return reasons;
 }
 
+function sumRatioDrift(
+  label: string,
+  figures: { [key: string]: number },
+  recorded: { [key: string]: number },
+  note: string,
+): string[] {
+  const reasons: string[] = [];
+  for (const key of Object.keys(figures))
+    if (Math.abs(figures[key]! - recorded[key]!) > RATIO_TOLERANCE)
+      reasons.push(`${label}: recorded ${key} ${recorded[key]} does not follow from ${note} (${figures[key]})`);
+  return reasons;
+}
+
+interface PooledFigures {
+  inScope: number;
+  correct: number;
+  ratios: {
+    coverage: number;
+    rubric: number;
+    precision: number;
+    strictPrecision: number;
+    strictPrecisionAllRelabelled: number;
+  };
+}
+
+/** The pooled figures recomputed from the two splits' counts. */
+function pooledFigures(gate: KpiGate): PooledFigures {
+  const { heldout, dev } = gate.real;
+  const inScope = heldout.inScope + dev.inScope;
+  const correct = heldout.correct + dev.correct;
+  const answered = correct + heldout.wrong + dev.wrong + heldout.falseMatches + dev.falseMatches;
+  return {
+    inScope,
+    correct,
+    ratios: {
+      coverage: share(correct, inScope),
+      rubric: share(heldout.rubricClean + dev.rubricClean, correct),
+      precision: share(correct, answered),
+      strictPrecision: share(correct, answered + heldout.relabelledFalseMatches),
+      strictPrecisionAllRelabelled: share(
+        correct,
+        answered + heldout.relabelledFalseMatches + dev.relabelledFalseMatches,
+      ),
+    },
+  };
+}
+
+function pooledConsistency(gate: KpiGate, figures: PooledFigures): string[] {
+  const { pooled } = gate.real;
+  const reasons: string[] = [];
+  if (pooled.inScope !== figures.inScope || pooled.correct !== figures.correct)
+    reasons.push('pooled counts are not the sum of the two splits');
+  reasons.push(...sumRatioDrift('pooled', figures.ratios, pooled, 'the counts'));
+  return reasons;
+}
+
+function syntheticConsistency(gate: KpiGate): string[] {
+  const reasons: string[] = [];
+  if (gate.synthetic.correct > gate.synthetic.inScope) reasons.push('synthetic: correct exceeds the in-scope count');
+  if (Math.abs(share(gate.synthetic.correct, gate.synthetic.inScope) - gate.synthetic.coverage) > RATIO_TOLERANCE)
+    reasons.push('synthetic: recorded coverage does not follow from its counts');
+  return reasons;
+}
+
+/** The measured figure each floor is judged by; recomputed from counts, never the recorded ratios. */
+function measuredFigures(gate: KpiGate, pooledRatios: PooledFigures['ratios']): { [key in Floor]: number } {
+  const { heldout, dev } = gate.real;
+  return {
+    heldoutCoverage: share(heldout.correct, heldout.inScope),
+    pooledCoverage: pooledRatios.coverage,
+    precision: Math.min(splitRatios(heldout).precision, splitRatios(dev).precision),
+    strictPrecision: pooledRatios.strictPrecision,
+    rubric: pooledRatios.rubric,
+    execution: gate.real.execution,
+    syntheticCoverage: share(gate.synthetic.correct, gate.synthetic.inScope),
+    syntheticPrecision: gate.synthetic.precision,
+  };
+}
+
+function thresholdReasons(gate: KpiGate, measured: { [key in Floor]: number }): string[] {
+  const reasons: string[] = [];
+  for (const key of FLOORS)
+    if (gate.thresholds[key] < KPI_FLOORS[key])
+      reasons.push(`${key} threshold ${gate.thresholds[key]} is below the floor ${KPI_FLOORS[key]}`);
+  for (const key of FLOORS)
+    if (measured[key] < gate.thresholds[key])
+      reasons.push(`${key} ${measured[key]} is below its threshold ${gate.thresholds[key]}`);
+  return reasons;
+}
+
 /** Every reason is collected so the boot log names all of them at once. */
 export function gatePasses(gate: KpiGate, fingerprint: string): GateVerdict {
   const reasons: string[] = [];
-  const { heldout, dev, pooled } = gate.real;
+  const { heldout, dev } = gate.real;
   if (gate.seedFingerprint !== fingerprint) reasons.push('gate fingerprint is not the fingerprint of this seed');
   if (!gate.autoActivate) reasons.push('autoActivate is not true');
   if (heldout.inScope === 0) reasons.push('the held-out in-scope set is empty');
   if (gate.synthetic.inScope === 0) reasons.push('the synthetic held-out in-scope set is empty');
   if (gate.real.matrixCells === 0) reasons.push('the TZ/DST matrix did not run (zero cells)');
   reasons.push(...splitConsistency('held-out', heldout), ...splitConsistency('dev', dev));
-  const pooledInScope = heldout.inScope + dev.inScope;
-  const pooledCorrect = heldout.correct + dev.correct;
-  const pooledAnswered = pooledCorrect + heldout.wrong + dev.wrong + heldout.falseMatches + dev.falseMatches;
-  if (pooled.inScope !== pooledInScope || pooled.correct !== pooledCorrect)
-    reasons.push('pooled counts are not the sum of the two splits');
-  const pooledFigures = {
-    coverage: share(pooledCorrect, pooledInScope),
-    rubric: share(heldout.rubricClean + dev.rubricClean, pooledCorrect),
-    precision: share(pooledCorrect, pooledAnswered),
-    strictPrecision: share(pooledCorrect, pooledAnswered + heldout.relabelledFalseMatches),
-    strictPrecisionAllRelabelled: share(
-      pooledCorrect,
-      pooledAnswered + heldout.relabelledFalseMatches + dev.relabelledFalseMatches,
-    ),
-  };
-  for (const key of Object.keys(pooledFigures) as (keyof typeof pooledFigures)[])
-    if (Math.abs(pooledFigures[key] - pooled[key]) > RATIO_TOLERANCE)
-      reasons.push(`pooled: recorded ${key} ${pooled[key]} does not follow from the counts (${pooledFigures[key]})`);
-  if (gate.synthetic.correct > gate.synthetic.inScope) reasons.push('synthetic: correct exceeds the in-scope count');
-  if (Math.abs(share(gate.synthetic.correct, gate.synthetic.inScope) - gate.synthetic.coverage) > RATIO_TOLERANCE)
-    reasons.push('synthetic: recorded coverage does not follow from its counts');
-
-  for (const key of FLOORS)
-    if (gate.thresholds[key] < KPI_FLOORS[key])
-      reasons.push(`${key} threshold ${gate.thresholds[key]} is below the floor ${KPI_FLOORS[key]}`);
+  const figures = pooledFigures(gate);
+  reasons.push(...pooledConsistency(gate, figures), ...syntheticConsistency(gate));
   // Recomputed figures decide, never the recorded ratios; the recorded ones were checked against them above.
-  const measured: { [key in Floor]: number } = {
-    heldoutCoverage: share(heldout.correct, heldout.inScope),
-    pooledCoverage: pooledFigures.coverage,
-    precision: Math.min(splitRatios(heldout).precision, splitRatios(dev).precision),
-    strictPrecision: pooledFigures.strictPrecision,
-    rubric: pooledFigures.rubric,
-    execution: gate.real.execution,
-    syntheticCoverage: share(gate.synthetic.correct, gate.synthetic.inScope),
-    syntheticPrecision: gate.synthetic.precision,
-  };
-  for (const key of FLOORS)
-    if (measured[key] < gate.thresholds[key])
-      reasons.push(`${key} ${measured[key]} is below its threshold ${gate.thresholds[key]}`);
+  reasons.push(...thresholdReasons(gate, measuredFigures(gate, figures.ratios)));
   if (gate.real.harmfulFalseMatches !== 0) reasons.push(`${gate.real.harmfulFalseMatches} harmful false matches`);
   if (gate.real.unconfirmedWrites !== 0) reasons.push(`${gate.real.unconfirmedWrites} unconfirmed writes`);
   if (gate.real.exceptions !== 0) reasons.push(`${gate.real.exceptions} exceptions`);

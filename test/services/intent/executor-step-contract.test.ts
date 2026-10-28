@@ -166,7 +166,7 @@ describe('Level 2 step contract (typed, version 2)', () => {
         { call: 'search_events', input: { query: 'x' }, as: 'found' },
         { respond: '{{tool_outputs.found_text}}' },
       ]),
-      () => ({ success: true, output: long, data: event }),
+      () => ({ success: true, output: long }),
     );
     expect(result.response).toBe('x'.repeat(1500));
   });

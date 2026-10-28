@@ -9,7 +9,7 @@ import { IntentMatcher } from '../../src/services/intent/intent-matcher.ts';
 import { seedFingerprint } from '../../src/services/intent/rule-fingerprint.ts';
 import { seedIntents } from '../../src/services/intent/seed-catalog.ts';
 import { type CanonicalSeed, intentRows } from '../../src/services/intent/seed-replacement.ts';
-import { defaultAnchor, matrixAnchors, weekdayIndex } from './anchor.ts';
+import { type Anchor, defaultAnchor, matrixAnchors, weekdayIndex } from './anchor.ts';
 import { type Conversation, ConversationSchema, expandPlaceholders, WEEKDAYS, ZONES } from './history.ts';
 import { failureClasses, familyOf, findingCodes, groupBy, percentile, type Slice, summarize } from './metrics.ts';
 import { type RunResult, runConversation } from './run.ts';
@@ -166,6 +166,71 @@ export interface BenchmarkRun {
   };
 }
 
+/** Whether a conversation's premise is bound to its own recorded clock, so another anchor cannot replay it. */
+function isBoundToRecordedClock(conversation: Conversation, anchor: Anchor): boolean {
+  // Real messages: unclear labels carry no verdict, and a spelled-out calendar date ("19 июня", "30.10") names one
+  // fixed day that no other anchor can replay (the label's offsets belong to the recorded date).
+  if (conversation.real && (conversation.real.status !== 'confirmed' || ABSOLUTE_DATE.test(conversation.say)))
+    return true;
+  if (conversation.expect.route !== 'ai') return false;
+  // "That time has already passed" is likewise a fact about the recorded clock: on an earlier anchor the same words
+  // name a future time and a rule is right to create the event, so a real message labelled so is not replayed.
+  if (conversation.real && conversation.expect.why === 'past_or_invalid') return true;
+  // "The named weekday is today" is a fact about the conversation's own clock; on another anchor's weekday the
+  // same words name a different day and a rule is right to answer, so the premise is not replayed there.
+  return (
+    conversation.expect.why === 'ambiguous_day' &&
+    weekdayIndex(anchor.date) !== WEEKDAYS.indexOf(conversation.clock.day)
+  );
+}
+
+async function runMatrix(
+  deps: Parameters<typeof runConversation>[0],
+  everything: readonly Conversation[],
+  step: number,
+): Promise<{ matrix: RunResult[]; anchorCount: number }> {
+  const matrix: RunResult[] = [];
+  let anchorCount = 0;
+  if (step <= 0) return { matrix, anchorCount };
+  for (const tz of ZONES) {
+    const anchors = matrixAnchors(tz);
+    anchorCount = Math.max(anchorCount, anchors.length);
+    for (const anchor of anchors)
+      for (const [index, conversation] of everything.entries()) {
+        if (index % step !== 0 || isBoundToRecordedClock(conversation, anchor)) continue;
+        matrix.push(
+          await runConversation(
+            deps,
+            { ...conversation, tz },
+            anchor,
+            `${conversation.id ?? index}@${tz}/${anchor.label}`,
+          ),
+        );
+      }
+  }
+  return { matrix, anchorCount };
+}
+
+const isConfirmed = (result: RunResult): boolean => result.conversation.real?.status === 'confirmed';
+const isUnclear = (result: RunResult): boolean => result.conversation.real?.status === 'unclear';
+
+function realReportOf(dev: readonly RunResult[], heldout: readonly RunResult[]): RealReport | null {
+  if (![...dev, ...heldout].some((result) => result.conversation.real !== undefined)) return null;
+  return {
+    confirmed: {
+      dev: reportOf(dev.filter(isConfirmed)),
+      heldout: reportOf(heldout.filter(isConfirmed)),
+      all: reportOf([...dev, ...heldout].filter(isConfirmed)),
+    },
+    unclear: { dev: summarize(dev.filter(isUnclear)), heldout: summarize(heldout.filter(isUnclear)) },
+    byUser: Object.fromEntries(
+      Object.entries(
+        groupBy([...dev, ...heldout].filter(isConfirmed), (result) => result.conversation.real?.user),
+      ).sort(([a], [b]) => a.localeCompare(b)),
+    ),
+  };
+}
+
 export async function runBenchmark(
   options: BenchmarkOptions,
   history: LoadedHistory = loadHistory(),
@@ -184,66 +249,13 @@ export async function runBenchmark(
   };
   const dev = await runSplit('dev', history.dev);
   const heldout = await runSplit('heldout', history.heldout);
-  const matrix: RunResult[] = [];
-  let anchorCount = 0;
-  if (options.matrixStep > 0) {
-    const everything = [...history.dev, ...history.heldout];
-    for (const tz of ZONES) {
-      const anchors = matrixAnchors(tz);
-      anchorCount = Math.max(anchorCount, anchors.length);
-      for (const anchor of anchors)
-        for (const [index, conversation] of everything.entries()) {
-          if (index % options.matrixStep !== 0) continue;
-          // Real messages: unclear labels carry no verdict, and a spelled-out calendar date ("19 июня", "30.10") names one
-          // fixed day that no other anchor can replay (the label's offsets belong to the recorded date).
-          if (conversation.real && (conversation.real.status !== 'confirmed' || ABSOLUTE_DATE.test(conversation.say)))
-            continue;
-          // "That time has already passed" is likewise a fact about the recorded clock: on an earlier anchor the same words
-          // name a future time and a rule is right to create the event, so a real message labelled so is not replayed.
-          if (conversation.real && conversation.expect.route === 'ai' && conversation.expect.why === 'past_or_invalid')
-            continue;
-          // "The named weekday is today" is a fact about the conversation's own clock; on another anchor's weekday the
-          // same words name a different day and a rule is right to answer, so the premise is not replayed there.
-          if (
-            conversation.expect.route === 'ai' &&
-            conversation.expect.why === 'ambiguous_day' &&
-            weekdayIndex(anchor.date) !== WEEKDAYS.indexOf(conversation.clock.day)
-          )
-            continue;
-          matrix.push(
-            await runConversation(
-              deps,
-              { ...conversation, tz },
-              anchor,
-              `${conversation.id ?? index}@${tz}/${anchor.label}`,
-            ),
-          );
-        }
-    }
-  }
+  const { matrix, anchorCount } = await runMatrix(deps, [...history.dev, ...history.heldout], options.matrixStep);
   // Fixtures freeze the clock; give it back so the report's timestamp is real.
   setSystemTime();
   const texts = [...history.dev, ...history.heldout]
     .map((conversation) => conversation.say)
     .map((say) => expandPlaceholders(say, { y: 2026, m: 10, d: 5 }));
-  const isConfirmed = (result: RunResult): boolean => result.conversation.real?.status === 'confirmed';
-  const isUnclear = (result: RunResult): boolean => result.conversation.real?.status === 'unclear';
-  const hasReal = [...dev, ...heldout].some((result) => result.conversation.real !== undefined);
-  const real: RealReport | null = hasReal
-    ? {
-        confirmed: {
-          dev: reportOf(dev.filter(isConfirmed)),
-          heldout: reportOf(heldout.filter(isConfirmed)),
-          all: reportOf([...dev, ...heldout].filter(isConfirmed)),
-        },
-        unclear: { dev: summarize(dev.filter(isUnclear)), heldout: summarize(heldout.filter(isUnclear)) },
-        byUser: Object.fromEntries(
-          Object.entries(
-            groupBy([...dev, ...heldout].filter(isConfirmed), (result) => result.conversation.real?.user),
-          ).sort(([a], [b]) => a.localeCompare(b)),
-        ),
-      }
-    : null;
+  const real = realReportOf(dev, heldout);
   return {
     results: { dev, heldout, matrix },
     report: {

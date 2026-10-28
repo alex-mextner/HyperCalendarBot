@@ -41,13 +41,15 @@ describe('real-history corpus: leak gates', () => {
 
   const PLACEHOLDER_URL = /^(?:https?:\/\/|www\.)?example\.org\//i;
 
+  const offendersIn = (value: string, pattern: RegExp, allowed: (hit: string) => boolean): string[] =>
+    [...value.matchAll(pattern)].map((match) => match[0]).filter((hit) => !allowed(hit));
+
   test('no e-mail, URL or handle survives except the scrubber placeholders', () => {
-    const offenders: string[] = [];
-    for (const value of everyString()) {
-      for (const match of value.matchAll(EMAIL)) if (!match[0].endsWith('@example.org')) offenders.push(match[0]);
-      for (const match of value.matchAll(URL_FORM)) if (!PLACEHOLDER_URL.test(match[0])) offenders.push(match[0]);
-      for (const match of value.matchAll(HANDLE)) if (!match[0].startsWith('@px_')) offenders.push(match[0]);
-    }
+    const offenders = [...everyString()].flatMap((value) => [
+      ...offendersIn(value, EMAIL, (hit) => hit.endsWith('@example.org')),
+      ...offendersIn(value, URL_FORM, (hit) => PLACEHOLDER_URL.test(hit)),
+      ...offendersIn(value, HANDLE, (hit) => hit.startsWith('@px_')),
+    ]);
     expect(offenders).toEqual([]);
   });
 
@@ -55,19 +57,25 @@ describe('real-history corpus: leak gates', () => {
     const PROMPT =
       /(?:введи(?:те)?\s+(?:пароль|код)|пароль\s*\(|двухфакторн|код\s+подтверждения\s+отправлен|enter\s+(?:the\s+|your\s+)?(?:password|code)|two-factor|2fa|login\s+code)/i;
     const SPACED_CODE = /^\s*\d(?:[\s-]\d){3,7}\s*$/;
+    const keptCodes = (history: { role: string; text?: string | null }[]): number => {
+      let asking = false;
+      let kept = 0;
+      for (const turn of history) {
+        const turnText = turn.text ?? '';
+        if (!turnText) continue;
+        if (turn.role === 'assistant') asking = PROMPT.test(turnText);
+        else if (turn.role === 'user' && (asking || SPACED_CODE.test(turnText)) && turnText !== '[REDACTED:credential]')
+          kept++;
+      }
+      return kept;
+    };
     const offenders: string[] = [];
     for (const line of text('corpus.jsonl').split('\n')) {
       if (line.trim().length === 0) continue;
       const record = z
         .object({ id: z.string(), history: z.array(z.object({ role: z.string(), text: z.string().nullish() })) })
         .parse(JSON.parse(line));
-      let asking = false;
-      for (const turn of record.history) {
-        const turnText = turn.text ?? '';
-        if (turn.role === 'assistant' && turnText) asking = PROMPT.test(turnText);
-        else if (turn.role === 'user' && turnText && (asking || SPACED_CODE.test(turnText)))
-          if (turnText !== '[REDACTED:credential]') offenders.push(record.id);
-      }
+      offenders.push(...Array.from({ length: keptCodes(record.history) }, () => record.id));
     }
     expect(offenders).toEqual([]);
   });

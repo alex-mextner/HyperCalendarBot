@@ -89,6 +89,59 @@ interface MessageRow {
   created_at: string;
 }
 
+/** How a follow-up pushes back on a rule answer, or null when it does not. */
+function pushbackKind(followUpText: string, asked: Set<string>): 'correction' | 'retry' | null {
+  // The answer to a rule's own «Да / Отмена» question is the confirmation working, not pushback.
+  if (CONFIRMATION_ANSWER.test(followUpText)) return null;
+  if (CORRECTION.test(followUpText)) return 'correction';
+  return overlap(asked, wordsOf(followUpText)) >= RETRY_OVERLAP ? 'retry' : null;
+}
+
+function turnsByUser(messages: MessageRow[]): Map<number, { at: number; text: string }[]> {
+  const byUser = new Map<number, { at: number; text: string }[]>();
+  for (const message of messages) {
+    const list = byUser.get(message.user_id) ?? [];
+    list.push({ at: epochOf(message.created_at), text: message.content });
+    byUser.set(message.user_id, list);
+  }
+  return byUser;
+}
+
+function judgeAnswers(
+  answers: AnswerRow[],
+  byUser: Map<number, { at: number; text: string }[]>,
+  followUpMs: number,
+  nowMs: number,
+): {
+  judged: number;
+  corrections: number;
+  retries: number;
+  perRule: Map<string, { answers: number; pushbacks: number }>;
+} {
+  let judged = 0;
+  let corrections = 0;
+  let retries = 0;
+  const perRule = new Map<string, { answers: number; pushbacks: number }>();
+  for (const answer of answers) {
+    const answeredAt = epochOf(answer.created_at);
+    const rule = perRule.get(answer.action_name) ?? { answers: 0, pushbacks: 0 };
+    rule.answers++;
+    perRule.set(answer.action_name, rule);
+    // The answer's own message is logged in the same second, before the answer: only later turns can push back.
+    if (answeredAt + followUpMs > nowMs) continue;
+    judged++;
+    const followUp = (byUser.get(answer.user_id) ?? []).find(
+      (turn) => turn.at > answeredAt && turn.at <= answeredAt + followUpMs,
+    );
+    const kind = followUp ? pushbackKind(followUp.text, wordsOf(answer.input_summary ?? '')) : null;
+    if (kind === null) continue;
+    if (kind === 'correction') corrections++;
+    else retries++;
+    rule.pushbacks++;
+  }
+  return { judged, corrections, retries, perRule };
+}
+
 export function monitorRuleAnswers(db: Database, options: MonitorOptions): RuleMonitorReport {
   const followUpMs = options.followUpMinutes * 60_000;
   const start = stamp(options.nowMs - options.hours * 3_600_000);
@@ -107,37 +160,8 @@ export function monitorRuleAnswers(db: Database, options: MonitorOptions): RuleM
        ORDER BY created_at, id LIMIT ?`,
     )
     .all(start, end, MONITOR_LIMITS.maxRows);
-  const byUser = new Map<number, { at: number; text: string }[]>();
-  for (const message of messages) {
-    const list = byUser.get(message.user_id) ?? [];
-    list.push({ at: epochOf(message.created_at), text: message.content });
-    byUser.set(message.user_id, list);
-  }
-
-  let judged = 0;
-  let corrections = 0;
-  let retries = 0;
-  const perRule = new Map<string, { answers: number; pushbacks: number }>();
-  for (const answer of answers) {
-    const answeredAt = epochOf(answer.created_at);
-    const rule = perRule.get(answer.action_name) ?? { answers: 0, pushbacks: 0 };
-    rule.answers++;
-    perRule.set(answer.action_name, rule);
-    // The answer's own message is logged in the same second, before the answer: only later turns can push back.
-    if (answeredAt + followUpMs > options.nowMs) continue;
-    judged++;
-    const asked = wordsOf(answer.input_summary ?? '');
-    const followUp = (byUser.get(answer.user_id) ?? []).find(
-      (turn) => turn.at > answeredAt && turn.at <= answeredAt + followUpMs,
-    );
-    if (!followUp) continue;
-    // The answer to a rule's own «Да / Отмена» question is the confirmation working, not pushback.
-    if (CONFIRMATION_ANSWER.test(followUp.text)) continue;
-    if (CORRECTION.test(followUp.text)) corrections++;
-    else if (overlap(asked, wordsOf(followUp.text)) >= RETRY_OVERLAP) retries++;
-    else continue;
-    rule.pushbacks++;
-  }
+  const byUser = turnsByUser(messages);
+  const { judged, corrections, retries, perRule } = judgeAnswers(answers, byUser, followUpMs, options.nowMs);
   const pushbackRate = judged === 0 ? null : (corrections + retries) / judged;
   return {
     windowHours: options.hours,

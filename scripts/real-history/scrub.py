@@ -18,7 +18,7 @@ import hashlib
 import hmac
 import re
 from dataclasses import dataclass, field, replace
-from typing import Iterable
+from typing import Iterable, Iterator
 
 import pools
 
@@ -50,17 +50,109 @@ ALTERNATES: dict[str, dict[str, tuple[str, ...]]] = {
 }
 # Possessive adjectives of a- and ya-class names: «Машин телефон», «к Ваниному».
 POSSESSIVE = ("ин", "ина", "ино", "ины", "ину", "иной", "иным", "ином", "иных")
-NOMINATIVE_STRIP = {"hard": 0, "soft": 1, "j": 1, "iy": 2, "a": 1, "ya": 1, "ia": 2, "adjf": 2, "none": 0}
+NOMINATIVE_STRIP = {
+    "hard": 0,
+    "soft": 1,
+    "j": 1,
+    "iy": 2,
+    "a": 1,
+    "ya": 1,
+    "ia": 2,
+    "adjf": 2,
+    "none": 0,
+}
 
 FUGITIVE = {"павел": "павл", "пётр": "петр", "лев": "льв", "петр": "петр"}
-SURNAME_SUFFIXES = ("ов", "ев", "ёв", "ин", "ын", "ова", "ева", "ёва", "ина", "ына", "ский", "ская", "цкий", "цкая", "енко", "ук", "юк")
+SURNAME_SUFFIXES = (
+    "ов",
+    "ев",
+    "ёв",
+    "ин",
+    "ын",
+    "ова",
+    "ева",
+    "ёва",
+    "ина",
+    "ына",
+    "ский",
+    "ская",
+    "цкий",
+    "цкая",
+    "енко",
+    "ук",
+    "юк",
+)
 FEMALE_SURNAME_SUFFIXES = ("ова", "ева", "ёва", "ина", "ына", "ская", "цкая")
-PLACE_PREPS = frozenset({"в", "во", "на", "из", "до", "около", "возле", "рядом", "по", "над", "под", "за", "от", "с", "со"})
-PERSON_PREPS = frozenset({"с", "со", "к", "ко", "для", "у", "от", "про", "о", "об", "обо", "без", "напомни", "позвони", "пригласи", "и"})
+PLACE_PREPS = frozenset(
+    {
+        "в",
+        "во",
+        "на",
+        "из",
+        "до",
+        "около",
+        "возле",
+        "рядом",
+        "по",
+        "над",
+        "под",
+        "за",
+        "от",
+        "с",
+        "со",
+    }
+)
+PERSON_PREPS = frozenset(
+    {
+        "с",
+        "со",
+        "к",
+        "ко",
+        "для",
+        "у",
+        "от",
+        "про",
+        "о",
+        "об",
+        "обо",
+        "без",
+        "напомни",
+        "позвони",
+        "пригласи",
+        "и",
+    }
+)
 GUESS_ENDINGS = tuple(
     sorted(
-        ("ами", "ями", "ого", "ому", "ым", "им", "ом", "ем", "ём", "ой", "ей", "ёй", "ою", "ею", "ах", "ях", "ов", "ев",
-         "а", "я", "у", "ю", "е", "ы", "и", "ь", "й"),
+        (
+            "ами",
+            "ями",
+            "ого",
+            "ому",
+            "ым",
+            "им",
+            "ом",
+            "ем",
+            "ём",
+            "ой",
+            "ей",
+            "ёй",
+            "ою",
+            "ею",
+            "ах",
+            "ях",
+            "ов",
+            "ев",
+            "а",
+            "я",
+            "у",
+            "ю",
+            "е",
+            "ы",
+            "и",
+            "ь",
+            "й",
+        ),
         key=len,
         reverse=True,
     )
@@ -68,7 +160,9 @@ GUESS_ENDINGS = tuple(
 
 
 MALE_NAMES = frozenset(x.lower() for x in pools.MALE_FULL + pools.MALE_DIM + pools.LATIN_MALE)
-FEMALE_NAMES = frozenset(x.lower() for x in pools.FEMALE_FULL + pools.FEMALE_DIM + pools.LATIN_FEMALE)
+FEMALE_NAMES = frozenset(
+    x.lower() for x in pools.FEMALE_FULL + pools.FEMALE_DIM + pools.LATIN_FEMALE
+)
 URL_WORDS = frozenset({"https", "http", "www", "com", "org", "net", "example", "tme", "html"})
 NAME_ENDING = re.compile(r"(?:ой|ей|ом|ем|ёй|ою|у|ю|е|а|я|ы|и)$")
 
@@ -150,6 +244,89 @@ def _is_latin(word: str) -> bool:
     return re.search(rf"[{LAT}]", word) is not None and re.search(rf"[{CYR}]", word) is None
 
 
+def _first_pool(entry: Entry, latin: bool) -> list[str]:
+    if latin:
+        return pools.LATIN_FEMALE if entry.gender == "f" else pools.LATIN_MALE
+    if entry.gender == "f":
+        return pools.FEMALE_DIM if entry.dim else pools.FEMALE_FULL
+    return pools.MALE_DIM if entry.dim else pools.MALE_FULL
+
+
+def _surname_pool(entry: Entry, latin: bool) -> list[str]:
+    if latin:
+        return pools.LATIN_MALE
+    base = pools.SURNAMES
+    return [name + "а" for name in base] if entry.gender == "f" else list(base)
+
+
+def _guess_ending(low: str, latin: bool) -> tuple[str, str]:
+    """(ending, stem) of an unknown word: the longest-listed guessed ending that leaves a stem of 3+ letters."""
+    if latin:
+        return "", low
+    for candidate in GUESS_ENDINGS:
+        if low.endswith(candidate) and len(low) - len(candidate) >= 3:
+            return candidate, low[: -len(candidate)]
+    return "", low
+
+
+def _guess_kind(low: str, stem: str, ending: str, previous: str) -> tuple[str, bool]:
+    """(entity kind, is female) of an unknown word from its shape and the word before it."""
+    female = ending in ("а", "я", "ой", "ую", "ою")
+    if stem.endswith(("ов", "ев", "ин", "ын", "ск")) or low.endswith(SURNAME_SUFFIXES):
+        female = low.endswith(FEMALE_SURNAME_SUFFIXES) or (
+            ending in ("ой", "ую", "ою", "а") and stem.endswith(("ов", "ев", "ин", "ын"))
+        )
+        return "surname", female
+    if previous in PLACE_PREPS - {"с", "со", "от"}:
+        return "place", False
+    if previous in PERSON_PREPS:
+        return "first", female
+    return "org", False
+
+
+def _edits_at(low: str, index: int, letters: str) -> Iterator[str]:
+    for letter in letters:
+        if index < len(low):
+            yield low[:index] + letter + low[index + 1 :]
+        yield low[:index] + letter + low[index:]
+    if index < len(low):
+        yield low[:index] + low[index + 1 :]
+    if index + 1 < len(low):
+        yield low[:index] + low[index + 1] + low[index] + low[index + 2 :]
+
+
+def _one_edit_variants(low: str) -> Iterator[str]:
+    letters = (
+        "абвгдежзийклмнопрстуфхцчшщъыьэюя"
+        if re.search(rf"[{CYR}]", low)
+        else "abcdefghijklmnopqrstuvwxyz"
+    )
+    for index in range(len(low) + 1):
+        yield from _edits_at(low, index, letters)
+
+
+def _is_skipped_entity_token(low: str) -> bool:
+    return len(low) < 3 or low in pools.SAFE_PROPER or low in URL_WORDS or low in pools.NEVER_ENTITY
+
+
+def _first_unused(pool: list[str], start: int, used: set[str]) -> str | None:
+    for offset in range(len(pool)):
+        candidate = pool[(start + offset) % len(pool)]
+        if norm(candidate) not in used:
+            return candidate
+    return None
+
+
+def _is_plausible_span(kind: str, value: str) -> bool:
+    if kind != "phone":
+        return True
+    return not (re.search(r"\d{4}-\d{2}-\d{2}|:", value) or not re.search(r"\d{3}", value))
+
+
+def _is_free_span(taken: list[tuple[int, int]], start: int, end: int) -> bool:
+    return all(end <= other_start or start >= other_end for other_start, other_end in taken)
+
+
 @dataclass
 class Scrubber:
     vocab: set[str]  # normalised common words (Russian and English)
@@ -200,13 +377,16 @@ class Scrubber:
         self.entries[key] = entry
         self._index(entry)
         if real:
-            self.real_norms.add(key)
-            for stem in entry.stems:
-                if len(stem) >= 3:
-                    self.real_stems.add(stem)
-                if len(stem) >= 5:
-                    self.stem_entries.setdefault(stem, entry)
+            self._note_real(key, entry)
         return entry
+
+    def _note_real(self, key: str, entry: Entry) -> None:
+        self.real_norms.add(key)
+        for stem in entry.stems:
+            if len(stem) >= 3:
+                self.real_stems.add(stem)
+            if len(stem) >= 5:
+                self.stem_entries.setdefault(stem, entry)
 
     _DIMS: set[str] | None = None
 
@@ -227,13 +407,24 @@ class Scrubber:
                 form = norm(stem + ending)
                 self.forms.setdefault(form, []).append((entry, case, ending))
             if cls == "none":
-                self.forms.setdefault(norm(entry.lemma), []).append((entry, "nom", ""))
-                for suffix in ("'s", "’s"):
-                    self.forms.setdefault(norm(entry.lemma + suffix), []).append((entry, "poss", suffix))
+                self._index_bare_forms(entry)
+
+    def _index_bare_forms(self, entry: Entry) -> None:
+        self.forms.setdefault(norm(entry.lemma), []).append((entry, "nom", ""))
+        for suffix in ("'s", "’s"):
+            self.forms.setdefault(norm(entry.lemma + suffix), []).append((entry, "poss", suffix))
 
     def _load_gazetteer(self) -> None:
         groups = (
-            (pools.MALE_FULL + pools.MALE_DIM + pools.FEMALE_FULL + pools.FEMALE_DIM + pools.LATIN_MALE + pools.LATIN_FEMALE, "first"),
+            (
+                pools.MALE_FULL
+                + pools.MALE_DIM
+                + pools.FEMALE_FULL
+                + pools.FEMALE_DIM
+                + pools.LATIN_MALE
+                + pools.LATIN_FEMALE,
+                "first",
+            ),
             (pools.PLACES, "place"),
         )
         for names, kind in groups:
@@ -253,39 +444,44 @@ class Scrubber:
         for token in WORD_RE.findall(surface):
             at_start, first_word = first_word, False
             for part in re.split(r"[-'’]", token):
-                low = norm(part)
-                if len(low) < 3 or low in pools.SAFE_PROPER or low in URL_WORDS or low in pools.NEVER_ENTITY:
-                    continue
-                ordinary = low in self.vocab and low not in self.proper and low not in MALE_NAMES and low not in FEMALE_NAMES
-                if ordinary and kind in ("text", "other"):
-                    continue  # a common word is not personal data, even when someone used it as a username
-                if ordinary:
-                    self._register(part, kind, real=False)  # a first name that is also a word: replaced when capitalised
-                elif kind == "text":
-                    # Free text: a capitalised word in the middle of a phrase is a proper noun; the first word is
-                    # capitalised anyway, so it counts only when it looks like a name. Lower-case slang is not personal.
-                    capitalised = part[:1].isupper() and not part.isupper()
-                    nameish = low in self.proper or low.endswith(SURNAME_SUFFIXES) or _is_latin(part)
-                    if capitalised and (not at_start or nameish):
-                        self._register(part, "other", real=True)
-                else:
-                    self._register(part, kind, real=True)
+                self._add_entity_part(part, kind, at_start)
+
+    def _add_entity_part(self, part: str, kind: str, at_start: bool) -> None:
+        low = norm(part)
+        if _is_skipped_entity_token(low):
+            return
+        ordinary = (
+            low in self.vocab
+            and low not in self.proper
+            and low not in MALE_NAMES
+            and low not in FEMALE_NAMES
+        )
+        if ordinary:
+            # a common word is not personal data, even when someone used it as a username; a first name that is also
+            # a word is replaced when capitalised
+            if kind not in ("text", "other"):
+                self._register(part, kind, real=False)
+        elif kind == "text":
+            self._add_free_text_part(part, low, at_start)
+        else:
+            self._register(part, kind, real=True)
+
+    def _add_free_text_part(self, part: str, low: str, at_start: bool) -> None:
+        # Free text: a capitalised word in the middle of a phrase is a proper noun; the first word is
+        # capitalised anyway, so it counts only when it looks like a name. Lower-case slang is not personal.
+        capitalised = part[:1].isupper() and not part.isupper()
+        nameish = low in self.proper or low.endswith(SURNAME_SUFFIXES) or _is_latin(part)
+        if capitalised and (not at_start or nameish):
+            self._register(part, "other", real=True)
 
     # ─── pseudonyms ─────────────────────────────────────────────────────────────────────────────────────────────
 
     def _pool(self, entry: Entry) -> list[str]:
         latin = _is_latin(entry.lemma)
         if entry.kind == "first":
-            if latin:
-                return pools.LATIN_FEMALE if entry.gender == "f" else pools.LATIN_MALE
-            if entry.gender == "f":
-                return pools.FEMALE_DIM if entry.dim else pools.FEMALE_FULL
-            return pools.MALE_DIM if entry.dim else pools.MALE_FULL
+            return _first_pool(entry, latin)
         if entry.kind == "surname":
-            if latin:
-                return pools.LATIN_MALE
-            base = pools.SURNAMES
-            return [name + "а" for name in base] if entry.gender == "f" else list(base)
+            return _surname_pool(entry, latin)
         if entry.kind == "place":
             return pools.PLACES if not latin else pools.LATIN_MALE
         if entry.kind == "street":
@@ -298,30 +494,50 @@ class Scrubber:
         key = norm(entry.lemma)
         chosen = self.mapping.get(key)
         if chosen is None:
-            everything = self._pool(entry)
-            if classes:
-                everything = [name for name in everything if classify(name) in classes] or everything
-            pool = [name for name in everything if not self._is_real_form(name) and norm(name) not in self.banned] or list(everything)
-            digest = hmac.new(self.secret, f"{entry.kind}|{entry.gender}|{key}".encode(), hashlib.sha256).digest()
-            start = int.from_bytes(digest[:8], "big")
-            for offset in range(len(pool)):
-                candidate = pool[(start + offset) % len(pool)]
-                if norm(candidate) not in self.used:
-                    chosen = candidate
-                    break
-            if chosen is None:  # pool exhausted: a numbered variant keeps the mapping injective
-                self.counters[entry.kind] = self.counters.get(entry.kind, 0) + 1
-                chosen = f"{pool[start % len(pool)]}{self.counters[entry.kind] + 1}"
-            self.mapping[key] = chosen
-            self.used.add(norm(chosen))
+            chosen = self._assign_pseudonym(entry, key, classes)
         cls = classify(chosen)
-        return Entry(chosen.lower(), cls, entry.kind, entry.gender, entry.dim, False, (norm(stem_of(chosen, cls)),))
+        return Entry(
+            chosen.lower(),
+            cls,
+            entry.kind,
+            entry.gender,
+            entry.dim,
+            False,
+            (norm(stem_of(chosen, cls)),),
+        )
+
+    def _assign_pseudonym(self, entry: Entry, key: str, classes: tuple[str, ...] | None) -> str:
+        everything = self._pool(entry)
+        if classes:
+            everything = [name for name in everything if classify(name) in classes] or everything
+        pool = [
+            name
+            for name in everything
+            if not self._is_real_form(name) and norm(name) not in self.banned
+        ] or list(everything)
+        digest = hmac.new(
+            self.secret, f"{entry.kind}|{entry.gender}|{key}".encode(), hashlib.sha256
+        ).digest()
+        start = int.from_bytes(digest[:8], "big")
+        chosen = _first_unused(pool, start, self.used)
+        if chosen is None:  # pool exhausted: a numbered variant keeps the mapping injective
+            self.counters[entry.kind] = self.counters.get(entry.kind, 0) + 1
+            chosen = f"{pool[start % len(pool)]}{self.counters[entry.kind] + 1}"
+        self.mapping[key] = chosen
+        self.used.add(norm(chosen))
+        return chosen
 
     def _is_real_form(self, name: str) -> bool:
         low = norm(name)
-        if low in self.real_norms or low in self.real_stems or any(hit[0].real for hit in self.forms.get(low, ())):
+        if (
+            low in self.real_norms
+            or low in self.real_stems
+            or any(hit[0].real for hit in self.forms.get(low, ()))
+        ):
             return True
-        return len(low) >= 5 and any(low.startswith(stem) and len(low) - len(stem) <= 3 for stem in self.stem_entries)
+        return len(low) >= 5 and any(
+            low.startswith(stem) and len(low) - len(stem) <= 3 for stem in self.stem_entries
+        )
 
     def _render(self, hit: Hit, original: str) -> str:
         for _ in range(8):
@@ -347,24 +563,15 @@ class Scrubber:
     def _unknown(self, token: str, previous: str) -> str:
         low = norm(token)
         latin = _is_latin(token)
-        ending, stem = "", low
-        if not latin:
-            for candidate in GUESS_ENDINGS:
-                if low.endswith(candidate) and len(low) - len(candidate) >= 3:
-                    ending, stem = candidate, low[: -len(candidate)]
-                    break
-        female = ending in ("а", "я", "ой", "ую", "ою")
-        if stem.endswith(("ов", "ев", "ин", "ын", "ск")) or low.endswith(SURNAME_SUFFIXES):
-            kind = "surname"
-            female = low.endswith(FEMALE_SURNAME_SUFFIXES) or (ending in ("ой", "ую", "ою", "а") and stem.endswith(("ов", "ев", "ин", "ын")))
-        elif previous in PLACE_PREPS - {"с", "со", "от"}:
-            kind, female = "place", False
-        elif previous in PERSON_PREPS:
-            kind = "first"
-        else:
-            kind, female = "org", False
-        probe = Entry(stem, "none" if latin else "hard", kind, "f" if female else "m", False, True, (stem,))
+        ending, stem = _guess_ending(low, latin)
+        kind, female = _guess_kind(low, stem, ending, previous)
+        probe = Entry(
+            stem, "none" if latin else "hard", kind, "f" if female else "m", False, True, (stem,)
+        )
         self._propagate(probe, stem, latin, low)
+        return with_case_of(token, self._unknown_word(probe, latin, ending))
+
+    def _unknown_word(self, probe: Entry, latin: bool, ending: str) -> str:
         for _ in range(8):
             target = self._pseudonym(probe, classes=None if latin else ("hard", "a"))
             if latin:
@@ -376,7 +583,7 @@ class Scrubber:
             if not self._is_real_form(word):
                 break
             self._reroll(probe)
-        return with_case_of(token, word)
+        return word
 
     def _propagate(self, probe: Entry, stem: str, latin: bool, exact: str) -> None:
         """A word found to be a proper noun is one everywhere: later (or, in a second pass, earlier) lower-case and
@@ -388,25 +595,16 @@ class Scrubber:
         if len(stem) >= 5:
             for ending in ("",) if latin else ("",) + GUESS_ENDINGS:
                 self.forms.setdefault(norm(stem + ending), []).append((probe, "x", ending))
-        self.forms.setdefault(exact, []).append((probe, "x", exact[len(stem):] if exact.startswith(stem) else ""))
+        self.forms.setdefault(exact, []).append(
+            (probe, "x", exact[len(stem) :] if exact.startswith(stem) else "")
+        )
         if len(stem) >= 5:
             self.stem_entries.setdefault(stem, probe)
             self.real_stems.add(stem)
 
     def _plausibly_typo(self, low: str) -> bool:
         """A one-edit neighbour of a common word is a typo, not a name."""
-        letters = "абвгдежзийклмнопрстуфхцчшщъыьэюя"
-        for index in range(len(low) + 1):
-            for letter in letters if re.search(rf"[{CYR}]", low) else "abcdefghijklmnopqrstuvwxyz":
-                if index < len(low) and norm(low[:index] + letter + low[index + 1 :]) in self.vocab:
-                    return True
-                if norm(low[:index] + letter + low[index:]) in self.vocab:
-                    return True
-            if index < len(low) and norm(low[:index] + low[index + 1 :]) in self.vocab:
-                return True
-            if index + 1 < len(low) and norm(low[:index] + low[index + 1] + low[index] + low[index + 2 :]) in self.vocab:
-                return True
-        return False
+        return any(norm(variant) in self.vocab for variant in _one_edit_variants(low))
 
     # ─── text ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -419,14 +617,18 @@ class Scrubber:
             out.append(text[cursor:start])
             token = match.group(0)
             lead = text[:start].rstrip(" \t«\"“'(")
-            sentence_start = lead == "" or lead[-1:] in ".!?…\n" or text[:start].rstrip(" \t").endswith("\n")
+            sentence_start = (
+                lead == "" or lead[-1:] in ".!?…\n" or text[:start].rstrip(" \t").endswith("\n")
+            )
             parts = re.split(r"([-'’])", token)
             rebuilt = []
             for part in parts:
                 if part in ("-", "'", "’"):
                     rebuilt.append(part)
                 else:
-                    rebuilt.append(self._token(part, previous, sentence_start and len(parts) == 1, token))
+                    rebuilt.append(
+                        self._token(part, previous, sentence_start and len(parts) == 1, token)
+                    )
             out.append("".join(rebuilt))
             previous = norm(token)
             cursor = end
@@ -448,35 +650,68 @@ class Scrubber:
         if self._sorted_vocab is None:
             self._sorted_vocab = sorted(self.vocab)
         index = bisect.bisect_left(self._sorted_vocab, low)
-        return index < len(self._sorted_vocab) and self._sorted_vocab[index].startswith(low) and len(self._sorted_vocab[index]) - len(low) <= 4
+        return (
+            index < len(self._sorted_vocab)
+            and self._sorted_vocab[index].startswith(low)
+            and len(self._sorted_vocab[index]) - len(low) <= 4
+        )
 
     def _token(self, token: str, previous: str, sentence_start: bool, whole: str) -> str:
         low = norm(token)
         if low in pools.SAFE_PROPER or low in pools.NEVER_ENTITY or low == "s" and "'" in whole:
             return token
-        capital = token[:1].isupper()
-        common = low in self.vocab
-        hits = self.forms.get(low)
-        if hits:
-            real = [hit for hit in hits if hit[0].real]
-            if real:
-                entry, case, ending = real[0]
-                return self._render(Hit(self._context_kind(entry, previous), case, ending), token)
-            ordinary = sentence_start and low in pools.NAME_LIKE_COMMON_WORDS
-            if capital and not ordinary:
-                entry, case, ending = hits[0]
-                return self._render(Hit(self._context_kind(entry, previous), case, ending), token)
-        if len(low) >= 5 and not common:
-            for stem, entry in self.stem_entries.items():
-                if low.startswith(stem) and len(low) - len(stem) <= 3:
-                    return self._render(Hit(self._context_kind(entry, previous), "x", low[len(stem):]), token)
+        rendered = self._render_known_form(token, low, previous, sentence_start)
+        if rendered is None:
+            rendered = self._render_by_stem(token, low, previous)
+        if rendered is not None:
+            return rendered
         if len(low) < 4:
             return token
+        return self._replace_if_unknown(token, low, previous, sentence_start)
+
+    def _render_known_form(
+        self, token: str, low: str, previous: str, sentence_start: bool
+    ) -> str | None:
+        hits = self.forms.get(low)
+        if not hits:
+            return None
+        real = [hit for hit in hits if hit[0].real]
+        if real:
+            chosen = real[0]
+        elif token[:1].isupper() and not (sentence_start and low in pools.NAME_LIKE_COMMON_WORDS):
+            chosen = hits[0]
+        else:
+            return None
+        entry, case, ending = chosen
+        return self._render(Hit(self._context_kind(entry, previous), case, ending), token)
+
+    def _render_by_stem(self, token: str, low: str, previous: str) -> str | None:
+        if len(low) < 5 or low in self.vocab:
+            return None
+        for stem, entry in self.stem_entries.items():
+            if low.startswith(stem) and len(low) - len(stem) <= 3:
+                return self._render(
+                    Hit(self._context_kind(entry, previous), "x", low[len(stem) :]), token
+                )
+        return None
+
+    def _replace_if_unknown(self, token: str, low: str, previous: str, sentence_start: bool) -> str:
+        capital = token[:1].isupper()
+        common = low in self.vocab
         if capital and not sentence_start:
             return token if common and low not in self.proper else self._unknown(token, previous)
         if capital:
-            return token if common or self._plausibly_typo(low) or self._is_inflected_word(low) else self._unknown(token, previous)
-        if previous in PERSON_PREPS and not common and NAME_ENDING.search(low) and not self._plausibly_typo(low):
+            return (
+                token
+                if common or self._plausibly_typo(low) or self._is_inflected_word(low)
+                else self._unknown(token, previous)
+            )
+        if (
+            previous in PERSON_PREPS
+            and not common
+            and NAME_ENDING.search(low)
+            and not self._plausibly_typo(low)
+        ):
             return self._unknown(token, previous)
         return token
 
@@ -486,7 +721,9 @@ class Scrubber:
         r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
         r"|\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b|\b\d{1,2}:\d{2}(?::\d{2})?\b"
     )
-    URL = re.compile(r"(?i)\b(?:https?://|www\.|t\.me/|tg://)[^\s<>\"')\]]+|\b[a-z0-9-]+\.(?:com|org|net|ru|io|me|app|dev)(?:/[^\s<>\"')\]]*)?")
+    URL = re.compile(
+        r"(?i)\b(?:https?://|www\.|t\.me/|tg://)[^\s<>\"')\]]+|\b[a-z0-9-]+\.(?:com|org|net|ru|io|me|app|dev)(?:/[^\s<>\"')\]]*)?"
+    )
     EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
     HANDLE = re.compile(r"(?<![\w@])@[A-Za-z0-9_]{4,32}\b")
     CARD = re.compile(r"(?<!\d)(?:\d{4}[ -]){3}\d{4}(?!\d)")
@@ -535,17 +772,26 @@ class Scrubber:
         fake = []
         for word in words:
             entry = Entry(norm(word), classify(word), "street", "f", False, True, (norm(word),))
-            fake.append(self._pseudonym(entry).lemma.capitalize() if word[:1].isupper() else self._pseudonym(entry).lemma)
-        house = re.sub(r"\d+", lambda m: str((int(m.group(0)) % 97) + 3 if len(m.group(0)) < 4 else self._digits_like("addr", m.group(0))), match.group("house"))
+            fake.append(
+                self._pseudonym(entry).lemma.capitalize()
+                if word[:1].isupper()
+                else self._pseudonym(entry).lemma
+            )
+        house = re.sub(
+            r"\d+",
+            lambda m: str(
+                (int(m.group(0)) % 97) + 3
+                if len(m.group(0)) < 4
+                else self._digits_like("addr", m.group(0))
+            ),
+            match.group("house"),
+        )
         return f"{match.group('kw')} {' '.join(fake)}{house}"
 
-    def scrub(self, text: str) -> str:
+    def _collect_spans(self, text: str) -> list[tuple[int, int, str, str]]:
+        """Non-overlapping pattern matches (start, end, kind, value) in text order; earlier patterns win."""
         spans: list[tuple[int, int, str, str]] = []
         taken: list[tuple[int, int]] = []
-
-        def free(start: int, end: int) -> bool:
-            return all(end <= other_start or start >= other_end for other_start, other_end in taken)
-
         for pattern, kind in (
             (self.KEEP, "keep"),
             (self.EMAIL, "email"),
@@ -557,22 +803,27 @@ class Scrubber:
             (self.ADDRESS, "address"),
         ):
             for match in pattern.finditer(text):
-                if free(match.start(), match.end()):
-                    if kind == "phone" and (re.search(r"\d{4}-\d{2}-\d{2}|:", match.group(0)) or not re.search(r"\d{3}", match.group(0))):
-                        continue
+                if _is_free_span(taken, match.start(), match.end()) and _is_plausible_span(
+                    kind, match.group(0)
+                ):
                     taken.append((match.start(), match.end()))
                     spans.append((match.start(), match.end(), kind, match.group(0)))
         spans.sort()
+        return spans
+
+    def _span_text(self, kind: str, value: str) -> str:
+        if kind == "keep":
+            return value
+        if kind == "address":
+            return self._address(self.ADDRESS.fullmatch(value))  # type: ignore[arg-type]
+        return self._replace_span(kind, value)
+
+    def scrub(self, text: str) -> str:
         out: list[str] = []
         cursor = 0
-        for start, end, kind, value in spans:
+        for start, end, kind, value in self._collect_spans(text):
             out.append(self._word_pass(text[cursor:start]) if start > cursor else "")
-            if kind == "keep":
-                out.append(value)
-            elif kind == "address":
-                out.append(self._address(self.ADDRESS.fullmatch(value)))  # type: ignore[arg-type]
-            else:
-                out.append(self._replace_span(kind, value))
+            out.append(self._span_text(kind, value))
             cursor = end
         out.append(self._word_pass(text[cursor:]))
         return "".join(out)
@@ -596,20 +847,31 @@ class Scrubber:
         found: list[tuple[str, str, str]] = []
         for match in WORD_RE.finditer(text):
             for part in re.split(r"[-'’]", match.group(0)):
-                low = norm(part)
-                if low in pools.SAFE_PROPER or low in pools.NEVER_ENTITY:
-                    continue
-                hits = self.forms.get(low)
-                real = [hit for hit in hits if hit[0].real] if hits else []
-                if real and low not in URL_WORDS:
-                    found.append(("form", low, real[0][0].kind))
-                    continue
-                if len(low) >= 5:
-                    for stem in self.real_stems:
-                        if len(stem) >= 5 and low.startswith(stem) and len(low) - len(stem) <= 3 and low not in self.used and low not in self.vocab and not any(low.startswith(norm(v)) for v in self.mapping.values() if len(v) >= 4):
-                            found.append(("stem", low, "stem"))
-                            break
+                leak = self._leak_of(norm(part))
+                if leak is not None:
+                    found.append(leak)
         return found
+
+    def _leak_of(self, low: str) -> tuple[str, str, str] | None:
+        if low in pools.SAFE_PROPER or low in pools.NEVER_ENTITY:
+            return None
+        hits = self.forms.get(low)
+        real = [hit for hit in hits if hit[0].real] if hits else []
+        if real and low not in URL_WORDS:
+            return ("form", low, real[0][0].kind)
+        if len(low) >= 5 and self._is_leaking_stem(low):
+            return ("stem", low, "stem")
+        return None
+
+    def _is_leaking_stem(self, low: str) -> bool:
+        if low in self.used or low in self.vocab:
+            return False
+        if not any(
+            len(stem) >= 5 and low.startswith(stem) and len(low) - len(stem) <= 3
+            for stem in self.real_stems
+        ):
+            return False
+        return not any(low.startswith(norm(v)) for v in self.mapping.values() if len(v) >= 4)
 
     def export_mapping(self) -> dict[str, str]:
         return dict(sorted(self.mapping.items()))

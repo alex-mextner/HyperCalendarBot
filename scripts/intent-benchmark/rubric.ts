@@ -64,42 +64,90 @@ export interface RubricInput {
   isWrite: boolean;
 }
 
-function messageFindings(message: BotMessage, input: RubricInput, names: readonly string[]): Finding[] {
-  const { conversation, anchor, userTexts, worldEvents } = input;
+const finding = (code: string, detail: string, soft = false): Finding => ({ code, detail: detail.slice(0, 140), soft });
+
+function shapeFindings(text: string, userText: string): Finding[] {
   const found: Finding[] = [];
-  const add = (code: string, detail: string, soft = false) => found.push({ code, detail: detail.slice(0, 140), soft });
-  const { text } = message;
-  const userText = userTexts.join(' ');
-  if (GENERIC.test(text)) add('GENERIC_WORDING', text);
-  if (/^\s*[[{]/.test(text) || /"[a-z_]+"\s*:\s*/.test(text)) add('RAW_JSON', text);
+  if (GENERIC.test(text)) found.push(finding('GENERIC_WORDING', text));
+  if (/^\s*[[{]/.test(text) || /"[a-z_]+"\s*:\s*/.test(text)) found.push(finding('RAW_JSON', text));
   if (/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}|\b\d{2}:\d{2}:\d{2}Z\b|\+00:00\b|\b\d{2}:\d{2}Z\b|start_utc/.test(text))
-    add('RAW_ISO_DATETIME', text);
+    found.push(finding('RAW_ISO_DATETIME', text));
   const isoDates = text.match(/\b\d{4}-\d{2}-\d{2}\b/g);
-  if (isoDates) add('RAW_ISO_DATE', isoDates.join(','), userText.includes(isoDates[0] ?? '#'));
+  if (isoDates) found.push(finding('RAW_ISO_DATE', isoDates.join(','), userText.includes(isoDates[0] ?? '#')));
   const internal = INTERNAL.exec(text);
-  if (internal) add('INTERNAL_TOKEN', internal[0]);
+  if (internal) found.push(finding('INTERNAL_TOKEN', internal[0]));
+  return found;
+}
+
+function languageFindings(
+  text: string,
+  userText: string,
+  lang: Conversation['lang'],
+  names: readonly string[],
+): Finding[] {
+  const found: Finding[] = [];
   const foreign = foreignScan(text, userText, names);
-  if (conversation.lang === 'ru' && foreign.latinWords >= 3) add('LANG_EN_IN_RU', text);
-  if (conversation.lang === 'en' && foreign.cyrillic >= 3) add('LANG_RU_IN_EN', text);
-  if (conversation.lang === 'ru' && TOOL_ERROR.test(text) && foreign.latinWords >= 2) add('RAW_TOOL_ERROR_IN_RU', text);
-  // A listed event's clock time must be the user's local time, not the stored UTC one.
-  if (!input.isWrite) {
-    for (const line of text.split('\n')) {
-      for (const event of worldEvents) {
-        if (!line.includes(event.title)) continue;
-        const tokens = (line.match(/\b\d{1,2}:\d{2}\b/g) ?? []).map((token) => token.padStart(5, '0'));
-        const utc = `${String(new Date(event.startMs).getUTCHours()).padStart(2, '0')}:${String(new Date(event.startMs).getUTCMinutes()).padStart(2, '0')}`;
-        const local = hhmm(event.startMs, anchor.tz);
-        if (tokens.length > 0 && !tokens.includes(local) && tokens.includes(utc) && utc !== local)
-          add('UTC_SHOWN_AS_LOCAL', `${event.title}: ${utc} vs ${local}`);
-      }
+  if (lang === 'ru' && foreign.latinWords >= 3) found.push(finding('LANG_EN_IN_RU', text));
+  if (lang === 'en' && foreign.cyrillic >= 3) found.push(finding('LANG_RU_IN_EN', text));
+  if (lang === 'ru' && TOOL_ERROR.test(text) && foreign.latinWords >= 2)
+    found.push(finding('RAW_TOOL_ERROR_IN_RU', text));
+  return found;
+}
+
+/** A listed event's clock time must be the user's local time, not the stored UTC one. */
+function localTimeFindings(text: string, worldEvents: readonly WorldEventView[], tz: string): Finding[] {
+  const found: Finding[] = [];
+  for (const line of text.split('\n')) {
+    for (const event of worldEvents) {
+      if (!line.includes(event.title)) continue;
+      const tokens = (line.match(/\b\d{1,2}:\d{2}\b/g) ?? []).map((token) => token.padStart(5, '0'));
+      const utc = `${String(new Date(event.startMs).getUTCHours()).padStart(2, '0')}:${String(new Date(event.startMs).getUTCMinutes()).padStart(2, '0')}`;
+      const local = hhmm(event.startMs, tz);
+      if (tokens.length > 0 && !tokens.includes(local) && tokens.includes(utc) && utc !== local)
+        found.push(finding('UTC_SHOWN_AS_LOCAL', `${event.title}: ${utc} vs ${local}`));
     }
   }
   return found;
 }
 
-export function rubricFindings(input: RubricInput): Finding[] {
+function messageFindings(message: BotMessage, input: RubricInput, names: readonly string[]): Finding[] {
+  const { conversation, anchor, userTexts, worldEvents } = input;
+  const { text } = message;
+  const userText = userTexts.join(' ');
+  return [
+    ...shapeFindings(text, userText),
+    ...languageFindings(text, userText, conversation.lang, names),
+    ...(input.isWrite ? [] : localTimeFindings(text, worldEvents, anchor.tz)),
+  ];
+}
+
+const EMPTY_CHECKED_FAMILIES: readonly string[] = ['calendar.day', 'calendar.period', 'calendar.count', 'slots.day'];
+
+function readFindings(first: TurnObservation, family: string): Finding[] {
+  const reply = first.messages.map((message) => message.text).join('\n');
+  const calls = first.tools.filter((call) => !call.mutation);
+  const failed = calls.some((call) => !call.ok);
+  if (failed && EMPTY.test(reply)) return [finding('READ_FAILURE_AS_EMPTY', reply)];
+  if (failed || calls.length === 0 || !EMPTY.test(reply) || !EMPTY_CHECKED_FAMILIES.includes(family)) return [];
   const found: Finding[] = [];
+  if (!(MONTH.test(reply) || NUMERIC_DATE.test(reply) || PERIOD_WORD.test(reply)))
+    found.push(finding('EMPTY_NO_CHECKED_DAY', reply));
+  if (!CALENDAR_NAMED.test(reply)) found.push(finding('EMPTY_NO_CALENDAR', reply));
+  return found;
+}
+
+function writeFindings(first: TurnObservation, input: RubricInput): Finding[] {
+  const found: Finding[] = [];
+  const prompt = first.messages.map((message) => message.text).join('\n');
+  if (prompt.trim().length === 0) found.push(finding('CONFIRM_EMPTY', ''));
+  if (input.expected.confirm === 'yes' && input.turns.length > 1) {
+    const last = input.turns[input.turns.length - 1]?.messages.at(-1)?.text ?? '';
+    if (!DONE.test(last)) found.push(finding('RESULT_DOES_NOT_SAY_WHAT_WAS_DONE', last));
+  }
+  return found;
+}
+
+export function rubricFindings(input: RubricInput): Finding[] {
   const names = [
     ...input.worldEvents.map((event) => event.title),
     'Иван',
@@ -112,35 +160,12 @@ export function rubricFindings(input: RubricInput): Finding[] {
     'Марк',
     'Mark',
   ];
-  const all = input.turns.flatMap((turn) => turn.messages);
-  for (const message of all) found.push(...messageFindings(message, input, names));
-  const add = (code: string, detail: string, soft = false) => found.push({ code, detail: detail.slice(0, 140), soft });
+  const found = input.turns
+    .flatMap((turn) => turn.messages)
+    .flatMap((message) => messageFindings(message, input, names));
   const first = input.turns[0];
-  const reply = first?.messages.map((message) => message.text).join('\n') ?? '';
-  if (!input.isWrite && first) {
-    const calls = first.tools.filter((call) => !call.mutation);
-    const failed = calls.some((call) => !call.ok);
-    if (failed && EMPTY.test(reply)) add('READ_FAILURE_AS_EMPTY', reply);
-    if (
-      !failed &&
-      calls.length > 0 &&
-      EMPTY.test(reply) &&
-      ['calendar.day', 'calendar.period', 'calendar.count', 'slots.day'].includes(input.expected.family)
-    ) {
-      if (!(MONTH.test(reply) || NUMERIC_DATE.test(reply) || PERIOD_WORD.test(reply)))
-        add('EMPTY_NO_CHECKED_DAY', reply);
-      if (!CALENDAR_NAMED.test(reply)) add('EMPTY_NO_CALENDAR', reply);
-    }
-  }
-  if (input.isWrite && first) {
-    const prompt = first.messages.map((message) => message.text).join('\n');
-    if (prompt.trim().length === 0) add('CONFIRM_EMPTY', '');
-    if (input.expected.confirm === 'yes' && input.turns.length > 1) {
-      const last = input.turns[input.turns.length - 1]?.messages.at(-1)?.text ?? '';
-      if (!DONE.test(last)) add('RESULT_DOES_NOT_SAY_WHAT_WAS_DONE', last);
-    }
-  }
-  return found;
+  if (!first) return found;
+  return [...found, ...(input.isWrite ? writeFindings(first, input) : readFindings(first, input.expected.family))];
 }
 
 export const hardFindings = (findings: readonly Finding[]): Finding[] => findings.filter((finding) => !finding.soft);

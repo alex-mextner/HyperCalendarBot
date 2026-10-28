@@ -21,22 +21,30 @@ function slice(canon: CanonicalText, from: number, to: number): CanonicalText {
   return { text: canon.text.slice(from, to), spans: canon.spans.slice(from, to) };
 }
 
+function foldCharacter(character: string): string {
+  if (character === 'ё') return 'е';
+  if (character === 'Ё') return 'Е';
+  // A line break reads as " ; ": a pasted "date / time / title" block is one request, but a day word alone on its
+  // line is a list heading and must not bind to the next line's number.
+  return /[\r\n\u2028\u2029]/u.test(character) ? ' ; ' : character;
+}
+
+function trimTrailingPunctuation(canon: CanonicalText): CanonicalText {
+  return slice(canon, 0, canon.text.length - (TRAILING_PUNCTUATION.exec(canon.text)?.[0].length ?? 0));
+}
+
 /** Folds ё/Ё (same length) and strips the noise around a command. */
 export function canonicalize(raw: string): CanonicalText {
   const spans: CanonicalText['spans'] = [];
   let text = '';
   let offset = 0;
   for (const character of raw) {
-    // A line break reads as " ; ": a pasted "date / time / title" block is one request, but a day word alone on its
-    // line is a list heading and must not bind to the next line's number.
-    const folded =
-      character === 'ё' ? 'е' : character === 'Ё' ? 'Е' : /[\r\n\u2028\u2029]/u.test(character) ? ' ; ' : character;
+    const folded = foldCharacter(character);
     for (let unit = 0; unit < folded.length; unit++) spans.push({ start: offset, end: offset + character.length });
     text += folded;
     offset += character.length;
   }
-  let canon: CanonicalText = { text, spans };
-  canon = slice(canon, 0, canon.text.length - (TRAILING_PUNCTUATION.exec(canon.text)?.[0].length ?? 0));
+  let canon = trimTrailingPunctuation({ text, spans });
   canon = slice(canon, LEADING_PUNCTUATION.exec(canon.text)?.[0].length ?? 0, canon.text.length);
   for (let round = 0; round < MAX_FILLER_ROUNDS; round++) {
     const lead = LEADING_FILLER.exec(canon.text);
@@ -45,8 +53,7 @@ export function canonicalize(raw: string): CanonicalText {
     const from = lead && lead[0].length < canon.text.length ? lead[0].length : 0;
     const to = tail ? canon.text.length - tail[0].length : canon.text.length;
     if (to <= from) break;
-    canon = slice(canon, from, to);
-    canon = slice(canon, 0, canon.text.length - (TRAILING_PUNCTUATION.exec(canon.text)?.[0].length ?? 0));
+    canon = trimTrailingPunctuation(slice(canon, from, to));
   }
   return canon;
 }

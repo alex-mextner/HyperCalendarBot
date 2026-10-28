@@ -14,7 +14,7 @@ import {
   today,
   weekdayMondayZero,
 } from './date-time-words.ts';
-import { parseEventPhrase } from './event-phrase.ts';
+import { type EventPhrase, parseEventPhrase } from './event-phrase.ts';
 import { distinctiveStem } from './event-reference.ts';
 import { humanWhen } from './human-time.ts';
 import { normalize } from './normalizer.ts';
@@ -225,50 +225,66 @@ function buildDatetime(
   return formatLocalInstant(start + (binding.plus_minutes ?? 0) * 60_000, timezone);
 }
 
+type EventPhraseBinding = Extract<Binding, { type: 'event_phrase' }>;
+
+function assertSlot(rule: 'require' | 'forbid' | undefined, present: boolean): void {
+  if ((rule === 'require' && !present) || (rule === 'forbid' && present)) fail();
+}
+
+/** Enforces which of day, time, invitee and span the requested shape allows. */
+function assertPhraseShape(binding: EventPhraseBinding, phrase: EventPhrase, hasSpan: boolean): void {
+  assertSlot(binding.date, phrase.date !== null);
+  assertSlot(binding.time, phrase.time !== null);
+  assertSlot(binding.invitee ?? 'forbid', phrase.invitee !== null);
+  if (hasSpan && (binding.span ?? 'forbid') === 'forbid') fail();
+}
+
+/** Start, end and their display text of a phrase that carries both a day and a time. */
+function phraseTiming(
+  binding: EventPhraseBinding,
+  phrase: EventPhrase & { date: string; time: string },
+  evaluation: Evaluation,
+): { [key: string]: WorkflowInputValue } {
+  const { now, userCtx } = evaluation;
+  const day = parseDayPart(phrase.date);
+  const [hour, minute] = phrase.time.split(':').map(Number) as [number, number];
+  const start = uniqueInstant(day, hour, minute, userCtx.timezone);
+  if (binding.future && start <= now.getTime()) fail();
+  let minutes = binding.default_minutes ?? 60;
+  if (phrase.endTime !== null) {
+    const [endHour, endMinute] = phrase.endTime.split(':').map(Number) as [number, number];
+    minutes = Math.round((uniqueInstant(day, endHour, endMinute, userCtx.timezone) - start) / 60_000);
+    if (minutes <= 0) fail();
+  } else if (phrase.durationMinutes !== null) minutes = phrase.durationMinutes;
+  const out: { [key: string]: WorkflowInputValue } = {};
+  out.start = formatLocalInstant(start, userCtx.timezone);
+  out.end = formatLocalInstant(start + minutes * 60_000, userCtx.timezone);
+  out.when_text = humanWhen(out.start, { now, timezone: userCtx.timezone, language: userCtx.language });
+  if (phrase.endTime !== null) out.end_suffix = `–${phrase.endTime}`;
+  return out;
+}
+
 /**
  * One free-form phrase read into the slots of a calendar request. The parser refuses anything ambiguous; here the
  * requested shape (day and time required or forbidden, span, invitee) is enforced and the start and end instants are
  * built in the user's zone, so a time skipped or repeated by a clock change fails before any tool runs.
  */
-function buildEventPhrase(
-  binding: Extract<Binding, { type: 'event_phrase' }>,
-  raw: string,
-  evaluation: Evaluation,
-): WorkflowInputValue {
+function buildEventPhrase(binding: EventPhraseBinding, raw: string, evaluation: Evaluation): WorkflowInputValue {
   const { now, userCtx } = evaluation;
   const reference = binding.reference === true;
   // A day word spelled with one slip ("пятнитцу") is read as the word it is a single edit from; the title is unaffected
   // unless it is itself that close to a command or day word.
   const text = reference ? (repairTypos(canonicalize(raw))?.text ?? raw) : raw;
   const phrase = parseEventPhrase(text, { now, timezone: userCtx.timezone, requireTitle: !reference });
-  const shape = (rule: 'require' | 'forbid' | undefined, present: boolean) => {
-    if ((rule === 'require' && !present) || (rule === 'forbid' && present)) fail();
-  };
-  shape(binding.date, phrase.date !== null);
-  shape(binding.time, phrase.time !== null);
-  shape(binding.invitee ?? 'forbid', phrase.invitee !== null);
   const hasSpan = phrase.endTime !== null || phrase.durationMinutes !== null;
-  if (hasSpan && (binding.span ?? 'forbid') === 'forbid') fail();
+  assertPhraseShape(binding, phrase, hasSpan);
   const out: { [key: string]: WorkflowInputValue } = { title: phrase.title, has_end: hasSpan };
   if (reference) out.ref = parseMention(phrase.title, binding.reject);
   if (phrase.date !== null) out.date = phrase.date;
   if (phrase.time !== null) out.time = phrase.time;
   if (phrase.invitee !== null) out.invitee = phrase.invitee;
   if (phrase.date !== null && phrase.time !== null) {
-    const day = parseDayPart(phrase.date);
-    const [hour, minute] = phrase.time.split(':').map(Number) as [number, number];
-    const start = uniqueInstant(day, hour, minute, userCtx.timezone);
-    if (binding.future && start <= now.getTime()) fail();
-    let minutes = binding.default_minutes ?? 60;
-    if (phrase.endTime !== null) {
-      const [endHour, endMinute] = phrase.endTime.split(':').map(Number) as [number, number];
-      minutes = Math.round((uniqueInstant(day, endHour, endMinute, userCtx.timezone) - start) / 60_000);
-      if (minutes <= 0) fail();
-    } else if (phrase.durationMinutes !== null) minutes = phrase.durationMinutes;
-    out.start = formatLocalInstant(start, userCtx.timezone);
-    out.end = formatLocalInstant(start + minutes * 60_000, userCtx.timezone);
-    out.when_text = humanWhen(out.start, { now, timezone: userCtx.timezone, language: userCtx.language });
-    if (phrase.endTime !== null) out.end_suffix = `–${phrase.endTime}`;
+    return { ...out, ...phraseTiming(binding, { ...phrase, date: phrase.date, time: phrase.time }, evaluation) };
   }
   return out;
 }

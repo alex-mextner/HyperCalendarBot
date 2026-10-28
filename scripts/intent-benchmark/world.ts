@@ -158,6 +158,75 @@ export interface Fixture {
   close: () => void;
 }
 
+type FixtureConversation = Pick<Conversation, 'lang' | 'chat' | 'world' | 'tz' | 'seedEvents' | 'say' | 'real'>;
+type WorldListEntry = { id: number; title: string; startMs: number; durationMin: number };
+
+function registerPeople(users: UserRepository, conversation: FixtureConversation): void {
+  for (const person of PEOPLE)
+    users.create({ telegram_id: person.id, timezone: 'UTC', language: 'en', username: person.username });
+  // Real history: a message that names a @username addresses a person the bot knows (the recorded exchange reached them).
+  const known = new Set(PEOPLE.map((person) => person.username.toLowerCase()));
+  for (const [index, [, handle]] of (conversation.real
+    ? [...conversation.say.matchAll(/@([A-Za-z][A-Za-z0-9_]{4,31})/g)]
+    : []
+  ).entries()) {
+    if (handle === undefined || known.has(handle.toLowerCase())) continue;
+    known.add(handle.toLowerCase());
+    users.create({ telegram_id: 900_000 + index, timezone: 'UTC', language: 'en', username: handle });
+  }
+}
+
+/** Creates the world events, the conversation's own seed events and the contacts; returns the event list. */
+function seedCalendar(
+  events: EventService,
+  contacts: ContactRepository,
+  db: Database,
+  conversation: FixtureConversation,
+  anchor: Anchor,
+): WorldListEntry[] {
+  const group = conversation.chat === 'group';
+  const scope = group ? { owner_type: 'group' as const, group_id: GROUP_CHAT_ID, created_by: USER_ID } : {};
+  const startOf = (event: Pick<WorldEvent, 'dayOffset' | 'at'>): number =>
+    localInstant(anchor.tz, shiftDay(anchor.date, event.dayOffset), event.at);
+  const worldList: WorldListEntry[] = [];
+  if (conversation.world === 'rich') {
+    for (const event of world.events) {
+      const created = events.createEvent({
+        user_id: USER_ID,
+        title: event.title[conversation.lang],
+        start_at: new Date(startOf(event)).toISOString(),
+        end_at: new Date(startOf(event) + event.durationMin * 60_000).toISOString(),
+        timezone: anchor.tz,
+        ...scope,
+      });
+      if (created.id !== event.id) throw new Error(`world event id drift: ${created.id} != ${event.id}`);
+      worldList.push({
+        id: event.id,
+        title: event.title[conversation.lang],
+        startMs: startOf(event),
+        durationMin: event.durationMin,
+      });
+    }
+  }
+  for (const event of conversation.seedEvents ?? []) {
+    const start = startOf(event);
+    const created = events.createEvent({
+      user_id: USER_ID,
+      title: event.title,
+      start_at: new Date(start).toISOString(),
+      end_at: new Date(start + event.durationMin * 60_000).toISOString(),
+      timezone: anchor.tz,
+      ...scope,
+    });
+    // A message that names an event by number ("#643") is only answerable when that number exists.
+    if (event.id !== undefined) db.query('UPDATE events SET id = ? WHERE id = ?').run(event.id, created.id);
+    worldList.push({ id: event.id ?? created.id, title: event.title, startMs: start, durationMin: event.durationMin });
+  }
+  for (const contact of world.contacts)
+    contacts.add(USER_ID, contact.name, contact.username ?? undefined, contact.telegramId ?? undefined);
+  return worldList;
+}
+
 /** `lang`/`chat`/anchor decide the user row, the calendar scope and the frozen clock. */
 export function buildFixture(
   template: RuleSetTemplate,
@@ -177,18 +246,7 @@ export function buildFixture(
     first_name: 'Ann',
     username: 'ann_test',
   });
-  for (const person of PEOPLE)
-    users.create({ telegram_id: person.id, timezone: 'UTC', language: 'en', username: person.username });
-  // Real history: a message that names a @username addresses a person the bot knows (the recorded exchange reached them).
-  const known = new Set(PEOPLE.map((person) => person.username.toLowerCase()));
-  for (const [index, [, handle]] of (conversation.real
-    ? [...conversation.say.matchAll(/@([A-Za-z][A-Za-z0-9_]{4,31})/g)]
-    : []
-  ).entries()) {
-    if (handle === undefined || known.has(handle.toLowerCase())) continue;
-    known.add(handle.toLowerCase());
-    users.create({ telegram_id: 900_000 + index, timezone: 'UTC', language: 'en', username: handle });
-  }
+  registerPeople(users, conversation);
   const eventRepo = new EventRepository(db);
   const events = new EventService({ eventRepo });
   const contacts = new ContactRepository(db);
@@ -197,44 +255,7 @@ export function buildFixture(
   const group = conversation.chat === 'group';
   const chat = group ? GROUP_CHAT_ID : USER_ID;
 
-  const startOf = (event: WorldEvent): number =>
-    localInstant(anchor.tz, shiftDay(anchor.date, event.dayOffset), event.at);
-  const worldList: Array<{ id: number; title: string; startMs: number; durationMin: number }> = [];
-  if (conversation.world === 'rich') {
-    for (const event of world.events) {
-      const created = events.createEvent({
-        user_id: USER_ID,
-        title: event.title[conversation.lang],
-        start_at: new Date(startOf(event)).toISOString(),
-        end_at: new Date(startOf(event) + event.durationMin * 60_000).toISOString(),
-        timezone: anchor.tz,
-        ...(group ? { owner_type: 'group' as const, group_id: GROUP_CHAT_ID, created_by: USER_ID } : {}),
-      });
-      if (created.id !== event.id) throw new Error(`world event id drift: ${created.id} != ${event.id}`);
-      worldList.push({
-        id: event.id,
-        title: event.title[conversation.lang],
-        startMs: startOf(event),
-        durationMin: event.durationMin,
-      });
-    }
-  }
-  for (const event of conversation.seedEvents ?? []) {
-    const start = localInstant(anchor.tz, shiftDay(anchor.date, event.dayOffset), event.at);
-    const created = events.createEvent({
-      user_id: USER_ID,
-      title: event.title,
-      start_at: new Date(start).toISOString(),
-      end_at: new Date(start + event.durationMin * 60_000).toISOString(),
-      timezone: anchor.tz,
-      ...(group ? { owner_type: 'group' as const, group_id: GROUP_CHAT_ID, created_by: USER_ID } : {}),
-    });
-    // A message that names an event by number ("#643") is only answerable when that number exists.
-    if (event.id !== undefined) db.query('UPDATE events SET id = ? WHERE id = ?').run(event.id, created.id);
-    worldList.push({ id: event.id ?? created.id, title: event.title, startMs: start, durationMin: event.durationMin });
-  }
-  for (const contact of world.contacts)
-    contacts.add(USER_ID, contact.name, contact.username ?? undefined, contact.telegramId ?? undefined);
+  const worldList = seedCalendar(events, contacts, db, conversation, anchor);
 
   const sharingSettingsRepo = new SharingSettingsRepository(db);
   const privacyService = new PrivacyService(sharingSettingsRepo);

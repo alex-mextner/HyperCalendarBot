@@ -93,49 +93,58 @@ export function formatDayAnswers(answers: DayAnswer[], context: HumanTimeContext
   return { text: bodies.join('\n\n') };
 }
 
+/** A legacy format's renderer; null when the response is not that format's shape, so the plain text is shown. */
+type LegacyRenderer = (response: string, context: RenderContext) => string | null;
+
+function legacyEventsList(response: string, context: RenderContext): string | null {
+  const events = EventsListCodec.safeParse(response);
+  if (!events.success) return null;
+  if (events.data.length === 0) return wordingFor(context.language).emptyList;
+  return renderAgenda(
+    events.data.map((event, index) => legacyEvent(index, event, context.timezone)),
+    context,
+    'personal',
+  );
+}
+
+function legacyFreeSlots(response: string, context: RenderContext): string | null {
+  const slots = FreeSlotsCodec.safeParse(response);
+  if (!slots.success) return null;
+  return slots.data.length === 0
+    ? `${capitalize(wordingFor(context.language).noFreeWindowsInline)}.`
+    : legacyFreeWindows(slots.data, context);
+}
+
+function legacySearchResults(response: string, context: RenderContext): string | null {
+  const events = SearchResultsCodec.safeParse(response);
+  if (!events.success) return null;
+  if (events.data.length === 0) return wordingFor(context.language).emptyList;
+  return events.data
+    .map((event, index) => {
+      const { date, time } = localStart(event.start_at, context.timezone);
+      return `${index + 1}. ${humanDay(date, context)}, ${time}  ${event.title}`;
+    })
+    .join('\n');
+}
+
+function legacyHolidays(response: string, context: RenderContext): string | null {
+  const holidays = HolidaysCodec.safeParse(response);
+  if (!holidays.success) return null;
+  if (holidays.data.length === 0) return wordingFor(context.language).nothingFound;
+  return holidays.data.map((holiday) => `${humanDay(holiday.date, context)} — ${holiday.name}`).join('\n');
+}
+
+const LEGACY_RENDERERS: { [legacyFormat: string]: LegacyRenderer } = {
+  events_list: legacyEventsList,
+  free_slots: legacyFreeSlots,
+  search_results: legacySearchResults,
+  holidays: legacyHolidays,
+  settings: (response, context) => renderSettingsOutput(response, undefined, context),
+};
+
 function renderLegacy(legacyFormat: string, response: string, context: RenderContext): string {
-  const words = wordingFor(context.language);
-  const plain = (): string => plainAnswer(response, context.language).text;
-  switch (legacyFormat) {
-    case 'events_list': {
-      const events = EventsListCodec.safeParse(response);
-      if (!events.success) return plain();
-      if (events.data.length === 0) return words.emptyList;
-      return renderAgenda(
-        events.data.map((event, index) => legacyEvent(index, event, context.timezone)),
-        context,
-        'personal',
-      );
-    }
-    case 'free_slots': {
-      const slots = FreeSlotsCodec.safeParse(response);
-      if (!slots.success) return plain();
-      return slots.data.length === 0
-        ? `${capitalize(words.noFreeWindowsInline)}.`
-        : legacyFreeWindows(slots.data, context);
-    }
-    case 'search_results': {
-      const events = SearchResultsCodec.safeParse(response);
-      if (!events.success) return plain();
-      if (events.data.length === 0) return words.emptyList;
-      return events.data
-        .map((event, index) => {
-          const { date, time } = localStart(event.start_at, context.timezone);
-          return `${index + 1}. ${humanDay(date, context)}, ${time}  ${event.title}`;
-        })
-        .join('\n');
-    }
-    case 'holidays': {
-      const holidays = HolidaysCodec.safeParse(response);
-      if (!holidays.success) return plain();
-      if (holidays.data.length === 0) return words.nothingFound;
-      return holidays.data.map((holiday) => `${humanDay(holiday.date, context)} — ${holiday.name}`).join('\n');
-    }
-    case 'settings':
-      return renderSettingsOutput(response, undefined, context) ?? plain();
-    default:
-      return plain();
-  }
+  const renderer = Object.hasOwn(LEGACY_RENDERERS, legacyFormat) ? LEGACY_RENDERERS[legacyFormat] : undefined;
+  return renderer?.(response, context) ?? plainAnswer(response, context.language).text;
 }
 
 const capitalize = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
