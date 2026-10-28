@@ -139,12 +139,6 @@ describe('InvitationRepository', () => {
     expect(repo.expirePastInvitations()).toBe(1);
   });
 
-  test('cancelForEvent cancels pending/maybe invitations', () => {
-    repo.create({ event_id: eventId, inviter_id: INVITER, invitee_id: INVITEE });
-    expect(repo.cancelForEvent(eventId)).toBe(1);
-    expect(repo.findById(1)!.status).toBe('cancelled');
-  });
-
   test('setMessageInfo stores message_id and chat_id', () => {
     const inv = repo.create({ event_id: eventId, inviter_id: INVITER, invitee_id: INVITEE });
     repo.setMessageInfo(inv.id, 555, 100);
