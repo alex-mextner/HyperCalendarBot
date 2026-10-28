@@ -3,7 +3,7 @@
 import type { OAuth2Client } from 'google-auth-library';
 import { type calendar_v3, google } from 'googleapis';
 import { syncLogger } from '../../utils/logger.ts';
-import { BOT_EVENT_MARKER } from './event-mapper.ts';
+import { listBotEventCopies } from './bot-event-copies.ts';
 
 export interface CalendarInfo {
   google_calendar_id: string;
@@ -66,26 +66,9 @@ export class GoogleCalendarApi {
     };
   }
 
-  /**
-   * Every live copy of one bot event in a calendar: the events whose private extended property
-   * `hypercalendarbot_event_id` equals `botEventId` (deleted events are not listed by default).
-   * Google filters on the server and may answer a page with fewer items than asked, even none, while
-   * more follow, so every page is read; stopping early would make an existing copy look absent and
-   * the caller would insert a second one.
-   */
+  /** Every live copy of one bot event in a calendar, all result pages (see `listBotEventCopies`). */
   async findBotEventCopies(calendarId: string, botEventId: number): Promise<calendar_v3.Schema$Event[]> {
-    const copies: calendar_v3.Schema$Event[] = [];
-    let pageToken: string | undefined;
-    do {
-      const res = await this.api.events.list({
-        calendarId,
-        privateExtendedProperty: [`${BOT_EVENT_MARKER}=${botEventId}`],
-        pageToken,
-      });
-      copies.push(...(res.data.items ?? []));
-      pageToken = res.data.nextPageToken ?? undefined;
-    } while (pageToken);
-    return copies;
+    return listBotEventCopies(async (query) => (await this.api.events.list(query)).data, calendarId, botEventId);
   }
 
   async insertEvent(calendarId: string, event: calendar_v3.Schema$Event): Promise<calendar_v3.Schema$Event> {

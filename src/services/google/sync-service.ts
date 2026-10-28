@@ -14,7 +14,13 @@ import type { EventChangeNotifier } from '../event/event-change-notifier.ts';
 import { expandRecurrence } from '../event/recurrence.ts';
 import { type GoogleCalendarApi, googleGoneStatus } from './calendar-api.ts';
 import { computeEventDiff, snapshotFromCalendarEvent, snapshotFromGoogleLocal } from './change-detection.ts';
-import { BOT_EVENT_MARKER, type GoogleEvent, googleToLocal, type LocalEventFromGoogle, localToGoogle } from './event-mapper.ts';
+import {
+  BOT_EVENT_MARKER,
+  type GoogleEvent,
+  googleToLocal,
+  type LocalEventFromGoogle,
+  localToGoogle,
+} from './event-mapper.ts';
 import {
   handleParticipantChange,
   handleParticipantDelete,
