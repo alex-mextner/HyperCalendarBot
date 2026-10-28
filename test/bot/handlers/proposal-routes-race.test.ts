@@ -24,7 +24,7 @@ function makeProposal(status: EditProposalStatus): EditProposal {
     created_at: '2026-10-28T00:00:00Z',
     expires_at: null,
     original_values: null,
-    source: 'user',
+    source: 'manual',
     organizer_message_id: null,
     organizer_chat_id: null,
     participant_message_id: null,
@@ -42,8 +42,11 @@ function makeCtx(data: string) {
 
 test('Accept and Reject tapped in the same turn: only the first settles the proposal', async () => {
   let stored = makeProposal('pending');
-  const updateStatus = mock((_id: number, status: EditProposalStatus) => {
+  // Like the real repository: only a pending proposal is updated, and the result says whether it was.
+  const updateStatus = mock((_id: number, status: EditProposalStatus): boolean => {
+    if (stored.status !== 'pending') return false;
     stored = { ...stored, status };
+    return true;
   });
   const updateEvent = mock(() => null);
   const sendMessage = mock(() => Promise.resolve());
