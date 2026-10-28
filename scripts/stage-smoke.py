@@ -276,23 +276,28 @@ class QaCliTransport:
         return message["id"]
 
     @staticmethod
-    def record_incoming(messages, texts, latencies, sent_at):
+    def record_incoming(messages, texts, latencies, send_started_at):
         for item in messages:
             if (
                 item.get("out") is False
             ):  # latest text per id wins, so edited answers replace their first draft
                 texts[item["id"]] = item.get("text") or ""
-                latencies.setdefault(item["id"], time.monotonic() - sent_at)
+                latencies.setdefault(item["id"], time.monotonic() - send_started_at)
 
     async def exchange(self, text, timeout, settle):
-        """Send text; return [(reply text, seconds after send)] once `settle` seconds pass quietly or on timeout."""
+        """Send text; return [(reply text, seconds since the send began)] after `settle` quiet seconds or on timeout.
+
+        The clock starts BEFORE `qa send`, which returns only after Telegram Web confirmed the message,
+        and is never restarted after the confirmation. The latency is therefore the time since the send
+        attempt began (UI send + confirmation + the bot's answer): an upper bound on the reply latency,
+        so a slow bot or a slow confirmation can fail max_first_reply_s (#858).
+        """
         require_one_line(text, "exchange")
-        started = time.monotonic()
+        send_started_at = time.monotonic()
         code, sent = await asyncio.to_thread(
             self.qa, "send", *self.text_flag(text), timeout=timeout
         )
         sent_id = self.sent_message_id(code, sent)
-        sent_at = time.monotonic()
         code, first = await asyncio.to_thread(
             self.qa,
             "wait",
@@ -306,11 +311,11 @@ class QaCliTransport:
         )
         if code != 0 or not first.get("ok"):
             return []  # the answer never came; the case fails on min_replies
-        latency = time.monotonic() - sent_at
+        latency = time.monotonic() - send_started_at
         reply = first["message"]
         texts = {reply["id"]: reply.get("text") or ""}
         latencies = {reply["id"]: latency}
-        deadline = started + timeout
+        deadline = send_started_at + timeout
         last_change = time.monotonic()
         snapshot = frozenset(texts.items())
         while time.monotonic() - last_change < settle and time.monotonic() < deadline:
@@ -320,7 +325,7 @@ class QaCliTransport:
             )
             if code != 0 or not read.get("ok"):
                 continue  # a flaky read must not turn a good answer into a failure; the next poll retries
-            self.record_incoming(read.get("messages", []), texts, latencies, sent_at)
+            self.record_incoming(read.get("messages", []), texts, latencies, send_started_at)
             current = frozenset(texts.items())
             if current != snapshot:
                 snapshot = current

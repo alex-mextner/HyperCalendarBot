@@ -14,8 +14,10 @@
 # stdin after the token line is the client's channel: DONE or EOF ends the wait.
 # stdout carries only the STAGE_READY line and the last line STAGE_QA_RESULT ...; all progress goes
 # to stderr.
-# Exit: 0 passed (DONE/EOF after READY), 1 failed (health/timeout), 2 refused (guard), 3 not
-# provisioned, 75 host lock wait timed out, 76 superseded. The verdict on the cases is the PC's.
+# Exit: 0 passed (DONE/EOF after READY), 1 failed (health/timeout: the PR is wrong), 2 refused (guard),
+# 3 not provisioned, 4 stage could not run (docker load / compose up failed: the cause may be
+# infrastructure or image startup, and there is no test verdict; the report posts `error`), 75 host
+# lock wait timed out, 76 superseded. The verdict on the cases is the PC's.
 # shellcheck disable=SC2329 # the functions below are reached only through traps and step(), which shellcheck cannot see
 set -euo pipefail
 umask 077
@@ -65,6 +67,7 @@ result_status() {
     0) echo passed ;;
     2) echo refused ;;
     3) echo not-provisioned ;;
+    4) echo infra-error ;;
     75) echo lock-timeout ;;
     76) echo superseded ;;
     *) echo failed ;;
@@ -232,7 +235,7 @@ STORE
 
 load_image() { gzip -dc "$WORK/image.tar.gz" | docker load; }
 LOADED=1
-step load_image || die 1 'docker load failed'
+step load_image || die 4 'docker load failed'
 LOADED_ID="$(docker image inspect "$IMAGE_REPO:$SHA" --format '{{.Id}}')"
 [[ "$LOADED_ID" == "$EXPECTED_IMAGE_ID" ]] || die 2 'loaded stage image identity does not match the verified artifact'
 
@@ -256,7 +259,7 @@ bash "$LIB/prepare-runtime-dirs.sh" "$STAGE_DIR"
 
 printf 'services:\n  bot-stage:\n    image: "%s"\n' "$IMAGE_REPO:$SHA" >"$WORK/image.yml"
 STACK_TOUCHED=1
-step compose up -d --no-build --pull never --force-recreate || die 1 'compose up failed'
+step compose up -d --no-build --pull never --force-recreate || die 4 'compose up failed'
 
 step python3 "$LIB/deploy-health.py" wait --container "$CONTAINER" --url "$HEALTH_URL" --mode health \
   --base-budget "$HEALTH_BASE_BUDGET" --hard-cap "$HEALTH_HARD_CAP" --poll "$HEALTH_POLL" \

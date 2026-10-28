@@ -23,7 +23,8 @@
 # runs queue here) -> verify + download -> exec LIB/stage-qa-run.sh, which takes the host deploy
 # lock and runs the stage. The stage lock fd stays open across the exec, so it is held until the
 # run ends. Exit codes and the last stdout line (STAGE_QA_RESULT ...) follow the stage QA contract:
-# 0 passed, 1 failed, 2 refused, 3 not provisioned, 75 lock wait timed out, 76 superseded.
+# 0 passed, 1 failed, 2 refused, 3 not provisioned, 4 stage infrastructure could not run (emitted by
+# the exec'd run script: docker load / compose up failed), 75 lock wait timed out, 76 superseded.
 set -euo pipefail
 umask 077
 
