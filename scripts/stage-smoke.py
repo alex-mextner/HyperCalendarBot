@@ -199,7 +199,9 @@ def telegram_get_me(token):
 
 
 # qa-cli's own wording for a page, a search result or a chat that did not show up in time, all before any text is typed.
-COLD_START_TIMEOUT = re.compile(r"timed out after \d+s waiting for (Telegram Web to load|search result|chat \S+ to open)")
+COLD_START_TIMEOUT = re.compile(
+    r"timed out after \d+s waiting for (Telegram Web to load|search result|chat \S+ to open)"
+)
 
 
 class QaCliTransport:
@@ -301,7 +303,9 @@ class QaCliTransport:
             except ConnectionError:
                 # Only a timeout BEFORE the message is typed is retried: the first call of a run starts a cold
                 # headless browser on a busy host, and nothing was sent. Any other failure may have delivered it.
-                if attempt == self.send_attempts or not COLD_START_TIMEOUT.search(str(sent.get("error", ""))):
+                if attempt == self.send_attempts or not COLD_START_TIMEOUT.search(
+                    str(sent.get("error", ""))
+                ):
                     raise
             await asyncio.sleep(self.retry_delay)
 

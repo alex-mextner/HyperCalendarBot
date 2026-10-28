@@ -3,7 +3,7 @@
 They fail when the pipeline stops running the stage bot and the QA smoke, when the smoke could
 target the production bot, when the case list is empty or loses a scenario, when `gh ship` stops
 requiring the check, or when the production deploy starts depending on the stage again.
-Behaviour of each piece is covered where it lives: test_stage_smoke.py (guards),
+Behaviour of each piece is covered where it lives: test_stage_smoke_guard.py (guards),
 test_stage_fetch_artifact.py (artifact verification), test_odroid_stage_qa.py (the root wrapper),
 test_stage_qa_gate.py (the ship gate), test/regressions/stage-qa-workflows.test.ts (the workflows).
 """
@@ -153,7 +153,10 @@ class SmokeTargetsOnlyTheStageBot(unittest.TestCase):
 
 
 PIDS_CAP = 512
-MEMORY_CAP_FORMS = {"768m", str(768 * 1024 * 1024)}  # Compose spells the same cap differently across versions
+MEMORY_CAP_FORMS = {
+    "768m",
+    str(768 * 1024 * 1024),
+}  # Compose spells the same cap differently across versions
 OVERLAY_TEMPLATE = 'services:\n  bot-stage:\n    image: "{image}"\n'
 
 
@@ -168,8 +171,8 @@ class TheStageComposeCarriesOneProcessCap(unittest.TestCase):
         # render_bot_stage below mirrors compose() in stage-qa-run.sh: keep project name, env file and overlay in sync.
         driver_line = "printf 'services:\\n  bot-stage:\\n    image: \"%s\"\\n'"
         self.assertIn(driver_line, RUN)
-        self.assertIn("-p \"$COMPOSE_PROJECT\"", RUN)
-        self.assertIn("--env-file \"$STAGE_DIR/stage.env\"", RUN)
+        self.assertIn('-p "$COMPOSE_PROJECT"', RUN)
+        self.assertIn('--env-file "$STAGE_DIR/stage.env"', RUN)
 
 
 def docker_compose_available():
@@ -208,12 +211,21 @@ class TheStageComposeRendersWithTheRealCompose(unittest.TestCase):
             overlay = tmp / "image.yml"
             overlay.write_text(OVERLAY_TEMPLATE.format(image="hypercalendarbot-stage:test"))
             command = [
-                "docker", "compose", "-p", "hypercalstage",
-                "--project-directory", tmpdir,
-                "--env-file", str(stage_env),
-                "-f", str(ROOT / "docker-compose.stage.yml"),
-                "-f", str(overlay),
-                "config", "--format", "json",
+                "docker",
+                "compose",
+                "-p",
+                "hypercalstage",
+                "--project-directory",
+                tmpdir,
+                "--env-file",
+                str(stage_env),
+                "-f",
+                str(ROOT / "docker-compose.stage.yml"),
+                "-f",
+                str(overlay),
+                "config",
+                "--format",
+                "json",
             ]
             done = subprocess.run(
                 command,
@@ -221,7 +233,10 @@ class TheStageComposeRendersWithTheRealCompose(unittest.TestCase):
                 text=True,
                 check=False,
                 timeout=60,
-                env={**os.environ, "DOCKER_CONFIG": tmpdir},  # no user credential helpers or contexts
+                env={
+                    **os.environ,
+                    "DOCKER_CONFIG": tmpdir,
+                },  # no user credential helpers or contexts
             )
         self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout)["services"]["bot-stage"]

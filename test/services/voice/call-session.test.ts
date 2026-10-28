@@ -1,4 +1,6 @@
-import { expect, type Mock, mock, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, expect, type Mock, mock, spyOn, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
+import { readdirSync } from 'node:fs';
 import { z } from 'zod';
 import { CallSession, type CallSessionConfig, type CallTurn } from '../../../src/services/voice/call-session.ts';
 import type { FluxStreamingSTTEvents } from '../../../src/services/voice/flux-streaming-stt.ts';
@@ -74,6 +76,47 @@ function makeTtsMock(audio = Buffer.from('audio')) {
   };
 }
 
+/** The real Bun.write, captured before any hook replaces it, so tests can prove it was put back. */
+const originalBunWrite = Bun.write;
+
+/** Every session the current test created; the afterEach hook ends them whether the test passed or threw. */
+const liveSessions: CallSession[] = [];
+
+/** Stands in for the real file write, so no test leaves anything in the shared /tmp. */
+let bunWrite: Mock<typeof Bun.write>;
+
+beforeEach(() => {
+  bunWrite = spyOn(Bun, 'write').mockImplementation(async () => 0);
+});
+
+/**
+ * Ends every live session, which stops its idle timers; ending an ended session is a no-op.
+ * One failing session must not leave the others running, so all are attempted before any failure is thrown.
+ */
+async function endLiveSessions(): Promise<void> {
+  const failures: unknown[] = [];
+  for (const session of liveSessions.splice(0)) {
+    try {
+      await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, 'several call sessions failed to end');
+}
+
+/** Ends sessions, then always restores Bun.write, even when ending a session fails. Safe to call twice. */
+async function disposeFixture(): Promise<void> {
+  try {
+    await endLiveSessions();
+  } finally {
+    bunWrite.mockRestore();
+  }
+}
+
+afterEach(disposeFixture);
+
 function makeSession(overrides: Partial<CallSessionConfig> = {}) {
   const ws = makeWsMock();
   const nova = makeNovaMock();
@@ -92,8 +135,10 @@ function makeSession(overrides: Partial<CallSessionConfig> = {}) {
     agent,
     tts,
     openerText: 'Привет! Чем могу помочь?',
+    unlink: async () => {},
     ...overrides,
   });
+  liveSessions.push(session);
 
   return { session, ws, nova, thinking, agent, tts };
 }
@@ -555,13 +600,14 @@ test('a check-in is dropped and its file removed when the caller starts speaking
   const written = new Promise<void>((resolve) => {
     finishWrite = resolve;
   });
-  const write = spyOn(Bun, 'write').mockImplementation(async () => {
+  bunWrite.mockClear();
+  bunWrite.mockImplementation(async () => {
     await written;
     return 0;
   });
   try {
     await Bun.sleep(20);
-    expect(write).toHaveBeenCalledTimes(1);
+    expect(bunWrite).toHaveBeenCalledTimes(1);
     await session.handleMessage(JSON.stringify({ type: 'VAD_START' }));
     finishWrite();
     await flushPromises();
@@ -571,7 +617,93 @@ test('a check-in is dropped and its file removed when the caller starts speaking
     ]);
     expect(unlink).toHaveBeenCalledWith('/tmp/call-test-session-2.ogg');
   } finally {
-    write.mockRestore();
     await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+  }
+});
+
+/** Real files in the shared /tmp written for one session id; other processes' files never match. */
+function realFilesOfSession(sessionId: string): string[] {
+  return readdirSync('/tmp').filter((name) => name.startsWith(`call-${sessionId}-`));
+}
+
+/** Lets any timer that survived disposal fire; a 1 ms idle timer would tick many times in this window. */
+const QUIET_WINDOW_MS = 30;
+
+test('negative control: a test that throws mid-call still has its session ended, silent and writing nothing', async () => {
+  const sessionId = `test-cleanup-${process.pid}-${randomUUID()}`;
+  const { session, ws, tts } = makeSession({ sessionId, inactivityMs: 1 });
+  const idleTimers: Timer[] = [];
+  const realSetTimeout = globalThis.setTimeout;
+  const setTimeoutSpy = spyOn(globalThis, 'setTimeout').mockImplementation(((
+    ...args: Parameters<typeof setTimeout>
+  ) => {
+    const handle = realSetTimeout(...args);
+    if (args[1] === 1) idleTimers.push(handle);
+    return handle;
+  }) as typeof setTimeout);
+  const clearTimeoutSpy = spyOn(globalThis, 'clearTimeout');
+  try {
+    // Same path a failed assertion takes: the opener finishes, which arms the 1 ms idle timer, and then
+    // the test body throws before it ever sends CALL_ENDED.
+    await expect(
+      (async () => {
+        await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+        await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+        throw new Error('simulated failed assertion');
+      })(),
+    ).rejects.toThrow('simulated failed assertion');
+    expect(liveSessions).toContain(session);
+    const armed = idleTimers.at(-1);
+    expect(armed).toBeDefined();
+
+    await disposeFixture();
+    expect(liveSessions).toEqual([]);
+    expect(Bun.write).toBe(originalBunWrite);
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(armed);
+  } finally {
+    setTimeoutSpy.mockRestore();
+    clearTimeoutSpy.mockRestore();
+  }
+  const synthesized = tts.synthesize.mock.calls.length;
+  const written = bunWrite.mock.calls.length;
+  const sent = ws.send.mock.calls.length;
+  await Bun.sleep(QUIET_WINDOW_MS);
+
+  expect(tts.synthesize).toHaveBeenCalledTimes(synthesized);
+  expect(bunWrite).toHaveBeenCalledTimes(written);
+  expect(ws.send).toHaveBeenCalledTimes(sent);
+  expect(realFilesOfSession(sessionId)).toEqual([]);
+});
+
+test('negative control: one session failing to end does not stop the others being ended', async () => {
+  const runId = `test-cleanup-${process.pid}-${randomUUID()}`;
+  const first = makeSession({ sessionId: `${runId}-a`, inactivityMs: 1 });
+  const second = makeSession({ sessionId: `${runId}-b`, inactivityMs: 1 });
+  await first.session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  await second.session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+
+  const secondHandle = spyOn(second.session, 'handleMessage');
+  const failure = new Error('first session refused to end');
+  const firstHandle = spyOn(first.session, 'handleMessage').mockRejectedValueOnce(failure);
+  try {
+    await expect(disposeFixture()).rejects.toBe(failure);
+    expect(liveSessions).toEqual([]);
+    expect(Bun.write).toBe(originalBunWrite);
+    expect(secondHandle).toHaveBeenCalledWith(JSON.stringify({ type: 'CALL_ENDED' }));
+
+    const synthesized = second.tts.synthesize.mock.calls.length;
+    const written = bunWrite.mock.calls.length;
+    const sent = second.ws.send.mock.calls.length;
+    await Bun.sleep(QUIET_WINDOW_MS);
+
+    // The second session received CALL_ENDED despite the first one's failure, so it stays silent.
+    expect(second.tts.synthesize).toHaveBeenCalledTimes(synthesized);
+    expect(bunWrite).toHaveBeenCalledTimes(written);
+    expect(second.ws.send).toHaveBeenCalledTimes(sent);
+    expect(realFilesOfSession(runId)).toEqual([]);
+  } finally {
+    firstHandle.mockRestore();
+    secondHandle.mockRestore();
+    await first.session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
   }
 });
