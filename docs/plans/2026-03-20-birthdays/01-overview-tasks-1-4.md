@@ -539,6 +539,7 @@ stdout: JSON object { "<user_id>": {"day": N, "month": N, "year": N} | null, ...
 Exit 0: success (partial results ok — unresolvable users omitted, not set to null)
 Exit 1: hard failure (session error, flood wait exceeded limit)
 """
+
 import sys
 import os
 import json
@@ -561,12 +562,12 @@ async def fetch(user_ids: list[int]) -> dict:
             for attempt in range(2):
                 try:
                     user = await app.get_users(uid)
-                    bd = getattr(user, 'birthday', None)
+                    bd = getattr(user, "birthday", None)
                     if bd is None:
                         results[str(uid)] = None
                     else:
                         entry: dict = {"day": bd.day, "month": bd.month}
-                        if getattr(bd, 'year', None):
+                        if getattr(bd, "year", None):
                             entry["year"] = bd.year
                         results[str(uid)] = entry
                     break
