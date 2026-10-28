@@ -132,7 +132,7 @@ done < <(emit_lines)
 
 echo "[leftover] $violations blocking, $warnings warning(s)." >&2
 [ "$violations" = "0" ] || {
-  echo "[leftover] FAIL — remove the leftovers above (or reference a ticket on the TODO)." >&2
+  echo "[leftover] FAIL — remove the leftovers above (or reference a ticket on the task marker)." >&2
   exit 1
 }
 echo "[leftover] PASS."
