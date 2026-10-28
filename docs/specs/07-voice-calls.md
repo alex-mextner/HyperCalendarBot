@@ -2,6 +2,8 @@
 
 > **2026-09-30:** restored behind `ServiceTier`, no service sends (#753). As implemented, `CallManager` places calls with `scripts/voice-call-bridge.py` (Pyrogram + patched ntgcalls, see `voice-calls-patch.md`) on the MTProto service tier, only while that tier is enabled — otherwise `make_call` is hidden and no call queue runs. `DISABLE_VOICE=true` opts out; live-call STT needs `DEEPGRAM_API_KEY`. The service account only places calls and never sends messages; a failed call is reported to the user by the bot (Bot API). The `@mtcute`, Mini App and voice-note approaches below are the historical design.
 
+> **2026-10-28:** Runpod was removed (owner order tg#25309). There is no Runpod STT provider, pre-warmer or cold-start analytics in `src/`; live-call STT is Deepgram Flux (`src/services/voice/flux-streaming-stt.ts`). Every Runpod, pre-warm, `provider: 'runpod'` and HuggingFace-STT passage below (§6 and the cost, risk and checklist lines) is the historical design and no longer applies.
+
 ## Status: Design Spec (Draft)
 
 ---
