@@ -6,9 +6,11 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
+import runpy
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -19,13 +21,19 @@ ROOT = Path(__file__).resolve().parents[2]
 SERVICE_ID = 5000000001
 
 
+def run_source(tree, namespace):
+    """Run the parsed module in a temp file (runpy, not exec) and return its globals."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "snippet.py"
+        path.write_text(ast.unparse(ast.fix_missing_locations(tree)))
+        return runpy.run_path(str(path), init_globals=namespace)
+
+
 def consumer_source(name):
     source = (ROOT / "scripts" / name).read_text()
     if name.endswith(".sh"):
         source = source.split("python3 << 'PYEOF'\n", 1)[1].split("\nPYEOF", 1)[0]
-        source = source.replace("${USER_ID}", "42").replace(
-            "${AUDIO}", "/synthetic.wav"
-        )
+        source = source.replace("${USER_ID}", "42").replace("${AUDIO}", "/synthetic.wav")
     return source
 
 
@@ -132,24 +140,23 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
 
         tree = ast.parse(consumer_source(name), filename=name)
         entry = next(
-            n
-            for n in tree.body
-            if isinstance(n, ast.AsyncFunctionDef) and n.name == "main"
+            n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "main"
         )
-        namespace = dict(
-            Client=Client,
-            PyTgCalls=Calls,
-            start_service_session=start_service_session,
-            asyncio=asyncio,
-            sys=SimpleNamespace(argv=["script", "42"]),
-            os=os,
-            json=json,
-            API_ID=123,
-            API_HASH="synthetic",
-            session_lock=contextlib.nullcontext,
-        )
-        exec(
-            compile(ast.Module(body=[entry], type_ignores=[]), name, "exec"), namespace
+        namespace = run_source(
+            ast.Module(body=[entry], type_ignores=[]),
+            {
+                "Client": Client,
+                "PyTgCalls": Calls,
+                "start_service_session": start_service_session,
+                "asyncio": asyncio,
+                "sys": SimpleNamespace(argv=["script", "42"]),
+                "os": os,
+                "json": json,
+                "API_ID": 123,
+                "API_HASH": "synthetic",
+                "session_lock": contextlib.nullcontext,
+                "contextlib": contextlib,
+            },
         )
         with (
             patch.dict(
@@ -164,18 +171,16 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
             patch.dict(
                 sys.modules,
                 {
-                    "mtproto_lock": SimpleNamespace(
-                        session_lock=contextlib.nullcontext
-                    ),
+                    "mtproto_lock": SimpleNamespace(session_lock=contextlib.nullcontext),
                     "pyrogram": SimpleNamespace(Client=Client),
                 },
             ),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             try:
-                await namespace["main"](
-                    42
-                ) if name == "get-user-info.py" else await namespace["main"]()
+                await namespace["main"](42) if name == "get-user-info.py" else await namespace[
+                    "main"
+                ]()
             except (ValueError, OperationFailure):
                 pass
         return events
@@ -214,9 +219,7 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
             "get-user-info.py",
         ]:
             with self.subTest(consumer=name):
-                self.assertEqual(
-                    await self.run_consumer(name, SERVICE_ID, expected=0), []
-                )
+                self.assertEqual(await self.run_consumer(name, SERVICE_ID, expected=0), [])
 
     async def test_unauthorized_service_never_initializes(self):
         for name in [
@@ -272,11 +275,23 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(creates_voice_caller_client(other))
         imported = ast.parse("from service_session import start_service_session")
         self.assertTrue(imports_start_service_session(imported))
-        self.assertFalse(imports_start_service_session(ast.parse("from service_session import other")))
-        self.assertFalse(imports_start_service_session(ast.parse("from elsewhere import start_service_session")))
-        self.assertFalse(imports_start_service_session(ast.parse("def f():\n    from service_session import start_service_session")))
-        self.assertTrue(calls_start_service_session(calls_of(ast.parse("start_service_session(app)"))))
-        self.assertFalse(calls_start_service_session(calls_of(ast.parse("app.start_service_session()"))))
+        self.assertFalse(
+            imports_start_service_session(ast.parse("from service_session import other"))
+        )
+        self.assertFalse(
+            imports_start_service_session(ast.parse("from elsewhere import start_service_session"))
+        )
+        self.assertFalse(
+            imports_start_service_session(
+                ast.parse("def f():\n    from service_session import start_service_session")
+            )
+        )
+        self.assertTrue(
+            calls_start_service_session(calls_of(ast.parse("start_service_session(app)")))
+        )
+        self.assertFalse(
+            calls_start_service_session(calls_of(ast.parse("app.start_service_session()")))
+        )
         self.assertTrue(drives_app_lifecycle(calls_of(ast.parse("app.start()"))))
         self.assertTrue(drives_app_lifecycle(calls_of(ast.parse("app.disconnect()"))))
         self.assertFalse(drives_app_lifecycle(calls_of(ast.parse("app.get_me()\nother.start()"))))

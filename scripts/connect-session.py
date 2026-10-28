@@ -10,9 +10,12 @@ Subcommands:
 Exit codes: 0 = success, 1 = known error (JSON on stdout), 2 = unexpected error.
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -26,6 +29,8 @@ from pyrogram.errors import (
     PhoneNumberInvalid,
     SessionPasswordNeeded,
 )
+
+logger = logging.getLogger("connect-session")
 
 API_ID = int(os.environ.get("MTPROTO_API_ID", "0"))
 API_HASH = os.environ.get("MTPROTO_API_HASH", "")
@@ -75,9 +80,7 @@ async def relay_two_factor_passwords(client: Client) -> None:
             break
 
 
-async def sign_in_with_code(
-    client: Client, phone: str, phone_code_hash: str, code: str
-) -> None:
+async def sign_in_with_code(client: Client, phone: str, phone_code_hash: str, code: str) -> None:
     try:
         await client.sign_in(phone, phone_code_hash, code)
         print(json.dumps({"status": "ok"}))
@@ -158,7 +161,7 @@ async def cmd_log_out(args: argparse.Namespace) -> None:
         print(json.dumps({"status": "ok"}))
     except Exception as e:
         print(error_json("LOG_OUT_FAILED", str(e)))
-        sys.exit(1)
+        raise SystemExit(1) from e
     finally:
         await client.storage.save()
         await client.disconnect()
@@ -222,6 +225,7 @@ async def disconnect_quietly(client: Client) -> None:
             f"Session query cleanup: {type(cleanup_error).__name__}",
             file=sys.stderr,
         )
+        logger.debug("disconnect failed", exc_info=True)
 
 
 async def cmd_get_authorizations(args: argparse.Namespace) -> None:
@@ -235,7 +239,7 @@ async def cmd_get_authorizations(args: argparse.Namespace) -> None:
         print(json.dumps({"authorizations": result}))
     except Exception as e:
         print(authorization_failure_json(e))
-        sys.exit(1)
+        raise SystemExit(1) from e
     finally:
         await disconnect_quietly(client)
 
@@ -270,7 +274,7 @@ def main() -> None:
         asyncio.run(commands[args.command](args))
     except Exception as e:
         print(error_json("UNEXPECTED", str(e)), file=sys.stderr)
-        sys.exit(2)
+        raise SystemExit(2) from e
 
 
 if __name__ == "__main__":

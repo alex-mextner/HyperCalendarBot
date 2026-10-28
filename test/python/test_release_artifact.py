@@ -5,8 +5,8 @@ import hashlib
 import importlib.util
 import io
 import json
-import tempfile
 import tarfile
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -42,18 +42,17 @@ class ArtifactTests(unittest.TestCase):
             {
                 "architecture": arch,
                 "os": "linux",
-                "config": {
-                    "Labels": {
-                        "org.opencontainers.image.revision": revision or self.sha
-                    }
-                },
+                "config": {"Labels": {"org.opencontainers.image.revision": revision or self.sha}},
                 "rootfs": {"type": "layers", "diff_ids": ["sha256:" + "c" * 64]},
             }
         ).encode()
         members, manifest_id = docker_save_members(tag or self.tag, config)
         if bad_digest:
             members = [
-                (name.replace(digest(config)[7:], "f" * 64), data.replace(digest(config)[7:].encode(), b"f" * 64))
+                (
+                    name.replace(digest(config)[7:], "f" * 64),
+                    data.replace(digest(config)[7:].encode(), b"f" * 64),
+                )
                 for name, data in members
             ]
         if duplicate:
@@ -82,10 +81,22 @@ class ArtifactTests(unittest.TestCase):
         # loaded image's .Id as sha256:f0828776…, the manifest index.json names (#784).
         revision = "11bb45f709a2669dd86d65a0df0ab6dfb77eb5fc"
         target = Path(self.tmp.name) / "image.tar.gz"
-        target.write_bytes(gzip.compress((ROOT / "test/python/fixtures/release-11bb45f7-metadata.tar").read_bytes()))
-        result = self.module.inspect_archive(target, revision, "ghcr.io/alex-mextner/hypercalendarbot:" + revision)
-        self.assertEqual(result["config_digest"], "sha256:37e137874b54ddd9d3f77006dbf94a0b7b8fcb591ddf0de50b97fbf5429631a2")
-        self.assertEqual(result["manifest_digest"], "sha256:f082877686a7f43cb915a9a265ba3aa23a4bdb6f1a1433f9a786b52d8f6b266a")
+        target.write_bytes(
+            gzip.compress(
+                (ROOT / "test/python/fixtures/release-11bb45f7-metadata.tar").read_bytes()
+            )
+        )
+        result = self.module.inspect_archive(
+            target, revision, "ghcr.io/alex-mextner/hypercalendarbot:" + revision
+        )
+        self.assertEqual(
+            result["config_digest"],
+            "sha256:37e137874b54ddd9d3f77006dbf94a0b7b8fcb591ddf0de50b97fbf5429631a2",
+        )
+        self.assertEqual(
+            result["manifest_digest"],
+            "sha256:f082877686a7f43cb915a9a265ba3aa23a4bdb6f1a1433f9a786b52d8f6b266a",
+        )
 
     def test_rejects_wrong_revision_arch_tag_digest_and_duplicate(self):
         for args in [
@@ -123,7 +134,9 @@ class ArtifactTests(unittest.TestCase):
 
         def rewrite_manifest(members):
             # A manifest blob, correctly named by its own digest, for some other config.
-            other = json.dumps({"schemaVersion": 2, "config": {"digest": "sha256:" + "e" * 64}}).encode()
+            other = json.dumps(
+                {"schemaVersion": 2, "config": {"digest": "sha256:" + "e" * 64}}
+            ).encode()
             index_at = next(i for i, m in enumerate(members) if m[0] == "index.json")
             index = json.loads(members[index_at][1])
             index["manifests"][0].update(digest=digest(other), size=len(other))
@@ -133,7 +146,9 @@ class ArtifactTests(unittest.TestCase):
         def tamper_manifest(members):
             # Same name and size, different bytes: the indexed digest no longer matches.
             return [
-                (name, data.replace(b'"schemaVersion": 2', b'"schemaVersion": 3')) if is_image_manifest((name, data)) else (name, data)
+                (name, data.replace(b'"schemaVersion": 2', b'"schemaVersion": 3'))
+                if is_image_manifest((name, data))
+                else (name, data)
                 for name, data in members
             ]
 
@@ -156,7 +171,10 @@ class ArtifactTests(unittest.TestCase):
         cases = {
             "no oci-layout": (drop("oci-layout"), "Missing artifact member"),
             "no index.json": (drop("index.json"), "Missing artifact member"),
-            "manifest blob missing": (lambda members: [m for m in members if not is_image_manifest(m)], "Missing artifact member"),
+            "manifest blob missing": (
+                lambda members: [m for m in members if not is_image_manifest(m)],
+                "Missing artifact member",
+            ),
             "two indexed images": (rewrite_index(second), "Exactly one indexed image"),
             "indexed image is an index": (rewrite_index(nested), "single image manifest"),
             "indexed for another tag": (rewrite_index(other_name), "Indexed image tag mismatch"),
@@ -213,7 +231,9 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(result["image_ref"], self.tag)
         self.assertEqual(result["os"], "linux")
         with tarfile.open(archive) as tar:
-            self.assertEqual(result["image_bytes"], sum(m.size for m in tar.getmembers() if m.isfile()))
+            self.assertEqual(
+                result["image_bytes"], sum(m.size for m in tar.getmembers() if m.isfile())
+            )
 
     def test_rejects_malformed_docker_manifest_for_its_own_reason(self):
         tag = self.tag
@@ -225,9 +245,18 @@ class ArtifactTests(unittest.TestCase):
             "two tags": ([{"RepoTags": [tag, tag], "Config": "x"}], "Artifact tag mismatch"),
             "no config path": ([{"RepoTags": [tag]}], "Missing config path"),
             "config path not a string": ([{"RepoTags": [tag], "Config": 7}], "Missing config path"),
-            "config path absolute": ([{"RepoTags": [tag], "Config": "/etc/passwd"}], "Unsafe artifact member path"),
-            "config path escapes": ([{"RepoTags": [tag], "Config": "../x"}], "Unsafe artifact member path"),
-            "config member missing": ([{"RepoTags": [tag], "Config": "blobs/none"}], "Missing artifact member"),
+            "config path absolute": (
+                [{"RepoTags": [tag], "Config": "/etc/passwd"}],
+                "Unsafe artifact member path",
+            ),
+            "config path escapes": (
+                [{"RepoTags": [tag], "Config": "../x"}],
+                "Unsafe artifact member path",
+            ),
+            "config member missing": (
+                [{"RepoTags": [tag], "Config": "blobs/none"}],
+                "Missing artifact member",
+            ),
         }
         for label, (manifest, reason) in cases.items():
             with self.subTest(label):
@@ -237,7 +266,10 @@ class ArtifactTests(unittest.TestCase):
 
     def test_rejects_json_members_that_are_not_small_regular_files(self):
         config_path = "blobs/sha256/" + digest(b"{}")[7:]
-        manifest = ("manifest.json", json.dumps([{"Config": config_path, "RepoTags": [self.tag]}]).encode())
+        manifest = (
+            "manifest.json",
+            json.dumps([{"Config": config_path, "RepoTags": [self.tag]}]).encode(),
+        )
         oversized = b" " * (self.module.MAX_JSON_BYTES + 1)
         cases = {
             "empty config": [manifest, (config_path, b"")],
@@ -270,13 +302,22 @@ class ArtifactTests(unittest.TestCase):
         base = {"architecture": "arm64", "os": "linux"}
         cases = {
             "config is a list": ([], "Expected a Linux arm64 artifact"),
-            "other os": ({"architecture": "arm64", "os": "windows", "config": label}, "Expected a Linux arm64 artifact"),
-            "no os": ({"architecture": "arm64", "config": label}, "Expected a Linux arm64 artifact"),
+            "other os": (
+                {"architecture": "arm64", "os": "windows", "config": label},
+                "Expected a Linux arm64 artifact",
+            ),
+            "no os": (
+                {"architecture": "arm64", "config": label},
+                "Expected a Linux arm64 artifact",
+            ),
             "runtime absent": (base, "Artifact revision mismatch"),
             "runtime null": ({**base, "config": None}, "Artifact revision mismatch"),
             "runtime not an object": ({**base, "config": 5}, "Artifact revision mismatch"),
             "labels null": ({**base, "config": {"Labels": None}}, "Artifact revision mismatch"),
-            "labels without revision": ({**base, "config": {"Labels": {}}}, "Artifact revision mismatch"),
+            "labels without revision": (
+                {**base, "config": {"Labels": {}}},
+                "Artifact revision mismatch",
+            ),
         }
         for name, (config, reason) in cases.items():
             with self.subTest(name):
@@ -314,16 +355,46 @@ class ArtifactTests(unittest.TestCase):
             return lambda d: d.update(digest=value)
 
         cases = {
-            "layout version": (rewrite("oci-layout", lambda _: b'{"imageLayoutVersion": "2.0.0"}'), "Missing OCI image layout"),
-            "layout not an object": (rewrite("oci-layout", lambda _: b"[]"), "Missing OCI image layout"),
-            "index not an object": (rewrite("index.json", lambda _: b"[]"), "Exactly one indexed image"),
-            "manifests not a list": (rewrite("index.json", index_with(lambda i: {"manifests": {}})), "Exactly one indexed image"),
-            "descriptor not an object": (rewrite("index.json", index_with(lambda i: {"manifests": ["x"]})), "Invalid index descriptor"),
-            "annotations not an object": (rewrite("index.json", index_with(descriptor(lambda d: d.update(annotations=[])))), "Indexed image tag mismatch"),
-            "no media type": (rewrite("index.json", index_with(descriptor(lambda d: d.pop("mediaType")))), "single image manifest"),
-            "digest not a string": (rewrite("index.json", index_with(descriptor(set_digest(5)))), "Invalid manifest digest"),
-            "digest malformed": (rewrite("index.json", index_with(descriptor(set_digest("sha256:abc")))), "Invalid manifest digest"),
-            "digest uppercase": (rewrite("index.json", index_with(descriptor(set_digest("sha256:" + "A" * 64)))), "Invalid manifest digest"),
+            "layout version": (
+                rewrite("oci-layout", lambda _: b'{"imageLayoutVersion": "2.0.0"}'),
+                "Missing OCI image layout",
+            ),
+            "layout not an object": (
+                rewrite("oci-layout", lambda _: b"[]"),
+                "Missing OCI image layout",
+            ),
+            "index not an object": (
+                rewrite("index.json", lambda _: b"[]"),
+                "Exactly one indexed image",
+            ),
+            "manifests not a list": (
+                rewrite("index.json", index_with(lambda i: {"manifests": {}})),
+                "Exactly one indexed image",
+            ),
+            "descriptor not an object": (
+                rewrite("index.json", index_with(lambda i: {"manifests": ["x"]})),
+                "Invalid index descriptor",
+            ),
+            "annotations not an object": (
+                rewrite("index.json", index_with(descriptor(lambda d: d.update(annotations=[])))),
+                "Indexed image tag mismatch",
+            ),
+            "no media type": (
+                rewrite("index.json", index_with(descriptor(lambda d: d.pop("mediaType")))),
+                "single image manifest",
+            ),
+            "digest not a string": (
+                rewrite("index.json", index_with(descriptor(set_digest(5)))),
+                "Invalid manifest digest",
+            ),
+            "digest malformed": (
+                rewrite("index.json", index_with(descriptor(set_digest("sha256:abc")))),
+                "Invalid manifest digest",
+            ),
+            "digest uppercase": (
+                rewrite("index.json", index_with(descriptor(set_digest("sha256:" + "A" * 64)))),
+                "Invalid manifest digest",
+            ),
         }
         for label, (edit, reason) in cases.items():
             with self.subTest(label):

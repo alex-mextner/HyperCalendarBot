@@ -24,11 +24,11 @@ reason=<text>` line. Exit 0 ok, 3 dead, 4 unhealthy (alive, never became healthy
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 READY_OK = ("ok", "ok (unverified)")
 
@@ -39,7 +39,9 @@ def sanitize(text):
 
 def sh(cmd, timeout=30):
     try:
-        done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, errors="replace")
+        done = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, errors="replace", check=False
+        )
     except (OSError, subprocess.TimeoutExpired):
         return 1, ""
     return done.returncode, done.stdout
@@ -59,8 +61,14 @@ def container_state(name):
     """(state dict, restart count); (MISSING, 0) when docker says there is no such container, (UNKNOWN, 0)
     for any other failure to read it (daemon unreachable, timeout, garbled answer)."""
     try:
-        done = subprocess.run(["docker", "inspect", "--format", "{{json .State}}|{{.RestartCount}}", name],
-                              capture_output=True, text=True, timeout=30, errors="replace")
+        done = subprocess.run(
+            ["docker", "inspect", "--format", "{{json .State}}|{{.RestartCount}}", name],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            errors="replace",
+            check=False,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return UNKNOWN, 0
     if done.returncode != 0:
@@ -93,9 +101,11 @@ def host_saturated(proc_dir, io_threshold, load_factor):
     """True while the host is I/O-bound or overloaded (the situation that made 06a32c61 slow)."""
     try:
         for line in (Path(proc_dir) / "pressure/io").read_text().splitlines():
-            if line.startswith("some"):
-                if float(re.search(r"avg10=([0-9.]+)", line).group(1)) >= io_threshold:
-                    return True
+            if (
+                line.startswith("some")
+                and float(re.search(r"avg10=([0-9.]+)", line).group(1)) >= io_threshold
+            ):
+                return True
     except (OSError, AttributeError, ValueError):
         pass
     try:
@@ -107,7 +117,9 @@ def host_saturated(proc_dir, io_threshold, load_factor):
 
 def result(code, verdict, health, ready, reason, started):
     elapsed = int(time.monotonic() - started)
-    print(f"RESULT verdict={verdict} health={sanitize(health)} ready={sanitize(ready)} elapsed={elapsed}s reason={reason}")
+    print(
+        f"RESULT verdict={verdict} health={sanitize(health)} ready={sanitize(ready)} elapsed={elapsed}s reason={reason}"
+    )
     return code
 
 
@@ -166,7 +178,9 @@ class HealthWait:
         if code is not None:
             return code
         if restarts != self.seen_restarts:
-            self.ok_since = None  # a single restart is not yet a loop, but it restarts the stability window
+            self.ok_since = (
+                None  # a single restart is not yet a loop, but it restarts the stability window
+            )
             self.seen_restarts = restarts
         self._probe_endpoints(state, now)
         if self._is_healthy():
@@ -184,7 +198,9 @@ class HealthWait:
         # only a persistent failure to read it is a verdict.
         self.unknown_streak += 1
         if self.unknown_streak >= UNKNOWN_LIMIT:
-            return self.finish(4, "unhealthy", f"docker inspect failed {self.unknown_streak} times in a row")
+            return self.finish(
+                4, "unhealthy", f"docker inspect failed {self.unknown_streak} times in a row"
+            )
         return None
 
     def _container_verdict(self, state, restarts):
@@ -194,10 +210,15 @@ class HealthWait:
         if state.get("OOMKilled"):
             return self.finish(3, "dead", "container was OOM-killed")
         if state.get("Restarting") or (restarts - self.baseline_restarts) >= 2:
-            return self.finish(3, "dead", f"crash loop (restart count {self.baseline_restarts}->{restarts})")
+            return self.finish(
+                3, "dead", f"crash loop (restart count {self.baseline_restarts}->{restarts})"
+            )
         if state and not state.get("Running"):
             return self.finish(
-                3, "dead", f"container is {state.get('Status', 'not running')} exit_code={state.get('ExitCode', '?')}")
+                3,
+                "dead",
+                f"container is {state.get('Status', 'not running')} exit_code={state.get('ExitCode', '?')}",
+            )
         return None
 
     def _probe_endpoints(self, state, now):
@@ -205,7 +226,9 @@ class HealthWait:
         base = self.base
         self.ready = probe(f"{base}/ready") if self.args.mode != "health" else self.ready
         marker = log_marker(self.args.container)
-        docker_health = state.get("Health", {}).get("Status") if isinstance(state.get("Health"), dict) else None
+        docker_health = (
+            state.get("Health", {}).get("Status") if isinstance(state.get("Health"), dict) else None
+        )
         shape = (bool(self.health), bool(self.ready), docker_health)
         if marker != self.last_marker or shape != self.last_code_shape:
             self.last_progress = now
@@ -223,7 +246,10 @@ class HealthWait:
             return self.finish(3, "dead", f"{fatal} fatal (level>=60) log lines since start")
         if errors > self.args.max_error_logs:
             return self.finish(
-                4, "unhealthy", f"{errors} level>=50 log lines since start (limit {self.args.max_error_logs})")
+                4,
+                "unhealthy",
+                f"{errors} level>=50 log lines since start (limit {self.args.max_error_logs})",
+            )
         note = f"{errors} level>=50 log lines since start" if errors else "no level>=50 log lines"
         return self.finish(0, "ok", f"stable for {self.args.stable}s, {note}")
 
@@ -235,17 +261,28 @@ class HealthWait:
         if elapsed >= args.hard_cap:
             return self.finish(4, "unhealthy", f"hard cap {args.hard_cap}s reached")
         if not (saturated and progressing):
-            why = "host not saturated" if not saturated else f"no progress for {int(now - self.last_progress)}s"
+            why = (
+                "host not saturated"
+                if not saturated
+                else f"no progress for {int(now - self.last_progress)}s"
+            )
             return self.finish(
-                4, "unhealthy", f"not healthy after {int(elapsed)}s of {args.base_budget}s budget ({why})")
+                4,
+                "unhealthy",
+                f"not healthy after {int(elapsed)}s of {args.base_budget}s budget ({why})",
+            )
         if elapsed - self.last_report >= 20 or self.last_report == 0:
-            print(f"HEALTH extended past the {args.base_budget}s budget at {int(elapsed)}s: host saturated, container alive and progressing")
+            print(
+                f"HEALTH extended past the {args.base_budget}s budget at {int(elapsed)}s: host saturated, container alive and progressing"
+            )
             self.last_report = elapsed
         return None
 
     def _report_progress(self, elapsed, restarts):
         if elapsed - self.last_report >= 20:
-            print(f"HEALTH t={int(elapsed)}s health={sanitize(self.health)} ready={sanitize(self.ready)} restarts={restarts}")
+            print(
+                f"HEALTH t={int(elapsed)}s health={sanitize(self.health)} ready={sanitize(self.ready)} restarts={restarts}"
+            )
             self.last_report = elapsed
 
 

@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,7 +26,9 @@ SHIPPED_WITH_CLOSE_SHAPED_LINE = SHIPPED.replace(
 
 
 def doc(name="002_y", rollback="yes", deletion="no", body="Creates table y.\n"):
-    front = f"---\nmigration: {name}\nrollback-compatible: {rollback}\ndata-deletion: {deletion}\n---\n"
+    front = (
+        f"---\nmigration: {name}\nrollback-compatible: {rollback}\ndata-deletion: {deletion}\n---\n"
+    )
     return (front + "\n# Migration\n\n" + body).encode()
 
 
@@ -34,8 +37,12 @@ def sha(data: bytes) -> str:
 
 
 def load_gate():
-    spec = importlib.util.spec_from_file_location("migration_gate", ROOT / "scripts/migration-gate.py")
+    spec = importlib.util.spec_from_file_location(
+        "migration_gate", ROOT / "scripts/migration-gate.py"
+    )
     module = importlib.util.module_from_spec(spec)
+    # dataclasses resolve string annotations through sys.modules[cls.__module__]
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -52,7 +59,9 @@ class MigrationParserTests(unittest.TestCase):
         # Independent ground truth: a plain count of "name: '...'" occurrences, not the
         # parser's own regex, so a real-world format drift can't fool both at once.
         expected = re.findall(r"name: '([^']+)'", self.real_text)
-        self.assertGreater(len(expected), 50, "sanity check: the real file should have many migrations")
+        self.assertGreater(
+            len(expected), 50, "sanity check: the real file should have many migrations"
+        )
         self.assertEqual(list(self.parse(self.real_text).names), expected)
 
     def test_every_fingerprint_is_a_64_char_hex_digest(self):
@@ -61,8 +70,12 @@ class MigrationParserTests(unittest.TestCase):
             self.assertRegex(parsed.digests[name], r"^[0-9a-f]{64}$")
         self.assertRegex(parsed.outside, r"^[0-9a-f]{64}$")
 
-    def test_appending_a_migration_changes_neither_the_previous_last_entry_nor_the_outside_code(self):
-        appended = self.real_text.replace("\n];\n", "\n  {\n    name: '999_test_only',\n    up(db){},\n  },\n];\n")
+    def test_appending_a_migration_changes_neither_the_previous_last_entry_nor_the_outside_code(
+        self,
+    ):
+        appended = self.real_text.replace(
+            "\n];\n", "\n  {\n    name: '999_test_only',\n    up(db){},\n  },\n];\n"
+        )
         before, after = self.parse(self.real_text), self.parse(appended)
         last = before.names[-1]
         self.assertEqual(before.digests[last], after.digests[last])
@@ -99,7 +112,9 @@ class MigrationParserTests(unittest.TestCase):
             self.parse(concatenated)
 
     def test_an_entry_named_by_a_constant_raises_instead_of_hiding_in_the_previous_entry(self):
-        hidden = self.real_text.replace("\n];\n", "\n  {\n    name: HIDDEN_NAME,\n    up(db){},\n  },\n];\n")
+        hidden = self.real_text.replace(
+            "\n];\n", "\n  {\n    name: HIDDEN_NAME,\n    up(db){},\n  },\n];\n"
+        )
         with self.assertRaises(ValueError):
             self.parse(hidden)
 
@@ -132,9 +147,8 @@ class MigrationParserTests(unittest.TestCase):
 
     def test_names_outside_ascii_letters_digits_and_underscore_raise(self):
         for name in ["001_create\tusers", "001_создать", "001-x"]:
-            with self.subTest(name=name):
-                with self.assertRaises(ValueError):
-                    self.parse(self.real_text.replace("name: '001_create_users'", f"name: '{name}'"))
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.parse(self.real_text.replace("name: '001_create_users'", f"name: '{name}'"))
 
 
 class MigrationDocContractTests(unittest.TestCase):
@@ -142,7 +156,9 @@ class MigrationDocContractTests(unittest.TestCase):
         self.gate = load_gate()
 
     def test_front_matter_declarations_are_read_with_the_doc_digest(self):
-        raw = doc(rollback="no", deletion="yes", body="Drops y.\n\n## Rollback\n\nRestore the backup.\n")
+        raw = doc(
+            rollback="no", deletion="yes", body="Drops y.\n\n## Rollback\n\nRestore the backup.\n"
+        )
         contract = self.gate.parse_doc(raw, "002_y")
         self.assertFalse(contract.rollback_compatible)
         self.assertTrue(contract.data_deletion)
@@ -150,9 +166,8 @@ class MigrationDocContractTests(unittest.TestCase):
 
     def test_an_empty_or_blank_doc_is_rejected(self):
         for raw in [b"", b"  \n\t\n"]:
-            with self.subTest(raw=raw):
-                with self.assertRaisesRegex(ValueError, "empty"):
-                    self.gate.parse_doc(raw, "002_y")
+            with self.subTest(raw=raw), self.assertRaisesRegex(ValueError, "empty"):
+                self.gate.parse_doc(raw, "002_y")
 
     def test_a_doc_whose_front_matter_is_not_exactly_the_contract_is_rejected(self):
         cases = {
@@ -168,9 +183,8 @@ class MigrationDocContractTests(unittest.TestCase):
             "incompatible without a Rollback section": doc(rollback="no", body="Drops y.\n"),
         }
         for label, raw in cases.items():
-            with self.subTest(label):
-                with self.assertRaises(ValueError):
-                    self.gate.parse_doc(raw, "002_y")
+            with self.subTest(label), self.assertRaises(ValueError):
+                self.gate.parse_doc(raw, "002_y")
 
     def test_a_doc_that_is_not_utf8_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -189,7 +203,9 @@ class MigrationDocContractTests(unittest.TestCase):
     def test_every_migration_from_063_on_ships_its_doc(self):
         # The gate refuses a new migration without its doc for good, after the merge. 063 is the
         # first migration shipped under the doc requirement; a later one without a doc fails here.
-        names = list(self.gate.parse_migrations((ROOT / "src/database/migrations.ts").read_text()).names)
+        names = list(
+            self.gate.parse_migrations((ROOT / "src/database/migrations.ts").read_text()).names
+        )
         for name in names[names.index("063_unconfirm_legacy_verified_locations") :]:
             with self.subTest(name):
                 self.assertTrue((ROOT / "docs/reference/migrations" / f"{name}.md").is_file())
@@ -210,6 +226,7 @@ class ProbeScriptTests(unittest.TestCase):
             env={"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]},
             stdin=subprocess.DEVNULL,
             capture_output=True,
+            check=False,
             timeout=120,
         )
 
@@ -225,7 +242,9 @@ class ProbeScriptTests(unittest.TestCase):
     def test_the_applied_probe_lists_what_the_database_records_in_order(self):
         (Path(self.tmp.name) / "data").mkdir()
         db = sqlite3.connect(Path(self.tmp.name) / "data/calendar.db")
-        db.execute("CREATE TABLE migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE)")
+        db.execute(
+            "CREATE TABLE migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE)"
+        )
         db.executemany("INSERT INTO migrations(name) VALUES (?)", [("002_y",), ("001_x",)])
         db.commit()
         db.close()
@@ -240,7 +259,15 @@ class GateDecisionTests(unittest.TestCase):
     def setUp(self):
         self.gate = load_gate()
 
-    def decide(self, running=RUNNING, release=RELEASE, applied=("001_x",), exported=PARSED, docs=None, reviewed=""):
+    def decide(
+        self,
+        running=RUNNING,
+        release=RELEASE,
+        applied=("001_x",),
+        exported=PARSED,
+        docs=None,
+        reviewed="",
+    ):
         if exported is self.PARSED:
             exported = self.gate.parse_migrations(release.decode()).names
         return self.gate.decide(
@@ -276,13 +303,22 @@ class GateDecisionTests(unittest.TestCase):
     def test_only_the_exact_transition_pair_overrides_a_risky_declaration(self):
         risky = {"002_y.md": doc(rollback="no", deletion="yes", body="## Rollback\n\nSteps.\n")}
         pair = self.pair()
-        for reviewed in [pair[::-1], sha(RELEASE) + ":" + sha(RUNNING), sha(RUNNING), ":" + sha(RELEASE), pair + " ", ""]:
+        for reviewed in [
+            pair[::-1],
+            sha(RELEASE) + ":" + sha(RUNNING),
+            sha(RUNNING),
+            ":" + sha(RELEASE),
+            pair + " ",
+            "",
+        ]:
             with self.subTest(reviewed=reviewed):
                 self.assertFalse(self.decide(docs=risky, reviewed=reviewed).accepted)
         decision = self.decide(docs=risky, reviewed=pair)
         self.assertEqual(decision.mode, "reviewed-override")
         self.assertEqual(decision.rollback_guard, ["002_y"])
-        self.assertTrue(decision.refusals, "the override still reports why automatic activation was refused")
+        self.assertTrue(
+            decision.refusals, "the override still reports why automatic activation was refused"
+        )
 
     def test_a_rollback_compatible_deletion_needs_no_rollback_guard(self):
         decision = self.decide(docs={"002_y.md": doc(deletion="yes")}, reviewed=self.pair())
@@ -307,7 +343,9 @@ class GateDecisionTests(unittest.TestCase):
         decision = self.decide(applied=("001_x", "002_y"))
         self.assertFalse(decision.accepted)
         self.assertRegex("\n".join(decision.refusals), "002_y.*applied")
-        self.assertEqual(self.decide(applied=("001_x", "002_y"), reviewed=self.pair()).mode, "reviewed-override")
+        self.assertEqual(
+            self.decide(applied=("001_x", "002_y"), reviewed=self.pair()).mode, "reviewed-override"
+        )
 
     def test_database_records_unknown_to_both_images_are_ignored(self):
         decision = self.decide(applied=("001_x", "000_renumbered_long_ago"))
@@ -318,7 +356,9 @@ class GateDecisionTests(unittest.TestCase):
         decision = self.decide(release=release)
         self.assertFalse(decision.accepted)
         self.assertIn("outside", "\n".join(decision.refusals))
-        self.assertEqual(self.decide(release=release, reviewed=self.pair(release)).mode, "reviewed-override")
+        self.assertEqual(
+            self.decide(release=release, reviewed=self.pair(release)).mode, "reviewed-override"
+        )
 
     def test_refusals_the_override_cannot_attest_to(self):
         # The override vouches for a reviewed decision. It cannot make a migration run that never
@@ -329,38 +369,48 @@ class GateDecisionTests(unittest.TestCase):
         reordered = (HEAD + ADDED + SHIPPED + TAIL).encode()
         concatenated = (HEAD + SHIPPED + ADDED.replace("'002_y'", "'002' + '_y'") + TAIL).encode()
         cases = {
-            "missing doc": dict(docs={}),
-            "invalid doc": dict(docs={"002_y.md": doc(name="001_x")}),
-            "edited shipped entry": dict(release=edited),
-            "removed shipped entry": dict(release=removed),
-            "reordered entries": dict(release=reordered),
-            "unparseable name": dict(release=concatenated, exported=["001_x", "002_y"]),
-            "exports differ from the source": dict(exported=["001_x", "002_y", "003_hidden"]),
-            "applied migrations unreadable": dict(applied=None),
-            "exports unreadable": dict(exported=None),
-            "docs unreadable": dict(docs=None),
+            "missing doc": {"docs": {}},
+            "invalid doc": {"docs": {"002_y.md": doc(name="001_x")}},
+            "edited shipped entry": {"release": edited},
+            "removed shipped entry": {"release": removed},
+            "reordered entries": {"release": reordered},
+            "unparseable name": {"release": concatenated, "exported": ["001_x", "002_y"]},
+            "exports differ from the source": {"exported": ["001_x", "002_y", "003_hidden"]},
+            "applied migrations unreadable": {"applied": None},
+            "exports unreadable": {"exported": None},
+            "docs unreadable": {"docs": None},
         }
         for label, case in cases.items():
             with self.subTest(label):
                 release = case.pop("release", RELEASE)
                 if "docs" in case and case["docs"] is None:
-                    decision = self.gate.decide(RUNNING, release, ["001_x"], ["001_x", "002_y"], None, self.pair(release))
+                    decision = self.gate.decide(
+                        RUNNING, release, ["001_x"], ["001_x", "002_y"], None, self.pair(release)
+                    )
                 else:
                     decision = self.decide(release=release, reviewed=self.pair(release), **case)
                 self.assertEqual(decision.mode, "refused", decision.refusals)
 
-    def test_an_edit_below_a_close_shaped_line_in_the_last_shipped_migration_is_never_overridable(self):
+    def test_an_edit_below_a_close_shaped_line_in_the_last_shipped_migration_is_never_overridable(
+        self,
+    ):
         # That "];" line is not the array close, so the edit is one of the shipped entry, which the
         # runner never re-runs, not a change to the code outside the entries.
         running = (HEAD + SHIPPED_WITH_CLOSE_SHAPED_LINE + TAIL).encode()
-        release = (HEAD + SHIPPED_WITH_CLOSE_SHAPED_LINE.replace("id INTEGER", "id TEXT") + TAIL).encode()
-        decision = self.decide(running=running, release=release, reviewed=self.pair(release, running))
+        release = (
+            HEAD + SHIPPED_WITH_CLOSE_SHAPED_LINE.replace("id INTEGER", "id TEXT") + TAIL
+        ).encode()
+        decision = self.decide(
+            running=running, release=release, reviewed=self.pair(release, running)
+        )
         self.assertEqual(decision.mode, "refused", decision.refusals)
         self.assertIn("001_x", "\n".join(decision.refusals))
 
     def test_unreadable_docs_are_not_reported_as_a_missing_doc(self):
         # 002_y's doc may well ship; the gate could not read the directory and says only that.
-        decision = self.gate.decide(RUNNING, RELEASE, ["001_x"], ["001_x", "002_y"], None, self.pair())
+        decision = self.gate.decide(
+            RUNNING, RELEASE, ["001_x"], ["001_x", "002_y"], None, self.pair()
+        )
         self.assertEqual(decision.mode, "refused")
         self.assertEqual(len(decision.refusals), 1, decision.refusals)
         self.assertNotIn("002_y", decision.refusals[0])
@@ -369,7 +419,9 @@ class GateDecisionTests(unittest.TestCase):
         for running, release in [(None, RELEASE), (RUNNING, None), (b"", RELEASE)]:
             with self.subTest(running=running, release=release):
                 reviewed = sha(running or b"") + ":" + sha(release or b"")
-                decision = self.gate.decide(running, release, ["001_x"], ["001_x", "002_y"], {}, reviewed)
+                decision = self.gate.decide(
+                    running, release, ["001_x"], ["001_x", "002_y"], {}, reviewed
+                )
                 self.assertFalse(decision.accepted)
 
     def test_every_refusal_path_yields_the_exact_refusals_mode_and_migrations(self):
@@ -381,56 +433,267 @@ class GateDecisionTests(unittest.TestCase):
         missing_doc = f"migration 002_y has no reviewed doc: {doc_dir}/002_y.md"
         utf8 = "the release migrations.ts cannot be parsed: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
         no_docs = f"the release image's {doc_dir} could not be read"
-        no_applied = "the database's applied migrations could not be read through the running container"
+        no_applied = (
+            "the database's applied migrations could not be read through the running container"
+        )
         good_docs = {"002_y.md": doc()}
         both = ["001_x", "002_y"]
         new_y = [("002_y", False, True)]
         edited = (HEAD + SHIPPED.replace("id INTEGER", "id TEXT") + ADDED + TAIL).encode()
         # label: (running, release, applied, exported, docs, mode plain, mode with pair, final, migrations, refusals)
         cases = {
-            "running unreadable": (None, RELEASE, ["001_x"], both, {}, "refused", "refused", True, [], ["migrations.ts could not be read in the running container"]),
-            "release empty": (RUNNING, b"", ["001_x"], both, {}, "refused", "refused", True, [], ["migrations.ts is empty in the release image"]),
-            "running unparseable": (b"garbage", RELEASE, ["001_x"], both, good_docs, "refused", "refused", True, [], ["the running migrations.ts cannot be parsed: no migration entry found"]),
-            "release not utf8": (RUNNING, b"\xff\xfe", ["001_x"], None, None, "refused", "refused", True, [], [utf8, no_docs]),
-            "everything unreadable": (RUNNING, b"\xff", None, None, None, "refused", "refused", True, [], [utf8, no_applied, no_docs]),
-            "exports unreadable": (RUNNING, RELEASE, ["001_x"], None, good_docs, "refused", "refused", True, new_y, ["the release image's exported migration list could not be read"]),
-            "exports differ": (RUNNING, RELEASE, ["001_x"], ["001_x", "003"], good_docs, "refused", "refused", True, new_y, ["the release exports migrations ['001_x', '003'] but its source entries are ['001_x', '002_y']"]),
-            "reordered": (RUNNING, (HEAD + ADDED + SHIPPED + TAIL).encode(), ["001_x"], ["002_y", "001_x"], good_docs, "refused", "refused", True, new_y, ["new migrations must follow the shipped ones; the release order is ['002_y', '001_x']"]),
-            "shipped removed": (RUNNING, (HEAD + ADDED + TAIL).encode(), ["001_x"], ["002_y"], good_docs, "refused", "refused", True, new_y, ["migration 001_x is missing from the release; a shipped migration is never renamed or removed"]),
-            "shipped edited": (RUNNING, edited, ["001_x"], both, good_docs, "refused", "refused", True, new_y, ["migration 001_x changed after it shipped; the runner never re-runs an applied migration"]),
-            "edit without a new entry": (RUNNING, (HEAD + SHIPPED.replace("INTEGER", "INTEGER ") + TAIL).encode(), ["001_x"], ["001_x"], {}, "refused", "refused", True, [], ["migration 001_x changed after it shipped; the runner never re-runs an applied migration"]),
-            "code outside the entries": (RUNNING, outside, ["001_x"], both, good_docs, "refused", "reviewed-override", False, new_y, ["migrations.ts code outside the migration entries changed; no migration doc can vouch for it"]),
+            "running unreadable": (
+                None,
+                RELEASE,
+                ["001_x"],
+                both,
+                {},
+                "refused",
+                "refused",
+                True,
+                [],
+                ["migrations.ts could not be read in the running container"],
+            ),
+            "release empty": (
+                RUNNING,
+                b"",
+                ["001_x"],
+                both,
+                {},
+                "refused",
+                "refused",
+                True,
+                [],
+                ["migrations.ts is empty in the release image"],
+            ),
+            "running unparseable": (
+                b"garbage",
+                RELEASE,
+                ["001_x"],
+                both,
+                good_docs,
+                "refused",
+                "refused",
+                True,
+                [],
+                ["the running migrations.ts cannot be parsed: no migration entry found"],
+            ),
+            "release not utf8": (
+                RUNNING,
+                b"\xff\xfe",
+                ["001_x"],
+                None,
+                None,
+                "refused",
+                "refused",
+                True,
+                [],
+                [utf8, no_docs],
+            ),
+            "everything unreadable": (
+                RUNNING,
+                b"\xff",
+                None,
+                None,
+                None,
+                "refused",
+                "refused",
+                True,
+                [],
+                [utf8, no_applied, no_docs],
+            ),
+            "exports unreadable": (
+                RUNNING,
+                RELEASE,
+                ["001_x"],
+                None,
+                good_docs,
+                "refused",
+                "refused",
+                True,
+                new_y,
+                ["the release image's exported migration list could not be read"],
+            ),
+            "exports differ": (
+                RUNNING,
+                RELEASE,
+                ["001_x"],
+                ["001_x", "003"],
+                good_docs,
+                "refused",
+                "refused",
+                True,
+                new_y,
+                [
+                    "the release exports migrations ['001_x', '003'] but its source entries are ['001_x', '002_y']"
+                ],
+            ),
+            "reordered": (
+                RUNNING,
+                (HEAD + ADDED + SHIPPED + TAIL).encode(),
+                ["001_x"],
+                ["002_y", "001_x"],
+                good_docs,
+                "refused",
+                "refused",
+                True,
+                new_y,
+                [
+                    "new migrations must follow the shipped ones; the release order is ['002_y', '001_x']"
+                ],
+            ),
+            "shipped removed": (
+                RUNNING,
+                (HEAD + ADDED + TAIL).encode(),
+                ["001_x"],
+                ["002_y"],
+                good_docs,
+                "refused",
+                "refused",
+                True,
+                new_y,
+                [
+                    "migration 001_x is missing from the release; a shipped migration is never renamed or removed"
+                ],
+            ),
+            "shipped edited": (
+                RUNNING,
+                edited,
+                ["001_x"],
+                both,
+                good_docs,
+                "refused",
+                "refused",
+                True,
+                new_y,
+                [
+                    "migration 001_x changed after it shipped; the runner never re-runs an applied migration"
+                ],
+            ),
+            "edit without a new entry": (
+                RUNNING,
+                (HEAD + SHIPPED.replace("INTEGER", "INTEGER ") + TAIL).encode(),
+                ["001_x"],
+                ["001_x"],
+                {},
+                "refused",
+                "refused",
+                True,
+                [],
+                [
+                    "migration 001_x changed after it shipped; the runner never re-runs an applied migration"
+                ],
+            ),
+            "code outside the entries": (
+                RUNNING,
+                outside,
+                ["001_x"],
+                both,
+                good_docs,
+                "refused",
+                "reviewed-override",
+                False,
+                new_y,
+                [
+                    "migrations.ts code outside the migration entries changed; no migration doc can vouch for it"
+                ],
+            ),
             "applied ahead without a doc": (
-                RUNNING, RELEASE, both, both, {}, "refused", "refused", True, [("002_y", True, False)],
+                RUNNING,
+                RELEASE,
+                both,
+                both,
+                {},
+                "refused",
+                "refused",
+                True,
+                [("002_y", True, False)],
                 [
                     "migration 002_y is already applied in the database but the running image does not carry it (an image rollback?); the runner will not run the release's version",
                     missing_doc,
                 ],
             ),
             "invalid doc": (
-                RUNNING, RELEASE, ["001_x"], both, {"002_y.md": doc(name="001_x")}, "refused", "refused", True, [("002_y", False, False)],
+                RUNNING,
+                RELEASE,
+                ["001_x"],
+                both,
+                {"002_y.md": doc(name="001_x")},
+                "refused",
+                "refused",
+                True,
+                [("002_y", False, False)],
                 [
-                    f"migration 002_y: {doc_dir}/002_y.md is not a valid migration doc: the doc must start with the front matter lines "
-                    "'---', 'migration: 002_y', 'rollback-compatible: yes|no', 'data-deletion: yes|no', '---'"
+                    (
+                        f"migration 002_y: {doc_dir}/002_y.md is not a valid migration doc: the doc must start with the front matter lines "
+                        "'---', 'migration: 002_y', 'rollback-compatible: yes|no', 'data-deletion: yes|no', '---'"
+                    )
                 ],
             ),
-            "missing doc": (RUNNING, RELEASE, ["001_x"], both, {}, "refused", "refused", True, [("002_y", False, False)], [missing_doc]),
+            "missing doc": (
+                RUNNING,
+                RELEASE,
+                ["001_x"],
+                both,
+                {},
+                "refused",
+                "refused",
+                True,
+                [("002_y", False, False)],
+                [missing_doc],
+            ),
             "rollback and deletion declared": (
-                RUNNING, RELEASE, ["001_x"], both, {"002_y.md": risky}, "refused", "reviewed-override", False, new_y,
+                RUNNING,
+                RELEASE,
+                ["001_x"],
+                both,
+                {"002_y.md": risky},
+                "refused",
+                "reviewed-override",
+                False,
+                new_y,
                 [
                     "migration 002_y declares rollback-compatible: no; the old image cannot run on its result",
                     "migration 002_y declares data-deletion: yes",
                 ],
             ),
-            "safe new migration": (RUNNING, RELEASE, ["001_x"], both, good_docs, "automatic", "automatic", False, new_y, []),
+            "safe new migration": (
+                RUNNING,
+                RELEASE,
+                ["001_x"],
+                both,
+                good_docs,
+                "automatic",
+                "automatic",
+                False,
+                new_y,
+                [],
+            ),
         }
-        for label, (running, release, applied, exported, docs, plain, reviewed, final, migrations, refusals) in cases.items():
-            for mode, pair in ((plain, ""), (reviewed, sha(running or b"") + ":" + sha(release or b""))):
+        for label, (
+            running,
+            release,
+            applied,
+            exported,
+            docs,
+            plain,
+            reviewed,
+            final,
+            migrations,
+            refusals,
+        ) in cases.items():
+            for mode, pair in (
+                (plain, ""),
+                (reviewed, sha(running or b"") + ":" + sha(release or b"")),
+            ):
                 with self.subTest(label, reviewed=bool(pair)):
                     decision = self.gate.decide(running, release, applied, exported, docs, pair)
                     self.assertEqual(decision.mode, mode)
                     self.assertEqual(decision.final, final)
-                    self.assertEqual([(m.name, m.applied, m.doc is not None) for m in decision.migrations], migrations)
+                    self.assertEqual(
+                        [(m.name, m.applied, m.doc is not None) for m in decision.migrations],
+                        migrations,
+                    )
                     self.assertEqual(decision.refusals, refusals)
 
 

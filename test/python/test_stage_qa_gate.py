@@ -121,8 +121,13 @@ def good_steps(*, step=QA_STEP, **qa_over):
 
 def good_job(**over):
     job = {
-        "id": JOB, "name": QA_JOB, "run_id": RUN, "run_attempt": 1,
-        "status": "completed", "conclusion": "success", "steps": good_steps(),
+        "id": JOB,
+        "name": QA_JOB,
+        "run_id": RUN,
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": good_steps(),
     }
     job.update(over)
     return job
@@ -130,7 +135,15 @@ def good_job(**over):
 
 def report_job(**over):
     times = {"started_at": "2026-10-27T08:37:15Z", "completed_at": "2026-10-27T08:37:18Z"}
-    return good_job(**{"id": REPORT_JOB, "name": "Post stage-qa", "steps": good_steps(step=REPORT_STEP), **times, **over})
+    return good_job(
+        **{
+            "id": REPORT_JOB,
+            "name": "Post stage-qa",
+            "steps": good_steps(step=REPORT_STEP),
+            **times,
+            **over,
+        }
+    )
 
 
 # A synthetic job log in the shape the runner writes it (BOM, a timestamp per line, the step header
@@ -146,7 +159,9 @@ SCRIPT_LINES = ["\x1b[36;1m# synthetic first line\x1b[0m", "\x1b[36;1mset -uo pi
 DRIVER_LINES = ["STAGE_ARTIFACT archive_sha256=0", "STAGE_QA_RESULT status=passed cases=6 failed=0"]
 
 
-def header_lines(sha=HEAD, *, env=None, script=SCRIPT_LINES, shell="shell: /usr/bin/bash -e {0}", env_open="env:"):
+def header_lines(
+    sha=HEAD, *, env=None, script=SCRIPT_LINES, shell="shell: /usr/bin/bash -e {0}", env_open="env:"
+):
     env_lines = ["  GH_TOKEN: ***", f"  HEAD_SHA: {sha}"] if env is None else env
     lines = ["##[group]Run # synthetic first line", *script]
     lines += [] if shell is None else [shell]
@@ -156,8 +171,13 @@ def header_lines(sha=HEAD, *, env=None, script=SCRIPT_LINES, shell="shell: /usr/
 
 # The report step's own header: the workflow's inputs of the verdict, rendered by the runner.
 GOOD_REPORT_ENV = {
-    "REPO": REPO, "HEAD_SHA": HEAD, "RUN_ID": str(RUN), "BUILD_CONCLUSION": "success",
-    "QA_RESULT": "success", "QA_RC": "0", "QA_CASES": "12",
+    "REPO": REPO,
+    "HEAD_SHA": HEAD,
+    "RUN_ID": str(RUN),
+    "BUILD_CONCLUSION": "success",
+    "QA_RESULT": "success",
+    "QA_RC": "0",
+    "QA_CASES": "12",
 }
 
 
@@ -177,19 +197,43 @@ def report_log(**over):
 
 
 def stamped(lines, newline="\n", bom=True):
-    body = newline.join(f"2026-10-27T08:23:24.{i:07d}Z {line}" for i, line in enumerate(lines)) + newline
+    body = (
+        newline.join(f"2026-10-27T08:23:24.{i:07d}Z {line}" for i, line in enumerate(lines))
+        + newline
+    )
     return ("\ufeff" if bom else "") + body
 
 
-def qa_log(sha=HEAD, *, header=None, driver=DRIVER_LINES, setup=SETUP_LINES, newline="\n", bom=True, raw_tail=""):
-    lines = [*setup, *(header_lines(sha) if header is None else header), *driver, "Evaluate and set job outputs"]
+def qa_log(
+    sha=HEAD,
+    *,
+    header=None,
+    driver=DRIVER_LINES,
+    setup=SETUP_LINES,
+    newline="\n",
+    bom=True,
+    raw_tail="",
+):
+    lines = [
+        *setup,
+        *(header_lines(sha) if header is None else header),
+        *driver,
+        "Evaluate and set job outputs",
+    ]
     return stamped(lines, newline, bom) + raw_tail
 
 
 def good_routes():
     return {
         WF_KEY: {"body": {"name": "stage-qa.yml"}},
-        PR_KEY: {"body": {"state": "OPEN", "isDraft": False, "headRefOid": HEAD, "isCrossRepository": False}},
+        PR_KEY: {
+            "body": {
+                "state": "OPEN",
+                "isDraft": False,
+                "headRefOid": HEAD,
+                "isCrossRepository": False,
+            }
+        },
         statuses_key(): {"body": [good_status()]},
         RUN_KEY: {"body": good_run()},
         REPO_KEY: {"body": {"default_branch": "main"}},
@@ -212,10 +256,18 @@ class GateHarness(unittest.TestCase):
     def gate(self, routes, **env):
         self.routes_file.write_text(json.dumps(routes))
         Path(str(self.routes_file) + ".log").unlink(missing_ok=True)
-        env = dict(os.environ, PATH=f"{self.tmp / 'bin'}:{os.environ['PATH']}", FAKE_GH_ROUTES=str(self.routes_file), **env)
+        env = dict(
+            os.environ,
+            PATH=f"{self.tmp / 'bin'}:{os.environ['PATH']}",
+            FAKE_GH_ROUTES=str(self.routes_file),
+            **env,
+        )
         return subprocess.run(
             [sys.executable, str(GATE), "--repo", REPO, "--pr", "7"],
-            capture_output=True, text=True, env=env,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
         )
 
     def assertNotGreen(self, routes, *words):
@@ -238,7 +290,6 @@ class GateHarness(unittest.TestCase):
 
 
 class GateTest(GateHarness):
-
     def test_green(self):
         done = self.gate(good_routes())
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -251,12 +302,20 @@ class GateTest(GateHarness):
 
     def test_pending_says_wait(self):
         routes = good_routes()
-        routes[statuses_key()] = {"body": [good_status(state="pending", description="stage build started", target_url="https://x/y")]}
+        routes[statuses_key()] = {
+            "body": [
+                good_status(
+                    state="pending", description="stage build started", target_url="https://x/y"
+                )
+            ]
+        }
         self.assertNotGreen(routes, "pending", "wait", "https://x/y")
 
     def test_failure(self):
         routes = good_routes()
-        routes[statuses_key()] = {"body": [good_status(state="failure", description=f"failed run={RUN}")]}
+        routes[statuses_key()] = {
+            "body": [good_status(state="failure", description=f"failed run={RUN}")]
+        }
         self.assertNotGreen(routes, "failure")
 
     def test_status_on_older_head_only_is_stale(self):
@@ -267,11 +326,18 @@ class GateTest(GateHarness):
 
     def test_newest_status_wins_over_older_success(self):
         routes = good_routes()
-        routes[statuses_key()] = {"body": [good_status(state="failure", description=f"failed run={RUN}"), good_status()]}
+        routes[statuses_key()] = {
+            "body": [good_status(state="failure", description=f"failed run={RUN}"), good_status()]
+        }
         self.assertNotGreen(routes, "failure")
 
     def test_description_mismatch(self):
-        for description in ("passed cases=0 run=4242", "passed cases=3 run=4242 extra", "ok", "passed cases=3 run=0"):
+        for description in (
+            "passed cases=0 run=4242",
+            "passed cases=3 run=4242 extra",
+            "ok",
+            "passed cases=3 run=0",
+        ):
             routes = good_routes()
             routes[statuses_key()] = {"body": [good_status(description=description)]}
             with self.subTest(description=description):
@@ -332,7 +398,15 @@ class GateTest(GateHarness):
             ({"isCrossRepository": True}, "fork"),
         ):
             routes = good_routes()
-            routes[PR_KEY] = {"body": {"state": "OPEN", "isDraft": False, "headRefOid": HEAD, "isCrossRepository": False, **over}}
+            routes[PR_KEY] = {
+                "body": {
+                    "state": "OPEN",
+                    "isDraft": False,
+                    "headRefOid": HEAD,
+                    "isCrossRepository": False,
+                    **over,
+                }
+            }
             with self.subTest(over=over):
                 self.assertNotGreen(routes, word)
 
@@ -343,7 +417,11 @@ class GateTest(GateHarness):
         self.assertIn("stage-qa gate inactive", done.stdout)
 
     def test_an_error_that_merely_contains_404_is_not_a_bootstrap_pass(self):
-        for message in ("gh: rate limit, installation 40412 throttled", "gh: Server Error (HTTP 5040)", "gh: remaining: 404 requests"):
+        for message in (
+            "gh: rate limit, installation 40412 throttled",
+            "gh: Server Error (HTTP 5040)",
+            "gh: remaining: 404 requests",
+        ):
             with self.subTest(message):
                 done = self.gate({WF_KEY: {"error": message}})
                 self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
@@ -368,7 +446,13 @@ class GateTest(GateHarness):
 
     def test_gh_missing_is_exit_2(self):
         env = dict(os.environ, PATH="/nonexistent")
-        done = subprocess.run([sys.executable, str(GATE), "--repo", REPO, "--pr", "7"], capture_output=True, text=True, env=env)
+        done = subprocess.run(
+            [sys.executable, str(GATE), "--repo", REPO, "--pr", "7"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
         self.assertEqual(done.returncode, 2)
 
     def test_statuses_pagination(self):
@@ -410,17 +494,35 @@ class LogBindingTest(GateHarness):
     def test_a_log_of_another_commit_is_refused(self):
         for sha in (OLD, MAIN):
             with self.subTest(sha=sha):
-                done = self.assertNotGreen(self.with_log(qa_log(sha)), "tested", sha[:12], f"not the PR head {HEAD[:12]}")
+                done = self.assertNotGreen(
+                    self.with_log(qa_log(sha)), "tested", sha[:12], f"not the PR head {HEAD[:12]}"
+                )
                 self.assertNotIn(sha, done.stderr)
 
     def test_a_head_sha_that_is_not_a_full_lowercase_sha_is_refused(self):
-        for value in (HEAD.upper(), HEAD[:39], HEAD + "a", "main", "", HEAD + " ", HEAD + " # x", "0x" + HEAD[2:]):
+        for value in (
+            HEAD.upper(),
+            HEAD[:39],
+            HEAD + "a",
+            "main",
+            "",
+            HEAD + " ",
+            HEAD + " # x",
+            "0x" + HEAD[2:],
+        ):
             with self.subTest(value=value):
                 header = header_lines(env=["  GH_TOKEN: ***", f"  HEAD_SHA: {value}"])
                 self.assertNotGreen(self.with_log(qa_log(header=header)), "HEAD_SHA")
-        for line in (f"   HEAD_SHA: {HEAD}", f" HEAD_SHA: {HEAD}", f"  HEAD_SHA:{HEAD}", f"  head_sha: {HEAD}"):
+        for line in (
+            f"   HEAD_SHA: {HEAD}",
+            f" HEAD_SHA: {HEAD}",
+            f"  HEAD_SHA:{HEAD}",
+            f"  head_sha: {HEAD}",
+        ):
             with self.subTest(line=line):
-                self.assertNotGreen(self.with_log(qa_log(header=header_lines(env=[line]))), "HEAD_SHA")
+                self.assertNotGreen(
+                    self.with_log(qa_log(header=header_lines(env=[line]))), "HEAD_SHA"
+                )
 
     def test_a_duplicate_or_missing_head_sha_declaration_is_refused(self):
         ok = f"  HEAD_SHA: {HEAD}"
@@ -442,7 +544,12 @@ class LogBindingTest(GateHarness):
         for name, header in {
             "no shell": header_lines(shell=None),
             "no env": header_lines(env_open=None),
-            "shell and env swapped": [*header_lines()[:-5], "env:", "shell: /usr/bin/bash -e {0}", *header_lines()[-3:]],
+            "shell and env swapped": [
+                *header_lines()[:-5],
+                "env:",
+                "shell: /usr/bin/bash -e {0}",
+                *header_lines()[-3:],
+            ],
         }.items():
             with self.subTest(name):
                 self.assertNotGreen(self.with_log(qa_log(header=header)), "env block")
@@ -450,8 +557,15 @@ class LogBindingTest(GateHarness):
     def test_a_log_without_a_step_header_is_refused(self):
         for name, log in {
             "setup only": stamped(SETUP_LINES),
-            "group not at the line start": stamped([*SETUP_LINES, "x" + header_lines()[0], *header_lines()[1:]]),
-            "wrong group name": stamped([*SETUP_LINES, *[line.replace("##[group]Run ", "##[group]Post ") for line in header_lines()]]),
+            "group not at the line start": stamped(
+                [*SETUP_LINES, "x" + header_lines()[0], *header_lines()[1:]]
+            ),
+            "wrong group name": stamped(
+                [
+                    *SETUP_LINES,
+                    *[line.replace("##[group]Run ", "##[group]Post ") for line in header_lines()],
+                ]
+            ),
         }.items():
             with self.subTest(name):
                 self.assertNotGreen(self.with_log(log), "no step header")
@@ -461,7 +575,9 @@ class LogBindingTest(GateHarness):
             plain = header_lines(sha)
             return {
                 "stamped": {"driver": [*DRIVER_LINES, *plain]},
-                "ansi": {"driver": [*DRIVER_LINES, *[f"\x1b[36;1m{line}\x1b[0m" for line in plain]]},
+                "ansi": {
+                    "driver": [*DRIVER_LINES, *[f"\x1b[36;1m{line}\x1b[0m" for line in plain]]
+                },
                 "glued to the endgroup": {"driver": [*DRIVER_LINES, "##[endgroup]", *plain]},
                 "unstamped": {"raw_tail": "\n".join(plain) + "\n"},
                 "bom and cr": {"raw_tail": "\ufeff" + "\r\n".join(plain) + "\r\n"},
@@ -487,7 +603,10 @@ class LogBindingTest(GateHarness):
             "step 2 failed": good_steps(conclusion="failure"),
             "step 2 skipped": good_steps(conclusion="skipped"),
             "step 2 running": good_steps(status="in_progress", conclusion=None),
-            "step 1 is not the setup": [{"number": 1, "name": "Run the stage QA through qa-cli"}, *good_steps()[1:]],
+            "step 1 is not the setup": [
+                {"number": 1, "name": "Run the stage QA through qa-cli"},
+                *good_steps()[1:],
+            ],
             "only the setup": good_steps()[:1],
             "none": [],
             "not a list": "steps",
@@ -540,10 +659,14 @@ class LogBindingTest(GateHarness):
             with self.subTest(status):
                 message = f"gh: failed (HTTP {status}) {secret}"
                 done = self.assertCannotEvaluate(
-                    self.with_log(error=message, stdout=f'{{"message": "{secret}"}}'), f"HTTP {status}", f"job {JOB}",
+                    self.with_log(error=message, stdout=f'{{"message": "{secret}"}}'),
+                    f"HTTP {status}",
+                    f"job {JOB}",
                 )
                 self.assertNotIn("SECRET", done.stdout + done.stderr)
-        done = self.assertCannotEvaluate(self.with_log(error=f"gh: unknown flag {secret}"), "gh exit 1")
+        done = self.assertCannotEvaluate(
+            self.with_log(error=f"gh: unknown flag {secret}"), "gh exit 1"
+        )
         self.assertNotIn("SECRET", done.stdout + done.stderr)
 
     def test_empty_garbage_and_truncated_logs_fail_closed(self):
@@ -553,13 +676,19 @@ class LogBindingTest(GateHarness):
             "blank lines": "\n\n\n",
             "plain text": "this is not a runner log\nat all\n",
             "binary": None,
-            "setup then a line without timestamp": stamped(SETUP_LINES) + "no timestamp here\n" + stamped(header_lines()),
+            "setup then a line without timestamp": stamped(SETUP_LINES)
+            + "no timestamp here\n"
+            + stamped(header_lines()),
             "short fraction": "2026-10-27T08:23:24.761Z ##[group]Run x\n",
             "header never closed": cut,
             "cut inside the header": stamped([*SETUP_LINES, *header_lines()[:3]])[:-5],
         }
         for name, text in cases.items():
-            route = {"b64": base64.b64encode(bytes(range(256)) * 4).decode()} if text is None else {"text": text}
+            route = (
+                {"b64": base64.b64encode(bytes(range(256)) * 4).decode()}
+                if text is None
+                else {"text": text}
+            )
             with self.subTest(name):
                 self.assertCannotEvaluate(self.with_log(**route))
 
@@ -569,7 +698,10 @@ class LogBindingTest(GateHarness):
 
     def test_a_header_beyond_the_head_of_the_log_cannot_be_evaluated(self):
         padding = ["setup output that goes on and on and on"] * 9000
-        done = self.assertCannotEvaluate(self.with_log(stamped([*SETUP_LINES, *padding, *header_lines()])), "no complete step header")
+        done = self.assertCannotEvaluate(
+            self.with_log(stamped([*SETUP_LINES, *padding, *header_lines()])),
+            "no complete step header",
+        )
         self.assertIn("256 KiB", done.stderr)
 
     def test_bytes_that_are_not_utf8_after_the_header_are_ignored(self):
@@ -592,7 +724,9 @@ class LogBindingTest(GateHarness):
                 self.assertNotIn(marker, done.stdout + done.stderr)
         for line in (f"{marker} not a timestamp", f"2026-10-27T08:23:24.0000000Z {marker}"):
             with self.subTest(line):
-                done = self.gate(self.with_log(stamped(SETUP_LINES) + line + "\n" + stamped(header_lines())))
+                done = self.gate(
+                    self.with_log(stamped(SETUP_LINES) + line + "\n" + stamped(header_lines()))
+                )
                 self.assertNotIn(marker, done.stdout + done.stderr)
 
     def test_the_pr_head_moving_while_the_gate_reads_is_refused(self):
@@ -627,7 +761,9 @@ class ReportVerdictTest(GateHarness):
     def test_a_forged_success_inside_the_report_window_fails_when_the_workflow_ran_no_case(self):
         # The QA driver exited 0 with zero cases: the report step posted `error`, a forger posted `success`.
         routes = self.with_report(QA_CASES="0")
-        self.assertEqual(routes[statuses_key()]["body"][0]["created_at"], "2026-10-27T08:37:17Z")  # inside the window
+        self.assertEqual(
+            routes[statuses_key()]["body"][0]["created_at"], "2026-10-27T08:37:17Z"
+        )  # inside the window
         self.assertNotGreen(routes, "did not report a pass", "QA_CASES")
 
     def test_a_status_reporting_other_cases_than_the_workflow_counted_fails(self):
@@ -637,11 +773,17 @@ class ReportVerdictTest(GateHarness):
 
     def test_every_input_of_the_verdict_must_say_pass(self):
         wrong = {
-            "HEAD_SHA": OLD, "RUN_ID": str(RUN + 1), "BUILD_CONCLUSION": "failure", "QA_RESULT": "failure", "QA_RC": "1",
+            "HEAD_SHA": OLD,
+            "RUN_ID": str(RUN + 1),
+            "BUILD_CONCLUSION": "failure",
+            "QA_RESULT": "failure",
+            "QA_RC": "1",
         }
         for name, value in wrong.items():
             with self.subTest(name=name):
-                self.assertNotGreen(self.with_report(**{name: value}), "did not report a pass", name)
+                self.assertNotGreen(
+                    self.with_report(**{name: value}), "did not report a pass", name
+                )
 
     def test_a_missing_or_duplicated_input_is_refused(self):
         for name in ("HEAD_SHA", "RUN_ID", "BUILD_CONCLUSION", "QA_RESULT", "QA_RC", "QA_CASES"):
@@ -649,9 +791,14 @@ class ReportVerdictTest(GateHarness):
                 self.assertNotGreen(self.with_report(**{name: None}), f"declares {name} 0 times")
             with self.subTest(name=name, case="duplicate"):
                 value = GOOD_REPORT_ENV[name]
-                self.assertNotGreen(self.with_report(**{name: [value, value]}), f"declares {name} 2 times")
+                self.assertNotGreen(
+                    self.with_report(**{name: [value, value]}), f"declares {name} 2 times"
+                )
             with self.subTest(name=name, case="duplicate with a forged value"):
-                self.assertNotGreen(self.with_report(**{name: [GOOD_REPORT_ENV[name], "0"]}), f"declares {name} 2 times")
+                self.assertNotGreen(
+                    self.with_report(**{name: [GOOD_REPORT_ENV[name], "0"]}),
+                    f"declares {name} 2 times",
+                )
 
     def test_a_report_log_without_an_env_block_is_refused(self):
         routes = good_routes()
@@ -678,7 +825,9 @@ class ReportVerdictTest(GateHarness):
     def test_the_real_workflow_report_step_declares_exactly_the_inputs_the_gate_reads(self):
         text = (ROOT / ".github" / "workflows" / "stage-qa.yml").read_text()
         report = text.split("\n  report:\n", 1)[1]
-        self.assertEqual(len(re.findall(r"^      - ", report.split("\n    steps:\n", 1)[1], re.MULTILINE)), 1)
+        self.assertEqual(
+            len(re.findall(r"^      - ", report.split("\n    steps:\n", 1)[1], re.MULTILINE)), 1
+        )
         self.assertIn("- name: Post the stage-qa status", report)
         env = report.split("        env:\n", 1)[1].split("        run:", 1)[0]
         declared = re.findall(r"^          ([A-Z_]+): ", env, re.MULTILINE)
@@ -695,7 +844,12 @@ class StatusFromReportJobTest(GateHarness):
         return routes
 
     def test_a_status_created_outside_the_report_job_is_refused(self):
-        for created in ("2026-10-27T08:37:14Z", "2026-10-27T08:37:19Z", "2026-10-27T08:00:00Z", "2026-10-28T08:37:16Z"):
+        for created in (
+            "2026-10-27T08:37:14Z",
+            "2026-10-27T08:37:19Z",
+            "2026-10-27T08:00:00Z",
+            "2026-10-28T08:37:16Z",
+        ):
             with self.subTest(created=created):
                 self.assertNotGreen(self.with_status(created_at=created), "outside its run time")
                 self.assertNotIn(LOG_KEY, self.fetched())
@@ -706,7 +860,15 @@ class StatusFromReportJobTest(GateHarness):
                 self.assertEqual(self.gate(self.with_status(created_at=created)).returncode, 0)
 
     def test_a_status_or_job_without_a_usable_time_cannot_be_evaluated(self):
-        for created in (None, "", "yesterday", "2026-10-27T08:37:17", "2026-13-45T08:37:17Z", "2026-10-27T08:37:17.000Z", 1788000000):
+        for created in (
+            None,
+            "",
+            "yesterday",
+            "2026-10-27T08:37:17",
+            "2026-13-45T08:37:17Z",
+            "2026-10-27T08:37:17.000Z",
+            1788000000,
+        ):
             with self.subTest(created=created):
                 self.assertCannotEvaluate(self.with_status(created_at=created), "timestamp")
         for over in ({"started_at": None}, {"completed_at": None}, {"started_at": "soon"}):
@@ -739,7 +901,9 @@ class StatusFromReportJobTest(GateHarness):
         for attempt in (3, 0, -1, "1", None, True, 1.0):
             routes = good_routes()
             routes[RUN_KEY] = {"body": good_run(run_attempt=2)}
-            routes[JOBS_KEY] = {"body": {"jobs": [good_job(run_attempt=attempt), report_job(run_attempt=2)]}}
+            routes[JOBS_KEY] = {
+                "body": {"jobs": [good_job(run_attempt=attempt), report_job(run_attempt=2)]}
+            }
             with self.subTest(attempt=attempt):
                 self.assertNotGreen(routes, "attempt")
 
@@ -751,7 +915,10 @@ class StatusFromReportJobTest(GateHarness):
             "both absent": (absent_run, [absent_job, absent_report]),
             "run absent": (absent_run, [good_job(), report_job()]),
             "run bool": (good_run(run_attempt=True), [good_job(), report_job()]),
-            "run zero": (good_run(run_attempt=0), [good_job(run_attempt=0), report_job(run_attempt=0)]),
+            "run zero": (
+                good_run(run_attempt=0),
+                [good_job(run_attempt=0), report_job(run_attempt=0)],
+            ),
         }
         for name, (run, jobs) in cases.items():
             routes = good_routes()
@@ -798,7 +965,10 @@ class WorkflowAssumptionsTest(unittest.TestCase):
         env = steps.split("        env:\n", 1)[1].split("        run:", 1)[0]
         self.assertEqual(
             dict(re.findall(r"^          ([A-Z_]+): (.*)$", env, re.MULTILINE)),
-            {"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}", "HEAD_SHA": "${{ github.event.workflow_run.head_sha }}"},
+            {
+                "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}",
+                "HEAD_SHA": "${{ github.event.workflow_run.head_sha }}",
+            },
         )
 
 
@@ -816,7 +986,10 @@ class PrShipTest(unittest.TestCase):
         self.shared = self.tmp / "tools" / "ci" / "ship" / "ship.sh"
         self.shared.parent.mkdir(parents=True)
         self.write_exec(self.shared, f'#!/usr/bin/env bash\necho "ship $*" >> "{self.log}"\n')
-        self.write_exec(self.tmp / "bin" / "gh", f'#!/usr/bin/env bash\nif [[ "$1 $2" == "repo view" ]]; then echo {REPO}; exit 0; fi\nexit 1\n')
+        self.write_exec(
+            self.tmp / "bin" / "gh",
+            f'#!/usr/bin/env bash\nif [[ "$1 $2" == "repo view" ]]; then echo {REPO}; exit 0; fi\nexit 1\n',
+        )
         self.set_gate(0)
 
     def write_exec(self, path, text):
@@ -850,7 +1023,11 @@ class PrShipTest(unittest.TestCase):
         self.write_exec(self.tmp / "tools" / "ci" / "ship" / "ship.sh", self.shared.read_text())
         return subprocess.run(
             ["bash", str(self.repo / ".claude" / "scripts" / "pr-ship.sh"), *args],
-            cwd=self.repo, capture_output=True, text=True, env=env,
+            cwd=self.repo,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
         )
 
     def calls(self):
@@ -887,7 +1064,10 @@ class PrShipTest(unittest.TestCase):
         self.assertEqual([c for c in self.calls() if c.startswith("ship")], [])
 
     def test_bootstrap_when_main_has_no_gate_script_yet_says_so_and_ships(self):
-        subprocess.run(["git", "-C", str(self.repo), "update-ref", "-d", "refs/remotes/origin/main"], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "update-ref", "-d", "refs/remotes/origin/main"],
+            check=True,
+        )
         done = self.run_ship("7")
         self.assertIn("stage-qa-gate.py is not on origin/main", done.stderr)
         self.assertIn("NOT enforced", done.stderr)

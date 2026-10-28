@@ -5,13 +5,22 @@ Usage: python voice-call-bridge.py <user_id> <session_id> <language>
 Env: MTPROTO_API_ID, MTPROTO_API_HASH
 Session: data/voice_caller.session
 """
+
 from ntgcalls import NTgCalls
 from service_session import start_service_session
+
 NTgCalls.enable_glib_loop(True)
 
-import sys, os, asyncio, json, struct
+import asyncio
+import json
+import logging
+import os
+import struct
+import sys
 
-API_ID = int(os.environ.get("MTPROTO_API_ID", 0))
+logger = logging.getLogger("voice-call-bridge")
+
+API_ID = int(os.environ.get("MTPROTO_API_ID", "0"))
 API_HASH = os.environ.get("MTPROTO_API_HASH", "")
 
 if len(sys.argv) < 4:
@@ -24,24 +33,31 @@ LANGUAGE = sys.argv[3]  # 'ru' | 'en'
 WS_URL = f"ws://localhost:3001/call/{SESSION_ID}"
 
 SAMPLE_RATE = 48000
-CHUNK_MS = 32  # 32ms → exactly 512 samples at 16kHz after 3:1 decimation (silero requires exactly 512)
+CHUNK_MS = (
+    32  # 32ms → exactly 512 samples at 16kHz after 3:1 decimation (silero requires exactly 512)
+)
 CHUNK_SAMPLES = SAMPLE_RATE * CHUNK_MS // 1000  # 1536 samples per chunk
 CHUNK_BYTES = CHUNK_SAMPLES * 2  # s16le mono = 2 bytes per sample
 VAD_THRESHOLD = 0.5
 
-import torch
 import numpy as np
-from silero_vad import load_silero_vad
-
+import torch
+import websockets
 from pyrogram import Client
 from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream, AudioQuality, RecordStream, StreamFrames, Direction, ChatUpdate
+from pytgcalls.types import (
+    ChatUpdate,
+    Direction,
+    MediaStream,
+    RecordStream,
+    StreamFrames,
+)
 from pytgcalls.types.raw.audio_stream import AudioParameters
-
-import websockets
+from silero_vad import load_silero_vad
 
 model = load_silero_vad()
 model.eval()
+
 
 def detect_vad(pcm_bytes: bytes) -> bool:
     """Returns True if speech detected in this chunk (input: 48kHz s16le mono)."""
@@ -52,16 +68,26 @@ def detect_vad(pcm_bytes: bytes) -> bool:
     prob = model(tensor, 16000).item()
     return prob > VAD_THRESHOLD
 
+
 def resample_to_16k(pcm_48k: bytes) -> bytes:
     """Downsample 48kHz s16le mono to 16kHz (3:1 decimation)."""
     arr = np.frombuffer(pcm_48k, dtype=np.int16)
     arr_16k = arr[::3]  # every 3rd sample
     return arr_16k.tobytes()
 
+
 async def main():
-    app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data",
-                 device_model="iPhone 16 Pro", system_version="18.3.2",
-                 app_version="11.4", lang_code="en", system_lang_code="en-US")
+    app = Client(
+        "voice_caller",
+        api_id=API_ID,
+        api_hash=API_HASH,
+        workdir="data",
+        device_model="iPhone 16 Pro",
+        system_version="18.3.2",
+        app_version="11.4",
+        lang_code="en",
+        system_lang_code="en-US",
+    )
     calls = PyTgCalls(app)
 
     play_task: asyncio.Task | None = None
@@ -102,10 +128,11 @@ async def main():
                 # hears buffered audio for several seconds. skip_stream cuts it.
                 await calls.skip_stream(USER_ID)
             except Exception:
+                logger.debug("skip_stream failed; falling back to pause", exc_info=True)
                 try:
                     await calls.pause(USER_ID)
                 except Exception:
-                    pass
+                    logger.debug("pause failed", exc_info=True)
 
         async def handle_resume():
             nonlocal paused
@@ -113,7 +140,7 @@ async def main():
             try:
                 await calls.resume(USER_ID)
             except Exception:
-                pass
+                logger.debug("resume failed", exc_info=True)
 
         async def handle_stop():
             # STOP cancels current audio playback — does NOT end the call.
@@ -123,7 +150,8 @@ async def main():
                 # pytgcalls >=3.0: skip_stream cancels current audio without hanging up
                 await calls.skip_stream(USER_ID)
             except Exception:
-                pass  # older pytgcalls may not have skip_stream; cancel of play_task is enough
+                # older pytgcalls may not have skip_stream; cancel of play_task is enough
+                logger.debug("skip_stream failed", exc_info=True)
 
         async def recv_commands():
             """Receive PLAY/PAUSE/RESUME/STOP from Bun."""
@@ -132,7 +160,7 @@ async def main():
                     continue  # ignore binary from Bun (shouldn't happen)
                 try:
                     msg = json.loads(raw)
-                except Exception:
+                except ValueError:
                     continue
 
                 cmd = msg.get("type")
@@ -154,9 +182,13 @@ async def main():
 
             frames_received += 1
             if frames_received == 1:
-                print('[vad] first audio frame received', file=sys.stderr, flush=True)
+                print("[vad] first audio frame received", file=sys.stderr, flush=True)
             elif frames_received % 500 == 0:
-                print(f'[vad] frames={frames_received} is_speaking={is_speaking}', file=sys.stderr, flush=True)
+                print(
+                    f"[vad] frames={frames_received} is_speaking={is_speaking}",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
             if LANGUAGE == "en":
                 # For EN (Flux STT): stream all audio unconditionally — Flux handles its own
@@ -182,7 +214,7 @@ async def main():
 
                 if detected and not is_speaking:
                     is_speaking = True
-                    print('[vad] VAD_START', file=sys.stderr, flush=True)
+                    print("[vad] VAD_START", file=sys.stderr, flush=True)
                     await ws.send(json.dumps({"type": "VAD_START"}))
                     seq_num = 0
 
@@ -197,6 +229,7 @@ async def main():
 
         # ------- Start call (lock session file during start/stop) -------
         from mtproto_lock import session_lock
+
         with session_lock():
             await start_service_session(app)
         await calls.start()
@@ -204,13 +237,18 @@ async def main():
         @calls.on_update()
         async def on_update(_, update):
             name = type(update).__name__
-            if name != 'StreamFrames':
-                print(f'[pytgcalls] update: {name}', file=sys.stderr, flush=True)
-            if "Closed" in name or "HungUp" in name:
+            if name != "StreamFrames":
+                print(f"[pytgcalls] update: {name}", file=sys.stderr, flush=True)
+            if (
+                "Closed" in name
+                or "HungUp" in name
+                or isinstance(update, ChatUpdate)
+                and update.status & ChatUpdate.Status.LEFT_CALL
+            ):
                 call_ended.set()
-            elif isinstance(update, ChatUpdate) and update.status & ChatUpdate.Status.LEFT_CALL:
-                call_ended.set()
-            if ("StreamEnded" in name or "StreamAudioEnded" in name) and play_done_event is not None:
+            if (
+                "StreamEnded" in name or "StreamAudioEnded" in name
+            ) and play_done_event is not None:
                 play_done_event.set()
             if isinstance(update, StreamFrames) and update.direction == Direction.INCOMING:
                 for frame in update.frames:
@@ -224,7 +262,9 @@ async def main():
         # Enable incoming audio capture — avoids a race where audio arrives
         # before the gather task is scheduled.
         # AudioParameters(48000, 1): 48kHz mono — avoids stereo de-interleave complexity
-        await calls.record(USER_ID, RecordStream(audio=True, audio_parameters=AudioParameters(SAMPLE_RATE, 1)))
+        await calls.record(
+            USER_ID, RecordStream(audio=True, audio_parameters=AudioParameters(SAMPLE_RATE, 1))
+        )
 
         ws_task = asyncio.create_task(recv_commands())
         call_done_task = asyncio.create_task(call_ended.wait())
@@ -239,19 +279,20 @@ async def main():
         try:
             await ws.send(json.dumps({"type": "CALL_ENDED"}))
         except Exception:
-            pass
+            logger.debug("CALL_ENDED send failed (ws closed)", exc_info=True)
 
     try:
         await calls.leave_call(USER_ID)
     except Exception:
-        pass
+        logger.debug("leave_call failed", exc_info=True)
     try:
         with session_lock():
             await app.stop()
     except Exception:
-        pass
+        logger.debug("app.stop failed", exc_info=True)
 
     if bun_closed_ws:
         sys.exit(1)
+
 
 asyncio.run(main())

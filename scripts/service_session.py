@@ -27,7 +27,7 @@ async def start_service_session(client, expected_id=None):
     except BaseException:
         try:
             await client.disconnect()
-        except Exception as cleanup_error:
+        except Exception as cleanup_error:  # noqa: BLE001 - cleanup must not mask the original error
             print(
                 f"Service session cleanup: {type(cleanup_error).__name__}",
                 file=sys.stderr,

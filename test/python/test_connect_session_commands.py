@@ -57,7 +57,9 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         module = load(client)
         out = io.StringIO()
         exit_code = None
-        args = types.SimpleNamespace(session_path="/tmp/synthetic.session", phone="+10000000000", **cli)
+        args = types.SimpleNamespace(
+            session_path="/tmp/synthetic.session", phone="+10000000000", **cli
+        )
         account = types.ModuleType("pyrogram.raw.functions.account")
         account.GetAuthorizations = lambda: None
         with (
@@ -98,9 +100,14 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         client = fake_client()
         module = load(client)
         client.sign_in.side_effect = module.PhoneCodeInvalid()
-        with patch.object(sys, "stdin", io.StringIO("1\n")), contextlib.redirect_stdout(io.StringIO()) as out:
-            with self.assertRaises(SystemExit) as raised:
-                await module.cmd_send_and_sign(types.SimpleNamespace(session_path="/tmp/s.session", phone="+1"))
+        with (
+            patch.object(sys, "stdin", io.StringIO("1\n")),
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            await module.cmd_send_and_sign(
+                types.SimpleNamespace(session_path="/tmp/s.session", phone="+1")
+            )
         self.assertEqual(raised.exception.code, 1)
         self.assertEqual(json.loads(out.getvalue().splitlines()[1])["error"], "CODE_INVALID")
 
@@ -108,9 +115,14 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         client = fake_client()
         module = load(client)
         client.sign_in.side_effect = module.PhoneCodeExpired()
-        with patch.object(sys, "stdin", io.StringIO("1\n")), contextlib.redirect_stdout(io.StringIO()) as out:
-            with self.assertRaises(SystemExit) as raised:
-                await module.cmd_send_and_sign(types.SimpleNamespace(session_path="/tmp/s.session", phone="+1"))
+        with (
+            patch.object(sys, "stdin", io.StringIO("1\n")),
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            await module.cmd_send_and_sign(
+                types.SimpleNamespace(session_path="/tmp/s.session", phone="+1")
+            )
         self.assertEqual(raised.exception.code, 1)
         self.assertEqual(json.loads(out.getvalue().splitlines()[1])["error"], "CODE_EXPIRED")
 
@@ -118,9 +130,13 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         client = fake_client()
         module = load(client)
         client.send_code.side_effect = module.PhoneNumberInvalid()
-        with contextlib.redirect_stdout(io.StringIO()) as out:
-            with self.assertRaises(SystemExit) as raised:
-                await module.cmd_send_and_sign(types.SimpleNamespace(session_path="/tmp/s.session", phone="+1"))
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            await module.cmd_send_and_sign(
+                types.SimpleNamespace(session_path="/tmp/s.session", phone="+1")
+            )
         self.assertEqual(raised.exception.code, 1)
         self.assertEqual(json.loads(out.getvalue())["error"], "PHONE_INVALID")
         client.disconnect.assert_awaited_once()
@@ -129,9 +145,13 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         client = fake_client()
         module = load(client)
         client.send_code.side_effect = self.flood(module, 17)
-        with contextlib.redirect_stdout(io.StringIO()) as out:
-            with self.assertRaises(SystemExit) as raised:
-                await module.cmd_send_and_sign(types.SimpleNamespace(session_path="/tmp/s.session", phone="+1"))
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            await module.cmd_send_and_sign(
+                types.SimpleNamespace(session_path="/tmp/s.session", phone="+1")
+            )
         self.assertEqual(raised.exception.code, 1)
         self.assertEqual(
             json.loads(out.getvalue()),
@@ -145,8 +165,13 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         client.check_password.side_effect = [
             effect(module) if callable(effect) else effect for effect in check_effects
         ]
-        with patch.object(sys, "stdin", io.StringIO("12345\n" + passwords)), contextlib.redirect_stdout(io.StringIO()) as out:
-            await module.cmd_send_and_sign(types.SimpleNamespace(session_path="/tmp/s.session", phone="+1"))
+        with (
+            patch.object(sys, "stdin", io.StringIO("12345\n" + passwords)),
+            contextlib.redirect_stdout(io.StringIO()) as out,
+        ):
+            await module.cmd_send_and_sign(
+                types.SimpleNamespace(session_path="/tmp/s.session", phone="+1")
+            )
         return client, [json.loads(line) for line in out.getvalue().splitlines()]
 
     async def test_two_factor_retries_wrong_passwords_skips_blank_lines_and_stops_on_success(self):
@@ -162,7 +187,9 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
                 {"status": "ok"},
             ],
         )
-        self.assertEqual([c.args for c in client.check_password.await_args_list], [("bad",), ("good",)])
+        self.assertEqual(
+            [c.args for c in client.check_password.await_args_list], [("bad",), ("good",)]
+        )
 
     async def test_two_factor_flood_wait_stops_the_relay_without_failing(self):
         _, lines = await self.drive_two_factor("pw\nmore\n", [lambda m: self.flood(m, 9)])
@@ -181,18 +208,24 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         client = fake_client()
         module = load(client)
         client.check_password.side_effect = module.PasswordHashInvalid()
-        with patch.object(sys, "stdin", io.StringIO("x\n")), contextlib.redirect_stdout(io.StringIO()) as out:
-            with self.assertRaises(SystemExit) as raised:
-                await module.cmd_check_password(types.SimpleNamespace(session_path="/tmp/s.session"))
+        with (
+            patch.object(sys, "stdin", io.StringIO("x\n")),
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            await module.cmd_check_password(types.SimpleNamespace(session_path="/tmp/s.session"))
         self.assertEqual(raised.exception.code, 1)
         self.assertEqual(json.loads(out.getvalue())["error"], "PASSWORD_INVALID")
 
         client = fake_client()
         module = load(client)
         client.check_password.side_effect = self.flood(module, 3)
-        with patch.object(sys, "stdin", io.StringIO("x\n")), contextlib.redirect_stdout(io.StringIO()) as out:
-            with self.assertRaises(SystemExit) as raised:
-                await module.cmd_check_password(types.SimpleNamespace(session_path="/tmp/s.session"))
+        with (
+            patch.object(sys, "stdin", io.StringIO("x\n")),
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            await module.cmd_check_password(types.SimpleNamespace(session_path="/tmp/s.session"))
         self.assertEqual(raised.exception.code, 1)
         self.assertEqual(json.loads(out.getvalue())["retry_after"], 3)
 
@@ -212,7 +245,9 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             )
 
         client = fake_client(
-            invoke=AsyncMock(return_value=types.SimpleNamespace(authorizations=[auth(1, 1), auth(2, 0)]))
+            invoke=AsyncMock(
+                return_value=types.SimpleNamespace(authorizations=[auth(1, 1), auth(2, 0)])
+            )
         )
         _, lines, code = await self.run_command("cmd_get_authorizations", client)
         self.assertIsNone(code)
@@ -222,8 +257,18 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             sorted(entries[0]),
             sorted(
-                ["hash", "device_model", "platform", "system_version", "app_name", "country",
-                 "region", "ip", "date_active", "current"]
+                [
+                    "hash",
+                    "device_model",
+                    "platform",
+                    "system_version",
+                    "app_name",
+                    "country",
+                    "region",
+                    "ip",
+                    "date_active",
+                    "current",
+                ]
             ),
         )
         client.disconnect.assert_awaited_once()
@@ -248,11 +293,16 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_unrecognised_failure_is_a_retryable_query_failure_without_reason(self):
-        for error in (ConnectionError("offline"), type("Weird", (Exception,), {"ID": "SOMETHING_ELSE"})()):
+        for error in (
+            ConnectionError("offline"),
+            type("Weird", (Exception,), {"ID": "SOMETHING_ELSE"})(),
+        ):
             client = fake_client(invoke=AsyncMock(side_effect=error))
             _, lines, code = await self.run_command("cmd_get_authorizations", client)
             self.assertEqual(code, 1)
-            self.assertEqual(lines, [{"error": "AUTH_QUERY_FAILED", "message": type(error).__name__}])
+            self.assertEqual(
+                lines, [{"error": "AUTH_QUERY_FAILED", "message": type(error).__name__}]
+            )
 
 
 if __name__ == "__main__":

@@ -11,8 +11,14 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd -P)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.."; pwd -P)"
+SCRIPT_DIR="$(
+  cd "$(dirname "$0")"
+  pwd -P
+)"
+PROJECT_DIR="$(
+  cd "$SCRIPT_DIR/.."
+  pwd -P
+)"
 
 # Load .env if tokens not already in environment
 if [[ -z "${BOT_TOKEN:-}" || -z "${BOT_ADMIN_ID:-}" ]]; then

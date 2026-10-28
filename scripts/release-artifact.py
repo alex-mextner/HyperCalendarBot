@@ -12,9 +12,9 @@ import argparse
 import functools
 import hashlib
 import json
-from pathlib import Path, PurePosixPath
 import re
 import tarfile
+from pathlib import Path, PurePosixPath
 
 MAX_JSON_BYTES = 2 * 1024 * 1024
 MANIFEST_TYPES = {
@@ -50,7 +50,7 @@ def docker_config_path(read_json, tag: str) -> str:
     if not isinstance(manifest, dict) or manifest.get("RepoTags") != [tag]:
         raise ValueError("Artifact tag mismatch")
     config_path = manifest.get("Config")
-    if not isinstance(config_path, str):
+    if type(config_path) is not str:
         raise ValueError("Missing config path")
     return config_path
 
@@ -69,8 +69,7 @@ def verify_config(config: object, raw: bytes, config_path: str, revision: str) -
     runtime = config.get("config") or {}
     if (
         not isinstance(runtime, dict)
-        or (runtime.get("Labels") or {}).get("org.opencontainers.image.revision")
-        != revision
+        or (runtime.get("Labels") or {}).get("org.opencontainers.image.revision") != revision
     ):
         raise ValueError("Artifact revision mismatch")
     return digest
@@ -120,7 +119,7 @@ def indexed_descriptor(read_json, tag: str) -> dict:
     if not isinstance(descriptors, list) or len(descriptors) != 1:
         raise ValueError("Exactly one indexed image is required")
     descriptor = descriptors[0]
-    if not isinstance(descriptor, dict):
+    if type(descriptor) is not dict:
         raise ValueError("Invalid index descriptor")
     # containerd names the loaded image by this annotation; `docker save` writes it.
     annotations = descriptor.get("annotations")
@@ -153,11 +152,7 @@ def main() -> None:
     parser.add_argument("revision")
     parser.add_argument("tag")
     args = parser.parse_args()
-    print(
-        json.dumps(
-            inspect_archive(args.archive, args.revision, args.tag), sort_keys=True
-        )
-    )
+    print(json.dumps(inspect_archive(args.archive, args.revision, args.tag), sort_keys=True))
 
 
 if __name__ == "__main__":

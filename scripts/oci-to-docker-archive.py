@@ -183,7 +183,9 @@ def select_image(
     for root in roots:
         walk(root, 0)
     if len(found) != 1:
-        raise ConversionError(f"Expected exactly one {os_name}/{arch} image for {tag}, found {len(found)}")
+        raise ConversionError(
+            f"Expected exactly one {os_name}/{arch} image for {tag}, found {len(found)}"
+        )
     return next(iter(found.values()))
 
 
@@ -223,7 +225,9 @@ def _add_bytes(out: tarfile.TarFile, name: str, data: bytes) -> None:
     out.addfile(info, io.BytesIO(data))
 
 
-def convert(source: Path, target: Path, tag: str, os_name: str = "linux", arch: str = "arm64") -> str:
+def convert(
+    source: Path, target: Path, tag: str, os_name: str = "linux", arch: str = "arm64"
+) -> str:
     """Write a docker-save archive for tag to target; return the config digest."""
     with tarfile.open(source, "r:*") as archive:
         oci = OciArchive(archive)
@@ -275,7 +279,11 @@ def convert(source: Path, target: Path, tag: str, os_name: str = "linux", arch: 
                             "size": len(raw_config),
                         },
                         "layers": [
-                            {"mediaType": "application/vnd.oci.image.layer.v1.tar", "digest": diff_id, "size": size}
+                            {
+                                "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                                "digest": diff_id,
+                                "size": size,
+                            }
                             for _, diff_id, size in converted
                         ],
                     }
@@ -297,7 +305,11 @@ def convert(source: Path, target: Path, tag: str, os_name: str = "linux", arch: 
                     ],
                 }
                 _add_bytes(out, "index.json", json.dumps(index).encode())
-                _add_bytes(out, "oci-layout", json.dumps({"imageLayoutVersion": "1.0.0"}).encode())
+                _add_bytes(
+                    out,
+                    "oci-layout",
+                    json.dumps({"imageLayoutVersion": "1.0.0"}).encode(),
+                )
             os.replace(partial, target)
     return config_digest
 

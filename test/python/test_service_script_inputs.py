@@ -7,12 +7,13 @@ import ast
 import asyncio
 import contextlib
 import os
-from pathlib import Path
+import runpy
 import subprocess
 import sys
 import tempfile
-from types import SimpleNamespace
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +24,10 @@ UNREACHABLE = 5000000103
 CREDENTIALS = {"MTPROTO_API_ID": "123", "MTPROTO_API_HASH": "synthetic"}
 
 
+class RPCError(Exception):
+    pass
+
+
 class FloodWait(Exception):
     def __init__(self, value):
         super().__init__(value)
@@ -30,11 +35,16 @@ class FloodWait(Exception):
 
 
 def load_function(script, name, namespace):
-    """Exec every top-level function of `script` (the module itself runs main() on import) and return `name`."""
+    """Run every top-level function of `script` (the module itself runs main() on import) and return `name`."""
     tree = ast.parse((SCRIPTS / script).read_text(), filename=script)
     functions = [n for n in tree.body if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))]
-    exec(compile(ast.Module(body=functions, type_ignores=[]), script, "exec"), namespace)
-    return namespace[name]
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "snippet.py"
+        path.write_text(
+            ast.unparse(ast.fix_missing_locations(ast.Module(body=functions, type_ignores=[])))
+        )
+        loaded = runpy.run_path(str(path), init_globals=namespace)
+    return loaded[name]
 
 
 class FetchBirthdaysTests(unittest.TestCase):
@@ -45,11 +55,9 @@ class FetchBirthdaysTests(unittest.TestCase):
 
             async def get_users(self, user_id):
                 if user_id == UNREACHABLE:
-                    raise RuntimeError("synthetic lookup failure")
+                    raise RPCError("synthetic lookup failure")
                 birthday = (
-                    SimpleNamespace(day=4, month=7, year=None)
-                    if user_id == WITH_BIRTHDAY
-                    else None
+                    SimpleNamespace(day=4, month=7, year=None) if user_id == WITH_BIRTHDAY else None
                 )
                 return SimpleNamespace(birthday=birthday)
 
@@ -62,20 +70,20 @@ class FetchBirthdaysTests(unittest.TestCase):
         fetch = load_function(
             "fetch-birthdays.py",
             "fetch",
-            dict(
-                API_ID=123,
-                API_HASH="synthetic",
-                FLOOD_WAIT_MAX=30,
-                asyncio=asyncio,
-                sys=sys,
-                start_service_session=start_service_session,
-            ),
+            {
+                "API_ID": 123,
+                "API_HASH": "synthetic",
+                "FLOOD_WAIT_MAX": 30,
+                "asyncio": asyncio,
+                "sys": sys,
+                "start_service_session": start_service_session,
+            },
         )
         with patch.dict(
             sys.modules,
             {
                 "pyrogram": SimpleNamespace(Client=Client),
-                "pyrogram.errors": SimpleNamespace(FloodWait=FloodWait),
+                "pyrogram.errors": SimpleNamespace(FloodWait=FloodWait, RPCError=RPCError),
                 "mtproto_lock": SimpleNamespace(session_lock=contextlib.nullcontext),
             },
         ):
@@ -96,6 +104,7 @@ class OperatorScriptInputTests(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
 
     def assert_refused(self, command, env, message):

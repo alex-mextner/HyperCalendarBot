@@ -32,6 +32,7 @@ QA step no PR-controlled text in its env (today only GH_TOKEN and HEAD_SHA, pinn
 Exit codes: 0 green (or gate inactive during bootstrap), 1 not green (fix hint printed),
 2 the gate could not evaluate (GitHub/gh error, unreadable or unrecognised log) - never a silent pass.
 """
+
 import argparse
 import json
 import re
@@ -77,7 +78,9 @@ class CannotEvaluate(Exception):
 
 def gh(*args):
     try:
-        done = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=60)
+        done = subprocess.run(
+            ["gh", *args], capture_output=True, text=True, timeout=60, check=False
+        )
     except (OSError, subprocess.SubprocessError) as error:
         raise CannotEvaluate(f"cannot run gh: {error}") from error
     return done
@@ -107,7 +110,9 @@ def workflow_exists_on_default_branch(repo):
 def newest_qa_status(repo, head):
     # Statuses come newest first; the first stage-qa entry is the effective one.
     for page in range(1, MAX_PAGES + 1):
-        batch = gh_json("api", f"repos/{repo}/commits/{head}/statuses?per_page={PAGE_SIZE}&page={page}")
+        batch = gh_json(
+            "api", f"repos/{repo}/commits/{head}/statuses?per_page={PAGE_SIZE}&page={page}"
+        )
         if not isinstance(batch, list):
             raise CannotEvaluate("statuses response is not a list")
         for status in batch:
@@ -115,7 +120,9 @@ def newest_qa_status(repo, head):
                 return status
         if len(batch) < PAGE_SIZE:
             return None
-    raise CannotEvaluate(f"more than {MAX_PAGES * PAGE_SIZE} statuses on {head[:12]}; cannot find {QA_CONTEXT}")
+    raise CannotEvaluate(
+        f"more than {MAX_PAGES * PAGE_SIZE} statuses on {head[:12]}; cannot find {QA_CONTEXT}"
+    )
 
 
 def full_name(value):
@@ -125,8 +132,13 @@ def full_name(value):
 def open_pr_head(repo, pr):
     """The head sha of PR `pr`, which must be an open, non-draft PR from this repository."""
     info = gh_json(
-        "pr", "view", str(pr), "--repo", repo,
-        "--json", "state,isDraft,headRefOid,isCrossRepository",
+        "pr",
+        "view",
+        str(pr),
+        "--repo",
+        repo,
+        "--json",
+        "state,isDraft,headRefOid,isCrossRepository",
     )
     head = info.get("headRefOid")
     if not isinstance(head, str) or not SHA.match(head):
@@ -134,9 +146,13 @@ def open_pr_head(repo, pr):
     if info.get("state") != "OPEN":
         raise NotGreen(f"PR #{pr} is {info.get('state')}, not open. Only open PRs can be shipped.")
     if info.get("isDraft"):
-        raise NotGreen(f"PR #{pr} is a draft. Mark it ready for review, then wait for Stage QA on the new head.")
+        raise NotGreen(
+            f"PR #{pr} is a draft. Mark it ready for review, then wait for Stage QA on the new head."
+        )
     if info.get("isCrossRepository"):
-        raise NotGreen(f"PR #{pr} comes from a fork. Stage QA never runs fork code; push the branch to {repo} instead.")
+        raise NotGreen(
+            f"PR #{pr} comes from a fork. Stage QA never runs fork code; push the branch to {repo} instead."
+        )
     return head
 
 
@@ -151,23 +167,33 @@ def require_success_status(status, head):
     state = status.get("state")
     url = status.get("target_url") or "(no run URL)"
     if state == "pending":
-        raise NotGreen(f"`{QA_CONTEXT}` is still pending on head {short}: wait for Stage build / Stage QA to finish ({url}), then retry.")
+        raise NotGreen(
+            f"`{QA_CONTEXT}` is still pending on head {short}: wait for Stage build / Stage QA to finish ({url}), then retry."
+        )
     if state != "success":
-        raise NotGreen(f"`{QA_CONTEXT}` is {state} on head {short} ({url}). Fix the failure and push a new commit; Stage QA reruns on the new head.")
+        raise NotGreen(
+            f"`{QA_CONTEXT}` is {state} on head {short} ({url}). Fix the failure and push a new commit; Stage QA reruns on the new head."
+        )
 
 
 def bind_status_to_run(status, repo):
     """The status must come from the Actions bot and point at its own QA run; return (cases, run_id, run_url)."""
     creator = (status.get("creator") or {}).get("login")
     if creator != BOT_LOGIN:
-        raise NotGreen(f"`{QA_CONTEXT}` was posted by {creator!r}, not {BOT_LOGIN}: it is not trusted. Let the Stage QA workflow post it by re-running it.")
+        raise NotGreen(
+            f"`{QA_CONTEXT}` was posted by {creator!r}, not {BOT_LOGIN}: it is not trusted. Let the Stage QA workflow post it by re-running it."
+        )
     match = DESCRIPTION.match(status.get("description") or "")
     if not match:
-        raise NotGreen(f"`{QA_CONTEXT}` description {status.get('description')!r} is not `passed cases=<n> run=<id>`: not a real QA result; re-run Stage QA.")
+        raise NotGreen(
+            f"`{QA_CONTEXT}` description {status.get('description')!r} is not `passed cases=<n> run=<id>`: not a real QA result; re-run Stage QA."
+        )
     run_id = int(match.group(2))
     expected_url = f"https://github.com/{repo}/actions/runs/{run_id}"
     if status.get("target_url") != expected_url:
-        raise NotGreen(f"`{QA_CONTEXT}` target_url {status.get('target_url')!r} is not {expected_url}: the status is not bound to its QA run; re-run Stage QA.")
+        raise NotGreen(
+            f"`{QA_CONTEXT}` target_url {status.get('target_url')!r} is not {expected_url}: the status is not bound to its QA run; re-run Stage QA."
+        )
     return int(match.group(1)), run_id, expected_url
 
 
@@ -193,9 +219,13 @@ def run_problems(run, run_id, repo, default_branch):
     if run.get("event") != "workflow_run":
         problems.append(f"event is {run.get('event')!r}, expected workflow_run")
     if run.get("status") != "completed" or run.get("conclusion") != "success":
-        problems.append(f"run is {run.get('status')}/{run.get('conclusion')}, expected completed/success")
+        problems.append(
+            f"run is {run.get('status')}/{run.get('conclusion')}, expected completed/success"
+        )
     if run.get("head_branch") != default_branch:
-        problems.append(f"head_branch is {run.get('head_branch')!r}, expected the default branch {default_branch!r}")
+        problems.append(
+            f"head_branch is {run.get('head_branch')!r}, expected the default branch {default_branch!r}"
+        )
     for key in ("repository", "head_repository"):
         if full_name(run.get(key)) != repo:
             problems.append(f"{key} is {full_name(run.get(key))!r}, expected {repo}")
@@ -210,7 +240,11 @@ def require_trusted_run(repo, run_id):
     default_branch = default_branch_name(repo)
     problems = run_problems(run, run_id, repo, default_branch)
     if problems:
-        raise NotGreen(f"`{QA_CONTEXT}` run {run_id} is not a trusted QA run: " + "; ".join(problems) + ". Re-run Stage QA from the PR.")
+        raise NotGreen(
+            f"`{QA_CONTEXT}` run {run_id} is not a trusted QA run: "
+            + "; ".join(problems)
+            + ". Re-run Stage QA from the PR."
+        )
     return run
 
 
@@ -236,7 +270,9 @@ def step_problems(job, step_name):
     if (qa.get("number"), qa.get("name")) != (2, step_name):
         problems.append(f"step 2 is not `{step_name}`")
     if qa.get("status") != "completed" or qa.get("conclusion") != "success":
-        problems.append(f"step 2 is {qa.get('status')}/{qa.get('conclusion')}, expected completed/success")
+        problems.append(
+            f"step 2 is {qa.get('status')}/{qa.get('conclusion')}, expected completed/success"
+        )
     return problems
 
 
@@ -254,10 +290,16 @@ def job_problems(job, run):
     if job.get("run_id") != run.get("id"):
         problems.append(f"job belongs to run {job.get('run_id')!r}, not {run.get('id')}")
     attempt = job.get("run_attempt")
-    if not is_count(attempt) or not is_count(run.get("run_attempt")) or not 1 <= attempt <= run["run_attempt"]:
+    if (
+        not is_count(attempt)
+        or not is_count(run.get("run_attempt"))
+        or not 1 <= attempt <= run["run_attempt"]
+    ):
         problems.append("job is not of an attempt of this run")
     if job.get("status") != "completed" or job.get("conclusion") != "success":
-        problems.append(f"job is {job.get('status')}/{job.get('conclusion')}, expected completed/success")
+        problems.append(
+            f"job is {job.get('status')}/{job.get('conclusion')}, expected completed/success"
+        )
     if not is_count(job.get("id")):
         problems.append("job has no numeric id")
     return problems
@@ -268,10 +310,16 @@ def require_one_successful_job(job_list, name, run, run_url, extra_problems):
     run_id = run.get("id")
     matching = [j for j in job_list if isinstance(j, dict) and j.get("name") == name]
     if len(matching) != 1:
-        raise NotGreen(f"Run {run_id} has {len(matching)} `{name}` jobs, expected exactly one successful ({run_url}); re-run Stage QA.")
+        raise NotGreen(
+            f"Run {run_id} has {len(matching)} `{name}` jobs, expected exactly one successful ({run_url}); re-run Stage QA."
+        )
     problems = job_problems(matching[0], run) + extra_problems(matching[0])
     if problems:
-        raise NotGreen(f"Run {run_id} has no successful `{name}` job ({run_url}): " + "; ".join(problems) + "; re-run all jobs of Stage QA.")
+        raise NotGreen(
+            f"Run {run_id} has no successful `{name}` job ({run_url}): "
+            + "; ".join(problems)
+            + "; re-run all jobs of Stage QA."
+        )
     return matching[0]
 
 
@@ -282,7 +330,9 @@ def require_run_jobs(repo, run, run_url):
     if not isinstance(job_list, list):
         raise CannotEvaluate("jobs response has no jobs list")
     qa_job = require_one_successful_job(job_list, QA_JOB_NAME, run, run_url, qa_step_problems)
-    report_job = require_one_successful_job(job_list, REPORT_JOB_NAME, run, run_url, report_step_problems)
+    report_job = require_one_successful_job(
+        job_list, REPORT_JOB_NAME, run, run_url, report_step_problems
+    )
     return qa_job, report_job
 
 
@@ -353,9 +403,11 @@ def read_job_log_head(repo, job_id):
         proc.stderr.close()
     if capped:
         cut = prefix[:LOG_HEAD_LIMIT]
-        return cut[:cut.rfind(b"\n") + 1], True
+        return cut[: cut.rfind(b"\n") + 1], True
     if code != 0:
-        raise CannotEvaluate(f"cannot read the log of job {job_id}: {failure_reason(code, detail, expired)}")
+        raise CannotEvaluate(
+            f"cannot read the log of job {job_id}: {failure_reason(code, detail, expired)}"
+        )
     return prefix, False
 
 
@@ -383,17 +435,21 @@ def first_step_header(texts, capped):
             header.append(text)
     if header is None and not capped:
         raise NotGreen("the job log has no step header")
-    raise CannotEvaluate(f"no complete step header within the first {LOG_HEAD_LIMIT // 1024} KiB of the job log")
+    raise CannotEvaluate(
+        f"no complete step header within the first {LOG_HEAD_LIMIT // 1024} KiB of the job log"
+    )
 
 
 def header_head_sha(header):
     """The one `HEAD_SHA` the runner printed in the env block of the step header."""
     shell = next((i for i, text in enumerate(header) if text.startswith("shell: ")), None)
-    if shell is None or header[shell + 1:shell + 2] != ["env:"]:
+    if shell is None or header[shell + 1 : shell + 2] != ["env:"]:
         raise NotGreen("the step header has no env block")
     declared = [i for i, text in enumerate(header) if HEAD_SHA_DECLARATION.match(text)]
     if len(declared) != 1 or declared[0] < shell + 2:
-        raise NotGreen(f"the step header declares HEAD_SHA {len(declared)} times, expected exactly once in its env block")
+        raise NotGreen(
+            f"the step header declares HEAD_SHA {len(declared)} times, expected exactly once in its env block"
+        )
     match = HEAD_SHA_ENV_LINE.match(header[declared[0]])
     if match is None:
         raise NotGreen("HEAD_SHA in the step header is not a full lowercase commit SHA")
@@ -414,16 +470,18 @@ def tested_head_sha(repo, job_id):
 def header_env(header, names):
     """The value of each of `names` printed once in the env block of the step header."""
     shell = next((i for i, text in enumerate(header) if text.startswith("shell: ")), None)
-    if shell is None or header[shell + 1:shell + 2] != ["env:"]:
+    if shell is None or header[shell + 1 : shell + 2] != ["env:"]:
         raise NotGreen("the step header has no env block")
     declared = {}
-    for text in header[shell + 2:]:
+    for text in header[shell + 2 :]:
         match = ENV_LINE.match(text)
         if match is not None:
             declared.setdefault(match.group(1), []).append(match.group(2))
     for name in names:
         if len(declared.get(name, [])) != 1:
-            raise NotGreen(f"the step header declares {name} {len(declared.get(name, []))} times, expected exactly once in its env block")
+            raise NotGreen(
+                f"the step header declares {name} {len(declared.get(name, []))} times, expected exactly once in its env block"
+            )
     return {name: declared[name][0] for name in names}
 
 
@@ -459,7 +517,9 @@ def require_report_says_passed(repo, report_job, head, run_id, cases, run_url):
 def require_head_unmoved(repo, pr, head):
     """The PR head can move while the evidence is read; the verdict is for the head it was asked about."""
     if open_pr_head(repo, pr) != head:
-        raise NotGreen(f"PR #{pr} head moved from {head[:12]} while the gate was reading; retry on the new head.")
+        raise NotGreen(
+            f"PR #{pr} head moved from {head[:12]} while the gate was reading; retry on the new head."
+        )
 
 
 def evaluate(repo, pr):
@@ -493,7 +553,10 @@ def main(argv):
         print(f"stage-qa gate: NOT GREEN. {error}", file=sys.stderr)
         return 1
     except CannotEvaluate as error:
-        print(f"stage-qa gate: cannot evaluate ({error}). Fix gh access/network and retry; refusing to ship blind.", file=sys.stderr)
+        print(
+            f"stage-qa gate: cannot evaluate ({error}). Fix gh access/network and retry; refusing to ship blind.",
+            file=sys.stderr,
+        )
         return 2
     print(f"stage-qa gate: green for {head[:12]} cases={cases} run={run_id}")
     return 0

@@ -21,6 +21,9 @@ SMOKE lines, our own messages) goes to stderr.
 Exit codes (same table as odroid-stage-qa.sh): 0 passed, 1 failed, 2 refused, 3 not provisioned,
 75 lock wait timed out, 76 superseded; a signal exits 128+signal.
 """
+
+from __future__ import annotations
+
 import argparse
 import fcntl
 import json
@@ -36,7 +39,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SMOKE_SCRIPT = SCRIPT_DIR / "stage-smoke.py"
@@ -57,7 +60,9 @@ TOKEN_PATTERN = re.compile(r"[\x21-\x7e]{1,4096}")
 USERNAME_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_]{4,31}")
 TARGET_PATTERN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9_.:-]*")
 PEER_PATTERN = re.compile(r"[0-9]{1,20}")
-SMOKE_SUMMARY = re.compile(r"^STAGE_SMOKE_(PASSED|FAILED)\b.*?\bcases=([0-9]+)\b.*?\bfailed=([0-9]+)\b")
+SMOKE_SUMMARY = re.compile(
+    r"^STAGE_SMOKE_(PASSED|FAILED)\b.*?\bcases=([0-9]+)\b.*?\bfailed=([0-9]+)\b"
+)
 
 READY_PREFIX = "STAGE_READY "
 RESULT_PREFIX = "STAGE_QA_RESULT"
@@ -65,7 +70,13 @@ RESULT_PREFIX = "STAGE_QA_RESULT"
 EXIT_PASSED, EXIT_FAILED, EXIT_REFUSED, EXIT_NOT_PROVISIONED = 0, 1, 2, 3
 EXIT_LOCK_TIMEOUT, EXIT_SUPERSEDED = 75, 76
 SMOKE_REFUSED, SMOKE_UNAVAILABLE = 64, 69
-WRAPPER_CODES = (EXIT_FAILED, EXIT_REFUSED, EXIT_NOT_PROVISIONED, EXIT_LOCK_TIMEOUT, EXIT_SUPERSEDED)
+WRAPPER_CODES = (
+    EXIT_FAILED,
+    EXIT_REFUSED,
+    EXIT_NOT_PROVISIONED,
+    EXIT_LOCK_TIMEOUT,
+    EXIT_SUPERSEDED,
+)
 STATUS_BY_CODE = {
     EXIT_PASSED: "passed",
     EXIT_REFUSED: "refused",
@@ -172,7 +183,7 @@ def print_result(sha, verdict):
 class Config(NamedTuple):
     ssh_target: str
     ssh_key: str
-    ssh_known_hosts: Optional[str]
+    ssh_known_hosts: str | None
     username: str
     deny_usernames: tuple
     qa_bin: str
@@ -196,7 +207,11 @@ DEFAULTS = {
     "state_dir": "~/.local/state/hypercal-stage-qa",
     "min_cases": 5,
     "required_cases": [
-        "start", "ping", "today-read-only-calendar", "simple-intent-phrase", "validation-search-without-query",
+        "start",
+        "ping",
+        "today-read-only-calendar",
+        "simple-intent-phrase",
+        "validation-search-without-query",
     ],
     "smoke_timeout": DEFAULT_SMOKE_TIMEOUT,
     "ready_timeout": DEFAULT_READY_TIMEOUT,
@@ -255,7 +270,9 @@ def _check_config_file(path):
     try:
         info = os.stat(path)
     except FileNotFoundError:
-        raise NotProvisioned(f"config {path} not found; run scripts/install-stage-qa-pc.sh") from None
+        raise NotProvisioned(
+            f"config {path} not found; run scripts/install-stage-qa-pc.sh"
+        ) from None
     except OSError as error:
         raise NotProvisioned(f"config {path} is not readable: {error.strerror}") from None
     if not stat.S_ISREG(info.st_mode):
@@ -331,11 +348,15 @@ def load_config(path):
 def check_provisioned(config):
     """Everything the run needs on this PC; returns the resolved ssh client and python."""
     if not os.path.isfile(config.ssh_key):
-        raise NotProvisioned(f"ssh key {config.ssh_key} not found; run scripts/install-stage-qa-pc.sh")
+        raise NotProvisioned(
+            f"ssh key {config.ssh_key} not found; run scripts/install-stage-qa-pc.sh"
+        )
     if config.ssh_known_hosts and not os.path.isfile(config.ssh_known_hosts):
         raise NotProvisioned(f"ssh known_hosts file {config.ssh_known_hosts} not found")
     if not (os.path.isfile(config.qa_bin) and os.access(config.qa_bin, os.X_OK)):
-        raise NotProvisioned(f"qa binary {config.qa_bin} not found or not executable (install qa-cli)")
+        raise NotProvisioned(
+            f"qa binary {config.qa_bin} not found or not executable (install qa-cli)"
+        )
     ssh = shutil.which("ssh")
     if ssh is None:
         raise NotProvisioned("ssh client not found in PATH")
@@ -343,7 +364,9 @@ def check_provisioned(config):
     if python is None:
         raise NotProvisioned(f"python {config.python} not found in PATH")
     if not SMOKE_SCRIPT.is_file():
-        raise NotProvisioned(f"{SMOKE_SCRIPT} not found; reinstall with scripts/install-stage-qa-pc.sh")
+        raise NotProvisioned(
+            f"{SMOKE_SCRIPT} not found; reinstall with scripts/install-stage-qa-pc.sh"
+        )
     return ssh, python
 
 
@@ -412,12 +435,16 @@ class PcLock:
             now = time.monotonic()
             waited = now - started
             if now >= next_log:
-                say(f"waiting for the PC qa lock, held by: {describe_owner(self.owner_path)} "
-                    f"(waited {int(waited)}s of {int(self.max_wait)}s)")
+                say(
+                    f"waiting for the PC qa lock, held by: {describe_owner(self.owner_path)} "
+                    f"(waited {int(waited)}s of {int(self.max_wait)}s)"
+                )
                 next_log = now + LOCK_LOG_EVERY_SECONDS
             if waited >= self.max_wait:
                 os.close(fd)
-                say(f"gave up after {int(waited)}s; the other QA run is still going. Re-run this check when it ends.")
+                say(
+                    f"gave up after {int(waited)}s; the other QA run is still going. Re-run this check when it ends."
+                )
                 raise LockTimeout()
             time.sleep(min(LOCK_POLL_SECONDS, max(self.max_wait - waited, 0.01)))
         self.fd = fd
@@ -427,8 +454,10 @@ class PcLock:
         # Truncate and rewrite in place: the owner file may belong to another user in a sticky dir.
         try:
             with open(self.owner_path, "w", encoding="utf-8") as handle:
-                handle.write(f"repo={LOCK_TAG}\npid={os.getpid()}\nstart_ticks={start_ticks(os.getpid())}\n"
-                             f"started={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n")
+                handle.write(
+                    f"repo={LOCK_TAG}\npid={os.getpid()}\nstart_ticks={start_ticks(os.getpid())}\n"
+                    f"started={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n"
+                )
         except OSError:
             pass
 
@@ -466,9 +495,13 @@ def _ready_object(payload_text, sha):
 
 
 def _check_ready_bot(username, config):
-    if type(username) is not str or normalized_username(username) != normalized_username(config.username):
+    if type(username) is not str or normalized_username(username) != normalized_username(
+        config.username
+    ):
         raise Refused("STAGE_READY names another bot than the configured stage bot")
-    if normalized_username(username) in {normalized_username(name) for name in config.deny_usernames}:
+    if normalized_username(username) in {
+        normalized_username(name) for name in config.deny_usernames
+    }:
         raise Refused("STAGE_READY names a denied (production) bot")
     if not has_stage_marker(username):
         raise Refused("STAGE_READY bot username does not contain stage or stg")
@@ -522,8 +555,13 @@ class SshSession:
         self.ready_seen = False
         self.gone = threading.Event()
         self.proc = subprocess.Popen(
-            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", errors="replace",
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             # Own session: a ^C or group kill aimed at the driver must not cut ssh before DONE is sent.
             start_new_session=True,
         )
@@ -540,7 +578,7 @@ class SshSession:
                 line = raw.rstrip("\r\n")
                 if line.startswith(READY_PREFIX) and not self.ready_seen:
                     self.ready_seen = True
-                    self.events.put(("ready", line[len(READY_PREFIX):]))
+                    self.events.put(("ready", line[len(READY_PREFIX) :]))
                 elif line.startswith(RESULT_PREFIX):
                     self.result_line = line
                     log(f"odroid: {line}")
@@ -594,9 +632,21 @@ class SshSession:
 
 def ssh_argv(config, ssh, sha):
     argv = [
-        ssh, "-i", config.ssh_key,
-        "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes",
-        "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-o", "ConnectTimeout=30",
+        ssh,
+        "-i",
+        config.ssh_key,
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=4",
+        "-o",
+        "ConnectTimeout=30",
     ]
     if config.ssh_known_hosts:
         argv += ["-o", f"UserKnownHostsFile={config.ssh_known_hosts}"]
@@ -610,7 +660,7 @@ def ssh_argv(config, ssh, sha):
 class SmokeOutcome(NamedTuple):
     kind: str  # "exit" | "timeout" | "ssh-gone"
     code: int = 0
-    summary: Optional[tuple] = None  # (status, cases, failed) of the last STAGE_SMOKE_* line
+    summary: tuple | None = None  # (status, cases, failed) of the last STAGE_SMOKE_* line
 
 
 def kill_group(proc):
@@ -632,20 +682,30 @@ def kill_group(proc):
 
 def smoke_command(config, python, sha, ready, cases_file):
     command = [
-        python, str(SMOKE_SCRIPT), "run",
-        "--cases-json", cases_file,
-        "--username", config.username,
-        "--peer", ready.peer,
-        "--sha", sha,
+        python,
+        str(SMOKE_SCRIPT),
+        "run",
+        "--cases-json",
+        cases_file,
+        "--username",
+        config.username,
+        "--peer",
+        ready.peer,
+        "--sha",
+        sha,
     ]
     for name in config.deny_usernames:
         command += ["--deny", name]
     return [
         *command,
-        "--receipt", os.path.join(config.state_dir, "receipts", f"{sha}.json"),
-        "--qa-bin", config.qa_bin,
-        "--min-cases", str(config.min_cases),
-        "--base-cases", str(ready.base_cases),
+        "--receipt",
+        os.path.join(config.state_dir, "receipts", f"{sha}.json"),
+        "--qa-bin",
+        config.qa_bin,
+        "--min-cases",
+        str(config.min_cases),
+        "--base-cases",
+        str(ready.base_cases),
     ]
 
 
@@ -653,7 +713,9 @@ def run_smoke(config, python, sha, ready, ssh_gone):
     receipts = os.path.join(config.state_dir, "receipts")
     os.makedirs(receipts, mode=0o700, exist_ok=True)
     # mkstemp creates the file 0600; the cases are PR data but there is no reason to expose them.
-    handle, cases_file = tempfile.mkstemp(prefix=f"cases-{sha[:12]}-", suffix=".json", dir=config.state_dir)
+    handle, cases_file = tempfile.mkstemp(
+        prefix=f"cases-{sha[:12]}-", suffix=".json", dir=config.state_dir
+    )
     proc = None
     summary = [None]
     try:
@@ -661,8 +723,12 @@ def run_smoke(config, python, sha, ready, ssh_gone):
             json.dump(ready.cases, stream)
         proc = subprocess.Popen(
             smoke_command(config, python, sha, ready, cases_file),
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             start_new_session=True,
         )
 
@@ -688,7 +754,9 @@ def run_smoke(config, python, sha, ready, ssh_gone):
                     kill_group(proc)
                     outcome, code = "ssh-gone", 0
                 elif time.monotonic() >= deadline:
-                    say(f"the smoke timed out after {int(config.smoke_timeout)}s; killing its process group")
+                    say(
+                        f"the smoke timed out after {int(config.smoke_timeout)}s; killing its process group"
+                    )
                     kill_group(proc)
                     outcome, code = "timeout", 0
         reader.join(timeout=5)
@@ -706,11 +774,17 @@ def smoke_verdict(config, outcome):
     """exit 0 -> 0 (only with a real pass summary), 1 -> 1, 64 -> 2, 69 -> 3, anything else -> 1."""
     cases, failed = (outcome.summary[1], outcome.summary[2]) if outcome.summary else (0, 0)
     if outcome.code == 0:
-        passed = (outcome.summary is not None and outcome.summary[0] == "PASSED"
-                  and failed == 0 and cases >= config.min_cases)
+        passed = (
+            outcome.summary is not None
+            and outcome.summary[0] == "PASSED"
+            and failed == 0
+            and cases >= config.min_cases
+        )
         if passed:
             return Verdict(EXIT_PASSED, cases, failed)
-        say("the smoke exited 0 without a pass summary covering the required cases; treating it as a failure")
+        say(
+            "the smoke exited 0 without a pass summary covering the required cases; treating it as a failure"
+        )
         return Verdict(EXIT_FAILED, cases, failed)
     if outcome.code == SMOKE_REFUSED:
         return Verdict(EXIT_REFUSED, cases, failed)
@@ -756,8 +830,10 @@ def run_session(config, ssh, python, sha, token):
         SignalState.cleaning = True
         ssh_code = session.finish(config.done_timeout)
     if session.ready_seen and ssh_code != 0:
-        say(f"odroid teardown reported exit status {ssh_code}; see the odroid output above "
-            f"(not a verdict of this run)")
+        say(
+            f"odroid teardown reported exit status {ssh_code}; see the odroid output above "
+            f"(not a verdict of this run)"
+        )
     if verdict.from_wrapper:
         return Verdict(wrapper_code(ssh_code), verdict.cases, verdict.failed)
     return verdict
@@ -792,9 +868,13 @@ class Parser(argparse.ArgumentParser):
 
 
 def main(argv):
-    parser = Parser(prog="stage-qa-pc.py", description="Run the per-PR stage QA from this PC (token on stdin).")
+    parser = Parser(
+        prog="stage-qa-pc.py", description="Run the per-PR stage QA from this PC (token on stdin)."
+    )
     parser.add_argument("sha", help="the 40-hex commit to check")
-    parser.add_argument("--config", default=DEFAULT_CONFIG, help="driver config (default %(default)s)")
+    parser.add_argument(
+        "--config", default=DEFAULT_CONFIG, help="driver config (default %(default)s)"
+    )
     args = parser.parse_args(argv)
     if not SHA_PATTERN.fullmatch(args.sha):
         say("the argument must be a 40-hex commit SHA")

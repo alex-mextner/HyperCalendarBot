@@ -15,7 +15,9 @@ def digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def docker_save_members(tag: str, config: bytes, layers: tuple[bytes, ...] = ()) -> tuple[list[tuple[str, bytes]], str]:
+def docker_save_members(
+    tag: str, config: bytes, layers: tuple[bytes, ...] = ()
+) -> tuple[list[tuple[str, bytes]], str]:
     """(archive members as (name, bytes), manifest digest) for one image tagged tag."""
     config_path = "blobs/sha256/" + digest(config)[7:]
     layer_paths = ["blobs/sha256/" + digest(layer)[7:] for layer in layers]
@@ -23,9 +25,17 @@ def docker_save_members(tag: str, config: bytes, layers: tuple[bytes, ...] = ())
         {
             "schemaVersion": 2,
             "mediaType": "application/vnd.oci.image.manifest.v1+json",
-            "config": {"mediaType": "application/vnd.oci.image.config.v1+json", "digest": digest(config), "size": len(config)},
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "digest": digest(config),
+                "size": len(config),
+            },
             "layers": [
-                {"mediaType": "application/vnd.oci.image.layer.v1.tar", "digest": digest(layer), "size": len(layer)}
+                {
+                    "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                    "digest": digest(layer),
+                    "size": len(layer),
+                }
                 for layer in layers
             ],
         }
@@ -39,12 +49,20 @@ def docker_save_members(tag: str, config: bytes, layers: tuple[bytes, ...] = ())
                 "mediaType": "application/vnd.oci.image.manifest.v1+json",
                 "digest": manifest_id,
                 "size": len(image_manifest),
-                "annotations": {"io.containerd.image.name": tag, "org.opencontainers.image.ref.name": tag.rpartition(":")[2]},
+                "annotations": {
+                    "io.containerd.image.name": tag,
+                    "org.opencontainers.image.ref.name": tag.rpartition(":")[2],
+                },
             }
         ],
     }
     members = [
-        ("manifest.json", json.dumps([{"Config": config_path, "RepoTags": [tag], "Layers": layer_paths}]).encode()),
+        (
+            "manifest.json",
+            json.dumps(
+                [{"Config": config_path, "RepoTags": [tag], "Layers": layer_paths}]
+            ).encode(),
+        ),
         (config_path, config),
         *zip(layer_paths, layers),
         ("blobs/sha256/" + manifest_id[7:], image_manifest),

@@ -8,13 +8,13 @@ import fcntl
 import functools
 import json
 import os
-from pathlib import Path
 import re
 import shlex
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 SHA = re.compile(r"[a-f0-9]{40}")
 DIGEST = re.compile(r"sha256:[a-f0-9]{64}")
@@ -34,11 +34,10 @@ def run(args, cwd, *, input_text=None, live=False, keep_fds=()):
         stderr=None if live else subprocess.PIPE,
         timeout=None if live else 60,
         pass_fds=keep_fds,
+        check=False,
     )
     if result.returncode:
-        raise DeploymentError(
-            f"{Path(args[0]).name} command failed ({result.returncode})"
-        )
+        raise DeploymentError(f"{Path(args[0]).name} command failed ({result.returncode})")
     return result.stdout or ""
 
 
@@ -90,18 +89,12 @@ def hosted_action(workflow, jobs):
         raise DeploymentError("unknown workflow state")
     if workflow.get("conclusion") == "success":
         return "hosted_success"
-    if (
-        workflow.get("conclusion") != "failure"
-        or not isinstance(jobs, list)
-        or not jobs
-    ):
+    if workflow.get("conclusion") != "failure" or not isinstance(jobs, list) or not jobs:
         raise DeploymentError("workflow did not establish runner unavailability")
     # Every job is checked: one that ran steps vetoes the override even after the proof was found.
     outcomes = [runner_outcome(job) for job in jobs]
     if "failed_without_runner" not in outcomes:
-        raise DeploymentError(
-            "skipped jobs alone do not establish runner unavailability"
-        )
+        raise DeploymentError("skipped jobs alone do not establish runner unavailability")
     return "local"
 
 
@@ -268,10 +261,7 @@ def inspect_hosted(repo, name, sha, call, sleep=time.sleep):
     if not isinstance(workflow, dict) or workflow.get("headSha") != sha:
         raise DeploymentError("workflow SHA mismatch")
     jobs = None
-    if (
-        workflow.get("status") == "completed"
-        and workflow.get("conclusion") == "failure"
-    ):
+    if workflow.get("status") == "completed" and workflow.get("conclusion") == "failure":
         jobs = failed_run_jobs(repo, name, workflow, call)
     return hosted_action(workflow, jobs)
 
@@ -282,9 +272,7 @@ def merged_target(repo, pr, sha, call):
         raise DeploymentError("full merged SHA and numeric PR required")
     repo = Path(repo).resolve()
     git_dir = Path(
-        call(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], repo
-        ).strip()
+        call(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], repo).strip()
     )
     name = call(
         ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
@@ -325,11 +313,7 @@ def deploy_destination():
     directory = os.environ.get("HYPERCAL_DEPLOY_PATH", "/opt/hypercal")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+", host):
         raise DeploymentError("invalid deployment host")
-    if (
-        not re.fullmatch(r"/[A-Za-z0-9_/-]+", directory)
-        or directory == "/"
-        or ".." in directory
-    ):
+    if not re.fullmatch(r"/[A-Za-z0-9_/-]+", directory) or directory == "/" or ".." in directory:
         raise DeploymentError("invalid deployment directory")
     return host, directory
 

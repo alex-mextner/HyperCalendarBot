@@ -38,6 +38,7 @@ import dataclasses
 import fnmatch
 import gzip
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -46,6 +47,7 @@ import socket
 import stat
 import sys
 import time
+import zlib
 
 MB = 1024 * 1024
 DAY = 86400
@@ -181,7 +183,10 @@ class Report:
             "managed_entries": self.managed_entries,
             "free_bytes": self.free_bytes,
             "total_bytes": self.total_bytes,
-            "actions": [{k: v for k, v in dataclasses.asdict(a).items() if v not in (None, False)} for a in self.actions],
+            "actions": [
+                {k: v for k, v in dataclasses.asdict(a).items() if v not in (None, False)}
+                for a in self.actions
+            ],
         }
 
 
@@ -262,7 +267,13 @@ def _scan_top_level_item(item, cfg):
         if item.is_file(follow_symlinks=False):
             if not _is_managed_file(item.name, cfg):
                 return None
-            return Entry(item.path, "file", st.st_size, st.st_mtime, [FileInfo(item.path, st.st_size, st.st_mtime)])
+            return Entry(
+                item.path,
+                "file",
+                st.st_size,
+                st.st_mtime,
+                [FileInfo(item.path, st.st_size, st.st_mtime)],
+            )
         if item.is_dir(follow_symlinks=False) and _is_managed_dir(item.name, cfg):
             files = []
             _walk_files(item.path, files)
@@ -279,7 +290,11 @@ def _entry_touched_recently(entry, now):
 def _assign_protection(entries, now):
     """Mark the newest release-*/failed-* dir and everything touched in the last few minutes as undeletable."""
     for pattern, label in EVIDENCE_DIR_PATTERNS.items():
-        group = [e for e in entries if e.kind == "dir" and fnmatch.fnmatchcase(os.path.basename(e.path), pattern)]
+        group = [
+            e
+            for e in entries
+            if e.kind == "dir" and fnmatch.fnmatchcase(os.path.basename(e.path), pattern)
+        ]
         if group:
             max(group, key=lambda e: (e.mtime, e.path)).protected = label
     for entry in entries:
@@ -336,12 +351,16 @@ def gzip_in_place(path, verify=_gz_matches_source):
         os.unlink(tmp)
     try:
         with open(path, "rb") as source, open(tmp, "xb") as raw:
-            with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=int(before.st_mtime)) as gz:
+            with gzip.GzipFile(
+                filename="", mode="wb", fileobj=raw, mtime=int(before.st_mtime)
+            ) as gz:
                 shutil.copyfileobj(source, gz, CHUNK)
             raw.flush()
             os.fsync(raw.fileno())
         os.chmod(tmp, stat.S_IMODE(before.st_mode))
-        with contextlib.suppress(OSError):  # only root can chown; a non-root run keeps its own owner
+        with contextlib.suppress(
+            OSError
+        ):  # only root can chown; a non-root run keeps its own owner
             os.chown(tmp, before.st_uid, before.st_gid)
         os.utime(tmp, ns=(before.st_atime_ns, before.st_mtime_ns))
         os.replace(tmp, target)
@@ -439,7 +458,9 @@ def _oversized_file_victim(entries, cfg, skip, now):
         (info, entry)
         for entry in entries
         for info in entry.files
-        if info.path not in skip and info.size > cfg.max_file_bytes and not _file_protection(entry, info, now)
+        if info.path not in skip
+        and info.size > cfg.max_file_bytes
+        and not _file_protection(entry, info, now)
     ]
     if not over:
         return None
@@ -496,7 +517,12 @@ def _compress_phase(root_real, entries, cfg, now, dry_run, compress, actions):
             continue
         try:
             _compress_one(root_real, info.path, compress)
-        except Exception as exc:  # the original is intact on any failure; report and carry on
+        except (
+            OSError,
+            CompressionError,
+            EOFError,
+            zlib.error,
+        ) as exc:  # original intact on failure; report, carry on
             actions.append(Action("compress-failed", info.path, detail=type(exc).__name__))
         else:
             actions.append(Action("compressed", info.path))
@@ -588,10 +614,18 @@ def _run(root, cfg, free_fn, now, dry_run, compress):
     root_real = validate_root(root)
     now = time.time() if now is None else now
     actions = []
-    entries = _compress_phase(root_real, scan_root(root_real, now, cfg), cfg, now, dry_run, compress, actions)
-    initial, violated, free, total = _enforce_limits(root_real, entries, cfg, now, dry_run, free_fn, actions)
+    entries = _compress_phase(
+        root_real, scan_root(root_real, now, cfg), cfg, now, dry_run, compress, actions
+    )
+    initial, violated, free, total = _enforce_limits(
+        root_real, entries, cfg, now, dry_run, free_fn, actions
+    )
     if initial:
-        actions.extend(Action("kept", e.path, protected=e.protected) for e in sorted(entries, key=lambda e: e.path) if e.protected)
+        actions.extend(
+            Action("kept", e.path, protected=e.protected)
+            for e in sorted(entries, key=lambda e: e.path)
+            if e.protected
+        )
     return Report(
         root=root_real,
         dry_run=dry_run,
@@ -630,7 +664,7 @@ def parse_env_file(path):
             if not line or line.startswith("#") or "=" not in line:
                 continue
             if line.startswith("export "):
-                line = line[len("export "):].lstrip()
+                line = line[len("export ") :].lstrip()
             key, _, value = line.partition("=")
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
@@ -664,11 +698,18 @@ def alert_findings(report, cfg):
     floor = f"floor {cfg.min_free_bytes // MB} MB / {cfg.min_free_percent:g}%"
     if "free" in report.violations:
         findings["free-below-floor"] = f"{state} is below the {floor} even after cleanup"
-    elif report.free_bytes < EARLY_WARNING_FACTOR * cfg.min_free_bytes or percent < EARLY_WARNING_FACTOR * cfg.min_free_percent:
-        findings["free-early-warning"] = f"disk-space watchdog: {state} is within {EARLY_WARNING_FACTOR}x of the {floor}"
+    elif (
+        report.free_bytes < EARLY_WARNING_FACTOR * cfg.min_free_bytes
+        or percent < EARLY_WARNING_FACTOR * cfg.min_free_percent
+    ):
+        findings["free-early-warning"] = (
+            f"disk-space watchdog: {state} is within {EARLY_WARNING_FACTOR}x of the {floor}"
+        )
     other = [v for v in report.violations if v != "free"]
     if other:
-        findings["unresolved"] = f"limits still exceeded with only protected entries left: {', '.join(other)}"
+        findings["unresolved"] = (
+            f"limits still exceeded with only protected entries left: {', '.join(other)}"
+        )
     return findings
 
 
@@ -704,7 +745,9 @@ def send_alert(report, cfg, env_file, state_file, now, sender=telegram_send):
         return result
     state = _load_state(state_file)
     # A recorded time in the future (clock stepped back) must not mute the alert for hours.
-    due = [k for k in findings if not 0 <= now - state.get(k, float("-inf")) < ALERT_INTERVAL_SECONDS]
+    due = [
+        k for k in findings if not 0 <= now - state.get(k, float("-inf")) < ALERT_INTERVAL_SECONDS
+    ]
     result["suppressed"] = [k for k in findings if k not in due]
     if not due:
         return result
@@ -713,9 +756,17 @@ def send_alert(report, cfg, env_file, state_file, now, sender=telegram_send):
         token, chat_id = credentials.get("BOT_TOKEN"), credentials.get("BOT_ADMIN_ID")
         if not token or not chat_id:
             raise MissingCredentials()
-        text = "\n".join([f"log-retention on {socket.gethostname()} ({report.root})"] + [f"- {findings[k]}" for k in due])
+        text = "\n".join(
+            [f"log-retention on {socket.gethostname()} ({report.root})"]
+            + [f"- {findings[k]}" for k in due]
+        )
         sender(token, chat_id, text)
-    except Exception as exc:  # report the class only; messages from urllib can embed the URL
+    except (
+        OSError,
+        ValueError,
+        http.client.HTTPException,
+        MissingCredentials,
+    ) as exc:  # class only: urllib messages can embed the URL
         result["failed"] = type(exc).__name__
         return result
     for kind in due:
@@ -753,7 +804,9 @@ def _non_negative_int(text):
 
 
 def build_parser():
-    parser = _Parser(description="Rotate deploy/health/backup logs by size and free disk; never by deploy.")
+    parser = _Parser(
+        description="Rotate deploy/health/backup logs by size and free disk; never by deploy."
+    )
     parser.add_argument("--root", required=True, help="logs directory to manage")
     parser.add_argument("--max-dir-mb", type=_non_negative_float, default=1024)
     parser.add_argument("--max-file-mb", type=_non_negative_float, default=200)
@@ -761,9 +814,17 @@ def build_parser():
     parser.add_argument("--min-free-mb", type=_non_negative_float, default=2048)
     parser.add_argument("--min-free-percent", type=_non_negative_float, default=5)
     parser.add_argument("--gzip-after-days", type=_non_negative_float, default=1)
-    parser.add_argument("--alert", action="store_true", help="send a Telegram message (needs BOT_TOKEN, BOT_ADMIN_ID)")
+    parser.add_argument(
+        "--alert",
+        action="store_true",
+        help="send a Telegram message (needs BOT_TOKEN, BOT_ADMIN_ID)",
+    )
     parser.add_argument("--env-file", default=DEFAULT_ENV_FILE)
-    parser.add_argument("--state-file", default=None, help="alert rate-limit state (default <root>/.log-retention-state.json)")
+    parser.add_argument(
+        "--state-file",
+        default=None,
+        help="alert rate-limit state (default <root>/.log-retention-state.json)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
@@ -838,7 +899,9 @@ def main(argv=None, *, free_fn=None, sender=None, now=None, out=None, err=None):
 
     run = plan if args.dry_run else apply
     report = run(root_real, cfg, free_fn=free_fn, now=now)
-    _print_report(report, _alert_if_requested(args, report, cfg, root_real, now, sender), args.json, out)
+    _print_report(
+        report, _alert_if_requested(args, report, cfg, root_real, now, sender), args.json, out
+    )
     return report.exit_code
 
 

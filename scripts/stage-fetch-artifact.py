@@ -16,6 +16,7 @@ Exit codes: 0 ok, 2 refused (one-line reason on stderr), 76 superseded (S is no 
 of an open, non-draft PR of R). `fetch` prints exactly one stdout line:
   STAGE_ARTIFACT archive_sha256=<hex> config_digest=<sha256:hex> image_bytes=<n> replay=<0|1>
 """
+
 import argparse
 import hashlib
 import json
@@ -73,12 +74,15 @@ def read_token():
 
 
 def authorized(token, url):
-    return urllib.request.Request(url, headers={
-        "Authorization": "Bearer " + token,
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": USER_AGENT,
-    })
+    return urllib.request.Request(
+        url,
+        headers={
+            "Authorization": "Bearer " + token,
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": USER_AGENT,
+        },
+    )
 
 
 def api(token, path, shape=dict):
@@ -118,7 +122,7 @@ def write_new(path, source, what):
             digest.update(chunk)
             view = memoryview(chunk)
             while view:
-                view = view[os.write(fd, view):]
+                view = view[os.write(fd, view) :]
     finally:
         os.close(fd)
     return digest.hexdigest()
@@ -133,7 +137,9 @@ def download(token, artifact_id, expected_digest, path):
                 actual = "sha256:" + write_new(path, response, "artifact download")
             break
         except urllib.error.HTTPError as error:
-            location = error.headers.get("Location") if error.code in (301, 302, 303, 307, 308) else None
+            location = (
+                error.headers.get("Location") if error.code in (301, 302, 303, 307, 308) else None
+            )
             error.close()
             if not location:
                 refuse(f"artifact download answered HTTP {error.code}")
@@ -172,12 +178,17 @@ def require_current_head(token):
 
 def build_run(token):
     """Id of the newest successful Stage build pull_request run for SHA; the caller names none."""
-    query = urllib.parse.urlencode({"head_sha": SHA, "event": "pull_request", "status": "completed", "per_page": 20})
-    runs = api(token, f"/repos/{REPO}/actions/workflows/stage-build.yml/runs?{query}").get("workflow_runs")
+    query = urllib.parse.urlencode(
+        {"head_sha": SHA, "event": "pull_request", "status": "completed", "per_page": 20}
+    )
+    runs = api(token, f"/repos/{REPO}/actions/workflows/stage-build.yml/runs?{query}").get(
+        "workflow_runs"
+    )
     if not isinstance(runs, list):
         refuse("workflow runs answer has no workflow_runs list")
     candidates = [
-        run for run in runs
+        run
+        for run in runs
         if isinstance(run, dict)
         # `type(...) is int`, not isinstance: a JSON true would otherwise pass as 1.
         and type(run.get("id")) is int
@@ -199,7 +210,10 @@ def build_run(token):
 def build_artifact(token, run_id):
     """The single stage-<sha> artifact uploaded by run_id: (id, digest)."""
     name = "stage-" + SHA
-    listing = api(token, f"/repos/{REPO}/actions/runs/{run_id}/artifacts?" + urllib.parse.urlencode({"name": name}))
+    listing = api(
+        token,
+        f"/repos/{REPO}/actions/runs/{run_id}/artifacts?" + urllib.parse.urlencode({"name": name}),
+    )
     artifacts = listing.get("artifacts")
     if not isinstance(artifacts, list):
         refuse("artifact list answer has no artifacts list")
@@ -219,7 +233,11 @@ def build_artifact(token, run_id):
     if type(size) is not int or not 0 < size <= MAX_DECLARED_ARTIFACT_BYTES:
         refuse("artifact size is missing or above 2 GiB")
     workflow_run = artifact.get("workflow_run")
-    if not isinstance(workflow_run, dict) or workflow_run.get("id") != run_id or workflow_run.get("head_sha") != SHA:
+    if (
+        not isinstance(workflow_run, dict)
+        or workflow_run.get("id") != run_id
+        or workflow_run.get("head_sha") != SHA
+    ):
         refuse(f"artifact {artifact_id} was not uploaded by run {run_id} for {SHA}")
     return artifact_id, digest
 
@@ -230,7 +248,11 @@ def prepare_out(out):
         os.mkdir(out, 0o700)
         return
     info = os.lstat(out)
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
         refuse("output path is not a 0700 directory owned by the caller")
     if os.listdir(out):
         refuse("output directory is not empty")
@@ -249,7 +271,7 @@ def refuse_oversized_directory(zip_path):
     end = tail.rfind(b"PK\x05\x06")
     if end < 0 or len(tail) - end < 22:
         refuse("artifact zip has no end-of-central-directory record")
-    total = int.from_bytes(tail[end + 10:end + 12], "little")
+    total = int.from_bytes(tail[end + 10 : end + 12], "little")
     if total == 0xFFFF or total > MAX_ZIP_ENTRIES:
         refuse(f"artifact zip has more than {MAX_ZIP_ENTRIES} members")
 
@@ -295,11 +317,18 @@ def inspect_image(out, archive_sum):
     """Run release-artifact.py (tag + revision label checks) on the image; return its JSON object."""
     lib = os.path.dirname(os.path.abspath(__file__))
     inspected = subprocess.run(
-        [sys.executable, os.path.join(lib, "release-artifact.py"), os.path.join(out, "image.tar.gz"), SHA, f"ghcr.io/alex-mextner/hypercalendarbot-stage:{SHA}"],
+        [
+            sys.executable,
+            os.path.join(lib, "release-artifact.py"),
+            os.path.join(out, "image.tar.gz"),
+            SHA,
+            f"ghcr.io/alex-mextner/hypercalendarbot-stage:{SHA}",
+        ],
         env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        check=False,
     )
     if inspected.returncode != 0:
         lines = inspected.stderr.strip().splitlines()
@@ -332,7 +361,11 @@ def fetch(token, out):
     sums = extract_known_files(zip_path, out)
     os.unlink(zip_path)
     artifact = inspect_image(out, sums["image.tar.gz"])
-    fd = os.open(os.path.join(out, "artifact.json"), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    fd = os.open(
+        os.path.join(out, "artifact.json"),
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        0o600,
+    )
     with os.fdopen(fd, "w") as handle:
         json.dump(artifact, handle, sort_keys=True)
         handle.write("\n")

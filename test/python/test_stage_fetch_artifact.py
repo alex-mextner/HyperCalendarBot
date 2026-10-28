@@ -11,7 +11,6 @@ import http.server
 import io
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
@@ -23,6 +22,7 @@ import unittest
 import urllib.parse
 import warnings
 import zipfile
+from pathlib import Path
 
 from docker_save_fixture import add_members, docker_save_members
 
@@ -37,7 +37,15 @@ REPO = "alex-mextner/HyperCalendarBot"
 BUILD_PATH = ".github/workflows/stage-build.yml"
 CASES = b'[{"name": "start"}]\n'
 REPLAY = b'[{"name": "replayed"}]\n'
-SHARED_HELPERS = ("NoRedirect", "read_token", "authorized", "api", "same_repository", "write_new", "download")
+SHARED_HELPERS = (
+    "NoRedirect",
+    "read_token",
+    "authorized",
+    "api",
+    "same_repository",
+    "write_new",
+    "download",
+)
 
 
 def processes_holding(secret):
@@ -55,7 +63,11 @@ def processes_holding(secret):
 
 def image_archive(revision=SHA, tag=None):
     config = json.dumps(
-        {"architecture": "arm64", "os": "linux", "config": {"Labels": {"org.opencontainers.image.revision": revision}}}
+        {
+            "architecture": "arm64",
+            "os": "linux",
+            "config": {"Labels": {"org.opencontainers.image.revision": revision}},
+        }
     ).encode()
     members, _ = docker_save_members(tag or f"{STAGE_IMAGE}:{SHA}", config)
     raw = io.BytesIO()
@@ -144,7 +156,9 @@ class FakeGitHub:
         listing = re.fullmatch(re.escape(base) + r"/actions/runs/(\d+)/artifacts", url.path)
         if listing:
             found = self.artifacts.get(int(listing[1]), [])
-            return request.reply(200, json.dumps({"total_count": len(found), "artifacts": found}).encode())
+            return request.reply(
+                200, json.dumps({"total_count": len(found), "artifacts": found}).encode()
+            )
         download = re.fullmatch(re.escape(base) + r"/actions/artifacts/(\d+)/zip", url.path)
         if download and int(download[1]) in self.zips:
             location = f"{self.url(self.blob)}/blob/{download[1]}?sig=synthetic"
@@ -158,7 +172,16 @@ class FakeGitHub:
             return request.reply(404)
         return request.reply(200, self.zips[int(found[1])])
 
-    def publish(self, zip_bytes, run_id=70, artifact_id=7, digest=None, run=None, artifact=None, extra_artifacts=()):
+    def publish(
+        self,
+        zip_bytes,
+        run_id=70,
+        artifact_id=7,
+        digest=None,
+        run=None,
+        artifact=None,
+        extra_artifacts=(),
+    ):
         """A successful Stage build pull_request run of this repo with its one stage-<sha> artifact."""
         self.runs.append(
             {
@@ -202,10 +225,27 @@ class StageFetchArtifactTests(unittest.TestCase):
         return list(members.items())
 
     def run_script(self, command="fetch", sha=SHA, token=FAKE_TOKEN):
-        argv = [sys.executable, str(SCRIPT), command, "--api", self.github.url(self.github.api), "--repo", REPO, "--sha", sha]
+        argv = [
+            sys.executable,
+            str(SCRIPT),
+            command,
+            "--api",
+            self.github.url(self.github.api),
+            "--repo",
+            REPO,
+            "--sha",
+            sha,
+        ]
         if command == "fetch":
             argv += ["--out", str(self.out)]
-        return subprocess.run(argv, input="" if token is None else token + "\n", text=True, capture_output=True, timeout=60)
+        return subprocess.run(
+            argv,
+            input="" if token is None else token + "\n",
+            text=True,
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
 
     def assertRefused(self, result, message=None):
         self.assertEqual(result.returncode, 2, result.stderr)
@@ -221,18 +261,29 @@ class StageFetchArtifactTests(unittest.TestCase):
         self.assertNotIn(FAKE_TOKEN, result.stdout + result.stderr)
 
     def test_verified_artifact_is_extracted_and_described(self):
-        extra = [("evil.sh", b"no\n"), ("scripts/extra.sh", b"no\n"), ("../escape", b"no\n"), ("image.tar.gz.bak", b"no")]
+        extra = [
+            ("evil.sh", b"no\n"),
+            ("scripts/extra.sh", b"no\n"),
+            ("../escape", b"no\n"),
+            ("image.tar.gz.bak", b"no"),
+        ]
         self.github.publish(make_zip(self.good_members() + extra))
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         archive_sum = hashlib.sha256(self.image).hexdigest()
         self.assertEqual(
             result.stdout.splitlines(),
-            [f"STAGE_ARTIFACT archive_sha256={archive_sum} config_digest={self.config_id} image_bytes="
-             + str(json.loads((self.out / "artifact.json").read_text())["image_bytes"]) + " replay=0"],
+            [
+                f"STAGE_ARTIFACT archive_sha256={archive_sum} config_digest={self.config_id} image_bytes="
+                + str(json.loads((self.out / "artifact.json").read_text())["image_bytes"])
+                + " replay=0"
+            ],
         )
         # Nothing but the fixed members, artifact.json and no leftover zip; extras never reach disk.
-        self.assertEqual(sorted(p.name for p in self.out.iterdir()), ["artifact.json", "image.tar.gz", "stage-smoke-cases.json"])
+        self.assertEqual(
+            sorted(p.name for p in self.out.iterdir()),
+            ["artifact.json", "image.tar.gz", "stage-smoke-cases.json"],
+        )
         self.assertFalse((self.tmp / "escape").exists())
         self.assertEqual((self.out / "image.tar.gz").read_bytes(), self.image)
         self.assertEqual((self.out / "stage-smoke-cases.json").read_bytes(), CASES)
@@ -245,7 +296,9 @@ class StageFetchArtifactTests(unittest.TestCase):
         self.assertEqual(artifact["image_ref"], f"{STAGE_IMAGE}:{SHA}")
         # The token authenticates every API call, never reaches the blob host, argv or any output.
         self.assertTrue(self.github.api_requests)
-        self.assertEqual({auth for _, auth, _ in self.github.api_requests}, {"Bearer " + FAKE_TOKEN})
+        self.assertEqual(
+            {auth for _, auth, _ in self.github.api_requests}, {"Bearer " + FAKE_TOKEN}
+        )
         self.assertEqual(len(self.github.blob_requests), 1)
         self.assertNotIn("authorization", {key.lower() for key in self.github.blob_requests[0]})
         self.assertEqual(self.github.argv_with_token, [])
@@ -254,7 +307,9 @@ class StageFetchArtifactTests(unittest.TestCase):
     def test_the_run_is_looked_up_with_the_pinned_query_not_a_caller_id(self):
         self.github.publish(make_zip(self.good_members()))
         self.assertEqual(self.run_script().returncode, 0)
-        runs = [q for path, _, q in self.github.api_requests if path.endswith("/stage-build.yml/runs")]
+        runs = [
+            q for path, _, q in self.github.api_requests if path.endswith("/stage-build.yml/runs")
+        ]
         self.assertEqual(len(runs), 1)
         self.assertEqual(
             {k: v[0] for k, v in runs[0].items()},
@@ -264,7 +319,9 @@ class StageFetchArtifactTests(unittest.TestCase):
         self.assertEqual(artifacts, [{"name": ["stage-" + SHA]}])
 
     def test_replay_file_is_extracted_when_present(self):
-        self.github.publish(make_zip(self.good_members(**{"stage-smoke-cases.replay.json": REPLAY})))
+        self.github.publish(
+            make_zip(self.good_members(**{"stage-smoke-cases.replay.json": REPLAY}))
+        )
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(result.stdout.rstrip().endswith("replay=1"), result.stdout)
@@ -299,9 +356,13 @@ class StageFetchArtifactTests(unittest.TestCase):
             "draft": lambda g: g.pulls[0].update(draft=True),
             "closed": lambda g: g.pulls[0].update(state="closed"),
             "head moved": lambda g: g.pulls[0]["head"].update(sha=OTHER_SHA),
-            "head repo differs": lambda g: g.pulls[0]["head"].update(repo={"full_name": "fork/HyperCalendarBot"}),
+            "head repo differs": lambda g: g.pulls[0]["head"].update(
+                repo={"full_name": "fork/HyperCalendarBot"}
+            ),
             "head repo deleted": lambda g: g.pulls[0]["head"].update(repo=None),
-            "base repo differs": lambda g: g.pulls[0]["base"].update(repo={"full_name": "other/Repo"}),
+            "base repo differs": lambda g: g.pulls[0]["base"].update(
+                repo={"full_name": "other/Repo"}
+            ),
             "no pull request": lambda g: g.pulls.clear(),
         }
         for label, change in cases.items():
@@ -336,7 +397,10 @@ class StageFetchArtifactTests(unittest.TestCase):
     def test_newest_run_that_is_a_fork_is_not_replaced_by_an_older_run(self):
         self.github.publish(make_zip(self.good_members()), run_id=70, artifact_id=7)
         self.github.publish(
-            make_zip(self.good_members()), run_id=71, artifact_id=8, run={"head_repository": {"full_name": "fork/X"}}
+            make_zip(self.good_members()),
+            run_id=71,
+            artifact_id=8,
+            run={"head_repository": {"full_name": "fork/X"}},
         )
         self.assertRefused(self.run_script(), "fork")
 
@@ -378,7 +442,8 @@ class StageFetchArtifactTests(unittest.TestCase):
             "duplicate image": self.good_members() + [("image.tar.gz", self.image)],
             "duplicate cases": self.good_members() + [("stage-smoke-cases.json", CASES)],
             "directory member": [("image.tar.gz/", b""), ("stage-smoke-cases.json", CASES)],
-            "optional is a directory": self.good_members() + [("stage-smoke-cases.replay.json/", b"")],
+            "optional is a directory": self.good_members()
+            + [("stage-smoke-cases.replay.json/", b"")],
             "missing image": [("stage-smoke-cases.json", CASES)],
             "missing cases": [("image.tar.gz", self.image)],
             "not a zip": None,
@@ -387,7 +452,9 @@ class StageFetchArtifactTests(unittest.TestCase):
             with self.subTest(label):
                 self.github = FakeGitHub()
                 self.addCleanup(self.github.close)
-                self.github.publish(make_zip(members) if members is not None else b"this is not a zip file")
+                self.github.publish(
+                    make_zip(members) if members is not None else b"this is not a zip file"
+                )
                 if self.out.exists():
                     shutil.rmtree(self.out)
                 self.assertRefused(self.run_script())
@@ -395,14 +462,26 @@ class StageFetchArtifactTests(unittest.TestCase):
     def test_bad_zip_members_are_refused_with_the_specific_reason(self):
         oversized = b" " * (8 * 1024 * 1024 + 1)
         cases = {
-            "duplicate image": (self.good_members() + [("image.tar.gz", self.image)], "member appears twice in artifact: image.tar.gz"),
-            "directory member": ([("image.tar.gz/", b""), ("stage-smoke-cases.json", CASES)], "member is not a regular file: image.tar.gz"),
+            "duplicate image": (
+                self.good_members() + [("image.tar.gz", self.image)],
+                "member appears twice in artifact: image.tar.gz",
+            ),
+            "directory member": (
+                [("image.tar.gz/", b""), ("stage-smoke-cases.json", CASES)],
+                "member is not a regular file: image.tar.gz",
+            ),
             "optional is a directory": (
                 self.good_members() + [("stage-smoke-cases.replay.json/", b"")],
                 "member is not a regular file: stage-smoke-cases.replay.json",
             ),
-            "missing image": ([("stage-smoke-cases.json", CASES)], "required member missing from artifact: image.tar.gz"),
-            "missing cases": ([("image.tar.gz", self.image)], "required member missing from artifact: stage-smoke-cases.json"),
+            "missing image": (
+                [("stage-smoke-cases.json", CASES)],
+                "required member missing from artifact: image.tar.gz",
+            ),
+            "missing cases": (
+                [("image.tar.gz", self.image)],
+                "required member missing from artifact: stage-smoke-cases.json",
+            ),
             "oversized cases": (
                 self.good_members(**{"stage-smoke-cases.json": oversized}),
                 "member is larger than 8388608 bytes: stage-smoke-cases.json",
@@ -460,7 +539,7 @@ class StageFetchArtifactTests(unittest.TestCase):
         self.assertEqual(self.github.api_requests, [])
 
     def test_shared_helpers_are_textually_identical_to_the_activator(self):
-        heredoc = re.search(r"<<'PY'\n(.*?)\nPY\n", ACTIVATOR.read_text(), re.S)[1]
+        heredoc = re.search(r"<<'PY'\n(.*?)\nPY\n", ACTIVATOR.read_text(), re.DOTALL)[1]
         theirs, ours = heredoc, SCRIPT.read_text()
 
         def sources(text):
@@ -480,15 +559,30 @@ class StageFetchArtifactTests(unittest.TestCase):
             theirs_src["refuse"].replace("hypercal-activate-release: ", "PREFIX"),
         )
         for constant in ("MAX_ARTIFACT_BYTES", "MAX_JSON_BYTES", "MAX_REDIRECTS"):
-            line = re.search(rf"^{constant} = .*$", theirs, re.M)[0]
+            line = re.search(rf"^{constant} = .*$", theirs, re.MULTILINE)[0]
             self.assertIn(line, ours)
-        self.assertIn("OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)", ours)
+        self.assertIn(
+            "OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)",
+            ours,
+        )
 
     def test_token_is_never_read_from_argv_or_environment(self):
         self.github.publish(make_zip(self.good_members()))
-        argv = [sys.executable, str(SCRIPT), "current", "--api", self.github.url(self.github.api), "--repo", REPO, "--sha", SHA]
+        argv = [
+            sys.executable,
+            str(SCRIPT),
+            "current",
+            "--api",
+            self.github.url(self.github.api),
+            "--repo",
+            REPO,
+            "--sha",
+            SHA,
+        ]
         env = {**os.environ, "GITHUB_TOKEN": FAKE_TOKEN, "GH_TOKEN": FAKE_TOKEN}
-        result = subprocess.run(argv, input="", text=True, capture_output=True, env=env, timeout=60)
+        result = subprocess.run(
+            argv, input="", text=True, capture_output=True, env=env, timeout=60, check=False
+        )
         self.assertRefused(result, "token is required")
 
 

@@ -1,4 +1,14 @@
-import importlib.util, json, os, signal, subprocess, sys, tempfile, time, unittest, unittest.mock
+import importlib.util
+import json
+import os
+import runpy
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -97,9 +107,7 @@ class FakeCommands:
         return "test/repo"
 
     def pr_view(self, args, kw):
-        return json.dumps(
-            {"state": "MERGED", "baseRefName": "main", "mergeCommit": {"oid": SHA}}
-        )
+        return json.dumps({"state": "MERGED", "baseRefName": "main", "mergeCommit": {"oid": SHA}})
 
     def probe(self, args, kw):
         return json.dumps(snapshot() if self.deployed else snapshot("c" * 40))
@@ -205,7 +213,9 @@ class PostShipTests(unittest.TestCase):
         environment = {k: v for k, v in os.environ.items() if k != "HYPERCAL_DEPLOY_HOST"}
         with unittest.mock.patch.dict(os.environ, environment, clear=True):
             self.invoke(fake)
-        hosts = [args[args.index("ConnectTimeout=10") + 1] for args, _ in fake.calls if args[0] == "ssh"]
+        hosts = [
+            args[args.index("ConnectTimeout=10") + 1] for args, _ in fake.calls if args[0] == "ssh"
+        ]
         self.assertEqual(hosts, ["root@odroidn2"])
 
     def test_verified_fallback_uses_merged_blob_and_full_local_gate(self):
@@ -235,9 +245,7 @@ class PostShipTests(unittest.TestCase):
 
     def test_unstarted_job_requires_explicit_no_runner_evidence(self):
         with self.assertRaises(module.DeploymentError):
-            module.hosted_action(
-                {"status": "completed", "conclusion": "failure"}, [{"steps": []}]
-            )
+            module.hosted_action({"status": "completed", "conclusion": "failure"}, [{"steps": []}])
 
     def test_annotation_cannot_authorize_override(self):
         job = {
@@ -246,9 +254,7 @@ class PostShipTests(unittest.TestCase):
             "message": "recent account payments have failed",
         }
         with self.assertRaises(module.DeploymentError):
-            module.hosted_action(
-                {"status": "completed", "conclusion": "failure"}, [job]
-            )
+            module.hosted_action({"status": "completed", "conclusion": "failure"}, [job])
 
     def test_nonblocking_lock_reports_busy_without_remote_call(self):
         fake = FakeCommands(self.root)
@@ -268,9 +274,7 @@ class PostShipTests(unittest.TestCase):
 
         def call(args, cwd, **kw):
             if args[:3] == ["gh", "pr", "view"]:
-                return json.dumps(
-                    {"state": "MERGED", "baseRefName": "main", "mergeCommit": None}
-                )
+                return json.dumps({"state": "MERGED", "baseRefName": "main", "mergeCommit": None})
             return fake(args, cwd, **kw)
 
         with self.assertRaises(module.DeploymentError):
@@ -287,9 +291,7 @@ class PostShipTests(unittest.TestCase):
         with self.assertRaises(module.DeploymentError):
             module.deploy(self.root, 42, SHA, call=call, sleep=lambda _: None)
         self.assertEqual(
-            json.loads((self.root / ".git/post-ship-release.json").read_text())[
-                "state"
-            ],
+            json.loads((self.root / ".git/post-ship-release.json").read_text())["state"],
             "failed",
         )
 
@@ -362,9 +364,7 @@ class RecoverySafetyTests(unittest.TestCase):
 
 class SkippedJobMetadataTests(unittest.TestCase):
     def check(self, jobs):
-        return module.hosted_action(
-            {"status": "completed", "conclusion": "failure"}, jobs
-        )
+        return module.hosted_action({"status": "completed", "conclusion": "failure"}, jobs)
 
     def test_explicit_skipped_dependencies_allow_only_no_runner_identifiers(self):
         for runner in [None, 0]:
@@ -457,15 +457,13 @@ class WrapperTests(unittest.TestCase):
         return root, work, env
 
     def run_wrapper(self, work, env, mode):
-        args = ["bash", str(work / "pr-ship.sh"), "42"] + (
-            ["--dry-run"] if mode == "dry" else []
-        )
+        args = ["bash", str(work / "pr-ship.sh"), "42"] + (["--dry-run"] if mode == "dry" else [])
         if mode == "cross-repo":
             args += ["--repo", "other/repo"]
         if mode == "cross-repo-equals":
             args += ["--repo=other/repo"]
         return subprocess.run(
-            args, cwd=work, env=env, text=True, capture_output=True, timeout=10
+            args, cwd=work, env=env, text=True, capture_output=True, timeout=10, check=False
         )
 
     def check_delegated(self, mode, out, d, root, work):
@@ -519,11 +517,15 @@ class RemoteProbeHostTests(unittest.TestCase):
                 return Reply()
 
             inspect = "sha256:" + "b" * 64 + "|true|" + SHA
-            with unittest.mock.patch.object(sys, "argv", ["probe", str(deploy)]), \
-                unittest.mock.patch("subprocess.check_output", return_value=inspect), \
-                unittest.mock.patch("urllib.request.urlopen", fake_urlopen), \
-                unittest.mock.patch("builtins.print"):
-                exec(module.REMOTE_PROBE, {})
+            with (
+                unittest.mock.patch.object(sys, "argv", ["probe", str(deploy)]),
+                unittest.mock.patch("subprocess.check_output", return_value=inspect),
+                unittest.mock.patch("urllib.request.urlopen", fake_urlopen),
+                unittest.mock.patch("builtins.print"),
+            ):
+                probe = Path(tmp) / "probe.py"
+                probe.write_text(module.REMOTE_PROBE)
+                runpy.run_path(str(probe))
             return seen
 
     def test_probe_uses_the_public_domain_from_the_deploy_env_file(self):
@@ -535,7 +537,7 @@ class RemoteProbeHostTests(unittest.TestCase):
 
     def test_probe_takes_the_last_assignment_and_drops_an_inline_comment(self):
         urls = self.probe_urls(
-            "PUBLIC_DOMAIN=hypercal.invntrm.ru\nPUBLIC_DOMAIN=\"hypercal.mextner.com\" # prod\n"
+            'PUBLIC_DOMAIN=hypercal.invntrm.ru\nPUBLIC_DOMAIN="hypercal.mextner.com" # prod\n'
         )
         self.assertEqual(
             urls,
@@ -601,7 +603,13 @@ def in_order(*replies):
 
 
 def completed(conclusion="failure", **fields):
-    return {"databaseId": 7, "headSha": SHA, "status": "completed", "conclusion": conclusion, **fields}
+    return {
+        "databaseId": 7,
+        "headSha": SHA,
+        "status": "completed",
+        "conclusion": conclusion,
+        **fields,
+    }
 
 
 class HostedActionDecisionTests(unittest.TestCase):
@@ -618,7 +626,13 @@ class HostedActionDecisionTests(unittest.TestCase):
         return self.action({"status": "completed", "conclusion": "failure"}, jobs)
 
     def job(self, **fields):
-        return {"status": "completed", "conclusion": "failure", "runner_id": 0, "steps": [], **fields}
+        return {
+            "status": "completed",
+            "conclusion": "failure",
+            "runner_id": 0,
+            "steps": [],
+            **fields,
+        }
 
     def test_no_workflow_means_local(self):
         self.assertEqual(self.action(None), "local")
@@ -631,7 +645,10 @@ class HostedActionDecisionTests(unittest.TestCase):
     def test_unfinished_runs_are_pending_whatever_the_jobs_say(self):
         for status in ["queued", "in_progress", "waiting", "requested", "pending"]:
             with self.subTest(status=status):
-                self.assertEqual(self.action({"status": status, "conclusion": "failure"}, "ignored"), "hosted_pending")
+                self.assertEqual(
+                    self.action({"status": status, "conclusion": "failure"}, "ignored"),
+                    "hosted_pending",
+                )
 
     def test_unknown_status_is_refused(self):
         for workflow in [{}, {"status": None}, {"status": "stale"}, {"status": "COMPLETED"}]:
@@ -639,7 +656,9 @@ class HostedActionDecisionTests(unittest.TestCase):
                 self.refuses("unknown workflow state", workflow)
 
     def test_completed_success_is_hosted_success(self):
-        self.assertEqual(self.action({"status": "completed", "conclusion": "success"}), "hosted_success")
+        self.assertEqual(
+            self.action({"status": "completed", "conclusion": "success"}), "hosted_success"
+        )
 
     def test_other_conclusions_and_unusable_job_lists_do_not_establish_unavailability(self):
         good = [self.job()]
@@ -668,16 +687,24 @@ class HostedActionDecisionTests(unittest.TestCase):
         }
         for label, job in malformed.items():
             with self.subTest(label):
-                self.refuses("invalid job metadata", {"status": "completed", "conclusion": "failure"}, [job])
+                self.refuses(
+                    "invalid job metadata", {"status": "completed", "conclusion": "failure"}, [job]
+                )
 
     def test_jobs_that_ran_steps_or_hold_a_runner_name_forbid_the_override(self):
         for label, job in {
             "steps ran": self.job(steps=[{"name": "x"}]),
             "named runner": self.job(runner_name="odroid"),
-            "steps on a skipped job": self.job(conclusion="skipped", runner_id=None, steps=[{"name": "x"}]),
+            "steps on a skipped job": self.job(
+                conclusion="skipped", runner_id=None, steps=[{"name": "x"}]
+            ),
         }.items():
             with self.subTest(label):
-                self.refuses("hosted executable steps ran", {"status": "completed", "conclusion": "failure"}, [job])
+                self.refuses(
+                    "hosted executable steps ran",
+                    {"status": "completed", "conclusion": "failure"},
+                    [job],
+                )
 
     def test_empty_or_missing_runner_name_does_not_count_as_a_runner(self):
         for name in [None, ""]:
@@ -695,13 +722,19 @@ class HostedActionDecisionTests(unittest.TestCase):
         }
         for label, job in refused.items():
             with self.subTest(label):
-                self.refuses("job did not establish runner unavailability", {"status": "completed", "conclusion": "failure"}, [job])
+                self.refuses(
+                    "job did not establish runner unavailability",
+                    {"status": "completed", "conclusion": "failure"},
+                    [job],
+                )
 
     def test_skipped_jobs_alone_never_establish_unavailability(self):
         skipped = self.job(conclusion="skipped", runner_id=None)
         for jobs in [[skipped], [skipped, dict(skipped, runner_id=0)]]:
             with self.subTest(jobs=len(jobs)):
-                self.refuses("skipped jobs alone", {"status": "completed", "conclusion": "failure"}, jobs)
+                self.refuses(
+                    "skipped jobs alone", {"status": "completed", "conclusion": "failure"}, jobs
+                )
 
     def test_a_failed_runner_less_job_among_skipped_ones_means_local(self):
         skipped = self.job(conclusion="skipped", runner_id=None)
@@ -740,12 +773,23 @@ class InspectHostedTests(unittest.TestCase):
     def test_lists_the_latest_ci_run_for_the_commit(self):
         call = self.runs(json.dumps([completed("success")]))
         self.assertEqual(self.inspect(call), "hosted_success")
-        args, kw = call.calls[0]
+        args, _kw = call.calls[0]
         self.assertEqual(
             args,
             [
-                "gh", "run", "list", "--repo", self.NAME, "--workflow", "CI/CD", "--commit", SHA,
-                "--limit", "1", "--json", "databaseId,headSha,status,conclusion",
+                "gh",
+                "run",
+                "list",
+                "--repo",
+                self.NAME,
+                "--workflow",
+                "CI/CD",
+                "--commit",
+                SHA,
+                "--limit",
+                "1",
+                "--json",
+                "databaseId,headSha,status,conclusion",
             ],
         )
         self.assertEqual(len(call.calls), 1)
@@ -767,9 +811,11 @@ class InspectHostedTests(unittest.TestCase):
     def test_a_non_list_collection_is_refused_without_retrying(self):
         sleeps = []
         for payload in ["{}", '"x"', "null", "5"]:
-            with self.subTest(payload=payload):
-                with self.assertRaisesRegex(module.DeploymentError, "invalid workflow collection"):
-                    self.inspect(self.runs(payload), sleeps)
+            with (
+                self.subTest(payload=payload),
+                self.assertRaisesRegex(module.DeploymentError, "invalid workflow collection"),
+            ):
+                self.inspect(self.runs(payload), sleeps)
         self.assertEqual(sleeps, [])
 
     def test_undecodable_and_oversized_metadata_are_refused(self):
@@ -779,10 +825,16 @@ class InspectHostedTests(unittest.TestCase):
             self.inspect(self.runs("[" + " " * 2_000_001 + "]"))
 
     def test_a_run_for_another_commit_is_refused(self):
-        for workflow in ["x", {"headSha": "c" * 40, "status": "completed", "conclusion": "success"}, {"status": "completed"}]:
-            with self.subTest(workflow=workflow):
-                with self.assertRaisesRegex(module.DeploymentError, "workflow SHA mismatch"):
-                    self.inspect(self.runs(json.dumps([workflow])))
+        for workflow in [
+            "x",
+            {"headSha": "c" * 40, "status": "completed", "conclusion": "success"},
+            {"status": "completed"},
+        ]:
+            with (
+                self.subTest(workflow=workflow),
+                self.assertRaisesRegex(module.DeploymentError, "workflow SHA mismatch"),
+            ):
+                self.inspect(self.runs(json.dumps([workflow])))
 
     def test_only_completed_failures_fetch_jobs(self):
         for workflow, expected in [
@@ -794,14 +846,20 @@ class InspectHostedTests(unittest.TestCase):
                 call = self.runs(json.dumps([workflow]))
                 self.assertEqual(self.inspect(call), expected)
                 self.assertEqual(len(call.calls), 1)
-        with self.assertRaisesRegex(module.DeploymentError, "did not establish runner unavailability"):
+        with self.assertRaisesRegex(
+            module.DeploymentError, "did not establish runner unavailability"
+        ):
             self.inspect(self.runs(json.dumps([completed("cancelled")])))
 
     def test_failed_run_jobs_are_fetched_by_run_id_and_decide_the_action(self):
         job = {"status": "completed", "conclusion": "failure", "runner_id": 0, "steps": []}
-        call = self.runs(json.dumps([completed("failure", databaseId=99)])).on(self.JOBS, self.jobs_payload([job]))
+        call = self.runs(json.dumps([completed("failure", databaseId=99)])).on(
+            self.JOBS, self.jobs_payload([job])
+        )
         self.assertEqual(self.inspect(call), "local")
-        self.assertEqual(call.calls[1][0], ["gh", "api", "repos/test/repo/actions/runs/99/jobs?per_page=100"])
+        self.assertEqual(
+            call.calls[1][0], ["gh", "api", "repos/test/repo/actions/runs/99/jobs?per_page=100"]
+        )
         ran = dict(job, steps=[{"name": "x"}], runner_id=4)
         call = self.runs(json.dumps([completed("failure")])).on(self.JOBS, self.jobs_payload([ran]))
         with self.assertRaisesRegex(module.DeploymentError, "hosted executable steps ran"):
@@ -811,7 +869,9 @@ class InspectHostedTests(unittest.TestCase):
         for run_id in [None, 0, -1, True, "7", 1.0]:
             with self.subTest(run_id=run_id):
                 call = self.runs(json.dumps([completed("failure", databaseId=run_id)]))
-                with self.assertRaisesRegex(module.DeploymentError, "invalid workflow run identifier"):
+                with self.assertRaisesRegex(
+                    module.DeploymentError, "invalid workflow run identifier"
+                ):
                     self.inspect(call)
                 self.assertEqual(len(call.calls), 1)
 
@@ -820,11 +880,20 @@ class InspectHostedTests(unittest.TestCase):
         cases = {
             "payload is a list": ("[]", "incomplete job metadata"),
             "no total_count": (json.dumps({"jobs": [job]}), "incomplete job metadata"),
-            "boolean total_count": (json.dumps({"jobs": [job], "total_count": True}), "incomplete job metadata"),
+            "boolean total_count": (
+                json.dumps({"jobs": [job], "total_count": True}),
+                "incomplete job metadata",
+            ),
             "more than one page": (self.jobs_payload([job], total=101), "incomplete job metadata"),
-            "jobs not a list": (json.dumps({"jobs": {}, "total_count": 0}), "incomplete job collection"),
+            "jobs not a list": (
+                json.dumps({"jobs": {}, "total_count": 0}),
+                "incomplete job collection",
+            ),
             "jobs missing": (json.dumps({"total_count": 0}), "incomplete job collection"),
-            "jobs shorter than total": (self.jobs_payload([job], total=2), "incomplete job collection"),
+            "jobs shorter than total": (
+                self.jobs_payload([job], total=2),
+                "incomplete job collection",
+            ),
         }
         for label, (payload, reason) in cases.items():
             with self.subTest(label):
@@ -868,13 +937,26 @@ class DeployContractTests(unittest.TestCase):
         return module.deploy(self.root, pr, sha, call=call, sleep=lambda _: None)
 
     def heads(self, fake):
-        return [tuple(args[:2]) if args[0] in ("git", "gh") else (args[0],) for args, _ in fake.calls]
+        return [
+            tuple(args[:2]) if args[0] in ("git", "gh") else (args[0],) for args, _ in fake.calls
+        ]
 
     def test_rejects_malformed_sha_or_pr_before_running_anything(self):
-        for pr, sha in [(42, "a" * 39), (42, "A" * 40), (42, "main"), (True, SHA), (0, SHA), (-3, SHA), ("42", SHA), (4.0, SHA)]:
+        for pr, sha in [
+            (42, "a" * 39),
+            (42, "A" * 40),
+            (42, "main"),
+            (True, SHA),
+            (0, SHA),
+            (-3, SHA),
+            ("42", SHA),
+            (4.0, SHA),
+        ]:
             with self.subTest(pr=pr, sha=sha):
                 fake = FakeCommands(self.root)
-                with self.assertRaisesRegex(module.DeploymentError, "full merged SHA and numeric PR required"):
+                with self.assertRaisesRegex(
+                    module.DeploymentError, "full merged SHA and numeric PR required"
+                ):
                     self.invoke(fake, pr=pr, sha=sha)
                 self.assertEqual(fake.calls, [])
 
@@ -888,12 +970,23 @@ class DeployContractTests(unittest.TestCase):
         self.assertFalse(self.status_path.exists())
 
     def test_repository_identity_is_stripped_and_pr_is_looked_up_in_it(self):
-        scripted = Scripted(FakeCommands(self.root, already=True)).on(("gh", "repo", "view"), "own-er/re.po_1\n")
+        scripted = Scripted(FakeCommands(self.root, already=True)).on(
+            ("gh", "repo", "view"), "own-er/re.po_1\n"
+        )
         self.invoke(scripted)
         view = next(args for args, _ in scripted.calls if args[:3] == ["gh", "pr", "view"])
         self.assertEqual(
             view,
-            ["gh", "pr", "view", "42", "--repo", "own-er/re.po_1", "--json", "state,baseRefName,mergeCommit"],
+            [
+                "gh",
+                "pr",
+                "view",
+                "42",
+                "--repo",
+                "own-er/re.po_1",
+                "--json",
+                "state,baseRefName,mergeCommit",
+            ],
         )
 
     def test_rejects_prs_that_are_not_merged_into_main(self):
@@ -905,7 +998,9 @@ class DeployContractTests(unittest.TestCase):
             "no state": {"baseRefName": "main", "mergeCommit": {"oid": SHA}},
         }.items():
             with self.subTest(label):
-                scripted = Scripted(FakeCommands(self.root)).on(("gh", "pr", "view"), json.dumps(payload))
+                scripted = Scripted(FakeCommands(self.root)).on(
+                    ("gh", "pr", "view"), json.dumps(payload)
+                )
                 with self.assertRaisesRegex(module.DeploymentError, "PR is not merged into main"):
                     self.invoke(scripted)
                 self.assertNotIn("ssh", [args[0] for args, _ in scripted.calls])
@@ -914,7 +1009,9 @@ class DeployContractTests(unittest.TestCase):
         for commit in [None, "x", {}, {"oid": "c" * 40}, [SHA]]:
             with self.subTest(commit=commit):
                 payload = {"state": "MERGED", "baseRefName": "main", "mergeCommit": commit}
-                scripted = Scripted(FakeCommands(self.root)).on(("gh", "pr", "view"), json.dumps(payload))
+                scripted = Scripted(FakeCommands(self.root)).on(
+                    ("gh", "pr", "view"), json.dumps(payload)
+                )
                 with self.assertRaisesRegex(module.DeploymentError, "PR merge identity mismatch"):
                     self.invoke(scripted)
 
@@ -929,7 +1026,10 @@ class DeployContractTests(unittest.TestCase):
             ("HYPERCAL_DEPLOY_PATH", "/opt/../etc", "invalid deployment directory"),
             ("HYPERCAL_DEPLOY_PATH", "/opt/$(id)", "invalid deployment directory"),
         ]:
-            with self.subTest(key=key, value=value), unittest.mock.patch.dict(os.environ, {key: value}):
+            with (
+                self.subTest(key=key, value=value),
+                unittest.mock.patch.dict(os.environ, {key: value}),
+            ):
                 fake = FakeCommands(self.root)
                 with self.assertRaisesRegex(module.DeploymentError, reason):
                     self.invoke(fake)
@@ -941,25 +1041,47 @@ class DeployContractTests(unittest.TestCase):
         self.invoke(fake)
         self.assertEqual(
             self.heads(fake)[:5],
-            [("git", "rev-parse"), ("gh", "repo"), ("gh", "pr"), ("git", "fetch"), ("git", "rev-parse")],
+            [
+                ("git", "rev-parse"),
+                ("gh", "repo"),
+                ("gh", "pr"),
+                ("git", "fetch"),
+                ("git", "rev-parse"),
+            ],
         )
-        self.assertEqual(fake.calls[0][0], ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"])
+        self.assertEqual(
+            fake.calls[0][0], ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]
+        )
 
     def test_probe_targets_the_configured_host_and_directory(self):
-        with unittest.mock.patch.dict(os.environ, {"HYPERCAL_DEPLOY_HOST": "deploy@box-1", "HYPERCAL_DEPLOY_PATH": "/srv/hyper_cal"}):
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"HYPERCAL_DEPLOY_HOST": "deploy@box-1", "HYPERCAL_DEPLOY_PATH": "/srv/hyper_cal"},
+        ):
             fake = FakeCommands(self.root, already=True)
             self.invoke(fake)
         args, kw = next(c for c in fake.calls if c[0][0] == "ssh")
         self.assertEqual(
             args,
-            ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "deploy@box-1", "python3 - /srv/hyper_cal"],
+            [
+                "ssh",
+                "-T",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                "deploy@box-1",
+                "python3 - /srv/hyper_cal",
+            ],
         )
         self.assertEqual(kw, {"input_text": module.REMOTE_PROBE})
 
     def test_already_deployed_records_the_live_image_and_ai_verification(self):
         for ready, verified in [("ok", True), ("ok (unverified)", False)]:
             with self.subTest(ready=ready):
-                scripted = Scripted(FakeCommands(self.root)).on(("ssh",), json.dumps(snapshot(ready=ready)))
+                scripted = Scripted(FakeCommands(self.root)).on(
+                    ("ssh",), json.dumps(snapshot(ready=ready))
+                )
                 outcome = self.invoke(scripted)
                 self.assertEqual(self.status(), outcome)
                 self.assertEqual(outcome["state"], "already_deployed")
@@ -977,7 +1099,9 @@ class DeployContractTests(unittest.TestCase):
 
     def test_main_moving_between_checks_supersedes_the_local_fallback(self):
         fake = FakeCommands(self.root)
-        scripted = Scripted(fake).on(("git", "rev-parse", "origin/main^{commit}"), in_order(SHA, "f" * 40))
+        scripted = Scripted(fake).on(
+            ("git", "rev-parse", "origin/main^{commit}"), in_order(SHA, "f" * 40)
+        )
         outcome = self.invoke(scripted)
         self.assertEqual(outcome["state"], "superseded")
         self.assertEqual(self.status()["state"], "superseded")
@@ -986,14 +1110,22 @@ class DeployContractTests(unittest.TestCase):
 
     def test_hosted_success_is_verified_by_a_second_live_probe_without_a_local_build(self):
         fake = FakeCommands(self.root, "success")
-        scripted = Scripted(fake).on(("ssh",), in_order(json.dumps(snapshot("c" * 40)), json.dumps(snapshot(ready="ok (unverified)"))))
+        scripted = Scripted(fake).on(
+            ("ssh",),
+            in_order(json.dumps(snapshot("c" * 40)), json.dumps(snapshot(ready="ok (unverified)"))),
+        )
         outcome = self.invoke(scripted)
-        self.assertEqual((outcome["state"], outcome["ready"], outcome["ai_verified"]), ("verified", "ok (unverified)", False))
+        self.assertEqual(
+            (outcome["state"], outcome["ready"], outcome["ai_verified"]),
+            ("verified", "ok (unverified)", False),
+        )
         self.assertEqual(outcome["image"], IMAGE)
         self.assertNotIn("bash", [args[0] for args, _ in scripted.calls])
 
     def test_hosted_success_without_live_evidence_fails_with_a_recorded_reason(self):
-        with self.assertRaisesRegex(module.DeploymentError, "hosted success lacks matching live deployment evidence"):
+        with self.assertRaisesRegex(
+            module.DeploymentError, "hosted success lacks matching live deployment evidence"
+        ):
             self.invoke(FakeCommands(self.root, "success"))
         self.assertEqual(
             (self.status()["state"], self.status()["reason"]),
@@ -1029,9 +1161,20 @@ class DeployContractTests(unittest.TestCase):
         self.assertEqual(
             [args[:2] if args[0] in ("git", "gh") else args[:1] for args, _ in scripted.calls],
             [
-                ["git", "rev-parse"], ["gh", "repo"], ["gh", "pr"], ["git", "fetch"], ["git", "rev-parse"],
-                ["ssh"], ["gh", "run"], ["gh", "run"], ["gh", "run"], ["git", "fetch"], ["git", "rev-parse"],
-                ["git", "show"], ["bash"], ["ssh"],
+                ["git", "rev-parse"],
+                ["gh", "repo"],
+                ["gh", "pr"],
+                ["git", "fetch"],
+                ["git", "rev-parse"],
+                ["ssh"],
+                ["gh", "run"],
+                ["gh", "run"],
+                ["gh", "run"],
+                ["git", "fetch"],
+                ["git", "rev-parse"],
+                ["git", "show"],
+                ["bash"],
+                ["ssh"],
             ],
         )
         show = next(args for args, _ in scripted.calls if args[:2] == ["git", "show"])
@@ -1039,10 +1182,14 @@ class DeployContractTests(unittest.TestCase):
 
     def test_fallback_without_matching_live_evidence_fails(self):
         scripted = Scripted(FakeCommands(self.root)).on(("bash",), "")
-        with self.assertRaisesRegex(module.DeploymentError, "fallback did not produce matching live deployment evidence"):
+        with self.assertRaisesRegex(
+            module.DeploymentError, "fallback did not produce matching live deployment evidence"
+        ):
             self.invoke(scripted)
         self.assertEqual(self.status()["state"], "failed")
-        self.assertEqual(self.status()["reason"], "fallback did not produce matching live deployment evidence")
+        self.assertEqual(
+            self.status()["reason"], "fallback did not produce matching live deployment evidence"
+        )
         self.assertEqual(self.status()["target"], SHA)
 
     def test_os_and_timeout_errors_are_recorded_then_reraised(self):
@@ -1062,9 +1209,13 @@ class DeployContractTests(unittest.TestCase):
 
     def test_status_failures_inside_the_run_are_reported_as_failed(self):
         scripted = Scripted(FakeCommands(self.root, already=True))
-        with unittest.mock.patch.object(module, "save_status", side_effect=[OSError("full"), None]) as save:
-            with self.assertRaises(OSError):
-                self.invoke(scripted)
+        with (
+            unittest.mock.patch.object(
+                module, "save_status", side_effect=[OSError("full"), None]
+            ) as save,
+            self.assertRaises(OSError),
+        ):
+            self.invoke(scripted)
         self.assertEqual(save.call_args_list[-1].args[1]["state"], "failed")
         self.assertEqual(save.call_args_list[-1].args[1]["reason"], "full")
 
@@ -1082,18 +1233,31 @@ class MainExitCodeTests(unittest.TestCase):
         return code, printed.call_args
 
     def test_exit_codes_follow_the_outcome_state(self):
-        for state, code in [("verified", 0), ("already_deployed", 0), ("busy", 75), ("superseded", 75), ("hosted_pending", 75)]:
+        for state, code in [
+            ("verified", 0),
+            ("already_deployed", 0),
+            ("busy", 75),
+            ("superseded", 75),
+            ("hosted_pending", 75),
+        ]:
             with self.subTest(state=state):
                 got, call = self.run_main({"state": state, "target": SHA})
                 self.assertEqual(got, code)
                 self.assertEqual(json.loads(call.args[0]), {"state": state, "target": SHA})
 
     def test_deployment_errors_exit_one_with_a_json_reason_on_stderr(self):
-        for error in [module.DeploymentError("nope"), OSError("io"), subprocess.TimeoutExpired("x", 1)]:
+        for error in [
+            module.DeploymentError("nope"),
+            OSError("io"),
+            subprocess.TimeoutExpired("x", 1),
+        ]:
             with self.subTest(error=type(error).__name__):
                 got, call = self.run_main(error)
                 self.assertEqual(got, 1)
-                self.assertEqual(json.loads(call.args[0]), {"state": "failed", "target": SHA, "reason": str(error)})
+                self.assertEqual(
+                    json.loads(call.args[0]),
+                    {"state": "failed", "target": SHA, "reason": str(error)},
+                )
                 self.assertIs(call.kwargs["file"], sys.stderr)
 
 

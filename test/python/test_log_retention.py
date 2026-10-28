@@ -47,14 +47,14 @@ class Workspace(unittest.TestCase):
 
     def cfg(self, **overrides):
         # Every limit is off unless a test turns one on, so each test exercises one criterion.
-        values = dict(
-            max_dir_bytes=AMPLE,
-            max_file_bytes=AMPLE,
-            max_files=10**6,
-            min_free_bytes=0,
-            min_free_percent=0.0,
-            gzip_after_seconds=10**9,
-        )
+        values = {
+            "max_dir_bytes": AMPLE,
+            "max_file_bytes": AMPLE,
+            "max_files": 10**6,
+            "min_free_bytes": 0,
+            "min_free_percent": 0.0,
+            "gzip_after_seconds": 10**9,
+        }
         values.update(overrides)
         return self.lr.Config(**values)
 
@@ -84,7 +84,11 @@ class Workspace(unittest.TestCase):
         state = {}
         for path in sorted(self.root.rglob("*")):
             st = path.lstat()
-            digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() and not path.is_symlink() else ""
+            digest = (
+                hashlib.sha256(path.read_bytes()).hexdigest()
+                if path.is_file() and not path.is_symlink()
+                else ""
+            )
             state[str(path)] = (st.st_size, st.st_mtime_ns, stat.S_IMODE(st.st_mode), digest)
         return state
 
@@ -113,7 +117,12 @@ class NoDeletionWhenHealthyTests(Workspace):
         self.make_dir("failed-a", {"deploy.log": 100}, 41 * DAY)
         before = self.snapshot()
 
-        report = self.lr.apply(self.root, self.cfg(max_dir_bytes=10**6, max_files=100), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root,
+            self.cfg(max_dir_bytes=10**6, max_files=100),
+            free_fn=ample_free,
+            now=self.now,
+        )
 
         self.assertEqual(report.exit_code, 0)
         self.assertEqual(self.deleted(report), [])
@@ -122,7 +131,13 @@ class NoDeletionWhenHealthyTests(Workspace):
     def test_defaults_match_the_documented_values(self):
         args = self.lr.build_parser().parse_args(["--root", "/x"])
         self.assertEqual(
-            (args.max_dir_mb, args.max_file_mb, args.max_files, args.min_free_mb, args.min_free_percent),
+            (
+                args.max_dir_mb,
+                args.max_file_mb,
+                args.max_files,
+                args.min_free_mb,
+                args.min_free_percent,
+            ),
             (1024, 200, 400, 2048, 5),
         )
         self.assertEqual(args.gzip_after_days, 1)
@@ -141,7 +156,9 @@ class DeletionOrderTests(Workspace):
         self.make_file("l2.log", 1000, 4 * DAY)
         self.make_file("l3.log", 1000, 3 * DAY)
 
-        report = self.lr.apply(self.root, self.cfg(max_dir_bytes=4000), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root, self.cfg(max_dir_bytes=4000), free_fn=ample_free, now=self.now
+        )
 
         self.assertEqual(self.deleted(report), ["release-1", "failed-1", "l1.log"])
         self.assertEqual(self.names(), ["failed-2", "l2.log", "l3.log", "release-2"])
@@ -164,9 +181,13 @@ class DeletionOrderTests(Workspace):
         self.make_dir("release-old", {"deploy.log": 100, "dump.bin": 5000}, 5 * DAY)
         self.make_dir("release-new", {"deploy.log": 100}, 1 * DAY)
 
-        report = self.lr.apply(self.root, self.cfg(max_file_bytes=1000), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root, self.cfg(max_file_bytes=1000), free_fn=ample_free, now=self.now
+        )
 
-        self.assertEqual(self.deleted(report), ["dump.bin.gz"])  # incompressible: still over the cap after gzip
+        self.assertEqual(
+            self.deleted(report), ["dump.bin.gz"]
+        )  # incompressible: still over the cap after gzip
         self.assertTrue((self.root / "release-old/deploy.log").exists())
         self.assertFalse((self.root / "release-old/dump.bin.gz").exists())
         self.assertEqual([a.reason for a in report.actions if a.kind == "deleted"], ["file-size"])
@@ -182,7 +203,9 @@ class DeletionOrderTests(Workspace):
     def test_oversized_file_in_the_last_deploy_is_kept_and_reported_unresolved(self):
         self.make_dir("release-new", {"dump.bin": 5000}, 5 * DAY)
 
-        report = self.lr.apply(self.root, self.cfg(max_file_bytes=1000), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root, self.cfg(max_file_bytes=1000), free_fn=ample_free, now=self.now
+        )
 
         self.assertTrue((self.root / "release-new/dump.bin.gz").exists())
         self.assertEqual(report.exit_code, 2)
@@ -199,7 +222,10 @@ class DeletionOrderTests(Workspace):
             return base_free + (initial - used), AMPLE
 
         report = self.lr.apply(
-            self.root, self.cfg(min_free_bytes=base_free + 2500), free_fn=free_that_grows_with_deletions, now=self.now
+            self.root,
+            self.cfg(min_free_bytes=base_free + 2500),
+            free_fn=free_that_grows_with_deletions,
+            now=self.now,
         )
 
         self.assertEqual(self.deleted(report), ["app-0.log", "app-1.log", "app-2.log"])
@@ -215,7 +241,9 @@ class DeletionOrderTests(Workspace):
             used = sum(p.stat().st_size for p in Path(root).iterdir())
             return 100 + (2000 - used), 10_000
 
-        report = self.lr.apply(self.root, self.cfg(min_free_percent=10.0), free_fn=free, now=self.now)
+        report = self.lr.apply(
+            self.root, self.cfg(min_free_percent=10.0), free_fn=free, now=self.now
+        )
 
         # 1% free -> delete older.log -> 11% >= 10%, so old.log survives.
         self.assertEqual(self.deleted(report), ["older.log"])
@@ -236,10 +264,18 @@ class ProtectedOnlyViolationTests(Workspace):
 
     def run_alerting(self, now):
         return self.run_main(
-            "--alert", "--env-file", str(self.env_file), "--max-dir-mb", "0.001", sender=self.sender, now=now
+            "--alert",
+            "--env-file",
+            str(self.env_file),
+            "--max-dir-mb",
+            "0.001",
+            sender=self.sender,
+            now=now,
         )
 
-    def test_violation_with_only_protected_entries_exits_2_deletes_nothing_and_alerts_once_per_6h(self):
+    def test_violation_with_only_protected_entries_exits_2_deletes_nothing_and_alerts_once_per_6h(
+        self,
+    ):
         before = self.snapshot()
 
         code, out, _ = self.run_alerting(self.now)
@@ -257,7 +293,9 @@ class ProtectedOnlyViolationTests(Workspace):
 
         state = self.root / ".log-retention-state.json"
         self.assertTrue(state.exists())
-        after = {k: v for k, v in self.snapshot().items() if not k.endswith(".log-retention-state.json")}
+        after = {
+            k: v for k, v in self.snapshot().items() if not k.endswith(".log-retention-state.json")
+        }
         self.assertEqual(after, before)
 
     def test_unmanaged_state_file_never_counts_as_a_managed_entry(self):
@@ -273,14 +311,20 @@ class CompressionTests(Workspace):
         os.chmod(path, 0o640)
         mtime = path.stat().st_mtime_ns
 
-        report = self.lr.apply(self.root, self.cfg(gzip_after_seconds=DAY), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root, self.cfg(gzip_after_seconds=DAY), free_fn=ample_free, now=self.now
+        )
 
         gz = self.root / "app.log.gz"
         self.assertFalse(path.exists())
-        self.assertEqual(gzip.open(gz, "rb").read(), content)
+        with gzip.open(gz, "rb") as opened:
+            self.assertEqual(opened.read(), content)
         self.assertEqual(stat.S_IMODE(gz.stat().st_mode), 0o640)
         self.assertEqual(gz.stat().st_mtime_ns, mtime)
-        self.assertEqual([os.path.basename(a.path) for a in report.actions if a.kind == "compressed"], ["app.log"])
+        self.assertEqual(
+            [os.path.basename(a.path) for a in report.actions if a.kind == "compressed"],
+            ["app.log"],
+        )
         self.assertEqual(self.names(), ["app.log.gz"])
 
     def test_original_is_removed_only_after_the_gzip_verifies(self):
@@ -325,12 +369,18 @@ class CompressionTests(Workspace):
             raise OSError("disk full")
 
         report = self.lr.apply(
-            self.root, self.cfg(gzip_after_seconds=DAY), free_fn=ample_free, now=self.now, compress=broken
+            self.root,
+            self.cfg(gzip_after_seconds=DAY),
+            free_fn=ample_free,
+            now=self.now,
+            compress=broken,
         )
 
         self.assertTrue(path.exists())
         failed = [a for a in report.actions if a.kind == "compress-failed"]
-        self.assertEqual([(os.path.basename(a.path), a.detail) for a in failed], [("app.log", "OSError")])
+        self.assertEqual(
+            [(os.path.basename(a.path), a.detail) for a in failed], [("app.log", "OSError")]
+        )
         self.assertEqual(report.exit_code, 0)
 
     def test_existing_gzip_target_is_never_overwritten(self):
@@ -357,7 +407,9 @@ class CompressionTests(Workspace):
 
         self.lr.apply(self.root, self.cfg(gzip_after_seconds=DAY), free_fn=ample_free, now=self.now)
 
-        self.assertEqual(sorted(p.name for p in directory.iterdir()), ["deploy.log.gz", "notes.txt.gz"])
+        self.assertEqual(
+            sorted(p.name for p in directory.iterdir()), ["deploy.log.gz", "notes.txt.gz"]
+        )
         self.assertEqual(directory.stat().st_mtime_ns, mtime)
 
     def test_already_compressed_files_are_not_compressed_again(self):
@@ -377,7 +429,10 @@ class ManagedSetBoundaryTests(Workspace):
         before = self.snapshot()
 
         report = self.lr.apply(
-            self.root, self.cfg(max_dir_bytes=1000, max_files=1, gzip_after_seconds=10**9), free_fn=ample_free, now=self.now
+            self.root,
+            self.cfg(max_dir_bytes=1000, max_files=1, gzip_after_seconds=10**9),
+            free_fn=ample_free,
+            now=self.now,
         )
 
         self.assertEqual(report.exit_code, 0)
@@ -396,7 +451,13 @@ class ManagedSetBoundaryTests(Workspace):
         self.assertTrue((self.root / "chats/alice/history.json").exists())
 
     def test_managed_name_patterns(self):
-        for name in ("healthcheck-2026.log.1", "backup-db.log.gz", "x.log", "y.log.gz", "healthcheck.log"):
+        for name in (
+            "healthcheck-2026.log.1",
+            "backup-db.log.gz",
+            "x.log",
+            "y.log.gz",
+            "healthcheck.log",
+        ):
             self.make_file(name, 10, 2 * DAY)
         for name in ("readme.md", "x.log.bak", "backup.sql", "healthcheck.txt"):
             self.make_file(name, 10, 2 * DAY)
@@ -451,17 +512,30 @@ class OnlyGlobTests(Workspace):
         return self.cfg(only_globs=self.PM2_GLOBS, **overrides)
 
     def current_logs(self):
-        return {name: self.make_file(name, 0, 30 * DAY, content=b"live" * 5000) for name in ("out.log", "error.log")}
+        return {
+            name: self.make_file(name, 0, 30 * DAY, content=b"live" * 5000)
+            for name in ("out.log", "error.log")
+        }
 
     def test_default_config_has_no_narrowing_and_the_cli_defaults_to_it(self):
-        self.assertEqual((self.lr.Config().only_globs, self.lr.Config().manage_evidence_dirs), ((), False))
+        self.assertEqual(
+            (self.lr.Config().only_globs, self.lr.Config().manage_evidence_dirs), ((), False)
+        )
         args = self.lr.build_parser().parse_args(["--root", "/x"])
         self.assertEqual(self.lr.config_from_args(args).only_globs, ())
         self.assertFalse(args.manage_evidence_dirs)
 
     def test_cli_collects_every_repeated_flag(self):
         args = self.lr.build_parser().parse_args(
-            ["--root", "/x", "--only-glob", "*__*.log", "--only-glob", "*__*.log.gz", "--manage-evidence-dirs"]
+            [
+                "--root",
+                "/x",
+                "--only-glob",
+                "*__*.log",
+                "--only-glob",
+                "*__*.log.gz",
+                "--manage-evidence-dirs",
+            ]
         )
         cfg = self.lr.config_from_args(args)
         self.assertEqual(cfg.only_globs, ("*__*.log", "*__*.log.gz"))
@@ -483,11 +557,22 @@ class OnlyGlobTests(Workspace):
         live = self.current_logs()
         before = {name: (p.read_bytes(), p.stat().st_mtime_ns) for name, p in live.items()}
         for index in range(4):
-            self.make_file(f"out__2026-01-0{index + 1}_00-00-00.log", 0, (20 - index) * DAY, content=b"r" * 5000)
+            self.make_file(
+                f"out__2026-01-0{index + 1}_00-00-00.log",
+                0,
+                (20 - index) * DAY,
+                content=b"r" * 5000,
+            )
 
         report = self.lr.apply(
             self.root,
-            self.pm2_cfg(max_dir_bytes=1, max_files=1, max_file_bytes=1000, gzip_after_seconds=DAY, min_free_bytes=AMPLE * 2),
+            self.pm2_cfg(
+                max_dir_bytes=1,
+                max_files=1,
+                max_file_bytes=1000,
+                gzip_after_seconds=DAY,
+                min_free_bytes=AMPLE * 2,
+            ),
             free_fn=ample_free,
             now=self.now,
         )
@@ -497,16 +582,23 @@ class OnlyGlobTests(Workspace):
             path = self.root / name
             self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), (content, mtime))
         self.assertEqual(self.names().count("out.log"), 1)
-        self.assertFalse(any(name.startswith("out.log.") or name.startswith("error.log.") for name in self.names()))
+        self.assertFalse(any(name.startswith(("out.log.", "error.log.")) for name in self.names()))
         touched = {os.path.basename(a.path) for a in report.actions if a.kind != "kept"}
         self.assertFalse(touched & {"out.log", "error.log"})
 
     def test_rotated_files_are_still_gzipped_and_deleted_oldest_first(self):
         self.current_logs()
         for index in range(4):
-            self.make_file(f"out__2026-01-0{index + 1}_00-00-00.log", 0, (20 - index) * DAY, content=b"r" * 500)
+            self.make_file(
+                f"out__2026-01-0{index + 1}_00-00-00.log", 0, (20 - index) * DAY, content=b"r" * 500
+            )
 
-        report = self.lr.apply(self.root, self.pm2_cfg(max_files=3, gzip_after_seconds=DAY), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root,
+            self.pm2_cfg(max_files=3, gzip_after_seconds=DAY),
+            free_fn=ample_free,
+            now=self.now,
+        )
 
         self.assertEqual(self.deleted(report), ["out__2026-01-01_00-00-00.log.gz"])
         self.assertEqual(
@@ -528,11 +620,18 @@ class OnlyGlobTests(Workspace):
         self.make_file("out__2.log", 100, 4 * DAY)
         before = {k: v for k, v in self.snapshot().items() if "release-" in k or "failed-" in k}
 
-        report = self.lr.apply(self.root, self.pm2_cfg(max_files=1, max_dir_bytes=150), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root,
+            self.pm2_cfg(max_files=1, max_dir_bytes=150),
+            free_fn=ample_free,
+            now=self.now,
+        )
 
         self.assertEqual(report.managed_entries, 1)
         self.assertEqual(self.deleted(report), ["out__1.log"])
-        self.assertEqual({k: v for k, v in self.snapshot().items() if "release-" in k or "failed-" in k}, before)
+        self.assertEqual(
+            {k: v for k, v in self.snapshot().items() if "release-" in k or "failed-" in k}, before
+        )
         self.assertEqual([a for a in report.actions if a.kind == "kept"], [])
 
     def test_manage_evidence_dirs_flag_brings_back_release_and_failed_dirs_with_protection(self):
@@ -544,7 +643,10 @@ class OnlyGlobTests(Workspace):
         self.current_logs()
 
         report = self.lr.apply(
-            self.root, self.pm2_cfg(manage_evidence_dirs=True, max_dir_bytes=2000), free_fn=ample_free, now=self.now
+            self.root,
+            self.pm2_cfg(manage_evidence_dirs=True, max_dir_bytes=2000),
+            free_fn=ample_free,
+            now=self.now,
         )
 
         self.assertEqual(self.deleted(report), ["release-1", "failed-1"])
@@ -555,7 +657,12 @@ class OnlyGlobTests(Workspace):
         self.make_dir("release-2", {"deploy.log": 1000}, 8 * DAY)
         self.make_dir("failed-1", {"deploy.log": 1000}, 7 * DAY)
 
-        report = self.lr.apply(self.root, self.cfg(only_globs=("release-*",), max_files=1), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root,
+            self.cfg(only_globs=("release-*",), max_files=1),
+            free_fn=ample_free,
+            now=self.now,
+        )
 
         self.assertEqual(self.deleted(report), ["release-1"])
         self.assertEqual(self.names(), ["failed-1", "release-2"])
@@ -563,7 +670,9 @@ class OnlyGlobTests(Workspace):
     def test_a_pattern_never_manages_a_dir_that_is_not_an_evidence_dir(self):
         self.make_dir("chats", {"history.json": 1000}, 90 * DAY)
 
-        report = self.lr.apply(self.root, self.cfg(only_globs=("*",), max_files=0), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root, self.cfg(only_globs=("*",), max_files=0), free_fn=ample_free, now=self.now
+        )
 
         self.assertEqual(report.managed_entries, 0)
         self.assertEqual(self.names(), ["chats"])
@@ -573,7 +682,9 @@ class OnlyGlobTests(Workspace):
         self.make_file("out__1.log", 100, 5 * DAY)
         self.make_file("out__2.log", 100, 4 * DAY)
 
-        code, out, _ = self.run_main("--only-glob", "*__*.log", "--only-glob", "*__*.log.gz", "--max-files", "1")
+        code, out, _ = self.run_main(
+            "--only-glob", "*__*.log", "--only-glob", "*__*.log.gz", "--max-files", "1"
+        )
 
         self.assertEqual(code, 0)
         self.assertIn("DELETED", out)
@@ -585,12 +696,16 @@ class RecentFileTests(Workspace):
     def test_file_modified_within_five_minutes_is_never_deleted(self):
         self.make_file("active.log", 5000, 60)
 
-        report = self.lr.apply(self.root, self.cfg(max_dir_bytes=100), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root, self.cfg(max_dir_bytes=100), free_fn=ample_free, now=self.now
+        )
 
         self.assertTrue((self.root / "active.log").exists())
         self.assertEqual(report.exit_code, 2)
         kept = [a for a in report.actions if a.kind == "kept"]
-        self.assertEqual([(os.path.basename(a.path), a.protected) for a in kept], [("active.log", "recent")])
+        self.assertEqual(
+            [(os.path.basename(a.path), a.protected) for a in kept], [("active.log", "recent")]
+        )
 
     def test_evidence_dir_with_a_recent_member_is_protected_whole(self):
         self.make_dir("release-old", {"a.log": 100}, 5 * DAY)
@@ -626,18 +741,27 @@ class SafetyTests(Workspace):
         before = self.snapshot()
         for candidate in (str(link), "/"):
             out, err = io.StringIO(), io.StringIO()
-            code = self.lr.main(["--root", candidate, "--max-files", "0"], free_fn=ample_free, out=out, err=err)
+            code = self.lr.main(
+                ["--root", candidate, "--max-files", "0"], free_fn=ample_free, out=out, err=err
+            )
             self.assertEqual(code, 3)
             self.assertIn("REFUSED", err.getvalue())
         self.assertEqual(self.snapshot(), before)
 
     def test_cli_refuses_filesystem_root_as_a_subprocess(self):
-        result = subprocess.run([sys.executable, str(SCRIPT), "--root", "/"], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--root", "/"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         self.assertEqual(result.returncode, 3)
         self.assertIn("REFUSED", result.stderr)
 
     def test_usage_errors_do_not_collide_with_the_violation_exit_code(self):
-        result = subprocess.run([sys.executable, str(SCRIPT), "--bogus"], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--bogus"], capture_output=True, text=True, check=False
+        )
         self.assertEqual(result.returncode, 64)
 
 
@@ -676,7 +800,12 @@ class DryRunTests(Workspace):
             self.make_file(f"app-{index}.log", 1000, (10 - index) * DAY)
         before = self.snapshot()
 
-        report = self.lr.plan(self.root, self.cfg(min_free_bytes=5000 + 2500), free_fn=lambda r: (5000, AMPLE), now=self.now)
+        report = self.lr.plan(
+            self.root,
+            self.cfg(min_free_bytes=5000 + 2500),
+            free_fn=lambda r: (5000, AMPLE),
+            now=self.now,
+        )
 
         self.assertEqual(self.deleted(report), ["app-0.log", "app-1.log", "app-2.log"])
         self.assertEqual(self.snapshot(), before)
@@ -686,7 +815,9 @@ class AlertTests(Workspace):
     def setUp(self):
         super().setUp()
         self.env_file = self.base / "hypercal.env"
-        self.env_file.write_text("# comment\nexport BOT_TOKEN='123456:SECRETTOKEN'\nBOT_ADMIN_ID=\"42\"\nOTHER=1\n")
+        self.env_file.write_text(
+            "# comment\nexport BOT_TOKEN='123456:SECRETTOKEN'\nBOT_ADMIN_ID=\"42\"\nOTHER=1\n"
+        )
         self.sent = []
 
     def sender(self, token, chat_id, text):
@@ -715,7 +846,9 @@ class AlertTests(Workspace):
         def failing(token, chat_id, text):
             raise ConnectionRefusedError(f"https://api.telegram.org/bot{token}/sendMessage")
 
-        code, out, err = self.run_main("--alert", "--env-file", str(self.env_file), "--max-files", "2", sender=failing)
+        code, out, err = self.run_main(
+            "--alert", "--env-file", str(self.env_file), "--max-files", "2", sender=failing
+        )
 
         self.assertEqual(code, 0)
         self.assertIn("ALERT_FAILED ConnectionRefusedError", out)
@@ -739,7 +872,9 @@ class AlertTests(Workspace):
         empty = self.base / "empty.env"
         empty.write_text("OTHER=1\n")
 
-        code, out, _ = self.run_main("--alert", "--env-file", str(empty), "--max-dir-mb", "0.001", sender=self.sender)
+        code, out, _ = self.run_main(
+            "--alert", "--env-file", str(empty), "--max-dir-mb", "0.001", sender=self.sender
+        )
 
         self.assertEqual(code, 2)
         self.assertIn("ALERT_FAILED MissingCredentials", out)
@@ -747,7 +882,7 @@ class AlertTests(Workspace):
 
     def test_free_space_below_the_floor_after_cleanup_alerts_and_exits_2(self):
         self.make_file("old.log", 100, 5 * DAY)
-        code, out, _ = self.run_main(
+        code, _out, _ = self.run_main(
             "--alert",
             "--env-file",
             str(self.env_file),
@@ -821,7 +956,14 @@ class AlertTests(Workspace):
         state = self.base / "state.json"
 
         self.run_main(
-            "--alert", "--env-file", str(self.env_file), "--max-dir-mb", "0.001", "--state-file", str(state), sender=self.sender
+            "--alert",
+            "--env-file",
+            str(self.env_file),
+            "--max-dir-mb",
+            "0.001",
+            "--state-file",
+            str(state),
+            sender=self.sender,
         )
 
         self.assertTrue(state.exists())
@@ -862,10 +1004,20 @@ class OutputTests(Workspace):
         env = dict(os.environ, LOG_RETENTION_FREE_BYTES_FILE=str(free_file))
 
         result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--root", str(self.root), "--min-free-mb", "1", "--min-free-percent", "0"],
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--root",
+                str(self.root),
+                "--min-free-mb",
+                "1",
+                "--min-free-percent",
+                "0",
+            ],
             capture_output=True,
             text=True,
             env=env,
+            check=False,
         )
 
         self.assertEqual(result.returncode, 2)
@@ -877,7 +1029,13 @@ class InternalPhaseCharacterizationTests(Workspace):
 
     def entries_summary(self, entries):
         return sorted(
-            (os.path.relpath(e.path, self.root), e.kind, e.size, e.protected, sorted(os.path.basename(f.path) for f in e.files))
+            (
+                os.path.relpath(e.path, self.root),
+                e.kind,
+                e.size,
+                e.protected,
+                sorted(os.path.basename(f.path) for f in e.files),
+            )
             for e in entries
         )
 
@@ -909,16 +1067,22 @@ class InternalPhaseCharacterizationTests(Workspace):
             ],
         )
 
-    def test_scan_root_protects_the_newest_evidence_dir_even_when_it_is_recent_and_honours_only_globs(self):
+    def test_scan_root_protects_the_newest_evidence_dir_even_when_it_is_recent_and_honours_only_globs(
+        self,
+    ):
         self.make_dir("release-1", {"a.log": 1}, 2 * DAY)
         self.make_dir("release-2", {"a.log": 1}, 60)
         self.make_file("out__1.log", 1, 3 * DAY)
         self.make_file("out.log", 1, 3 * DAY)
 
         narrowed = self.lr.scan_root(str(self.root), self.now, self.cfg(only_globs=("*__*.log",)))
-        evidence = self.lr.scan_root(str(self.root), self.now, self.cfg(only_globs=("*__*.log",), manage_evidence_dirs=True))
+        evidence = self.lr.scan_root(
+            str(self.root), self.now, self.cfg(only_globs=("*__*.log",), manage_evidence_dirs=True)
+        )
 
-        self.assertEqual(self.entries_summary(narrowed), [("out__1.log", "file", 1, None, ["out__1.log"])])
+        self.assertEqual(
+            self.entries_summary(narrowed), [("out__1.log", "file", 1, None, ["out__1.log"])]
+        )
         self.assertEqual(
             self.entries_summary(evidence),
             [
@@ -937,7 +1101,9 @@ class InternalPhaseCharacterizationTests(Workspace):
         self.make_file("young.log", 10, HOUR)
         self.make_file("big-young.log", 5000, HOUR)
         self.make_file("big-recent.log", 5000, 60)
-        self.make_dir("release-1", {"a.txt": 10, "b.gz": 10, "c.tmp": 10, "d.zip": 10, "e.log": 10}, 2 * DAY)
+        self.make_dir(
+            "release-1", {"a.txt": 10, "b.gz": 10, "c.tmp": 10, "d.zip": 10, "e.log": 10}, 2 * DAY
+        )
         self.make_dir("failed-1", {"big.dat": 5000, "small.dat": 10}, HOUR)
         entries = self.lr.scan_root(str(self.root), self.now, cfg)
 
@@ -956,11 +1122,17 @@ class InternalPhaseCharacterizationTests(Workspace):
         )
 
     def victim(self, entries, cfg, violated, skip=(), now=None):
-        picked = self.lr._pick_victim(entries, cfg, violated, set(skip), self.now if now is None else now)
+        picked = self.lr._pick_victim(
+            entries, cfg, violated, set(skip), self.now if now is None else now
+        )
         if picked is None:
             return None
         entry, info, reason = picked
-        return os.path.relpath(entry.path, self.root), None if info is None else os.path.relpath(info.path, self.root), reason
+        return (
+            os.path.relpath(entry.path, self.root),
+            None if info is None else os.path.relpath(info.path, self.root),
+            reason,
+        )
 
     def test_pick_victim_chooses_per_violation_with_protection_and_skip(self):
         cfg = self.cfg(max_file_bytes=1000)
@@ -975,18 +1147,32 @@ class InternalPhaseCharacterizationTests(Workspace):
         entries = self.lr.scan_root(str(self.root), self.now, cfg)
 
         # Oldest oversized unprotected file wins and is deleted alone (release-2 is the last deploy).
-        self.assertEqual(self.victim(entries, cfg, ["file-size"]), ("release-1", "release-1/deploy.log", "file-size"))
         self.assertEqual(
-            self.victim(entries, cfg, ["file-size"], skip={str(self.root / "release-1/deploy.log")}),
+            self.victim(entries, cfg, ["file-size"]),
+            ("release-1", "release-1/deploy.log", "file-size"),
+        )
+        self.assertEqual(
+            self.victim(
+                entries, cfg, ["file-size"], skip={str(self.root / "release-1/deploy.log")}
+            ),
             ("release-1", "release-1/x.log", "file-size"),
         )
         # failed-1 is protected as last-failure, so its oversized files are never chosen.
-        skip = {str(self.root / p) for p in ("release-1/deploy.log", "release-1/x.log", "b.log", "a.log")}
+        skip = {
+            str(self.root / p)
+            for p in ("release-1/deploy.log", "release-1/x.log", "b.log", "a.log")
+        }
         self.assertIsNone(self.victim(entries, cfg, ["file-size"], skip=skip))
         # With a deletion reason too, the oldest whole unprotected entry takes over, labelled by the first reason.
-        self.assertEqual(self.victim(entries, cfg, ["file-size", "free", "size"], skip=skip), ("small.log", None, "free"))
+        self.assertEqual(
+            self.victim(entries, cfg, ["file-size", "free", "size"], skip=skip),
+            ("small.log", None, "free"),
+        )
         self.assertEqual(self.victim(entries, cfg, ["size", "files"]), ("small.log", None, "size"))
-        self.assertEqual(self.victim(entries, cfg, ["files", "free"], skip={str(self.root / "small.log")}), ("release-1", None, "files"))
+        self.assertEqual(
+            self.victim(entries, cfg, ["files", "free"], skip={str(self.root / "small.log")}),
+            ("release-1", None, "files"),
+        )
 
     def test_pick_victim_returns_none_without_a_deletion_reason_or_candidate(self):
         cfg = self.cfg()
@@ -1016,7 +1202,10 @@ class InternalPhaseCharacterizationTests(Workspace):
         report = self.lr.apply(self.root, self.cfg(max_files=2), free_fn=ample_free, now=self.now)
 
         self.assertEqual(
-            [(a.kind, os.path.basename(a.path), a.reason, a.bytes, a.detail) for a in report.actions],
+            [
+                (a.kind, os.path.basename(a.path), a.reason, a.bytes, a.detail)
+                for a in report.actions
+            ],
             [
                 ("delete-failed", "app-0.log", "files", None, "PermissionError"),
                 ("deleted", "app-1.log", "files", 100, None),
@@ -1026,14 +1215,23 @@ class InternalPhaseCharacterizationTests(Workspace):
         self.assertEqual(self.names(), ["app-0.log", "app-3.log"])
         self.assertEqual((report.exit_code, report.violations, report.managed_entries), (0, [], 2))
 
-    def test_failed_member_deletion_skips_that_file_and_a_violation_stays_when_nothing_else_can_go(self):
+    def test_failed_member_deletion_skips_that_file_and_a_violation_stays_when_nothing_else_can_go(
+        self,
+    ):
         self.make_dir("release-1", {"big.gz": 5000, "ok.gz": 10}, 5 * DAY)
         self.make_dir("release-2", {"a.gz": 10}, 4 * DAY)
-        self.lr._delete_member = lambda root_real, info: (_ for _ in ()).throw(PermissionError("denied"))
+        self.lr._delete_member = lambda root_real, info: (_ for _ in ()).throw(
+            PermissionError("denied")
+        )
 
-        report = self.lr.apply(self.root, self.cfg(max_file_bytes=1000), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root, self.cfg(max_file_bytes=1000), free_fn=ample_free, now=self.now
+        )
 
-        kinds = [(a.kind, os.path.relpath(a.path, self.root), a.reason, a.detail, a.protected) for a in report.actions]
+        kinds = [
+            (a.kind, os.path.relpath(a.path, self.root), a.reason, a.detail, a.protected)
+            for a in report.actions
+        ]
         self.assertEqual(
             kinds,
             [
@@ -1050,10 +1248,15 @@ class InternalPhaseCharacterizationTests(Workspace):
         self.make_dir("release-2", {"a.gz": 10}, 4 * DAY)
         self.lr._delete_entry = self.failing_delete("_delete_entry", "release-1")
 
-        report = self.lr.apply(self.root, self.cfg(max_file_bytes=1000), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root, self.cfg(max_file_bytes=1000), free_fn=ample_free, now=self.now
+        )
 
         self.assertEqual(
-            [(a.kind, os.path.relpath(a.path, self.root), a.reason, a.bytes) for a in report.actions],
+            [
+                (a.kind, os.path.relpath(a.path, self.root), a.reason, a.bytes)
+                for a in report.actions
+            ],
             [("delete-failed", "release-1", "file-size", None), ("kept", "release-2", None, None)],
         )
 
@@ -1068,7 +1271,11 @@ class InternalPhaseCharacterizationTests(Workspace):
         self.assertEqual(quiet.actions, [])
         self.assertEqual(
             [(a.kind, os.path.basename(a.path), a.protected) for a in loud.actions],
-            [("kept", "active.log", "recent"), ("kept", "failed-1", "last-failure"), ("kept", "release-1", "last-deploy")],
+            [
+                ("kept", "active.log", "recent"),
+                ("kept", "failed-1", "last-failure"),
+                ("kept", "release-1", "last-deploy"),
+            ],
         )
         self.assertEqual((loud.initial_violations, loud.violations), (["files"], ["files"]))
 
@@ -1077,9 +1284,14 @@ class InternalPhaseCharacterizationTests(Workspace):
         self.make_file("old.log", 0, 3 * DAY, content=content)
         self.make_file("keep.log", 10, HOUR)
 
-        report = self.lr.apply(self.root, self.cfg(gzip_after_seconds=DAY), free_fn=ample_free, now=self.now)
+        report = self.lr.apply(
+            self.root, self.cfg(gzip_after_seconds=DAY), free_fn=ample_free, now=self.now
+        )
 
-        self.assertEqual([(a.kind, os.path.basename(a.path)) for a in report.actions], [("compressed", "old.log")])
+        self.assertEqual(
+            [(a.kind, os.path.basename(a.path)) for a in report.actions],
+            [("compressed", "old.log")],
+        )
         self.assertEqual(self.names(), ["keep.log", "old.log.gz"])
         self.assertEqual(report.managed_entries, 2)
         self.assertEqual(report.managed_bytes, (self.root / "old.log.gz").stat().st_size + 10)
@@ -1088,7 +1300,9 @@ class InternalPhaseCharacterizationTests(Workspace):
         self.make_file("old.log", 100, 3 * DAY)
         before = self.snapshot()
 
-        report = self.lr.plan(self.root, self.cfg(gzip_after_seconds=DAY), free_fn=ample_free, now=self.now)
+        report = self.lr.plan(
+            self.root, self.cfg(gzip_after_seconds=DAY), free_fn=ample_free, now=self.now
+        )
 
         self.assertEqual([(a.kind, a.dry_run) for a in report.actions], [("compressed", True)])
         self.assertEqual(self.snapshot(), before)
@@ -1099,7 +1313,15 @@ class InternalPhaseCharacterizationTests(Workspace):
         env_file.write_text("BOT_TOKEN=1:T\nBOT_ADMIN_ID=42\n")
         sent = []
         missing = self.base / "no-such-dir" / "state.json"
-        args = ("--alert", "--env-file", str(env_file), "--max-dir-mb", "0.001", "--state-file", str(missing))
+        args = (
+            "--alert",
+            "--env-file",
+            str(env_file),
+            "--max-dir-mb",
+            "0.001",
+            "--state-file",
+            str(missing),
+        )
 
         code, out, _ = self.run_main(*args, sender=lambda *a: sent.append(a))
         self.assertEqual(code, 2)
@@ -1117,12 +1339,18 @@ class InternalPhaseCharacterizationTests(Workspace):
         self.make_dir("release-1", {"a.log": 5000}, DAY)
         sent = []
 
-        code, out, _ = self.run_main("--alert", "--dry-run", "--json", "--max-dir-mb", "0.001", sender=lambda *a: sent.append(a))
+        code, out, _ = self.run_main(
+            "--alert",
+            "--dry-run",
+            "--json",
+            "--max-dir-mb",
+            "0.001",
+            sender=lambda *a: sent.append(a),
+        )
 
         self.assertEqual((code, sent), (2, []))
         self.assertNotIn("alert", json.loads(out))
         self.assertFalse((self.root / ".log-retention-state.json").exists())
-
 
 
 if __name__ == "__main__":
