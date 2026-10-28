@@ -140,11 +140,113 @@ function claimsCopy(row: UnlinkedRow): boolean {
   return status !== 'local_only';
 }
 
+/** What the two matching phases accumulate for one user. */
+interface MatchState {
+  db: Database;
+  userId: number;
+  counts: BackfillCounts;
+  links: BackfillLink[];
+  /** Rows a phase has decided about (linked, or left ambiguous): the next phase skips them. */
+  taken: Set<UnlinkedRow>;
+  contestedCopyIds: Set<string>;
+}
+
+function markContested(state: MatchState, copies: readonly calendar_v3.Schema$Event[]): void {
+  for (const copy of copies) if (copy.id) state.contestedCopyIds.add(copy.id);
+}
+
+/** Whether the user has a live row (owner row or link row) of this bot event, linked or not. */
+function userHasRowOfEvent(db: Database, userId: number, eventId: number): boolean {
+  const found = db
+    .query<{ n: number }, [number, number, number, number]>(
+      `SELECT (SELECT COUNT(*) FROM events WHERE id = ? AND user_id = ? AND is_deleted = 0)
+            + (SELECT COUNT(*) FROM participant_google_sync WHERE event_id = ? AND user_id = ?) AS n`,
+    )
+    .get(eventId, userId, eventId, userId);
+  return found !== null && found.n > 0;
+}
+
+/** Phase 1: copies that carry the marker of a bot event, matched to that event's unlinked rows. */
+function matchByMarker(
+  state: MatchState,
+  rows: readonly UnlinkedRow[],
+  looseCopies: readonly calendar_v3.Schema$Event[],
+): void {
+  const rowsByEvent = groupBy(rows, (row) => String(row.event.id));
+  const copiesByMarker = groupBy(looseCopies, (copy) => copy.extendedProperties?.private?.[BOT_EVENT_MARKER] ?? null);
+  for (const [marker, copies] of copiesByMarker) {
+    const candidates = rowsByEvent.get(marker) ?? [];
+    for (const row of candidates) state.taken.add(row);
+    const [only] = candidates;
+    const [copy] = copies;
+    if (candidates.length === 0) {
+      if (userHasRowOfEvent(state.db, state.userId, Number(marker) || 0)) {
+        state.counts.extraCopiesOfLinkedEvent += copies.length;
+      } else {
+        state.counts.copiesWithoutRow += copies.length;
+      }
+    } else if (only && copy?.id && candidates.length === 1 && copies.length === 1) {
+      state.counts.linkableByMarker++;
+      state.links.push({
+        kind: only.kind,
+        userId: state.userId,
+        eventId: only.event.id,
+        googleEventId: copy.id,
+        via: 'marker',
+      });
+    } else {
+      state.counts.ambiguous++;
+      markContested(state, copies);
+    }
+  }
+}
+
+/**
+ * Phase 2: rows that claim a copy and found none by marker: the same summary and times, one row and
+ * one copy, among copies that carry no bot marker at all (a copy marked for any bot event belongs to
+ * that event).
+ */
+function matchBySlot(state: MatchState, rows: readonly UnlinkedRow[], live: readonly calendar_v3.Schema$Event[]): void {
+  const slotRows = rows.filter(
+    (row) =>
+      !state.taken.has(row) && claimsCopy(row) && !row.event.recurrence_rule && row.event.parent_event_id === null,
+  );
+  const slotCopies = live.filter(
+    (copy) =>
+      copy.extendedProperties?.private?.[BOT_EVENT_MARKER] === undefined &&
+      !copy.recurrence?.length &&
+      !isLinked(state.db, copy.id ?? ''),
+  );
+  const copiesBySlot = groupBy(slotCopies, slotKey);
+  const rowsBySlot = groupBy(slotRows, (row) => slotKey(localToGoogle(row.event)));
+  for (const row of slotRows) {
+    const key = slotKey(localToGoogle(row.event));
+    const matches = key === null ? [] : (copiesBySlot.get(key) ?? []);
+    const peers = key === null ? [] : (rowsBySlot.get(key) ?? []);
+    const [match] = matches;
+    if (!match?.id) continue;
+    if (matches.length === 1 && peers.length === 1) {
+      state.counts.linkableBySlot++;
+      state.links.push({
+        kind: row.kind,
+        userId: state.userId,
+        eventId: row.event.id,
+        googleEventId: match.id,
+        via: 'slot',
+      });
+      state.taken.add(row);
+    } else {
+      state.counts.ambiguous++;
+      markContested(state, matches);
+    }
+  }
+}
+
 /**
  * Compares the live events of the user's calendar with the rows that have no Google id. A copy is
  * matched to a row only when the match is the single candidate on both sides: first through the
  * bot-event marker the copy carries, then, for rows that claim a copy and found none, through
- * (summary, start, end) on copies that carry no marker of a live row. Read-only.
+ * (summary, start, end) on copies that carry no marker. Read-only.
  */
 export function planGoogleIdBackfill(
   db: Database,
@@ -154,86 +256,34 @@ export function planGoogleIdBackfill(
   // An instance of a series is not a copy of an event of its own, whatever properties it inherits.
   const live = calendarEvents.filter((copy) => copy.id && copy.status !== 'cancelled' && !copy.recurringEventId);
   const rows = unlinkedRows(db, userId);
-
   const botCopies = live.filter((copy) => copy.extendedProperties?.private?.[BOT_EVENT_MARKER] !== undefined);
   const loose = botCopies.filter((copy) => !isLinked(db, copy.id ?? ''));
-  const counts: BackfillCounts = {
-    googleListed: live.length,
-    googleBotCopies: botCopies.length,
-    alreadyLinked: botCopies.length - loose.length,
-    looseCopies: loose.length,
-    unlinkedRows: rows.length,
-    linkableByMarker: 0,
-    linkableBySlot: 0,
-    ambiguous: 0,
-    copiesWithoutRow: 0,
-    extraCopiesOfLinkedEvent: 0,
-    rowsWithoutCopy: 0,
+  const state: MatchState = {
+    db,
+    userId,
+    counts: {
+      googleListed: live.length,
+      googleBotCopies: botCopies.length,
+      alreadyLinked: botCopies.length - loose.length,
+      looseCopies: loose.length,
+      unlinkedRows: rows.length,
+      linkableByMarker: 0,
+      linkableBySlot: 0,
+      ambiguous: 0,
+      copiesWithoutRow: 0,
+      extraCopiesOfLinkedEvent: 0,
+      rowsWithoutCopy: 0,
+    },
+    links: [],
+    taken: new Set(),
+    contestedCopyIds: new Set(),
   };
-  const links: BackfillLink[] = [];
-  const taken = new Set<UnlinkedRow>();
-  const contestedCopyIds = new Set<string>();
+  matchByMarker(state, rows, loose);
+  matchBySlot(state, rows, live);
+  state.counts.rowsWithoutCopy = rows.filter((row) => !state.taken.has(row)).length;
 
-  const rowsByEvent = groupBy(rows, (row) => String(row.event.id));
-  for (const [marker, copies] of groupBy(
-    loose,
-    (copy) => copy.extendedProperties?.private?.[BOT_EVENT_MARKER] ?? null,
-  )) {
-    const candidates = rowsByEvent.get(marker) ?? [];
-    for (const row of candidates) taken.add(row);
-    const [only] = candidates;
-    const [copy] = copies;
-    if (candidates.length === 0) {
-      const eventId = Number(marker) || 0;
-      const rowExists = db
-        .query<{ n: number }, [number, number, number, number]>(
-          `SELECT (SELECT COUNT(*) FROM events WHERE id = ? AND user_id = ? AND is_deleted = 0)
-                + (SELECT COUNT(*) FROM participant_google_sync WHERE event_id = ? AND user_id = ?) AS n`,
-        )
-        .get(eventId, userId, eventId, userId);
-      if (rowExists && rowExists.n > 0) counts.extraCopiesOfLinkedEvent += copies.length;
-      else counts.copiesWithoutRow += copies.length;
-    } else if (only && copy?.id && candidates.length === 1 && copies.length === 1) {
-      counts.linkableByMarker++;
-      links.push({ kind: only.kind, userId, eventId: only.event.id, googleEventId: copy.id, via: 'marker' });
-    } else {
-      counts.ambiguous++;
-      for (const contested of copies) if (contested.id) contestedCopyIds.add(contested.id);
-    }
-  }
-
-  // Rows that claim a copy and found none by marker: the same summary and times, one row and one copy,
-  // among copies that carry no bot marker at all (a copy marked for any bot event belongs to that event).
-  const slotRows = rows.filter(
-    (row) => !taken.has(row) && claimsCopy(row) && !row.event.recurrence_rule && row.event.parent_event_id === null,
-  );
-  const slotCopies = live.filter(
-    (copy) =>
-      copy.extendedProperties?.private?.[BOT_EVENT_MARKER] === undefined &&
-      !copy.recurrence?.length &&
-      !isLinked(db, copy.id ?? ''),
-  );
-  const copiesBySlot = groupBy(slotCopies, slotKey);
-  const rowsBySlot = groupBy(slotRows, (row) => slotKey(localToGoogle(row.event)));
-  for (const row of slotRows) {
-    const key = slotKey(localToGoogle(row.event));
-    const matches = key === null ? [] : (copiesBySlot.get(key) ?? []);
-    const peers = key === null ? [] : (rowsBySlot.get(key) ?? []);
-    const [match] = matches;
-    if (!match?.id || matches.length === 0) continue;
-    if (matches.length === 1 && peers.length === 1) {
-      counts.linkableBySlot++;
-      links.push({ kind: row.kind, userId, eventId: row.event.id, googleEventId: match.id, via: 'slot' });
-      taken.add(row);
-    } else {
-      counts.ambiguous++;
-      for (const contested of matches) if (contested.id) contestedCopyIds.add(contested.id);
-    }
-  }
-  counts.rowsWithoutCopy = rows.filter((row) => !taken.has(row)).length;
-
-  syncLogger.info(counts, 'Google id backfill planned');
-  return { userId, counts, links, contestedCopyIds: [...contestedCopyIds] };
+  syncLogger.info(state.counts, 'Google id backfill planned');
+  return { userId, counts: state.counts, links: state.links, contestedCopyIds: [...state.contestedCopyIds] };
 }
 
 /**
