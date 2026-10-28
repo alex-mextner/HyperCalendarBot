@@ -32,10 +32,13 @@ function listed(id: string, summary: string, startUtc: string, marker?: number):
   };
 }
 
+/** One table row as SQLite returns it: column name to value. */
+type DbRow = { [column: string]: string | number | null };
+
 interface RowDump {
-  events: unknown[];
-  participantLinks: unknown[];
-  syncLog: unknown[];
+  events: DbRow[];
+  participantLinks: DbRow[];
+  syncLog: DbRow[];
 }
 
 describe('Google id backfill (#875)', () => {
@@ -81,9 +84,9 @@ describe('Google id backfill (#875)', () => {
 
   function dump(): RowDump {
     return {
-      events: db.query('SELECT * FROM events ORDER BY id').all(),
-      participantLinks: db.query('SELECT * FROM participant_google_sync ORDER BY id').all(),
-      syncLog: db.query('SELECT * FROM sync_log ORDER BY id').all(),
+      events: db.query<DbRow, []>('SELECT * FROM events ORDER BY id').all(),
+      participantLinks: db.query<DbRow, []>('SELECT * FROM participant_google_sync ORDER BY id').all(),
+      syncLog: db.query<DbRow, []>('SELECT * FROM sync_log ORDER BY id').all(),
     };
   }
 
@@ -177,8 +180,7 @@ describe('Google id backfill (#875)', () => {
 
     expect(applied).toEqual({ applied: 3, skippedChanged: 0 });
     const after = dump();
-    const withoutIds = (rows: unknown[]) =>
-      rows.map((row) => ({ ...(row as Record<string, unknown>), google_event_id: undefined }));
+    const withoutIds = (rows: DbRow[]) => rows.map((row) => ({ ...row, google_event_id: undefined }));
     expect(withoutIds(after.events)).toEqual(withoutIds(before.events));
     expect(withoutIds(after.participantLinks)).toEqual(withoutIds(before.participantLinks));
     expect(eventIdOf(ids.byMarker)).toBe('g-alpha');
