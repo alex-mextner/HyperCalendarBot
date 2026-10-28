@@ -76,6 +76,9 @@ function makeTtsMock(audio = Buffer.from('audio')) {
   };
 }
 
+/** The real Bun.write, captured before any hook replaces it, so tests can prove it was put back. */
+const originalBunWrite = Bun.write;
+
 /** Every session the current test created; the afterEach hook ends them whether the test passed or threw. */
 const liveSessions: CallSession[] = [];
 
@@ -623,6 +626,9 @@ function realFilesOfSession(sessionId: string): string[] {
   return readdirSync('/tmp').filter((name) => name.startsWith(`call-${sessionId}-`));
 }
 
+/** Lets any timer that survived disposal fire; a 1 ms idle timer would tick many times in this window. */
+const QUIET_WINDOW_MS = 30;
+
 test('negative control: a test that throws mid-call still has its session ended, silent and writing nothing', async () => {
   const sessionId = `test-cleanup-${process.pid}-${randomUUID()}`;
   const { session, ws, tts } = makeSession({ sessionId, inactivityMs: 1 });
@@ -650,8 +656,9 @@ test('negative control: a test that throws mid-call still has its session ended,
     const armed = idleTimers.at(-1);
     expect(armed).toBeDefined();
 
-    await endLiveSessions();
+    await disposeFixture();
     expect(liveSessions).toEqual([]);
+    expect(Bun.write).toBe(originalBunWrite);
     expect(clearTimeoutSpy).toHaveBeenCalledWith(armed);
   } finally {
     setTimeoutSpy.mockRestore();
@@ -660,10 +667,43 @@ test('negative control: a test that throws mid-call still has its session ended,
   const synthesized = tts.synthesize.mock.calls.length;
   const written = bunWrite.mock.calls.length;
   const sent = ws.send.mock.calls.length;
-  await Bun.sleep(30);
+  await Bun.sleep(QUIET_WINDOW_MS);
 
   expect(tts.synthesize).toHaveBeenCalledTimes(synthesized);
   expect(bunWrite).toHaveBeenCalledTimes(written);
   expect(ws.send).toHaveBeenCalledTimes(sent);
   expect(realFilesOfSession(sessionId)).toEqual([]);
+});
+
+test('negative control: one session failing to end does not stop the others being ended', async () => {
+  const runId = `test-cleanup-${process.pid}-${randomUUID()}`;
+  const first = makeSession({ sessionId: `${runId}-a`, inactivityMs: 1 });
+  const second = makeSession({ sessionId: `${runId}-b`, inactivityMs: 1 });
+  await first.session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  await second.session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+
+  const secondHandle = spyOn(second.session, 'handleMessage');
+  const failure = new Error('first session refused to end');
+  const firstHandle = spyOn(first.session, 'handleMessage').mockRejectedValueOnce(failure);
+  try {
+    await expect(disposeFixture()).rejects.toBe(failure);
+    expect(liveSessions).toEqual([]);
+    expect(Bun.write).toBe(originalBunWrite);
+    expect(secondHandle).toHaveBeenCalledWith(JSON.stringify({ type: 'CALL_ENDED' }));
+
+    const synthesized = second.tts.synthesize.mock.calls.length;
+    const written = bunWrite.mock.calls.length;
+    const sent = second.ws.send.mock.calls.length;
+    await Bun.sleep(QUIET_WINDOW_MS);
+
+    // The second session received CALL_ENDED despite the first one's failure, so it stays silent.
+    expect(second.tts.synthesize).toHaveBeenCalledTimes(synthesized);
+    expect(bunWrite).toHaveBeenCalledTimes(written);
+    expect(second.ws.send).toHaveBeenCalledTimes(sent);
+    expect(realFilesOfSession(runId)).toEqual([]);
+  } finally {
+    firstHandle.mockRestore();
+    secondHandle.mockRestore();
+    await first.session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+  }
 });
