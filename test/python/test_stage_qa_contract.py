@@ -9,7 +9,10 @@ test_stage_qa_gate.py (the ship gate), test/regressions/stage-qa-workflows.test.
 """
 
 import json
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -147,6 +150,91 @@ class SmokeTargetsOnlyTheStageBot(unittest.TestCase):
     def test_prod_compose_is_not_the_stage_compose(self):
         self.assertNotEqual(PROD_COMPOSE, STAGE_COMPOSE)
         self.assertIn("container_name: hypercal-bot\n", PROD_COMPOSE)
+
+
+PIDS_CAP = 512
+MEMORY_CAP_FORMS = {"768m", str(768 * 1024 * 1024)}  # Compose spells the same cap differently across versions
+OVERLAY_TEMPLATE = 'services:\n  bot-stage:\n    image: "{image}"\n'
+
+
+class TheStageComposeCarriesOneProcessCap(unittest.TestCase):
+    def test_the_cap_is_not_spelled_as_pids_limit(self):
+        # Compose v5 (the odroid's) rejects pids_limit next to deploy.resources.limits ("can't set distinct
+        # values on 'pids_limit' and 'deploy.resources.limits.pids'"): every Stage QA run died at compose up (#885).
+        self.assertNotRegex(STAGE_COMPOSE, r"(?m)^\s*pids_limit:")
+        self.assertRegex(STAGE_COMPOSE, rf"(?m)^\s+pids:\s*{PIDS_CAP}\s*$")
+
+    def test_the_overlay_the_render_test_uses_is_the_one_the_driver_writes(self):
+        # render_bot_stage below mirrors compose() in stage-qa-run.sh: keep project name, env file and overlay in sync.
+        driver_line = "printf 'services:\\n  bot-stage:\\n    image: \"%s\"\\n'"
+        self.assertIn(driver_line, RUN)
+        self.assertIn("-p \"$COMPOSE_PROJECT\"", RUN)
+        self.assertIn("--env-file \"$STAGE_DIR/stage.env\"", RUN)
+
+
+def docker_compose_available():
+    try:
+        probe = subprocess.run(
+            ["docker", "compose", "version"],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
+
+
+class TheStageComposeRendersWithTheRealCompose(unittest.TestCase):
+    """The text checks cannot see what Compose itself refuses, so this renders the tracked file exactly
+    as compose() in stage-qa-run.sh does: the stage file plus the image overlay, env from stage.env.
+    `config` only parses: no daemon, no container. Skipped without the compose plugin, except in CI,
+    where a missing plugin fails so the check cannot silently vanish."""
+
+    def setUp(self):
+        if docker_compose_available():
+            return
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            self.fail("CI must have the docker compose plugin: this is the real-engine check")
+        self.skipTest("no docker compose plugin on this host (CI runs it)")
+
+    def render_bot_stage(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            (tmp / "stage").mkdir()
+            (tmp / "stage" / "bot.env").write_text("")
+            stage_env = tmp / "stage" / "stage.env"
+            stage_env.write_text("STAGE_REDIS_PASSWORD=dummy0password\n")
+            overlay = tmp / "image.yml"
+            overlay.write_text(OVERLAY_TEMPLATE.format(image="hypercalendarbot-stage:test"))
+            command = [
+                "docker", "compose", "-p", "hypercalstage",
+                "--project-directory", tmpdir,
+                "--env-file", str(stage_env),
+                "-f", str(ROOT / "docker-compose.stage.yml"),
+                "-f", str(overlay),
+                "config", "--format", "json",
+            ]
+            done = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+                env={**os.environ, "DOCKER_CONFIG": tmpdir},  # no user credential helpers or contexts
+            )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)["services"]["bot-stage"]
+
+    def test_the_effective_stage_compose_renders_and_keeps_the_process_cap(self):
+        bot = self.render_bot_stage()
+        self.assertEqual(bot["image"], "hypercalendarbot-stage:test")
+        limits = bot["deploy"]["resources"]["limits"]
+        self.assertEqual(limits["pids"], PIDS_CAP)
+        self.assertNotIn("pids_limit", bot)
+        self.assertIn(str(limits["memory"]), MEMORY_CAP_FORMS)
+        self.assertEqual(float(limits["cpus"]), 1.0)
+        self.assertEqual(bot["security_opt"], ["no-new-privileges:true"])
 
 
 class TheQaRunsThroughQaCliOnThePc(unittest.TestCase):
