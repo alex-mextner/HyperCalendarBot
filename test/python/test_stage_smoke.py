@@ -413,6 +413,20 @@ class RunTests(Base):
         self.assertEqual(code, 1)
         self.assertIn("no reply matched any of the expected patterns", out)
 
+    def test_a_failed_case_prints_what_the_stage_bot_answered_one_line_and_cut_short(self):
+        long_reply = "line one\nline two " + "x" * 400
+        code, out, _, _ = self.run_smoke(answers={"/ping": [("something else", 0.2), (long_reply, 0.3)], "hi": [("ok", 0.2)]})
+        self.assertEqual(code, 1)
+        self.assertIn("SMOKE REPLY ping #1: something else", out)
+        second = next(line for line in out.splitlines() if line.startswith("SMOKE REPLY ping #2: "))
+        self.assertTrue(second.startswith("SMOKE REPLY ping #2: line one line two xxx"))
+        self.assertEqual(len(second), len("SMOKE REPLY ping #2: ") + smoke.REPLY_PREVIEW_CHARS)
+
+    def test_a_passing_case_prints_no_reply_text(self):
+        code, out, _, _ = self.run_smoke()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("SMOKE REPLY", out)
+
     def test_forbidden_text_fails(self):
         code, out, _, _ = self.run_smoke(
             answers={"/ping": [("pong", 0.2)], "hi": [("Traceback (most recent call last)", 0.2)]}
@@ -621,7 +635,12 @@ if flags.get("--peer") != scenario["peer"] or flags.get("--username") != scenari
 
 fail = scenario.get("fail", {}).get(action)
 if fail:
-    emit({"ok": False, "error": fail["error"]}, fail["code"])
+    # "times" makes the failure transient: it happens that many times in a row, then the action works.
+    failed = state.setdefault("failed", {})
+    if failed.get(action, 0) < fail.get("times", 10**9):
+        failed[action] = failed.get(action, 0) + 1
+        json.dump(state, open(state_path, "w"))
+        emit({"ok": False, "error": fail["error"]}, fail["code"])
 if action == "open":
     emit({"ok": True, "peer": scenario["peer"], "last_id": 1})
 if action == "send":
@@ -748,6 +767,53 @@ class QaCliTransportTests(Base):
         self.save()
         replies = self.exchange("q", settle=2)
         self.assertEqual([text for text, _ in replies], ["the real answer"])
+
+    COLD = "timed out after 30s waiting for Telegram Web to load"
+
+    def count(self, action):
+        return sum(1 for call in self.calls() if call[2] == action)
+
+    def test_a_send_that_times_out_loading_telegram_web_is_retried_because_nothing_was_sent(self):
+        # The first call of a run starts a cold headless browser on a busy host; that load is slow, not broken.
+        self.scenario["fail"] = {"send": {"code": 1, "error": self.COLD, "times": 2}}
+        self.scenario["texts"]["/ping"] = {"first": msg(101, "pong"), "reads": [[msg(101, "pong")]]}
+        self.save()
+        replies = self.exchange("/ping", retry_delay=0)
+        self.assertEqual([text for text, _ in replies], ["pong"])
+        self.assertEqual(self.count("send"), 3)
+
+    def test_the_search_and_open_timeouts_before_a_send_are_retried_too(self):
+        for error in ("timed out after 10s waiting for search result for @HyperCalendarStageBot",
+                      "timed out after 10s waiting for chat 8898802296 to open"):
+            with self.subTest(error):
+                self.scenario["fail"] = {"send": {"code": 1, "error": error, "times": 1}}
+                self.scenario["texts"]["/ping"] = {"first": msg(101, "pong"), "reads": [[msg(101, "pong")]]}
+                self.save()
+                (self.dir / "state.json").unlink(missing_ok=True)
+                (self.dir / "calls.jsonl").unlink(missing_ok=True)
+                self.assertEqual([t for t, _ in self.exchange("/ping", retry_delay=0)], ["pong"])
+
+    def test_time_spent_retrying_the_send_does_not_shrink_the_window_for_the_answer(self):
+        # Two cold-start retries of 0.3 s outlast the 0.5 s exchange budget; the answer still gets its full window.
+        self.scenario["fail"] = {"send": {"code": 1, "error": self.COLD, "times": 2}}
+        self.scenario["texts"]["q"] = {"first": msg(101, "part 1"), "reads": [[msg(101, "part 1"), msg(102, "part 2")]]}
+        self.save()
+        replies = self.exchange("q", timeout=0.5, settle=0.05, retry_delay=0.3)
+        self.assertEqual([text for text, _ in replies], ["part 1", "part 2"])
+
+    def test_a_cold_load_that_never_finishes_is_unavailable_after_three_attempts(self):
+        self.scenario["fail"] = {"send": {"code": 1, "error": self.COLD}}
+        self.save()
+        with self.assertRaises(ConnectionError):
+            self.exchange("/ping", retry_delay=0)
+        self.assertEqual(self.count("send"), 3)
+
+    def test_a_send_failing_for_any_other_reason_is_not_retried_in_case_it_was_delivered(self):
+        self.scenario["fail"] = {"send": {"code": 1, "error": "timed out after 30s waiting for the message to be confirmed"}}
+        self.save()
+        with self.assertRaises(ConnectionError):
+            self.exchange("/ping", retry_delay=0)
+        self.assertEqual(self.count("send"), 1)
 
     def test_polling_stops_after_settle_seconds_without_a_change(self):
         self.scenario["texts"]["q"] = {"first": msg(101, "a"), "reads": [[msg(101, "a")]]}
