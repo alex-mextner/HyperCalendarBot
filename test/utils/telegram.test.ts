@@ -208,8 +208,11 @@ describe('splitMessage (HTML mode)', () => {
     expect(chunks.map(visible).join('')).toBe(visible(text));
   });
 
-  test('a closing tag without an opening tag costs nothing and is kept', () => {
+  test('a closing tag without an opening tag is kept as text and still respects maxLen', () => {
     expect(split('</i>abcdef', 6)).toEqual(['</i>ab', 'cdef']);
+    const chunks = split('abcde</i>', 6);
+    expect(chunks).toEqual(['abcde', '</i>']);
+    for (const chunk of chunks) expect(chunk.length).toBeLessThanOrEqual(6);
   });
 
   test('throws when an open tag cannot fit with its closing tag in a chunk', () => {

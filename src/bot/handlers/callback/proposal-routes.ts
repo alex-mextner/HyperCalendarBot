@@ -139,6 +139,13 @@ export function registerProposalRoutes(dispatch: CallbackDispatch, deps: Callbac
     const lang = (user.language ?? 'en') as Lang;
     const proposal = await loadOwnedPendingProposal(ctx, user, lang, Number(parts[2]), editProposalDeps);
     if (!proposal) return;
+    // `await` above yields, so a second tap on the same proposal may have passed the same pending check. Re-read
+    // the status in the same synchronous run as the transition below: exactly one tap may act on a proposal.
+    const current = editProposalDeps.editProposalRepo.findById(proposal.id);
+    if (current?.status !== 'pending') {
+      await ctx.answer({ text: t(lang).callbackErrors.proposalAlreadyProcessed(current?.status ?? proposal.status) });
+      return;
+    }
 
     // Resolve the event title up front — bypass soft-delete so the
     // proposer's notification always shows which event their proposal

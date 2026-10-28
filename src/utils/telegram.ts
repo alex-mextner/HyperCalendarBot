@@ -113,8 +113,10 @@ function openedTag(token: string): OpenHtmlTag | null {
 /** Length the closing tags will have once `token` is appended: it may open one more tag or close one. */
 function closingLengthAfter(token: string, open: OpenHtmlTag[]): number {
   const opened = openedTag(token);
-  const closes = CLOSING_TAG.test(token);
-  return closingTags(open).length + (opened ? opened.end.length : 0) - (closes ? token.length : 0);
+  // A closing tag pops the innermost open tag (splitHtmlMessage does `open.pop()`), so it frees that
+  // tag's closing text; with nothing open it frees nothing and the stray tag is plain text to fit.
+  const freed = CLOSING_TAG.test(token) ? (open.at(-1)?.end.length ?? 0) : 0;
+  return closingTags(open).length + (opened ? opened.end.length : 0) - freed;
 }
 
 /** Seals `chunk` with its closing tags and returns the reopened prefix of the next chunk. */
