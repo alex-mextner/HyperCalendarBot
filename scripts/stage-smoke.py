@@ -218,10 +218,10 @@ class QaCliTransport:
 
     def qa(self, action, *flags, timeout):
         """One qa call: returns (exit code, parsed last stdout line). Raises Refused (exit 2) or ConnectionError."""
+        command = ["telegram", "chat"]
         argv = [
             self.qa_bin,
-            "telegram",
-            "chat",
+            *command,
             action,
             "--peer",
             self.peer,
