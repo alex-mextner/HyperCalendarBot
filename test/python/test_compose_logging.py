@@ -1,17 +1,20 @@
 """Docker's own log rotation stays on for every service (owner requirement 7)."""
 
-from pathlib import Path
 import re
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 class ComposeLoggingTests(unittest.TestCase):
-
     def test_every_service_rotates_json_file_logs_by_size_and_count(self):
         text = (ROOT / "docker-compose.yml").read_text()
-        services = re.split(r"^  (?=[a-z][a-z0-9_-]*:\n)", text.split("\nservices:\n", 1)[1].split("\nvolumes:\n", 1)[0], flags=re.M)
+        services = re.split(
+            r"^  (?=[a-z][a-z0-9_-]*:\n)",
+            text.split("\nservices:\n", 1)[1].split("\nvolumes:\n", 1)[0],
+            flags=re.MULTILINE,
+        )
         services = [block for block in services if block.strip()]
         self.assertGreaterEqual(len(services), 2)
         for block in services:

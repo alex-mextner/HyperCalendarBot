@@ -77,6 +77,23 @@ async function verifyLabels(page: Page): Promise<void> {
     assert.equal(await page.locator(`label[for="${id}"]`).count(), 1, `label for ${id}`);
 }
 
+/** The cards ship placeholder text; index.js must replace every one with its workflow JSON from index-workflows.js. */
+async function verifyWorkflowsHydrated(page: Page): Promise<void> {
+  const hydrated = await page
+    .locator('pre[data-workflow]')
+    .evaluateAll((blocks) => blocks.filter((block) => block.textContent?.trimStart().startsWith('{')).length);
+  assert.equal(hydrated, await page.locator('pre[data-workflow]').count(), 'workflow blocks left unfilled');
+}
+
+/** Without any installed font Chromium lays text out at zero height, so every innerText read comes back empty. */
+async function verifyTextIsLaidOut(page: Page): Promise<void> {
+  const height = await page.locator('h1').evaluate((heading) => heading.getBoundingClientRect().height);
+  assert.ok(
+    height > 0,
+    'Chromium rendered the page heading with zero height: this host has no usable fonts (install fontconfig and a font, or set FONTCONFIG_FILE)',
+  );
+}
+
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
@@ -84,10 +101,12 @@ try {
   await page.route('https://**/*', (r) => r.abort());
   await page.goto(pathToFileURL(resolve(import.meta.dir, '../docs/intents/index.html')).href);
   assert.equal(await page.locator('article[data-name]').count(), total);
+  await verifyTextIsLaidOut(page);
   assert.equal(await page.locator('#count').innerText(), `Показано: ${total} из ${total}`);
   assert.equal(await overflows(page), false);
   await page.screenshot({ path: resolve(directory, 'catalogue-desktop.png') });
   await verifyLabels(page);
+  await verifyWorkflowsHydrated(page);
   await verifyFilters(page);
   await verifySearchAndDetails(page);
   await verifyEngineAndLineage(page);

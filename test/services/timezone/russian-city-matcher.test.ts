@@ -72,6 +72,15 @@ describe('matchCity', () => {
     expect(matchCity('майами')).toBe('America/New_York');
   });
 
+  test('a single word of a multi-word city matches it across first-letter buckets', () => {
+    expect(matchCity('новгород')).toBe('Europe/Moscow');
+  });
+
+  test('ignores input shorter than two characters once punctuation is stripped', () => {
+    expect(matchCity('м')).toBeNull();
+    expect(matchCity('м?')).toBeNull();
+  });
+
   test('handles question marks and punctuation', () => {
     expect(matchCity('москве?')).toBe('Europe/Moscow');
     expect(matchCity('лондоне!')).toBe('Europe/London');

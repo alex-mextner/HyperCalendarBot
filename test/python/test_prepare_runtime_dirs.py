@@ -1,17 +1,16 @@
 """prepare-runtime-dirs.sh must not hand the deploy's root-only evidence to the bot container (#823)."""
 
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/prepare-runtime-dirs.sh"
 
 
 class PrepareRuntimeDirsTests(unittest.TestCase):
-
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -32,8 +31,20 @@ class PrepareRuntimeDirsTests(unittest.TestCase):
         (self.bin / "chown").chmod(0o755)
 
     def run_script(self):
-        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", BOT_UID=str(os.getuid()), BOT_GID=str(os.getgid()))
-        return subprocess.run(["bash", str(SCRIPT), str(self.deploy)], env=env, capture_output=True, text=True, timeout=30)
+        env = dict(
+            os.environ,
+            PATH=f"{self.bin}:{os.environ['PATH']}",
+            BOT_UID=str(os.getuid()),
+            BOT_GID=str(os.getgid()),
+        )
+        return subprocess.run(
+            ["bash", str(SCRIPT), str(self.deploy)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
 
     def test_evidence_directories_are_never_chowned_to_the_bot(self):
         result = self.run_script()

@@ -1,18 +1,19 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { GoogleSyncState } from '../../../src/database/types.ts';
+import { mockBullmq } from '../../helpers/mock-bullmq.ts';
 
 // ─── BullMQ mock ───────────────────────────────────────────────────────────────
 
 const mockQueueAdd = mock(async () => ({ id: 'j1' }));
 
-mock.module('bullmq', () => ({
+mockBullmq({
   Queue: class MockQueue {
     add = mockQueueAdd;
   },
   Worker: class MockWorker {
     on = mock(() => {});
   },
-}));
+});
 
 const { createParticipantPushScheduler } = await import('../../../src/services/google/push-scheduler.ts');
 

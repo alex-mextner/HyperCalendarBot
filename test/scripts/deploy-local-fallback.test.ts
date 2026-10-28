@@ -38,7 +38,7 @@ describe('local deploy transport contracts (behavior exercised in Python harness
   });
   test('readiness must be healthy, not just routed to a bot', () => {
     expect(remote).toContain('"$HEALTH" == ok');
-    expect(remote).toContain('ok|"ok (unverified)")');
+    expect(remote).toContain('ok | "ok (unverified)")');
     expect(remote).not.toContain('"ai chain down"');
     expect(remote).toContain('--no-build --pull never');
   });

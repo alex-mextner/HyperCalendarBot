@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
+import type OpenAI from 'openai';
 import { z } from 'zod';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
@@ -520,6 +521,37 @@ describe('a model payload never confirms a place (#620)', () => {
   });
 });
 
+type ToolDefinition = OpenAI.ChatCompletionTool;
+
+/** `[toolName, field]` for every parameter the tool advertises as a boolean. */
+function advertisedBooleanFields(tool: ToolDefinition): [string, string][] {
+  if (tool.type !== 'function') return [];
+  const properties = tool.function.parameters?.properties;
+  if (!properties || typeof properties !== 'object') return [];
+  return Object.entries(properties)
+    .filter(([, advertised]) => Reflect.get(advertised, 'type') === 'boolean')
+    .map(([field]) => [tool.function.name, field]);
+}
+
+/** The validation schema of one tool field; a missing one means the advertised field is never validated. */
+function validatedField(toolName: string, field: string): z.ZodType {
+  const schema = new Map<string, z.ZodType>(Object.entries(toolSchemas)).get(toolName);
+  if (!(schema instanceof z.ZodObject)) throw new Error(`${toolName} has no object schema`);
+  const fieldSchema = schema.shape[field];
+  if (!fieldSchema) throw new Error(`${toolName}.${field} is not validated`);
+  return fieldSchema;
+}
+
+function expectExactBooleanLiterals(label: string, fieldSchema: z.ZodType): void {
+  expect([label, fieldSchema.safeParse('true').data]).toEqual([label, true]);
+  expect([label, fieldSchema.safeParse('false').data]).toEqual([label, false]);
+  expect([label, fieldSchema.safeParse(true).data]).toEqual([label, true]);
+  expect([label, fieldSchema.safeParse(false).data]).toEqual([label, false]);
+  for (const rejected of ['yes', '', '1', 'False', 1, null]) {
+    expect([label, rejected, fieldSchema.safeParse(rejected).success]).toEqual([label, rejected, false]);
+  }
+}
+
 describe('boolean tool field boundary', () => {
   const USER_ID = 123;
   let ctx: AgentContext;
@@ -613,31 +645,16 @@ describe('boolean tool field boundary', () => {
   });
 
   test('every advertised boolean tool field accepts only the exact string literals', () => {
-    const schemasByName = new Map<string, z.ZodType>(Object.entries(toolSchemas));
-    const checked = new Set<string>();
+    const checked: string[] = [];
     for (const tool of [...getToolDefinitions(), ...getToolDefinitions('live_call')]) {
-      if (tool.type !== 'function') continue;
-      const properties = tool.function.parameters?.properties;
-      if (!properties || typeof properties !== 'object') continue;
-      for (const [field, advertised] of Object.entries(properties)) {
-        if (Reflect.get(advertised, 'type') !== 'boolean') continue;
-        const schema = schemasByName.get(tool.function.name);
-        if (!(schema instanceof z.ZodObject)) throw new Error(`${tool.function.name} has no object schema`);
-        const fieldSchema = schema.shape[field];
-        if (!fieldSchema) throw new Error(`${tool.function.name}.${field} is not validated`);
-        const label = `${tool.function.name}.${field}`;
-        expect([label, fieldSchema.safeParse('true').data]).toEqual([label, true]);
-        expect([label, fieldSchema.safeParse('false').data]).toEqual([label, false]);
-        expect([label, fieldSchema.safeParse(true).data]).toEqual([label, true]);
-        expect([label, fieldSchema.safeParse(false).data]).toEqual([label, false]);
-        for (const rejected of ['yes', '', '1', 'False', 1, null]) {
-          expect([label, rejected, fieldSchema.safeParse(rejected).success]).toEqual([label, rejected, false]);
-        }
-        checked.add(label);
+      for (const [name, field] of advertisedBooleanFields(tool)) {
+        const label = `${name}.${field}`;
+        expectExactBooleanLiterals(label, validatedField(name, field));
+        checked.push(label);
       }
     }
-    expect([...checked]).toContain('create_event.location_abstract');
-    expect([...checked]).toContain('update_event.location_abstract');
+    expect(checked).toContain('create_event.location_abstract');
+    expect(checked).toContain('update_event.location_abstract');
   });
 });
 

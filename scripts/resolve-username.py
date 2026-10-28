@@ -6,14 +6,16 @@ Output: JSON {"id": 123456, "firstName": "John", "username": "john"} to stdout
 Exit code: 0 on success, 2 when Telegram has no such username, 1 when the lookup could not run
 Session: data/voice_caller.session
 """
-from service_session import start_service_session
-import sys
-import os
+
 import asyncio
 import json
+import os
 import sqlite3
+import sys
 
-API_ID = int(os.environ.get("MTPROTO_API_ID", 0))
+from service_session import start_service_session
+
+API_ID = int(os.environ.get("MTPROTO_API_ID", "0"))
 API_HASH = os.environ.get("MTPROTO_API_HASH", "")
 
 if len(sys.argv) < 2:
@@ -47,15 +49,15 @@ async def resolve_with_retry(app):
                 continue
             print(f"ERROR:{e}", file=sys.stderr, flush=True)
             return None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - classified by exception class name below
             print(f"ERROR:{type(e).__name__}", file=sys.stderr, flush=True)
             return NOT_FOUND if type(e).__name__ in NOT_FOUND_ERRORS else None
     return None
 
 
 async def main():
-    from pyrogram import Client
     from mtproto_lock import session_lock
+    from pyrogram import Client
 
     with session_lock():
         app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data")

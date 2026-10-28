@@ -293,203 +293,273 @@ function doubleConversionError(
   );
 }
 
+/**
+ * One supported expression form. Null means "not my form" (or, for the
+ * conversion form, "recognised but unhandled") so the next form is tried.
+ */
+type CalculateForm = (expr: string) => ToolResult | null;
+
+const ISO_DATETIME_DIFF_RE = new RegExp(`^(${ISO_DT_RE})\\s*-\\s*(${ISO_DT_RE})$`);
+const DATE_ONLY_DIFF_RE = /^(\d{4}-\d{2}-\d{2})\s*-\s*(\d{4}-\d{2}-\d{2})$/;
+const ISO_DATETIME_SHIFT_RE = new RegExp(
+  `^(${ISO_DT_RE})\\s*([+-])\\s*(\\d+(?:\\.\\d+)?)\\s*(${DURATION_UNITS})\\s*$`,
+  'i',
+);
+const DATE_ONLY_SHIFT_RE = new RegExp(`^(\\d{4}-\\d{2}-\\d{2})\\s*([+-])\\s*(\\d+)\\s*(${DURATION_UNITS})\\b`, 'i');
+const TIME_SHIFT_RE = /^(\d{1,2}):(\d{2})\s*([+-])\s*(\d+(?:\.\d+)?)\s*(min|minutes?|h|hr|hours?)\b/i;
+const ARITHMETIC_CHARS_RE = /^[\d\s+\-*/.()]+$/;
+
+/** "HH:MM" of a minute-of-day count (0..1439). */
+function formatHhmm(minuteOfDay: number): string {
+  const hh = Math.floor(minuteOfDay / 60)
+    .toString()
+    .padStart(2, '0');
+  const mm = (minuteOfDay % 60).toString().padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+/** `date` moved by `n` months/years when `unitL` is one of those; null for fixed-length units. */
+function shiftByCalendarUnit(date: Date, op: string, n: number, unitL: string): Date | null {
+  const forward = op === '+';
+  if (unitL.startsWith('mo')) return forward ? addMonths(date, n) : subMonths(date, n);
+  if (unitL === 'y' || unitL.startsWith('year')) return forward ? addYears(date, n) : subYears(date, n);
+  return null;
+}
+
+type FixedUnit = 'minute' | 'hour' | 'week' | 'day';
+
+function fixedUnitOf(unitL: string): FixedUnit {
+  if (unitL.startsWith('min')) return 'minute';
+  if (unitL === 'h' || unitL.startsWith('hr') || unitL.startsWith('hour')) return 'hour';
+  if (unitL === 'w' || unitL.startsWith('week')) return 'week';
+  return 'day';
+}
+
+function fixedUnitDeltaMs(unit: FixedUnit, amount: number): number {
+  switch (unit) {
+    case 'minute':
+      return amount * 60_000;
+    case 'hour':
+      return amount * 3_600_000;
+    case 'week':
+      return amount * 7 * 86_400_000;
+    case 'day':
+      return amount * 86_400_000;
+  }
+}
+
+function weekdayForm(expr: string): ToolResult | null {
+  const match = expr.match(WEEKDAY_RE);
+  if (!match) return null;
+  const dateStr = match[1] ?? match[2] ?? match[3] ?? '';
+  if (!DATE_ONLY_RE.test(dateStr)) return { success: false, error: WEEKDAY_HINT };
+  const date = parseCalendarDate(dateStr);
+  if (!date) return { success: false, error: `Invalid date: ${dateStr}` };
+  return { success: true, output: WEEKDAY_FORMAT.format(date) };
+}
+
+/**
+ * Date-less fixed offsets are deterministic and retained for explicit user
+ * input and backward compatibility with the old prompt.
+ */
+function fixedOffsetTimeToUtcForm(expr: string): ToolResult | null {
+  const match = expr.match(TIME_FIXED_TO_UTC_RE);
+  if (!match) return null;
+  const [, hourRaw, minuteRaw, secondRaw, signRaw, offsetHourRaw, offsetMinuteRaw] = match;
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw ?? '0');
+  const offsetMinutes = parseOffsetMinutes({
+    sign: signRaw,
+    offsetHour: offsetHourRaw,
+    offsetMinute: offsetMinuteRaw,
+  });
+  if (hour > 23 || minute > 59 || second > 59 || offsetMinutes === null)
+    return { success: false, error: `Invalid fixed-offset datetime: ${expr}` };
+  const hhmm = formatHhmm((((hour * 60 + minute - offsetMinutes) % 1440) + 1440) % 1440);
+  return { success: true, output: secondRaw === undefined ? hhmm : `${hhmm}:${String(second).padStart(2, '0')}` };
+}
+
+/** An instant rendered in UTC (ISO Z) or in an IANA zone (local ISO with that instant's offset, so a target-side DST fold is unambiguous). */
+function renderConvertedInstant(date: Date, target: string, targetIsUtc: boolean): ToolResult {
+  if (targetIsUtc) return { success: true, output: date.toISOString() };
+  try {
+    return { success: true, output: formatLocalIso(date, validateAndGetOffset(target, date)) };
+  } catch {
+    // Intl throws RangeError for an unknown zone name: the model's input error.
+    return { success: false, error: `Invalid timezone: ${target}` };
+  }
+}
+
+/** "<instant or dated wall clock> to UTC|<IANA zone>". */
+function conversionForm(expr: string): ToolResult | null {
+  const match = expr.match(CONVERSION_RE);
+  if (!match) return null;
+  const [, source, target] = match;
+  const targetIsUtc = /^(?:etc\/)?utc$/i.test(target!);
+  const instant = parseSourceInstant(source!);
+  if (instant && 'error' in instant) return { success: false, error: instant.error };
+  if (instant) return renderConvertedInstant(new Date(instant.ms), target!, targetIsUtc);
+  // Only an IANA zone on either side makes the offset date-dependent; the
+  // example keeps the model's own time and zones and only adds a date.
+  if (DATELESS_SOURCE_RE.test(source!) && (source!.includes('/') || !targetIsUtc))
+    return {
+      success: false,
+      error: `Conversion with an IANA timezone needs the calendar date because the UTC offset depends on DST on that date. Put the event's date first, e.g. "2026-09-23 ${source} to ${target}".`,
+    };
+  return null;
+}
+
+/** A bare ISO instant with Z/offset is already unambiguous: normalize to UTC. */
+function bareInstantForm(expr: string): ToolResult | null {
+  const instant = parseIsoInstant(expr);
+  if (!instant) return null;
+  return 'error' in instant
+    ? { success: false, error: instant.error }
+    : { success: true, output: new Date(instant.ms).toISOString() };
+}
+
+/** ISO datetime difference: "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z". */
+function isoDatetimeDiffForm(expr: string): ToolResult | null {
+  const match = expr.match(ISO_DATETIME_DIFF_RE);
+  if (!match) return null;
+  const [, aStr, bStr] = match;
+  // Same validation as the other instant forms: "2026-02-31T…" is refused, not rolled over.
+  const a = parseIsoInstant(aStr!);
+  const b = parseIsoInstant(bStr!);
+  if (!a || 'error' in a) return { success: false, error: `Cannot parse datetime: ${aStr}` };
+  if (!b || 'error' in b) return { success: false, error: `Cannot parse datetime: ${bStr}` };
+  return { success: true, output: formatDiffMs(Math.abs(a.ms - b.ms)) };
+}
+
+/** Date-only difference: "2026-04-10 - 2026-03-21". */
+function dateOnlyDiffForm(expr: string): ToolResult | null {
+  const match = expr.match(DATE_ONLY_DIFF_RE);
+  if (!match) return null;
+  const [, aStr, bStr] = match;
+  const a = parseCalendarDate(aStr!);
+  const b = parseCalendarDate(bStr!);
+  if (!a) return { success: false, error: `Invalid date: ${aStr}` };
+  if (!b) return { success: false, error: `Invalid date: ${bStr}` };
+  const days = Math.round(Math.abs(a.getTime() - b.getTime()) / 86_400_000);
+  return { success: true, output: `${days} days` };
+}
+
+/** Whether shifting by `op` moves a fixed-offset instant's wall clock toward UTC. */
+function shiftsTowardUtc(offsetMinutes: number, op: string): boolean {
+  return offsetMinutes !== 0 && (offsetMinutes > 0 ? op === '-' : op === '+');
+}
+
+/** ISO datetime ± duration: "2026-03-18T22:34:00Z + 31min", "+ 1month", "+ 2weeks". */
+function isoDatetimeShiftForm(expr: string): ToolResult | null {
+  const match = expr.match(ISO_DATETIME_SHIFT_RE);
+  if (!match) return null;
+  const [, dateStr, op, amtStr, unit] = match;
+  const instant = parseIsoInstant(dateStr!);
+  if (!instant || 'error' in instant) return { success: false, error: `Cannot parse datetime: ${dateStr}` };
+  const date = new Date(instant.ms);
+  const amt = parseFloat(amtStr!);
+  const unitL = unit!.toLowerCase();
+  const calendarShifted = shiftByCalendarUnit(date, op!, Math.trunc(amt), unitL);
+  if (calendarShifted) return { success: true, output: calendarShifted.toISOString() };
+
+  const fixedUnit = fixedUnitOf(unitL);
+  const deltaMs = fixedUnitDeltaMs(fixedUnit, amt);
+  const isClockUnit = fixedUnit === 'minute' || fixedUnit === 'hour';
+  if (
+    isClockUnit &&
+    shiftsTowardUtc(instant.offsetMinutes, op!) &&
+    deltaMs === Math.abs(instant.offsetMinutes) * 60_000
+  )
+    return {
+      success: false,
+      error: doubleConversionError(dateStr!, instant, op!, {
+        amount: amt,
+        unit: fixedUnit === 'hour' ? 'hour' : 'minute',
+        token: `${amtStr}${unit}`,
+      }),
+    };
+  return { success: true, output: new Date(date.getTime() + (op === '+' ? 1 : -1) * deltaMs).toISOString() };
+}
+
+/** Date-only ± duration: "2026-03-18 + 7days", "+ 2weeks", "+ 1month". */
+function dateOnlyShiftForm(expr: string): ToolResult | null {
+  const match = expr.match(DATE_ONLY_SHIFT_RE);
+  if (!match) return null;
+  const [, dateStr, op, amtStr, unit] = match;
+  const date = parseCalendarDate(dateStr!);
+  if (!date) return { success: false, error: `Invalid date: ${dateStr}` };
+  const amt = Number.parseInt(amtStr!, 10);
+  const unitL = unit!.toLowerCase();
+  const calendarShifted = shiftByCalendarUnit(date, op!, amt, unitL);
+  if (calendarShifted) return { success: true, output: calendarShifted.toISOString().slice(0, 10) };
+  const sign = op === '+' ? 1 : -1;
+  const weeks = fixedUnitOf(unitL) === 'week' ? 7 : 1;
+  const result = new Date(date.getTime() + sign * amt * weeks * 86_400_000);
+  return { success: true, output: result.toISOString().slice(0, 10) };
+}
+
+/** HH:MM ± duration: "22:34 + 31min". */
+function timeShiftForm(expr: string): ToolResult | null {
+  const match = expr.match(TIME_SHIFT_RE);
+  if (!match) return null;
+  const [, h, m, op, amtStr, unit] = match;
+  const amt = parseFloat(amtStr!);
+  const sign = op === '+' ? 1 : -1;
+  const shiftMin = unit!.toLowerCase().startsWith('min') ? sign * amt : sign * amt * 60;
+  const totalMin = Number.parseInt(h!, 10) * 60 + Number.parseInt(m!, 10) + shiftMin;
+  return { success: true, output: formatHhmm(((totalMin % 1440) + 1440) % 1440) };
+}
+
+/**
+ * Datetime-looking input should fail with a self-correcting contract instead
+ * of a generic parser error. In particular, never guess the user's timezone
+ * from an offset-free local datetime or from phrases such as "UTC+2 to UTC".
+ */
+function datetimeSyntaxHintForm(expr: string): ToolResult | null {
+  return DATETIME_LIKE_RE.test(expr) ? { success: false, error: DATETIME_SYNTAX_HINT } : null;
+}
+
+/** A date is never an arithmetic operand: "2026-09-24" would evaluate to 1993. */
+function dateTokenHintForm(expr: string): ToolResult | null {
+  return DATE_TOKEN_RE.test(expr) ? { success: false, error: DATE_SYNTAX_HINT } : null;
+}
+
+/** Numeric arithmetic: digits, whitespace, operators, parentheses only. */
+function arithmeticForm(expr: string): ToolResult | null {
+  if (!ARITHMETIC_CHARS_RE.test(expr)) return null;
+  try {
+    const result = evalArithmetic(expr);
+    if (!Number.isFinite(result)) return { success: false, error: 'Result is not a finite number' };
+    return { success: true, output: String(result) };
+  } catch {
+    return { success: false, error: `Cannot evaluate: ${expr}` };
+  }
+}
+
+/** Tried in order: the first form that returns a result wins, so more specific shapes precede looser ones. */
+const CALCULATE_FORMS: readonly CalculateForm[] = [
+  weekdayForm,
+  fixedOffsetTimeToUtcForm,
+  conversionForm,
+  bareInstantForm,
+  isoDatetimeDiffForm,
+  dateOnlyDiffForm,
+  isoDatetimeShiftForm,
+  dateOnlyShiftForm,
+  timeShiftForm,
+  datetimeSyntaxHintForm,
+  dateTokenHintForm,
+  arithmeticForm,
+];
+
 export function handleCalculate(input: { expression: string }): ToolResult {
   if (input.expression.length > 500) return { success: false, error: 'Expression exceeds the 500 character limit' };
   const expr = input.expression.trim();
 
-  const weekdayMatch = expr.match(WEEKDAY_RE);
-  if (weekdayMatch) {
-    const dateStr = weekdayMatch[1] ?? weekdayMatch[2] ?? weekdayMatch[3] ?? '';
-    if (!DATE_ONLY_RE.test(dateStr)) return { success: false, error: WEEKDAY_HINT };
-    const date = parseCalendarDate(dateStr);
-    if (!date) return { success: false, error: `Invalid date: ${dateStr}` };
-    return { success: true, output: WEEKDAY_FORMAT.format(date) };
-  }
-
-  // Date-less fixed offsets are deterministic and retained for explicit user
-  // input and backward compatibility with the old prompt.
-  const timeFixedMatch = expr.match(TIME_FIXED_TO_UTC_RE);
-  if (timeFixedMatch) {
-    const [, hourRaw, minuteRaw, secondRaw, signRaw, offsetHourRaw, offsetMinuteRaw] = timeFixedMatch;
-    const hour = Number(hourRaw);
-    const minute = Number(minuteRaw);
-    const second = Number(secondRaw ?? '0');
-    const offsetMinutes = parseOffsetMinutes({
-      sign: signRaw,
-      offsetHour: offsetHourRaw,
-      offsetMinute: offsetMinuteRaw,
-    });
-    if (hour > 23 || minute > 59 || second > 59 || offsetMinutes === null)
-      return { success: false, error: `Invalid fixed-offset datetime: ${expr}` };
-    const utcMinutes = (((hour * 60 + minute - offsetMinutes) % 1440) + 1440) % 1440;
-    const hhmm = `${Math.floor(utcMinutes / 60)
-      .toString()
-      .padStart(2, '0')}:${(utcMinutes % 60).toString().padStart(2, '0')}`;
-    return { success: true, output: secondRaw === undefined ? hhmm : `${hhmm}:${String(second).padStart(2, '0')}` };
-  }
-
-  // Instant → UTC (ISO Z) or → IANA zone (local ISO with that instant's offset,
-  // so a DST fold on the target side is unambiguous).
-  const conversionMatch = expr.match(CONVERSION_RE);
-  if (conversionMatch) {
-    const [, source, target] = conversionMatch;
-    const targetIsUtc = /^(?:etc\/)?utc$/i.test(target!);
-    const instant = parseSourceInstant(source!);
-    if (instant && 'error' in instant) return { success: false, error: instant.error };
-    if (instant) {
-      const date = new Date(instant.ms);
-      if (targetIsUtc) return { success: true, output: date.toISOString() };
-      try {
-        return { success: true, output: formatLocalIso(date, validateAndGetOffset(target!, date)) };
-      } catch {
-        // Intl throws RangeError for an unknown zone name: the model's input error.
-        return { success: false, error: `Invalid timezone: ${target}` };
-      }
-    }
-    // Only an IANA zone on either side makes the offset date-dependent; the
-    // example keeps the model's own time and zones and only adds a date.
-    if (DATELESS_SOURCE_RE.test(source!) && (source!.includes('/') || !targetIsUtc))
-      return {
-        success: false,
-        error: `Conversion with an IANA timezone needs the calendar date because the UTC offset depends on DST on that date. Put the event's date first, e.g. "2026-09-23 ${source} to ${target}".`,
-      };
-  }
-
-  // A bare ISO instant with Z/offset is already unambiguous: normalize to UTC.
-  const bareInstant = parseIsoInstant(expr);
-  if (bareInstant)
-    return 'error' in bareInstant
-      ? { success: false, error: bareInstant.error }
-      : { success: true, output: new Date(bareInstant.ms).toISOString() };
-
-  // ISO datetime difference: "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z"
-  const isoDatetimeDiffMatch = expr.match(new RegExp(`^(${ISO_DT_RE})\\s*-\\s*(${ISO_DT_RE})$`));
-  if (isoDatetimeDiffMatch) {
-    const [, aStr, bStr] = isoDatetimeDiffMatch;
-    // Same validation as the other instant forms: "2026-02-31T…" is refused, not rolled over.
-    const a = parseIsoInstant(aStr!);
-    const b = parseIsoInstant(bStr!);
-    if (!a || 'error' in a) return { success: false, error: `Cannot parse datetime: ${aStr}` };
-    if (!b || 'error' in b) return { success: false, error: `Cannot parse datetime: ${bStr}` };
-    return { success: true, output: formatDiffMs(Math.abs(a.ms - b.ms)) };
-  }
-
-  // Date-only difference: "2026-04-10 - 2026-03-21"
-  const dateOnlyDiffMatch = expr.match(/^(\d{4}-\d{2}-\d{2})\s*-\s*(\d{4}-\d{2}-\d{2})$/);
-  if (dateOnlyDiffMatch) {
-    const [, aStr, bStr] = dateOnlyDiffMatch;
-    const a = parseCalendarDate(aStr!);
-    const b = parseCalendarDate(bStr!);
-    if (!a) return { success: false, error: `Invalid date: ${aStr}` };
-    if (!b) return { success: false, error: `Invalid date: ${bStr}` };
-    const days = Math.round(Math.abs(a.getTime() - b.getTime()) / 86_400_000);
-    return { success: true, output: `${days} days` };
-  }
-
-  // ISO datetime ± duration: "2026-03-18T22:34:00Z + 31min", "+ 1month", "+ 2weeks"
-  const isoDatetimeMatch = expr.match(
-    new RegExp(`^(${ISO_DT_RE})\\s*([+-])\\s*(\\d+(?:\\.\\d+)?)\\s*(${DURATION_UNITS})\\s*$`, 'i'),
-  );
-  if (isoDatetimeMatch) {
-    const [, dateStr, op, amtStr, unit] = isoDatetimeMatch;
-    const instant = parseIsoInstant(dateStr!);
-    if (!instant || 'error' in instant) return { success: false, error: `Cannot parse datetime: ${dateStr}` };
-    const date = new Date(instant.ms);
-    const amt = parseFloat(amtStr!);
-    const unitL = unit!.toLowerCase();
-    if (unitL.startsWith('mo') || unitL.startsWith('month')) {
-      const n = Math.trunc(amt);
-      const result = op === '+' ? addMonths(date, n) : subMonths(date, n);
-      return { success: true, output: result.toISOString() };
-    }
-    if (unitL === 'y' || unitL.startsWith('year')) {
-      const n = Math.trunc(amt);
-      const result = op === '+' ? addYears(date, n) : subYears(date, n);
-      return { success: true, output: result.toISOString() };
-    }
-    const sign = op === '+' ? 1 : -1;
-    const isMinutes = unitL.startsWith('min');
-    const isHours = unitL === 'h' || unitL.startsWith('hr') || unitL.startsWith('hour');
-    let deltaMs: number;
-    if (isMinutes) deltaMs = amt * 60_000;
-    else if (isHours) deltaMs = amt * 3_600_000;
-    else if (unitL === 'w' || unitL.startsWith('week')) deltaMs = amt * 7 * 86_400_000;
-    else deltaMs = amt * 86_400_000;
-    const towardUtc = instant.offsetMinutes !== 0 && (instant.offsetMinutes > 0 ? op === '-' : op === '+');
-    if ((isMinutes || isHours) && towardUtc && deltaMs === Math.abs(instant.offsetMinutes) * 60_000)
-      return {
-        success: false,
-        error: doubleConversionError(dateStr!, instant, op!, {
-          amount: amt,
-          unit: isHours ? 'hour' : 'minute',
-          token: `${amtStr}${unit}`,
-        }),
-      };
-    return { success: true, output: new Date(date.getTime() + sign * deltaMs).toISOString() };
-  }
-
-  // Date-only ± duration: "2026-03-18 + 7days", "+ 2weeks", "+ 1month"
-  const dateOnlyMatch = expr.match(
-    new RegExp(`^(\\d{4}-\\d{2}-\\d{2})\\s*([+-])\\s*(\\d+)\\s*(${DURATION_UNITS})\\b`, 'i'),
-  );
-  if (dateOnlyMatch) {
-    const [, dateStr, op, amtStr, unit] = dateOnlyMatch;
-    const date = parseCalendarDate(dateStr!);
-    if (!date) return { success: false, error: `Invalid date: ${dateStr}` };
-    const amt = Number.parseInt(amtStr!, 10);
-    const unitL = unit!.toLowerCase();
-    if (unitL.startsWith('mo') || unitL.startsWith('month')) {
-      const result = op === '+' ? addMonths(date, amt) : subMonths(date, amt);
-      return { success: true, output: result.toISOString().slice(0, 10) };
-    }
-    if (unitL === 'y' || unitL.startsWith('year')) {
-      const result = op === '+' ? addYears(date, amt) : subYears(date, amt);
-      return { success: true, output: result.toISOString().slice(0, 10) };
-    }
-    const sign = op === '+' ? 1 : -1;
-    const weeks = unitL === 'w' || unitL.startsWith('week') ? 7 : 1;
-    const result = new Date(date.getTime() + sign * amt * weeks * 86_400_000);
-    return { success: true, output: result.toISOString().slice(0, 10) };
-  }
-
-  // HH:MM ± duration: "22:34 + 31min"
-  const timeMatch = expr.match(/^(\d{1,2}):(\d{2})\s*([+-])\s*(\d+(?:\.\d+)?)\s*(min|minutes?|h|hr|hours?)\b/i);
-  if (timeMatch) {
-    const [, h, m, op, amtStr, unit] = timeMatch;
-    let totalMin = Number.parseInt(h!, 10) * 60 + Number.parseInt(m!, 10);
-    const amt = parseFloat(amtStr!);
-    const sign = op === '+' ? 1 : -1;
-    if (unit!.toLowerCase().startsWith('min')) totalMin += sign * amt;
-    else totalMin += sign * amt * 60;
-    totalMin = ((totalMin % 1440) + 1440) % 1440;
-    const rh = Math.floor(totalMin / 60)
-      .toString()
-      .padStart(2, '0');
-    const rm = (totalMin % 60).toString().padStart(2, '0');
-    return { success: true, output: `${rh}:${rm}` };
-  }
-
-  // Datetime-looking input should fail with a self-correcting contract instead
-  // of a generic parser error. In particular, never guess the user's timezone
-  // from an offset-free local datetime or from phrases such as "UTC+2 to UTC".
-  if (DATETIME_LIKE_RE.test(expr)) {
-    return { success: false, error: DATETIME_SYNTAX_HINT };
-  }
-
-  // A date is never an arithmetic operand: "2026-09-24" would evaluate to 1993.
-  if (DATE_TOKEN_RE.test(expr)) return { success: false, error: DATE_SYNTAX_HINT };
-
-  // Numeric arithmetic: digits, whitespace, operators, parentheses only
-  if (/^[\d\s+\-*/.()]+$/.test(expr)) {
-    try {
-      const result = evalArithmetic(expr);
-      if (!Number.isFinite(result)) {
-        return { success: false, error: 'Result is not a finite number' };
-      }
-      return { success: true, output: String(result) };
-    } catch {
-      return { success: false, error: `Cannot evaluate: ${expr}` };
-    }
+  for (const form of CALCULATE_FORMS) {
+    const result = form(expr);
+    if (result) return result;
   }
 
   return {

@@ -12,7 +12,6 @@ import fcntl
 import gzip
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import signal
@@ -21,6 +20,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ENTRY = ROOT / "scripts/odroid-stage-qa.sh"
@@ -34,10 +34,18 @@ PROD_BOT_TOKEN = "1234567:PROD-TELEGRAM-TOKEN-MUST-NEVER-REACH-STAGE"
 STAGE_BOT_TOKEN = "7654321:STAGE-TELEGRAM-TOKEN"
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 CONFIG_DIGEST = "sha256:" + "ab" * 32
-LIB_FILES = (
-    "stage-fetch-artifact.py stage-qa-run.sh stage-smoke.py docker-compose.stage.yml release-artifact.py "
-    "odroid-deploy-lock.sh deploy-health.py deploy-evidence.py prepare-runtime-dirs.sh log-retention.py"
-).split()
+LIB_FILES = [
+    "stage-fetch-artifact.py",
+    "stage-qa-run.sh",
+    "stage-smoke.py",
+    "docker-compose.stage.yml",
+    "release-artifact.py",
+    "odroid-deploy-lock.sh",
+    "deploy-health.py",
+    "deploy-evidence.py",
+    "prepare-runtime-dirs.sh",
+    "log-retention.py",
+]
 RESULT = re.compile(r"^STAGE_QA_RESULT status=([a-z-]+) sha=(\S+) cases=(\d+) failed=(\d+)$")
 
 PROD_ENV = """\
@@ -64,12 +72,23 @@ PUBLIC_DOMAIN=bot.example.org
 WEBHOOK_SECRET=hook-secret
 """
 GUARD_JSON = {
-    "username": "hypercal_stage_bot", "peer": "7654321", "base_cases": 5,
+    "username": "hypercal_stage_bot",
+    "peer": "7654321",
+    "base_cases": 5,
     "cases": [{"name": name, "send": "/" + name} for name in ("start", "ping", "a", "b", "c")],
 }
 ALLOWED_KEYS = {
-    "ZAI_API_KEY", "HF_TOKEN", "CLAUDE_MODEL", "OPENROUTER_API_KEY", "GROQ_API_KEY", "AI_PRIMARY",
-    "INTENT_LEARNER_ENABLED", "LOG_LEVEL", "TZ", "BOT_TOKEN", "BOT_USERNAME",
+    "ZAI_API_KEY",
+    "HF_TOKEN",
+    "CLAUDE_MODEL",
+    "OPENROUTER_API_KEY",
+    "GROQ_API_KEY",
+    "AI_PRIMARY",
+    "INTENT_LEARNER_ENABLED",
+    "LOG_LEVEL",
+    "TZ",
+    "BOT_TOKEN",
+    "BOT_USERNAME",
 }
 
 
@@ -78,6 +97,12 @@ def rewrite(text, replacements):
         assert text.count(old) == 1, old
         text = text.replace(old, new)
     return text
+
+
+def close_stdin(process):
+    """Close the pipe and drop the handle: Python 3.12's Popen.communicate() flushes a closed stdin and raises ValueError."""
+    process.stdin.close()
+    process.stdin = None
 
 
 def wait_for(predicate, what, seconds=30):
@@ -90,7 +115,7 @@ def wait_for(predicate, what, seconds=30):
 
 
 def lock_is_free(path):
-    result = subprocess.run(["flock", "-n", str(path), "true"], capture_output=True)
+    result = subprocess.run(["flock", "-n", str(path), "true"], capture_output=True, check=False)
     return result.returncode == 0
 
 
@@ -99,15 +124,16 @@ class HeldLock:
 
     def __init__(self, path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.file = open(path, "a+")
-        fcntl.flock(self.file, fcntl.LOCK_EX)
+        self.fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT)
+        fcntl.flock(self.fd, fcntl.LOCK_EX)
 
     def release(self):
-        if not self.file.closed:
-            self.file.close()
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
 
 
-STUB_FETCH = r'''
+STUB_FETCH = r"""
 import json, os, re, stat, sys
 REC, CTL, TOKEN = {rec!r}, {ctl!r}, {token!r}
 ctl = json.load(open(CTL))
@@ -136,9 +162,9 @@ if ctl["replay"]:
 with open(os.path.join(out, "artifact.json"), "w") as f:
     json.dump({{"config_digest": ctl["image_id"], "manifest_digest": "sha256:" + "cd" * 32, "image_bytes": 1000}}, f)
 print("STAGE_ARTIFACT archive_sha256=" + "00" * 32 + " config_digest=" + ctl["image_id"] + " image_bytes=1000 replay=0")
-'''
+"""
 
-STUB_SMOKE = r'''
+STUB_SMOKE = r"""
 import json, os, sys
 REC, CTL = {rec!r}, {ctl!r}
 ctl = json.load(open(CTL))
@@ -154,9 +180,9 @@ if ctl["guard_garbage"]:
     print("not a guard line")
     sys.exit(0)
 print("STAGE_GUARD " + json.dumps(ctl["guard_json"], separators=(",", ":")))
-'''
+"""
 
-STUB_HEALTH = r'''
+STUB_HEALTH = r"""
 import json, os, sys
 REC, CTL = {rec!r}, {ctl!r}
 ctl = json.load(open(CTL))
@@ -166,9 +192,9 @@ with open(os.path.join(REC, "events.log"), "a") as f:
     f.write("health\n")
 print("RESULT verdict=" + ("ok" if ctl["health_rc"] == 0 else "unhealthy") + " health=ok ready=ok elapsed=1s reason=stub")
 sys.exit(ctl["health_rc"])
-'''
+"""
 
-STUB_EVIDENCE = r'''
+STUB_EVIDENCE = r"""
 import json, os, sys
 REC = {rec!r}
 cmd = sys.argv[1]
@@ -183,9 +209,9 @@ with open(os.path.join(REC, "events.log"), "a") as f:
 with open(os.path.join(REC, f"evidence-{{cmd}}.json"), "w") as f:
     json.dump({{"argv": sys.argv[1:], "env": dict(os.environ)}}, f)
 print("EVIDENCE_DIR=" + os.path.join(root, name))
-'''
+"""
 
-STUB_DOCKER = r'''#!/bin/bash
+STUB_DOCKER = r"""#!/bin/bash
 REC={rec}
 CTL={ctl}
 ev() {{ printf '%s\n' "$*" >>"$REC/events.log"; }}
@@ -213,11 +239,11 @@ case "$1" in
     done ;;
 esac
 exit 0
-'''
+"""
 
-STUB_PREPARE = '''#!/bin/bash
+STUB_PREPARE = """#!/bin/bash
 printf 'prepare-dirs %s\\n' "$1" >>{rec}/events.log
-'''
+"""
 
 
 class StageWorld(unittest.TestCase):
@@ -235,19 +261,43 @@ class StageWorld(unittest.TestCase):
         self.bin = self.tmp / "bin"
         self.lib = self.tmp / "lib"
         self.locks = self.tmp / "locks"
-        for directory in (self.deploy, self.stage, self.rec, self.bin, self.lib, self.locks, self.rec / "dockerroot",
-                          self.stage / "data", self.stage / "logs"):
+        for directory in (
+            self.deploy,
+            self.stage,
+            self.rec,
+            self.bin,
+            self.lib,
+            self.locks,
+            self.rec / "dockerroot",
+            self.stage / "data",
+            self.stage / "logs",
+        ):
             directory.mkdir(parents=True, exist_ok=True)
         self.stage_lock = self.locks / "hypercal-stage.lock"
         self.host_lock = self.locks / "odroid-deploy.lock"
         self.ctl_path = self.tmp / "ctl.json"
-        self.ctl(fetch_rc=0, current_rc=0, health_rc=0, guard_rc=0, guard_garbage=False, guard_json=GUARD_JSON,
-                 image_id=CONFIG_DIGEST, replay=False, cases_text='[{"name": "ping"}]')
+        self.ctl(
+            fetch_rc=0,
+            current_rc=0,
+            health_rc=0,
+            guard_rc=0,
+            guard_garbage=False,
+            guard_json=GUARD_JSON,
+            image_id=CONFIG_DIGEST,
+            replay=False,
+            cases_text='[{"name": "ping"}]',
+        )
         (self.rec / "image.tar.gz").write_bytes(gzip.compress(b"IMAGE-BYTES"))
         (self.deploy / ".env").write_text(PROD_ENV.format(prod=PROD_BOT_TOKEN))
         (self.stage / "stage.env").write_text(
-            f"BOT_TOKEN={STAGE_BOT_TOKEN}\nBOT_USERNAME=hypercal_stage_bot\nSTAGE_REDIS_PASSWORD=redispass1\n")
-        fmt = {"rec": str(self.rec), "ctl": str(self.ctl_path), "token": FAKE_TOKEN, "deploy": str(self.deploy)}
+            f"BOT_TOKEN={STAGE_BOT_TOKEN}\nBOT_USERNAME=hypercal_stage_bot\nSTAGE_REDIS_PASSWORD=redispass1\n"
+        )
+        fmt = {
+            "rec": str(self.rec),
+            "ctl": str(self.ctl_path),
+            "token": FAKE_TOKEN,
+            "deploy": str(self.deploy),
+        }
         self.write_exec(self.bin / "docker", STUB_DOCKER.format(**fmt))
         self.write_exec(self.lib / "stage-fetch-artifact.py", STUB_FETCH.format(**fmt))
         self.write_exec(self.lib / "stage-smoke.py", STUB_SMOKE.format(**fmt))
@@ -270,26 +320,57 @@ class StageWorld(unittest.TestCase):
     def set_constants(self, stage_wait, stage_slice, host_wait, host_slice, run_timeout):
         path = f"{self.bin}:{SAFE_PATH}"
         self.entry = self.tmp / "hypercal-stage-qa"
-        self.entry.write_text(rewrite(ENTRY.read_text(), [
-            ("readonly API=https://api.github.com\n", "readonly API=http://127.0.0.1:9\n"),
-            ("readonly DEPLOY_PATH=/opt/hypercal\n", f"readonly DEPLOY_PATH={self.deploy}\n"),
-            ("readonly LIB=/usr/local/lib/hypercal-stage\n", f"readonly LIB={self.lib}\n"),
-            ("readonly STAGE_LOCK_FILE=/run/lock/hypercal-stage.lock\n", f"readonly STAGE_LOCK_FILE={self.stage_lock}\n"),
-            ("readonly STAGE_LOCK_MAX_WAIT=3000\n", f"readonly STAGE_LOCK_MAX_WAIT={stage_wait}\n"),
-            ("readonly STAGE_LOCK_SLICE=30\n", f"readonly STAGE_LOCK_SLICE={stage_slice}\n"),
-            (f"readonly SAFE_PATH={SAFE_PATH}\n", f"readonly SAFE_PATH={path}\n"),
-        ]))
+        self.entry.write_text(
+            rewrite(
+                ENTRY.read_text(),
+                [
+                    ("readonly API=https://api.github.com\n", "readonly API=http://127.0.0.1:9\n"),
+                    (
+                        "readonly DEPLOY_PATH=/opt/hypercal\n",
+                        f"readonly DEPLOY_PATH={self.deploy}\n",
+                    ),
+                    ("readonly LIB=/usr/local/lib/hypercal-stage\n", f"readonly LIB={self.lib}\n"),
+                    (
+                        "readonly STAGE_LOCK_FILE=/run/lock/hypercal-stage.lock\n",
+                        f"readonly STAGE_LOCK_FILE={self.stage_lock}\n",
+                    ),
+                    (
+                        "readonly STAGE_LOCK_MAX_WAIT=3000\n",
+                        f"readonly STAGE_LOCK_MAX_WAIT={stage_wait}\n",
+                    ),
+                    (
+                        "readonly STAGE_LOCK_SLICE=30\n",
+                        f"readonly STAGE_LOCK_SLICE={stage_slice}\n",
+                    ),
+                    (f"readonly SAFE_PATH={SAFE_PATH}\n", f"readonly SAFE_PATH={path}\n"),
+                ],
+            )
+        )
         self.entry.chmod(0o755)
         run = self.lib / "stage-qa-run.sh"
-        run.write_text(rewrite(RUN.read_text(), [
-            ("readonly API=https://api.github.com\n", "readonly API=http://127.0.0.1:9\n"),
-            ("readonly DEPLOY_PATH=/opt/hypercal\n", f"readonly DEPLOY_PATH={self.deploy}\n"),
-            ("readonly HOST_LOCK_FILE=/run/lock/odroid-deploy.lock\n", f"readonly HOST_LOCK_FILE={self.host_lock}\n"),
-            ("readonly HOST_LOCK_MAX_WAIT=2400\n", f"readonly HOST_LOCK_MAX_WAIT={host_wait}\n"),
-            ("readonly HOST_LOCK_SLICE=30\n", f"readonly HOST_LOCK_SLICE={host_slice}\n"),
-            ("readonly RUN_TIMEOUT=2400\n", f"readonly RUN_TIMEOUT={run_timeout}\n"),
-            (f"readonly SAFE_PATH={SAFE_PATH}\n", f"readonly SAFE_PATH={path}\n"),
-        ]))
+        run.write_text(
+            rewrite(
+                RUN.read_text(),
+                [
+                    ("readonly API=https://api.github.com\n", "readonly API=http://127.0.0.1:9\n"),
+                    (
+                        "readonly DEPLOY_PATH=/opt/hypercal\n",
+                        f"readonly DEPLOY_PATH={self.deploy}\n",
+                    ),
+                    (
+                        "readonly HOST_LOCK_FILE=/run/lock/odroid-deploy.lock\n",
+                        f"readonly HOST_LOCK_FILE={self.host_lock}\n",
+                    ),
+                    (
+                        "readonly HOST_LOCK_MAX_WAIT=2400\n",
+                        f"readonly HOST_LOCK_MAX_WAIT={host_wait}\n",
+                    ),
+                    ("readonly HOST_LOCK_SLICE=30\n", f"readonly HOST_LOCK_SLICE={host_slice}\n"),
+                    ("readonly RUN_TIMEOUT=2400\n", f"readonly RUN_TIMEOUT={run_timeout}\n"),
+                    (f"readonly SAFE_PATH={SAFE_PATH}\n", f"readonly SAFE_PATH={path}\n"),
+                ],
+            )
+        )
         run.chmod(0o755)
 
     def popen(self, sha=SHA, token=FAKE_TOKEN, done=True, ssh_command=None):
@@ -301,14 +382,20 @@ class StageWorld(unittest.TestCase):
         env = {"PATH": "/usr/bin:/bin", "HOME": str(self.tmp)}
         if ssh_command is not None:
             env["SSH_ORIGINAL_COMMAND"] = ssh_command
-        process = subprocess.Popen([str(self.entry), *([] if sha is None else [sha])], stdin=subprocess.PIPE,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        process = subprocess.Popen(
+            [str(self.entry), *([] if sha is None else [sha])],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
         process.stdin.write("" if token is None else token + "\n")
         if done and token is not None:
             process.stdin.write("DONE\n")
         process.stdin.flush()
         if done or token is None:
-            process.stdin.close()
+            close_stdin(process)
         return process
 
     def run_entry(self, sha=SHA, token=FAKE_TOKEN, **kwargs):
@@ -320,7 +407,7 @@ class StageWorld(unittest.TestCase):
         """Read the STAGE_READY line from the entry's stdout (blocks until the stage is up)."""
         line = process.stdout.readline()
         self.assertRegex(line, r"^STAGE_READY \{", line)
-        return json.loads(line[len("STAGE_READY "):])
+        return json.loads(line[len("STAGE_READY ") :])
 
     def finish(self, process):
         out = process.stdout.read()
@@ -351,7 +438,9 @@ class StageWorld(unittest.TestCase):
         lines = completed.stdout.strip().splitlines()
         self.assertTrue(lines, completed.stderr)
         match = RESULT.match(lines[-1])
-        self.assertIsNotNone(match, f"last stdout line is not a RESULT line: {lines[-1]!r}\n{completed.stderr}")
+        self.assertIsNotNone(
+            match, f"last stdout line is not a RESULT line: {lines[-1]!r}\n{completed.stderr}"
+        )
         return match.group(1), match.group(2), int(match.group(3)), int(match.group(4))
 
     def assertOutcome(self, completed, code, status, cases=0, failed=0):
@@ -359,7 +448,9 @@ class StageWorld(unittest.TestCase):
         self.assertEqual(self.result(completed), (status, SHA, cases, failed), completed.stderr)
 
     def leftover_work_dirs(self):
-        return sorted(p.name for p in self.deploy.iterdir() if p.name.startswith(".stage-incoming-"))
+        return sorted(
+            p.name for p in self.deploy.iterdir() if p.name.startswith(".stage-incoming-")
+        )
 
     def record_text(self):
         parts = []
@@ -383,13 +474,25 @@ class RunOutcomes(StageWorld):
     def test_pass_runs_everything_in_order_and_leaves_evidence(self):
         result = self.run_entry()
         self.assertOutcome(result, 0, "passed")
-        order = ["fetch-fetch", "fetch-current", "docker-load", "prepare-dirs", "compose-up", "health", "guard",
-                 "evidence release-logs", "compose-down", "docker-rmi"]
+        order = [
+            "fetch-fetch",
+            "fetch-current",
+            "docker-load",
+            "prepare-dirs",
+            "compose-up",
+            "health",
+            "guard",
+            "evidence release-logs",
+            "compose-down",
+            "docker-rmi",
+        ]
         indexes = [self.index_of(prefix) for prefix in order]
         self.assertEqual(indexes, sorted(indexes), self.events())
         self.assertFalse(self.has_event("evidence failed"))
         self.assertFalse((self.stage / "receipts").exists())
-        self.assertTrue((self.stage / "evidence" / f"release-stage-{SHA[:12]}" / "container.log").is_file())
+        self.assertTrue(
+            (self.stage / "evidence" / f"release-stage-{SHA[:12]}" / "container.log").is_file()
+        )
         self.assertTornDown()
         self.assertNoSecrets(result)
 
@@ -403,26 +506,41 @@ class RunOutcomes(StageWorld):
     def test_ready_line_carries_the_guard_data_and_comes_before_any_teardown(self):
         process = self.popen(done=False)
         ready = self.ready(process)
-        self.assertEqual(ready, {"sha": SHA, "username": "hypercal_stage_bot", "peer": "7654321",
-                                 "cases": GUARD_JSON["cases"], "base_cases": 5})
+        self.assertEqual(
+            ready,
+            {
+                "sha": SHA,
+                "username": "hypercal_stage_bot",
+                "peer": "7654321",
+                "cases": GUARD_JSON["cases"],
+                "base_cases": 5,
+            },
+        )
         self.assertFalse(self.has_event("compose-down"))
         self.assertFalse(self.has_event(f"docker-rmi {STAGE_IMAGE}:" + SHA))
         self.assertFalse(self.has_event("evidence"))
         self.assertFalse(lock_is_free(self.stage_lock))
         self.assertFalse(lock_is_free(self.host_lock))
         process.stdin.write("DONE\n")
-        process.stdin.close()
+        close_stdin(process)
         result = self.finish(process)
         self.assertOutcome(result, 0, "passed")
         self.assertTornDown()
 
     def test_ready_line_is_one_line_and_keeps_non_ascii_case_data(self):
-        self.ctl(guard_json={**GUARD_JSON, "base_cases": 1,
-                            "cases": [{"name": "ping", "send": "/ping", "expect": ["pong|понг"]}]})
+        self.ctl(
+            guard_json={
+                **GUARD_JSON,
+                "base_cases": 1,
+                "cases": [{"name": "ping", "send": "/ping", "expect": ["pong|понг"]}],
+            }
+        )
         result = self.run_entry()
         lines = [l for l in result.stdout.splitlines() if l.startswith("STAGE_READY ")]
         self.assertEqual(len(lines), 1)
-        self.assertEqual(json.loads(lines[0][len("STAGE_READY "):])["cases"][0]["expect"], ["pong|понг"])
+        self.assertEqual(
+            json.loads(lines[0][len("STAGE_READY ") :])["cases"][0]["expect"], ["pong|понг"]
+        )
 
     def test_guard_and_health_get_the_contract_arguments(self):
         self.ctl(replay=True)
@@ -430,19 +548,47 @@ class RunOutcomes(StageWorld):
         guard = json.loads((self.rec / "guard.json").read_text())["argv"]
         work = Path(guard[guard.index("--cases") + 1]).parent
         self.assertEqual(work.parent, self.deploy)
-        self.assertEqual(guard, [
-            "guard",
-            "--cases", str(work / "stage-smoke-cases.json"),
-            "--extra-cases", str(work / "stage-smoke-cases.replay.json"),
-            "--min-cases", "5",
-            "--require-case", "start", "--require-case", "ping", "--require-case", "today-read-only-calendar",
-            "--require-case", "simple-intent-phrase", "--require-case", "validation-search-without-query",
-            "--stage-env", str(self.stage / "stage.env"), "--prod-env", str(self.deploy / ".env"),
-            "--deny", "HyperCalendarBot",
-        ])
+        self.assertEqual(
+            guard,
+            [
+                "guard",
+                "--cases",
+                str(work / "stage-smoke-cases.json"),
+                "--extra-cases",
+                str(work / "stage-smoke-cases.replay.json"),
+                "--min-cases",
+                "5",
+                "--require-case",
+                "start",
+                "--require-case",
+                "ping",
+                "--require-case",
+                "today-read-only-calendar",
+                "--require-case",
+                "simple-intent-phrase",
+                "--require-case",
+                "validation-search-without-query",
+                "--stage-env",
+                str(self.stage / "stage.env"),
+                "--prod-env",
+                str(self.deploy / ".env"),
+                "--deny",
+                "HyperCalendarBot",
+            ],
+        )
         health = json.loads((self.rec / "health.json").read_text())["argv"]
-        self.assertEqual(health[:7], ["wait", "--container", "hypercal-bot-stage", "--url", "http://127.0.0.1:3002",
-                                      "--mode", "health"])
+        self.assertEqual(
+            health[:7],
+            [
+                "wait",
+                "--container",
+                "hypercal-bot-stage",
+                "--url",
+                "http://127.0.0.1:3002",
+                "--mode",
+                "health",
+            ],
+        )
 
     def test_extra_cases_flag_only_when_a_replay_file_was_shipped(self):
         self.assertOutcome(self.run_entry(), 0, "passed")
@@ -450,7 +596,11 @@ class RunOutcomes(StageWorld):
 
     def test_compose_command_pins_project_files_and_image_override(self):
         self.run_entry()
-        compose = [line for line in (self.rec / "docker.log").read_text().splitlines() if line.startswith("docker compose")]
+        compose = [
+            line
+            for line in (self.rec / "docker.log").read_text().splitlines()
+            if line.startswith("docker compose")
+        ]
         up = next(line for line in compose if " up " in line)
         self.assertIn("-p hypercalstage --project-directory " + str(self.deploy), up)
         self.assertIn(f"-f {self.lib}/docker-compose.stage.yml", up)
@@ -486,7 +636,7 @@ class RunOutcomes(StageWorld):
                 process = self.popen(**kwargs)
                 self.ready(process)
                 if kwargs:
-                    process.stdin.close()
+                    close_stdin(process)
                 self.assertOutcome(self.finish(process), 0, "passed")
                 self.assertTornDown()
 
@@ -499,7 +649,7 @@ class RunOutcomes(StageWorld):
         self.assertIsNone(process.poll())
         self.assertFalse(self.has_event("compose-down"))
         process.stdin.write("DONE\n")
-        process.stdin.close()
+        close_stdin(process)
         self.assertOutcome(self.finish(process), 0, "passed")
 
     def test_unhealthy_stage_is_a_failure_with_evidence_and_teardown(self):
@@ -514,8 +664,13 @@ class RunOutcomes(StageWorld):
         (self.rec / "image.tar.gz").write_bytes(gzip.compress(b"X"))
         self.ctl(image_id="sha256:" + "ee" * 32)
         # The stub docker reports ctl image_id for both artifact.json and inspect; split them.
-        text = (self.bin / "docker").read_text().replace('print(json.load(open(sys.argv[1]))["image_id"])',
-                                                          'print("sha256:" + "11" * 32)')
+        text = (
+            (self.bin / "docker")
+            .read_text()
+            .replace(
+                'print(json.load(open(sys.argv[1]))["image_id"])', 'print("sha256:" + "11" * 32)'
+            )
+        )
         (self.bin / "docker").write_text(text)
         result = self.run_entry()
         self.assertOutcome(result, 2, "refused")
@@ -534,7 +689,16 @@ class RunOutcomes(StageWorld):
         self.assertFalse(guard["fd3_open"])
         self.assertEqual(
             json.loads(next(self.rec.glob("fetch-fetch.*.json")).read_text())["argv"][:7],
-            ["fetch", "--api", "http://127.0.0.1:9", "--repo", "alex-mextner/HyperCalendarBot", "--sha", SHA])
+            [
+                "fetch",
+                "--api",
+                "http://127.0.0.1:9",
+                "--repo",
+                "alex-mextner/HyperCalendarBot",
+                "--sha",
+                SHA,
+            ],
+        )
 
     def test_work_dir_is_a_private_namespaced_dir_and_is_removed(self):
         self.run_entry()
@@ -565,8 +729,19 @@ class BotEnvAndDatabase(StageWorld):
         self.assertEqual(env["ZAI_API_KEY"], "zai-secret")
         self.assertEqual(env["LOG_LEVEL"], "debug")
         text = (self.stage / "bot.env").read_text()
-        for leaked in (PROD_BOT_TOKEN, "hypercal_prod_bot", "google-secret", "mtproto-secret", "smtp-secret",
-                       "inline-secret", "bot.example.org", "tg-hash", "hook-secret", "leak-1", "svc-secret"):
+        for leaked in (
+            PROD_BOT_TOKEN,
+            "hypercal_prod_bot",
+            "google-secret",
+            "mtproto-secret",
+            "smtp-secret",
+            "inline-secret",
+            "bot.example.org",
+            "tg-hash",
+            "hook-secret",
+            "leak-1",
+            "svc-secret",
+        ):
             self.assertNotIn(leaked, text)
         self.assertEqual(stat.S_IMODE((self.stage / "bot.env").stat().st_mode), 0o600)
         self.assertNoSecrets(result)
@@ -604,13 +779,21 @@ class NotProvisioned(StageWorld):
         def drop_key(name, key):
             def mutate():
                 path = self.stage / name
-                path.write_text("".join(l for l in path.read_text().splitlines(True) if not l.startswith(key)))
+                path.write_text(
+                    "".join(l for l in path.read_text().splitlines(True) if not l.startswith(key))
+                )
+
             return mutate
+
         def blank_key(name, key):
             def mutate():
                 path = self.stage / name
-                path.write_text(re.sub(f"^{key}=.*$", f"{key}=", path.read_text(), flags=re.M))
+                path.write_text(
+                    re.sub(f"^{key}=.*$", f"{key}=", path.read_text(), flags=re.MULTILINE)
+                )
+
             return mutate
+
         cases = {
             "stage.env missing": lambda: (self.stage / "stage.env").unlink(),
             "stage.env without BOT_TOKEN": drop_key("stage.env", "BOT_TOKEN"),
@@ -632,11 +815,20 @@ class NotProvisioned(StageWorld):
 
 class Refusals(StageWorld):
     def test_bad_arguments_and_missing_token_are_refused_without_touching_anything(self):
-        for sha, token in (("main", FAKE_TOKEN), (SHA.upper(), FAKE_TOKEN), (SHA[:39], FAKE_TOKEN), (SHA, None), (SHA, "")):
+        for sha, token in (
+            ("main", FAKE_TOKEN),
+            (SHA.upper(), FAKE_TOKEN),
+            (SHA[:39], FAKE_TOKEN),
+            (SHA, None),
+            (SHA, ""),
+        ):
             with self.subTest(sha=sha, token=bool(token)):
                 result = self.run_entry(sha, token)
                 self.assertEqual(result.returncode, 2, result.stderr)
-                self.assertRegex(result.stdout.strip().splitlines()[-1], r"^STAGE_QA_RESULT status=refused sha=\S+ cases=0 failed=0$")
+                self.assertRegex(
+                    result.stdout.strip().splitlines()[-1],
+                    r"^STAGE_QA_RESULT status=refused sha=\S+ cases=0 failed=0$",
+                )
                 self.assertEqual(self.events(), [])
                 self.assertFalse(self.stage_lock.exists())
 
@@ -646,11 +838,25 @@ class Refusals(StageWorld):
         self.assertTrue(self.has_event("fetch-fetch"))
 
     def test_invalid_ssh_original_command_is_refused_without_touching_anything(self):
-        for command in (None, "", SHA + " extra", "rm -rf /", SHA[:39], SHA.upper(), SHA + "\n" + SHA, "main", "-" + SHA[1:], SHA + ";id"):
+        for command in (
+            None,
+            "",
+            SHA + " extra",
+            "rm -rf /",
+            SHA[:39],
+            SHA.upper(),
+            SHA + "\n" + SHA,
+            "main",
+            "-" + SHA[1:],
+            SHA + ";id",
+        ):
             with self.subTest(command=command):
                 result = self.run_entry(None, ssh_command=command)
                 self.assertEqual(result.returncode, 2, result.stderr)
-                self.assertRegex(result.stdout.strip().splitlines()[-1], r"^STAGE_QA_RESULT status=refused sha=\S+ cases=0 failed=0$")
+                self.assertRegex(
+                    result.stdout.strip().splitlines()[-1],
+                    r"^STAGE_QA_RESULT status=refused sha=\S+ cases=0 failed=0$",
+                )
                 self.assertEqual(self.events(), [])
                 self.assertFalse(self.stage_lock.exists())
 
@@ -734,7 +940,9 @@ class Locks(StageWorld):
         for process in (first, second):
             out, err = process.communicate(timeout=60)
             self.assertEqual(process.returncode, 0, err)
-            self.assertTrue(out.strip().splitlines()[-1].startswith("STAGE_QA_RESULT status=passed"))
+            self.assertTrue(
+                out.strip().splitlines()[-1].startswith("STAGE_QA_RESULT status=passed")
+            )
         events = self.events()
         fetches = [i for i, line in enumerate(events) if line == "fetch-fetch"]
         downs = [i for i, line in enumerate(events) if line == "compose-down"]
@@ -756,7 +964,9 @@ class Teardown(StageWorld):
         process.send_signal(signal.SIGTERM)
         result = self.finish(process)
         self.assertEqual(result.returncode, 143, result.stderr)
-        self.assertRegex(result.stdout.strip().splitlines()[-1], r"^STAGE_QA_RESULT status=failed sha=" + SHA)
+        self.assertRegex(
+            result.stdout.strip().splitlines()[-1], r"^STAGE_QA_RESULT status=failed sha=" + SHA
+        )
         self.assertTrue(self.has_event("evidence release-logs"))
         self.assertLess(self.index_of("evidence"), self.index_of("compose-down"))
         self.assertTornDown()
@@ -814,7 +1024,7 @@ class Hardening(StageWorld):
         out = process.stdout.read()
         process.wait(timeout=60)
         process.stdout.close()
-        process.stdin.close()
+        close_stdin(process)
         self.assertRegex(out.strip().splitlines()[-1], r"^STAGE_QA_RESULT status=failed sha=" + SHA)
         self.assertTrue(self.has_event("evidence release-logs"), self.events())
         self.assertTornDown()
@@ -844,14 +1054,17 @@ class Hardening(StageWorld):
 
     def test_leftover_stage_containers_and_images_of_a_killed_run_are_swept_before_loading(self):
         (self.rec / "stale-images").write_text(
-            f"{STAGE_IMAGE}:" + "b" * 40 + f"\n{STAGE_IMAGE}:" + "c" * 40 + "\n")
+            f"{STAGE_IMAGE}:" + "b" * 40 + f"\n{STAGE_IMAGE}:" + "c" * 40 + "\n"
+        )
         self.assertOutcome(self.run_entry(), 0, "passed")
         events = self.events()
         self.assertIn("docker-rm rm -f hypercal-bot-stage hypercal-stage-redis", events)
         for tag in ("b" * 40, "c" * 40):
             self.assertIn(f"docker-rmi {STAGE_IMAGE}:{tag}", events)
-        sweep = max(events.index("docker-rm rm -f hypercal-bot-stage hypercal-stage-redis"),
-                    events.index(f"docker-rmi {STAGE_IMAGE}:{'c' * 40}"))
+        sweep = max(
+            events.index("docker-rm rm -f hypercal-bot-stage hypercal-stage-redis"),
+            events.index(f"docker-rmi {STAGE_IMAGE}:{'c' * 40}"),
+        )
         self.assertLess(sweep, self.index_of("docker-load"))
 
     def test_the_sweep_never_removes_a_production_image_even_if_docker_lists_one(self):
@@ -908,14 +1121,29 @@ class Installer(unittest.TestCase):
 
     def make_script(self, euid=None):
         uid, gid = os.getuid(), os.getgid()
-        text = rewrite(INSTALLER.read_text(), [
-            ("readonly LIB_DIR=/usr/local/lib/hypercal-stage\n", f"readonly LIB_DIR={self.lib}\n"),
-            ("readonly ENTRY_PATH=/usr/local/sbin/hypercal-stage-qa\n", f"readonly ENTRY_PATH={self.entry_path}\n"),
-            ("readonly REQUIRED_EUID=0\n", f"readonly REQUIRED_EUID={uid if euid is None else euid}\n"),
-            ("readonly INSTALL_OWNER=root:root\n", f"readonly INSTALL_OWNER={uid}:{gid}\n"),
-            ("readonly STAGE_LOCK_FILE=/run/lock/hypercal-stage.lock\n", f"readonly STAGE_LOCK_FILE={self.lock}\n"),
-            ("readonly STAGE_LOCK_WAIT=60\n", "readonly STAGE_LOCK_WAIT=1\n"),
-        ])
+        text = rewrite(
+            INSTALLER.read_text(),
+            [
+                (
+                    "readonly LIB_DIR=/usr/local/lib/hypercal-stage\n",
+                    f"readonly LIB_DIR={self.lib}\n",
+                ),
+                (
+                    "readonly ENTRY_PATH=/usr/local/sbin/hypercal-stage-qa\n",
+                    f"readonly ENTRY_PATH={self.entry_path}\n",
+                ),
+                (
+                    "readonly REQUIRED_EUID=0\n",
+                    f"readonly REQUIRED_EUID={uid if euid is None else euid}\n",
+                ),
+                ("readonly INSTALL_OWNER=root:root\n", f"readonly INSTALL_OWNER={uid}:{gid}\n"),
+                (
+                    "readonly STAGE_LOCK_FILE=/run/lock/hypercal-stage.lock\n",
+                    f"readonly STAGE_LOCK_FILE={self.lock}\n",
+                ),
+                ("readonly STAGE_LOCK_WAIT=60\n", "readonly STAGE_LOCK_WAIT=1\n"),
+            ],
+        )
         script = self.tmp / "install-stage-qa.sh"
         script.write_text(text)
         script.chmod(0o755)
@@ -935,8 +1163,11 @@ class Installer(unittest.TestCase):
             path.chmod(0o755 if name.endswith((".sh", ".py")) else 0o644)
 
     def git(self, *args):
-        subprocess.run(["git", "-C", str(self.src), "-c", "user.name=t", "-c", "user.email=t@t", *args],
-                       check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.src), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            check=True,
+            capture_output=True,
+        )
 
     def publish(self):
         """Point origin/main at HEAD, as a fetch of the reviewed main would."""
@@ -947,8 +1178,14 @@ class Installer(unittest.TestCase):
         self.git("commit", "-q", "-m", message)
 
     def install(self, *args):
-        return subprocess.run([str(self.script), *(args or (str(self.src),))], capture_output=True, text=True,
-                              env={"PATH": "/usr/bin:/bin"}, timeout=60)
+        return subprocess.run(
+            [str(self.script), *(args or (str(self.src),))],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+            timeout=60,
+            check=False,
+        )
 
     def test_fresh_install_copies_exactly_the_lib_files_and_the_entry(self):
         result = self.install()
@@ -960,12 +1197,23 @@ class Installer(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.entry_path.stat().st_mode), 0o755)
         self.assertEqual(stat.S_IMODE(self.lib.stat().st_mode), 0o755)
         self.assertEqual(stat.S_IMODE((self.lib / "stage-qa-run.sh").stat().st_mode), 0o755)
-        self.assertEqual(stat.S_IMODE((self.lib / "docker-compose.stage.yml").stat().st_mode), 0o644)
-        self.assertEqual([p.name for p in self.lib.parent.iterdir() if ".new" in p.name or ".bak" in p.name], [])
+        self.assertEqual(
+            stat.S_IMODE((self.lib / "docker-compose.stage.yml").stat().st_mode), 0o644
+        )
+        self.assertEqual(
+            [p.name for p in self.lib.parent.iterdir() if ".new" in p.name or ".bak" in p.name], []
+        )
 
     def test_cwd_is_the_default_checkout(self):
-        result = subprocess.run([str(self.script)], cwd=self.src, capture_output=True, text=True,
-                                env={"PATH": "/usr/bin:/bin"}, timeout=60)
+        result = subprocess.run(
+            [str(self.script)],
+            cwd=self.src,
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+            timeout=60,
+            check=False,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.lib / "stage-qa-run.sh").is_file())
 
@@ -979,15 +1227,27 @@ class Installer(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.lib / "stage-qa-run.sh").read_text(), "# stage-qa-run.sh two\n")
         self.assertEqual(self.entry_path.read_text(), "# odroid-stage-qa.sh two\n")
-        lib_backups = sorted(p for p in self.lib.parent.iterdir() if p.name.startswith(self.lib.name + ".bak-"))
-        entry_backups = sorted(p for p in self.entry_path.parent.iterdir() if p.name.startswith(self.entry_path.name + ".bak-"))
+        lib_backups = sorted(
+            p for p in self.lib.parent.iterdir() if p.name.startswith(self.lib.name + ".bak-")
+        )
+        entry_backups = sorted(
+            p
+            for p in self.entry_path.parent.iterdir()
+            if p.name.startswith(self.entry_path.name + ".bak-")
+        )
         self.assertEqual((len(lib_backups), len(entry_backups)), (1, 1))
         self.assertRegex(lib_backups[0].name, r"\.bak-\d{8}T\d{6}Z$")
-        self.assertEqual((lib_backups[0] / "stage-qa-run.sh").read_text(), "# stage-qa-run.sh one\n")
+        self.assertEqual(
+            (lib_backups[0] / "stage-qa-run.sh").read_text(), "# stage-qa-run.sh one\n"
+        )
         self.assertEqual(entry_backups[0].read_text(), "# odroid-stage-qa.sh one\n")
-        rollback = next(line for line in result.stdout.splitlines() if line.startswith("rollback: "))
+        rollback = next(
+            line for line in result.stdout.splitlines() if line.startswith("rollback: ")
+        )
         self.assertIn(lib_backups[0].name, rollback)
-        subprocess.run(["bash", "-c", rollback[len("rollback: "):]], check=True, capture_output=True)
+        subprocess.run(
+            ["bash", "-c", rollback[len("rollback: ") :]], check=True, capture_output=True
+        )
         self.assertEqual((self.lib / "stage-qa-run.sh").read_text(), "# stage-qa-run.sh one\n")
         self.assertEqual(self.entry_path.read_text(), "# odroid-stage-qa.sh one\n")
 
@@ -1035,7 +1295,12 @@ class Installer(unittest.TestCase):
         self.assertNotIn("override", (result.stdout + result.stderr).lower())
 
     def test_head_behind_origin_main_is_accepted(self):
-        old = subprocess.run(["git", "-C", str(self.src), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        old = subprocess.run(
+            ["git", "-C", str(self.src), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
         self.write_checkout("two")
         self.commit("second")
         self.publish()
@@ -1055,8 +1320,14 @@ class Installer(unittest.TestCase):
         if os.getuid() == 0:
             self.skipTest("running as root")
         script = self.make_script(euid=0)
-        result = subprocess.run([str(script), str(self.src)], capture_output=True, text=True,
-                                env={"PATH": "/usr/bin:/bin"}, timeout=60)
+        result = subprocess.run(
+            [str(script), str(self.src)],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+            timeout=60,
+            check=False,
+        )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("root", result.stderr)
         self.assertFalse(self.lib.exists())
@@ -1071,7 +1342,9 @@ class Installer(unittest.TestCase):
         result = self.install()
         self.assertEqual(result.returncode, 75, result.stderr)
         self.assertEqual((self.lib / "stage-qa-run.sh").read_text(), "# stage-qa-run.sh one\n")
-        self.assertEqual([p.name for p in self.lib.parent.iterdir() if ".bak" in p.name or ".new" in p.name], [])
+        self.assertEqual(
+            [p.name for p in self.lib.parent.iterdir() if ".bak" in p.name or ".new" in p.name], []
+        )
 
     def test_lib_file_list_matches_the_contract(self):
         text = INSTALLER.read_text()

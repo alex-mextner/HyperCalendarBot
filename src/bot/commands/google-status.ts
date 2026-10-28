@@ -4,6 +4,7 @@ import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
+import type { GoogleCalendar } from '../../database/types.ts';
 import { googleCalendarColorEmoji } from '../../services/google/calendar-colors.ts';
 import { isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
@@ -24,6 +25,15 @@ export function formatSyncAge(isoString: string | null | undefined, lang: string
   if (diffHr < 24) return `${diffHr} ${lang === 'ru' ? 'ч' : 'hr'}`;
   const diffDays = Math.floor(diffHr / 24);
   return `${diffDays} ${lang === 'ru' ? 'д' : 'd'}`;
+}
+
+function formatCalendarStatusLine(cal: GoogleCalendar, lang: Lang): string {
+  const check = cal.sync_enabled ? '✅' : '⬜';
+  const dot = googleCalendarColorEmoji(cal.color) || '📅';
+  const primary = cal.is_primary ? ' ★' : '';
+  const disabledLabel = lang === 'ru' ? 'отключён' : 'disabled';
+  const ageStr = cal.sync_enabled ? formatSyncAge(cal.last_synced_at, lang) : disabledLabel;
+  return `${check} ${dot} ${cal.calendar_name}${primary} — ${ageStr}`;
 }
 
 export async function handleGoogleStatus(ctx: BotCommandContext, deps: GoogleStatusDeps): Promise<void> {
@@ -48,24 +58,11 @@ export async function handleGoogleStatus(ctx: BotCommandContext, deps: GoogleSta
 
   const calendars = deps.calendarRepo.getCalendars(userId);
 
-  const lines: string[] = [];
-  lines.push(`🔗 Google Calendar — ${t(lang).gcal_status_connected}`);
-  lines.push('');
-
+  const lines: string[] = [`🔗 Google Calendar — ${t(lang).gcal_status_connected}`, ''];
   if (calendars.length === 0) {
     lines.push(lang === 'ru' ? 'Нет подключённых календарей.' : 'No calendars found.');
   } else {
-    for (const cal of calendars) {
-      const check = cal.sync_enabled ? '✅' : '⬜';
-      const dot = googleCalendarColorEmoji(cal.color) || '📅';
-      const primary = cal.is_primary ? ' ★' : '';
-      const ageStr = cal.sync_enabled
-        ? formatSyncAge(cal.last_synced_at, lang)
-        : lang === 'ru'
-          ? 'отключён'
-          : 'disabled';
-      lines.push(`${check} ${dot} ${cal.calendar_name}${primary} — ${ageStr}`);
-    }
+    lines.push(...calendars.map((cal) => formatCalendarStatusLine(cal, lang)));
   }
 
   const keyboard = new InlineKeyboard()

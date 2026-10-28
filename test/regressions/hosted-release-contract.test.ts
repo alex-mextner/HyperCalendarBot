@@ -191,11 +191,17 @@ test('no pull-request-triggered workflow targets a self-hosted runner', () => {
   }
 });
 
-// The release pin is a commit status only the GitHub-hosted build job can post. Code left
-// on a self-hosted runner gets the tokens of the jobs that run there, so no such job, in any
-// workflow, may hold statuses: write. Permissions must be explicit: the repository default for
-// an undeclared GITHUB_TOKEN can include write access.
-test('no job on a self-hosted runner can write commit statuses', () => {
+type Permissions = string | Record<string, string> | undefined;
+
+/** The `statuses` access a job's effective permissions grant; undeclared permissions get the repo default. */
+function statusesAccess(permissions: Permissions): string {
+  if (permissions === undefined) return 'repository default';
+  if (typeof permissions === 'string') return permissions;
+  return permissions.statuses ?? 'none';
+}
+
+/** `file:job` → its statuses access, for every job in any workflow that runs on a self-hosted runner. */
+function selfHostedStatusAccess(): { job: string; statuses: string }[] {
   const permissionsSchema = z.union([z.string(), z.record(z.string(), z.string())]);
   const jobSchema = z
     .object({
@@ -213,18 +219,20 @@ test('no job on a self-hosted runner can write commit statuses', () => {
     for (const [name, job] of Object.entries(parsed.jobs)) {
       const labels = [job['runs-on'] ?? []].flat();
       if (!labels.some((label) => label === 'self-hosted' || label.startsWith('odroid'))) continue;
-      const permissions = job.permissions ?? parsed.permissions;
-      const statuses =
-        permissions === undefined
-          ? 'repository default'
-          : typeof permissions === 'string'
-            ? permissions
-            : (permissions.statuses ?? 'none');
+      const statuses = statusesAccess(job.permissions ?? parsed.permissions);
       statusAccess.push({ job: `${file}:${name}`, statuses });
     }
   }
+  return statusAccess;
+}
+
+// The release pin is a commit status only the GitHub-hosted build job can post. Code left
+// on a self-hosted runner gets the tokens of the jobs that run there, so no such job, in any
+// workflow, may hold statuses: write. Permissions must be explicit: the repository default for
+// an undeclared GITHUB_TOKEN can include write access.
+test('no job on a self-hosted runner can write commit statuses', () => {
   // readdirSync order differs between filesystems: compare by job name.
-  expect(statusAccess.sort((a, b) => a.job.localeCompare(b.job))).toEqual([
+  expect(selfHostedStatusAccess().sort((a, b) => a.job.localeCompare(b.job))).toEqual([
     { job: 'deploy.yml:deploy', statuses: 'read' },
     { job: 'stage-qa.yml:qa', statuses: 'read' },
   ]);

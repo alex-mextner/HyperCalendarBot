@@ -38,6 +38,7 @@ import dataclasses
 import fnmatch
 import gzip
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -46,6 +47,7 @@ import socket
 import stat
 import sys
 import time
+import zlib
 
 MB = 1024 * 1024
 DAY = 86400
@@ -181,7 +183,10 @@ class Report:
             "managed_entries": self.managed_entries,
             "free_bytes": self.free_bytes,
             "total_bytes": self.total_bytes,
-            "actions": [{k: v for k, v in dataclasses.asdict(a).items() if v not in (None, False)} for a in self.actions],
+            "actions": [
+                {k: v for k, v in dataclasses.asdict(a).items() if v not in (None, False)}
+                for a in self.actions
+            ],
         }
 
 
@@ -253,31 +258,56 @@ def _is_managed_dir(name, cfg):
     return any(fnmatch.fnmatchcase(name, p) for p in cfg.only_globs)
 
 
-def scan_root(root_real, now, cfg):
-    """Return the managed entries under root with protection already assigned."""
-    entries = []
-    with os.scandir(root_real) as it:
-        for item in it:
-            try:
-                if item.is_symlink():
-                    continue
-                st = item.stat(follow_symlinks=False)
-                if item.is_file(follow_symlinks=False):
-                    if _is_managed_file(item.name, cfg):
-                        entries.append(Entry(item.path, "file", st.st_size, st.st_mtime, [FileInfo(item.path, st.st_size, st.st_mtime)]))
-                elif item.is_dir(follow_symlinks=False) and _is_managed_dir(item.name, cfg):
-                    files = []
-                    _walk_files(item.path, files)
-                    entries.append(Entry(item.path, "dir", sum(f.size for f in files), st.st_mtime, files))
-            except FileNotFoundError:
-                continue
+def _scan_top_level_item(item, cfg):
+    """The managed Entry for one directory item of root, or None for symlinks, unmanaged names and vanished items."""
+    try:
+        if item.is_symlink():
+            return None
+        st = item.stat(follow_symlinks=False)
+        if item.is_file(follow_symlinks=False):
+            if not _is_managed_file(item.name, cfg):
+                return None
+            return Entry(
+                item.path,
+                "file",
+                st.st_size,
+                st.st_mtime,
+                [FileInfo(item.path, st.st_size, st.st_mtime)],
+            )
+        if item.is_dir(follow_symlinks=False) and _is_managed_dir(item.name, cfg):
+            files = []
+            _walk_files(item.path, files)
+            return Entry(item.path, "dir", sum(f.size for f in files), st.st_mtime, files)
+    except FileNotFoundError:
+        return None
+    return None
+
+
+def _entry_touched_recently(entry, now):
+    return _is_recent(entry.mtime, now) or any(_is_recent(f.mtime, now) for f in entry.files)
+
+
+def _assign_protection(entries, now):
+    """Mark the newest release-*/failed-* dir and everything touched in the last few minutes as undeletable."""
     for pattern, label in EVIDENCE_DIR_PATTERNS.items():
-        group = [e for e in entries if e.kind == "dir" and fnmatch.fnmatchcase(os.path.basename(e.path), pattern)]
+        group = [
+            e
+            for e in entries
+            if e.kind == "dir" and fnmatch.fnmatchcase(os.path.basename(e.path), pattern)
+        ]
         if group:
             max(group, key=lambda e: (e.mtime, e.path)).protected = label
     for entry in entries:
-        if entry.protected is None and (_is_recent(entry.mtime, now) or any(_is_recent(f.mtime, now) for f in entry.files)):
+        if entry.protected is None and _entry_touched_recently(entry, now):
             entry.protected = RECENT
+
+
+def scan_root(root_real, now, cfg):
+    """Return the managed entries under root with protection already assigned."""
+    with os.scandir(root_real) as it:
+        scanned = [_scan_top_level_item(item, cfg) for item in it]
+    entries = [entry for entry in scanned if entry is not None]
+    _assign_protection(entries, now)
     return entries
 
 
@@ -321,12 +351,16 @@ def gzip_in_place(path, verify=_gz_matches_source):
         os.unlink(tmp)
     try:
         with open(path, "rb") as source, open(tmp, "xb") as raw:
-            with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=int(before.st_mtime)) as gz:
+            with gzip.GzipFile(
+                filename="", mode="wb", fileobj=raw, mtime=int(before.st_mtime)
+            ) as gz:
                 shutil.copyfileobj(source, gz, CHUNK)
             raw.flush()
             os.fsync(raw.fileno())
         os.chmod(tmp, stat.S_IMODE(before.st_mode))
-        with contextlib.suppress(OSError):  # only root can chown; a non-root run keeps its own owner
+        with contextlib.suppress(
+            OSError
+        ):  # only root can chown; a non-root run keeps its own owner
             os.chown(tmp, before.st_uid, before.st_gid)
         os.utime(tmp, ns=(before.st_atime_ns, before.st_mtime_ns))
         os.replace(tmp, target)
@@ -364,21 +398,22 @@ def _preserving_dir_mtime(directory):
             os.utime(directory, ns=(st.st_atime_ns, st.st_mtime_ns))
 
 
+def _compressible_name(entry_kind, name):
+    """Top-level files must be plain log names; evidence-dir members just must not be compressed already."""
+    if entry_kind == "file":
+        return bool(TOP_LEVEL_COMPRESSIBLE.search(name))
+    return not name.endswith(ALREADY_COMPRESSED_SUFFIXES)
+
+
 def _compression_candidates(entries, cfg, now):
-    found = []
-    for entry in entries:
-        for info in entry.files:
-            name = os.path.basename(info.path)
-            if entry.kind == "file":
-                if not TOP_LEVEL_COMPRESSIBLE.search(name):
-                    continue
-            elif name.endswith(ALREADY_COMPRESSED_SUFFIXES):
-                continue
-            if _is_recent(info.mtime, now):
-                continue
-            if now - info.mtime > cfg.gzip_after_seconds or info.size > cfg.max_file_bytes:
-                found.append((entry, info))
-    return found
+    return [
+        (entry, info)
+        for entry in entries
+        for info in entry.files
+        if _compressible_name(entry.kind, os.path.basename(info.path))
+        and not _is_recent(info.mtime, now)
+        and (now - info.mtime > cfg.gzip_after_seconds or info.size > cfg.max_file_bytes)
+    ]
 
 
 # --- criteria and deletion --------------------------------------------------------------------
@@ -417,21 +452,31 @@ def _file_protection(entry, info, now):
     return RECENT if _is_recent(info.mtime, now) else None
 
 
+def _oversized_file_victim(entries, cfg, skip, now):
+    """The oldest unprotected file over the per-file cap, as (entry, file), or None."""
+    over = [
+        (info, entry)
+        for entry in entries
+        for info in entry.files
+        if info.path not in skip
+        and info.size > cfg.max_file_bytes
+        and not _file_protection(entry, info, now)
+    ]
+    if not over:
+        return None
+    info, entry = min(over, key=lambda pair: (pair[0].mtime, pair[0].path))
+    return entry, info
+
+
 def _pick_victim(entries, cfg, violated, skip, now):
     """Return (entry, file_or_None, reason) for the next deletion, or None when nothing may be deleted.
 
     A single-file violation costs only that file; the other criteria cost the oldest whole entry.
     """
     if "file-size" in violated:
-        over = [
-            (info, entry)
-            for entry in entries
-            for info in entry.files
-            if info.path not in skip and info.size > cfg.max_file_bytes and not _file_protection(entry, info, now)
-        ]
-        if over:
-            info, entry = min(over, key=lambda pair: (pair[0].mtime, pair[0].path))
-            return entry, info, "file-size"
+        oversized = _oversized_file_victim(entries, cfg, skip, now)
+        if oversized is not None:
+            return (*oversized, "file-size")
     reasons = [v for v in violated if v in DELETION_REASONS]
     if not reasons:
         return None
@@ -463,35 +508,95 @@ def _compress_one(root_real, path, compress):
         return compress(path)
 
 
-def _run(root, cfg, free_fn, now, dry_run, compress):
-    root_real = validate_root(root)
-    now = time.time() if now is None else now
-    entries = scan_root(root_real, now, cfg)
-    actions = []
-
+def _compress_phase(root_real, entries, cfg, now, dry_run, compress, actions):
+    """gzip the old/large plain files; returns the entries, rescanned when anything was really compressed."""
     compressed_any = False
-    for entry, info in _compression_candidates(entries, cfg, now):
+    for _entry, info in _compression_candidates(entries, cfg, now):
         if dry_run:
             actions.append(Action("compressed", info.path, dry_run=True))
             continue
         try:
             _compress_one(root_real, info.path, compress)
-        except Exception as exc:  # the original is intact on any failure; report and carry on
+        except (
+            OSError,
+            CompressionError,
+            EOFError,
+            zlib.error,
+        ) as exc:  # original intact on failure; report, carry on
             actions.append(Action("compress-failed", info.path, detail=type(exc).__name__))
         else:
             actions.append(Action("compressed", info.path))
             compressed_any = True
-    if compressed_any:
-        entries = scan_root(root_real, now, cfg)
+    return scan_root(root_real, now, cfg) if compressed_any else entries
 
-    # A dry run cannot free real space, so it credits the bytes its simulated deletions would free.
-    freed_simulated = 0
 
-    def read_free():
-        free, total = free_fn(root_real)
-        return free + (freed_simulated if dry_run else 0), total
+class _FreeSpace:
+    """Free-space reader; a dry run cannot free real space, so it credits the bytes its simulated deletions would free."""
 
-    free, total = read_free()
+    def __init__(self, free_fn, root_real, dry_run):
+        self._free_fn = free_fn
+        self._root_real = root_real
+        self._dry_run = dry_run
+        self._simulated_freed = 0
+
+    def read(self):
+        free, total = self._free_fn(self._root_real)
+        return free + self._simulated_freed, total
+
+    def credit(self, nbytes):
+        if self._dry_run:
+            self._simulated_freed += nbytes
+
+
+def _remove_victim(root_real, entry, info, whole):
+    if whole:
+        _delete_entry(root_real, entry)
+    else:
+        _delete_member(root_real, info)
+
+
+def _skip_after_failure(skip, entry, info, whole):
+    """A victim that could not be deleted is never picked again (its files neither, when it went as a whole)."""
+    skip.add(entry.path)
+    if whole:
+        skip.update(f.path for f in entry.files)
+    if info is not None:
+        skip.add(info.path)
+
+
+def _forget_victim(entries, entry, info, whole):
+    if whole:
+        entries.remove(entry)
+    else:
+        entry.files.remove(info)
+        entry.size -= info.size
+
+
+def _delete_victim(root_real, victim, entries, skip, dry_run, actions):
+    """Delete (on a dry run only simulate) one victim; returns the bytes freed, 0 when the deletion failed."""
+    entry, info, reason = victim
+    whole = info is None or len(entry.files) == 1
+    path = entry.path if whole else info.path
+    nbytes = entry.size if whole else info.size
+    try:
+        if not dry_run:
+            _remove_victim(root_real, entry, info, whole)
+    except (OSError, RootRefused) as exc:
+        actions.append(Action("delete-failed", path, reason=reason, detail=type(exc).__name__))
+        _skip_after_failure(skip, entry, info, whole)
+        return 0
+    actions.append(Action("deleted", path, reason=reason, bytes=nbytes, dry_run=dry_run))
+    _forget_victim(entries, entry, info, whole)
+    return nbytes
+
+
+def _enforce_limits(root_real, entries, cfg, now, dry_run, free_fn, actions):
+    """Delete the oldest entries one at a time until every criterion holds or only protected ones are left.
+
+    Returns (initial violations, final violations, free bytes, total bytes).
+    """
+    free_space = _FreeSpace(free_fn, root_real, dry_run)
+    free, total = free_space.read()
     violated = _evaluate(entries, cfg, free, total)
     initial = list(violated)
     skip = set()
@@ -499,38 +604,28 @@ def _run(root, cfg, free_fn, now, dry_run, compress):
         victim = _pick_victim(entries, cfg, violated, skip, now)
         if victim is None:
             break
-        entry, info, reason = victim
-        whole = info is None or len(entry.files) == 1
-        path = entry.path if whole else info.path
-        nbytes = entry.size if whole else info.size
-        try:
-            if not dry_run:
-                if whole:
-                    _delete_entry(root_real, entry)
-                else:
-                    _delete_member(root_real, info)
-        except (OSError, RootRefused) as exc:
-            actions.append(Action("delete-failed", path, reason=reason, detail=type(exc).__name__))
-            skip.add(entry.path)
-            skip.update(f.path for f in entry.files if whole)
-            if info is not None:
-                skip.add(info.path)
-        else:
-            actions.append(Action("deleted", path, reason=reason, bytes=nbytes, dry_run=dry_run))
-            if whole:
-                entries.remove(entry)
-            else:
-                entry.files.remove(info)
-                entry.size -= info.size
-            if dry_run:
-                freed_simulated += nbytes
-        free, total = read_free()
+        free_space.credit(_delete_victim(root_real, victim, entries, skip, dry_run, actions))
+        free, total = free_space.read()
         violated = _evaluate(entries, cfg, free, total)
+    return initial, violated, free, total
 
+
+def _run(root, cfg, free_fn, now, dry_run, compress):
+    root_real = validate_root(root)
+    now = time.time() if now is None else now
+    actions = []
+    entries = _compress_phase(
+        root_real, scan_root(root_real, now, cfg), cfg, now, dry_run, compress, actions
+    )
+    initial, violated, free, total = _enforce_limits(
+        root_real, entries, cfg, now, dry_run, free_fn, actions
+    )
     if initial:
-        for entry in sorted(entries, key=lambda e: e.path):
-            if entry.protected:
-                actions.append(Action("kept", entry.path, protected=entry.protected))
+        actions.extend(
+            Action("kept", e.path, protected=e.protected)
+            for e in sorted(entries, key=lambda e: e.path)
+            if e.protected
+        )
     return Report(
         root=root_real,
         dry_run=dry_run,
@@ -569,7 +664,7 @@ def parse_env_file(path):
             if not line or line.startswith("#") or "=" not in line:
                 continue
             if line.startswith("export "):
-                line = line[len("export "):].lstrip()
+                line = line[len("export ") :].lstrip()
             key, _, value = line.partition("=")
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
@@ -603,11 +698,18 @@ def alert_findings(report, cfg):
     floor = f"floor {cfg.min_free_bytes // MB} MB / {cfg.min_free_percent:g}%"
     if "free" in report.violations:
         findings["free-below-floor"] = f"{state} is below the {floor} even after cleanup"
-    elif report.free_bytes < EARLY_WARNING_FACTOR * cfg.min_free_bytes or percent < EARLY_WARNING_FACTOR * cfg.min_free_percent:
-        findings["free-early-warning"] = f"disk-space watchdog: {state} is within {EARLY_WARNING_FACTOR}x of the {floor}"
+    elif (
+        report.free_bytes < EARLY_WARNING_FACTOR * cfg.min_free_bytes
+        or percent < EARLY_WARNING_FACTOR * cfg.min_free_percent
+    ):
+        findings["free-early-warning"] = (
+            f"disk-space watchdog: {state} is within {EARLY_WARNING_FACTOR}x of the {floor}"
+        )
     other = [v for v in report.violations if v != "free"]
     if other:
-        findings["unresolved"] = f"limits still exceeded with only protected entries left: {', '.join(other)}"
+        findings["unresolved"] = (
+            f"limits still exceeded with only protected entries left: {', '.join(other)}"
+        )
     return findings
 
 
@@ -643,7 +745,9 @@ def send_alert(report, cfg, env_file, state_file, now, sender=telegram_send):
         return result
     state = _load_state(state_file)
     # A recorded time in the future (clock stepped back) must not mute the alert for hours.
-    due = [k for k in findings if not 0 <= now - state.get(k, float("-inf")) < ALERT_INTERVAL_SECONDS]
+    due = [
+        k for k in findings if not 0 <= now - state.get(k, float("-inf")) < ALERT_INTERVAL_SECONDS
+    ]
     result["suppressed"] = [k for k in findings if k not in due]
     if not due:
         return result
@@ -652,9 +756,17 @@ def send_alert(report, cfg, env_file, state_file, now, sender=telegram_send):
         token, chat_id = credentials.get("BOT_TOKEN"), credentials.get("BOT_ADMIN_ID")
         if not token or not chat_id:
             raise MissingCredentials()
-        text = "\n".join([f"log-retention on {socket.gethostname()} ({report.root})"] + [f"- {findings[k]}" for k in due])
+        text = "\n".join(
+            [f"log-retention on {socket.gethostname()} ({report.root})"]
+            + [f"- {findings[k]}" for k in due]
+        )
         sender(token, chat_id, text)
-    except Exception as exc:  # report the class only; messages from urllib can embed the URL
+    except (
+        OSError,
+        ValueError,
+        http.client.HTTPException,
+        MissingCredentials,
+    ) as exc:  # class only: urllib messages can embed the URL
         result["failed"] = type(exc).__name__
         return result
     for kind in due:
@@ -692,7 +804,9 @@ def _non_negative_int(text):
 
 
 def build_parser():
-    parser = _Parser(description="Rotate deploy/health/backup logs by size and free disk; never by deploy.")
+    parser = _Parser(
+        description="Rotate deploy/health/backup logs by size and free disk; never by deploy."
+    )
     parser.add_argument("--root", required=True, help="logs directory to manage")
     parser.add_argument("--max-dir-mb", type=_non_negative_float, default=1024)
     parser.add_argument("--max-file-mb", type=_non_negative_float, default=200)
@@ -700,9 +814,17 @@ def build_parser():
     parser.add_argument("--min-free-mb", type=_non_negative_float, default=2048)
     parser.add_argument("--min-free-percent", type=_non_negative_float, default=5)
     parser.add_argument("--gzip-after-days", type=_non_negative_float, default=1)
-    parser.add_argument("--alert", action="store_true", help="send a Telegram message (needs BOT_TOKEN, BOT_ADMIN_ID)")
+    parser.add_argument(
+        "--alert",
+        action="store_true",
+        help="send a Telegram message (needs BOT_TOKEN, BOT_ADMIN_ID)",
+    )
     parser.add_argument("--env-file", default=DEFAULT_ENV_FILE)
-    parser.add_argument("--state-file", default=None, help="alert rate-limit state (default <root>/.log-retention-state.json)")
+    parser.add_argument(
+        "--state-file",
+        default=None,
+        help="alert rate-limit state (default <root>/.log-retention-state.json)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
@@ -737,6 +859,31 @@ def config_from_args(args):
     )
 
 
+def _alert_if_requested(args, report, cfg, root_real, now, sender):
+    """The send_alert result, or None when alerting is off or this is a dry run."""
+    if not args.alert or args.dry_run:
+        return None
+    state_file = args.state_file or os.path.join(root_real, STATE_FILE_NAME)
+    return send_alert(report, cfg, args.env_file, state_file, now, sender or telegram_send)
+
+
+def _print_report(report, alert, as_json, out):
+    if as_json:
+        document = report.to_dict()
+        if alert is not None:
+            document["alert"] = alert
+        print(json.dumps(document, indent=2), file=out)
+        return
+    for line in report.lines():
+        print(line, file=out)
+    if alert is None:
+        return
+    if alert["failed"]:
+        print(f"ALERT_FAILED {alert['failed']}", file=out)
+    if alert.get("state_error"):
+        print(f"ALERT_STATE_FAILED {alert['state_error']}", file=out)
+
+
 def main(argv=None, *, free_fn=None, sender=None, now=None, out=None, err=None):
     out = sys.stdout if out is None else out
     err = sys.stderr if err is None else err
@@ -752,25 +899,9 @@ def main(argv=None, *, free_fn=None, sender=None, now=None, out=None, err=None):
 
     run = plan if args.dry_run else apply
     report = run(root_real, cfg, free_fn=free_fn, now=now)
-
-    alert = None
-    if args.alert and not args.dry_run:
-        state_file = args.state_file or os.path.join(root_real, STATE_FILE_NAME)
-        alert = send_alert(report, cfg, args.env_file, state_file, now, sender or telegram_send)
-
-    if args.json:
-        document = report.to_dict()
-        if alert is not None:
-            document["alert"] = alert
-        print(json.dumps(document, indent=2), file=out)
-    else:
-        for line in report.lines():
-            print(line, file=out)
-        if alert is not None:
-            if alert["failed"]:
-                print(f"ALERT_FAILED {alert['failed']}", file=out)
-            if alert.get("state_error"):
-                print(f"ALERT_STATE_FAILED {alert['state_error']}", file=out)
+    _print_report(
+        report, _alert_if_requested(args, report, cfg, root_real, now, sender), args.json, out
+    )
     return report.exit_code
 
 

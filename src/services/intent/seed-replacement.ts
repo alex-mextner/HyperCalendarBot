@@ -26,33 +26,39 @@ export interface SeedReplacementPlan {
 export function intentRows(db: Database): Intent[] {
   return db.query<Intent, []>('SELECT * FROM intents ORDER BY id').all();
 }
+function assertSeedItemValid(item: CanonicalSeed, names: Set<string>): void {
+  if (!/^basis\.[a-z0-9_.]+$/.test(item.canonical_name) || names.has(item.canonical_name))
+    throw new Error('Canonical names must be unique and namespaced');
+  names.add(item.canonical_name);
+  const workflow = WorkflowSchema.parse(item.workflow);
+  if (workflow.version !== 2) throw new Error(`${item.canonical_name}: explicit workflow v2 required`);
+  const errors = validateWorkflow(workflow, item.pattern);
+  if (errors.length) throw new Error(`${item.canonical_name}: ${errors.join('; ')}`);
+  if (!item.pattern.startsWith('^') || !item.pattern.endsWith('$') || item.pattern.length > 8192)
+    throw new Error(`${item.canonical_name}: finite anchored matcher required`);
+  if (!item.phrases.length || !item.trigger_words.length) throw new Error('Examples and triggers are required');
+}
+function seedIntentRow(item: CanonicalSeed, id: number): Intent {
+  return {
+    id,
+    canonical_name: item.canonical_name,
+    phrases: JSON.stringify(item.phrases),
+    trigger_words: JSON.stringify(item.trigger_words),
+    pattern: item.pattern,
+    workflow: JSON.stringify(item.workflow),
+    format: 'text',
+    status: 'approved',
+    source_message: item.source_message,
+    created_at: '2000-01-01 00:00:00',
+  };
+}
 export function validateCanonicalSeed(seed: readonly CanonicalSeed[]): void {
   if (seed.length < 1 || seed.length > 256) throw new Error('Canonical seed count is out of bounds');
   const names = new Set<string>();
   const rows: Intent[] = [];
   for (const [index, item] of seed.entries()) {
-    if (!/^basis\.[a-z0-9_.]+$/.test(item.canonical_name) || names.has(item.canonical_name))
-      throw new Error('Canonical names must be unique and namespaced');
-    names.add(item.canonical_name);
-    const workflow = WorkflowSchema.parse(item.workflow);
-    if (workflow.version !== 2) throw new Error(`${item.canonical_name}: explicit workflow v2 required`);
-    const errors = validateWorkflow(workflow, item.pattern);
-    if (errors.length) throw new Error(`${item.canonical_name}: ${errors.join('; ')}`);
-    if (!item.pattern.startsWith('^') || !item.pattern.endsWith('$') || item.pattern.length > 8192)
-      throw new Error(`${item.canonical_name}: finite anchored matcher required`);
-    if (!item.phrases.length || !item.trigger_words.length) throw new Error('Examples and triggers are required');
-    rows.push({
-      id: index + 1,
-      canonical_name: item.canonical_name,
-      phrases: JSON.stringify(item.phrases),
-      trigger_words: JSON.stringify(item.trigger_words),
-      pattern: item.pattern,
-      workflow: JSON.stringify(item.workflow),
-      format: 'text',
-      status: 'approved',
-      source_message: item.source_message,
-      created_at: '2000-01-01 00:00:00',
-    });
+    assertSeedItemValid(item, names);
+    rows.push(seedIntentRow(item, index + 1));
   }
   const matcher = new IntentMatcher();
   matcher.load(rows);

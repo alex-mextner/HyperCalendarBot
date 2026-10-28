@@ -55,59 +55,80 @@ function inc(map: Map<string, number>, key: string | undefined): void {
   if (!key) return;
   map.set(key, (map.get(key) ?? 0) + 1);
 }
-export function summarizeAiLogs(rows: readonly AiLogRow[]) {
-  const requestRows: AiLogRow[] = [];
-  const providerDurations = new Map<string, number[]>();
-  const providerFailures = new Map<string, number>();
-  const providerSkips = new Map<string, number>();
-  const routeDurations = new Map<string, number[]>();
-  const routeFallbacks = new Map<string, number>();
-  const outcomes = new Map<string, number>();
-  const terminations = new Map<string, number>();
+function pushDuration(map: Map<string, number[]>, key: string, value: number): void {
+  const values = map.get(key) ?? [];
+  values.push(value);
+  map.set(key, values);
+}
 
+/** Everything one pass over the log rows collects, before any percentile is taken. */
+interface LogTallies {
+  requestRows: AiLogRow[];
+  providerDurations: Map<string, number[]>;
+  providerFailures: Map<string, number>;
+  providerSkips: Map<string, number>;
+  routeDurations: Map<string, number[]>;
+  routeFallbacks: Map<string, number>;
+  outcomes: Map<string, number>;
+  terminations: Map<string, number>;
+}
+
+function noteRequestMetric(tallies: LogTallies, row: AiLogRow): void {
+  tallies.requestRows.push(row);
+  inc(tallies.outcomes, row.deliveryOutcome);
+  inc(tallies.terminations, row.termination);
+}
+
+function noteModelCallMetric(tallies: LogTallies, row: AiLogRow): void {
+  if (row.provider && row.model && typeof row.providerDurationMs === 'number') {
+    pushDuration(tallies.providerDurations, `${row.provider}:${row.model}`, row.providerDurationMs);
+  }
+  for (const failure of row.failedProviders ?? [])
+    inc(tallies.providerFailures, `${failure.provider}:${failure.model}`);
+  for (const skip of row.skippedProviders ?? []) inc(tallies.providerSkips, `${skip.provider}:${skip.model}`);
+}
+
+function noteRoutingDecision(tallies: LogTallies, tier: string, row: AiLogRow): void {
+  if (typeof row.durationMs === 'number') pushDuration(tallies.routeDurations, tier, row.durationMs);
+  if (row.fallback) inc(tallies.routeFallbacks, tier);
+}
+
+function tallyLogRows(rows: readonly AiLogRow[]): LogTallies {
+  const tallies: LogTallies = {
+    requestRows: [],
+    providerDurations: new Map(),
+    providerFailures: new Map(),
+    providerSkips: new Map(),
+    routeDurations: new Map(),
+    routeFallbacks: new Map(),
+    outcomes: new Map(),
+    terminations: new Map(),
+  };
   for (const row of rows) {
-    if (row.msg === 'AI request metric' && row.requestId) {
-      requestRows.push(row);
-      inc(outcomes, row.deliveryOutcome);
-      inc(terminations, row.termination);
-      continue;
-    }
-    if (row.msg === 'AI model call metric' && row.requestId) {
-      if (row.provider && row.model && typeof row.providerDurationMs === 'number') {
-        const key = `${row.provider}:${row.model}`;
-        const values = providerDurations.get(key) ?? [];
-        values.push(row.providerDurationMs);
-        providerDurations.set(key, values);
-      }
-      for (const failure of row.failedProviders ?? []) inc(providerFailures, `${failure.provider}:${failure.model}`);
-      for (const skip of row.skippedProviders ?? []) inc(providerSkips, `${skip.provider}:${skip.model}`);
-      continue;
-    }
-    if ((row.msg === 'Routing decision' || row.msg === 'Routing decision fallback') && row.tier) {
-      if (typeof row.durationMs === 'number') {
-        const values = routeDurations.get(row.tier) ?? [];
-        values.push(row.durationMs);
-        routeDurations.set(row.tier, values);
-      }
-      if (row.fallback) inc(routeFallbacks, row.tier);
+    if (row.msg === 'AI request metric' && row.requestId) noteRequestMetric(tallies, row);
+    else if (row.msg === 'AI model call metric' && row.requestId) noteModelCallMetric(tallies, row);
+    else if ((row.msg === 'Routing decision' || row.msg === 'Routing decision fallback') && row.tier) {
+      noteRoutingDecision(tallies, row.tier, row);
     }
   }
+  return tallies;
+}
 
-  const values = (key: keyof AiLogRow) =>
-    requestRows.flatMap((row) => (typeof row[key] === 'number' ? [row[key] as number] : []));
-  type TokenSummary = {
-    prompt: number;
-    completion: number;
-    reportedTotal: number;
-    reasoning: number;
-    cached: number;
-    missingRounds: number;
-    partialRounds: number;
-    fallbacks: number;
-    attempts: number;
-    calls: number;
-  };
-  const tokens = requestRows.reduce<TokenSummary>(
+interface TokenSummary {
+  prompt: number;
+  completion: number;
+  reportedTotal: number;
+  reasoning: number;
+  cached: number;
+  missingRounds: number;
+  partialRounds: number;
+  fallbacks: number;
+  attempts: number;
+  calls: number;
+}
+
+function sumTokens(requestRows: readonly AiLogRow[]): TokenSummary {
+  return requestRows.reduce<TokenSummary>(
     (acc, row) => ({
       prompt: acc.prompt + (row.promptTokens ?? 0),
       completion: acc.completion + (row.completionTokens ?? 0),
@@ -133,9 +154,12 @@ export function summarizeAiLogs(rows: readonly AiLogRow[]) {
       calls: 0,
     },
   );
+}
 
+function providerBreakdown(tallies: LogTallies) {
+  const { providerDurations, providerFailures, providerSkips } = tallies;
   const providerKeys = new Set([...providerDurations.keys(), ...providerFailures.keys(), ...providerSkips.keys()]);
-  const byProvider = Object.fromEntries(
+  return Object.fromEntries(
     [...providerKeys].sort().map((key) => [
       key,
       {
@@ -145,12 +169,22 @@ export function summarizeAiLogs(rows: readonly AiLogRow[]) {
       },
     ]),
   );
+}
+
+function tierBreakdown({ routeDurations, routeFallbacks }: LogTallies) {
   const tierKeys = new Set([...routeDurations.keys(), ...routeFallbacks.keys()]);
-  const byTier = Object.fromEntries(
+  return Object.fromEntries(
     [...tierKeys]
       .sort()
       .map((tier) => [tier, { ...stats(routeDurations.get(tier) ?? []), fallbacks: routeFallbacks.get(tier) ?? 0 }]),
   );
+}
+
+export function summarizeAiLogs(rows: readonly AiLogRow[]) {
+  const tallies = tallyLogRows(rows);
+  const { requestRows } = tallies;
+  const values = (key: keyof AiLogRow) =>
+    requestRows.flatMap((row) => (typeof row[key] === 'number' ? [row[key] as number] : []));
   return {
     requests: requestRows.length,
     endToEndMs: stats(values('elapsedMs')),
@@ -158,10 +192,10 @@ export function summarizeAiLogs(rows: readonly AiLogRow[]) {
     modelMs: stats(values('modelDurationMs')),
     toolMs: stats(values('toolDurationMs')),
     deliveryActionMs: stats(values('deliveryActionMs')),
-    outcomes: Object.fromEntries([...outcomes.entries()].sort()),
-    terminations: Object.fromEntries([...terminations.entries()].sort()),
-    tokens,
-    byProvider,
-    byTier,
+    outcomes: Object.fromEntries([...tallies.outcomes.entries()].sort()),
+    terminations: Object.fromEntries([...tallies.terminations.entries()].sort()),
+    tokens: sumTokens(requestRows),
+    byProvider: providerBreakdown(tallies),
+    byTier: tierBreakdown(tallies),
   };
 }

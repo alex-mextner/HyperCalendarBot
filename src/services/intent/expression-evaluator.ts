@@ -124,63 +124,64 @@ class Parser {
     let value = context[rootKey];
 
     // Function call: ident(arg, arg, ...)
-    if (this.peek()?.type === 'lparen') {
-      this.consume(); // (
-      const args: unknown[] = [];
-      while (this.peek()?.type !== 'rparen') {
-        if (args.length > 0) {
-          if (this.peek()?.type !== 'comma') throw new Error('Expected , between function arguments');
-          this.consume(); // ,
-        }
-        args.push(this.parseValue(context));
-      }
-      this.consume(); // )
-      if (typeof value !== 'function') throw new Error(`'${rootKey}' is not a function in context`);
-      return (value as (...a: unknown[]) => unknown)(...args);
-    }
+    if (this.peek()?.type === 'lparen') return this.parseCall(rootKey, value, context);
 
     // Chain: .identifier or [number]
     while (true) {
       const next = this.peek();
-
-      if (next?.type === 'dot') {
-        this.consume(); // consume '.'
-        const propToken = this.consume();
-        if (propToken.type !== 'ident') {
-          throw new Error(`Expected property name after '.', got ${JSON.stringify(propToken)}`);
-        }
-        const prop = propToken.value;
-        if (DANGEROUS_PROPS.has(prop)) {
-          throw new Error(`Access to '${prop}' is not allowed`);
-        }
-        if (value === undefined || value === null) {
-          throw new Error(`Cannot access property '${prop}' of ${String(value)}`);
-        }
-        value = Reflect.get(value as object, prop);
-        continue;
-      }
-
-      if (next?.type === 'lbracket') {
-        this.consume(); // consume '['
-        const indexToken = this.consume();
-        if (indexToken.type !== 'number') {
-          throw new Error(`Expected numeric index inside [], got ${JSON.stringify(indexToken)}`);
-        }
-        const rbracket = this.consume();
-        if (rbracket.type !== 'rbracket') {
-          throw new Error(`Expected ']' after array index`);
-        }
-        if (!Array.isArray(value)) {
-          throw new Error(`Cannot index non-array value`);
-        }
-        value = (value as unknown[])[indexToken.value];
-        continue;
-      }
-
-      break;
+      if (next?.type === 'dot') value = this.parseDotAccess(value);
+      else if (next?.type === 'lbracket') value = this.parseIndexAccess(value);
+      else break;
     }
 
     return value;
+  }
+
+  private parseCall(rootKey: string, callee: unknown, context: StepResults): unknown {
+    this.consume(); // (
+    const args: unknown[] = [];
+    while (this.peek()?.type !== 'rparen') {
+      if (args.length > 0) {
+        if (this.peek()?.type !== 'comma') throw new Error('Expected , between function arguments');
+        this.consume(); // ,
+      }
+      args.push(this.parseValue(context));
+    }
+    this.consume(); // )
+    if (typeof callee !== 'function') throw new Error(`'${rootKey}' is not a function in context`);
+    return (callee as (...a: unknown[]) => unknown)(...args);
+  }
+
+  private parseDotAccess(value: unknown): unknown {
+    this.consume(); // consume '.'
+    const propToken = this.consume();
+    if (propToken.type !== 'ident') {
+      throw new Error(`Expected property name after '.', got ${JSON.stringify(propToken)}`);
+    }
+    const prop = propToken.value;
+    if (DANGEROUS_PROPS.has(prop)) {
+      throw new Error(`Access to '${prop}' is not allowed`);
+    }
+    if (value === undefined || value === null) {
+      throw new Error(`Cannot access property '${prop}' of ${String(value)}`);
+    }
+    return Reflect.get(value as object, prop);
+  }
+
+  private parseIndexAccess(value: unknown): unknown {
+    this.consume(); // consume '['
+    const indexToken = this.consume();
+    if (indexToken.type !== 'number') {
+      throw new Error(`Expected numeric index inside [], got ${JSON.stringify(indexToken)}`);
+    }
+    const rbracket = this.consume();
+    if (rbracket.type !== 'rbracket') {
+      throw new Error(`Expected ']' after array index`);
+    }
+    if (!Array.isArray(value)) {
+      throw new Error(`Cannot index non-array value`);
+    }
+    return (value as unknown[])[indexToken.value];
   }
 }
 

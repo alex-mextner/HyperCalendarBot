@@ -39,14 +39,15 @@ Exit: 0 passed, 1 a case failed, 64 refused (guard, empty cases, bad input, qa-c
 import argparse
 import asyncio
 import datetime
+import http.client
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 REFUSED = 64
 UNAVAILABLE = 69
@@ -76,33 +77,57 @@ def bot_id(token):
     return head
 
 
+NUMBER_KEYS = ("min_replies", "timeout_s", "settle_s", "max_first_reply_s")
+PATTERN_KEYS = ("expect", "forbid")
+
+
+def check_case_numbers(case):
+    for key in NUMBER_KEYS:
+        if key in case and (isinstance(case[key], bool) or not isinstance(case[key], (int, float))):
+            raise Refused(f"case {case['name']}: {key} must be a number")
+
+
+def check_case_patterns(case):
+    """expect/forbid are lists of non-empty patterns that compile; a string would be iterated per character."""
+    for key in PATTERN_KEYS:
+        patterns = case.get(key, [])
+        if not isinstance(patterns, list) or not all(
+            isinstance(pattern, str) and pattern for pattern in patterns
+        ):
+            raise Refused(f"case {case['name']}: {key} must be a list of non-empty patterns")
+    if case.get("min_replies", 1) < 1:
+        # Even with a `forbid`, a case that passes on silence lets a dead bot go green.
+        raise Refused(f"case {case['name']} asserts nothing: min_replies must be at least 1")
+    for key in PATTERN_KEYS:
+        for pattern in case.get(key, []):
+            try:
+                re.compile(pattern)
+            except re.error as error:
+                raise Refused(f"case {case['name']}: bad {key} pattern ({error})") from None
+
+
+def validate_case(case, index, seen):
+    if (
+        not isinstance(case, dict)
+        or not case.get("name")
+        or not isinstance(case.get("send"), str)
+        or not case["send"]
+    ):
+        raise Refused(f"case #{index} needs a name and a send text")
+    if case["name"] in seen:
+        raise Refused(f"duplicate case name '{case['name']}'")
+    seen.add(case["name"])
+    require_one_line(case["send"], case["name"])
+    check_case_numbers(case)
+    check_case_patterns(case)
+
+
 def validate_cases(cases, label, what="smoke"):
     if not isinstance(cases, list) or not cases:
         raise Refused(f"{label} has no {what} cases; an empty list must never pass a check")
     seen = set()
     for index, case in enumerate(cases):
-        if not isinstance(case, dict) or not case.get("name") or not isinstance(case.get("send"), str) or not case["send"]:
-            raise Refused(f"case #{index} needs a name and a send text")
-        if case["name"] in seen:
-            raise Refused(f"duplicate case name '{case['name']}'")
-        seen.add(case["name"])
-        require_one_line(case["send"], case["name"])
-        for key in ("min_replies", "timeout_s", "settle_s", "max_first_reply_s"):
-            if key in case and (isinstance(case[key], bool) or not isinstance(case[key], (int, float))):
-                raise Refused(f"case {case['name']}: {key} must be a number")
-        for key in ("expect", "forbid"):
-            patterns = case.get(key, [])
-            if not isinstance(patterns, list) or not all(isinstance(pattern, str) and pattern for pattern in patterns):
-                raise Refused(f"case {case['name']}: {key} must be a list of non-empty patterns")
-        if case.get("min_replies", 1) < 1:
-            # Even with a `forbid`, a case that passes on silence lets a dead bot go green.
-            raise Refused(f"case {case['name']} asserts nothing: min_replies must be at least 1")
-        for key in ("expect", "forbid"):
-            for pattern in case.get(key, []):
-                try:
-                    re.compile(pattern)
-                except re.error as error:
-                    raise Refused(f"case {case['name']}: bad {key} pattern ({error})") from None
+        validate_case(case, index, seen)
     return cases
 
 
@@ -153,7 +178,9 @@ def guard_target(stage_env, prod_env, deny):
     if username.lower() in denied:
         raise Refused(f"refusing to smoke-test @{username}: it is a production bot")
     if not STAGE_NAME.search(username):
-        raise Refused(f"@{username} does not look like a stage bot (its username must contain 'stage' or 'stg')")
+        raise Refused(
+            f"@{username} does not look like a stage bot (its username must contain 'stage' or 'stg')"
+        )
     if prod_env.get("BOT_TOKEN") and bot_id(token) == bot_id(prod_env["BOT_TOKEN"]):
         raise Refused("the stage token is the production token")
     return username
@@ -166,7 +193,8 @@ def telegram_get_me(token):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open(f"https://api.telegram.org/bot{token}/getMe", timeout=20) as response:
             return json.load(response)["result"]["username"]
-    except Exception as error:  # the message of a urllib error would contain the token URL
+    except (OSError, http.client.HTTPException, ValueError, LookupError, TypeError) as error:
+        # the message of a urllib error would contain the token URL
         raise Refused(f"getMe for the stage token failed ({type(error).__name__})") from None
 
 
@@ -190,19 +218,38 @@ class QaCliTransport:
 
     def qa(self, action, *flags, timeout):
         """One qa call: returns (exit code, parsed last stdout line). Raises Refused (exit 2) or ConnectionError."""
-        argv = [self.qa_bin, "telegram", "chat", action, "--peer", self.peer, "--username", self.username, *flags]
+        command = ["telegram", "chat"]
+        argv = [
+            self.qa_bin,
+            *command,
+            action,
+            "--peer",
+            self.peer,
+            "--username",
+            self.username,
+            *flags,
+        ]
         try:
-            proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout + self.call_grace, stdin=subprocess.DEVNULL)
+            proc = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=timeout + self.call_grace,
+                stdin=subprocess.DEVNULL,
+                check=False,
+            )
         except subprocess.TimeoutExpired:
-            raise ConnectionError(f"qa {action} did not finish within {timeout + self.call_grace:g}s") from None
+            raise ConnectionError(
+                f"qa {action} did not finish within {timeout + self.call_grace:g}s"
+            ) from None
         except OSError as error:
             raise ConnectionError(f"qa binary is not runnable ({type(error).__name__})") from None
         lines = [line for line in proc.stdout.splitlines() if line.strip()]
         try:
             payload = json.loads(lines[-1])
-            if not isinstance(payload, dict):
-                raise ValueError
         except (IndexError, ValueError):
+            payload = None
+        if not isinstance(payload, dict):
             if proc.returncode == 3:
                 raise ConnectionError("qa-cli is not logged in to Telegram") from None
             raise ConnectionError(f"qa {action} printed no JSON (exit {proc.returncode})") from None
@@ -220,18 +267,43 @@ class QaCliTransport:
         # argparse takes a value starting with "-" for an option only in the "--text=VALUE" form.
         return [f"--text={text}"] if text.startswith("-") else ["--text", text]
 
+    @staticmethod
+    def sent_message_id(code, sent):
+        """The id of the message qa confirmed sending; anything else fails closed."""
+        message = sent.get("message") if code == 0 and sent.get("ok") else None
+        if not isinstance(message, dict) or "id" not in message:
+            raise ConnectionError(f"qa send failed: {sent.get('error', 'no confirmed message')}")
+        return message["id"]
+
+    @staticmethod
+    def record_incoming(messages, texts, latencies, sent_at):
+        for item in messages:
+            if (
+                item.get("out") is False
+            ):  # latest text per id wins, so edited answers replace their first draft
+                texts[item["id"]] = item.get("text") or ""
+                latencies.setdefault(item["id"], time.monotonic() - sent_at)
+
     async def exchange(self, text, timeout, settle):
         """Send text; return [(reply text, seconds after send)] once `settle` seconds pass quietly or on timeout."""
         require_one_line(text, "exchange")
         started = time.monotonic()
-        code, sent = await asyncio.to_thread(self.qa, "send", *self.text_flag(text), timeout=timeout)
-        message = sent.get("message") if code == 0 and sent.get("ok") else None
-        if not isinstance(message, dict) or "id" not in message:
-            raise ConnectionError(f"qa send failed: {sent.get('error', 'no confirmed message')}")
-        sent_id = message["id"]
+        code, sent = await asyncio.to_thread(
+            self.qa, "send", *self.text_flag(text), timeout=timeout
+        )
+        sent_id = self.sent_message_id(code, sent)
         sent_at = time.monotonic()
         code, first = await asyncio.to_thread(
-            self.qa, "wait", "--after", str(sent_id), "--from", "peer", "--timeout", f"{timeout:g}", timeout=timeout)
+            self.qa,
+            "wait",
+            "--after",
+            str(sent_id),
+            "--from",
+            "peer",
+            "--timeout",
+            f"{timeout:g}",
+            timeout=timeout,
+        )
         if code != 0 or not first.get("ok"):
             return []  # the answer never came; the case fails on min_replies
         latency = time.monotonic() - sent_at
@@ -243,13 +315,12 @@ class QaCliTransport:
         snapshot = frozenset(texts.items())
         while time.monotonic() - last_change < settle and time.monotonic() < deadline:
             await asyncio.sleep(self.poll_interval)
-            code, read = await asyncio.to_thread(self.qa, "read", "--after", str(sent_id), timeout=timeout)
+            code, read = await asyncio.to_thread(
+                self.qa, "read", "--after", str(sent_id), timeout=timeout
+            )
             if code != 0 or not read.get("ok"):
                 continue  # a flaky read must not turn a good answer into a failure; the next poll retries
-            for item in read.get("messages", []):
-                if item.get("out") is False:  # latest text per id wins, so edited answers replace their first draft
-                    texts[item["id"]] = item.get("text") or ""
-                    latencies.setdefault(item["id"], time.monotonic() - sent_at)
+            self.record_incoming(read.get("messages", []), texts, latencies, sent_at)
             current = frozenset(texts.items())
             if current != snapshot:
                 snapshot = current
@@ -263,7 +334,11 @@ def judge(case, replies):
     joined = "\n".join(text for text, _ in replies)
     if len(replies) < case.get("min_replies", 1):
         problems.append(f"{len(replies)} replies, expected at least {case.get('min_replies', 1)}")
-    if replies and case.get("expect") and not any(re.search(p, joined, re.IGNORECASE | re.DOTALL) for p in case["expect"]):
+    if (
+        replies
+        and case.get("expect")
+        and not any(re.search(p, joined, re.IGNORECASE | re.DOTALL) for p in case["expect"])
+    ):
         problems.append("no reply matched any of the expected patterns")
     for pattern in case.get("forbid", []):
         if re.search(pattern, joined, re.IGNORECASE | re.DOTALL):
@@ -282,21 +357,33 @@ async def run_cases(cases, transport, scale):
         replies = await transport.exchange(case["send"], timeout, case.get("settle_s", 3))
         problems = judge(case, replies)
         first = min((latency for _, latency in replies), default=None)
-        result = {"name": case["name"], "ok": not problems, "problems": problems,
-                  "replies": len(replies), "first_reply_s": None if first is None else round(first, 2)}
+        result = {
+            "name": case["name"],
+            "ok": not problems,
+            "problems": problems,
+            "replies": len(replies),
+            "first_reply_s": None if first is None else round(first, 2),
+        }
         if case.get("source"):
             result["source"] = str(case["source"])
         results.append(result)
         status = "PASS" if not problems else "FAIL"
-        print(f"SMOKE {status} {case['name']} replies={len(replies)} first={result['first_reply_s']}s"
-              + (f" source={result['source']}" if "source" in result else "")
-              + "".join(f" problem={p}" for p in problems))
+        print(
+            f"SMOKE {status} {case['name']} replies={len(replies)} first={result['first_reply_s']}s"
+            + (f" source={result['source']}" if "source" in result else "")
+            + "".join(f" problem={p}" for p in problems)
+        )
     return results
 
 
 def write_receipt(path, sha, username, results, passed):
-    record = {"sha": sha, "bot": username, "passed": passed, "cases": results,
-              "at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+    record = {
+        "sha": sha,
+        "bot": username,
+        "passed": passed,
+        "cases": results,
+        "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
     tmp = Path(str(path) + ".tmp")
     tmp.write_text(json.dumps(record, indent=2) + "\n")
     tmp.chmod(0o600)  # names, counts and latencies only; the directory is root-only anyway
@@ -312,7 +399,12 @@ def guard_command(args, get_me):
     if actual.lower() != username.lower():
         raise Refused(f"the stage token belongs to @{actual}, not @{username}")
     base = len(load_cases(args.cases))
-    payload = {"username": username, "peer": bot_id(stage_env["BOT_TOKEN"]), "cases": cases, "base_cases": base}
+    payload = {
+        "username": username,
+        "peer": bot_id(stage_env["BOT_TOKEN"]),
+        "cases": cases,
+        "base_cases": base,
+    }
     print("STAGE_GUARD " + json.dumps(payload, separators=(",", ":"), ensure_ascii=True))
     return 0
 
@@ -324,7 +416,9 @@ def check_run_target(username, peer, deny):
     if username.lower() in {name.lstrip("@").lower() for name in deny}:
         raise Refused(f"refusing to smoke-test @{username}: it is a production bot")
     if not STAGE_NAME.search(username):
-        raise Refused(f"@{username} does not look like a stage bot (its username must contain 'stage' or 'stg')")
+        raise Refused(
+            f"@{username} does not look like a stage bot (its username must contain 'stage' or 'stg')"
+        )
     if not peer.isdigit():
         raise Refused("--peer must be the numeric bot id")
 
@@ -336,7 +430,9 @@ def run_command(args, transport_factory):
     if not 1 <= base <= len(cases):
         raise Refused(f"--base-cases {base} does not fit a list of {len(cases)} cases")
     if base < args.min_cases:
-        raise Refused(f"{args.cases_json} has {base} smoke cases, at least {args.min_cases} are required")
+        raise Refused(
+            f"{args.cases_json} has {base} smoke cases, at least {args.min_cases} are required"
+        )
     factory = transport_factory or (lambda: QaCliTransport(args.qa_bin, args.peer, args.username))
 
     async def go():
@@ -352,14 +448,18 @@ def run_command(args, transport_factory):
     if args.receipt:
         write_receipt(args.receipt, args.sha, args.username, results, passed)
     word = "PASSED" if passed else "FAILED"
-    print(f"STAGE_SMOKE_{word} sha={args.sha} bot=@{args.username} cases={len(results)} failed={sum(not r['ok'] for r in results)}")
+    print(
+        f"STAGE_SMOKE_{word} sha={args.sha} bot=@{args.username} cases={len(results)} failed={sum(not r['ok'] for r in results)}"
+    )
     return 0 if passed else 1
 
 
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
-    guard = commands.add_parser("guard", help="odroid: prove the target is not production, print STAGE_GUARD")
+    guard = commands.add_parser(
+        "guard", help="odroid: prove the target is not production, print STAGE_GUARD"
+    )
     guard.add_argument("--cases", required=True)
     guard.add_argument("--extra-cases", action="append", default=[])
     guard.add_argument("--min-cases", type=int, default=1)

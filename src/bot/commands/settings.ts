@@ -331,6 +331,338 @@ interface TelegramSettingsDeps {
   enterScene: () => Promise<void>;
 }
 
+/** One `stg:*` callback in flight: the acting user, the sub-action and whichever repositories this deployment has. */
+interface SettingsCallbackScope {
+  ctx: BotCallbackContext;
+  user: User;
+  lang: 'en' | 'ru';
+  subAction: string;
+  prefsService: NotificationPreferencesService;
+  callSettingsRepo: CallSettingsRepository | undefined;
+  sharingSettingsRepo: SharingSettingsRepository | undefined;
+  userRepo: UserRepository | undefined;
+  telegramDeps: TelegramSettingsDeps | undefined;
+}
+
+/** A section returns true once it has answered the callback; false lets the next section look at it. */
+type SettingsSection = (scope: SettingsCallbackScope) => Promise<boolean>;
+
+/** Answer the callback and replace the message with a settings view. */
+async function showSettingsView(ctx: BotCallbackContext, view: { text: string; kb: InlineKeyboard }): Promise<void> {
+  await ctx.answer();
+  await ctx.editText(view.text, { reply_markup: view.kb });
+}
+
+// ─── Close / back ────────────────────────────────────────────────────────────
+
+async function handleCloseOrBack({ ctx, lang, subAction, callSettingsRepo }: SettingsCallbackScope): Promise<boolean> {
+  if (subAction === 'close') {
+    await ctx.answer();
+    await ctx.message?.delete();
+    return true;
+  }
+
+  if (subAction === 'back') {
+    await ctx.answer();
+    await ctx.editText(t(lang).settings.title, { reply_markup: settingsCategoryKeyboard(lang, !!callSettingsRepo) });
+    return true;
+  }
+  return false;
+}
+
+// ─── General ─────────────────────────────────────────────────────────────────
+
+function isGeneralAction(subAction: string): boolean {
+  return (
+    subAction === 'general' ||
+    subAction.startsWith('set_lang:') ||
+    subAction.startsWith('set_country:') ||
+    subAction === 'show_countries'
+  );
+}
+
+/** Persist a language / country change; returns the user as it is after the change. */
+function applyGeneralChange({ user, subAction, userRepo }: SettingsCallbackScope): User {
+  let currentUser = user;
+  if (!userRepo) return currentUser;
+
+  if (subAction.startsWith('set_lang:')) {
+    const newLang = subAction.split(':')[1] as 'en' | 'ru';
+    const updated = userRepo.update(currentUser.telegram_id, { language: newLang });
+    if (updated) currentUser = updated;
+  }
+  if (subAction.startsWith('set_country:')) {
+    const code = subAction.split(':')[1]!;
+    const updated = userRepo.update(currentUser.telegram_id, { country_code: code });
+    if (updated) currentUser = updated;
+  }
+  return currentUser;
+}
+
+async function handleGeneralSection(scope: SettingsCallbackScope): Promise<boolean> {
+  const { ctx, subAction } = scope;
+  if (!isGeneralAction(subAction)) return false;
+
+  const currentUser = applyGeneralChange(scope);
+
+  if (subAction === 'show_countries') {
+    const currentLang = (currentUser.language ?? 'en') as 'en' | 'ru';
+    await ctx.answer();
+    await ctx.editText(t(currentLang).settings.showCountries, {
+      reply_markup: countryPickerKeyboard(currentUser.country_code, currentLang),
+    });
+    return true;
+  }
+
+  await showSettingsView(ctx, buildGeneralView(currentUser));
+  return true;
+}
+
+// ─── Notifications ───────────────────────────────────────────────────────────
+
+const NOTIFICATIONS_VIEW_ACTIONS = ['notifications', 'toggle_morning', 'toggle_evening', 'toggle_quiet'];
+
+function applyNotificationToggle({ subAction, prefsService, user }: SettingsCallbackScope): void {
+  if (subAction === 'toggle_morning') prefsService.toggleMorningAgenda(user.telegram_id);
+  else if (subAction === 'toggle_evening') prefsService.toggleEveningReview(user.telegram_id);
+  else if (subAction === 'toggle_quiet') prefsService.toggleQuietHours(user.telegram_id);
+}
+
+function toggleReminderInterval(intervals: number[], value: number): number[] {
+  if (intervals.includes(value)) return intervals.filter((x) => x !== value);
+  return [...intervals, value].sort((a, b) => a - b);
+}
+
+async function showReminderIntervals({
+  ctx,
+  user,
+  lang,
+  subAction,
+  prefsService,
+}: SettingsCallbackScope): Promise<void> {
+  const prefs = prefsService.getOrCreate(user.telegram_id);
+  let intervals = NumberArrayCodec.parse(prefs.default_reminder_intervals);
+
+  if (subAction.startsWith('toggle_reminder:')) {
+    intervals = toggleReminderInterval(intervals, Number.parseInt(subAction.split(':')[1]!, 10));
+    prefsService.updateDefaultIntervals(user.telegram_id, intervals);
+  }
+
+  await showSettingsView(ctx, buildReminderIntervalsView(intervals, lang));
+}
+
+async function showNotifications({ ctx, user, lang, prefsService }: SettingsCallbackScope): Promise<void> {
+  const prefs = prefsService.getOrCreate(user.telegram_id);
+  const intervals = NumberArrayCodec.parse(prefs.default_reminder_intervals);
+  const view = buildNotificationsView(
+    !!prefs.morning_agenda_enabled,
+    prefs.morning_agenda_time,
+    !!prefs.evening_review_enabled,
+    prefs.evening_review_time,
+    !!prefs.quiet_hours_enabled,
+    prefs.quiet_hours_start,
+    prefs.quiet_hours_end,
+    intervals,
+    lang,
+  );
+  await showSettingsView(ctx, view);
+}
+
+async function handleNotificationsSection(scope: SettingsCallbackScope): Promise<boolean> {
+  const { subAction } = scope;
+  applyNotificationToggle(scope);
+
+  if (subAction === 'edit_reminders' || subAction.startsWith('toggle_reminder:')) {
+    await showReminderIntervals(scope);
+    return true;
+  }
+
+  if (NOTIFICATIONS_VIEW_ACTIONS.includes(subAction)) {
+    await showNotifications(scope);
+    return true;
+  }
+  return false;
+}
+
+// ─── Calls ───────────────────────────────────────────────────────────────────
+
+async function handleCallsSection({
+  ctx,
+  user,
+  lang,
+  subAction,
+  callSettingsRepo,
+}: SettingsCallbackScope): Promise<boolean> {
+  if (subAction !== 'calls' && subAction !== 'toggle_calls') return false;
+
+  if (!callSettingsRepo) {
+    // A button left over from when calls were available: say so and show the current categories.
+    await ctx.answer({ text: t(lang).settings.callsUnavailable });
+    await ctx.editText(t(lang).settings.title, { reply_markup: settingsCategoryKeyboard(lang, false) });
+    return true;
+  }
+  callSettingsRepo.ensureDefaults(user.telegram_id);
+  if (subAction === 'toggle_calls') {
+    const cur = callSettingsRepo.get(user.telegram_id);
+    callSettingsRepo.setEnabled(user.telegram_id, !cur?.enabled);
+  }
+  await showSettingsView(ctx, buildCallsView(!!callSettingsRepo.get(user.telegram_id)?.enabled, lang));
+  return true;
+}
+
+// ─── Privacy ─────────────────────────────────────────────────────────────────
+
+const PRIVACY_VIEW_ACTIONS = ['privacy', 'cycle_visibility', 'toggle_inline', 'toggle_invitations'];
+
+/** Apply a privacy toggle; defaults are ensured for every sub-action that reaches this section. */
+function applyPrivacyChange(repo: SharingSettingsRepository, userId: number, subAction: string): void {
+  repo.ensureDefaults(userId);
+  if (subAction === 'cycle_visibility') {
+    const cur = (repo.get(userId)?.default_visibility ?? 'private') as Visibility;
+    const next = VISIBILITIES[(VISIBILITIES.indexOf(cur) + 1) % VISIBILITIES.length];
+    repo.update(userId, { default_visibility: next });
+  } else if (subAction === 'toggle_inline') {
+    const cur = repo.get(userId);
+    repo.update(userId, { inline_mode_enabled: cur?.inline_mode_enabled ? 0 : 1 });
+  } else if (subAction === 'toggle_invitations') {
+    const cur = repo.get(userId);
+    repo.update(userId, { allow_invitations: cur?.allow_invitations ? 0 : 1 });
+  }
+}
+
+async function handlePrivacySection({
+  ctx,
+  user,
+  lang,
+  subAction,
+  sharingSettingsRepo,
+}: SettingsCallbackScope): Promise<boolean> {
+  if (sharingSettingsRepo) applyPrivacyChange(sharingSettingsRepo, user.telegram_id, subAction);
+
+  if (!PRIVACY_VIEW_ACTIONS.includes(subAction)) return false;
+
+  let visibility = 'private';
+  let inlineEnabled = false;
+  let invitations = false;
+  const settings = sharingSettingsRepo?.get(user.telegram_id);
+  if (settings) {
+    visibility = settings.default_visibility;
+    inlineEnabled = !!settings.inline_mode_enabled;
+    invitations = !!settings.allow_invitations;
+  }
+  await showSettingsView(ctx, buildPrivacyView(visibility, inlineEnabled, invitations, lang));
+  return true;
+}
+
+// ─── Voice ───────────────────────────────────────────────────────────────────
+
+async function handleVoiceSection({ ctx, user, lang, subAction, userRepo }: SettingsCallbackScope): Promise<boolean> {
+  let currentUser = user;
+  if (subAction === 'toggle_voice' && userRepo) {
+    const toggled = user.voice_response_enabled === 1 ? 0 : 1;
+    userRepo.update(user.telegram_id, { voice_response_enabled: toggled });
+    currentUser = userRepo.findByTelegramId(user.telegram_id) ?? user;
+  }
+
+  if (subAction !== 'voice' && subAction !== 'toggle_voice') return false;
+  await showSettingsView(ctx, buildVoiceView(currentUser.voice_response_enabled, lang));
+  return true;
+}
+
+// ─── Default event duration ──────────────────────────────────────────────────
+
+async function handleDurationSection({
+  ctx,
+  user,
+  lang,
+  subAction,
+  userRepo,
+}: SettingsCallbackScope): Promise<boolean> {
+  if (subAction === 'edit_duration') {
+    const duration = user.default_event_duration_minutes ?? 60;
+    const view = buildDurationView(duration, lang);
+    pendingDurationInput.set(user.telegram_id, Date.now());
+    await showSettingsView(ctx, view);
+    return true;
+  }
+
+  if (subAction.startsWith('set_duration:') && userRepo) {
+    const mins = Number.parseInt(subAction.split(':')[1]!, 10);
+    if (mins > 0 && mins <= 1440) {
+      userRepo.update(user.telegram_id, { default_event_duration_minutes: mins });
+      pendingDurationInput.delete(user.telegram_id);
+    }
+    const updated = userRepo.findByTelegramId(user.telegram_id) ?? user;
+    const updatedLang = (updated.language ?? 'en') as 'en' | 'ru';
+    await showSettingsView(ctx, buildDurationView(updated.default_event_duration_minutes ?? 60, updatedLang));
+    return true;
+  }
+  return false;
+}
+
+// ─── Telegram Account ────────────────────────────────────────────────────────
+
+async function disconnectTelegramAccount(
+  ctx: BotCallbackContext,
+  user: User,
+  lang: 'en' | 'ru',
+  telegramDeps: TelegramSettingsDeps,
+): Promise<void> {
+  const session = telegramDeps.sessionRepo.getActive(user.telegram_id);
+  if (session && telegramDeps.masterKey) {
+    await revokeRemoteSession(session, telegramDeps.masterKey, user.telegram_id);
+  }
+  telegramDeps.sessionRepo.updateStatus(user.telegram_id, 'revoked');
+  const s = t(lang).settings;
+  await ctx.answer();
+  await ctx.editText(s.telegramDisconnected, {
+    reply_markup: new InlineKeyboard().text(s.telegramConnect, 'stg:tg_connect').row().text(s.back, 'stg:back'),
+  });
+}
+
+async function handleTelegramSection({
+  ctx,
+  user,
+  lang,
+  subAction,
+  telegramDeps,
+}: SettingsCallbackScope): Promise<boolean> {
+  if (!telegramDeps) return false;
+
+  if (subAction === 'telegram') {
+    const session = telegramDeps.sessionRepo.findByUserId(user.telegram_id);
+    await showSettingsView(ctx, buildTelegramView(session, lang));
+    return true;
+  }
+
+  if (subAction === 'tg_connect') {
+    await ctx.answer();
+    await telegramDeps.enterScene();
+    return true;
+  }
+
+  if (subAction === 'tg_disconnect_confirm') {
+    await disconnectTelegramAccount(ctx, user, lang, telegramDeps);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Sections are tried in order and may have side effects before deciding they do not own the sub-action
+ * (notification toggles, privacy defaults), so the order is part of the behavior.
+ */
+const SETTINGS_SECTIONS: readonly SettingsSection[] = [
+  handleCloseOrBack,
+  handleGeneralSection,
+  handleNotificationsSection,
+  handleCallsSection,
+  handlePrivacySection,
+  handleVoiceSection,
+  handleDurationSection,
+  handleTelegramSection,
+];
+
 /** `callSettingsRepo` is passed only when the bot can place calls; without it the calls category is hidden. */
 export async function handleSettingsCallback(
   ctx: BotCallbackContext,
@@ -343,230 +675,20 @@ export async function handleSettingsCallback(
   telegramDeps?: TelegramSettingsDeps,
 ): Promise<void> {
   const lang = (user.language ?? 'en') as 'en' | 'ru';
+  const scope: SettingsCallbackScope = {
+    ctx,
+    user,
+    lang,
+    subAction,
+    prefsService,
+    callSettingsRepo,
+    sharingSettingsRepo,
+    userRepo,
+    telegramDeps,
+  };
 
-  if (subAction === 'close') {
-    await ctx.answer();
-    await ctx.message?.delete();
-    return;
-  }
-
-  if (subAction === 'back') {
-    await ctx.answer();
-    await ctx.editText(t(lang).settings.title, { reply_markup: settingsCategoryKeyboard(lang, !!callSettingsRepo) });
-    return;
-  }
-
-  if (
-    subAction === 'general' ||
-    subAction.startsWith('set_lang:') ||
-    subAction.startsWith('set_country:') ||
-    subAction === 'show_countries'
-  ) {
-    let currentUser = user;
-
-    if (subAction.startsWith('set_lang:') && userRepo) {
-      const newLang = subAction.split(':')[1] as 'en' | 'ru';
-      const updated = userRepo.update(currentUser.telegram_id, { language: newLang });
-      if (updated) currentUser = updated;
-    }
-    if (subAction.startsWith('set_country:') && userRepo) {
-      const code = subAction.split(':')[1]!;
-      const updated = userRepo.update(currentUser.telegram_id, { country_code: code });
-      if (updated) currentUser = updated;
-    }
-
-    if (subAction === 'show_countries') {
-      const currentLang = (currentUser.language ?? 'en') as 'en' | 'ru';
-      await ctx.answer();
-      await ctx.editText(t(currentLang).settings.showCountries, {
-        reply_markup: countryPickerKeyboard(currentUser.country_code, currentLang),
-      });
-      return;
-    }
-
-    const { text, kb } = buildGeneralView(currentUser);
-    await ctx.answer();
-    await ctx.editText(text, { reply_markup: kb });
-    return;
-  }
-
-  // ─── Notifications ─────────────────────────────────────────────────────────
-
-  if (subAction === 'toggle_morning') prefsService.toggleMorningAgenda(user.telegram_id);
-  else if (subAction === 'toggle_evening') prefsService.toggleEveningReview(user.telegram_id);
-  else if (subAction === 'toggle_quiet') prefsService.toggleQuietHours(user.telegram_id);
-
-  if (subAction === 'edit_reminders' || subAction.startsWith('toggle_reminder:')) {
-    const prefs = prefsService.getOrCreate(user.telegram_id);
-    let intervals = NumberArrayCodec.parse(prefs.default_reminder_intervals);
-
-    if (subAction.startsWith('toggle_reminder:')) {
-      const val = Number.parseInt(subAction.split(':')[1]!, 10);
-      if (intervals.includes(val)) {
-        intervals = intervals.filter((x) => x !== val);
-      } else {
-        intervals = [...intervals, val].sort((a, b) => a - b);
-      }
-      prefsService.updateDefaultIntervals(user.telegram_id, intervals);
-    }
-
-    const { text, kb } = buildReminderIntervalsView(intervals, lang);
-    await ctx.answer();
-    await ctx.editText(text, { reply_markup: kb });
-    return;
-  }
-
-  if (
-    subAction === 'notifications' ||
-    subAction === 'toggle_morning' ||
-    subAction === 'toggle_evening' ||
-    subAction === 'toggle_quiet'
-  ) {
-    const prefs = prefsService.getOrCreate(user.telegram_id);
-    const intervals = NumberArrayCodec.parse(prefs.default_reminder_intervals);
-    const { text, kb } = buildNotificationsView(
-      !!prefs.morning_agenda_enabled,
-      prefs.morning_agenda_time,
-      !!prefs.evening_review_enabled,
-      prefs.evening_review_time,
-      !!prefs.quiet_hours_enabled,
-      prefs.quiet_hours_start,
-      prefs.quiet_hours_end,
-      intervals,
-      lang,
-    );
-    await ctx.answer();
-    await ctx.editText(text, { reply_markup: kb });
-    return;
-  }
-
-  // ─── Calls ─────────────────────────────────────────────────────────────────
-
-  if (subAction === 'calls' || subAction === 'toggle_calls') {
-    if (!callSettingsRepo) {
-      // A button left over from when calls were available: say so and show the current categories.
-      await ctx.answer({ text: t(lang).settings.callsUnavailable });
-      await ctx.editText(t(lang).settings.title, { reply_markup: settingsCategoryKeyboard(lang, false) });
-      return;
-    }
-    callSettingsRepo.ensureDefaults(user.telegram_id);
-    if (subAction === 'toggle_calls') {
-      const cur = callSettingsRepo.get(user.telegram_id);
-      callSettingsRepo.setEnabled(user.telegram_id, !cur?.enabled);
-    }
-    const { text, kb } = buildCallsView(!!callSettingsRepo.get(user.telegram_id)?.enabled, lang);
-    await ctx.answer();
-    await ctx.editText(text, { reply_markup: kb });
-    return;
-  }
-
-  // ─── Privacy ───────────────────────────────────────────────────────────────
-
-  if (sharingSettingsRepo) {
-    sharingSettingsRepo.ensureDefaults(user.telegram_id);
-    if (subAction === 'cycle_visibility') {
-      const cur = (sharingSettingsRepo.get(user.telegram_id)?.default_visibility ?? 'private') as Visibility;
-      const next = VISIBILITIES[(VISIBILITIES.indexOf(cur) + 1) % VISIBILITIES.length];
-      sharingSettingsRepo.update(user.telegram_id, { default_visibility: next });
-    } else if (subAction === 'toggle_inline') {
-      const cur = sharingSettingsRepo.get(user.telegram_id);
-      sharingSettingsRepo.update(user.telegram_id, { inline_mode_enabled: cur?.inline_mode_enabled ? 0 : 1 });
-    } else if (subAction === 'toggle_invitations') {
-      const cur = sharingSettingsRepo.get(user.telegram_id);
-      sharingSettingsRepo.update(user.telegram_id, { allow_invitations: cur?.allow_invitations ? 0 : 1 });
-    }
-  }
-
-  if (
-    subAction === 'privacy' ||
-    subAction === 'cycle_visibility' ||
-    subAction === 'toggle_inline' ||
-    subAction === 'toggle_invitations'
-  ) {
-    let visibility = 'private';
-    let inlineEnabled = false;
-    let invitations = false;
-    if (sharingSettingsRepo) {
-      const settings = sharingSettingsRepo.get(user.telegram_id);
-      if (settings) {
-        visibility = settings.default_visibility;
-        inlineEnabled = !!settings.inline_mode_enabled;
-        invitations = !!settings.allow_invitations;
-      }
-    }
-    const { text, kb } = buildPrivacyView(visibility, inlineEnabled, invitations, lang);
-    await ctx.answer();
-    await ctx.editText(text, { reply_markup: kb });
-    return;
-  }
-
-  // ─── Voice ─────────────────────────────────────────────────────────────────
-
-  let currentUser = user;
-  if (subAction === 'toggle_voice' && userRepo) {
-    const toggled = user.voice_response_enabled === 1 ? 0 : 1;
-    userRepo.update(user.telegram_id, { voice_response_enabled: toggled });
-    currentUser = userRepo.findByTelegramId(user.telegram_id) ?? user;
-  }
-
-  if (subAction === 'voice' || subAction === 'toggle_voice') {
-    const { text, kb } = buildVoiceView(currentUser.voice_response_enabled, lang);
-    await ctx.answer();
-    await ctx.editText(text, { reply_markup: kb });
-    return;
-  }
-
-  if (subAction === 'edit_duration') {
-    const duration = user.default_event_duration_minutes ?? 60;
-    const { text, kb } = buildDurationView(duration, lang);
-    pendingDurationInput.set(user.telegram_id, Date.now());
-    await ctx.answer();
-    await ctx.editText(text, { reply_markup: kb });
-    return;
-  }
-
-  if (subAction.startsWith('set_duration:') && userRepo) {
-    const mins = Number.parseInt(subAction.split(':')[1]!, 10);
-    if (mins > 0 && mins <= 1440) {
-      userRepo.update(user.telegram_id, { default_event_duration_minutes: mins });
-      pendingDurationInput.delete(user.telegram_id);
-    }
-    const updated = userRepo.findByTelegramId(user.telegram_id) ?? user;
-    const updatedLang = (updated.language ?? 'en') as 'en' | 'ru';
-    const { text, kb } = buildDurationView(updated.default_event_duration_minutes ?? 60, updatedLang);
-    await ctx.answer();
-    await ctx.editText(text, { reply_markup: kb });
-    return;
-  }
-
-  // ─── Telegram Account ───────────────────────────────────────────────────────
-
-  if (subAction === 'telegram' && telegramDeps) {
-    const session = telegramDeps.sessionRepo.findByUserId(user.telegram_id);
-    const { text, kb } = buildTelegramView(session, lang);
-    await ctx.answer();
-    await ctx.editText(text, { reply_markup: kb });
-    return;
-  }
-
-  if (subAction === 'tg_connect' && telegramDeps) {
-    await ctx.answer();
-    await telegramDeps.enterScene();
-    return;
-  }
-
-  if (subAction === 'tg_disconnect_confirm' && telegramDeps) {
-    const session = telegramDeps.sessionRepo.getActive(user.telegram_id);
-    if (session && telegramDeps.masterKey) {
-      await revokeRemoteSession(session, telegramDeps.masterKey, user.telegram_id);
-    }
-    telegramDeps.sessionRepo.updateStatus(user.telegram_id, 'revoked');
-    const s = t(lang).settings;
-    await ctx.answer();
-    await ctx.editText(s.telegramDisconnected, {
-      reply_markup: new InlineKeyboard().text(s.telegramConnect, 'stg:tg_connect').row().text(s.back, 'stg:back'),
-    });
-    return;
+  for (const section of SETTINGS_SECTIONS) {
+    if (await section(scope)) return;
   }
 
   await ctx.answer();

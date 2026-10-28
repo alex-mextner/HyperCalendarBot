@@ -5,6 +5,7 @@ token line, prints STAGE_READY / STAGE_QA_RESULT per scenario and waits for DONE
 stub stage-smoke.py in a temp lib dir next to a copy of the driver, because the driver runs
 `<its own dir>/stage-smoke.py run ...`. Nothing here talks to Telegram, ssh, qa-cli or the network.
 """
+
 import fcntl
 import json
 import os
@@ -29,9 +30,15 @@ OTHER_SHA = "b" * 40
 FAKE_TOKEN = "fake-test-token-not-a-secret-0001"
 USERNAME = "HyperCalendarStageBot"
 PEER = "123456789"
-REQUIRED = ["start", "ping", "today-read-only-calendar", "simple-intent-phrase", "validation-search-without-query"]
+REQUIRED = [
+    "start",
+    "ping",
+    "today-read-only-calendar",
+    "simple-intent-phrase",
+    "validation-search-without-query",
+]
 
-FAKE_SSH = '''#!@PY@
+FAKE_SSH = """#!@PY@
 import json, os, sys, time
 here = os.path.dirname(os.path.abspath(__file__))
 sc = json.load(open(os.path.join(here, "ssh_scenario.json")))
@@ -79,9 +86,9 @@ elif mode == "silent":
     wait_for_done()
 result()
 sys.exit(sc.get("rc", 0))
-'''
+"""
 
-STUB_SMOKE = '''#!@PY@
+STUB_SMOKE = """#!@PY@
 import json, os, stat, subprocess, sys, time
 here = os.path.dirname(os.path.abspath(__file__))
 sc = json.load(open(os.path.join(here, "smoke_scenario.json")))
@@ -110,7 +117,13 @@ if sc.get("sleep"):
 if sc.get("final"):
     print(sc["final"], flush=True)
 sys.exit(sc.get("rc", 0))
-'''
+"""
+
+
+def close_stdin(process):
+    """Close the pipe and drop the handle: Python 3.12's Popen.communicate() flushes a closed stdin and raises ValueError."""
+    process.stdin.close()
+    process.stdin = None
 
 
 def write_exe(path, text):
@@ -119,12 +132,21 @@ def write_exe(path, text):
 
 
 def base_cases(names=None):
-    return [{"name": name, "send": "/x", "expect": {"text_contains": ["ok"]}} for name in (names or REQUIRED)]
+    return [
+        {"name": name, "send": "/x", "expect": {"text_contains": ["ok"]}}
+        for name in (names or REQUIRED)
+    ]
 
 
 def ready_payload(**overrides):
     cases = base_cases()
-    payload = {"sha": SHA, "username": USERNAME, "peer": PEER, "cases": cases, "base_cases": len(cases)}
+    payload = {
+        "sha": SHA,
+        "username": USERNAME,
+        "peer": PEER,
+        "cases": cases,
+        "base_cases": len(cases),
+    }
     payload.update(overrides)
     return payload
 
@@ -215,15 +237,27 @@ class DriverCase(unittest.TestCase):
         return argv
 
     def spawn(self, sha=SHA, token=FAKE_TOKEN + "\n", config=True):
-        process = subprocess.Popen(self.argv(sha, config), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, text=True, env=self.env)
+        process = subprocess.Popen(
+            self.argv(sha, config),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=self.env,
+        )
         process.stdin.write(token)
-        process.stdin.close()
+        close_stdin(process)
         return process
 
     def run_driver(self, sha=SHA, token=FAKE_TOKEN + "\n", config=True):
-        process = subprocess.Popen(self.argv(sha, config), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, text=True, env=self.env)
+        process = subprocess.Popen(
+            self.argv(sha, config),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=self.env,
+        )
         out, err = process.communicate(token, timeout=60)
         return process.returncode, out, err
 
@@ -240,7 +274,9 @@ class DriverCase(unittest.TestCase):
         return json.loads(self.smoke_record.read_text())
 
     def assert_result(self, out, status, sha=SHA, cases=0, failed=0):
-        self.assertEqual(out, f"STAGE_QA_RESULT status={status} sha={sha} cases={cases} failed={failed}\n")
+        self.assertEqual(
+            out, f"STAGE_QA_RESULT status={status} sha={sha} cases={cases} failed={failed}\n"
+        )
 
     def assert_done_sent_and_waited(self):
         self.assertIsNotNone(self.ssh_event("done"), self.ssh_events())
@@ -249,14 +285,27 @@ class DriverCase(unittest.TestCase):
 
 class Verdicts(DriverCase):
     def test_pass_prints_only_the_result_on_stdout_and_forwards_the_rest_to_stderr(self):
-        self.set_ssh(mode="ready", ready=ready_payload(), sha=SHA, stderr_lines=["odroid says hello"],
-                     stdout_lines=["odroid stdout noise"])
-        self.set_smoke(stdout_lines=["SMOKE PASS start 0.5s"], stderr_lines=["smoke stderr line"],
-                       final=f"STAGE_SMOKE_PASSED sha={SHA} bot=@{USERNAME} cases=5 failed=0")
+        self.set_ssh(
+            mode="ready",
+            ready=ready_payload(),
+            sha=SHA,
+            stderr_lines=["odroid says hello"],
+            stdout_lines=["odroid stdout noise"],
+        )
+        self.set_smoke(
+            stdout_lines=["SMOKE PASS start 0.5s"],
+            stderr_lines=["smoke stderr line"],
+            final=f"STAGE_SMOKE_PASSED sha={SHA} bot=@{USERNAME} cases=5 failed=0",
+        )
         rc, out, err = self.run_driver()
         self.assertEqual(rc, 0, err)
         self.assert_result(out, "passed", cases=5, failed=0)
-        for line in ("odroid says hello", "odroid stdout noise", "SMOKE PASS start 0.5s", "smoke stderr line"):
+        for line in (
+            "odroid says hello",
+            "odroid stdout noise",
+            "SMOKE PASS start 0.5s",
+            "smoke stderr line",
+        ):
             self.assertIn(line, err)
         self.assert_done_sent_and_waited()
 
@@ -264,10 +313,27 @@ class Verdicts(DriverCase):
         rc, out, err = self.run_driver()
         self.assertEqual(rc, 0, err)
         start = self.ssh_event("start")
-        self.assertEqual(start["argv"], [
-            "-i", str(self.key), "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes",
-            "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-o", "ConnectTimeout=30",
-            "root@odroidn2", SHA])
+        self.assertEqual(
+            start["argv"],
+            [
+                "-i",
+                str(self.key),
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-o",
+                "ServerAliveInterval=15",
+                "-o",
+                "ServerAliveCountMax=4",
+                "-o",
+                "ConnectTimeout=30",
+                "root@odroidn2",
+                SHA,
+            ],
+        )
         self.assertEqual(self.ssh_event("token")["token"], FAKE_TOKEN)
         self.assertNotIn(FAKE_TOKEN, json.dumps(start))
         self.assertNotIn(FAKE_TOKEN, json.dumps(self.smoke()))
@@ -295,10 +361,27 @@ class Verdicts(DriverCase):
         record = self.smoke()
         argv = record["argv"]
         self.assertEqual(argv[:2], ["run", "--cases-json"])
-        self.assertEqual(argv[3:], [
-            "--username", USERNAME, "--peer", PEER, "--sha", SHA, "--deny", "HyperCalendarBot",
-            "--receipt", str(self.state / "receipts" / f"{SHA}.json"), "--qa-bin", str(self.qa),
-            "--min-cases", "5", "--base-cases", "5"])
+        self.assertEqual(
+            argv[3:],
+            [
+                "--username",
+                USERNAME,
+                "--peer",
+                PEER,
+                "--sha",
+                SHA,
+                "--deny",
+                "HyperCalendarBot",
+                "--receipt",
+                str(self.state / "receipts" / f"{SHA}.json"),
+                "--qa-bin",
+                str(self.qa),
+                "--min-cases",
+                "5",
+                "--base-cases",
+                "5",
+            ],
+        )
         self.assertEqual(record["cases"], cases)
         self.assertEqual(record["cases_mode"], 0o600)
         self.assertFalse(Path(argv[2]).exists(), "the cases file must be removed after the run")
@@ -308,7 +391,9 @@ class Verdicts(DriverCase):
         self.set_ssh(mode="ready", ready=ready_payload(username=USERNAME.lower()), sha=SHA)
         rc, _, err = self.run_driver()
         self.assertEqual(rc, 0, err)
-        self.assertEqual(self.smoke()["argv"][self.smoke()["argv"].index("--username") + 1], USERNAME)
+        self.assertEqual(
+            self.smoke()["argv"][self.smoke()["argv"].index("--username") + 1], USERNAME
+        )
 
     def test_a_failed_case_is_exit_1_with_the_counts_of_the_smoke(self):
         self.set_smoke(rc=1, final=f"STAGE_SMOKE_FAILED sha={SHA} bot=@{USERNAME} cases=5 failed=2")
@@ -334,9 +419,12 @@ class Verdicts(DriverCase):
         self.assert_result(out, "failed")
 
     def test_exit_0_without_a_pass_summary_is_not_a_pass(self):
-        for final in (None, f"STAGE_SMOKE_FAILED sha={SHA} bot=@{USERNAME} cases=5 failed=1",
-                      f"STAGE_SMOKE_PASSED sha={SHA} bot=@{USERNAME} cases=0 failed=0",
-                      f"STAGE_SMOKE_PASSED sha={SHA} bot=@{USERNAME} cases=4 failed=0"):
+        for final in (
+            None,
+            f"STAGE_SMOKE_FAILED sha={SHA} bot=@{USERNAME} cases=5 failed=1",
+            f"STAGE_SMOKE_PASSED sha={SHA} bot=@{USERNAME} cases=0 failed=0",
+            f"STAGE_SMOKE_PASSED sha={SHA} bot=@{USERNAME} cases=4 failed=0",
+        ):
             with self.subTest(final=final):
                 self.set_smoke(rc=0, final=final)
                 rc, out, err = self.run_driver()
@@ -354,12 +442,20 @@ class Verdicts(DriverCase):
 
 class WrapperEndsBeforeReady(DriverCase):
     def test_the_wrapper_exit_code_is_the_verdict_and_nothing_runs(self):
-        table = ((76, "superseded"), (2, "refused"), (3, "not-provisioned"), (75, "lock-timeout"), (1, "failed"))
+        table = (
+            (76, "superseded"),
+            (2, "refused"),
+            (3, "not-provisioned"),
+            (75, "lock-timeout"),
+            (1, "failed"),
+        )
         for wrapper_rc, status in table:
             with self.subTest(wrapper_rc=wrapper_rc):
                 self.ssh_log.unlink(missing_ok=True)
                 self.smoke_record.unlink(missing_ok=True)
-                self.set_ssh(mode="result_only", rc=wrapper_rc, sha=SHA, stderr_lines=["wrapper explains"])
+                self.set_ssh(
+                    mode="result_only", rc=wrapper_rc, sha=SHA, stderr_lines=["wrapper explains"]
+                )
                 rc, out, err = self.run_driver()
                 self.assertEqual(rc, wrapper_rc, err)
                 self.assert_result(out, status)
@@ -391,7 +487,9 @@ class WrapperEndsBeforeReady(DriverCase):
         self.assertFalse(self.smoke_record.exists())
 
     def test_ssh_dying_after_ready_kills_the_smoke_and_fails(self):
-        self.set_ssh(mode="ready", ready=ready_payload(), sha=SHA, die_after_ready=1, die_after_ready_delay=1)
+        self.set_ssh(
+            mode="ready", ready=ready_payload(), sha=SHA, die_after_ready=1, die_after_ready_delay=1
+        )
         self.set_smoke(sleep=60)
         started = time.monotonic()
         rc, out, err = self.run_driver()
@@ -402,7 +500,9 @@ class WrapperEndsBeforeReady(DriverCase):
         self.assertTrue(wait_dead(ids["pid"]) and wait_dead(ids["child"]))
 
     def test_ssh_ending_cleanly_after_ready_without_done_is_not_a_pass(self):
-        self.set_ssh(mode="ready", ready=ready_payload(), sha=SHA, die_after_ready=0, die_after_ready_delay=1)
+        self.set_ssh(
+            mode="ready", ready=ready_payload(), sha=SHA, die_after_ready=0, die_after_ready_delay=1
+        )
         self.set_smoke(sleep=60)
         rc, out, err = self.run_driver()
         self.assertEqual(rc, 1, err)
@@ -438,7 +538,9 @@ class ReadyValidation(DriverCase):
             "empty peer": ready_payload(peer=""),
             "empty cases": ready_payload(cases=[], base_cases=0),
             "short list": ready_payload(cases=base[:4], base_cases=4),
-            "extras do not fill the floor": ready_payload(cases=[*base[:4], dict(base[4], name="extra")], base_cases=4),
+            "extras do not fill the floor": ready_payload(
+                cases=[*base[:4], dict(base[4], name="extra")], base_cases=4
+            ),
             "missing required": ready_payload(cases=replaced, base_cases=5),
             "base_cases larger than the list": ready_payload(base_cases=99),
             "base_cases not an int": ready_payload(base_cases="5"),
@@ -462,8 +564,12 @@ class ReadyValidation(DriverCase):
         self.refuses(ready_payload(cases=[*base, *base_cases(["start"])], base_cases=5))
 
     def test_a_second_ready_line_is_ignored_and_does_not_start_a_second_run(self):
-        self.set_ssh(mode="ready", ready=ready_payload(), sha=SHA,
-                     stdout_lines_after_ready=["STAGE_READY " + json.dumps(ready_payload(username="evil"))])
+        self.set_ssh(
+            mode="ready",
+            ready=ready_payload(),
+            sha=SHA,
+            stdout_lines_after_ready=["STAGE_READY " + json.dumps(ready_payload(username="evil"))],
+        )
         rc, out, err = self.run_driver()
         self.assertEqual(rc, 0, err)
         self.assert_result(out, "passed", cases=5)
@@ -540,11 +646,18 @@ class NotProvisioned(DriverCase):
         self.expect_not_provisioned("ssh")
 
     def test_defaults_fill_the_optional_keys(self):
-        for key in ("deny_usernames", "min_cases", "required_cases", "lock_max_wait", "smoke_timeout",
-                    "ready_timeout", "done_timeout"):
+        for key in (
+            "deny_usernames",
+            "min_cases",
+            "required_cases",
+            "lock_max_wait",
+            "smoke_timeout",
+            "ready_timeout",
+            "done_timeout",
+        ):
             self.config.pop(key)
         self.write_config()
-        rc, out, err = self.run_driver()
+        rc, _out, err = self.run_driver()
         self.assertEqual(rc, 0, err)
         argv = self.smoke()["argv"]
         self.assertEqual(argv[argv.index("--min-cases") + 1], "5")
@@ -560,8 +673,15 @@ class ArgumentsAndToken(DriverCase):
                 self.assertEqual(self.ssh_events(), [])
 
     def test_missing_sha_is_refused(self):
-        process = subprocess.run([sys.executable, str(self.lib / "stage-qa-pc.py")], input=FAKE_TOKEN + "\n",
-                                 capture_output=True, text=True, env=self.env, timeout=30)
+        process = subprocess.run(
+            [sys.executable, str(self.lib / "stage-qa-pc.py")],
+            input=FAKE_TOKEN + "\n",
+            capture_output=True,
+            text=True,
+            env=self.env,
+            timeout=30,
+            check=False,
+        )
         self.assertEqual(process.returncode, 2)
         self.assert_result(process.stdout, "refused", sha="-")
 
@@ -594,7 +714,8 @@ class PcLock(DriverCase):
         fcntl.flock(fd, fcntl.LOCK_EX)
         if owner:
             Path(str(self.lock) + ".owner").write_text(
-                f"repo=esb-qa\npid={os.getpid()}\nstart_ticks={start_ticks(os.getpid())}\nstarted=2026-10-26T00:00:00Z\n")
+                f"repo=esb-qa\npid={os.getpid()}\nstart_ticks={start_ticks(os.getpid())}\nstarted=2026-10-26T00:00:00Z\n"
+            )
         state = {"open": True}
 
         def release():
@@ -638,14 +759,18 @@ class PcLock(DriverCase):
         self.config["lock_max_wait"] = 1
         self.write_config()
         self.hold(owner=False)
-        Path(str(self.lock) + ".owner").write_text("repo=esb-qa\npid=999999\nstart_ticks=1\nstarted=x\n")
+        Path(str(self.lock) + ".owner").write_text(
+            "repo=esb-qa\npid=999999\nstart_ticks=1\nstarted=x\n"
+        )
         rc, _, err = self.run_driver()
         self.assertEqual(rc, 75)
         self.assertIn("stale", err)
 
     def test_the_driver_records_itself_as_owner_while_running_and_clears_it_after(self):
-        self.set_smoke(owner_file=str(self.lock) + ".owner",
-                       final=f"STAGE_SMOKE_PASSED sha={SHA} bot=@{USERNAME} cases=5 failed=0")
+        self.set_smoke(
+            owner_file=str(self.lock) + ".owner",
+            final=f"STAGE_SMOKE_PASSED sha={SHA} bot=@{USERNAME} cases=5 failed=0",
+        )
         rc, _, err = self.run_driver()
         self.assertEqual(rc, 0, err)
         owner = dict(line.split("=", 1) for line in self.smoke()["owner"].splitlines())
@@ -689,7 +814,10 @@ class Signals(DriverCase):
                 self.assertTrue(out.startswith("STAGE_QA_RESULT status=failed sha="), out)
                 self.assertEqual(len(out.splitlines()), 1)
                 self.assert_done_sent_and_waited()
-                self.assertTrue(wait_dead(ids["pid"]) and wait_dead(ids["child"]), "smoke process group must die")
+                self.assertTrue(
+                    wait_dead(ids["pid"]) and wait_dead(ids["child"]),
+                    "smoke process group must die",
+                )
                 fd = os.open(self.lock, os.O_RDWR)
                 try:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -704,9 +832,11 @@ class Signals(DriverCase):
         process.send_signal(signal.SIGTERM)
         time.sleep(0.7)
         process.send_signal(signal.SIGTERM)
-        out, err = process.communicate(timeout=30)
+        _out, err = process.communicate(timeout=30)
         self.assertEqual(process.returncode, 143, err)
-        self.assertIsNotNone(self.ssh_event("finished"), "ssh must be waited for even after a second signal")
+        self.assertIsNotNone(
+            self.ssh_event("finished"), "ssh must be waited for even after a second signal"
+        )
 
     def test_signal_while_waiting_for_the_lock_exits_without_ssh(self):
         self.config["lock_max_wait"] = 60
@@ -729,7 +859,7 @@ class Signals(DriverCase):
         while self.ssh_event("token") is None and time.monotonic() < deadline:
             time.sleep(0.1)
         process.send_signal(signal.SIGTERM)
-        out, err = process.communicate(timeout=30)
+        _out, err = process.communicate(timeout=30)
         self.assertEqual(process.returncode, 143, err)
         self.assert_done_sent_and_waited()
 
@@ -771,7 +901,10 @@ class Static(unittest.TestCase):
         self.assertNotRegex(text, r"shell\s*=\s*True")
 
     def test_scripts_parse(self):
-        subprocess.run([sys.executable, "-c", f"import ast; ast.parse(open({str(DRIVER)!r}).read())"], check=True)
+        subprocess.run(
+            [sys.executable, "-c", f"import ast; ast.parse(open({str(DRIVER)!r}).read())"],
+            check=True,
+        )
         subprocess.run(["bash", "-n", str(INSTALLER)], check=True)
 
 
@@ -805,7 +938,9 @@ class Installer(unittest.TestCase):
     def make_script(self, forbidden_euid=None):
         replacements = [("readonly PC_LOCK_WAIT=60\n", "readonly PC_LOCK_WAIT=1\n")]
         if forbidden_euid is not None:
-            replacements.append(("readonly FORBIDDEN_EUID=0\n", f"readonly FORBIDDEN_EUID={forbidden_euid}\n"))
+            replacements.append(
+                ("readonly FORBIDDEN_EUID=0\n", f"readonly FORBIDDEN_EUID={forbidden_euid}\n")
+            )
         script = self.tmp / "install-stage-qa-pc.sh"
         script.write_text(rewrite(INSTALLER.read_text(), replacements))
         script.chmod(0o755)
@@ -816,8 +951,11 @@ class Installer(unittest.TestCase):
         (self.src / "scripts/stage-smoke.py").write_text(f"# stage-smoke {version}\n")
 
     def git(self, *args):
-        subprocess.run(["git", "-C", str(self.src), "-c", "user.name=t", "-c", "user.email=t@t", *args],
-                       check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.src), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            check=True,
+            capture_output=True,
+        )
 
     def publish(self):
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
@@ -827,13 +965,21 @@ class Installer(unittest.TestCase):
         self.git("commit", "-q", "-m", message)
 
     def install(self, *args, script=None):
-        return subprocess.run([str(script or self.script), *(args or (str(self.src),))], capture_output=True,
-                              text=True, env={"PATH": "/usr/bin:/bin", "HOME": str(self.home)}, timeout=60)
+        return subprocess.run(
+            [str(script or self.script), *(args or (str(self.src),))],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(self.home)},
+            timeout=60,
+            check=False,
+        )
 
     def test_fresh_install_lays_out_lib_entry_config_and_key(self):
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(sorted(p.name for p in self.lib.iterdir()), ["stage-qa-pc.py", "stage-smoke.py"])
+        self.assertEqual(
+            sorted(p.name for p in self.lib.iterdir()), ["stage-qa-pc.py", "stage-smoke.py"]
+        )
         self.assertEqual((self.lib / "stage-smoke.py").read_text(), "# stage-smoke one\n")
         self.assertTrue((self.lib / "stage-qa-pc.py").read_text().endswith("# one\n"))
         entry = self.entry.read_text()
@@ -842,22 +988,30 @@ class Installer(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.entry.stat().st_mode), 0o755)
         self.assertEqual(stat.S_IMODE(self.config.stat().st_mode), 0o600)
         config = json.loads(self.config.read_text())
-        self.assertEqual(config, {
-            "ssh_target": "root@odroidn2",
-            "ssh_key": "~/.ssh/hypercal-stage-qa_ed25519",
-            "username": "HyperCalendarStageBot",
-            "deny_usernames": ["HyperCalendarBot"],
-            "qa_bin": "~/.local/bin/qa",
-            "python": "python3",
-            "lock_file": "~/.local/state/hypercal-stage-qa/qa.lock",
-            "lock_max_wait": 2700,
-            "state_dir": "~/.local/state/hypercal-stage-qa",
-            "min_cases": 5,
-            "required_cases": REQUIRED,
-        })
+        self.assertEqual(
+            config,
+            {
+                "ssh_target": "root@odroidn2",
+                "ssh_key": "~/.ssh/hypercal-stage-qa_ed25519",
+                "username": "HyperCalendarStageBot",
+                "deny_usernames": ["HyperCalendarBot"],
+                "qa_bin": "~/.local/bin/qa",
+                "python": "python3",
+                "lock_file": "~/.local/state/hypercal-stage-qa/qa.lock",
+                "lock_max_wait": 2700,
+                "state_dir": "~/.local/state/hypercal-stage-qa",
+                "min_cases": 5,
+                "required_cases": REQUIRED,
+            },
+        )
         self.assertEqual(stat.S_IMODE(self.key.stat().st_mode), 0o600)
         self.assertTrue(self.key.with_name(self.key.name + ".pub").exists())
-        self.assertEqual(sorted(p.name for p in self.lib.parent.iterdir() if ".new" in p.name or ".bak" in p.name), [])
+        self.assertEqual(
+            sorted(
+                p.name for p in self.lib.parent.iterdir() if ".new" in p.name or ".bak" in p.name
+            ),
+            [],
+        )
 
     def test_prints_the_authorized_keys_line_and_the_rollback(self):
         result = self.install()
@@ -884,8 +1038,13 @@ class Installer(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         self.assertEqual((backups[0] / "stage-smoke.py").read_text(), "# stage-smoke one\n")
         rollback = re.search(r"(?m)^rollback: (.+)$", result.stdout).group(1)
-        done = subprocess.run(["bash", "-c", rollback], capture_output=True, text=True,
-                              env={"PATH": "/usr/bin:/bin", "HOME": str(self.home)})
+        done = subprocess.run(
+            ["bash", "-c", rollback],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(self.home)},
+            check=False,
+        )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual((self.lib / "stage-smoke.py").read_text(), "# stage-smoke one\n")
         self.assertTrue((self.lib / "stage-qa-pc.py").read_text().endswith("# one\n"))
@@ -894,8 +1053,13 @@ class Installer(unittest.TestCase):
     def test_first_install_rollback_removes_what_it_created(self):
         result = self.install()
         rollback = re.search(r"(?m)^rollback: (.+)$", result.stdout).group(1)
-        done = subprocess.run(["bash", "-c", rollback], capture_output=True, text=True,
-                              env={"PATH": "/usr/bin:/bin", "HOME": str(self.home)})
+        done = subprocess.run(
+            ["bash", "-c", rollback],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(self.home)},
+            check=False,
+        )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertFalse(self.lib.exists())
         self.assertFalse(self.entry.exists())
@@ -958,12 +1122,22 @@ class Installer(unittest.TestCase):
         write_exe(bin_dir / "ssh", FAKE_SSH)
         log = self.tmp / "ssh.log"
         (bin_dir / "ssh_scenario.json").write_text(
-            json.dumps({"mode": "result_only", "rc": 76, "sha": SHA, "log": str(log)}))
+            json.dumps({"mode": "result_only", "rc": 76, "sha": SHA, "log": str(log)})
+        )
         write_exe(self.home / ".local/bin/qa", "#!/bin/sh\nexit 0\n")
-        done = subprocess.run([str(self.entry), SHA], input=FAKE_TOKEN + "\n", capture_output=True, text=True,
-                              timeout=60, env={"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(self.home)})
+        done = subprocess.run(
+            [str(self.entry), SHA],
+            input=FAKE_TOKEN + "\n",
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(self.home)},
+            check=False,
+        )
         self.assertEqual(done.returncode, 76, done.stderr)
-        self.assertEqual(done.stdout, f"STAGE_QA_RESULT status=superseded sha={SHA} cases=0 failed=0\n")
+        self.assertEqual(
+            done.stdout, f"STAGE_QA_RESULT status=superseded sha={SHA} cases=0 failed=0\n"
+        )
         start = json.loads(log.read_text().splitlines()[0])
         self.assertEqual(start["argv"][:2], ["-i", str(self.key)])
         self.assertEqual(start["argv"][-2:], ["root@odroidn2", SHA])

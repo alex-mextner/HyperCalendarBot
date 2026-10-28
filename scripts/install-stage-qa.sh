@@ -39,15 +39,22 @@ readonly -a LIB_SOURCES=(
 )
 readonly ENTRY_SOURCE=scripts/odroid-stage-qa.sh
 
-fail() { local code="${2:-2}"; echo "install-stage-qa: $1" >&2; exit "$code"; }
+fail() {
+  local code="${2:-2}"
+  echo "install-stage-qa: $1" >&2
+  exit "$code"
+}
 
 NEW_LIB=""
 NEW_ENTRY=""
-cleanup() { [[ -z "$NEW_LIB" ]] || rm -rf -- "$NEW_LIB"; [[ -z "$NEW_ENTRY" ]] || rm -f -- "$NEW_ENTRY"; }
+cleanup() {
+  [[ -z "$NEW_LIB" ]] || rm -rf -- "$NEW_LIB"
+  [[ -z "$NEW_ENTRY" ]] || rm -f -- "$NEW_ENTRY"
+}
 trap cleanup EXIT
 
-(( EUID == REQUIRED_EUID )) || fail 'must run as root (the files it installs are executed as root)'
-(( $# <= 1 )) || fail 'usage: install-stage-qa.sh [<checkout>]'
+((EUID == REQUIRED_EUID)) || fail 'must run as root (the files it installs are executed as root)'
+(($# <= 1)) || fail 'usage: install-stage-qa.sh [<checkout>]'
 SRC="$(cd "${1:-$PWD}" && pwd -P)" || fail 'checkout directory not found'
 
 ALL_SOURCES=("${LIB_SOURCES[@]}" "$ENTRY_SOURCE")
@@ -73,7 +80,10 @@ BRANCH="$(git_in_src branch --show-current || true)"
 # Hold the stage lock while swapping: a run in flight keeps the stage lock for its whole life, so
 # the install waits for it instead of swapping the scripts under it.
 mkdir -p -- "$(dirname "$STAGE_LOCK_FILE")"
-( umask 0; : >>"$STAGE_LOCK_FILE" )
+(
+  umask 0
+  : >>"$STAGE_LOCK_FILE"
+)
 exec {LOCK_FD}<"$STAGE_LOCK_FILE"
 flock -w "$STAGE_LOCK_WAIT" "$LOCK_FD" \
   || fail "a stage QA run holds $STAGE_LOCK_FILE; nothing was changed, retry when it ends" 75

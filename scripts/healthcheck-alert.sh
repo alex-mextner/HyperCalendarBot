@@ -108,7 +108,7 @@ probe_health() {
 answered_by_bot() {
   [[ "$HTTP_CODE" == "200" ]] || return 1
   case "$(cat "$BODY_FILE")" in
-    ok|"ok (unverified)"|"ai chain down") return 0 ;;
+    ok | "ok (unverified)" | "ai chain down") return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -174,9 +174,9 @@ else
       # stays silent, so an indefinite wait would swallow the alert for a
       # *different* outage starting later. That silence is the worse failure,
       # whether it comes from a quiet bot or from a broken contract.
-      [[ -f "$UNVERIFIED_FILE" ]] || date +%s > "$UNVERIFIED_FILE"
-      WAITED=$(( $(date +%s) - $(cat "$UNVERIFIED_FILE") ))
-      if (( WAITED > UNVERIFIED_HOLD )); then
+      [[ -f "$UNVERIFIED_FILE" ]] || date +%s >"$UNVERIFIED_FILE"
+      WAITED=$(($(date +%s) - $(cat "$UNVERIFIED_FILE")))
+      if ((WAITED > UNVERIFIED_HOLD)); then
         rm -f "$STATE_FILE" "$UNVERIFIED_FILE"
         echo "$(date -u +%FT%TZ) dropping down-state after ${WAITED}s without proof; no recovery announced" >&2
       fi

@@ -13,7 +13,6 @@ import http.server
 import io
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
@@ -23,6 +22,7 @@ import threading
 import unittest
 import urllib.parse
 import zipfile
+from pathlib import Path
 
 from docker_save_fixture import add_members, docker_save_members
 
@@ -41,7 +41,7 @@ def workflow_release_files():
     """Release-relative paths the hosted build copies into its uploaded release directory."""
     text = (ROOT / ".github/workflows/deploy.yml").read_text()
     copied = set()
-    for sources, subdir in re.findall(r"^\s*cp (.+) release(/scripts)?/\s*$", text, re.M):
+    for sources, subdir in re.findall(r"^\s*cp (.+) release(/scripts)?/\s*$", text, re.MULTILINE):
         for source in sources.split():
             copied.add(("scripts/" if subdir else "") + Path(source).name)
     if not copied:
@@ -66,7 +66,9 @@ def image_archive(revision=SHA, extra_label=None):
     labels = {"org.opencontainers.image.revision": revision}
     if extra_label:
         labels["fixture.variant"] = extra_label
-    config = json.dumps({"architecture": "arm64", "os": "linux", "config": {"Labels": labels}}).encode()
+    config = json.dumps(
+        {"architecture": "arm64", "os": "linux", "config": {"Labels": labels}}
+    ).encode()
     members, _ = docker_save_members(f"{IMAGE}:{SHA}", config)
     raw = io.BytesIO()
     with tarfile.open(fileobj=raw, mode="w:gz") as tar:
@@ -156,10 +158,22 @@ class FakeGitHub:
             return request.reply(404)
         hops, artifact_id = int(found[1]), int(found[2])
         if hops:
-            return request.reply(302, headers=[("Location", f"/hop/{hops - 1}/{artifact_id}?sig=synthetic")])
+            return request.reply(
+                302,
+                headers=[("Location", f"/hop/{hops - 1}/{artifact_id}?sig=synthetic")],
+            )
         return request.reply(200, self.zips[artifact_id])
 
-    def upload(self, artifact_id, zip_bytes, run_id=70, digest=None, name="release-" + SHA, expired=False, **run_changes):
+    def upload(
+        self,
+        artifact_id,
+        zip_bytes,
+        run_id=70,
+        digest=None,
+        name="release-" + SHA,
+        expired=False,
+        **run_changes,
+    ):
         """An artifact uploaded into workflow run run_id, which is a push-to-main run unless changed."""
         self.runs[run_id] = {
             "id": run_id,
@@ -217,9 +231,18 @@ class ActivateReleaseTests(unittest.TestCase):
         self.wrapper = self.tmp / "hypercal-activate-release"
         text = WRAPPER.read_text()
         for old, new in (
-            ("readonly API=https://api.github.com\n", f"readonly API={self.github.url(self.github.api)}\n"),
-            ("readonly DEPLOY_PATH=/opt/hypercal\n", f"readonly DEPLOY_PATH={self.deploy}\n"),
-            (f"readonly SAFE_PATH={SAFE_PATH}\n", f"readonly SAFE_PATH={self.bin}:{SAFE_PATH}\n"),
+            (
+                "readonly API=https://api.github.com\n",
+                f"readonly API={self.github.url(self.github.api)}\n",
+            ),
+            (
+                "readonly DEPLOY_PATH=/opt/hypercal\n",
+                f"readonly DEPLOY_PATH={self.deploy}\n",
+            ),
+            (
+                f"readonly SAFE_PATH={SAFE_PATH}\n",
+                f"readonly SAFE_PATH={self.bin}:{SAFE_PATH}\n",
+            ),
         ):
             self.assertEqual(text.count(old), 1, old)
             text = text.replace(old, new)
@@ -263,6 +286,7 @@ class ActivateReleaseTests(unittest.TestCase):
             text=True,
             capture_output=True,
             timeout=60,
+            check=False,
         )
 
     def recorded(self):
@@ -280,7 +304,11 @@ class ActivateReleaseTests(unittest.TestCase):
         self.assertNotIn(FAKE_TOKEN, result.stdout + result.stderr)
 
     def test_verified_release_reaches_the_activator_with_sums_computed_by_root(self):
-        extra = [("evil.sh", b"not part of the release\n"), ("scripts/extra.sh", b"no\n"), ("../escape", b"no\n")]
+        extra = [
+            ("evil.sh", b"not part of the release\n"),
+            ("scripts/extra.sh", b"no\n"),
+            ("../escape", b"no\n"),
+        ]
         self.github.publish(7, self.release_zip(extra=extra))
         result = self.run_wrapper()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -329,8 +357,13 @@ class ActivateReleaseTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("artifact.json", self.recorded()["files"])
 
-    def test_helper_scripts_of_later_changes_are_optional_so_older_releases_still_deploy(self):
-        self.github.publish(7, self.release_zip(drop=["scripts/deploy-health.py", "scripts/log-retention.py"]))
+    def test_helper_scripts_of_later_changes_are_optional_so_older_releases_still_deploy(
+        self,
+    ):
+        self.github.publish(
+            7,
+            self.release_zip(drop=["scripts/deploy-health.py", "scripts/log-retention.py"]),
+        )
         result = self.run_wrapper()
         self.assertEqual(result.returncode, 0, result.stderr)
         files = self.recorded()["files"]
@@ -350,7 +383,10 @@ class ActivateReleaseTests(unittest.TestCase):
         self.github.publish(7, self.release_zip())
         result = self.run_wrapper()
         self.assertRefused(result, f"superseded: main is {OTHER_SHA}")
-        self.assertEqual([path for path, _ in self.github.api_requests], [f"/repos/{REPO}/git/ref/heads/main"])
+        self.assertEqual(
+            [path for path, _ in self.github.api_requests],
+            [f"/repos/{REPO}/git/ref/heads/main"],
+        )
         self.assertEqual(self.github.blob_requests, [])
 
     def test_artifact_the_status_does_not_name_is_never_deployed(self):
@@ -400,8 +436,12 @@ class ActivateReleaseTests(unittest.TestCase):
             "no creator": {"creator": None},
             "description without digest": {"description": "artifact 7"},
             "description with bare hex": {"description": "artifact 7 " + "a" * 64},
-            "description with trailing text": {"description": "artifact 7 sha256:" + "a" * 64 + " extra"},
-            "target outside the repository": {"target_url": "https://github.com/someone/HyperCalendarBot/actions/runs/70"},
+            "description with trailing text": {
+                "description": "artifact 7 sha256:" + "a" * 64 + " extra"
+            },
+            "target outside the repository": {
+                "target_url": "https://github.com/someone/HyperCalendarBot/actions/runs/70"
+            },
             "target not a run": {"target_url": f"https://github.com/{REPO}/pull/70"},
             "target on another host": {"target_url": f"https://example.com/{REPO}/actions/runs/70"},
         }
@@ -422,12 +462,17 @@ class ActivateReleaseTests(unittest.TestCase):
                 digest = self.github.upload(7, self.release_zip())
                 if changes is not None:
                     self.github.post_status(7, digest, **changes)
-                self.assertRefused(self.run_wrapper(), messages.get(label, "status description is not"))
+                self.assertRefused(
+                    self.run_wrapper(), messages.get(label, "status description is not")
+                )
                 self.assertEqual(self.github.blob_requests, [])
 
     def test_artifact_that_disagrees_with_the_status_is_refused(self):
         cases = {
-            "status digest differs from the artifact": ({}, {"description": "artifact 7 sha256:" + "0" * 64}),
+            "status digest differs from the artifact": (
+                {},
+                {"description": "artifact 7 sha256:" + "0" * 64},
+            ),
             "artifact from another run": ({"run_id": 71}, {}),
             "artifact named differently": ({"name": "release-" + OTHER_SHA}, {}),
             "expired artifact": ({"expired": True}, {}),
@@ -460,7 +505,10 @@ class ActivateReleaseTests(unittest.TestCase):
             with self.subTest(label):
                 self.github.statuses.clear()
                 self.github.publish(7, self.release_zip(), **changes)
-                self.assertRefused(self.run_wrapper(), f"run 70 is not a push-to-main run of {WORKFLOW_PATH}")
+                self.assertRefused(
+                    self.run_wrapper(),
+                    f"run 70 is not a push-to-main run of {WORKFLOW_PATH}",
+                )
                 self.assertEqual(self.github.blob_requests, [])
 
     def test_downloaded_zip_that_differs_from_the_recorded_digest_is_refused(self):
@@ -475,7 +523,10 @@ class ActivateReleaseTests(unittest.TestCase):
     def test_image_built_from_another_revision_is_refused(self):
         image, _ = image_archive(revision=OTHER_SHA)
         self.github.publish(7, self.release_zip(image=image))
-        self.assertRefused(self.run_wrapper(), "release image rejected: ValueError: Artifact revision mismatch")
+        self.assertRefused(
+            self.run_wrapper(),
+            "release image rejected: ValueError: Artifact revision mismatch",
+        )
 
     def test_activator_failure_code_propagates_and_stage_is_removed(self):
         self.github.publish(7, self.release_zip(activator=self.recorder(exit_code=17)))
@@ -494,16 +545,26 @@ class ActivateReleaseTests(unittest.TestCase):
         }.items():
             with self.subTest(label):
                 result = subprocess.run(
-                    [str(self.wrapper), *args], input=FAKE_TOKEN + "\n", text=True, capture_output=True, timeout=30
+                    [str(self.wrapper), *args],
+                    input=FAKE_TOKEN + "\n",
+                    text=True,
+                    capture_output=True,
+                    timeout=30,
+                    check=False,
                 )
                 self.assertRefused(result, "hypercal-activate-release:")
         for label, token in {"no token": None, "short token": "short"}.items():
             with self.subTest(label):
-                self.assertRefused(self.run_wrapper(token=token), "a GitHub token is required on stdin")
+                self.assertRefused(
+                    self.run_wrapper(token=token), "a GitHub token is required on stdin"
+                )
         self.assertEqual(self.github.api_requests, [])
 
     def test_stage_name_passes_the_real_activator_ownership_guard(self):
-        self.github.publish(7, self.release_zip(activator=(ROOT / "scripts/deploy-prebuilt-image.sh").read_text()))
+        self.github.publish(
+            7,
+            self.release_zip(activator=(ROOT / "scripts/deploy-prebuilt-image.sh").read_text()),
+        )
         # A held release lock stops the real activator right after its staging guard.
         flock = self.bin / "flock"
         flock.write_text("#!/bin/sh\nexit 1\n")

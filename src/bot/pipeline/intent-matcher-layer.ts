@@ -2,10 +2,10 @@
 
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
-import type { User } from '../../database/types.ts';
+import type { Intent, User } from '../../database/types.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
 import type { IntentExecutor, MutationEvidence } from '../../services/intent/intent-executor.ts';
-import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
+import type { IntentMatcher, MatchResult } from '../../services/intent/intent-matcher.ts';
 import { formatResponse } from '../../services/intent/response-formatter.ts';
 import { evidenceMessage, guardRuleTools, type RunTools } from '../../services/intent/rule-run-guard.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
@@ -60,6 +60,12 @@ export function createIntentMatcherLayer(
   actionLogRepo?: ActionLogRepository,
 ) {
   type Result = Awaited<ReturnType<IntentExecutor['run']>>;
+  type MatchedRule = {
+    match: MatchResult;
+    intent: Intent;
+    workflow: Workflow;
+    ruleFingerprint: string;
+  };
   async function deliverResponse(ctx: BotCommandContext, plainText: string, removeKeyboard = false): Promise<void> {
     // formatResponse returns display text, not a trusted Telegram HTML document.
     const chunks = splitMessage(escapeHtml(plainText), 4000, 'HTML');
@@ -179,9 +185,15 @@ export function createIntentMatcherLayer(
       );
       return { handled: true };
     }
+    await finishResumedRun(turn, session, row.format, result);
+    return { handled: true };
+  }
+  /** Delivers what a resumed workflow produced: a new suspension, a failure report or its response. */
+  async function finishResumedRun(turn: Turn, session: WorkflowSession, format: string, result: Result): Promise<void> {
+    const { ctx, user, chatId, userId } = turn;
     if (result.suspended && result.suspendedAt !== undefined) {
       await saveSuspension(ctx, chatId, userId, session, result);
-      return { handled: true };
+      return;
     }
     // The answer was consumed by the resumed workflow, so it cannot be replayed as a fresh request.
     if (!result.success && result.mutationEvidence !== undefined) {
@@ -190,72 +202,89 @@ export function createIntentMatcherLayer(
         'Resumed intent workflow failed',
       );
       await ctx.send(evidenceMessage(user.language, result.mutationEvidence));
-      return { handled: true };
+      return;
     }
     if (result.response) {
       // Same formatting as a first-pass match: a resumed workflow can end in a tool
       // whose text output is written for the AI agent, not for the user.
-      const text = formatResponse(row.format, result.response, user.timezone, user.language, result.responseEvents);
+      const text = formatResponse(format, result.response, user.timezone, user.language, result.responseEvents);
       if (session.workflow.version === 2) {
         await deliverResponse(ctx, text, true);
       } else await ctx.send(text);
     }
-    return { handled: true };
   }
-  return async (
-    ctx: BotCommandContext,
-    messageText: string,
-    extra?: {
-      feedbackContext?: FeedbackThreadContext;
-      groupContext?: GroupContext;
-      supplementMode?: boolean;
-    },
-  ): Promise<PipelineResult> => {
-    const user = ctx.dbUser;
-    if (!user) return { handled: false };
-    const userId = user.telegram_id;
-    const chatId = Number(ctx.chatId ?? userId);
-    const groupCtx = extra?.groupContext;
-
-    // 1. Check for active workflow session (resuming from ask_user).
-    // TTL is enforced inside workflowSessions.get() — a non-null result is always fresh.
-    const session = workflowSessions.get(chatId, userId);
-    if (session) return resumeSession({ ctx, user, chatId, userId, groupCtx, messageText }, session);
-
-    // 2. Try matching
+  /** Matches the message to a runnable stored rule; undefined when it should go on to the AI agent. */
+  function findRunnableRule(messageText: string): MatchedRule | undefined {
     const match = matcher.match(messageText);
-    if (!match) return { handled: false };
+    if (!match) return undefined;
 
-    // 3. Load workflow from DB
     const intent = intentRepo.getById(match.intentId);
-    if (!intent) return { handled: false };
+    if (!intent) return undefined;
 
     const workflowResult = WorkflowCodec.safeParse(intent.workflow);
     if (!workflowResult.success) {
       cmdLogger.error({ intentId: match.intentId }, 'Intent has invalid workflow JSON, skipping');
-      return { handled: false };
+      return undefined;
     }
-    const workflow: Workflow = workflowResult.data;
     const ruleFingerprint = intentRepo.runnableFingerprint(intent);
     if (ruleFingerprint === null) {
       cmdLogger.warn({ intentId: match.intentId }, 'Matched intent rule is no longer runnable, skipping');
-      return { handled: false };
+      return undefined;
     }
+    return { match, intent, workflow: workflowResult.data, ruleFingerprint };
+  }
+  /** Fall through to the AI agent on failure with no write evidence (e.g. unresolved variables, read error). */
+  async function handleFailedRun(turn: Turn, rule: MatchedRule, result: Result): Promise<PipelineResult> {
+    const { ctx, user, userId } = turn;
+    cmdLogger.warn(
+      { intentId: rule.match.intentId, userId, error: result.response },
+      'Intent workflow step failed, falling through to AI agent',
+    );
+    if (notifyAdmin) {
+      notifyAdmin(
+        `⚠️ Intent failed: ${rule.intent.canonical_name} (id=${rule.match.intentId})\nMessage: "${turn.messageText}"\nError: ${result.response ?? 'no response'}`,
+      ).catch((err: unknown) => {
+        cmdLogger.error({ err: err }, 'Failed to send intent fail report to admin');
+      });
+    }
+    if (result.mutationEvidence === 'applied' || result.mutationEvidence === 'unknown') {
+      await ctx.send(evidenceMessage(user.language, result.mutationEvidence));
+      return { handled: true };
+    }
+    return { handled: false };
+  }
+  async function respondToRun(turn: Turn, rule: MatchedRule, result: Result): Promise<PipelineResult> {
+    const { ctx, user } = turn;
+    if (!result.response) return { handled: true };
+    const formatted = formatResponse(
+      rule.intent.format,
+      result.response,
+      user.timezone,
+      user.language,
+      result.responseEvents,
+    );
+    // ctx.send is wrapped in bot/index.ts and already writes this to chat history;
+    // the supplement agent reads the text from supplementAutoResponse, not from history.
+    if (rule.workflow.version === 2) await deliverResponse(ctx, formatted);
+    else await ctx.send(formatted);
+    if (result.completeResponse) return { handled: true };
+    return { handled: true, needsSupplement: true, supplementAutoResponse: formatted };
+  }
+  async function runMatchedRule(turn: Turn, rule: MatchedRule): Promise<PipelineResult> {
+    const { ctx, user, chatId, userId, groupCtx, messageText } = turn;
+    const { match, intent, workflow, ruleFingerprint } = rule;
     const guard = guardRuleTools(intentRepo, match.intentId, ruleFingerprint, toolExecutor);
 
     // Log intent match to action log
-    if (actionLogRepo) {
-      actionLogRepo.insert({
-        user_id: userId,
-        chat_id: chatId,
-        action_type: 'intent_match',
-        action_name: intent.canonical_name,
-        message_id: ctx.id,
-        input_summary: messageText.slice(0, 200),
-      });
-    }
+    actionLogRepo?.insert({
+      user_id: userId,
+      chat_id: chatId,
+      action_type: 'intent_match',
+      action_name: intent.canonical_name,
+      message_id: ctx.id,
+      input_summary: messageText.slice(0, 200),
+    });
 
-    // 4. Execute
     const result = await executor.run(workflow, match.captures, await runContext(user, groupCtx), guard.run);
     if (guard.changed()) {
       await refuseRun(
@@ -267,7 +296,6 @@ export function createIntentMatcherLayer(
       return { handled: true };
     }
 
-    // 5. Handle suspension
     if (result.suspended && result.suspendedAt !== undefined) {
       await saveSuspension(
         ctx,
@@ -288,48 +316,36 @@ export function createIntentMatcherLayer(
       return { handled: true };
     }
 
-    // 6. Fall through to AI agent on failure with no write evidence (e.g. unresolved variables, read error)
-    if (!result.success) {
-      cmdLogger.warn(
-        { intentId: match.intentId, userId, error: result.response },
-        'Intent workflow step failed, falling through to AI agent',
-      );
-      if (notifyAdmin) {
-        notifyAdmin(
-          `⚠️ Intent failed: ${intent.canonical_name} (id=${match.intentId})\nMessage: "${messageText}"\nError: ${result.response ?? 'no response'}`,
-        ).catch((err: unknown) => {
-          cmdLogger.error({ err: err }, 'Failed to send intent fail report to admin');
-        });
-      }
-      if (result.mutationEvidence === 'applied' || result.mutationEvidence === 'unknown') {
-        await ctx.send(evidenceMessage(user.language, result.mutationEvidence));
-        return { handled: true };
-      }
-      return { handled: false };
-    }
+    if (!result.success) return handleFailedRun(turn, rule, result);
 
-    // 7. Persist last mentioned event for cross-request workflows
+    // Persist last mentioned event for cross-request workflows
     if (result.mentionedEventId !== undefined) {
       onEventMentioned?.(userId, result.mentionedEventId);
     }
+    return respondToRun(turn, rule, result);
+  }
+  return async (
+    ctx: BotCommandContext,
+    messageText: string,
+    extra?: {
+      feedbackContext?: FeedbackThreadContext;
+      groupContext?: GroupContext;
+      supplementMode?: boolean;
+    },
+  ): Promise<PipelineResult> => {
+    const user = ctx.dbUser;
+    if (!user) return { handled: false };
+    const userId = user.telegram_id;
+    const chatId = Number(ctx.chatId ?? userId);
+    const turn: Turn = { ctx, user, chatId, userId, groupCtx: extra?.groupContext, messageText };
 
-    // 8. Format and send response
-    if (result.response) {
-      const formatted = formatResponse(
-        intent.format,
-        result.response,
-        user.timezone,
-        user.language,
-        result.responseEvents,
-      );
-      // ctx.send is wrapped in bot/index.ts and already writes this to chat history;
-      // the supplement agent reads the text from supplementAutoResponse, not from history.
-      if (workflow.version === 2) await deliverResponse(ctx, formatted);
-      else await ctx.send(formatted);
-      if (result.completeResponse) return { handled: true };
-      return { handled: true, needsSupplement: true, supplementAutoResponse: formatted };
-    }
+    // Check for active workflow session (resuming from ask_user).
+    // TTL is enforced inside workflowSessions.get() — a non-null result is always fresh.
+    const session = workflowSessions.get(chatId, userId);
+    if (session) return resumeSession(turn, session);
 
-    return { handled: true };
+    const rule = findRunnableRule(messageText);
+    if (!rule) return { handled: false };
+    return runMatchedRule(turn, rule);
   };
 }

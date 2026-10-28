@@ -49,6 +49,94 @@ interface LearnerConfig {
   streamImpl?: typeof aiStreamRound;
 }
 
+type LearnerResponse = z.infer<typeof LearnerResponseSchema>;
+
+/** Outcome of one model reply: a final answer (possibly "skip"), or feedback to send back for another attempt. */
+type LearnerVerdict =
+  | { kind: 'done'; data: CreateIntentData | null }
+  | { kind: 'retry'; feedback: string; exhausted: { context: object; message: string } };
+
+/** Strip markdown code fences if the model ignored the "no markdown" instruction. */
+function stripCodeFences(text: string): string {
+  return text
+    .replace(/^\s*```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/, '')
+    .trim();
+}
+
+/**
+ * Parse and validate the JSON response; null means the model explicitly skipped.
+ * Use safeParse first — a {"skip":true} response omits required fields and
+ * would throw a ZodError with .parse(), even though it's a valid AI decision.
+ */
+function parseLearnerJson(json: string): LearnerResponse | null {
+  const parsedResult = LearnerResponseCodec.safeParse(json);
+  if (parsedResult.success) return parsedResult.data;
+  const skipCheck = jsonCodec(z.object({ skip: z.boolean().optional() }).passthrough()).safeParse(json);
+  if (skipCheck.success && skipCheck.data.skip) return null;
+  throw parsedResult.error;
+}
+
+/** Required fields — phrases can be empty for parameterized intents. */
+function lacksRequiredFields(parsed: LearnerResponse): boolean {
+  return !parsed.canonical_name || !parsed.workflow || (!parsed.phrases.length && !parsed.pattern);
+}
+
+function judgeLearnerReply(text: string, attempt: number, message: string): LearnerVerdict {
+  const parsed = parseLearnerJson(stripCodeFences(text));
+  if (parsed === null || parsed.skip || lacksRequiredFields(parsed)) return { kind: 'done', data: null };
+
+  // Validate workflow schema
+  const workflowResult = WorkflowSchema.safeParse(parsed.workflow);
+  if (!workflowResult.success) {
+    cmdLogger.warn({ attempt, errors: workflowResult.error.issues }, 'IntentLearner workflow has invalid schema');
+    const schemaErrors = workflowResult.error.issues.map((i) => `- ${i.path.join('.') || 'root'}: ${i.message}`);
+    return {
+      kind: 'retry',
+      feedback: [
+        'The workflow does not match the required schema. Fix it and return corrected JSON.',
+        'Schema errors:',
+        ...schemaErrors,
+      ].join('\n'),
+      exhausted: {
+        context: { errors: workflowResult.error.issues },
+        message: 'IntentLearner: workflow schema still invalid after retries, skipping',
+      },
+    };
+  }
+
+  // Validate template variables and the tool calls themselves
+  const varErrors = validateWorkflow(workflowResult.data, parsed.pattern ?? null);
+  if (varErrors.length > 0) {
+    cmdLogger.warn({ attempt, errors: varErrors }, 'IntentLearner workflow is invalid');
+    return {
+      kind: 'retry',
+      feedback: [
+        'The workflow is invalid. Fix the errors below and return corrected JSON.',
+        'Errors:',
+        ...varErrors.map((e) => `- ${e}`),
+      ].join('\n'),
+      exhausted: {
+        context: { errors: varErrors },
+        message: 'IntentLearner: workflow still invalid after retries, skipping',
+      },
+    };
+  }
+
+  return {
+    kind: 'done',
+    data: {
+      canonical_name: parsed.canonical_name,
+      phrases: parsed.phrases,
+      trigger_words: parsed.trigger_words,
+      pattern: parsed.pattern ?? undefined,
+      workflow: workflowResult.data,
+      format: parsed.format || 'text',
+      source_message: message,
+    },
+  };
+}
+
 export class IntentLearner {
   private dailyCallCount = 0;
   private lastResetDate = '';
@@ -175,88 +263,19 @@ export class IntentLearner {
       const text = result.text;
       if (!text) return null;
 
-      // Strip markdown code fences if model ignored "no markdown" instruction
-      const json = text
-        .replace(/^\s*```(?:json)?\s*/i, '')
-        .replace(/\s*```\s*$/, '')
-        .trim();
+      const verdict = judgeLearnerReply(text, attempt, message);
+      if (verdict.kind === 'done') return verdict.data;
 
-      // Parse and validate JSON response.
-      // Use safeParse first — a {"skip":true} response omits required fields and
-      // would throw a ZodError with .parse(), even though it's a valid AI decision.
-      const parsedResult = LearnerResponseCodec.safeParse(json);
-      if (!parsedResult.success) {
-        const skipCheck = jsonCodec(z.object({ skip: z.boolean().optional() }).passthrough()).safeParse(json);
-        if (skipCheck.success && skipCheck.data.skip) return null;
-        throw parsedResult.error;
-      }
-      const parsed = parsedResult.data;
-
-      if (parsed.skip) return null;
-
-      // Validate required fields — phrases can be empty for parameterized intents
-      if (!parsed.canonical_name || !parsed.workflow) {
-        return null;
-      }
-      if (!parsed.phrases.length && !parsed.pattern) {
-        return null;
+      if (attempt < MAX_RETRIES) {
+        // Feed the errors back and retry
+        conversationMessages.push({ role: 'assistant', content: text });
+        conversationMessages.push({ role: 'user', content: verdict.feedback });
+        continue;
       }
 
-      // Validate workflow schema
-      const workflowResult = WorkflowSchema.safeParse(parsed.workflow);
-      if (!workflowResult.success) {
-        cmdLogger.warn({ attempt, errors: workflowResult.error.issues }, 'IntentLearner workflow has invalid schema');
-
-        if (attempt < MAX_RETRIES) {
-          const schemaErrors = workflowResult.error.issues.map((i) => `- ${i.path.join('.') || 'root'}: ${i.message}`);
-          const errorFeedback = [
-            'The workflow does not match the required schema. Fix it and return corrected JSON.',
-            'Schema errors:',
-            ...schemaErrors,
-          ].join('\n');
-          conversationMessages.push({ role: 'assistant', content: text });
-          conversationMessages.push({ role: 'user', content: errorFeedback });
-          continue;
-        }
-
-        cmdLogger.error(
-          { errors: workflowResult.error.issues },
-          'IntentLearner: workflow schema still invalid after retries, skipping',
-        );
-        return null;
-      }
-
-      // Validate template variables and the tool calls themselves
-      const varErrors = validateWorkflow(workflowResult.data, parsed.pattern ?? null);
-      if (varErrors.length > 0) {
-        cmdLogger.warn({ attempt, errors: varErrors }, 'IntentLearner workflow is invalid');
-
-        if (attempt < MAX_RETRIES) {
-          // Feed the errors back and retry
-          const errorFeedback = [
-            'The workflow is invalid. Fix the errors below and return corrected JSON.',
-            'Errors:',
-            ...varErrors.map((e) => `- ${e}`),
-          ].join('\n');
-          conversationMessages.push({ role: 'assistant', content: text });
-          conversationMessages.push({ role: 'user', content: errorFeedback });
-          continue;
-        }
-
-        // After all retries failed — skip this intent
-        cmdLogger.error({ errors: varErrors }, 'IntentLearner: workflow still invalid after retries, skipping');
-        return null;
-      }
-
-      return {
-        canonical_name: parsed.canonical_name,
-        phrases: parsed.phrases,
-        trigger_words: parsed.trigger_words,
-        pattern: parsed.pattern ?? undefined,
-        workflow: workflowResult.data,
-        format: parsed.format || 'text',
-        source_message: message,
-      };
+      // After all retries failed — skip this intent
+      cmdLogger.error(verdict.exhausted.context, verdict.exhausted.message);
+      return null;
     }
 
     return null;

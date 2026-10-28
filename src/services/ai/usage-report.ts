@@ -171,6 +171,22 @@ function tally(counter: Counter, value: number | null, answered: boolean): void 
   }
 }
 
+function addAnswered(acc: Accumulator, event: AiUsageEvent): void {
+  acc.ok++;
+  if (event.durationMs !== null) acc.okDurations.push(event.durationMs);
+  acc.firstOkAt = acc.firstOkAt === null ? event.at : Math.min(acc.firstOkAt, event.at);
+  acc.lastOkAt = acc.lastOkAt === null ? event.at : Math.max(acc.lastOkAt, event.at);
+}
+
+function addFailed(acc: Accumulator, event: AiUsageEvent): void {
+  acc.errors++;
+  const errorClass = event.errorClass ?? 'other';
+  acc.errorsByClass[errorClass] = (acc.errorsByClass[errorClass] ?? 0) + 1;
+  if (acc.lastError === null || event.at >= acc.lastError.at) {
+    acc.lastError = { errorClass, httpStatus: event.httpStatus, at: event.at };
+  }
+}
+
 function add(acc: Accumulator, event: AiUsageEvent): void {
   if (event.outcome === 'skipped') {
     acc.skipped++;
@@ -180,19 +196,8 @@ function add(acc: Accumulator, event: AiUsageEvent): void {
   const answered = event.outcome === 'ok';
   for (const field of TOKEN_FIELDS) tally(acc.tokenSums[field], event[field], answered);
   tally(acc.cost, event.costMicroUsd, answered);
-  if (answered) {
-    acc.ok++;
-    if (event.durationMs !== null) acc.okDurations.push(event.durationMs);
-    acc.firstOkAt = acc.firstOkAt === null ? event.at : Math.min(acc.firstOkAt, event.at);
-    acc.lastOkAt = acc.lastOkAt === null ? event.at : Math.max(acc.lastOkAt, event.at);
-    return;
-  }
-  acc.errors++;
-  const errorClass = event.errorClass ?? 'other';
-  acc.errorsByClass[errorClass] = (acc.errorsByClass[errorClass] ?? 0) + 1;
-  if (acc.lastError === null || event.at >= acc.lastError.at) {
-    acc.lastError = { errorClass, httpStatus: event.httpStatus, at: event.at };
-  }
+  if (answered) addAnswered(acc, event);
+  else addFailed(acc, event);
 }
 
 function successRateOf(ok: number, errors: number): number | null {

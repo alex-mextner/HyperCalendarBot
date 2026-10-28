@@ -142,6 +142,7 @@ export class ReminderMaterializer {
   ): number {
     let inserted = 0;
     const now = Date.now();
+    const common = { eventId, userId, occurrenceStart, occurrenceEnd: occurrenceEnd ?? null, now };
 
     if (allDay) {
       const prefs = this.prefsRepo.get(userId);
@@ -156,50 +157,54 @@ export class ReminderMaterializer {
         ['day of', datePart],
       ] as [string, string][]) {
         const remindAt = allDayReminderUtc(`${dateStr}T00:00:00Z`, localTime, userTimezone);
-        if (remindAt.getTime() < now) continue;
-        const remindAtIso = remindAt.toISOString();
-        if (this.reminderRepo.existsForEventAt(eventId, remindAtIso)) continue;
-        this.reminderRepo.insert({
-          event_id: eventId,
-          user_id: userId,
-          remind_at_utc: remindAtIso,
-          interval_minutes: -1,
-          interval_label: label,
-          occurrence_start: occurrenceStart,
-          occurrence_end: occurrenceEnd ?? null,
-        });
-        inserted++;
+        inserted += this.insertOccurrenceReminder(common, remindAt, -1, label);
       }
       return inserted;
     }
 
-    const overrides = reminderOverrides ? NumberArrayCodec.parse(reminderOverrides) : null;
-    let intervals: number[];
-    if (overrides) {
-      intervals = overrides;
-    } else {
-      const prefs = this.prefsRepo.get(userId);
-      intervals = prefs ? NumberArrayCodec.parse(prefs.default_reminder_intervals) : [30, 0];
-    }
-
+    const intervals = this.occurrenceIntervals(reminderOverrides, userId);
     const eventStart = new Date(occurrenceStart);
     for (const minutes of intervals) {
       const remindAt = truncateToMinute(new Date(eventStart.getTime() - minutes * 60_000));
-      if (remindAt.getTime() < now) continue;
-      const remindAtIso = remindAt.toISOString();
-      if (this.reminderRepo.existsForEventAt(eventId, remindAtIso)) continue;
-      this.reminderRepo.insert({
-        event_id: eventId,
-        user_id: userId,
-        remind_at_utc: remindAtIso,
-        interval_minutes: minutes,
-        interval_label: formatIntervalLabel(minutes),
-        occurrence_start: occurrenceStart,
-        occurrence_end: occurrenceEnd ?? null,
-      });
-      inserted++;
+      inserted += this.insertOccurrenceReminder(common, remindAt, minutes, formatIntervalLabel(minutes));
     }
     return inserted;
+  }
+
+  /** Per-event override intervals, else the user's defaults, else 30 min + at start. */
+  private occurrenceIntervals(reminderOverrides: string | null, userId: number): number[] {
+    const overrides = reminderOverrides ? NumberArrayCodec.parse(reminderOverrides) : null;
+    if (overrides) return overrides;
+    const prefs = this.prefsRepo.get(userId);
+    return prefs ? NumberArrayCodec.parse(prefs.default_reminder_intervals) : [30, 0];
+  }
+
+  /** Inserts one occurrence reminder unless it is already past or exists; returns 1 when inserted, else 0. */
+  private insertOccurrenceReminder(
+    ctx: {
+      eventId: number;
+      userId: number;
+      occurrenceStart: string;
+      occurrenceEnd: string | null;
+      now: number;
+    },
+    remindAt: Date,
+    intervalMinutes: number,
+    intervalLabel: string,
+  ): number {
+    if (remindAt.getTime() < ctx.now) return 0;
+    const remindAtIso = remindAt.toISOString();
+    if (this.reminderRepo.existsForEventAt(ctx.eventId, remindAtIso)) return 0;
+    this.reminderRepo.insert({
+      event_id: ctx.eventId,
+      user_id: ctx.userId,
+      remind_at_utc: remindAtIso,
+      interval_minutes: intervalMinutes,
+      interval_label: intervalLabel,
+      occurrence_start: ctx.occurrenceStart,
+      occurrence_end: ctx.occurrenceEnd,
+    });
+    return 1;
   }
 
   /**

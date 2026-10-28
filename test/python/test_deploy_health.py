@@ -2,16 +2,16 @@
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/deploy-health.py"
 
-FAKE_DOCKER = r'''#!/usr/bin/env python3
+FAKE_DOCKER = r"""#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
 fx = Path(os.environ["FX"])
@@ -42,9 +42,9 @@ elif args[:1] == ["logs"] and "--tail" in args:
 elif args[:1] == ["logs"]:
     for line in sc.get("fresh_logs", []):
         print(line)
-'''
+"""
 
-FAKE_CURL = r'''#!/usr/bin/env python3
+FAKE_CURL = r"""#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
 fx = Path(os.environ["FX"])
@@ -60,11 +60,10 @@ if n >= sc.get("health_after", 0):
     print("ok", end="")
     sys.exit(0)
 sys.exit(22 if sc.get("answers_503") else 7)
-'''
+"""
 
 
 class HealthVerdictTests(unittest.TestCase):
-
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -80,7 +79,9 @@ class HealthVerdictTests(unittest.TestCase):
         self.set_host(io=0.0, load=0.1)
 
     def set_host(self, io, load):
-        (self.proc / "pressure/io").write_text(f"some avg10={io:.2f} avg60=1.00 avg300=1.00 total=1\nfull avg10=0 avg60=0 avg300=0 total=1\n")
+        (self.proc / "pressure/io").write_text(
+            f"some avg10={io:.2f} avg60=1.00 avg300=1.00 total=1\nfull avg10=0 avg60=0 avg300=0 total=1\n"
+        )
         (self.proc / "loadavg").write_text(f"{load} 1.0 1.0 1/100 123\n")
 
     def wait(self, scenario, *flags, baseline_ready="ok", mode="ready"):
@@ -88,11 +89,32 @@ class HealthVerdictTests(unittest.TestCase):
         (self.fx / "polls").unlink(missing_ok=True)
         env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", FX=str(self.fx))
         cmd = [
-            sys.executable, str(SCRIPT), "wait", "--container", "hypercal-bot", "--url", "https://example.invalid",
-            "--mode", mode, "--baseline-ready", baseline_ready, "--poll", "0.02", "--stable", "0.1",
-            "--base-budget", "0.5", "--hard-cap", "2", "--stall", "0.5", "--proc-dir", str(self.proc), *flags,
+            sys.executable,
+            str(SCRIPT),
+            "wait",
+            "--container",
+            "hypercal-bot",
+            "--url",
+            "https://example.invalid",
+            "--mode",
+            mode,
+            "--baseline-ready",
+            baseline_ready,
+            "--poll",
+            "0.02",
+            "--stable",
+            "0.1",
+            "--base-budget",
+            "0.5",
+            "--hard-cap",
+            "2",
+            "--stall",
+            "0.5",
+            "--proc-dir",
+            str(self.proc),
+            *flags,
         ]
-        done = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)
+        done = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30, check=False)
         line = next((l for l in done.stdout.splitlines() if l.startswith("RESULT ")), "")
         return done.returncode, line, done.stdout
 
@@ -104,7 +126,13 @@ class HealthVerdictTests(unittest.TestCase):
     def test_slow_start_under_io_saturation_is_extended_not_failed(self):
         # The 2026-10-24 incident: health answers only after the base budget while the host is saturated.
         self.set_host(io=60.0, load=9.0)
-        code, line, out = self.wait({"health_after": 14, "answers_503": True}, "--base-budget", "0.1", "--hard-cap", "8")
+        code, line, out = self.wait(
+            {"health_after": 14, "answers_503": True},
+            "--base-budget",
+            "0.1",
+            "--hard-cap",
+            "8",
+        )
         self.assertEqual(code, 0, line + out)
         self.assertIn("extended past", out)
 
@@ -166,12 +194,16 @@ class HealthVerdictTests(unittest.TestCase):
         code, line, _ = self.wait({"ready_after": 10**6})
         self.assertEqual(code, 4, line)
 
-    def test_readiness_already_failing_before_the_deploy_is_not_this_releases_fault(self):
+    def test_readiness_already_failing_before_the_deploy_is_not_this_releases_fault(
+        self,
+    ):
         code, line, out = self.wait({"ready_after": 10**6}, baseline_ready="ai chain down")
         self.assertEqual(code, 0, line)
         self.assertIn("ready not required", out)
 
-    def test_an_unavailable_baseline_probe_proves_nothing_so_readiness_is_required(self):
+    def test_an_unavailable_baseline_probe_proves_nothing_so_readiness_is_required(
+        self,
+    ):
         code, line, out = self.wait({"ready_after": 10**6}, baseline_ready="")
         self.assertEqual(code, 4, line)
         self.assertNotIn("ready not required", out)
@@ -194,7 +226,7 @@ class HealthVerdictTests(unittest.TestCase):
         self.assertEqual(code, 0, line)
 
     def test_result_bodies_are_sanitized_for_the_shell_caller(self):
-        code, line, _ = self.wait({"ready_body": "ok (unverified)"})
+        _code, line, _ = self.wait({"ready_body": "ok (unverified)"})
         self.assertNotRegex(line, r"[;$`]")
 
 

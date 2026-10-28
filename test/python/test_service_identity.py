@@ -1,7 +1,9 @@
-import os, sys, unittest
-from unittest.mock import patch
+import os
+import sys
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from service_session import start_service_session
@@ -59,11 +61,12 @@ class Tests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_environment_is_reported_without_connecting(self):
         for value in ["", "garbage", "0"]:
             app = Client()
-            with patch.dict(os.environ, {"MTPROTO_SERVICE_USER_ID": value}):
-                with self.assertRaisesRegex(
-                    ValueError, "SERVICE_IDENTITY_UNCONFIGURED"
-                ):
-                    await start_service_session(app)
+            environment = patch.dict(os.environ, {"MTPROTO_SERVICE_USER_ID": value})
+            with (
+                environment,
+                self.assertRaisesRegex(ValueError, "SERVICE_IDENTITY_UNCONFIGURED"),
+            ):
+                await start_service_session(app)
             self.assertFalse(app.connected)
 
     async def test_boolean_is_not_a_service_identity(self):

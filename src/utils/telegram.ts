@@ -85,34 +85,67 @@ export function splitMessage(text: string, maxLen = 4000, parseMode?: ParseMode)
   return chunks;
 }
 
+const OPENING_TAG = /^<([a-z][\w-]*)\b[^>]*>$/i;
+const CLOSING_TAG = /^<\/([a-z][\w-]*)>$/i;
+
+interface OpenHtmlTag {
+  /** The tag exactly as written, replayed at the top of the next chunk. */
+  start: string;
+  end: string;
+}
+
+/** Entities, Unicode code points and tags as indivisible tokens; a stray `<` or `&` is a literal. */
+const HTML_TOKEN = /<[^>]+>|&(?:#\d+|#x[\da-f]+|\w+);|[^<&]|[<&]/giu;
+
+function closingTags(open: OpenHtmlTag[]): string {
+  return open
+    .toReversed()
+    .map((tag) => tag.end)
+    .join('');
+}
+
+/** The tag a token opens (null for text, entities and closing tags). */
+function openedTag(token: string): OpenHtmlTag | null {
+  const name = token.match(OPENING_TAG)?.[1];
+  return name === undefined ? null : { start: token, end: `</${name}>` };
+}
+
+/** Length the closing tags will have once `token` is appended: it may open one more tag or close one. */
+function closingLengthAfter(token: string, open: OpenHtmlTag[]): number {
+  const opened = openedTag(token);
+  // A closing tag pops the innermost open tag (splitHtmlMessage does `open.pop()`), so it frees that
+  // tag's closing text; with nothing open it frees nothing and the stray tag is plain text to fit.
+  const freed = CLOSING_TAG.test(token) ? (open.at(-1)?.end.length ?? 0) : 0;
+  return closingTags(open).length + (opened ? opened.end.length : 0) - freed;
+}
+
+/** Seals `chunk` with its closing tags and returns the reopened prefix of the next chunk. */
+function sealAndReopen(chunks: string[], chunk: string, open: OpenHtmlTag[]): string {
+  chunks.push(chunk + closingTags(open));
+  return open.map((tag) => tag.start).join('');
+}
+
 /** Keep escaped entities, Unicode code points and formatted spans intact across messages. */
 function splitHtmlMessage(text: string, maxLen: number): string[] {
   if (text.length <= maxLen) return [text];
   const chunks: string[] = [];
-  const open: { start: string; end: string }[] = [];
+  const open: OpenHtmlTag[] = [];
   let chunk = '';
-  const closing = () =>
-    open
-      .toReversed()
-      .map((tag) => tag.end)
-      .join('');
-  for (const match of text.matchAll(/<[^>]+>|&(?:#\d+|#x[\da-f]+|\w+);|[^<&]|[<&]/giu)) {
+  for (const match of text.matchAll(HTML_TOKEN)) {
     const token = match[0];
-    const start = token.match(/^<([a-z][\w-]*)\b[^>]*>$/i);
-    const end = token.match(/^<\/([a-z][\w-]*)>$/i);
-    const closingLength = closing().length + (start ? `</${start[1]}>`.length : 0) - (end ? token.length : 0);
+    const closingLength = closingLengthAfter(token, open);
     if (chunk.length + token.length + closingLength > maxLen) {
-      chunks.push(chunk + closing());
-      chunk = open.map((tag) => tag.start).join('');
+      chunk = sealAndReopen(chunks, chunk, open);
       if (chunk.length + token.length + closingLength > maxLen) {
         throw new Error('HTML tag exceeds message chunk capacity');
       }
     }
     chunk += token;
-    if (start) open.push({ start: token, end: `</${start[1]}>` });
-    if (end) open.pop();
+    const opened = openedTag(token);
+    if (opened) open.push(opened);
+    if (CLOSING_TAG.test(token)) open.pop();
   }
-  if (chunk) chunks.push(chunk + closing());
+  if (chunk) chunks.push(chunk + closingTags(open));
   return chunks;
 }
 

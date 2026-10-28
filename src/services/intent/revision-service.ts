@@ -24,7 +24,7 @@ import {
 } from './revision-body.ts';
 import { type RegistryIntegrity, readApprovedRules, registryIntegrity, type StoredRule } from './revision-ledger.ts';
 import { type RegistryView, type RevisionOutcome, validateRevision } from './revision-validator.ts';
-import { digestsByName, RuleListCodec, seedFingerprint } from './rule-fingerprint.ts';
+import { digestsByName, type RuleDefinition, RuleListCodec, seedFingerprint } from './rule-fingerprint.ts';
 import type { CanonicalSeed } from './seed-replacement.ts';
 
 export interface AdminPrincipal {
@@ -162,6 +162,28 @@ function storedOutcome(outcome: RevisionOutcome): RevisionValidation {
   if (!outcome.ok) return outcome;
   const { removed, inserted, dropped } = outcome;
   return dropped ? { ok: true, removed, inserted, dropped } : { ok: true, removed, inserted };
+}
+
+/** The previous activation in the provenance walk: what the next one must be based on, and its rule digests. */
+interface ActivationStep {
+  id: number;
+  fingerprint: string | null;
+  digests: Map<string, string>;
+}
+
+/**
+ * The activation's target rules, only when they decode, match its target fingerprint, and the
+ * activation follows `previous` (or restarts the history); null when any of that fails.
+ */
+function verifiedActivationRules(
+  row: IntentRevisionRow,
+  previous: ActivationStep | null,
+  restarts: boolean,
+): RuleDefinition[] | null {
+  const target = RuleListCodec.safeParse(row.target_rules ?? '');
+  const linked = restarts || (row.base_revision_id === previous?.id && row.base_fingerprint === previous.fingerprint);
+  if (!target.success || seedFingerprint(target.data) !== row.target_fingerprint || !linked) return null;
+  return target.data;
 }
 
 export class IntentRevisionService {
@@ -342,18 +364,16 @@ export class IntentRevisionService {
    */
   private provenance(): Map<string, RevisionKind> | null {
     const kinds = new Map<string, RevisionKind>();
-    let previous: { id: number; fingerprint: string | null; digests: Map<string, string> } | null = null;
+    let previous: ActivationStep | null = null;
     for (const row of this.revisions.decidedActivations()) {
-      const target = RuleListCodec.safeParse(row.target_rules ?? '');
       const restarts = row.kind === 'source_baseline' && row.base_revision_id === null && row.base_fingerprint === null;
-      const linked =
-        restarts || (row.base_revision_id === previous?.id && row.base_fingerprint === previous.fingerprint);
-      if (!target.success || seedFingerprint(target.data) !== row.target_fingerprint || !linked) {
+      const rules = verifiedActivationRules(row, previous, restarts);
+      if (!rules) {
         dbLogger.error({ revisionId: row.id }, 'intent revision history does not verify; rule origins unknown');
         return null;
       }
       const before = restarts || !previous ? new Map<string, string>() : previous.digests;
-      const current = digestsByName(target.data);
+      const current = digestsByName(rules);
       for (const [name, hash] of current) if (before.get(name) !== hash) kinds.set(name, row.kind);
       previous = { id: row.id, fingerprint: row.target_fingerprint, digests: current };
     }

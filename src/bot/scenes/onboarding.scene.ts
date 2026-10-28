@@ -1,8 +1,8 @@
 // src/bot/scenes/onboarding.scene.ts
 
 import { Scene } from '@gramio/scenes';
-import { InlineKeyboard } from 'gramio';
-import { CB, t } from '../../config/constants.ts';
+import { InlineKeyboard, type Keyboard } from 'gramio';
+import { CB, type Lang, t } from '../../config/constants.ts';
 import type { DatabaseService } from '../../database/index.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
@@ -23,6 +23,7 @@ import {
   cityInputPrompt,
   countryKeyboard,
   languageKeyboard,
+  type RemoveKeyboardParams,
   removeKeyboard,
   timezoneConfirmKeyboard,
   timezoneMethodKeyboard,
@@ -38,6 +39,139 @@ export interface OnboardingInvitationDeps {
   eventService: EventService;
 }
 
+interface SendOptions {
+  reply_markup?: InlineKeyboard | Keyboard | RemoveKeyboardParams['reply_markup'];
+  parse_mode?: 'HTML';
+}
+
+type Send = (text: string, options?: SendOptions) => Promise<unknown>;
+
+/** What the timezone step needs from the scene context; the scene builds it once per update. */
+interface TimezoneStepEnv {
+  lang: Lang;
+  state: OnboardingState;
+  send: Send;
+  update(patch: Partial<OnboardingState>, options?: { step?: number }): Promise<unknown>;
+}
+
+interface TimezoneCallbackEnv extends TimezoneStepEnv {
+  userId: number;
+  answer(): Promise<unknown>;
+}
+
+function unresolvedCityMessage(lang: Lang): string {
+  return lang === 'ru'
+    ? 'Не удалось определить таймзону. Попробуйте ещё раз или:\n• Отправьте 📍 геолокацию\n• Введите код напрямую, например: <code>Europe/Belgrade</code>\n  Список кодов: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones'
+    : 'Could not determine timezone. Try again or:\n• Share 📍 location\n• Enter timezone code directly, e.g. <code>Europe/Belgrade</code>\n  Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones';
+}
+
+async function handleTypedCity(
+  env: TimezoneStepEnv,
+  rawText: string | undefined,
+  resolveCityFn: typeof resolveCity,
+): Promise<void> {
+  const text = rawText?.trim();
+  if (!text) return;
+  const tz = await resolveCityFn(text);
+  if (!tz) {
+    await env.send(unresolvedCityMessage(env.lang), { parse_mode: 'HTML' });
+    return;
+  }
+  await env.send(`✅ ${getTimezoneDisplay(tz)}`, { reply_markup: timezoneConfirmKeyboard(env.lang) });
+  await env.update({ detectedTz: tz }, { step: undefined });
+}
+
+async function handleSharedLocation(env: TimezoneStepEnv, latitude: number, longitude: number): Promise<void> {
+  const tz = resolveTimezone(latitude, longitude);
+  const display = getTimezoneDisplay(tz);
+  await env.send(t(env.lang).tz_detected(tz, display), {
+    ...removeKeyboard(),
+    reply_markup: timezoneConfirmKeyboard(env.lang),
+  });
+  await env.update({ detectedTz: tz }, { step: undefined });
+}
+
+async function confirmDetectedTimezone(env: TimezoneCallbackEnv, db: DatabaseService): Promise<void> {
+  const tz = env.state.detectedTz;
+  if (!tz) return;
+  db.users.update(env.userId, { timezone: tz, country_code: guessCountryFromTimezone(tz) ?? undefined });
+  await env.send(`✅ ${getTimezoneDisplay(tz)}`, removeKeyboard());
+  await env.answer();
+  await env.update({ timezone: tz });
+}
+
+async function handleTimezoneCallback(
+  env: TimezoneCallbackEnv,
+  data: string | undefined,
+  db: DatabaseService,
+): Promise<void> {
+  if (!data) return;
+  const [action, ...rest] = data.split(':');
+  if (action === CB.ONBOARD_TZ && rest.join(':') === 'confirm') {
+    await confirmDetectedTimezone(env, db);
+    return;
+  }
+  await env.answer();
+  if (action === CB.ONBOARD_TZ_RETRY) {
+    await env.send(cityInputPrompt(env.lang), { reply_markup: timezoneMethodKeyboard(env.lang) });
+  }
+}
+
+function agendaKeyboard(lang: Lang): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('08:00', `${CB.ONBOARD_AGENDA}:08:00`)
+    .text('09:00', `${CB.ONBOARD_AGENDA}:09:00`)
+    .text('10:00', `${CB.ONBOARD_AGENDA}:10:00`)
+    .row()
+    .text('11:00', `${CB.ONBOARD_AGENDA}:11:00`)
+    .text('12:00', `${CB.ONBOARD_AGENDA}:12:00`)
+    .text(lang === 'ru' ? 'Нет' : 'No thanks', `${CB.ONBOARD_AGENDA}:no`);
+}
+
+interface PendingInvitationDisplay {
+  send: Send;
+  params: OnboardingParams | undefined;
+  deps: OnboardingInvitationDeps | undefined;
+  userId: number;
+  lang: Lang;
+  userTimezone: string | undefined;
+}
+
+/** Re-displays the invitation that triggered onboarding, now in the user's own timezone. */
+async function redisplayPendingInvitation({
+  send,
+  params,
+  deps,
+  userId,
+  lang,
+  userTimezone,
+}: PendingInvitationDisplay): Promise<void> {
+  const { pendingInvitationId, pendingEventId, pendingInviterTelegramId } = params ?? {};
+  if (!pendingInvitationId || !pendingEventId || !pendingInviterTelegramId || !deps) return;
+  try {
+    const invitation = deps.invitationRepo.findById(pendingInvitationId);
+    if (invitation?.status !== 'pending') return;
+    const event = deps.eventService.getEvent(pendingEventId, pendingInviterTelegramId);
+    const inviter = deps.userRepo.findByTelegramId(pendingInviterTelegramId);
+    if (!event || !userTimezone) return;
+    const inviterName = inviter?.first_name ?? inviter?.username ?? `User ${pendingInviterTelegramId}`;
+    const text = formatInvitation(
+      event,
+      event.timezone,
+      lang,
+      inviterName,
+      pendingInviterTelegramId,
+      inviter?.username,
+      userTimezone,
+      true,
+      readInvitationRoster(deps.invitationRepo, event.id, userId),
+    );
+    await send(text, { parse_mode: 'HTML', reply_markup: invitationRsvpKeyboard(invitation.id, lang, event) });
+  } catch (err) {
+    botLogger.warn({ err, userId }, 'Failed to re-display invitation after onboarding');
+  }
+}
+
 export function createOnboardingScene(
   db: DatabaseService,
   userComposer: UserResolverComposer,
@@ -48,6 +182,25 @@ export function createOnboardingScene(
   invitationDeps?: OnboardingInvitationDeps,
 ) {
   const resolveCity_ = resolveCityFn ?? resolveCity;
+
+  // Save morning agenda preference if user selected a time (not "no")
+  const saveMorningAgenda = (userId: number, selectedTime: string, timezone: string | undefined) => {
+    if (selectedTime === 'no' || !prefsService || !timezone) return;
+    prefsService.getOrCreate(userId);
+    prefsService.updateMorningTime(userId, selectedTime);
+    db.notificationPreferences.update(userId, { morning_agenda_enabled: 1 });
+  };
+
+  // Offer Google Calendar connection if configured and not already connected
+  const offerGoogleCalendar = async (send: Send, userId: number, lang: Lang) => {
+    if (!gcalConfigured || db.users.findByTelegramId(userId)?.google_refresh_token_enc) return;
+    const gcalKb = new InlineKeyboard()
+      .text(t(lang).gcal_connect_button, `${CB.GCAL}:onboard:connect`)
+      .row()
+      .text(t(lang).gcal_onboarding_maybe_later, GCAL_ONBOARD_LATER);
+    await send(t(lang).gcal_onboarding, { reply_markup: gcalKb });
+  };
+
   return (
     new Scene('onboarding')
       .state<OnboardingState>()
@@ -76,78 +229,29 @@ export function createOnboardingScene(
 
       // Step 1: Timezone (message + location + callback)
       .step(['message', 'location', 'callback_query'], async (context) => {
-        const { lang } = context.scene.state;
-        const l = lang ?? 'en';
+        const l = context.scene.state.lang ?? 'en';
 
         if (context.scene.step.firstTime) {
           await context.send(cityInputPrompt(l), { reply_markup: timezoneMethodKeyboard(l) });
           return;
         }
 
-        // Handle typed city name
+        const env: TimezoneStepEnv = {
+          lang: l,
+          state: context.scene.state,
+          send: (text, options) => context.send(text, options),
+          update: (patch, options) => (options ? context.scene.update(patch, options) : context.scene.update(patch)),
+        };
         if (context.is('message')) {
-          const text = context.text?.trim();
-          if (!text) return;
-          const tz = await resolveCity_(text);
-          if (tz) {
-            await context.send(`✅ ${getTimezoneDisplay(tz)}`, {
-              reply_markup: timezoneConfirmKeyboard(l),
-            });
-            await context.scene.update({ detectedTz: tz }, { step: undefined });
-          } else {
-            const msg =
-              l === 'ru'
-                ? 'Не удалось определить таймзону. Попробуйте ещё раз или:\n• Отправьте 📍 геолокацию\n• Введите код напрямую, например: <code>Europe/Belgrade</code>\n  Список кодов: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones'
-                : 'Could not determine timezone. Try again or:\n• Share 📍 location\n• Enter timezone code directly, e.g. <code>Europe/Belgrade</code>\n  Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones';
-            await context.send(msg, { parse_mode: 'HTML' });
-          }
-          return;
-        }
-
-        // Handle location
-        if (context.is('location')) {
-          const { latitude, longitude } = context.eventLocation;
-          const tz = resolveTimezone(latitude, longitude);
-          const display = getTimezoneDisplay(tz);
-          await context.send(t(l).tz_detected(tz, display), {
-            ...removeKeyboard(),
-            reply_markup: timezoneConfirmKeyboard(l),
-          });
-          await context.scene.update({ detectedTz: tz }, { step: undefined });
-          return;
-        }
-
-        // Handle callback
-        if (context.is('callback_query')) {
-          const data = context.data;
-          if (!data) return;
-
-          const parts = data.split(':');
-          const action = parts[0];
-
-          if (action === CB.ONBOARD_TZ) {
-            const payload = parts.slice(1).join(':');
-            if (payload === 'confirm') {
-              const tz = context.scene.state.detectedTz;
-              if (!tz) return;
-              db.users.update(context.from.id, {
-                timezone: tz,
-                country_code: guessCountryFromTimezone(tz) ?? undefined,
-              });
-              await context.send(`✅ ${getTimezoneDisplay(tz)}`, removeKeyboard());
-              await context.answer();
-              await context.scene.update({ timezone: tz });
-              return;
-            }
-          }
-
-          if (action === CB.ONBOARD_TZ_RETRY) {
-            await context.answer();
-            await context.send(cityInputPrompt(l), { reply_markup: timezoneMethodKeyboard(l) });
-            return;
-          }
-
-          await context.answer();
+          await handleTypedCity(env, context.text, resolveCity_);
+        } else if (context.is('location')) {
+          await handleSharedLocation(env, context.eventLocation.latitude, context.eventLocation.longitude);
+        } else if (context.is('callback_query')) {
+          await handleTimezoneCallback(
+            { ...env, userId: context.from.id, answer: () => context.answer() },
+            context.data,
+            db,
+          );
         }
       })
 
@@ -180,19 +284,10 @@ export function createOnboardingScene(
 
       // Step 3: Morning agenda prompt (callback)
       .step('callback_query', async (context) => {
-        const { lang } = context.scene.state;
-        const l = lang ?? 'en';
+        const l = context.scene.state.lang ?? 'en';
 
         if (context.scene.step.firstTime) {
-          const agendaKb = new InlineKeyboard()
-            .text('08:00', `${CB.ONBOARD_AGENDA}:08:00`)
-            .text('09:00', `${CB.ONBOARD_AGENDA}:09:00`)
-            .text('10:00', `${CB.ONBOARD_AGENDA}:10:00`)
-            .row()
-            .text('11:00', `${CB.ONBOARD_AGENDA}:11:00`)
-            .text('12:00', `${CB.ONBOARD_AGENDA}:12:00`)
-            .text(l === 'ru' ? 'Нет' : 'No thanks', `${CB.ONBOARD_AGENDA}:no`);
-          await context.send(t(l).agenda_prompt, { reply_markup: agendaKb });
+          await context.send(t(l).agenda_prompt, { reply_markup: agendaKeyboard(l) });
           return;
         }
 
@@ -201,70 +296,27 @@ export function createOnboardingScene(
         const parts = data.split(':');
         if (parts[0] !== CB.ONBOARD_AGENDA) return;
 
-        const selectedTime = parts.slice(1).join(':');
+        const userId = context.from.id;
         const { timezone } = context.scene.state;
-
-        // Save morning agenda preference if user selected a time (not "no")
-        if (selectedTime !== 'no' && prefsService && timezone) {
-          prefsService.getOrCreate(context.from.id);
-          prefsService.updateMorningTime(context.from.id, selectedTime);
-          db.notificationPreferences.update(context.from.id, { morning_agenda_enabled: 1 });
-        }
+        saveMorningAgenda(userId, parts.slice(1).join(':'), timezone);
 
         // Complete onboarding
-        db.users.update(context.from.id, { onboarding_completed: 1 });
+        db.users.update(userId, { onboarding_completed: 1 });
         await context.answer();
 
+        const send: Send = (text, options) => context.send(text, options);
         const tourKb = new InlineKeyboard().text(t(l).feature_tour_btn, `${CB.FEATURE_TOUR}:0`);
-        await context.send(t(l).onboard_done, { reply_markup: tourKb });
+        await send(t(l).onboard_done, { reply_markup: tourKb });
 
-        // Re-display invitation with user's timezone after onboarding
-        const params = context.scene.params;
-        if (params?.pendingInvitationId && params.pendingEventId && params.pendingInviterTelegramId && invitationDeps) {
-          try {
-            const invitation = invitationDeps.invitationRepo.findById(params.pendingInvitationId);
-            if (invitation && invitation.status === 'pending') {
-              const event = invitationDeps.eventService.getEvent(
-                params.pendingEventId,
-                params.pendingInviterTelegramId,
-              );
-              const inviter = invitationDeps.userRepo.findByTelegramId(params.pendingInviterTelegramId);
-              const inviterName = inviter?.first_name ?? inviter?.username ?? `User ${params.pendingInviterTelegramId}`;
-              const userTz = context.scene.state.timezone;
-              if (event && userTz) {
-                const text = formatInvitation(
-                  event,
-                  event.timezone,
-                  l,
-                  inviterName,
-                  params.pendingInviterTelegramId,
-                  inviter?.username,
-                  userTz,
-                  true,
-                  readInvitationRoster(invitationDeps.invitationRepo, event.id, context.from.id),
-                );
-                await context.send(text, {
-                  parse_mode: 'HTML',
-                  reply_markup: invitationRsvpKeyboard(invitation.id, l, event),
-                });
-              }
-            }
-          } catch (err) {
-            botLogger.warn({ err, userId: context.from.id }, 'Failed to re-display invitation after onboarding');
-          }
-        }
-
-        // Show Google Calendar onboarding prompt if configured and not already connected
-        if (gcalConfigured) {
-          const user = db.users.findByTelegramId(context.from.id);
-          if (!user?.google_refresh_token_enc) {
-            const gcalKb = new InlineKeyboard()
-              .text(t(l).gcal_connect_button, `${CB.GCAL}:onboard:connect`)
-              .row()
-              .text(t(l).gcal_onboarding_maybe_later, GCAL_ONBOARD_LATER);
-            await context.send(t(l).gcal_onboarding, { reply_markup: gcalKb });
-          }
-        }
+        await redisplayPendingInvitation({
+          send,
+          params: context.scene.params,
+          deps: invitationDeps,
+          userId,
+          lang: l,
+          userTimezone: context.scene.state.timezone,
+        });
+        await offerGoogleCalendar(send, userId, l);
 
         await context.scene.exit();
       })

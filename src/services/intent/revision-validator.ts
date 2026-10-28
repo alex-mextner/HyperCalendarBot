@@ -165,6 +165,21 @@ function checkSources(operations: readonly RevisionOperation[], registry: Regist
   return errors;
 }
 
+function draftNameProblems(
+  name: string,
+  op: RevisionOperation,
+  taken: ReadonlySet<string>,
+  drafted: ReadonlySet<string>,
+): string[] {
+  const errors: string[] = [];
+  if (!DRAFT_NAME.test(name) || name.length > 128) errors.push(`${name}: names are lowercase dotted snake_case`);
+  if (taken.has(name)) errors.push(`${name}: name is held by another intent`);
+  if (drafted.has(name)) errors.push(`${name}: name is drafted twice`);
+  if (name.startsWith('basis.') && !(op.kind !== 'create' && op.sourceNames.includes(name)))
+    errors.push(`${name}: only the operation replacing a basis rule may keep its basis name`);
+  return errors;
+}
+
 function checkDraftNames(operations: readonly RevisionOperation[], registry: RegistryView): string[] {
   const errors: string[] = [];
   const affected = new Set(operations.flatMap((op) => op.sourceNames));
@@ -175,11 +190,7 @@ function checkDraftNames(operations: readonly RevisionOperation[], registry: Reg
   const drafted = new Set<string>();
   for (const op of operations)
     for (const { canonical_name: name } of op.intents) {
-      if (!DRAFT_NAME.test(name) || name.length > 128) errors.push(`${name}: names are lowercase dotted snake_case`);
-      if (taken.has(name)) errors.push(`${name}: name is held by another intent`);
-      if (drafted.has(name)) errors.push(`${name}: name is drafted twice`);
-      if (name.startsWith('basis.') && !(op.kind !== 'create' && op.sourceNames.includes(name)))
-        errors.push(`${name}: only the operation replacing a basis rule may keep its basis name`);
+      errors.push(...draftNameProblems(name, op, taken, drafted));
       drafted.add(name);
     }
   return errors;
@@ -250,7 +261,7 @@ function buildCandidate(operations: readonly RevisionOperation[], registry: Regi
 
 const examplesOf = (rule: RuleDefinition) => [...new Set([...rule.phrases, rule.source_message].filter(Boolean))];
 
-function checkRouting(candidate: Candidate): string[] {
+function checkExampleRouting(candidate: Candidate): string[] {
   const errors: string[] = [];
   for (const { id, rule, op } of candidate.target)
     for (const example of examplesOf(rule)) {
@@ -260,6 +271,11 @@ function checkRouting(candidate: Candidate): string[] {
       if (!op && candidate.baseline.match(example)?.intentId === id && routed !== id)
         errors.push(`Active ${rule.canonical_name} loses its example "${example}"`);
     }
+  return errors;
+}
+
+function checkNegativeRouting(candidate: Candidate): string[] {
+  const errors: string[] = [];
   const draftIds = new Set(candidate.target.filter((entry) => entry.op).map((entry) => entry.id));
   for (const meta of canonicalMetadata)
     for (const negative of meta.negativeExamples) {
@@ -268,6 +284,10 @@ function checkRouting(candidate: Candidate): string[] {
         errors.push(`Known negative "${negative}" of ${meta.name} now routes to a drafted rule`);
     }
   return errors;
+}
+
+function checkRouting(candidate: Candidate): string[] {
+  return [...checkExampleRouting(candidate), ...checkNegativeRouting(candidate)];
 }
 
 function checkDisposition(disposition: ExampleDisposition, routedTo: string | undefined): string | null {
@@ -282,10 +302,8 @@ function checkDisposition(disposition: ExampleDisposition, routedTo: string | un
   return null;
 }
 
-/** Every example a removed or replaced rule loses is either covered by the operation or disposed of. */
-function checkPreservation(candidate: Candidate, op: RevisionOperation, registry: RegistryView): string[] {
-  const errors: string[] = [];
-  const names = new Map(candidate.target.map((entry) => [entry.id, entry.rule.canonical_name]));
+/** Examples of the operation's source rules that no rule of the operation itself routes to any more. */
+function lostExamples(candidate: Candidate, op: RevisionOperation, registry: RegistryView): Set<string> {
   const ownIds = new Set(candidate.target.filter((entry) => entry.op === op).map((entry) => entry.id));
   const lost = new Set<string>();
   for (const source of registry.rules.filter((rule) => op.sourceNames.includes(rule.canonical_name)))
@@ -294,6 +312,14 @@ function checkPreservation(candidate: Candidate, op: RevisionOperation, registry
       if (candidate.baseline.match(example)?.intentId === source.id && (routed === undefined || !ownIds.has(routed)))
         lost.add(example);
     }
+  return lost;
+}
+
+/** Every example a removed or replaced rule loses is either covered by the operation or disposed of. */
+function checkPreservation(candidate: Candidate, op: RevisionOperation, registry: RegistryView): string[] {
+  const errors: string[] = [];
+  const names = new Map(candidate.target.map((entry) => [entry.id, entry.rule.canonical_name]));
+  const lost = lostExamples(candidate, op, registry);
   for (const example of lost) {
     const given = op.dispositions.filter((disposition) => disposition.example === example);
     if (given.length !== 1)

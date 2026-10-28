@@ -88,15 +88,13 @@ function matcher(seeds: Seed[]): IntentMatcher {
   );
   return m;
 }
-export function auditDefinition(seed: Seed) {
-  const parsed = WorkflowSchema.safeParse(seed.workflow);
-  const errors = parsed.success ? validateWorkflow(parsed.data, seed.pattern) : [];
+function requiredCaptures(workflow: Seed['workflow']): string[] {
   const requiredSet = new Set<string>();
   const captureText = (text: string) => {
     for (const match of text.matchAll(/\{\{(\$\d+)([^}]*)\}\}/g))
       if (!match[2]?.includes('default(')) requiredSet.add(match[1]!);
   };
-  const source = seed.workflow as { bindings?: { [key: string]: { [key: string]: unknown } }; [key: string]: unknown };
+  const source = workflow as { bindings?: { [key: string]: { [key: string]: unknown } }; [key: string]: unknown };
   const { bindings, ...body } = source;
   captureText(JSON.stringify(body));
   for (const binding of Object.values(bindings ?? {}))
@@ -104,8 +102,9 @@ export function auditDefinition(seed: Seed) {
       if (key === 'from' && (binding.optional === true || binding.default_amount !== undefined)) continue;
       captureText(JSON.stringify(value));
     }
-  const required = [...requiredSet];
-
+  return [...requiredSet];
+}
+function countExampleMatches(seed: Seed, required: string[]): { matched: number; missing: number } {
   const m = matcher([seed]);
   let matched = 0;
   let missing = 0;
@@ -116,6 +115,13 @@ export function auditDefinition(seed: Seed) {
       if (required.some((c) => result.captures[c] === undefined)) missing++;
     }
   }
+  return { matched, missing };
+}
+export function auditDefinition(seed: Seed) {
+  const parsed = WorkflowSchema.safeParse(seed.workflow);
+  const errors = parsed.success ? validateWorkflow(parsed.data, seed.pattern) : [];
+  const required = requiredCaptures(seed.workflow);
+  const { matched, missing } = countExampleMatches(seed, required);
   return {
     schemaValid: parsed.success,
     contractErrors: errors.length,
@@ -136,167 +142,217 @@ function extendWindow(window: { first: string | null; last: string | null }, tim
 function count(db: Database, sql: string): number {
   return (db.query(sql).get() as { n: number }).n;
 }
+type MatchRecord = { action_name: string; n: number; first: string; last: string };
+type ToolRecord = { action_name: string; success: number; n: number };
+type LogWindow = { first: string | null; last: string | null; n: number };
+type HistoryRow = { content: string; created_at: string };
+type MatchEvidenceRow = { input_summary: string; action_name: string };
+
+function assertMaxHistory(maxHistory: number): void {
+  if (!Number.isSafeInteger(maxHistory) || maxHistory < 1 || maxHistory > MAX_HISTORY_LIMIT)
+    throw new Error('maxHistory must be 1..20000');
+}
+function readRawIntents(db: Database): Raw[] {
+  if (count(db, 'SELECT COUNT(*) n FROM intents') > MAX_INTENT_ROWS)
+    throw new Error('Intent catalogue exceeds 2000 rows; use a bounded migration audit');
+  return db
+    .query(
+      'SELECT id,canonical_name,phrases,trigger_words,pattern,workflow,format,status,created_at FROM intents ORDER BY id',
+    )
+    .all() as Raw[];
+}
+function readMatchRecords(db: Database, logsAvailable: boolean): MatchRecord[] {
+  if (!logsAvailable) return [];
+  return db
+    .query(
+      "SELECT action_name, COUNT(*) n, MIN(created_at) first, MAX(created_at) last FROM user_action_log WHERE action_type='intent_match' GROUP BY action_name",
+    )
+    .all() as MatchRecord[];
+}
+function hasInputColumn(db: Database, logsAvailable: boolean): boolean {
+  return (
+    logsAvailable &&
+    (db.query('PRAGMA table_info(user_action_log)').all() as { name: string }[]).some((c) => c.name === 'input_summary')
+  );
+}
+function readMatchEvidence(db: Database, inputColumn: boolean): MatchEvidenceRow[] {
+  if (!inputColumn) return [];
+  return db
+    .query(
+      "SELECT input_summary,action_name FROM user_action_log WHERE action_type='intent_match' AND input_summary IS NOT NULL ORDER BY created_at DESC,rowid DESC LIMIT ?",
+    )
+    .all(CATALOGUE_LIMIT) as MatchEvidenceRow[];
+}
+function replayEvidence(evidence: MatchEvidenceRow[], currentMatcher: IntentMatcher, seeds: Seed[]) {
+  let oversized = 0;
+  let matched = 0;
+  let same = 0;
+  for (const row of evidence) {
+    if (row.input_summary.length > MAX_INPUT_LENGTH) {
+      oversized++;
+      continue;
+    }
+    const hit = currentMatcher.match(row.input_summary);
+    if (hit) {
+      matched++;
+      if (seeds[hit.intentId - 1]?.canonical_name === row.action_name) same++;
+    }
+  }
+  return { oversized, matched, same };
+}
+function readLogWindow(db: Database, logsAvailable: boolean): LogWindow | null {
+  if (!logsAvailable) return null;
+  return db
+    .query('SELECT MIN(created_at) first,MAX(created_at) last,COUNT(*) n FROM user_action_log')
+    .get() as LogWindow;
+}
+function readToolRecords(db: Database, logsAvailable: boolean): ToolRecord[] {
+  if (!logsAvailable) return [];
+  return db
+    .query(
+      "SELECT action_name,success,COUNT(*) n FROM user_action_log WHERE action_type='ai_tool' GROUP BY action_name,success ORDER BY n DESC",
+    )
+    .all() as ToolRecord[];
+}
+function readUserHistory(db: Database, historyAvailable: boolean, maxHistory: number): HistoryRow[] {
+  if (!historyAvailable) return [];
+  return db
+    .query("SELECT content,created_at FROM chat_history WHERE role='user' ORDER BY id DESC LIMIT ?")
+    .all(maxHistory) as HistoryRow[];
+}
+function replayHistory(history: HistoryRow[], currentMatcher: IntentMatcher) {
+  const replayCounts = new Map<number, number>();
+  let matched = 0;
+  let oversized = 0;
+  let skippedActivity = 0;
+  const examinedWindow: { first: string | null; last: string | null } = { first: null, last: null };
+  for (const item of history) {
+    // Do not execute untrusted learned regexes or workflows, and never retain the raw input in output.
+    if (item.content.length > MAX_INPUT_LENGTH) {
+      oversized++;
+      continue;
+    }
+    const envelope = parse(item.content);
+    if (envelope && typeof envelope === 'object') {
+      skippedActivity++;
+      continue;
+    }
+    extendWindow(examinedWindow, item.created_at);
+    const hit = currentMatcher.match(item.content);
+    if (hit) {
+      matched++;
+      replayCounts.set(hit.intentId, (replayCounts.get(hit.intentId) ?? 0) + 1);
+    }
+  }
+  return { replayCounts, matched, oversized, skippedActivity, examinedWindow };
+}
+type SnapshotContext = {
+  logsAvailable: boolean;
+  historyAvailable: boolean;
+  matches: Map<string, MatchRecord>;
+  replayCounts: Map<number, number>;
+};
+function summarizeSeeds(seeds: Seed[], byName: Map<string, Raw>, ctx: SnapshotContext) {
+  return seeds.map((seed, i) => {
+    const row = byName.get(seed.canonical_name);
+    const d = seedDefinition(seed);
+    const current = row ? definition(row) : null;
+    const changedFields = current
+      ? Object.keys(d).filter((k) => stable(current[k as keyof typeof current]) !== stable(d[k as keyof typeof d]))
+      : [];
+    return {
+      name: seed.canonical_name,
+      examples: seed.phrases,
+      workflow: seed.workflow,
+      tools: calls(seed.workflow),
+      sourceFingerprint: hash(d),
+      present: !!row,
+      databaseId: row?.id ?? null,
+      status: row?.status ?? null,
+      definition: !row ? 'absent' : changedFields.length ? 'changed' : 'same',
+      changedFields,
+      createdAt: row?.created_at ?? null,
+      recordedMatches: ctx.logsAvailable ? (ctx.matches.get(seed.canonical_name)?.n ?? 0) : null,
+      lastMatch: ctx.matches.get(seed.canonical_name)?.last ?? null,
+      replayMatches: ctx.historyAvailable ? (ctx.replayCounts.get(i + 1) ?? 0) : null,
+      audit: auditDefinition(seed),
+    };
+  });
+}
+function summarizeDatabase(raw: Raw[], knownNames: Set<string>, ctx: SnapshotContext) {
+  return raw.map((row) => {
+    const workflow = parse(row.workflow);
+    const parsed = WorkflowSchema.safeParse(workflow);
+    const tools = calls(workflow);
+    const phraseData = parse(row.phrases);
+    const errors = parsed.success ? validateWorkflow(parsed.data, row.pattern) : [];
+    return {
+      id: row.id,
+      name: knownNames.has(row.canonical_name) ? row.canonical_name : `Накопленный #${row.id}`,
+      seedName: knownNames.has(row.canonical_name) ? row.canonical_name : null,
+      status: row.status,
+      createdAt: row.created_at,
+      phraseCount: Array.isArray(phraseData) ? phraseData.length : null,
+      tools,
+      schemaValid: parsed.success,
+      contractErrors: errors.length,
+      recordedMatches: ctx.logsAvailable ? (ctx.matches.get(row.canonical_name)?.n ?? 0) : null,
+      lastMatch: ctx.matches.get(row.canonical_name)?.last ?? null,
+    };
+  });
+}
+function summarizeTotals(raw: Raw[], seedCount: number) {
+  return {
+    database: raw.length,
+    seed: seedCount,
+    approved: raw.filter((r) => r.status === 'approved').length,
+    pending: raw.filter((r) => r.status === 'pending').length,
+    rejected: raw.filter((r) => r.status === 'rejected').length,
+    other: raw.filter((r) => !['approved', 'pending', 'rejected'].includes(r.status)).length,
+  };
+}
+function summarizeToolOutcomes(toolRecords: ToolRecord[]) {
+  return toolRecords.map((r) => ({
+    tool: /^[a-z][a-z0-9_]{0,80}$/.test(r.action_name) ? r.action_name : 'other',
+    reportedSuccess: r.success === 1,
+    attempts: r.n,
+  }));
+}
 export function collectIntentSnapshot(
   db: Database,
   seeds: Seed[],
   options: { sourceRevision: string; maxHistory?: number; capturedAt?: string },
 ) {
   const maxHistory = options.maxHistory ?? CATALOGUE_LIMIT;
-  if (!Number.isSafeInteger(maxHistory) || maxHistory < 1 || maxHistory > MAX_HISTORY_LIMIT)
-    throw new Error('maxHistory must be 1..20000');
+  assertMaxHistory(maxHistory);
   const ownsTransaction = !db.inTransaction;
   if (ownsTransaction) db.exec('BEGIN');
   try {
-    if (count(db, 'SELECT COUNT(*) n FROM intents') > MAX_INTENT_ROWS)
-      throw new Error('Intent catalogue exceeds 2000 rows; use a bounded migration audit');
-    const raw = db
-      .query(
-        'SELECT id,canonical_name,phrases,trigger_words,pattern,workflow,format,status,created_at FROM intents ORDER BY id',
-      )
-      .all() as Raw[];
+    const raw = readRawIntents(db);
     const logsAvailable = tableExists(db, 'user_action_log');
     const historyAvailable = tableExists(db, 'chat_history');
     const byName = new Map(raw.map((r) => [r.canonical_name, r]));
     const knownNames = new Set(seeds.map((s) => s.canonical_name));
-    const records = logsAvailable
-      ? (db
-          .query(
-            "SELECT action_name, COUNT(*) n, MIN(created_at) first, MAX(created_at) last FROM user_action_log WHERE action_type='intent_match' GROUP BY action_name",
-          )
-          .all() as { action_name: string; n: number; first: string; last: string }[])
-      : [];
+    const records = readMatchRecords(db, logsAvailable);
     const matches = new Map(records.map((r) => [r.action_name, r]));
-    const inputColumn =
-      logsAvailable &&
-      (db.query('PRAGMA table_info(user_action_log)').all() as { name: string }[]).some(
-        (c) => c.name === 'input_summary',
-      );
-    const evidence = inputColumn
-      ? (db
-          .query(
-            "SELECT input_summary,action_name FROM user_action_log WHERE action_type='intent_match' AND input_summary IS NOT NULL ORDER BY created_at DESC,rowid DESC LIMIT ?",
-          )
-          .all(CATALOGUE_LIMIT) as { input_summary: string; action_name: string }[])
-      : [];
+    const inputColumn = hasInputColumn(db, logsAvailable);
+    const evidence = readMatchEvidence(db, inputColumn);
     const currentMatcher = matcher(seeds);
-    let evidenceOversized = 0;
-    let evidenceMatched = 0;
-    let evidenceSame = 0;
-    for (const row of evidence) {
-      if (row.input_summary.length > MAX_INPUT_LENGTH) {
-        evidenceOversized++;
-        continue;
-      }
-      const hit = currentMatcher.match(row.input_summary);
-      if (hit) {
-        evidenceMatched++;
-        if (seeds[hit.intentId - 1]?.canonical_name === row.action_name) evidenceSame++;
-      }
-    }
-
-    const logWindow = logsAvailable
-      ? (db.query('SELECT MIN(created_at) first,MAX(created_at) last,COUNT(*) n FROM user_action_log').get() as {
-          first: string | null;
-          last: string | null;
-          n: number;
-        })
-      : null;
-    const toolRecords = logsAvailable
-      ? (db
-          .query(
-            "SELECT action_name,success,COUNT(*) n FROM user_action_log WHERE action_type='ai_tool' GROUP BY action_name,success ORDER BY n DESC",
-          )
-          .all() as { action_name: string; success: number; n: number }[])
-      : [];
-    const history = historyAvailable
-      ? (db
-          .query("SELECT content,created_at FROM chat_history WHERE role='user' ORDER BY id DESC LIMIT ?")
-          .all(maxHistory) as { content: string; created_at: string }[])
-      : [];
+    const evidenceReplay = replayEvidence(evidence, currentMatcher, seeds);
+    const logWindow = readLogWindow(db, logsAvailable);
+    const toolRecords = readToolRecords(db, logsAvailable);
+    const history = readUserHistory(db, historyAvailable, maxHistory);
     const retained = historyAvailable ? count(db, "SELECT COUNT(*) n FROM chat_history WHERE role='user'") : null;
-    const replayCounts = new Map<number, number>();
-    let matched = 0;
-    let oversized = 0;
-    let skippedActivity = 0;
-    const examinedWindow: { first: string | null; last: string | null } = { first: null, last: null };
-    for (const item of history) {
-      // Do not execute untrusted learned regexes or workflows, and never retain the raw input in output.
-      if (item.content.length > MAX_INPUT_LENGTH) {
-        oversized++;
-        continue;
-      }
-      const envelope = parse(item.content);
-      if (envelope && typeof envelope === 'object') {
-        skippedActivity++;
-        continue;
-      }
-      extendWindow(examinedWindow, item.created_at);
-      const hit = currentMatcher.match(item.content);
-      if (hit) {
-        matched++;
-        replayCounts.set(hit.intentId, (replayCounts.get(hit.intentId) ?? 0) + 1);
-      }
-    }
-    const seedsSummary = seeds.map((seed, i) => {
-      const row = byName.get(seed.canonical_name);
-      const d = seedDefinition(seed);
-      const current = row ? definition(row) : null;
-      const changedFields = current
-        ? Object.keys(d).filter((k) => stable(current[k as keyof typeof current]) !== stable(d[k as keyof typeof d]))
-        : [];
-      return {
-        name: seed.canonical_name,
-        examples: seed.phrases,
-        workflow: seed.workflow,
-        tools: calls(seed.workflow),
-        sourceFingerprint: hash(d),
-        present: !!row,
-        databaseId: row?.id ?? null,
-        status: row?.status ?? null,
-        definition: !row ? 'absent' : changedFields.length ? 'changed' : 'same',
-        changedFields,
-        createdAt: row?.created_at ?? null,
-        recordedMatches: logsAvailable ? (matches.get(seed.canonical_name)?.n ?? 0) : null,
-        lastMatch: matches.get(seed.canonical_name)?.last ?? null,
-        replayMatches: historyAvailable ? (replayCounts.get(i + 1) ?? 0) : null,
-        audit: auditDefinition(seed),
-      };
-    });
-    const database = raw.map((row) => {
-      const workflow = parse(row.workflow);
-      const parsed = WorkflowSchema.safeParse(workflow);
-      const tools = calls(workflow);
-      const phraseData = parse(row.phrases);
-      const errors = parsed.success ? validateWorkflow(parsed.data, row.pattern) : [];
-      return {
-        id: row.id,
-        name: knownNames.has(row.canonical_name) ? row.canonical_name : `Накопленный #${row.id}`,
-        seedName: knownNames.has(row.canonical_name) ? row.canonical_name : null,
-        status: row.status,
-        createdAt: row.created_at,
-        phraseCount: Array.isArray(phraseData) ? phraseData.length : null,
-        tools,
-        schemaValid: parsed.success,
-        contractErrors: errors.length,
-        recordedMatches: logsAvailable ? (matches.get(row.canonical_name)?.n ?? 0) : null,
-        lastMatch: matches.get(row.canonical_name)?.last ?? null,
-      };
-    });
+    const replay = replayHistory(history, currentMatcher);
+    const ctx: SnapshotContext = { logsAvailable, historyAvailable, matches, replayCounts: replay.replayCounts };
     return {
       schemaVersion: 1,
       capturedAt: options.capturedAt ?? new Date().toISOString(),
       sourceRevision: options.sourceRevision,
       catalogueFingerprint: hash(seeds.map(seedDefinition)),
-      totals: {
-        database: raw.length,
-        seed: seeds.length,
-        approved: raw.filter((r) => r.status === 'approved').length,
-        pending: raw.filter((r) => r.status === 'pending').length,
-        rejected: raw.filter((r) => r.status === 'rejected').length,
-        other: raw.filter((r) => !['approved', 'pending', 'rejected'].includes(r.status)).length,
-      },
-      seeds: seedsSummary,
-      database,
+      totals: summarizeTotals(raw, seeds.length),
+      seeds: summarizeSeeds(seeds, byName, ctx),
+      database: summarizeDatabase(raw, knownNames, ctx),
       statistics: {
         logsAvailable,
         logWindow,
@@ -305,26 +361,22 @@ export function collectIntentSnapshot(
         recordedInputReplay: {
           available: inputColumn,
           fetched: evidence.length,
-          examined: evidence.length - evidenceOversized,
-          skippedOversized: evidenceOversized,
-          matched: evidenceMatched,
-          sameIntent: evidenceSame,
+          examined: evidence.length - evidenceReplay.oversized,
+          skippedOversized: evidenceReplay.oversized,
+          matched: evidenceReplay.matched,
+          sameIntent: evidenceReplay.same,
           limit: CATALOGUE_LIMIT,
         },
-        toolOutcomes: toolRecords.map((r) => ({
-          tool: /^[a-z][a-z0-9_]{0,80}$/.test(r.action_name) ? r.action_name : 'other',
-          reportedSuccess: r.success === 1,
-          attempts: r.n,
-        })),
+        toolOutcomes: summarizeToolOutcomes(toolRecords),
         replay: {
           available: historyAvailable,
           retainedUserMessages: retained,
-          examined: history.length - oversized - skippedActivity,
-          skippedActivity,
-          skippedOversized: oversized,
-          matched,
+          examined: history.length - replay.oversized - replay.skippedActivity,
+          skippedActivity: replay.skippedActivity,
+          skippedOversized: replay.oversized,
+          matched: replay.matched,
           truncated: retained !== null && retained > history.length,
-          window: examinedWindow.first === null ? null : examinedWindow,
+          window: replay.examinedWindow.first === null ? null : replay.examinedWindow,
           sampledWindow: history.length
             ? { first: history[history.length - 1]!.created_at, last: history[0]!.created_at }
             : null,

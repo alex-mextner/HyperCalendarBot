@@ -46,9 +46,7 @@ class Tests(unittest.IsolatedAsyncioTestCase):
             contextlib.redirect_stderr(io.StringIO()),
             self.assertRaises(SystemExit) as stopped,
         ):
-            await module.send_message(
-                "/tmp/synthetic.session", 5000000001, "synthetic", None
-            )
+            await module.send_message("/tmp/synthetic.session", 5000000001, "synthetic", None)
         self.assertEqual(stopped.exception.code, 1)
         self.assertEqual(json.loads(output.getvalue())["reason"], "revoked")
         client.send_message.assert_not_awaited()

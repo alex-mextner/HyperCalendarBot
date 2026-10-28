@@ -26,6 +26,30 @@ export interface InviteDeps {
   groupRepo?: GroupChatRepository;
 }
 
+async function handleGroupInvite(
+  ctx: BotCommandContext,
+  eventService: EventService,
+  groupRepo: GroupChatRepository | undefined,
+  lang: 'en' | 'ru',
+): Promise<void> {
+  const groupId = getGroupId(ctx);
+  if (groupId === null) return;
+  const timezone = groupRepo?.getTimezone(groupId) ?? 'UTC';
+  const occurrences = eventService.getUpcomingForGroup(groupId, 10);
+  if (occurrences.length === 0) {
+    await ctx.send(lang === 'ru' ? '📭 Нет событий в группе' : '📭 No group events');
+    return;
+  }
+  const events = occurrences.map((o) => ({ ...o.event, start_at: o.occurrence_start }));
+  await ctx.send(inviteEventPrompt(lang), {
+    reply_markup: eventPickerKeyboard(events, timezone, CB.INVITE_PICK, lang),
+  });
+}
+
+function inviteEventPrompt(lang: 'en' | 'ru'): string {
+  return lang === 'ru' ? '📨 Выберите событие для приглашения:' : '📨 Select an event to invite someone to:';
+}
+
 export async function handleInvite(ctx: BotCommandContext, deps: InviteDeps): Promise<void> {
   const { eventService, groupRepo } = deps;
   const user = ctx.dbUser;
@@ -33,21 +57,7 @@ export async function handleInvite(ctx: BotCommandContext, deps: InviteDeps): Pr
   const lang = user.language as 'en' | 'ru';
 
   if (isGroup(ctx)) {
-    const groupId = getGroupId(ctx);
-    if (groupId === null) return;
-    const timezone = groupRepo?.getTimezone(groupId) ?? 'UTC';
-    const occurrences = eventService.getUpcomingForGroup(groupId, 10);
-    if (occurrences.length === 0) {
-      await ctx.send(lang === 'ru' ? '📭 Нет событий в группе' : '📭 No group events');
-      return;
-    }
-    const events = occurrences.map((o) => ({ ...o.event, start_at: o.occurrence_start }));
-    await ctx.send(
-      lang === 'ru' ? '📨 Выберите событие для приглашения:' : '📨 Select an event to invite someone to:',
-      {
-        reply_markup: eventPickerKeyboard(events, timezone, CB.INVITE_PICK, lang),
-      },
-    );
+    await handleGroupInvite(ctx, eventService, groupRepo, lang);
     return;
   }
 
@@ -57,7 +67,7 @@ export async function handleInvite(ctx: BotCommandContext, deps: InviteDeps): Pr
     return;
   }
 
-  await ctx.send(lang === 'ru' ? '📨 Выберите событие для приглашения:' : '📨 Select an event to invite someone to:', {
+  await ctx.send(inviteEventPrompt(lang), {
     reply_markup: eventPickerKeyboard(events, user.timezone, CB.INVITE_PICK, lang),
   });
 }

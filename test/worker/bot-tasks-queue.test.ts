@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { mockBullmq } from '../helpers/mock-bullmq.ts';
 
 type JobProcessor = (job: { data: { type: string } }) => Promise<void>;
 type FailedHandler = (job: { id: string; data: { type: string } } | undefined, err: Error) => void;
@@ -17,7 +18,7 @@ const mockWorkerOn = mock((_event: string, handler: FailedHandler) => {
   capturedFailedHandler = handler;
 });
 
-mock.module('bullmq', () => ({
+mockBullmq({
   Queue: class MockQueue {
     name: string;
     constructor(name: string, opts: Record<string, unknown>) {
@@ -36,7 +37,7 @@ mock.module('bullmq', () => ({
     }
     on = mockWorkerOn;
   },
-}));
+});
 
 const {
   createBotTasksQueue,
@@ -144,6 +145,12 @@ describe('bot-tasks job processor', () => {
     await expect(capturedProcessor({ data: { type: 'cron-chat-history-cleanup' } })).resolves.toBeUndefined();
     await expect(capturedProcessor({ data: { type: 'cron-session-keepalive' } })).resolves.toBeUndefined();
     await expect(capturedProcessor({ data: { type: 'cron-ai-usage-cleanup' } })).resolves.toBeUndefined();
+  });
+
+  test('a job type that is no cron task, even an Object.prototype name, is a no-op', async () => {
+    createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
+    for (const type of ['cron-removed-long-ago', '__proto__', 'constructor', 'toString'])
+      await expect(capturedProcessor({ data: { type } }), type).resolves.toBeUndefined();
   });
 
   test('failed handler logs without throwing when job is present', () => {
