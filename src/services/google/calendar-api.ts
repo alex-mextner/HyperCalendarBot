@@ -3,6 +3,7 @@
 import type { OAuth2Client } from 'google-auth-library';
 import { type calendar_v3, google } from 'googleapis';
 import { syncLogger } from '../../utils/logger.ts';
+import { listBotEventCopies } from './bot-event-copies.ts';
 
 export interface CalendarInfo {
   google_calendar_id: string;
@@ -63,6 +64,11 @@ export class GoogleCalendarApi {
       nextSyncToken: res.data.nextSyncToken ?? null,
       nextPageToken: res.data.nextPageToken ?? null,
     };
+  }
+
+  /** Every live copy of one bot event in a calendar, all result pages (see `listBotEventCopies`). */
+  async findBotEventCopies(calendarId: string, botEventId: number): Promise<calendar_v3.Schema$Event[]> {
+    return listBotEventCopies(async (query) => (await this.api.events.list(query)).data, calendarId, botEventId);
   }
 
   async insertEvent(calendarId: string, event: calendar_v3.Schema$Event): Promise<calendar_v3.Schema$Event> {

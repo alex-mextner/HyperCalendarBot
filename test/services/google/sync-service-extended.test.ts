@@ -15,6 +15,7 @@ function createMockApi(overrides: { [key: string]: unknown } = {}) {
     insertEvent: mock(() => Promise.resolve({ id: 'g-new-1', etag: '"etag-new"' })),
     updateEvent: mock((_calId: string, eventId: string) => Promise.resolve({ id: eventId, etag: '"etag-upd"' })),
     deleteEvent: mock(() => Promise.resolve()),
+    findBotEventCopies: mock(() => Promise.resolve([])),
     watchEvents: mock(() => Promise.resolve({ resourceId: 'res-123', expiration: '2026-03-22T00:00:00Z' })),
     ...overrides,
   };

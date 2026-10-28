@@ -2,6 +2,13 @@ import type { CalendarEvent } from '../../database/types.ts';
 import { syncLogger } from '../../utils/logger.ts';
 import { formatLocationPlain } from '../location/format-location.ts';
 
+/**
+ * The private extended property that names the bot event a Google copy was made from. It is the
+ * stable key a copy is found by when its id was never stored (#875), and what the pull recognises
+ * the bot's own copies by.
+ */
+export const BOT_EVENT_MARKER = 'hypercalendarbot_event_id';
+
 interface LocalEventForGoogle
   extends Pick<CalendarEvent, 'location' | 'resolved_address' | 'venue_name' | 'location_verified'> {
   id: number;
@@ -71,11 +78,11 @@ export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
     summary: local.title,
     description: local.description ?? undefined,
     // Free-form text Google geocodes: the verified place, else the typed text. Pull never reads it
-    // back into a bot event: copies carrying hypercalendarbot_event_id are skipped.
+    // back into a bot event: copies carrying BOT_EVENT_MARKER are skipped.
     location: formatLocationPlain(local) || undefined,
     extendedProperties: {
       private: {
-        hypercalendarbot_event_id: String(local.id),
+        [BOT_EVENT_MARKER]: String(local.id),
         hypercalendarbot_version: String(local.sync_version),
       },
     },

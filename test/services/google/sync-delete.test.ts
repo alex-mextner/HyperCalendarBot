@@ -17,6 +17,7 @@ import { runMigrations } from '../../../src/database/schema.ts';
 import type { EventChangeNotifier } from '../../../src/services/event/event-change-notifier.ts';
 import { expandRecurrence } from '../../../src/services/event/recurrence.ts';
 import type { EventListResult, GoogleCalendarApi } from '../../../src/services/google/calendar-api.ts';
+import { BOT_EVENT_MARKER } from '../../../src/services/google/event-mapper.ts';
 import { SyncService } from '../../../src/services/google/sync-service.ts';
 import { syncLogger } from '../../../src/utils/logger.ts';
 
@@ -65,6 +66,11 @@ function makeGoogle(pageSize = 250): GoogleDouble {
     deleteEvent: async (_calendarId: string, eventId: string) => {
       touch(eventId, { ...events.get(eventId), status: 'cancelled' });
     },
+    findBotEventCopies: async (_calendarId: string, botEventId: number) =>
+      [...events.values()].filter(
+        (event) =>
+          event.status !== 'cancelled' && event.extendedProperties?.private?.[BOT_EVENT_MARKER] === String(botEventId),
+      ),
     listEvents: async (
       _calendarId: string,
       opts: { syncToken?: string; pageToken?: string },

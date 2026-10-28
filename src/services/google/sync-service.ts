@@ -14,7 +14,13 @@ import type { EventChangeNotifier } from '../event/event-change-notifier.ts';
 import { expandRecurrence } from '../event/recurrence.ts';
 import { type GoogleCalendarApi, googleGoneStatus } from './calendar-api.ts';
 import { computeEventDiff, snapshotFromCalendarEvent, snapshotFromGoogleLocal } from './change-detection.ts';
-import { type GoogleEvent, googleToLocal, type LocalEventFromGoogle, localToGoogle } from './event-mapper.ts';
+import {
+  BOT_EVENT_MARKER,
+  type GoogleEvent,
+  googleToLocal,
+  type LocalEventFromGoogle,
+  localToGoogle,
+} from './event-mapper.ts';
 import {
   handleParticipantChange,
   handleParticipantDelete,
@@ -23,6 +29,18 @@ import {
 
 /** Side effect to run after the pull's transaction committed; null when nothing is to be sent. */
 type PendingNotification = (() => Promise<void>) | null;
+
+/** How a Google copy of a bot event got linked: inserted now, or found by its marker (made by an earlier attempt). */
+type CopyOrigin = 'inserted' | 'adopted_by_marker';
+
+/** A Google copy of a bot event whose id is known, with the way it was reached. */
+interface LinkedCopy {
+  id: string;
+  etag: string | undefined;
+  origin: CopyOrigin;
+  /** Further adoptable live copies with the same marker (left by the old replay of a lost insert); never touched. */
+  duplicates: number;
+}
 
 /** A participant's linked Google copy about to be updated. */
 interface ParticipantCopy {
@@ -81,6 +99,16 @@ type GoogleDeleteReason = 'cancelled_in_google' | 'absent_in_full_list' | 'occur
 
 /** A reconcile never removes more than half of a calendar's linked events at once once this many are missing. */
 const RECONCILE_REFUSE_MIN = 3;
+
+/** Oldest first; an equal creation time falls back to the id. Plain code-unit order, not the locale's, so every machine picks the same copy. */
+function byCreatedThenId(a: calendar_v3.Schema$Event, b: calendar_v3.Schema$Event): number {
+  return compareText(a.created ?? '', b.created ?? '') || compareText(a.id ?? '', b.id ?? '');
+}
+
+function compareText(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
 
 const DAY_MS = 86_400_000;
 
@@ -221,7 +249,7 @@ export class SyncService {
         for (const gEvent of result.events) {
           if (gEvent.status === 'cancelled') continue;
           if (gEvent.id) live.add(gEvent.id);
-          if (gEvent.extendedProperties?.private?.hypercalendarbot_event_id) continue;
+          if (gEvent.extendedProperties?.private?.[BOT_EVENT_MARKER]) continue;
 
           const local = googleToLocal(gEvent as GoogleEvent, userId, calendarId);
           this.eventRepo.insertSyncedEvent({
@@ -304,7 +332,7 @@ export class SyncService {
         for (const gEvent of result.events) {
           if (gEvent.status === 'cancelled') {
             await this.handleDeletedEvent(userId, calendarId, gEvent as GoogleEvent, primaryCalendar, stats);
-          } else if (gEvent.extendedProperties?.private?.hypercalendarbot_event_id) {
+          } else if (gEvent.extendedProperties?.private?.[BOT_EVENT_MARKER]) {
             stats.botCopiesSkipped++;
           } else {
             await this.handleUpdatedOrNewEvent(userId, calendarId, gEvent as GoogleEvent);
@@ -334,6 +362,12 @@ export class SyncService {
     syncLogger.info(stats, 'Google pull applied');
   }
 
+  /**
+   * Pushes one event's change to Google. The scheduled `action` is a hint: a row that has a Google
+   * id is updated, one that has none gets its copy created, because the row can have changed since
+   * the push was queued (a second create must never insert a second copy, an update has nothing to
+   * address without an id). A delete is the one action taken as asked.
+   */
   async pushEvent(
     api: GoogleCalendarApi,
     userId: number,
@@ -345,44 +379,124 @@ export class SyncService {
 
     const calendarId = event.google_calendar_id ?? 'primary';
 
-    switch (action) {
-      case 'create': {
-        const gEvent = localToGoogle(event);
-        const created = await api.insertEvent(calendarId, gEvent);
-        this.eventRepo.updateSyncFields(eventId, {
-          google_event_id: created.id ?? undefined,
-          google_etag: created.etag ?? undefined,
-          sync_status: 'synced',
-          last_synced_at: new Date().toISOString(),
-        });
-        break;
+    if (action === 'delete') {
+      if (event.google_event_id) {
+        await api.deleteEvent(calendarId, event.google_event_id);
       }
-      case 'update': {
-        const gEvent = localToGoogle(event);
-        const updated = await api.updateEvent(calendarId, event.google_event_id!, gEvent);
-        this.eventRepo.updateSyncFields(eventId, {
-          google_etag: updated.etag ?? undefined,
-          sync_status: 'synced',
-          last_synced_at: new Date().toISOString(),
-        });
-        break;
-      }
-      case 'delete': {
-        if (event.google_event_id) {
-          await api.deleteEvent(calendarId, event.google_event_id);
-        }
-        this.eventRepo.remove(eventId, userId);
-        break;
-      }
+      this.eventRepo.remove(eventId, userId);
+      this.logPush(userId, eventId, 'delete', event.google_event_id ?? undefined);
+      return;
     }
 
+    if (event.google_event_id) {
+      const updated = await api.updateEvent(calendarId, event.google_event_id, localToGoogle(event));
+      this.eventRepo.updateSyncFields(eventId, {
+        google_etag: updated.etag ?? undefined,
+        sync_status: 'synced',
+        last_synced_at: new Date().toISOString(),
+      });
+      this.logPush(userId, eventId, 'update', event.google_event_id);
+      return;
+    }
+
+    await this.ensureCopy(api, calendarId, eventId, localToGoogle(event), (copy) => {
+      this.eventRepo.updateSyncFields(eventId, {
+        google_event_id: copy.id,
+        google_etag: copy.etag ?? undefined,
+        sync_status: 'synced',
+        last_synced_at: new Date().toISOString(),
+      });
+      const duplicates = copy.duplicates > 0 ? { duplicates: copy.duplicates } : {};
+      this.logPush(userId, eventId, 'create', copy.id, JSON.stringify({ via: copy.origin, ...duplicates }));
+    });
+  }
+
+  private logPush(
+    userId: number,
+    eventId: number,
+    action: 'create' | 'update' | 'delete',
+    googleEventId: string | undefined,
+    details?: string,
+  ): void {
     this.syncRepo.logSync({
       user_id: userId,
       event_id: eventId,
-      google_event_id: event.google_event_id ?? undefined,
+      google_event_id: googleEventId,
       direction: 'push',
       action,
+      details,
     });
+  }
+
+  /**
+   * Makes bot event `eventId` exist in Google exactly once and hands the copy to `onLinked`, which runs
+   * in one transaction (the link and the creation receipt both carry the id, or neither is written).
+   * The calendar is searched for the copy before anything is inserted: an earlier attempt may have
+   * created it and lost the answer (a timeout, a restart while the job ran, a failed write afterwards),
+   * and unknown completion is not failure. A copy found is updated to the current body and adopted;
+   * with several, the oldest is. A copy some row already points at is never adopted: two users can
+   * share one Google calendar, and each link keeps its own copy. The same check runs again inside the
+   * transaction, right before the link is written, so a copy another job linked while this one was
+   * awaiting Google is never linked twice (the sync worker runs one job at a time; this keeps the
+   * guarantee if that ever changes). One extra read per creation buys all of this for retries,
+   * restarts and relinking after a disconnect alike, with no state to persist before the insert. An
+   * insert whose answer has no id is an error: the next attempt finds that copy.
+   */
+  private async ensureCopy(
+    api: GoogleCalendarApi,
+    calendarId: string,
+    eventId: number,
+    gEvent: GoogleEvent,
+    onLinked: (copy: LinkedCopy) => void,
+  ): Promise<void> {
+    const found = await api.findBotEventCopies(calendarId, eventId);
+    const [oldest, ...newer] = found.filter((candidate) => this.isAdoptable(candidate)).sort(byCreatedThenId);
+
+    let copy: LinkedCopy;
+    if (oldest?.id) {
+      const updated = await api.updateEvent(calendarId, oldest.id, gEvent);
+      copy = { id: oldest.id, etag: updated.etag ?? undefined, origin: 'adopted_by_marker', duplicates: newer.length };
+    } else {
+      const created = await api.insertEvent(calendarId, gEvent);
+      if (!created.id) {
+        throw new Error(`Google answered the insert of event ${eventId} without an event id`);
+      }
+      copy = { id: created.id, etag: created.etag ?? undefined, origin: 'inserted', duplicates: 0 };
+    }
+
+    this.db.transaction(() => {
+      if (this.isLinkedToRow(copy.id)) {
+        throw new Error(`Google copy ${copy.id} of event ${eventId} was linked to another row meanwhile`);
+      }
+      onLinked(copy);
+    })();
+    const evidence = { eventId, googleEventId: copy.id, origin: copy.origin, duplicates: copy.duplicates };
+    if (copy.duplicates > 0) {
+      syncLogger.warn(
+        evidence,
+        'Google copy linked; several copies carry this bot event marker, the others are left alone',
+      );
+    } else {
+      syncLogger.info(evidence, 'Google copy linked');
+    }
+  }
+
+  /** A live copy of the event itself (not an instance of a series) that no row points at yet. */
+  private isAdoptable(copy: calendar_v3.Schema$Event): boolean {
+    if (!copy.id || copy.status === 'cancelled' || copy.recurringEventId) return false;
+    return !this.isLinkedToRow(copy.id);
+  }
+
+  /** Whether any row, of any user, points at this Google event. */
+  private isLinkedToRow(googleEventId: string): boolean {
+    return (
+      this.db
+        .query(
+          `SELECT 1 FROM events WHERE google_event_id = ?
+           UNION ALL SELECT 1 FROM participant_google_sync WHERE google_event_id = ? LIMIT 1`,
+        )
+        .get(googleEventId, googleEventId) !== null
+    );
   }
 
   resolveConflict(localEvent: CalendarEvent, googleUpdatedAt: string): 'keep_local' | 'keep_google' {
@@ -892,14 +1006,16 @@ export class SyncService {
     gEvent: GoogleEvent,
   ): Promise<void> {
     const link = { user_id: participantUserId, event_id: eventId };
-    await this.insertParticipantCopy(api, participantSyncRepo, link, calendarId, gEvent);
-    this.syncRepo.logSync({
-      user_id: participantUserId,
-      event_id: eventId,
-      direction: 'push',
-      action: 'create',
-      details: 'participant_sync',
-    });
+    await this.ensureParticipantCopy(api, participantSyncRepo, link, calendarId, gEvent, (copy) =>
+      this.syncRepo.logSync({
+        user_id: participantUserId,
+        event_id: eventId,
+        google_event_id: copy.id,
+        direction: 'push',
+        action: 'create',
+        details: copy.origin === 'inserted' ? 'participant_sync' : `participant_sync:${copy.origin}`,
+      }),
+    );
   }
 
   /** Whether the participant's RSVP is declined; the pull records a copy deleted in Google as one. */
@@ -908,23 +1024,28 @@ export class SyncService {
     return participant?.status === 'declined';
   }
 
-  /** Inserts a fresh copy into the participant's calendar and points their link row at it. */
-  private async insertParticipantCopy(
+  /**
+   * Creates the participant's copy (or finds the one an earlier attempt made) and points their link
+   * row at it; `onLinked` writes the caller's log row in the same transaction as the link.
+   */
+  private ensureParticipantCopy(
     api: GoogleCalendarApi,
     participantSyncRepo: ParticipantGoogleSyncRepository,
     link: Pick<ParticipantGoogleSync, 'user_id' | 'event_id'>,
     calendarId: string,
     gEvent: GoogleEvent,
-  ): Promise<calendar_v3.Schema$Event> {
-    const created = await api.insertEvent(calendarId, gEvent);
-    participantSyncRepo.upsert(link.user_id, link.event_id, {
-      google_event_id: created.id,
-      google_calendar_id: calendarId,
-      google_etag: created.etag,
-      sync_status: 'synced',
-      last_synced_at: new Date().toISOString(),
+    onLinked: (copy: LinkedCopy) => void,
+  ): Promise<void> {
+    return this.ensureCopy(api, calendarId, link.event_id, gEvent, (copy) => {
+      participantSyncRepo.upsert(link.user_id, link.event_id, {
+        google_event_id: copy.id,
+        google_calendar_id: calendarId,
+        google_etag: copy.etag,
+        sync_status: 'synced',
+        last_synced_at: new Date().toISOString(),
+      });
+      onLinked(copy);
     });
-    return created;
   }
 
   /**
@@ -1015,13 +1136,13 @@ export class SyncService {
     }
     if (listed) throw err;
 
-    const created = await this.insertParticipantCopy(api, participantSyncRepo, link, calendarId, copy.gEvent);
-    const newGoogleEventId = created.id ?? undefined;
-    record('create', newGoogleEventId, {
-      probe: 'not_found',
-      outcome: 'recreated',
-      new_google_event_id: newGoogleEventId,
-    });
+    await this.ensureParticipantCopy(api, participantSyncRepo, link, calendarId, copy.gEvent, (linked) =>
+      record('create', linked.id, {
+        probe: 'not_found',
+        outcome: 'recreated',
+        new_google_event_id: linked.id,
+      }),
+    );
   }
 
   async setupWatchChannel(

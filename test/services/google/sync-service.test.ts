@@ -12,6 +12,7 @@ import { ParticipantRepository } from '../../../src/database/repositories/partic
 import { ParticipantGoogleSyncRepository } from '../../../src/database/repositories/participant-google-sync.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { GoogleCalendarApi } from '../../../src/services/google/calendar-api.ts';
+import { BOT_EVENT_MARKER } from '../../../src/services/google/event-mapper.ts';
 import { SyncService } from '../../../src/services/google/sync-service.ts';
 
 function createMockApi(
@@ -32,6 +33,7 @@ function createMockApi(
     insertEvent: mock(() => Promise.resolve({ id: 'g-new-1', etag: '"etag-new"' })),
     updateEvent: mock((_calId: string, eventId: string) => Promise.resolve({ id: eventId, etag: '"etag-upd"' })),
     deleteEvent: mock(() => Promise.resolve()),
+    findBotEventCopies: mock(() => Promise.resolve([])),
   };
 }
 
@@ -262,6 +264,10 @@ function makeInMemoryGoogleCalendar(): { api: GoogleCalendarApi; stored: Map<str
     api: asGoogleCalendarApi({
       insertEvent: async (_calendarId, event) => save(`g-${stored.size + 1}`, event),
       updateEvent: async (_calendarId, eventId, event) => save(eventId, event),
+      findBotEventCopies: async (_calendarId, botEventId) =>
+        [...stored.values()].filter(
+          (event) => event.extendedProperties?.private?.[BOT_EVENT_MARKER] === String(botEventId),
+        ),
       listEvents: async () => ({
         events: [...stored.values()],
         nextSyncToken: 'token-after-pull',
