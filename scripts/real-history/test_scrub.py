@@ -1,11 +1,14 @@
 """Unit tests of the scrubber on invented data. Run: python3 -m unittest scripts/real-history/test_scrub.py -v"""
 
+import glob
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+from corpus_sources import OpenedDb
 from scrub import Scrubber, norm
 
 VOCAB = {
@@ -169,6 +172,18 @@ class ScrubTest(unittest.TestCase):
         s = make([("Anton", "first")])
         out = s.scrub("meet Anton and Anton's friend")
         self.assertNotIn("Anton", out)
+
+
+class OpenedDbTemp(unittest.TestCase):
+    def test_corrupt_archive_leaves_no_unpacked_copy(self):
+        before = set(glob.glob("/tmp/rh-*.db"))
+        with tempfile.TemporaryDirectory() as folder:
+            broken = os.path.join(folder, "broken.db.gz")
+            with open(broken, "wb") as handle:
+                handle.write(b"this is not a gzip archive")
+            with self.assertRaises(OSError):
+                OpenedDb(broken)
+        self.assertEqual(set(glob.glob("/tmp/rh-*.db")) - before, set())
 
 
 if __name__ == "__main__":
