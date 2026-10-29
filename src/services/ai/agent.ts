@@ -1,7 +1,12 @@
 import type { ChatHistoryMessage } from '../../database/types.ts';
 import { logger } from '../../utils/logger.ts';
 import { hasPersistablePayload, withoutSkippedToolCalls } from './agent/assistant-turn.ts';
-import { buildHistoryMessages, relevantHistoryRows, withRetryQuestion } from './agent/conversation.ts';
+import {
+  buildHistoryMessages,
+  relevantHistoryRows,
+  withRetryQuestion,
+  withSupplementTurn,
+} from './agent/conversation.ts';
 import { announceFailure } from './agent/failure-announcement.ts';
 import { agentGiveUpMessage, aiFailureNotices } from './agent/failure-notices.ts';
 import { AssistantMessageCodec, tagSender } from './agent/history-rows.ts';
@@ -97,7 +102,7 @@ export class CalendarBotAgent {
     const messages = await buildHistoryMessages(ctx, rows, { summarizer: this.summarizer, measuredStream, signal });
     // The retry question is judged against the newest saved row, before regrouping moved anything to the end.
     const ordered = withRetryQuestion(ctx, messages, regroupToolCallBlocks(messages));
-    return { systemParts, messages: sanitizeMessages(ordered) };
+    return { systemParts, messages: withSupplementTurn(ctx, sanitizeMessages(ordered)) };
   }
 
   saveAssistantTurn(ctx: AgentContext, assistantMessage: MessageParam, skipIds?: Set<string>): void {

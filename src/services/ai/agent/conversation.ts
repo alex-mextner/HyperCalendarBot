@@ -86,3 +86,22 @@ export function withRetryQuestion(ctx: AgentContext, stored: MessageParam[], ord
   if (alreadyAsked) return ordered;
   return [...ordered, { role: 'user', content: ctx.messageText }];
 }
+
+/**
+ * A supplement reviews the answer the rule system has just sent, and that answer is the newest
+ * stored turn: the conversation ends on an assistant message. Claude 5.5 refuses such a request
+ * ("does not support assistant message prefill", HTTP 400); with z.ai and Hugging Face out it
+ * failed the whole chain (#895). The review instruction lives in the system prompt, so this turn
+ * only asks the model to carry it out; it names no tool, so a renamed tool cannot make it stale.
+ * A conversation that already ends on a user message (a group's newest row, a normal turn) is kept.
+ */
+export function withSupplementTurn(ctx: AgentContext, messages: MessageParam[]): MessageParam[] {
+  if (!ctx.supplementMode || messages.at(-1)?.role !== 'assistant') return messages;
+  return [
+    ...messages,
+    {
+      role: 'user',
+      content: 'Review the auto-response above as the Supplement Mode instructions say.',
+    },
+  ];
+}

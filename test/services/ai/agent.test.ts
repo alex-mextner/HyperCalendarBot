@@ -436,6 +436,32 @@ describe('CalendarBotAgent', () => {
       const { messages } = await agent.buildMessages(ctx, []);
       expect(messages.length).toBe(0);
     });
+
+    // Claude 5.5 answers 400 "does not support assistant message prefill" to a conversation that ends on an
+    // assistant turn (2026-10-28, #895); the rule's reply is the newest stored turn when the supplement runs.
+    test('a supplement conversation ends with a user message after the rule reply', async () => {
+      ctx.chatHistory.save(USER_ID, 'user', 'What do I have today?');
+      ctx.conversationLogger.logBotResponse(USER_ID, 'Today: nothing planned.');
+      const supplementCtx = { ...ctx, supplementMode: true, supplementAutoResponse: 'Today: nothing planned.' };
+      const agent = new CalendarBotAgent(config, sender);
+      const { messages } = await agent.buildMessages(supplementCtx, ctx.chatHistory.getRecent(USER_ID));
+      expect(messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
+    });
+
+    test('a normal conversation is not given an extra user turn', async () => {
+      ctx.chatHistory.save(USER_ID, 'user', 'What do I have today?');
+      const agent = new CalendarBotAgent(config, sender);
+      const { messages } = await agent.buildMessages(ctx, ctx.chatHistory.getRecent(USER_ID));
+      expect(messages.map((m) => m.role)).toEqual(['user']);
+    });
+
+    test('a supplement conversation that already ends on a user message is left alone', async () => {
+      ctx.chatHistory.save(USER_ID, 'user', 'What do I have today?');
+      const supplementCtx = { ...ctx, supplementMode: true, supplementAutoResponse: 'Today: nothing planned.' };
+      const agent = new CalendarBotAgent(config, sender);
+      const { messages } = await agent.buildMessages(supplementCtx, ctx.chatHistory.getRecent(USER_ID));
+      expect(messages.map((m) => m.role)).toEqual(['user']);
+    });
   });
 
   test('buildMessages fetches 50 entries for group chats', async () => {
