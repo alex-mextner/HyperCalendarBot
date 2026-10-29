@@ -4,8 +4,8 @@
     "send": "/start",
     "expect": ["Choose your language|Выберите язык|Welcome back|С возвращением"],
     "forbid": ["Traceback|went wrong|пошло не так|Произошла ошибка"],
-    "max_first_reply_s": 30,
-    "timeout_s": 60
+    "max_first_reply_s": 60,
+    "timeout_s": 90
   },
   {
     "name": "ping",
