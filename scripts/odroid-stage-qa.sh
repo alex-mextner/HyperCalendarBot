@@ -11,7 +11,7 @@
 # the artifact.
 #
 # Usage: printf '%s\n' "$GITHUB_TOKEN" | sudo -n /usr/local/sbin/hypercal-stage-qa <sha40>
-#        or, as the forced command of the PC driver's ssh key (SHA in SSH_ORIGINAL_COMMAND, no args):
+#        or, as an ssh forced command (SHA in SSH_ORIGINAL_COMMAND, no args):
 #        printf '%s\n' "$GITHUB_TOKEN" | ssh <odroid> <sha40>
 # After the stage is up and guarded the run prints one STAGE_READY {json} line and keeps the stage
 # until the client writes DONE (or closes stdin).
@@ -84,9 +84,9 @@ fail() {
   exit 2
 }
 
-# Called as an ssh forced command (the PC driver, scripts/stage-qa-pc.py) it has no arguments and
+# Called as an ssh forced command (an ssh key whose authorized_keys entry names this file) it has no arguments and
 # the client's command line, which sshd leaves in SSH_ORIGINAL_COMMAND, must be exactly the SHA.
-# With one argument (the sudo path) the environment is ignored.
+# With one argument (the sudo path, the QA runner's driver scripts/stage-qa-driver.py) the environment is ignored.
 # shellcheck disable=SC2016 # $GITHUB_TOKEN is literal text in the usage line
 case "$#" in
   0) CANDIDATE="${SSH_ORIGINAL_COMMAND-}" ;;

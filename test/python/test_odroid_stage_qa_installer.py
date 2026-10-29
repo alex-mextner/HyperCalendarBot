@@ -2,6 +2,7 @@
 
 Shared fixtures live in odroid_stage_qa_support.py."""
 
+import json
 import os
 import shutil
 import stat
@@ -53,6 +54,8 @@ class Installer(unittest.TestCase):
         self.entry_path.parent.mkdir(parents=True)
         self.lib.parent.mkdir(parents=True)
         self.lock = self.tmp / "stage.lock"
+        self.config = self.tmp / "etc/hypercal-stage-qa/driver.json"
+        self.runner_home = self.tmp / "runner-home"
         self.write_checkout("one")
         self.git("init", "-q", "-b", "main")
         self.commit("initial")
@@ -82,6 +85,20 @@ class Installer(unittest.TestCase):
                     f"readonly STAGE_LOCK_FILE={self.lock}\n",
                 ),
                 ("readonly STAGE_LOCK_WAIT=60\n", "readonly STAGE_LOCK_WAIT=1\n"),
+                (
+                    "readonly DRIVER_CONFIG=/etc/hypercal-stage-qa/driver.json\n",
+                    f"readonly DRIVER_CONFIG={self.config}\n",
+                ),
+                (
+                    "readonly BROWSER_TARGET=ultra@65.21.40.51\n",
+                    "readonly BROWSER_TARGET=qa@browser.example\n",
+                ),
+                (
+                    "readonly RUNNER_HOME=/var/lib/hcb-qa-runner\n",
+                    f"readonly RUNNER_HOME={self.runner_home}\n",
+                ),
+                # The copy runs as the test user, which may not chown to root.
+                ("install -d -m 0755 -o root -g root --", "install -d -m 0755 --"),
             ],
         )
         script = self.tmp / "install-stage-qa.sh"
@@ -140,6 +157,8 @@ class Installer(unittest.TestCase):
         self.assertEqual(
             stat.S_IMODE((self.lib / "docker-compose.stage.yml").stat().st_mode), 0o644
         )
+        for name in ("stage-qa-driver.py", "stage_qa_common.py"):
+            self.assertEqual(stat.S_IMODE((self.lib / name).stat().st_mode), 0o755, name)
         self.assertEqual(
             [p.name for p in self.lib.parent.iterdir() if ".new" in p.name or ".bak" in p.name], []
         )
@@ -285,6 +304,98 @@ class Installer(unittest.TestCase):
         self.assertEqual(
             [p.name for p in self.lib.parent.iterdir() if ".bak" in p.name or ".new" in p.name], []
         )
+
+    def test_fresh_install_creates_the_driver_config_with_the_documented_keys(self):
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(self.config.read_text()),
+            {
+                "browser_target": "qa@browser.example",
+                "browser_key": f"{self.runner_home}/.ssh/hypercal-stage-browser_ed25519",
+                "browser_known_hosts": f"{self.runner_home}/.ssh/known_hosts",
+            },
+        )
+        self.assertEqual(stat.S_IMODE(self.config.stat().st_mode), 0o644)
+        self.assertIn(f"created {self.config}", result.stdout)
+        self.assertEqual([p.name for p in self.config.parent.iterdir()], ["driver.json"])
+
+    def test_an_existing_driver_config_is_never_overwritten(self):
+        self.config.parent.mkdir(parents=True)
+        self.config.write_text('{"browser_target": "operator@edited"}\n')
+        self.config.chmod(0o600)
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.config.read_text(), '{"browser_target": "operator@edited"}\n')
+        self.assertEqual(stat.S_IMODE(self.config.stat().st_mode), 0o600)
+        self.assertNotIn("created", result.stdout)
+        rollback = next(
+            line for line in result.stdout.splitlines() if line.startswith("rollback: ")
+        )
+        self.assertNotIn(str(self.config), rollback)
+
+    def test_a_reinstall_keeps_the_config_the_first_install_created(self):
+        self.assertEqual(self.install().returncode, 0)
+        edited = self.config.read_text().replace("qa@browser.example", "operator@edited")
+        self.config.write_text(edited)
+        self.write_checkout("two")
+        self.commit("second")
+        self.publish()
+        time.sleep(1.1)
+        self.assertEqual(self.install().returncode, 0)
+        self.assertEqual(self.config.read_text(), edited)
+
+    def test_the_rollback_line_removes_a_created_config(self):
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rollback = next(
+            line for line in result.stdout.splitlines() if line.startswith("rollback: ")
+        )
+        self.assertIn(str(self.config), rollback)
+        subprocess.run(
+            ["bash", "-c", rollback[len("rollback: ") :]], check=True, capture_output=True
+        )
+        self.assertFalse(self.config.exists())
+        self.assertFalse(self.lib.exists())
+        self.assertFalse(self.entry_path.exists())
+
+    def test_a_failed_config_creation_leaves_no_new_file_behind(self):
+        blocker = self.tmp / "etc"
+        blocker.write_text("a file where the config directory must go\n")
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(blocker.read_text(), "a file where the config directory must go\n")
+        for directory in (self.lib.parent, self.entry_path.parent, self.tmp):
+            self.assertEqual(
+                [p.name for p in directory.iterdir() if ".new" in p.name], [], directory
+            )
+
+    def test_a_refused_install_creates_no_config(self):
+        (self.src / "scripts" / "stage_qa_common.py").unlink()
+        self.commit("remove")
+        self.publish()
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("stage_qa_common.py", result.stderr)
+        self.assertFalse(self.config.parent.exists())
+
+    def test_the_config_is_created_before_anything_is_swapped_and_never_holds_a_case_floor(self):
+        # Nothing the config step creates is replaced by the swap, so it comes first: a failure up to the swap
+        # then leaves the previous lib dir and entry exactly as they were.
+        text = INSTALLER.read_text()
+        created = text.index('mv -f -- "$NEW_CONFIG" "$DRIVER_CONFIG"')
+        self.assertLess(created, text.index('mv -T -- "$NEW_LIB" "$LIB_DIR"'))
+        self.assertLess(created, text.index('mv -f -- "$NEW_ENTRY" "$ENTRY_PATH"'))
+        self.assertNotIn("min_cases", text)
+        self.assertIn('rm -f -- "$CREATED_CONFIG"', text)
+
+    def test_the_rollback_of_a_fresh_install_removes_the_config_before_the_entry_is_restored(self):
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rollback = next(
+            line for line in result.stdout.splitlines() if line.startswith("rollback: ")
+        )
+        self.assertLess(rollback.index(str(self.config)), rollback.index(str(self.entry_path)))
 
     def test_lib_file_list_matches_the_contract(self):
         text = INSTALLER.read_text()

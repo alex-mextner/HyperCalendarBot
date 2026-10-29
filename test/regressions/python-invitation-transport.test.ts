@@ -32,7 +32,7 @@ test('every compatibility entrypoint exists and its topic modules are discovered
 // do not spend the invitation-transport suite's deadline or share its Python mocks.
 // The deploy harness runs the real remote shell against a fake docker for every case,
 // which takes over a minute on a loaded machine.
-// The stage QA suites run the real root scripts, the PC driver and a fake ssh, docker or qa per case.
+// The stage QA suites run the real root scripts, the odroid driver, the browser half and a fake ssh, docker or qa per case.
 // test_stage_qa_gate.py drives the real gate CLI against a fake gh, one process per gate run plus
 // one per API call. On 2026-10-27 its 52 cases made 177 gate runs and took 30-35 s, all process
 // spawning bar one 1 s deadline case, which is over the 30 s default on a hosted runner. It gets
@@ -45,7 +45,9 @@ const TIMEOUT_MS: Record<string, number> = {
   'test_odroid_stage_qa_teardown.py': 180_000,
   'test_stage_fetch_artifact.py': 180_000,
   'test_stage_qa_gate.py': 120_000,
-  'test_stage_qa_pc.py': 180_000,
+  'test_stage_qa_driver.py': 180_000,
+  'test_stage_qa_browser.py': 180_000,
+  'test_stage_qa_browser_installer.py': 180_000,
   'test_stage_smoke.py': 180_000,
 };
 test('every per-suite timeout names a Python suite that exists', () => {

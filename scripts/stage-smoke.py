@@ -4,8 +4,8 @@
 Two halves of one engine, split by machine because nothing PR-controlled may run next to a logged-in
 Telegram account:
   * `guard` runs on the odroid next to the stage env. It proves the target is not production and
-    validates the case list, then prints ONE line `STAGE_GUARD {json}` for the PC driver.
-  * `run` runs on the PC. It validates the list again (never trusting the odroid), sends every case to
+    validates the case list, then prints ONE line `STAGE_GUARD {json}` for the driver.
+  * `run` runs on the browser host (stage-qa-browser.py). It validates the list again (never trusting the odroid), sends every case to
     the stage bot through qa-cli (`qa telegram chat send|wait|read`, Telegram Web A in a logged-in
     browser, so blockquote answers are readable), and asserts that answers arrive, match, and arrive
     fast enough. Any failed case fails the PR's `stage-qa` check.
@@ -52,7 +52,7 @@ from pathlib import Path
 REFUSED = 64
 UNAVAILABLE = 69
 STAGE_NAME = re.compile(r"stage|stg", re.IGNORECASE)
-USERNAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,31}$")
+USERNAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
 
 
 class Refused(Exception):
@@ -453,7 +453,7 @@ def guard_command(args, get_me):
 
 
 def check_run_target(username, peer, deny):
-    """The PC's own copy of the production checks: it only knows the names it was given, never the odroid's env."""
+    """The browser host's own copy of the production checks: it only knows the names it was given, never the odroid's env."""
     if not USERNAME.fullmatch(username):
         raise Refused("--username is malformed")
     if username.lower() in {name.lstrip("@").lower() for name in deny}:
@@ -510,7 +510,7 @@ def build_parser():
     guard.add_argument("--stage-env", required=True)
     guard.add_argument("--prod-env", required=True)
     guard.add_argument("--deny", action="append", default=[])
-    run = commands.add_parser("run", help="PC: run the guarded cases through qa-cli")
+    run = commands.add_parser("run", help="browser host: run the guarded cases through qa-cli")
     run.add_argument("--cases-json", required=True)
     run.add_argument("--username", required=True)
     run.add_argument("--peer", required=True)

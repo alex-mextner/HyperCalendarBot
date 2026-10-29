@@ -5,9 +5,11 @@
 # Why by hand: root runs everything installed here on behalf of PR runs, so it must come from code
 # a human reviewed on main, never from a PR artifact or the runner's workspace.
 #
-# Installs   LIB (/usr/local/lib/hypercal-stage): the helper files of the contract, copied into a
+# Installs   LIB (/usr/local/lib/hypercal-stage): the helper files of the contract and the QA driver
+#            (stage-qa-driver.py + stage_qa_common.py, run by the stage-qa runner's job), copied into a
 #            fresh dir and swapped in while holding the stage lock (no run is in flight);
-#            /usr/local/sbin/hypercal-stage-qa: the root entry (root:root 0755).
+#            /usr/local/sbin/hypercal-stage-qa: the root entry (root:root 0755);
+#            /etc/hypercal-stage-qa/driver.json (browser host, key, known_hosts): ONLY if absent.
 # Keeps      the previous LIB as <LIB>.bak-<UTC stamp> and the previous entry as <entry>.bak-<stamp>,
 #            and prints the one-line rollback command.
 # Refuses    a non-root caller, a checkout that is not a git checkout, a layout where any listed file is
@@ -36,8 +38,13 @@ readonly -a LIB_SOURCES=(
   scripts/deploy-evidence.py
   scripts/prepare-runtime-dirs.sh
   scripts/log-retention.py
+  scripts/stage-qa-driver.py
+  scripts/stage_qa_common.py
 )
 readonly ENTRY_SOURCE=scripts/odroid-stage-qa.sh
+readonly DRIVER_CONFIG=/etc/hypercal-stage-qa/driver.json
+readonly BROWSER_TARGET=ultra@65.21.40.51
+readonly RUNNER_HOME=/var/lib/hcb-qa-runner
 
 fail() {
   local code="${2:-2}"
@@ -47,9 +54,15 @@ fail() {
 
 NEW_LIB=""
 NEW_ENTRY=""
+NEW_CONFIG=""
+CREATED_CONFIG=""
+ROLLBACK_CONFIG=""
 cleanup() {
+  local status=$?
   [[ -z "$NEW_LIB" ]] || rm -rf -- "$NEW_LIB"
   [[ -z "$NEW_ENTRY" ]] || rm -f -- "$NEW_ENTRY"
+  [[ -z "$NEW_CONFIG" ]] || rm -f -- "$NEW_CONFIG"
+  [[ -z "$CREATED_CONFIG" || "$status" == 0 ]] || rm -f -- "$CREATED_CONFIG"
 }
 trap cleanup EXIT
 
@@ -106,7 +119,30 @@ NEW_ENTRY="$ENTRY_PATH.new.$$"
 install -m 0755 "$SRC/$ENTRY_SOURCE" "$NEW_ENTRY"
 chown "$INSTALL_OWNER" "$NEW_ENTRY"
 
+# The driver's config (browser host, key, known_hosts) only when absent: never overwritten, no secret in it.
+# Created before anything is swapped, so a failure up to here leaves the old lib and entry untouched (the swap
+# below replaces nothing this creates); a failed install removes the config it just created.
+if [[ ! -e "$DRIVER_CONFIG" ]]; then
+  install -d -m 0755 -o root -g root -- "$(dirname "$DRIVER_CONFIG")"
+  NEW_CONFIG="$DRIVER_CONFIG.new.$$"
+  cat >"$NEW_CONFIG" <<EOF
+{
+  "browser_target": "$BROWSER_TARGET",
+  "browser_key": "$RUNNER_HOME/.ssh/hypercal-stage-browser_ed25519",
+  "browser_known_hosts": "$RUNNER_HOME/.ssh/known_hosts"
+}
+EOF
+  chmod 0644 "$NEW_CONFIG"
+  chown "$INSTALL_OWNER" "$NEW_CONFIG"
+  mv -f -- "$NEW_CONFIG" "$DRIVER_CONFIG"
+  NEW_CONFIG=""
+  CREATED_CONFIG="$DRIVER_CONFIG"
+  ROLLBACK_CONFIG="rm -f -- $(printf '%q' "$DRIVER_CONFIG")"
+  printf 'created %s\n' "$DRIVER_CONFIG"
+fi
+
 ROLLBACK=()
+[[ -z "$ROLLBACK_CONFIG" ]] || ROLLBACK+=("$ROLLBACK_CONFIG")
 if [[ -e "$LIB_DIR" ]]; then
   mv -T -- "$LIB_DIR" "$BACKUP_LIB"
   ROLLBACK+=("rm -rf -- $(printf '%q' "$LIB_DIR")" "mv -T -- $(printf '%q %q' "$BACKUP_LIB" "$LIB_DIR")")

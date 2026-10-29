@@ -9,7 +9,7 @@
 # Flow: provisioned-files check -> host deploy lock -> "still the PR head" re-check -> disk check +
 # docker load -> bot.env from an allow-list of the prod .env -> fresh stage DB -> compose up ->
 # health -> stage-smoke.py guard -> print STAGE_READY {json} -> wait for the client's DONE line (or
-# EOF) while the cases run elsewhere (the PC driver, scripts/stage-qa-pc.py, through qa-cli) ->
+# EOF) while the cases run elsewhere (the browser host, scripts/stage-qa-browser.py, through qa-cli) ->
 # (always) evidence, compose down, image removal, work dir removal.
 # stdin after the token line is the client's channel: DONE or EOF ends the wait.
 # stdout carries only the STAGE_READY line and the last line STAGE_QA_RESULT ...; all progress goes
@@ -17,7 +17,7 @@
 # Exit: 0 passed (DONE/EOF after READY), 1 failed (health/timeout: the PR is wrong), 2 refused (guard),
 # 3 not provisioned, 4 stage could not run (docker load / compose up failed: the cause may be
 # infrastructure or image startup, and there is no test verdict; the report posts `error`), 75 host
-# lock wait timed out, 76 superseded. The verdict on the cases is the PC's.
+# lock wait timed out, 76 superseded. The verdict on the cases is the browser host's.
 # shellcheck disable=SC2329 # the functions below are reached only through traps and step(), which shellcheck cannot see
 set -euo pipefail
 umask 077
@@ -266,8 +266,8 @@ step python3 "$LIB/deploy-health.py" wait --container "$CONTAINER" --url "$HEALT
   --stable "$HEALTH_STABLE" --stall "$HEALTH_STALL" || die 1 'the stage instance did not become healthy'
 
 # --- guard: the cases and the stage bot's identity, validated on the odroid ---
-# The cases run on the PC (qa-cli drives Telegram Web there); the odroid only proves the target is
-# the stage bot and not production, with the same guard the PC repeats on its side.
+# The cases run on the browser host (qa-cli drives Telegram Web there); the odroid only proves the target is
+# the stage bot and not production, with the same guard that host repeats on its side.
 extra=()
 [[ ! -f "$WORK/stage-smoke-cases.replay.json" ]] || extra=(--extra-cases "$WORK/stage-smoke-cases.replay.json")
 run_guard() {
@@ -293,6 +293,8 @@ try:
         raise ValueError("expected exactly one STAGE_GUARD line")
     guard = json.loads(lines[0][len("STAGE_GUARD "):])
     username, peer, cases, base = guard["username"], guard["peer"], guard["cases"], guard["base_cases"]
+    # Deliberately loose shape check; the strict Telegram bound [A-Za-z][A-Za-z0-9_]{4,31} is enforced by the
+    # stage-smoke.py guard and the browser half.
     if (not isinstance(username, str) or not re.fullmatch(r"[A-Za-z0-9_]{3,64}", username)
             or not isinstance(peer, str) or not re.fullmatch(r"[0-9]+", peer)
             or not isinstance(cases, list) or not cases or type(base) is not int or not 0 < base <= len(cases)):
@@ -306,7 +308,7 @@ READY
 )" || die 2 'the stage guard printed no valid STAGE_GUARD line'
 printf 'STAGE_READY %s\n' "$READY_LINE" >&4
 
-# --- hold the stage until the PC has run its cases ---
+# --- hold the stage until the browser host has run its cases ---
 # DONE (or the ssh connection dropping = EOF) ends the wait; the watchdog budget counts from the
 # host lock. read runs in this shell (not a child) so DONE is consumed from the real stdin.
 while :; do
