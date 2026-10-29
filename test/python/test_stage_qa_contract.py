@@ -56,6 +56,15 @@ class SmokeHasSomethingToCheck(unittest.TestCase):
             for pattern in [*case.get("expect", []), *case.get("forbid", [])]:
                 re.compile(pattern)
 
+    def test_the_first_case_allows_a_cold_stage_bot_to_answer(self):
+        # The first case of a run meets a stage bot that was just recreated. On 2026-10-29 a cold one
+        # answered /start after 33.6 s and the run failed against a 30 s limit (#900). The limit keeps
+        # headroom over that measurement and stays inside the case's own wait window.
+        first = CASES[0]
+        self.assertEqual(first["name"], "start")
+        self.assertGreaterEqual(first["max_first_reply_s"], 60)
+        self.assertLess(first["max_first_reply_s"], first["timeout_s"])
+
     def test_the_runner_requires_the_scenarios_the_owner_asked_for_and_the_repository_list_has_them(
         self,
     ):
