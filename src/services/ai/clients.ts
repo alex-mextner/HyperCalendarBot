@@ -5,6 +5,7 @@
 
 import OpenAI from 'openai';
 import { loadConfig } from '../../config/env.ts';
+import { createClaudeClient } from './claude-client-pool.ts';
 
 const ZAI_TIMEOUT_MS = 15_000;
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -61,8 +62,7 @@ export function openrouterClient(): OpenAI {
 export function claudeClient(): OpenAI {
   if (!claude) {
     const cfg = loadConfig();
-    claude = new OpenAI({
-      apiKey: cfg.CLAUDE_API_TOKEN!,
+    claude = createClaudeClient([cfg.CLAUDE_API_TOKEN, cfg.CLAUDE_API_TOKEN2], {
       baseURL: 'https://api.anthropic.com/v1/',
       defaultHeaders: { 'anthropic-version': '2023-06-01' },
       timeout: DEFAULT_TIMEOUT_MS,

@@ -47,11 +47,11 @@ const report = jsonCodec(
   }),
 );
 
-function run(databasePath: string) {
+function run(databasePath: string, claudeEnv: Record<string, string> = {}) {
   const result = Bun.spawnSync(
     [process.execPath, '--no-env-file', join(import.meta.dir, '../../scripts/provider-circuit-state.ts')],
     {
-      env: { PATH: process.env.PATH ?? '', DATABASE_PATH: databasePath, ...ENV },
+      env: { PATH: process.env.PATH ?? '', DATABASE_PATH: databasePath, ...ENV, ...claudeEnv },
       stdout: 'pipe',
       stderr: 'pipe',
     },
@@ -110,3 +110,38 @@ describe('scripts/provider-circuit-state.ts', () => {
     expect(providers.filter((row) => row.provider !== 'openrouter').every((row) => row.scope === 'account')).toBe(true);
   });
 });
+
+for (const [primary, expectedScope] of [
+  ['primary', 'primary\0backup'],
+  ['', 'backup'],
+] as const) {
+  test(`inspection follows the runtime Claude credential scope with primary=${Boolean(primary)}`, () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hcb-claude-circuit-state-'));
+    dirs.push(dir);
+    const database = join(dir, 'calendar.db');
+    const store = openProviderCircuitStore(`${database}.provider-state.sqlite`);
+    try {
+      store.recordFailure(
+        {
+          key: providerCircuitKey('claude', '', expectedScope),
+          provider: 'claude',
+          label: 'Claude (synthetic)',
+          chain: 'smart',
+        },
+        { failureClass: 'quota_exhausted', status: 429, retryAtMs: Date.now() + 60_000, resetHint: null },
+        null,
+        Date.now(),
+      );
+    } finally {
+      store.close();
+    }
+    const result = run(database, { CLAUDE_API_TOKEN: primary, CLAUDE_API_TOKEN2: 'backup' });
+    expect(result.exitCode).toBe(0);
+    expect(
+      report
+        .parse(result.stdout)
+        .providers.filter((row) => row.provider === 'claude')
+        .map((row) => [row.scope, row.state, row.status]),
+    ).toEqual([['account', 'open', 429]]);
+  });
+}

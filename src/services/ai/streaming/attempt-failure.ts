@@ -3,15 +3,16 @@
 // rethrows, anything else is recorded, alerted, noted for eligibility and handed on to the next slot.
 
 import OpenAI from 'openai';
+import { CredentialsCoolingDownError } from '../claude-credential-pool.ts';
 import { settleInconclusive } from '../provider-circuit.ts';
 import { noteFailureForEligibility } from '../provider-eligibility.ts';
-import { failedAttempt, recordAiUsage } from '../usage-recorder.ts';
+import { failedAttempt, recordAiUsage, skippedAttempt } from '../usage-recorder.ts';
 import { benchChainOf } from './chains.ts';
 import { isCallerAbort } from './error-classification.ts';
 import { ProviderSafetyStopError } from './errors.ts';
 import { describeFailure, failureAttempt, reportSlotFailure, settleCircuitAfterFailure } from './failure.ts';
 import { aiLogger } from './logger.ts';
-import { type AdmittedAttempt, attemptScopeOf, type RoundState } from './round-attempts.ts';
+import { type AdmittedAttempt, attemptScopeOf, type RoundState, recordPendingHttpFailure } from './round-attempts.ts';
 import type { ProviderFailure } from './types.ts';
 
 /** HTTP statuses that say the request was wrong, not that the provider is unavailable: they never bench a provider. */
@@ -84,20 +85,30 @@ function discardShownOutput(state: RoundState, failure: ProviderFailure): void {
 export function handleAttemptFailure(state: RoundState, attempt: AdmittedAttempt, error: unknown): void {
   if (error instanceof ProviderSafetyStopError) handleSafetyStop(state, attempt, error);
   const { slot, circuit, admission } = attempt;
+  const recordedPending = recordPendingHttpFailure(state, attempt);
+  if (error instanceof CredentialsCoolingDownError) {
+    state.failures.push({ ...describeFailure(slot, error), skippedBeforeRequest: true });
+    recordAiUsage(
+      skippedAttempt(attemptScopeOf(state, slot), slot.provider, attempt.requestModel, 'credential_cooldown'),
+    );
+    settleInconclusive(admission, { pushBack: false });
+    return;
+  }
   const failure = describeFailure(slot, error);
   state.failures.push(failure);
   const callerAborted = isCallerAbort(state.options.signal);
-  recordAiUsage(
-    failureAttempt(
-      attemptScopeOf(state, slot),
-      slot,
-      failure.model,
-      error,
-      callerAborted,
-      attempt.attemptAt,
-      attempt.attemptStartedAt,
-    ),
-  );
+  if (!recordedPending)
+    recordAiUsage(
+      failureAttempt(
+        attemptScopeOf(state, slot),
+        slot,
+        failure.model,
+        error,
+        callerAborted,
+        attempt.attemptAt,
+        attempt.attemptStartedAt,
+      ),
+    );
   // An account-level failure is owned by the durable circuit, which tells the
   // admin once per incident from stored facts; it is not reported again here.
   const ownedByCircuit = settleCircuitAfterFailure(circuit, admission, error, failure, callerAborted);

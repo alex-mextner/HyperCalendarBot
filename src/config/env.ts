@@ -99,6 +99,8 @@ export interface EnvConfig {
   GROQ_API_KEY?: string;
   // Anthropic Claude (paid reserve after z.ai; OpenAI-compatible endpoint)
   CLAUDE_API_TOKEN?: string;
+  /** Independent backup credential, used with the same Claude models and request settings. */
+  CLAUDE_API_TOKEN2?: string;
   CLAUDE_MODEL?: string;
   CLAUDE_FAST_MODEL?: string;
   // OpenRouter (optional; serves DeepSeek and GLM Flash behind one key). Used only when
@@ -284,6 +286,7 @@ export function loadConfig(): EnvConfig {
     MTPROTO_SERVICE_USER_ID: optionalNumberEnv('MTPROTO_SERVICE_USER_ID'),
     GROQ_API_KEY: optionalEnv('GROQ_API_KEY'),
     CLAUDE_API_TOKEN: optionalEnv('CLAUDE_API_TOKEN'),
+    CLAUDE_API_TOKEN2: optionalEnv('CLAUDE_API_TOKEN2'),
     CLAUDE_MODEL: optionalEnv('CLAUDE_MODEL'),
     CLAUDE_FAST_MODEL: optionalEnv('CLAUDE_FAST_MODEL'),
     OPENROUTER_API_KEY: optionalEnv('OPENROUTER_API_KEY'),

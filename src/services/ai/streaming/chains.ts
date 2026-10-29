@@ -5,6 +5,7 @@
 import type { ChainOrder, EnvConfig } from '../../../config/env.ts';
 import type { ProviderChainKind } from '../../../utils/ai-provider-alert.ts';
 import { logOnce } from '../../../utils/logger.ts';
+import { claudeCredentialScope } from '../claude-client-pool.ts';
 import { claudeClient, hfClient, openrouterClient, zaiClient } from '../clients.ts';
 import { excludedModelReason, isQualifiedFor, type ModelRole, presetById } from '../model-presets.ts';
 import { providerCircuitKey } from '../provider-circuit.ts';
@@ -167,7 +168,7 @@ export function buildSmartChain(cfg: EnvConfig): ProviderSlot[] {
   return buildChain('smart', cfg.AI_SMART_CHAIN, {
     zai: { model: cfg.ZAI_MODEL, apiKey: cfg.ZAI_API_KEY, baseUrl: cfg.ZAI_BASE_URL },
     hf: { model: cfg.HF_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
-    claude: { model: cfg.CLAUDE_MODEL, apiKey: cfg.CLAUDE_API_TOKEN },
+    claude: { model: cfg.CLAUDE_MODEL, apiKey: claudeCredentialScope(cfg.CLAUDE_API_TOKEN, cfg.CLAUDE_API_TOKEN2) },
     openrouter: {
       model: cfg.OPENROUTER_MODEL,
       apiKey: cfg.OPENROUTER_API_KEY,
@@ -180,7 +181,10 @@ export function buildFastChain(cfg: EnvConfig): ProviderSlot[] {
   return buildChain('fast', cfg.AI_FAST_CHAIN, {
     zai: { model: cfg.ZAI_FAST_MODEL, apiKey: cfg.ZAI_API_KEY, baseUrl: cfg.ZAI_BASE_URL },
     hf: { model: cfg.HF_FAST_MODEL, apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL },
-    claude: { model: cfg.CLAUDE_FAST_MODEL, apiKey: cfg.CLAUDE_API_TOKEN },
+    claude: {
+      model: cfg.CLAUDE_FAST_MODEL,
+      apiKey: claudeCredentialScope(cfg.CLAUDE_API_TOKEN, cfg.CLAUDE_API_TOKEN2),
+    },
     openrouter: {
       model: cfg.OPENROUTER_FAST_MODEL,
       apiKey: cfg.OPENROUTER_API_KEY,
@@ -199,7 +203,7 @@ function providerAccount(cfg: EnvConfig, provider: ProviderId): { apiKey?: strin
     case 'hf':
       return { apiKey: cfg.HF_TOKEN, baseUrl: cfg.HF_BASE_URL, model: cfg.HF_MODEL };
     case 'claude':
-      return { apiKey: cfg.CLAUDE_API_TOKEN, model: cfg.CLAUDE_MODEL };
+      return { apiKey: claudeCredentialScope(cfg.CLAUDE_API_TOKEN, cfg.CLAUDE_API_TOKEN2), model: cfg.CLAUDE_MODEL };
     case 'openrouter':
       return { apiKey: cfg.OPENROUTER_API_KEY, baseUrl: cfg.OPENROUTER_BASE_URL, model: cfg.OPENROUTER_MODEL };
   }
