@@ -43,6 +43,8 @@ LIB_FILES = [
     "deploy-evidence.py",
     "prepare-runtime-dirs.sh",
     "log-retention.py",
+    "stage-qa-driver.py",
+    "stage_qa_common.py",
 ]
 RESULT = re.compile(r"^STAGE_QA_RESULT status=([a-z-]+) sha=(\S+) cases=(\d+) failed=(\d+)$")
 

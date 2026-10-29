@@ -2,7 +2,7 @@
 // Contract of the per-PR stage QA check (#840): PR code is built on a GitHub-hosted runner and only a
 // workflow_run workflow from the default branch reaches the odroid, carrying a SHA and never code.
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -11,6 +11,8 @@ const ROOT = resolve(import.meta.dir, '../..');
 const WORKFLOWS = resolve(ROOT, '.github/workflows');
 const REPO = 'alex-mextner/HyperCalendarBot';
 const SHA = 'a'.repeat(40);
+// Includes the interpreter: the workflow runs the installed driver as `python3 <path>`.
+const INSTALLED_DRIVER_CMD = 'python3 /usr/local/lib/hypercal-stage/stage-qa-driver.py';
 
 // A trigger's config is null, an object (types, workflows, branches) or a list; only its presence and a few fields matter.
 const triggerConfig = z.union([z.null(), z.looseObject({}), z.array(z.looseObject({}))]);
@@ -155,12 +157,12 @@ describe('Stage QA: the trusted workflow_run workflow is the only way onto the s
     expect(qaWorkflow.permissions).toEqual({});
   });
 
-  // The qa-cli Telegram Web session lives on the owner's PC, so the qa job runs on a runner there. It is its own
+  // The qa job runs on its own runner (user and label) on the odroid; the browser half runs on the server. It is its own
   // label: the production deploy runner (odroid-hcb) must never receive a stage job or the reverse.
-  test('qa runs on the PC runner label, never on the deploy runner label', () => {
-    expect(qa['runs-on']).toEqual(['self-hosted', 'qa-pc']);
+  test('qa runs on the stage-qa runner label, never on the deploy runner label', () => {
+    expect(qa['runs-on']).toEqual(['self-hosted', 'stage-qa']);
     expect(JSON.stringify(qaWorkflow)).not.toContain('odroid-hcb');
-    expect(JSON.stringify(load('deploy.yml').jobs.deploy?.['runs-on'])).not.toContain('qa-pc');
+    expect(JSON.stringify(load('deploy.yml').jobs.deploy?.['runs-on'])).not.toContain('stage-qa');
   });
 
   test('qa only starts for a successful, same-repository pull_request run of Stage build', () => {
@@ -188,10 +190,10 @@ describe('Stage QA: the trusted workflow_run workflow is the only way onto the s
     for (const entry of [...qa.steps, ...report.steps]) expect(entry.run ?? '').not.toContain('${{');
   });
 
-  test('qa hands the installed PC driver the head SHA as its only argument and the token on stdin', () => {
+  test('qa hands the installed odroid driver the head SHA as its only argument and the token on stdin', () => {
     const run = getStep('stage-qa.yml', 'qa', 'Run the stage QA through qa-cli');
     expect(run.env?.HEAD_SHA).toBe('${{ github.event.workflow_run.head_sha }}');
-    expect(run.run).toContain('printf \'%s\\n\' "$GH_TOKEN" | "$HOME/.local/bin/hypercal-stage-qa-pc" "$HEAD_SHA"');
+    expect(run.run).toContain(`printf '%s\\n' "$GH_TOKEN" | ${INSTALLED_DRIVER_CMD} "$HEAD_SHA"`);
     expect(run.run).not.toContain('sudo');
     expect(qa.name).toBe('Stage QA run');
     expect(qa.outputs).toEqual({
@@ -201,11 +203,24 @@ describe('Stage QA: the trusted workflow_run workflow is the only way onto the s
     expect(run.id).toBe('run');
   });
 
-  test('qa waits behind other stage runs and the other repository, so its limit is generous but bounded', () => {
-    // PC lock 45 min + the wrapper's stage and host lock waits and health (up to 2 h) + smoke 25 min + teardown 10 min:
-    // a shorter job limit would cancel a legitimate queued run and leave stage-qa pending.
-    expect(qa['timeout-minutes']).toBeGreaterThanOrEqual(200);
-    expect(qa['timeout-minutes']).toBeLessThanOrEqual(240);
+  test('qa waits behind other stage runs and the other repository, so its limit covers every driver timeout', () => {
+    // The driver waits for the browser lock, then for READY (stage lock + host deploy lock + stage start), then runs
+    // the cases and tears down: a shorter job limit would cancel a legitimate queued run and leave stage-qa pending.
+    const driver = readFileSync(resolve(ROOT, 'scripts/stage-qa-driver.py'), 'utf8');
+    const seconds = ['LOCK', 'READY', 'BROWSER', 'DONE'].map((name) => {
+      const found = new RegExp(`^DEFAULT_${name}_TIMEOUT = (\\d+)$`, 'm').exec(driver);
+      if (!found?.[1]) throw new Error(`stage-qa-driver.py has no DEFAULT_${name}_TIMEOUT`);
+      return Number(found[1]);
+    });
+    expect(seconds).toEqual([3000, 5700, 1800, 600]);
+    const total = seconds.reduce((sum, value) => sum + value, 0);
+    const limit = qa['timeout-minutes'];
+    if (limit === undefined) throw new Error('qa has no timeout-minutes');
+    expect(limit * 60).toBeGreaterThan(total);
+    expect(limit).toBe(210);
+    expect(readFileSync(resolve(WORKFLOWS, 'stage-qa.yml'), 'utf8')).toContain(
+      'lock_timeout + ready_timeout + browser_timeout + done_timeout',
+    );
     expect(qaWorkflow.concurrency).toEqual({
       group: 'stage-qa-${{ github.event.workflow_run.head_branch }}',
       'cancel-in-progress': true,
@@ -263,15 +278,15 @@ describe('the self-hosted stage job is the only extra self-hosted job and no wor
   });
 });
 
-// #858: the runner on the owner's PC (labels self-hosted, Linux, X64 and qa-pc) holds the qa-cli Telegram Web session.
+// #858: the stage QA runner on the odroid (labels self-hosted, Linux, ARM64 and stage-qa) runs the driver that holds the secrets for the browser host.
 // It must take only the stage QA job, so no workflow may name the generic self-hosted label (or the default OS and
 // architecture labels, or an expression/runner group nobody can resolve statically) outside a job listed here.
 describe('runner labels: only an explicitly allowed job may leave the GitHub-hosted runners', () => {
   const GITHUB_HOSTED_LABEL = /^(?:ubuntu|macos|windows)-[a-z0-9.-]+$/i;
-  // `<file>#<job id>` -> the exact runs-on labels. qa-pc exists only on the owner PC, odroid-hcb only on the odroid.
+  // `<file>#<job id>` -> the exact runs-on labels. stage-qa and odroid-hcb exist only on the odroid, each on its own runner.
   const ALLOWED_SELF_HOSTED: Record<string, readonly string[]> = {
     'deploy.yml#deploy': ['self-hosted', 'odroid-hcb'],
-    'stage-qa.yml#qa': ['self-hosted', 'qa-pc'],
+    'stage-qa.yml#qa': ['self-hosted', 'stage-qa'],
   };
   const runsOn = z.union([
     z.string(),
@@ -339,7 +354,7 @@ describe('runner labels: only an explicitly allowed job may leave the GitHub-hos
     }
   };
 
-  test('the repository workflows leave the GitHub-hosted runners only for the odroid deploy and the PC stage QA job', () => {
+  test('the repository workflows leave the GitHub-hosted runners only for the odroid deploy and the odroid stage QA job', () => {
     expect(runnerViolations(WORKFLOWS)).toEqual([]);
   });
 
@@ -365,10 +380,10 @@ describe('runner labels: only an explicitly allowed job may leave the GitHub-hos
     }
   });
 
-  test('the qa-pc and odroid-hcb labels are not enough outside their own job', () => {
+  test('the stage-qa and odroid-hcb labels are not enough outside their own job', () => {
     for (const [file, body] of [
-      ['stray.yml', '    runs-on: [self-hosted, qa-pc]\n'],
-      ['stray.yml', '    runs-on: qa-pc\n'],
+      ['stray.yml', '    runs-on: [self-hosted, stage-qa]\n'],
+      ['stray.yml', '    runs-on: stage-qa\n'],
       ['stray.yml', '    runs-on: [self-hosted, odroid-hcb]\n'],
     ] as const) {
       withWorkflow(file, body, (violations) => {
@@ -403,9 +418,9 @@ describe('runner labels: only an explicitly allowed job may leave the GitHub-hos
     });
   });
 
-  test('exactly one job names qa-pc (the stage QA job) and exactly one names odroid-hcb (the deploy job)', () => {
+  test('exactly one job names stage-qa (the stage QA job) and exactly one names odroid-hcb (the deploy job)', () => {
     const owners: Record<string, string[]> = {
-      'qa-pc': ['stage-qa.yml#qa'],
+      'stage-qa': ['stage-qa.yml#qa'],
       'odroid-hcb': ['deploy.yml#deploy'],
     };
     for (const [label, expected] of Object.entries(owners)) {
@@ -421,25 +436,24 @@ describe('runner labels: only an explicitly allowed job may leave the GitHub-hos
   });
 });
 
-describe('the qa step: runs the PC driver and reports its exit code and case count', () => {
+describe('the qa step: runs the odroid driver and reports its exit code and case count', () => {
   const run = getStep('stage-qa.yml', 'qa', 'Run the stage QA through qa-cli');
 
   async function runQa(wrapperExit: number, wrapperOutput: string) {
     const script = run.run;
-    if (!script) throw new Error('the qa step has no script');
+    if (!script?.includes(INSTALLED_DRIVER_CMD)) throw new Error('the qa step does not call the installed driver');
     const work = mkdtempSync(join(tmpdir(), 'hcb-stage-qa-'));
     try {
       const outputFile = join(work, 'github-output');
       const seen = join(work, 'driver.json');
       writeFileSync(outputFile, '');
       // A fake driver at the installed path: records its argv and stdin, prints its output, exits like it.
-      mkdirSync(join(work, '.local/bin'), { recursive: true });
+      const driverPath = join(work, 'stage-qa-driver.py');
       writeFileSync(
-        join(work, '.local/bin/hypercal-stage-qa-pc'),
-        `#!/usr/bin/env python3\nimport json, sys\ndata = sys.stdin.read()\njson.dump({"argv": sys.argv[1:], "stdin": data}, open(${JSON.stringify(seen)}, "w"))\nprint(${JSON.stringify(wrapperOutput)})\nsys.exit(${wrapperExit})\n`,
-        { mode: 0o755 },
+        driverPath,
+        `import json, sys\ndata = sys.stdin.read()\njson.dump({"argv": sys.argv[1:], "stdin": data}, open(${JSON.stringify(seen)}, "w"))\nprint(${JSON.stringify(wrapperOutput)})\nsys.exit(${wrapperExit})\n`,
       );
-      const child = Bun.spawn(['bash', '-e', '-c', script], {
+      const child = Bun.spawn(['bash', '-e', '-c', script.replaceAll(INSTALLED_DRIVER_CMD, `python3 ${driverPath}`)], {
         env: {
           PATH: process.env.PATH ?? '/usr/bin:/bin',
           HOME: work,
@@ -483,7 +497,7 @@ describe('the qa step: runs the PC driver and reports its exit code and case cou
     expect(result.outputs).toEqual({ rc: '1', cases: '6' });
   });
 
-  // #858: the PC driver exits 4 when the odroid could not load the image or start compose.
+  // #858: the odroid driver exits 4 when the odroid could not load the image or start compose.
   test('an infrastructure failure of the stage host publishes rc 4, the case count and the exit code', async () => {
     const result = await runQa(4, `STAGE_QA_RESULT status=infra-error sha=${SHA} cases=0 failed=0`);
     expect(result.exitCode).toBe(4);
@@ -491,7 +505,7 @@ describe('the qa step: runs the PC driver and reports its exit code and case cou
   });
 
   test('a wrapper that printed no result line is reported as rc 70, never as a pass or a plain failure', async () => {
-    const result = await runQa(1, 'hypercal-stage-qa-pc: command not found');
+    const result = await runQa(1, 'stage-qa-driver.py: No such file or directory');
     expect(result.exitCode).toBe(70);
     expect(result.outputs.rc).toBe('70');
     expect(result.outputs.cases).toBe('0');

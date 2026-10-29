@@ -1,4 +1,4 @@
-"""One exit-code table across the stage QA layers (#858): wrapper, PC driver, workflow report, runbook.
+"""One exit-code table across the stage QA layers (#858): wrapper, odroid driver, workflow report, runbook.
 
 Exit 4 = the stage infrastructure could not run (docker load / compose up failed) -> status `error`.
 Exit 1 = the pull request is wrong (health after a successful start, the run budget, a case) ->
@@ -8,6 +8,7 @@ the wrapper are installed by hand), so a drifting table would post a wrong verdi
 
 import importlib.util
 import re
+import sys
 import unittest
 from pathlib import Path
 
@@ -15,9 +16,16 @@ ROOT = Path(__file__).resolve().parents[2]
 RUN = (ROOT / "scripts/stage-qa-run.sh").read_text()
 WORKFLOW = (ROOT / ".github/workflows/stage-qa.yml").read_text()
 RUNBOOK = (ROOT / "docs/reference/deploy-runbook.md").read_text()
-SPEC = importlib.util.spec_from_file_location("stage_qa_pc", ROOT / "scripts/stage-qa-pc.py")
+SCRIPTS = ROOT / "scripts"
+SPEC = importlib.util.spec_from_file_location("stage_qa_driver", SCRIPTS / "stage-qa-driver.py")
 driver = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(driver)
+sys.path.insert(0, str(SCRIPTS))
+try:
+    import stage_qa_common as common
+
+    SPEC.loader.exec_module(driver)
+finally:
+    sys.path.remove(str(SCRIPTS))
 
 
 def result_status_table(script):
@@ -30,17 +38,17 @@ def result_status_table(script):
 
 class ExitCodeTable(unittest.TestCase):
     def test_the_run_script_and_the_driver_name_every_exit_code_the_same_way(self):
-        self.assertEqual(result_status_table(RUN), driver.STATUS_BY_CODE)
-        self.assertEqual(driver.STATUS_BY_CODE[4], "infra-error")
+        self.assertEqual(result_status_table(RUN), common.STATUS_BY_CODE)
+        self.assertEqual(common.STATUS_BY_CODE[4], "infra-error")
 
     def test_a_status_the_driver_does_not_know_is_a_failure(self):
-        self.assertEqual(driver.status_for(1), "failed")
-        self.assertEqual(driver.status_for(5), "failed")
+        self.assertEqual(common.status_for(1), "failed")
+        self.assertEqual(common.status_for(5), "failed")
 
     def test_the_driver_passes_exit_4_through_and_collapses_unknown_codes_to_failure(self):
         self.assertEqual(driver.wrapper_code(4), 4)
         for unknown in (5, 77, 255):
-            self.assertEqual(driver.wrapper_code(unknown), driver.EXIT_FAILED)
+            self.assertEqual(driver.wrapper_code(unknown), common.EXIT_FAILED)
 
     def test_the_workflow_report_posts_error_for_4_and_failure_only_for_1(self):
         self.assertRegex(

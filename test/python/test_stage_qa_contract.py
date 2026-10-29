@@ -17,6 +17,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+# The runner of the owner's PC, retired with #840; spelled in parts so this file does not name it itself.
+RETIRED_RUNNER = "p" + "c"
 
 
 def text(relative):
@@ -252,49 +254,111 @@ class TheStageComposeRendersWithTheRealCompose(unittest.TestCase):
         self.assertEqual(bot["security_opt"], ["no-new-privileges:true"])
 
 
-class TheQaRunsThroughQaCliOnThePc(unittest.TestCase):
-    """Owner decision (tg#25056): the smoke uses the PC's qa-cli Telegram Web session; no Telethon, no 2FA."""
+class TheQaRunsThroughQaCliOnTheBrowserHost(unittest.TestCase):
+    """Owner decision (tg#25056, then 2026-10-28): the smoke uses the browser host's qa-cli Telegram Web
+    session; no Telethon, no 2FA, and nothing browser-shaped on the odroid."""
 
-    DRIVER = text("scripts/stage-qa-pc.py")
-    PC_INSTALLER = text("scripts/install-stage-qa-pc.sh")
+    DRIVER = text("scripts/stage-qa-driver.py")
+    BROWSER = text("scripts/stage-qa-browser.py")
+    COMMON = text("scripts/stage_qa_common.py")
+    BROWSER_INSTALLER = text("scripts/install-stage-qa-browser.sh")
+    ODROID_INSTALLER = text("scripts/install-stage-qa.sh")
     WRAPPER = text("scripts/odroid-stage-qa.sh")
+
+    def function_body(self, source, name, kind="def"):
+        match = re.search(
+            rf"^{kind} {name}\b.*?(?=^def |^class |\Z)", source, re.DOTALL | re.MULTILINE
+        )
+        self.assertIsNotNone(match, f"{name} not found")
+        return match.group(0)
 
     def test_no_default_path_file_mentions_telethon_or_a_qa_session(self):
         for name, body in (
             ("stage-smoke.py", SMOKE),
-            ("stage-qa-pc.py", self.DRIVER),
+            ("stage-qa-driver.py", self.DRIVER),
+            ("stage-qa-browser.py", self.BROWSER),
+            ("stage_qa_common.py", self.COMMON),
             ("stage-qa-run.sh", RUN),
             ("odroid-stage-qa.sh", self.WRAPPER),
             ("stage-qa.yml", QA_WORKFLOW),
             ("stage-build.yml", BUILD_WORKFLOW),
-            ("install-stage-qa-pc.sh", self.PC_INSTALLER),
+            ("install-stage-qa-browser.sh", self.BROWSER_INSTALLER),
+            ("install-stage-qa.sh", self.ODROID_INSTALLER),
         ):
-            for word in (
-                "telethon",
-                "qa_session",
-                "qa-smoke.env",
-                "provision_smoke_session",
-            ):
+            for word in ("telethon", "qa_session", "qa-smoke.env", "provision_smoke_session"):
                 self.assertNotIn(word, body.lower(), f"{name} still mentions {word}")
 
     def test_the_smoke_talks_to_telegram_only_through_qa_telegram_chat(self):
         self.assertIn('"telegram", "chat"', SMOKE.replace("'", '"'))
         self.assertNotRegex(SMOKE, r"api\.telegram\.org/bot[^g]*sendMessage")
 
-    def test_the_driver_enforces_its_own_floor_and_deny_list_from_its_own_config(self):
+    def test_the_browser_half_enforces_its_own_floor_and_deny_list_from_its_own_config(self):
         for needle in ("deny_usernames", "required_cases", "min_cases", "username"):
-            self.assertIn(needle, self.DRIVER)
-        self.assertNotIn("sudo", self.DRIVER)
+            self.assertIn(needle, self.BROWSER)
+        self.assertNotIn("sudo", self.BROWSER)
 
-    def test_the_only_thing_the_ssh_key_can_do_is_start_the_wrapper(self):
-        self.assertIn('restrict,command="%s"', self.PC_INSTALLER)
-        self.assertRegex(self.PC_INSTALLER, r"ODROID_ENTRY=/usr/local/sbin/hypercal-stage-qa\b")
+    def test_the_odroid_ssh_key_can_only_start_the_browser_entry_and_the_wrapper_takes_only_a_sha(
+        self,
+    ):
+        self.assertIn('restrict,command="%s"', self.BROWSER_INSTALLER)
+        self.assertIn(
+            'exec python3 %q/stage-qa-browser.py "${SSH_ORIGINAL_COMMAND-}"', self.BROWSER_INSTALLER
+        )
+        self.assertRegex(self.ODROID_INSTALLER, r"ENTRY_PATH=/usr/local/sbin/hypercal-stage-qa\b")
         self.assertIn("SSH_ORIGINAL_COMMAND", self.WRAPPER)
         self.assertRegex(self.WRAPPER, r"\^\[0-9a-f\]\{40\}\$")
 
     def test_the_driver_always_ends_the_odroid_session(self):
         self.assertIn("DONE", self.DRIVER)
         self.assertIn("DONE", RUN)
+
+    def test_the_driver_never_runs_the_browser(self):
+        for word in ("qa telegram", "agent-browser", "agent_browser"):
+            self.assertNotIn(word, self.DRIVER)
+
+    def test_the_browser_half_never_talks_to_the_wrapper_or_github(self):
+        for word in ("api.github.com", "sudo", "GH_TOKEN", "TOKEN_PATTERN", "read_token"):
+            self.assertNotIn(word, self.BROWSER, word)
+        self.assertNotRegex(self.BROWSER, r"/usr/local/sbin/hypercal-stage-qa\b")
+
+    def test_the_driver_hands_the_browser_ssh_only_the_ready_payload(self):
+        argv = self.function_body(self.DRIVER, "browser_argv")
+        self.assertNotRegex(argv, r"token", "browser_argv must not see the token")
+        session = self.function_body(self.DRIVER, "BrowserSession", kind="class")
+        self.assertNotRegex(session, r"token")
+        self.assertIn("send_payload", session)
+        # The payload comes from the wrapper's READY line, the token only goes to the wrapper's stdin.
+        drive = self.function_body(self.DRIVER, "drive")
+        self.assertIn("session.write_line(token)", drive)
+        self.assertIn("browser.send_payload(payload)", drive)
+        self.assertNotRegex(drive, r"browser\.\w+\([^)]*token")
+
+    def test_the_browser_lock_is_taken_before_the_wrapper_is_started(self):
+        # The wrapper's watchdog runs from its own locks: a wait for the browser lock after it would kill the run.
+        run_session = self.function_body(self.DRIVER, "run_session")
+        self.assertLess(
+            run_session.index("BrowserSession("), run_session.index("await_browser_lock(")
+        )
+        self.assertLess(
+            run_session.index("await_browser_lock("), run_session.index("WrapperSession(")
+        )
+        self.assertIn("LOCKED_LINE", self.DRIVER)
+        browser = self.function_body(self.BROWSER, "execute")
+        self.assertLess(browser.index("lock.acquire("), browser.index("announce_locked()"))
+        self.assertLess(browser.index("announce_locked()"), browser.index("wait_payload("))
+        self.assertIn("LOCKED_LINE", self.COMMON)
+
+    def test_the_driver_has_no_case_floor_of_its_own(self):
+        self.assertNotIn("min_cases", self.DRIVER)
+        self.assertNotIn("min_cases", self.ODROID_INSTALLER)
+
+    def test_the_workflow_runs_the_root_installed_driver(self):
+        self.assertIn("python3 /usr/local/lib/hypercal-stage/stage-qa-driver.py", QA_WORKFLOW)
+
+    def test_the_odroid_installer_installs_the_driver_and_its_common_module(self):
+        lib = re.search(r"LIB_SOURCES=\((.*?)\)", self.ODROID_INSTALLER, re.DOTALL).group(1)
+        self.assertIn("scripts/stage-qa-driver.py", lib)
+        self.assertIn("scripts/stage_qa_common.py", lib)
 
 
 class TheProductionDeployDoesNotDependOnTheStage(unittest.TestCase):
@@ -318,8 +382,33 @@ class TheProductionDeployDoesNotDependOnTheStage(unittest.TestCase):
                 self.assertNotIn(word, body, f"{relative} still mentions {word!r}")
 
     def test_the_stage_never_takes_the_deploy_runner_label(self):
-        self.assertIn("qa-pc", QA_WORKFLOW)
-        self.assertNotIn("odroid-hcb", QA_WORKFLOW)
+        self.assertIn("runs-on: [self-hosted, stage-qa]", QA_WORKFLOW)
+        runs_on = re.findall(r"^\s*runs-on:.*$", QA_WORKFLOW, re.MULTILINE)
+        self.assertTrue(runs_on)
+        for line in runs_on:
+            self.assertNotIn("odroid-hcb", line)
+        self.assertNotIn(f"qa-{RETIRED_RUNNER}", QA_WORKFLOW)
+
+    def test_nothing_tracked_still_names_the_pc_runner(self):
+        listed = subprocess.run(
+            ["git", "ls-files", "scripts", "test", ".github", ".claude"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
+        needles = tuple(
+            f"{prefix}{RETIRED_RUNNER}"
+            for prefix in ("qa-", "stage-qa-", "hypercal-stage-qa-", "install-stage-qa-")
+        )
+        me = Path(__file__).resolve().relative_to(ROOT).as_posix()
+        for relative in listed:
+            path = ROOT / relative
+            if relative == me or not path.is_file():
+                continue
+            body = path.read_text(errors="ignore")
+            for needle in needles:
+                self.assertNotIn(needle, body, f"{relative} still mentions {needle}")
 
 
 class TheShipGateRequiresTheCheck(unittest.TestCase):
