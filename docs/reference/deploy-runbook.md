@@ -287,7 +287,7 @@ To roll back: stop the bot on the odroid first. If the odroid wrote anything aft
 
 Apt is bounded in `pr-ci.yml`. On 2026-10-27 the azure Ubuntu mirror was slow, not down: the unbounded `apt-get update && install ffmpeg` step took 12 minutes 24 seconds in PR CI run 40573146944 (normally about 20 seconds) and was still running after 15 minutes in run 40573388213, with no log output; a first 300-second ceiling (run 40576298443) was exceeded while the log still showed ffmpeg's dependencies downloading one by one (about 14 MB in the last 17 seconds, a 5.8 MB package in 28), so the ceilings now sit above the slow case. The job has `timeout-minutes: 75`, a step writes `Acquire::Retries`/`Timeout` settings into `/etc/apt/apt.conf.d/99-ci-bounded` (which also bounds Playwright's own apt calls, each 25 minutes), ffmpeg is installed only when `ffmpeg -version` fails (`apt-get update` 300 s, install 1200 s, step 25 minutes), and the step then runs `ffmpeg -version` again: an unusable ffmpeg fails the job, tests are never skipped or stubbed. `deploy.yml`'s `test` job still has the old unbounded step because it did not stall.
 
-This is the hosted check only. Agents still validate the exact PR head with the full suite on Runpod (AGENTS.md § Heavy work runs on Runpod), never a full `bun test` on the shared workstation.
+This is the hosted check only. Agents still validate the exact PR head with the full suite on the owner's server (`server-run`, AGENTS.md § Heavy work runs on the server), never a full `bun test` on the shared workstation.
 
 ## Stage QA (per pull request, #840)
 

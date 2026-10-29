@@ -8,49 +8,41 @@ Read `CLAUDE.md` and the deployment runbook before changing runtime behavior.
 - Fix incidents systematically: reproduce with anonymized regression tests, fix the production path, run tests, obtain independent review, fix findings, rerun checks, commit atomically, merge through normal `gh ship`, then verify the exact deployed revision.
 - Calendar data repair is not proof that the bot is fixed. Check authoritative tool results, database changes, synchronization and actual delivery separately. Never report a created invitation as delivered or a declined attendance as event deletion.
 - Never rerun completed writes merely to repair an explanation. Preserve durable execution evidence across provider changes and retries. Unknown completion is not failure and must not trigger blind replay.
-- Validate the exact pull-request head with `bun test` (on Runpod — § Heavy work runs on Runpod), typecheck and `bun run lint`. Preserve disclosed skips. Use normal local CI fallback when hosted CI is unavailable; do not bypass real failures or manufacture successful checks.
+- Validate the exact pull-request head with `bun test` (on the server — § Heavy work runs on the server), typecheck and `bun run lint`. Preserve disclosed skips. Use normal local CI fallback when hosted CI is unavailable; do not bypass real failures or manufacture successful checks.
 - Install dependencies with the system Bun, which matches the CI pin: `bun install --frozen-lockfile`. Its postinstall (`scripts/install-git-hooks.sh`) installs lefthook only into this repository's own hooks directory, never into a global `core.hooksPath`, and lefthook's own dependency postinstall is not trusted. `trustedDependencies` replaces Bun's default allowlist, so a new dependency that needs its install script must be added there. Do not use `bun x bun@<version>`: Bun before 1.3.14 ignores the shared global store and copies about 0.5 GB into every worktree.
 - Never symlink `node_modules` to another checkout (Bun writes through the link; it corrupted the main checkout on 2026-09-09) and never clear the Bun cache (`bun pm cache rm`, `~/.bun/install/cache`).
 - Verify version/review requirements and the selected worktree before `gh ship`. Distinguish implemented, reviewed, merged, deployed and live-tested in reports.
 - Currency/FX functionality belongs in ExpenseSyncBot. This bot retains a general calculator and date/time arithmetic, not exchange-rate services.
 
-## Heavy work runs on Runpod
+## Heavy work runs on the server
 
 This workstation is shared by many agent sessions, the review queue and the owner's own
 desktop; a full suite here starves all of them (it froze the machine twice on 2026-10-10).
-**Rule: locally, a single test file at most; the full suite, coverage and benchmarks go to a
-Runpod pod** via the shared `runpod-offload` skill (`skill://runpod-offload`; script
-`~/.agents/skills/runpod-offload/runpod-run`, on PATH as `runpod-run`).
+**Rule: locally, a single test file at most; the full suite, coverage, whole-repo typecheck,
+benchmarks and docker go to the owner's server** (`ultra@65.21.40.51`, x86_64, 16 cores) via
+`server-run`. Never use the odroid for heavy work.
 
-Heavy here: `bun test` (~1700 tests), `bun test --coverage`, the intent/benchmark runs. The
-release image is a linux/arm64 `container build` on Apple Silicon (see the deploy runbook)
-and stays where it is; everything else that keeps several cores busy for more than a minute
-goes to the pod.
+Heavy here: `bun test` (~1700 tests), `bun test --coverage`, whole-repo `tsc`, the
+intent/benchmark runs. The release image is a linux/arm64 `container build` on Apple Silicon
+(see the deploy runbook) and stays where it is; everything else that keeps several cores busy
+for more than a minute goes to the server.
 
 ```bash
-# The pod mirrors CI (deploy.yml, pr-ci.yml) as the unprivileged runner user: bun 1.4.2, ffmpeg, the
-# same `bun install --frozen-lockfile` (the committed bun.lock installs frozen on linux, so a
-# stale lock fails here too — see docs/reference/deploy-runbook.md), Playwright's chromium-headless-shell for
-# test/worker/playwright-pool.test.ts (which refuses skipped browser tests). The apt list is
-# Playwright's own chromium dependency list for Ubuntu 24.04 (playwright-core nativeDeps.js).
-HCB_APT=ffmpeg,libasound2t64,libatk-bridge2.0-0t64,libatk1.0-0t64,libatspi2.0-0t64,libcairo2,libcups2t64,libdbus-1-3,libdrm2,libgbm1,libglib2.0-0t64,libnspr4,libnss3,libpango-1.0-0,libx11-6,libxcb1,libxcomposite1,libxdamage1,libxext6,libxfixes3,libxkbcommon0,libxrandr2
-HCB_BOOT='curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash -s -- bun-v1.4.2 && chmod -R a+rX /opt/bun'
-runpod-run --apt "$HCB_APT" --bootstrap "$HCB_BOOT" -- bash -c 'bun install --frozen-lockfile && bunx playwright install chromium-headless-shell && bun test'
-                                        # full suite on a 4-vCPU CPU pod ($0.16/h on 2026-10-11; --dry-run shows today's), pod deleted when done
-runpod-run --ttl 30 --apt "$HCB_APT" --bootstrap "$HCB_BOOT" -- bash -c 'bun install --frozen-lockfile && bunx playwright install chromium-headless-shell && bun test'
-                                        # same, keeping the pod 30 idle minutes between runs (bootstrap and apt run once per pod)
-runpod-run --ttl 30 --apt "$HCB_APT" --bootstrap "$HCB_BOOT" -- bash -c 'bun install --frozen-lockfile && bunx playwright install chromium-headless-shell && bun test --coverage'
-                                        # coverage report, same pod
+# `server-run` rsyncs this git checkout (tracked + untracked-not-ignored files) to
+# ~/work/sr/<repo>-<hash> on the server, runs the command there under `nice -n 10 bash -lc`,
+# streams the output and returns its exit code. The server already has bun and uv. It runs
+# Ubuntu 26.04, so Playwright needs the 24.04 platform override to download its
+# chromium-headless-shell for test/worker/playwright-pool.test.ts (which refuses skipped
+# browser tests). The install is CI's `bun install --frozen-lockfile` (the committed bun.lock
+# installs frozen on linux, so a stale lock fails here too; see docs/reference/deploy-runbook.md).
+HCB='export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64; bun install --frozen-lockfile && bunx playwright install chromium-headless-shell'
+server-run -- bash -c "$HCB && bun test"              # full suite
+server-run -- bash -c "$HCB && bun test --coverage"   # coverage report
 bun test test/services/intent/intent-learner.test.ts   # local: one file, that's the limit
 ```
 
-`--bootstrap` replaces the lockfile-detected install (which also pulls the `uv.lock` torch stack
-the suite does not need) with just the bun toolchain;
-the install, browser download and tests then run as `runner`, never root — the `postinstall`
-hook and the permission (`EACCES`) tests behave as on CI. `runpod-run --dry-run -- …` prints
-the plan and price. `runpod-run --status` lists every pod on the account; bare
-`runpod-run --stop` terminates only this repo's pods, `runpod-run --stop all` every pod created
-under this hostname — leave none behind.
+`server-run --status` lists the remote checkouts and `server-run --clean` removes them —
+clean up when a task is finished.
 
 ## Branch and worktree cleanup
 

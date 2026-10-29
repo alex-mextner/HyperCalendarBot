@@ -62,7 +62,7 @@ No commands are dropped. All listed commands WILL be implemented in their respec
 | Image rendering | Playwright (worker process) | |
 | WebRTC | `@roamhq/wrtc` | Proven in `voice-ai-agent-ios` |
 | TTS | Edge TTS (primary), OpenAI TTS (fallback) | |
-| STT | Whisper on RunPod (primary), HuggingFace (fallback) | |
+| STT | Deepgram Flux streaming | Runpod / HuggingFace STT removed, see `07-voice-calls.md` |
 | Holiday data | `date-holidays` npm (offline) | Nager.Date API as fallback |
 | Timezone | `date-fns` + `@date-fns/tz` | |
 | Recurrence | `rrule` npm package | |
@@ -678,6 +678,7 @@ CREATE TABLE call_daily_count (
   PRIMARY KEY (user_id, date)
 );
 
+-- Historical (Runpod cold starts; Runpod STT was removed, owner order tg#25309): no code writes this table
 CREATE TABLE cold_start_analytics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   timestamp TEXT NOT NULL DEFAULT (datetime('now')),
@@ -741,9 +742,7 @@ AI_BASE_URL=https://api.z.ai/api/anthropic
 AI_MODEL=glm-5
 
 # Voice Calls (sub-project 07)
-RUNPOD_API_KEY=
-RUNPOD_ENDPOINT=
-HF_API_KEY=                       # HuggingFace fallback
+DEEPGRAM_API_KEY=                # live-call STT (Deepgram Flux); Runpod was removed (owner order tg#25309)
 
 # Environment
 NODE_ENV=development
