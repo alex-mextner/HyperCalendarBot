@@ -22,6 +22,7 @@
 # Refuses    root, a checkout that is not a git checkout, a layout where a listed file is missing,
 #            uncommitted changes to (or untracked) listed files, and a HEAD that is not on origin/main.
 set -euo pipefail
+# 077 makes every directory this script creates (mkdir -p included) mode 0700, so no explicit mkdir -m is needed.
 umask 077
 
 # Fixed on purpose: no environment overrides for what is installed (only $HOME decides where the user-level files
@@ -35,9 +36,13 @@ readonly AGENT_BROWSER_VERSION=0.39.1
 readonly QA_CLI_URL=git+https://git.hyperide.ai/ultrabricks/qa-cli
 readonly QA_CLI_REF=875b11a0f3965de54e2015d525720008d8926f2f
 
-fail() { local code="${2:-2}"; echo "install-stage-qa-browser: $1" >&2; exit "$code"; }
+fail() {
+  local code="${2:-2}"
+  echo "install-stage-qa-browser: $1" >&2
+  exit "$code"
+}
 
-(( EUID != FORBIDDEN_EUID )) || fail 'run as the normal user, not root (the files belong to the account the forced command runs as)'
+((EUID != FORBIDDEN_EUID)) || fail 'run as the normal user, not root (the files belong to the account the forced command runs as)'
 [[ "${HOME:-}" == /* && -d "$HOME" ]] || fail 'HOME is not set to an existing absolute directory'
 
 readonly BASE_DIR="$HOME/hypercal-stage-qa"
@@ -75,7 +80,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-(( $# <= 1 )) || fail 'usage: install-stage-qa-browser.sh [<checkout>]'
+(($# <= 1)) || fail 'usage: install-stage-qa-browser.sh [<checkout>]'
 SRC="$(cd "${1:-$PWD}" && pwd -P)" || fail 'checkout directory not found'
 
 for rel in "${LIB_SOURCES[@]}"; do
@@ -100,8 +105,11 @@ command -v python3 >/dev/null || fail 'python3 is not installed (the entry runs 
 
 # Hold the browser lock while swapping: a QA run holds it for its whole life, so the install waits instead
 # of swapping stage-smoke.py under a running run.
-mkdir -p -m 0700 -- "$(dirname "$LOCK_FILE")"
-( umask 0; : >>"$LOCK_FILE" )
+mkdir -p -- "$(dirname "$LOCK_FILE")"
+(
+  umask 0
+  : >>"$LOCK_FILE"
+)
 exec {LOCK_FD}<"$LOCK_FILE"
 flock -w "$BROWSER_LOCK_WAIT" "$LOCK_FD" \
   || fail "a QA run holds $LOCK_FILE; nothing was changed, retry when it ends" 75
@@ -115,8 +123,14 @@ BACKUP_ENTRY="$ENTRY_PATH.bak-$STAMP"
 
 ARCH="$(uname -m)"
 case "$ARCH" in
-  x86_64) AB_BINARY=agent-browser-linux-x64; LIB_ARCH=x86_64-linux-gnu ;;
-  aarch64) AB_BINARY=agent-browser-linux-arm64; LIB_ARCH=aarch64-linux-gnu ;;
+  x86_64)
+    AB_BINARY=agent-browser-linux-x64
+    LIB_ARCH=x86_64-linux-gnu
+    ;;
+  aarch64)
+    AB_BINARY=agent-browser-linux-arm64
+    LIB_ARCH=aarch64-linux-gnu
+    ;;
   *) fail "unsupported architecture $ARCH for agent-browser" ;;
 esac
 AB_PATH="$NPM_DIR/node_modules/agent-browser/bin/$AB_BINARY"
@@ -141,9 +155,11 @@ uv tool install --force --python python3 "$QA_CLI_URL@$QA_CLI_REF" >&2 || fail '
 CHROME_LIB_PATH="$CHROME_LIBS_DIR/root/usr/lib/$LIB_ARCH:$CHROME_LIBS_DIR/root/lib/$LIB_ARCH"
 missing_libs() { LD_LIBRARY_PATH="$CHROME_LIB_PATH" ldd "$CHROME_PATH" 2>&1 | grep -c 'not found' || true; }
 if [[ "$(missing_libs)" != 0 || ! -d "$CHROME_LIBS_DIR/root/usr/share/fonts" ]]; then
-  command -v apt-get >/dev/null && command -v dpkg-deb >/dev/null || fail 'apt-get and dpkg-deb are needed to unpack the shared libraries Chrome needs'
+  if ! command -v apt-get >/dev/null || ! command -v dpkg-deb >/dev/null; then
+    fail 'apt-get and dpkg-deb are needed to unpack the shared libraries Chrome needs'
+  fi
   mkdir -p -- "$CHROME_LIBS_DIR/debs" "$CHROME_LIBS_DIR/root"
-  ( cd "$CHROME_LIBS_DIR/debs" && apt-get download "${CHROME_DEBS[@]}" >&2 ) || fail 'apt-get download of the Chrome libraries failed'
+  (cd "$CHROME_LIBS_DIR/debs" && apt-get download "${CHROME_DEBS[@]}" >&2) || fail 'apt-get download of the Chrome libraries failed'
   for deb in "$CHROME_LIBS_DIR"/debs/*.deb; do dpkg-deb -x "$deb" "$CHROME_LIBS_DIR/root"; done
   [[ "$(missing_libs)" == 0 ]] || fail "Chrome still has missing shared libraries (see: LD_LIBRARY_PATH=$CHROME_LIB_PATH ldd $CHROME_PATH)"
 fi
@@ -167,7 +183,7 @@ NEW_FONTS_CONF=""
 
 CONFIG_CREATED=0
 if [[ ! -e "$CONFIG_PATH" ]]; then
-  mkdir -p -m 0700 -- "$(dirname "$CONFIG_PATH")"
+  mkdir -p -- "$(dirname "$CONFIG_PATH")"
   NEW_CONFIG="$(mktemp "$CONFIG_PATH.new.XXXXXX")"
   cat >"$NEW_CONFIG" <<'JSON'
 {
@@ -191,7 +207,7 @@ fi
 # ---------------------------------------------------------------- lib and entry
 
 mkdir -p -- "$(dirname "$LIB_DIR")" "$(dirname "$ENTRY_PATH")"
-mkdir -p -m 0700 -- "$TMP_DIR"
+mkdir -p -- "$TMP_DIR"
 NEW_LIB="$(mktemp -d "$LIB_DIR.new.XXXXXX")"
 chmod 0755 "$NEW_LIB"
 for rel in "${LIB_SOURCES[@]}"; do
@@ -210,7 +226,7 @@ NEW_ENTRY="$ENTRY_PATH.new.$$"
   printf 'export LD_LIBRARY_PATH=%q\n' "$CHROME_LIB_PATH"
   printf 'export FONTCONFIG_FILE=%q\n' "$FONTS_CONF"
   printf 'export TMPDIR=%q\n' "$TMP_DIR"
-  printf 'exec python3 %q/stage-qa-browser.py "${SSH_ORIGINAL_COMMAND-}"\n' "$LIB_DIR"
+  printf 'exec python3 %q/stage-qa-browser.py %s\n' "$LIB_DIR" "\"\${SSH_ORIGINAL_COMMAND-}\""
 } >"$NEW_ENTRY"
 chmod 0755 "$NEW_ENTRY"
 
@@ -234,7 +250,7 @@ mv -f -- "$NEW_ENTRY" "$ENTRY_PATH"
 NEW_ENTRY=""
 
 printf 'installed browser stage QA from %s (%s) into %s and %s\n' "$HEAD_SHA" "${BRANCH:-detached}" "$LIB_DIR" "$ENTRY_PATH"
-if (( CONFIG_CREATED )); then
+if ((CONFIG_CREATED)); then
   printf 'created %s (review it; it is never overwritten)\n' "$CONFIG_PATH"
 else
   printf 'kept the existing %s\n' "$CONFIG_PATH"

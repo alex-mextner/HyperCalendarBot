@@ -335,6 +335,18 @@ class FreshInstall(InstallerCase):
         self.assertEqual(self.strays(), [])
         self.assertEqual(self.backups(), [])
 
+    def test_entry_passes_the_ssh_command_as_one_quoted_argument(self):
+        self.assertEqual(self.install().returncode, 0)
+        self.assertEqual(
+            self.entry.read_text().splitlines()[-1],
+            f'exec python3 {self.lib}/stage-qa-browser.py "${{SSH_ORIGINAL_COMMAND-}}"',
+        )
+
+    def test_directories_the_installer_creates_are_private(self):
+        self.assertEqual(self.install().returncode, 0)
+        for path in (self.tmp_dir, self.config.parent, self.lock.parent):
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700, path)
+
     def test_fonts_conf_points_at_the_unpacked_fonts(self):
         self.assertEqual(self.install().returncode, 0)
         text = self.fonts.read_text()
@@ -500,6 +512,15 @@ class Reinstall(InstallerCase):
         self.assertTrue((self.lib / "stage_qa_common.py").read_text().endswith("# one\n"))
         self.assertEqual(self.entry.read_text(), old_entry)
         self.assertEqual(self.backups(), [])
+
+    def test_existing_directories_keep_their_mode(self):
+        for path in (self.tmp_dir, self.config.parent, self.lock.parent):
+            path.mkdir(parents=True)
+            path.chmod(0o750)
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for path in (self.tmp_dir, self.config.parent, self.lock.parent):
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o750, path)
 
     def test_an_existing_config_is_never_overwritten_not_even_when_invalid(self):
         self.config.parent.mkdir(parents=True)
@@ -788,9 +809,6 @@ class Static(unittest.TestCase):
 
     def test_script_parses(self):
         subprocess.run(["bash", "-n", str(INSTALLER)], check=True)
-
-    def test_entry_passes_the_ssh_command_as_one_quoted_argument(self):
-        self.assertIn('"${SSH_ORIGINAL_COMMAND-}"', INSTALLER.read_text())
 
 
 if __name__ == "__main__":
