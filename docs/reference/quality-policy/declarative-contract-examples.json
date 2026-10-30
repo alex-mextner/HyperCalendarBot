@@ -1,0 +1,225 @@
+{
+  "schema_version": 1,
+  "status": "design_examples_not_runtime_config",
+  "rules": [
+    {
+      "id": "evidence.required_for_schedule_claim",
+      "phase": "pre_deliver",
+      "requires": [
+        "actor_scope",
+        "requested_interval",
+        "claim_kinds",
+        "read_receipts"
+      ],
+      "when": {
+        "all": [
+          {
+            "fact": "claim_kinds",
+            "contains": "schedule_completeness"
+          },
+          {
+            "check": "coverage.contains_requested_interval",
+            "equals": false
+          }
+        ]
+      },
+      "effect": "fetch_missing_context",
+      "severity": "semantic",
+      "authorization_override": false
+    },
+    {
+      "id": "delivery.never_infer_from_queue",
+      "phase": "pre_deliver",
+      "requires": [
+        "invitation_ref",
+        "delivery_receipt",
+        "claim_delivery"
+      ],
+      "when": {
+        "all": [
+          {
+            "fact": "claim_delivery",
+            "equals": "delivered"
+          },
+          {
+            "fact": "delivery_receipt.state",
+            "not_equals": "delivered"
+          }
+        ]
+      },
+      "effect": "repair_response",
+      "severity": "factual",
+      "repair_write_tools": false
+    },
+    {
+      "id": "mutation.unknown_never_replay",
+      "phase": "pre_execute",
+      "requires": [
+        "operation_identity",
+        "operation_ledger"
+      ],
+      "when": {
+        "fact": "operation_ledger.state",
+        "equals": "unknown"
+      },
+      "effect": "fetch_missing_context",
+      "permitted_fetch": "operation_reconciliation",
+      "retry_original_write": false
+    },
+    {
+      "id": "mutation.confirmation_is_exact",
+      "phase": "pre_execute",
+      "requires": [
+        "actor_scope",
+        "operation_plan",
+        "resource_revision",
+        "confirmation_token"
+      ],
+      "when": {
+        "all": [
+          {
+            "fact": "operation_plan.requires_confirmation",
+            "equals": true
+          },
+          {
+            "check": "confirmation.covers_exact_current_operation",
+            "equals": false
+          }
+        ]
+      },
+      "effect": "clarify",
+      "severity": "safety",
+      "classifier_override": false
+    },
+    {
+      "id": "classifier.unqualified_is_advisory",
+      "phase": "context",
+      "requires": [
+        "question_pack_version",
+        "qualification_ref",
+        "truncation_state"
+      ],
+      "when": {
+        "any": [
+          {
+            "fact": "qualification_ref.valid",
+            "equals": false
+          },
+          {
+            "fact": "truncation_state",
+            "not_equals": "complete"
+          }
+        ]
+      },
+      "effect": "escalate",
+      "escalation_target": "context_plan",
+      "write_authority": false
+    }
+  ],
+  "examples": [
+    {
+      "id": "chat_no_tools",
+      "task": "greeting",
+      "llm_tool_calls": 0,
+      "required_external_evidence": false,
+      "expected": "allow"
+    },
+    {
+      "id": "intent_receipt_no_new_tools",
+      "task": "create_event",
+      "llm_tool_calls": 0,
+      "trusted_current_intent_receipt": "applied",
+      "expected": "allow_verified_fact_render"
+    },
+    {
+      "id": "fresh_scoped_cache",
+      "task": "schedule_read",
+      "llm_tool_calls": 0,
+      "cache_coverage": "complete_fresh_authorized",
+      "expected": "allow_verified_fact_render"
+    },
+    {
+      "id": "missing_schedule_read",
+      "task": "schedule_read",
+      "llm_tool_calls": 0,
+      "cache_coverage": "not_loaded",
+      "expected": "fetch_missing_context"
+    },
+    {
+      "id": "discovery_is_not_execution",
+      "task": "create_event",
+      "llm_tool_calls": 1,
+      "only_tool": "discover_tools",
+      "claimed": "created",
+      "expected": "repair_unexecuted_plan"
+    },
+    {
+      "id": "already_applied_bad_wording",
+      "task": "create_event",
+      "ledger": "applied",
+      "claimed_time": "wrong",
+      "expected": "repair_response_no_write"
+    },
+    {
+      "id": "unknown_write",
+      "task": "create_event",
+      "ledger": "unknown",
+      "expected": "reconcile_do_not_replay"
+    },
+    {
+      "id": "pending_not_delivered",
+      "task": "invitation",
+      "delivery": "queued",
+      "claimed": "delivered",
+      "expected": "repair_response_no_send"
+    },
+    {
+      "id": "decline_is_not_delete",
+      "task": "attendance",
+      "ledger": "declined",
+      "expected": "never_delete_event"
+    },
+    {
+      "id": "stale_confirmation",
+      "task": "delete_event",
+      "confirmation_revision": 4,
+      "current_revision": 5,
+      "expected": "show_current_state_and_reconfirm"
+    },
+    {
+      "id": "equivalent_offsets",
+      "actual": "2026-09-28T13:00:00+02:00",
+      "expected_instant": "2026-09-28T11:00:00Z",
+      "expected_grade": "semantic_equivalent"
+    },
+    {
+      "id": "wrong_clock",
+      "actual": "2026-09-28T13:00:00Z",
+      "expected_instant": "2026-09-28T11:00:00Z",
+      "expected_grade": "semantic_failure_zero_time_tolerance"
+    },
+    {
+      "id": "cosmetic_tone",
+      "facts_and_state": "correct",
+      "only_difference": "emoji_or_politeness",
+      "expected_grade": "cosmetic_deviation"
+    },
+    {
+      "id": "quoted_complaint",
+      "user": "Найди событие с названием «ты опять всё сломал»",
+      "expected_route": "read_not_repair"
+    },
+    {
+      "id": "existing_repair_short_reply",
+      "user": "Да",
+      "trusted_open_repair": true,
+      "expected_route": "preserve_repair_floor"
+    },
+    {
+      "id": "group_cache_scope",
+      "requested_scope": "group",
+      "cache_scope": "personal",
+      "expected": "deny_cross_scope_evidence"
+    }
+  ]
+}
