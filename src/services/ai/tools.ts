@@ -64,7 +64,7 @@ const scopeProperty = Object.freeze({
 /** Secretary delegation target shared by every event-facing tool. */
 const ownerIdProperty = Object.freeze({
   type: 'number',
-  description: "Another user's calendar. Requires active secretary access to it.",
+  description: "Another user's calendar (needs secretary access).",
 });
 
 const toolDefinitions: ToolDefinition[] = [
@@ -414,6 +414,7 @@ const toolDefinitions: ToolDefinition[] = [
           type: 'string',
           description: 'Telegram @username without @. Resolved automatically when invitee_id is absent.',
         },
+        owner_id: ownerIdProperty,
       },
       required: ['event_id'],
     },
@@ -425,6 +426,7 @@ const toolDefinitions: ToolDefinition[] = [
       type: 'object' as const,
       properties: {
         event_id: { type: 'number', description: 'ID of the event to check invitations for' },
+        owner_id: ownerIdProperty,
       },
       required: ['event_id'],
     },
@@ -676,6 +678,7 @@ const toolDefinitions: ToolDefinition[] = [
       type: 'object' as const,
       properties: {
         invitation_id: { type: 'number', description: 'ID of the invitation to cancel' },
+        owner_id: ownerIdProperty,
       },
       required: ['invitation_id'],
     },
@@ -688,6 +691,7 @@ const toolDefinitions: ToolDefinition[] = [
       properties: {
         invitation_id: { type: 'number', description: 'ID of the invitation to resend' },
         invitee_username: { type: 'string', description: 'Telegram @username without @, if known.' },
+        owner_id: ownerIdProperty,
       },
       required: ['invitation_id'],
     },

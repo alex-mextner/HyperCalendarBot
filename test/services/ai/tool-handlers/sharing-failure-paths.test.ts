@@ -4,11 +4,12 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { ContactRepository } from '../../../../src/database/repositories/contact.repository.ts';
 import { EditProposalRepository } from '../../../../src/database/repositories/edit-proposal.repository.ts';
 import {
+  handleCancelInvitation,
   handleProposeEdit,
   handleResendInvitation,
   handleSendInvitation,
 } from '../../../../src/services/ai/tool-handlers/sharing.ts';
-import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import type { AgentContext, ToolResult } from '../../../../src/services/ai/types.ts';
 import {
   createSharingFixture,
   futureStartAt,
@@ -31,14 +32,46 @@ describe('sharing handlers: failure paths', () => {
   describe('handleResendInvitation refusals', () => {
     test('reports a missing invitation', async () => {
       const result = await handleResendInvitation(fixture.makeCtx(), { invitation_id: 9999 });
-      expect(result).toEqual({ success: false, error: 'Invitation not found.' });
+      expect(result).toEqual({ success: false, mutationState: 'not_applied', error: 'Invitation not found.' });
     });
 
-    test("refuses somebody else's invitation", async () => {
+    // A foreign id must answer exactly as a missing one, for the owner path too: 'Not your invitation.'
+    // used to tell anyone guessing ids which of them exist.
+    test("answers somebody else's invitation exactly as a missing one, and delivers nothing", async () => {
       const event = ownedEvent(OTHER_USER_ID, 'Not Mine');
       const inv = fixture.invitationRepo.create({ event_id: event.id, inviter_id: OTHER_USER_ID, invitee_id: USER_ID });
-      const result = await handleResendInvitation(fixture.makeCtx(), { invitation_id: inv.id });
-      expect(result).toEqual({ success: false, error: 'Not your invitation.' });
+      const delivered: number[] = [];
+      const ctx = fixture.makeCtx({
+        sender: {
+          sendMessage: async () => ({ message_id: 1 }),
+          editMessageText: async () => {},
+          sendInvitation: async (inviteeId, _text, invitationId) => {
+            delivered.push(inviteeId);
+            return { message_id: 700 + invitationId };
+          },
+        },
+      });
+
+      const foreign = await handleResendInvitation(ctx, { invitation_id: inv.id });
+      const missing = await handleResendInvitation(ctx, { invitation_id: inv.id + 1000 });
+
+      expect(foreign).toEqual(missing);
+      expect(foreign).toEqual({ success: false, mutationState: 'not_applied', error: 'Invitation not found.' });
+      expect(delivered).toEqual([]);
+      expect(fixture.invitationRepo.findById(inv.id)).toEqual(inv);
+    });
+
+    test("answers cancelling somebody else's invitation exactly as a missing one, and cancels nothing", () => {
+      const event = ownedEvent(OTHER_USER_ID, 'Not Mine');
+      const inv = fixture.invitationRepo.create({ event_id: event.id, inviter_id: OTHER_USER_ID, invitee_id: USER_ID });
+      const ctx = fixture.makeCtx();
+
+      const foreign = handleCancelInvitation(ctx, { invitation_id: inv.id });
+      const missing = handleCancelInvitation(ctx, { invitation_id: inv.id + 1000 });
+
+      expect(foreign).toEqual(missing);
+      expect(foreign.success).toBe(false);
+      expect(fixture.invitationRepo.findById(inv.id)).toEqual(inv);
     });
 
     test('refuses an invitation that is no longer pending', async () => {
@@ -46,7 +79,11 @@ describe('sharing handlers: failure paths', () => {
       const inv = fixture.invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
       fixture.invitationRepo.updateStatus(inv.id, 'accepted', 'pending');
       const result = await handleResendInvitation(fixture.makeCtx(), { invitation_id: inv.id });
-      expect(result).toEqual({ success: false, error: 'Cannot resend — status is "accepted".' });
+      expect(result).toEqual({
+        success: false,
+        mutationState: 'not_applied',
+        error: 'Cannot resend — status is "accepted".',
+      });
     });
 
     test('reports delivery failure with the exact hint when the bot API and deep link both fail', async () => {
@@ -163,6 +200,58 @@ describe('sharing handlers: failure paths', () => {
       expect(result.success).toBe(false);
       expect(result.mutationState).toBe('not_applied');
       expect(result.error).toContain('The proposal has no editable change.');
+    });
+  });
+
+  // A denial changed nothing. Without mutationState the executor classifies a failed write as
+  // 'uncertain' and the receipt tells the user to check the calendar before repeating.
+  describe('cancel_invitation and resend_invitation denials are a plain "not applied"', () => {
+    type Tool = 'cancel_invitation' | 'resend_invitation';
+
+    async function denials(): Promise<{ name: string; tool: Tool; result: ToolResult }[]> {
+      const foreignEvent = ownedEvent(OTHER_USER_ID, 'Not Mine');
+      const foreign = fixture.invitationRepo.create({
+        event_id: foreignEvent.id,
+        inviter_id: OTHER_USER_ID,
+        invitee_id: USER_ID,
+      });
+      const ownEvent = ownedEvent(USER_ID, 'Answered');
+      const answered = fixture.invitationRepo.create({
+        event_id: ownEvent.id,
+        inviter_id: USER_ID,
+        invitee_id: OTHER_USER_ID,
+      });
+      fixture.invitationRepo.updateStatus(answered.id, 'accepted', 'pending');
+      const ctx = fixture.makeCtx();
+      const cancel = (name: string, input: { invitation_id: number; owner_id?: number }) => ({
+        name: `cancel: ${name}`,
+        tool: 'cancel_invitation' as const,
+        result: handleCancelInvitation(ctx, input),
+      });
+      const resend = async (name: string, input: { invitation_id: number; owner_id?: number }) => ({
+        name: `resend: ${name}`,
+        tool: 'resend_invitation' as const,
+        result: await handleResendInvitation(ctx, input),
+      });
+      return [
+        cancel('no access to the named owner', { invitation_id: foreign.id, owner_id: OTHER_USER_ID }),
+        cancel('missing invitation', { invitation_id: 9999 }),
+        cancel('foreign invitation', { invitation_id: foreign.id }),
+        await resend('no access to the named owner', { invitation_id: foreign.id, owner_id: OTHER_USER_ID }),
+        await resend('missing invitation', { invitation_id: 9999 }),
+        await resend('foreign invitation', { invitation_id: foreign.id }),
+        await resend('no longer pending', { invitation_id: answered.id }),
+      ];
+    }
+
+    test('every denial carries mutationState not_applied', async () => {
+      for (const { name, result } of await denials()) {
+        expect({ name, success: result.success, mutationState: result.mutationState }).toEqual({
+          name,
+          success: false,
+          mutationState: 'not_applied',
+        });
+      }
     });
   });
 });

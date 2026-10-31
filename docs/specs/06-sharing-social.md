@@ -705,12 +705,14 @@ share_event(params: {
 send_invitation(params: {
   event_id: number;
   invitee_id: number; // telegram_user_id
+  owner_id?: number;  // secretary with write access: the calendar owner whose event it is
 }): Promise<{ success: boolean; invitation_id?: number; deep_link?: string }>
 
 // Check invitation status
 get_invitation_status(params: {
   invitation_id?: number;
   event_id?: number; // get all invitations for event
+  owner_id?: number; // secretary (read or write access) reading the owner's event
 }): Promise<Invitation[]>
 
 // Update sharing settings
@@ -726,6 +728,8 @@ set_event_visibility(params: {
   visibility: 'private' | 'free_busy' | 'full';
 }): Promise<{ success: boolean }>
 ```
+
+**Secretary invitations.** `send_invitation`, `resend_invitation` and `cancel_invitation` accept `owner_id` and need active `write` secretary access to that owner; `get_invitation_status` needs read access. The invitation's `inviter_id` is the event owner, not the secretary: cards, RSVP notices, the roster and reschedule all read the event as `(event_id, inviter_id)`. Delivery is Bot API first; on failure only the deep link goes to the secretary's private chat. No connected Telegram (MTProto) session sends for the owner. The requester can be invited with their own Telegram ID; inviting the owner is refused (the owner is the organizer). The user picker (`pick_users`) does not yet apply to a secretary-managed event.
 
 ---
 

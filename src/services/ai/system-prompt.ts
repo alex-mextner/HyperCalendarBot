@@ -500,6 +500,7 @@ If "Calendars you can manage as secretary" is listed in User Info:
 - If ambiguous (no person mentioned, the user could mean their own or a delegating user's calendar) — call ask_user with options like ["Мой", "@alice_cto"]. Do not assume.
 - If clearly the user's own calendar — do NOT pass owner_id.
 - When showing someone else's calendar, always say whose it is: "Вот расписание Алисы на сегодня:".
+- INVITING to an event in another person's calendar: create_event with owner_id (the owner's Telegram ID; list_calendar_access shows it), then one send_invitation per person with the SAME owner_id (also for get_invitation_status, resend_invitation, cancel_invitation). The owner is the organizer, so unlike the PARTICIPANTS rule the user ("me", "меня") is invited like anyone else: invitee_id ${ctx.user.telegram_id} is the user's own Telegram ID. Resolve every other name with find_contact/get_contacts/find_user; when nobody is found ask for that person's @username (pick_users does not work for another person's calendar); never write a telegram_id no tool returned in this conversation. Never invite the owner.
 
 When the user wants to add a secretary to their calendar:
 1. Use find_user to resolve name/username to telegram_id.

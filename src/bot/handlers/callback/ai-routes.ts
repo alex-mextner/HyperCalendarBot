@@ -276,7 +276,7 @@ export function registerAiRoutes(dispatch: CallbackDispatch, deps: CallbackRoute
     try {
       await continueWithAgent(
         user,
-        `Confirmed recipient Telegram ID ${approved.recipientId} for event ${approved.eventId}. Send that invitation with force=true; do not change the ID or use a conflicting username.`,
+        `Confirmed recipient Telegram ID ${approved.recipientId} for event ${approved.eventId}. Send that invitation with force=true${approved.ownerId === undefined ? '' : ` and owner_id ${approved.ownerId}`}; do not change the ID or use a conflicting username.`,
         agentContinuation,
       );
       finishRecipientApproval(payload, false);

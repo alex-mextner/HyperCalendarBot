@@ -275,6 +275,47 @@ describe('recipient and contact tool boundaries', () => {
     });
   }
 
+  test.each([
+    [undefined, 'Send that invitation with force=true; do not change'],
+    [2002, 'Send that invitation with force=true and owner_id 2002; do not change'],
+  ])('the confirmation continuation for owner %p says how to send', async (ownerId, expected) => {
+    const event = ctx.eventService.createEvent({
+      user_id: 10,
+      title: 'Continuation text',
+      start_at: new Date(Date.now() + 86400000).toISOString(),
+      timezone: 'UTC',
+    });
+    const token = issueRecipientApproval(10, event.id, 5000000002, { ownerId });
+    const texts: string[] = [];
+    const agentContinuation = {
+      agent: {
+        run: async (continuation: AgentContext) => {
+          texts.push(continuation.messageText);
+          return { responseText: '', toolCalls: [], toolResults: [] };
+        },
+      },
+      buildContext: (user: User, chatId: number, messageText: string): AgentContext => ({
+        ...ctx,
+        user,
+        chatId,
+        messageText,
+        conversationLogger: new ConversationLogger(new ChatHistoryRepository(db)),
+      }),
+    };
+    const handler = createCallbackHandler(ctx.eventService, {} as never, {} as never, {} as never, {
+      agentContinuation,
+    });
+    await handler({
+      data: `ric:${token}`,
+      dbUser: ctx.user,
+      from: { id: 10 },
+      chatId: 10,
+      answer: async () => {},
+    } as never);
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toContain(expected);
+  });
+
   test('inspection metadata is reused for resend without refreshing the same scoped ID', async () => {
     const event = ctx.eventService.createEvent({
       user_id: 10,
