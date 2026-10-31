@@ -125,7 +125,8 @@ describe('CalendarBotAgent.run()', () => {
     expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe('Confirmed title');
     expect(result.toolCalls.filter((call) => call.name === 'update_event')).toHaveLength(1);
     expect(result.responseText).not.toContain('late unsupported claim');
-    expect(result.responseText).toContain('Completed');
+    expect(result.responseText).toContain('Updated: event “Confirmed title”');
+    expect(result.responseText).toContain('fields: title');
     expect(enqueue).not.toHaveBeenCalled();
   });
 

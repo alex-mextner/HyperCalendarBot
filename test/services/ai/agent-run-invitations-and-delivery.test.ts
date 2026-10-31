@@ -44,9 +44,10 @@ describe('CalendarBotAgent.run()', () => {
       { kind: 'error', error: new Error('Synthetic provider interruption') },
     ]);
     const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
-    expect(result.responseText).toContain('Not completed:');
-    expect(result.responseText).toContain('request rejected before applying changes');
-    expect(result.responseText).not.toContain('Outcome unknown');
+    expect(result.responseText).toContain(
+      { create_event: 'Not created: event', update_event: 'Not updated: event', send_invitation: 'was not sent' }[name],
+    );
+    expect(result.responseText).not.toContain('Could not confirm');
     expect(result.responseText).not.toContain('Confirmed changes remain');
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
@@ -121,8 +122,8 @@ describe('CalendarBotAgent.run()', () => {
     const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
     const stored = db.query('SELECT start_at FROM events WHERE id=?').get(event.id) as { start_at: string };
     expect(stored.start_at).toBe('2030-01-01T10:00:00Z');
-    expect(result.responseText).toContain('Outcome unknown');
-    expect(result.responseText).not.toContain('request rejected before applying changes');
+    expect(result.responseText).toContain('Could not confirm the update');
+    expect(result.responseText).not.toContain('nothing was changed');
     expect(enqueue).not.toHaveBeenCalled();
   });
 
@@ -144,7 +145,7 @@ describe('CalendarBotAgent.run()', () => {
     expect(result.responseText).toBe('');
     expect(sender.sendUserPicker).toHaveBeenCalledTimes(1);
     expect(db.query('SELECT id FROM invitations WHERE event_id = ?').all(event.id)).toHaveLength(0);
-    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('Completed: Send invitation');
+    expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('The invitation to');
   });
 
   test.each([
@@ -175,9 +176,8 @@ describe('CalendarBotAgent.run()', () => {
     ]);
     const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
     expect(db.query('SELECT id FROM invitations WHERE event_id = ?').all(event.id)).toHaveLength(1);
-    expect(result.responseText).toContain(delivery === 'delivered' ? 'Invitation delivered' : 'Invitation created');
     expect(result.responseText).toContain(
-      delivery === 'manual' ? 'forward' : delivery === 'failed' ? 'not delivered' : 'delivered',
+      { delivered: 'was sent', manual: 'Please forward the link', failed: 'created but not delivered' }[delivery],
     );
     expect(result.responseText).not.toContain('789');
     expect(result.responseText).not.toContain('<b>private');
@@ -281,6 +281,6 @@ describe('CalendarBotAgent.run()', () => {
     expect(ctx.eventService.getEvent(event.id, 789)).not.toBeNull();
     expect(ctx.participantRepo.findByEventAndUser(event.id, USER_ID)?.status).toBe('declined');
     expect(result.responseText).toContain('Attendance declined');
-    expect(result.responseText).not.toContain('Completed: Delete event');
+    expect(result.responseText).not.toContain('Deleted: event');
   });
 });

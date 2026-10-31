@@ -114,8 +114,8 @@ async function executeFresh(
   const { ctx, writer, dbg, requestMetrics, exposure, ledger } = env;
   if (tc.name !== DISCOVERY_TOOL && !SILENT_TOOLS.has(tc.name)) {
     // Group chats: never surface raw tool arguments (invitee_id, owner_id, etc.) in the
-    // execution log — same "hide targets from other members" contract as finalNotice's
-    // hideTargets (ctx.isGroup).
+    // execution log — same "hide targets from other members" contract as the write receipt's
+    // ReceiptView.hideTargets (ctx.isGroup).
     writer.setToolLabel(tc.name, ctx.isGroup ? undefined : input);
     await writer.flush(true);
   }
@@ -138,7 +138,7 @@ async function executeFresh(
       'Tool call complete',
     );
   }
-  ledger.writeOutcomes.record(tc.name, input, toolResult);
+  ledger.writeOutcomes.record(tc.name, input, toolResult, ctx.isGroup, ctx.user.timezone);
 
   // Record dedup key only after a successful execution — failed calls
   // must not block retries with a synthetic DUPLICATE result.

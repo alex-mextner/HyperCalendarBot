@@ -86,7 +86,7 @@ describe('CalendarBotAgent.run()', () => {
     const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
     expect(ctx.eventService.getEvent(event.id, USER_ID)).toBeNull();
     expect(enqueue).not.toHaveBeenCalled();
-    expect(result.responseText).toContain('Completed: Delete event');
+    expect(result.responseText).toContain('Deleted: event');
     expect(result.responseText).toContain('interrupted');
     expect(result.responseText).not.toContain('private provider');
   });
@@ -121,7 +121,7 @@ describe('CalendarBotAgent.run()', () => {
       { kind: 'text', text: 'Successfully deleted everything.' },
     ]);
     const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
-    expect(result.responseText).toContain('Not completed: Delete event');
+    expect(result.responseText).toContain('Not deleted: event');
     expect(result.responseText).not.toContain('Successfully deleted everything.');
     const history = ctx.chatHistory.getRecent(USER_ID);
     expect(JSON.stringify(history)).not.toContain('Successfully deleted everything.');
@@ -140,7 +140,7 @@ describe('CalendarBotAgent.run()', () => {
       { kind: 'text', text: 'Updated.' },
     ]);
     const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
-    expect(result.responseText).not.toContain('Not completed:');
+    expect(result.responseText).not.toContain('Not updated');
     expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe('Corrected');
   });
 
@@ -173,8 +173,8 @@ describe('CalendarBotAgent.run()', () => {
     const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
     expect(script.calls).toHaveLength(5);
     expect(result.toolResults.map((entry) => entry.success)).toEqual([true, true, false]);
-    expect(result.responseText).toContain('Completed: Delete event');
-    expect(result.responseText).toContain('Not completed: Delete event');
+    expect(result.responseText).toContain('Deleted: event');
+    expect(result.responseText).toContain('Not deleted: event');
     expect(result.responseText).not.toContain('Everything succeeded.');
     expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('Everything succeeded.');
     expect(ctx.eventService.getEvent(event.id, USER_ID)).toBeNull();
@@ -195,7 +195,7 @@ describe('CalendarBotAgent.run()', () => {
     if (name === 'supplement_skip') ctx.supplementMode = true;
     const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
     expect(script.calls).toHaveLength(2);
-    expect(result.responseText).not.toContain('Not completed:');
+    expect(result.responseText).not.toContain('Not deleted:');
     if (name === 'ask_user') expect(sender.sendButtons).toHaveBeenCalledTimes(1);
     if (name === 'pick_users') expect(sender.sendUserPicker).toHaveBeenCalledTimes(1);
     if (name === 'supplement_skip') expect(sender.editMessageText).not.toHaveBeenCalled();
@@ -247,12 +247,12 @@ describe('CalendarBotAgent.run()', () => {
       date.mockRestore();
     }
     if (ending === 'quiet-retry') expect(enqueue).toHaveBeenCalledTimes(1);
-    expect(result.responseText).toContain('Not completed:');
+    expect(result.responseText).toContain('Not deleted:');
     expect(result.responseText).not.toContain('Successfully deleted');
     const history = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
-    expect(history).toContain('Not completed:');
+    expect(history).toContain('Not deleted:');
     expect(history).not.toContain('Successfully deleted');
-    expect(delivered).toContain('Not completed:');
+    expect(delivered).toContain('Not deleted:');
     expect(delivered).not.toContain('Successfully deleted');
   });
 
@@ -322,11 +322,11 @@ describe('CalendarBotAgent.run()', () => {
     };
     try {
       const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
-      expect(result.responseText).toContain('Not completed:');
-      expect(delivered).toContain('Not completed:');
+      expect(result.responseText).toContain('Not deleted:');
+      expect(delivered).toContain('Not deleted:');
       expect(delivered).not.toContain('Deleted successfully');
       const history = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
-      expect(history).toContain('Not completed:');
+      expect(history).toContain('Not deleted:');
       expect(history).not.toContain('Deleted successfully');
       expect(history).not.toContain('Unverified answer');
     } finally {
@@ -353,7 +353,7 @@ describe('CalendarBotAgent.run()', () => {
     const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
     expect(result.responseText).toContain('title');
     expect(result.responseText).toContain('start time');
-    expect(delivered).toContain('Not completed:');
+    expect(delivered).toContain('Not updated: event “Before”');
     const saved = ctx.eventService.getEvent(event.id, USER_ID);
     expect(saved?.title).toBe('Before');
     expect(saved?.location).toBe('Office');
@@ -374,7 +374,7 @@ describe('CalendarBotAgent.run()', () => {
     expect(sender.deleteMessage).toHaveBeenCalled();
     expect(enqueue).not.toHaveBeenCalled();
     const history = JSON.stringify(ctx.chatHistory.getRecent(USER_ID));
-    expect(history).toContain('Not completed:');
+    expect(history).toContain('Not deleted:');
     expect(history).not.toContain('Deleted successfully');
   });
 
@@ -384,7 +384,7 @@ describe('CalendarBotAgent.run()', () => {
       { kind: 'text', text: 'Created successfully.' },
     ]);
     const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
-    expect(result.responseText).toContain('Not completed: Create event');
+    expect(result.responseText).toContain('Not created: event');
     expect(result.responseText).not.toContain('Created successfully.');
     expect(JSON.stringify(ctx.chatHistory.getRecent(USER_ID))).not.toContain('Created successfully.');
   });

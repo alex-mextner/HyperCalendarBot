@@ -50,7 +50,7 @@ const LOCAL_DAY = 'EEE yyyy-MM-dd';
  * converted to UTC (the model resolves local dates to UTC, e.g. Belgrade Mon 28 → 27T22:00Z), so it
  * is read on the user's wall clock.
  */
-function allDayCalendarDate(value: string, timezone: string): string {
+export function allDayCalendarDate(value: string, timezone: string): string {
   const ms = Date.parse(value);
   if (ms % 86_400_000 === 0) return new Date(ms).toISOString().slice(0, 10);
   return format(new TZDate(ms, timezone), 'yyyy-MM-dd');

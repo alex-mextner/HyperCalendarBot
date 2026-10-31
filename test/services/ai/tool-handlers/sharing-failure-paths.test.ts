@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { ContactRepository } from '../../../../src/database/repositories/contact.repository.ts';
 import { EditProposalRepository } from '../../../../src/database/repositories/edit-proposal.repository.ts';
+import { WRITE_TOOLS } from '../../../../src/services/ai/tool-executor.ts';
 import {
   handleCancelInvitation,
   handleProposeEdit,
@@ -10,6 +11,8 @@ import {
   handleSendInvitation,
 } from '../../../../src/services/ai/tool-handlers/sharing.ts';
 import type { AgentContext, ToolResult } from '../../../../src/services/ai/types.ts';
+import { WriteOutcomes } from '../../../../src/services/ai/write-outcomes.ts';
+import type { ReceiptView } from '../../../../src/services/ai/write-receipt.ts';
 import {
   createSharingFixture,
   futureStartAt,
@@ -17,6 +20,18 @@ import {
   type SharingFixture,
   USER_ID,
 } from './sharing-fixtures.ts';
+
+const RECEIPT_VIEW: ReceiptView = {
+  language: 'en',
+  timezone: 'UTC',
+  hideTargets: false,
+  requesterId: USER_ID,
+  now: new Date('2026-10-31T09:00:00Z'),
+  personLabel: () => null,
+  personKey: ({ id, username }) => (id === null ? `@${username}` : `id:${id}`),
+  calendarOwnerName: () => null,
+  hasCalendarAccess: () => false,
+};
 
 describe('sharing handlers: failure paths', () => {
   let fixture: SharingFixture;
@@ -244,13 +259,17 @@ describe('sharing handlers: failure paths', () => {
       ];
     }
 
-    test('every denial carries mutationState not_applied', async () => {
-      for (const { name, result } of await denials()) {
+    test('every denial carries mutationState not_applied and the receipt says nothing changed', async () => {
+      for (const { name, tool, result } of await denials()) {
         expect({ name, success: result.success, mutationState: result.mutationState }).toEqual({
           name,
           success: false,
           mutationState: 'not_applied',
         });
+        const ledger = new WriteOutcomes(WRITE_TOOLS);
+        ledger.record(tool, { invitation_id: 1 }, { ...result, disposition: 'failed' });
+        expect(ledger.mayHaveMutated).toBe(false);
+        expect(ledger.finalNotice(RECEIPT_VIEW)).not.toContain('Could not confirm');
       }
     });
   });

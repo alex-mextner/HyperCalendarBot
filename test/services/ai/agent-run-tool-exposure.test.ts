@@ -303,7 +303,7 @@ describe('CalendarBotAgent.run()', () => {
       }).run(ctx);
       expect(change).toHaveBeenCalledTimes(1);
       expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe('Verified later change');
-      expect(result.responseText).not.toContain('Not completed');
+      expect(result.responseText).not.toContain('Not updated');
       expect(result.toolCalls.map((call) => call.name)).toEqual(['update_event', 'update_event']);
     } finally {
       change.mockRestore();
@@ -380,10 +380,11 @@ describe('CalendarBotAgent.run()', () => {
     expect(result.toolCalls.filter((call) => call.name === 'add_contact')).toHaveLength(2);
     // add_contact is not in WriteOutcomes' targeted-dedup map (unlike update_event/
     // send_invitation), so the failed attempt 1 is never superseded by attempt 2's
-    // success — the user sees both as a receipt, not a clean "Saved." reply. That is
-    // pre-existing write-outcomes framing, not something this fix changes; pin what
+    // success — the user sees both in the receipt, not a clean "Saved." reply. That is
+    // pre-existing write-outcomes behaviour, not something this fix changes; pin what
     // is actually shown rather than a substring that happens to also match "Saved.".
-    expect(result.responseText).toContain('Attempt 2: Completed');
+    expect(result.responseText).toContain('Not done: change');
+    expect(result.responseText).toContain('Done: change');
     expect(result.responseText).not.toContain('Saved.');
   });
 

@@ -187,7 +187,7 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
     );
     const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
     expectNoRejectedProse(result.responseText);
-    expect(result.responseText).toContain('Completed:');
+    expect(result.responseText).toContain('Created: event');
     expect(result.toolCalls.filter((call) => call.name === 'create_event')).toHaveLength(1);
     expect(result.toolResults[0]?.success).toBe(true);
     const count = db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM events').get();
@@ -510,7 +510,7 @@ describe('re-validation accepts answers grounded in the same run (#492)', () => 
     );
     const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
 
-    expect(result.responseText).toContain('Выполнено: Создание события');
+    expect(result.responseText).toContain('Создано: событие «Пробежка»');
     expect(result.responseText).not.toContain('22 сентября');
     expect(script.counts.validator).toBe(0);
     const created = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events WHERE title = 'Пробежка'").get();
@@ -528,7 +528,7 @@ describe('re-validation accepts answers grounded in the same run (#492)', () => 
     );
     const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
 
-    expect(result.responseText).toContain('Выполнено: Создание события');
+    expect(result.responseText).toContain('Создано: событие «Пробежка»');
     const created = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events WHERE title = 'Пробежка'").get();
     expect(created?.n).toBe(1);
   });
@@ -545,8 +545,8 @@ describe('re-validation accepts answers grounded in the same run (#492)', () => 
     );
     const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
 
-    expect(result.responseText).toContain('Выполнено: Создание события');
-    expect(result.responseText).toContain('Не выполнено: Удаление события');
+    expect(result.responseText).toContain('Создано: событие «Пробежка»');
+    expect(result.responseText).toContain('Не удалено: событие');
   });
 
   test('a supplement backed by its own reads is still delivered (#515)', async () => {
