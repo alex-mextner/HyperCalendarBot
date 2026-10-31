@@ -4,6 +4,12 @@
 import type { Lang } from '../../../config/constants.ts';
 import { CB, t, toLang } from '../../../config/constants.ts';
 import {
+  AI_BUTTON_ACTION,
+  AI_OPTION_ACTION,
+  type InlineKeyboardRows,
+  parseAiOptionPayload,
+} from '../../../services/ai/ask-user-buttons.ts';
+import {
   approveDeletes,
   chooseTargets,
   type DeleteTarget,
@@ -17,7 +23,9 @@ import { cmdLogger } from '../../../utils/logger.ts';
 import { isGroup } from '../../group-context.ts';
 import type { BotCallbackContext } from '../../types.ts';
 import { continueWithAgent } from '../agent-continuation.ts';
-import type { CallbackDispatch, CallbackRouteDeps } from './types.ts';
+import type { CallbackDispatch, CallbackHandlerOpts, CallbackRouteDeps } from './types.ts';
+
+type CallbackHandler = NonNullable<ReturnType<CallbackDispatch['get']>>;
 
 /**
  * Parse ai_btn payload into answer text and optional group restriction.
@@ -41,15 +49,100 @@ export function parseAiBtnPayload(
   return { answerText: payload };
 }
 
+/** What a tap on an ask_user button means: the answer, and the one user allowed to give it in a group. */
+interface AiButtonTap {
+  /** Undefined for an `ai_opt` tap whose message no longer carries the tapped button: answered already, or inaccessible to the bot. */
+  answerText: string | undefined;
+  restrictedToUserId?: number;
+}
+
+/**
+ * Reads a tap on either ask_user button form (`ai_btn`, `ai_opt`). `keyboard` is the inline keyboard
+ * of the tapped message, where an `ai_opt` button's own label is the answer. Undefined when `data`
+ * is not an ask_user button or its payload is malformed.
+ */
+export function readAiButtonTap(
+  data: string,
+  inGroup: boolean,
+  keyboard: InlineKeyboardRows | undefined,
+): AiButtonTap | undefined {
+  const firstColon = data.indexOf(':');
+  const action = firstColon === -1 ? data : data.slice(0, firstColon);
+  const payload = firstColon === -1 ? '' : data.slice(firstColon + 1);
+  if (action === AI_BUTTON_ACTION) return parseAiBtnPayload(payload, inGroup);
+  if (action !== AI_OPTION_ACTION) return undefined;
+  const option = parseAiOptionPayload(payload);
+  if (!option) return undefined;
+  const tapped = keyboard?.flat().find((button) => button.callback_data === data);
+  return { answerText: tapped?.text, ...option };
+}
+
 interface DeleteReportLabels {
   deleteDone: (count: number) => string;
   deleteKeptPast: (count: number) => string;
   deleteFailed: (titles: string) => string;
 }
 
+/** Telegram refuses a message over 4096 characters; the "✅ " marker and an ellipsis ride on top of the answer. */
+const MAX_ACKNOWLEDGED_ANSWER_CHARS = 4000;
+
+/**
+ * The answer as shown after "✅ ". One line, because the "already answered" test needs the marker
+ * line to end the text, and short enough to be an acceptable message on its own whatever the label.
+ */
+function acknowledgedAnswer(answerText: string): string {
+  const oneLine = answerText.replace(/\s*[\r\n]+\s*/g, ' ');
+  return oneLine.length > MAX_ACKNOWLEDGED_ANSWER_CHARS
+    ? `${oneLine.slice(0, MAX_ACKNOWLEDGED_ANSWER_CHARS)}…`
+    : oneLine;
+}
+
+/** A question whose text already ends in a "✅ answer" line: the edit that records an answer landed. */
+const ANSWERED_QUESTION = /(?:^|\n\n)✅ [^\n]*$/;
+
+const ANSWERED_MEMORY_LIMIT = 1000;
+
+/**
+ * Remembers which question messages were answered, for the taps a client still sends from a message
+ * it shows unanswered (the acknowledgement edit failed, or two taps raced before either edit landed).
+ * Bounded to the newest ANSWERED_MEMORY_LIMIT messages. A restart forgets it, as it forgets the
+ * pending AI turn it guards.
+ */
+function createAnsweredMessages() {
+  const answered = new Set<string>();
+  const keyOf = (ctx: BotCallbackContext) =>
+    ctx.message?.id === undefined ? undefined : `${ctx.chatId}:${ctx.message.id}`;
+  return {
+    has: (ctx: BotCallbackContext) => {
+      const key = keyOf(ctx);
+      return key !== undefined && answered.has(key);
+    },
+    add: (ctx: BotCallbackContext) => {
+      const key = keyOf(ctx);
+      if (key === undefined) return;
+      answered.add(key);
+      // Oldest first: a Set iterates in insertion order.
+      const oldest = answered.values().next();
+      if (answered.size > ANSWERED_MEMORY_LIMIT && !oldest.done) answered.delete(oldest.value);
+    },
+    release: (ctx: BotCallbackContext) => {
+      const key = keyOf(ctx);
+      if (key !== undefined) answered.delete(key);
+    },
+  };
+}
+
+/**
+ * One memory for the whole process, not one per handler: src/bot/index.ts builds the callback handler
+ * (and so these routes) afresh for every update, so state held inside the handler is empty on each tap.
+ * The bot runs as a single container (docker-compose.yml), so process memory sees every tap; Redis
+ * would only add a round trip and a failure mode to a guard that the pending AI turn does not outlive.
+ */
+const answeredMessages = createAnsweredMessages();
+
 async function recordAskUserAnswer(ctx: BotCallbackContext, question: string, answerText: string): Promise<boolean> {
   const entities = ctx.message?.entities?.map((entity) => entity.payload) ?? [];
-  const answered = `✅ ${answerText}`;
+  const answered = `✅ ${acknowledgedAnswer(answerText)}`;
   const kept = question ? `${question}\n\n${answered}` : answered;
   try {
     try {
@@ -90,6 +183,77 @@ async function reportDeleteOutcome(
       .editText(result)
       .catch((err: unknown) => cmdLogger.warn({ err }, 'Failed to edit the delete confirmation'));
   }
+}
+
+/**
+ * Acknowledges the tap, records the answer in the chat and starts the AI continuation. A callback
+ * query too old to answer says nothing about the user's answer, so that failure is only logged.
+ */
+async function acknowledgeAndContinue(
+  ctx: BotCallbackContext,
+  userId: number,
+  question: string,
+  answerText: string,
+  onAiButtonClick: CallbackHandlerOpts['onAiButtonClick'],
+): Promise<void> {
+  await ctx.answer().catch((err: unknown) => cmdLogger.warn({ err }, 'Failed to answer the ask_user tap'));
+  const recorded = await recordAskUserAnswer(ctx, question, answerText);
+  if (!recorded) return;
+  const cbChatId = ctx.chatId;
+  if (onAiButtonClick && cbChatId) {
+    onAiButtonClick(userId, cbChatId, answerText).catch((e) => {
+      cmdLogger.error({ err: e }, 'AI button continuation failed');
+    });
+  }
+}
+
+/** Handler of both ask_user button forms: records the answer once and hands it to the AI. */
+function createAskUserTapHandler(onAiButtonClick: CallbackHandlerOpts['onAiButtonClick']): CallbackHandler {
+  return async (ctx, _payload, _parts, user, data) => {
+    const tap = readAiButtonTap(data, isGroup(ctx), ctx.message?.replyMarkup?.payload.inline_keyboard);
+    if (!tap) {
+      cmdLogger.warn({ userId: user.telegram_id, action: data.split(':')[0] }, 'ask_user button data is malformed');
+      await ctx.answer();
+      return;
+    }
+    const { answerText, restrictedToUserId } = tap;
+    const lang = (user.language ?? 'en') as Lang;
+
+    // In groups, only the user who triggered the question can answer
+    if (restrictedToUserId !== undefined && ctx.from.id !== restrictedToUserId) {
+      await ctx.answer({ text: t(lang).callbackErrors.notYourQuestion, show_alert: false });
+      return;
+    }
+
+    // Keep the question: after a destructive confirmation it is the user's only record of
+    // what they agreed to. Appending at the end leaves the entity offsets valid.
+    const question = ctx.message?.text ?? '';
+    // A later tap from a client that still shows the buttons finds an answer already recorded,
+    // the same option or another one: the AI must not get a second answer (a destructive
+    // confirmation would run again, or run after the user declined it). The recorded answer is
+    // either the "✅" line of the edited message or, when that edit failed or has not landed yet,
+    // this process's memory of the message. Answering removes the keyboard, so a late `ai_opt`
+    // tap has no label to read: this test comes before that one.
+    if (ANSWERED_QUESTION.test(question) || answeredMessages.has(ctx)) {
+      await ctx.answer();
+      cmdLogger.info({ userId: user.telegram_id }, 'ai_btn tap on an already answered question ignored');
+      return;
+    }
+    if (answerText === undefined) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'ai_opt tap found no matching button in the tapped message');
+      await ctx.answer({ text: t(lang).callbackErrors.unavailable, show_alert: true });
+      return;
+    }
+    // Claimed before the first await: a second tap arriving while the edit is in flight sees it.
+    answeredMessages.add(ctx);
+    try {
+      await acknowledgeAndContinue(ctx, user.telegram_id, question, answerText, onAiButtonClick);
+    } catch (err) {
+      // The answer never reached the AI: release the claim so the user's retap is processed, not ignored.
+      answeredMessages.release(ctx);
+      throw err;
+    }
+  };
 }
 
 export function registerAiRoutes(dispatch: CallbackDispatch, deps: CallbackRouteDeps): void {
@@ -189,36 +353,6 @@ export function registerAiRoutes(dispatch: CallbackDispatch, deps: CallbackRoute
   });
 
   // AI ask_user button responses — trigger AI continuation
-  dispatch.set('ai_btn', async (ctx, _payload, _parts, user, data) => {
-    const firstColon = data.indexOf(':');
-    const { answerText, restrictedToUserId } = parseAiBtnPayload(data.slice(firstColon + 1), isGroup(ctx));
-    const lang = (user.language ?? 'en') as Lang;
-
-    // In groups, only the user who triggered the question can answer
-    const clickerId = ctx.from.id;
-    if (restrictedToUserId !== undefined && clickerId !== restrictedToUserId) {
-      await ctx.answer({ text: t(lang).callbackErrors.notYourQuestion, show_alert: false });
-      return;
-    }
-
-    await ctx.answer();
-    // Keep the question: after a destructive confirmation it is the user's only record of
-    // what they agreed to. Appending at the end leaves the entity offsets valid.
-    const question = ctx.message?.text ?? '';
-    // A later tap from a client that still shows the buttons finds an answer already recorded,
-    // the same option or another one: the AI must not get a second answer (a destructive
-    // confirmation would run again, or run after the user declined it).
-    if (/(?:^|\n\n)✅ [^\n]*$/.test(question)) {
-      cmdLogger.info({ userId: user.telegram_id }, 'ai_btn tap on an already answered question ignored');
-      return;
-    }
-    const recorded = await recordAskUserAnswer(ctx, question, answerText);
-    if (!recorded) return;
-    const cbChatId = ctx.chatId;
-    if (onAiButtonClick && cbChatId) {
-      onAiButtonClick(user.telegram_id, cbChatId, answerText).catch((e) => {
-        cmdLogger.error({ err: e }, 'AI button continuation failed');
-      });
-    }
-  });
+  const handleTap = createAskUserTapHandler(onAiButtonClick);
+  for (const action of [AI_BUTTON_ACTION, AI_OPTION_ACTION]) dispatch.set(action, handleTap);
 }

@@ -1,5 +1,6 @@
 import { t, toLang } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
+import { askUserInputProblem } from '../ask-user-buttons.ts';
 import {
   canResolveRecipientUsername,
   lookUpUsername,
@@ -114,8 +115,16 @@ export async function handleAskUser(
     return { success: false, error: 'Buttons not supported.' };
   }
   const CANCEL = 'Отмена';
-  const options = askedOptions.some((o) => o === CANCEL) ? askedOptions : [...askedOptions, CANCEL];
+  const cancelAdded = !askedOptions.some((o) => o === CANCEL);
+  const options = cancelAdded ? [...askedOptions, CANCEL] : askedOptions;
   const userId = ctx.isGroup ? ctx.user.telegram_id : undefined;
+  const problem = askUserInputProblem(question, options, cancelAdded ? CANCEL : undefined);
+  if (problem) {
+    return {
+      success: false,
+      error: `ASK_USER_INVALID_INPUT: ${problem}. Nothing was sent; correct the call and ask again.`,
+    };
+  }
   try {
     await ctx.sender.sendButtons(ctx.chatId, question, options, 'HTML', userId);
   } catch (err) {

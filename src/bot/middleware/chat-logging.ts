@@ -11,7 +11,7 @@ import type { ChatTurnReservation } from '../../services/ai/chat-run-gate.ts';
 import { withChatTurn } from '../../services/ai/chat-turn-context.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import { resolveCallbackButtonLabel } from '../callback-label.ts';
-import { parseAiBtnPayload } from '../handlers/callback.handler.ts';
+import { readAiButtonTap } from '../handlers/callback/ai-routes.ts';
 import { CONNECT_WIZARD_REDACTION } from '../scenes/connect-telegram.scene.ts';
 import type { ConnectWizardGuard } from './connect-wizard-guard.ts';
 
@@ -99,14 +99,18 @@ export function createChatLogging(deps: ChatLoggingDeps) {
     const action = firstColon >= 0 ? data.slice(0, firstColon) : data;
     const payload = firstColon >= 0 ? data.slice(firstColon + 1) : '';
     const callbackMessage = callbackQuery.message;
+    const replyMarkup = callbackMessage && 'reply_markup' in callbackMessage ? callbackMessage.reply_markup : undefined;
 
-    if (action === 'ai_btn') {
-      const chatType = callbackMessage?.chat?.type;
-      const isGroupCallback = chatType === 'group' || chatType === 'supergroup';
-      saveUserTurn(turn, parseAiBtnPayload(payload, isGroupCallback).answerText);
+    const chatType = callbackMessage?.chat?.type;
+    const isGroupCallback = chatType === 'group' || chatType === 'supergroup';
+    // An ask_user answer is the user's next turn. A long option rides as an index, so the text is the
+    // tapped button's label; a tap whose label cannot be read is not an answer and logs as a press.
+    const keyboard = replyMarkup && 'inline_keyboard' in replyMarkup ? replyMarkup.inline_keyboard : undefined;
+    const answerText = readAiButtonTap(data, isGroupCallback, keyboard)?.answerText;
+    if (answerText !== undefined) {
+      saveUserTurn(turn, answerText);
       return;
     }
-    const replyMarkup = callbackMessage && 'reply_markup' in callbackMessage ? callbackMessage.reply_markup : undefined;
     const buttonLabel = resolveCallbackButtonLabel(replyMarkup, data, action);
     conversationLogger.logButtonPress(turn.userId, buttonLabel, payload || undefined, turn.logChatId);
     actionLog.insert({

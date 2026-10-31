@@ -27,6 +27,14 @@ interface MockCallbackCtxOverrides {
   data?: undefined;
 }
 
+// Each tap is a message of its own: the answered-ask_user memory is shared by every handler, so a
+// fixed id would make one test's answer silence the next test's tap.
+let lastMessageId = 0;
+function nextMessageId(): number {
+  lastMessageId += 1;
+  return lastMessageId;
+}
+
 function makeCtx(data: string, overrides: MockCallbackCtxOverrides = {}) {
   return {
     data,
@@ -34,7 +42,7 @@ function makeCtx(data: string, overrides: MockCallbackCtxOverrides = {}) {
     dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC' },
     answer: mock(() => Promise.resolve()),
     editText: mock(() => Promise.resolve()),
-    message: { id: 1, text: '', chat: { id: 100, type: 'private' }, send: mock(() => Promise.resolve()) },
+    message: { id: nextMessageId(), text: '', chat: { id: 100, type: 'private' }, send: mock(() => Promise.resolve()) },
     from: { id: 100 },
     ...overrides,
   };
