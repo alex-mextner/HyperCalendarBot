@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import type { AiErrorClass } from '../../database/repositories/ai-usage.repository.ts';
+import { SPEND_LIMIT_REJECTION } from './claude-credential-pool.ts';
 
 export interface ProviderErrorClassification {
   errorClass: AiErrorClass;
@@ -18,6 +19,10 @@ const QUOTA_WORDING =
  */
 export const MODERATION_REJECTION = /content policy|safety (?:policy|filter)|requires moderation|input was flagged/i;
 
+function spentQuota(status: number, message: string): boolean {
+  return QUOTA_WORDING.test(message) || (status === 400 && SPEND_LIMIT_REJECTION.test(message));
+}
+
 function classifyStatus(status: number, message: string): AiErrorClass {
   if (status === 402) return 'quota';
   if (status === 403 && MODERATION_REJECTION.test(message)) return 'bad_request';
@@ -27,7 +32,7 @@ function classifyStatus(status: number, message: string): AiErrorClass {
   if (status === 413) return 'rate_limit';
   if (status === 429) return QUOTA_WORDING.test(message) ? 'quota' : 'rate_limit';
   if (status >= 500) return 'server';
-  if (status >= 400) return QUOTA_WORDING.test(message) ? 'quota' : 'bad_request';
+  if (status >= 400) return spentQuota(status, message) ? 'quota' : 'bad_request';
   return 'other';
 }
 

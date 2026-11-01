@@ -104,9 +104,14 @@ export function settleCircuitAfterFailure(
     settleInconclusive(admission, { pushBack: false });
     return false;
   }
+  const availability = getClaudeCredentialAvailability(error);
+  if (availability && availability.state !== 'cooling') {
+    settleInconclusive(admission, { pushBack: false });
+    return true;
+  }
   return settleFailure(circuit, admission, {
     status: failure.status,
-    recoveryAfterMs: getClaudeCredentialAvailability(error)?.retryAfterMs,
+    recoveryAfterMs: availability?.retryAfterMs,
     message: failure.message,
     headers: error instanceof OpenAI.APIError ? error.headers : undefined,
     providerDown: isProviderDown(error),

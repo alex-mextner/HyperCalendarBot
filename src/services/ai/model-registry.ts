@@ -12,6 +12,7 @@
 import OpenAI from 'openai';
 import { logger } from '../../utils/logger.ts';
 import { withClaudeCredentials } from './claude-client-pool.ts';
+import { CredentialsCoolingDownError } from './claude-credential-pool.ts';
 import { excludedModelReason } from './model-presets.ts';
 import type { ProviderId } from './provider-ids.ts';
 
@@ -287,6 +288,7 @@ async function listLiveModels(
         : await client.models.list({ timeout: timeoutMs, signal });
     return page.data.map((model) => model.id);
   } catch (err) {
+    if (err instanceof CredentialsCoolingDownError) throw err;
     if (
       signal?.aborted ||
       (err instanceof Error && err.name === 'AbortError') ||

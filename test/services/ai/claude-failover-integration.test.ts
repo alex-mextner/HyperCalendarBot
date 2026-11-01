@@ -296,3 +296,130 @@ test('recovery accounting records terminal model rejection once when no next com
   expect(round.actualAttempts).toBe(1);
   expect(events.map((event) => [event.outcome, event.httpStatus, event.durationMs])).toEqual([['error', 404, 5]]);
 });
+
+test('a backup failure cannot open the shared circuit after another request recovers an already-attempted primary', async () => {
+  let clock = 1_000_000;
+  const wallClock = spyOn(Date, 'now').mockImplementation(() => clock);
+  let primaryCalls = 0;
+  let failBackup: ((value: Response) => void) | undefined;
+  const sent: (string | null)[] = [];
+  const client = createClaudeClient(['primary', 'backup'], {
+    ...clientOptions,
+    fetch: async (input, init) => {
+      const token = sentRequest(input, init).headers.get('authorization');
+      sent.push(token);
+      if (token === 'Bearer backup')
+        return new Promise<Response>((resolve) => {
+          failBackup = resolve;
+        });
+      primaryCalls++;
+      return primaryCalls === 1
+        ? rejected(401, 'revoked', '300')
+        : new Response(
+            JSON.stringify({
+              id: 'synthetic',
+              object: 'chat.completion',
+              created: 0,
+              model: 'claude-synthetic',
+              choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+            }),
+            { headers: { 'content-type': 'application/json' } },
+          );
+    },
+  });
+  const invoke = () =>
+    withClaudeCredentials(
+      client,
+      (candidate, signal) =>
+        candidate.chat.completions.create({ model: 'claude-synthetic', messages, max_tokens: 32 }, { signal }),
+      { timeoutMs: 2000 },
+    );
+  try {
+    const concurrent = invoke().catch((error: unknown) => error);
+    await Bun.sleep(1);
+    clock += 300_001;
+    expect((await invoke()).choices[0]?.message.content).toBe('ok');
+    failBackup?.(rejected(401, 'revoked backup', '300'));
+    const terminal = await concurrent;
+    expect(terminal).toBeInstanceOf(OpenAI.APIError);
+    const slot = streamingSlot('Claude', 'claude', () => client, 'claude-synthetic', 'concurrent-pool-recovery');
+    const attempt = admitSlot(state(), slot);
+    if (!attempt) throw new Error('expected admission');
+    settleCircuitAfterFailure(attempt.circuit, attempt.admission, terminal, describeFailure(slot, terminal), false);
+    expect(admitProvider(attempt.circuit).kind).toBe('allow');
+    expect(sent).toEqual(['Bearer primary', 'Bearer backup', 'Bearer primary']);
+  } finally {
+    wallClock.mockRestore();
+  }
+});
+
+for (const [message, expectedNext] of [
+  // Model-specific: neither key is unhealthy, so the shared circuit must stay inconclusive.
+  ['API key does not have permission to use this model', 'allow'],
+  // Account-level: both keys are cooled, so the shared circuit opens.
+  ['This organization has been disabled', 'skip'],
+] as const) {
+  test(`both keys answering 403 "${message}" leaves the shared circuit ${expectedNext === 'allow' ? 'closed' : 'open'}`, async () => {
+    let calls = 0;
+    const client = createClaudeClient(['primary', 'backup'], {
+      ...clientOptions,
+      fetch: async () => {
+        calls++;
+        return rejected(403, message);
+      },
+    });
+    let terminal: unknown;
+    await withClaudeCredentials(
+      client,
+      (candidate, signal) =>
+        candidate.chat.completions.create({ model: 'claude-synthetic', messages, max_tokens: 32 }, { signal }),
+      { timeoutMs: 2000 },
+    ).catch((error: unknown) => {
+      terminal = error;
+    });
+    expect(calls).toBe(2);
+    const slot = streamingSlot('Claude', 'claude', () => client, 'claude-synthetic', `both-403-${expectedNext}`);
+    const attempt = admitSlot(state(), slot);
+    if (!attempt) throw new Error('expected admission');
+    settleCircuitAfterFailure(attempt.circuit, attempt.admission, terminal, describeFailure(slot, terminal), false);
+    expect(admitProvider(attempt.circuit).kind).toBe(expectedNext);
+  });
+}
+
+for (const [index, tokens] of [
+  ['primary', 'bad\u200btoken'],
+  ['bad\u200btoken', 'primary'],
+  ['primary', 'bad\u200btoken', ' primary '],
+].entries()) {
+  test(`a malformed key beside one usable key keeps single-key behavior on the real round path (ordering ${index})`, async () => {
+    const sent: string[] = [];
+    const client = createClaudeClient(tokens, {
+      ...clientOptions,
+      fetch: async (input, init) => {
+        sent.push(sentRequest(input, init).headers.get('authorization') ?? '');
+        return sent.length === 1 ? rejected(503) : answer();
+      },
+    });
+    const slot = streamingSlot('Claude', 'claude', () => client, 'claude-synthetic', `one-usable-key-${index}`);
+    const first = state(false, 2000);
+    const firstAttempt = admitSlot(first, slot);
+    if (!firstAttempt) throw new Error('expected admission');
+    try {
+      await runAdmittedAttempt(first, firstAttempt, 2000);
+      throw new Error('expected 503');
+    } catch (error) {
+      expect(error).toBeInstanceOf(OpenAI.APIError);
+      expect((error as InstanceType<typeof OpenAI.APIError>).status).toBe(503);
+      handleAttemptFailure(first, firstAttempt, error);
+    }
+    // The provider circuit is not under test; only the local credential cooldown is.
+    resetProviderCircuit();
+    const second = state(false, 2000);
+    const secondAttempt = admitSlot(second, slot);
+    if (!secondAttempt) throw new Error('expected admission');
+    expect((await runAdmittedAttempt(second, secondAttempt, 2000)).text).toBe('ok');
+    expect(sent).toEqual(['Bearer primary', 'Bearer primary']);
+    flushAiUsageEvents();
+    expect(events.filter((event) => event.skipReason === 'credential_cooldown')).toEqual([]);
+  });
+}

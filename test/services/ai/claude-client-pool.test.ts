@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import OpenAI from 'openai';
 import { createClaudeClient, withClaudeCredentials } from '../../../src/services/ai/claude-client-pool.ts';
+import { getClaudeCredentialAvailability } from '../../../src/services/ai/claude-credential-pool.ts';
 import { resetModelRegistry, resolveModelOverride } from '../../../src/services/ai/model-registry.ts';
 
 const originalFetch = globalThis.fetch;
@@ -281,4 +282,332 @@ test('request-specific 429 does not rotate or cool credentials for the next beni
     ).choices[0]?.message.content,
   ).toBe('ok');
   expect(seen).toEqual(['Bearer primary', 'Bearer primary']);
+});
+
+for (const message of [
+  'Your API key does not have access to model claude-denied',
+  'API key does not have permission to use this model',
+]) {
+  test(`model-specific 403 "${message}" tries both credentials without disabling permitted models`, async () => {
+    const sent: [string | null, string][] = [];
+    const client = createClaudeClient(['primary', 'backup'], {
+      baseURL: 'https://api.anthropic.com/v1',
+      fetch: async (input, init) => {
+        const request = input instanceof Request ? new Request(input, init) : new Request(String(input), init);
+        const body: unknown = await request.json();
+        if (!body || typeof body !== 'object' || !('model' in body) || typeof body.model !== 'string')
+          throw new Error('synthetic request omitted model');
+        sent.push([request.headers.get('authorization'), body.model]);
+        if (body.model === 'claude-denied')
+          return new Response(JSON.stringify({ error: { message } }), { status: 403 });
+        return new Response(
+          JSON.stringify({
+            id: 'synthetic',
+            object: 'chat.completion',
+            created: 0,
+            model: body.model,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+    await expect(
+      withClaudeCredentials(
+        client,
+        (candidate, signal) => candidate.chat.completions.create({ ...params, model: 'claude-denied' }, { signal }),
+        { timeoutMs: 1000 },
+      ),
+    ).rejects.toBeInstanceOf(OpenAI.APIError);
+    expect(
+      (
+        await withClaudeCredentials(
+          client,
+          (candidate, signal) => candidate.chat.completions.create({ ...params, model: 'claude-allowed' }, { signal }),
+          { timeoutMs: 1000 },
+        )
+      ).choices[0]?.message.content,
+    ).toBe('ok');
+    expect(sent).toEqual([
+      ['Bearer primary', 'claude-denied'],
+      ['Bearer backup', 'claude-denied'],
+      ['Bearer primary', 'claude-allowed'],
+    ]);
+  });
+}
+
+test('a single configured credential keeps the legacy next-request retry after a transient SDK error', async () => {
+  const sent: (string | null)[] = [];
+  const client = createClaudeClient([' primary ', 'primary'], {
+    baseURL: 'https://api.anthropic.com/v1',
+    fetch: async (input, init) => {
+      const request = input instanceof Request ? new Request(input, init) : new Request(String(input), init);
+      sent.push(request.headers.get('authorization'));
+      return sent.length === 1
+        ? new Response(JSON.stringify({ error: { message: 'temporarily unavailable' } }), { status: 503 })
+        : new Response(
+            JSON.stringify({
+              id: 'synthetic',
+              object: 'chat.completion',
+              created: 0,
+              model: params.model,
+              choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+            }),
+            { headers: { 'content-type': 'application/json' } },
+          );
+    },
+  });
+  await expect(
+    withClaudeCredentials(client, (candidate, signal) => candidate.chat.completions.create(params, { signal }), {
+      timeoutMs: 1000,
+    }),
+  ).rejects.toBeInstanceOf(OpenAI.APIError);
+  expect(
+    (
+      await withClaudeCredentials(
+        client,
+        (candidate, signal) => candidate.chat.completions.create(params, { signal }),
+        { timeoutMs: 1000 },
+      )
+    ).choices[0]?.message.content,
+  ).toBe('ok');
+  expect(sent).toEqual(['Bearer primary', 'Bearer primary']);
+});
+
+test('local credential cooldown never poisons the model catalog cache after quota recovers', async () => {
+  let catalogs = 0;
+  const client = createClaudeClient(['primary', 'backup'], {
+    baseURL: 'https://api.anthropic.com/v1',
+    fetch: async (input, init) => {
+      const request = input instanceof Request ? new Request(input, init) : new Request(String(input), init);
+      if (request.url.endsWith('/models')) {
+        catalogs++;
+        return new Response(JSON.stringify({ data: [{ id: 'claude-sonnet-5-5' }] }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ error: { message: 'quota unavailable' } }), {
+        status: 429,
+        headers: { 'retry-after': '1' },
+      });
+    },
+  });
+  await withClaudeCredentials(client, (candidate, signal) => candidate.chat.completions.create(params, { signal }), {
+    timeoutMs: 1000,
+  }).catch(() => undefined);
+  const query = { provider: 'claude' as const, client, configuredModel: 'claude-missing-cooldown' };
+  expect(await resolveModelOverride(query)).toBeNull();
+  expect(catalogs).toBe(0);
+  await Bun.sleep(1100);
+  expect(await resolveModelOverride(query)).toBe('claude-sonnet-5-5');
+  expect(catalogs).toBe(1);
+});
+
+test('local SDK serialization TypeError never retries another key or cools a credential', async () => {
+  const seen: (string | null)[] = [];
+  const client = createClaudeClient(['primary', 'backup'], {
+    baseURL: 'https://api.anthropic.com/v1',
+    fetch: async (input, init) => {
+      const request = input instanceof Request ? new Request(input, init) : new Request(String(input), init);
+      seen.push(request.headers.get('authorization'));
+      return new Response(
+        JSON.stringify({
+          id: 'synthetic',
+          object: 'chat.completion',
+          created: 0,
+          model: params.model,
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      );
+    },
+  });
+  const circular = { ...params };
+  Object.assign(circular, { syntheticCycle: circular });
+  let attempts = 0;
+  await expect(
+    withClaudeCredentials(client, (candidate, signal) => candidate.chat.completions.create(circular, { signal }), {
+      timeoutMs: 1000,
+      onHttpAttempt: () => attempts++,
+    }),
+  ).rejects.toBeInstanceOf(TypeError);
+  expect(seen).toEqual([]);
+  expect(attempts).toBe(1);
+  expect(
+    (
+      await withClaudeCredentials(
+        client,
+        (candidate, signal) => candidate.chat.completions.create(params, { signal }),
+        { timeoutMs: 1000 },
+      )
+    ).choices[0]?.message.content,
+  ).toBe('ok');
+  expect(seen).toEqual(['Bearer primary']);
+});
+
+const okTransport = (seen: (string | null)[]) => async (input: string | URL | Request, init?: RequestInit) => {
+  const request = input instanceof Request ? new Request(input, init) : new Request(String(input), init);
+  seen.push(request.headers.get('authorization'));
+  return new Response(
+    JSON.stringify({
+      id: 'synthetic',
+      object: 'chat.completion',
+      created: 0,
+      model: params.model,
+      choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+    }),
+    { headers: { 'content-type': 'application/json' } },
+  );
+};
+
+// Dummy values only: each is rejected by Headers (zero-width space, U+2026, CR/LF) before any fetch.
+const MALFORMED_TOKENS = ['bad\u200btoken', 'tok\u2026en', 'tok\r\nen'];
+
+for (const malformed of MALFORMED_TOKENS) {
+  test(`a malformed primary token (${JSON.stringify(malformed).length} chars) is ignored so the valid backup serves`, async () => {
+    const seen: (string | null)[] = [];
+    const client = createClaudeClient([malformed, 'backup'], {
+      baseURL: 'https://api.anthropic.com/v1',
+      fetch: okTransport(seen),
+    });
+    const result = await withClaudeCredentials(
+      client,
+      (candidate, signal) => candidate.chat.completions.create(params, { signal }),
+      { timeoutMs: 1000 },
+    );
+    expect(result.choices[0]?.message.content).toBe('ok');
+    expect(seen).toEqual(['Bearer backup']);
+  });
+
+  test(`a malformed backup token (${JSON.stringify(malformed).length} chars) never blocks the valid primary`, async () => {
+    const seen: (string | null)[] = [];
+    const client = createClaudeClient(['primary', malformed], {
+      baseURL: 'https://api.anthropic.com/v1',
+      fetch: okTransport(seen),
+    });
+    await withClaudeCredentials(client, (candidate, signal) => candidate.chat.completions.create(params, { signal }), {
+      timeoutMs: 1000,
+    });
+    expect(seen).toEqual(['Bearer primary']);
+  });
+
+  test(`only malformed tokens still build a client and fail without leaking the token (${JSON.stringify(malformed).length} chars)`, async () => {
+    const seen: (string | null)[] = [];
+    for (const tokens of [[malformed], [malformed, `${malformed}2`]]) {
+      const client = createClaudeClient(tokens, { baseURL: 'https://api.anthropic.com/v1', fetch: okTransport(seen) });
+      const error = await withClaudeCredentials(
+        client,
+        (candidate, signal) => candidate.chat.completions.create(params, { signal }),
+        { timeoutMs: 1000 },
+      ).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(TypeError);
+      const text = `${(error as Error).message}\n${(error as Error).stack}\n${JSON.stringify(getClaudeCredentialAvailability(error))}`;
+      for (const token of tokens) expect(text.includes(token.trim())).toBe(false);
+    }
+    expect(seen).toEqual([]);
+  });
+}
+
+for (const message of [
+  'does not have permission to use the specified resource',
+  'This organization has been disabled',
+  'Your API key does not have permission to perform this action',
+]) {
+  test(`account-level 403 "${message}" cools the key and rotates (not mistaken for a model permission)`, async () => {
+    const seen: (string | null)[] = [];
+    const okResponse = okTransport(seen);
+    const client = createClaudeClient(['primary', 'backup'], {
+      baseURL: 'https://api.anthropic.com/v1',
+      fetch: async (input, init) => {
+        const request = input instanceof Request ? new Request(input, init) : new Request(String(input), init);
+        if (request.headers.get('authorization') !== 'Bearer primary') return okResponse(input, init);
+        seen.push('Bearer primary');
+        return new Response(JSON.stringify({ error: { message } }), { status: 403 });
+      },
+    });
+    const run = () =>
+      withClaudeCredentials(client, (candidate, signal) => candidate.chat.completions.create(params, { signal }), {
+        timeoutMs: 1000,
+      });
+    expect((await run()).choices[0]?.message.content).toBe('ok');
+    expect((await run()).choices[0]?.message.content).toBe('ok');
+    // The second request never touches the cooled primary.
+    expect(seen).toEqual(['Bearer primary', 'Bearer backup', 'Bearer backup']);
+  });
+}
+
+// First request: a retry-after 503 (a transient, key-level failure); every later request succeeds.
+const transientThenOkTransport = (seen: (string | null)[]) => {
+  const okResponse = okTransport(seen);
+  return async (input: string | URL | Request, init?: RequestInit) => {
+    const response = await okResponse(input, init);
+    return seen.length > 1
+      ? response
+      : new Response(JSON.stringify({ error: { message: 'temporarily unavailable' } }), {
+          status: 503,
+          headers: { 'retry-after': '60' },
+        });
+  };
+};
+
+for (const tokens of [
+  ['primary', 'bad\u200btoken'],
+  ['bad\u200btoken', 'primary'],
+  ['primary', 'bad\u200btoken', ' primary '],
+]) {
+  test(`a malformed key beside one usable key keeps the single-key next-request retry (${tokens.length} configured)`, async () => {
+    const sent: (string | null)[] = [];
+    const client = createClaudeClient(tokens, {
+      baseURL: 'https://api.anthropic.com/v1',
+      fetch: transientThenOkTransport(sent),
+    });
+    const run = () =>
+      withClaudeCredentials(client, (candidate, signal) => candidate.chat.completions.create(params, { signal }), {
+        timeoutMs: 1000,
+      });
+    await expect(run()).rejects.toBeInstanceOf(OpenAI.APIError);
+    expect((await run()).choices[0]?.message.content).toBe('ok');
+    expect(sent).toEqual(['Bearer primary', 'Bearer primary']);
+  });
+}
+
+for (const status of [401, 503]) {
+  test(`a leading malformed key is ignored while the remaining valid keys still rotate after HTTP ${status}`, async () => {
+    const sent: (string | null)[] = [];
+    const okResponse = okTransport(sent);
+    const client = createClaudeClient(['bad\u200btoken', 'a', 'b'], {
+      baseURL: 'https://api.anthropic.com/v1',
+      fetch: async (input, init) => {
+        const request = input instanceof Request ? new Request(input, init) : new Request(String(input), init);
+        if (request.headers.get('authorization') !== 'Bearer a') return okResponse(input, init);
+        sent.push('Bearer a');
+        return new Response(JSON.stringify({ error: { message: 'unavailable' } }), {
+          status,
+          headers: { 'retry-after': '60' },
+        });
+      },
+    });
+    const result = await withClaudeCredentials(
+      client,
+      (candidate, signal) => candidate.chat.completions.create(params, { signal }),
+      { timeoutMs: 1000 },
+    );
+    expect(result.choices[0]?.message.content).toBe('ok');
+    expect(sent).toEqual(['Bearer a', 'Bearer b']);
+  });
+}
+
+test('duplicate-only credentials stay a single unpooled key', async () => {
+  const sent: (string | null)[] = [];
+  const client = createClaudeClient(['a', ' a '], {
+    baseURL: 'https://api.anthropic.com/v1',
+    fetch: transientThenOkTransport(sent),
+  });
+  const run = () =>
+    withClaudeCredentials(client, (candidate, signal) => candidate.chat.completions.create(params, { signal }), {
+      timeoutMs: 1000,
+    });
+  await expect(run()).rejects.toBeInstanceOf(OpenAI.APIError);
+  expect((await run()).choices[0]?.message.content).toBe('ok');
+  expect(sent).toEqual(['Bearer a', 'Bearer a']);
 });

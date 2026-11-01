@@ -1,3 +1,9 @@
+/**
+ * Same 1s floor as the streaming round budget (`roundDeadlineReached`), but never above a quarter of a short
+ * budget, so a first attempt that merely used some of a 1s budget still leaves room for the backup.
+ */
+const MIN_USEFUL_ATTEMPT_MS = 1000;
+
 /** Request-level credential rotation. Never wraps stream consumption or business tools. */
 export interface ClaudeCredentialRequestOptions {
   signal?: AbortSignal;
@@ -10,6 +16,8 @@ export interface ClaudeCredentialRequestOptions {
 interface CredentialAvailability {
   retryAfterMs: number;
   local: boolean;
+  /** Ready/probing is inconclusive, so a terminal key failure cannot disable the whole provider. */
+  state: 'ready' | 'probing' | 'cooling';
 }
 const credentialAvailability = new WeakMap<object, CredentialAvailability>();
 /** Safe aggregate health only; the original SDK error and its HTTP status remain unchanged. */
@@ -32,12 +40,11 @@ class CredentialAttemptTimeoutError extends Error {
 }
 
 export class CredentialsCoolingDownError extends Error {
-  readonly status = 429;
   readonly headers: Headers;
-  constructor(remainingMs: number) {
+  constructor(remainingMs: number, state: CredentialAvailability['state'] = 'cooling') {
     super('Claude credentials are cooling down');
     this.name = 'CredentialsCoolingDownError';
-    credentialAvailability.set(this, { retryAfterMs: Math.max(1000, remainingMs), local: true });
+    credentialAvailability.set(this, { retryAfterMs: Math.max(1000, remainingMs), local: true, state });
     this.headers = new Headers({
       'retry-after': String(Math.max(1, Math.ceil(remainingMs / 1000))),
     });
@@ -48,13 +55,18 @@ function metadata(error: unknown): FailureMetadata {
   return error && typeof error === 'object' ? error : {};
 }
 
+/**
+ * A 400 that says THIS key's balance or spend cap is spent (rather than that the request is malformed).
+ * Anthropic words a workspace/org cap as "You have reached your specified [workspace ]API usage limits".
+ */
+export const SPEND_LIMIT_REJECTION =
+  /credit balance|insufficient (?:credits|balance)|spend(?:ing)?[ _-]limit|reached your (?:specified )?(?:workspace )?api usage limits?/i;
+
 function retryable(error: unknown): boolean {
   const { status, message, name } = metadata(error);
   if (status !== undefined) {
     if ([401, 402, 403, 408, 409, 429].includes(status) || (status >= 500 && status <= 599)) return true;
-    return (
-      status === 400 && /credit balance|insufficient (?:credits|balance)|spend(?:ing)?[ _-]limit/i.test(message ?? '')
-    );
+    return status === 400 && SPEND_LIMIT_REJECTION.test(message ?? '');
   }
   return (
     error instanceof TypeError ||
@@ -118,17 +130,45 @@ export function createClaudeCredentialPool(
   now: () => number = Date.now,
   isRequestRejection: (error: unknown) => boolean = () => false,
   isConnectionFailure: (error: unknown) => boolean = () => false,
+  shouldCooldown: (error: unknown) => boolean = () => true,
 ) {
   const credentials = [...new Set(tokens.map((token) => token?.trim()).filter((token): token is string => !!token))];
   const unavailableUntil = new Map<string, number>();
   const failureVersion = new Map<string, number>();
   const recoveryProbes = new Set<string>();
   const available = (token: string) => (unavailableUntil.get(token) ?? 0) <= now() && !recoveryProbes.has(token);
-  const coolingError = () => new CredentialsCoolingDownError(Math.min(...unavailableUntil.values()) - now());
+  function availability(local: boolean): CredentialAvailability {
+    if (credentials.some(available)) return { local, retryAfterMs: 0, state: 'ready' };
+    if (credentials.some((token) => recoveryProbes.has(token))) return { local, retryAfterMs: 1000, state: 'probing' };
+    const retryAfterMs = Math.max(
+      1000,
+      Math.min(...credentials.map((token) => (unavailableUntil.get(token) ?? 0) - now())),
+    );
+    return { local, retryAfterMs, state: 'cooling' };
+  }
+  const coolingError = () => {
+    const current = availability(true);
+    return new CredentialsCoolingDownError(current.retryAfterMs, current.state);
+  };
   interface FailedAttempt {
     error: unknown;
     startedAt: number;
     durationMs: number;
+  }
+
+  function recordCredentialFailure(token: string, error: unknown, version: number): void {
+    if (shouldCooldown(error)) {
+      unavailableUntil.set(token, Math.max(unavailableUntil.get(token) ?? 0, now() + cooldownMs(error, now())));
+      failureVersion.set(token, (failureVersion.get(token) ?? 0) + 1);
+    } else if ((failureVersion.get(token) ?? 0) === version) {
+      unavailableUntil.delete(token);
+    }
+  }
+
+  function clearExpiredFailureAfterResponse(token: string, error: unknown, version: number): void {
+    const until = unavailableUntil.get(token);
+    if (metadata(error).status === undefined || until === undefined || until > now()) return;
+    if ((failureVersion.get(token) ?? 0) === version) unavailableUntil.delete(token);
   }
 
   async function attempt<T>(
@@ -158,9 +198,14 @@ export function createClaudeCredentialPool(
       return { ok: true, value };
     } catch (error) {
       options.signal?.throwIfAborted();
-      if (isRequestRejection(error) || !(isConnectionFailure(error) || retryable(error))) throw error;
-      unavailableUntil.set(token, Math.max(unavailableUntil.get(token) ?? 0, now() + cooldownMs(error, now())));
-      failureVersion.set(token, (failureVersion.get(token) ?? 0) + 1);
+      if (isRequestRejection(error) || !(isConnectionFailure(error) || retryable(error))) {
+        clearExpiredFailureAfterResponse(token, error, version);
+        throw error;
+      }
+      // A timeout of a slice below the useful floor says nothing about the key (a healthy slow key misses it
+      // too), so it rotates to the next key but must not cool the key for later full-budget requests.
+      if (!(error instanceof CredentialAttemptTimeoutError && timeoutMs < MIN_USEFUL_ATTEMPT_MS))
+        recordCredentialFailure(token, error, version);
       return {
         ok: false,
         failure: {
@@ -178,10 +223,7 @@ export function createClaudeCredentialPool(
     if (!lastFailure) throw coolingError();
     const error = lastFailure.error;
     if (credentials.length > 1 && error && typeof error === 'object') {
-      credentialAvailability.set(error, {
-        retryAfterMs: Math.max(1000, Math.min(...unavailableUntil.values()) - now()),
-        local: false,
-      });
+      credentialAvailability.set(error, availability(false));
     }
     throw error;
   }
@@ -195,16 +237,20 @@ export function createClaudeCredentialPool(
       if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)
         throw new Error('Claude request budget must be positive');
       if (credentials.length === 0) throw new Error('Claude API token is not configured');
-      const eligible = credentials.filter(available);
-      if (eligible.length === 0) throw coolingError();
       const startedAt = performance.now();
+      const attempted = new Set<string>();
       let lastFailure: FailedAttempt | undefined;
-      for (const [index, token] of eligible.entries()) {
+      while (attempted.size < credentials.length) {
         options.signal?.throwIfAborted();
-        if (!available(token)) continue;
+        const eligible = credentials.filter((token) => !attempted.has(token) && available(token));
+        const token = eligible[0];
+        if (!token) break;
         const remaining = options.timeoutMs - (performance.now() - startedAt);
-        if (remaining <= 0) throw new CredentialAttemptTimeoutError();
-        const result = await attempt(operation, token, remaining / (eligible.length - index), options, lastFailure);
+        if (remaining <= 0 && !lastFailure) throw new CredentialAttemptTimeoutError();
+        // A sliver cannot complete a request and would cool a healthy key; keep the real failure instead.
+        if (lastFailure && remaining < Math.min(options.timeoutMs / 4, MIN_USEFUL_ATTEMPT_MS)) break;
+        attempted.add(token);
+        const result = await attempt(operation, token, remaining / eligible.length, options, lastFailure);
         if (result.ok) return result.value;
         lastFailure = result.failure;
       }

@@ -1,5 +1,9 @@
-import { expect, test } from 'bun:test';
-import { createClaudeCredentialPool } from '../../../src/services/ai/claude-credential-pool.ts';
+import { expect, spyOn, test } from 'bun:test';
+import {
+  CredentialsCoolingDownError,
+  createClaudeCredentialPool,
+  getClaudeCredentialAvailability,
+} from '../../../src/services/ai/claude-credential-pool.ts';
 
 const options = { timeoutMs: 1000 };
 const failure = (status: number, message = 'unavailable', retryAfter?: string) =>
@@ -46,8 +50,16 @@ test('recognized spend-limit 400 rotates; invalid schema and missing model do no
   for (const [status, message, expected] of [
     [400, 'Your credit balance is too low', 2],
     [400, 'enforced_spend_limit_reached', 2],
+    [400, 'You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.', 2],
+    [
+      400,
+      'You have reached your specified workspace API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.',
+      2,
+    ],
     [400, 'invalid tool schema', 1],
     [400, 'invalid billing schema', 1],
+    [400, 'prompt is too long: 250000 tokens > 200000 maximum', 1],
+    [400, 'You have reached the maximum number of tools allowed in one request', 1],
     [404, 'model missing', 1],
   ] as const) {
     let calls = 0;
@@ -73,13 +85,28 @@ test('Retry-After prevents calls while both cool down and primary recovers after
   };
   await expect(pool.run(attempt, options)).rejects.toThrow('limited');
   await expect(pool.run(attempt, options)).rejects.toThrow('cooling down');
-  now += 119_000;
+  now += 119_999;
   await expect(pool.run(attempt, options)).rejects.toThrow('cooling down');
   expect(seen).toEqual(['primary', 'backup']);
-  now += 1000;
+  now += 1;
   expect(await pool.run(attempt, options)).toBe('recovered');
   expect(seen).toEqual(['primary', 'backup', 'primary']);
 });
+
+for (const retryAfter of ['0', '0.5', '0.001']) {
+  test(`sub-second Retry-After "${retryAfter}" still cools a key for exactly the one second floor`, async () => {
+    let now = 1_000_000;
+    const pool = createClaudeCredentialPool(['primary', 'backup'], () => now);
+    await pool.run(async (token) => {
+      if (token === 'primary') throw failure(429, 'limited', retryAfter);
+      return 'backup';
+    }, options);
+    now += 999;
+    expect(await pool.run(async (token) => token, options)).toBe('backup');
+    now += 1;
+    expect(await pool.run(async (token) => token, options)).toBe('primary');
+  });
+}
 
 test('HTTP-date Retry-After is respected', async () => {
   let now = Date.parse('2026-10-29T12:00:00Z');
@@ -318,4 +345,330 @@ test('a short Retry-After allows prompt recovery instead of imposing the default
   }, options);
   now += 1001;
   expect(await pool.run(async (token) => token, options)).toBe('primary');
+});
+
+test('a credential recovered during another key failure is reconsidered once within the same request', async () => {
+  let clock = 1_000_000;
+  const pool = createClaudeCredentialPool(['primary', 'backup'], () => clock);
+  await pool.run(async (token) => {
+    if (token === 'primary') throw failure(401);
+    return 'seed backup';
+  }, options);
+  clock += 300_001;
+  let recoverPrimary: ((value: string) => void) | undefined;
+  const recovering = pool.run(
+    async () =>
+      new Promise<string>((resolve) => {
+        recoverPrimary = resolve;
+      }),
+    options,
+  );
+  await Bun.sleep(1);
+  const seen: string[] = [];
+  let failBackup: ((reason: unknown) => void) | undefined;
+  const concurrent = pool.run(async (token) => {
+    seen.push(token);
+    if (token === 'backup')
+      return new Promise<string>((_resolve, reject) => {
+        failBackup = reject;
+      });
+    return 'newly recovered primary';
+  }, options);
+  await Bun.sleep(1);
+  recoverPrimary?.('recovered');
+  await recovering;
+  failBackup?.(failure(401));
+  expect(await concurrent).toBe('newly recovered primary');
+  expect(seen).toEqual(['backup', 'primary']);
+});
+
+test('terminal availability includes an already-attempted key recovered by another request', async () => {
+  let clock = 1_000_000;
+  const pool = createClaudeCredentialPool(['primary', 'backup'], () => clock);
+  let failBackup: ((reason: unknown) => void) | undefined;
+  const seen: string[] = [];
+  const concurrent = pool
+    .run(async (token) => {
+      seen.push(token);
+      if (token === 'primary') throw failure(401);
+      return new Promise<string>((_resolve, reject) => {
+        failBackup = reject;
+      });
+    }, options)
+    .catch((error: unknown) => error);
+  await Bun.sleep(1);
+  clock += 300_001;
+  expect(await pool.run(async (token) => token, options)).toBe('primary');
+  failBackup?.(failure(401));
+  const terminal = await concurrent;
+  expect(seen).toEqual(['primary', 'backup']);
+  expect(getClaudeCredentialAvailability(terminal)).toEqual({ local: false, retryAfterMs: 0, state: 'ready' });
+});
+
+test('an active recovery probe makes terminal pool availability inconclusive rather than five minutes down', async () => {
+  let clock = 1_000_000;
+  const pool = createClaudeCredentialPool(['primary', 'backup'], () => clock);
+  await pool.run(async (token) => {
+    if (token === 'primary') throw failure(401);
+    return 'seed backup';
+  }, options);
+  clock += 300_001;
+  let recoverPrimary: ((value: string) => void) | undefined;
+  const recovering = pool.run(
+    async () =>
+      new Promise<string>((resolve) => {
+        recoverPrimary = resolve;
+      }),
+    options,
+  );
+  await Bun.sleep(1);
+  const terminal = await pool
+    .run(async () => {
+      throw failure(401);
+    }, options)
+    .catch((error: unknown) => error);
+  recoverPrimary?.('recovered');
+  await recovering;
+  expect(getClaudeCredentialAvailability(terminal)).toEqual({ local: false, retryAfterMs: 1000, state: 'probing' });
+});
+
+test('a local auth cooldown has availability metadata and zero HTTP calls without inventing HTTP 429', async () => {
+  const pool = createClaudeCredentialPool(['primary', 'backup']);
+  await pool
+    .run(async () => {
+      throw failure(401);
+    }, options)
+    .catch(() => undefined);
+  let calls = 0;
+  const terminal = await pool
+    .run(async () => {
+      calls++;
+      return 'unexpected';
+    }, options)
+    .catch((error: unknown) => error);
+  expect(terminal).toBeInstanceOf(CredentialsCoolingDownError);
+  expect(calls).toBe(0);
+  expect(terminal).not.toHaveProperty('status');
+  expect(getClaudeCredentialAvailability(terminal)).toMatchObject({ local: true, state: 'cooling' });
+});
+
+for (const status of [400, 404]) {
+  test(`an authoritative HTTP ${status} after expiry clears stale probe-only credential state`, async () => {
+    let clock = 1_000_000;
+    const pool = createClaudeCredentialPool(['primary', 'backup'], () => clock);
+    await pool.run(async (token) => {
+      if (token === 'primary') throw failure(401);
+      return 'backup';
+    }, options);
+    clock += 300_001;
+    await pool
+      .run(async () => {
+        throw failure(status, 'request rejected');
+      }, options)
+      .catch(() => undefined);
+    let release: ((value: string) => void) | undefined;
+    const first = pool.run(
+      async (token) =>
+        token === 'primary'
+          ? new Promise<string>((resolve) => {
+              release = resolve;
+            })
+          : 'backup',
+      options,
+    );
+    await Bun.sleep(1);
+    const second = await pool.run(async (token) => token, options);
+    release?.('primary');
+    await first;
+    expect(second).toBe('primary');
+  });
+}
+
+test('a fatal HTTP response cannot erase a newer concurrent credential cooldown', async () => {
+  let clock = 1_000_000;
+  const pool = createClaudeCredentialPool(['primary', 'backup'], () => clock);
+  let failOlder: ((reason: unknown) => void) | undefined;
+  const older = pool.run(
+    async (token) =>
+      token === 'primary'
+        ? new Promise<string>((_resolve, reject) => {
+            failOlder = reject;
+          })
+        : 'backup',
+    options,
+  );
+  await Bun.sleep(1);
+  await pool.run(async (token) => {
+    if (token === 'primary') throw failure(401);
+    return 'backup';
+  }, options);
+  clock += 300_001;
+  let rejectRequest: ((reason: unknown) => void) | undefined;
+  const recovering = pool
+    .run(
+      async () =>
+        new Promise<string>((_resolve, reject) => {
+          rejectRequest = reject;
+        }),
+      options,
+    )
+    .catch(() => undefined);
+  await Bun.sleep(1);
+  failOlder?.(failure(401));
+  await older;
+  rejectRequest?.(failure(400, 'invalid request'));
+  await recovering;
+  expect(await pool.run(async (token) => token, options)).toBe('backup');
+});
+
+test('negative, zero and past-dated Retry-After never produce a negative or sub-second cooldown', async () => {
+  for (const retryAfter of ['-30', '0', 'Thu, 01 Jan 2026 00:00:00 GMT'] as const) {
+    let now = Date.parse('2026-10-29T12:00:00Z');
+    const seen: string[] = [];
+    const pool = createClaudeCredentialPool(['primary', 'backup'], () => now);
+    await pool.run(async (token) => {
+      seen.push(token);
+      if (token === 'primary') throw failure(429, 'limited', retryAfter);
+      return 'backup';
+    }, options);
+    expect(await pool.run(async (token) => token, options)).toBe('backup');
+    now += 300_001;
+    expect(await pool.run(async (token) => token, options)).toBe('primary');
+    expect(seen).toEqual(['primary', 'backup']);
+  }
+});
+
+test('oversized and unprocessable requests never rotate or cool a credential', async () => {
+  for (const status of [413, 422]) {
+    const pool = createClaudeCredentialPool(['primary', 'backup']);
+    const seen: string[] = [];
+    await pool
+      .run(async (token) => {
+        seen.push(token);
+        throw failure(status, 'request rejected');
+      }, options)
+      .catch(() => undefined);
+    expect(await pool.run(async (token) => token, options)).toBe('primary');
+    expect(seen).toEqual(['primary']);
+  }
+});
+
+test('a caller abort during the backup attempt propagates and does not cool the backup', async () => {
+  const pool = createClaudeCredentialPool(['primary', 'backup']);
+  const controller = new AbortController();
+  const seen: string[] = [];
+  let backupStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    backupStarted = resolve;
+  });
+  const running = pool
+    .run(
+      async (token, signal) => {
+        seen.push(token);
+        if (token === 'primary') throw failure(401);
+        backupStarted?.();
+        return new Promise<string>((_resolve, reject) =>
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true }),
+        );
+      },
+      { ...options, signal: controller.signal },
+    )
+    .catch((error: unknown) => error);
+  await started;
+  controller.abort(new Error('caller canceled'));
+  expect(((await running) as Error).message).toBe('caller canceled');
+  expect(await pool.run(async (token) => token, options)).toBe('backup');
+  expect(seen).toEqual(['primary', 'backup']);
+});
+
+test('a backup recovered mid-request gets no sliver budget: the primary failure survives and the backup is not cooled', async () => {
+  let now = 1_000_000;
+  let elapsed = 0;
+  const pool = createClaudeCredentialPool(['primary', 'backup'], () => now);
+  // Cool both keys with different resets: primary 1s, backup 2s.
+  await pool
+    .run(async (token) => {
+      throw failure(429, 'limited', token === 'primary' ? '1' : '2');
+    }, options)
+    .catch(() => undefined);
+  now += 1001; // primary is back, the backup still cools
+  const clock = spyOn(performance, 'now').mockImplementation(() => elapsed);
+  const seen: string[] = [];
+  const primaryFailure = failure(529, 'overloaded');
+  try {
+    const error = await pool
+      .run(
+        async (token) => {
+          seen.push(token);
+          if (token === 'backup') await new Promise<never>(() => undefined); // a doomed attempt would hang here
+          now += 1000; // the backup recovers while the primary spends the whole budget
+          elapsed += 999.5;
+          throw primaryFailure;
+        },
+        { timeoutMs: 1000 },
+      )
+      .catch((caught: unknown) => caught);
+    expect(error).toBe(primaryFailure);
+    expect(seen).toEqual(['primary']);
+    expect(getClaudeCredentialAvailability(error)?.state).toBe('ready');
+    // The recovered backup was never spent on a doomed attempt, so it serves the next request first-class.
+    elapsed += 10_000;
+    expect(await pool.run(async (token) => token, options)).toBe('backup');
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+test('a failed attempt that exhausted the budget rethrows its own failure, not a fresh timeout', async () => {
+  let elapsed = 0;
+  const clock = spyOn(performance, 'now').mockImplementation(() => elapsed);
+  const primaryFailure = failure(529, 'overloaded');
+  try {
+    const error = await createClaudeCredentialPool(['primary', 'backup'])
+      .run(
+        async () => {
+          elapsed += 5000;
+          throw primaryFailure;
+        },
+        { timeoutMs: 1000 },
+      )
+      .catch((caught: unknown) => caught);
+    expect(error).toBe(primaryFailure);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+const neverAnswers = (_token: string, signal: AbortSignal) =>
+  new Promise<never>((_resolve, reject) =>
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true }),
+  );
+
+test('two healthy slow keys sharing a sub-second slice each are not cooled by their own too-short timeout', async () => {
+  const pool = createClaudeCredentialPool(['primary', 'backup']);
+  // 1500ms shared between two keys leaves 750ms per attempt, below the one-second useful floor.
+  const error = await pool.run(neverAnswers, { timeoutMs: 1500 }).catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).name).toBe('CredentialAttemptTimeoutError');
+  const seen: string[] = [];
+  const result = await pool.run(async (token) => {
+    seen.push(token);
+    return 'answered';
+  }, options);
+  expect(result).toBe('answered');
+  expect(seen).toEqual(['primary']);
+});
+
+test('a key that outlasts a full useful slice is still cooled for its timeout', async () => {
+  const pool = createClaudeCredentialPool(['only']);
+  await pool.run(neverAnswers, { timeoutMs: 1100 }).catch(() => undefined);
+  let calls = 0;
+  const error = await pool
+    .run(async () => {
+      calls++;
+      return 'unreachable';
+    }, options)
+    .catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(CredentialsCoolingDownError);
+  expect(calls).toBe(0);
 });
