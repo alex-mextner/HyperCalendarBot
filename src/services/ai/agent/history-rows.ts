@@ -12,6 +12,13 @@ function withTimestamp(text: string, createdAt: string, timezone: string): strin
   return `[${local}] ${text}`;
 }
 
+/**
+ * Shown after the time of a user turn that waited behind an earlier run of its chat and reads after what that
+ * run wrote: the user sent it before those rows existed, so it replies to none of the questions in them.
+ */
+export const QUEUED_TURN_MARKER =
+  '[queued: sent while the assistant was still handling the previous message; it answers nothing the assistant said after it was sent]';
+
 /** Plain-text fallback for group-chat sender attribution. */
 /**
  * Exported so the system prompt's description of this prefix can be pinned to
@@ -148,19 +155,24 @@ export function parseHistoryRow(msg: ChatHistoryMessage, timezone: string): Mess
   }
 
   // role === 'user'
+  const queued = msg.turn_order == null ? '' : `${QUEUED_TURN_MARKER} `;
   const activity = ActivityEventCodec.safeParse(msg.content);
   if (activity.success) {
     return [
       {
         role: 'user',
-        content: withTimestamp(formatActivityEvent(activity.data as ActivityEvent), msg.created_at, timezone),
+        content: withTimestamp(
+          `${queued}${formatActivityEvent(activity.data as ActivityEvent)}`,
+          msg.created_at,
+          timezone,
+        ),
       },
     ];
   }
   return [
     {
       role: 'user',
-      content: withTimestamp(msg.content, msg.created_at, timezone),
+      content: withTimestamp(`${queued}${msg.content}`, msg.created_at, timezone),
     },
   ];
 }

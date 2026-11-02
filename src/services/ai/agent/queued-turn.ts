@@ -72,27 +72,29 @@ export function scheduleWindowAround(
 /**
  * Sets up a run that has just been given its turn. Always: the turns queued behind it (reserved at the moment
  * they were saved, so a message whose handler is still busy elsewhere counts too) are kept out of its history,
- * and the message it answers is read after what earlier runs wrote (same row, same id). After a wait: the user
- * and the schedule window are read again (the earlier run may have changed either). A step that fails leaves
- * the run on what it had; this is a refinement, never a reason to fail the run.
+ * and the message it answers is read after what earlier runs wrote (same row, same id). After a wait, or when
+ * that placement found rows saved after the message (an earlier run finished just before this one reached the
+ * gate, so it never waited): the user and the schedule window are read again (the earlier run may have changed
+ * either). A step that fails leaves the run on what it had; this is a refinement, never a reason to fail the run.
  */
 export function prepareQueuedTurn(ctx: AgentContext, slot: ChatRunSlot): void {
   ctx.deferredTurnRowIds = () => slot.queuedTurnRowIds();
   const userId = ctx.user.telegram_id;
-  if (slot.waited) {
-    try {
-      ctx.user = ctx.userRepo.findByTelegramId(userId) ?? ctx.user;
-      if (ctx.recentEventsWindow) ctx.recentEventsWindow = scheduleWindowAround(ctx.eventService, userId);
-    } catch (err) {
-      queuedTurnLogger.warn({ err, userId }, 'Could not refresh the context of a run that waited for its turn');
-    }
-  }
+  let placed = false;
   // Only a run's own message is placed: a scheduled or synthetic run borrows the user's latest row for the
   // action log, and a supplement answers a message the main run already placed.
-  if (slot.ownRowId === undefined || ctx.supplementMode) return;
+  if (slot.ownRowId !== undefined && !ctx.supplementMode) {
+    try {
+      placed = ctx.chatHistory.placeUserTurnAfterLatest(slot.ownRowId, userId);
+    } catch (err) {
+      queuedTurnLogger.warn({ err, userId }, 'Could not place the message of a run behind the earlier turn');
+    }
+  }
+  if (!slot.waited && !placed) return;
   try {
-    ctx.chatHistory.placeUserTurnAfterLatest(slot.ownRowId, userId);
+    ctx.user = ctx.userRepo.findByTelegramId(userId) ?? ctx.user;
+    if (ctx.recentEventsWindow) ctx.recentEventsWindow = scheduleWindowAround(ctx.eventService, userId);
   } catch (err) {
-    queuedTurnLogger.warn({ err, userId }, 'Could not place the message of a run behind the earlier turn');
+    queuedTurnLogger.warn({ err, userId }, 'Could not refresh the context of a run that waited for its turn');
   }
 }

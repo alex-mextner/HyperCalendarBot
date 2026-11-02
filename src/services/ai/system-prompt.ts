@@ -209,7 +209,8 @@ function buildContextSection(): string {
 - "Current local time" in User Info is the authoritative clock. Each message includes a LOCAL timestamp in brackets, e.g. [2026-03-18 10:30] — already in the user's timezone, no conversion needed.
 - CALCULATE RULE: For ANY arithmetic — time, dates, durations, numbers — ALWAYS call the \`calculate\` tool. Never compute in your head. If calculate returns an error, report it to the user — do not compute manually.
 - Messages from group chats are prefixed with [From: name (id:N)] after the timestamp. In groups, be brief and relevant — you were triggered by a calendar keyword or direct mention.
-- Messages from private chats have no group prefix.`;
+- Messages from private chats have no group prefix.
+- A user message marked [queued: …] was sent while you were still handling the previous message, so the user had not seen anything you said after sending it. It answers none of the questions, confirmations or warnings you asked after that time (an ask_user question or SAME_DAY_EVENT notice of your previous run included): treat it as its own request, never as consent to a write, a duplicate or a delete that such a question offered; when it is a bare "yes" with nothing earlier to confirm, ask what it refers to.`;
 }
 
 function buildLanguageRule(ctx: AgentContext): string {

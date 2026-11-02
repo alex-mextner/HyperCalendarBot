@@ -289,6 +289,54 @@ describe('deleting on a day the user did not name', () => {
     expect(liveRows().map((row) => row.id)).toEqual([past]);
   });
 
+  test('a "Да" that waited behind the run asking the question is not its answer: it was sent before the question', () => {
+    const origin = 'Во вторник отмени английский';
+    say(origin);
+    say('Да'); // sent while the run for the line above was still working
+    toolTurn(
+      'c1',
+      'ask_user',
+      { question: 'Удалить «Английский» во вторник?', options: ['Да', 'Нет'] },
+      'Вопрос отправлен.',
+    );
+    const queued = history.getRecent(USER, 30).findLast((row) => row.content === 'Да')!;
+    expect(history.placeUserTurnAfterLatest(queued.id, USER)).toBe(true);
+
+    const rows = history.getRecent(USER, 30);
+    expect(rows.at(-1)?.content).toBe('Да'); // read last, after the question
+    expect(resolveTurnDayReferences('Да', rows, SUNDAY_NIGHT, TZ)).toBeNull();
+  });
+
+  test('a time-only message that waited behind a run which then asked in plain text is not the answer to it', () => {
+    say('в 23:30');
+    const alone = resolveTurnDayReferences('в 23:30', history.getRecent(USER, 30), SUNDAY_NIGHT, TZ);
+    expect(alone).not.toBeNull(); // a fresh time-only message means today while that time is ahead
+    save('assistant', 'Во сколько?'); // the earlier run's question, saved after the message was sent
+    const queued = history.getRecent(USER, 30).findLast((row) => row.content === 'в 23:30')!;
+    expect(history.placeUserTurnAfterLatest(queued.id, USER)).toBe(true);
+
+    const rows = history.getRecent(USER, 30);
+    expect(rows.at(-1)?.content).toBe('в 23:30');
+    expect(resolveTurnDayReferences('в 23:30', rows, SUNDAY_NIGHT, TZ)).toEqual(alone);
+  });
+
+  test('a button answer that waited behind another run still answers the question asked before it was sent', () => {
+    say('Во вторник отмени английский');
+    toolTurn(
+      'c1',
+      'ask_user',
+      { question: 'Удалить «Английский» во вторник?', options: ['Да', 'Нет'] },
+      'Вопрос отправлен.',
+    );
+    say('Да'); // the tap
+    toolTurn('c2', 'search_events', { query: 'x' }, 'nothing'); // a run that was busy meanwhile wrote this
+    const tap = history.getRecent(USER, 30).findLast((row) => row.content === 'Да')!;
+    expect(history.placeUserTurnAfterLatest(tap.id, USER)).toBe(true);
+
+    const references = resolveTurnDayReferences('Да', history.getRecent(USER, 30), SUNDAY_NIGHT, TZ);
+    expect(references?.allowedDates.has('2026-09-29')).toBe(true);
+  });
+
   test('a late "Да" confirms the Tuesday meant when the question was asked', async () => {
     // Asked on Sunday the 27th (Tuesday = the 29th), answered on Thursday 1 October, when
     // the coming Tuesday is already the 6th.

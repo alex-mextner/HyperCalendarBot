@@ -100,7 +100,8 @@ describe('CalendarBotAgent.run() in one chat', () => {
     expect(titlesInCalendar(fixture)).toEqual([STANDUP.title, REVIEW.title]);
   });
 
-  test('a run that waited reads the user and schedule as the earlier run left them', async () => {
+  /** A model that changes the user's timezone during its first request (parked until released) and records each system prompt. */
+  function timezoneChangingModel() {
     const prompts: string[] = [];
     const parked = Promise.withResolvers<void>();
     const reached = Promise.withResolvers<void>();
@@ -126,19 +127,40 @@ describe('CalendarBotAgent.run() in one chat', () => {
       }
       return answer;
     };
-    const agent = new CalendarBotAgent(fixture.config, fixture.sender, { streamImpl });
+    return { prompts, streamImpl, reached: reached.promise, release: () => parked.resolve() };
+  }
+
+  test('a run that waited reads the user and schedule as the earlier run left them', async () => {
+    const model = timezoneChangingModel();
+    const agent = new CalendarBotAgent(fixture.config, fixture.sender, { streamImpl: model.streamImpl });
 
     const first = go(agent, turn(agent, 'first message'));
-    await reached.promise;
+    await model.reached;
     const second = go(agent, turn(agent, 'second message')); // its context still holds the old user
     await settle();
-    expect(prompts).toHaveLength(1);
-    parked.resolve();
+    expect(model.prompts).toHaveLength(1);
+    model.release();
     await Promise.all([first, second]);
 
-    expect(prompts[0]).toContain('UTC');
-    expect(prompts[0]).not.toContain('Pacific/Auckland');
-    expect(prompts[1]).toContain('Pacific/Auckland');
+    expect(model.prompts[0]).toContain('UTC');
+    expect(model.prompts[0]).not.toContain('Pacific/Auckland');
+    expect(model.prompts[1]).toContain('Pacific/Auckland');
+  });
+
+  test('a run whose earlier run finished just before it reached the gate reads the same fresh context', async () => {
+    const model = timezoneChangingModel();
+    const agent = new CalendarBotAgent(fixture.config, fixture.sender, { streamImpl: model.streamImpl });
+
+    const first = go(agent, turn(agent, 'first message'));
+    await model.reached;
+    const secondContext = turn(agent, 'second message'); // saved while the first run works; its handler is slow
+    model.release();
+    await first;
+    const second = go(agent, secondContext); // nothing is ahead any more: it never waits
+    await second;
+
+    expect(model.prompts[0]).not.toContain('Pacific/Auckland');
+    expect(model.prompts[1]).toContain('Pacific/Auckland');
   });
 
   test('a queued message gets one answer of its own and its turn is saved once, after the earlier run', async () => {

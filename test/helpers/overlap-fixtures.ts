@@ -3,6 +3,7 @@
 // model is scripted; agents, tools, the 5 s repeated-call throttle and the database are real.
 import { spyOn } from 'bun:test';
 import type OpenAI from 'openai';
+import { QUEUED_TURN_MARKER } from '../../src/services/ai/agent/history-rows.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../src/services/ai/streaming.ts';
 import type { TelegramSender } from '../../src/services/ai/types.ts';
 import { type AgentRunFixture, fakeMetrics, isValidatorCall, USER_ID } from '../services/ai/agent-run-helpers.ts';
@@ -21,9 +22,11 @@ export function textOf(message: OpenAI.ChatCompletionMessageParam | undefined): 
   return typeof content === 'string' ? content : JSON.stringify(content ?? '');
 }
 
-/** A user turn as the model is shown it, without the timestamp the history builder prefixes. */
+/** A user turn as the model is shown it, without the timestamp (and queued marker) the history builder prefixes. */
 export function userTurn(message: OpenAI.ChatCompletionMessageParam | undefined): string {
-  return textOf(message).replace(/^\[[^\]]*\] /, '');
+  return textOf(message)
+    .replace(/^\[[^\]]*\] /, '')
+    .replace(`${QUEUED_TURN_MARKER} `, '');
 }
 
 function textRound(text: string): StreamRoundResult {
@@ -149,4 +152,65 @@ export function recordDelivery(sender: TelegramSender): string[] {
     shown.push(text);
   };
   return shown;
+}
+
+export const ASKED = { question: 'Which day for the Synthetic Standup?', options: ['Monday', 'Tuesday'] };
+
+function singleToolRound(id: string, name: string, args: object): StreamRoundResult {
+  const call = { id, name, arguments: JSON.stringify(args) };
+  return {
+    text: '',
+    toolCalls: [call],
+    finishReason: 'tool_calls',
+    assistantMessage: {
+      role: 'assistant',
+      content: null,
+      tool_calls: [{ id, type: 'function' as const, function: { name, arguments: call.arguments } }],
+    },
+    providerUsed: 'mock',
+  };
+}
+
+/**
+ * The first run ends in ask_user. Every later request is answered by a model that reads what it is shown: a
+ * user turn that follows that question and is not marked as queued is the user's answer to it (the Standup is
+ * created, a deliberate copy); a queued turn was written before the question existed and answers nothing.
+ */
+export class AskingHost {
+  readonly requests: ModelRequest[] = [];
+  private readonly released = Promise.withResolvers<void>();
+  private readonly reachedFirst = Promise.withResolvers<void>();
+  private firstRequestSeen = false;
+
+  /** Settles once the first model request is waiting. */
+  get reached(): Promise<void> {
+    return this.reachedFirst.promise;
+  }
+
+  /** The parked request returns its ask_user question. */
+  release(): void {
+    this.released.resolve();
+  }
+
+  model = async (opts: StreamRoundOptions, callbacks: StreamCallbacks = {}): Promise<StreamRoundResult> => {
+    if (isValidatorCall(opts)) return { ...textRound('APPROVE'), metrics: fakeMetrics('hf', 10, 2) };
+    this.requests.push({ messages: opts.messages });
+    if (!this.firstRequestSeen) {
+      this.firstRequestSeen = true;
+      this.reachedFirst.resolve();
+      await this.released.promise;
+      return singleToolRound('ask-1', 'ask_user', ASKED);
+    }
+    const messages = opts.messages;
+    const last = messages.at(-1);
+    const questionAbove = messages
+      .slice(0, -1)
+      .some((m) => m.role === 'assistant' && JSON.stringify(m.tool_calls ?? []).includes('ask_user'));
+    const readAsAnswer = last?.role === 'user' && questionAbove && !/queued/i.test(textOf(last));
+    const round = readAsAnswer
+      ? singleToolRound('create-answer', 'create_event', { ...STANDUP, allow_duplicate: true })
+      : textRound('Noted: that message answers nothing I asked.');
+    callbacks.onTextDelta?.(round.text);
+    return round;
+  };
 }

@@ -279,20 +279,21 @@ export class EventRepository {
   }
 
   /**
-   * Creates the event unless the calendar already holds it. Candidates are the live, non-recurring events
-   * of the same calendar (the user's own primary-calendar events, or the same group) with the same title
-   * (trimmed, whitespace collapsed, case folded) and the same all-day flag:
+   * Creates the event unless the calendar already holds it. Candidates are the live events of the same
+   * calendar (the user's own primary-calendar events, or the same group) with the same title (trimmed,
+   * whitespace collapsed, case folded) and the same all-day flag; a one-off is compared with one-offs, a series
+   * (with a recurrence rule) with series of the same rule, never across:
    * - `duplicate`: same start and end (all-day: the same dates) and the same details the caller stated,
    *   created within `windowMs`. That is what a repeated message, a retry after a lost reply or a second
    *   overlapping run produces; the existing row comes back and nothing is written.
-   * - `same_day`: any other candidate on the same local day (all-day: the same first date), whatever its
-   *   age: a second copy, or the old half of a move done by creating (#520). The caller decides whether the
-   *   user really wants it; nothing is written.
+   * - `same_day` (one-offs only): any other candidate on the same local day (all-day: the same first date),
+   *   whatever its age: a second copy, or the old half of a move done by creating (#520). The caller decides
+   *   whether the user really wants it; nothing is written. A series is matched only as an exact, recent
+   *   repeat: two series on one day may be a deliberate pair.
    * - `created`: otherwise. `onCreated` runs in the same transaction as the insert, so an event never
    *   persists without the effects that must accompany it.
    * The check and the insert are one immediate transaction, so two writers (connections, or a process
-   * restarted in between) cannot both miss each other's row. A recurring event is always created: a series
-   * never stands in for another.
+   * restarted in between) cannot both miss each other's row.
    */
   createUnlessDuplicate(
     data: CreateEventData,
@@ -301,7 +302,7 @@ export class EventRepository {
   ): { event: CalendarEvent; outcome: CreateOutcome } {
     return this.db
       .transaction((): { event: CalendarEvent; outcome: CreateOutcome } => {
-        const match = data.recurrence_rule ? null : this.findSameEvent(data, windowMs);
+        const match = this.findSameEvent(data, windowMs);
         if (match) return { event: this.findCreated(match.id, data), outcome: match.outcome };
         const event = this.create(data);
         onCreated?.(event);
@@ -316,13 +317,14 @@ export class EventRepository {
   ): { id: number; outcome: Exclude<CreateOutcome, 'created'> } | null {
     assertValidEventTimestamps(data);
     const isGroup = data.owner_type === 'group' && data.group_id != null;
+    const series = data.recurrence_rule != null && data.recurrence_rule !== '';
     const candidates = this.db
       .prepare(
         `SELECT id, title, description, location, start_at, end_at, timezone, reminder_overrides,
                 created_at >= datetime('now', ?) AS recent
          FROM events
          WHERE is_deleted = 0 AND is_cancelled = 0
-           AND recurrence_rule IS NULL AND parent_event_id IS NULL
+           AND ${series ? 'recurrence_rule = ?' : 'recurrence_rule IS NULL'} AND parent_event_id IS NULL
            AND ${
              isGroup
                ? "owner_type = 'group' AND group_id = ?"
@@ -336,6 +338,7 @@ export class EventRepository {
       )
       .all(
         `-${Math.ceil(windowMs / 1000)} seconds`,
+        ...(series ? [data.recurrence_rule!] : []),
         ...(isGroup ? [data.group_id!] : [data.user_id, data.user_id]),
         data.all_day ? 1 : 0,
         data.start_at,
@@ -361,6 +364,7 @@ export class EventRepository {
       : (c: { start_at: string }) => localDay(c.start_at, data.timezone) === localDay(data.start_at, data.timezone);
     const duplicate = sameTitle.find((c) => c.recent === 1 && sameSpan(c) && sameDetails(data, c));
     if (duplicate) return { id: duplicate.id, outcome: 'duplicate' };
+    if (series) return null;
     const sameDayEvent = sameTitle.find(sameDay);
     return sameDayEvent ? { id: sameDayEvent.id, outcome: 'same_day' } : null;
   }

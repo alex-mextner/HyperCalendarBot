@@ -150,6 +150,8 @@ export interface ChatHistoryMessage {
   content: string; // plain text for user, JSON content blocks for assistant/tool
   chat_id: number | null;
   created_at: string;
+  /** Set when this user turn waited behind an earlier run and reads after rows saved after it (it was sent before them). */
+  turn_order?: number | null;
 }
 
 // ── Google Sync row types ──

@@ -286,6 +286,25 @@ describe('ChatHistoryRepository queued-turn handling', () => {
       expect(repo.getRecent(USER_ID, 20).at(-1)?.id).toBe(confirm);
     });
 
+    test('the turn keeps the time it was sent and is marked as moved; reading order does not depend on that time', () => {
+      const confirm = repo.save(USER_ID, 'user', 'Yes');
+      db.prepare('UPDATE chat_history SET created_at = ? WHERE id = ?').run('2020-01-01 00:00:05', confirm);
+      const output = repo.save(USER_ID, 'assistant', 'earlier output');
+      const other = repo.save(USER_ID, 'user', 'Thanks');
+
+      expect(repo.placeUserTurnAfterLatest(confirm, USER_ID)).toBe(true);
+      const answer = repo.save(USER_ID, 'assistant', 'answer to the moved turn');
+
+      const rows = repo.getRecent(USER_ID, 20);
+      expect(rows.map((row) => row.content)).toEqual(['earlier output', 'Thanks', 'Yes', 'answer to the moved turn']);
+      const moved = rows.find((row) => row.id === confirm);
+      expect(moved?.created_at).toBe('2020-01-01 00:00:05');
+      expect(moved?.turn_order).toBe(other + 0.5);
+      expect(rows.find((row) => row.id === output)?.turn_order).toBeNull();
+      // The newest two rows by reading order, not by the time the moved turn was sent.
+      expect(repo.getRecent(USER_ID, 2).map((row) => row.id)).toEqual([confirm, answer]);
+    });
+
     test('rows saved afterwards, in the same second, still read after the moved turn', () => {
       const confirm = repo.save(USER_ID, 'user', 'Yes');
       repo.save(USER_ID, 'assistant', 'earlier output');

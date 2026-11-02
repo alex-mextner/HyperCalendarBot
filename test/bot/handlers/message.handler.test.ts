@@ -1,6 +1,14 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createMessageHandler } from '../../../src/bot/handlers/message.handler.ts';
-import { type MockCtxOverrides, makeCtx, makeDeps } from './message-handler-fixtures.ts';
+import type { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
+import { stub } from '../partial-stub.ts';
+import {
+  type MockCtxOverrides,
+  makeCtx,
+  makeDeps,
+  makeHandlerDeps,
+  makeMessageCtx,
+} from './message-handler-fixtures.ts';
 
 describe('createMessageHandler', () => {
   test('routes text message to AI agent in private chat', async () => {
@@ -12,11 +20,12 @@ describe('createMessageHandler', () => {
 
   test('links the run to the row saved for this very message, not to the user’s latest row', async () => {
     // A newer message of the same user already replaced the per-user entry (row 99) while this one was handled.
-    const deps = makeDeps({ chatHistoryIds: new Map([[100, 99]]) });
-    const handler = createMessageHandler(deps as never);
-    await handler({ ...makeCtx(), chatHistoryId: 41 } as never);
-    const call = (deps.agent.run as ReturnType<typeof mock>).mock.calls[0]![0] as { chatHistoryId: number };
-    expect(call.chatHistoryId).toBe(41);
+    const run = mock<CalendarBotAgent['run']>(() =>
+      Promise.resolve({ responseText: '', toolCalls: [], toolResults: [] }),
+    );
+    const deps = makeHandlerDeps({ agent: stub({ run }), chatHistoryIds: new Map([[100, 99]]) });
+    await createMessageHandler(deps)(makeMessageCtx({ chatHistoryId: 41 }));
+    expect(run.mock.calls[0]?.[0].chatHistoryId).toBe(41);
   });
 
   test('ignores messages without text', async () => {

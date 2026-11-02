@@ -210,14 +210,34 @@ describe('create_event repeated within minutes', () => {
     expect(rows()).toHaveLength(1);
   });
 
-  test('recurring events are never matched, whichever side is recurring', async () => {
+  test('a one-off and a series never stand in for each other', async () => {
     await handleCreateEvent(ctx, { ...STANDUP, recurrence_rule: 'FREQ=WEEKLY' });
-    await handleCreateEvent(laterRun(), { ...STANDUP, recurrence_rule: 'FREQ=WEEKLY' });
-    await handleCreateEvent(laterRun(), { ...STANDUP });
-    expect(rows()).toHaveLength(3);
+    const oneOff = await handleCreateEvent(laterRun(), { ...STANDUP });
+    expect(oneOff.output).not.toContain('already exists'); // the series is not an earlier copy of the one-off
+    expect(rows()).toHaveLength(2);
     const once = await handleCreateEvent(laterRun(), { ...STANDUP });
-    expect(once.output).toContain('already exists'); // the one-off from the line above, not the recurring ones
-    expect(rows()).toHaveLength(3);
+    expect(once.output).toContain('already exists'); // the one-off from the line above, not the series
+    expect(rows()).toHaveLength(2);
+  });
+
+  test('a repeated create of a series creates it once; another rule or start is another series', async () => {
+    const weekly = { ...STANDUP, recurrence_rule: 'FREQ=WEEKLY' };
+    await handleCreateEvent(ctx, weekly);
+    const again = await handleCreateEvent(laterRun(), weekly);
+    expect(again.output).toContain('already exists');
+    expect(rows()).toHaveLength(1);
+
+    await handleCreateEvent(laterRun(), { ...STANDUP, recurrence_rule: 'FREQ=DAILY' });
+    await handleCreateEvent(laterRun(), {
+      ...weekly,
+      start_at: '2030-03-05T11:00:00Z',
+      end_at: '2030-03-05T11:30:00Z',
+    });
+    expect(rows()).toHaveLength(3); // a same-day series is not a conflict: two series on one day may be deliberate
+
+    ageEvents(11);
+    await handleCreateEvent(laterRun(), weekly);
+    expect(rows()).toHaveLength(4); // not a repeat any more: ten minutes passed
   });
 
   test('another owner’s identical event is not matched', async () => {

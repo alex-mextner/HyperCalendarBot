@@ -8,6 +8,7 @@ import { createAiAgentLayer } from '../../../src/bot/pipeline/ai-agent-layer.ts'
 import type { PipelineLayer } from '../../../src/bot/pipeline/types.ts';
 import type { BotCommandContext } from '../../../src/bot/types.ts';
 import { ActionLogRepository } from '../../../src/database/repositories/action-log.repository.ts';
+import { QUEUED_TURN_MARKER } from '../../../src/services/ai/agent/history-rows.ts';
 import { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { ChatTurnReservation } from '../../../src/services/ai/chat-run-gate.ts';
 import { withChatTurn } from '../../../src/services/ai/chat-turn-context.ts';
@@ -15,12 +16,15 @@ import { executeTool } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { cmdLogger } from '../../../src/utils/logger.ts';
 import {
+  ASKED,
+  AskingHost,
   type ModelRequest,
   REVIEW,
   recordDelivery,
   SlowHost,
   STANDUP,
   settle,
+  textOf,
   titlesInCalendar,
   userTurn,
 } from '../../helpers/overlap-fixtures.ts';
@@ -261,5 +265,47 @@ describe('overlapping confirmations in one private chat (2026-11-01)', () => {
     } finally {
       info.mockRestore();
     }
+  });
+
+  describe('a message queued behind a run that ends in ask_user', () => {
+    const SENT_BEFORE_THE_QUESTION = '2020-01-01 00:00:05';
+
+    test('is an independent turn: it is read after the question but answers none of it, and creates nothing', async () => {
+      const asking = new AskingHost();
+      fixture.ctx.sender = { ...fixture.sender, sendButtons: async () => ({ message_id: 43 }) };
+      const layer = layerFor(new CalendarBotAgent(fixture.config, fixture.sender, { streamImpl: asking.model }));
+
+      const first = arrive(layer, 'Move the standup');
+      await asking.reached;
+      const secondRow = receive('Yes');
+      // Telegram stamps the message when the user sent it, long before the first run's question existed.
+      fixture.db
+        .prepare('UPDATE chat_history SET created_at = ? WHERE id = ?')
+        .run(SENT_BEFORE_THE_QUESTION, secondRow);
+      const second = deliver(layer, 'Yes', secondRow);
+      await settle();
+      asking.release();
+      await Promise.all([first, second]);
+
+      // The model read the queued «Yes» as the answer to a question it was never shown: nothing is created.
+      expect(titlesInCalendar(fixture)).toEqual([]);
+
+      const secondRun = asking.requests.find((request) => userTurn(request.messages.at(-1)).includes('Yes'));
+      expect(secondRun).toBeDefined();
+      const shown = secondRun?.messages ?? [];
+      const questionAt = shown.findIndex(
+        (m) => m.role === 'assistant' && JSON.stringify(m.tool_calls ?? []).includes(ASKED.question),
+      );
+      // Order: it is the newest turn, after the question the first run asked...
+      expect(questionAt).toBeGreaterThan(-1);
+      expect(shown.at(-1)?.role).toBe('user');
+      // ...but it is shown with the time it was sent and as queued, not as a reply to that question.
+      expect(textOf(shown.at(-1))).toContain(QUEUED_TURN_MARKER);
+      expect(JSON.stringify(shown.at(-1))).toContain(SENT_BEFORE_THE_QUESTION);
+
+      // The stored row keeps the time the user sent it.
+      const stored = fixture.db.prepare('SELECT created_at FROM chat_history WHERE id = ?').get(secondRow);
+      expect(stored).toEqual({ created_at: SENT_BEFORE_THE_QUESTION });
+    });
   });
 });

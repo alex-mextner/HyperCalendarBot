@@ -7,14 +7,19 @@ import { runMigrations } from '../../src/database/schema.ts';
 
 const MIGRATION = '067_ai_usage_role_preset_cost';
 
-test('is the last migration, appended after 066', () => {
-  expect(migrations.at(-1)?.name).toBe(MIGRATION);
-  expect(migrations.at(-2)?.name).toBe('066_ai_usage_events');
+const BEFORE_067 = migrations.slice(
+  0,
+  migrations.findIndex((migration) => migration.name === MIGRATION),
+);
+
+test('is appended directly after 066', () => {
+  const names = migrations.map((migration) => migration.name);
+  expect(names.indexOf(MIGRATION)).toBe(names.indexOf('066_ai_usage_events') + 1);
 });
 
 test('adds role, preset and cost_micro_usd, all nullable, once; rows written before it read back NULL', () => {
   const db = new Database(':memory:');
-  runMigrations(db, migrations.slice(0, -1));
+  runMigrations(db, BEFORE_067);
   db.exec(
     "INSERT INTO ai_usage_events (at, provider, model, chain, purpose, outcome) VALUES (1, 'zai', 'm', 'smart', 'agent', 'ok')",
   );

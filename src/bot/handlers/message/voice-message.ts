@@ -5,6 +5,7 @@ import { mkdir } from 'node:fs/promises';
 import { InlineKeyboard } from 'gramio';
 import { t } from '../../../config/constants.ts';
 import type { User } from '../../../database/types.ts';
+import { withChatTurn } from '../../../services/ai/chat-turn-context.ts';
 import type { AgentContext } from '../../../services/ai/types.ts';
 import {
   fixDateOrdinals,
@@ -150,16 +151,23 @@ export async function handleVoiceMessage(
 
     const logChatId = Number(chatId) !== user.telegram_id ? Number(chatId) : undefined;
     const chatHistoryId = deps.conversationLogger.logUserMessage(user.telegram_id, transcription, logChatId);
+    // The transcript is saved here, not by the logging middleware (which saw no text): its place in the chat's
+    // line is reserved in the same step, so a voice message sent behind a running turn is answered after it.
+    const reservation = deps.agent.reserveChatTurn(Number(chatId), chatHistoryId);
 
-    const agentContext: AgentContext = {
-      ...buildAgentContextFactory(deps)(user, Number(chatId), transcription),
-      inputMode: 'voice_message',
-      incomingMessageId: ctx.id,
-      chatHistoryId,
-      voiceFileId: voice.file_id,
-    };
-
-    const { responseText } = await deps.agent.run(agentContext);
+    let responseText: string | undefined;
+    try {
+      const agentContext: AgentContext = {
+        ...buildAgentContextFactory(deps)(user, Number(chatId), transcription),
+        inputMode: 'voice_message',
+        incomingMessageId: ctx.id,
+        chatHistoryId,
+        voiceFileId: voice.file_id,
+      };
+      ({ responseText } = await withChatTurn(reservation, () => deps.agent.run(agentContext)));
+    } finally {
+      reservation.release();
+    }
 
     // Send voice reply if TTS is available and user has opted in
     if (responseText && user.voice_response_enabled === 1 && deps.sendVoice) {
