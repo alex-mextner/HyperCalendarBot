@@ -55,6 +55,24 @@ describe('classifyProviderError', () => {
   });
 
   test.each([
+    'You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.',
+    'You have reached your specified workspace API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.',
+    'enforced_spend_limit_reached',
+  ])('a 400 spend-cap message is quota: %s', (message) => {
+    expect(classifyProviderError(apiError(400, message), false)).toEqual({ errorClass: 'quota', httpStatus: 400 });
+  });
+
+  test.each([
+    'prompt is too long: 250000 tokens > 200000 maximum',
+    'You have reached the maximum number of tools allowed in one request',
+  ])('an ordinary 400 stays bad_request: %s', (message) => {
+    expect(classifyProviderError(apiError(400, message), false)).toEqual({
+      errorClass: 'bad_request',
+      httpStatus: 400,
+    });
+  });
+
+  test.each([
     'This model requires moderation and your input was flagged for harassment',
     'Rejected by the content policy',
     'blocked by the safety filter',

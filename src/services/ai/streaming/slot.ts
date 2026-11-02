@@ -5,6 +5,7 @@
 
 import type OpenAI from 'openai';
 import { logOnce } from '../../../utils/logger.ts';
+import { withClaudeCredentials } from '../claude-client-pool.ts';
 import { type ModelPreset, type ModelRole, presetRequestFields } from '../model-presets.ts';
 import { getModelOverride } from '../model-registry.ts';
 import type { ProviderId } from '../provider-ids.ts';
@@ -17,6 +18,7 @@ import {
   hasInvalidToolCalls,
   normalizeUsage,
 } from './response-shape.ts';
+import { providerTimeoutCapMs } from './round-budget.ts';
 import { consumeStream } from './stream-reader.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from './types.ts';
 
@@ -111,15 +113,39 @@ async function openCompletionStream(
   provider: ProviderId,
   signal: AbortSignal | undefined,
   onHttpAttempt: () => void,
+  deadlineAt: number,
+  onCredentialRetry: StreamCallbacks['onCredentialRetry'],
 ): Promise<{ stream: AsyncIterable<OpenAI.ChatCompletionChunk>; startedAt: number }> {
   let startedAt = performance.now();
+  let attemptAt = Date.now();
   let stream: AsyncIterable<OpenAI.ChatCompletionChunk>;
+  const onAttempt = () => {
+    startedAt = performance.now();
+    attemptAt = Date.now();
+    onHttpAttempt();
+  };
+  const requestOptions = () => ({
+    signal,
+    timeoutMs: deadlineAt - performance.now(),
+    onHttpAttempt: onAttempt,
+    onRetry: (attempt: { error: unknown; startedAt: number; durationMs: number }) =>
+      onCredentialRetry?.({ ...attempt, model: params.model }),
+  });
   try {
     startedAt = performance.now();
-    onHttpAttempt();
-    stream = await client.chat.completions.create(params, { signal });
+    stream = await withClaudeCredentials(
+      client,
+      (candidate, attemptSignal) => candidate.chat.completions.create(params, { signal: attemptSignal }),
+      requestOptions(),
+    );
   } catch (error) {
     if (!rejectsUsageStreamOption(error)) throw error;
+    onCredentialRetry?.({
+      error,
+      model: params.model,
+      startedAt: attemptAt,
+      durationMs: Math.max(0, performance.now() - startedAt),
+    });
     const { stream_options: _unsupported, ...withoutUsage } = params;
     providersWithoutStreamingUsage.add(provider);
     logOnce(`usage-stream-unsupported:${provider}`, () =>
@@ -129,10 +155,14 @@ async function openCompletionStream(
       ),
     );
     startedAt = performance.now();
-    onHttpAttempt();
-    stream = await client.chat.completions.create(withoutUsage as OpenAI.ChatCompletionCreateParamsStreaming, {
-      signal,
-    });
+    stream = await withClaudeCredentials(
+      client,
+      (candidate, attemptSignal) =>
+        candidate.chat.completions.create(withoutUsage as OpenAI.ChatCompletionCreateParamsStreaming, {
+          signal: attemptSignal,
+        }),
+      requestOptions(),
+    );
   }
   return { stream, startedAt };
 }
@@ -173,6 +203,8 @@ export function streamingSlot(
         provider,
         opts.signal,
         onHttpAttempt,
+        opts.providerDeadlineAt ?? performance.now() + providerTimeoutCapMs(opts),
+        cbs.onCredentialRetry,
       );
       const consumed = await consumeStream(
         stream,

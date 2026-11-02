@@ -11,6 +11,8 @@
 
 import OpenAI from 'openai';
 import { logger } from '../../utils/logger.ts';
+import { withClaudeCredentials } from './claude-client-pool.ts';
+import { CredentialsCoolingDownError } from './claude-credential-pool.ts';
 import { excludedModelReason } from './model-presets.ts';
 import type { ProviderId } from './provider-ids.ts';
 
@@ -29,7 +31,7 @@ const PROBE_TIMEOUT_MS = 10_000;
  */
 export interface ModelListingClient {
   models: {
-    list(options?: { timeout?: number }): Promise<{ data: { id: string }[] }>;
+    list(options?: { timeout?: number; signal?: AbortSignal }): Promise<{ data: { id: string }[] }>;
   };
 }
 
@@ -251,6 +253,9 @@ export function resetModelRegistry(): void {
 export interface ResolveModelOverrideOptions {
   provider: ProviderId;
   client: ModelListingClient;
+  /** The original provider/round cancellation, retained during catalog discovery. */
+  signal?: AbortSignal;
+  providerDeadlineAt?: number;
   /** The model id from `.env` that the provider rejected. */
   configuredModel: string;
   /** Use the fast-tier preference list. Default: false. */
@@ -265,11 +270,31 @@ export interface ResolveModelOverrideOptions {
   deadModel?: string;
 }
 
-async function listLiveModels(client: ModelListingClient): Promise<string[] | null> {
+async function listLiveModels(
+  client: ModelListingClient,
+  signal?: AbortSignal,
+  deadlineAt = performance.now() + PROBE_TIMEOUT_MS,
+): Promise<string[] | null> {
+  const timeoutMs = Math.floor(Math.min(PROBE_TIMEOUT_MS, deadlineAt - performance.now()));
+  if (timeoutMs <= 0) throw new DOMException('Catalog probe timed out', 'TimeoutError');
   try {
-    const page = await client.models.list({ timeout: PROBE_TIMEOUT_MS });
+    const page =
+      client instanceof OpenAI
+        ? await withClaudeCredentials(
+            client,
+            (candidate, signal) => candidate.models.list({ timeout: timeoutMs, signal }),
+            { timeoutMs, signal },
+          )
+        : await client.models.list({ timeout: timeoutMs, signal });
     return page.data.map((model) => model.id);
   } catch (err) {
+    if (err instanceof CredentialsCoolingDownError) throw err;
+    if (
+      signal?.aborted ||
+      (err instanceof Error && err.name === 'AbortError') ||
+      err instanceof OpenAI.APIUserAbortError
+    )
+      throw err;
     registryLogger.warn({ err }, 'Could not list live models from provider');
     return null;
   }
@@ -297,7 +322,17 @@ async function probeAndCache(
   if (PREFERRED_MODELS[provider].preferredOnly && preferredModelsFor(provider, fast === true).length === 0) {
     return commitProbeResult(key, sequence, { override: null, expiresAt: Date.now() + NEGATIVE_TTL_MS, sequence });
   }
-  const liveModels = await listLiveModels(options.client);
+  let liveModels: string[] | null;
+  try {
+    liveModels = await listLiveModels(options.client, options.signal, options.providerDeadlineAt);
+  } catch {
+    return null;
+  } // Aborted shared probes are unknown, never a negative catalog result.
+  if (
+    options.signal?.aborted ||
+    (options.providerDeadlineAt !== undefined && options.providerDeadlineAt <= performance.now())
+  )
+    return null;
   if (!liveModels) {
     return commitProbeResult(key, sequence, { override: null, expiresAt: Date.now() + NEGATIVE_TTL_MS, sequence });
   }
@@ -338,7 +373,36 @@ async function probeAndCache(
  * `/v1/models` is probed once rather than per request. Never throws: on any
  * failure it returns null and the caller falls through to the next provider.
  */
+/** Each caller may stop waiting; the bounded shared lookup remains useful to other live callers. */
+async function waitForCatalog(
+  probe: Promise<string | null>,
+  options: ResolveModelOverrideOptions,
+): Promise<string | null> {
+  if (options.signal?.aborted) return null;
+  const remaining =
+    options.providerDeadlineAt === undefined ? undefined : options.providerDeadlineAt - performance.now();
+  if (remaining !== undefined && remaining <= 0) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const stopped = new Promise<null>((resolve) => {
+    onAbort = () => resolve(null);
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (remaining !== undefined) timer = setTimeout(onAbort, remaining);
+  });
+  try {
+    return await Promise.race([probe, stopped]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) options.signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 export async function resolveModelOverride(options: ResolveModelOverrideOptions): Promise<string | null> {
+  if (
+    options.signal?.aborted ||
+    (options.providerDeadlineAt !== undefined && options.providerDeadlineAt <= performance.now())
+  )
+    return null;
   const key = cacheKey(options.provider, options.configuredModel);
   const pending = inFlight.get(key);
   const forced = options.forceRefresh === true;
@@ -347,23 +411,34 @@ export async function resolveModelOverride(options: ResolveModelOverrideOptions)
     // Join another forced probe — it also knows the cached replacement is dead.
     // An older ordinary probe is not joinable: it would hand back the very model
     // this caller just found to be gone.
-    if (pending?.forced) return pending.promise;
+    if (pending?.forced) return waitForCatalog(pending.promise, options);
   } else {
     const entry = cache.get(key);
     if (entry && entry.expiresAt > Date.now()) return entry.override?.resolvedModel ?? null;
-    if (pending) return pending.promise;
+    if (pending) return waitForCatalog(pending.promise, options);
   }
 
+  const budget = Math.min(
+    PROBE_TIMEOUT_MS,
+    options.providerDeadlineAt === undefined ? PROBE_TIMEOUT_MS : options.providerDeadlineAt - performance.now(),
+  );
+  if (budget <= 0) return null;
+  // A caller signal only owns its waiter. The probe retains the original admitted budget.
+  const sharedOptions = {
+    ...options,
+    providerDeadlineAt: performance.now() + budget,
+    signal: AbortSignal.timeout(Math.max(1, Math.ceil(budget))),
+  };
   probeSequence += 1;
   const sequence = probeSequence;
   const probe: InFlightProbe = {
     forced,
     sequence,
-    promise: probeAndCache(options, key, sequence).finally(() => {
+    promise: probeAndCache(sharedOptions, key, sequence).finally(() => {
       // Only clear our own entry: a newer probe may already have replaced it.
       if (inFlight.get(key)?.sequence === sequence) inFlight.delete(key);
     }),
   };
   inFlight.set(key, probe);
-  return probe.promise;
+  return waitForCatalog(probe.promise, options);
 }

@@ -13,6 +13,8 @@ export interface StreamRoundOptions {
   maxTokens: number;
   /** Optional narrower wall-time cap for one provider, including all stream chunks. */
   providerTimeoutMs?: number;
+  /** Internal absolute monotonic deadline of the admitted provider slot. */
+  providerDeadlineAt?: number;
   temperature?: number;
   /** Use the fast chain (cheap/fast models) instead of the smart chain. Default: false. */
   fast?: boolean;
@@ -30,7 +32,16 @@ export interface StreamRoundOptions {
   deferOutageAlert?: boolean;
 }
 
+export interface FailedHttpAttempt {
+  error: unknown;
+  model: string;
+  startedAt: number;
+  durationMs: number;
+}
+
 export interface StreamCallbacks {
+  /** Internal failed completion metadata; recorded on the next HTTP start or terminal exit. */
+  onCredentialRetry?: (attempt: FailedHttpAttempt) => void;
   onTextDelta?: (text: string) => void;
   onToolCallStart?: (name: string) => void;
   /** Called when provider failed mid-stream and fallback to next provider is attempted.

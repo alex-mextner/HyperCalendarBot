@@ -91,6 +91,8 @@ export interface CircuitFailureInput {
   status: number | undefined;
   message: string;
   headers?: unknown;
+  /** Aggregate credential pool recovery; absent for ordinary single-account provider errors. */
+  recoveryAfterMs?: number;
   /** The provider looked unreachable or broken (5xx, timeout, connection error). */
   providerDown: boolean;
 }
@@ -117,6 +119,21 @@ function explicitResetAt(input: CircuitFailureInput, now: number): number | null
   return Number.isNaN(at) || at <= now ? null : Math.min(at, now + MAX_EXPLICIT_RESET_MS);
 }
 
+/** An aggregate credential delay supersedes the last failed key's own reset. */
+function credentialRecoveryAt(delayMs: number | undefined, now: number): number | null {
+  if (delayMs === undefined || !Number.isFinite(delayMs) || delayMs < 0) return null;
+  return now + Math.max(1000, Math.min(delayMs, MAX_EXPLICIT_RESET_MS));
+}
+
+/** Rejections about one request must not silence unrelated valid requests. */
+function isRequestRejection({ status, message }: CircuitFailureInput): boolean {
+  if (status === 403) return MODERATION_REJECTION.test(message);
+  return (
+    status === 429 &&
+    /request (?:is )?too (?:large|big)|context (?:length|window)|maximum (?:context|input)/i.test(message)
+  );
+}
+
 /**
  * Decides whether a failure is a statement about the ACCOUNT. The status must
  * be present for account classes: error text echoes the request, which makes
@@ -124,13 +141,8 @@ function explicitResetAt(input: CircuitFailureInput, now: number): number | null
  */
 export function classifyCircuitFailure(input: CircuitFailureInput, now: number): CircuitVerdict | null {
   const { status } = input;
-  // Rejections about this request must not silence unrelated, valid requests.
-  if (
-    status === 429 &&
-    /request (?:is )?too (?:large|big)|context (?:length|window)|maximum (?:context|input)/i.test(input.message)
-  )
-    return null;
-  if (status === 403 && MODERATION_REJECTION.test(input.message)) return null;
+  const recoveryAt = credentialRecoveryAt(input.recoveryAfterMs, now);
+  if (isRequestRejection(input)) return null;
   if (status === 401 || status === 402 || status === 403 || status === 429) {
     const classified = classifyProviderFailure({ provider: 'circuit', status, message: input.message });
     const failureClass = status === 429 ? 'quota_exhausted' : classified;
@@ -138,14 +150,14 @@ export function classifyCircuitFailure(input: CircuitFailureInput, now: number):
       return {
         failureClass,
         status,
-        retryAtMs: explicitResetAt(input, now),
-        resetHint: quotaResetHint(input.message),
+        retryAtMs: recoveryAt ?? explicitResetAt(input, now),
+        resetHint: recoveryAt === null ? quotaResetHint(input.message) : null,
       };
     }
-    if (failureClass === 'auth_failed') return { failureClass, status, retryAtMs: null, resetHint: null };
+    if (failureClass === 'auth_failed') return { failureClass, status, retryAtMs: recoveryAt, resetHint: null };
   }
   if (input.providerDown) {
-    return { failureClass: 'unavailable', status: status ?? null, retryAtMs: null, resetHint: null };
+    return { failureClass: 'unavailable', status: status ?? null, retryAtMs: recoveryAt, resetHint: null };
   }
   return null;
 }

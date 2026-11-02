@@ -5,6 +5,7 @@
 import OpenAI from 'openai';
 import type { AiUsageEvent } from '../../../database/repositories/ai-usage.repository.ts';
 import { type ProviderChainKind, reportProviderFailure } from '../../../utils/ai-provider-alert.ts';
+import { getClaudeCredentialAvailability } from '../claude-credential-pool.ts';
 import { type Admission, type CircuitContext, settleFailure, settleInconclusive } from '../provider-circuit.ts';
 import type { ProviderId } from '../provider-ids.ts';
 import { classifyProviderError } from '../usage-classification.ts';
@@ -103,8 +104,14 @@ export function settleCircuitAfterFailure(
     settleInconclusive(admission, { pushBack: false });
     return false;
   }
+  const availability = getClaudeCredentialAvailability(error);
+  if (availability && availability.state !== 'cooling') {
+    settleInconclusive(admission, { pushBack: false });
+    return true;
+  }
   return settleFailure(circuit, admission, {
     status: failure.status,
+    recoveryAfterMs: availability?.retryAfterMs,
     message: failure.message,
     headers: error instanceof OpenAI.APIError ? error.headers : undefined,
     providerDown: isProviderDown(error),

@@ -14,11 +14,13 @@ async function streamRetryingBodilessRejection(
   opts: StreamRoundOptions,
   cbs: StreamCallbacks,
   onAttempt: () => void,
+  onRejected: (error: unknown, model: string) => void,
 ): Promise<StreamRoundResult> {
   try {
     return await slot.stream(model, opts, cbs, onAttempt);
   } catch (error) {
     if (!isBodilessRejection(error) || isCallerAbort(opts.signal)) throw error;
+    onRejected(error, model);
     aiLogger.warn(
       { provider: slot.label, model, userId: opts.userId },
       'Provider rejected the request with an empty 400 — repeating it once',
@@ -44,18 +46,35 @@ export async function runSlot(
 ): Promise<StreamRoundResult> {
   // A preset slot runs the model that was measured and nothing else: neither a cached replacement nor a
   // fresh heuristic one, which would serve the role unmeasured.
+  let httpAt = Date.now();
+  let httpStartedAt = performance.now();
+  const onHttpAttempt = () => {
+    httpAt = Date.now();
+    httpStartedAt = performance.now();
+    onAttempt();
+  };
+  const onRejected = (error: unknown, model: string) =>
+    cbs.onCredentialRetry?.({
+      error,
+      model,
+      startedAt: httpAt,
+      durationMs: Math.max(0, performance.now() - httpStartedAt),
+    });
   const measured = slot.presetId !== undefined;
   const cachedOverride = measured ? null : getModelOverride(slot.provider, slot.configuredModel);
   const model = cachedOverride ?? slot.configuredModel;
 
   try {
-    return await streamRetryingBodilessRejection(slot, model, opts, cbs, onAttempt);
+    return await streamRetryingBodilessRejection(slot, model, opts, cbs, onHttpAttempt, onRejected);
   } catch (error) {
     if (measured || !isModelNotFoundError(error)) throw error;
 
+    onRejected(error, model);
     const replacement = await resolveModelOverride({
       provider: slot.provider,
       client: slot.getClient(),
+      signal: opts.signal,
+      providerDeadlineAt: opts.providerDeadlineAt,
       configuredModel: slot.configuredModel,
       fast: opts.fast === true,
       // The cached replacement is dead too — probe again instead of reusing it.
@@ -68,6 +87,6 @@ export async function runSlot(
       { provider: slot.label, configuredModel: slot.configuredModel, resolvedModel: replacement, userId: opts.userId },
       'Configured model is gone — retrying the same provider with an auto-detected live model',
     );
-    return await slot.stream(replacement, opts, cbs, onAttempt);
+    return await slot.stream(replacement, opts, cbs, onHttpAttempt);
   }
 }

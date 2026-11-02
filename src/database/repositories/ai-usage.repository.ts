@@ -20,7 +20,13 @@ export type AiErrorClass =
  * a chat provider) are retired and never written any more; they stay so that historical rows keep
  * their type.
  */
-export type AiSkipReason = 'preflight_size' | 'circuit_open' | 'eligibility_bench' | 'local_budget' | 'round_deadline';
+export type AiSkipReason =
+  | 'preflight_size'
+  | 'circuit_open'
+  | 'eligibility_bench'
+  | 'local_budget'
+  | 'round_deadline'
+  | 'credential_cooldown';
 
 /**
  * One provider attempt of an AI round. Token fields are null when the provider reported no

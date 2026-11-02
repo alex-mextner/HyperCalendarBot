@@ -3,6 +3,7 @@
 // OpenRouter, one `model` row per configured model (rate limits and outages of that model's upstream).
 import { existsSync } from 'node:fs';
 import { loadConfig } from '../src/config/env.ts';
+import { claudeCredentialScope } from '../src/services/ai/claude-client-pool.ts';
 import { presetById } from '../src/services/ai/model-presets.ts';
 import { openProviderCircuitStore, providerCircuitKey } from '../src/services/ai/provider-circuit.ts';
 import type { ProviderId } from '../src/services/ai/provider-ids.ts';
@@ -22,7 +23,7 @@ interface Circuit {
 const accounts: [ProviderId, string, string][] = [
   ['zai', config.ZAI_BASE_URL, config.ZAI_API_KEY],
   ['hf', config.HF_BASE_URL, config.HF_TOKEN],
-  ['claude', '', config.CLAUDE_API_TOKEN ?? ''],
+  ['claude', '', claudeCredentialScope(config.CLAUDE_API_TOKEN, config.CLAUDE_API_TOKEN2) ?? ''],
   ['openrouter', config.OPENROUTER_BASE_URL, config.OPENROUTER_API_KEY ?? ''],
 ];
 

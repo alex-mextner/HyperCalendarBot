@@ -13,7 +13,8 @@ import { type Admission, admitProvider, type CircuitContext, settleAnswered } fr
 import { withinProviderDeadline } from '../provider-deadline.ts';
 import { clearBlock, isBlocked } from '../provider-eligibility.ts';
 import { roleForPurpose, rolesApplyTo } from '../role-routing.ts';
-import { type AttemptScope, answeredAttempt, recordAiUsage, skippedAttempt } from '../usage-recorder.ts';
+import { classifyProviderError } from '../usage-classification.ts';
+import { type AttemptScope, answeredAttempt, failedAttempt, recordAiUsage, skippedAttempt } from '../usage-recorder.ts';
 import { benchChainOf, buildFastChain, buildRoleChain, buildSmartChain, withoutModelsOf } from './chains.ts';
 import { AllProvidersFailedError, unexposedToolNamesOf } from './errors.ts';
 import { providerFailureMetrics, skippedByCircuit } from './failure.ts';
@@ -21,7 +22,13 @@ import { aiLogger } from './logger.ts';
 import { providerTimeoutCapMs } from './round-budget.ts';
 import { modelRequestedFrom, type ProviderSlot, slotName } from './slot.ts';
 import { runSlot } from './slot-runner.ts';
-import type { ProviderFailure, StreamCallbacks, StreamRoundOptions, StreamRoundResult } from './types.ts';
+import type {
+  FailedHttpAttempt,
+  ProviderFailure,
+  StreamCallbacks,
+  StreamRoundOptions,
+  StreamRoundResult,
+} from './types.ts';
 
 /** Everything one round shares across its attempts. The mutable fields are the round's running bookkeeping. */
 export interface RoundState {
@@ -47,8 +54,9 @@ export interface AdmittedAttempt {
   readonly requestModel: string;
   readonly circuit: CircuitContext;
   readonly admission: Exclude<Admission, { kind: 'skip' }>;
-  readonly attemptAt: number;
-  readonly attemptStartedAt: number;
+  attemptAt: number;
+  attemptStartedAt: number;
+  pendingFailure?: FailedHttpAttempt;
 }
 
 export function createRoundState(options: StreamRoundOptions, callbacks: StreamCallbacks): RoundState {
@@ -172,17 +180,41 @@ export function admitSlot(state: RoundState, slot: ProviderSlot): AdmittedAttemp
   return { slot, requestModel, circuit, admission, attemptAt: Date.now(), attemptStartedAt: performance.now() };
 }
 
+/** A completed failed HTTP request is recorded once, before another request or the terminal exit. */
+export function recordPendingHttpFailure(state: RoundState, attempt: AdmittedAttempt): boolean {
+  const failure = attempt.pendingFailure;
+  if (!failure) return false;
+  attempt.pendingFailure = undefined;
+  recordAiUsage(
+    failedAttempt(
+      attemptScopeOf(state, attempt.slot),
+      attempt.slot.provider,
+      failure.model,
+      failure.startedAt,
+      Math.round(failure.durationMs),
+      classifyProviderError(failure.error, false),
+      null,
+    ),
+  );
+  return true;
+}
+
 /** The slot call under its provider deadline; callbacks and the attempt counter go quiet once the attempt's signal aborts. */
-function runUnderDeadline(state: RoundState, slot: ProviderSlot, timeoutMs: number): Promise<StreamRoundResult> {
+function runUnderDeadline(state: RoundState, attempt: AdmittedAttempt, timeoutMs: number): Promise<StreamRoundResult> {
   const { options, wrappedCallbacks } = state;
+  const { slot } = attempt;
+  const providerDeadlineAt = performance.now() + timeoutMs;
   return withinProviderDeadline(
     async (signal) =>
       runSlot(
         slot,
-        { ...options, signal },
+        { ...options, signal, providerDeadlineAt },
         {
           onTextDelta: (text) => {
             if (!signal.aborted) wrappedCallbacks.onTextDelta?.(text);
+          },
+          onCredentialRetry: (failure) => {
+            if (!signal.aborted) attempt.pendingFailure = failure;
           },
           onToolCallStart: (name) => {
             if (!signal.aborted) wrappedCallbacks.onToolCallStart?.(name);
@@ -190,7 +222,10 @@ function runUnderDeadline(state: RoundState, slot: ProviderSlot, timeoutMs: numb
         },
         () => {
           signal.throwIfAborted();
+          recordPendingHttpFailure(state, attempt);
           state.actualAttempts++;
+          attempt.attemptAt = Date.now();
+          attempt.attemptStartedAt = performance.now();
         },
       ),
     timeoutMs,
@@ -244,7 +279,7 @@ export async function runAdmittedAttempt(
     },
     'Trying provider',
   );
-  const result = await runUnderDeadline(state, slot, Math.min(state.cap, remainingMs));
+  const result = await runUnderDeadline(state, attempt, Math.min(state.cap, remainingMs));
   settleSuccess(state, attempt, result);
   return result;
 }
