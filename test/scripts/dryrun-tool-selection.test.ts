@@ -1,11 +1,16 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import OpenAI from 'openai';
+import { DRYRUN_CASES } from '../../scripts/dryrun-cases.ts';
 import {
   type CaseOutcome,
   classifyTurn,
   formatOutcomeRow,
+  type ProviderSpec,
+  runCase,
   totalsByProvider,
   verdict,
 } from '../../scripts/dryrun-tool-selection.ts';
+import { createClaudeClient } from '../../src/services/ai/claude-client-pool.ts';
 import { DISCOVERY_TOOL } from '../../src/services/ai/tool-exposure.ts';
 
 const outcome = (overrides: Partial<CaseOutcome>): CaseOutcome => ({
@@ -109,5 +114,157 @@ describe('dryrun tool-selection scoring', () => {
     expect([...totals.keys()]).toEqual(['zai', 'hf']);
     expect(totals.get('zai')).toEqual({ pass: 1, total: 2, tokens: [100], rounds: 3, blind: 3 });
     expect(totals.get('hf')).toEqual({ pass: 1, total: 1, tokens: [40], rounds: 0, blind: 0 });
+  });
+});
+
+describe('dryrun request round', () => {
+  interface Recorded {
+    authorization: string | null;
+    body: unknown;
+  }
+
+  const jsonObject = (body: unknown): body is { [key: string]: unknown } =>
+    typeof body === 'object' && body !== null && !Array.isArray(body);
+  const fieldOf = (body: unknown, key: string): unknown => {
+    if (!jsonObject(body)) throw new Error('request body is not a JSON object');
+    return body[key];
+  };
+  const keysOf = (body: unknown): string[] => {
+    if (!jsonObject(body)) throw new Error('request body is not a JSON object');
+    return Object.keys(body);
+  };
+
+  // No network: answers each request with the next scripted status (default: 200 with one
+  // get_events tool call). Error replies carry retry-after-ms: 0 so SDK retries never sleep.
+  const transport =
+    (recorded: Recorded[], statuses: number[] = []) =>
+    async (input: string | URL | Request, init?: RequestInit) => {
+      const request = input instanceof Request ? new Request(input, init) : new Request(String(input), init);
+      const status = statuses[recorded.length] ?? 200;
+      recorded.push({
+        authorization: request.headers.get('authorization'),
+        body: JSON.parse(await request.text()),
+      });
+      if (status !== 200) {
+        return new Response(JSON.stringify({ error: { message: 'synthetic', type: 'synthetic' } }), {
+          status,
+          headers: { 'content-type': 'application/json', 'retry-after-ms': '0' },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          id: 'chatcmpl-synthetic',
+          object: 'chat.completion',
+          created: 0,
+          model: 'synthetic-model',
+          choices: [
+            {
+              index: 0,
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'get_events', arguments: '{}' } }],
+              },
+            },
+          ],
+          usage: { prompt_tokens: 7, completion_tokens: 1, total_tokens: 8 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+  const providerFor = (name: ProviderSpec['name'], client: OpenAI): ProviderSpec => ({
+    name,
+    model: 'synthetic-model',
+    client: () => client,
+  });
+  const testCase = DRYRUN_CASES[0];
+  if (!testCase) throw new Error('DRYRUN_CASES is empty');
+  const baseURL = 'https://api.anthropic.com/v1';
+
+  for (const malformed of ['bad\u200btoken', 'tok\u2026en', 'tok\r\nen']) {
+    for (const tokens of [[malformed], [malformed, `${malformed}2`]]) {
+      test(`claude with only malformed credentials (${tokens.length}) fails closed without echoing a token`, async () => {
+        const recorded: Recorded[] = [];
+        const client = createClaudeClient(tokens, { baseURL, fetch: transport(recorded) });
+        const create = spyOn(client.chat.completions, 'create');
+        const result = await runCase(providerFor('claude', client), testCase);
+        expect(create).not.toHaveBeenCalled();
+        expect(recorded).toEqual([]);
+        expect(result.ok).toBe(false);
+        expect(result.error).toBe('Claude API token is not a valid HTTP header value');
+        for (const token of tokens) {
+          expect(JSON.stringify(result)).not.toContain(token.trim());
+          expect(formatOutcomeRow(result)).not.toContain(token.trim());
+        }
+      });
+    }
+  }
+
+  const expectedKeys = ['max_tokens', 'messages', 'model', 'temperature', 'tools'];
+
+  test('claude with one usable key among malformed ones has no pool, so the SDK retries a 429 in place', async () => {
+    const recorded: Recorded[] = [];
+    const client = createClaudeClient(['bad\u200btoken', 'backup'], {
+      baseURL,
+      fetch: transport(recorded, [429, 200]),
+    });
+    const create = spyOn(client.chat.completions, 'create');
+    const result = await runCase(providerFor('claude', client), testCase);
+    expect(result.error).toBeNull();
+    expect(result.tools).toEqual(['get_events']);
+    expect(recorded.map((r) => r.authorization)).toEqual(['Bearer backup', 'Bearer backup']);
+    expect(recorded[1]?.body).toEqual(recorded[0]?.body);
+    expect(fieldOf(recorded[0]?.body, 'model')).toBe('synthetic-model');
+    expect(create.mock.calls[0]?.[1]).toMatchObject({ maxRetries: 4 });
+  });
+
+  test('claude with a single configured key retries a 429 with the same request', async () => {
+    const recorded: Recorded[] = [];
+    const client = createClaudeClient(['backup'], { baseURL, fetch: transport(recorded, [429, 200]) });
+    const create = spyOn(client.chat.completions, 'create');
+    const result = await runCase(providerFor('claude', client), testCase);
+    expect(result.error).toBeNull();
+    expect(result.tools).toEqual(['get_events']);
+    expect(recorded.map((r) => r.authorization)).toEqual(['Bearer backup', 'Bearer backup']);
+    expect(recorded[1]?.body).toEqual(recorded[0]?.body);
+    expect(fieldOf(recorded[0]?.body, 'model')).toBe('synthetic-model');
+    expect(create.mock.calls[0]?.[1]).toMatchObject({ maxRetries: 4 });
+  });
+
+  test('claude with two keys rotates on 401 and retries a 429 on the next key with identical requests', async () => {
+    const recorded: Recorded[] = [];
+    const client = createClaudeClient(['primary', 'backup'], {
+      baseURL,
+      fetch: transport(recorded, [401, 429, 200]),
+    });
+    const create = spyOn(client.chat.completions, 'create');
+    const result = await runCase(providerFor('claude', client), testCase);
+    expect(result.error).toBeNull();
+    expect(result.tools).toEqual(['get_events']);
+    expect(recorded.map((r) => r.authorization)).toEqual(['Bearer primary', 'Bearer backup', 'Bearer backup']);
+    expect(recorded[1]?.body).toEqual(recorded[0]?.body);
+    expect(recorded[2]?.body).toEqual(recorded[0]?.body);
+    expect(fieldOf(recorded[0]?.body, 'model')).toBe('synthetic-model');
+    for (const call of create.mock.calls) expect(call[1]).toMatchObject({ maxRetries: 4 });
+  });
+
+  test('non-claude providers keep the direct call, SDK retries and unforced tools', async () => {
+    const recorded: Recorded[] = [];
+    const client = new OpenAI({
+      apiKey: 'synthetic',
+      baseURL: 'https://dryrun.invalid/v1',
+      fetch: transport(recorded),
+    });
+    const create = spyOn(client.chat.completions, 'create');
+    const result = await runCase(providerFor('zai', client), testCase);
+    expect(result.error).toBeNull();
+    expect(result.tools).toEqual(['get_events']);
+    expect(recorded).toHaveLength(1);
+    const body = recorded[0]?.body;
+    expect(keysOf(body).sort()).toEqual(expectedKeys);
+    expect(fieldOf(body, 'model')).toBe('synthetic-model');
+    expect(fieldOf(body, 'temperature')).toBe(0);
+    expect(create.mock.calls[0]?.[1]).toMatchObject({ maxRetries: 4 });
   });
 });

@@ -23,6 +23,9 @@ const registered = new WeakMap<
   }
 >();
 
+/** Clients whose only usable credential cannot be sent as an Authorization header. */
+const headerInvalid = new WeakSet<OpenAI>();
+
 /** Both credentials scope durable circuits; adding/rotating a backup must invalidate an old exhausted circuit. */
 export function claudeCredentialScope(primary?: string, secondary?: string): string | undefined {
   const tokens = [
@@ -31,8 +34,13 @@ export function claudeCredentialScope(primary?: string, secondary?: string): str
   return tokens.length ? tokens.join('\0') : undefined;
 }
 
-/** The SDK builds `Authorization: Bearer <key>` through Headers, which rejects CR/LF/NUL and non-Latin-1 text. */
+/**
+ * The SDK builds `Authorization: Bearer <key>` through Headers, which rejects CR/LF/NUL and non-Latin-1 text.
+ * The explicit check additionally rejects C0 controls (incl. SOH/US/TAB inside the token) and DEL, which Headers
+ * accepts but the HTTP transport rejects with a 400 invalid header value.
+ */
 function isHeaderSafe(token: string): boolean {
+  if ([...token].some((char) => char < ' ' || char === '\u007f')) return false;
   try {
     new Headers().append('authorization', `Bearer ${token}`);
     return true;
@@ -62,9 +70,11 @@ export function createClaudeClient(
   // request-body serialization error, so it must never reach the pool; the value is deliberately not logged.
   const usable = distinct.length > 1 ? distinct.filter(isHeaderSafe) : [];
   // One usable credential (one configured, or one left after filtering) keeps the single-key SDK/caller
-  // timeout and error behavior: no pool, no local cooldown. With none usable the first malformed client
-  // fails fast without a fetch.
-  const first = clientFor(usable.length === 1 ? (usable[0] ?? firstDistinct) : firstDistinct);
+  // timeout and error behavior: no pool, no local cooldown. With none usable the client is marked and every
+  // request fails before the SDK builds its header: Bun 1.4.2's header TypeError echoes the rejected value.
+  const chosen = usable.length === 1 ? (usable[0] ?? firstDistinct) : firstDistinct;
+  const first = clientFor(chosen);
+  if (usable.length < 2 && !isHeaderSafe(chosen)) headerInvalid.add(first);
   if (usable.length > 1)
     registered.set(first, {
       pool: createClaudeCredentialPool(
@@ -89,6 +99,7 @@ export async function withClaudeCredentials<T>(
   const entry = registered.get(client);
   if (!entry) {
     options.signal?.throwIfAborted();
+    if (headerInvalid.has(client)) throw new TypeError('Claude API token is not a valid HTTP header value');
     options.onHttpAttempt?.();
     return operation(client, options.signal);
   }

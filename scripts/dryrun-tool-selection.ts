@@ -35,6 +35,7 @@ import { EventReminderRepository } from '../src/database/repositories/event-remi
 import { HolidayRepository } from '../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../src/database/schema.ts';
+import { withClaudeCredentials } from '../src/services/ai/claude-client-pool.ts';
 import { claudeClient, hfClient, openrouterClient, zaiClient } from '../src/services/ai/clients.ts';
 import type { ProviderId } from '../src/services/ai/provider-ids.ts';
 import { acceptsSamplingTemperature, CLAUDE_MAX_OUTPUT_TOKENS } from '../src/services/ai/streaming.ts';
@@ -59,7 +60,7 @@ const MAX_COMPLETION_TOKENS = Number(process.env.DRYRUN_MAX_TOKENS) > 0 ? Number
 const MAX_ROUNDS = 4;
 /** The production client gives up after 15 s; a dry run measures tool choice, not latency, so it waits longer (DRYRUN_TIMEOUT_MS). */
 const REQUEST_TIMEOUT_MS = Number(process.env.DRYRUN_TIMEOUT_MS) > 0 ? Number(process.env.DRYRUN_TIMEOUT_MS) : 90_000;
-/** The SDK retries 429 with backoff; the production clients disable retries, a dry run must not score a rate limit as a miss. */
+/** SDK retries of 429/5xx with backoff: the production clients disable them, but the dry run executes no business tools and must not score a rate limit as a miss. Claude's pool (2+ usable tokens) still bounds them with its signal and shared timeout. */
 const RATE_LIMIT_RETRIES = 4;
 
 function toolMode(): ToolSchemaMode {
@@ -69,7 +70,7 @@ function toolMode(): ToolSchemaMode {
   return mode;
 }
 
-interface ProviderSpec {
+export interface ProviderSpec {
   name: ProviderId;
   model: string;
   client: () => OpenAI;
@@ -283,15 +284,32 @@ function prepareRun(provider: ProviderSpec, testCase: DryRunCase): CaseRun {
 
 function requestRound(run: CaseRun): Promise<OpenAI.ChatCompletion> {
   const { provider, exposure, allowed, messages, settings } = run;
-  return provider.client().chat.completions.create(
-    {
-      model: provider.model,
-      messages,
-      tools: exposure ? exposure.schemas() : allowed,
-      max_tokens: settings.maxTokens,
-      ...(settings.temperature === null ? {} : { temperature: settings.temperature }),
-    },
-    { timeout: REQUEST_TIMEOUT_MS, maxRetries: RATE_LIMIT_RETRIES },
+  const params: OpenAI.ChatCompletionCreateParamsNonStreaming = {
+    model: provider.model,
+    messages,
+    tools: exposure ? exposure.schemas() : allowed,
+    max_tokens: settings.maxTokens,
+    ...(settings.temperature === null ? {} : { temperature: settings.temperature }),
+  };
+  if (provider.name !== 'claude') {
+    return provider.client().chat.completions.create(params, {
+      timeout: REQUEST_TIMEOUT_MS,
+      maxRetries: RATE_LIMIT_RETRIES,
+    });
+  }
+  // The dry run executes no business tools, so SDK retries of 429/5xx are safe. With two or more usable
+  // tokens the pool's AbortSignal and shared REQUEST_TIMEOUT_MS budget still bound every attempt and retry
+  // sleep; with one usable token there is no pool and no signal, so the SDK timeout/retries behave as in the
+  // non-Claude path. A malformed token fails closed before any SDK call echoes it.
+  return withClaudeCredentials(
+    provider.client(),
+    (candidate, signal) =>
+      candidate.chat.completions.create(params, {
+        signal,
+        timeout: REQUEST_TIMEOUT_MS,
+        maxRetries: RATE_LIMIT_RETRIES,
+      }),
+    { timeoutMs: REQUEST_TIMEOUT_MS },
   );
 }
 
@@ -361,7 +379,7 @@ function failedOutcome(run: CaseRun, err: unknown): CaseOutcome {
   };
 }
 
-async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<CaseOutcome> {
+export async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<CaseOutcome> {
   const run = prepareRun(provider, testCase);
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {

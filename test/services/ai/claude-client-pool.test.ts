@@ -460,8 +460,17 @@ const okTransport = (seen: (string | null)[]) => async (input: string | URL | Re
   );
 };
 
-// Dummy values only: each is rejected by Headers (zero-width space, U+2026, CR/LF) before any fetch.
-const MALFORMED_TOKENS = ['bad\u200btoken', 'tok\u2026en', 'tok\r\nen'];
+// Dummy values only, none reaching a fetch: zero-width space, U+2026 and CR/LF are rejected by Headers; internal
+// SOH, US, TAB and DEL are accepted by Headers but are control characters the transport then rejects with a 400.
+const MALFORMED_TOKENS = [
+  'bad\u200btoken',
+  'tok\u2026en',
+  'tok\r\nen',
+  'bad\u0001token',
+  'bad\u001ftoken',
+  'bad\ttoken',
+  'bad\u007ftoken',
+];
 
 for (const malformed of MALFORMED_TOKENS) {
   test(`a malformed primary token (${JSON.stringify(malformed).length} chars) is ignored so the valid backup serves`, async () => {
@@ -491,18 +500,26 @@ for (const malformed of MALFORMED_TOKENS) {
     expect(seen).toEqual(['Bearer primary']);
   });
 
-  test(`only malformed tokens still build a client and fail without leaking the token (${JSON.stringify(malformed).length} chars)`, async () => {
+  test(`only malformed tokens fail before any SDK call or HTTP attempt without leaking the token (${JSON.stringify(malformed).length} chars)`, async () => {
     const seen: (string | null)[] = [];
     for (const tokens of [[malformed], [malformed, `${malformed}2`]]) {
       const client = createClaudeClient(tokens, { baseURL: 'https://api.anthropic.com/v1', fetch: okTransport(seen) });
+      let operations = 0;
+      let httpAttempts = 0;
       const error = await withClaudeCredentials(
         client,
-        (candidate, signal) => candidate.chat.completions.create(params, { signal }),
-        { timeoutMs: 1000 },
+        (candidate, signal) => {
+          operations++;
+          return candidate.chat.completions.create(params, { signal });
+        },
+        { timeoutMs: 1000, onHttpAttempt: () => httpAttempts++ },
       ).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(TypeError);
+      // Bun 1.4.2 (the pinned production runtime) echoes the rejected header value in the SDK's own TypeError.
       const text = `${(error as Error).message}\n${(error as Error).stack}\n${JSON.stringify(getClaudeCredentialAvailability(error))}`;
       for (const token of tokens) expect(text.includes(token.trim())).toBe(false);
+      expect(operations).toBe(0);
+      expect(httpAttempts).toBe(0);
     }
     expect(seen).toEqual([]);
   });
