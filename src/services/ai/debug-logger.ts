@@ -88,6 +88,11 @@ export class AiDebugRunContext {
     this.parts.push('='.repeat(80));
   }
 
+  /** The request id the container log and incident alerts carry, so a run can be found in both. */
+  logRequestId(requestId: string): void {
+    this.parts.push(`REQUEST ID: ${requestId}`);
+  }
+
   logSystemPrompt(prompt: string): void {
     this.parts.push('');
     this.parts.push('## SYSTEM PROMPT');

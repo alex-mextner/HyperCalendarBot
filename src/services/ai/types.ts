@@ -44,6 +44,7 @@ import type { SharingService } from '../sharing/sharing-service.ts';
 import type { TelegramProfile } from '../telegram-session/service-tier.ts';
 import type { StressDictionary } from '../voice/stress-dictionary.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
+import type { RunIncidentReporter } from './agent/run-incident.ts';
 import type { DayReferenceSet } from './day-references.ts';
 import type { ToolSchemaMode } from './tool-schema-mode.ts';
 
@@ -422,6 +423,10 @@ export interface AgentConfig {
   toolSchemaMode?: ToolSchemaMode;
   debugLogger?: import('./debug-logger.ts').AiDebugLogger;
   summarizer?: import('./history-summarizer.ts').HistorySummarizer;
+  /** Where runs that ended badly for the user are reported (rate limited); absent in tests and dev. */
+  runIncidents?: RunIncidentReporter;
+  /** Overrides how long a validator model verdict may take; tests shorten it. */
+  validationTimeoutMs?: number;
 }
 
 /**

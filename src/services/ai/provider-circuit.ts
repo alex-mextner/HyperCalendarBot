@@ -53,11 +53,15 @@ import {
   sendProviderIncident,
 } from '../../utils/ai-provider-alert.ts';
 import { logger } from '../../utils/logger.ts';
+import { reportIfDatabaseBusy } from '../incident/database-busy.ts';
 import { retryAfterMs } from './provider-eligibility.ts';
 import type { ProviderId } from './provider-ids.ts';
 import { MODERATION_REJECTION } from './usage-classification.ts';
 
 const circuitLogger = logger.child({ module: 'ai-circuit' });
+
+/** How long SQLite waits on a locked sidecar before the statement fails with SQLITE_BUSY. */
+const CIRCUIT_BUSY_TIMEOUT_MS = 3000;
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
@@ -404,7 +408,7 @@ export function openProviderCircuitStore(path: string): ProviderCircuitStore {
   const db = new Database(path, { create: true });
   try {
     if (onDisk) chmodSync(path, 0o600);
-    db.exec('PRAGMA busy_timeout = 3000');
+    db.exec(`PRAGMA busy_timeout = ${CIRCUIT_BUSY_TIMEOUT_MS}`);
     if (onDisk) db.exec('PRAGMA journal_mode = WAL');
     db.exec(SCHEMA);
     return new ProviderCircuitStore(db);
@@ -444,6 +448,8 @@ function guarded<T>(operation: string, fallback: T, run: () => T): T {
   try {
     return run();
   } catch (err) {
+    // A locked sidecar is swallowed here, so the central error handlers never see it: report it now.
+    reportIfDatabaseBusy(err, CIRCUIT_BUSY_TIMEOUT_MS);
     circuitLogger.warn({ err, operation }, 'Provider circuit storage failed — treating the provider as available');
     return fallback;
   }

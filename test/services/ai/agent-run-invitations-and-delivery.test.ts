@@ -62,7 +62,7 @@ describe('CalendarBotAgent.run()', () => {
       promptTokens: 110,
       completionTokens: 22,
       termination: 'normal',
-      deliveryOutcome: 'delivered',
+      deliveryOutcome: 'edited',
     });
     expect(result.metrics?.usagePartialRounds).toBe(2);
     // A duration or random request UUID can incidentally contain the actor's digits.
@@ -87,6 +87,8 @@ describe('CalendarBotAgent.run()', () => {
         'usagePartialRounds',
         'termination',
         'deliveryOutcome',
+        'deliveredMessageCount',
+        'deliveredMessageIds',
       ].sort(),
     );
   });

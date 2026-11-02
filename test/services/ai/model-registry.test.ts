@@ -16,6 +16,7 @@ import {
   resolveModelOverride,
   selectReplacementModel,
 } from '../../../src/services/ai/model-registry.ts';
+import { configureTimeoutReporter, TimeoutReporter } from '../../../src/services/incident/timeout-reporter.ts';
 
 /** Fake OpenAI-compatible client exposing only the models listing endpoint. */
 function makeListingClient(ids: string[]) {
@@ -239,6 +240,27 @@ describe('resolveModelOverride', () => {
     expect(resolved).toBeNull();
     expect(list).toHaveBeenCalledTimes(1);
     expect(getModelOverride('hf', 'dead-model')).toBeNull();
+  });
+
+  test('a models listing that times out is reported as a recovered timeout, a plain failure is not', async () => {
+    const alerts: string[] = [];
+    configureTimeoutReporter(new TimeoutReporter((text) => alerts.push(text)));
+    try {
+      const plain = makeFailingListingClient(new Error('models endpoint unreachable'));
+      await resolveModelOverride({ provider: 'hf', client: plain.client, configuredModel: 'dead-model-a' });
+      expect(alerts).toEqual([]);
+
+      const slow = makeFailingListingClient(new OpenAI.APIConnectionTimeoutError());
+      expect(
+        await resolveModelOverride({ provider: 'hf', client: slow.client, configuredModel: 'dead-model-b' }),
+      ).toBeNull();
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]).toContain('Timeout (model_listing)');
+      expect(alerts[0]).toContain('limitMs: 10000');
+      expect(alerts[0]).toContain('unrecovered=0 recovered=1');
+    } finally {
+      configureTimeoutReporter(null);
+    }
   });
 
   test('returns null when the endpoint yields nothing usable, and does not re-probe within the TTL', async () => {

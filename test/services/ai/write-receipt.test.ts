@@ -264,7 +264,7 @@ describe('when the guard fires', () => {
       },
     );
     const plan = receipt(ledger, secretaryContext('ru'));
-    expect(plan).toEqual({ evidence: null, silent: false, validationNotice: null, guarded: false });
+    expect(plan).toEqual({ evidence: null, silent: false, validationNotice: null, guarded: false, interrupted: false });
   });
 
   test('a failure that a later write of the same event fixed is not reported and does not guard', () => {
@@ -443,6 +443,7 @@ describe('an invitation effect without a parsable invitee', () => {
       silent: false,
       validationNotice: null,
       guarded: false,
+      interrupted: false,
     });
   });
 

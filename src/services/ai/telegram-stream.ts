@@ -1,5 +1,6 @@
 import { logger } from '../../utils/logger.ts';
 import { escapeHtml, markdownToHtml, splitMessage } from '../../utils/telegram.ts';
+import { DeliveryLedger, type DeliveryReport } from './delivery-report.ts';
 import type { TelegramSender } from './types.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
@@ -102,6 +103,7 @@ async function withTelegramRateLimitRetry<T>(operation: () => Promise<T>, label:
 
 export class TelegramStreamWriter {
   private messageId: number | null = null;
+  private readonly delivery = new DeliveryLedger();
   private text = '';
   private lastFlushedLength = 0;
   private lastFlushTime = 0;
@@ -450,7 +452,11 @@ export class TelegramStreamWriter {
           () => this.sender.editMessageText(this.chatId, messageId, this.text, 'HTML'),
           'Finalize edit',
         );
+        this.delivery.record('edited', messageId);
       } catch (err) {
+        // "not modified" says the text is already displayed.
+        if (String(err).includes('message is not modified')) this.delivery.record('edited', messageId);
+        else this.delivery.failed();
         aiLogger.error({ err }, 'Finalize edit failed');
       }
     } else if (this.text.trim()) {
@@ -460,7 +466,9 @@ export class TelegramStreamWriter {
           'Finalize send',
         );
         this.messageId = result.message_id;
+        this.delivery.record('sent', result.message_id);
       } catch (err) {
+        this.delivery.failed();
         aiLogger.error({ err }, 'Finalize send failed');
       }
     }
@@ -470,13 +478,19 @@ export class TelegramStreamWriter {
   private async deliverOverflowChunks(chunks: readonly string[]): Promise<void> {
     for (let i = 1; i < chunks.length; i++) {
       try {
-        await withTelegramRateLimitRetry(
+        const result = await withTelegramRateLimitRetry(
           () => this.sender.sendMessage(this.chatId, chunks[i]!, 'HTML'),
           'Finalize overflow send',
         );
+        this.delivery.record('sent', result.message_id);
       } catch (err) {
         aiLogger.warn({ err }, 'Failed to send overflow chunk with HTML, retrying plain text');
-        await this.sender.sendMessage(this.chatId, chunks[i]!).catch(() => {});
+        try {
+          const result = await this.sender.sendMessage(this.chatId, chunks[i]!);
+          this.delivery.record('sent', result.message_id);
+        } catch {
+          this.delivery.failed();
+        }
       }
     }
   }
@@ -490,8 +504,10 @@ export class TelegramStreamWriter {
     try {
       if (this.messageId) {
         await this.sender.editMessageText(this.chatId, this.messageId, errorText);
+        this.delivery.recordFallback(this.messageId);
       } else {
-        await this.sender.sendMessage(this.chatId, errorText);
+        const result = await this.sender.sendMessage(this.chatId, errorText);
+        this.delivery.recordFallback(result.message_id);
       }
     } catch (err) {
       const errStr = String(err);
@@ -499,7 +515,12 @@ export class TelegramStreamWriter {
       if (errStr.includes('message is not modified')) return;
       aiLogger.error({ err }, 'Error fallback delivery also failed');
       // Last attempt: plain send (works whether messageId is set or not)
-      await this.sender.sendMessage(this.chatId, errorText).catch(() => {});
+      try {
+        const result = await this.sender.sendMessage(this.chatId, errorText);
+        this.delivery.recordFallback(result.message_id);
+      } catch {
+        this.delivery.failed();
+      }
     }
   }
 
@@ -562,5 +583,10 @@ export class TelegramStreamWriter {
 
   getMessageId(): number | null {
     return this.messageId;
+  }
+
+  /** What the final delivery actually did, from the Telegram API results (ids and counts only). */
+  deliveryReport(): DeliveryReport {
+    return this.delivery.report();
   }
 }

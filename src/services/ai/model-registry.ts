@@ -11,10 +11,12 @@
 
 import OpenAI from 'openai';
 import { logger } from '../../utils/logger.ts';
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 import { withClaudeCredentials } from './claude-client-pool.ts';
 import { CredentialsCoolingDownError } from './claude-credential-pool.ts';
 import { excludedModelReason } from './model-presets.ts';
 import type { ProviderId } from './provider-ids.ts';
+import { classifyProviderError } from './usage-classification.ts';
 
 const registryLogger = logger.child({ module: 'ai-model-registry' });
 
@@ -277,6 +279,7 @@ async function listLiveModels(
 ): Promise<string[] | null> {
   const timeoutMs = Math.floor(Math.min(PROBE_TIMEOUT_MS, deadlineAt - performance.now()));
   if (timeoutMs <= 0) throw new DOMException('Catalog probe timed out', 'TimeoutError');
+  const startedAt = performance.now();
   try {
     const page =
       client instanceof OpenAI
@@ -295,6 +298,15 @@ async function listLiveModels(
       err instanceof OpenAI.APIUserAbortError
     )
       throw err;
+    // The caller falls back to the configured model, so the user still gets an answer.
+    if (classifyProviderError(err, false).errorClass === 'timeout') {
+      reportTimeout({
+        kind: 'model_listing',
+        elapsedMs: performance.now() - startedAt,
+        limitMs: PROBE_TIMEOUT_MS,
+        recovered: true,
+      });
+    }
     registryLogger.warn({ err }, 'Could not list live models from provider');
     return null;
   }

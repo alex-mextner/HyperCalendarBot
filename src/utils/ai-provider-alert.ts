@@ -68,6 +68,7 @@
 // restart discards anyway.
 
 import OpenAI from 'openai';
+import { reportTimeout } from '../services/incident/timeout-reporter.ts';
 import { logger } from './logger.ts';
 
 const alertLogger = logger.child({ module: 'ai-provider-alert' });
@@ -253,6 +254,8 @@ function telegramSender(botToken: string, adminId: number): (html: string) => vo
   };
 }
 
+const ADMIN_PING_TIMEOUT_MS = 10_000;
+
 /** Call once at startup. Without it every report is a no-op (dev/test without an admin). */
 export function initProviderAlerts(config: AlertDeps): void {
   circuitSender = config.send
@@ -272,16 +275,25 @@ export function initProviderAlerts(config: AlertDeps): void {
     : config.adminId === undefined
       ? null
       : async (html) => {
+          const startedAt = Date.now();
           try {
             const response = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              signal: AbortSignal.timeout(10000),
+              signal: AbortSignal.timeout(ADMIN_PING_TIMEOUT_MS),
               body: JSON.stringify({ chat_id: config.adminId, text: html, parse_mode: 'HTML' }),
             });
             const body: unknown = await response.json();
             return response.ok && body !== null && typeof body === 'object' && Reflect.get(body, 'ok') === true;
-          } catch {
+          } catch (err) {
+            if (err instanceof Error && err.name === 'TimeoutError') {
+              reportTimeout({
+                kind: 'http',
+                elapsedMs: Date.now() - startedAt,
+                limitMs: ADMIN_PING_TIMEOUT_MS,
+                recovered: false,
+              });
+            }
             return false;
           }
         };

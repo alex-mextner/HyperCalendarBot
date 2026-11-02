@@ -23,6 +23,7 @@ import type { AgentContext, TelegramSender } from '../../../src/services/ai/type
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import { configureTimeoutReporter, TimeoutReporter } from '../../../src/services/incident/timeout-reporter.ts';
 
 const USER_ID = 716_000_001;
 const REQUEST = 'Завтра в 20:30 отвезти переноску';
@@ -319,7 +320,9 @@ describe('agent drain on shutdown', () => {
     expect(enqueued).toEqual([REQUEST]);
   });
 
-  test('a run still stuck at the deadline is left behind and the drain returns', async () => {
+  test('a run still stuck at the deadline is left behind, the drain returns and the owner is alerted', async () => {
+    const alerts: string[] = [];
+    configureTimeoutReporter(new TimeoutReporter((text) => alerts.push(text)));
     // The retry store never answers (Redis hung): the turn cannot finish its failure path.
     ctx.retryEnqueue = () => Promise.withResolvers<boolean>().promise;
     const probe = makeSender();
@@ -331,10 +334,15 @@ describe('agent drain on shutdown', () => {
       settled = true;
     });
     await secondRoundStarted;
-    // A real deadline on purpose: this exercises drain's own timer.
-    await agent.drain(20);
+    try {
+      // A real deadline on purpose: this exercises drain's own timer.
+      await agent.drain(20);
+    } finally {
+      configureTimeoutReporter(null);
+    }
 
     expect(settled).toBe(false);
+    expect(alerts.filter((text) => text.includes('Timeout (agent_drain)'))).toHaveLength(1);
   });
 
   test('a turn whose retry store hangs still tells its user inside the production drain window', async () => {

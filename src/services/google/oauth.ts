@@ -6,6 +6,7 @@ import type { GoogleSyncRepository } from '../../database/repositories/google-sy
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import { decrypt } from '../../utils/crypto.ts';
 import { syncLogger } from '../../utils/logger.ts';
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 
 export class GoogleNotConnectedError extends Error {
   constructor(public userId: number) {
@@ -36,6 +37,10 @@ export interface RedisLockClient {
 // Token refresh is guarded by a 5-minute window: if the stored token expires
 // within this threshold we treat it as expired and refresh proactively.
 const REFRESH_THRESHOLD_MS = 5 * 60_000;
+
+/** How long a process waits for another one's token refresh, and how often it looks. */
+const LOCK_WAIT_MS = 10_000;
+const LOCK_POLL_MS = 500;
 
 export class GoogleOAuthService {
   constructor(
@@ -182,11 +187,14 @@ export class GoogleOAuthService {
 
   private async waitForLockRelease(redis: RedisLockClient, lockKey: string): Promise<void> {
     let waited = 0;
-    while (waited < 10_000) {
-      await Bun.sleep(500);
-      waited += 500;
-      if (!(await redis.get(lockKey))) break;
+    while (waited < LOCK_WAIT_MS) {
+      await Bun.sleep(LOCK_POLL_MS);
+      waited += LOCK_POLL_MS;
+      if (!(await redis.get(lockKey))) return;
     }
+    // The holder never released the lock: carry on with whatever the database holds. A later Google
+    // call that fails for it fails on its own path, so this counts as absorbed.
+    reportTimeout({ kind: 'google_refresh_lock', elapsedMs: waited, limitMs: LOCK_WAIT_MS, recovered: true });
   }
 
   async revokeToken(refreshToken: string): Promise<void> {

@@ -13,12 +13,14 @@
 // composes live in ./streaming/ (types, errors, stream reading, slots, chains, per-round attempts, attempt
 // failure handling, budget).
 
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 import { handleAttemptFailure } from './streaming/attempt-failure.ts';
 import {
   admitSlot,
   buildRoundChain,
   createRoundState,
   exhaustedRoundError,
+  type RoundState,
   recordDeadlineSkips,
   runAdmittedAttempt,
   selectAttempts,
@@ -97,11 +99,26 @@ export async function aiStreamRound(
     const attempt = admitSlot(state, slot);
     if (!attempt) continue;
     try {
-      return await runAdmittedAttempt(state, attempt, remainingMs);
+      const result = await runAdmittedAttempt(state, attempt, remainingMs);
+      reportProviderTimeouts(state, options.requestId, true);
+      return result;
     } catch (error) {
       handleAttemptFailure(state, attempt, error);
     }
   }
 
+  reportProviderTimeouts(state, options.requestId, false);
   throw exhaustedRoundError(state);
+}
+
+/** A provider attempt that timed out is counted even when the next provider saved the round. */
+function reportProviderTimeouts(state: RoundState, requestId: string | undefined, recovered: boolean): void {
+  if (!state.failures.some((failure) => failure.timedOut)) return;
+  reportTimeout({
+    kind: 'provider',
+    requestId,
+    elapsedMs: performance.now() - state.roundStartedAt,
+    limitMs: state.cap,
+    recovered,
+  });
 }

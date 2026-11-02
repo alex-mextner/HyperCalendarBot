@@ -2,9 +2,15 @@
 // claims the run's tools cannot support. A rejected answer gets one corrective retry with tools,
 // and a retry is never approval — unverified text stays out of delivery and history.
 import { logger } from '../../../utils/logger.ts';
-import { shouldValidateResponse, supplementIsGrounded, validateResponse } from '../response-validator.ts';
+import {
+  shouldValidateResponse,
+  supplementIsGrounded,
+  type ValidationResult,
+  validateResponse,
+} from '../response-validator.ts';
 import { buildUserProfileEvidence } from '../system-prompt.ts';
 import { isSkipText, toolDefinitionsFor } from './round-support.ts';
+import { requestBudgetSpent } from './run-limits.ts';
 import type { TurnEnv, TurnState } from './turn-state.ts';
 import { runRetryAfterRejection, type ValidationRetryOutcome } from './validation-retry.ts';
 
@@ -20,6 +26,29 @@ function supplementIsRejected(env: TurnEnv, state: TurnState, evidence: ProseEvi
   aiLogger.info({ userId: env.ctx.user.telegram_id }, 'Supplement states facts its own reads do not back — dropped');
   state.responseUnverified = true;
   return true;
+}
+
+/**
+ * One validator verdict for `prose`, recorded on the turn. The validator may start while the request
+ * budget has time left, even when little is, and then runs on its own clock; once the budget is
+ * spent it launches nothing and only the deterministic checks can decide.
+ */
+async function judge(
+  env: TurnEnv,
+  state: TurnState,
+  evidence: ProseEvidence,
+  prose: string,
+): Promise<ValidationResult> {
+  const verdict = await validateResponse(
+    { ...evidence, response: prose, userProfile: buildUserProfileEvidence(env.ctx) },
+    env.validatorStream,
+    {
+      canAskModel: !requestBudgetSpent(env.startTime, env.requestTimeoutMs),
+      timeoutMs: env.validationTimeoutMs,
+    },
+  );
+  state.validation = verdict;
+  return verdict;
 }
 
 /**
@@ -40,34 +69,49 @@ async function revalidateRetryAnswer(
     state.responseUnverified = true;
     return;
   }
-  const reValidation = await validateResponse(
-    { ...evidence, response: retryOutcome.lastRoundText, userProfile: buildUserProfileEvidence(ctx) },
-    env.validatorStream,
-  );
-  state.responseUnverified = !reValidation.approved;
-  if (!reValidation.approved) {
+  const reValidation = await judge(env, state, evidence, retryOutcome.lastRoundText);
+  state.responseUnverified = reValidation.verdict !== 'approved';
+  if (reValidation.verdict === 'rejected') {
     aiLogger.warn(
       { userId: ctx.user.telegram_id, reason: reValidation.reason },
       'Retry response rejected by validator — suppressing unverified explanation',
     );
+  } else if (reValidation.verdict === 'unavailable') {
+    aiLogger.warn(
+      { userId: ctx.user.telegram_id, cause: reValidation.cause },
+      'Validator unavailable for the retry response — it stays unverified',
+    );
   }
 }
 
-/** Runs the validator; a rejection triggers the retry and, when it answered in prose, a second look. */
+/**
+ * Runs the validator. A rejection triggers the corrective retry and, when it answered in prose, a
+ * second look. An outage after the run changed the calendar does not: the retry could replay those
+ * writes, and an outage says nothing about whether the answer was wrong.
+ */
 async function validateWithRetry(env: TurnEnv, state: TurnState, evidence: ProseEvidence): Promise<boolean> {
   const { ctx } = env;
-  const validation = await validateResponse(
-    { ...evidence, userProfile: buildUserProfileEvidence(ctx) },
-    env.validatorStream,
-  );
-  if (validation.approved) return false;
+  const validation = await judge(env, state, evidence, evidence.response);
+  if (validation.verdict === 'approved') return false;
 
-  aiLogger.info(
-    { userId: ctx.user.telegram_id, reason: validation.reason },
-    'Response validation REJECTED — retrying with tools',
-  );
   state.responseUnverified = true;
   state.pendingAssistantTurn = null;
+  if (validation.verdict === 'unavailable' && env.ledger.writeOutcomes.mayHaveMutated) {
+    aiLogger.warn(
+      { userId: ctx.user.telegram_id, requestId: env.requestId, cause: validation.cause },
+      'Validator unavailable after calendar writes — no retry; the reply comes from the write receipts',
+    );
+    return true;
+  }
+  aiLogger.info(
+    {
+      userId: ctx.user.telegram_id,
+      ...(validation.verdict === 'rejected' ? { reason: validation.reason } : { cause: validation.cause }),
+    },
+    validation.verdict === 'rejected'
+      ? 'Response validation REJECTED — retrying with tools'
+      : 'Response validator unavailable — retrying with tools',
+  );
   const retryOutcome = await runRetryAfterRejection(env, state.currentMessages, evidence.response);
 
   if (retryOutcome.hitStopLoop) state.termination = retryOutcome.waiting ? 'waiting' : 'stop';

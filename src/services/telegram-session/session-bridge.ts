@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import { open, unlink } from 'node:fs/promises';
 import { z } from 'zod';
 import { logger } from '../../utils/logger.ts';
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 
 const bridgeLogger = logger.child({ module: 'session-bridge' });
 
@@ -10,6 +11,8 @@ const PYTHON_PATH = 'venv/bin/python';
 const CONNECT_SCRIPT = 'scripts/connect-session.py';
 const SEND_SCRIPT = 'scripts/send-as-user.py';
 const SPAWN_TIMEOUT_MS = 60_000;
+/** The whole send_and_sign flow (code request, OTP, optional 2FA) must finish inside this. */
+const AUTH_FLOW_TIMEOUT_MS = 5 * 60 * 1000;
 
 // --- zod codecs: JSON string -> parsed schema (no bare JSON.parse) ---
 
@@ -100,7 +103,16 @@ async function spawnBridge(args: string[], stdinData?: Buffer): Promise<BridgeRe
     stdin: stdinData ?? undefined,
   });
 
-  const timeout = setTimeout(() => proc.kill(), SPAWN_TIMEOUT_MS);
+  const startedAt = performance.now();
+  const timeout = setTimeout(() => {
+    reportTimeout({
+      kind: 'mtproto_bridge',
+      elapsedMs: performance.now() - startedAt,
+      limitMs: SPAWN_TIMEOUT_MS,
+      recovered: false,
+    });
+    proc.kill();
+  }, SPAWN_TIMEOUT_MS);
   try {
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -266,13 +278,18 @@ async function spawnSendAndSign(
     },
   );
 
-  const timeout = setTimeout(
-    () => {
-      proc.kill();
-      liveAuthHandles.delete(userId);
-    },
-    5 * 60 * 1000,
-  ); // 5 min timeout for entire flow
+  const startedAt = performance.now();
+  const timeout = setTimeout(() => {
+    reportTimeout({
+      kind: 'mtproto_bridge',
+      elapsedMs: performance.now() - startedAt,
+      limitMs: AUTH_FLOW_TIMEOUT_MS,
+      // The flow waits for the user to type the login code: expiry means they walked away, nothing failed.
+      recovered: true,
+    });
+    proc.kill();
+    liveAuthHandles.delete(userId);
+  }, AUTH_FLOW_TIMEOUT_MS);
 
   // Read the first line from stdout (phone_code_hash JSON)
   const reader = proc.stdout.getReader();

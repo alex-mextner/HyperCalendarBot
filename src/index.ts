@@ -92,6 +92,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
     {
       debugLogger: ctx.aiDebugLogger,
       summarizer: ctx.historySummarizer,
+      runIncidents: ctx.runIncidents,
       toolSchemaMode: config.AI_TOOL_SCHEMA_MODE,
     },
     {

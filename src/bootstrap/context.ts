@@ -10,9 +10,11 @@
 //    listening when the Google phase fills in its Google fields.
 //  - `botRef` starts with inert placeholders; src/index.ts patches it right after createBot().
 
+import { RunIncidentReporter } from '../services/ai/agent/run-incident.ts';
 import { AiDebugLogger } from '../services/ai/debug-logger.ts';
 import { HistorySummarizer } from '../services/ai/history-summarizer.ts';
 import { aiStreamRound } from '../services/ai/streaming.ts';
+import { configureTimeoutReporter, TimeoutReporter } from '../services/incident/timeout-reporter.ts';
 import { hasChainAnswered, isAiChainDown } from '../utils/ai-provider-alert.ts';
 import type { WebServerDeps } from '../web/server.ts';
 import { createBotRef } from './bot-ref.ts';
@@ -38,6 +40,8 @@ export function createWebServerDeps({ config, db }: CoreServices): WebServerDeps
 
 export function createStartupContext(core: CoreServices): StartupContext {
   const { config, db } = core;
+  // Every timeout the bot hits goes through reportTimeout(); one alert per kind per window reaches the repair flow.
+  configureTimeoutReporter(new TimeoutReporter((text, source) => db.alerts.push(text, source)));
   const summarizerRedis = new Bun.RedisClient(config.REDIS_URL);
   return {
     config,
@@ -50,6 +54,8 @@ export function createStartupContext(core: CoreServices): StartupContext {
     }),
     aiDebugLogger: new AiDebugLogger(!!config.AI_DEBUG_LOGS, 'logs'),
     historySummarizer: new HistorySummarizer(createSummarizerRedis(summarizerRedis), aiStreamRound),
+    // The alert queue crash handlers and failed workers already feed; the watcher launches an investigation from it.
+    runIncidents: new RunIncidentReporter((text, source) => db.alerts.push(text, source)),
     summarizerRedis,
     resources: {},
     speech: {},

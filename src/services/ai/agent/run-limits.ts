@@ -19,6 +19,15 @@ export const RETRY_STORE_TIMEOUT_MS = 1_500;
  */
 export const AGENT_DRAIN_SETTLE_MS = RETRY_STORE_TIMEOUT_MS + 1_000;
 
+/**
+ * How long the response validator may take once it starts. The fast chain asks one provider for at
+ * most 8 s (see round-budget.ts), so 16 s covers a failed first provider and a full second attempt.
+ * The validator runs on its own clock, not on what is left of the request budget: on 2026-11-01 a
+ * validator that started with 2.7 s of the request budget left was cut off by that budget and the
+ * run's good answer was thrown away. The request deadline still decides whether it may start.
+ */
+export const VALIDATION_TIMEOUT_MS = 16_000;
+
 /** True once the overall request budget is spent: no further provider round may start. */
 export function requestBudgetSpent(startedAt: number, timeoutMs: number, now: number = Date.now()): boolean {
   return now - startedAt >= timeoutMs;

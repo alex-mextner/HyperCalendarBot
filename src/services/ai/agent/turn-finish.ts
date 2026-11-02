@@ -11,9 +11,11 @@ import { receiptView } from '../write-receipt.ts';
 import { aiFailureNotices } from './failure-notices.ts';
 import type { MessageParam } from './message-sanitizer.ts';
 import { turnIds } from './queued-turn.ts';
+import { buildReceiptConfirmation } from './receipt-confirmation.ts';
 import { correctUtcClockTimesInReply } from './reply-correction.ts';
 import type { RetryOutcome } from './retry-store.ts';
 import { isSkipText } from './round-support.ts';
+import { anyWriteSucceeded, classifyRunIncident, type RunIncident, tallyTools } from './run-incident.ts';
 import type { AgentRunResult } from './run-types.ts';
 import type { ToolRunLedger } from './tool-round.ts';
 import type { RunFailure, TurnEnv, TurnState } from './turn-state.ts';
@@ -27,6 +29,8 @@ export interface FinishDeps {
   announceFailure: (error: unknown, retry: RetryOutcome) => void;
   /** The model ended the conversation: its debug session is over. */
   endSession: () => void;
+  /** A run that ended badly for the user is reported to the owner's alert queue. */
+  reportIncident: (incident: RunIncident) => void;
 }
 
 /** How the evidence guard decided to close the turn. */
@@ -39,6 +43,8 @@ export interface GuardPlan {
   validationNotice: string | null;
   /** The draft is untrusted and is rebuilt from tool lines and notices only. */
   guarded: boolean;
+  /** `evidence` carries the "request interrupted" line: the run is known to have been cut short. */
+  interrupted: boolean;
 }
 
 /**
@@ -48,28 +54,51 @@ export interface GuardPlan {
 export function planGuard(ctx: AgentContext, state: TurnState, runFailed: boolean, ledger: ToolRunLedger): GuardPlan {
   const { writeOutcomes, toolEvidence } = ledger;
   const { termination, responseUnverified } = state;
-  const evidence = writeOutcomes.finalNotice(
-    receiptView(ctx),
-    (runFailed || responseUnverified) && writeOutcomes.mayHaveMutated,
-  );
+  const view = receiptView(ctx);
+  // A validator outage says nothing about the answer and never justifies "interrupted": when every
+  // write of a finished run landed cleanly, the reply is a receipt built from those results alone.
+  const receipt =
+    state.validation.verdict === 'unavailable' && responseUnverified && !runFailed
+      ? buildReceiptConfirmation(view, toolEvidence, writeOutcomes)
+      : null;
+  const outage = state.validation.verdict === 'unavailable';
+  const interrupted = (runFailed || (responseUnverified && !outage)) && writeOutcomes.mayHaveMutated;
+  const evidence = receipt ?? writeOutcomes.finalNotice(view, interrupted);
+  const silent = guardIsSilent(ctx, termination, writeOutcomes, evidence);
+  const validationNotice =
+    responseUnverified && !silent && !evidence && termination !== 'waiting'
+      ? unverifiedNotice(ctx, state, toolEvidence)
+      : null;
+  const guarded = responseUnverified || evidence !== null || termination === 'waiting' || termination === 'error';
+  return {
+    evidence,
+    silent,
+    validationNotice,
+    guarded,
+    interrupted: receipt === null && evidence !== null && interrupted,
+  };
+}
+
+function guardIsSilent(
+  ctx: AgentContext,
+  termination: TurnState['termination'],
+  writeOutcomes: ToolRunLedger['writeOutcomes'],
+  evidence: string | null,
+): boolean {
   // A supplement is optional text and stays quiet when guarded, unless it may have changed the
   // calendar: then the receipt is its reply, or the user would never learn of the change.
   const supplementQuiet = ctx.supplementMode && !(evidence !== null && writeOutcomes.mayHaveMutated);
-  const silent = Boolean(
+  return Boolean(
     supplementQuiet ||
       ctx.wasExplicitInvocation === false ||
       (termination === 'waiting' && !writeOutcomes.speechQuestion),
   );
-  const needsValidationNotice = responseUnverified && !silent && !evidence && termination !== 'waiting';
-  let validationNotice: string | null = null;
-  if (needsValidationNotice) {
-    validationNotice =
-      state.unresolvedWeekdays.length > 0
-        ? weekdayMismatchNotice(ctx.user.language, state.unresolvedWeekdays)
-        : unverifiedResponseNotice(ctx.user.language, ctx.user.timezone, ctx.isGroup ? [] : toolEvidence);
-  }
-  const guarded = responseUnverified || evidence !== null || termination === 'waiting' || termination === 'error';
-  return { evidence, silent, validationNotice, guarded };
+}
+
+function unverifiedNotice(ctx: AgentContext, state: TurnState, toolEvidence: ToolRunLedger['toolEvidence']): string {
+  return state.unresolvedWeekdays.length > 0
+    ? weekdayMismatchNotice(ctx.user.language, state.unresolvedWeekdays)
+    : unverifiedResponseNotice(ctx.user.language, ctx.user.timezone, ctx.isGroup ? [] : toolEvidence);
 }
 
 /** Rebuilds a guarded draft: the whole request is untrusted, so only notices are written. */
@@ -167,23 +196,26 @@ function persistTurnTail(
 async function discardTurn(env: TurnEnv, state: TurnState, ledger: ToolRunLedger): Promise<AgentRunResult> {
   const deliveryStartedAt = performance.now();
   await env.writer.discard();
-  const metrics = env.requestMetrics.snapshot(state.termination, 'discarded', elapsedMs(deliveryStartedAt));
+  const metrics = env.requestMetrics.snapshot(
+    state.termination,
+    { outcome: 'discarded', messageIds: [] },
+    elapsedMs(deliveryStartedAt),
+  );
   aiLogger.info(metrics, 'AI request metric');
   return { responseText: '', toolCalls: ledger.allToolCalls, toolResults: ledger.allToolResults, metrics };
 }
 
 async function deliverTurn(env: TurnEnv, state: TurnState, ledger: ToolRunLedger): Promise<AgentRunResult> {
   const { ctx, writer } = env;
-  let deliveryOutcome: 'delivered' | 'fallback' = 'delivered';
   const deliveryStartedAt = performance.now();
   try {
     await writer.finalize();
   } catch (finalizeErr) {
-    deliveryOutcome = 'fallback';
     aiLogger.error({ err: finalizeErr, userId: ctx.user.telegram_id }, 'Writer finalize failed');
     await writer.sendErrorFallback(t(ctx.user.language).ai_send_error);
   }
-  const metrics = env.requestMetrics.snapshot(state.termination, deliveryOutcome, elapsedMs(deliveryStartedAt));
+  // The outcome is what the Telegram API answered, not what the bot hoped.
+  const metrics = env.requestMetrics.snapshot(state.termination, writer.deliveryReport(), elapsedMs(deliveryStartedAt));
   aiLogger.info(metrics, 'AI request metric');
 
   const msgId = writer.getMessageId();
@@ -222,6 +254,37 @@ function recordTurnEnd(env: TurnEnv, state: TurnState, deps: FinishDeps): string
   return finalText;
 }
 
+/** Hands a run that ended badly for the user to the incident reporter: identifiers and counts only. */
+function reportIncident(
+  env: TurnEnv,
+  state: TurnState,
+  failure: RunFailure,
+  plan: GuardPlan,
+  result: AgentRunResult,
+  deps: FinishDeps,
+): void {
+  const incidentClass = classifyRunIncident(state, failure, plan, Boolean(env.ctx.supplementMode));
+  const { metrics } = result;
+  if (!incidentClass || !metrics) return;
+  const { allToolCalls, allToolResults } = env.ledger;
+  const { validation } = state;
+  deps.reportIncident({
+    incidentClass,
+    requestId: env.requestId,
+    termination: state.termination,
+    elapsedMs: metrics.elapsedMs,
+    deliveryOutcome: metrics.deliveryOutcome,
+    deliveredMessageIds: metrics.deliveredMessageIds,
+    tools: tallyTools(allToolCalls, allToolResults),
+    writeSucceeded: anyWriteSucceeded(allToolCalls, allToolResults),
+    modelCalls: metrics.modelCalls,
+    modelAttempts: metrics.modelAttempts,
+    providerFallbacks: metrics.providerFallbacks,
+    validator: validation.verdict === 'unavailable' ? `unavailable(${validation.cause})` : validation.verdict,
+    errorName: failure.error instanceof Error ? failure.error.name : null,
+  });
+}
+
 /**
  * Settles a turn whose loop, validation or failure path is over: applies the evidence guard,
  * persists what the user was told, tells them of a failure, and delivers the reply.
@@ -257,6 +320,10 @@ export async function finishTurn(
   // into a bare "..." — that is the silence the user reads as being ignored.
   // A tool that delivered the answer with no text after it is not a bare "..." either.
   const nothingToShow = isSkipText(finalText) || (finalText.length === 0 && (failure.failed || answeredByTool));
-  if ((plan.silent && plan.guarded) || nothingToShow) return discardTurn(env, state, ledger);
-  return deliverTurn(env, state, ledger);
+  const result =
+    (plan.silent && plan.guarded) || nothingToShow
+      ? await discardTurn(env, state, ledger)
+      : await deliverTurn(env, state, ledger);
+  reportIncident(env, state, failure, plan, result, deps);
+  return result;
 }

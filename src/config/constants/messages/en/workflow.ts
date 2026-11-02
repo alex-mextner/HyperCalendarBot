@@ -21,6 +21,14 @@ export const enWorkflow = {
     invitationManual: 'Invitation created; not delivered. Please forward the link sent to your private chat.',
     invitationFailed: 'Invitation created; not delivered.',
     interrupted: 'The request was interrupted. Some actions may already have happened; no automatic replay will run.',
+    receipt: {
+      intro: 'Done in your calendar:',
+      created: (title: string, when: string) => `Created: "${title}" — ${when}`,
+      updated: (title: string, when: string) => `Updated: "${title}" — now ${when}`,
+      deleted: (title: string, when: string) => `Deleted: "${title}" (was ${when})`,
+      allDay: 'all day',
+      outro: 'This comes from the calendar itself. I could not verify my written answer, so I am not sending it.',
+    },
     spokenQuestion: (question: string, options: string) => `${question} Options: ${options}`,
     // The receipt that replaces the model's text when a run had failed, skipped or unconfirmed writes.
     anEvent: 'event',

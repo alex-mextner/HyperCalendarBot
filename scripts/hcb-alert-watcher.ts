@@ -13,6 +13,8 @@
  *      lost. (The DO cron that used to post it was also disabled on 2026-10-10.)
  *   2. drains GET /admin/alerts/next. The pop is destructive on the server, so every alert is
  *      written to the local spool before anything else happens to it.
+ *      Alerts from the source `agent-run-incident` (a user's agent run ended badly) get a class
+ *      checklist in the brief; their text carries run identifiers and counts only, never user data.
  *   3. launches ONE session for everything pending, at most one per HCB_ALERT_RATE_LIMIT_SECONDS,
  *      through the sanctioned rig-detached-omp launcher, plus a tmux window that follows its log.
  *
@@ -356,6 +358,11 @@ async function probeReady(cfg: WatcherConfig, deps: WatcherDeps): Promise<ProbeR
     const message = singleLine(err instanceof Error ? err.message : 'unknown error');
     const code = err instanceof Error && 'code' in err ? String(err.code) : '';
     if (DNS_ERROR_CODES.includes(code)) return { kind: 'unresolvable', detail: message };
+    // A host that is up but starved (swap on a microSD) answers late, which says something different from
+    // a refused connection: name the limit so the journal and the incident text tell them apart.
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      return { kind: 'down', detail: `no answer within ${cfg.probeTimeoutSeconds}s (probe timeout)` };
+    }
     return { kind: 'down', detail: `no response (${message})` };
   }
 }
@@ -461,6 +468,9 @@ function recordFailedProbe(
   const continuing = continuesFailureRun(cfg, state, now);
   const failures = continuing ? state.consecutiveProbeFailures + 1 : 1;
   const first = continuing ? (state.firstProbeFailureAt ?? now) : now;
+  // One failed probe raises nothing, but it must leave its reason in the journal (2026-11-01 17:30 UTC left
+  // only lastProbeFailureAt in state.json). Past the threshold the incident line and the queue polls say it.
+  if (failures <= cfg.downProbes) deps.log(`readiness probe failed (${failures}/${cfg.downProbes}): ${failure}`);
   // After a gap the earlier outage's key means nothing: the bot may have recovered and failed again unseen.
   let incident = continuing ? state.downIncidentKey : null;
   if (failures >= cfg.downProbes && !incident)
@@ -636,6 +646,72 @@ function fence(text: string): string {
   return `<alert-data>\n${escaped}\n</alert-data>`;
 }
 
+/** The `source` of the alert the bot pushes when a user's agent run ends badly (AGENT_RUN_INCIDENT_SOURCE in src/services/ai/agent/run-incident.ts). */
+const AGENT_RUN_INCIDENT_SOURCE = 'agent-run-incident';
+
+/** What each class of run incident asks the investigator to establish beyond the common steps; keyed by the class named on the alert's first line. */
+const INCIDENT_CLASS_BLOCKS: Record<string, string> = {
+  error:
+    "Class: error — the run threw. The cause is the last error-level line (`err`, with its stack) among the run's log lines; the alert's `error:` line names only the class. Check whether a write succeeded before the throw: the user may then have been told it failed after the event was created (unknown completion is not failure).",
+  unverified:
+    'Class: unverified — the answer was not delivered as written. Read `validator:`. `unavailable(timeout|provider_error|aborted|budget_expired)` means the validator could not reach a verdict. A validator outage is not evidence that the answer was wrong; with `writeSucceeded: yes` the bot must have sent a deterministic receipt-only confirmation (exact titles, dates and times from the write receipts) and must not have run the retry-with-tools pass (it could replay writes) nor said "request interrupted" when every tool succeeded: confirm from the log and the chat log what was sent. `rejected` means the validator judged the answer wrong (and a corrective retry may have run): this is NOT an outage; read the validator line and the answer in the run log to decide whether the rejection was right. With `writeSucceeded: no`, find out why nothing was written and what the user was told.',
+  limit:
+    "Class: limit — the rounds or the request budget ran out. Count the run's purpose=agent metric lines and their durations: slow providers or a slow host (long calls, fallbacks) are one cause, a tool loop (the same call repeated, a failing tool the model keeps retrying) is another. Check whether writes happened before the limit and what the user was told.",
+  interrupted:
+    'Class: interrupted — the user was told the request was interrupted. Find what cut the run (deadline, abort, late producer) and whether every tool call had succeeded (`tools:`, the rows): if so the notice was wrong, the answer was lost and the work was not.',
+};
+
+/**
+ * Steps for alerts raised by a user's agent run, or '' when the session has none. Only the alert's
+ * `source` selects it, and the class comes from a closed set matched on the text's first line, so alert
+ * text can neither switch the checklist on nor put its own words into it.
+ */
+function incidentChecklist(items: PendingAlert[]): string {
+  const incidents = items.filter((item) => item.source === AGENT_RUN_INCIDENT_SOURCE);
+  if (incidents.length === 0) return '';
+  const classes = new Set<string>();
+  for (const item of incidents) {
+    const name = /^Agent run incident \(([a-z]+)\)/.exec(item.text)?.[1];
+    if (name && Object.hasOwn(INCIDENT_CLASS_BLOCKS, name)) classes.add(name);
+  }
+  const blocks = [...classes].map((name) => INCIDENT_CLASS_BLOCKS[name]);
+  return `
+## Agent-run incident checklist
+
+These alerts say a user's agent run ended badly (error, unverified answer, spent round limit or an "interrupted" notice) while /health and /ready stayed green. The alert carries the run's requestId and counts only. Your report does the same: requestIds, counts and timings, never user text, event titles, chat ids or user ids. The production host can answer very slowly when it swaps (an ssh command may take a minute): run one command at a time and give it time before calling it hung.
+
+1. Find the runs. For EVERY requestId in the alerts above (one chat can have two overlapping runs, each with its own alert) take the lines from the container log: \`ssh root@odroidn2 "docker logs --since <alert time minus 15 min, as 2026-01-02T03:04:05Z> --until <alert time plus 5 min> hypercal-bot 2>&1 | grep <requestId>"\`. The start line of a run carries its \`chatId\` (and the first characters of the user's message: do not quote them). The per-chat debug log (written only while AI_DEBUG_LOGS is on) has a \`REQUEST ID: <uuid>\` line per run: \`ssh root@odroidn2 "docker exec hypercal-bot grep -rl 'REQUEST ID: <requestId>' /app/logs/chats"\` names the file. A run without that line (debug logging off, or older than the line) is found by time instead: \`docker exec hypercal-bot ls -lt /app/logs/chats/<chatId>\` with the chatId from the start line, then the file that covers the run's start time. The file holds the user's text: do not quote it. Put the lines of all runs on one timeline.
+2. Receipts against rows. For each run list its write tool results (tool, ok or fail, the receipt) and compare them with the database: \`sqlite3 -readonly /opt/hypercal/data/calendar.db "SELECT id, user_id, title, start_at, end_at, created_at, google_event_id FROM events WHERE created_at BETWEEN '<UTC start>' AND '<UTC end>' ORDER BY id"\` (a few minutes around the run, UTC). Look for DUPLICATES: the same title and start_at created twice, typically by two overlapping runs of one chat or by a retry after an interrupted answer. For each copy give its id, created_at and google_event_id, and which run wrote it.
+3. Delivery. Establish what the user actually saw: the \`delivery:\` line, the send lines in the log and the end of the chat log. A tool success is not a delivered message, and a failed render is not a failed write.
+4. Host load and the render queue. \`ssh root@odroidn2 'uptime; cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io; free -m'\` shows the host now; the log around the run shows it then (sync jobs and model calls that take far longer than usual). A host that swaps on its microSD (IO pressure "full", swap in use) slows every call at once. Render jobs (BullMQ queue image-render; completed jobs are removed after 60 s, failed ones kept for an hour): the \`Enqueuing render job\`, \`Render complete\` and \`Image render failed\` lines of the run, and now \`docker exec hypercal-redis redis-cli LLEN bull:image-render:wait\` plus \`ZCARD bull:image-render:prioritized\` (renders are queued with a priority, so a backlog sits in prioritized, not in wait), \`ZCARD bull:image-render:failed\`, \`ZREVRANGE bull:image-render:failed 0 4\` and per id \`HMGET bull:image-render:<id> timestamp processedOn finishedOn failedReason\` (never HGETALL: the job data holds the calendar). A render slower than the run's remaining budget gives a text answer without the image, by design.
+5. Validator and provider timings. In the run's \`AI model call metric\` lines compare purpose=agent, purpose=validator and purpose=retry: totalDurationMs, success, failedProviders, fallbackCount. Say which call used up the request budget (elapsedMs in the alert) and whether the validator failed by its own timeout, a provider error or the budget.
+6. Report only. NEVER replay a write, resend a message, or edit or delete a row (a duplicate too) or anything in Google: unknown completion is not failure (AGENTS.md), and the owner decides every data repair. For a duplicate give the owner both ids and your recommendation.
+7. Fix or ticket. Run \`task find\` with the symptom words (for example "duplicate create_event", "validator timeout", "odroid memory pressure") and reuse a matching ticket, adding your evidence as a comment, before \`task new\`. A pull request body says \`Refs #N\`. A fix follows the Rules below (worktree, regression test with synthetic data only, no merge).
+
+${blocks.join('\n\n')}
+`;
+}
+
+/** The `source` of the aggregated alert src/services/incident/timeout-reporter.ts pushes for every kind of timeout. */
+const TIMEOUT_ALERT_SOURCE = 'timeout';
+
+/**
+ * Steps for aggregated timeout alerts, or '' when the session has none. Only the alert's `source` selects it;
+ * its words never reach this text.
+ */
+function timeoutChecklist(items: PendingAlert[]): string {
+  if (!items.some((item) => item.source === TIMEOUT_ALERT_SOURCE)) return '';
+  return `
+## Timeout checklist
+
+These alerts are aggregated by kind (validator, provider, agent_request, http, render, ...): at most one per kind per 10 minutes, with the \`unrecovered\` and \`recovered\` counts since the last alert. The alert carries kinds, durations and counts only; your report does the same, never user text, titles or ids.
+
+1. UNRECOVERED timeouts are incidents. A user turn, a validator verdict or a delivery was lost to them. Find the run by its requestId in the container log (\`ssh root@odroidn2 "docker logs --since <alert time minus 15 min> --until <alert time plus 5 min> hypercal-bot 2>&1 | grep <requestId>"\`), establish what the user saw and which writes had already landed, and report only: NEVER replay a write.
+2. A burst of RECOVERED timeouts (a provider fallback or a retry absorbed them) is a capacity signal, not an outage. Check host load and swap (\`ssh root@odroidn2 'uptime; cat /proc/pressure/io; free -m'\`) and the provider timings in the \`AI model call metric\` lines; compare with earlier bursts (\`task find\` first, and add your evidence to a matching ticket such as the odroid memory-pressure one).
+3. Say which limit fired (limitMs against elapsedMs) and whether it is still the right limit for this host; propose a change only with the measurements, as a ticket with \`Refs #N\` in the pull request.
+`;
+}
+
 export function buildBrief(args: {
   session: string;
   repoDir: string;
@@ -670,7 +746,7 @@ Repository: ${args.repoDir} (the main checkout; read AGENTS.md, CLAUDE.md and do
 Production: container hypercal-bot on root@odroidn2 (/opt/hypercal), public ${args.baseUrl}; \`${args.baseUrl}/ready\` is the readiness probe.
 Read-only means: curl on /ready, \`ssh root@odroidn2 'docker ps'\` and \`docker logs --since 2h hypercal-bot\` (redact before quoting), \`sqlite3 -readonly\` on /opt/hypercal/data/calendar.db, \`gh run list|view\`, \`gh pr|issue view\`, \`git log|show|diff\`.
 Establish: what is failing and since when; the exact deployed revision against the recent merges (did a deploy cause it — with evidence, not a guess); who is affected; whether it already recovered.
-
+${incidentChecklist(args.items)}${timeoutChecklist(args.items)}
 ## Rules
 
 - Do not restart, stop, roll back, redeploy or remove the container, and change nothing on the server; no database writes; no deleting files, branches or worktrees; no force-push; never print or copy a secret (.env, tokens, keychain values).

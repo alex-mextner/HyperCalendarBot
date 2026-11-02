@@ -14,6 +14,7 @@
 
 import type { EnvConfig } from '../config/env.ts';
 import type { DatabaseService } from '../database/index.ts';
+import type { RunIncidentReporter } from '../services/ai/agent/run-incident.ts';
 import type { AiDebugLogger } from '../services/ai/debug-logger.ts';
 import type { HistorySummarizer } from '../services/ai/history-summarizer.ts';
 import type { NliClassifier } from '../services/nli/nli-classifier.ts';
@@ -63,6 +64,8 @@ export interface StartupContext {
   onWorkerFailed: WorkerFailedFactory;
   aiDebugLogger: AiDebugLogger;
   historySummarizer: HistorySummarizer;
+  /** One rate-limited reporter for every agent (chat and live call): runs that end badly reach the alert queue. */
+  runIncidents: RunIncidentReporter;
   /** Closed by shutdown; owned here because the summarizer outlives every phase. */
   summarizerRedis: { close(): void };
   resources: ShutdownResources;

@@ -2,6 +2,7 @@
 // The durable, provider-generic circuit: classification, the sidecar file, the
 // half-open lease and the one-notice-per-incident contract.
 
+import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +23,7 @@ import {
   settleInconclusive,
   TRANSIENT_OPEN_THRESHOLD,
 } from '../../../src/services/ai/provider-circuit.ts';
+import { configureTimeoutReporter, TimeoutReporter } from '../../../src/services/incident/timeout-reporter.ts';
 import {
   initProviderAlerts,
   reportProviderAnswered,
@@ -190,6 +192,26 @@ describe('sidecar file', () => {
     settleFailure(c, admitProvider(c), CREDITS);
     expect(admitProvider(c).kind).toBe('skip');
   });
+
+  test('a sidecar another connection keeps locked is reported as a db_busy timeout and the provider stays available', () => {
+    const c = ctx('zai');
+    configureProviderCircuit(dbPath);
+    const alerts: string[] = [];
+    configureTimeoutReporter(new TimeoutReporter((text) => alerts.push(text)));
+    const holder = new Database(dbPath);
+    holder.exec('BEGIN IMMEDIATE');
+    try {
+      // The store waits its full busy timeout (3 s) before SQLite refuses the write: a real lock, no stub.
+      settleFailure(c, admitProvider(c), CREDITS);
+    } finally {
+      holder.close();
+      configureTimeoutReporter(null);
+    }
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain('Timeout (db_busy)');
+    expect(alerts[0]).toContain('limitMs: 3000');
+    expect(admitProvider(c).kind).toBe('allow');
+  }, 30_000);
 });
 
 describe('half-open lease', () => {

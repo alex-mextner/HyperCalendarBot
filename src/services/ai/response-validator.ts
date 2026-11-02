@@ -4,7 +4,9 @@
 // After the agent finishes a round without any tool calls, the validator checks
 // whether the response looks hallucinated — e.g. the model claims "you have
 // nothing scheduled today" without actually calling get_events. If the validator
-// rejects, the agent retries with a strong system nudge to USE THE TOOLS.
+// rejects, the agent retries with a strong system nudge to USE THE TOOLS. When the
+// validator cannot reach a verdict at all (timeout, provider error, spent request
+// budget) the result is `unavailable`, which is no rejection: see ValidationResult.
 //
 // An answer whose concrete facts all come from the same run's schedule reads is
 // accepted deterministically; everything else goes to the FAST chain
@@ -16,7 +18,9 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import { t, toLang } from '../../config/constants.ts';
 import { logger } from '../../utils/logger.ts';
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 import { formatEventSummaries } from '../intent/response-formatter.ts';
+import { VALIDATION_TIMEOUT_MS } from './agent/run-limits.ts';
 import { readDayContent } from './day-references.ts';
 import { MEMORY_SECTION_MAX_CHARS } from './prompt-sections.ts';
 import {
@@ -27,12 +31,11 @@ import {
   type ToolEvidence,
   verifiedScheduleEvents,
 } from './response-grounding.ts';
-import { aiStreamRound, ProviderSafetyStopError } from './streaming.ts';
+import { AllProvidersFailedError, aiStreamRound, ProviderSafetyStopError } from './streaming.ts';
 import { isMutationTool } from './tool-executor.ts';
 
 const aiLogger = logger.child({ module: 'response-validator' });
 
-const VALIDATION_TIMEOUT_MS = 15_000;
 const VALIDATION_MAX_TOKENS = 256;
 /** Cap for the untrusted user message inside the validator prompt. */
 const MAX_USER_MESSAGE_CHARS = 500;
@@ -306,7 +309,38 @@ export function supplementIsGrounded(input: ValidationInput): boolean {
   return !hasUnbackedFacts(input);
 }
 
-export type ValidationResult = { approved: true } | { approved: false; reason: string };
+/** Why no verdict was reached: no reason to doubt the answer, and no reason to trust it either. */
+export type ValidatorUnavailableCause = 'timeout' | 'provider_error' | 'aborted' | 'budget_expired';
+
+/**
+ * A rejection says the answer is wrong. An unavailable validator says nothing about the answer, so
+ * callers must not treat it like a rejection: no corrective retry, no claim that the run failed.
+ */
+export type ValidationResult =
+  | { verdict: 'approved' }
+  | { verdict: 'rejected'; reason: string }
+  | { verdict: 'unavailable'; cause: ValidatorUnavailableCause };
+
+export interface ValidateOptions {
+  /**
+   * False once the request's overall deadline has passed: no provider may be launched, so only the
+   * deterministic checks can still decide and anything else is `unavailable`.
+   */
+  canAskModel?: boolean;
+  /** How long the model verdict may take; tests shorten it. */
+  timeoutMs?: number;
+}
+
+/** An aborted or timed-out call names itself; anything else is a provider failure. */
+function unavailableCause(err: unknown): ValidatorUnavailableCause {
+  // The provider chain wraps every attempt's failure: a chain where an attempt hit its deadline is a timeout.
+  if (err instanceof AllProvidersFailedError && err.failures.some((failure) => failure.timedOut)) return 'timeout';
+  if (err instanceof Error || err instanceof DOMException) {
+    if (err.name === 'TimeoutError') return 'timeout';
+    if (err.name === 'AbortError') return 'aborted';
+  }
+  return 'provider_error';
+}
 
 /**
  * Replaces an answer that could not be verified. A rejected explanation is not
@@ -327,21 +361,14 @@ export function unverifiedResponseNotice(language: string, timezone: string, too
   return messages.unverified_answer_with_events(lines.join('\n'));
 }
 
-/**
- * Only an explicit approval verifies a response. A validator outage is not
- * evidence, even when a tool was called. The agent preserves confirmed writes
- * and replaces an unverified explanation without replaying the original request.
- */
-export async function validateResponse(
-  input: ModelValidationInput,
-  streamImpl: StreamImpl = aiStreamRound,
-): Promise<ValidationResult> {
+/** The checks that need no model: a rejection the text itself proves, or null. */
+function deterministicRejection(input: ModelValidationInput): ValidationResult | null {
   if (
     CALENDAR_WRITE_REQUEST_PATTERNS.some((pattern) => pattern.test(input.userMessage)) &&
     CALENDAR_WRITE_REFUSAL_PATTERNS.some((pattern) => pattern.test(input.response))
   ) {
     return {
-      approved: false,
+      verdict: 'rejected',
       reason: 'Refused an ordinary calendar write because of user-provided content',
     };
   }
@@ -352,14 +379,27 @@ export async function validateResponse(
   const echoesTheUser = input.tools.length === 0 && claimsCompleteOrEmptySchedule(input.userMessage);
   if (!hasSuccessfulScheduleRead(input.tools) && !echoesTheUser && claimsCompleteOrEmptySchedule(input.response)) {
     return {
-      approved: false,
+      verdict: 'rejected',
       reason: 'Claimed the complete/empty schedule without a successful schedule read',
     };
   }
+  return null;
+}
+
+export async function validateResponse(
+  input: ModelValidationInput,
+  streamImpl: StreamImpl = aiStreamRound,
+  options: ValidateOptions = {},
+): Promise<ValidationResult> {
+  const { canAskModel = true, timeoutMs = VALIDATION_TIMEOUT_MS } = options;
+  const rejection = deterministicRejection(input);
+  if (rejection) return rejection;
 
   // One clock read, so every check reads "today" as the same day.
   const now = new Date();
-  if (isGroundedInRun(input, now)) return { approved: true };
+  if (isGroundedInRun(input, now)) return { verdict: 'approved' };
+  // Every check above is local and needs no time; only the model verdict does.
+  if (!canAskModel) return { verdict: 'unavailable', cause: 'budget_expired' };
 
   const toolCallsSummary =
     input.tools.length > 0 ? input.tools.map((tool) => tool.name).join(', ') : '(none — no tools were called)';
@@ -389,6 +429,7 @@ export async function validateResponse(
     '</assistant_response>',
   ].join('\n');
 
+  const startedAt = Date.now();
   try {
     const result = await streamImpl({
       messages: [
@@ -397,19 +438,22 @@ export async function validateResponse(
       ],
       maxTokens: VALIDATION_MAX_TOKENS,
       fast: true,
-      signal: AbortSignal.timeout(VALIDATION_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     const text = result.text.trim();
     aiLogger.info({ result: text, providerUsed: result.providerUsed }, 'Response validation result');
 
-    if (text.toUpperCase() === 'APPROVE') return { approved: true };
+    if (text.toUpperCase() === 'APPROVE') return { verdict: 'approved' };
 
     const reason = text.replace(/^REJECT:\s*/i, '').trim() || 'Validation failed';
-    return { approved: false, reason };
+    return { verdict: 'rejected', reason };
   } catch (err) {
     if (err instanceof ProviderSafetyStopError) throw err;
-    aiLogger.error({ err }, 'Response validation failed');
-    return { approved: false, reason: 'Validator unavailable — response could not be verified' };
+    const cause = unavailableCause(err);
+    aiLogger.error({ err, cause }, 'Response validation unavailable — no verdict reached');
+    if (cause === 'timeout')
+      reportTimeout({ kind: 'validator', elapsedMs: Date.now() - startedAt, limitMs: timeoutMs, recovered: false });
+    return { verdict: 'unavailable', cause };
   }
 }

@@ -1,6 +1,7 @@
 // src/services/nli/nli-classifier.ts
 import { z } from 'zod';
 import { cmdLogger } from '../../utils/logger.ts';
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 
 // HuggingFace retired the `api-inference.huggingface.co` host — it no longer
 // resolves in DNS. Requests failed instantly and, because this classifier fails
@@ -33,7 +34,11 @@ export class NliClassifier {
   async isCalendarRelated(text: string): Promise<boolean> {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const startedAt = Date.now();
+      const timeout = setTimeout(() => {
+        reportTimeout({ kind: 'nli', elapsedMs: Date.now() - startedAt, limitMs: REQUEST_TIMEOUT_MS, recovered: true });
+        controller.abort();
+      }, REQUEST_TIMEOUT_MS);
 
       const response = await fetch(HF_API_URL, {
         method: 'POST',

@@ -1,5 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright';
+import { reportTimeout } from '../services/incident/timeout-reporter.ts';
 import { imageLogger } from '../utils/logger.ts';
 
 interface PoolOptions {
@@ -9,6 +10,12 @@ interface PoolOptions {
   maxReinitAttempts?: number;
   /** Instance-scoped launch seam; tests must not replace the global Playwright module. */
   launchBrowser?: () => Promise<Browser>;
+}
+
+/** When acquire() gives up, and the limit it was given (kept for the timeout report). */
+interface AcquireDeadline {
+  at: number;
+  limitMs: number;
 }
 
 export class PlaywrightPool {
@@ -120,6 +127,16 @@ export class PlaywrightPool {
     if (this.dead) throw new Error('PlaywrightPool is permanently disabled after repeated init failures');
   }
 
+  /** Nothing recovers an acquire that gave up: the caller gets the error and the render fails. */
+  private reportAcquireTimeout(deadline: AcquireDeadline): void {
+    reportTimeout({
+      kind: 'playwright_acquire',
+      elapsedMs: performance.now() - (deadline.at - deadline.limitMs),
+      limitMs: deadline.limitMs,
+      recovered: false,
+    });
+  }
+
   /** Creates a page and leases it, discarding it if the pool stopped or switched browsers meanwhile. */
   private async leaseNewPage(): Promise<Page> {
     const { page, browser } = await this.createPage();
@@ -146,7 +163,7 @@ export class PlaywrightPool {
   private shouldRetryAfterGenerationLoss(
     requestedBrowser: Browser | null,
     error: unknown,
-    deadline: number,
+    deadline: AcquireDeadline,
     recoveries: { count: number },
   ): boolean {
     if (!requestedBrowser || (this.browser === requestedBrowser && requestedBrowser.isConnected())) return false;
@@ -154,13 +171,15 @@ export class PlaywrightPool {
       throw new Error('acquire failed: browser recovery limit reached', { cause: error });
     }
     if (this.browser === requestedBrowser) this.handleBrowserDisconnect(requestedBrowser);
-    if (performance.now() >= deadline)
+    if (performance.now() >= deadline.at) {
+      this.reportAcquireTimeout(deadline);
       throw new Error('acquire timeout: browser recovery did not complete', { cause: error });
+    }
     return true;
   }
 
   /** Leases a freshly created page, or returns undefined when the browser generation was lost and acquire should retry. */
-  private async acquireNewPage(deadline: number, recoveries: { count: number }): Promise<Page | undefined> {
+  private async acquireNewPage(deadline: AcquireDeadline, recoveries: { count: number }): Promise<Page | undefined> {
     const requestedBrowser = this.browser;
     try {
       return await this.leaseNewPage();
@@ -175,7 +194,7 @@ export class PlaywrightPool {
   async acquire(timeoutMs = 10_000): Promise<Page> {
     this.assertRunning();
 
-    const deadline = performance.now() + timeoutMs;
+    const deadline: AcquireDeadline = { at: performance.now() + timeoutMs, limitMs: timeoutMs };
     const recoveries = { count: 0 };
 
     while (true) {
@@ -202,8 +221,9 @@ export class PlaywrightPool {
       }
 
       // Wait or timeout
-      const remaining = deadline - performance.now();
+      const remaining = deadline.at - performance.now();
       if (remaining <= 0) {
+        this.reportAcquireTimeout(deadline);
         throw new Error('acquire timeout: no page available within time limit');
       }
 

@@ -4,6 +4,7 @@ import type { GoogleSyncRepository } from '../../../src/database/repositories/go
 import type { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import type { GoogleSyncState, User } from '../../../src/database/types.ts';
 import { GoogleOAuthService, type RedisLockClient } from '../../../src/services/google/oauth.ts';
+import { configureTimeoutReporter, TimeoutReporter } from '../../../src/services/incident/timeout-reporter.ts';
 import { encrypt } from '../../../src/utils/crypto.ts';
 import { STORED_AT, userRow } from '../ai/context-fixtures.ts';
 import { partialOf } from '../ai/partial-stubs.ts';
@@ -206,5 +207,25 @@ describe('GoogleOAuthService.getAuthClient', () => {
     expect(redis.get).toHaveBeenCalledTimes(2);
     expect(client.credentials.access_token).toBe('fresh');
     expect(client.credentials.refresh_token).toBe('test-refresh-token');
+  });
+
+  test('lock not acquired and never released: carries on with the stored state and reports one recovered timeout', async () => {
+    const syncRepo = makeSyncRepo(syncStateRow({ access_token: 'stored', expires_at: PAST_EXPIRES }));
+    const sleep = spyOn(Bun, 'sleep').mockResolvedValue(undefined);
+    const redis = makeRedis(null);
+    redis.get.mockReturnValue(Promise.resolve('held'));
+    const alerts: string[] = [];
+    configureTimeoutReporter(new TimeoutReporter((text) => alerts.push(text)));
+    try {
+      const client = await makeService(VALID_USER, syncRepo, redis).getAuthClient(42);
+      expect(client.credentials.access_token).toBe('stored');
+    } finally {
+      configureTimeoutReporter(null);
+    }
+    expect(sleep).toHaveBeenCalledTimes(20);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain('Timeout (google_refresh_lock)');
+    expect(alerts[0]).toContain('limitMs: 10000');
+    expect(alerts[0]).toContain('unrecovered=0 recovered=1');
   });
 });

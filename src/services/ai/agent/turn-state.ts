@@ -2,6 +2,7 @@
 // final-response validation, and the delivery that closes the turn.
 import type { WeekdayDateMismatch } from '../day-references.ts';
 import type { AgentTermination } from '../request-metrics.ts';
+import type { ValidationResult } from '../response-validator.ts';
 import type { aiStreamRound } from '../streaming.ts';
 import type { MessageParam } from './message-sanitizer.ts';
 import type { RetryOutcome } from './retry-store.ts';
@@ -25,6 +26,8 @@ export interface TurnState {
   unresolvedWeekdays: WeekdayDateMismatch[];
   /** Stays set until a validation retry produces an explicitly approved answer. */
   responseUnverified: boolean;
+  /** The last verdict the response validator reached, `not_run` when no check applied to this turn. */
+  validation: ValidationResult | { verdict: 'not_run' };
   /** Assistant prose held back until the final guard can reconcile it with execution evidence. */
   pendingHistory: MessageParam[];
 }
@@ -38,6 +41,7 @@ export function createTurnState(): TurnState {
     weekdaysCorrected: false,
     unresolvedWeekdays: [],
     responseUnverified: false,
+    validation: { verdict: 'not_run' },
     pendingHistory: [],
   };
 }
@@ -54,4 +58,6 @@ export interface TurnEnv extends ValidationRetryEnv {
   requestSignal: AbortSignal;
   agentStream: typeof aiStreamRound;
   validatorStream: typeof aiStreamRound;
+  /** How long a model verdict may take once the validator starts. */
+  validationTimeoutMs: number;
 }
