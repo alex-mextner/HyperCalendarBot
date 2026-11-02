@@ -329,7 +329,12 @@ describe('ChatRunGate', () => {
 
     test('a run whose place expired still owns its message and is placed behind the runs in between', async () => {
       const time = new ManualTime();
-      const expiring = new ChatRunGate({ leaseMs: LEASE_MS, reservationMs: 1000, now: time.now, schedule: time.schedule });
+      const expiring = new ChatRunGate({
+        leaseMs: LEASE_MS,
+        reservationMs: 1000,
+        now: time.now,
+        schedule: time.schedule,
+      });
       const reservation = expiring.reserve(1, 10);
       time.advance(1000);
       const slot = await expiring.run(1, { reservation }, async (s) => s);

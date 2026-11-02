@@ -456,7 +456,9 @@ function respondWithText(
   if (writeReports.some((report) => 'existing' in report)) {
     const { timezone, language } = env.userCtx;
     const lines = writeReports.map((report) =>
-      'existing' in report ? renderToolAnswer(report.existing, { now: new Date(), timezone, language }).text : report.text,
+      'existing' in report
+        ? renderToolAnswer(report.existing, { now: new Date(), timezone, language }).text
+        : report.text,
     );
     return { success: true, response: lines.join('\n'), mentionedEventId };
   }
@@ -619,8 +621,7 @@ async function runLevel2Step(
   if (step.abstain === true) return { success: false, errorCode: 'ABSTAIN' };
 
   // Respond with text and optionally stop
-  if (step.respond !== undefined)
-    return respondWithText(step.respond, env, state.mentionedEventId, state.writeReports);
+  if (step.respond !== undefined) return respondWithText(step.respond, env, state.mentionedEventId, state.writeReports);
 
   // No call — nothing to execute in this step
   if (step.call === undefined) return null;
