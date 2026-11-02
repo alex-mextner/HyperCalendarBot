@@ -4,6 +4,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { t } from '../../../../src/config/constants.ts';
+import { CalendarProposalRepository } from '../../../../src/database/repositories/calendar-proposal.repository.ts';
 import { ContactRepository } from '../../../../src/database/repositories/contact.repository.ts';
 import { SecretaryRepository } from '../../../../src/database/repositories/secretary.repository.ts';
 import type { SecretaryPermission, SecretaryStatus } from '../../../../src/database/types.ts';
@@ -57,6 +58,7 @@ function recordingSender(log: DeliveryLog, botReachable: boolean): TelegramSende
 describe('send_invitation on behalf of the calendar owner (secretary)', () => {
   let fx: SharingFixture;
   let secretaryRepo: SecretaryRepository;
+  let calendarProposalRepo: CalendarProposalRepository;
   let contactRepo: ContactRepository;
   let log: DeliveryLog;
 
@@ -74,7 +76,7 @@ describe('send_invitation on behalf of the calendar owner (secretary)', () => {
       chatId: callerId,
       messageText: INCIDENT_MESSAGE,
       contactRepo,
-      secretary: { secretaryRepo, secretaryForLine: undefined, calendarProposalRepo: undefined as never },
+      secretary: { secretaryRepo, secretaryForLine: undefined, calendarProposalRepo },
       sender: recordingSender(log, true),
       deepLinkService: fx.deepLinkService,
       botUsername: 'TestBot',
@@ -97,6 +99,7 @@ describe('send_invitation on behalf of the calendar owner (secretary)', () => {
     fx = createSharingFixture();
     log = { invitations: [], messages: [], connectedSessionSends: 0 };
     secretaryRepo = new SecretaryRepository(fx.db);
+    calendarProposalRepo = new CalendarProposalRepository(fx.db);
     contactRepo = new ContactRepository(fx.db);
     fx.userRepo.create({ telegram_id: SECRETARY_ID, username: 'requester_a', first_name: 'Kim', language: 'ru' });
     fx.userRepo.create({ telegram_id: OWNER_ID, first_name: 'Olga', language: 'ru' });
@@ -533,7 +536,7 @@ describe('send_invitation on behalf of the calendar owner (secretary)', () => {
       secretary: {
         secretaryRepo,
         secretaryForLine: `User ${OWNER_ID} (read+write)`,
-        calendarProposalRepo: undefined as never,
+        calendarProposalRepo,
       },
     });
     const prompt = buildSystemPrompt(ctx);

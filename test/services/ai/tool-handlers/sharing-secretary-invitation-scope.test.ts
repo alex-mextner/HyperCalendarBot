@@ -3,6 +3,7 @@
 // details as they are when the invitation is created, not as they were before the recipient lookup
 // awaited. Ids are synthetic.
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { CalendarProposalRepository } from '../../../../src/database/repositories/calendar-proposal.repository.ts';
 import { ContactRepository } from '../../../../src/database/repositories/contact.repository.ts';
 import { SecretaryRepository } from '../../../../src/database/repositories/secretary.repository.ts';
 import type { SecretaryPermission, SecretaryStatus } from '../../../../src/database/types.ts';
@@ -30,6 +31,7 @@ interface Delivery {
 describe('secretary invitation tools: event scope and access timing', () => {
   let fx: SharingFixture;
   let secretaryRepo: SecretaryRepository;
+  let calendarProposalRepo: CalendarProposalRepository;
   let contactRepo: ContactRepository;
   let deliveries: Delivery[];
 
@@ -55,7 +57,7 @@ describe('secretary invitation tools: event scope and access timing', () => {
       chatId: callerId,
       messageText: 'invite @anton_a',
       contactRepo,
-      secretary: { secretaryRepo, secretaryForLine: undefined, calendarProposalRepo: undefined as never },
+      secretary: { secretaryRepo, secretaryForLine: undefined, calendarProposalRepo },
       sender,
       deepLinkService: fx.deepLinkService,
       botUsername: 'TestBot',
@@ -90,6 +92,7 @@ describe('secretary invitation tools: event scope and access timing', () => {
     fx = createSharingFixture();
     deliveries = [];
     secretaryRepo = new SecretaryRepository(fx.db);
+    calendarProposalRepo = new CalendarProposalRepository(fx.db);
     contactRepo = new ContactRepository(fx.db);
     fx.userRepo.create({ telegram_id: SECRETARY_ID, username: 'requester_a', first_name: 'Kim', language: 'ru' });
     fx.userRepo.create({ telegram_id: OWNER_ID, first_name: 'Olga', language: 'ru' });

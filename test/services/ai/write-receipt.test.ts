@@ -1552,16 +1552,25 @@ describe('an update rewrites what the earlier create now stands for', () => {
     expect(text).not.toContain('A repeat of the creation');
   });
 
-  test.each([
-    ['end_at', { end_at: null }, call],
-    ['location', { location: null }, { ...call, location: 'Office' }],
-    ['description', { description: null }, { ...call, description: 'Agenda' }],
-  ])('clearing %s makes the event match a create that never had it', (_field, clear, original) => {
+  type ClearableField = 'end_at' | 'location' | 'description';
+  interface CreateInput {
+    title: string;
+    start_at: string;
+    end_at?: string;
+    location?: string;
+    description?: string;
+  }
+
+  test.each<[ClearableField, CreateInput]>([
+    ['end_at', call],
+    ['location', { ...call, location: 'Office' }],
+    ['description', { ...call, description: 'Agenda' }],
+  ])('clearing %s makes the event match a create that never had it', (field, original) => {
     const ledger = new WriteOutcomes(WRITE_TOOLS);
     ledger.record('create_event', original, okCall);
-    ledger.record('update_event', { event_id: 601, ...clear }, okCall);
-    const bare: Record<string, unknown> = { ...original };
-    for (const field of Object.keys(clear)) delete bare[field];
+    ledger.record('update_event', { event_id: 601, [field]: null }, okCall);
+    const bare: CreateInput = { ...original };
+    delete bare[field];
     ledger.record('create_event', bare, rejectedCreate);
     expect(ledger.finalNotice(receiptViewFor('en'))).toBeNull();
   });

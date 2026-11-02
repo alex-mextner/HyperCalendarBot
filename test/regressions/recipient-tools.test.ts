@@ -33,6 +33,7 @@ import { EventService } from '../../src/services/event/event-service.ts';
 import { GroupMemberService } from '../../src/services/group/member-service.ts';
 import { DeepLinkService } from '../../src/services/sharing/deep-link-service.ts';
 import { InvitationService } from '../../src/services/sharing/invitation-service.ts';
+import { makeCallbackHandler, makeCallbackTap } from '../helpers/callback-handler.ts';
 import { disabledServiceTier } from '../helpers/service-tier.ts';
 
 function makeCtx(db: Database, overrides: Partial<AgentContext> = {}): AgentContext {
@@ -302,16 +303,10 @@ describe('recipient and contact tool boundaries', () => {
         conversationLogger: new ConversationLogger(new ChatHistoryRepository(db)),
       }),
     };
-    const handler = createCallbackHandler(ctx.eventService, {} as never, {} as never, {} as never, {
-      agentContinuation,
-    });
-    await handler({
-      data: `ric:${token}`,
-      dbUser: ctx.user,
-      from: { id: 10 },
-      chatId: 10,
-      answer: async () => {},
-    } as never);
+    const handler = makeCallbackHandler({ agentContinuation }, ctx.eventService);
+    const { ctx: tap } = makeCallbackTap(`ric:${token}`, ctx.user);
+    Object.assign(tap, { from: { id: 10 }, chatId: 10 });
+    await handler(tap);
     expect(texts).toHaveLength(1);
     expect(texts[0]).toContain(expected);
   });
