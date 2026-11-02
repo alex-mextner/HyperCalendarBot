@@ -498,6 +498,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         conversationLogger,
         actionLog: db.actionLog,
         chatHistoryIds,
+        reserveChatTurn: (chatId, rowId) => agent.reserveChatTurn(chatId, rowId),
         isConnectWizardInput: connectWizardGuard.isConnectWizardInput,
       }),
     )

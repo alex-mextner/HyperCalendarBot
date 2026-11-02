@@ -172,6 +172,14 @@ export interface AgentContext {
   messageText: string;
   /** chat_history row ID of the incoming user message. Used to link action log → conversation. */
   chatHistoryId?: number;
+  /** Telegram update_id of the message this run answers; only for logs (a redelivery repeats it). */
+  updateId?: number;
+  /**
+   * chat_history rows of the turns queued behind this run in its chat, read when the history is loaded (and by
+   * the history tool). They arrived after this run's message, so the model reads the conversation without
+   * them; their own runs answer them.
+   */
+  deferredTurnRowIds?: () => ReadonlySet<number>;
   isGroup: boolean;
   eventService: EventService;
   holidayService: HolidayService;
@@ -363,6 +371,12 @@ export interface ToolResult {
     | { kind: 'invitation'; delivery: 'delivered' | 'manual_forward' | 'failed' }
     | { kind: 'attendance_declined' }
     | { kind: 'event_deleted' };
+  /**
+   * A create that wrote nothing because the calendar already held that event (a repeat of the same
+   * request). Distinct from `mutationState`: the call succeeded, but no new event exists, so a receipt or
+   * an intent answer must say "already in the calendar", not "created".
+   */
+  alreadyExists?: { entity: 'event'; id: number };
 
   /**
    * Agent-only instruction appended to the tool result seen by the AI.

@@ -57,6 +57,8 @@ export type PipelineLayer = (
     feedbackContext?: FeedbackThreadContext;
     groupContext?: GroupContext;
     incomingMessageId?: number;
+    /** The chat_history row saved for this very message (see DerivedProps.chatHistoryId). */
+    chatHistoryId?: number;
     supplementMode?: boolean;
     supplementAutoResponse?: string;
     /** True when the user explicitly addressed the bot (DM, @mention, "Бот,", reply).

@@ -157,6 +157,9 @@ export const enAiTools = {
       noUpcomingEvents: 'No upcoming events.',
       upcomingEvents: (count: number, lines: string) => `Next ${count} events:\n${lines}`,
       eventCreated: (parts: string) => `Event created: ${parts}`,
+      eventAlreadyExists: (parts: string) => `Event already exists (saved moments ago, not created again): ${parts}`,
+      eventSameDay: (title: string, id: number, when: string) =>
+        `“${title}” (id: ${id}) is already in the calendar on that day (${when}), so nothing was created.`,
       eventUpdated: (parts: string) => `Event updated: ${parts}`,
       eventDeleted: (title: string, id: number) => `Event "${title}" (id: ${id}) deleted.`,
       eventDeclined: (id: number) =>

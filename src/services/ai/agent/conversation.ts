@@ -7,13 +7,20 @@ import type { AgentContext } from '../types.ts';
 import { parseHistoryRow, tagSender } from './history-rows.ts';
 import { isToolMessage, type MessageParam } from './message-sanitizer.ts';
 
-/** In a group the conversation is the group's own, whoever sent each row. */
+/**
+ * The rows the model reads. In a group the conversation is the group's own, whoever sent each row.
+ * Turns queued behind this run in its chat (ctx.deferredTurnRowIds) are left out by the query itself, before
+ * the limit: they arrived after the message being answered and get their own run once this one has replied. A private chat's `history` was loaded that way
+ * by the caller.
+ */
 export function relevantHistoryRows(
   ctx: AgentContext,
   history: ChatHistoryMessage[],
   limit: number,
 ): ChatHistoryMessage[] {
-  return ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, limit) : history;
+  return ctx.isGroup && ctx.groupChatId
+    ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, limit, ctx.deferredTurnRowIds?.())
+    : history;
 }
 
 async function condenseToolResult(

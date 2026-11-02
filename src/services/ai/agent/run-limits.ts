@@ -3,6 +3,11 @@
 export const MAX_ROUNDS = 15;
 export const TIMEOUT_MS = 90_000;
 /**
+ * How long past its request budget a run may still hold its chat (its failure notice, retry store and
+ * history write come after the budget) before the run queued behind it stops waiting for it.
+ */
+export const CHAT_RUN_GRACE_MS = 30_000;
+/**
  * How long a failed turn waits to learn whether its retry was stored before it answers anyway.
  * Kept inside the first shutdown drain below, so a hung store never makes that drain abandon the
  * turn. The late drain in index.ts is shorter: turns that start then meet queues already closed.

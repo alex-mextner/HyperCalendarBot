@@ -420,7 +420,16 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     );
 
     const run = () =>
-      runPipeline(ctx, messageText, layers, groupContext, incomingMsgId, admission.wasExplicitInvocation);
+      runPipeline(
+        ctx,
+        messageText,
+        layers,
+        groupContext,
+        incomingMsgId,
+        admission.wasExplicitInvocation,
+        undefined,
+        ctx.chatHistoryId,
+      );
     if (admission.isGroupSessionMessage && deps.botToken) {
       await runPipelineWithTyping(run, chatId, deps.botToken);
     } else {

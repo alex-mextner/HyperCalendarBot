@@ -24,6 +24,8 @@ export const enAgentStatus = {
   agent_restarting_unconfirmed:
     '🔄 Restarting for an update — if I have not answered this in a few minutes, send it again.',
   agent_timeout: '⚠️ That took too long — timing out.',
+  agent_queue_lease_expired:
+    '⏳ My previous answer in this chat is taking too long, so I am handling your message now. If something shows up twice, check your calendar.',
   ai_response_blocked: 'The provider stopped this response. I will not automatically repeat the request.',
   ai_unanswered: '⚠️ I could not answer that — please ask again.',
   ai_unanswered_writes: (writes: string) => `⚠️ I could not put an answer together — here is what I did:\n${writes}`,

@@ -6,7 +6,7 @@ import { cmdLogger } from '../../utils/logger.ts';
 import { isEventSummary } from '../ai/event-summaries.ts';
 import { isMutationTool, isReadOnlyCall } from '../ai/tool-executor.ts';
 import type { ToolResult, ToolResultData } from '../ai/types.ts';
-import { quotableText, type ToolAnswer } from './answer-renderers.ts';
+import { quotableText, renderToolAnswer, type ToolAnswer } from './answer-renderers.ts';
 import { confirmationChoice } from './confirm-words.ts';
 import { evaluate } from './expression-evaluator.ts';
 import { applyFilters, parseFilterChain } from './filter-parser.ts';
@@ -198,6 +198,7 @@ function toolAnswer(tool: string, input: unknown, result: ToolResult): ToolAnswe
     output: result.output,
     ...(result.data !== undefined ? { data: result.data } : {}),
     ...(result.effect !== undefined ? { effect: result.effect } : {}),
+    ...(result.alreadyExists !== undefined ? { alreadyExists: result.alreadyExists } : {}),
   };
 }
 
@@ -326,11 +327,18 @@ interface Level2Env {
 }
 
 /** Values the step loop carries from one executed tool step to the next and into the final result. */
+type WriteReport = { existing: ToolAnswer } | { text: string };
+
 interface Level2LoopState {
   mentionedEventId: number | undefined;
   lastToolOutput: string | undefined;
   lastAnswer: ToolAnswer | undefined;
   completeResponse: boolean;
+  /**
+   * What the confirmed write steps of this run reported, in order: a create that found its event already saved
+   * (a closing «created» sentence would be untrue) or the tool's own words for a write.
+   */
+  writeReports: WriteReport[];
 }
 
 function resolveStepInput(env: Level2Env, name: string, template: unknown, strict = env.strict): unknown {
@@ -439,7 +447,19 @@ function applyResumeAnswer(steps: Level2Step[], resumeState: ResumeState, env: L
 }
 
 /** `respond:` field — answer with text and stop. */
-function respondWithText(template: string, env: Level2Env, mentionedEventId: number | undefined): ExecutorResult {
+function respondWithText(
+  template: string,
+  env: Level2Env,
+  mentionedEventId: number | undefined,
+  writeReports: WriteReport[],
+): ExecutorResult {
+  if (writeReports.some((report) => 'existing' in report)) {
+    const { timezone, language } = env.userCtx;
+    const lines = writeReports.map((report) =>
+      'existing' in report ? renderToolAnswer(report.existing, { now: new Date(), timezone, language }).text : report.text,
+    );
+    return { success: true, response: lines.join('\n'), mentionedEventId };
+  }
   const text = resolveVariables(template, env.captures, env.userCtx, env.stepResults, env.i18n, {
     strict: env.strict,
   });
@@ -566,6 +586,8 @@ async function runToolStep(
   state.lastToolOutput = result.output;
   const answer = toolAnswer(call, resolvedInput, result);
   state.lastAnswer = answer;
+  if (answer?.alreadyExists) state.writeReports.push({ existing: answer });
+  else if (result.mutationState === 'confirmed' && result.output) state.writeReports.push({ text: result.output });
   state.completeResponse = result.completeResponse === true;
 
   // If result carries structured event data, update last_mentioned_event in-workflow
@@ -597,7 +619,8 @@ async function runLevel2Step(
   if (step.abstain === true) return { success: false, errorCode: 'ABSTAIN' };
 
   // Respond with text and optionally stop
-  if (step.respond !== undefined) return respondWithText(step.respond, env, state.mentionedEventId);
+  if (step.respond !== undefined)
+    return respondWithText(step.respond, env, state.mentionedEventId, state.writeReports);
 
   // No call — nothing to execute in this step
   if (step.call === undefined) return null;
@@ -637,6 +660,7 @@ async function runLevel2(
     mentionedEventId: undefined,
     lastToolOutput: undefined,
     lastAnswer: undefined,
+    writeReports: [],
     completeResponse: false,
   };
 

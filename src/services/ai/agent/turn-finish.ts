@@ -9,6 +9,7 @@ import type { TelegramStreamWriter } from '../telegram-stream.ts';
 import type { AgentContext } from '../types.ts';
 import { aiFailureNotices } from './failure-notices.ts';
 import type { MessageParam } from './message-sanitizer.ts';
+import { turnIds } from './queued-turn.ts';
 import { correctUtcClockTimesInReply } from './reply-correction.ts';
 import type { RetryOutcome } from './retry-store.ts';
 import { isSkipText } from './round-support.ts';
@@ -211,6 +212,7 @@ function recordTurnEnd(env: TurnEnv, state: TurnState, deps: FinishDeps): string
       requestId: env.requestId,
       userId: ctx.user.telegram_id,
       chatId: ctx.chatId,
+      ...turnIds(ctx),
       toolCount: ledger.allToolCalls.length,
       supplementMode: !!ctx.supplementMode,
       termination: state.termination,

@@ -250,6 +250,24 @@ describe('every example runs through the real executor and schema dispatch', () 
     }
   });
 
+  test('a confirmed create that finds the event already saved never says it was created', async () => {
+    const existing = (): ToolResult => ({
+      success: true,
+      output: 'Event already exists: id: 21',
+      data: { ...STANDUP, id: 21 },
+      mutationState: 'not_applied',
+      alreadyExists: { entity: 'event', id: 21 },
+    });
+    for (const name of ['basis.event.create', 'basis.event.create_invite']) {
+      const example = canonicalMetadata.find((meta) => meta.name === name)!.examples.synthetic[0]!;
+      const first = await runMessage(example, stubTools({ create_event: existing }));
+      const done = await answer(name, first, 'yes');
+      expect(done.success, name).toBe(true);
+      expect(done.response, name).toContain('already in the calendar');
+      expect(done.response, name).not.toMatch(/created|Done/);
+    }
+  });
+
   test('every private rule refuses or steps aside in a group before any tool runs', async () => {
     let checked = 0;
     for (const meta of canonicalMetadata) {

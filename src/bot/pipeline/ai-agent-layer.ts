@@ -32,10 +32,28 @@ interface AgentLayerExtra {
   feedbackContext?: FeedbackThreadContext;
   groupContext?: GroupContext;
   incomingMessageId?: number;
+  chatHistoryId?: number;
   supplementMode?: boolean;
   supplementAutoResponse?: string;
   wasExplicitInvocation?: boolean;
   retryAttempt?: number;
+}
+
+/**
+ * The routing line. `updateId` (Telegram's, per update) and `messageId` tell a redelivery of one update
+ * (same ids twice) from a second message (new ids). The message text is what the line always carried.
+ */
+function logRouting(ctx: BotCommandContext, user: User, messageText: string, extra: AgentLayerExtra | undefined): void {
+  cmdLogger.info(
+    {
+      userId: user.telegram_id,
+      messageText,
+      ...(ctx.updateId !== undefined && { updateId: ctx.updateId }),
+      ...(extra?.incomingMessageId !== undefined && { messageId: extra.incomingMessageId }),
+      ...(extra?.supplementMode && { supplementMode: true }),
+    },
+    'Routing to AI agent',
+  );
 }
 
 export function createAiAgentLayer(deps: AgentLayerDeps) {
@@ -157,10 +175,14 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
       extra?.incomingMessageId,
     );
 
+    // The row saved for this very message; the per-user map may already name a newer message's row.
+    if (extra?.chatHistoryId !== undefined) agentContext.chatHistoryId = extra.chatHistoryId;
+
     if (extra?.feedbackContext && agentContext.feedback) {
       agentContext.feedback.feedbackContext = extra.feedbackContext;
     }
 
+    if (ctx.updateId !== undefined) agentContext.updateId = ctx.updateId;
     agentContext.retryAttempt = currentAttempt;
 
     if (deps.retryQueue) {
@@ -176,10 +198,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
 
     await attachScenePause(agentContext, user.telegram_id);
 
-    cmdLogger.info(
-      { userId: user.telegram_id, messageText, ...(extra?.supplementMode && { supplementMode: true }) },
-      'Routing to AI agent',
-    );
+    logRouting(ctx, user, messageText, extra);
 
     await runAgent(agentContext, ctx, user, messageText, extra);
     return { handled: true };

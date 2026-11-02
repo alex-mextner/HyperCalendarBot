@@ -10,6 +10,15 @@ describe('createMessageHandler', () => {
     expect(deps.agent.run).toHaveBeenCalledTimes(1);
   });
 
+  test('links the run to the row saved for this very message, not to the user’s latest row', async () => {
+    // A newer message of the same user already replaced the per-user entry (row 99) while this one was handled.
+    const deps = makeDeps({ chatHistoryIds: new Map([[100, 99]]) });
+    const handler = createMessageHandler(deps as never);
+    await handler({ ...makeCtx(), chatHistoryId: 41 } as never);
+    const call = (deps.agent.run as ReturnType<typeof mock>).mock.calls[0]![0] as { chatHistoryId: number };
+    expect(call.chatHistoryId).toBe(41);
+  });
+
   test('ignores messages without text', async () => {
     const deps = makeDeps();
     const handler = createMessageHandler(deps as never);

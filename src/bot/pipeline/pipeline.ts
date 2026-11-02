@@ -12,6 +12,7 @@ export async function runPipeline(
   incomingMessageId?: number,
   wasExplicitInvocation?: boolean,
   retryAttempt?: number,
+  chatHistoryId?: number,
 ): Promise<void> {
   let feedbackContext: FeedbackThreadContext | undefined;
   let supplementMode = false;
@@ -27,6 +28,7 @@ export async function runPipeline(
         supplementAutoResponse,
         wasExplicitInvocation,
         retryAttempt,
+        chatHistoryId,
       });
       if (result.handled) {
         if ('needsSupplement' in result) {

@@ -232,6 +232,29 @@ describe('agent drain on shutdown', () => {
     expect(log).toContain('## END — no FINAL logged for this turn');
   });
 
+  test('a message queued behind a still-streaming run is released by the shutdown, drained and queued again', async () => {
+    const probe = makeSender();
+    const { impl, secondRoundStarted } = stalledAfterTool({
+      name: 'calculate',
+      input: { expression: '2026-09-28 20:30 Europe/Belgrade to UTC' },
+    });
+    const agent = new CalendarBotAgent({}, probe.sender, { streamImpl: impl });
+
+    const running = agent.run(ctx);
+    await secondRoundStarted;
+    // Same chat, so this run waits for the one above — it has not started and has said nothing.
+    const queued = agent.run({ ...ctx, messageText: 'And add the second one too' });
+
+    await agent.drain(DRAIN_BOUND_MS);
+    expect((await Promise.allSettled([running, queued])).map((outcome) => outcome.status)).toEqual([
+      'fulfilled',
+      'fulfilled',
+    ]);
+    // Neither message is dropped: each is stored for a retry, and the user is told the bot is restarting.
+    expect([...enqueued].sort()).toEqual([REQUEST, 'And add the second one too'].sort());
+    expect(probe.delivered.join('\n')).toContain(t('ru').agent_restarting(true));
+  });
+
   test('a scheduled retry cut short by a restart is told so and queued again', async () => {
     ctx.retryAttempt = 1;
     const probe = makeSender();

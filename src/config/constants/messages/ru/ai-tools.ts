@@ -162,6 +162,10 @@ export const ruAiTools = {
       noUpcomingEvents: 'Предстоящих событий нет.',
       upcomingEvents: (count: number, lines: string) => `Следующие ${count}:\n${lines}`,
       eventCreated: (parts: string) => `Событие создано: ${parts}`,
+      eventAlreadyExists: (parts: string) =>
+        `Событие уже есть в календаре (сохранено только что, повторно не создавалось): ${parts}`,
+      eventSameDay: (title: string, id: number, when: string) =>
+        `«${title}» (id: ${id}) уже есть в календаре в этот день (${when}), поэтому ничего не создано.`,
       eventUpdated: (parts: string) => `Событие обновлено: ${parts}`,
       eventDeleted: (title: string, id: number) => `Событие «${title}» (id: ${id}) удалено.`,
       eventDeclined: (id: number) => `Ты отклонил(а) общее событие (id: ${id}). Оно удалено из твоего календаря.`,

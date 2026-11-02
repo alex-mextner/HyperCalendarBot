@@ -31,6 +31,8 @@ export interface ToolAnswer {
   output: string;
   data?: ToolResultData;
   effect?: ToolResult['effect'];
+  /** The create wrote nothing: the event was already saved. */
+  alreadyExists?: ToolResult['alreadyExists'];
 }
 
 export interface RenderContext extends HumanTimeContext {
@@ -140,6 +142,7 @@ function renderConfirmation(answer: ToolAnswer, context: RenderContext): Rendere
   const write: ConfirmedWrite =
     answer.tool === 'create_event' ? 'created' : answer.tool === 'update_event' ? 'updated' : 'deleted';
   const when = `${humanDay(event.date, context)}, ${eventTimeLabel(event, context, words)}`;
+  if (answer.alreadyExists?.entity === 'event') return rendered(words.alreadyExists(event.title, when));
   return rendered(words.confirmed(write, event.title, when));
 }
 
