@@ -1168,4 +1168,32 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE chat_history ADD COLUMN turn_order REAL');
     },
   },
+  {
+    name: '070_image_deliveries',
+    up(db) {
+      // Durable bookkeeping of asynchronous AI pictures: how far each got, so the next process can
+      // finish, expire or mark it unknown after a crash. See docs/reference/migrations/070_image_deliveries.md.
+      db.exec(`
+        CREATE TABLE image_deliveries (
+          id TEXT PRIMARY KEY,
+          chat_id INTEGER NOT NULL,
+          language TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          label TEXT NOT NULL,
+          job_type TEXT NOT NULL,
+          slot TEXT NOT NULL,
+          payload_hash TEXT NOT NULL,
+          rebuilds INTEGER NOT NULL DEFAULT 0,
+          job_json TEXT,
+          state TEXT NOT NULL CHECK (state IN ('queued','rendered','sending','delivered','failed','expired','unknown','superseded')),
+          message_id INTEGER,
+          note_sent INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      db.exec('CREATE INDEX idx_image_deliveries_state ON image_deliveries(state)');
+    },
+  },
 ];
