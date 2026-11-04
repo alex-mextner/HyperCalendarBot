@@ -252,8 +252,8 @@ export function handleListGoogleCalendars(ctx: AgentContext): ToolResult {
 }
 handleListGoogleCalendars.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
-export function handleLookupStress(ctx: AgentContext, input: { words: string[] }): ToolResult {
-  if (!ctx.voice) {
+export async function handleLookupStress(ctx: AgentContext, input: { words: string[] }): Promise<ToolResult> {
+  if (!ctx.voice || !(await ctx.voice.stressDictionary.ensureLoaded())) {
     return { success: false, error: 'Stress dictionary not loaded' };
   }
 

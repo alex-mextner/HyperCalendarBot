@@ -44,6 +44,7 @@ function lastAssistantText(history: ChatHistoryMessage[]): string {
 async function synthesizeVoice(voiceDeps: VoiceDeps, isRu: boolean, text: string): Promise<Buffer | undefined> {
   if (isRu && voiceDeps.sileroTts && voiceDeps.stressDictionary) {
     const withNumbers = numbersToWords(fixDateOrdinals(text));
+    await voiceDeps.stressDictionary.ensureLoaded();
     const withStress = markStress(withNumbers, voiceDeps.stressDictionary);
     return voiceDeps.sileroTts.synthesize(transliterateEnglish(withStress));
   }

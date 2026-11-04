@@ -55,7 +55,8 @@ function selectTtsEngine(speech: SpeechServices, tools: StressTextTools, lang: s
   if (lang === 'ru' && sileroTts && stressDictionary) {
     return {
       failureMessage: 'Silero TTS failed, falling back to Google',
-      synthesize: (clean) => {
+      synthesize: async (clean) => {
+        await stressDictionary.ensureLoaded();
         const stressedText = tools.markStress(tools.numbersToWords(clean), stressDictionary);
         botLogger.info({ engine: 'silero', lang }, 'Voice call TTS');
         return sileroTts.synthesize(stressedText);

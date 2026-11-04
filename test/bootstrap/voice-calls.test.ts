@@ -1,9 +1,13 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { SpeechServices } from '../../src/bootstrap/runtime.ts';
 import { createVoiceCallTts, type StressTextTools } from '../../src/bootstrap/voice-calls.ts';
 import { KokoroTtsService } from '../../src/services/voice/kokoro-tts-service.ts';
 import { SileroTtsService } from '../../src/services/voice/silero-tts-service.ts';
 import { StressDictionary } from '../../src/services/voice/stress-dictionary.ts';
+import { markStress, numbersToWords } from '../../src/services/voice/stress-marker.ts';
 import { TtsService } from '../../src/services/voice/tts-service.ts';
 
 const tools: StressTextTools = {
@@ -79,6 +83,24 @@ describe('createVoiceCallTts', () => {
 
     expect(result.toString()).toBe('google');
     expect(spies.silero).not.toHaveBeenCalled();
+  });
+
+  test('Russian with a stress dictionary that is not read yet loads it first, so Silero gets the stressed text', async () => {
+    const { speech, spies } = services();
+    const dir = mkdtempSync(join(tmpdir(), 'hcb-call-stress-'));
+    try {
+      const path = join(dir, 'stress-dict.json');
+      writeFileSync(path, JSON.stringify({ молоко: 'молок+о' }));
+      speech.stressDictionary = await StressDictionary.lazyFromFile(path);
+
+      const result = await createVoiceCallTts(speech, { numbersToWords, markStress }).synthesize('молоко', 'ru');
+
+      expect(result.toString()).toBe('silero');
+      expect(spies.silero).toHaveBeenCalledWith('молок+о');
+      expect(spies.fallback).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('any other language uses the Google fallback', async () => {

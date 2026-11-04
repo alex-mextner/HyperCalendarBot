@@ -83,7 +83,8 @@ export function numbersToWords(text: string): string {
 /**
  * Adds stress marks (+) to Russian text using the stress dictionary.
  * Words not found in the dictionary are left unchanged (Silero has auto-stress).
- * Preserves original punctuation and spacing.
+ * Preserves original punctuation and spacing. The dictionary may load on first use: `await dict.ensureLoaded()`
+ * before calling (an unloaded one throws instead of treating every word as unknown).
  */
 export function markStress(text: string, dict: StressDictionary): string {
   return text.replace(RUSSIAN_WORD, (word) => {
