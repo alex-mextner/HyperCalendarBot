@@ -9,12 +9,15 @@ import {
 } from '../../../src/bot/handlers/message.handler.ts';
 import type { UserMemoryRepository } from '../../../src/database/repositories/user-memory.repository.ts';
 import type { Intent } from '../../../src/database/types.ts';
+import type { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
+import type { ChatTurnReservation } from '../../../src/services/ai/chat-run-gate.ts';
+import { currentChatTurn } from '../../../src/services/ai/chat-turn-context.ts';
 import type { KokoroTtsService } from '../../../src/services/voice/kokoro-tts-service.ts';
 import type { SileroTtsService } from '../../../src/services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../../../src/services/voice/stress-dictionary.ts';
 import { stub } from '../partial-stub.ts';
 import { makeUserRow } from '../telegram-fixtures.ts';
-import { makeHandlerDeps, makeMessageCtx } from './message-handler-fixtures.ts';
+import { makeHandlerDeps, makeMessageCtx, reserveIdleChatTurn } from './message-handler-fixtures.ts';
 
 describe('toEventSummary', () => {
   const BASE_EVENT = {
@@ -112,6 +115,7 @@ describe('voice reply TTS fallback', () => {
     return makeHandlerDeps({
       agent: stub({
         run: mock(() => Promise.resolve({ responseText: 'Ответ бота', toolCalls: [], toolResults: [] })),
+        reserveChatTurn: reserveIdleChatTurn(),
       }),
       sendVoice: mock(() => Promise.resolve()),
       botToken: 'test-token',
@@ -128,6 +132,26 @@ describe('voice reply TTS fallback', () => {
       text: undefined,
     });
   }
+
+  test('a transcript takes its place in the chat line when it is saved, runs inside it and gives it up after', async () => {
+    const reservation: ChatTurnReservation = { chatId: 1, rowId: 77, release: mock(() => {}) };
+    const reserveChatTurn = mock<CalendarBotAgent['reserveChatTurn']>(() => reservation);
+    const seenByRun: (ChatTurnReservation | undefined)[] = [];
+    const run = mock<CalendarBotAgent['run']>(() => {
+      seenByRun.push(currentChatTurn());
+      return Promise.resolve({ responseText: 'Ответ бота', toolCalls: [], toolResults: [] });
+    });
+    const deps = makeVoiceDeps({
+      agent: stub({ run, reserveChatTurn }),
+      conversationLogger: stub({ logUserMessage: mock(() => 77), logBotResponse: mock(() => {}) }),
+    });
+
+    await createMessageHandler(deps)(makeVoiceCtx());
+
+    expect(reserveChatTurn).toHaveBeenCalledWith(100, 77);
+    expect(seenByRun).toEqual([reservation]);
+    expect(reservation.release).toHaveBeenCalledTimes(1);
+  });
 
   test('uses primary sileroTts when available', async () => {
     const synthesize = mock(() => Promise.resolve(audioBuffer));

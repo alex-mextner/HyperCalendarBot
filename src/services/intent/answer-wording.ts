@@ -27,6 +27,8 @@ export interface AnswerWording {
   freeNowhere: (day: HumanDayParts, calendar: string) => string;
   noFreeWindowsInline: string;
   confirmed: (write: ConfirmedWrite, title: string, when: string) => string;
+  /** A create that found the same event already saved: nothing new was written. */
+  alreadyExists: (title: string, when: string) => string;
   eventCard: {
     place: string;
     description: string;
@@ -105,6 +107,7 @@ const ruWords: AnswerWording = {
   noFreeWindowsInline: 'свободных окон нет',
   confirmed: (write, title, when) =>
     `${write === 'created' ? 'Событие создано' : write === 'updated' ? 'Событие обновлено' : 'Событие удалено'}: «${title}» — ${when}.`,
+  alreadyExists: (title, when) => `Это событие уже есть в календаре, второй раз не создавал: «${title}» — ${when}.`,
   eventCard: {
     place: 'Место',
     description: 'Описание',
@@ -202,6 +205,8 @@ const enWords: AnswerWording = {
     `For ${day.relative ? `${day.relative}, ` : ''}${day.calendar}, there are no free windows ${calendar}: the day is fully booked.`,
   noFreeWindowsInline: 'no free windows',
   confirmed: (write, title, when) => `Event ${write}: “${title}” — ${when}.`,
+  alreadyExists: (title, when) =>
+    `This event is already in the calendar, so I did not create it again: “${title}” — ${when}.`,
   eventCard: {
     place: 'Where',
     description: 'Notes',

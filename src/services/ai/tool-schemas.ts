@@ -40,6 +40,7 @@ const createEventSchema = z
     recurrence_rule: z.string().optional(),
     reminder_minutes: z.array(z.number()).optional(),
     force: toolBoolean.optional(),
+    allow_duplicate: toolBoolean.optional(),
     scope: scopeField,
     owner_id: numericId.optional(),
   })

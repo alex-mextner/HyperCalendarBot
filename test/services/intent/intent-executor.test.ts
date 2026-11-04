@@ -651,6 +651,79 @@ describe('IntentExecutor', () => {
       });
     });
 
+    test('carries the already-exists outcome of a create so the answer cannot say "created"', async () => {
+      const workflow: Workflow = { steps: [{ call: 'create_event', input: { title: 'Английский' } }] };
+      const mockExecutor = () => ({
+        success: true,
+        output: 'Event already exists: id: 239',
+        data: eventData[0],
+        alreadyExists: { entity: 'event' as const, id: 239 },
+      });
+
+      const result = await executor.run(workflow, {}, userCtx, mockExecutor);
+      expect(result.answer?.alreadyExists).toEqual({ entity: 'event', id: 239 });
+    });
+
+    test('a closing respond after a repeated create keeps what the later steps wrote', async () => {
+      const workflow: Workflow = {
+        steps: [
+          { call: 'create_event', input: { title: 'Английский' } },
+          { call: 'send_invitation', input: { event_id: '239', invitee_username: 'anna_smith' } },
+          { respond: 'Готово: создал и пригласил.' },
+        ],
+      };
+      const mockExecutor = (name: string) =>
+        name === 'create_event'
+          ? {
+              success: true,
+              output: 'Event already exists: id: 239',
+              data: eventData[0],
+              alreadyExists: { entity: 'event' as const, id: 239 },
+            }
+          : { success: true, output: 'Приглашение отправлено @anna_smith.', mutationState: 'confirmed' as const };
+
+      const result = await executor.run(workflow, {}, userCtx, mockExecutor);
+      expect(result.response).toContain('уже есть в календаре');
+      expect(result.response).toContain('Приглашение отправлено @anna_smith.');
+      expect(result.response).not.toContain('создал');
+    });
+
+    test('a closing respond reports every create of a multi-create workflow, new ones and repeats, in order', async () => {
+      const workflow: Workflow = {
+        steps: [
+          { call: 'create_event', input: { title: 'Первое' } },
+          { call: 'create_event', input: { title: 'Английский' } },
+          { respond: 'Готово: создал всё.' },
+        ],
+      };
+      let calls = 0;
+      const mockExecutor = () =>
+        ++calls === 1
+          ? { success: true, output: 'Создано: Первое.', mutationState: 'confirmed' as const }
+          : {
+              success: true,
+              output: 'Event already exists: id: 239',
+              data: eventData[0],
+              alreadyExists: { entity: 'event' as const, id: 239 },
+            };
+
+      const result = await executor.run(workflow, {}, userCtx, mockExecutor);
+      const lines = (result.response ?? '').split('\n');
+      expect(lines[0]).toBe('Создано: Первое.');
+      expect(lines[1]).toContain('уже есть в календаре');
+      expect(result.response).not.toContain('создал всё');
+    });
+
+    test('a failed create step is shown as the tool wrote it, such as the same-day refusal', async () => {
+      const workflow: Workflow = {
+        steps: [{ call: 'create_event', input: { title: 'Yoga' } }, { respond: 'Done: created.' }],
+      };
+      const refusal = '“Yoga” (id: 12) is already in the calendar on that day, so nothing was created.';
+      const result = await executor.run(workflow, {}, userCtx, () => ({ success: false, error: refusal }));
+      expect(result.success).toBe(false);
+      expect(result.response).toBe(refusal);
+    });
+
     test('carries the last Level 1 tool', async () => {
       const workflow: Workflow = {
         tools: [{ name: 'get_events', input: { start_date: '2026-06-01', end_date: '2026-06-01' } }],

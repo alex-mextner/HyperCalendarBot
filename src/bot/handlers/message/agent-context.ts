@@ -2,11 +2,10 @@
 // Builds the per-request AgentContext (sender, repositories, chat-history ids) for the message handler.
 
 import type { EventOccurrence, User } from '../../../database/types.ts';
+import { scheduleWindowAround } from '../../../services/ai/agent/queued-turn.ts';
 import type { AgentContext } from '../../../services/ai/types.ts';
 import { cmdLogger } from '../../../utils/logger.ts';
 import type { MessageHandlerDeps } from './types.ts';
-
-const SCHEDULE_CONTEXT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
 interface AgentGroupInfo {
   isGroup: boolean;
@@ -29,13 +28,10 @@ function describeSecretaryAccess(deps: MessageHandlerDeps, user: User): string |
     .join(', ');
 }
 
-/** Events two weeks either side of now, so the model knows the user's nearby schedule; empty on a read failure. */
+/** The nearby schedule the model is shown; empty on a read failure. */
 function recentEventsWindow(deps: MessageHandlerDeps, user: User): EventOccurrence[] {
   try {
-    const now = new Date();
-    const start = new Date(now.getTime() - SCHEDULE_CONTEXT_WINDOW_MS).toISOString();
-    const end = new Date(now.getTime() + SCHEDULE_CONTEXT_WINDOW_MS).toISOString();
-    return deps.eventService.getEventsInRange(user.telegram_id, start, end);
+    return scheduleWindowAround(deps.eventService, user.telegram_id);
   } catch (err) {
     cmdLogger.error({ err, userId: user.telegram_id }, 'Failed to build schedule context');
     return [];

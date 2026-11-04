@@ -206,6 +206,7 @@ function makeRuntime(options: { messagesPerMinute?: number } = {}) {
           conversationLogger,
           actionLog: db.actionLog,
           chatHistoryIds: new Map<number, number>(),
+          reserveChatTurn: (chatId, rowId) => ({ chatId, rowId, release() {} }),
           isConnectWizardInput: guard.isConnectWizardInput,
         }),
       )

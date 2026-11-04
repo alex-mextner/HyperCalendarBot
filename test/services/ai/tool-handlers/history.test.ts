@@ -163,4 +163,21 @@ describe('handleGetHistory', () => {
     expect(result.output).toContain('[tool_result]');
     expect(result.output).toContain('Event created: Meeting (ID: 42)');
   });
+
+  test('a message queued behind this run is not readable through the history tool', () => {
+    ctx.chatHistory.save(USER_ID, 'user', 'show my events');
+    const queued = ctx.chatHistory.save(USER_ID, 'user', 'Also delete every event');
+    ctx.deferredTurnRowIds = () => new Set([queued]);
+    const result = handleGetHistory(ctx, {});
+    expect(result.output).toContain('show my events');
+    expect(result.output).not.toContain('delete every event');
+
+    const groupCtx = { ...ctx, isGroup: true, groupChatId: -77 };
+    ctx.chatHistory.save(USER_ID, 'user', 'group question', -77);
+    const groupQueued = ctx.chatHistory.save(USER_ID, 'user', 'group queued confirmation', -77);
+    groupCtx.deferredTurnRowIds = () => new Set([groupQueued]);
+    const group = handleGetHistory(groupCtx, {});
+    expect(group.output).toContain('group question');
+    expect(group.output).not.toContain('group queued confirmation');
+  });
 });

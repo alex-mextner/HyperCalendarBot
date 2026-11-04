@@ -112,7 +112,13 @@ describe('event tools report local wall-clock times (Europe/Belgrade)', () => {
   });
 
   test('create_event', async () => {
-    const result = await handleCreateEvent(ctx, { title: 'Lesson', start_at: START, end_at: END });
+    // The seeded Lesson is this same event, so a second copy has to be asked for.
+    const result = await handleCreateEvent(ctx, {
+      title: 'Lesson',
+      start_at: START,
+      end_at: END,
+      allow_duplicate: true,
+    });
     expect(result.success).toBe(true);
     expectLocalLine(result.output ?? '', id + 1);
   });

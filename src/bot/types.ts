@@ -11,6 +11,11 @@ export interface DerivedProps {
   dbUser: User | undefined;
   userTimezone: string | undefined;
   lang: 'en' | 'ru';
+  /**
+   * The chat_history row the logging middleware saved for this update's user turn. Unlike the per-user
+   * `chatHistoryIds` map it cannot be overwritten by a message that arrives while this one is handled.
+   */
+  chatHistoryId?: number;
 }
 
 /**

@@ -94,17 +94,29 @@ function pendingFrom(origin: ChatHistoryMessage, question: AskedQuestion | null)
 }
 
 /**
+ * The rows the sender of the message at `index` could have seen, newest first: those before it in reading
+ * order that were saved before it. A turn that waited behind an earlier run is read after what that run
+ * wrote, but the sender never saw those rows, so they are never what the message answers.
+ */
+function rowsSeenBefore(history: ChatHistoryMessage[], index: number): ChatHistoryMessage[] {
+  const sentAtRow = history[index]!.id;
+  return history
+    .slice(0, index)
+    .filter((row) => row.id <= sentAtRow)
+    .reverse();
+}
+
+/**
  * The ask_user question the current message answers, with the user message that led to
  * it and when the question was asked — or null when the turn before this message did not
  * end in ask_user, or when the newest saved user message is not this one (a live-call
  * transcript is never saved).
  */
 function pendingQuestion(messageText: string, history: ChatHistoryMessage[]): PendingQuestion | null {
-  let index = currentMessageIndex(messageText, history);
+  const index = currentMessageIndex(messageText, history);
   if (index < 0) return null;
   let question: AskedQuestion | null = null;
-  for (index--; index >= 0; index--) {
-    const row = history[index]!;
+  for (const row of rowsSeenBefore(history, index)) {
     if (row.role === 'tool') continue;
     if (row.role === 'user') return pendingFrom(row, question);
     if (ActivityCodec.safeParse(row.content).success) continue;
@@ -160,13 +172,13 @@ function assistantText(content: string): string {
 /**
  * Whether the bot's last reply before this message asked something in plain text ("Во
  * сколько?"): the message then answers it, and the day may have been named before. Any
- * question counts, a closing "Что-то ещё?" too: the time-only rule then imposes nothing.
+ * question counts, a closing "Что-то ещё?" too: the time-only rule then imposes nothing. Rows saved after
+ * the message was are skipped, as in pendingQuestion.
  */
 function answersPlainQuestion(messageText: string, history: ChatHistoryMessage[]): boolean {
-  let index = currentMessageIndex(messageText, history);
+  const index = currentMessageIndex(messageText, history);
   if (index < 0) return false;
-  for (index--; index >= 0; index--) {
-    const row = history[index]!;
+  for (const row of rowsSeenBefore(history, index)) {
     if (row.role === 'tool') continue;
     if (row.role === 'user') return false;
     const text = assistantText(row.content);

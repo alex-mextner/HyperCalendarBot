@@ -161,6 +161,20 @@ describe('a write is confirmed, never listed as a read result', () => {
     );
   });
 
+  test('a create that found the event already saved says so instead of "created"', () => {
+    const existing = event(11, 'Deep work', 1, '13:00', 150);
+    const repeat: ToolAnswer = {
+      ...answer('create_event', {}, 'raw', existing),
+      alreadyExists: { entity: 'event', id: 11 },
+    };
+    expect(render(repeat, en).text).toBe(
+      'This event is already in the calendar, so I did not create it again: “Deep work” — tomorrow, Wed Oct 7, 13:00–15:30.',
+    );
+    expect(render(repeat).text).toBe(
+      'Это событие уже есть в календаре, второй раз не создавал: «Deep work» — завтра, ср 7 октября, 13:00–15:30.',
+    );
+  });
+
   test('a write without event data shows the tool’s own sentence', () => {
     const declined = answer('delete_event', {}, 'Ты отказался от события. Оно убрано из твоего календаря.');
     expect(render(declined).text).toBe('Ты отказался от события. Оно убрано из твоего календаря.');

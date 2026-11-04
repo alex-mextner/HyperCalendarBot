@@ -248,3 +248,129 @@ describe('ChatHistoryRepository', () => {
     });
   });
 });
+
+describe('ChatHistoryRepository queued-turn handling', () => {
+  const USER_ID = 321;
+  let db: Database;
+  let repo: ChatHistoryRepository;
+
+  beforeEach(() => {
+    db = createTestDb();
+    new UserRepository(db).create({ telegram_id: USER_ID });
+    repo = new ChatHistoryRepository(db);
+  });
+
+  test('excluded rows are left out before the limit, in private history, group history and the history search', () => {
+    const rows = Array.from({ length: 6 }, (_, index) => repo.save(USER_ID, 'user', `m${index}`));
+    const newest = new Set([rows[4]!, rows[5]!]);
+    expect(repo.getRecent(USER_ID, 3, newest).map((row) => row.content)).toEqual(['m1', 'm2', 'm3']);
+    expect(repo.getRecent(USER_ID, 3).map((row) => row.content)).toEqual(['m3', 'm4', 'm5']);
+    expect(repo.search(USER_ID, { excludeIds: newest }).map((row) => row.content)).toEqual(['m0', 'm1', 'm2', 'm3']);
+    repo.save(USER_ID, 'user', 'g1', -5);
+    const group = repo.save(USER_ID, 'user', 'g2', -5);
+    expect(repo.getRecentByChat(-5, 10, new Set([group])).map((row) => row.content)).toEqual(['g1']);
+    expect(repo.searchByChat(-5, { excludeIds: new Set([group]) }).map((row) => row.content)).toEqual(['g1']);
+  });
+
+  describe('placeUserTurnAfterLatest', () => {
+    const roles = () => repo.getRecent(USER_ID, 20).map((row) => `${row.role}:${row.content}`);
+
+    test('reads the turn after what was saved since, under the same id', () => {
+      const confirm = repo.save(USER_ID, 'user', 'Yes');
+      repo.save(USER_ID, 'assistant', 'working on the earlier request');
+      repo.save(USER_ID, 'tool', '[]');
+
+      expect(repo.placeUserTurnAfterLatest(confirm, USER_ID)).toBe(true);
+
+      expect(roles()).toEqual(['assistant:working on the earlier request', 'tool:[]', 'user:Yes']);
+      expect(repo.getRecent(USER_ID, 20).at(-1)?.id).toBe(confirm);
+    });
+
+    test('the turn keeps the time it was sent and is marked as moved; reading order does not depend on that time', () => {
+      const confirm = repo.save(USER_ID, 'user', 'Yes');
+      db.prepare('UPDATE chat_history SET created_at = ? WHERE id = ?').run('2020-01-01 00:00:05', confirm);
+      const output = repo.save(USER_ID, 'assistant', 'earlier output');
+      const other = repo.save(USER_ID, 'user', 'Thanks');
+
+      expect(repo.placeUserTurnAfterLatest(confirm, USER_ID)).toBe(true);
+      const answer = repo.save(USER_ID, 'assistant', 'answer to the moved turn');
+
+      const rows = repo.getRecent(USER_ID, 20);
+      expect(rows.map((row) => row.content)).toEqual(['earlier output', 'Thanks', 'Yes', 'answer to the moved turn']);
+      const moved = rows.find((row) => row.id === confirm);
+      expect(moved?.created_at).toBe('2020-01-01 00:00:05');
+      expect(moved?.turn_order).toBe(other + 0.5);
+      expect(rows.find((row) => row.id === output)?.turn_order).toBeNull();
+      // The newest two rows by reading order, not by the time the moved turn was sent.
+      expect(repo.getRecent(USER_ID, 2).map((row) => row.id)).toEqual([confirm, answer]);
+    });
+
+    test('rows saved afterwards, in the same second, still read after the moved turn', () => {
+      const confirm = repo.save(USER_ID, 'user', 'Yes');
+      repo.save(USER_ID, 'assistant', 'earlier output');
+      repo.placeUserTurnAfterLatest(confirm, USER_ID);
+      repo.save(USER_ID, 'assistant', 'answer to the moved turn');
+      expect(roles()).toEqual(['assistant:earlier output', 'user:Yes', 'assistant:answer to the moved turn']);
+    });
+
+    test('nothing moves while no bot row follows the turn', () => {
+      const first = repo.save(USER_ID, 'user', 'Yes');
+      const queued = repo.save(USER_ID, 'user', 'Thanks');
+      expect(repo.placeUserTurnAfterLatest(first, USER_ID)).toBe(false);
+      expect(roles()).toEqual(['user:Yes', 'user:Thanks']);
+      expect(queued).toBeGreaterThan(first);
+    });
+
+    test('a group turn stays in its group', () => {
+      const row = repo.save(USER_ID, 'user', 'book it', -1001);
+      repo.save(USER_ID, 'assistant', 'earlier answer', -1001);
+      expect(repo.placeUserTurnAfterLatest(row, USER_ID)).toBe(true);
+      expect(repo.getRecentByChat(-1001, 10).map((entry) => entry.content)).toEqual(['earlier answer', 'book it']);
+    });
+
+    test('in a group, another member’s run output counts as what the turn must be read after', () => {
+      new UserRepository(db).create({ telegram_id: 456 });
+      const memberAMessage = repo.save(USER_ID, 'user', 'A: add the review', -1001);
+      repo.save(456, 'assistant', 'answer to member B', -1001); // the active run was triggered by member B
+      expect(repo.placeUserTurnAfterLatest(memberAMessage, USER_ID)).toBe(true);
+      expect(repo.getRecentByChat(-1001, 10).map((entry) => entry.content)).toEqual([
+        'answer to member B',
+        'A: add the review',
+      ]);
+    });
+
+    test('a private turn is not moved by bot rows of another conversation', () => {
+      new UserRepository(db).create({ telegram_id: 456 });
+      const privateTurn = repo.save(USER_ID, 'user', 'Yes');
+      repo.save(USER_ID, 'assistant', 'group answer', -1001);
+      repo.save(456, 'assistant', 'someone else', undefined);
+      expect(repo.placeUserTurnAfterLatest(privateTurn, USER_ID)).toBe(false);
+    });
+
+    test('tool actions logged against the turn keep pointing at it', () => {
+      const turn = repo.save(USER_ID, 'user', 'Yes');
+      repo.save(USER_ID, 'assistant', 'earlier run output');
+      repo.placeUserTurnAfterLatest(turn, USER_ID);
+      db.prepare(
+        "INSERT INTO user_action_log (user_id, chat_id, action_type, action_name, chat_history_id, success) VALUES (?, ?, 'tool', 'create_event', ?, 1)",
+      ).run(USER_ID, USER_ID, turn);
+      expect(db.prepare('SELECT chat_history_id FROM user_action_log').get()).toEqual({ chat_history_id: turn });
+    });
+
+    test.each([
+      ['another user’s row', 456, 'user'],
+      ['a bot row', USER_ID, 'assistant'],
+    ] as const)('leaves %s where it is', (_name, owner, role) => {
+      new UserRepository(db).create({ telegram_id: 456 });
+      const row = repo.save(owner, role, 'Yes');
+      repo.save(USER_ID, 'assistant', 'later');
+      expect(repo.placeUserTurnAfterLatest(row, USER_ID)).toBe(false);
+    });
+
+    test('a row that no longer exists is reported, nothing changes', () => {
+      repo.save(USER_ID, 'user', 'Yes');
+      expect(repo.placeUserTurnAfterLatest(9_999, USER_ID)).toBe(false);
+      expect(roles()).toEqual(['user:Yes']);
+    });
+  });
+});

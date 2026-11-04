@@ -59,6 +59,7 @@ export function handleGetHistory(ctx: AgentContext, input: GetHistoryInput): Too
     const messages = ctx.chatHistory.searchByChat(ctx.groupChatId, {
       limit,
       search: input.search,
+      excludeIds: ctx.deferredTurnRowIds?.(),
     });
     if (messages.length === 0)
       return {
@@ -78,6 +79,7 @@ export function handleGetHistory(ctx: AgentContext, input: GetHistoryInput): Too
     search: input.search,
     before,
     after,
+    excludeIds: ctx.deferredTurnRowIds?.(),
   });
 
   if (messages.length === 0) {

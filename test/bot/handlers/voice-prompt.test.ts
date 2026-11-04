@@ -17,7 +17,10 @@ function makeFetch(filePath = 'voice/file.ogg') {
 
 function makeVoiceDeps(overrides: Partial<MessageHandlerDeps> & { [key: string]: unknown } = {}) {
   return {
-    agent: { run: mock(() => Promise.resolve({ responseText: 'Ответ от AI', toolCalls: [], toolResults: [] })) },
+    agent: {
+      run: mock(() => Promise.resolve({ responseText: 'Ответ от AI', toolCalls: [], toolResults: [] })),
+      reserveChatTurn: mock(() => ({ chatId: 100, rowId: 1, release: () => {} })),
+    },
     eventService: { getEventsInRange: mock(() => []) },
     holidayService: {},
     chatHistory: {},

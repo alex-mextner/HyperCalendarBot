@@ -1,7 +1,7 @@
 // src/services/event/event-service.ts
 
 import type { AgendaRepository } from '../../database/repositories/agenda.repository.ts';
-import type { EventRepository } from '../../database/repositories/event.repository.ts';
+import type { CreateOutcome, EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { CalendarEvent, CreateEventData, EventOccurrence, UpdateEventData } from '../../database/types.ts';
@@ -18,6 +18,14 @@ import {
   recurrenceExpansionRange,
 } from './free-slots.ts';
 import { expandRecurrence } from './recurrence.ts';
+
+/**
+ * How recently an identical event (same calendar, title, start, end) must have been created for a
+ * repeated create to be taken as the same request. Covers a retry after a lost reply and a slow second
+ * run (a model round trip takes a minute on a loaded host). An older same-title event on the same day is
+ * not a repeat but is still not saved silently (EventRepository.createUnlessDuplicate, `same_day`).
+ */
+export const RECENT_DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 
 export interface FreeSlot {
   start: string;
@@ -59,40 +67,59 @@ export class EventService {
   }
 
   createEvent(data: CreateEventData): CalendarEvent {
-    const event = this.eventRepo.create(data);
-    if (this.materializer) {
-      // Explicit reminder intervals are persisted on creation and reused after edits/restarts.
-      const overrides = data.reminder_minutes
-        ? JSON.stringify(data.reminder_minutes)
-        : (event.reminder_overrides ?? null);
-      this.materializer.materialize(
-        {
-          id: event.id,
-          start_at: event.start_at,
-          reminder_overrides: overrides,
-          all_day: event.all_day,
-          user_timezone: event.timezone,
-        },
-        event.user_id,
-      );
-      // For recurring events, also materialize reminders for upcoming occurrences
-      if (event.recurrence_rule) {
-        this.materializeRecurringOccurrences(event, overrides);
-      }
-    }
-    if (this.domainEvents) {
-      if (event.owner_type === 'group' && event.group_id) {
-        this.domainEvents.emit('myGroup.newEvent', {
-          userId: event.created_by ?? event.user_id,
-          groupChatId: event.group_id,
-          newEvent: event,
-          createdBy: event.created_by ?? event.user_id,
-        });
-      } else {
-        this.domainEvents.emit('myCalendar.newEvent', { userId: event.user_id, newEvent: event });
-      }
-    }
+    const event = this.eventRepo.createWithEffects(data, (created) => this.materializeReminders(data, created));
+    this.announceCreated(event);
     return event;
+  }
+
+  /**
+   * createEvent for a request that may be a repeat (see EventRepository.createUnlessDuplicate): a repeat
+   * (`duplicate`) or a same-title event on the same day (`same_day`) returns the existing event and
+   * writes nothing: no second reminder set, no second "new event" signal. The reminders are written in the
+   * insert's own transaction, so a failure leaves no event behind and a retry starts clean.
+   */
+  createEventIfNew(data: CreateEventData): { event: CalendarEvent; outcome: CreateOutcome } {
+    const result = this.eventRepo.createUnlessDuplicate(data, RECENT_DUPLICATE_WINDOW_MS, (event) =>
+      this.materializeReminders(data, event),
+    );
+    if (result.outcome === 'created') this.announceCreated(result.event);
+    return result;
+  }
+
+  private materializeReminders(data: CreateEventData, event: CalendarEvent): void {
+    if (!this.materializer) return;
+    // Explicit reminder intervals are persisted on creation and reused after edits/restarts.
+    const overrides = data.reminder_minutes
+      ? JSON.stringify(data.reminder_minutes)
+      : (event.reminder_overrides ?? null);
+    this.materializer.materialize(
+      {
+        id: event.id,
+        start_at: event.start_at,
+        reminder_overrides: overrides,
+        all_day: event.all_day,
+        user_timezone: event.timezone,
+      },
+      event.user_id,
+    );
+    // For recurring events, also materialize reminders for upcoming occurrences
+    if (event.recurrence_rule) {
+      this.materializeRecurringOccurrences(event, overrides);
+    }
+  }
+
+  private announceCreated(event: CalendarEvent): void {
+    if (!this.domainEvents) return;
+    if (event.owner_type === 'group' && event.group_id) {
+      this.domainEvents.emit('myGroup.newEvent', {
+        userId: event.created_by ?? event.user_id,
+        groupChatId: event.group_id,
+        newEvent: event,
+        createdBy: event.created_by ?? event.user_id,
+      });
+    } else {
+      this.domainEvents.emit('myCalendar.newEvent', { userId: event.user_id, newEvent: event });
+    }
   }
 
   updateEvent(

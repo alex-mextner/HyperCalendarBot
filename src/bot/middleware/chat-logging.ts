@@ -7,6 +7,8 @@
 import type { Next, TelegramUpdate } from 'gramio';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { User } from '../../database/types.ts';
+import type { ChatTurnReservation } from '../../services/ai/chat-run-gate.ts';
+import { withChatTurn } from '../../services/ai/chat-turn-context.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import { resolveCallbackButtonLabel } from '../callback-label.ts';
 import { parseAiBtnPayload } from '../handlers/callback.handler.ts';
@@ -24,6 +26,8 @@ interface ChatLoggingContext {
   update?: TelegramUpdate;
   send?: ReplyFn;
   editText?: ReplyFn;
+  /** Set to the row saved for this update's user turn, so the handler reads its own row, not the user's latest. */
+  chatHistoryId?: number;
 }
 
 export interface ChatLoggingDeps {
@@ -31,6 +35,8 @@ export interface ChatLoggingDeps {
   actionLog: Pick<ActionLogRepository, 'insert'>;
   /** Latest user chat_history row per user, read by the AI pipeline for the current turn. */
   chatHistoryIds: Map<number, number>;
+  /** Holds a message's place in its chat's agent line the moment the message is saved; see ChatRunGate.reserve. */
+  reserveChatTurn: (chatId: number, rowId: number) => ChatTurnReservation;
   /** The connect-wizard guard's verdict on this update's text or edit, reached before this middleware. */
   isConnectWizardInput: ConnectWizardGuard['isConnectWizardInput'];
 }
@@ -41,13 +47,16 @@ interface LoggingTurn {
   logChatId: number | undefined;
   /** Chat id for the action log, falling back to the user's private chat. */
   actionChatId: number;
+  /** The chat_history row this update's user turn was saved as; absent when the update saved none. */
+  savedRowId?: number;
 }
 
 export function createChatLogging(deps: ChatLoggingDeps) {
-  const { conversationLogger, actionLog, chatHistoryIds, isConnectWizardInput } = deps;
+  const { conversationLogger, actionLog, chatHistoryIds, reserveChatTurn, isConnectWizardInput } = deps;
 
   function saveUserTurn(turn: LoggingTurn, text: string): void {
-    chatHistoryIds.set(turn.userId, conversationLogger.logUserMessage(turn.userId, text, turn.logChatId));
+    turn.savedRowId = conversationLogger.logUserMessage(turn.userId, text, turn.logChatId);
+    chatHistoryIds.set(turn.userId, turn.savedRowId);
   }
 
   function logIncomingText(turn: LoggingTurn, text: string, messageId: number | undefined, inConnectWizard: boolean) {
@@ -165,7 +174,18 @@ export function createChatLogging(deps: ChatLoggingDeps) {
     };
 
     logIncomingUpdate(update, turn, isConnectWizardInput(context));
+    if (turn.savedRowId === undefined) {
+      wrapBotReplies(context, turn);
+      return next();
+    }
+    context.chatHistoryId = turn.savedRowId;
+    // Saved and reserved in one synchronous step, so the order of places in the chat's line is the order of rows.
+    const reservation = reserveChatTurn(turn.actionChatId, turn.savedRowId);
     wrapBotReplies(context, turn);
-    return next();
+    try {
+      return await withChatTurn(reservation, () => next());
+    } finally {
+      reservation.release();
+    }
   };
 }

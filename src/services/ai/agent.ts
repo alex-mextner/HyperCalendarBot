@@ -17,17 +17,20 @@ import {
   regroupToolCallBlocks,
   sanitizeMessages,
 } from './agent/message-sanitizer.ts';
+import { announceExpiredQueueLease, prepareQueuedTurn, showTypingWhileQueued, turnIds } from './agent/queued-turn.ts';
 import { settleFinalResponse } from './agent/response-validation.ts';
 import { type RetryOutcome, storeRetryAfterFailure } from './agent/retry-store.ts';
 import { runRoundLoop } from './agent/round-loop.ts';
 import { toolDefinitionsFor } from './agent/round-support.ts';
-import { AGENT_DRAIN_SETTLE_MS, RETRY_STORE_TIMEOUT_MS, TIMEOUT_MS } from './agent/run-limits.ts';
+import { AGENT_DRAIN_SETTLE_MS, CHAT_RUN_GRACE_MS, RETRY_STORE_TIMEOUT_MS, TIMEOUT_MS } from './agent/run-limits.ts';
 import type { AgentRunResult, AgentToolCallRecord, AgentToolResultRecord } from './agent/run-types.ts';
 import { toolCallKey, toolResultContent } from './agent/tool-call-key.ts';
 import type { ToolRunLedger } from './agent/tool-round.ts';
 import { finishTurn } from './agent/turn-finish.ts';
 import { createTurnState, type RunFailure, type TurnEnv, type TurnState } from './agent/turn-state.ts';
 import { createTurnWriter, senderForTurn } from './agent/turn-writer.ts';
+import { ChatRunGate, type ChatRunSlot, type ChatTurnReservation } from './chat-run-gate.ts';
+import { currentChatTurn } from './chat-turn-context.ts';
 import { resolveTurnDayReferences } from './day-reference-guard.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
@@ -67,11 +70,19 @@ export class CalendarBotAgent {
   private readonly shutdown = new AbortController();
   /** Runs not yet settled, including their debug-log flush — what a shutdown drain waits for. */
   private readonly inFlight = new Set<Promise<AgentRunResult>>();
+  /** One run at a time per chat; queued runs are in `inFlight` too, so a drain waits for them. */
+  private readonly chatRuns: ChatRunGate;
 
   constructor(
     config: AgentConfig,
     sender: TelegramSender,
-    opts?: { streamImpl?: typeof aiStreamRound; requestTimeoutMs?: number; retryStoreTimeoutMs?: number },
+    opts?: {
+      streamImpl?: typeof aiStreamRound;
+      requestTimeoutMs?: number;
+      retryStoreTimeoutMs?: number;
+      /** Replaces the default gate; tests use it to bound a hung run without real time. */
+      chatRunGate?: ChatRunGate;
+    },
   ) {
     this.toolSchemaMode = config.toolSchemaMode ?? 'full';
     this.sender = sender;
@@ -80,6 +91,7 @@ export class CalendarBotAgent {
     this.summarizer = config.summarizer;
     this.requestTimeoutMs = opts?.requestTimeoutMs ?? TIMEOUT_MS;
     this.retryStoreTimeoutMs = opts?.retryStoreTimeoutMs ?? RETRY_STORE_TIMEOUT_MS;
+    this.chatRuns = opts?.chatRunGate ?? new ChatRunGate({ leaseMs: this.requestTimeoutMs + CHAT_RUN_GRACE_MS });
     if (!Number.isSafeInteger(this.requestTimeoutMs) || this.requestTimeoutMs < 1 || this.requestTimeoutMs > TIMEOUT_MS)
       throw new Error(`requestTimeoutMs must be between 1 and ${TIMEOUT_MS}`);
   }
@@ -170,13 +182,34 @@ export class CalendarBotAgent {
       // Debug logging is evidence, not a dependency: the turn still runs without it.
       aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'AI debug log unavailable for this turn');
     }
-    const turn = this.runTurn(ctx, dbg).finally(() => {
-      this.inFlight.delete(turn);
-      // Every exit leaves the turn's evidence, including one that threw after its failure path.
-      dbg?.flush();
-    });
+    // One run at a time per chat: a message that arrives while an earlier run is still working waits for it
+    // and is then handled on the history that run wrote. The wait ends at shutdown (the run then fails fast).
+    const turn = this.chatRuns
+      .run(
+        ctx.chatId,
+        {
+          reservation: currentChatTurn(),
+          abort: this.shutdown.signal,
+          whileWaiting: () => showTypingWhileQueued(ctx, this.sender),
+        },
+        (slot) => this.runTurn(ctx, dbg, slot),
+      )
+      .finally(() => {
+        this.inFlight.delete(turn);
+        // Every exit leaves the turn's evidence, including one that threw after its failure path.
+        dbg?.flush();
+      });
     this.inFlight.add(turn);
     return turn;
+  }
+
+  /**
+   * Holds the next place in `chatId`'s line for the user message just saved as `rowId`, before its handler can
+   * wait on anything: the run that answers this row takes the place over, and later messages queue behind it
+   * whatever order their handlers reach `run`. The caller releases it when the update's handling ends.
+   */
+  reserveChatTurn(chatId: number, rowId: number): ChatTurnReservation {
+    return this.chatRuns.reserve(chatId, rowId);
   }
 
   /**
@@ -185,7 +218,9 @@ export class CalendarBotAgent {
    */
   private async startConversation(env: TurnEnv, state: TurnState, summaryStream: typeof aiStreamRound): Promise<void> {
     const { ctx, dbg, requestSignal } = env;
-    const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
+    // Turns queued behind this run are left out in the query, before the limit, and resolved
+    // now: a message that joined the queue while this run was starting is excluded too.
+    const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30, ctx.deferredTurnRowIds?.());
     // A bare "Да" answers the ask_user of the conversation it was saved to: the group's own.
     const turnHistory = relevantHistoryRows(ctx, history, 30);
     ctx.dayReferences = resolveTurnDayReferences(ctx.messageText, turnHistory, new Date(), ctx.user.timezone);
@@ -206,7 +241,9 @@ export class CalendarBotAgent {
     state.currentMessages = [{ role: 'system', content: activePrompt }, ...historyMessages];
   }
 
-  private async runTurn(ctx: AgentContext, dbg: AiDebugRunContext | null): Promise<AgentRunResult> {
+  private async runTurn(ctx: AgentContext, dbg: AiDebugRunContext | null, slot: ChatRunSlot): Promise<AgentRunResult> {
+    // The request budget below counts from the moment this turn is given the chat, not from arrival.
+    prepareQueuedTurn(ctx, slot);
     const startTime = Date.now();
     const requestSignal = AbortSignal.any([AbortSignal.timeout(this.requestTimeoutMs), this.shutdown.signal]);
     const requestMetrics = new AgentRequestMetrics();
@@ -216,6 +253,7 @@ export class CalendarBotAgent {
         requestId,
         userId: ctx.user.telegram_id,
         chatId: ctx.chatId,
+        ...turnIds(ctx),
         supplementMode: !!ctx.supplementMode,
         msg: ctx.messageText.slice(0, 100),
       },
@@ -269,6 +307,9 @@ export class CalendarBotAgent {
 
     const failure: RunFailure = { failed: false, error: undefined, retry: 'not_stored' };
     try {
+      // Inside the try and under the request signal: a stalled notice fails this turn into the normal failure
+      // path (stored retry, user notice) instead of outliving the shutdown drain.
+      await waitForAbort(() => announceExpiredQueueLease(ctx, slot, this.sender), requestSignal);
       await writer.init();
       await this.startConversation(env, state, summaryStream);
       await runRoundLoop(env, state);

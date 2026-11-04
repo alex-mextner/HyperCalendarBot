@@ -23,6 +23,7 @@ export interface CreateEventInput {
   recurrence_rule?: string;
   reminder_minutes?: number[];
   force?: boolean;
+  allow_duplicate?: boolean;
   scope?: Scope;
   owner_id?: number;
 }

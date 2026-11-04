@@ -86,6 +86,7 @@ const toolDefinitions: ToolDefinition[] = [
     name: 'create_event',
     description:
       'Create a new calendar event. Returns the created event. ' +
+      'A just-saved repeat returns "already exists": do not repeat. SAME_DAY_EVENT: to change it use update_event. ' +
       'If the event time is in the past, the tool will reject with PAST_EVENT error — ' +
       'you must ask the user to confirm via ask_user, then retry with force: true.',
     input_schema: {
@@ -114,6 +115,10 @@ const toolDefinitions: ToolDefinition[] = [
         force: {
           type: 'boolean',
           description: 'Set to true to create event in the past after user confirmed. Do NOT set without asking first.',
+        },
+        allow_duplicate: {
+          type: 'boolean',
+          description: 'Only after the user confirmed a second same-day event.',
         },
         scope: scopeProperty,
         owner_id: ownerIdProperty,

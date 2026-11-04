@@ -152,7 +152,13 @@ describe('scripts/report-ai-usage.ts', () => {
     dirs.push(dir);
     const path = join(dir, 'calendar.db');
     const db = new Database(path);
-    runMigrations(db, migrations.slice(0, -1));
+    runMigrations(
+      db,
+      migrations.slice(
+        0,
+        migrations.findIndex((migration) => migration.name === '067_ai_usage_role_preset_cost'),
+      ),
+    );
     db.close();
 
     const result = run('--database', path);

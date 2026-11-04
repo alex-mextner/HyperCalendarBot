@@ -7,9 +7,12 @@ import type { BotCommandContext } from '../../../src/bot/types.ts';
 import { stub } from '../partial-stub.ts';
 import { makeUserRow, sentMessage, telegramChat, telegramUser } from '../telegram-fixtures.ts';
 
+/** What `agent.reserveChatTurn` returns for a voice turn: a place nobody queues behind. */
+export const reserveIdleChatTurn = () => mock(() => ({ chatId: 100, rowId: 1, release: () => {} }));
+
 export function makeDeps(overrides: { [key: string]: unknown } = {}) {
   return {
-    agent: { run: mock(() => Promise.resolve()) },
+    agent: { run: mock(() => Promise.resolve()), reserveChatTurn: reserveIdleChatTurn() },
     eventService: { getEventsInRange: mock(() => []), getLatestCreated: mock(() => null) },
     holidayService: {},
     chatHistory: {},
@@ -60,6 +63,8 @@ export function makeMessageCtx(overrides: Partial<MessageCtx> = {}): MessageCtx 
     threadId: undefined,
     venue: undefined,
     location: undefined,
+    chatHistoryId: undefined,
+    updateId: undefined,
     voice: undefined,
     replyMessage: undefined,
     text: 'привет',
@@ -75,7 +80,10 @@ export function makeMessageCtx(overrides: Partial<MessageCtx> = {}): MessageCtx 
 /** Message handler dependencies: the required ones stubbed for a plain text turn; `overrides` replace or add. */
 export function makeHandlerDeps(overrides: Partial<MessageHandlerDeps> = {}): MessageHandlerDeps {
   return {
-    agent: stub({ run: mock(() => Promise.resolve({ responseText: '', toolCalls: [], toolResults: [] })) }),
+    agent: stub({
+      run: mock(() => Promise.resolve({ responseText: '', toolCalls: [], toolResults: [] })),
+      reserveChatTurn: reserveIdleChatTurn(),
+    }),
     eventService: stub({ getEventsInRange: mock(() => []), getLatestCreated: mock(() => null) }),
     holidayService: stub({}),
     chatHistory: stub({}),

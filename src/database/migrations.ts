@@ -1160,4 +1160,12 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    name: '069_chat_history_turn_order',
+    up(db) {
+      // A user turn that waited behind an earlier run of its chat is read after what that run wrote, without
+      // changing its id (the action log and the per-user row map hold ids). NULL: the turn reads at its own id.
+      db.exec('ALTER TABLE chat_history ADD COLUMN turn_order REAL');
+    },
+  },
 ];

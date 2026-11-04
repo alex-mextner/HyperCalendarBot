@@ -1,5 +1,6 @@
 // src/database/repositories/event.repository.ts
 import type { Database, SQLQueryBindings, Statement } from 'bun:sqlite';
+import { allDayDates } from '../../utils/date.ts';
 import { assertValidEventTimestamps } from '../../utils/event-timestamps.ts';
 import type { CalendarEvent, CreateEventData, UpdateEventData } from '../types.ts';
 
@@ -76,6 +77,59 @@ function takeTitleMatches<Params extends SQLQueryBindings[]>(
   } finally {
     statement.finalize();
   }
+}
+
+export type CreateOutcome = 'created' | 'duplicate' | 'same_day';
+
+/** The calendar day (YYYY-MM-DD) an instant falls on in `timezone`. */
+function localDay(instant: string, timezone: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(instant));
+  } catch {
+    return instant.slice(0, 10);
+  }
+}
+
+/** Timed events are the same span when start and end are the same instants, however the offset is spelled. */
+function sameInstants(data: CreateEventData) {
+  const start = Date.parse(data.start_at);
+  const end = data.end_at ? Date.parse(data.end_at) : null;
+  return (c: { start_at: string; end_at: string | null }) =>
+    Date.parse(c.start_at) === start && (c.end_at ? Date.parse(c.end_at) : null) === end;
+}
+
+/** What the caller stated beyond title and time (description, location, reminders) must not differ from the saved row. */
+function sameDetails(
+  data: CreateEventData,
+  saved: { description: string | null; location: string | null; reminder_overrides: string | null },
+): boolean {
+  const same = (stated: string | undefined, have: string | null) =>
+    stated === undefined || stated.trim() === (have ?? '').trim();
+  return (
+    same(data.description, saved.description) &&
+    same(data.location, saved.location) &&
+    (data.reminder_minutes === undefined ||
+      JSON.stringify(data.reminder_minutes) === JSON.stringify(parseMinutes(saved.reminder_overrides)))
+  );
+}
+
+function parseMinutes(raw: string | null): unknown {
+  if (raw === null) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** Titles are the same event's when they differ only in surrounding or repeated whitespace, case or Unicode form. */
+function normalizedTitle(title: string): string {
+  return title.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 export const EVENT_UPDATE_FIELDS = [
@@ -204,11 +258,128 @@ export class EventRepository {
         data.event_type ?? null,
         data.reminder_minutes === undefined ? null : JSON.stringify(data.reminder_minutes),
       );
-    const id = Number(result.lastInsertRowid);
-    if (data.owner_type === 'group' && data.group_id != null) {
-      return this.findByIdInGroup(id, data.group_id)!;
-    }
+    return this.findCreated(Number(result.lastInsertRowid), data);
+  }
+
+  /** The row a create just wrote or matched, read back the way the creator's scope sees it. */
+  private findCreated(id: number, data: CreateEventData): CalendarEvent {
+    if (data.owner_type === 'group' && data.group_id != null) return this.findByIdInGroup(id, data.group_id)!;
     return this.findById(id, data.user_id)!;
+  }
+
+  /** Creates the event and runs `onCreated` (its reminders) in one transaction: if either fails, neither is kept. */
+  createWithEffects(data: CreateEventData, onCreated: (event: CalendarEvent) => void): CalendarEvent {
+    return this.db
+      .transaction((): CalendarEvent => {
+        const event = this.create(data);
+        onCreated(event);
+        return event;
+      })
+      .immediate();
+  }
+
+  /**
+   * Creates the event unless the calendar already holds it. Candidates are the live events of the same
+   * calendar (the user's own primary-calendar events, or the same group) with the same title (trimmed,
+   * whitespace collapsed, case folded) and the same all-day flag; a one-off is compared with one-offs, a series
+   * (with a recurrence rule) with series of the same rule, never across:
+   * - `duplicate`: same start and end (all-day: the same dates) and the same details the caller stated,
+   *   created within `windowMs`. That is what a repeated message, a retry after a lost reply or a second
+   *   overlapping run produces; the existing row comes back and nothing is written.
+   * - `same_day` (one-offs only): any other candidate on the same local day (all-day: the same first date),
+   *   whatever its age: a second copy, or the old half of a move done by creating (#520). The caller decides
+   *   whether the user really wants it; nothing is written. A series is matched only as an exact, recent
+   *   repeat: two series on one day may be a deliberate pair.
+   * - `created`: otherwise. `onCreated` runs in the same transaction as the insert, so an event never
+   *   persists without the effects that must accompany it.
+   * The check and the insert are one immediate transaction, so two writers (connections, or a process
+   * restarted in between) cannot both miss each other's row.
+   */
+  createUnlessDuplicate(
+    data: CreateEventData,
+    windowMs: number,
+    onCreated?: (event: CalendarEvent) => void,
+  ): { event: CalendarEvent; outcome: CreateOutcome } {
+    return this.db
+      .transaction((): { event: CalendarEvent; outcome: CreateOutcome } => {
+        const match = this.findSameEvent(data, windowMs);
+        if (match) return { event: this.findCreated(match.id, data), outcome: match.outcome };
+        const event = this.create(data);
+        onCreated?.(event);
+        return { event, outcome: 'created' };
+      })
+      .immediate();
+  }
+
+  private findSameEvent(
+    data: CreateEventData,
+    windowMs: number,
+  ): { id: number; outcome: Exclude<CreateOutcome, 'created'> } | null {
+    assertValidEventTimestamps(data);
+    const isGroup = data.owner_type === 'group' && data.group_id != null;
+    const series = data.recurrence_rule != null && data.recurrence_rule !== '';
+    const candidates = this.db
+      .prepare(
+        `SELECT id, title, description, location, start_at, end_at, timezone, reminder_overrides,
+                created_at >= datetime('now', ?) AS recent
+         FROM events
+         WHERE is_deleted = 0 AND is_cancelled = 0
+           AND ${series ? 'recurrence_rule = ?' : 'recurrence_rule IS NULL'} AND parent_event_id IS NULL
+           AND ${
+             isGroup
+               ? "owner_type = 'group' AND group_id = ?"
+               : `owner_type = 'user' AND user_id = ?
+                  AND (google_calendar_id IS NULL OR google_calendar_id = 'primary'
+                       OR google_calendar_id IN (SELECT google_calendar_id FROM google_calendars WHERE user_id = ? AND is_primary = 1))`
+           }
+           AND all_day = ?
+           AND ABS(julianday(start_at) - julianday(?)) < 3
+         ORDER BY id ASC`,
+      )
+      .all(
+        `-${Math.ceil(windowMs / 1000)} seconds`,
+        ...(series ? [data.recurrence_rule!] : []),
+        ...(isGroup ? [data.group_id!] : [data.user_id, data.user_id]),
+        data.all_day ? 1 : 0,
+        data.start_at,
+      ) as {
+      id: number;
+      title: string;
+      description: string | null;
+      location: string | null;
+      start_at: string;
+      end_at: string | null;
+      timezone: string;
+      reminder_overrides: string | null;
+      recent: number;
+    }[];
+    const wanted = normalizedTitle(data.title);
+    const sameTitle = candidates.filter((c) => normalizedTitle(c.title) === wanted);
+    if (sameTitle.length === 0) return null;
+
+    const sameSpan = data.all_day ? this.sameAllDaySpan(data) : sameInstants(data);
+    const sameDay = data.all_day
+      ? (c: { start_at: string; timezone: string }) =>
+          allDayDates(c.start_at, null, c.timezone).first === allDayDates(data.start_at, null, data.timezone).first
+      : (c: { start_at: string }) => localDay(c.start_at, data.timezone) === localDay(data.start_at, data.timezone);
+    const duplicate = sameTitle.find((c) => c.recent === 1 && sameSpan(c) && sameDetails(data, c));
+    if (duplicate) return { id: duplicate.id, outcome: 'duplicate' };
+    if (series) return null;
+    const sameDayEvent = sameTitle.find(sameDay);
+    return sameDayEvent ? { id: sameDayEvent.id, outcome: 'same_day' } : null;
+  }
+
+  /**
+   * All-day values are floating dates (a bare date, UTC midnight or local midnight in some zone): compare the
+   * dates they mean, each read in the zone it was saved with (a group event saved from Belgrade is read the
+   * same way by a member in Los Angeles).
+   */
+  private sameAllDaySpan(data: CreateEventData) {
+    const wanted = allDayDates(data.start_at, data.end_at ?? null, data.timezone);
+    return (c: { start_at: string; end_at: string | null; timezone: string }) => {
+      const have = allDayDates(c.start_at, c.end_at, c.timezone);
+      return have.first === wanted.first && have.endExclusive === wanted.endExclusive;
+    };
   }
 
   /** Load event by ID without ownership checks. For internal service use only (sync workers, etc.). */
