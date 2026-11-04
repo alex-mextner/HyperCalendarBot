@@ -101,7 +101,7 @@ describe('receipt-only confirmation', () => {
   test('a write that names no event falls back to the ledger summary, never "interrupted"', () => {
     const noEvent = run({ name: 'create_event', input: { title: 'Synthetic bare' }, result: OK });
     const receipt = buildReceiptConfirmation(view('en'), noEvent.evidence, noEvent.ledger) ?? '';
-    expect(receipt).toContain('Completed');
+    expect(receipt).toContain('Created: event');
     expect(receipt).not.toMatch(/interrupted/i);
   });
 

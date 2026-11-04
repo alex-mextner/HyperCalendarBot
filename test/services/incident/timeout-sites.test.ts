@@ -35,6 +35,28 @@ const EXEMPT: { [site: string]: Exemption } = {
     reason: 'provider HTTP client timeout; an attempt that hits it is reported per round by streaming.ts',
     reportedBy: 'src/services/ai/streaming.ts#reportProviderTimeouts',
   },
+  'src/services/ai/claude-credential-pool.ts#requestWithinBudget': {
+    reason:
+      'per-key request budget; run() counts every attempt that timed out before the request ended, except the one thrown at the streaming round, which reports it',
+    reportedBy: 'src/services/ai/claude-credential-pool.ts#reportKeyTimeouts',
+  },
+  'src/services/ai/model-registry.ts#resolveModelOverride': {
+    reason: 'arms the catalogue probe budget; probeAndCache counts a listing that ran out of it',
+    reportedBy: 'src/services/ai/model-registry.ts#reportListingTimeout',
+  },
+  'src/services/ai/model-registry.ts#listLiveModels': {
+    reason: 'the listing request budget; a listing that timed out is counted by the shared reportListingTimeout',
+    reportedBy: 'src/services/ai/model-registry.ts#reportListingTimeout',
+  },
+  'src/services/ai/model-registry.ts#waitForCatalog': {
+    reason:
+      "a joiner's wait for the shared listing; its expiry before the probe's own is counted by reportListingTimeout",
+    reportedBy: 'src/services/ai/model-registry.ts#reportListingTimeout',
+  },
+  'src/services/ai/chat-run-gate.ts#scheduleWithTimeout': {
+    reason: 'the lease and reservation timers of the chat line; a lease that ran out is reported by waitFor',
+    reportedBy: 'src/services/ai/chat-run-gate.ts#ChatRunGate.waitFor',
+  },
   'src/services/ai/provider-circuit.ts#openProviderCircuitStore': {
     reason: 'sets the sidecar SQLite busy timeout; guarded() forwards the locked-database error it swallows',
     reportedBy: 'src/services/ai/provider-circuit.ts#guarded',

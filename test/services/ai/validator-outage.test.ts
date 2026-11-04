@@ -89,8 +89,8 @@ describe('validator outage after writes', () => {
     const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
 
     expect(script.calls).toHaveLength(4);
-    expect(result.responseText).toContain('Not completed');
-    expect(result.responseText).toContain('Completed');
+    expect(result.responseText).toContain('Not updated');
+    expect(result.responseText).toContain('Created: event');
     expect(result.metrics?.termination).toBe('unverified');
   });
 

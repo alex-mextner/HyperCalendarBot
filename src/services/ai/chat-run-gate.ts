@@ -19,6 +19,7 @@
 // goes on. Shutdown also ends the wait, so queued runs take their normal fail-fast path.
 
 import { logger } from '../../utils/logger.ts';
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 
 const gateLogger = logger.child({ module: 'ai-chat-gate' });
 
@@ -88,6 +89,8 @@ interface QueuedRun {
   settled: boolean;
   /** True once a later run has reported giving up on this entry: a hung run is announced once, not per message. */
   leaseAnnounced: boolean;
+  /** True once the lease that ran out on this entry was counted as a timeout, so one hung run counts once. */
+  leaseReported: boolean;
 }
 
 function newEntry(rowId: number | undefined, reserved: boolean): QueuedRun {
@@ -100,6 +103,7 @@ function newEntry(rowId: number | undefined, reserved: boolean): QueuedRun {
     finished: Promise.withResolvers<void>(),
     settled: false,
     leaseAnnounced: false,
+    leaseReported: false,
   };
 }
 
@@ -154,6 +158,14 @@ export class ChatRunGate {
         { chatId, rowId, reservationMs: this.reservationMs },
         'A reserved place in the chat was never used',
       );
+      // The message's handler ran longer than its reservation: it loses its place in the line, so a message
+      // saved after it can run first. It still runs, at the end of the line: recovered.
+      reportTimeout({
+        kind: 'chat_run_reservation',
+        elapsedMs: this.reservationMs,
+        limitMs: this.reservationMs,
+        recovered: true,
+      });
       this.release(chatId, entry);
     }, this.reservationMs);
     const reservation: ChatTurnReservation = {
@@ -315,15 +327,18 @@ export class ChatRunGate {
     abort?.removeEventListener('abort', onAbort);
     const leaseRanOut = !ahead.settled && abort?.aborted !== true;
     if (!ahead.settled) {
+      const heldMs = ahead.startedAt === 0 ? 0 : this.now() - ahead.startedAt;
       gateLogger.warn(
-        {
-          chatId,
-          heldMs: ahead.startedAt === 0 ? 0 : this.now() - ahead.startedAt,
-          leaseMs: this.leaseMs,
-          shuttingDown: abort?.aborted === true,
-        },
+        { chatId, heldMs, leaseMs: this.leaseMs, shuttingDown: abort?.aborted === true },
         'Not waiting any longer for the earlier agent run in this chat',
       );
+      // The waiting message goes on beside the hung run, so it is served: recovered. The hung run's own
+      // deadline is reported where it is armed, and the run itself is counted once, not once per message
+      // that waited behind it.
+      if (leaseRanOut && !ahead.leaseReported) {
+        ahead.leaseReported = true;
+        reportTimeout({ kind: 'chat_run_lease', elapsedMs: heldMs, limitMs: this.leaseMs, recovered: true });
+      }
     }
     return leaseRanOut;
   }

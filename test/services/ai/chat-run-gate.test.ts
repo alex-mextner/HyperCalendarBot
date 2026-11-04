@@ -7,6 +7,7 @@ import {
   type ChatTurn,
   type ChatTurnReservation,
 } from '../../../src/services/ai/chat-run-gate.ts';
+import { withCountingReporter } from '../../helpers/counting-timeout-reporter.ts';
 import { ManualTime } from '../../helpers/manual-time.ts';
 
 const LEASE_MS = 120_000;
@@ -144,6 +145,57 @@ describe('ChatRunGate', () => {
     expect(await Promise.all([hung.result, next.result, last.result])).toEqual(['hung', 'next', 'last']);
     expect(gate.busyChats).toBe(0);
   });
+
+  test('a lease that ran out is counted once as a recovered timeout, and runs that finish in turn count none', () =>
+    withCountingReporter(async (reporter) => {
+      const hung = manualRun(gate, 1, 'hung', log);
+      const next = manualRun(gate, 1, 'next', log);
+      await settle();
+      time.advance(LEASE_MS);
+      await settle();
+      expect(reporter.reports).toHaveLength(1);
+      expect(reporter.reports[0]).toMatchObject({ kind: 'chat_run_lease', limitMs: LEASE_MS, recovered: true });
+      expect(reporter.reports[0]?.elapsedMs).toBeGreaterThanOrEqual(LEASE_MS);
+
+      hung.finish();
+      next.finish();
+      await Promise.all([hung.result, next.result]);
+      const prompt = manualRun(gate, 2, 'prompt', log);
+      const queued = manualRun(gate, 2, 'queued', log);
+      prompt.finish();
+      queued.finish();
+      await Promise.all([prompt.result, queued.result]);
+      expect(reporter.reports).toHaveLength(1);
+    }));
+
+  test('one hung run is counted once however many messages wait behind it', () =>
+    withCountingReporter(async (reporter) => {
+      const hung = manualRun(gate, 1, 'hung', log);
+      const next = manualRun(gate, 1, 'next', log);
+      const last = manualRun(gate, 1, 'last', log);
+      await settle();
+      time.advance(LEASE_MS);
+      await settle();
+      next.finish();
+      await settle();
+      expect(log).toContain('start last');
+      last.finish();
+      hung.finish();
+      await Promise.all([hung.result, next.result, last.result]);
+      const later = manualRun(gate, 1, 'later', log);
+      later.finish();
+      await later.result;
+      expect(reporter.reports.filter((report) => report.kind === 'chat_run_lease')).toHaveLength(1);
+    }));
+
+  test('a reserved place that nobody used is counted as a recovered reservation timeout', () =>
+    withCountingReporter(async (reporter) => {
+      gate.reserve(1, 11);
+      time.advance(60_000);
+      await settle();
+      expect(reporter.reports).toHaveLength(1);
+      expect(reporter.reports[0]).toMatchObject({ kind: 'chat_run_reservation', limitMs: 60_000, recovered: true });
+    }));
 
   test('the lease of a run behind a hung one counts from when it began, not when it was queued', async () => {
     const hung = manualRun(gate, 1, 'hung', log);

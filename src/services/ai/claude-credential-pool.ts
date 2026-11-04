@@ -1,3 +1,5 @@
+import { reportTimeout } from '../incident/timeout-reporter.ts';
+
 /**
  * Same 1s floor as the streaming round budget (`roundDeadlineReached`), but never above a quarter of a short
  * budget, so a first attempt that merely used some of a 1s budget still leaves room for the backup.
@@ -125,6 +127,29 @@ async function requestWithinBudget<T>(
   }
 }
 
+/**
+ * Attempts that timed out on one key while the request went on to another. The caller never sees them, so they are
+ * counted here, on every way out of the request. When the request ends in an error, a timeout that is itself that
+ * error is left to the streaming round (it classifies the thrown error). Every one counted here is recovered: the
+ * pool cannot tell whether the user was served (the slot retries, the next provider answers), and a request that
+ * ends with nobody answered is reported by the streaming round as an exhausted round.
+ */
+function reportKeyTimeouts(
+  failures: readonly { error: unknown; timedOut: boolean; durationMs: number; limitMs: number }[],
+  outcome: { ok: true } | { ok: false; error: unknown },
+): void {
+  for (const failure of failures) {
+    if (!failure.timedOut) continue;
+    if (!outcome.ok && failure.error === outcome.error) continue;
+    reportTimeout({
+      kind: 'claude_credential',
+      elapsedMs: failure.durationMs,
+      limitMs: failure.limitMs,
+      recovered: true,
+    });
+  }
+}
+
 export function createClaudeCredentialPool(
   tokens: readonly (string | undefined)[],
   now: () => number = Date.now,
@@ -154,6 +179,9 @@ export function createClaudeCredentialPool(
     error: unknown;
     startedAt: number;
     durationMs: number;
+    /** The attempt's own budget cut it; the request moved on to the next key. */
+    timedOut: boolean;
+    limitMs: number;
   }
 
   function recordCredentialFailure(token: string, error: unknown, version: number): void {
@@ -212,6 +240,8 @@ export function createClaudeCredentialPool(
           error,
           startedAt: attemptStartedAt,
           durationMs: Math.max(0, performance.now() - attemptStarted),
+          timedOut: error instanceof CredentialAttemptTimeoutError,
+          limitMs: timeoutMs,
         },
       };
     } finally {
@@ -239,22 +269,31 @@ export function createClaudeCredentialPool(
       if (credentials.length === 0) throw new Error('Claude API token is not configured');
       const startedAt = performance.now();
       const attempted = new Set<string>();
-      let lastFailure: FailedAttempt | undefined;
-      while (attempted.size < credentials.length) {
-        options.signal?.throwIfAborted();
-        const eligible = credentials.filter((token) => !attempted.has(token) && available(token));
-        const token = eligible[0];
-        if (!token) break;
-        const remaining = options.timeoutMs - (performance.now() - startedAt);
-        if (remaining <= 0 && !lastFailure) throw new CredentialAttemptTimeoutError();
-        // A sliver cannot complete a request and would cool a healthy key; keep the real failure instead.
-        if (lastFailure && remaining < Math.min(options.timeoutMs / 4, MIN_USEFUL_ATTEMPT_MS)) break;
-        attempted.add(token);
-        const result = await attempt(operation, token, remaining / eligible.length, options, lastFailure);
-        if (result.ok) return result.value;
-        lastFailure = result.failure;
+      const failures: FailedAttempt[] = [];
+      try {
+        while (attempted.size < credentials.length) {
+          options.signal?.throwIfAborted();
+          const eligible = credentials.filter((token) => !attempted.has(token) && available(token));
+          const token = eligible[0];
+          if (!token) break;
+          const lastFailure = failures.at(-1);
+          const remaining = options.timeoutMs - (performance.now() - startedAt);
+          if (remaining <= 0 && !lastFailure) throw new CredentialAttemptTimeoutError();
+          // A sliver cannot complete a request and would cool a healthy key; keep the real failure instead.
+          if (lastFailure && remaining < Math.min(options.timeoutMs / 4, MIN_USEFUL_ATTEMPT_MS)) break;
+          attempted.add(token);
+          const result = await attempt(operation, token, remaining / eligible.length, options, lastFailure);
+          if (result.ok) {
+            reportKeyTimeouts(failures, { ok: true });
+            return result.value;
+          }
+          failures.push(result.failure);
+        }
+        return throwFinalFailure(failures.at(-1));
+      } catch (error) {
+        reportKeyTimeouts(failures, { ok: false, error });
+        throw error;
       }
-      return throwFinalFailure(lastFailure);
     },
   };
 }

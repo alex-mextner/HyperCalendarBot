@@ -16,7 +16,10 @@ import {
   resolveModelOverride,
   selectReplacementModel,
 } from '../../../src/services/ai/model-registry.ts';
-import { configureTimeoutReporter, TimeoutReporter } from '../../../src/services/incident/timeout-reporter.ts';
+import { withCountingReporter } from '../../helpers/counting-timeout-reporter.ts';
+
+/** Lets every continuation already queued run, without waiting on a clock. */
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /** Fake OpenAI-compatible client exposing only the models listing endpoint. */
 function makeListingClient(ids: string[]) {
@@ -242,26 +245,96 @@ describe('resolveModelOverride', () => {
     expect(getModelOverride('hf', 'dead-model')).toBeNull();
   });
 
-  test('a models listing that times out is reported as a recovered timeout, a plain failure is not', async () => {
-    const alerts: string[] = [];
-    configureTimeoutReporter(new TimeoutReporter((text) => alerts.push(text)));
-    try {
+  test('a models listing that times out is reported as a recovered timeout, a plain failure is not', () =>
+    withCountingReporter(async (reporter) => {
       const plain = makeFailingListingClient(new Error('models endpoint unreachable'));
       await resolveModelOverride({ provider: 'hf', client: plain.client, configuredModel: 'dead-model-a' });
-      expect(alerts).toEqual([]);
+      expect(reporter.reports).toEqual([]);
 
       const slow = makeFailingListingClient(new OpenAI.APIConnectionTimeoutError());
       expect(
         await resolveModelOverride({ provider: 'hf', client: slow.client, configuredModel: 'dead-model-b' }),
       ).toBeNull();
-      expect(alerts).toHaveLength(1);
-      expect(alerts[0]).toContain('Timeout (model_listing)');
-      expect(alerts[0]).toContain('limitMs: 10000');
-      expect(alerts[0]).toContain('unrecovered=0 recovered=1');
-    } finally {
-      configureTimeoutReporter(null);
-    }
+      expect(reporter.reports).toHaveLength(1);
+      expect(reporter.reports[0]).toMatchObject({ kind: 'model_listing', recovered: true });
+      // The listing's own budget, not a constant: a whole probe budget minus the instant it took to start.
+      expect(reporter.reports[0]?.limitMs).toBeGreaterThan(9000);
+      expect(reporter.reports[0]?.limitMs).toBeLessThanOrEqual(10000);
+    }));
+
+  test('a joiner whose provider deadline ends before the shared lookup reports the expiry once', async () => {
+    let finishListing: (() => void) | undefined;
+    const list = mock(
+      () =>
+        new Promise<{ data: { id: string }[] }>((resolve) => {
+          finishListing = () => resolve({ data: [{ id: 'live-model' }] });
+        }),
+    );
+    const client: ModelListingClient = { models: { list } };
+    const patient = new AbortController();
+    await withCountingReporter(async (reporter) => {
+      try {
+        // The first caller has the whole probe budget and starts the shared lookup.
+        const first = resolveModelOverride({
+          provider: 'hf',
+          client,
+          configuredModel: 'dead-model',
+          signal: patient.signal,
+        });
+        // The second joins it with a provider deadline far shorter than the lookup.
+        const second = await resolveModelOverride({
+          provider: 'hf',
+          client,
+          configuredModel: 'dead-model',
+          providerDeadlineAt: performance.now() + 30,
+        });
+        expect(second).toBeNull();
+        expect(list).toHaveBeenCalledTimes(1);
+        expect(reporter.reports).toHaveLength(1);
+        expect(reporter.reports[0]).toMatchObject({ kind: 'model_listing', recovered: true });
+        expect(reporter.reports[0]?.limitMs).toBeLessThanOrEqual(30);
+        patient.abort();
+        expect(await first).toBeNull();
+        expect(reporter.reports).toHaveLength(1);
+      } finally {
+        finishListing?.();
+        // Let the finished probe settle before the next test resets the registry.
+        await settle();
+      }
+    });
   });
+
+  test('the caller that started the lookup and its own probe count one hung listing once', () =>
+    withCountingReporter(async (reporter) => {
+      // A client that honours its abort signal, as the SDK does.
+      let listRejected: Promise<void> = Promise.resolve();
+      const list = mock((options?: { timeout?: number; signal?: AbortSignal }) => {
+        const abortedList = new Promise<{ data: { id: string }[] }>((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true });
+        });
+        listRejected = abortedList.then(
+          () => undefined,
+          () => undefined,
+        );
+        return abortedList;
+      });
+      const client: ModelListingClient = { models: { list } };
+      expect(
+        await resolveModelOverride({
+          provider: 'hf',
+          client,
+          configuredModel: 'dead-model',
+          providerDeadlineAt: performance.now() + 40,
+        }),
+      ).toBeNull();
+      // The probe settles on its own clock a moment after its caller stopped waiting: wait for its listing to
+      // reject, then let the continuation that reports it run.
+      await listRejected;
+      await settle();
+      expect(reporter.reports).toHaveLength(1);
+      expect(reporter.reports[0]).toMatchObject({ kind: 'model_listing', recovered: true });
+      expect(reporter.reports[0]?.limitMs).toBeLessThanOrEqual(40);
+    }));
 
   test('returns null when the endpoint yields nothing usable, and does not re-probe within the TTL', async () => {
     const { client, list } = makeListingClient(['whisper-large-v3']);
