@@ -1,5 +1,7 @@
 import type { ChatHistoryMessage } from '../../database/types.ts';
 import { logger } from '../../utils/logger.ts';
+import { reportIfDatabaseBusy } from '../incident/database-busy.ts';
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 import { hasPersistablePayload, withoutSkippedToolCalls } from './agent/assistant-turn.ts';
 import {
   buildHistoryMessages,
@@ -22,7 +24,14 @@ import { settleFinalResponse } from './agent/response-validation.ts';
 import { type RetryOutcome, storeRetryAfterFailure } from './agent/retry-store.ts';
 import { runRoundLoop } from './agent/round-loop.ts';
 import { toolDefinitionsFor } from './agent/round-support.ts';
-import { AGENT_DRAIN_SETTLE_MS, CHAT_RUN_GRACE_MS, RETRY_STORE_TIMEOUT_MS, TIMEOUT_MS } from './agent/run-limits.ts';
+import type { RunIncidentReporter } from './agent/run-incident.ts';
+import {
+  AGENT_DRAIN_SETTLE_MS,
+  CHAT_RUN_GRACE_MS,
+  RETRY_STORE_TIMEOUT_MS,
+  TIMEOUT_MS,
+  VALIDATION_TIMEOUT_MS,
+} from './agent/run-limits.ts';
 import type { AgentRunResult, AgentToolCallRecord, AgentToolResultRecord } from './agent/run-types.ts';
 import { toolCallKey, toolResultContent } from './agent/tool-call-key.ts';
 import type { ToolRunLedger } from './agent/tool-round.ts';
@@ -66,6 +75,8 @@ export class CalendarBotAgent {
   private summarizer?: HistorySummarizer;
   private requestTimeoutMs: number;
   private readonly retryStoreTimeoutMs: number;
+  private readonly validationTimeoutMs: number;
+  private readonly runIncidents?: RunIncidentReporter;
   /** Aborts every in-flight and later run once the process starts shutting down. */
   private readonly shutdown = new AbortController();
   /** Runs not yet settled, including their debug-log flush — what a shutdown drain waits for. */
@@ -89,6 +100,8 @@ export class CalendarBotAgent {
     this.debugLogger = config.debugLogger;
     this.streamImpl = opts?.streamImpl ?? aiStreamRound;
     this.summarizer = config.summarizer;
+    this.runIncidents = config.runIncidents;
+    this.validationTimeoutMs = config.validationTimeoutMs ?? VALIDATION_TIMEOUT_MS;
     this.requestTimeoutMs = opts?.requestTimeoutMs ?? TIMEOUT_MS;
     this.retryStoreTimeoutMs = opts?.retryStoreTimeoutMs ?? RETRY_STORE_TIMEOUT_MS;
     this.chatRuns = opts?.chatRunGate ?? new ChatRunGate({ leaseMs: this.requestTimeoutMs + CHAT_RUN_GRACE_MS });
@@ -155,9 +168,11 @@ export class CalendarBotAgent {
         if (outcome === 'timeout') break;
       }
       const stillRunning = this.inFlight.size;
-      if (stillRunning > 0)
+      if (stillRunning > 0) {
+        // Runs left behind may still be writing when the database closes: an unrecovered deadline.
+        reportTimeout({ kind: 'agent_drain', elapsedMs: settleMs, limitMs: settleMs, recovered: false });
         aiLogger.warn({ initialInFlight, stillRunning }, 'Agent runs abandoned at shutdown deadline');
-      else aiLogger.info({ initialInFlight }, 'Agent runs drained for shutdown');
+      } else aiLogger.info({ initialInFlight }, 'Agent runs drained for shutdown');
     } finally {
       clearTimeout(timer);
     }
@@ -259,9 +274,10 @@ export class CalendarBotAgent {
       },
       'Agent run started',
     );
+    dbg?.logRequestId(requestId);
 
-    const streamFor = (purpose: StreamPurpose) =>
-      createMeasuredStream({ streamImpl: this.streamImpl, requestSignal, requestMetrics, requestId }, purpose);
+    const streamFor = (purpose: StreamPurpose, signal: AbortSignal = requestSignal) =>
+      createMeasuredStream({ streamImpl: this.streamImpl, requestSignal: signal, requestMetrics, requestId }, purpose);
     const summaryStream = streamFor('history');
 
     const exposure =
@@ -302,7 +318,10 @@ export class CalendarBotAgent {
       retryStream: streamFor('retry'),
       requestSignal,
       agentStream: streamFor('agent'),
-      validatorStream: streamFor('validator'),
+      // The validator runs on its own clock (validationTimeoutMs): only a shutdown cuts it short. The
+      // request deadline decides whether it may start (see judge in agent/response-validation.ts).
+      validatorStream: streamFor('validator', this.shutdown.signal),
+      validationTimeoutMs: this.validationTimeoutMs,
     };
 
     const failure: RunFailure = { failed: false, error: undefined, retry: 'not_stored' };
@@ -316,6 +335,18 @@ export class CalendarBotAgent {
       await settleFinalResponse(env, state);
     } catch (error) {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
+      // This catch keeps the error from the bot's onError, so a locked database is forwarded here.
+      reportIfDatabaseBusy(error);
+      // The overall request deadline fired (not a shutdown): no fallback can recover this turn.
+      if (requestSignal.aborted && !this.shutdown.signal.aborted) {
+        reportTimeout({
+          kind: 'agent_request',
+          requestId,
+          elapsedMs: Date.now() - startTime,
+          limitMs: this.requestTimeoutMs,
+          recovered: false,
+        });
+      }
       failure.failed = true;
       failure.error = error;
       state.termination = 'error';
@@ -331,6 +362,10 @@ export class CalendarBotAgent {
       saveTurn: (message) => this.saveAssistantTurn(ctx, message),
       announceFailure: (error, retry) => this.announceFailure(ctx, error, writer, retry),
       endSession: () => this.debugLogger?.endSession(ctx.chatId),
+      reportIncident: (incident) => {
+        // A run cut short by this process shutting down is not an incident.
+        if (!this.shutdown.signal.aborted) this.runIncidents?.report(incident);
+      },
     });
   }
 

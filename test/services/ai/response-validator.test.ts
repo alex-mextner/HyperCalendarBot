@@ -8,6 +8,7 @@ import {
   shouldValidateResponse,
   supplementIsGrounded,
   unverifiedResponseNotice,
+  type ValidatorUnavailableCause,
   validateResponse,
 } from '../../../src/services/ai/response-validator.ts';
 import type { StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
@@ -191,7 +192,7 @@ describe('tool-run evidence prefilter — deterministic rejection', () => {
         return stubText('APPROVE')({ messages: [], maxTokens: 1 });
       },
     );
-    expect(result.approved).toBe(false);
+    expect(result.verdict).toBe('rejected');
     expect(called).toBe(false);
   });
 
@@ -210,7 +211,7 @@ describe('tool-run evidence prefilter — deterministic rejection', () => {
         return stubText('APPROVE')({ messages: [], maxTokens: 1 });
       },
     );
-    expect(result.approved).toBe(false);
+    expect(result.verdict).toBe('rejected');
     expect(called).toBe(false);
   });
 
@@ -229,7 +230,7 @@ describe('tool-run evidence prefilter — deterministic rejection', () => {
         return stubText('APPROVE')({ messages: [], maxTokens: 1 });
       },
     );
-    expect(result.approved).toBe(false);
+    expect(result.verdict).toBe('rejected');
     expect(called).toBe(false);
   });
 
@@ -249,7 +250,7 @@ describe('tool-run evidence prefilter — deterministic rejection', () => {
       },
     );
     expect(called).toBe(true);
-    expect(result.approved).toBe(true);
+    expect(result.verdict).toBe('approved');
   });
 });
 
@@ -259,7 +260,7 @@ describe('validateResponse — happy path parsing', () => {
       { userMessage: 'hi', ...NO_TOOLS, response: 'hello there' },
       stubText('APPROVE'),
     );
-    expect(result.approved).toBe(true);
+    expect(result.verdict).toBe('approved');
   });
 
   test.each([
@@ -268,12 +269,12 @@ describe('validateResponse — happy path parsing', () => {
     'APPROVE\nREJECT: missing evidence',
   ])('non-exact approval %s is rejected', async (verdict) => {
     const result = await validateResponse({ userMessage: 'hi', ...NO_TOOLS, response: 'hello' }, stubText(verdict));
-    expect(result.approved).toBe(false);
+    expect(result.verdict).toBe('rejected');
   });
 
   test('approve (lowercase) → approved (case-insensitive)', async () => {
     const result = await validateResponse({ userMessage: 'hi', ...NO_TOOLS, response: 'hello' }, stubText('approve'));
-    expect(result.approved).toBe(true);
+    expect(result.verdict).toBe('approved');
   });
 
   test('REJECT: reason → rejected with reason', async () => {
@@ -281,16 +282,16 @@ describe('validateResponse — happy path parsing', () => {
       { userMessage: 'what do I have today?', ...NO_TOOLS, response: 'nothing today' },
       stubText('REJECT: claimed facts without calling get_events'),
     );
-    expect(result.approved).toBe(false);
-    if (!result.approved) {
+    expect(result.verdict).toBe('rejected');
+    if (result.verdict === 'rejected') {
       expect(result.reason).toBe('claimed facts without calling get_events');
     }
   });
 
   test('REJECT without a reason → generic reason', async () => {
     const result = await validateResponse({ userMessage: 'hi', ...NO_TOOLS, response: 'bye' }, stubText('REJECT:'));
-    expect(result.approved).toBe(false);
-    if (!result.approved) {
+    expect(result.verdict).toBe('rejected');
+    if (result.verdict === 'rejected') {
       expect(result.reason).toBe('Validation failed');
     }
   });
@@ -300,7 +301,7 @@ describe('validateResponse — happy path parsing', () => {
       { userMessage: 'hi', ...NO_TOOLS, response: 'bye' },
       stubText('I am not sure'),
     );
-    expect(result.approved).toBe(false);
+    expect(result.verdict).toBe('rejected');
   });
 });
 
@@ -319,7 +320,7 @@ describe('calendar write refusal guard', () => {
       },
     );
 
-    expect(result.approved).toBe(true);
+    expect(result.verdict).toBe('approved');
     expect(called).toBe(true);
   });
 
@@ -337,9 +338,9 @@ describe('calendar write refusal guard', () => {
       },
     );
 
-    expect(result.approved).toBe(false);
+    expect(result.verdict).toBe('rejected');
     expect(called).toBe(false);
-    if (!result.approved) expect(result.reason).toContain('calendar write');
+    if (result.verdict === 'rejected') expect(result.reason).toContain('calendar write');
   });
 });
 
@@ -349,10 +350,7 @@ describe('validateResponse — fail-closed semantics', () => {
       { userMessage: 'what do I have today?', ...NO_TOOLS, response: 'nothing' },
       stubThrow(new Error('all providers failed')),
     );
-    expect(result.approved).toBe(false);
-    if (!result.approved) {
-      expect(result.reason).toContain('Validator unavailable');
-    }
+    expect(result).toEqual({ verdict: 'unavailable', cause: 'provider_error' });
   });
 
   test('stream throws AND tools were called → fail-CLOSED (tool names are not approval)', async () => {
@@ -366,7 +364,7 @@ describe('validateResponse — fail-closed semantics', () => {
       },
       stubThrow(new Error('all providers failed')),
     );
-    expect(result.approved).toBe(false);
+    expect(result).toEqual({ verdict: 'unavailable', cause: 'provider_error' });
   });
 });
 
@@ -564,7 +562,7 @@ describe('validateResponse — answers grounded in the same run (#492)', () => {
         return stubText(modelVerdict)(opts);
       },
     );
-    return { approved: result.approved, modelCalls };
+    return { approved: result.verdict === 'approved', modelCalls };
   }
 
   test('facts that all come from the run’s read are approved without asking the model', async () => {
@@ -758,7 +756,7 @@ test('content refusal after calculate is still validated instead of leaking thro
     },
     stubText('APPROVE'),
   );
-  expect(result.approved).toBe(false);
+  expect(result.verdict).toBe('rejected');
 });
 
 test('asking for a missing English title is not classified as a content refusal', async () => {
@@ -770,7 +768,7 @@ test('asking for a missing English title is not classified as a content refusal'
     },
     stubText('APPROVE'),
   );
-  expect(result.approved).toBe(true);
+  expect(result.verdict).toBe('approved');
 });
 
 test(`a userProfile over MAX_USER_PROFILE_CHARS is cut to exactly that cap (#740)`, async () => {
@@ -797,4 +795,62 @@ test(`a userProfile over MAX_USER_PROFILE_CHARS is cut to exactly that cap (#740
   const profileBlock = capturedUserContent.match(/<user_profile>\n([\s\S]*?)\n<\/user_profile>/);
   expect(profileBlock).not.toBeNull();
   expect(profileBlock?.[1]).toBe(longProfile.slice(0, MAX_USER_PROFILE_CHARS));
+});
+
+describe('validateResponse — an outage is not a rejection', () => {
+  const unbackedAnswer = {
+    userMessage: 'Что у меня?',
+    timezone: 'UTC',
+    userProfile: '',
+    tools: executed(['get_events']),
+    response: 'В 18:45 у тебя встреча.',
+  };
+
+  const outages: [string, Error, ValidatorUnavailableCause][] = [
+    ['TimeoutError', new DOMException('The operation timed out.', 'TimeoutError'), 'timeout'],
+    ['AbortError', new DOMException('Aborted', 'AbortError'), 'aborted'],
+    ['a provider failure', new Error('all providers failed'), 'provider_error'],
+  ];
+  test.each(outages)('%s is reported as unavailable with its cause', async (_name, error, cause) => {
+    expect(await validateResponse(unbackedAnswer, stubThrow(error))).toEqual({ verdict: 'unavailable', cause });
+  });
+
+  test('without time left only the deterministic checks decide, and the model is never asked', async () => {
+    let called = false;
+    const impl = async (opts: StreamRoundOptions) => {
+      called = true;
+      return stubText('APPROVE')(opts);
+    };
+    const claimsEmptyDay = { ...unbackedAnswer, tools: [], response: 'В пятницу у тебя ничего не запланировано.' };
+
+    // A cheap local rejection still applies.
+    expect(await validateResponse(claimsEmptyDay, impl, { canAskModel: false })).toMatchObject({
+      verdict: 'rejected',
+    });
+    // Everything the local checks cannot settle is no verdict at all, not a failure of the answer.
+    expect(await validateResponse(unbackedAnswer, impl, { canAskModel: false })).toEqual({
+      verdict: 'unavailable',
+      cause: 'budget_expired',
+    });
+    expect(called).toBe(false);
+  });
+
+  test('an answer grounded in the run is approved locally even with no time left', async () => {
+    const grounded = {
+      userMessage: 'Что у меня?',
+      timezone: 'Europe/Belgrade',
+      userProfile: '',
+      tools: [WEEK_FROM_SUNDAY],
+      response: 'Во вторник в 12:30 — «Английский с Томом».',
+    };
+    setSystemTime(SUNDAY_NIGHT);
+    try {
+      const verdict = await validateResponse(grounded, stubThrow(new Error('must not be called')), {
+        canAskModel: false,
+      });
+      expect(verdict).toEqual({ verdict: 'approved' });
+    } finally {
+      setSystemTime();
+    }
+  });
 });

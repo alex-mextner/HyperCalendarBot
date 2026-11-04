@@ -3,6 +3,7 @@ import { unlink as fsUnlink } from 'node:fs/promises';
 import { z } from 'zod';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import type { AgentContext } from '../ai/types.ts';
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 import type { FluxStreamingSTT } from './flux-streaming-stt.ts';
 import { classifyInterrupt } from './interruption-classifier.ts';
 import type { NovaStreamingSTT } from './nova-streaming-stt.ts';
@@ -408,15 +409,23 @@ export class CallSession {
     if (this.ended) return;
     const file = `data/call-phrases/${this.cfg.language}/stt_error.ogg`;
     this.clearSttErrorTimeout();
+    const sttErrorTimeoutMs = this.cfg.sttErrorTimeoutMs ?? 15_000;
+    const startedAt = Date.now();
     this.sttErrorTimeout = setTimeout(() => {
       if (!this.ended) {
+        reportTimeout({
+          kind: 'voice_stt',
+          elapsedMs: Date.now() - startedAt,
+          limitMs: sttErrorTimeoutMs,
+          recovered: false,
+        });
         voiceLogger.warn(
           { sessionId: this.cfg.sessionId },
           'Force-ending call: PLAY_DONE never arrived after STT error',
         );
         this.cfg.ws.close();
       }
-    }, this.cfg.sttErrorTimeoutMs ?? 15_000);
+    }, sttErrorTimeoutMs);
     if (this.lastPlayFile !== null) {
       this.pendingErrorPhrase = file;
     } else {

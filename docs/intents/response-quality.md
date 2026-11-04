@@ -50,3 +50,23 @@ friendly invention.
 
 The reference implementation of the empty-calendar wording is
 `src/services/ai/empty-agenda.ts`, called from the `get_events` tool handler.
+
+## Receipt-only confirmation after a validator outage
+
+When the response validator cannot reach a verdict (timeout, provider error, spent request budget)
+and the run already changed the calendar, the bot does not send the model's prose and does not
+retry with tools. It sends a confirmation built only from the run's own write results
+(`buildReceiptConfirmation`, `src/services/ai/agent/receipt-confirmation.ts`). Required wording:
+
+- Russian, direct, one line per change: the verb of what happened (Создано / Изменено / Удалено),
+  the exact title in «», and the local weekday, day and clock time (or "весь день") taken from the
+  write result in the user's timezone, e.g. `Создано: «Synthetic standup» — вторник, 6 марта, 09:00`.
+- Honest scope: it says these facts come from the calendar itself and that the written answer could
+  not be checked, so it is not sent, and that repeating the request is unnecessary. It never says
+  "Запрос прерван" or "Часть действий могла уже выполниться" when every write succeeded; an
+  outage is not a failure of the run.
+- Nothing the model invented: no free windows, no counts, no advice. A write that failed or whose
+  outcome is unknown keeps the guard notice with the failure named instead of this confirmation.
+
+Bad: "Выполнено: Создание события / Выполнено: Создание события / Запрос прерван…" (two lines that
+cannot be told apart, and a claim that the request was cut short after every tool succeeded).

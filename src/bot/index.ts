@@ -24,6 +24,7 @@ import { GroupSessionManager } from '../services/group/group-session.ts';
 import { GroupMemberService } from '../services/group/member-service.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
 import type { RenderService } from '../services/image/render-service.ts';
+import { reportIfDatabaseBusy } from '../services/incident/database-busy.ts';
 import type { AdminEditSession } from '../services/intent/admin-edit-session.ts';
 import { databaseDirectory } from '../services/intent/db-backup.ts';
 import type { EventMentionStore } from '../services/intent/event-mention-store.ts';
@@ -996,6 +997,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .onError(({ context, kind, error }) => {
       const ctx = context as { from?: { id?: number }; chatId?: number } | undefined;
       botLogger.error({ kind, err: error, userId: ctx?.from?.id, chatId: ctx?.chatId }, 'Bot error');
+      reportIfDatabaseBusy(error);
       try {
         if (context && 'send' in context) {
           const dbUser = 'dbUser' in context ? (context as { dbUser?: { language?: string } }).dbUser : undefined;

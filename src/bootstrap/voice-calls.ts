@@ -154,11 +154,11 @@ function createCallSessionManager(
   deepgramApiKey: string,
   tts: VoiceCallTts,
 ): CallSessionManager {
-  const { db, botRef, aiDebugLogger, historySummarizer } = ctx;
+  const { db, botRef, aiDebugLogger, historySummarizer, runIncidents } = ctx;
   // TelegramSender for voice calls — forwards to botRef, which wraps bot.api once the bot exists.
   const voiceSender = createVoiceSender(botRef);
   const voiceAgent = new mods.CalendarBotAgent(
-    { debugLogger: aiDebugLogger, summarizer: historySummarizer },
+    { debugLogger: aiDebugLogger, summarizer: historySummarizer, runIncidents },
     voiceSender,
   );
   ctx.resources.voiceAgent = voiceAgent;

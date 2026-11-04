@@ -78,7 +78,7 @@ describe('CalendarBotAgent.run()', () => {
     }
   });
 
-  test('one request budget includes validation and does not poison the next request', async () => {
+  test('a hung validator is cut at its own bound and does not poison the next request', async () => {
     let slow = true;
     let validationSignal: AbortSignal | undefined;
     const script = makeStreamImpl([
@@ -92,7 +92,11 @@ describe('CalendarBotAgent.run()', () => {
       } else if (slow) await Bun.sleep(35);
       return script.impl(opts, cbs);
     };
-    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl, requestTimeoutMs: 70 });
+    // The validator starts inside the request budget and then runs on its own 100 ms clock.
+    const agent = new CalendarBotAgent({ ...config, validationTimeoutMs: 100 }, sender, {
+      streamImpl: impl,
+      requestTimeoutMs: 70,
+    });
     const started = performance.now();
     const first = await agent.run(ctx);
     expect(performance.now() - started).toBeLessThan(250);

@@ -1,6 +1,7 @@
 import type { Queue, QueueEvents } from 'bullmq';
 import { imageLogger } from '../../utils/logger.ts';
 import type { ImageRenderJob, ImageRenderResult } from '../../worker/image-render.queue.ts';
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 
 // Production (ODROID-N2+, since 2026-10-09) renders take 6–15 s because the idle Chromium and
 // Bun heap sit in swap between renders; 15 s dropped a finished 15.2 s render on 2026-10-12.
@@ -14,6 +15,11 @@ export interface ImageRenderer {
   renderDirect(job: ImageRenderJob): Promise<Buffer>;
 }
 
+/** BullMQ's `Job.waitUntilFinished` has no typed timeout error; its message is the only signal. */
+function isWaitTimeout(err: unknown): boolean {
+  return err instanceof Error && /timed out before finishing/.test(err.message);
+}
+
 export class RenderService implements ImageRenderer {
   constructor(
     private queue: Queue<ImageRenderJob>,
@@ -21,11 +27,26 @@ export class RenderService implements ImageRenderer {
   ) {}
 
   async renderDirect(job: ImageRenderJob): Promise<Buffer> {
+    const startedAt = Date.now();
     imageLogger.info({ type: job.type, userId: job.userId }, 'Enqueuing render job');
 
     const added = await this.queue.add('render', job, { priority: 1 });
 
-    const result = (await added.waitUntilFinished(this.queueEvents, RENDER_TIMEOUT_MS)) as ImageRenderResult;
+    let result: ImageRenderResult;
+    try {
+      result = (await added.waitUntilFinished(this.queueEvents, RENDER_TIMEOUT_MS)) as ImageRenderResult;
+    } catch (err) {
+      // The error goes to the caller, who owns the user's reply; nothing here recovers a lost render.
+      if (isWaitTimeout(err)) {
+        reportTimeout({
+          kind: 'render',
+          elapsedMs: Date.now() - startedAt,
+          limitMs: RENDER_TIMEOUT_MS,
+          recovered: false,
+        });
+      }
+      throw err;
+    }
 
     imageLogger.info({ type: job.type, userId: job.userId, renderTimeMs: result.renderTimeMs }, 'Render complete');
 

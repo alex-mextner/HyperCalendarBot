@@ -37,6 +37,7 @@ export function describeFailure(slot: ProviderSlot, error: unknown): ProviderFai
     status,
     message,
     transient: isTransientProviderError(error),
+    ...(classifyProviderError(error, false).errorClass === 'timeout' ? { timedOut: true } : {}),
     ...(error instanceof EmptyProviderResponseError && error.diagnostics ? { emptyResponse: error.diagnostics } : {}),
   };
 }

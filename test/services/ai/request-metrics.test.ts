@@ -26,7 +26,7 @@ describe('AgentRequestMetrics', () => {
     m.recordRound(round(null));
     m.recordFailedRound(40, 3, 2);
     m.recordTool(7);
-    const s = m.snapshot('error', 'discarded', 4);
+    const s = m.snapshot('error', { outcome: 'discarded', messageIds: [] }, 4);
     expect(s.modelCalls).toBe(4);
     expect(s.modelAttempts).toBe(9);
     expect(s.providerFallbacks).toBe(5);
@@ -41,11 +41,12 @@ describe('AgentRequestMetrics', () => {
   });
   test('first visible is latched once', async () => {
     const m = new AgentRequestMetrics();
-    expect(m.snapshot('normal', 'delivered', 0).firstVisibleMs).toBeNull();
+    const delivered = { outcome: 'delivered', messageIds: [7] } as const;
+    expect(m.snapshot('normal', delivered, 0).firstVisibleMs).toBeNull();
     m.markVisible();
-    const first = m.snapshot('normal', 'delivered', 0).firstVisibleMs;
+    const first = m.snapshot('normal', delivered, 0).firstVisibleMs;
     await Bun.sleep(2);
     m.markVisible();
-    expect(m.snapshot('normal', 'delivered', 0).firstVisibleMs).toBe(first);
+    expect(m.snapshot('normal', delivered, 0).firstVisibleMs).toBe(first);
   });
 });

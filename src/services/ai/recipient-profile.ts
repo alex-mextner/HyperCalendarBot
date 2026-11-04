@@ -1,6 +1,7 @@
 /** Request-scoped, bounded live-profile inspection through the shared service account
  *  (ctx.lookupTelegramUser, present only when that account is on). Callers must check permission on
  *  every use; without the account every inspection is null and callers use saved metadata. */
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 import type { TelegramProfile } from '../telegram-session/service-tier.ts';
 import type { AgentContext } from './types.ts';
 
@@ -25,7 +26,17 @@ export function inspectRecipientProfile(ctx: AgentContext, id: number): Promise<
   if (cache.size >= MAX_INSPECTIONS) return Promise.resolve(null);
   const lookup = ctx.lookupTelegramUser;
   const pending = new Promise<Profile | null>((resolve) => {
-    const timeout = setTimeout(() => resolve(null), 20_000);
+    const startedAt = Date.now();
+    const timeout = setTimeout(() => {
+      // Callers fall back to saved metadata, so the user still gets an answer.
+      reportTimeout({
+        kind: 'recipient_profile',
+        elapsedMs: Date.now() - startedAt,
+        limitMs: 20_000,
+        recovered: true,
+      });
+      resolve(null);
+    }, 20_000);
     timeout.unref();
     Promise.resolve()
       .then(() => lookup(id))

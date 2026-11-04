@@ -2,6 +2,7 @@
 import { Database } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { DB_BUSY_TIMEOUT_MS } from '../services/incident/database-busy.ts';
 import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
 import { ActionLogRepository } from './repositories/action-log.repository.ts';
@@ -79,7 +80,7 @@ export class DatabaseService {
     this.db = new Database(dbPath);
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA foreign_keys = ON');
-    this.db.exec('PRAGMA busy_timeout = 5000');
+    this.db.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS}`);
     this.db.exec('PRAGMA synchronous = NORMAL');
     this.db.exec('PRAGMA cache_size = -16000');
     this.db.exec('PRAGMA mmap_size = 268435456');

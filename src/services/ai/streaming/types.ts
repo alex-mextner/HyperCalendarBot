@@ -116,4 +116,6 @@ export interface ProviderFailure {
   message: string;
   /** True when the provider looked temporarily down rather than rejecting the request. */
   transient: boolean;
+  /** The attempt ran into a deadline (provider cap or round deadline), as opposed to an answer or a fault. */
+  timedOut?: boolean;
 }

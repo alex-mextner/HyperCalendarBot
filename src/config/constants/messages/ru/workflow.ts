@@ -21,6 +21,14 @@ export const ruWorkflow = {
     invitationManual: 'Приглашение создано, но не доставлено. Перешли ссылку из личного чата.',
     invitationFailed: 'Приглашение создано, но не доставлено.',
     interrupted: 'Запрос прерван. Часть действий могла уже выполниться; автоматического повтора не будет.',
+    receipt: {
+      intro: 'Сделано в календаре:',
+      created: (title: string, when: string) => `Создано: «${title}» — ${when}`,
+      updated: (title: string, when: string) => `Изменено: «${title}» — теперь ${when}`,
+      deleted: (title: string, when: string) => `Удалено: «${title}» (было ${when})`,
+      allDay: 'весь день',
+      outro: 'Это данные самого календаря. Свой текстовый ответ проверить не удалось, поэтому не отправляю его.',
+    },
     spokenQuestion: (question: string, options: string) => `${question} Варианты: ${options}`,
     // The receipt that replaces the model's text when a run had failed, skipped or unconfirmed writes.
     anEvent: 'событие',

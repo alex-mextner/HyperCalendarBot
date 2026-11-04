@@ -5,6 +5,7 @@
 // without ADMIN_ALERT_TOKEN it skips only the alert queue.
 
 import type { EnvConfig } from '../config/env.ts';
+import { reportIfDatabaseBusy } from '../services/incident/database-busy.ts';
 import { botLogger } from '../utils/logger.ts';
 import { makeWorkerFailureHandler } from '../utils/worker-alert.ts';
 
@@ -47,6 +48,7 @@ export function createWorkerFailedFactory(
       } else {
         collaborators.logger.error({ jobId: job?.id, worker: name, err }, 'Worker job failed');
       }
+      reportIfDatabaseBusy(err);
       alertHandler?.(job, err);
     };
   };

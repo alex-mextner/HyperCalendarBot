@@ -1,5 +1,6 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { RenderService } from '../../../src/services/image/render-service.ts';
+import { configureTimeoutReporter, TimeoutReporter } from '../../../src/services/incident/timeout-reporter.ts';
 import type { ImageRenderJob } from '../../../src/worker/image-render.queue.ts';
 import { THEME_LIGHT } from '../../../src/worker/templates/themes.ts';
 
@@ -93,5 +94,57 @@ describe('RenderService', () => {
     // About 3× the slowest measured production render (15.2 s), yet bounded so a stuck worker
     // cannot hold a command for long.
     expect(waitUntilFinished.mock.calls[0]?.[1]).toBe(45_000);
+  });
+
+  describe('a render that does not finish in time', () => {
+    const alerts: { text: string; source: string }[] = [];
+    const job: ImageRenderJob = {
+      type: 'daily-agenda',
+      data: {
+        date: '2026-10-12',
+        dayOfWeek: 'Mon',
+        dateFormatted: 'October 12',
+        eventCount: 0,
+        allDayEvents: [],
+        timedEvents: [],
+        theme: THEME_LIGHT,
+        locale: 'en',
+      },
+      userId: 123,
+    };
+
+    function serviceFailingWith(error: Error): RenderService {
+      const waitUntilFinished = mock(() => Promise.reject(error));
+      return new RenderService(
+        { add: mock(() => Promise.resolve({ id: '7', waitUntilFinished })) } as unknown as ConstructorParameters<
+          typeof RenderService
+        >[0],
+        {} as unknown as ConstructorParameters<typeof RenderService>[1],
+      );
+    }
+
+    beforeEach(() => {
+      alerts.length = 0;
+      configureTimeoutReporter(new TimeoutReporter((text, source) => alerts.push({ text, source })));
+    });
+    afterEach(() => configureTimeoutReporter(null));
+
+    test('reaches the repair flow as an unrecovered render timeout and still fails the caller', async () => {
+      const error = new Error(
+        'Job wait render timed out before finishing, no finish notification arrived after 45000ms (id=7)',
+      );
+      await expect(serviceFailingWith(error).renderDirect(job)).rejects.toBe(error);
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]?.text).toContain('Timeout (render)');
+      expect(alerts[0]?.text).toContain('limitMs: 45000');
+      expect(alerts[0]?.text).toContain('unrecovered=1 recovered=0');
+    });
+
+    test('a render that fails for another reason is not reported as a timeout', async () => {
+      await expect(serviceFailingWith(new Error('Browser crashed')).renderDirect(job)).rejects.toThrow(
+        'Browser crashed',
+      );
+      expect(alerts).toEqual([]);
+    });
   });
 });

@@ -324,6 +324,7 @@ describe('evidence guard plan', () => {
       silent: false,
       validationNotice: null,
       guarded: false,
+      interrupted: false,
     });
   });
 
@@ -373,7 +374,7 @@ describe('evidence guard plan', () => {
     const { ctx } = createAgentRunFixture();
     const state = createTurnState();
     state.termination = 'normal';
-    const open = { evidence: null, silent: false, validationNotice: null, guarded: false };
+    const open = { evidence: null, silent: false, validationNotice: null, guarded: false, interrupted: false };
     expect(answersDirectMessage(ctx, state, false, open)).toBe(true);
     expect(answersDirectMessage(ctx, state, true, open)).toBe(false);
     expect(answersDirectMessage(ctx, state, false, { ...open, silent: true })).toBe(false);

@@ -4,6 +4,7 @@ import {
   createClaudeCredentialPool,
   getClaudeCredentialAvailability,
 } from '../../../src/services/ai/claude-credential-pool.ts';
+import { withCountingReporter } from '../../helpers/counting-timeout-reporter.ts';
 
 const options = { timeoutMs: 1000 };
 const failure = (status: number, message = 'unavailable', retryAfter?: string) =>
@@ -672,3 +673,71 @@ test('a key that outlasts a full useful slice is still cooled for its timeout', 
   expect(error).toBeInstanceOf(CredentialsCoolingDownError);
   expect(calls).toBe(0);
 });
+
+test('a key that times out and is saved by the backup is counted as one recovered credential timeout', () =>
+  withCountingReporter(async (reporter) => {
+    const pool = createClaudeCredentialPool(['primary', 'backup']);
+    const result = await pool.run(
+      async (token, signal) => (token === 'primary' ? neverAnswers(token, signal) : 'backup answered'),
+      { timeoutMs: 60 },
+    );
+    expect(result).toBe('backup answered');
+    expect(reporter.reports).toHaveLength(1);
+    expect(reporter.reports[0]).toMatchObject({ kind: 'claude_credential', recovered: true });
+    expect(reporter.reports[0]?.limitMs).toBeGreaterThan(20);
+    expect(reporter.reports[0]?.limitMs).toBeLessThanOrEqual(30);
+  }));
+
+test('a key that answers in time reports no timeout', () =>
+  withCountingReporter(async (reporter) => {
+    const healthy = createClaudeCredentialPool(['primary', 'backup']);
+    expect(await healthy.run(async () => 'fast', { timeoutMs: 60 })).toBe('fast');
+    expect(reporter.reports).toEqual([]);
+  }));
+
+test('when every key times out the last timeout is left to the streaming round and the earlier one is counted here', () =>
+  withCountingReporter(async (reporter) => {
+    const pool = createClaudeCredentialPool(['primary', 'backup']);
+    const error = await pool.run(neverAnswers, { timeoutMs: 60 }).catch((caught: unknown) => caught);
+    expect((error as Error).name).toBe('CredentialAttemptTimeoutError');
+    expect(reporter.reports).toHaveLength(1);
+    expect(reporter.reports[0]).toMatchObject({ kind: 'claude_credential', recovered: true });
+  }));
+
+test('a key timeout is still counted when the backup then fails with a server error', () =>
+  withCountingReporter(async (reporter) => {
+    const pool = createClaudeCredentialPool(['primary', 'backup']);
+    const error = await pool
+      .run(
+        async (token, signal) => {
+          if (token === 'primary') return neverAnswers(token, signal);
+          throw failure(503, 'backup unavailable');
+        },
+        { timeoutMs: 60 },
+      )
+      .catch((caught: unknown) => caught);
+    expect((error as Error).message).toBe('backup unavailable');
+    expect(reporter.reports).toHaveLength(1);
+    expect(reporter.reports[0]).toMatchObject({ kind: 'claude_credential', recovered: true });
+  }));
+
+test('a key timeout is still counted when the backup then rejects the request outright', () =>
+  withCountingReporter(async (reporter) => {
+    const pool = createClaudeCredentialPool(
+      ['primary', 'backup'],
+      Date.now,
+      (error) => error instanceof Error && 'status' in error && error.status === 400,
+    );
+    const error = await pool
+      .run(
+        async (token, signal) => {
+          if (token === 'primary') return neverAnswers(token, signal);
+          throw failure(400, 'bad request');
+        },
+        { timeoutMs: 60 },
+      )
+      .catch((caught: unknown) => caught);
+    expect((error as Error).message).toBe('bad request');
+    expect(reporter.reports).toHaveLength(1);
+    expect(reporter.reports[0]).toMatchObject({ kind: 'claude_credential', recovered: true });
+  }));

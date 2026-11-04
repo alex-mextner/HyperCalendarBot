@@ -2,6 +2,7 @@
 // told to do the work with tools, under what is left of the request's overall budget.
 import { t } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
+import { reportTimeout } from '../../incident/timeout-reporter.ts';
 import type { WeekdayDateMismatch } from '../day-references.ts';
 import type { aiStreamRound } from '../streaming.ts';
 import type { MessageParam } from './message-sanitizer.ts';
@@ -69,6 +70,13 @@ export async function runRetryAfterRejection(
 
     if (requestBudgetSpent(env.startTime, env.requestTimeoutMs)) {
       aiLogger.warn({ userId: ctx.user.telegram_id }, 'Agent timeout (retry)');
+      reportTimeout({
+        kind: 'agent_request',
+        requestId: env.requestId,
+        elapsedMs: Date.now() - env.startTime,
+        limitMs: env.requestTimeoutMs,
+        recovered: false,
+      });
       writer.appendText(`\n\n${t(ctx.user.language).agent_timeout}`);
       return { hitStopLoop: false, lastRoundText: '', lastRoundHadToolCalls: false };
     }

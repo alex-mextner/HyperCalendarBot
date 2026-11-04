@@ -1,7 +1,8 @@
+import type { DeliveryOutcome, DeliveryReport } from './delivery-report.ts';
 import type { StreamRoundMetrics } from './streaming.ts';
 
 export type AgentTermination = 'normal' | 'waiting' | 'stop' | 'limit' | 'error' | 'unverified' | 'silent';
-export type DeliveryOutcome = 'delivered' | 'fallback' | 'discarded';
+export type { DeliveryOutcome };
 
 export interface AgentRequestMetricSnapshot {
   requestId: string;
@@ -22,6 +23,10 @@ export interface AgentRequestMetricSnapshot {
   usagePartialRounds: number;
   termination: AgentTermination;
   deliveryOutcome: DeliveryOutcome;
+  /** How many Telegram messages the delivery created or edited, as the API reported them. */
+  deliveredMessageCount: number;
+  /** Their ids (no text, no user ids); empty when none is known. */
+  deliveredMessageIds: number[];
 }
 
 const elapsed = (start: number): number => Math.max(0, performance.now() - start);
@@ -89,7 +94,7 @@ export class AgentRequestMetrics {
   }
   snapshot(
     termination: AgentTermination,
-    deliveryOutcome: DeliveryOutcome,
+    delivery: DeliveryReport,
     deliveryActionMs: number,
   ): AgentRequestMetricSnapshot {
     return {
@@ -110,7 +115,9 @@ export class AgentRequestMetrics {
       usageMissingRounds: this.usageMissingRounds,
       usagePartialRounds: this.usagePartialRounds,
       termination,
-      deliveryOutcome,
+      deliveryOutcome: delivery.outcome,
+      deliveredMessageCount: delivery.messageIds.length,
+      deliveredMessageIds: [...delivery.messageIds],
     };
   }
 }

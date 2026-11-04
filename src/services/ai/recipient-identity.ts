@@ -1,4 +1,5 @@
 import type { Contact } from '../../database/types.ts';
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 import type { TelegramProfile } from '../telegram-session/service-tier.ts';
 import { consumeRecipientApproval } from './recipient-confirmation.ts';
 import { cachedRecipientProfile } from './recipient-profile.ts';
@@ -116,7 +117,16 @@ async function isCurrentGroupMember(ctx: AgentContext, groupId: number): Promise
     return await Promise.race([
       ctx.group.checkGroupMembership(groupId, ctx.user.telegram_id),
       new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), 3000);
+        const startedAt = Date.now();
+        timer = setTimeout(() => {
+          reportTimeout({
+            kind: 'recipient_lookup',
+            elapsedMs: Date.now() - startedAt,
+            limitMs: 3000,
+            recovered: false,
+          });
+          resolve(false);
+        }, 3000);
       }),
     ]);
   } catch {

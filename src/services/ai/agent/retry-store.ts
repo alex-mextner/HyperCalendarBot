@@ -1,5 +1,6 @@
 // Stores a failed turn's backoff retry without letting a hung store hold back the user's notice.
 import { logger } from '../../../utils/logger.ts';
+import { reportTimeout } from '../../incident/timeout-reporter.ts';
 import { ProviderSafetyStopError } from '../streaming.ts';
 import type { AgentContext } from '../types.ts';
 
@@ -31,10 +32,13 @@ export async function storeRetryWithin(
     },
   );
   const storeDeadline = Promise.withResolvers<'timeout'>();
+  const startedAt = Date.now();
   const storeTimer = setTimeout(() => storeDeadline.resolve('timeout'), timeoutMs);
   const outcome = await Promise.race([stored, storeDeadline.promise]);
   clearTimeout(storeTimer);
   if (outcome === 'timeout') {
+    // The job may still land, but the caller got no answer: not recovered.
+    reportTimeout({ kind: 'retry_store', elapsedMs: Date.now() - startedAt, limitMs: timeoutMs, recovered: false });
     aiLogger.warn({ userId }, 'Retry store did not answer in time — not promising a comeback, not asking for a resend');
     return 'unknown';
   }

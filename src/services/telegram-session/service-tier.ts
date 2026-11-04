@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { jsonCodec } from '../../utils/json-codec.ts';
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 
 export const SERVICE_SESSION_FILE = 'voice_caller.session';
 export const SERVICE_PYTHON = 'venv/bin/python';
@@ -160,7 +161,16 @@ export const spawnServiceScript: ServiceScriptRunner = async (script, args, { st
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const timer = setTimeout(() => proc.kill(), timeoutMs);
+  const startedAt = performance.now();
+  const timer = setTimeout(() => {
+    reportTimeout({
+      kind: 'mtproto_script',
+      elapsedMs: performance.now() - startedAt,
+      limitMs: timeoutMs,
+      recovered: false,
+    });
+    proc.kill();
+  }, timeoutMs);
   try {
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(proc.stdout).text(),

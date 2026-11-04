@@ -20,6 +20,7 @@
 
 import { AGENT_DRAIN_SETTLE_MS } from '../services/ai/agent.ts';
 import { configureAiUsageRecording } from '../services/ai/usage-recorder.ts';
+import { flushTimeoutReports, reportTimeout } from '../services/incident/timeout-reporter.ts';
 import { botLogger } from '../utils/logger.ts';
 import type { ShutdownResources, StartupContext } from './runtime.ts';
 
@@ -73,6 +74,9 @@ export function createShutdown(deps: ShutdownDeps): () => Promise<void> {
     deps.summarizerRedis.close();
     deps.webServerHandle?.stop();
     deps.flushAiUsageRecording();
+    // Timeouts still held back inside their alert window go out now: the alert queue lives in this database.
+    const unsent = flushTimeoutReports();
+    if (unsent.length > 0) botLogger.error({ unsent }, 'Timeout alerts could not be queued before shutdown');
     deps.database.close();
   };
 }
@@ -82,10 +86,19 @@ export function createShutdownWithTimeout(deps: ShutdownDeps): () => Promise<voi
   return async () => {
     deps.webServerDeps.telegramUpdatesClosed = true;
     const deadline = Promise.withResolvers<void>();
-    const timer = setTimeout(
-      () => deadline.reject(new Error(`Shutdown timeout after ${deps.timeoutMs / 1000}s`)),
-      deps.timeoutMs,
-    );
+    const startedAt = Date.now();
+    const timer = setTimeout(() => {
+      // Reported here, not in the catch: a close that throws is a failure, not a missed deadline.
+      reportTimeout({
+        kind: 'shutdown',
+        elapsedMs: Date.now() - startedAt,
+        limitMs: deps.timeoutMs,
+        recovered: false,
+      });
+      // The hung close may never reach its own flush: send what is held while the database is still open.
+      flushTimeoutReports();
+      deadline.reject(new Error(`Shutdown timeout after ${deps.timeoutMs / 1000}s`));
+    }, deps.timeoutMs);
     await Promise.race([shutdown(), deadline.promise])
       .catch((err: unknown) => {
         deps.logger.fatal({ err }, 'Shutdown timed out, forcing exit');

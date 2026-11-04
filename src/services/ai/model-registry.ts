@@ -11,10 +11,12 @@
 
 import OpenAI from 'openai';
 import { logger } from '../../utils/logger.ts';
+import { reportTimeout } from '../incident/timeout-reporter.ts';
 import { withClaudeCredentials } from './claude-client-pool.ts';
 import { CredentialsCoolingDownError } from './claude-credential-pool.ts';
 import { excludedModelReason } from './model-presets.ts';
 import type { ProviderId } from './provider-ids.ts';
+import { classifyProviderError } from './usage-classification.ts';
 
 const registryLogger = logger.child({ module: 'ai-model-registry' });
 
@@ -107,6 +109,8 @@ interface InFlightProbe {
   /** A forced probe already knows the cached replacement is dead. */
   forced: boolean;
   sequence: number;
+  /** When the probe's own budget ends (`performance.now()` clock); it reports its own timeout. */
+  deadlineAt: number;
 }
 
 const cache = new Map<string, CacheEntry>();
@@ -270,6 +274,14 @@ export interface ResolveModelOverrideOptions {
   deadModel?: string;
 }
 
+/**
+ * A catalogue listing that ran out of its budget. Counted as recovered on purpose: whether the user's request was
+ * served is decided by the next slot, and a round that fails is reported by the streaming round itself.
+ */
+function reportListingTimeout(startedAt: number, limitMs: number): void {
+  reportTimeout({ kind: 'model_listing', elapsedMs: performance.now() - startedAt, limitMs, recovered: true });
+}
+
 async function listLiveModels(
   client: ModelListingClient,
   signal?: AbortSignal,
@@ -277,6 +289,7 @@ async function listLiveModels(
 ): Promise<string[] | null> {
   const timeoutMs = Math.floor(Math.min(PROBE_TIMEOUT_MS, deadlineAt - performance.now()));
   if (timeoutMs <= 0) throw new DOMException('Catalog probe timed out', 'TimeoutError');
+  const startedAt = performance.now();
   try {
     const page =
       client instanceof OpenAI
@@ -295,6 +308,7 @@ async function listLiveModels(
       err instanceof OpenAI.APIUserAbortError
     )
       throw err;
+    if (classifyProviderError(err, false).errorClass === 'timeout') reportListingTimeout(startedAt, timeoutMs);
     registryLogger.warn({ err }, 'Could not list live models from provider');
     return null;
   }
@@ -312,6 +326,16 @@ function commitProbeResult(key: string, sequence: number, entry: CacheEntry): st
   return entry.override?.resolvedModel ?? null;
 }
 
+/**
+ * The probe's signal is its own budget (a caller's signal only owns its waiter), so an abort that reaches
+ * `probeAndCache` is the listing running out of time.
+ */
+function reportProbeAbort(options: ResolveModelOverrideOptions, err: unknown, startedAt: number): void {
+  const timedOut = options.signal?.aborted || (err instanceof DOMException && err.name === 'TimeoutError');
+  if (timedOut)
+    reportListingTimeout(startedAt, (options.providerDeadlineAt ?? startedAt + PROBE_TIMEOUT_MS) - startedAt);
+}
+
 async function probeAndCache(
   options: ResolveModelOverrideOptions,
   key: string,
@@ -323,9 +347,11 @@ async function probeAndCache(
     return commitProbeResult(key, sequence, { override: null, expiresAt: Date.now() + NEGATIVE_TTL_MS, sequence });
   }
   let liveModels: string[] | null;
+  const startedAt = performance.now();
   try {
     liveModels = await listLiveModels(options.client, options.signal, options.providerDeadlineAt);
-  } catch {
+  } catch (err) {
+    reportProbeAbort(options, err, startedAt);
     return null;
   } // Aborted shared probes are unknown, never a negative catalog result.
   if (
@@ -375,22 +401,44 @@ async function probeAndCache(
  */
 /** Each caller may stop waiting; the bounded shared lookup remains useful to other live callers. */
 async function waitForCatalog(
-  probe: Promise<string | null>,
+  probe: InFlightProbe,
   options: ResolveModelOverrideOptions,
+  joined: boolean,
 ): Promise<string | null> {
   if (options.signal?.aborted) return null;
   const remaining =
     options.providerDeadlineAt === undefined ? undefined : options.providerDeadlineAt - performance.now();
   if (remaining !== undefined && remaining <= 0) return null;
+  const waitStartedAt = performance.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
+  let deadlineExpired = false;
   const stopped = new Promise<null>((resolve) => {
     onAbort = () => resolve(null);
     options.signal?.addEventListener('abort', onAbort, { once: true });
-    if (remaining !== undefined) timer = setTimeout(onAbort, remaining);
+    if (remaining !== undefined) {
+      timer = setTimeout(() => {
+        deadlineExpired = true;
+        resolve(null);
+      }, remaining);
+    }
   });
   try {
-    return await Promise.race([probe, stopped]);
+    const result = await Promise.race([probe.promise, stopped]);
+    // The caller that started the probe never reports: the probe's budget is its own deadline and the probe
+    // reports that expiry itself. A joiner whose deadline ended before the probe's own would otherwise leave
+    // the expiry unreported (its slot fails with the model-not-found error, which says nothing about time).
+    if (
+      joined &&
+      deadlineExpired &&
+      result === null &&
+      remaining !== undefined &&
+      options.providerDeadlineAt !== undefined &&
+      options.providerDeadlineAt < probe.deadlineAt
+    ) {
+      reportListingTimeout(waitStartedAt, remaining);
+    }
+    return result;
   } finally {
     clearTimeout(timer);
     if (onAbort) options.signal?.removeEventListener('abort', onAbort);
@@ -411,11 +459,11 @@ export async function resolveModelOverride(options: ResolveModelOverrideOptions)
     // Join another forced probe — it also knows the cached replacement is dead.
     // An older ordinary probe is not joinable: it would hand back the very model
     // this caller just found to be gone.
-    if (pending?.forced) return waitForCatalog(pending.promise, options);
+    if (pending?.forced) return waitForCatalog(pending, options, true);
   } else {
     const entry = cache.get(key);
     if (entry && entry.expiresAt > Date.now()) return entry.override?.resolvedModel ?? null;
-    if (pending) return waitForCatalog(pending.promise, options);
+    if (pending) return waitForCatalog(pending, options, true);
   }
 
   const budget = Math.min(
@@ -424,9 +472,10 @@ export async function resolveModelOverride(options: ResolveModelOverrideOptions)
   );
   if (budget <= 0) return null;
   // A caller signal only owns its waiter. The probe retains the original admitted budget.
+  const deadlineAt = performance.now() + budget;
   const sharedOptions = {
     ...options,
-    providerDeadlineAt: performance.now() + budget,
+    providerDeadlineAt: deadlineAt,
     signal: AbortSignal.timeout(Math.max(1, Math.ceil(budget))),
   };
   probeSequence += 1;
@@ -434,11 +483,12 @@ export async function resolveModelOverride(options: ResolveModelOverrideOptions)
   const probe: InFlightProbe = {
     forced,
     sequence,
+    deadlineAt,
     promise: probeAndCache(sharedOptions, key, sequence).finally(() => {
       // Only clear our own entry: a newer probe may already have replaced it.
       if (inFlight.get(key)?.sequence === sequence) inFlight.delete(key);
     }),
   };
   inFlight.set(key, probe);
-  return waitForCatalog(probe.promise, options);
+  return waitForCatalog(probe, options, false);
 }
