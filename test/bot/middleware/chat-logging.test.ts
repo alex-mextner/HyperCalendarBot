@@ -161,6 +161,7 @@ describe('chat logging of an ask_user answer', () => {
       conversationLogger: new ConversationLogger(db.chatHistory),
       actionLog: db.actionLog,
       chatHistoryIds: new Map<number, number>(),
+      reserveChatTurn: (chatId, rowId) => ({ chatId, rowId, release() {} }),
       isConnectWizardInput: () => false,
     });
     const update: TelegramUpdate = {

@@ -64,7 +64,7 @@ const scopeProperty = Object.freeze({
 /** Secretary delegation target shared by every event-facing tool. */
 const ownerIdProperty = Object.freeze({
   type: 'number',
-  description: "Another user's calendar (needs secretary access).",
+  description: "Calendar owner's ID (as secretary).",
 });
 
 const toolDefinitions: ToolDefinition[] = [
