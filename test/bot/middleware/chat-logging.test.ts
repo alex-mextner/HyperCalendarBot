@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { TelegramUpdate } from 'gramio';
+import type { TelegramInlineKeyboardMarkup, TelegramUpdate } from 'gramio';
 import { createChatLogging } from '../../../src/bot/middleware/chat-logging.ts';
 import { createConnectWizardGuard } from '../../../src/bot/middleware/connect-wizard-guard.ts';
 import { CONNECT_WIZARD_REDACTION } from '../../../src/bot/scenes/connect-telegram.scene.ts';
 import { DatabaseService } from '../../../src/database/index.ts';
 import { currentChatTurn } from '../../../src/services/ai/chat-turn-context.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
+import { cyrillicOption, fakeTelegram } from '../../helpers/ask-user-keyboard.ts';
 
 describe('chat logging when the connect-wizard state cannot be read (GH-519)', () => {
   test('the text is stored as the connect-wizard marker, stays in the chat and still reaches the next handler', async () => {
@@ -142,5 +143,85 @@ describe('the row saved for each update', () => {
     expect(currentChatTurn()).toBeUndefined(); // and nothing leaks out of the update
     expect(events).toEqual([`reserve ${user.telegram_id}:${rowId}`, 'handler', `release ${rowId}`]); // none for the command
     db.db.close();
+  });
+});
+
+describe('chat logging of an ask_user answer', () => {
+  const ASKER = 2002;
+  const GROUP_CHAT = -100200;
+
+  /** Runs one tap through the middleware and returns what chat_history stored. */
+  async function logTap(
+    data: string,
+    { group, keyboard }: { group: boolean; keyboard?: TelegramInlineKeyboardMarkup },
+  ): Promise<{ role: string; content: string; chat_id: number | null }[]> {
+    const db = new DatabaseService(':memory:');
+    const user = db.users.create({ telegram_id: ASKER, language: 'ru', timezone: 'UTC' });
+    const logging = createChatLogging({
+      conversationLogger: new ConversationLogger(db.chatHistory),
+      actionLog: db.actionLog,
+      chatHistoryIds: new Map<number, number>(),
+      reserveChatTurn: (chatId, rowId) => ({ chatId, rowId, release() {} }),
+      isConnectWizardInput: () => false,
+    });
+    const update: TelegramUpdate = {
+      update_id: 1,
+      callback_query: {
+        id: 'tap-1',
+        chat_instance: 'synthetic',
+        from: { id: ASKER, is_bot: false, first_name: 'Synthetic' },
+        data,
+        message: {
+          message_id: 7,
+          date: 1,
+          chat: group ? { id: GROUP_CHAT, type: 'supergroup', title: 'Synthetic' } : { id: ASKER, type: 'private' },
+          text: 'Как поступить?',
+          ...(keyboard ? { reply_markup: keyboard } : {}),
+        },
+      },
+    };
+    await logging({ dbUser: user, update }, async () => {});
+    const stored = db.db
+      .query<{ role: string; content: string; chat_id: number | null }, []>(
+        'SELECT role, content, chat_id FROM chat_history ORDER BY id',
+      )
+      .all();
+    db.db.close();
+    return stored;
+  }
+
+  for (const group of [false, true]) {
+    for (const length of [20, 30, 60, 200]) {
+      test(`a ${length}-character answer is stored as the user's turn, ${group ? 'group' : 'private chat'}`, async () => {
+        const option = cyrillicOption(length);
+        const { sender, sent } = fakeTelegram();
+        await sender.sendButtons!(
+          group ? GROUP_CHAT : ASKER,
+          'Как поступить?',
+          [option, 'Нет'],
+          'HTML',
+          group ? ASKER : undefined,
+        );
+        const keyboard = sent[0]!;
+
+        const stored = await logTap(keyboard.inline_keyboard[0]![0]!.callback_data!, { group, keyboard });
+
+        expect(stored).toEqual([{ role: 'user', content: option, chat_id: group ? GROUP_CHAT : null }]);
+      });
+    }
+  }
+
+  test('a short answer sent before the index form existed is stored as before', async () => {
+    expect(await logTap('ai_btn:19:00', { group: false })).toEqual([{ role: 'user', content: '19:00', chat_id: null }]);
+    expect(await logTap(`ai_btn:${ASKER}:Да`, { group: true })).toEqual([
+      { role: 'user', content: 'Да', chat_id: GROUP_CHAT },
+    ]);
+  });
+
+  test('an index tap whose keyboard is gone is logged as a button press, not as something the user said', async () => {
+    const stored = await logTap('ai_opt:1', { group: false });
+
+    expect(stored).toHaveLength(1);
+    expect(JSON.parse(stored[0]!.content)).toMatchObject({ kind: 'button', label: 'ai_opt', detail: '1' });
   });
 });

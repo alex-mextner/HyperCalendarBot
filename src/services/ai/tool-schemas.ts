@@ -252,6 +252,7 @@ const shareEventSchema = z
 const sendInvitationSchema = z
   .object({
     event_id: numericId.pipe(z.number().positive().safe()),
+    owner_id: numericId.optional(),
     force: toolBoolean.optional(),
     invitee_id: numericId
       .pipe(
@@ -272,7 +273,7 @@ const sendInvitationSchema = z
     message: 'Either invitee_id or invitee_username must be provided',
   });
 
-const getInvitationStatusSchema = z.object({ event_id: numericId }).passthrough();
+const getInvitationStatusSchema = z.object({ event_id: numericId, owner_id: numericId.optional() }).passthrough();
 
 const shareAgendaSchema = z
   .object({
@@ -298,12 +299,13 @@ const proposeEditSchema = z
   })
   .passthrough();
 
-const cancelInvitationSchema = z.object({ invitation_id: numericId }).passthrough();
+const cancelInvitationSchema = z.object({ invitation_id: numericId, owner_id: numericId.optional() }).passthrough();
 
 const resendInvitationSchema = z
   .object({
     invitation_id: numericId,
     invitee_username: z.string().optional(),
+    owner_id: numericId.optional(),
   })
   .passthrough();
 

@@ -51,9 +51,24 @@ curl https://hypercal.mextner.com/ready
 system prompt, history, tool calls, responses. Enabled via `AI_DEBUG_LOGS=true`.
 
 ```bash
-# Latest log for a chat (logs inside container at /app/logs/):
-ssh root@odroidn2 'docker exec hypercal-bot ls -lt /app/logs/chats/5153477378/ | head -3'
-ssh root@odroidn2 'docker exec hypercal-bot cat /app/logs/chats/5153477378/<timestamp>.log'
+# Latest log for a chat (logs inside container at /app/logs/). Copy it to a private temp file and
+# read ranges; never cat a whole chat log into a session (calendar data, Telegram ids):
+ssh root@odroidn2 'docker exec hypercal-bot ls -lt /app/logs/chats/<chatId>/ | head -3'
+# Absolute template: a bare `mktemp` honours TMPDIR, which can point inside the checkout.
+umask 077; f=$(mktemp /tmp/hcb-chat.XXXXXX)   # mode 0600, outside the repository
+ssh root@odroidn2 'docker exec hypercal-bot cat /app/logs/chats/<chatId>/<timestamp>.log' > "$f"
+grep -n '^## ROUND\|^## FINAL\|^## END' "$f"; sed -n '<from>,<to>p' "$f"
+rm -f "$f"
+
+# Docker logs around an incident: warnings and errors plus the records that exist for a delivery.
+# A FINAL answer is recorded before delivery and does not prove it, and a successful ask_user send
+# logs nothing: a missing delivery record is unknown, not failure.
+#   AI request metric (level 30; deliveryOutcome delivered|fallback|discarded)
+#   Finalize edit failed / Finalize send failed / Writer finalize failed (level 50)
+#   Delivered via bot API / Delivered via the inviter's own Telegram account (level 30, invitation sent)
+#   Bot API + inviter session failed — deep-link fallback attempted (level 30, invitation not delivered)
+#   Delivery chain failed (level 50)
+ssh root@odroidn2 'docker logs --since 3h hypercal-bot 2>&1 | grep -E "\"level\":(40|50|60)|AI request metric|Delivered via|deep-link fallback attempted"'
 ```
 
 ## Shared Server

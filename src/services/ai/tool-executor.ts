@@ -117,13 +117,19 @@ export interface ToolInputMap {
   get_holidays: { limit?: number };
   manage_settings: ManageSettingsInput;
   share_event: { event_id: number; target_type: 'user' | 'group'; target_id: number };
-  send_invitation: { event_id: number; invitee_id?: number; invitee_username?: string; force?: boolean };
-  get_invitation_status: { event_id: number };
+  send_invitation: {
+    event_id: number;
+    invitee_id?: number;
+    invitee_username?: string;
+    force?: boolean;
+    owner_id?: number;
+  };
+  get_invitation_status: { event_id: number; owner_id?: number };
   share_agenda: { period: 'today' | 'tomorrow' | 'week'; target_type: 'user' | 'group'; target_id: number };
   set_event_visibility: { event_id: number; visibility: 'private' | 'free_busy' | 'full'; owner_id?: number };
   propose_edit: { event_id: number; changes: Record<string, string | null>; reason?: string };
-  cancel_invitation: { invitation_id: number };
-  resend_invitation: { invitation_id: number; invitee_username?: string };
+  cancel_invitation: { invitation_id: number; owner_id?: number };
+  resend_invitation: { invitation_id: number; invitee_username?: string; owner_id?: number };
   get_google_calendar_status: Record<never, never>;
   list_google_calendars: Record<never, never>;
   lookup_stress: { words: string[] };

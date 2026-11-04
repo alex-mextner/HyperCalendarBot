@@ -144,8 +144,9 @@ async function resolveGroupRecipient(
 }
 
 /** An explicit invitee_id that is an owned address-book row ID is ambiguous recipient evidence even when a saved
- *  contact has that Telegram ID: only an ID verified in this conversation (picker, username) or the invitation's
- *  own recipient overrides it. An ID derived from a saved @username is that contact's Telegram ID, not a row ID. */
+ *  contact has that Telegram ID: only an ID verified in this conversation (picker, username), the invitation's
+ *  own recipient or the requester's own Telegram ID overrides it. An ID derived from a saved @username is that
+ *  contact's Telegram ID, not a row ID. */
 function findAmbiguousContactRow(
   ctx: AgentContext,
   input: RecipientInput,
@@ -155,6 +156,7 @@ function findAmbiguousContactRow(
   if (
     input.invitee_id === undefined ||
     input.invitee_id === establishedInvitationRecipientId ||
+    input.invitee_id === ctx.user.telegram_id ||
     ctx.verifiedRecipientIds?.has(input.invitee_id)
   )
     return null;

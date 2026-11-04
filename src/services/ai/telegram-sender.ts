@@ -3,6 +3,7 @@ import { InlineKeyboard, Keyboard } from 'gramio';
 import { CB } from '../../config/constants.ts';
 import type { ParseMode } from '../../utils/telegram.ts';
 import { groupRsvpKeyboard, invitationRsvpKeyboard } from '../sharing/invitation-rsvp-keyboard.ts';
+import { askUserCallbackData } from './ask-user-buttons.ts';
 import type { InvitationKeyboardVariant, TelegramSender } from './types.ts';
 
 interface TelegramSenderOptions {
@@ -43,9 +44,8 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
     },
     async sendButtons(chatId: number, text: string, buttons: string[], parseMode?: ParseMode, userId?: number) {
       const kb = new InlineKeyboard();
-      for (const btn of buttons) {
-        const cbData = userId ? `ai_btn:${userId}:${btn}` : `ai_btn:${btn}`;
-        kb.text(btn, cbData).row();
+      for (const [index, btn] of buttons.entries()) {
+        kb.text(btn, askUserCallbackData(index, btn, userId)).row();
       }
       const result = await bot.api.sendMessage({
         chat_id: chatId,

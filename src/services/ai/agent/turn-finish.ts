@@ -7,6 +7,7 @@ import { elapsedMs } from '../request-metrics.ts';
 import { unverifiedResponseNotice } from '../response-validator.ts';
 import type { TelegramStreamWriter } from '../telegram-stream.ts';
 import type { AgentContext } from '../types.ts';
+import { receiptView } from '../write-receipt.ts';
 import { aiFailureNotices } from './failure-notices.ts';
 import type { MessageParam } from './message-sanitizer.ts';
 import { turnIds } from './queued-turn.ts';
@@ -48,8 +49,7 @@ export function planGuard(ctx: AgentContext, state: TurnState, runFailed: boolea
   const { writeOutcomes, toolEvidence } = ledger;
   const { termination, responseUnverified } = state;
   const evidence = writeOutcomes.finalNotice(
-    ctx.user.language,
-    ctx.isGroup,
+    receiptView(ctx),
     (runFailed || responseUnverified) && writeOutcomes.mayHaveMutated,
   );
   // A supplement is optional text and stays quiet when guarded, unless it may have changed the
@@ -240,7 +240,7 @@ export async function finishTurn(
   applyGuard(writer, plan, state, ledger);
   if (!plan.guarded) correctUtcClockTimesInReply(ctx, writer, state.pendingHistory);
 
-  const writes = writeOutcomes.summary(ctx.user.language, ctx.isGroup);
+  const writes = writeOutcomes.summary(receiptView(ctx));
   const answeredByTool = writes === null && writeOutcomes.toolAnswered;
   const unansweredNotice = replaceSilentDraft(env, state, failure.failed, plan, writes, answeredByTool);
   persistTurnTail(env, state, plan, unansweredNotice, deps.saveTurn);

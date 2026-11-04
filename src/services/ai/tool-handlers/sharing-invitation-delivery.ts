@@ -49,32 +49,41 @@ interface InvitationDeliveryTarget {
   inviteeUsername: string | undefined;
   event: CalendarEvent | null | undefined;
   isGroupTarget: boolean;
+  /** The event owner the invitation is sent for; differs from ctx.user when a secretary acts for them. */
+  organizerId: number;
 }
 
-/** Callers must have checked ctx.sender: deliverInvitation needs a sender to reach anyone. */
+/**
+ * Callers must have checked ctx.sender: deliverInvitation needs a sender to reach anyone.
+ * The card names the organizer (the event owner), while every message to the person who typed the
+ * request (the deep-link fallback) goes to ctx.user. A secretary never sends as the owner: neither
+ * the secretary's nor the owner's connected Telegram account is used on the owner's behalf.
+ */
 export function deliverInvitationFromContext(
   ctx: AgentContext,
   sharing: SharingCapability,
   sender: NonNullable<AgentContext['sender']>,
   target: InvitationDeliveryTarget,
 ): Promise<InvitationDeliveryResult> {
+  const actingForOwner = target.organizerId !== ctx.user.telegram_id;
+  const organizer = actingForOwner ? ctx.userRepo.findByTelegramId(target.organizerId) : ctx.user;
   return deliverInvitation({
     invitationId: target.invitationId,
     eventId: target.eventId,
     inviteeId: target.inviteeId,
     inviteeUsername: target.inviteeUsername,
-    inviterId: ctx.user.telegram_id,
-    inviterName: ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`,
-    inviterUsername: ctx.user.username ?? undefined,
-    inviterTimezone: ctx.user.timezone,
+    inviterId: target.organizerId,
+    inviterName: organizer?.first_name ?? organizer?.username ?? `User ${target.organizerId}`,
+    inviterUsername: organizer?.username ?? undefined,
+    inviterTimezone: organizer?.timezone ?? ctx.user.timezone,
     event: target.event,
-    lang: (ctx.user.language ?? 'en') as 'en' | 'ru',
+    lang: (organizer?.language ?? 'en') as 'en' | 'ru',
     inviterLang: (ctx.user.language ?? 'en') as 'en' | 'ru',
     // The deep-link fallback is a PRIVATE invite link — it must reach the inviter's
     // private chat, never ctx.chatId (which may be a group the bot was invoked from,
     // leaking the invitee's personal invitation to every member).
     fallbackChatId: ctx.user.telegram_id,
-    allowInviterSession: !target.isGroupTarget,
+    allowInviterSession: !target.isGroupTarget && !actingForOwner,
     isGroupTarget: target.isGroupTarget,
     deps: {
       sender,

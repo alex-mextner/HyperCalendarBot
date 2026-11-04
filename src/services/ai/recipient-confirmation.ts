@@ -3,6 +3,8 @@ interface Approval {
   actorId: number;
   eventId: number;
   recipientId: number;
+  /** The calendar owner a secretary's invitation is for; absent for the user's own. */
+  ownerId?: number;
   expiresAt: number;
   confirmed: boolean;
 }
@@ -12,7 +14,7 @@ export function issueRecipientApproval(
   actorId: number,
   eventId: number,
   recipientId: number,
-  now = Date.now(),
+  { now = Date.now(), ownerId }: { now?: number; ownerId?: number } = {},
 ): string {
   for (const [token, item] of approvals) if (item.expiresAt <= now) approvals.delete(token);
   if (approvals.size >= 1000) {
@@ -20,7 +22,14 @@ export function issueRecipientApproval(
     if (first) approvals.delete(first);
   }
   const token = crypto.randomUUID();
-  approvals.set(token, { actorId, eventId, recipientId, expiresAt: now + TTL, confirmed: false });
+  approvals.set(token, {
+    actorId,
+    eventId,
+    recipientId,
+    ...(ownerId !== undefined && { ownerId }),
+    expiresAt: now + TTL,
+    confirmed: false,
+  });
   return token;
 }
 export function confirmRecipientApproval(

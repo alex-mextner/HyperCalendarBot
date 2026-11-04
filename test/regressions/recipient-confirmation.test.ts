@@ -39,7 +39,7 @@ test('confirmed force is scoped to actor,event,ID and consumed once', async () =
   expect(consumeRecipientApproval(7001, 92, 5000000001)).toBe(false);
 });
 test('expired or duplicated buttons cannot trigger approval', () => {
-  const token = issueRecipientApproval(7001, 94, 5000000001, 1000);
+  const token = issueRecipientApproval(7001, 94, 5000000001, { now: 1000 });
   expect(confirmRecipientApproval(token, 7001, 7001, 302000)).toBeNull();
   const token2 = issueRecipientApproval(7001, 95, 5000000001);
   expect(confirmRecipientApproval(token2, 7001, 7001)).not.toBeNull();

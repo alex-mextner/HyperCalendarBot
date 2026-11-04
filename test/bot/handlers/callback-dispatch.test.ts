@@ -28,7 +28,7 @@ import { makeUserRow, sentMessage, telegramUser } from '../telegram-fixtures.ts'
 type Registrar = (dispatch: CallbackDispatch, deps: CallbackRouteDeps) => void;
 
 const ROUTE_GROUPS: Array<{ name: string; register: Registrar; prefixes: string[] }> = [
-  { name: 'ai', register: registerAiRoutes, prefixes: ['ric', 'dlc', CB.SCENE_HELP, 'ai_btn'] },
+  { name: 'ai', register: registerAiRoutes, prefixes: ['ric', 'dlc', CB.SCENE_HELP, 'ai_btn', 'ai_opt'] },
   {
     name: 'event',
     register: registerEventRoutes,
@@ -110,7 +110,7 @@ describe('callback prefix table', () => {
         owners.set(prefix, group.name);
       }
     }
-    expect(owners.size).toBe(47);
+    expect(owners.size).toBe(48);
   });
 });
 

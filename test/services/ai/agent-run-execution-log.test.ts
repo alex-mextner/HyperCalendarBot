@@ -107,7 +107,7 @@ describe('CalendarBotAgent.run()', () => {
       delivered = text;
     };
     await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
-    expect(delivered).toContain('Not completed:');
+    expect(delivered).toContain('Not deleted: event');
     expect(delivered).not.toContain('Готово! Событие удалено');
   });
 

@@ -175,16 +175,17 @@ describe('silent final guard (#508)', () => {
     expect(invitations).toHaveLength(1);
     const tr = t('ru').writeOutcomes;
     const reply = delivered.at(-1) ?? '';
+    const sent = 'Приглашение на «Синтетическая встреча» отправлено';
     expect(deleted).toEqual([]);
     expect(reply).toContain('Ход выполнения');
     expect(reply).toContain(t('ru').ai_unanswered_writes('').trim());
-    expect(reply).toContain(`${tr.completed}: ${tr.operations.create_event}`);
-    expect(reply).toContain(tr.invitationDelivered);
+    expect(reply).toContain(`${tr.operations.create_event.done}: событие «Синтетическая встреча»`);
+    expect(reply).toContain(sent);
     expect(reply).not.toContain('[SKIP]');
-    expect(result.responseText).toContain(tr.operations.create_event);
+    expect(result.responseText).toContain(tr.operations.create_event.done);
     // The next turn's model must see what the user was told, not the skip token.
     const history = assistantHistory();
-    expect(history).toContain(tr.invitationDelivered);
+    expect(history).toContain(sent);
     expect(history).not.toContain('[SKIP]');
   });
 
@@ -229,7 +230,7 @@ describe('silent final guard (#508)', () => {
 
     const tr = t('ru').writeOutcomes;
     expect(deleted).toEqual([]);
-    expect(delivered.at(-1)).toContain(`${tr.completed}: ${tr.operations.create_event}`);
+    expect(delivered.at(-1)).toContain(`${tr.operations.create_event.done}: событие «Синтетическая встреча»`);
   });
 
   /** Wires a renderer and records every photo actually sent to the chat. */

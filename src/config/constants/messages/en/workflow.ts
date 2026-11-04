@@ -1,5 +1,5 @@
 // src/config/constants/messages/en/workflow.ts
-// Intent-workflow outcome text, day headings and write-outcome (delivery/attempt) wording.
+// Intent-workflow outcome text, day headings and write-receipt wording.
 
 import { capitalize } from '../../text-helpers.ts';
 
@@ -16,29 +16,90 @@ export const enWorkflow = {
       `${relative ? `${capitalize(relative)}, ` : ''}${weekday} ${month}/${day}`,
   },
   writeOutcomes: {
-    completed: 'Completed',
-    notCompleted: 'Not completed',
-    uncertain: 'Outcome unknown',
-    failed: 'attempt failed; completion not confirmed',
-    notApplied: 'request rejected before applying changes',
-    skipped: 'skipped; no new write executed',
+    // What the model reads back from send_invitation: one invitation, said once.
     invitationDelivered: 'Invitation delivered',
     invitationManual: 'Invitation created; not delivered. Please forward the link sent to your private chat.',
     invitationFailed: 'Invitation created; not delivered.',
-    attendanceDeclined: 'Attendance declined; the event remains.',
     interrupted: 'The request was interrupted. Some actions may already have happened; no automatic replay will run.',
-    attempts:
-      'These are distinct execution attempts, not a list of outstanding requests. Later successes are shown separately.',
-    write: 'Write',
-    field: 'field',
-    attempt: (n: number) => `Attempt ${n}`,
     spokenQuestion: (question: string, options: string) => `${question} Options: ${options}`,
-    operations: {
-      delete_event: 'Delete event',
-      update_event: 'Update event',
-      create_event: 'Create event',
-      send_invitation: 'Send invitation',
+    // The receipt that replaces the model's text when a run had failed, skipped or unconfirmed writes.
+    anEvent: 'event',
+    theEvent: 'the event',
+    eventNamed: (title: string, when: string | null) => (when ? `event “${title}” (${when})` : `event “${title}”`),
+    eventTitle: (title: string) => `“${title}”`,
+    change: 'change',
+    calendarOf: (name: string) => `calendar: ${name}`,
+    otherCalendar: 'another calendar',
+    delegatedCalendar: 'someone else’s calendar that you manage as a secretary',
+    changedFields: (fields: readonly string[]) => `, fields: ${fields.join(', ')}`,
+    nothingChanged: 'nothing was changed',
+    skipped: 'skipped, not run again',
+    repeatUnknown: (event: string | null) =>
+      event
+        ? `A repeat of the creation could not be confirmed: ${event}. Check the calendar for a duplicate.`
+        : 'A repeat of an event creation could not be confirmed. Check the calendar for a duplicate.',
+    retriedAfterUnknown:
+      'The retry worked, but the first try may have gone through too: check the calendar for a duplicate.',
+    attendanceDeclined: (title: string | null) =>
+      title ? `Attendance of “${title}” declined; the event remains.` : 'Attendance declined; the event remains.',
+    retry: 'Tell me what to repeat: I will not redo what already went through.',
+    checkFirst: 'Check the calendar before repeating anything; I never repeat a request on my own.',
+    people: (names: readonly string[], unnamed: number) => {
+      const count = `${unnamed} ${unnamed === 1 ? 'person' : 'people'}`;
+      if (names.length === 0) return count;
+      return unnamed === 0 ? names.join(', ') : `${names.join(', ')} and ${unnamed} more`;
     },
+    invitations: {
+      sent: (n: number, event: string, who: string) =>
+        n === 1 ? `The invitation to ${event} was sent: ${who}.` : `The invitations to ${event} were sent: ${who}.`,
+      created: (n: number, event: string, who: string) =>
+        n === 1
+          ? `The invitation to ${event} was created: ${who}.`
+          : `The invitations to ${event} were created: ${who}.`,
+      manual: (n: number, event: string, who: string) =>
+        n === 1
+          ? `The invitation to ${event} was created but not delivered: ${who}. Please forward the link sent to your private chat.`
+          : `The invitations to ${event} were created but not delivered: ${who}. Please forward the links sent to your private chat.`,
+      undelivered: (n: number, event: string, who: string) =>
+        n === 1
+          ? `The invitation to ${event} was created but not delivered: ${who}.`
+          : `The invitations to ${event} were created but not delivered: ${who}.`,
+      rejected: (n: number, event: string, who: string) =>
+        n === 1
+          ? `The invitation to ${event} was not sent: ${who}.`
+          : `The invitations to ${event} were not sent: ${who}.`,
+      unknown: (n: number, event: string, who: string) =>
+        n === 1
+          ? `Could not confirm that the invitation to ${event} went through: ${who}.`
+          : `Could not confirm that the invitations to ${event} went through: ${who}.`,
+      skipped: (n: number, event: string, who: string) =>
+        n === 1
+          ? `The invitation to ${event} was skipped and not sent again: ${who}.`
+          : `The invitations to ${event} were skipped and not sent again: ${who}.`,
+    },
+    operations: {
+      create_event: {
+        done: 'Created',
+        notDone: 'Not created',
+        unknown: 'Could not confirm creation',
+      },
+      update_event: {
+        done: 'Updated',
+        notDone: 'Not updated',
+        unknown: 'Could not confirm the update',
+      },
+      delete_event: {
+        done: 'Deleted',
+        notDone: 'Not deleted',
+        unknown: 'Could not confirm the deletion',
+      },
+    },
+    otherWrite: {
+      done: 'Done',
+      notDone: 'Not done',
+      unknown: 'Could not confirm it went through',
+    },
+    field: 'field',
     fields: {
       title: 'title',
       start_at: 'start time',
