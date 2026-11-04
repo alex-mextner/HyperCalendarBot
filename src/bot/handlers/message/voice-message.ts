@@ -40,6 +40,7 @@ async function synthesizePrimary(user: User, plainText: string, deps: MessageHan
     if (isRu && deps.sileroTts && deps.stressDictionary) {
       const withOrdinals = fixDateOrdinals(plainText);
       const withNumbers = numbersToWords(withOrdinals);
+      await deps.stressDictionary.ensureLoaded();
       const withStress = markStress(withNumbers, deps.stressDictionary);
       const stressedText = transliterateEnglish(withStress);
       cmdLogger.info({ userId: user.telegram_id, textLen: stressedText.length }, 'Synthesizing RU voice reply');

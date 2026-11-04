@@ -34,7 +34,9 @@ bun scripts/generate-stress-dict.ts
 
 ## Usage
 
-Loaded at bot startup by `StressDictionary.loadFromFile()` in
-`src/services/voice/stress-dictionary.ts`. Used by `markStress()` in
-`src/services/voice/stress-marker.ts` to add stress marks to Russian text
-before feeding it to Silero TTS.
+Registered at bot startup by `loadStressDictionary()` in `src/bootstrap/speech.ts` and read through
+`StressDictionary.lazyFromFile()` in `src/services/voice/stress-dictionary.ts`: at startup when
+`SILERO_PYTHON_PATH` is set, otherwise on first use (the `lookup_stress` tool), because parsing it costs about
+80 MB retained and over 300 MB at the peak. Used by `markStress()` in `src/services/voice/stress-marker.ts` to
+add stress marks to Russian text before feeding it to Silero TTS. The scripts under `scripts/` read it
+directly with `StressDictionary.loadFromFile()`.

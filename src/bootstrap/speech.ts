@@ -6,8 +6,11 @@
 // Ordering invariants:
 //  - It runs AFTER the voice-call phase and BEFORE createBot(). The voice-call TTS adapter reads
 //    `ctx.speech` at call time, so it sees these services even though they are created later.
-//  - The stress dictionary loads before Silero: Silero is only created when a dictionary exists,
-//    because Russian text is stress-marked with it before synthesis.
+//  - The stress dictionary is registered before Silero: Silero is only created when a dictionary exists,
+//    because Russian text is stress-marked with it before synthesis. With Silero configured the file is
+//    read right here, as it always was (every Russian reply needs it, and an unreadable file must keep
+//    Silero off instead of speaking unstressed text); without Silero it is only registered and its entries
+//    load when a model first calls `lookup_stress` (see loadStressDictionary).
 //  - Every service is optional and keyed on its own env variable; a missing dictionary is logged
 //    and never stops startup.
 //  - Modules are imported lazily (runtime-selected by configuration, same as before the split) so a
@@ -20,10 +23,21 @@ import type { StartupContext } from './runtime.ts';
 
 const STRESS_DICTIONARY_PATH = 'data/dictionaries/stress-dict.json';
 
-async function loadStressDictionary(): Promise<StressDictionary | undefined> {
+/**
+ * Registers the stress dictionary. The 555K-entry file costs about 80 MB retained (over 300 MB at the peak), and
+ * without Silero the only reader is the `lookup_stress` tool, so it is registered unread and every consumer calls
+ * `ensureLoaded()` first. `readNow` (Silero configured) reads it here: a file that cannot be read then leaves the
+ * dictionary absent, which keeps Silero off, as before. A missing file leaves it absent either way.
+ */
+export async function loadStressDictionary(
+  path: string = STRESS_DICTIONARY_PATH,
+  readNow = false,
+): Promise<StressDictionary | undefined> {
   try {
     const { StressDictionary: StressDictionaryClass } = await import('../services/voice/stress-dictionary.ts');
-    return await StressDictionaryClass.loadFromFile(STRESS_DICTIONARY_PATH);
+    const dictionary = await StressDictionaryClass.lazyFromFile(path);
+    if (readNow && !(await dictionary.ensureLoaded())) return undefined;
+    return dictionary;
   } catch (error) {
     botLogger.warn({ err: error }, 'Stress dictionary not loaded');
     return undefined;
@@ -72,7 +86,7 @@ export async function initSpeechServices(ctx: StartupContext): Promise<void> {
   const { config, speech } = ctx;
 
   speech.transcriptionService = await createTranscriptionService(config);
-  speech.stressDictionary = await loadStressDictionary();
+  speech.stressDictionary = await loadStressDictionary(STRESS_DICTIONARY_PATH, Boolean(config.SILERO_PYTHON_PATH));
   speech.fallbackTts = await createFallbackTts();
   speech.kokoroTts = await createKokoroTts(config);
   speech.nliClassifier = await createNliClassifier(config);

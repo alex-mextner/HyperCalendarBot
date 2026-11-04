@@ -169,7 +169,10 @@ describe('voice response prompt', () => {
     const deps = makeVoiceDeps({
       sileroTts: { synthesize } as unknown as MessageHandlerDeps['sileroTts'],
       sendVoice,
-      stressDictionary: { lookup: () => null } as unknown as MessageHandlerDeps['stressDictionary'],
+      stressDictionary: {
+        lookup: () => null,
+        ensureLoaded: () => Promise.resolve(true),
+      } as unknown as MessageHandlerDeps['stressDictionary'],
     });
     globalThis.fetch = makeFetch();
 
@@ -191,7 +194,10 @@ describe('voice response prompt', () => {
     const deps = makeVoiceDeps({
       sileroTts: { synthesize } as unknown as MessageHandlerDeps['sileroTts'],
       sendVoice,
-      stressDictionary: { lookup: () => null } as unknown as MessageHandlerDeps['stressDictionary'],
+      stressDictionary: {
+        lookup: () => null,
+        ensureLoaded: () => Promise.resolve(true),
+      } as unknown as MessageHandlerDeps['stressDictionary'],
     });
     globalThis.fetch = makeFetch();
 
@@ -213,7 +219,10 @@ describe('voice response prompt', () => {
     const deps = makeVoiceDeps({
       sileroTts: { synthesize } as unknown as MessageHandlerDeps['sileroTts'],
       sendVoice,
-      stressDictionary: { lookup: () => null } as unknown as MessageHandlerDeps['stressDictionary'],
+      stressDictionary: {
+        lookup: () => null,
+        ensureLoaded: () => Promise.resolve(true),
+      } as unknown as MessageHandlerDeps['stressDictionary'],
     });
     globalThis.fetch = makeFetch();
 

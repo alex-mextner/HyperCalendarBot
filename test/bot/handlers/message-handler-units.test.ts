@@ -109,7 +109,7 @@ describe('voice reply TTS fallback', () => {
   const audioBuffer = Buffer.from('fake-audio');
   const fakeAudioDownload = mock(() => Promise.resolve(Buffer.from('fake-voice-download')));
   const voiceUser = makeUserRow({ telegram_id: 1, language: 'ru', timezone: 'UTC', voice_response_enabled: 1 });
-  const noStress = stub<StressDictionary>({ lookup: () => null });
+  const noStress = stub<StressDictionary>({ lookup: () => null, ensureLoaded: () => Promise.resolve(true) });
 
   function makeVoiceDeps(overrides: Partial<MessageHandlerDeps> = {}) {
     return makeHandlerDeps({
