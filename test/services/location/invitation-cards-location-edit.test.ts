@@ -47,6 +47,18 @@ const HARBOUR_CAFE: GeocodedLocation = {
   venueName: 'Harbour Cafe',
 };
 
+/** The address a pin the creator drops at the hotel's door reverse-geocodes to. */
+const PINNED_DOOR: GeocodedLocation = {
+  formattedAddress: 'Example Boulevard 9, Sampletown',
+  latitude: 52.1102,
+  longitude: 4.2803,
+  city: 'Sampletown',
+  country: 'Exampleland',
+  placeId: 'SYNTHETIC_PINNED_DOOR',
+  googleMapsUrl: 'https://www.google.com/maps/place/?q=place_id:SYNTHETIC_PINNED_DOOR',
+  venueName: null,
+};
+
 interface CardEdit {
   text: string;
   keyboard: InlineKeyboard | undefined;
@@ -71,6 +83,7 @@ class GatedCandidateStore extends InMemoryLocationCandidateStore {
 function setup(
   search: { [text: string]: GeocodedLocation[] } = {},
   candidateStore: InMemoryLocationCandidateStore = new InMemoryLocationCandidateStore(),
+  pinAddress: GeocodedLocation | null = null,
 ) {
   db = new Database(':memory:');
   runMigrations(db, migrations);
@@ -104,7 +117,7 @@ function setup(
     geocodingService: {
       findPlace: async (text) => search[text] ?? [],
       geocodeAddress: async () => [],
-      reverseGeocode: async () => null,
+      reverseGeocode: async () => pinAddress,
       locateArea: async () => null,
     },
     addressCache: new AddressCache({
@@ -276,5 +289,37 @@ describe('a location edit re-renders delivered invitation cards that showed the 
     expect(s.cards[0]?.text).toContain('19:30');
     expect(s.cards[0]?.text).not.toContain('18:00');
     expectNoOldPlace(s.cards[0]);
+  });
+
+  test('a pin confirmed while the question for the re-sent text starts stays on the event and the card (#681)', async () => {
+    const store = new GatedCandidateStore();
+    const s = setup({}, store, PINNED_DOOR);
+    const questions = spyOn(s.verification, 'verifyEventLocation');
+    const released = Promise.withResolvers<void>();
+    store.gate = released.promise;
+
+    // The assistant re-sends the confirmed text with a new time: its question waits on closing the
+    // previous picker, still holding the event as it was (the old place confirmed)
+    const resent = await handleUpdateEvent(s.agentCtx, {
+      event_id: s.event.id,
+      location: 'seaside hotel',
+      start_at: '2026-10-05T18:00:00Z',
+    });
+    expect(resent.success).toBe(true);
+    // Meanwhile the creator drops a pin for the same text
+    const pin = { latitude: PINNED_DOOR.latitude, longitude: PINNED_DOOR.longitude, venue: null };
+    expect(await s.verification.resolveFromSharedLocation(s.event.id, pin, OWNER_ID)).toBe(true);
+    released.resolve();
+    await Promise.all(questions.mock.results.map((r) => r.value));
+
+    // The question's older snapshot must not erase the pin
+    const stored = s.events.findById(s.event.id, OWNER_ID);
+    expect(stored?.location_verified).toBe(1);
+    expect(stored?.resolved_address).toBe(PINNED_DOOR.formattedAddress);
+    expect(stored?.google_maps_url).toBe(PINNED_DOOR.googleMapsUrl);
+    expect(s.cards.at(-1)?.text).toContain(PINNED_DOOR.formattedAddress);
+    expectNoOldPlace(s.cards.at(-1));
+    // The pin answered the question: nothing is asked
+    expect(s.toCreator).toEqual([]);
   });
 });

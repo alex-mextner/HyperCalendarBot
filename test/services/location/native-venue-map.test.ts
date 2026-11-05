@@ -384,7 +384,7 @@ describe('Map button on the event detail card', () => {
   test('pressing Map after the place was dropped sends nothing', async () => {
     const s = setup();
     await s.confirmCandidate(0);
-    s.eventRepo.clearLocationFields(s.event.id);
+    expect(s.eventRepo.clearLocationFieldsIfUnchanged(s.event.id, s.storedEvent())).toBe(true);
     s.venues.length = 0;
 
     await s.tap(`ev_map:${s.event.id}`);
@@ -512,6 +512,8 @@ describe('the picker shows the chosen place on the map once', () => {
 describe('a venue picked in Telegram is the place the user chose', () => {
   test('it is offered for the recent event and applied with its name and address, without a reverse geocode', async () => {
     const s = setup();
+    // A user who already has a home city: nothing is geocoded for a venue pick
+    new UserRepository(db).update(OWNER_ID, { city: 'Белград' });
 
     await s.share({ location: TELEGRAM_VENUE.location, venue: TELEGRAM_VENUE });
 
@@ -553,6 +555,36 @@ describe('a venue picked in Telegram is the place the user chose', () => {
         address: TELEGRAM_VENUE.address,
       },
     ]);
+  });
+
+  test('a user without a home city learns it from the venue, which keeps its name and address (#680)', async () => {
+    const s = setup();
+    expect(s.owner().city).toBeNull();
+
+    await s.share({ location: TELEGRAM_VENUE.location, venue: TELEGRAM_VENUE });
+    await s.tap(`loc_geo:geo:${s.event.id}`);
+
+    // One reverse geocode, only for the city
+    expect(s.geocoder.reverseCalls).toEqual([
+      { lat: TELEGRAM_VENUE.location.latitude, lng: TELEGRAM_VENUE.location.longitude },
+    ]);
+    expect(s.owner().city).toBe(STREET_AT_VENUE.city);
+    const stored = s.storedEvent();
+    expect(stored.venue_name).toBe(TELEGRAM_VENUE.title);
+    expect(stored.resolved_address).toBe(TELEGRAM_VENUE.address);
+    expect(stored.google_maps_url).toContain('query_place_id=ChIJ-venue');
+  });
+
+  test('a venue outside the user region does not become the home city (#680)', async () => {
+    const s = setup();
+    // The Belgrade venue is neither in this user's timezone nor in their home country
+    new UserRepository(db).update(OWNER_ID, { timezone: 'Asia/Tokyo', country_code: 'JP' });
+
+    await s.share({ location: TELEGRAM_VENUE.location, venue: TELEGRAM_VENUE });
+    await s.tap(`loc_geo:geo:${s.event.id}`);
+
+    expect(s.storedEvent().venue_name).toBe(TELEGRAM_VENUE.title);
+    expect(s.owner().city).toBeNull();
   });
 });
 
