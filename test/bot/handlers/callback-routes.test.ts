@@ -1,9 +1,12 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
-import { png } from '../../fixtures/png.ts';
+import type { ImageDelivery } from '../../../src/services/image/image-delivery.ts';
+import { asCallbackContext } from '../../fixtures/doubles.ts';
+import { describePictureContract, gatedDelivery } from '../../fixtures/picture-contract.ts';
 
 function makeCtx(data: string, language = 'en', extras: { chat?: unknown; message?: unknown } = {}) {
   return {
+    id: 'cb-1',
     data,
     dbUser: { telegram_id: 100, language, timezone: 'UTC' },
     chat: extras.chat,
@@ -11,6 +14,7 @@ function makeCtx(data: string, language = 'en', extras: { chat?: unknown; messag
     answer: mock(() => Promise.resolve()),
     editText: mock(() => Promise.resolve()),
     send: mock(() => Promise.resolve()),
+    bot: { api: { pinChatMessage: mock(() => Promise.resolve()), sendMessage: mock(() => Promise.resolve()) } },
   };
 }
 
@@ -36,7 +40,7 @@ function makeHandler(
     calendarRepo?: unknown;
     disconnectDeps?: unknown;
     onCalendarsDone?: unknown;
-    renderService?: unknown;
+    imageDelivery?: ImageDelivery;
     invitationService?: unknown;
     eventRepo?: unknown;
   } = {},
@@ -50,7 +54,7 @@ function makeHandler(
       calendarRepo: overrides.calendarRepo as never,
       disconnectDeps: overrides.disconnectDeps as never,
       onCalendarsDone: overrides.onCalendarsDone as never,
-      renderService: overrides.renderService as never,
+      imageDelivery: overrides.imageDelivery,
       invitationService: overrides.invitationService as never,
       eventRepo: overrides.eventRepo as never,
     },
@@ -342,137 +346,178 @@ describe('GCAL callback', () => {
 
 // ── IMG_DAILY ──
 
+/** A tapped message whose sends are recorded: photos, documents and texts (notes). */
+function makeTappedMessage() {
+  const texts: string[] = [];
+  let photos = 0;
+  return {
+    message: {
+      chat: { id: 100, type: 'private' },
+      sendPhoto: mock(() => {
+        photos++;
+        return Promise.resolve({ id: 5 });
+      }),
+      sendDocument: mock(() => {
+        photos++;
+        return Promise.resolve({ id: 6 });
+      }),
+      send: mock((text: string) => {
+        texts.push(text);
+        return Promise.resolve();
+      }),
+    },
+    photos: () => photos,
+    texts: () => [...texts],
+  };
+}
+
 describe('IMG_DAILY callback', () => {
-  test('renders daily image and sends photo', async () => {
-    const sendPhoto = mock(() => Promise.resolve());
-    const eventService = makeEventService({
-      getEventsForDay: mock(() => []),
-    });
-    const holidayService = {
-      getHolidaysForDate: mock(() => []),
-    };
-    const renderService = {
-      renderDirect: mock(() => Promise.resolve(png())),
-    };
-    const ctx = makeCtx('imd:2026-03-15', 'en', {
-      message: { chat: { id: 100, type: 'private' }, sendPhoto, send: mock(() => Promise.resolve()) },
-    });
-    const handler = makeHandler({ eventService, holidayService, renderService });
+  const holidayService = { getHolidaysForDate: mock(() => []) };
+
+  test('answers the tap at once, queues the picture and delivers it when the render ends', async () => {
+    const eventService = makeEventService({ getEventsForDay: mock(() => []) });
+    const { delivery, renderer, release } = gatedDelivery();
+    const tapped = makeTappedMessage();
+    const ctx = makeCtx('imd:2026-03-15', 'en', { message: tapped.message });
+    const handler = makeHandler({ eventService, holidayService, imageDelivery: delivery });
+
     await handler(ctx as never);
-    expect(ctx.answer).toHaveBeenCalled();
-    expect(renderService.renderDirect).toHaveBeenCalled();
-    expect(sendPhoto).toHaveBeenCalled();
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(renderer.renderDirect).toHaveBeenCalledTimes(1);
+    expect(tapped.photos()).toBe(0); // the handler returned while the render is pending
+
+    release();
+    await delivery.whenIdle();
+
+    expect(tapped.photos()).toBe(1);
+    expect(tapped.texts()).toEqual([]);
   });
 
-  test('render failure sends error message', async () => {
-    const sendFn = mock(() => Promise.resolve());
-    const eventService = makeEventService({
-      getEventsForDay: mock(() => []),
-    });
-    const holidayService = {
-      getHolidaysForDate: mock(() => []),
-    };
-    const renderService = {
-      renderDirect: mock(() => Promise.reject(new Error('render boom'))),
-    };
-    const ctx = makeCtx('imd:2026-03-15', 'en', {
-      message: { chat: { id: 100, type: 'private' }, sendPhoto: mock(() => Promise.resolve()), send: sendFn },
-    });
-    const handler = makeHandler({ eventService, holidayService, renderService });
+  test('a render failure sends one note naming the day', async () => {
+    const eventService = makeEventService({ getEventsForDay: mock(() => []) });
+    const { delivery, fail, failures } = gatedDelivery();
+    const tapped = makeTappedMessage();
+    const ctx = makeCtx('imd:2026-03-15', 'en', { message: tapped.message });
+    const handler = makeHandler({ eventService, holidayService, imageDelivery: delivery });
+
     await handler(ctx as never);
-    expect(sendFn).toHaveBeenCalled();
-    const msg = (sendFn.mock.calls[0] as unknown[])[0] as string;
-    expect(msg).toContain('failed');
+    fail(new Error('render boom'));
+    await delivery.whenIdle();
+
+    expect(tapped.texts()).toHaveLength(1);
+    expect(tapped.texts()[0]).toContain('2026-03-15');
+    expect(failures).toHaveLength(1);
   });
 
   test('missing message context fails closed before event selection or rendering', async () => {
-    const eventService = makeEventService({
-      getEventsForDay: mock(() => []),
-    });
-    const holidayService = {
-      getHolidaysForDate: mock(() => []),
-    };
-    const renderService = {
-      renderDirect: mock(() => Promise.reject(new Error('boom'))),
-    };
+    const eventService = makeEventService({ getEventsForDay: mock(() => []) });
+    const { delivery, renderer } = gatedDelivery();
     const ctx = makeCtx('imd:2026-03-15', 'en');
-    const handler = makeHandler({ eventService, holidayService, renderService });
+    const handler = makeHandler({ eventService, holidayService, imageDelivery: delivery });
     await handler(ctx as never);
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(eventService.getEventsForDay).not.toHaveBeenCalled();
     expect(eventService.getEventsInRange).not.toHaveBeenCalled();
-    expect(renderService.renderDirect).not.toHaveBeenCalled();
+    expect(renderer.renderDirect).not.toHaveBeenCalled();
   });
 
-  test('no renderService skips IMG_DAILY', async () => {
+  test('no image delivery skips IMG_DAILY', async () => {
     const ctx = makeCtx('imd:2026-03-15');
     const handler = makeHandler();
     await handler(ctx as never);
     // Falls through to unknown action warning + answer
     expect(ctx.answer).toHaveBeenCalled();
   });
+
+  describePictureContract('IMG_DAILY', () => {
+    const tapped = makeTappedMessage();
+    return {
+      run: (delivery, requestId) => {
+        const ctx = makeCtx('imd:2026-03-15', 'en', { message: tapped.message });
+        const handler = makeHandler({
+          eventService: makeEventService({ getEventsForDay: mock(() => []) }),
+          holidayService,
+          imageDelivery: delivery,
+        });
+        return handler(asCallbackContext({ ...ctx, id: `cb-${requestId}` }));
+      },
+      photos: tapped.photos,
+      texts: tapped.texts,
+    };
+  });
 });
 
 // ── IMG_WEEKLY ──
 
 describe('IMG_WEEKLY callback', () => {
-  test('renders weekly image and sends photo', async () => {
-    const sendPhoto = mock(() => Promise.resolve());
-    const eventService = makeEventService({
-      getEventsInRange: mock(() => []),
-    });
-    const renderService = {
-      renderDirect: mock(() => Promise.resolve(png())),
-    };
-    const ctx = makeCtx('imw:2026-03-09', 'en', {
-      message: { chat: { id: 100, type: 'private' }, sendPhoto, send: mock(() => Promise.resolve()) },
-    });
-    const handler = makeHandler({ eventService, renderService });
+  test('answers the tap at once, queues the picture and delivers it when the render ends', async () => {
+    const eventService = makeEventService({ getEventsInRange: mock(() => []) });
+    const { delivery, renderer, release } = gatedDelivery();
+    const tapped = makeTappedMessage();
+    const ctx = makeCtx('imw:2026-03-09', 'en', { message: tapped.message });
+    const handler = makeHandler({ eventService, imageDelivery: delivery });
+
     await handler(ctx as never);
-    expect(ctx.answer).toHaveBeenCalled();
-    expect(renderService.renderDirect).toHaveBeenCalled();
-    expect(sendPhoto).toHaveBeenCalled();
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(renderer.renderDirect).toHaveBeenCalledTimes(1);
+    expect(tapped.photos()).toBe(0);
+
+    release();
+    await delivery.whenIdle();
+
+    expect(tapped.photos()).toBe(1);
   });
 
-  test('render failure sends error message', async () => {
-    const sendFn = mock(() => Promise.resolve());
-    const eventService = makeEventService({
-      getEventsInRange: mock(() => []),
-    });
-    const renderService = {
-      renderDirect: mock(() => Promise.reject(new Error('render boom'))),
-    };
-    const ctx = makeCtx('imw:2026-03-09', 'en', {
-      message: { chat: { id: 100, type: 'private' }, sendPhoto: mock(() => Promise.resolve()), send: sendFn },
-    });
-    const handler = makeHandler({ eventService, renderService });
+  test('a render failure sends one note', async () => {
+    const eventService = makeEventService({ getEventsInRange: mock(() => []) });
+    const { delivery, fail } = gatedDelivery();
+    const tapped = makeTappedMessage();
+    const ctx = makeCtx('imw:2026-03-09', 'en', { message: tapped.message });
+    const handler = makeHandler({ eventService, imageDelivery: delivery });
+
     await handler(ctx as never);
-    expect(sendFn).toHaveBeenCalled();
-    const msg = (sendFn.mock.calls[0] as unknown[])[0] as string;
-    expect(msg).toContain('failed');
+    fail(new Error('render boom'));
+    await delivery.whenIdle();
+
+    expect(tapped.texts()).toHaveLength(1);
+    expect(tapped.texts()[0]).toContain('could not prepare the picture');
   });
 
   test('missing message context fails closed before event selection or rendering', async () => {
-    const eventService = makeEventService({
-      getEventsInRange: mock(() => []),
-    });
-    const renderService = {
-      renderDirect: mock(() => Promise.reject(new Error('boom'))),
-    };
+    const eventService = makeEventService({ getEventsInRange: mock(() => []) });
+    const { delivery, renderer } = gatedDelivery();
     const ctx = makeCtx('imw:2026-03-09', 'en');
-    const handler = makeHandler({ eventService, renderService });
+    const handler = makeHandler({ eventService, imageDelivery: delivery });
     await handler(ctx as never);
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(eventService.getEventsForDay).not.toHaveBeenCalled();
     expect(eventService.getEventsInRange).not.toHaveBeenCalled();
-    expect(renderService.renderDirect).not.toHaveBeenCalled();
+    expect(renderer.renderDirect).not.toHaveBeenCalled();
   });
 
-  test('no renderService skips IMG_WEEKLY', async () => {
+  test('no image delivery skips IMG_WEEKLY', async () => {
     const ctx = makeCtx('imw:2026-03-09');
     const handler = makeHandler();
     await handler(ctx as never);
     expect(ctx.answer).toHaveBeenCalled();
+  });
+
+  describePictureContract('IMG_WEEKLY', () => {
+    const tapped = makeTappedMessage();
+    return {
+      run: (delivery, requestId) => {
+        const ctx = makeCtx('imw:2026-03-09', 'en', { message: tapped.message });
+        const handler = makeHandler({
+          eventService: makeEventService({ getEventsInRange: mock(() => []) }),
+          imageDelivery: delivery,
+        });
+        return handler(asCallbackContext({ ...ctx, id: `cb-${requestId}` }));
+      },
+      photos: tapped.photos,
+      texts: tapped.texts,
+    };
   });
 });
 

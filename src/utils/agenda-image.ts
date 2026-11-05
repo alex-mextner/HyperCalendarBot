@@ -1,6 +1,14 @@
 import { Blob as BufferBlob } from 'node:buffer';
 // Shared lossless PNG delivery policy for command, callback, and AI render transports.
-export class AgendaImageError extends Error {}
+/** `tooLarge`: the picture is over a limit the user can stay under by asking for less; any other typed error is a defect of the renderer or the transport. */
+export class AgendaImageError extends Error {
+  constructor(
+    message: string,
+    readonly tooLarge = false,
+  ) {
+    super(message);
+  }
+}
 
 export const AGENDA_ALLOCATION_ERROR =
   'Agenda image is too large for the screenshot allocation limit. Choose a shorter date range.';
@@ -12,6 +20,12 @@ export function agendaImageErrorMessage(error: unknown): string | undefined {
   return undefined;
 }
 
+/** True for a picture over a size limit (the raster allocation, the 50 MB document), whichever way the error reached us. */
+export function agendaImageTooLarge(error: unknown): boolean {
+  if (error instanceof AgendaImageError) return error.tooLarge;
+  return error instanceof Error && error.message === AGENDA_ALLOCATION_ERROR;
+}
+
 export async function sendAgendaImage<T>(
   file: File,
   transport: {
@@ -21,7 +35,7 @@ export async function sendAgendaImage<T>(
   },
 ): Promise<T> {
   if (file.size > 50 * 1024 * 1024)
-    throw new AgendaImageError('Agenda PNG exceeds the 50 MB document limit. Choose a shorter date range.');
+    throw new AgendaImageError('Agenda PNG exceeds the 50 MB document limit. Choose a shorter date range.', true);
   const header = Buffer.from(await BufferBlob.prototype.slice.call(file, 0, 24).arrayBuffer());
   if (
     header.length < 24 ||
@@ -61,7 +75,7 @@ export function planAgendaRaster(height: number, density: number) {
     density < 1 ||
     width * height > maxPixels
   ) {
-    throw new AgendaImageError(AGENDA_ALLOCATION_ERROR);
+    throw new AgendaImageError(AGENDA_ALLOCATION_ERROR, true);
   }
   const scale = width * height * density * density > maxPixels ? 'css' : 'device';
   const effectiveDensity = scale === 'css' ? 1 : density;

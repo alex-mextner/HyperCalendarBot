@@ -1,9 +1,9 @@
 // src/services/image/render-conflict.ts
 
+import type { ImageRenderJob } from '../../worker/image-render.queue.ts';
 import type { ConflictRow, ConflictScheduleData } from '../../worker/templates/conflict-schedule.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import type { ConflictResult } from '../invite/conflict-service.ts';
-import type { ImageRenderer } from './render-service.ts';
 
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 
@@ -11,8 +11,8 @@ function toMinutes(iso: string): number {
   return Math.round(new Date(iso).getTime() / 60_000);
 }
 
-export async function renderConflictImage(
-  renderService: ImageRenderer,
+/** The render job for the organizer/invitee conflict picture, built from the schedules alone (no worker involved). */
+export function conflictImageJob(
   organizerId: number,
   organizerLabel: string,
   organizerEvents: { startAt: string; endAt: string; title: string }[],
@@ -20,7 +20,7 @@ export async function renderConflictImage(
   eventStart: string,
   eventEnd: string,
   locale: 'ru' | 'en',
-): Promise<Buffer> {
+): ImageRenderJob {
   const startMs = new Date(eventStart).getTime();
   const endMs = new Date(eventEnd).getTime();
   const windowStartIso = new Date(startMs - TWO_HOURS_MS).toISOString();
@@ -76,9 +76,5 @@ export async function renderConflictImage(
     locale,
   };
 
-  return renderService.renderDirect({
-    type: 'conflict-schedule',
-    data,
-    userId: organizerId,
-  });
+  return { type: 'conflict-schedule', data, userId: organizerId };
 }

@@ -23,7 +23,7 @@ import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { GroupSessionManager } from '../services/group/group-session.ts';
 import { GroupMemberService } from '../services/group/member-service.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
-import type { RenderService } from '../services/image/render-service.ts';
+import type { ImageDelivery } from '../services/image/image-delivery.ts';
 import { reportIfDatabaseBusy } from '../services/incident/database-busy.ts';
 import type { AdminEditSession } from '../services/intent/admin-edit-session.ts';
 import { databaseDirectory } from '../services/intent/db-backup.ts';
@@ -141,7 +141,8 @@ export interface GoogleBotDeps {
 
 export interface CreateBotOpts {
   googleDeps?: GoogleBotDeps;
-  renderService?: RenderService;
+  /** Calendar pictures (AI tools, commands, buttons, invitation notices) are queued here; their renders run in the background. */
+  imageDelivery?: ImageDelivery;
   /** Logs and queues a call; rejects when the queue write fails (the logged call is then marked failed). */
   callQueue?: { enqueue(data: CallRequest): Promise<void> };
   transcriptionService?: TranscriptionService;
@@ -167,7 +168,7 @@ export interface CreateBotOpts {
 export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts) {
   const {
     googleDeps,
-    renderService,
+    imageDelivery,
     callQueue,
     transcriptionService,
     serviceTier,
@@ -341,7 +342,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     sharingSettingsRepo: db.sharingSettings,
     sharedEventRepo: db.sharedEvents,
     privacyService,
-    renderService,
+    imageDelivery,
     callSettingsRepo: db.callSettings,
     callQueue: buildCallQueueAdapter(callQueue, db),
     notificationPrefs: {
@@ -536,7 +537,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         ctx,
         eventService,
         holidayService,
-        renderService,
+        imageDelivery,
         db.groupChats,
         googleDeps?.calendarRepo,
         weatherService,
@@ -547,16 +548,16 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         ctx,
         eventService,
         holidayService,
-        renderService,
+        imageDelivery,
         db.groupChats,
         googleDeps?.calendarRepo,
         weatherService,
       ),
     )
     .command('week', (ctx) =>
-      handleWeek(ctx, eventService, holidayService, renderService, db.groupChats, weatherService),
+      handleWeek(ctx, eventService, holidayService, imageDelivery, db.groupChats, weatherService),
     )
-    .command('month', (ctx) => handleMonth(ctx, eventService, undefined, renderService, db.groupChats))
+    .command('month', (ctx) => handleMonth(ctx, eventService, undefined, imageDelivery, db.groupChats))
     .command('add', (ctx) => handleAdd(ctx, scenesSetup.scenes.addEventScene, db.groupChats))
     .command('edit', (ctx) => handleEdit(ctx, eventService, db.groupChats))
     .command('delete', (ctx) => handleDelete(ctx, eventService, db.groupChats))
@@ -643,7 +644,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         disconnectDeps: googleDeps?.disconnectDeps,
         onCalendarsDone: googleDeps?.onCalendarsDone,
         triggerSync: googleDeps?.triggerSync,
-        renderService,
+        imageDelivery,
         invitationService,
         eventRepo: db.events,
         chatHistoryRepo: db.chatHistory,
@@ -681,12 +682,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
               } as Parameters<typeof bot.api.editMessageText>[0])
               .catch(() => {});
           },
-          sendDocument: async (chatId: number, document: File, caption: string) => {
-            await bot.api.sendDocument({ chat_id: chatId, document, caption });
-          },
-          sendPhoto: async (chatId: number, photo: File) => {
-            await bot.api.sendPhoto({ chat_id: chatId, photo });
-          },
+          sendDocument: (chatId: number, document: File, caption: string) =>
+            bot.api.sendDocument({ chat_id: chatId, document, caption }),
+          sendPhoto: (chatId: number, photo: File) => bot.api.sendPhoto({ chat_id: chatId, photo }),
         },
         onboardingScene: scenesSetup.scenes.onboardingScene,
         // Call settings exist only while the bot can place calls; otherwise /settings hides them.
@@ -1026,7 +1024,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     inlineService,
     groupSessions,
     db,
-    renderService,
     agentContextBuilder: buildAgentContextFactory(msgDeps),
     agent,
     intentMatcher,

@@ -21,6 +21,7 @@ import { HolidayService } from '../../../src/services/holiday/holiday-service.ts
 import { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
 import { createVoiceSender } from '../../../src/services/voice/voice-sender.ts';
 import type { ImageRenderJob } from '../../../src/worker/image-render.queue.ts';
+import { makeImageDelivery } from '../../fixtures/image-delivery.ts';
 import { png } from '../../fixtures/png.ts';
 
 // Replay of 2026-09-27 (synthetic ids): on Sunday night the user asked to cancel "all English on
@@ -228,20 +229,16 @@ describe('bot-rendered delete confirmation', () => {
     const rendered: string[] = [];
     let output = '';
     onContinuation = async (ctx) => {
+      const imageDelivery = makeImageDelivery(async (job: ImageRenderJob) => {
+        if (job.type === 'daily-agenda') rendered.push(job.data.date);
+        return png();
+      }).delivery;
       const result = await executeTool(
-        {
-          ...ctx,
-          sender: { ...ctx.sender!, sendPhoto: async () => ({ message_id: 3 }) },
-          renderService: {
-            renderDirect: async (job: ImageRenderJob) => {
-              if (job.type === 'daily-agenda') rendered.push(job.data.date);
-              return png();
-            },
-          },
-        },
+        { ...ctx, sender: { ...ctx.sender!, sendPhoto: async () => ({ message_id: 3 }) }, imageDelivery },
         'render_day_image',
         { date: '2026-09-01' },
       );
+      await imageDelivery.whenIdle();
       output = String(result.output);
     };
     const message = await askAll();

@@ -1,20 +1,29 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, mock, test } from 'bun:test';
+import type { AnyScene } from '@gramio/scenes';
 import type { InlineKeyboard } from 'gramio';
+import type { CallbackHandlerOpts } from '../../../src/bot/handlers/callback/types.ts';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
 import { t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { ImageDeliveryRepository } from '../../../src/database/repositories/image-delivery.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
+import type { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import type { ImageDelivery } from '../../../src/services/image/image-delivery.ts';
+import type { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
 import { DomainEventBus } from '../../../src/services/scheduled/domain-event-bus.ts';
 import { InvitationCardRefresher, type InvitationEditOptions } from '../../../src/services/sharing/invitation-cards.ts';
 import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
+import { asCallbackContext, asDouble } from '../../fixtures/doubles.ts';
+import { makeImageDelivery } from '../../fixtures/image-delivery.ts';
+import { describePictureContract, gatedDelivery } from '../../fixtures/picture-contract.ts';
 import { png } from '../../fixtures/png.ts';
 import { makeCallbackHandler, makeCallbackTap } from '../../helpers/callback-handler.ts';
 import { flushPromises } from '../../helpers/mock-context.ts';
@@ -599,99 +608,86 @@ describe('propose-time callbacks', () => {
 });
 
 describe('conflict image on accept', () => {
-  function makeHandlerWithRender(
-    invSvc: unknown,
-    notifyDeps: {
-      userRepo: { findByTelegramId: ReturnType<typeof mock> };
-      sendMessage: ReturnType<typeof mock>;
-      sendPhoto?: ReturnType<typeof mock>;
-    },
-    eventRepo: {
-      findById: ReturnType<typeof mock>;
-      findVisibleOverlapping?: ReturnType<typeof mock>;
-      isParticipant?: ReturnType<typeof mock>;
-    },
-    renderService: { renderDirect: ReturnType<typeof mock> },
-  ) {
-    return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
-      renderService: renderService as never,
-      invitationService: invSvc as never,
-      eventRepo: eventRepo as never,
-      invitationNotifyDeps: notifyDeps as never,
+  const inv = { id: 1, status: 'accepted', event_id: 5, inviter_id: 100, invitee_id: 200 };
+  const event = { id: 5, title: 'Party', start_at: '2026-03-20T10:00:00Z', end_at: '2026-03-20T11:00:00Z' };
+  const inviter = { telegram_id: 100, first_name: 'Alice', language: 'en', username: null, timezone: 'UTC' };
+
+  /** An accept tap with the inviter's Telegram transport recorded: texts to the inviter and pictures. */
+  function acceptHarness(options: { delivery?: ImageDelivery; inviteeEvents?: unknown[] } = {}) {
+    const texts: string[] = [];
+    const photoChats: number[] = [];
+    const sendMessage = mock((_chatId: number, text: string) => {
+      texts.push(text);
+      return Promise.resolve();
     });
-  }
-
-  test('sends conflict image to inviter on accept when renderService provided', async () => {
-    const sendPhoto = mock(() => Promise.resolve());
-    const renderDirect = mock(() => Promise.resolve(png()));
-    const sendMessage = mock(() => Promise.resolve());
-    const inv = { id: 1, status: 'accepted', event_id: 5, inviter_id: 100, invitee_id: 200 };
-    const event = { id: 5, title: 'Party', start_at: '2026-03-20T10:00:00Z', end_at: '2026-03-20T11:00:00Z' };
-    const invSvc = { acceptInvitation: mock(() => ({ success: true, invitation: inv })) };
-    const userRepo = {
-      findByTelegramId: mock(() => ({
-        telegram_id: 100,
-        first_name: 'Alice',
-        language: 'en',
-        username: null,
-        timezone: 'UTC',
-      })),
-    };
-    const eventRepo = {
-      findById: mock(() => event),
-      findVisibleOverlapping: mock(() => []),
-      isParticipant: mock(() => false),
-    };
-    const renderService = { renderDirect };
-    const notifyDeps = { userRepo, sendMessage, sendPhoto };
-    const ctx = {
-      data: 'inv:accept:1',
-      dbUser: { telegram_id: 200, language: 'en', timezone: 'UTC', first_name: 'Bob', username: null },
-      answer: mock(() => Promise.resolve()),
-      editText: mock(() => Promise.resolve()),
-    };
-    const handler = makeHandlerWithRender(invSvc, notifyDeps, eventRepo, renderService);
-    await handler(ctx as never);
-    await flushPromises();
-    expect(renderDirect).toHaveBeenCalledTimes(1);
-    expect(sendPhoto).toHaveBeenCalledTimes(1);
-    const photoCall = sendPhoto.mock.calls[0] as unknown[];
-    expect(photoCall[0]).toBe(100);
-  });
-
-  test('invitee event titles are null for non-shared events in conflict image', async () => {
-    const sendPhoto = mock(() => Promise.resolve());
-    const renderDirect = mock(() => Promise.resolve(png()));
-    const sendMessage = mock(() => Promise.resolve());
-    const inv = { id: 1, status: 'accepted', event_id: 5, inviter_id: 100, invitee_id: 200 };
-    const event = { id: 5, title: 'Party', start_at: '2026-03-20T10:00:00Z', end_at: '2026-03-20T11:00:00Z' };
-    const inviteeEvent = { id: 99, title: 'Secret', start_at: '2026-03-20T09:00:00Z', end_at: '2026-03-20T10:30:00Z' };
-    const invSvc = { acceptInvitation: mock(() => ({ success: true, invitation: inv })) };
+    const sendPhoto = mock((chatId: number) => {
+      photoChats.push(chatId);
+      return Promise.resolve({ message_id: 9 });
+    });
     const userRepo = {
       findByTelegramId: mock((id: number) =>
         id === 100
-          ? { telegram_id: 100, first_name: 'Alice', language: 'en', username: null, timezone: 'UTC' }
+          ? inviter
           : { telegram_id: 200, first_name: 'Bob', language: 'en', username: 'bob', timezone: 'UTC' },
       ),
     };
-    // isParticipant returns false → organizer is NOT participant of invitee's event → title must be null
     const eventRepo = {
       findById: mock(() => event),
-      // organizer call returns [] (no own overlapping), invitee call returns [inviteeEvent]
-      findVisibleOverlapping: mock((userId: number) => (userId === 200 ? [inviteeEvent] : [])),
+      // organizer call returns [] (no own overlapping), invitee call returns the invitee's events
+      findVisibleOverlapping: mock((userId: number) => (userId === 200 ? (options.inviteeEvents ?? []) : [])),
       isParticipant: mock(() => false),
     };
-    const renderService = { renderDirect };
+    const invSvc = { acceptInvitation: mock(() => ({ success: true, invitation: inv })) };
     const notifyDeps = { userRepo, sendMessage, sendPhoto };
-    const ctx = {
-      data: 'inv:accept:1',
-      dbUser: { telegram_id: 200, language: 'en', timezone: 'UTC', first_name: 'Bob', username: 'bob' },
-      answer: mock(() => Promise.resolve()),
-      editText: mock(() => Promise.resolve()),
+    const handler = createCallbackHandler(
+      asDouble<EventService>({}),
+      asDouble<AnyScene>({}),
+      asDouble<HolidayService>({}),
+      asDouble<NotificationPreferencesService>({}),
+      {
+        imageDelivery: options.delivery,
+        invitationService: asDouble<InvitationService>(invSvc),
+        eventRepo: asDouble<EventRepository>(eventRepo),
+        invitationNotifyDeps: asDouble<CallbackHandlerOpts['invitationNotifyDeps']>(notifyDeps),
+      },
+    );
+    const tap = async (callbackId = 'cb-1') => {
+      const ctx = {
+        id: callbackId,
+        data: 'inv:accept:1',
+        dbUser: { telegram_id: 200, language: 'en', timezone: 'UTC', first_name: 'Bob', username: 'bob' },
+        answer: mock(() => Promise.resolve()),
+        editText: mock(() => Promise.resolve()),
+      };
+      await handler(asCallbackContext(ctx));
+      await flushPromises(); // notifyInviter is fire-and-forget
+      return ctx;
     };
-    const handler = makeHandlerWithRender(invSvc, notifyDeps, eventRepo, renderService);
-    await handler(ctx as never);
-    await flushPromises();
+    return { tap, texts, photoChats, sendPhoto };
+  }
+
+  test('queues the conflict picture on accept and sends it to the inviter when the render ends', async () => {
+    const { delivery, renderer, release } = gatedDelivery();
+    const h = acceptHarness({ delivery });
+
+    await h.tap();
+
+    expect(renderer.renderDirect).toHaveBeenCalledTimes(1);
+    expect(h.sendPhoto).not.toHaveBeenCalled(); // the tap finished while the render is pending
+    release();
+    await delivery.whenIdle();
+    expect(h.photoChats).toEqual([100]);
+  });
+
+  test('invitee event titles are null for non-shared events in conflict image', async () => {
+    const inviteeEvent = { id: 99, title: 'Secret', start_at: '2026-03-20T09:00:00Z', end_at: '2026-03-20T10:30:00Z' };
+    const renderDirect = mock(() => Promise.resolve(png()));
+    const { delivery } = makeImageDelivery(renderDirect);
+    // isParticipant returns false → organizer is NOT participant of invitee's event → title must be null
+    const h = acceptHarness({ delivery, inviteeEvents: [inviteeEvent] });
+
+    await h.tap();
+    await delivery.whenIdle();
 
     expect(renderDirect).toHaveBeenCalledTimes(1);
     const renderCall = renderDirect.mock.calls[0] as unknown[];
@@ -704,41 +700,60 @@ describe('conflict image on accept', () => {
     }
   });
 
-  test('does not render when renderService missing', async () => {
-    const sendPhoto = mock(() => Promise.resolve());
-    const sendMessage = mock(() => Promise.resolve());
-    const inv = { id: 1, status: 'accepted', event_id: 5, inviter_id: 100, invitee_id: 200 };
-    const event = { id: 5, title: 'Party', start_at: '2026-03-20T10:00:00Z', end_at: '2026-03-20T11:00:00Z' };
-    const invSvc = { acceptInvitation: mock(() => ({ success: true, invitation: inv })) };
-    const userRepo = {
-      findByTelegramId: mock(() => ({
-        telegram_id: 100,
-        first_name: 'Alice',
-        language: 'en',
-        username: null,
-        timezone: 'UTC',
-      })),
+  test('does not render when image delivery is missing', async () => {
+    const h = acceptHarness();
+
+    await h.tap();
+
+    expect(h.sendPhoto).not.toHaveBeenCalled();
+  });
+
+  test('a failed render tells the inviter once with the schedule comparison named', async () => {
+    const { delivery, fail, failures } = gatedDelivery();
+    const h = acceptHarness({ delivery });
+
+    await h.tap();
+    const answered = h.texts.length;
+    fail(new Error('chromium crashed'));
+    await delivery.whenIdle();
+
+    expect(h.texts).toHaveLength(answered + 1);
+    expect(h.texts.at(-1)).toContain('schedule comparison');
+    expect(failures).toHaveLength(1);
+  });
+
+  test('answering again after a failed picture queues a new one; a redelivered tap does not', async () => {
+    const db = new Database(':memory:');
+    runMigrations(db, migrations);
+    const { delivery, fail, release, failures } = gatedDelivery({ store: new ImageDeliveryRepository(db) });
+    const h = acceptHarness({ delivery });
+
+    await h.tap('cb-first');
+    fail(new Error('chromium crashed'));
+    await delivery.whenIdle();
+    expect(failures).toHaveLength(1);
+    expect(h.photoChats).toEqual([]);
+
+    await h.tap('cb-second'); // the invitee answers again: a new request, so a new picture
+    release(1);
+    await delivery.whenIdle();
+    expect(h.photoChats).toEqual([100]);
+
+    await h.tap('cb-second'); // Telegram redelivers that tap: the same request, already delivered
+    await delivery.whenIdle();
+    expect(h.photoChats).toEqual([100]);
+  });
+
+  describePictureContract('accepted invitation conflict picture', () => {
+    let h: ReturnType<typeof acceptHarness> | undefined;
+    return {
+      run: async (delivery, requestId) => {
+        h ??= acceptHarness({ delivery });
+        await h.tap(`cb-${requestId}`);
+      },
+      photos: () => h?.photoChats.length ?? 0,
+      texts: () => [...(h?.texts ?? [])],
     };
-    const eventRepo = {
-      findById: mock(() => event),
-      findVisibleOverlapping: mock(() => []),
-      isParticipant: mock(() => false),
-    };
-    const notifyDeps = { userRepo, sendMessage, sendPhoto };
-    const ctx = {
-      data: 'inv:accept:1',
-      dbUser: { telegram_id: 200, language: 'en', timezone: 'UTC', first_name: 'Bob', username: null },
-      answer: mock(() => Promise.resolve()),
-      editText: mock(() => Promise.resolve()),
-    };
-    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
-      invitationService: invSvc as never,
-      eventRepo: eventRepo as never,
-      invitationNotifyDeps: notifyDeps as never,
-    });
-    await handler(ctx as never);
-    await flushPromises();
-    expect(sendPhoto).not.toHaveBeenCalled();
   });
 });
 

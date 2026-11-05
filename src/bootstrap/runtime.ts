@@ -38,6 +38,12 @@ export interface ShutdownResources {
   notificationQueue?: ClosableResource;
   botTasksQueue?: ClosableResource;
   syncQueue?: ClosableResource;
+  /**
+   * The picture deliveries still pending, closed before the image queue. With the store (always in production) no note
+   * is sent: the rows stay queued and the BullMQ jobs are kept, so the next start resumes them. Also sends the
+   * render-failure summary still held back for its alert window.
+   */
+  imageDelivery?: ClosableResource;
   imageQueue?: ClosableResource;
   broadcastQueue?: ClosableResource;
   callQueue?: ClosableResource;

@@ -17,11 +17,12 @@ import {
   handleRenderTable,
   handleRenderWeekImage,
 } from '../../../../src/services/ai/tool-handlers/render.ts';
-import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import type { AgentContext, ToolResult } from '../../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 import type { ImageRenderJob } from '../../../../src/worker/image-render.queue.ts';
+import { makeImageDelivery } from '../../../fixtures/image-delivery.ts';
 import { png } from '../../../fixtures/png.ts';
 
 let db: Database;
@@ -91,19 +92,26 @@ function setup(userId: number, group = false) {
       sendMessage: async () => ({ message_id: 1 }),
       sendPhoto: async () => ({ message_id: 2 }),
     },
-    renderService: {
-      renderDirect: async (job) => {
-        jobs.push(job);
-        return png();
-      },
-    },
+    imageDelivery: makeImageDelivery(async (job) => {
+      jobs.push(job);
+      return png();
+    }).delivery,
   };
   return { ctx, jobs };
 }
+/** The tool call returns at once; the picture's render and delivery finish in the background. */
+async function settled(ctx: AgentContext, call: Promise<ToolResult>): Promise<ToolResult> {
+  const result = await call;
+  await ctx.imageDelivery?.whenIdle();
+  return result;
+}
 const handlers = {
-  day: (ctx: AgentContext, owner_id?: number) => handleRenderDayImage(ctx, { date: '2099-06-01', owner_id }),
-  week: (ctx: AgentContext, owner_id?: number) => handleRenderWeekImage(ctx, { week_start: '2099-06-01', owner_id }),
-  month: (ctx: AgentContext, owner_id?: number) => handleRenderMonthImage(ctx, { month: '2099-06', owner_id }),
+  day: (ctx: AgentContext, owner_id?: number) =>
+    settled(ctx, handleRenderDayImage(ctx, { date: '2099-06-01', owner_id })),
+  week: (ctx: AgentContext, owner_id?: number) =>
+    settled(ctx, handleRenderWeekImage(ctx, { week_start: '2099-06-01', owner_id })),
+  month: (ctx: AgentContext, owner_id?: number) =>
+    settled(ctx, handleRenderMonthImage(ctx, { month: '2099-06', owner_id })),
 };
 for (const [name, handler] of Object.entries(handlers)) {
   for (const userId of [1, 2, 3]) {
@@ -174,47 +182,73 @@ for (const timezone of ['Pacific/Kiritimati', 'Etc/GMT+12', 'America/Los_Angeles
 
 for (const [name, handler] of Object.entries({
   ...handlers,
-  table: (ctx: AgentContext) => handleRenderTable(ctx, { title: 'Table', markdown: '| A |\n|---|\n| B |' }),
+  table: (ctx: AgentContext) =>
+    settled(ctx, handleRenderTable(ctx, { title: 'Table', markdown: '| A |\n|---|\n| B |' })),
 })) {
   test(`${name} delivers oversized PNG via actual sender document API`, async () => {
     const { Bot } = await import('gramio');
     const { createTelegramSender } = await import('../../../../src/services/ai/telegram-sender.ts');
-    const { png } = await import('../../../fixtures/png.ts');
     const { ctx } = setup(1);
     const bot = new Bot('123:test');
     const calls: string[] = [];
+    const documents: unknown[] = [];
     bot.api.sendPhoto = async () => {
       throw new Error('Oversized photo');
     };
     bot.api.sendDocument = async (params) => {
       calls.push(String(params.caption ?? ''));
-      expect(params.document).toBeInstanceOf(File);
+      documents.push(params.document); // checked below: a throw in here would be swallowed by the background delivery
       return { message_id: 42, date: 0, chat: { id: 1, type: 'private' } };
     };
     bot.api.pinChatMessage = async () => true;
     ctx.sender = createTelegramSender(bot);
-    ctx.renderService = { renderDirect: async () => png(2160, 9000) };
+    ctx.imageDelivery = makeImageDelivery(async () => png(2160, 9000)).delivery;
     expect((await handler(ctx)).success).toBe(true);
+    await ctx.imageDelivery!.whenIdle();
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain('PNG');
+    expect(documents[0]).toBeInstanceOf(File);
   });
-  test(`${name} cannot claim delivery without document capability`, async () => {
-    const { png } = await import('../../../fixtures/png.ts');
+  test(`${name} cannot claim delivery without document capability: the user gets the reason as the one note`, async () => {
     const { ctx } = setup(1);
-    ctx.renderService = { renderDirect: async () => png(2160, 9000) };
-    expect((await handler(ctx)).success).toBe(false);
+    const notes: string[] = [];
+    ctx.sender = {
+      ...ctx.sender!,
+      sendPhoto: async () => {
+        throw new Error('a photo must not be attempted for an oversized PNG');
+      },
+      sendMessage: async (_chatId: number, text: string) => {
+        notes.push(text);
+        return { message_id: 1 };
+      },
+    };
+    ctx.imageDelivery = makeImageDelivery(async () => png(2160, 9000)).delivery;
+    // The tool call itself only queues; the undeliverable picture is told, not claimed.
+    expect((await handler(ctx)).success).toBe(true);
+    // No document sender is a defect of the transport, not a request that is too big: the failure note, not "too large".
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('could not prepare the picture');
+    expect(notes[0]).not.toContain('document delivery');
   });
 }
 
-test('AI preserves the screenshot allocation error after queue serialization', async () => {
+test('the screenshot allocation error, which crosses the queue as a bare message, still ends as the localized note', async () => {
   const { ctx } = setup(1);
   const message = 'Agenda image is too large for the screenshot allocation limit. Choose a shorter date range.';
-  ctx.renderService = {
-    renderDirect: async () => {
-      throw new Error(message);
+  const notes: string[] = [];
+  ctx.sender = {
+    ...ctx.sender!,
+    sendMessage: async (_chatId: number, text: string) => {
+      notes.push(text);
+      return { message_id: 1 };
     },
   };
+  ctx.imageDelivery = makeImageDelivery(async () => {
+    throw new Error(message);
+  }).delivery;
   const result = await handlers.day(ctx);
-  expect(result.success).toBe(false);
-  expect(result.error).toBe(message);
+  expect(result.success).toBe(true);
+  expect(notes).toHaveLength(1);
+  expect(notes[0]).toContain('too large to send');
+  expect(notes[0]).not.toContain('allocation');
 });

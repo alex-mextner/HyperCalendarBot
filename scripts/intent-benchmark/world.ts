@@ -30,7 +30,7 @@ import type { AgentContext, SharingCapability, TelegramSender } from '../../src/
 import { ConversationLogger } from '../../src/services/conversation-logger.ts';
 import { EventService } from '../../src/services/event/event-service.ts';
 import { HolidayService } from '../../src/services/holiday/holiday-service.ts';
-import type { ImageRenderer } from '../../src/services/image/render-service.ts';
+import { ImageDelivery } from '../../src/services/image/image-delivery.ts';
 import { IntentExecutor } from '../../src/services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../src/services/intent/intent-matcher.ts';
 import {
@@ -272,7 +272,7 @@ export function buildFixture(
     privacyService,
     editProposalRepo: new EditProposalRepository(db),
   };
-  const renderService: ImageRenderer = { renderDirect: async () => pngStub() };
+  const imageDelivery = new ImageDelivery({ renderer: { renderDirect: async () => pngStub() } });
   const sender: TelegramSender = {
     sendMessage: async () => ({ message_id: 3 }),
     editMessageText: async () => {},
@@ -296,7 +296,7 @@ export function buildFixture(
     actionLogRepo: new ActionLogRepository(db),
     toolOrigin: 'intent_workflow',
     sharing: sharing,
-    renderService,
+    imageDelivery,
     sender,
   });
   const callTool = async (name: string, input: unknown, origin?: { text: string; actorId: number; chatId: number }) => {

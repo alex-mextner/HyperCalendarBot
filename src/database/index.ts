@@ -25,6 +25,7 @@ import { GroupChatRepository } from './repositories/group-chat.repository.ts';
 import { GroupMemberRepository } from './repositories/group-member.repository.ts';
 import { GroupSessionRepository } from './repositories/group-session.repository.ts';
 import { HolidayRepository } from './repositories/holiday.repository.ts';
+import { ImageDeliveryRepository } from './repositories/image-delivery.repository.ts';
 import { InvitationRepository } from './repositories/invitation.repository.ts';
 import { NotificationLogRepository } from './repositories/notification-log.repository.ts';
 import { NotificationPreferencesRepository } from './repositories/notification-preferences.repository.ts';
@@ -70,6 +71,7 @@ export class DatabaseService {
   readonly actionLog: ActionLogRepository;
   readonly aiUsage: AiUsageRepository;
   readonly alerts: AlertRepository;
+  readonly imageDeliveries: ImageDeliveryRepository;
   readonly featureUsage: FeatureUsageRepository;
   readonly participantGoogleSync: ParticipantGoogleSyncRepository;
   readonly telegramSessions: TelegramSessionRepository;
@@ -118,6 +120,7 @@ export class DatabaseService {
     this.actionLog = new ActionLogRepository(this.db);
     this.aiUsage = new AiUsageRepository(this.db);
     this.alerts = new AlertRepository(this.db);
+    this.imageDeliveries = new ImageDeliveryRepository(this.db);
     this.featureUsage = new FeatureUsageRepository(this.db);
     this.participantGoogleSync = new ParticipantGoogleSyncRepository(this.db);
     this.telegramSessions = new TelegramSessionRepository(this.db);

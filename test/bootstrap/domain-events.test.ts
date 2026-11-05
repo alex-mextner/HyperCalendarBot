@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { subscribeParticipantGooglePush } from '../../src/bootstrap/domain-events.ts';
+import { subscribeImageStaleness, subscribeParticipantGooglePush } from '../../src/bootstrap/domain-events.ts';
 import type { GroupMemberRepository } from '../../src/database/repositories/group-member.repository.ts';
 import type { CalendarEvent } from '../../src/database/types.ts';
 import { DomainEventBus } from '../../src/services/scheduled/domain-event-bus.ts';
@@ -118,5 +118,21 @@ describe('subscribeParticipantGooglePush', () => {
     } finally {
       logged.mockRestore();
     }
+  });
+});
+
+describe('subscribeImageStaleness', () => {
+  test('every calendar write tells the picture delivery whose data changed', () => {
+    const bus = new DomainEventBus();
+    const changed: number[] = [];
+    subscribeImageStaleness(bus, { eventsChanged: (userId) => changed.push(userId) });
+
+    bus.emit('myCalendar.newEvent', { userId: 1, newEvent: eventWithId(1) });
+    bus.emit('myCalendar.updatedEvent', { userId: 2, updatedEvent: eventWithId(1), oldEvent: eventWithId(1) });
+    bus.emit('myCalendar.deletedEvent', { userId: 3, eventId: 1, title: 'e' });
+    bus.emit('myGroup.newEvent', { userId: 4, groupChatId: -9, newEvent: eventWithId(2), createdBy: 4 });
+    bus.emit('myCalendar.eventStarting', { userId: 5, event: eventWithId(1) });
+
+    expect(changed).toEqual([1, 2, 3, 4]);
   });
 });

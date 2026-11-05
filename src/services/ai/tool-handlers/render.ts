@@ -6,12 +6,14 @@ import { agendaImageErrorMessage, sendAgendaImage } from '../../../utils/agenda-
 import { autoPin } from '../../../utils/auto-pin.ts';
 import { getDayRangeUtc, getWeekRangeUtc, localCalendarDate } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
+import type { ImageRenderJob } from '../../../worker/image-render.queue.ts';
 import { getTheme } from '../../../worker/templates/themes.ts';
 import { enrichAgenda } from '../../event/agenda-enrichment.ts';
 import { formatWeekLabel } from '../../image/data-mapper.ts';
-import { renderDayImage } from '../../image/render-day.ts';
-import { renderMonthImage } from '../../image/render-month.ts';
-import { renderWeekImage } from '../../image/render-week.ts';
+import type { ImageDelivery, ImageEnqueueResult, ImageKind } from '../../image/image-delivery.ts';
+import { dayImageJob } from '../../image/render-day.ts';
+import { monthImageJob } from '../../image/render-month.ts';
+import { weekImageJob } from '../../image/render-week.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
@@ -66,19 +68,19 @@ type Guard<T> = { ok: true; value: T } | { ok: false; result: ToolResult };
 
 /** What every agenda-image tool needs once its shared guards have passed. */
 interface ImageRenderTarget {
-  renderService: NonNullable<AgentContext['renderService']>;
+  imageDelivery: ImageDelivery;
   sender: NonNullable<AgentContext['sender']>;
   userId: number;
   scope: Scope;
 }
 
-/** Guards shared by the day/week/month image tools: renderer + photo transport, secretary read access, group scope. */
+/** Guards shared by the day/week/month image tools: image delivery + photo transport, secretary read access, group scope. */
 function resolveImageRenderTarget(
   ctx: AgentContext,
   input: { scope?: Scope; owner_id?: number },
 ): Guard<ImageRenderTarget> {
-  const { renderService, sender } = ctx;
-  if (!renderService || !sender?.sendPhoto) {
+  const { imageDelivery, sender } = ctx;
+  if (!imageDelivery || !sender?.sendPhoto) {
     return { ok: false, result: { success: false, error: 'Image rendering not available.' } };
   }
   const access = checkSecretaryAccess(
@@ -92,7 +94,7 @@ function resolveImageRenderTarget(
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { ok: false, result: { success: false, error: 'Group context required for group scope' } };
   }
-  return { ok: true, value: { renderService, sender, userId: access.effectiveUserId, scope } };
+  return { ok: true, value: { imageDelivery, sender, userId: access.effectiveUserId, scope } };
 }
 
 function imageLanguage(ctx: AgentContext): 'ru' | 'en' {
@@ -125,23 +127,96 @@ function agendaForImage(
   );
 }
 
-/** Send the rendered PNG (photo, or document when oversized) and schedule the best-effort pin. */
-async function deliverAgendaPng(
-  ctx: AgentContext,
-  target: ImageRenderTarget,
-  buffer: Uint8Array,
-  filename: string,
-): Promise<void> {
-  const { sender } = target;
-  const file = new File([buffer], filename, { type: 'image/png' });
-  const sent = await sendAgendaImage(file, {
-    language: ctx.user.language,
-    sendPhoto: (photo) => sender.sendPhoto!(ctx.chatId, photo),
-    sendDocument: sender.sendDocument
-      ? (document, options) => sender.sendDocument!(ctx.chatId, document, options.caption)
-      : undefined,
+/** What one picture is, as the delivery service needs to know it. */
+interface QueuedImage {
+  kind: ImageKind;
+  /** What the user asked for, for their own failure note. */
+  label: string;
+  /** The same slot shows the same thing at different times (kind + target + whose calendar). */
+  slot: string;
+  filename: string;
+  dataOwner?: number | 'group';
+  buildJob(): ImageRenderJob;
+}
+
+type QueueImageResult = ImageEnqueueResult | { status: 'supplement' };
+
+/**
+ * Hand the picture to the background delivery and return at once: it goes to this chat as its own
+ * message (a photo, or a document when oversized) whenever the render ends, then the best-effort pin
+ * runs. The failure note and the timeout alert are the delivery service's.
+ */
+function queueImage(ctx: AgentContext, imageDelivery: ImageDelivery, image: QueuedImage): QueueImageResult {
+  // A supplement is silent: its sender drops everything, so its picture would reach nobody. Queued anyway it
+  // would still hold the chat's places, match (and so block) the same picture a real request asks for a
+  // moment later, or supersede and abort a real one that renders.
+  if (ctx.supplementMode) return { status: 'supplement' };
+  const { sender } = ctx;
+  if (!sender?.sendPhoto) return { status: 'closed' };
+  const sendPhoto = sender.sendPhoto.bind(sender);
+  return imageDelivery.enqueue({
+    chatId: ctx.chatId,
+    language: imageLanguage(ctx),
+    kind: image.kind,
+    label: image.label,
+    slot: image.slot,
+    requestId: ctx.incomingMessageId,
+    dataOwner: image.dataOwner,
+    buildJob: image.buildJob,
+    send: async (png) => {
+      const file = new File([png], image.filename, { type: 'image/png' });
+      const sent = await sendAgendaImage(file, {
+        language: ctx.user.language,
+        sendPhoto: (photo) => sendPhoto(ctx.chatId, photo),
+        sendDocument: sender.sendDocument
+          ? (document, options) => sender.sendDocument!(ctx.chatId, document, options.caption)
+          : undefined,
+      });
+      schedulePinFireAndForget(ctx, sent.message_id);
+      return sent.message_id;
+    },
+    notify: (text) => sender.sendMessage(ctx.chatId, text),
   });
-  schedulePinFireAndForget(ctx, sent.message_id);
+}
+
+/**
+ * The tool result for one enqueue. `output` is plain for the user (the intent workflows reply with it);
+ * the hint is for the model: the picture is only queued, so it must not claim it was sent or attached.
+ */
+function queuedResult(
+  status: QueueImageResult['status'],
+  tr: { imageAlreadyQueued: string; imageAlreadyHandled: string; imageBusy: string },
+  queued: { output: string; tool: string; repeat: string },
+): ToolResult {
+  const notSent = 'do NOT say the picture was sent or attached, write your text answer now';
+  switch (status) {
+    case 'queued':
+      return {
+        success: true,
+        output: queued.output,
+        agentHint: `The picture is only QUEUED, NOT sent yet: it arrives later as a separate message (or the user gets a short note if it fails). Do NOT call ${queued.tool} again ${queued.repeat} in this turn, and ${notSent}.`,
+      };
+    case 'duplicate':
+      return {
+        success: true,
+        output: tr.imageAlreadyQueued,
+        agentHint: `This exact picture is already queued and NOT sent yet. Do NOT call ${queued.tool} again, and ${notSent}.`,
+      };
+    case 'settled':
+      return { success: false, error: tr.imageAlreadyHandled };
+    case 'busy':
+      return {
+        success: false,
+        error: tr.imageBusy,
+      };
+    case 'closed':
+      return { success: false, error: 'Image rendering not available.' };
+    case 'supplement':
+      return {
+        success: false,
+        error: 'A background follow-up sends no pictures: nothing was rendered. Do not call this tool again.',
+      };
+  }
 }
 
 /** Typed agenda-image errors are the user-facing answer; anything else is logged and reported with `fallbackError`. */
@@ -197,6 +272,17 @@ function resolveWeekStartIso(weekStart: string, timezone: string): string | null
   return startOfWeek(date, { weekStartsOn: 1 }).toISOString().slice(0, 10);
 }
 
+/**
+ * The owner key a picture's slot and staleness hang on: the group, or the user whose calendar it shows. A group
+ * picture is also per viewer (its holidays and language are the requester's), so two members never replace
+ * each other's picture.
+ */
+function pictureOwner(ctx: AgentContext, target: ImageRenderTarget): { key: string; dataOwner: number | 'group' } {
+  return target.scope === 'group'
+    ? { key: `group:${ctx.groupChatId}:viewer:${ctx.user.telegram_id}`, dataOwner: 'group' }
+    : { key: `user:${target.userId}`, dataOwner: target.userId };
+}
+
 export async function handleRenderDayImage(
   ctx: AgentContext,
   input: { date: string; scope?: Scope; owner_id?: number },
@@ -210,34 +296,37 @@ export async function handleRenderDayImage(
   if (!day) return { success: false, error: 'Invalid calendar date.' };
   const { date, dateObj, redirected } = day;
 
-  const occurrences =
-    scope === 'group'
-      ? (() => {
-          const { start, end } = getDayRangeUtc(dateObj, ctx.user.timezone);
-          return ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, start, end);
-        })()
-      : ctx.eventService.getEventsForDay(userId, dateObj, ctx.user.timezone);
-  const holidays = ctx.holidayService?.getHolidaysForDate(userId, date) ?? [];
   const lang = imageLanguage(ctx);
   const tr = t(lang).aiTools.meta;
+  const owner = pictureOwner(ctx, target);
+
+  // Read the agenda when the render starts, and again if the calendar changes while it renders.
+  const buildJob = (): ImageRenderJob => {
+    const occurrences =
+      scope === 'group'
+        ? (() => {
+            const { start, end } = getDayRangeUtc(dateObj, ctx.user.timezone);
+            return ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, start, end);
+          })()
+        : ctx.eventService.getEventsForDay(userId, dateObj, ctx.user.timezone);
+    const holidays = ctx.holidayService?.getHolidaysForDate(userId, date) ?? [];
+    return dayImageJob(agendaForImage(ctx, target, occurrences, lang), date, ctx.user.timezone, lang, userId, holidays);
+  };
 
   try {
-    const buffer = await renderDayImage(
-      target.renderService,
-      agendaForImage(ctx, target, occurrences, lang),
-      date,
-      ctx.user.timezone,
-      lang,
-      userId,
-      holidays,
-    );
-    await deliverAgendaPng(ctx, target, buffer, 'day.png');
-    return {
-      success: true,
-      output: redirected ? tr.dayImageSentInstead(date, input.date) : tr.dayImageSent(date),
-      agentHint:
-        'The day image has already been delivered to the chat. Do NOT call render_day_image again for this date in this turn.',
-    };
+    const status = queueImage(ctx, target.imageDelivery, {
+      kind: 'day',
+      label: date,
+      slot: `day:${owner.key}:${date}:${lang}`,
+      filename: 'day.png',
+      dataOwner: owner.dataOwner,
+      buildJob,
+    }).status;
+    return queuedResult(status, tr, {
+      output: redirected ? tr.dayImageQueuedInstead(date, input.date) : tr.dayImageQueued(date),
+      tool: 'render_day_image',
+      repeat: 'for this date',
+    });
   } catch (err) {
     return imageRenderFailure(err, tr.dayImageFailed(date), { date, requested: input.date }, 'Day image render failed');
   }
@@ -248,47 +337,39 @@ export async function handleRenderTable(
   ctx: AgentContext,
   input: { title: string; markdown: string; caption?: string },
 ): Promise<ToolResult> {
-  if (!ctx.renderService || !ctx.sender?.sendPhoto) {
+  const { imageDelivery, sender } = ctx;
+  if (!imageDelivery || !sender?.sendPhoto) {
     return { success: false, error: 'Image rendering not available.' };
   }
 
-  const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
+  const lang = imageLanguage(ctx);
   const tr = t(lang).aiTools.meta;
-  const sender = ctx.sender;
 
   try {
-    const buffer = await ctx.renderService.renderDirect({
-      type: 'md-table',
-      data: {
-        title: input.title,
-        markdown: input.markdown,
-        caption: input.caption,
-        theme: getTheme(),
-      },
-      userId: ctx.user.telegram_id,
-    });
-    const file = new File([buffer], 'table.png', { type: 'image/png' });
-    const sent = await sendAgendaImage(file, {
-      language: ctx.user.language,
-      sendPhoto: (photo) => sender.sendPhoto!(ctx.chatId, photo),
-      sendDocument: sender.sendDocument
-        ? (document, options) => sender.sendDocument!(ctx.chatId, document, options.caption)
-        : undefined,
-    });
-    schedulePinFireAndForget(ctx, sent.message_id);
-
+    const status = queueImage(ctx, imageDelivery, {
+      kind: 'table',
+      label: input.title,
+      slot: `table:${Bun.hash(JSON.stringify([input.title, input.markdown, input.caption ?? null]))}`,
+      filename: 'table.png',
+      buildJob: () => ({
+        type: 'md-table',
+        data: {
+          title: input.title,
+          markdown: input.markdown,
+          caption: input.caption,
+          theme: getTheme(),
+        },
+        userId: ctx.user.telegram_id,
+      }),
+    }).status;
     const voiceNote = ctx.inputMode === 'live_call' ? ` ${tr.tableRenderingVoice}` : '';
-    return {
-      success: true,
-      output: `${tr.tableSent(input.title)}${voiceNote}`,
-      agentHint:
-        'The table has already been delivered to the chat. Do NOT call render_table again with identical arguments in this turn.',
-    };
+    return queuedResult(status, tr, {
+      output: `${tr.tableQueued(input.title)}${voiceNote}`,
+      tool: 'render_table',
+      repeat: 'with identical arguments',
+    });
   } catch (err) {
-    const imageError = agendaImageErrorMessage(err);
-    if (imageError) return { success: false, error: imageError };
-    renderLogger.error({ err, title: input.title }, 'Table image render failed');
-    return { success: false, error: tr.tableFailed(input.title) };
+    return imageRenderFailure(err, tr.tableFailed(input.title), { title: input.title }, 'Table image render failed');
   }
 }
 handleRenderTable.meta = { skipActionLog: true, delivers: true } satisfies ToolHandlerMeta;
@@ -313,25 +394,29 @@ export async function handleRenderWeekImage(
     localCalendarDate(weekStartIso, ctx.user.timezone),
     ctx.user.timezone,
   );
-
-  const occurrences = rangeOccurrences(ctx, target, startUtc, endUtc);
+  const owner = pictureOwner(ctx, target);
 
   try {
-    const buffer = await renderWeekImage(
-      target.renderService,
-      agendaForImage(ctx, target, occurrences, lang),
-      weekStartIso,
-      ctx.user.timezone,
-      lang,
-      target.userId,
-    );
-    await deliverAgendaPng(ctx, target, buffer, 'week.png');
-    return {
-      success: true,
-      output: tr.weekImageSent(formatWeekLabel(weekStartIso, lang)),
-      agentHint:
-        'The weekly image has already been delivered to the chat. Do NOT call render_week_image again with identical arguments in this turn.',
-    };
+    const status = queueImage(ctx, target.imageDelivery, {
+      kind: 'week',
+      label: formatWeekLabel(weekStartIso, lang),
+      slot: `week:${owner.key}:${weekStartIso}:${lang}`,
+      filename: 'week.png',
+      dataOwner: owner.dataOwner,
+      buildJob: () =>
+        weekImageJob(
+          agendaForImage(ctx, target, rangeOccurrences(ctx, target, startUtc, endUtc), lang),
+          weekStartIso,
+          ctx.user.timezone,
+          lang,
+          target.userId,
+        ),
+    }).status;
+    return queuedResult(status, tr, {
+      output: tr.weekImageQueued(formatWeekLabel(weekStartIso, lang)),
+      tool: 'render_week_image',
+      repeat: 'with identical arguments',
+    });
   } catch (err) {
     return imageRenderFailure(
       err,
@@ -359,28 +444,32 @@ export async function handleRenderMonthImage(
   const startUtc = new Date(Date.UTC(year, month, 1)).toISOString();
   const endUtc = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999)).toISOString();
 
-  const occurrences = rangeOccurrences(ctx, target, startUtc, endUtc);
-
   const lang = imageLanguage(ctx);
   const tr = t(lang).aiTools.meta;
+  const owner = pictureOwner(ctx, target);
 
   try {
-    const buffer = await renderMonthImage(
-      target.renderService,
-      agendaForImage(ctx, target, occurrences, lang),
-      year,
-      month,
-      ctx.user.timezone,
-      lang,
-      target.userId,
-    );
-    await deliverAgendaPng(ctx, target, buffer, 'month.png');
-    return {
-      success: true,
-      output: tr.monthImageSent(input.month),
-      agentHint:
-        'The monthly image has already been delivered to the chat. Do NOT call render_month_image again with identical arguments in this turn.',
-    };
+    const status = queueImage(ctx, target.imageDelivery, {
+      kind: 'month',
+      label: input.month,
+      slot: `month:${owner.key}:${year}-${month}:${lang}`,
+      filename: 'month.png',
+      dataOwner: owner.dataOwner,
+      buildJob: () =>
+        monthImageJob(
+          agendaForImage(ctx, target, rangeOccurrences(ctx, target, startUtc, endUtc), lang),
+          year,
+          month,
+          ctx.user.timezone,
+          lang,
+          target.userId,
+        ),
+    }).status;
+    return queuedResult(status, tr, {
+      output: tr.monthImageQueued(input.month),
+      tool: 'render_month_image',
+      repeat: 'with identical arguments',
+    });
   } catch (err) {
     return imageRenderFailure(
       err,

@@ -7,13 +7,15 @@ import { CB, t } from '../../../config/constants.ts';
 import type { User } from '../../../database/types.ts';
 import { enrichAgenda, enrichAgendaEvents } from '../../../services/event/agenda-enrichment.ts';
 import { formatDayAgenda, formatEventDetail, formatWeekAgenda } from '../../../services/event/formatters.ts';
-import { mapDailyAgendaData, mapWeeklyOverviewData } from '../../../services/image/data-mapper.ts';
-import { agendaImageErrorMessage, sendAgendaImage } from '../../../utils/agenda-image.ts';
-import { autoPin } from '../../../utils/auto-pin.ts';
+import { formatWeekLabel, mapDailyAgendaData, mapWeeklyOverviewData } from '../../../services/image/data-mapper.ts';
+import type { ImageDelivery } from '../../../services/image/image-delivery.ts';
+import type { PictureRequest } from '../../../services/image/queue-picture.ts';
+import { queuePicture } from '../../../services/image/queue-picture.ts';
 import { getDayRangeUtc, getWeekRangeUtc, localCalendarWeekDays } from '../../../utils/date.ts';
-import { imageLogger } from '../../../utils/logger.ts';
+import type { ImageRenderJob } from '../../../worker/image-render.queue.ts';
 import { getTheme } from '../../../worker/templates/themes.ts';
 import { sendAgendaText } from '../../commands/agenda-text.ts';
+import { pinPicture } from '../../commands/picture-transport.ts';
 import { getGroupId, isGroup } from '../../group-context.ts';
 import type { BotCallbackContext } from '../../types.ts';
 import type { CallbackDispatch, CallbackRouteDeps } from './types.ts';
@@ -23,9 +25,14 @@ interface AgendaView {
   groupId: number | undefined;
 }
 
+/** The part of a picture's slot that says whose picture it is: a viewer inside a group chat, or the user in private. */
+function viewerKey(groupId: number | undefined, userId: number): string {
+  return groupId === undefined ? `user:${userId}` : `group:${groupId}:viewer:${userId}`;
+}
+
 export function registerAgendaRoutes(dispatch: CallbackDispatch, deps: CallbackRouteDeps): void {
   const { eventService, holidayService } = deps;
-  const { renderService, groupRepo } = deps.opts;
+  const { imageDelivery, groupRepo } = deps.opts;
 
   function agendaView(ctx: BotCallbackContext, user: User): AgendaView | null {
     const chat = ctx.message?.chat;
@@ -48,56 +55,40 @@ export function registerAgendaRoutes(dispatch: CallbackDispatch, deps: CallbackR
     groupId: number | undefined;
   }
 
-  async function deliverAgendaImage(
+  /**
+   * Queue the picture and return: it is sent as a reply to the tapped message when ready. The button
+   * spinner was already answered by the caller, so the user is never kept waiting on a render.
+   */
+  async function queueAgendaImage(
     ctx: BotCallbackContext,
+    imageDelivery: ImageDelivery,
     lang: Lang,
-    userId: number,
-    filename: string,
-    render: () => Promise<Buffer>,
+    user: User,
+    view: AgendaView,
+    picture: Pick<PictureRequest, 'kind' | 'label' | 'slot' | 'filename' | 'buildJob'>,
   ): Promise<void> {
-    try {
-      const buffer = await render();
-      const file = new File([buffer], filename, { type: 'image/png' });
-      if (!ctx.message) {
-        await ctx.answer({ text: t(lang).callbackErrors.couldNotSendImage });
-        return;
-      }
-      const sent = await sendAgendaImage(file, {
-        language: lang,
-        sendPhoto: (photo) => ctx.message!.sendPhoto(photo),
-        sendDocument: (document, options) => ctx.message!.sendDocument(document, options),
-      });
-      if (!sent) return;
-      pinSentAgenda(ctx, Number(ctx.chatId ?? userId), sent.id);
-    } catch (err) {
-      imageLogger.error({ err }, 'Render failed');
-      if (ctx.message) {
-        await ctx.message.send(agendaImageErrorMessage(err) ?? t(lang).callbackErrors.imageGenerationFailed);
-      } else {
-        await ctx.answer({ text: t(lang).callbackErrors.renderFailed });
-      }
+    const message = ctx.message;
+    if (!message) {
+      await ctx.answer({ text: t(lang).callbackErrors.couldNotSendImage });
+      return;
     }
-  }
-
-  function pinSentAgenda(ctx: BotCallbackContext, chatId: number, messageId: number): void {
-    autoPin(chatId, messageId, {
-      pinChatMessage: (cid, pinnedId, options) =>
-        ctx.bot.api.pinChatMessage({
-          chat_id: cid,
-          message_id: pinnedId,
-          disable_notification: options.disable_notification,
-        }),
-      sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }).then(() => {}),
-      isGroupChat: isGroup(ctx),
-      groupChatRepo: groupRepo,
-    }).catch((err) => {
-      imageLogger.error({ err }, 'autoPin failed');
+    const chatId = Number(ctx.chatId ?? user.telegram_id);
+    await queuePicture(imageDelivery, {
+      ...picture,
+      chatId,
+      language: lang,
+      requestId: ctx.id,
+      dataOwner: view.groupId === undefined ? user.telegram_id : 'group',
+      sendPhoto: async (file) => (await message.sendPhoto(file)).id,
+      sendDocument: async (file, options) => (await message.sendDocument(file, options)).id,
+      notify: (text) => message.send(text),
+      onSent: (messageId) => pinPicture(ctx, chatId, messageId, groupRepo, isGroup(ctx)),
     });
   }
 
   // Image: daily agenda
   dispatch.set(CB.IMG_DAILY, async (ctx, payload, _parts, user) => {
-    if (!renderService) {
+    if (!imageDelivery) {
       await ctx.answer();
       return;
     }
@@ -108,44 +99,54 @@ export function registerAgendaRoutes(dispatch: CallbackDispatch, deps: CallbackR
     const view = agendaView(ctx, user);
     if (!view) return;
     const { timezone, groupId } = view;
-    const now = new Date();
-    const [year, month, day] = dateIso.split('-').map(Number);
-    const dayDate = new TZDate(year!, month! - 1, day!, 12, timezone);
-    const { start, end } = getDayRangeUtc(dayDate, timezone);
-    const occurrences = enrichAgenda(
-      groupId === undefined
-        ? eventService.getEventsForDay(user.telegram_id, dayDate, timezone)
-        : eventService.getEventsInRangeForGroup(groupId, start, end),
-      { userId: user.telegram_id, language: lang, groupId },
-      eventService.agendaRepository,
-    );
 
-    const userNow = new TZDate(now, timezone);
-    const todayIso = userNow.toISOString().slice(0, 10);
-    const isToday = dateIso === todayIso;
-    const currentTimeMinutes = isToday ? userNow.getHours() * 60 + userNow.getMinutes() : undefined;
+    // Read the agenda when the render starts, and again if the calendar changes while it renders.
+    const buildJob = (): ImageRenderJob => {
+      const now = new Date();
+      const [year, month, day] = dateIso.split('-').map(Number);
+      const dayDate = new TZDate(year!, month! - 1, day!, 12, timezone);
+      const { start, end } = getDayRangeUtc(dayDate, timezone);
+      const occurrences = enrichAgenda(
+        groupId === undefined
+          ? eventService.getEventsForDay(user.telegram_id, dayDate, timezone)
+          : eventService.getEventsInRangeForGroup(groupId, start, end),
+        { userId: user.telegram_id, language: lang, groupId },
+        eventService.agendaRepository,
+      );
 
-    const holidays = holidayService.getHolidaysForDate(user.telegram_id, dateIso);
+      const userNow = new TZDate(now, timezone);
+      const todayIso = userNow.toISOString().slice(0, 10);
+      const isToday = dateIso === todayIso;
+      const currentTimeMinutes = isToday ? userNow.getHours() * 60 + userNow.getMinutes() : undefined;
 
-    const imgData = mapDailyAgendaData({
-      occurrences,
-      dateIso,
-      timezone,
-      locale: user.language as 'ru' | 'en',
-      theme: getTheme(),
-      currentTimeMinutes,
-      isHoliday: holidays.length > 0,
-      holidayName: holidays[0]?.name,
+      const holidays = holidayService.getHolidaysForDate(user.telegram_id, dateIso);
+
+      const data = mapDailyAgendaData({
+        occurrences,
+        dateIso,
+        timezone,
+        locale: user.language as 'ru' | 'en',
+        theme: getTheme(),
+        currentTimeMinutes,
+        isHoliday: holidays.length > 0,
+        holidayName: holidays[0]?.name,
+      });
+      return { type: 'daily-agenda', data, userId: user.telegram_id };
+    };
+
+    await queueAgendaImage(ctx, imageDelivery, lang, user, view, {
+      kind: 'day',
+      label: dateIso,
+      // The picture is localised per viewer (holidays, language), so two members of one group tapping the same day are two pictures.
+      slot: `day:${viewerKey(groupId, user.telegram_id)}:${dateIso}:${lang}`,
+      filename: 'agenda.png',
+      buildJob,
     });
-
-    await deliverAgendaImage(ctx, lang, user.telegram_id, 'agenda.png', () =>
-      renderService.renderDirect({ type: 'daily-agenda', data: imgData, userId: user.telegram_id }),
-    );
   });
 
   // Image: weekly overview
   dispatch.set(CB.IMG_WEEKLY, async (ctx, payload, _parts, user) => {
-    if (!renderService) {
+    if (!imageDelivery) {
       await ctx.answer();
       return;
     }
@@ -156,45 +157,54 @@ export function registerAgendaRoutes(dispatch: CallbackDispatch, deps: CallbackR
     const view = agendaView(ctx, user);
     if (!view) return;
     const { timezone, groupId } = view;
-    const now = new Date();
-    const [year, month, day] = weekStartIso.split('-').map(Number);
-    const weekStartDate = new TZDate(year!, month! - 1, day!, 12, timezone);
-    const { start, end } = getWeekRangeUtc(weekStartDate, timezone);
-    const occurrences = enrichAgenda(
-      groupId === undefined
-        ? eventService.getEventsInRange(user.telegram_id, start, end)
-        : eventService.getEventsInRangeForGroup(groupId, start, end),
-      { userId: user.telegram_id, language: lang, groupId },
-      eventService.agendaRepository,
-    );
 
-    const occurrencesByDay = new Map<string, typeof occurrences>();
-    for (const dayKey of localCalendarWeekDays(start, timezone)) {
-      occurrencesByDay.set(dayKey, []);
-    }
-    for (const occ of occurrences) {
-      const occDate = new TZDate(new Date(occ.occurrence_start), timezone).toISOString().slice(0, 10);
-      const dayList = occurrencesByDay.get(occDate);
-      if (dayList) {
-        dayList.push(occ);
+    // Read the agenda when the render starts, and again if the calendar changes while it renders.
+    const buildJob = (): ImageRenderJob => {
+      const now = new Date();
+      const [year, month, day] = weekStartIso.split('-').map(Number);
+      const weekStartDate = new TZDate(year!, month! - 1, day!, 12, timezone);
+      const { start, end } = getWeekRangeUtc(weekStartDate, timezone);
+      const occurrences = enrichAgenda(
+        groupId === undefined
+          ? eventService.getEventsInRange(user.telegram_id, start, end)
+          : eventService.getEventsInRangeForGroup(groupId, start, end),
+        { userId: user.telegram_id, language: lang, groupId },
+        eventService.agendaRepository,
+      );
+
+      const occurrencesByDay = new Map<string, typeof occurrences>();
+      for (const dayKey of localCalendarWeekDays(start, timezone)) {
+        occurrencesByDay.set(dayKey, []);
       }
-    }
+      for (const occ of occurrences) {
+        const occDate = new TZDate(new Date(occ.occurrence_start), timezone).toISOString().slice(0, 10);
+        const dayList = occurrencesByDay.get(occDate);
+        if (dayList) {
+          dayList.push(occ);
+        }
+      }
 
-    const userNow = new TZDate(now, timezone);
-    const todayIso = userNow.toISOString().slice(0, 10);
+      const userNow = new TZDate(now, timezone);
+      const todayIso = userNow.toISOString().slice(0, 10);
 
-    const imgData = mapWeeklyOverviewData({
-      occurrencesByDay,
-      weekStartIso,
-      timezone,
-      locale: user.language as 'ru' | 'en',
-      theme: getTheme(),
-      todayIso,
+      const data = mapWeeklyOverviewData({
+        occurrencesByDay,
+        weekStartIso,
+        timezone,
+        locale: user.language as 'ru' | 'en',
+        theme: getTheme(),
+        todayIso,
+      });
+      return { type: 'weekly-overview', data, userId: user.telegram_id };
+    };
+
+    await queueAgendaImage(ctx, imageDelivery, lang, user, view, {
+      kind: 'week',
+      label: formatWeekLabel(weekStartIso, lang),
+      slot: `week:${viewerKey(groupId, user.telegram_id)}:${weekStartIso}:${lang}`,
+      filename: 'week.png',
+      buildJob,
     });
-
-    await deliverAgendaImage(ctx, lang, user.telegram_id, 'week.png', () =>
-      renderService.renderDirect({ type: 'weekly-overview', data: imgData, userId: user.telegram_id }),
-    );
   });
 
   async function sendShareAgenda(

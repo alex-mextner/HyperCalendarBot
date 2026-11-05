@@ -17,6 +17,7 @@ import type { AgentContext, ToolResult } from '../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../src/services/conversation-logger.ts';
 import { EventService } from '../../src/services/event/event-service.ts';
 import { HolidayService } from '../../src/services/holiday/holiday-service.ts';
+import { ImageDelivery } from '../../src/services/image/image-delivery.ts';
 import type { ImageRenderer } from '../../src/services/image/render-service.ts';
 import { IntentExecutor } from '../../src/services/intent/intent-executor.ts';
 import { IntentMatcher } from '../../src/services/intent/intent-matcher.ts';
@@ -126,7 +127,7 @@ export function createFixture(db: Database, options: FixtureOptions = {}): Fixtu
       },
       ...(options.renderer
         ? {
-            renderService: options.renderer,
+            imageDelivery: new ImageDelivery({ renderer: options.renderer }),
             sender: {
               sendPhoto: async () => ({ message_id: 2 }),
               sendMessage: async () => ({ message_id: 3 }),

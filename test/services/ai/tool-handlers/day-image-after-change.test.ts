@@ -1,6 +1,7 @@
 // A day picture sent after calendar changes must show a changed upcoming day, not a past one (#506).
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
+import { t } from '../../../../src/config/constants.ts';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
@@ -22,6 +23,7 @@ import { ConversationLogger } from '../../../../src/services/conversation-logger
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 import type { ImageRenderJob } from '../../../../src/worker/image-render.queue.ts';
+import { makeImageDelivery } from '../../../fixtures/image-delivery.ts';
 import { png } from '../../../fixtures/png.ts';
 
 const USER_ID = 1001;
@@ -69,12 +71,10 @@ function setup(timezone = TIMEZONE, messageText = 'cancel all my English lessons
       sendMessage: async () => ({ message_id: 1 }),
       sendPhoto: async () => ({ message_id: 2 }),
     },
-    renderService: {
-      renderDirect: async (job: ImageRenderJob) => {
-        if (job.type === 'daily-agenda') renderedDates.push(job.data.date);
-        return png();
-      },
-    },
+    imageDelivery: makeImageDelivery(async (job: ImageRenderJob) => {
+      if (job.type === 'daily-agenda') renderedDates.push(job.data.date);
+      return png();
+    }).delivery,
   };
   ctx.dayReferences = resolveTurnDayReferences(messageText, chatHistory.getRecent(USER_ID, 30), new Date(), timezone);
   return { ctx, lesson, renderedDates };
@@ -94,6 +94,7 @@ test('after deleting a past and an upcoming lesson, a past-day picture shows the
   expect((await deleteApproved(ctx, nextTuesday.id)).success).toBe(true);
 
   const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+  await ctx.imageDelivery!.whenIdle();
 
   expect(result.success).toBe(true);
   expect(renderedDates).toEqual(['2026-09-29']);
@@ -109,6 +110,7 @@ test('create and update in the same run steer a past-day picture to the earliest
   expect((await handleUpdateEvent(ctx, { event_id: moved.id, start_at: '2026-09-30T16:00:00Z' })).success).toBe(true);
 
   const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+  await ctx.imageDelivery!.whenIdle();
 
   expect(renderedDates).toEqual(['2026-09-30']);
   expect(result.output).toContain('2026-09-30');
@@ -120,6 +122,7 @@ test('a snoozed event counts as a change for the day picture', async () => {
   expect(handleSnoozeEvent(ctx, { event_id: lateLesson.id, minutes: 10 }).success).toBe(true);
 
   const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+  await ctx.imageDelivery!.whenIdle();
 
   expect(renderedDates).toEqual(['2026-09-29']);
   expect(result.output).toContain('2026-09-29');
@@ -129,10 +132,11 @@ test('a past-day picture in a run without changes renders the requested day', as
   const { ctx, renderedDates } = setup();
 
   const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+  await ctx.imageDelivery!.whenIdle();
 
   expect(result.success).toBe(true);
   expect(renderedDates).toEqual(['2026-09-01']);
-  expect(result.output).toBe('Day calendar image for 2026-09-01 has been sent to the chat.');
+  expect(result.output).toBe(t('en').aiTools.meta.dayImageQueued('2026-09-01'));
 });
 
 test('a past-day picture after changes only on past days renders the requested day', async () => {
@@ -143,9 +147,10 @@ test('a past-day picture after changes only on past days renders the requested d
   expect((await deleteApproved(ctx, earlierTuesday.id)).success).toBe(true);
 
   const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+  await ctx.imageDelivery!.whenIdle();
 
   expect(renderedDates).toEqual(['2026-09-01']);
-  expect(result.output).toBe('Day calendar image for 2026-09-01 has been sent to the chat.');
+  expect(result.output).toBe(t('en').aiTools.meta.dayImageQueued('2026-09-01'));
 });
 
 test('an upcoming-day picture is never redirected by other changed days', async () => {
@@ -154,6 +159,7 @@ test('an upcoming-day picture is never redirected by other changed days', async 
   expect((await deleteApproved(ctx, nextTuesday.id)).success).toBe(true);
 
   await handleRenderDayImage(ctx, { date: '2026-10-05' });
+  await ctx.imageDelivery!.whenIdle();
 
   expect(renderedDates).toEqual(['2026-10-05']);
 });
@@ -165,6 +171,7 @@ test('an all-day change west of UTC counts for the day written, not the day befo
   expect(created.success).toBe(true);
 
   const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+  await ctx.imageDelivery!.whenIdle();
 
   expect(renderedDates).toEqual(['2026-09-29']);
   expect(result.output).toContain('2026-09-29');
@@ -177,9 +184,10 @@ test('a past day the user named for the picture is shown as asked, not replaced 
   expect((await deleteApproved(ctx, nextTuesday.id)).success).toBe(true);
 
   const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+  await ctx.imageDelivery!.whenIdle();
 
   expect(renderedDates).toEqual(['2026-09-01']);
-  expect(result.output).toBe('Day calendar image for 2026-09-01 has been sent to the chat.');
+  expect(result.output).toBe(t('en').aiTools.meta.dayImageQueued('2026-09-01'));
 });
 
 test('a past day the user named as the one to change still yields to the upcoming changed day', async () => {
@@ -188,6 +196,7 @@ test('a past day the user named as the one to change still yields to the upcomin
   expect((await handleUpdateEvent(ctx, { event_id: moved.id, start_at: '2026-09-29T16:00:00Z' })).success).toBe(true);
 
   const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+  await ctx.imageDelivery!.whenIdle();
 
   expect(renderedDates).toEqual(['2026-09-29']);
   expect(result.output).toContain('instead of the past day 2026-09-01');
@@ -201,6 +210,7 @@ test('a clock time alone names no day for the picture: a past-day picture still 
   expect(created.success).toBe(true);
 
   const result = await handleRenderDayImage(ctx, { date: '2026-09-01' });
+  await ctx.imageDelivery!.whenIdle();
 
   expect(renderedDates).toEqual(['2026-09-27']);
   expect(result.output).toContain('instead of the past day 2026-09-01');

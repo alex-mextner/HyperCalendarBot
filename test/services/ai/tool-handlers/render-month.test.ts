@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleRenderMonthImage } from '../../../../src/services/ai/tool-handlers/render.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import { makeImageDelivery } from '../../../fixtures/image-delivery.ts';
 import { png } from '../../../fixtures/png.ts';
 
 function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
@@ -12,9 +13,7 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
       sendPhoto: mock(() => Promise.resolve({ message_id: 42 })),
       sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
     },
-    renderService: {
-      renderDirect: mock(() => Promise.resolve(png())),
-    },
+    imageDelivery: makeImageDelivery(() => Promise.resolve(png())).delivery,
     eventService: {
       getEventsInRange: mock(() => []),
       getEventsInRangeForGroup: mock(() => []),
@@ -26,21 +25,22 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
 }
 
 describe('handleRenderMonthImage', () => {
-  test('returns success after render + send photo', async () => {
+  test('returns success once the picture is queued', async () => {
     const ctx = makeCtx();
     const result = await handleRenderMonthImage(ctx, { month: '2026-04' });
     expect(result.success).toBe(true);
     expect(result.output).toBeTruthy();
   });
 
-  test('output contains month and past-tense marker', async () => {
+  test('output names the month and says it is being prepared, never that it was sent', async () => {
     const ctx = makeCtx();
     const result = await handleRenderMonthImage(ctx, { month: '2026-04' });
     expect(result.output).toContain('2026-04');
-    expect(result.output).toContain('отправлена');
+    expect(result.output).toContain('готовится');
+    expect(result.output).not.toContain('отправлена');
   });
 
-  test('sendPhoto is awaited before handler returns', async () => {
+  test('the photo is sent by the background delivery, after the handler returned', async () => {
     const sendPhoto = mock(() => Promise.resolve({ message_id: 42 }));
     const ctx = makeCtx({
       sender: {
@@ -49,6 +49,8 @@ describe('handleRenderMonthImage', () => {
       } as never,
     });
     await handleRenderMonthImage(ctx, { month: '2026-04' });
+    expect(sendPhoto).not.toHaveBeenCalled();
+    await ctx.imageDelivery!.whenIdle();
     expect(sendPhoto).toHaveBeenCalledTimes(1);
   });
 
@@ -57,10 +59,11 @@ describe('handleRenderMonthImage', () => {
     const result = await handleRenderMonthImage(ctx, { month: '2026-04' });
     expect(result.agentHint).toBeDefined();
     expect(result.agentHint!).toContain('Do NOT call render_month_image again');
+    expect(result.agentHint!).toContain('do NOT say the picture was sent or attached');
   });
 
-  test('fails when renderService missing', async () => {
-    const ctx = makeCtx({ renderService: undefined });
+  test('fails when image delivery is missing', async () => {
+    const ctx = makeCtx({ imageDelivery: undefined });
     const result = await handleRenderMonthImage(ctx, { month: '2026-04' });
     expect(result.success).toBe(false);
   });
@@ -94,14 +97,14 @@ describe('handleRenderMonthImage', () => {
     expect(result.success).toBe(true);
   });
 
-  test('render failure returns success:false with error message', async () => {
+  test('a render failure is not a failed tool call: the user gets one note', async () => {
     const ctx = makeCtx({
-      renderService: {
-        renderDirect: mock(() => Promise.reject(new Error('playwright down'))),
-      },
+      imageDelivery: makeImageDelivery(() => Promise.reject(new Error('playwright down'))).delivery,
     });
     const result = await handleRenderMonthImage(ctx, { month: '2026-04' });
-    expect(result.success).toBe(false);
-    expect(result.error).toBeTruthy();
+    expect(result.success).toBe(true);
+    await ctx.imageDelivery!.whenIdle();
+    expect(ctx.sender!.sendMessage).toHaveBeenCalledTimes(1);
+    expect(ctx.sender!.sendPhoto).not.toHaveBeenCalled();
   });
 });

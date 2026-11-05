@@ -1,18 +1,18 @@
 import { TZDate } from '@date-fns/tz';
 import type { EventOccurrence } from '../../database/types.ts';
+import type { ImageRenderJob } from '../../worker/image-render.queue.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import { mapMonthlyCalendarData } from './data-mapper.ts';
-import type { ImageRenderer } from './render-service.ts';
 
-export async function renderMonthImage(
-  renderService: ImageRenderer,
+/** The render job for the picture, built from the agenda alone (no worker involved). */
+export function monthImageJob(
   occurrences: EventOccurrence[],
   year: number,
   month: number, // 0-based
   timezone: string,
   locale: 'ru' | 'en',
   userId: number,
-): Promise<Buffer> {
+): ImageRenderJob {
   const occurrencesByDay = new Map<string, EventOccurrence[]>();
   for (const occ of occurrences) {
     const dayKey = new TZDate(new Date(occ.occurrence_start), timezone).toISOString().slice(0, 10);
@@ -34,9 +34,5 @@ export async function renderMonthImage(
     todayIso,
   });
 
-  return renderService.renderDirect({
-    type: 'monthly-calendar',
-    data,
-    userId,
-  });
+  return { type: 'monthly-calendar', data, userId };
 }

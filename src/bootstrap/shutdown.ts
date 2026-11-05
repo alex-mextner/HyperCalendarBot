@@ -9,7 +9,11 @@
 //     agent (AGENT_DRAIN_SETTLE_MS) so each running AI turn tells its user, queues its retry and
 //     writes its debug log while the queues, Redis and the database are still open.
 //  3. Close the queues in a fixed order: ai-messages, event checker, notifications, bot tasks, Google
-//     sync, image render, broadcast, calls.
+//     sync, image delivery, image render, broadcast, calls. Image delivery goes first of the two image
+//     closes: pictures still rendering are logged as interrupted and their records stay queued so the next start
+//     delivers them (no note is sent), a picture mid-upload gets a 1.5 s grace and, if it does not land, is recorded
+//     unknown; then the render-failure summary still held back for its alert window is sent. Redis and Telegram
+//     still answer while this runs.
 //  4. A second, shorter drain (LATE_AGENT_DRAIN_SETTLE_MS): turns started by handlers that outlived
 //     bot.stop() while the queues closed. Nothing may still be writing when Redis and SQLite close.
 //  5. Google Redis client, summarizer Redis, the web server.
@@ -51,6 +55,7 @@ function closableQueues(resources: ShutdownResources) {
     resources.notificationQueue,
     resources.botTasksQueue,
     resources.syncQueue,
+    resources.imageDelivery,
     resources.imageQueue,
     resources.broadcastQueue,
     resources.callQueue,

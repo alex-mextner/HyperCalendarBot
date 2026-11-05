@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleMonth } from '../../../src/bot/commands/month.ts';
-import type { ImageRenderer } from '../../../src/services/image/render-service.ts';
-import { png } from '../../fixtures/png.ts';
+import { asCommandContext, asEventService } from '../../fixtures/doubles.ts';
+import { describePictureContract, gatedDelivery } from '../../fixtures/picture-contract.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
@@ -19,20 +19,6 @@ function makeEventService(occurrences: Array<{ occurrence_start: string; occurre
   return {
     getEventsInRange: mock(() => occurrences),
   };
-}
-
-type MonthArgs = Parameters<typeof handleMonth>;
-
-/** Runs /month on partial doubles; the test-only cast stays in this one factory (CLAUDE.md). */
-async function runMonthWithRender(renderService: ImageRenderer) {
-  const ctx = makeCtx();
-  await handleMonth(
-    ctx as unknown as MonthArgs[0],
-    makeEventService() as unknown as MonthArgs[1],
-    undefined,
-    renderService,
-  );
-  return ctx;
 }
 
 describe('handleMonth', () => {
@@ -117,24 +103,29 @@ describe('handleMonth', () => {
     expect(opts.reply_markup).toBeDefined();
   });
 
-  test('pins image after successful month render', async () => {
+  test('the month picture is queued after the text, delivered later and pinned', async () => {
     const { handleMonth } = await import('../../../src/bot/commands/month.ts');
     const pinChatMessage = mock(() => Promise.resolve());
     const ctx = {
+      id: 7,
       dbUser: user,
       send: mock(() => Promise.resolve()),
       editText: mock(() => Promise.resolve()),
       sendPhoto: mock(() => Promise.resolve({ id: 55 })),
+      sendDocument: mock(() => Promise.resolve({ id: 56 })),
       bot: { api: { pinChatMessage, sendMessage: mock(() => Promise.resolve()) } },
     };
     const svc = makeEventService();
-    const renderService = { renderDirect: mock(() => Promise.resolve(png())) };
+    const { delivery, release } = gatedDelivery();
 
-    // yearMonth undefined -> triggers image render (only on initial /month command)
-    await handleMonth(ctx as never, svc as never, undefined, renderService as never);
-    await Promise.resolve(); // flush fire-and-forget autoPin
+    // yearMonth undefined -> queues the picture (only on the initial /month command)
+    await handleMonth(asCommandContext(ctx), asEventService(svc), undefined, delivery);
+    expect(ctx.sendPhoto).not.toHaveBeenCalled();
+    release();
+    await delivery.whenIdle();
+    await new Promise<void>((resolve) => setImmediate(resolve)); // flush the fire-and-forget autoPin
 
-    expect(ctx.sendPhoto).toHaveBeenCalled();
+    expect(ctx.sendPhoto).toHaveBeenCalledTimes(1);
     expect(pinChatMessage).toHaveBeenCalledWith({
       chat_id: user.telegram_id,
       message_id: 55,
@@ -142,13 +133,28 @@ describe('handleMonth', () => {
     });
   });
 
-  test('a month render failure does not blame the date range', async () => {
-    const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
+  test('month navigation does not queue a picture', async () => {
+    const { handleMonth } = await import('../../../src/bot/commands/month.ts');
+    const ctx = makeCtx({ id: 7, sendPhoto: mock(() => Promise.resolve({ id: 55 })) });
+    const { delivery, renderer } = gatedDelivery();
 
-    const ctx = await runMonthWithRender(renderService);
+    await handleMonth(asCommandContext(ctx), asEventService(makeEventService()), '2026-02', delivery);
+
+    expect(renderer.renderDirect).not.toHaveBeenCalled();
+  });
+
+  test('a month render failure is told once by the delivery and does not blame the date range', async () => {
+    const ctx = makeCtx({ id: 7 });
+    const { delivery, fail } = gatedDelivery();
+    await handleMonth(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
+
+    fail(new Error('render failed'));
+    await delivery.whenIdle();
 
     expect(ctx.send).toHaveBeenCalledTimes(2);
-    expect(ctx.send).toHaveBeenLastCalledWith('⚠️ Image generation failed. Use text version above.');
+    const note = (ctx.send.mock.calls[1] as unknown[])[0] as string;
+    expect(note).toContain('could not prepare the picture');
+    expect(note).not.toContain('date range');
   });
 });
 
@@ -201,4 +207,27 @@ describe('handleMonth group context', () => {
     expect(eventService.getEventsInRange).toHaveBeenCalled();
     expect(eventService.getEventsInRangeForGroup).not.toHaveBeenCalled();
   });
+});
+
+describePictureContract('handleMonth', () => {
+  const texts: string[] = [];
+  let photos = 0;
+  return {
+    run: (delivery, requestId) => {
+      const ctx = makeCtx({
+        id: requestId,
+        send: mock((text: string) => {
+          texts.push(text);
+          return Promise.resolve();
+        }),
+        sendPhoto: mock(() => {
+          photos++;
+          return Promise.resolve({ id: 55 });
+        }),
+      });
+      return handleMonth(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
+    },
+    photos: () => photos,
+    texts: () => [...texts],
+  };
 });

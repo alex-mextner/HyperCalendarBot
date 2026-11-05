@@ -1,7 +1,11 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { t } from '../../../../src/config/constants.ts';
 import { handleRenderWeekImage } from '../../../../src/services/ai/tool-handlers/render.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import { makeImageDelivery } from '../../../fixtures/image-delivery.ts';
 import { png } from '../../../fixtures/png.ts';
+
+const meta = (lang: 'ru' | 'en') => t(lang).aiTools.meta;
 
 function makeCtx(
   overrides: Omit<Partial<AgentContext>, 'user'> & { user?: Partial<AgentContext['user']> } = {},
@@ -15,9 +19,7 @@ function makeCtx(
       sendPhoto: mock(() => Promise.resolve({ message_id: 42 })),
       sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
     },
-    renderService: {
-      renderDirect: mock(() => Promise.resolve(png())),
-    },
+    imageDelivery: makeImageDelivery(() => Promise.resolve(png())).delivery,
     eventService: {
       getEventsInRange: mock(() => []),
       getEventsInRangeForGroup: mock(() => []),
@@ -29,7 +31,7 @@ function makeCtx(
 }
 
 describe('handleRenderWeekImage', () => {
-  test('returns success after render + send photo', async () => {
+  test('returns success once the picture is queued', async () => {
     const ctx = makeCtx();
     const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
     expect(result.success).toBe(true);
@@ -40,13 +42,13 @@ describe('handleRenderWeekImage', () => {
     const ctx = makeCtx();
     // 2026-04-06 is Monday
     const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-06' });
-    expect(result.output).toBe('Календарь на 6–12 апреля 2026 — картинка в чате.');
+    expect(result.output).toBe(meta('ru').weekImageQueued('6–12 апреля 2026'));
     const english = makeCtx({ user: { telegram_id: 1, language: 'en', timezone: 'Europe/Moscow' } });
     const inEnglish = await handleRenderWeekImage(english, { week_start: '2026-04-06' });
-    expect(inEnglish.output).toBe('Calendar for April 6–12, 2026 — the picture is in the chat.');
+    expect(inEnglish.output).toBe(meta('en').weekImageQueued('April 6–12, 2026'));
   });
 
-  test('sendPhoto is awaited before handler returns', async () => {
+  test('the photo is sent by the background delivery, after the handler returned', async () => {
     const sendPhoto = mock(() => Promise.resolve({ message_id: 42 }));
     const ctx = makeCtx({
       sender: {
@@ -55,6 +57,8 @@ describe('handleRenderWeekImage', () => {
       } as never,
     });
     await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
+    expect(sendPhoto).not.toHaveBeenCalled();
+    await ctx.imageDelivery!.whenIdle();
     expect(sendPhoto).toHaveBeenCalledTimes(1);
   });
 
@@ -63,10 +67,11 @@ describe('handleRenderWeekImage', () => {
     const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
     expect(result.agentHint).toBeDefined();
     expect(result.agentHint!).toContain('Do NOT call render_week_image again');
+    expect(result.agentHint!).toContain('do NOT say the picture was sent or attached');
   });
 
-  test('fails when renderService missing', async () => {
-    const ctx = makeCtx({ renderService: undefined });
+  test('fails when image delivery is missing', async () => {
+    const ctx = makeCtx({ imageDelivery: undefined });
     const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
     expect(result.success).toBe(false);
   });
@@ -94,15 +99,15 @@ describe('handleRenderWeekImage', () => {
     expect(getEventsInRangeForGroup).toHaveBeenCalled();
   });
 
-  test('render failure returns success:false with error message', async () => {
+  test('a render failure is not a failed tool call: the user gets one note', async () => {
     const ctx = makeCtx({
-      renderService: {
-        renderDirect: mock(() => Promise.reject(new Error('playwright down'))),
-      },
+      imageDelivery: makeImageDelivery(() => Promise.reject(new Error('playwright down'))).delivery,
     });
     const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
-    expect(result.success).toBe(false);
-    expect(result.error).toBeTruthy();
+    expect(result.success).toBe(true);
+    await ctx.imageDelivery!.whenIdle();
+    expect(ctx.sender!.sendMessage).toHaveBeenCalledTimes(1);
+    expect(ctx.sender!.sendPhoto).not.toHaveBeenCalled();
   });
 
   test('normalizes non-Monday week_start to Monday of same week', async () => {

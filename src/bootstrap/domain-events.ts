@@ -11,6 +11,7 @@
 //  - TriggerService subscribes later, in scheduled-ai.ts, once the AI queue exists.
 
 import { AgendaRepository } from '../database/repositories/agenda.repository.ts';
+import type { ImageDelivery } from '../services/image/image-delivery.ts';
 import { DomainEventBus } from '../services/scheduled/domain-event-bus.ts';
 import { InvitationCardRefresher } from '../services/sharing/invitation-cards.ts';
 import type { WeatherService } from '../services/weather/weather-service.ts';
@@ -77,9 +78,24 @@ function subscribeInvitationCardRefresh(
   });
 }
 
+/**
+ * A picture still rendering when the calendar changes would show the old state next to a text that
+ * already states the new one: pending pictures of the changed data are rebuilt once.
+ */
+export function subscribeImageStaleness(
+  bus: DomainEventBus,
+  imageDelivery: Pick<ImageDelivery, 'eventsChanged'>,
+): void {
+  bus.on('myCalendar.newEvent', ({ userId }) => imageDelivery.eventsChanged(userId));
+  bus.on('myCalendar.updatedEvent', ({ userId }) => imageDelivery.eventsChanged(userId));
+  bus.on('myCalendar.deletedEvent', ({ userId }) => imageDelivery.eventsChanged(userId));
+  bus.on('myGroup.newEvent', ({ userId }) => imageDelivery.eventsChanged(userId));
+}
+
 export interface DomainEventInputs {
   participantPushScheduler: ParticipantPushScheduler | undefined;
   weatherService: WeatherService | undefined;
+  imageDelivery: ImageDelivery | undefined;
 }
 
 export function createDomainEventBus(ctx: StartupContext, inputs: DomainEventInputs): DomainEventBus {
@@ -88,5 +104,6 @@ export function createDomainEventBus(ctx: StartupContext, inputs: DomainEventInp
     subscribeParticipantGooglePush(bus, inputs.participantPushScheduler, ctx.db.groupMembers);
   }
   subscribeInvitationCardRefresh(bus, ctx, inputs.weatherService);
+  if (inputs.imageDelivery) subscribeImageStaleness(bus, inputs.imageDelivery);
   return bus;
 }

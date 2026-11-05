@@ -10,6 +10,7 @@ import { InvitationRepository } from '../../../src/database/repositories/invitat
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
+import { makeImageDelivery } from '../../fixtures/image-delivery.ts';
 import { png } from '../../fixtures/png.ts';
 
 let db: Database;
@@ -110,17 +111,16 @@ for (const command of ['today', 'tomorrow', 'week', 'search', 'month'] as const)
         return message;
       },
     });
-    const renderer = {
-      renderDirect: async (job: ImageRenderJob) => {
-        jobs.push(job);
-        return png(2160, 9000);
-      },
-    };
-    if (command === 'today') await handleToday(ctx, service, undefined, renderer);
-    if (command === 'tomorrow') await handleTomorrow(ctx, service, undefined, renderer);
-    if (command === 'week') await handleWeek(ctx, service, undefined, renderer);
+    const { delivery } = makeImageDelivery(async (job) => {
+      jobs.push(job);
+      return png(2160, 9000);
+    });
+    if (command === 'today') await handleToday(ctx, service, undefined, delivery);
+    if (command === 'tomorrow') await handleTomorrow(ctx, service, undefined, delivery);
+    if (command === 'week') await handleWeek(ctx, service, undefined, delivery);
     if (command === 'search') await handleSearch(ctx, service);
-    if (command === 'month') await handleMonth(ctx, service, undefined, renderer);
+    if (command === 'month') await handleMonth(ctx, service, undefined, delivery);
+    await delivery.whenIdle(); // the picture is delivered in the background, after the command returned
     if (command !== 'month') {
       expect(sent.join('\n')).toContain('Alice &lt;friend&gt;: ⏳ pending');
       expect(sent.join('\n')).toContain('Text only notes');

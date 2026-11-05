@@ -73,6 +73,7 @@ Each layer returns `{ handled: true }` to stop propagation, or `{ handled: false
 - `tools.ts` — 40+ tool definitions (the Claude API schema).
 - `tool-executor.ts` — dispatches tool name → handler function.
 - `tool-handlers/` — one file per domain: `events`, `reminders`, `sharing`, `secretary`, `proposals`, `slots`, `settings`, `meta`, `feedback`, `history`.
+- Picture tools (`render_day_image`, `render_week_image`, `render_month_image`, `render_table` in `tool-handlers/render.ts`) never wait for the render: they enqueue through `ctx.imageDelivery` (`src/services/image/image-delivery.ts`) and return "queued, NOT sent" at once; the picture arrives later as its own message, a failure sends one note and reaches the alert queue (runbook "Asynchronous pictures"). Never put a render wait back into a tool call and never tell the model a picture "was sent".
 - `system-prompt.ts` — builds the system prompt as `SystemPromptParts` in prefix-cache order. Providers cache by leading bytes (z.ai implicit cache, Anthropic `cache_control`), so a per-request value must never be added ahead of static text; `test/services/ai/prompt-prefix-stability.test.ts` enforces it and `scripts/measure-ai-payload.ts` reports the shared-prefix tokens.
   - `stable` — identical for every request (role, Context, static Rules, Proactive, Shared Events, Stall).
   - `modeRules` — static text that depends only on the mode (group chat rules, voice/live-call instructions), never on user data.
@@ -111,7 +112,7 @@ If you add a new `FeatureKey`, add it to `FEATURE_KEYS` in `src/database/reposit
 For periodic/scheduled tasks always use BullMQ repeating jobs — never `setInterval` or `setTimeout`. Repeating jobs survive restarts and are observable in the queue.
 
 BullMQ on Redis; the main queues:
-- **image-render** — Playwright renders weekly/monthly calendar images.
+- **image-render** — Playwright renders the calendar images. EVERY picture (AI tools, `/today` `/tomorrow` `/week` `/month`, agenda buttons, the conflict picture sent to an inviter) goes through `ImageDelivery` (`queuePicture` for non-AI callers): the handler sends its text, queues the picture and returns; the picture arrives later, bounded at 150 s, one note on failure, a timeout reaches the alert queue as `reportTimeout({kind: 'render'})`. Nothing in the bot awaits `RenderService.renderDirect`; do not add a render wait to a handler.
 - **call-reminders** — voice call reminders via the Python bridge; created only when the MTProto service tier is enabled.
 - **bot-tasks** — periodic jobs: secretary expiry (daily), sharing cleanup (10min), proposal expiry (hourly), per-user session keepalive (14 days), AI usage ledger cleanup (daily), birthday sync (daily, only when the service tier is enabled).
 

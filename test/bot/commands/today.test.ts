@@ -1,16 +1,22 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { handleToday } from '../../../src/bot/commands/today.ts';
-import type { ImageRenderer } from '../../../src/services/image/render-service.ts';
-import { png } from '../../fixtures/png.ts';
+import { t } from '../../../src/config/constants.ts';
+import { configureTimeoutReporter } from '../../../src/services/incident/timeout-reporter.ts';
+import { AgendaImageError } from '../../../src/utils/agenda-image.ts';
+import { asCommandContext, asEventService } from '../../fixtures/doubles.ts';
+import { captureTimeoutAlerts, gatedDelivery } from '../../fixtures/picture-contract.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
 
 function makeCtx(overrides = {}) {
   return {
+    id: 7,
     dbUser: user,
     send: mock(() => Promise.resolve()),
-    sendPhoto: mock(() => Promise.resolve()),
+    sendPhoto: mock(() => Promise.resolve({ id: 42 })),
+    sendDocument: mock(() => Promise.resolve({ id: 43 })),
+    bot: { api: { pinChatMessage: mock(() => Promise.resolve()), sendMessage: mock(() => Promise.resolve()) } },
     ...overrides,
   };
 }
@@ -21,19 +27,10 @@ function makeEventService(occurrences = []) {
   };
 }
 
-type TodayArgs = Parameters<typeof handleToday>;
+/** Lets every already-settled promise continuation run (a macrotask turn, no wall-clock wait). */
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-/** Runs /today on partial doubles; the test-only cast stays in this one factory (CLAUDE.md). */
-async function runTodayWithRender(renderService: ImageRenderer, overrides = {}) {
-  const ctx = makeCtx(overrides);
-  await handleToday(
-    ctx as unknown as TodayArgs[0],
-    makeEventService() as unknown as TodayArgs[1],
-    undefined,
-    renderService,
-  );
-  return ctx;
-}
+afterEach(() => configureTimeoutReporter(null));
 
 describe('handleToday', () => {
   test('sends day agenda with no events', async () => {
@@ -61,7 +58,7 @@ describe('handleToday', () => {
     expect(text).toContain('Нет событий');
   });
 
-  test('does not call sendPhoto when no renderService', async () => {
+  test('does not call sendPhoto when there is no image delivery (text-only)', async () => {
     const { handleToday } = await import('../../../src/bot/commands/today.ts');
     const ctx = makeCtx();
     const svc = makeEventService();
@@ -69,56 +66,102 @@ describe('handleToday', () => {
     await handleToday(ctx as never, svc as never);
 
     expect(ctx.sendPhoto).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalledTimes(1);
   });
 
-  test('a render failure that is not about size does not blame the date range', async () => {
-    // The exact error production returned on 2026-10-12 when the render outlived the wait.
-    const renderService = {
-      renderDirect: mock(() =>
-        Promise.reject(
-          new Error(
-            'Job wait render timed out before finishing, no finish notification arrived after 15000ms (id=539)',
-          ),
-        ),
-      ),
-    };
+  test('returns with the text before a slow render ends; the late picture is delivered once and pinned', async () => {
+    const { delivery, renderer, release } = gatedDelivery();
+    const ctx = makeCtx();
 
-    const ctx = await runTodayWithRender(renderService);
+    await handleToday(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
 
-    expect(ctx.send).toHaveBeenCalledTimes(2);
-    expect(ctx.send).toHaveBeenLastCalledWith('⚠️ Image generation failed. Use text version above.');
+    // The handler is done while the render is still pending: only the text went out.
+    expect(renderer.renderDirect).toHaveBeenCalledTimes(1);
+    expect(ctx.send).toHaveBeenCalledTimes(1);
     expect(ctx.sendPhoto).not.toHaveBeenCalled();
-  });
 
-  test('the render failure notice follows the user language', async () => {
-    const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
+    release();
+    await delivery.whenIdle();
+    await flush();
 
-    const ctx = await runTodayWithRender(renderService, { dbUser: userRu });
-
-    expect(ctx.send).toHaveBeenLastCalledWith('⚠️ Не удалось сгенерировать изображение. Смотри текстовую версию выше.');
-  });
-
-  test('pins image after successful render', async () => {
-    const { handleToday } = await import('../../../src/bot/commands/today.ts');
-    const pinChatMessage = mock(() => Promise.resolve());
-    const ctx = {
-      dbUser: user,
-      send: mock(() => Promise.resolve()),
-      sendPhoto: mock(() => Promise.resolve({ id: 42 })),
-      bot: { api: { pinChatMessage, sendMessage: mock(() => Promise.resolve()) } },
-    };
-    const svc = makeEventService();
-    const renderService = { renderDirect: mock(() => Promise.resolve(png())) };
-
-    await handleToday(ctx as never, svc as never, undefined, renderService as never);
-    await Promise.resolve(); // flush fire-and-forget autoPin
-
-    expect(ctx.sendPhoto).toHaveBeenCalled();
-    expect(pinChatMessage).toHaveBeenCalledWith({
+    expect(ctx.sendPhoto).toHaveBeenCalledTimes(1);
+    expect(ctx.send).toHaveBeenCalledTimes(1); // no note: the picture arrived
+    expect(ctx.bot.api.pinChatMessage).toHaveBeenCalledWith({
       chat_id: user.telegram_id,
       message_id: 42,
       disable_notification: true,
     });
+  });
+
+  test('a double command while the first picture renders delivers one picture', async () => {
+    const { delivery, releaseAll } = gatedDelivery();
+    const ctx = makeCtx();
+    const again = makeCtx({ id: 8 });
+
+    await handleToday(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
+    await handleToday(asCommandContext(again), asEventService(makeEventService()), undefined, delivery);
+    releaseAll();
+    await delivery.whenIdle();
+
+    expect(ctx.sendPhoto.mock.calls.length + again.sendPhoto.mock.calls.length).toBe(1);
+  });
+
+  test('a render failure gives one note and one owner alert, not the date-range wording', async () => {
+    const { delivery, fail, failures } = gatedDelivery();
+    const ctx = makeCtx();
+
+    await handleToday(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
+    fail(new Error('chromium crashed'));
+    await delivery.whenIdle();
+
+    expect(ctx.sendPhoto).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalledTimes(2); // the text, then ONE note
+    const note = (ctx.send.mock.calls[1] as unknown[])[0] as string;
+    expect(note).toContain('could not prepare the picture');
+    expect(note).not.toContain('date range');
+    expect(failures).toHaveLength(1);
+  });
+
+  test('a render that outlives its bound gives one note and one timeout alert for the repair flow', async () => {
+    const alerts = captureTimeoutAlerts();
+    const { delivery, failures } = gatedDelivery({ boundMs: 20 });
+    const ctx = makeCtx();
+
+    await handleToday(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
+    await delivery.whenIdle();
+
+    expect(ctx.send).toHaveBeenCalledTimes(2);
+    expect((ctx.send.mock.calls[1] as unknown[])[0]).toContain('did not get ready in time');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]?.text).toContain('Timeout (render)');
+    expect(failures).toHaveLength(0);
+  });
+
+  test('a picture too large to send explains it once and raises no alert', async () => {
+    const { delivery, fail, failures } = gatedDelivery();
+    const ctx = makeCtx();
+
+    await handleToday(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
+    fail(new AgendaImageError('Agenda PNG exceeds the 50 MB document limit. Choose a shorter date range.', true));
+    await delivery.whenIdle();
+
+    expect(ctx.send).toHaveBeenCalledTimes(2);
+    expect((ctx.send.mock.calls[1] as unknown[])[0]).toContain('too large to send');
+    expect((ctx.send.mock.calls[1] as unknown[])[0]).not.toContain('Agenda PNG');
+    expect(failures).toHaveLength(0);
+  });
+
+  test('the failure note follows the user language', async () => {
+    const { delivery, fail } = gatedDelivery();
+    const ctx = makeCtx({ dbUser: userRu });
+
+    await handleToday(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
+    fail(new Error('render failed'));
+    await delivery.whenIdle();
+
+    expect((ctx.send.mock.calls[1] as unknown[])[0]).toContain(
+      t('ru').aiTools.meta.imageNoteFailed(new Date().toISOString().slice(0, 10)),
+    );
   });
 
   test('shows holiday entries when holidayService returns them', async () => {

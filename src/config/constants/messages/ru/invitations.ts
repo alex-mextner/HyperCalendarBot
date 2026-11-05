@@ -42,6 +42,13 @@ export const ruInvitations = {
     `📨 ${name} отклонил(а) приглашение на "<b>${title}</b>" ❌`,
   invitation_response_maybe: (name: string, title: string) =>
     `📨 ${name} ответил(а) "возможно" на приглашение "<b>${title}</b>" 🤔`,
+  /** What the inviter's picture note calls the schedule-comparison picture sent after an acceptance. */
+  invitation_conflict_picture_label: 'сравнение расписаний',
+  /** The inviter's note when the schedule-comparison picture was skipped because the bot has too many pictures pending. */
+  invitation_conflict_picture_skipped:
+    'Картинку со сравнением расписаний пропустили: сейчас уже готовится слишком много картинок.',
+  /** The inviter's note when the schedule-comparison job could not even be built; there is no text version of it. */
+  invitation_conflict_picture_failed: 'Не получилось подготовить картинку со сравнением расписаний.',
   // SAFETY: see en.invitationRoster — every name argument must already be HTML-escaped.
   invitationRoster: {
     header: '👥 Участники:',

@@ -29,7 +29,7 @@ import { installCrashHandlers } from './bootstrap/crash-handlers.ts';
 import { createDomainEventBus } from './bootstrap/domain-events.ts';
 import { initEventMentionStore } from './bootstrap/event-mentions.ts';
 import { initGoogleSync } from './bootstrap/google-sync.ts';
-import { initImageRender } from './bootstrap/image-render.ts';
+import { initImageRender, recoverImageDeliveries } from './bootstrap/image-render.ts';
 import { launchBot } from './bootstrap/launch.ts';
 import { initLocationVerification } from './bootstrap/location.ts';
 import { initNotificationScheduler } from './bootstrap/notifications.ts';
@@ -39,6 +39,7 @@ import { initSpeechServices } from './bootstrap/speech.ts';
 import { initVoiceCalls } from './bootstrap/voice-calls.ts';
 import { initWeatherService } from './bootstrap/weather.ts';
 import { createBot } from './bot/index.ts';
+import { createTelegramSender } from './services/ai/telegram-sender.ts';
 import { createServiceTier } from './services/telegram-session/service-tier.ts';
 import { botLogger } from './utils/logger.ts';
 import { startWebServer } from './web/server.ts';
@@ -63,7 +64,7 @@ if (serviceTier.enabled) {
 const botHandle = createBotHandle<{ api: TelegramSendApi }>();
 
 const googleSync = await initGoogleSync(ctx, botHandle);
-const renderService = await initImageRender(ctx);
+const imageRender = await initImageRender(ctx);
 
 // Broadcast queue — enqueuer created early so createBot() can wire it into tool handlers.
 // The worker starts later, after botRef is patched.
@@ -78,6 +79,7 @@ const eventMentionStore = await initEventMentionStore(ctx);
 const domainEventBus = createDomainEventBus(ctx, {
   participantPushScheduler: googleSync?.participantPushScheduler,
   weatherService,
+  imageDelivery: imageRender?.imageDelivery,
 });
 const location = await initLocationVerification(ctx, {
   weatherService,
@@ -97,7 +99,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
     },
     {
       googleDeps: googleSync?.googleDeps,
-      renderService,
+      imageDelivery: imageRender?.imageDelivery,
       callQueue,
       transcriptionService: speech.transcriptionService,
       serviceTier,
@@ -128,6 +130,7 @@ botHandle.set(bot);
 patchBotRef(ctx.botRef, bot.api);
 // Created after botRef is patched so every send is the real implementation.
 broadcast.startWorker(ctx, bot.api);
+if (imageRender) recoverImageDeliveries(imageRender.imageDelivery, createTelegramSender(bot));
 
 await initScheduledAi(ctx, {
   domainEventBus,

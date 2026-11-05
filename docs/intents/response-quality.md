@@ -29,6 +29,18 @@ integration is never an empty result.
 **Proportion.** A short question does not need a long formal report. Necessary clarifications
 stay; internal identifiers are shown only when they help choose or confirm an object.
 
+**Pictures are announced as coming, never as attached.** A day, week, month, table or schedule-comparison
+picture is rendered in the background and arrives as its own message after the text answer, whether it
+comes from the AI, a command (`/today`, `/tomorrow`, `/week`, `/month`), an agenda button or an
+invitation notice (see the deploy runbook, "Asynchronous pictures"). An answer or workflow reply therefore
+never says the picture "is attached", "is below" or "was sent": the tool result reads "is being prepared
+and will arrive in the chat as a separate message" (ru: «готовится и придёт в чат отдельным сообщением»),
+i.e. the picture is on the way. When the AI answers, the facts a picture shows belong in its text as
+before; a command's text already carries them. When a picture cannot be made the user gets exactly one
+short note saying so (it timed out, it failed, or the bot restarted), naming the picture by its date,
+week, month or title and offering to try again; the note never contains an internal error and never claims
+the text already says everything the picture showed.
+
 ## Example
 
 Request: "Что завтра?" ("What is tomorrow?")

@@ -31,7 +31,7 @@ as before. No existing column or row is read, changed or deleted.
 ## Order in the file
 
 Appended after `067_ai_usage_role_preset_cost`, the last entry. Nothing is moved or renumbered. The number
-069 leaves 068 to the other open changes that claim it (the AI speed metrics and the image deliveries).
+069 leaves 068 to the other open change that claims it (the AI speed metrics); the image deliveries took 070.
 
 ## Why it is safe to deploy automatically
 

@@ -40,6 +40,13 @@ export const enInvitations = {
     `📨 ${name} declined your invitation to "<b>${title}</b>" ❌`,
   invitation_response_maybe: (name: string, title: string) =>
     `📨 ${name} responded "maybe" to your invitation to "<b>${title}</b>" 🤔`,
+  /** What the inviter's picture note calls the schedule-comparison picture sent after an acceptance. */
+  invitation_conflict_picture_label: 'schedule comparison',
+  /** The inviter's note when the schedule-comparison picture was skipped because the bot has too many pictures pending. */
+  invitation_conflict_picture_skipped:
+    'The schedule comparison picture was skipped: too many pictures are already being prepared.',
+  /** The inviter's note when the schedule-comparison job could not even be built; there is no text version of it. */
+  invitation_conflict_picture_failed: 'The schedule comparison picture could not be prepared.',
   // SAFETY: every name argument must already be HTML-escaped.
   invitationRoster: {
     header: '👥 Participants:',

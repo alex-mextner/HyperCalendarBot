@@ -26,6 +26,7 @@ import { HolidayService } from '../../../src/services/holiday/holiday-service.ts
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 import { PrivacyService } from '../../../src/services/sharing/privacy-service.ts';
 import { SharingService } from '../../../src/services/sharing/sharing-service.ts';
+import { makeImageDelivery } from '../../fixtures/image-delivery.ts';
 
 const USER_ID = 5081;
 const INVITEE_ID = 5082;
@@ -233,7 +234,7 @@ describe('silent final guard (#508)', () => {
     expect(delivered.at(-1)).toContain(`${tr.operations.create_event.done}: событие «Синтетическая встреча»`);
   });
 
-  /** Wires a renderer and records every photo actually sent to the chat. */
+  /** Wires a renderer behind the real background delivery and records every photo actually sent to the chat. */
   const stubRenderer = (renderDirect: () => Promise<Buffer>) => {
     const photos: File[] = [];
     sender.sendPhoto = async (_chatId, photo) => {
@@ -241,9 +242,11 @@ describe('silent final guard (#508)', () => {
       return { message_id: 44 };
     };
     ctx.sender = sender;
-    ctx.renderService = { renderDirect };
+    ctx.imageDelivery = makeImageDelivery(renderDirect).delivery;
     return photos;
   };
+  /** The picture is delivered after the turn: wait for the background delivery before asserting on it. */
+  const settle = () => ctx.imageDelivery!.whenIdle();
   // Smallest header sendAgendaImage accepts: PNG signature + IHDR 1×1.
   const png = Buffer.concat([
     Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
@@ -254,9 +257,10 @@ describe('silent final guard (#508)', () => {
   test.each([
     ['[SKIP]', '[SKIP]'],
     ['empty', ''],
-  ])('a rendered image already answered the request: %s final adds no notice and no bare "..."', async (_label, finalText) => {
+  ])('a queued image already answers the request: %s final adds no notice and no bare "..."', async (_label, finalText) => {
     const photos = stubRenderer(async () => png);
     const result = await run([renderTable, { text: finalText }]);
+    await settle();
 
     expect(photos).toHaveLength(1);
     expect(result.responseText).toBe('');
@@ -265,35 +269,51 @@ describe('silent final guard (#508)', () => {
     expect(delivered.some((text) => text.endsWith('...'))).toBe(false);
   });
 
-  test("a throttled repeat render sent no photo, so '[SKIP]' still gets the could-not-answer line", async () => {
+  test("a throttled repeat render queued nothing, so '[SKIP]' still gets the could-not-answer line", async () => {
     const photos = stubRenderer(async () => png);
     await run([renderTable, { text: '[SKIP]' }]);
+    await settle();
     delivered.length = 0;
     deleted.length = 0;
 
-    // The identical call within the 5 s throttle window is skipped without sending anything.
+    // The identical call within the 5 s throttle window is skipped without queueing anything.
     await run([renderTable, { text: '[SKIP]' }]);
+    await settle();
 
     expect(photos).toHaveLength(1);
     expect(deleted).toEqual([]);
     expect(delivered.at(-1)).toContain(t('ru').ai_unanswered);
   });
 
-  test("a failed render sent no photo, so '[SKIP]' still gets the could-not-answer line", async () => {
+  test("a render that fails after it was queued: '[SKIP]' stays quiet and the user gets the delivery's one honest note", async () => {
     const photos = stubRenderer(async () => {
       throw new Error('synthetic renderer outage');
     });
     await run([renderTable, { text: '[SKIP]' }]);
+    await settle();
 
     expect(photos).toHaveLength(0);
-    expect(deleted).toEqual([]);
-    expect(delivered.at(-1)).toContain(t('ru').ai_unanswered);
+    expect(delivered.filter((text) => text === t('ru').aiTools.meta.imageNoteFailed('Неделя'))).toHaveLength(1);
+    expect(delivered.join('\n')).not.toContain(t('ru').ai_unanswered);
+  });
+
+  test("an upload cut off after it was queued: '[SKIP]' stays quiet and the user gets one note that the picture may not have arrived", async () => {
+    const photos = stubRenderer(async () => png);
+    sender.sendPhoto = async () => {
+      throw new Error('socket hang up');
+    };
+    await run([renderTable, { text: '[SKIP]' }]);
+    await settle();
+
+    expect(photos).toHaveLength(0);
+    expect(delivered.filter((text) => text === t('ru').aiTools.meta.imageNoteUncertain('Неделя'))).toHaveLength(1);
+    expect(delivered.join('\n')).not.toContain(t('ru').ai_unanswered);
   });
 
   test.each([
-    ['a reaction then a failed render', 'reaction-first'],
-    ['a failed render then a reaction', 'render-first'],
-  ])("%s: a 👍 does not stand in for the picture that never came, so '[SKIP]' gets the could-not-answer line", async (_label, order) => {
+    ['a reaction then a failing render', 'reaction-first'],
+    ['a failing render then a reaction', 'render-first'],
+  ])('%s: still one note for the picture, and no could-not-answer line', async (_label, order) => {
     const photos = stubRenderer(async () => {
       throw new Error('synthetic renderer outage');
     });
@@ -302,30 +322,34 @@ describe('silent final guard (#508)', () => {
       ...(order === 'reaction-first' ? [reaction, renderTable] : [renderTable, reaction]),
       { text: '[SKIP]' },
     ]);
+    await settle();
 
     expect(photos).toHaveLength(0);
-    expect(deleted).toEqual([]);
-    expect(delivered.at(-1)).toContain(t('ru').ai_unanswered);
+    expect(delivered.filter((text) => text === t('ru').aiTools.meta.imageNoteFailed('Неделя'))).toHaveLength(1);
+    expect(delivered.join('\n')).not.toContain(t('ru').ai_unanswered);
   });
 
-  test("a reaction then a throttled repeat render (no photo sent) does not excuse '[SKIP]'", async () => {
+  test("a reaction then a throttled repeat render (nothing queued) does not excuse '[SKIP]'", async () => {
     const photos = stubRenderer(async () => png);
     await run([renderTable, { text: '[SKIP]' }]);
+    await settle();
     delivered.length = 0;
     deleted.length = 0;
 
     await run([{ tool: 'set_reaction', input: () => ({ emoji: '👍' }) }, renderTable, { text: '[SKIP]' }]);
+    await settle();
 
     expect(photos).toHaveLength(1);
     expect(delivered.at(-1)).toContain(t('ru').ai_unanswered);
   });
 
-  test("a delivered picture stays the answer when a reaction after it fails: '[SKIP]' adds no notice", async () => {
+  test("a queued picture stays the answer when a reaction after it fails: '[SKIP]' adds no notice", async () => {
     const photos = stubRenderer(async () => png);
     sender.setReaction = async () => {
       throw new Error('synthetic REACTION_INVALID');
     };
     await run([renderTable, { tool: 'set_reaction', input: () => ({ emoji: '👍' }) }, { text: '[SKIP]' }]);
+    await settle();
 
     expect(photos).toHaveLength(1);
     expect(delivered.join('\n')).not.toContain(t('ru').ai_unanswered);

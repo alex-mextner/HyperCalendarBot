@@ -1,14 +1,18 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleTomorrow } from '../../../src/bot/commands/tomorrow.ts';
+import { asCommandContext, asEventService } from '../../fixtures/doubles.ts';
+import { describePictureContract, gatedDelivery } from '../../fixtures/picture-contract.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
 
 function makeCtx(overrides = {}) {
   return {
+    id: 7,
     dbUser: user,
     send: mock(() => Promise.resolve()),
-    sendPhoto: mock(() => Promise.resolve()),
+    sendPhoto: mock(() => Promise.resolve({ id: 42 })),
+    sendDocument: mock(() => Promise.resolve({ id: 43 })),
     ...overrides,
   };
 }
@@ -45,7 +49,7 @@ describe('handleTomorrow', () => {
     expect(text).toContain('Нет событий');
   });
 
-  test('does not call sendPhoto when no renderService', async () => {
+  test('does not call sendPhoto when there is no image delivery (text-only)', async () => {
     const { handleTomorrow } = await import('../../../src/bot/commands/tomorrow.ts');
     const ctx = makeCtx();
     const svc = makeEventService();
@@ -55,15 +59,18 @@ describe('handleTomorrow', () => {
     expect(ctx.sendPhoto).not.toHaveBeenCalled();
   });
 
-  test('calls renderService when provided and catches errors', async () => {
+  test('a render failure is told once by the delivery, not by the command', async () => {
     const { handleTomorrow } = await import('../../../src/bot/commands/tomorrow.ts');
     const ctx = makeCtx();
     const svc = makeEventService();
-    const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
+    const { delivery, fail } = gatedDelivery();
 
-    await handleTomorrow(ctx as never, svc as never, undefined, renderService as never);
+    await handleTomorrow(asCommandContext(ctx), asEventService(svc), undefined, delivery);
+    fail(new Error('render failed'));
+    await delivery.whenIdle();
+
     expect(ctx.send).toHaveBeenCalledTimes(2);
-    expect(ctx.send).toHaveBeenLastCalledWith('⚠️ Image generation failed. Use text version above.');
+    expect((ctx.send.mock.calls[1] as unknown[])[0]).toContain('could not prepare the picture');
   });
 
   test('shows holiday entries when holidayService returns them', async () => {
@@ -178,4 +185,27 @@ describe('handleTomorrow group context', () => {
     expect(eventService.getEventsForDay).toHaveBeenCalled();
     expect(eventService.getEventsInRangeForGroup).not.toHaveBeenCalled();
   });
+});
+
+describePictureContract('handleTomorrow', () => {
+  const texts: string[] = [];
+  let photos = 0;
+  return {
+    run: (delivery, requestId) => {
+      const ctx = makeCtx({
+        id: requestId,
+        send: mock((text: string) => {
+          texts.push(text);
+          return Promise.resolve();
+        }),
+        sendPhoto: mock(() => {
+          photos++;
+          return Promise.resolve({ id: 42 });
+        }),
+      });
+      return handleTomorrow(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
+    },
+    photos: () => photos,
+    texts: () => [...texts],
+  };
 });

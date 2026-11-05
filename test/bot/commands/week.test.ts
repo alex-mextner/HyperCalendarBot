@@ -1,15 +1,19 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { TZDate } from '@date-fns/tz';
 import { handleWeek } from '../../../src/bot/commands/week.ts';
+import { asCommandContext, asEventService } from '../../fixtures/doubles.ts';
+import { describePictureContract, gatedDelivery } from '../../fixtures/picture-contract.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
 
 function makeCtx(overrides = {}) {
   return {
+    id: 7,
     dbUser: user,
     send: mock(() => Promise.resolve()),
-    sendPhoto: mock(() => Promise.resolve()),
+    sendPhoto: mock(() => Promise.resolve({ id: 42 })),
+    sendDocument: mock(() => Promise.resolve({ id: 43 })),
     ...overrides,
   };
 }
@@ -46,7 +50,7 @@ describe('handleWeek', () => {
     expect(text).toContain('нет событий');
   });
 
-  test('does not call sendPhoto when no renderService', async () => {
+  test('does not call sendPhoto when there is no image delivery (text-only)', async () => {
     const { handleWeek } = await import('../../../src/bot/commands/week.ts');
     const ctx = makeCtx();
     const svc = makeEventService();
@@ -56,16 +60,18 @@ describe('handleWeek', () => {
     expect(ctx.sendPhoto).not.toHaveBeenCalled();
   });
 
-  test('calls renderService when provided and catches errors', async () => {
+  test('a render failure is told once by the delivery, not by the command', async () => {
     const { handleWeek } = await import('../../../src/bot/commands/week.ts');
     const ctx = makeCtx();
     const svc = makeEventService();
-    const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
+    const { delivery, fail } = gatedDelivery();
 
-    await handleWeek(ctx as never, svc as never, undefined, renderService as never);
+    await handleWeek(asCommandContext(ctx), asEventService(svc), undefined, delivery);
+    fail(new Error('render failed'));
+    await delivery.whenIdle();
 
     expect(ctx.send).toHaveBeenCalledTimes(2);
-    expect(ctx.send).toHaveBeenLastCalledWith('⚠️ Image generation failed. Use text version above.');
+    expect((ctx.send.mock.calls[1] as unknown[])[0]).toContain('could not prepare the picture');
   });
 
   test('queries holidayService for each of 7 days', async () => {
@@ -257,4 +263,27 @@ describe('handleWeek group context', () => {
     expect(text).toContain('🌨');
     expect(text).toContain('-5..1°');
   });
+});
+
+describePictureContract('handleWeek', () => {
+  const texts: string[] = [];
+  let photos = 0;
+  return {
+    run: (delivery, requestId) => {
+      const ctx = makeCtx({
+        id: requestId,
+        send: mock((text: string) => {
+          texts.push(text);
+          return Promise.resolve();
+        }),
+        sendPhoto: mock(() => {
+          photos++;
+          return Promise.resolve({ id: 42 });
+        }),
+      });
+      return handleWeek(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
+    },
+    photos: () => photos,
+    texts: () => [...texts],
+  };
 });
