@@ -1215,7 +1215,7 @@ describe('agent-run-incident alerts (a user run that ended badly while /health a
       .sort();
     expect(found).toEqual(['1,2|2|2|1', '6,7|2|2|2', '8,9|2|1|1']);
 
-    const rows = db.query<Record<string, unknown>, []>(copies.replace('<ids>', '8, 9')).all();
+    const rows = db.query<{ id: number; is_deleted: number }, []>(copies.replace('<ids>', '8, 9')).all();
     expect(rows.map((row) => [row.id, row.is_deleted])).toEqual([
       [8, 0],
       [9, 1],
