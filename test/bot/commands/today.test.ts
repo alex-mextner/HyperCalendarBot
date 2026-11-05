@@ -3,6 +3,7 @@ import { handleToday } from '../../../src/bot/commands/today.ts';
 import { t } from '../../../src/config/constants.ts';
 import { configureTimeoutReporter } from '../../../src/services/incident/timeout-reporter.ts';
 import { AgendaImageError } from '../../../src/utils/agenda-image.ts';
+import { asCommandContext, asEventService } from '../../fixtures/doubles.ts';
 import { captureTimeoutAlerts, gatedDelivery } from '../../fixtures/picture-contract.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
@@ -72,7 +73,7 @@ describe('handleToday', () => {
     const { delivery, renderer, release } = gatedDelivery();
     const ctx = makeCtx();
 
-    await handleToday(ctx as never, makeEventService() as never, undefined, delivery);
+    await handleToday(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
 
     // The handler is done while the render is still pending: only the text went out.
     expect(renderer.renderDirect).toHaveBeenCalledTimes(1);
@@ -97,8 +98,8 @@ describe('handleToday', () => {
     const ctx = makeCtx();
     const again = makeCtx({ id: 8 });
 
-    await handleToday(ctx as never, makeEventService() as never, undefined, delivery);
-    await handleToday(again as never, makeEventService() as never, undefined, delivery);
+    await handleToday(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
+    await handleToday(asCommandContext(again), asEventService(makeEventService()), undefined, delivery);
     releaseAll();
     await delivery.whenIdle();
 
@@ -109,7 +110,7 @@ describe('handleToday', () => {
     const { delivery, fail, failures } = gatedDelivery();
     const ctx = makeCtx();
 
-    await handleToday(ctx as never, makeEventService() as never, undefined, delivery);
+    await handleToday(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
     fail(new Error('chromium crashed'));
     await delivery.whenIdle();
 
@@ -126,7 +127,7 @@ describe('handleToday', () => {
     const { delivery, failures } = gatedDelivery({ boundMs: 20 });
     const ctx = makeCtx();
 
-    await handleToday(ctx as never, makeEventService() as never, undefined, delivery);
+    await handleToday(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
     await delivery.whenIdle();
 
     expect(ctx.send).toHaveBeenCalledTimes(2);
@@ -140,7 +141,7 @@ describe('handleToday', () => {
     const { delivery, fail, failures } = gatedDelivery();
     const ctx = makeCtx();
 
-    await handleToday(ctx as never, makeEventService() as never, undefined, delivery);
+    await handleToday(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
     fail(new AgendaImageError('Agenda PNG exceeds the 50 MB document limit. Choose a shorter date range.', true));
     await delivery.whenIdle();
 
@@ -154,7 +155,7 @@ describe('handleToday', () => {
     const { delivery, fail } = gatedDelivery();
     const ctx = makeCtx({ dbUser: userRu });
 
-    await handleToday(ctx as never, makeEventService() as never, undefined, delivery);
+    await handleToday(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
     fail(new Error('render failed'));
     await delivery.whenIdle();
 

@@ -1,5 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
+import type { ImageDelivery } from '../../../src/services/image/image-delivery.ts';
+import { asCallbackContext } from '../../fixtures/doubles.ts';
 import { describePictureContract, gatedDelivery } from '../../fixtures/picture-contract.ts';
 
 function makeCtx(data: string, language = 'en', extras: { chat?: unknown; message?: unknown } = {}) {
@@ -38,7 +40,7 @@ function makeHandler(
     calendarRepo?: unknown;
     disconnectDeps?: unknown;
     onCalendarsDone?: unknown;
-    imageDelivery?: unknown;
+    imageDelivery?: ImageDelivery;
     invitationService?: unknown;
     eventRepo?: unknown;
   } = {},
@@ -52,7 +54,7 @@ function makeHandler(
       calendarRepo: overrides.calendarRepo as never,
       disconnectDeps: overrides.disconnectDeps as never,
       onCalendarsDone: overrides.onCalendarsDone as never,
-      imageDelivery: overrides.imageDelivery as never,
+      imageDelivery: overrides.imageDelivery,
       invitationService: overrides.invitationService as never,
       eventRepo: overrides.eventRepo as never,
     },
@@ -438,7 +440,7 @@ describe('IMG_DAILY callback', () => {
           holidayService,
           imageDelivery: delivery,
         });
-        return handler({ ...ctx, id: `cb-${requestId}` } as never);
+        return handler(asCallbackContext({ ...ctx, id: `cb-${requestId}` }));
       },
       photos: tapped.photos,
       texts: tapped.texts,
@@ -511,7 +513,7 @@ describe('IMG_WEEKLY callback', () => {
           eventService: makeEventService({ getEventsInRange: mock(() => []) }),
           imageDelivery: delivery,
         });
-        return handler({ ...ctx, id: `cb-${requestId}` } as never);
+        return handler(asCallbackContext({ ...ctx, id: `cb-${requestId}` }));
       },
       photos: tapped.photos,
       texts: tapped.texts,

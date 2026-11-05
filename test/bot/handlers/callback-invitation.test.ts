@@ -1,6 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, mock, test } from 'bun:test';
+import type { AnyScene } from '@gramio/scenes';
 import type { InlineKeyboard } from 'gramio';
+import type { CallbackHandlerOpts } from '../../../src/bot/handlers/callback/types.ts';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
 import { t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
@@ -12,11 +14,14 @@ import { SharingSettingsRepository } from '../../../src/database/repositories/sh
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
+import type { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import type { ImageDelivery } from '../../../src/services/image/image-delivery.ts';
+import type { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
 import { DomainEventBus } from '../../../src/services/scheduled/domain-event-bus.ts';
 import { InvitationCardRefresher, type InvitationEditOptions } from '../../../src/services/sharing/invitation-cards.ts';
 import { invitationRsvpKeyboard } from '../../../src/services/sharing/invitation-rsvp-keyboard.ts';
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
+import { asCallbackContext, asDouble } from '../../fixtures/doubles.ts';
 import { makeImageDelivery } from '../../fixtures/image-delivery.ts';
 import { describePictureContract, gatedDelivery } from '../../fixtures/picture-contract.ts';
 import { png } from '../../fixtures/png.ts';
@@ -634,12 +639,18 @@ describe('conflict image on accept', () => {
     };
     const invSvc = { acceptInvitation: mock(() => ({ success: true, invitation: inv })) };
     const notifyDeps = { userRepo, sendMessage, sendPhoto };
-    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
-      imageDelivery: options.delivery as never,
-      invitationService: invSvc as never,
-      eventRepo: eventRepo as never,
-      invitationNotifyDeps: notifyDeps as never,
-    });
+    const handler = createCallbackHandler(
+      asDouble<EventService>({}),
+      asDouble<AnyScene>({}),
+      asDouble<HolidayService>({}),
+      asDouble<NotificationPreferencesService>({}),
+      {
+        imageDelivery: options.delivery,
+        invitationService: asDouble<InvitationService>(invSvc),
+        eventRepo: asDouble<EventRepository>(eventRepo),
+        invitationNotifyDeps: asDouble<CallbackHandlerOpts['invitationNotifyDeps']>(notifyDeps),
+      },
+    );
     const tap = async (callbackId = 'cb-1') => {
       const ctx = {
         id: callbackId,
@@ -648,7 +659,7 @@ describe('conflict image on accept', () => {
         answer: mock(() => Promise.resolve()),
         editText: mock(() => Promise.resolve()),
       };
-      await handler(ctx as never);
+      await handler(asCallbackContext(ctx));
       await flushPromises(); // notifyInviter is fire-and-forget
       return ctx;
     };

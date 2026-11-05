@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleTomorrow } from '../../../src/bot/commands/tomorrow.ts';
+import { asCommandContext, asEventService } from '../../fixtures/doubles.ts';
 import { describePictureContract, gatedDelivery } from '../../fixtures/picture-contract.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
@@ -64,7 +65,7 @@ describe('handleTomorrow', () => {
     const svc = makeEventService();
     const { delivery, fail } = gatedDelivery();
 
-    await handleTomorrow(ctx as never, svc as never, undefined, delivery);
+    await handleTomorrow(asCommandContext(ctx), asEventService(svc), undefined, delivery);
     fail(new Error('render failed'));
     await delivery.whenIdle();
 
@@ -202,7 +203,7 @@ describePictureContract('handleTomorrow', () => {
           return Promise.resolve({ id: 42 });
         }),
       });
-      return handleTomorrow(ctx as never, makeEventService() as never, undefined, delivery);
+      return handleTomorrow(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
     },
     photos: () => photos,
     texts: () => [...texts],

@@ -337,11 +337,10 @@ for (const prefix of [CB.IMG_DAILY, CB.IMG_WEEKLY]) {
     expect(documents).toBe(1);
     bot.api.sendDocument = async () => {
       // Telegram's own answer: the document was not accepted, so the user is told (a dropped connection would not be).
-      throw new TelegramError(
-        { ok: false, error_code: 400, description: 'Bad Request: rejected' },
-        'sendDocument',
-        {} as never,
-      );
+      throw new TelegramError({ ok: false, error_code: 400, description: 'Bad Request: rejected' }, 'sendDocument', {
+        chat_id: 1,
+        document: 'document',
+      });
     };
     bot.api.sendMessage = async (params) => {
       errors.push(String(params.text));

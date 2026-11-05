@@ -116,6 +116,18 @@ export type ImageDeliveryOutcome =
   /** Another attempt (a process that overlapped this one during a deploy) already claimed the send: nothing was uploaded here. */
   | 'claimed_elsewhere';
 
+/** The facts an outcome log line carries beyond the delivery's identity. */
+export interface ImageOutcomeDetails {
+  phase?: 'send' | 'render' | 'recovery';
+  delivery?: 'unknown' | 'not_started';
+  messageId?: number;
+  errorName?: string;
+  expected?: boolean;
+  recovered?: boolean;
+  stale?: boolean;
+  resumable?: boolean;
+}
+
 export interface RenderFailureReport {
   kind: ImageKind;
   jobType: ImageRenderJob['type'];
@@ -179,7 +191,7 @@ class SendTimeoutError extends Error {
 }
 
 /** The persisted state an outcome ends in: an upload of unknown end is `unknown`, a render cut by the bound `expired`. */
-function storedState(outcome: ImageDeliveryOutcome, details: Record<string, unknown>): ImageDeliveryEndState {
+function storedState(outcome: ImageDeliveryOutcome, details: ImageOutcomeDetails): ImageDeliveryEndState {
   if (outcome === 'delivered') return 'delivered';
   if (outcome === 'unknown') return 'unknown';
   if (outcome === 'superseded') return 'superseded';
@@ -822,12 +834,7 @@ export class ImageDelivery {
   }
 
   /** Logs the one outcome of the delivery (never user text) and records it. False when it was already settled. */
-  private settle(
-    entry: Entry,
-    outcome: ImageDeliveryOutcome,
-    details: Record<string, unknown>,
-    persist = true,
-  ): boolean {
+  private settle(entry: Entry, outcome: ImageDeliveryOutcome, details: ImageOutcomeDetails, persist = true): boolean {
     if (entry.settled) return false;
     entry.settled = true;
     const at = this.now();
@@ -902,7 +909,7 @@ export class ImageDelivery {
     outcome: ImageDeliveryOutcome,
     row: { chat_id: number; kind: string; job_type: string; created_at: number },
     at: number,
-    details: Record<string, unknown>,
+    details: ImageOutcomeDetails,
   ): void {
     imageLogger.info(
       {

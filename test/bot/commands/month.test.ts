@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleMonth } from '../../../src/bot/commands/month.ts';
+import { asCommandContext, asEventService } from '../../fixtures/doubles.ts';
 import { describePictureContract, gatedDelivery } from '../../fixtures/picture-contract.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
@@ -118,7 +119,7 @@ describe('handleMonth', () => {
     const { delivery, release } = gatedDelivery();
 
     // yearMonth undefined -> queues the picture (only on the initial /month command)
-    await handleMonth(ctx as never, svc as never, undefined, delivery);
+    await handleMonth(asCommandContext(ctx), asEventService(svc), undefined, delivery);
     expect(ctx.sendPhoto).not.toHaveBeenCalled();
     release();
     await delivery.whenIdle();
@@ -137,7 +138,7 @@ describe('handleMonth', () => {
     const ctx = makeCtx({ id: 7, sendPhoto: mock(() => Promise.resolve({ id: 55 })) });
     const { delivery, renderer } = gatedDelivery();
 
-    await handleMonth(ctx as never, makeEventService() as never, '2026-02', delivery);
+    await handleMonth(asCommandContext(ctx), asEventService(makeEventService()), '2026-02', delivery);
 
     expect(renderer.renderDirect).not.toHaveBeenCalled();
   });
@@ -145,7 +146,7 @@ describe('handleMonth', () => {
   test('a month render failure is told once by the delivery and does not blame the date range', async () => {
     const ctx = makeCtx({ id: 7 });
     const { delivery, fail } = gatedDelivery();
-    await handleMonth(ctx as never, makeEventService() as never, undefined, delivery);
+    await handleMonth(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
 
     fail(new Error('render failed'));
     await delivery.whenIdle();
@@ -224,7 +225,7 @@ describePictureContract('handleMonth', () => {
           return Promise.resolve({ id: 55 });
         }),
       });
-      return handleMonth(ctx as never, makeEventService() as never, undefined, delivery);
+      return handleMonth(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
     },
     photos: () => photos,
     texts: () => [...texts],

@@ -2,7 +2,8 @@ import { describe, expect, mock, test } from 'bun:test';
 import { TelegramError } from 'gramio';
 import { t } from '../../../../src/config/constants.ts';
 import { handleRenderTable } from '../../../../src/services/ai/tool-handlers/render.ts';
-import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import type { AgentContext, TelegramSender } from '../../../../src/services/ai/types.ts';
+import { asDouble } from '../../../fixtures/doubles.ts';
 import { makeImageDelivery } from '../../../fixtures/image-delivery.ts';
 import { png } from '../../../fixtures/png.ts';
 
@@ -49,10 +50,10 @@ describe('handleRenderTable', () => {
   test('the photo is sent by the background delivery, after the handler returned', async () => {
     const sendPhoto = mock(() => Promise.resolve({ message_id: 42 }));
     const ctx = makeCtx({
-      sender: {
+      sender: asDouble<TelegramSender>({
         sendPhoto,
         sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
-      } as never,
+      }),
     });
     await handleRenderTable(ctx, { title: 'T', markdown: '| A |\n|---|\n| 1 |' });
     expect(sendPhoto).not.toHaveBeenCalled();
@@ -109,13 +110,12 @@ describe('handleRenderTable', () => {
 
   test('an upload Telegram refused sends one note and is not reported as delivered', async () => {
     const sendMessage = mock(() => Promise.resolve({ message_id: 1 }));
-    const refused = new TelegramError(
-      { ok: false, error_code: 429, description: 'Too Many Requests' },
-      'sendPhoto',
-      {} as never,
-    );
+    const refused = new TelegramError({ ok: false, error_code: 429, description: 'Too Many Requests' }, 'sendPhoto', {
+      chat_id: 1,
+      photo: 'photo',
+    });
     const ctx = makeCtx({
-      sender: { sendPhoto: mock(() => Promise.reject(refused)), sendMessage } as never,
+      sender: asDouble<TelegramSender>({ sendPhoto: mock(() => Promise.reject(refused)), sendMessage }),
     });
     const result = await handleRenderTable(ctx, { title: 'T', markdown: '| A |\n|---|\n| 1 |' });
     expect(result.success).toBe(true);
@@ -126,7 +126,7 @@ describe('handleRenderTable', () => {
   test('an upload that ended in a dropped connection may have landed: the note says it may not have arrived, not that it failed', async () => {
     const sendMessage = mock((_chatId: number, text: string) => Promise.resolve({ message_id: 1, text }));
     const sendPhoto = mock(() => Promise.reject(new Error('socket hang up')));
-    const ctx = makeCtx({ sender: { sendPhoto, sendMessage } as never });
+    const ctx = makeCtx({ sender: asDouble<TelegramSender>({ sendPhoto, sendMessage }) });
     await handleRenderTable(ctx, { title: 'T', markdown: '| A |\n|---|\n| 1 |' });
     await ctx.imageDelivery!.whenIdle();
     expect(sendPhoto).toHaveBeenCalledTimes(1); // the upload was attempted, then cut off

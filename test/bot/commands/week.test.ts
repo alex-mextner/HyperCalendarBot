@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { TZDate } from '@date-fns/tz';
 import { handleWeek } from '../../../src/bot/commands/week.ts';
+import { asCommandContext, asEventService } from '../../fixtures/doubles.ts';
 import { describePictureContract, gatedDelivery } from '../../fixtures/picture-contract.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
@@ -65,7 +66,7 @@ describe('handleWeek', () => {
     const svc = makeEventService();
     const { delivery, fail } = gatedDelivery();
 
-    await handleWeek(ctx as never, svc as never, undefined, delivery);
+    await handleWeek(asCommandContext(ctx), asEventService(svc), undefined, delivery);
     fail(new Error('render failed'));
     await delivery.whenIdle();
 
@@ -280,7 +281,7 @@ describePictureContract('handleWeek', () => {
           return Promise.resolve({ id: 42 });
         }),
       });
-      return handleWeek(ctx as never, makeEventService() as never, undefined, delivery);
+      return handleWeek(asCommandContext(ctx), asEventService(makeEventService()), undefined, delivery);
     },
     photos: () => photos,
     texts: () => [...texts],

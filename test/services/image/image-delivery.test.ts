@@ -21,6 +21,8 @@ import {
 import { AgendaImageError } from '../../../src/utils/agenda-image.ts';
 import { imageLogger } from '../../../src/utils/logger.ts';
 import type { ImageRenderJob } from '../../../src/worker/image-render.queue.ts';
+import { THEME_LIGHT } from '../../../src/worker/templates/themes.ts';
+import { asLoggedOutcome, type LoggedOutcome } from '../../fixtures/image-delivery.ts';
 import { png } from '../../fixtures/png.ts';
 
 const tr = t('en').aiTools.meta;
@@ -64,7 +66,7 @@ function job(date: string, extra: string = ''): ImageRenderJob {
       eventCount: 0,
       allDayEvents: [],
       timedEvents: [],
-      theme: { name: 'synthetic' } as never,
+      theme: THEME_LIGHT,
       locale: 'en',
       holidayName: extra,
     },
@@ -118,7 +120,7 @@ function harness(deps: { boundMs?: number; sendBoundMs?: number; ignoreAbort?: b
 /** Every delivery of the running test: one still pending holds a render timer that must not outlive the test. */
 let deliveries: ImageDelivery[];
 let alerts: { text: string; source: string }[];
-let outcomes: Record<string, unknown>[];
+let outcomes: LoggedOutcome[];
 /** Every line the service logged at any level: [fields, message]. */
 let logCalls: unknown[][];
 let infoSpy: ReturnType<typeof spyOn>;
@@ -131,16 +133,16 @@ beforeEach(() => {
   configureTimeoutReporter(new TimeoutReporter((text, source) => alerts.push({ text, source })));
   outcomes = [];
   logCalls = [];
-  infoSpy = spyOn(imageLogger, 'info').mockImplementation(((obj: unknown, message?: string) => {
+  infoSpy = spyOn(imageLogger, 'info').mockImplementation((obj: unknown, message?: string) => {
     logCalls.push([obj, message]);
-    if (message === 'Image delivery outcome') outcomes.push(obj as Record<string, unknown>);
-  }) as never);
-  warnSpy = spyOn(imageLogger, 'warn').mockImplementation(((obj: unknown, message?: string) => {
+    if (message === 'Image delivery outcome') outcomes.push(asLoggedOutcome(obj));
+  });
+  warnSpy = spyOn(imageLogger, 'warn').mockImplementation((obj: unknown, message?: string) => {
     logCalls.push([obj, message]);
-  }) as never);
-  errorSpy = spyOn(imageLogger, 'error').mockImplementation(((obj: unknown, message?: string) => {
+  });
+  errorSpy = spyOn(imageLogger, 'error').mockImplementation((obj: unknown, message?: string) => {
     logCalls.push([obj, message]);
-  }) as never);
+  });
 });
 
 afterEach(async () => {
@@ -362,11 +364,10 @@ describe('a render that fails for another reason', () => {
     h.delivery.enqueue(
       h.request(1, 'day:a', 'v1', {
         send: async () => {
-          throw new TelegramError(
-            { ok: false, error_code: 429, description: 'Too Many Requests' },
-            'sendPhoto',
-            {} as never,
-          );
+          throw new TelegramError({ ok: false, error_code: 429, description: 'Too Many Requests' }, 'sendPhoto', {
+            chat_id: 1,
+            photo: 'photo',
+          });
         },
       }),
     );
@@ -380,7 +381,7 @@ describe('a render that fails for another reason', () => {
 
   test('a note that cannot be sent does not throw out of the delivery', async () => {
     const h = harness();
-    const warn = spyOn(imageLogger, 'warn').mockImplementation((() => undefined) as never);
+    const warn = spyOn(imageLogger, 'warn').mockImplementation(() => {});
     try {
       h.delivery.enqueue(
         h.request(1, 'day:a', 'v1', {
@@ -724,7 +725,7 @@ describe('shutdown while pictures are pending', () => {
 
   test('the notes are bounded by the shutdown budget: a stuck Telegram call cannot hold the exit', async () => {
     const h = harness();
-    const warn = spyOn(imageLogger, 'warn').mockImplementation((() => undefined) as never);
+    const warn = spyOn(imageLogger, 'warn').mockImplementation(() => {});
     try {
       h.delivery.enqueue(h.request(1, 'day:a', 'v1', { notify: () => new Promise<void>(() => {}) }));
       await Promise.resolve();

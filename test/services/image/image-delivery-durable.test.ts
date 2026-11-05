@@ -23,6 +23,7 @@ import {
 import { configureTimeoutReporter, TimeoutReporter } from '../../../src/services/incident/timeout-reporter.ts';
 import { imageLogger } from '../../../src/utils/logger.ts';
 import type { ImageRenderJob } from '../../../src/worker/image-render.queue.ts';
+import { asLoggedOutcome, type LoggedOutcome } from '../../fixtures/image-delivery.ts';
 import { png } from '../../fixtures/png.ts';
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -55,7 +56,7 @@ let db: Database;
 let store: ImageDeliveryRepository;
 let queue: FakeQueue;
 let alerts: string[];
-let outcomes: Record<string, unknown>[];
+let outcomes: LoggedOutcome[];
 let failures: RenderFailureReport[];
 let infoSpy: ReturnType<typeof spyOn>;
 let errorSpy: ReturnType<typeof spyOn>;
@@ -72,10 +73,10 @@ beforeEach(() => {
   failures = [];
   deliveries = [];
   configureTimeoutReporter(new TimeoutReporter((text) => alerts.push(text)));
-  infoSpy = spyOn(imageLogger, 'info').mockImplementation(((obj: unknown, message?: string) => {
-    if (message === 'Image delivery outcome') outcomes.push(obj as Record<string, unknown>);
-  }) as never);
-  errorSpy = spyOn(imageLogger, 'error').mockImplementation((() => undefined) as never);
+  infoSpy = spyOn(imageLogger, 'info').mockImplementation((obj: unknown, message?: string) => {
+    if (message === 'Image delivery outcome') outcomes.push(asLoggedOutcome(obj));
+  });
+  errorSpy = spyOn(imageLogger, 'error').mockImplementation(() => {});
 });
 
 afterEach(async () => {
@@ -623,7 +624,10 @@ describe('supersede and rebuild with a durable record', () => {
 
 describe('every end of a delivery is recorded, told and reported exactly once', () => {
   const refused = (code: number) =>
-    new TelegramError({ ok: false, error_code: code, description: 'Bad Request' }, 'sendPhoto', {} as never);
+    new TelegramError({ ok: false, error_code: code, description: 'Bad Request' }, 'sendPhoto', {
+      chat_id: 1,
+      photo: 'photo',
+    });
 
   function enqueueWith(overrides: Partial<ImageDeliveryRequest>) {
     const process1 = startProcess();
@@ -703,18 +707,17 @@ describe('every end of a delivery is recorded, told and reported exactly once', 
     ['a chat that is gone (404)', refused(404)],
     [
       'a chat Telegram reports as not found (400)',
-      new TelegramError(
-        { ok: false, error_code: 400, description: 'Bad Request: chat not found' },
-        'sendPhoto',
-        {} as never,
-      ),
+      new TelegramError({ ok: false, error_code: 400, description: 'Bad Request: chat not found' }, 'sendPhoto', {
+        chat_id: 1,
+        photo: 'photo',
+      }),
     ],
     [
       'a group that does not let the bot send photos',
       new TelegramError(
         { ok: false, error_code: 400, description: 'Bad Request: not enough rights to send photos to the chat' },
         'sendPhoto',
-        {} as never,
+        { chat_id: 1, photo: 'photo' },
       ),
     ],
   ] as const) {

@@ -59,7 +59,7 @@ beforeEach(() => {
   store = new ImageDeliveryRepository(db);
   alerts = [];
   configureTimeoutReporter(new TimeoutReporter((text) => alerts.push(text)));
-  errorSpy = spyOn(botLogger, 'error').mockImplementation((() => undefined) as never);
+  errorSpy = spyOn(botLogger, 'error').mockImplementation(() => {});
 });
 
 afterEach(() => {

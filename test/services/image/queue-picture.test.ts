@@ -120,8 +120,8 @@ describe('queuePicture', () => {
 
   test('a note that cannot be sent is logged once, not thrown, and the picture is still not queued', async () => {
     const g = gatedDelivery();
-    const warn = spyOn(imageLogger, 'warn').mockImplementation((() => undefined) as never);
-    const error = spyOn(imageLogger, 'error').mockImplementation((() => undefined) as never);
+    const warn = spyOn(imageLogger, 'warn').mockImplementation(() => {});
+    const error = spyOn(imageLogger, 'error').mockImplementation(() => {});
     try {
       const { picture } = request({
         buildJob: () => {
