@@ -2,10 +2,21 @@
 //
 // The installer is what keeps the incident consumer alive on the owner's PC, so it has to be safe to
 // run twice (the second run must not restart a healthy service) and must never put the alert secret
-// where a process list, a unit file or a terminal could show it. systemctl, keychain, loginctl, ssh
-// and bun are stubs in a throwaway HOME: nothing here reaches the real user manager or keyring.
+// where a process list, a unit file or a terminal could show it. systemctl, keychain, loginctl and ssh
+// are stubs in a throwaway HOME: nothing here reaches the real user manager or keyring. bun is a stub
+// too, except in the tests that check the watcher's build against the real binary.
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -270,6 +281,155 @@ describe('install', () => {
     expect(exitCode).not.toBe(0);
     expect(output).toContain('hcb-alert-watcher.ts');
     expect(existsSync(unitPath())).toBe(false);
+  });
+
+  /** The tests below build the watcher with the real Bun, which is what the installer's check runs. */
+  function useRealBun(): void {
+    rmSync(join(work, 'bin/bun'));
+    symlinkSync(process.execPath, join(work, 'bin/bun'));
+  }
+
+  function writeWatcher(source: string): void {
+    writeFileSync(join(repo, 'scripts/hcb-alert-watcher.ts'), source);
+  }
+
+  /** A refused install writes no unit and runs no systemctl command. */
+  function expectNothingInstalled(): void {
+    expect(existsSync(unitPath())).toBe(false);
+    expect(calls('systemctl.log')).toEqual([]);
+  }
+
+  test('with the real bun, a watcher whose package is not installed is refused with the install command', async () => {
+    writeFileSync(join(work, 'secret-present'), '');
+    useRealBun();
+    // A name that exists on no machine: a `zod` here would resolve whenever TMPDIR sits inside a checkout.
+    writeWatcher(`export { z } from 'hcb-missing-package-${crypto.randomUUID()}';\n`);
+    const { exitCode, output } = await install();
+
+    expect(exitCode).not.toBe(0);
+    expect(output).toMatch(/Could not resolve/);
+    expect(output).toContain(`(cd ${repo} && bun install --frozen-lockfile)`);
+    expectNothingInstalled();
+  });
+
+  test('with the real bun, a package whose installed version lacks an export is refused with the install command', async () => {
+    writeFileSync(join(work, 'secret-present'), '');
+    useRealBun();
+    // What a merge that raises a dependency leaves behind: the package resolves, but the old copy lacks the name.
+    mkdirSync(join(repo, 'node_modules/hcb-old-package'), { recursive: true });
+    writeFileSync(
+      join(repo, 'node_modules/hcb-old-package/package.json'),
+      JSON.stringify({ name: 'hcb-old-package', version: '1.0.0', main: 'index.js', type: 'module' }),
+    );
+    writeFileSync(join(repo, 'node_modules/hcb-old-package/index.js'), 'export const oldName = 1;\n');
+    writeWatcher("export { newName } from 'hcb-old-package';\n");
+    const { exitCode, output } = await install();
+
+    expect(exitCode).not.toBe(0);
+    expect(output).toContain('No matching export');
+    expect(output).toContain(`(cd ${repo} && bun install --frozen-lockfile)`);
+    expectNothingInstalled();
+  });
+
+  test("with the real bun, a build failure that is not a missing package shows Bun's own error and does not blame the dependencies", async () => {
+    writeFileSync(join(work, 'secret-present'), '');
+    useRealBun();
+    // What a bad merge leaves behind: `bun install` cannot fix it, so the operator must be sent to the real cause.
+    writeWatcher('<<<<<<< HEAD\nconst a = 1;\n=======\nconst a = 2;\n>>>>>>> other\n');
+    const { exitCode, output } = await install();
+
+    expect(exitCode).not.toBe(0);
+    expect(output).toMatch(/bun build of .*hcb-alert-watcher\.ts failed/);
+    expect(output).toContain('Unexpected <<');
+    expect(output).not.toMatch(/bun install/);
+    expectNothingInstalled();
+  });
+
+  test('with the real bun, a missing local file is not blamed on the dependencies', async () => {
+    writeFileSync(join(work, 'secret-present'), '');
+    useRealBun();
+    // A renamed module: Bun says `Could not resolve` for it too, but `bun install` cannot bring it back.
+    writeWatcher("export { a } from './renamed-module';\n");
+    const { exitCode, output } = await install();
+
+    expect(exitCode).not.toBe(0);
+    expect(output).toMatch(/bun build of .*hcb-alert-watcher\.ts failed/);
+    expect(output).toContain('./renamed-module');
+    expect(output).not.toMatch(/bun install/);
+    expectNothingInstalled();
+  });
+
+  test('with the real bun, a local file that lacks an export is a code bug and gets no install hint', async () => {
+    writeFileSync(join(work, 'secret-present'), '');
+    useRealBun();
+    // Only a file under node_modules is a stale install; the same Bun error for a file of the repo is not fixed by `bun install`.
+    writeFileSync(join(repo, 'scripts/local.js'), 'export const present = 1;\n');
+    writeWatcher("export { absent } from './local.js';\n");
+    const { exitCode, output } = await install();
+
+    expect(exitCode).not.toBe(0);
+    expect(output).toContain('No matching export');
+    expect(output).not.toMatch(/bun install/);
+    expectNothingInstalled();
+  });
+
+  test('a build killed without any output still names its exit status', async () => {
+    writeFileSync(join(work, 'secret-present'), '');
+    stub('bun', 'exit 137');
+    const { exitCode, output } = await install();
+
+    expect(exitCode).toBe(1);
+    expect(output).toMatch(/bun build of .*hcb-alert-watcher\.ts failed \(exit 137\)/);
+    expectNothingInstalled();
+  });
+
+  test('a build log far longer than the pipe buffer still ends in a message with its first lines, not in silence', async () => {
+    writeFileSync(join(work, 'secret-present'), '');
+    // 3000 lines of 100 characters on stderr: over the 64 KiB a pipe holds, so a writer feeding `head` is cut off by SIGPIPE.
+    stub('bun', `for i in $(seq 1 3000); do printf 'error: line %04d %090d\\n' "$i" 0 >&2; done\nexit 1`);
+    const { exitCode, output } = await install();
+
+    expect(exitCode).toBe(1);
+    expect(output).toMatch(/bun build of .*hcb-alert-watcher\.ts failed/);
+    expect(output).toContain('error: line 0001');
+    // The message is an excerpt, not the 300 KB log.
+    expect(output).not.toContain('error: line 3000');
+    expect(output.length).toBeLessThan(5000);
+    expectNothingInstalled();
+  });
+
+  test('--dry-run runs the same check and refuses a watcher that does not build, changing nothing', async () => {
+    writeFileSync(join(work, 'secret-present'), '');
+    useRealBun();
+    writeWatcher('<<<<<<< HEAD\n');
+    const { exitCode, output } = await install(['--dry-run']);
+
+    expect(exitCode).not.toBe(0);
+    expect(output).toMatch(/bun build of .*hcb-alert-watcher\.ts failed/);
+    expectNothingInstalled();
+  });
+
+  test('--uninstall still removes a unit when the watcher no longer builds', async () => {
+    writeFileSync(join(work, 'secret-present'), '');
+    await install();
+    rmSync(join(work, 'systemctl.log'));
+    useRealBun();
+    writeWatcher('<<<<<<< HEAD\n');
+    const { exitCode } = await install(['--uninstall']);
+
+    expect(exitCode).toBe(0);
+    expect(existsSync(unitPath())).toBe(false);
+    expect(calls('systemctl.log')).toEqual(['--user disable --now hcb-alert-watcher.service', '--user daemon-reload']);
+  });
+
+  test('with the real bun, the real watcher of this checkout resolves and installs', async () => {
+    writeFileSync(join(work, 'secret-present'), '');
+    useRealBun();
+    const { exitCode, output } = await install([], { HCB_REPO_DIR: join(import.meta.dir, '../..') });
+
+    expect(output).not.toMatch(/bun build of .* failed/);
+    expect(exitCode).toBe(0);
+    expect(existsSync(unitPath())).toBe(true);
   });
 
   test('--dry-run prints the plan and touches nothing', async () => {
