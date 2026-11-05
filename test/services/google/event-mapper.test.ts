@@ -208,6 +208,11 @@ describe('event-mapper', () => {
         const result = localToGoogle({ ...geocoded, location_verified: 0 });
         expect(result.location).toBe('кафе у парка');
       });
+
+      test('a location made only of spaces sends no location', () => {
+        const result = localToGoogle({ ...geocoded, location: '   ', location_verified: 0 });
+        expect(result.location).toBeUndefined();
+      });
     });
   });
 

@@ -58,6 +58,16 @@ describe('buildUserSessionInvitationText', () => {
     expect(text).not.toContain('📍');
   });
 
+  test('omits location line when location is only spaces', () => {
+    const text = buildUserSessionInvitationText({
+      event: { ...baseEvent, location: '   ' },
+      inviterTimezone: 'Europe/Moscow',
+      deepLink: 'https://t.me/hypercal_bot?start=invite_123',
+      lang: 'en',
+    });
+    expect(text).not.toContain('📍');
+  });
+
   test('truncates description to 100 chars', () => {
     const longDesc = 'x'.repeat(200);
     const text = buildUserSessionInvitationText({
