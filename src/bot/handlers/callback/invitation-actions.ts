@@ -295,7 +295,8 @@ export async function answerInvitation(call: InvitationActionCall, subAction: In
       user,
       opts.invitationNotifyDeps,
       opts.eventRepo,
-      opts.renderService,
+      opts.imageDelivery,
+      ctx.id,
     ).catch(() => {});
   }
   if (!user.onboarding_completed && opts.onboardingScene) {

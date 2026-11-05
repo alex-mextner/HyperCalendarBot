@@ -170,7 +170,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
     eventReminderRepo: deps.eventReminderRepo,
     contactRepo: deps.contactRepo,
     participantRepo: deps.participantRepo,
-    renderService: deps.renderService,
+    imageDelivery: deps.imageDelivery,
     deepLinkService: deps.deepLinkService,
     botUsername: deps.botUsername,
     resolveUsername: deps.resolveUsername,

@@ -2,6 +2,7 @@
 // which local day an occurrence belongs to, including occurrences that cross midnight in the user's zone.
 import { describe, expect, mock, setSystemTime, test } from 'bun:test';
 import { handleMonth } from '../../../src/bot/commands/month.ts';
+import { makeImageDelivery } from '../../fixtures/image-delivery.ts';
 import { png } from '../../fixtures/png.ts';
 
 type MonthArgs = Parameters<typeof handleMonth>;
@@ -71,10 +72,14 @@ describe('handleMonth bucketing', () => {
   test('navigation callbacks never render an image', async () => {
     const ctx = makeCtx();
     const renderDirect = mock(() => Promise.resolve(png()));
+    const { delivery } = makeImageDelivery(renderDirect);
 
-    await handleMonth(ctx as unknown as MonthArgs[0], makeEventService() as unknown as MonthArgs[1], '2026-06', {
-      renderDirect,
-    } as unknown as MonthArgs[3]);
+    await handleMonth(
+      ctx as unknown as MonthArgs[0],
+      makeEventService() as unknown as MonthArgs[1],
+      '2026-06',
+      delivery,
+    );
 
     expect(renderDirect).not.toHaveBeenCalled();
     expect(ctx.sendPhoto).not.toHaveBeenCalled();
@@ -86,10 +91,15 @@ describe('handleMonth bucketing', () => {
     try {
       const ctx = makeCtx();
       const renderDirect = mock((_job: unknown) => Promise.resolve(png()));
+      const { delivery } = makeImageDelivery(renderDirect);
 
-      await handleMonth(ctx as unknown as MonthArgs[0], makeEventService() as unknown as MonthArgs[1], undefined, {
-        renderDirect,
-      } as unknown as MonthArgs[3]);
+      await handleMonth(
+        ctx as unknown as MonthArgs[0],
+        makeEventService() as unknown as MonthArgs[1],
+        undefined,
+        delivery,
+      );
+      await delivery.whenIdle();
 
       const job = renderDirect.mock.calls[0]![0] as {
         data: { weeks: { dayNumber: number; isOtherMonth: boolean; isToday: boolean; eventCount: number }[][] };

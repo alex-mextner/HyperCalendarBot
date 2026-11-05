@@ -2,6 +2,7 @@ import { Queue, QueueEvents, Worker } from 'bullmq';
 import { planAgendaRaster } from '../utils/agenda-image.ts';
 import { imageLogger } from '../utils/logger.ts';
 import { parseRedisUrl } from '../utils/redis.ts';
+import { UnrecoverableError } from '../utils/unrecoverable-error.ts';
 import { playwrightPool } from './playwright-pool.ts';
 import type { ConflictScheduleData } from './templates/conflict-schedule.ts';
 import { getTemplate } from './templates/index.ts';
@@ -15,13 +16,20 @@ import type {
 
 // --- Job types ---
 
-export type ImageRenderJob =
+type ImageRenderPayload =
   | { type: 'daily-agenda'; data: DailyAgendaData; userId: number }
   | { type: 'weekly-overview'; data: WeeklyOverviewData; userId: number }
   | { type: 'event-card'; data: EventCardData; userId: number }
   | { type: 'monthly-calendar'; data: MonthlyCalendarData; userId: number }
   | { type: 'conflict-schedule'; data: ConflictScheduleData; userId: number }
   | { type: 'md-table'; data: MdTableData; userId: number };
+
+/**
+ * `expiresAt` (epoch ms) is the moment nobody waits for the picture any more (the delivery bound of
+ * ImageDelivery). A job that only reaches the worker after it — a stalled job re-queued by a restart,
+ * or a retry — is dropped unrendered: on the shared host a render for nobody costs a real user's picture.
+ */
+export type ImageRenderJob = ImageRenderPayload & { expiresAt?: number };
 
 export interface ImageRenderResult {
   bufferBase64: string; // PNG as base64 (Buffer doesn't survive Redis JSON roundtrip)
@@ -37,6 +45,9 @@ const QUEUE_NAME = 'image-render';
 // --- Process function (exported for testing) ---
 
 export async function processRenderJob(job: ImageRenderJob): Promise<ImageRenderResult> {
+  if (job.expiresAt !== undefined && Date.now() > job.expiresAt) {
+    throw new UnrecoverableError('Image render job expired before it started');
+  }
   const start = performance.now();
 
   const template = getTemplate(job.type);
@@ -83,7 +94,9 @@ export function createImageRenderQueue(redisUrl: string) {
     defaultJobOptions: {
       attempts: 2,
       backoff: { type: 'fixed', delay: 1000 },
-      removeOnComplete: { age: 60, count: 100 },
+      // A finished render stays a little over the 150 s delivery bound, so a bot restarted inside the bound can
+      // still collect a picture finished while it was down; after that its row is expired and nobody wants it.
+      removeOnComplete: { age: 180, count: 100 },
       removeOnFail: { age: 3600 },
     },
   });

@@ -580,7 +580,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'render_day_image',
     description:
-      'Generate and send a visual calendar image for a specific date. Use when the user explicitly asks to see their schedule as an image, OR when showing a full-day overview with multiple events and a visual layout would be genuinely helpful. Do NOT use for single event operations, confirmations, or quick replies.',
+      'Queue a visual calendar image for a date (arrives as a separate message). Use when the user explicitly asks to see their schedule as an image, OR for a full-day overview with many events where a visual layout helps. Do NOT use for single event operations, confirmations, or quick replies.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -594,7 +594,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'render_week_image',
     description:
-      'Generate and send a visual weekly calendar image, for an explicit request or a week overview with many events.',
+      'Queue a visual weekly calendar image (arrives as a separate message), for an explicit request or a week overview with many events.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -607,7 +607,8 @@ const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'render_month_image',
-    description: 'Generate and send a visual monthly calendar image, for requests like "show April" or "monthly view".',
+    description:
+      'Queue a visual monthly calendar image (arrives as a separate message), for requests like "show April" or "monthly view".',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -621,9 +622,9 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'render_table',
     description:
-      'Render a Markdown table as an image and send it to the chat. Call it whenever you have tabular data, ' +
-      'in parallel with your text reply — and in that reply present the same data as a bullet list, never as raw ' +
-      'Markdown table syntax. During a voice call the image still goes to the chat, so mention it out loud.',
+      'Queue a Markdown table as an image (arrives as a separate message). Call it whenever you have tabular data, ' +
+      'in parallel with your text reply — present the same data there as a bullet list, never as raw ' +
+      'Markdown table syntax. In a voice call, say the image goes to the chat.',
     input_schema: {
       type: 'object' as const,
       properties: {

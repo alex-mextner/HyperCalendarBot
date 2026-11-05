@@ -77,7 +77,41 @@ const EXEMPT: { [site: string]: Exemption } = {
     reason: 'a 50 ms poll sleep inside the acquire loop; the loop deadline is reported by reportAcquireTimeout',
     reportedBy: 'src/worker/playwright-pool.ts#PlaywrightPool.reportAcquireTimeout',
   },
+  'src/services/image/render-service.ts#RenderService.renderDirect': {
+    reason:
+      "the worker wait of a picture's render; it throws a typed RenderTimeoutError and ImageDelivery.failTimedOut reports it once, with the user's note, so a second report here would count one slow render twice",
+    reportedBy: 'src/services/image/image-delivery.ts#ImageDelivery.failTimedOut',
+  },
+  'src/services/image/image-delivery.ts#deadlineAfter': {
+    reason:
+      'the shared timer of the render and upload bounds of a picture (renderOnce and run; ImageDelivery.failTimedOut reports the one that fired, renderFresh the one that cut a rebuild) and of the two waits of close(), which are accounted for on that entry',
+    reportedBy: 'src/services/image/image-delivery.ts#ImageDelivery.failTimedOut',
+  },
+  'src/services/image/image-delivery.ts#ImageDelivery.renderOnce': {
+    reason:
+      'the picture render bound; a render cut by it is reported by ImageDelivery.failTimedOut, and a rebuild cut by it (the earlier picture is sent instead) by ImageDelivery.renderFresh as recovered',
+    reportedBy: 'src/services/image/image-delivery.ts#ImageDelivery.failTimedOut',
+  },
+  'src/services/image/image-delivery.ts#ImageDelivery.tell': {
+    reason:
+      "the bound on the one failure note of a picture, so a Telegram call that hangs or sleeps through a flood wait does not hold the delivery. Deliberately NOT reported: the delivery's own end (failed, timed out) is already reported once, and a note that does not go out only logs 'the failure note could not be sent'",
+  },
+  'src/services/image/image-delivery.ts#ImageDelivery.run': {
+    reason: 'the picture upload bound; an upload cut by it is reported by ImageDelivery.failTimedOut',
+    reportedBy: 'src/services/image/image-delivery.ts#ImageDelivery.failTimedOut',
+  },
+  'src/services/image/image-delivery.ts#ImageDelivery.close': {
+    reason:
+      "two waits at shutdown. The upload grace: a picture whose upload is still running ends unknown and raises the UncertainSend alert (reportUncertain). The shutdown note budget: deliberately NOT reported, it is best effort at exit (a stuck Telegram call only logs 'shutdown note not sent'); the whole shutdown deadline is already bounded and reported in bootstrap/shutdown.ts",
+  },
   // Timers that are not deadlines: nothing is cut off or abandoned when they fire.
+  'src/services/image/render-failure-reporter.ts#defaultSchedule': {
+    reason: 'the end of the 10 min aggregation window of the render-failure alert; it sends what was held back',
+  },
+  'src/services/image/image-delivery.ts#ImageDelivery.schedule': {
+    reason:
+      'the pause before the store is asked again to write a delivery outcome it refused (a locked database); nothing is cut off or abandoned when it fires',
+  },
   'src/services/ai/telegram-stream.ts#sleep': { reason: 'edit throttle and flood-wait sleep' },
   'src/services/voice/thinking-phrase-player.ts#ThinkingPhrasePlayer.start': {
     reason: 'UI timers for filler phrases',

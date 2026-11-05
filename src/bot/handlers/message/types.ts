@@ -32,7 +32,7 @@ import type { EventService } from '../../../services/event/event-service.ts';
 import type { GroupSessionManager } from '../../../services/group/group-session.ts';
 import type { GroupMemberService } from '../../../services/group/member-service.ts';
 import type { HolidayService } from '../../../services/holiday/holiday-service.ts';
-import type { RenderService } from '../../../services/image/render-service.ts';
+import type { ImageDelivery } from '../../../services/image/image-delivery.ts';
 import type { AdminEditSession } from '../../../services/intent/admin-edit-session.ts';
 import type { EventMentionStore } from '../../../services/intent/event-mention-store.ts';
 import type { IntentExecutor } from '../../../services/intent/intent-executor.ts';
@@ -75,7 +75,7 @@ export interface MessageHandlerDeps {
   sharingSettingsRepo?: SharingSettingsRepository;
   sharedEventRepo?: SharedEventRepository;
   privacyService?: PrivacyService;
-  renderService?: RenderService;
+  imageDelivery?: ImageDelivery;
   notificationPrefs?: {
     getPrefs(userId: number): NotificationPreferencesRow;
     update(userId: number, patch: NotificationPreferencesUpdate): void;

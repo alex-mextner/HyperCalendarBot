@@ -1,22 +1,19 @@
-import { enrichAgenda } from '../../services/event/agenda-enrichment.ts';
-import { agendaImageErrorMessage, sendAgendaImage } from '../../utils/agenda-image.ts';
 // src/bot/commands/month.ts
 
 import { TZDate } from '@date-fns/tz';
 import { endOfMonth, format, getDay, getDaysInMonth, startOfMonth } from 'date-fns';
-import { t } from '../../config/constants.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { EventOccurrence, User } from '../../database/types.ts';
+import { enrichAgenda } from '../../services/event/agenda-enrichment.ts';
 import type { EventService } from '../../services/event/event-service.ts';
-import { mapMonthlyCalendarData } from '../../services/image/data-mapper.ts';
-import type { ImageRenderer } from '../../services/image/render-service.ts';
-import { autoPin } from '../../utils/auto-pin.ts';
-import { imageLogger } from '../../utils/logger.ts';
-import { getTheme } from '../../worker/templates/themes.ts';
+import type { ImageDelivery } from '../../services/image/image-delivery.ts';
+import { queuePicture } from '../../services/image/queue-picture.ts';
+import { monthImageJob } from '../../services/image/render-month.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import { monthNavKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 import { isCallbackContext } from '../types.ts';
+import { commandPictureTransport, pinPicture } from './picture-transport.ts';
 
 /** Calendar month being shown, with the UTC bounds used for the single range query over it. */
 interface MonthWindow {
@@ -148,79 +145,39 @@ async function handleGroupMonth(
   await deliverMonthText(ctx, text, window.monthStart, yearMonth);
 }
 
-function localDayIso(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
 interface MonthImageInput {
-  renderService: ImageRenderer;
-  occurrences: EventOccurrence[];
-  monthStart: Date;
+  imageDelivery: ImageDelivery;
+  /** The month's agenda as it is now; called when the picture is queued and again if the calendar changes while it renders. */
+  load(): EventOccurrence[];
+  window: MonthWindow;
   user: User;
   lang: 'en' | 'ru';
   groupRepo: GroupChatRepository | undefined;
 }
 
-/** Render the month as an image, send and pin it; render failures are reported to the user. */
-async function sendMonthImage(ctx: BotCommandContext | BotCallbackContext, input: MonthImageInput): Promise<void> {
-  const { renderService, occurrences, monthStart, user, lang, groupRepo } = input;
-  try {
-    const occurrencesByDay = new Map<string, EventOccurrence[]>();
-    for (const occ of occurrences) {
-      const dayIso = localDayIso(new TZDate(occ.occurrence_start, user.timezone));
-      if (!occurrencesByDay.has(dayIso)) occurrencesByDay.set(dayIso, []);
-      occurrencesByDay.get(dayIso)!.push(occ);
-    }
-
-    const todayIso = localDayIso(new TZDate(new Date(), user.timezone));
-
-    const data = mapMonthlyCalendarData({
-      occurrencesByDay,
-      year: monthStart.getFullYear(),
-      month: monthStart.getMonth(),
-      timezone: user.timezone,
-      locale: lang,
-      theme: getTheme(),
-      todayIso,
-    });
-
-    const buffer = await renderService.renderDirect({
-      type: 'monthly-calendar',
-      data,
-      userId: user.telegram_id,
-    });
-    const file = new File([buffer], 'month.png', { type: 'image/png' });
-    const sent = await sendAgendaImage(file, {
-      language: user.language,
-      sendPhoto: (photo) => ctx.sendPhoto(photo),
-      sendDocument: (document, options) => ctx.sendDocument(document, options),
-    });
-    autoPin(user.telegram_id, sent.id, {
-      pinChatMessage: (chatId, messageId, options) =>
-        ctx.bot.api.pinChatMessage({
-          chat_id: chatId,
-          message_id: messageId,
-          disable_notification: options.disable_notification,
-        }),
-      sendMessage: async (chatId, text) => {
-        await ctx.bot.api.sendMessage({ chat_id: chatId, text });
-      },
-      isGroupChat: false,
-      groupChatRepo: groupRepo,
-    }).catch((err) => {
-      imageLogger.error({ err }, 'autoPin failed');
-    });
-  } catch (err) {
-    imageLogger.error({ err }, 'Month render failed');
-    await ctx.send(agendaImageErrorMessage(err) ?? t(lang).callbackErrors.imageGenerationFailed);
-  }
+/** Queue the month picture (it is sent and pinned when ready); the text answer is already out. */
+async function queueMonthImage(ctx: BotCommandContext | BotCallbackContext, input: MonthImageInput): Promise<void> {
+  const { imageDelivery, load, window, user, lang, groupRepo } = input;
+  const chatId = user.telegram_id;
+  await queuePicture(imageDelivery, {
+    ...commandPictureTransport(ctx, chatId),
+    language: lang,
+    kind: 'month',
+    label: window.monthLabel,
+    slot: `month:user:${chatId}:${window.monthStart.getFullYear()}-${window.monthStart.getMonth()}`,
+    dataOwner: chatId,
+    filename: 'month.png',
+    buildJob: () =>
+      monthImageJob(load(), window.monthStart.getFullYear(), window.monthStart.getMonth(), user.timezone, lang, chatId),
+    onSent: (messageId) => pinPicture(ctx, chatId, messageId, groupRepo, false),
+  });
 }
 
 export async function handleMonth(
   ctx: BotCommandContext | BotCallbackContext,
   eventService: EventService,
   yearMonth?: string,
-  renderService?: ImageRenderer,
+  imageDelivery?: ImageDelivery,
   groupRepo?: GroupChatRepository,
 ): Promise<void> {
   const user = ctx.dbUser;
@@ -235,24 +192,19 @@ export async function handleMonth(
   const window = resolveMonthWindow(yearMonth, user.timezone, lang);
 
   // Count events per day — single range query for the whole month, then bucket
-  const allOccurrences = enrichAgenda(
-    eventService.getEventsInRange(user.telegram_id, window.monthStartUtc, window.monthEndUtc),
-    { userId: user.telegram_id, language: lang },
-    eventService.agendaRepository,
-  );
+  const load = () =>
+    enrichAgenda(
+      eventService.getEventsInRange(user.telegram_id, window.monthStartUtc, window.monthEndUtc),
+      { userId: user.telegram_id, language: lang },
+      eventService.agendaRepository,
+    );
+  const allOccurrences = load();
 
   const text = buildMonthText(window, countEventsPerDay(allOccurrences, user.timezone));
   await deliverMonthText(ctx, text, window.monthStart, yearMonth);
 
-  // Render month image (only on initial /month command, not nav callbacks)
-  if (!yearMonth && renderService) {
-    await sendMonthImage(ctx, {
-      renderService,
-      occurrences: allOccurrences,
-      monthStart: window.monthStart,
-      user,
-      lang,
-      groupRepo,
-    });
+  // Month picture (only on the initial /month command, not nav callbacks)
+  if (!yearMonth && imageDelivery) {
+    await queueMonthImage(ctx, { imageDelivery, load, window, user, lang, groupRepo });
   }
 }

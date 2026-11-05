@@ -1,19 +1,19 @@
 import { TZDate } from '@date-fns/tz';
 import type { EventOccurrence } from '../../database/types.ts';
+import type { ImageRenderJob } from '../../worker/image-render.queue.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import type { DayWeather } from '../weather/types.ts';
 import { mapWeeklyOverviewData } from './data-mapper.ts';
-import type { ImageRenderer } from './render-service.ts';
 
-export async function renderWeekImage(
-  renderService: ImageRenderer,
+/** The render job for the picture, built from the agenda alone (no worker involved). */
+export function weekImageJob(
   occurrences: EventOccurrence[],
   weekStartIso: string,
   timezone: string,
   locale: 'ru' | 'en',
   userId: number,
   weatherByDate?: { [date: string]: DayWeather },
-): Promise<Buffer> {
+): ImageRenderJob {
   const startD = new Date(`${weekStartIso}T12:00:00Z`);
   const occurrencesByDay = new Map<string, EventOccurrence[]>();
   for (let i = 0; i < 7; i++) {
@@ -42,9 +42,5 @@ export async function renderWeekImage(
     weatherByDate,
   });
 
-  return renderService.renderDirect({
-    type: 'weekly-overview',
-    data,
-    userId,
-  });
+  return { type: 'weekly-overview', data, userId };
 }

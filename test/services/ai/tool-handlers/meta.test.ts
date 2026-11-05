@@ -29,6 +29,7 @@ import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 import type { ImageRenderJob } from '../../../../src/worker/image-render.queue.ts';
+import { makeImageDelivery } from '../../../fixtures/image-delivery.ts';
 import { png } from '../../../fixtures/png.ts';
 
 function createTestDb() {
@@ -590,12 +591,10 @@ describe('meta tool handlers', () => {
     beforeEach(() => {
       renderCalls = [];
       photoCalls = [];
-      ctx.renderService = {
-        renderDirect(job) {
-          renderCalls.push(job as unknown as ImageRenderJob);
-          return Promise.resolve(png());
-        },
-      };
+      ctx.imageDelivery = makeImageDelivery((job) => {
+        renderCalls.push(job);
+        return Promise.resolve(png());
+      }).delivery;
       ctx.sender = {
         sendMessage: (() => Promise.resolve({ message_id: 1 })) as never,
         editMessageText: (() => Promise.resolve()) as never,
@@ -606,8 +605,8 @@ describe('meta tool handlers', () => {
       };
     });
 
-    test('returns error when renderService not available', async () => {
-      ctx.renderService = undefined;
+    test('returns error when image delivery is not available', async () => {
+      ctx.imageDelivery = undefined;
       const result = await handleRenderDayImage(ctx, { date: '2026-03-15' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not available');
@@ -624,6 +623,9 @@ describe('meta tool handlers', () => {
       const result = await handleRenderDayImage(ctx, { date: '2026-03-15' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('2026-03-15');
+      await ctx.imageDelivery!.whenIdle();
+      expect(renderCalls).toHaveLength(1);
+      expect(photoCalls).toEqual([{ chatId: USER_ID }]);
     });
 
     test('fetches group events when scope=group', async () => {
@@ -653,6 +655,9 @@ describe('meta tool handlers', () => {
       const result = await handleRenderDayImage(gCtx, { date: '2026-03-15', scope: 'group' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('2026-03-15');
+      await gCtx.imageDelivery!.whenIdle();
+      // The group picture goes to the group chat, not to the requesting user's private chat.
+      expect(photoCalls).toEqual([{ chatId: GROUP_CHAT_ID }]);
     });
 
     test('scope defaults to group when isGroup=true', async () => {

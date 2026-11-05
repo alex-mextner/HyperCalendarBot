@@ -13,6 +13,12 @@ export type ImageDeliveryState =
   | 'unknown'
   | 'superseded';
 
+/** The states `finish` can end a delivery in. */
+export type ImageDeliveryEndState = Extract<
+  ImageDeliveryState,
+  'delivered' | 'failed' | 'expired' | 'unknown' | 'superseded'
+>;
+
 export interface ImageDeliveryRow {
   id: string;
   chat_id: number;
@@ -51,7 +57,7 @@ export interface NewImageDelivery {
 const COLUMNS =
   'id, chat_id, language, kind, label, job_type, slot, payload_hash, rebuilds, job_json, state, message_id, note_sent, created_at, expires_at, updated_at';
 const TERMINAL = "('delivered','failed','expired','unknown','superseded')";
-/** Terminal rows are bookkeeping only; they are pruned after a week. */
+/** Terminal rows are bookkeeping only; a week old ones are pruned at the next start (the only caller is the start-up reconciliation). */
 export const IMAGE_DELIVERY_RETENTION_MS = 7 * 86_400_000;
 
 export class ImageDeliveryRepository {
@@ -61,7 +67,9 @@ export class ImageDeliveryRepository {
    * False when a delivery with this id exists in ANY state: the id is deterministic (chat, Telegram
    * request, kind, slot, payload), so a replay of the same request is a duplicate. A finished row is not
    * replaced: an `unknown` one (the upload may have landed) or a `delivered` one must never allow a
-   * second send, and its recorded message id must survive. Rows are pruned after a week.
+   * second send, and its recorded message id must survive. The one exception is `superseded`: that picture
+   * was never uploaded and its user was never told anything, so the same request again (the data went back to
+   * what it showed) takes its row's place. Rows are pruned once a week old, at the next start.
    */
   insert(row: NewImageDelivery): boolean {
     // IMMEDIATE takes the write lock at the start, so a second connection cannot slip in between the read and the insert.
@@ -70,7 +78,12 @@ export class ImageDeliveryRepository {
         const existing = this.db
           .query<{ id: string }, [string]>('SELECT id FROM image_deliveries WHERE id = ?')
           .get(row.id);
-        if (existing) return false;
+        if (
+          existing &&
+          !this.db.run("DELETE FROM image_deliveries WHERE id = ? AND state = 'superseded'", [row.id]).changes
+        ) {
+          return false;
+        }
         this.db.run(
           `INSERT INTO image_deliveries
            (id, chat_id, language, kind, label, job_type, slot, payload_hash, job_json, state, message_id, note_sent, created_at, expires_at, updated_at)
@@ -137,12 +150,7 @@ export class ImageDeliveryRepository {
    * `sending` row (the upload may have landed) can still end `delivered`, `unknown` or `failed`. False when
    * the row was not in a state that allows the move.
    */
-  finish(
-    id: string,
-    state: 'delivered' | 'failed' | 'expired' | 'unknown' | 'superseded',
-    at: number,
-    messageId?: number,
-  ): boolean {
+  finish(id: string, state: ImageDeliveryEndState, at: number, messageId?: number): boolean {
     const from =
       state === 'expired' || state === 'superseded' ? "('queued','rendered')" : "('queued','rendered','sending')";
     return (

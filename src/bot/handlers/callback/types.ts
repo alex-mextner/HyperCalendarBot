@@ -22,7 +22,7 @@ import type { CreateEventData, UpdateEventData, User } from '../../../database/t
 import type { EventService } from '../../../services/event/event-service.ts';
 import type { GoogleOAuthService } from '../../../services/google/oauth.ts';
 import type { HolidayService } from '../../../services/holiday/holiday-service.ts';
-import type { ImageRenderer } from '../../../services/image/render-service.ts';
+import type { ImageDelivery } from '../../../services/image/image-delivery.ts';
 import type { AdminEditSession } from '../../../services/intent/admin-edit-session.ts';
 import type { NotificationPreferencesService } from '../../../services/notification/preferences.ts';
 import type { ScenePauseService } from '../../../services/scene-pause.ts';
@@ -46,7 +46,8 @@ export interface CallbackHandlerOpts {
   calendarRepo?: GoogleCalendarRepository;
   disconnectDeps?: DisconnectDeps;
   onCalendarsDone?: (userId: number) => Promise<void>;
-  renderService?: ImageRenderer;
+  /** Buttons and invitation notices queue their pictures here; no handler waits for a render. */
+  imageDelivery?: ImageDelivery;
   invitationService?: InvitationService;
   eventRepo?: EventRepository;
   chatHistoryRepo?: ChatHistoryRepository;
@@ -66,8 +67,9 @@ export interface CallbackHandlerOpts {
       options: { parse_mode: ParseMode; reply_markup?: InlineKeyboard },
     ) => Promise<void>;
     editMessage?: (chatId: number, messageId: number, text: string, markup?: InlineKeyboard) => Promise<void>;
-    sendPhoto?: (chatId: number, photo: File) => Promise<void>;
-    sendDocument?: (chatId: number, document: File, caption: string) => Promise<void>;
+    /** Return the Telegram message id: a durable picture delivery records it. */
+    sendPhoto?: (chatId: number, photo: File) => Promise<{ message_id: number }>;
+    sendDocument?: (chatId: number, document: File, caption: string) => Promise<{ message_id: number }>;
   };
   onboardingScene?: AnyScene;
   editProposalDeps?: {

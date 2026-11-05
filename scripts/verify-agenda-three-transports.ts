@@ -16,6 +16,7 @@ import type { AgentContext } from '../src/services/ai/types.ts';
 import { ConversationLogger } from '../src/services/conversation-logger.ts';
 import { EventService } from '../src/services/event/event-service.ts';
 import { HolidayService } from '../src/services/holiday/holiday-service.ts';
+import { ImageDelivery } from '../src/services/image/image-delivery.ts';
 
 const bytes = Buffer.from(await Bun.file('logs/agenda-three/synthetic100.png').arrayBuffer());
 const db = new Database(':memory:');
@@ -40,14 +41,15 @@ try {
   };
   bot.api.sendMessage = async () => payload;
   bot.api.pinChatMessage = async () => true;
-  const renderer = { renderDirect: async () => bytes };
+  const delivery = new ImageDelivery({ renderer: { renderDirect: async () => bytes } });
   const command = Object.assign(new MessageContext({ bot, payload }), {
     dbUser: user,
     userTimezone: 'UTC',
     lang: 'en' as const,
     scene: { enter: async () => {} },
   });
-  await handleToday(command, events, undefined, renderer);
+  await handleToday(command, events, undefined, delivery);
+  await delivery.whenIdle();
   assert.equal(documents, 1);
   const history = new ChatHistoryRepository(db);
   const ctx: AgentContext = {
@@ -62,10 +64,11 @@ try {
     conversationLogger: new ConversationLogger(history),
     eventReminderRepo: new EventReminderRepository(db),
     sender: createTelegramSender(bot),
-    renderService: renderer,
+    imageDelivery: delivery,
   };
   const result = await handleRenderDayImage(ctx, { date: new Date().toISOString().slice(0, 10) });
   assert.equal(result.success, true);
+  await delivery.whenIdle();
   assert.equal(documents, 2);
   console.log(
     JSON.stringify({

@@ -2,7 +2,7 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
 import { Scene } from '@gramio/scenes';
-import { Bot, CallbackQueryContext } from 'gramio';
+import { Bot, CallbackQueryContext, TelegramError } from 'gramio';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler.ts';
 import { CB } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
@@ -17,6 +17,7 @@ import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import { NotificationPreferencesService } from '../../../src/services/notification/preferences.ts';
 import type { ImageRenderJob } from '../../../src/worker/image-render.queue.ts';
+import { makeImageDelivery } from '../../fixtures/image-delivery.ts';
 import { png } from '../../fixtures/png.ts';
 
 let db: Database;
@@ -73,6 +74,10 @@ function setup(data: string, chatId = -10, chatType: 'private' | 'supergroup' = 
     }),
     { dbUser: user, userTimezone: user.timezone, lang: 'en' as const, scene: { enter: async () => {} } },
   );
+  const { delivery } = makeImageDelivery(async (job) => {
+    jobs.push(job);
+    return image;
+  });
   const handler = createCallbackHandler(
     service,
     new Scene('unused'),
@@ -87,20 +92,16 @@ function setup(data: string, chatId = -10, chatType: 'private' | 'supergroup' = 
       ),
       eventRepo: new EventRepository(db),
       groupRepo: groups,
-      renderService: {
-        renderDirect: async (job) => {
-          jobs.push(job);
-          return image;
-        },
-      },
+      imageDelivery: delivery,
     },
   );
-  return { handler, ctx, jobs, groups, service, bot, user };
+  return { handler, ctx, jobs, groups, service, bot, user, delivery };
 }
 for (const prefix of [CB.IMG_DAILY, CB.IMG_WEEKLY]) {
   test(`${prefix} selects group calendar and timezone before enrichment`, async () => {
-    const { handler, ctx, jobs } = setup(`${prefix}:2099-06-01`);
+    const { handler, ctx, jobs, delivery } = setup(`${prefix}:2099-06-01`);
     await handler(ctx);
+    await delivery.whenIdle();
     expect(jobs).toHaveLength(1);
     const payload = JSON.stringify(jobs[0]);
     expect(payload).toContain('GROUP MEETING');
@@ -319,7 +320,7 @@ test('share delivery failure never reports sent below', async () => {
 
 for (const prefix of [CB.IMG_DAILY, CB.IMG_WEEKLY]) {
   test(`${prefix} actual callback sends oversized image as document and reports rejection`, async () => {
-    const { handler, ctx, bot } = setup(`${prefix}:2099-06-01`, -10, 'supergroup', png(2160, 9000));
+    const { handler, ctx, bot, delivery } = setup(`${prefix}:2099-06-01`, -10, 'supergroup', png(2160, 9000));
     let documents = 0;
     const errors: string[] = [];
     bot.api.sendPhoto = async () => {
@@ -332,15 +333,22 @@ for (const prefix of [CB.IMG_DAILY, CB.IMG_WEEKLY]) {
       return { message_id: 42, date: 0, chat: { id: -10, type: 'supergroup' } };
     };
     await handler(ctx);
+    await delivery.whenIdle();
     expect(documents).toBe(1);
     bot.api.sendDocument = async () => {
-      throw new Error('Rejected');
+      // Telegram's own answer: the document was not accepted, so the user is told (a dropped connection would not be).
+      throw new TelegramError(
+        { ok: false, error_code: 400, description: 'Bad Request: rejected' },
+        'sendDocument',
+        {} as never,
+      );
     };
     bot.api.sendMessage = async (params) => {
       errors.push(String(params.text));
       return { message_id: 43, date: 0, chat: { id: -10, type: 'supergroup' } };
     };
     await handler(ctx);
+    await delivery.whenIdle();
     expect(errors.length).toBeGreaterThan(0);
   });
 }

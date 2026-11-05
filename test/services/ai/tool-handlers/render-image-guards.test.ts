@@ -1,6 +1,7 @@
-// Characterization tests for the shared guards and failure mapping of the day/week/month image handlers:
-// secretary access denial, invalid dates, group-scope requirements, typed agenda-image errors and
-// unexpected render failures reported with the localized fallback text.
+// Characterization tests for the shared guards of the day/week/month image handlers (secretary access
+// denial, invalid dates, group-scope requirements) and for how a failed picture reaches the user: the
+// tool call only queues, so a typed agenda-image error or an unexpected render failure arrives as one
+// short note in the chat, never as a failed tool call.
 import { describe, expect, mock, test } from 'bun:test';
 import { t } from '../../../../src/config/constants.ts';
 import type { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
@@ -11,12 +12,13 @@ import {
 } from '../../../../src/services/ai/tool-handlers/render.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { AgendaImageError } from '../../../../src/utils/agenda-image.ts';
+import { makeImageDelivery } from '../../../fixtures/image-delivery.ts';
 import { png } from '../../../fixtures/png.ts';
 import { partialOf } from '../partial-stubs.ts';
 
 const meta = t('en').aiTools.meta;
 
-function makeCtx(renderDirect: () => Promise<Uint8Array> = () => Promise.resolve(png()), overrides = {}): AgentContext {
+function makeCtx(renderDirect: () => Promise<Buffer> = () => Promise.resolve(png()), overrides = {}): AgentContext {
   return {
     user: { telegram_id: 1, language: 'en', timezone: 'UTC' },
     chatId: 1,
@@ -25,7 +27,7 @@ function makeCtx(renderDirect: () => Promise<Uint8Array> = () => Promise.resolve
       sendPhoto: mock(() => Promise.resolve({ message_id: 42 })),
       sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
     },
-    renderService: { renderDirect: mock(renderDirect) },
+    imageDelivery: makeImageDelivery(renderDirect).delivery,
     eventService: {
       getEventsForDay: mock(() => []),
       getEventsInRange: mock(() => []),
@@ -45,7 +47,7 @@ const handlers = [
 
 describe.each(handlers)('%s image handler guards', (_name, run) => {
   test('unavailable renderer or sender is reported first', async () => {
-    const noRenderer = await run(makeCtx(undefined, { renderService: undefined }));
+    const noRenderer = await run(makeCtx(undefined, { imageDelivery: undefined }));
     expect(noRenderer).toEqual({ success: false, error: 'Image rendering not available.' });
     const noPhoto = await run(makeCtx(undefined, { sender: {} }));
     expect(noPhoto).toEqual({ success: false, error: 'Image rendering not available.' });
@@ -74,17 +76,42 @@ describe.each(handlers)('%s image handler guards', (_name, run) => {
     expect(result).toEqual({ success: false, error: 'Group context required for group scope' });
   });
 
-  test('typed agenda image errors are surfaced verbatim', async () => {
-    const ctx = makeCtx(() => Promise.reject(new AgendaImageError('too tall')));
-    expect(await run(ctx)).toEqual({ success: false, error: 'too tall' });
+  test('a typed agenda image error reaches the user as one localized note, never its internal English text', async () => {
+    const ctx = makeCtx(() => Promise.reject(new AgendaImageError('too tall', true)));
+    const result = await run(ctx);
+    expect(result.success).toBe(true);
+    await ctx.imageDelivery!.whenIdle();
+    expect(ctx.sender!.sendPhoto).not.toHaveBeenCalled();
+    expect(ctx.sender!.sendMessage).toHaveBeenCalledTimes(1);
+    const note = (ctx.sender!.sendMessage as ReturnType<typeof mock>).mock.calls[0]![1] as string;
+    expect(note).toContain('too large to send');
+    expect(note).not.toContain('too tall');
   });
 
-  test('unexpected render failures use the localized fallback text', async () => {
+  test('a supplement turn queues no picture: it could only block or cancel a real one', async () => {
+    const supplement = makeCtx(undefined, { supplementMode: true });
+    const result = await run(supplement);
+    expect(result.success).toBe(false);
+    await supplement.imageDelivery!.whenIdle();
+    expect(supplement.sender!.sendPhoto).not.toHaveBeenCalled();
+    expect(supplement.sender!.sendMessage).not.toHaveBeenCalled();
+
+    // The same picture asked for by a real turn of the same chat is not seen as a duplicate of a hidden one.
+    const real = makeCtx(undefined, { imageDelivery: supplement.imageDelivery });
+    expect(await run(real)).toMatchObject({ success: true });
+    await real.imageDelivery!.whenIdle();
+    expect(real.sender!.sendPhoto).toHaveBeenCalledTimes(1);
+  });
+
+  test('unexpected render failures send one localized note without the internal error text', async () => {
     const ctx = makeCtx(() => Promise.reject(new Error('playwright down')));
     const result = await run(ctx);
-    expect(result.success).toBe(false);
-    expect(result.error).toBeTruthy();
-    expect(result.error).not.toContain('playwright down');
+    expect(result.success).toBe(true);
+    await ctx.imageDelivery!.whenIdle();
+    expect(ctx.sender!.sendMessage).toHaveBeenCalledTimes(1);
+    const note = (ctx.sender!.sendMessage as ReturnType<typeof mock>).mock.calls[0]![1] as string;
+    expect(note).toContain('could not prepare the picture');
+    expect(note).not.toContain('playwright down');
   });
 });
 
@@ -108,30 +135,54 @@ describe('handleRenderDayImage specifics', () => {
     expect(ctx.eventService.getEventsForDay).not.toHaveBeenCalled();
   });
 
-  test('success output names the date and tells the model not to re-render', async () => {
+  test('two members of one group asking for the same group day are two pictures, not a duplicate or a replacement', async () => {
+    const first = makeCtx(undefined, { groupChatId: -100 });
+    const second = makeCtx(undefined, {
+      groupChatId: -100,
+      user: { telegram_id: 2, language: 'en', timezone: 'UTC' },
+      imageDelivery: first.imageDelivery,
+    });
+    expect(await handleRenderDayImage(first, { date: '2026-04-07', scope: 'group' })).toMatchObject({ success: true });
+    expect(await handleRenderDayImage(second, { date: '2026-04-07', scope: 'group' })).toMatchObject({ success: true });
+    await first.imageDelivery!.whenIdle();
+    expect(first.sender!.sendPhoto).toHaveBeenCalledTimes(1);
+    expect(second.sender!.sendPhoto).toHaveBeenCalledTimes(1);
+  });
+
+  test('the result says queued, not sent, and tells the model not to re-render', async () => {
     const result = await handleRenderDayImage(makeCtx(), { date: '2026-04-07' });
-    expect(result.output).toBe(meta.dayImageSent('2026-04-07'));
+    expect(result.output).toBe(meta.dayImageQueued('2026-04-07'));
+    // The output is what a workflow reply shows the user: it says "being prepared", never "sent".
+    expect(result.output).not.toMatch(/\bsent\b/);
     expect(result.agentHint).toBe(
-      'The day image has already been delivered to the chat. Do NOT call render_day_image again for this date in this turn.',
+      'The picture is only QUEUED, NOT sent yet: it arrives later as a separate message (or the user gets a short note if it fails). Do NOT call render_day_image again for this date in this turn, and do NOT say the picture was sent or attached, write your text answer now.',
     );
   });
 
-  test('fallback failure text names the requested date', async () => {
-    const result = await handleRenderDayImage(
-      makeCtx(() => Promise.reject(new Error('boom'))),
-      { date: '2026-04-07' },
-    );
-    expect(result.error).toBe(meta.dayImageFailed('2026-04-07'));
+  test('a day that cannot be mapped into a render job fails the tool call with the localized text', async () => {
+    const ctx = makeCtx(undefined, {
+      eventService: {
+        getEventsForDay: () => {
+          throw new Error('boom');
+        },
+      },
+    });
+    const result = await handleRenderDayImage(ctx, { date: '2026-04-07' });
+    expect(result).toEqual({ success: false, error: meta.dayImageFailed('2026-04-07') });
   });
 });
 
 describe('handleRenderWeekImage specifics', () => {
-  test('fallback failure text names the requested week_start', async () => {
-    const result = await handleRenderWeekImage(
-      makeCtx(() => Promise.reject(new Error('boom'))),
-      { week_start: '2026-04-08' },
-    );
-    expect(result.error).toBe(meta.weekImageFailed('2026-04-08'));
+  test('a week that cannot be read fails the tool call with the localized text', async () => {
+    const ctx = makeCtx(undefined, {
+      eventService: {
+        getEventsInRange: () => {
+          throw new Error('boom');
+        },
+      },
+    });
+    const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-08' });
+    expect(result).toEqual({ success: false, error: meta.weekImageFailed('2026-04-08') });
   });
 
   test('malformed or overflowing week_start is rejected with the localized failure text', async () => {
@@ -154,11 +205,15 @@ describe('handleRenderWeekImage specifics', () => {
 });
 
 describe('handleRenderMonthImage specifics', () => {
-  test('fallback failure text names the requested month', async () => {
-    const result = await handleRenderMonthImage(
-      makeCtx(() => Promise.reject(new Error('boom'))),
-      { month: '2026-04' },
-    );
-    expect(result.error).toBe(meta.monthImageFailed('2026-04'));
+  test('a month that cannot be read fails the tool call with the localized text', async () => {
+    const ctx = makeCtx(undefined, {
+      eventService: {
+        getEventsInRange: () => {
+          throw new Error('boom');
+        },
+      },
+    });
+    const result = await handleRenderMonthImage(ctx, { month: '2026-04' });
+    expect(result).toEqual({ success: false, error: meta.monthImageFailed('2026-04') });
   });
 });

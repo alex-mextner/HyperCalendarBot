@@ -1,25 +1,23 @@
-import { enrichAgenda } from '../../services/event/agenda-enrichment.ts';
-import { agendaImageErrorMessage, sendAgendaImage } from '../../utils/agenda-image.ts';
 // src/bot/commands/today.ts
 
 import { TZDate } from '@date-fns/tz';
-import { t } from '../../config/constants.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { EventOccurrence, User } from '../../database/types.ts';
+import { enrichAgenda } from '../../services/event/agenda-enrichment.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatDayAgenda } from '../../services/event/formatters.ts';
 import { googleCalendarColorEmoji } from '../../services/google/calendar-colors.ts';
 import type { HolidayEntry, HolidayService } from '../../services/holiday/holiday-service.ts';
-import { renderDayImage } from '../../services/image/render-day.ts';
-import type { ImageRenderer } from '../../services/image/render-service.ts';
+import type { ImageDelivery } from '../../services/image/image-delivery.ts';
+import { queuePicture } from '../../services/image/queue-picture.ts';
+import { dayImageJob } from '../../services/image/render-day.ts';
 import type { DayWeather } from '../../services/weather/types.ts';
 import type { WeatherService } from '../../services/weather/weather-service.ts';
-import { autoPin } from '../../utils/auto-pin.ts';
-import { imageLogger } from '../../utils/logger.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
 import { sendAgendaText } from './agenda-text.ts';
+import { commandPictureTransport, pinPicture } from './picture-transport.ts';
 
 async function fetchTodayWeather(
   weatherService: WeatherService | undefined,
@@ -69,60 +67,40 @@ async function handleGroupToday(
 }
 
 interface TodayImageInput {
-  renderService: ImageRenderer;
-  occurrences: EventOccurrence[];
+  imageDelivery: ImageDelivery;
+  /** The agenda as it is now; called when the picture is queued and again if the calendar changes while it renders. */
+  load(): { occurrences: EventOccurrence[]; holidays: HolidayEntry[] };
   dateIso: string;
-  holidays: HolidayEntry[];
   user: User;
   groupRepo: GroupChatRepository | undefined;
   lang: 'en' | 'ru';
 }
 
-/** Render today's agenda as an image, send it and pin it; render failures are reported to the user. */
-async function sendTodayImage(ctx: BotCommandContext, input: TodayImageInput): Promise<void> {
-  const { renderService, occurrences, dateIso, holidays, user, groupRepo, lang } = input;
-  try {
-    const buffer = await renderDayImage(
-      renderService,
-      occurrences,
-      dateIso,
-      user.timezone,
-      user.language as 'ru' | 'en',
-      user.telegram_id,
-      holidays,
-    );
-    const file = new File([buffer], 'today.png', { type: 'image/png' });
-    const sent = await sendAgendaImage(file, {
-      language: user.language,
-      sendPhoto: (photo) => ctx.sendPhoto(photo),
-      sendDocument: (document, options) => ctx.sendDocument(document, options),
-    });
-    autoPin(user.telegram_id, sent.id, {
-      pinChatMessage: (chatId, messageId, options) =>
-        ctx.bot.api.pinChatMessage({
-          chat_id: chatId,
-          message_id: messageId,
-          disable_notification: options.disable_notification,
-        }),
-      sendMessage: async (chatId, text) => {
-        await ctx.bot.api.sendMessage({ chat_id: chatId, text });
-      },
-      isGroupChat: false,
-      groupChatRepo: groupRepo,
-    }).catch((err) => {
-      imageLogger.error({ err }, 'autoPin failed');
-    });
-  } catch (err) {
-    imageLogger.error({ err }, 'Render failed');
-    await ctx.send(agendaImageErrorMessage(err) ?? t(lang).callbackErrors.imageGenerationFailed);
-  }
+/** Queue today's agenda picture (it is sent and pinned when ready); the text answer is already out. */
+async function queueTodayImage(ctx: BotCommandContext, input: TodayImageInput): Promise<void> {
+  const { imageDelivery, load, dateIso, user, groupRepo, lang } = input;
+  const chatId = user.telegram_id;
+  await queuePicture(imageDelivery, {
+    ...commandPictureTransport(ctx, chatId),
+    language: lang,
+    kind: 'day',
+    label: dateIso,
+    slot: `day:user:${chatId}:${dateIso}`,
+    dataOwner: chatId,
+    filename: 'today.png',
+    buildJob: () => {
+      const { occurrences, holidays } = load();
+      return dayImageJob(occurrences, dateIso, user.timezone, lang, chatId, holidays);
+    },
+    onSent: (messageId) => pinPicture(ctx, chatId, messageId, groupRepo, false),
+  });
 }
 
 export async function handleToday(
   ctx: BotCommandContext,
   eventService: EventService,
   holidayService?: HolidayService,
-  renderService?: ImageRenderer,
+  imageDelivery?: ImageDelivery,
   groupRepo?: GroupChatRepository,
   googleCalendarRepo?: GoogleCalendarRepository,
   weatherService?: WeatherService,
@@ -137,13 +115,16 @@ export async function handleToday(
   }
 
   const now = new Date();
-  const occurrences = enrichAgenda(
-    eventService.getEventsForDay(user.telegram_id, now, user.timezone),
-    { userId: user.telegram_id, language: lang },
-    eventService.agendaRepository,
-  );
   const dateIso = new TZDate(now, user.timezone).toISOString().slice(0, 10);
-  const holidays = holidayService?.getHolidaysForDate(user.telegram_id, dateIso) ?? [];
+  const load = () => ({
+    occurrences: enrichAgenda(
+      eventService.getEventsForDay(user.telegram_id, now, user.timezone),
+      { userId: user.telegram_id, language: lang },
+      eventService.agendaRepository,
+    ),
+    holidays: holidayService?.getHolidaysForDate(user.telegram_id, dateIso) ?? [],
+  });
+  const { occurrences, holidays } = load();
   const calendarColors = buildCalendarColorMap(googleCalendarRepo, user.telegram_id);
   const dayWeather = await fetchTodayWeather(weatherService, user.timezone, lang);
   const text = formatDayAgenda(
@@ -158,8 +139,8 @@ export async function handleToday(
 
   await sendAgendaText(ctx, text);
 
-  if (renderService) {
-    await sendTodayImage(ctx, { renderService, occurrences, dateIso, holidays, user, groupRepo, lang });
+  if (imageDelivery) {
+    await queueTodayImage(ctx, { imageDelivery, load, dateIso, user, groupRepo, lang });
   }
 }
 

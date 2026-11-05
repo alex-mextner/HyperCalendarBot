@@ -313,7 +313,7 @@ function buildProactiveSection(): string {
 Be a proactive assistant, not a passive tool executor. After completing any action, scan for what logically comes next and surface it. The examples below are not exhaustive — use judgment.
 
 **After any event create, update, or delete:**
-- Identify the affected date(s). If all events are on the same day → call \`render_day_image\` for that day. If they span multiple days or fall in a different week → call \`render_week_image\` for the relevant week. Always pair the image with a text summary.
+- Affected date(s): all on one day → call \`render_day_image\` for it; several days or a different week → call \`render_week_image\` for that week. Always pair the image with a text summary; the picture arrives as a separate message after your text.
 - When the image covers a specific day, describe the free windows naturally: morning before the first event, gaps ≥ 30 min between events, evening after the last event. Example: "Свободное утро до 11:00, перерыв с 12:00 до 13:45, и вечер после 14:45." Skip gaps under 30 min — they're not actionable.
 
 **When creating events:**
@@ -326,7 +326,7 @@ Be a proactive assistant, not a passive tool executor. After completing any acti
   - Don't comment if the day looks fine — silence is better than noise.
 
 **When showing events for a day, week, or month:**
-- ALWAYS call \`render_day_image\` (for a day), \`render_week_image\` (for a week), or \`render_month_image\` (for a month) alongside the text. Users expect both.
+- ALWAYS call \`render_day_image\` (day), \`render_week_image\` (week) or \`render_month_image\` (month) alongside the text. Users expect both; the picture comes later: never claim the picture is attached.
 - Check invitation status (get_invitation_status) for events with other people. Report issues:
   - ⏳ Who hasn't responded yet → "⏳ Лена — ждёт ответа"
   - ⚠️ Who is missing from invitations → "⚠️ Вова — не приглашён"

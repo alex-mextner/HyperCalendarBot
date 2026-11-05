@@ -30,7 +30,7 @@ import type { ConversationLogger } from '../conversation-logger.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
-import type { ImageRenderer } from '../image/render-service.ts';
+import type { ImageDelivery } from '../image/image-delivery.ts';
 import type { EventSummary } from '../intent/variable-resolver.ts';
 import type { AddressCache } from '../location/address-cache.ts';
 import type { EventPlace } from '../location/event-venue.ts';
@@ -200,7 +200,8 @@ export interface AgentContext {
   sender?: TelegramSender;
   /** Called after any successful tool call that references an event (by ID or creation). */
   onEventMentioned?: (eventId: number) => void;
-  renderService?: ImageRenderer;
+  /** Queues pictures for background delivery as their own message; absent when rendering is off (no Redis, no browser). */
+  imageDelivery?: ImageDelivery;
   deepLinkService?: DeepLinkService;
   botUsername?: string;
   /** Telegram file_id of the voice message that triggered this interaction. */
@@ -408,7 +409,7 @@ export interface ToolHandlerMeta {
   skipActionLog?: boolean;
   /** Tool always results in [SKIP] — no status message or tool label shown. */
   silent?: boolean;
-  /** A successful call delivers the answer itself (e.g. a rendered image); no text reply is owed. */
+  /** A successful call delivers the answer itself (a reaction) or has queued it for delivery as a separate message (a picture, whose failure sends its own note); no text reply is owed. */
   delivers?: boolean;
   /**
    * Tool result must NOT be persisted to chat_history.

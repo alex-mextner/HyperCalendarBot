@@ -78,12 +78,19 @@ export const enAiTools = {
       deleteKeptPast: (count: number) => `Past events kept: ${count}`,
       deleteFailed: (titles: string) => `⚠️ Not deleted: ${titles}`,
       deleteCancelled: '❌ Cancelled, nothing was deleted.',
-      dayImageSent: (date: string) => `Day calendar image for ${date} has been sent to the chat.`,
-      weekImageSent: (week: string) => `Calendar for ${week} — the picture is in the chat.`,
-      monthImageSent: (month: string) => `Monthly calendar image for ${month} has been sent to the chat.`,
+      dayImageQueued: (date: string) =>
+        `Day calendar image for ${date} is being prepared and will arrive in the chat as a separate message.`,
+      weekImageQueued: (week: string) =>
+        `Weekly calendar image for ${week} is being prepared and will arrive in the chat as a separate message.`,
+      monthImageQueued: (month: string) =>
+        `Monthly calendar image for ${month} is being prepared and will arrive in the chat as a separate message.`,
+      imageAlreadyQueued: 'This picture is already being prepared and will arrive in the chat as a separate message.',
+      imageAlreadyHandled:
+        'This picture was already handled for this message: it was sent, or you were told it did not work out. Ask for it again in a new message.',
+      imageBusy: 'Too many pictures are already being prepared, so this one was not queued. Try again a little later.',
       dayImageFailed: (date: string) => `Failed to render or send the day image for ${date}.`,
-      dayImageSentInstead: (date: string, requested: string) =>
-        `Day calendar image for ${date} has been sent to the chat instead of the past day ${requested}: ${date} is the nearest upcoming day with the changes just made.`,
+      dayImageQueuedInstead: (date: string, requested: string) =>
+        `Day calendar image for ${date} is being prepared instead of the past day ${requested} (${date} is the nearest upcoming day with the changes just made) and will arrive in the chat as a separate message.`,
       weekImageFailed: (weekStart: string) => `Failed to render or send the weekly image starting ${weekStart}.`,
       monthImageFailed: (month: string) => `Failed to render or send the monthly image for ${month}.`,
       callQueued: 'Call queued. You will receive a voice call shortly.',
@@ -98,9 +105,34 @@ export const enAiTools = {
       userPickerSent: 'User picker sent. Waiting for user to select participants.',
       sceneResumed: 'Continue the wizard from where you left off.',
       sceneCancelled: 'Wizard cancelled.',
-      tableSent: (title: string) => `Table "${title}" has been sent to the chat.`,
+      tableQueued: (title: string) =>
+        `Table "${title}" is being prepared as a picture and will arrive in the chat as a separate message.`,
       tableFailed: (title: string) => `Failed to render or send the table "${title}".`,
-      tableRenderingVoice: 'Check the chat — the table is there.',
+      tableRenderingVoice: 'The table picture will arrive in the chat in a moment.',
+      imageNoteFailed: (label: string) =>
+        `I could not prepare the picture "${label}". Ask me again if you still want it.`,
+      imageNoteTimedOut: (label: string) =>
+        `The picture "${label}" did not get ready in time: the server is busy right now. Ask me again a little later if you still want it.`,
+      imageNoteInterrupted: (label: string) =>
+        `The bot was restarting, so the picture "${label}" did not arrive. Ask me again if you still want it.`,
+      // The picture came out in a form Telegram cannot take (too tall or too big): asking again for the same thing fails again.
+      imageNoteUndeliverable: (label: string) =>
+        `The picture "${label}" is too large to send. Ask me for a shorter period or a smaller table.`,
+      // A picture nobody can request again (the schedule comparison after an accepted invitation): the same
+      // notes without the offer to ask again.
+      imageNoteFailedFinal: (label: string) => `I could not prepare the picture "${label}".`,
+      imageNoteTimedOutFinal: (label: string) =>
+        `The picture "${label}" did not get ready in time: the server is busy right now.`,
+      imageNoteInterruptedFinal: (label: string) => `The bot was restarting, so the picture "${label}" did not arrive.`,
+      imageNoteUndeliverableFinal: (label: string) => `The picture "${label}" is too large to send.`,
+      // The upload ended in a way that does not say whether Telegram stored it, so neither "it came" nor "it did not come" is true.
+      imageNoteUncertain: (label: string) =>
+        `The picture "${label}" may not have arrived: the upload was cut off. If you do not see it, ask me again.`,
+      imageNoteUncertainFinal: (label: string) =>
+        `The picture "${label}" may not have arrived: the upload was cut off.`,
+      // Telegram refuses pictures in this chat for good (blocked or removed bot, a group without photo rights): asking again cannot help.
+      imageNoteRefused: (label: string) =>
+        `The picture "${label}" could not be sent: Telegram does not let me send pictures in this chat.`,
       telegramConnectedStatus: 'Telegram account connected',
       telegramNotConnectedStatus: 'Telegram account not connected. Connect via /connect_telegram',
     },
