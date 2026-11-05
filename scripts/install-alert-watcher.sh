@@ -11,7 +11,7 @@
 #   scripts/install-alert-watcher.sh --fetch-token-from HOST      first install: also copy the
 #                                                                 production ADMIN_ALERT_TOKEN from
 #                                                                 HOST:/opt/hypercal/.env into the keychain
-#   scripts/install-alert-watcher.sh --dry-run                    print the unit, change nothing
+#   scripts/install-alert-watcher.sh --dry-run                    check the watcher builds, print the unit, change nothing
 #   scripts/install-alert-watcher.sh --uninstall                  stop and remove the unit
 #
 # Safe to run again: an unchanged unit is left alone and a running service is not restarted.
@@ -86,6 +86,27 @@ launcher="${HCB_OMP_LAUNCHER:-$HOME/.agents/skills/rig-detached-omp/rig-detached
 [[ -x "$launcher" ]] || die "the rig-detached-omp launcher is missing at $launcher (it ships with the rig-detached-omp skill: run rig apply)"
 bun_bin="$(command -v bun)" || die "bun is not on PATH"
 keychain_bin="$(command -v keychain)" || die "keychain is not on PATH"
+# The watcher imports packages (zod) from the checkout's node_modules. On 2026-11-04 the canonical checkout had
+# none, and the unit crash-looped every 30 s with `Cannot find package 'zod'` while looking installed. `bun build`
+# resolves the real import graph without running anything, so refuse before a unit is written or started. Any
+# build failure refuses. `bun install` is suggested only when it can fix the failure: Bun adds `Maybe you need to
+# "bun install"?` to a missing PACKAGE (a missing local file says only `Could not resolve`), and a stale install
+# shows as `No matching export in "<path>/node_modules/..."`. A syntax error or a renamed local module is not fixed by
+# it, and the operator must see Bun's own words to find the cause.
+build_status=0
+build_log="$("$bun_bin" build "$watcher" --target bun 2>&1 >/dev/null)" || build_status=$?
+if ((build_status != 0)); then
+  # A here-string, not a pipe from printf: `head` closing early would SIGPIPE a writer and, under pipefail and
+  # errexit, end the script before `die` runs when a long error log leaves the operator with no message.
+  build_head="$(head -n 8 <<<"$build_log" | cut -c1-200)"
+  hint=""
+  if [[ "$build_log" == *'Maybe you need to "bun install"?'* || "$build_log" =~ No\ matching\ export\ in\ \"[^\"]*node_modules/ ]]; then
+    printf -v hint 'Install the dependencies first: (cd %q && bun install --frozen-lockfile)' "$repo"
+  fi
+  die "bun build of $watcher failed (exit $build_status):
+$build_head${hint:+
+$hint}"
+fi
 # The unit runs with a fixed PATH, and so does every omp session it starts. A tool that only the installing
 # shell can find would make `tg report`, `ctmux ensure` or `gh` fail at 3 a.m., so check against that PATH.
 unit_search_path="$HOME/.local/bin:$HOME/.bun/bin:/usr/local/bin:/usr/bin:/bin"
