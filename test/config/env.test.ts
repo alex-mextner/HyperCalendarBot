@@ -2,6 +2,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { loadConfig } from '../../src/config/env.ts';
 import type { ProviderId } from '../../src/services/ai/provider-ids.ts';
+import { redactSecrets, resetRegisteredSecrets } from '../../src/utils/redact-secrets.ts';
+import {
+  FAKE_ADMIN_ALERT_TOKEN,
+  FAKE_MTPROTO_API_HASH,
+  FAKE_REDIS_PASSWORD,
+  FAKE_SECOND_CLAUDE_TOKEN,
+  FAKE_TELEGRAM_TOKEN,
+} from '../helpers/fake-secrets.ts';
 
 describe('loadConfig', () => {
   const originalEnv = { ...process.env };
@@ -32,6 +40,53 @@ describe('loadConfig', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.REDIS_URL = 'redis://localhost:6379';
     setAiVars();
+  });
+
+  test('the configured bot token and ADMIN_ALERT_TOKEN are registered so logs and alerts never print them (#972)', () => {
+    resetRegisteredSecrets();
+    process.env.BOT_TOKEN = FAKE_TELEGRAM_TOKEN;
+    process.env.ADMIN_ALERT_TOKEN = FAKE_ADMIN_ALERT_TOKEN;
+    process.env.MTPROTO_API_HASH = FAKE_MTPROTO_API_HASH;
+    process.env.CLAUDE_API_TOKEN2 = FAKE_SECOND_CLAUDE_TOKEN;
+
+    loadConfig();
+
+    const line = redactSecrets(`token=${FAKE_ADMIN_ALERT_TOKEN} bot=${FAKE_TELEGRAM_TOKEN}`);
+    expect(line).not.toContain(FAKE_ADMIN_ALERT_TOKEN);
+    expect(line).not.toContain(FAKE_TELEGRAM_TOKEN);
+    const others = redactSecrets(`hash=${FAKE_MTPROTO_API_HASH} second=${FAKE_SECOND_CLAUDE_TOKEN}`);
+    expect(others).not.toContain(FAKE_MTPROTO_API_HASH);
+    expect(others).not.toContain(FAKE_SECOND_CLAUDE_TOKEN);
+    resetRegisteredSecrets();
+  });
+
+  test('the password inside REDIS_URL is registered, so a logged connection error cannot print it', () => {
+    resetRegisteredSecrets();
+    process.env.REDIS_URL = `redis://:${FAKE_REDIS_PASSWORD}@redis:6379`;
+
+    loadConfig();
+
+    expect(redactSecrets(`connect ECONNREFUSED ${FAKE_REDIS_PASSWORD}`)).not.toContain(FAKE_REDIS_PASSWORD);
+    resetRegisteredSecrets();
+  });
+
+  test('a password written percent-encoded in REDIS_URL is registered in that form too, as a quoted URL shows it', () => {
+    resetRegisteredSecrets();
+    process.env.REDIS_URL = 'redis://:Pa%24%24-0123456789abcdef@redis:6379';
+
+    loadConfig();
+
+    expect(redactSecrets('connect redis://:Pa%24%24-0123456789abcdef@redis:6379')).not.toContain('0123456789abcdef');
+    expect(redactSecrets('password Pa$$-0123456789abcdef')).not.toContain('0123456789abcdef');
+    resetRegisteredSecrets();
+  });
+
+  test('a REDIS_URL with no password or an escape that does not decode still loads', () => {
+    for (const url of ['redis://localhost:6379', 'redis://:bad%zzescape-0123456789@redis:6379']) {
+      process.env.REDIS_URL = url;
+      expect(() => loadConfig()).not.toThrow();
+    }
+    resetRegisteredSecrets();
   });
 
   test('AI_TOOL_SCHEMA_MODE defaults to hybrid, accepts full and lazy as the rollback switch, rejects misspellings', () => {

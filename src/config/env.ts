@@ -11,6 +11,7 @@ import {
 } from '../services/ai/role-routing.ts';
 import { TOOL_SCHEMA_MODES, type ToolSchemaMode } from '../services/ai/tool-schema-mode.ts';
 import { logger, logOnce } from '../utils/logger.ts';
+import { registerSecretValues } from '../utils/redact-secrets.ts';
 import { GOOGLE_OAUTH_CALLBACK_PATH, publicUrl } from './public-url.ts';
 
 /** Owner-chosen order for main requests: z.ai, then Claude, then Hugging Face.
@@ -235,6 +236,24 @@ function parseTelegramSessionMasterKey(): string | undefined {
   return undefined;
 }
 
+/**
+ * The password in `redis://:<password>@host:port`, as written in the URL (percent-encoded: what a quoted URL
+ * shows) and decoded (what a client prints). It has no recognisable shape, and a connection error can quote the URL.
+ */
+function redisPasswords(redisUrl: string): string[] {
+  try {
+    const { password } = new URL(redisUrl);
+    if (password === '') return [];
+    try {
+      return [password, decodeURIComponent(password)];
+    } catch {
+      return [password];
+    }
+  } catch {
+    return [];
+  }
+}
+
 export function loadConfig(): EnvConfig {
   const BOT_TOKEN = requireEnv('BOT_TOKEN');
   const toolSchemaMode = parseToolSchemaMode();
@@ -256,7 +275,7 @@ export function loadConfig(): EnvConfig {
   const INTENT_LEARNER_DAILY_LIMIT = parseIntegerEnv('INTENT_LEARNER_DAILY_LIMIT') ?? 100;
   const telegramSessionMasterKey = parseTelegramSessionMasterKey();
 
-  return {
+  const config: EnvConfig = {
     BOT_TOKEN,
     DATABASE_PATH: process.env.DATABASE_PATH || './data/calendar.db',
     NODE_ENV: (process.env.NODE_ENV as EnvConfig['NODE_ENV']) || 'development',
@@ -312,4 +331,27 @@ export function loadConfig(): EnvConfig {
     GOOGLE_API_KEY: optionalEnv('GOOGLE_API_KEY'),
     TELEGRAM_SESSION_MASTER_KEY: telegramSessionMasterKey,
   };
+
+  // The log and alert redaction knows the SHAPE of a Telegram token or an Anthropic key; these have none
+  // (an operator-chosen ADMIN_ALERT_TOKEN) or are worth matching exactly, so the loaded values are registered.
+  registerSecretValues([
+    ...redisPasswords(config.REDIS_URL),
+    config.BOT_TOKEN,
+    config.INLINE_BOT_TOKEN,
+    config.ADMIN_ALERT_TOKEN,
+    config.CLAUDE_API_TOKEN,
+    config.CLAUDE_API_TOKEN2,
+    config.MTPROTO_API_HASH,
+    config.ZAI_API_KEY,
+    config.HF_TOKEN,
+    config.GROQ_API_KEY,
+    config.OPENROUTER_API_KEY,
+    config.DEEPGRAM_API_KEY,
+    config.OPENWEATHER_API_KEY,
+    config.GOOGLE_API_KEY,
+    config.GOOGLE_CLIENT_SECRET,
+    config.ENCRYPTION_KEY,
+    config.TELEGRAM_SESSION_MASTER_KEY,
+  ]);
+  return config;
 }

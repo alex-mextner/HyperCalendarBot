@@ -105,6 +105,10 @@ const EXEMPT: { [site: string]: Exemption } = {
       "two waits at shutdown. The upload grace: a picture whose upload is still running ends unknown and raises the UncertainSend alert (reportUncertain). The shutdown note budget: deliberately NOT reported, it is best effort at exit (a stuck Telegram call only logs 'shutdown note not sent'); the whole shutdown deadline is already bounded and reported in bootstrap/shutdown.ts",
   },
   // Timers that are not deadlines: nothing is cut off or abandoned when they fire.
+  'src/bootstrap/launch.ts#launchBot': {
+    reason:
+      'the backoff pause between two Telegram start attempts after a transient network failure; nothing is cut off or abandoned when it fires, and giving up is a fatal log plus the crash alert',
+  },
   'src/services/image/render-failure-reporter.ts#defaultSchedule': {
     reason: 'the end of the 10 min aggregation window of the render-failure alert; it sends what was held back',
   },

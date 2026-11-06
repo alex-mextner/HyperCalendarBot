@@ -108,11 +108,20 @@ export function createOnStartHandler(
 ): (context: { info: { username?: string } }) => Promise<void> {
   return async ({ info }) => {
     webServerDeps.botStarted = true;
-    await api.setMyCommands({ commands: menu.en });
-    await api.setMyCommands({
-      commands: menu.ru,
-      language_code: 'ru',
-    });
+    // gramio runs this hook without awaiting it, so a rejection here is an unhandled one and the crash
+    // handler exits the process (#972: a connection reset right after a successful start). The menu is
+    // cosmetic, so each call failing is logged and the bot keeps serving.
+    const languages: Array<{ commands: BotCommand[]; language_code?: string }> = [
+      { commands: menu.en },
+      { commands: menu.ru, language_code: 'ru' },
+    ];
+    for (const params of languages) {
+      try {
+        await api.setMyCommands(params);
+      } catch (err) {
+        botLogger.warn({ err, language: params.language_code ?? 'default' }, 'Bot command menu was not updated');
+      }
+    }
     botLogger.info({ username: info.username }, 'Bot started');
   };
 }
