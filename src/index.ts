@@ -30,7 +30,7 @@ import { createDomainEventBus } from './bootstrap/domain-events.ts';
 import { initEventMentionStore } from './bootstrap/event-mentions.ts';
 import { initGoogleSync } from './bootstrap/google-sync.ts';
 import { initImageRender, recoverImageDeliveries } from './bootstrap/image-render.ts';
-import { launchBot } from './bootstrap/launch.ts';
+import { handleLaunchFailure, launchBot } from './bootstrap/launch.ts';
 import { initLocationVerification } from './bootstrap/location.ts';
 import { initNotificationScheduler } from './bootstrap/notifications.ts';
 import { initScheduledAi } from './bootstrap/scheduled-ai.ts';
@@ -42,9 +42,12 @@ import { createBot } from './bot/index.ts';
 import { createTelegramSender } from './services/ai/telegram-sender.ts';
 import { createServiceTier } from './services/telegram-session/service-tier.ts';
 import { botLogger } from './utils/logger.ts';
+import { installConsoleRedaction } from './utils/redact-secrets.ts';
 import { startWebServer } from './web/server.ts';
 
 const crashHandlers = installCrashHandlers();
+// Libraries print with console, outside pino (gramio's polling loop); keep credentials out of those lines too.
+installConsoleRedaction();
 
 const core = await initCore(crashHandlers);
 const { config } = core;
@@ -152,6 +155,15 @@ Object.freeze(msgDeps);
 
 bot.onStart(createOnStartHandler(buildBotCommands(config), bot.api, ctx.webServerDeps));
 
-installShutdownSignals(createProcessShutdown(ctx, { bot, agent, webServerHandle }));
+const shutdown = createProcessShutdown(ctx, { bot, agent, webServerHandle });
+installShutdownSignals(shutdown);
 
-await launchBot(config, ctx.webServerDeps, bot);
+// A launch that threw ends in the graceful shutdown and exit 1 (handleLaunchFailure).
+await launchBot(config, ctx.webServerDeps, bot).catch((error: unknown) =>
+  handleLaunchFailure(error, {
+    logger: botLogger,
+    alertFatal: (failure) => crashHandlers.alertFatal(failure),
+    shutdown,
+    exit: (code) => process.exit(code),
+  }),
+);

@@ -8,6 +8,7 @@
 // (it writes to db.alerts), so a crash before that point is logged and exits without an alert.
 
 import { botLogger } from '../utils/logger.ts';
+import { redactSecrets } from '../utils/redact-secrets.ts';
 
 export interface CrashLogger {
   fatal(obj: object, message: string): void;
@@ -22,6 +23,11 @@ export interface CrashHandlerDeps {
 export interface CrashHandlers {
   /** Best-effort and synchronous: db.alerts.push() does not await. */
   setAlertSink(sink: ((message: string) => void) | undefined): void;
+  /**
+   * Queues the alert for a failure the caller handles itself, with no exit: a start failure that must
+   * first run the graceful shutdown, which closes the database this alert is written to.
+   */
+  alertFatal(error: Error): void;
   onUncaughtException(error: Error): void;
   onUnhandledRejection(reason: unknown): void;
 }
@@ -41,9 +47,12 @@ export function createCrashHandlers(deps: CrashHandlerDeps): CrashHandlers {
     setAlertSink(sink) {
       alertSink = sink;
     },
+    alertFatal(error) {
+      alertSink?.(redactSecrets(`Bot failed to start: ${error.stack ?? error.message}`));
+    },
     onUncaughtException(error) {
       deps.logger.fatal({ err: error }, 'Uncaught exception');
-      alertSink?.(`Bot crashed: ${error.stack ?? error.message}`);
+      alertSink?.(redactSecrets(`Bot crashed: ${error.stack ?? error.message}`));
       deps.exit(1);
     },
     onUnhandledRejection(reason) {
@@ -53,7 +62,7 @@ export function createCrashHandlers(deps: CrashHandlerDeps): CrashHandlers {
         return;
       }
       deps.logger.fatal({ err }, 'Unhandled promise rejection');
-      alertSink?.(`Bot unhandled rejection: ${err.stack ?? err.message}`);
+      alertSink?.(redactSecrets(`Bot unhandled rejection: ${err.stack ?? err.message}`));
       deps.exit(1);
     },
   };

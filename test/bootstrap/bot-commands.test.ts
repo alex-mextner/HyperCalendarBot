@@ -73,18 +73,38 @@ describe('createOnStartHandler', () => {
     expect(events).toEqual(['default:true', 'ru:true']);
   });
 
-  test('botStarted is set even when publishing the menu fails', async () => {
+  test('a menu call that fails does not reject: botStarted stays set, the failure is logged and the bot keeps running (#972)', async () => {
     const deps = { botStarted: false };
     const handler = createOnStartHandler(
       { en: [], ru: [] },
       {
         setMyCommands: async () => {
-          throw new Error('telegram down');
+          throw Object.assign(new Error('ECONNRESET: socket closed'), { code: 'ECONNRESET' });
         },
       },
       deps,
     );
-    await expect(handler({ info: {} })).rejects.toThrow('telegram down');
+
+    await expect(handler({ info: {} })).resolves.toBeUndefined();
+
     expect(deps.botStarted).toBe(true);
+  });
+
+  test('a failed default-language menu does not skip the Russian one', async () => {
+    const languages: Array<string | undefined> = [];
+    const handler = createOnStartHandler(
+      { en: [], ru: [] },
+      {
+        setMyCommands: async (params) => {
+          languages.push(params.language_code);
+          if (params.language_code === undefined) throw new Error('telegram down');
+        },
+      },
+      { botStarted: false },
+    );
+
+    await handler({ info: {} });
+
+    expect(languages).toEqual([undefined, 'ru']);
   });
 });

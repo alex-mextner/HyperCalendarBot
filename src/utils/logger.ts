@@ -1,10 +1,33 @@
 // src/utils/logger.ts
-import pino from 'pino';
+import pino, { type DestinationStream } from 'pino';
+import { redactSecrets } from './redact-secrets.ts';
 
-export const logger = pino({
-  level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-  transport: process.env.NODE_ENV !== 'production' ? { target: 'pino-pretty', options: { colorize: true } } : undefined,
-});
+interface LoggerOptions {
+  level?: string;
+  /** Where lines go. Omitted: stdout in production, a pretty-printing transport otherwise. */
+  destination?: DestinationStream;
+}
+
+/**
+ * Every serialized line passes `redactSecrets` right before it is written (pino's `streamWrite` hook), so
+ * a bot token in `err.path`, an error message, a stack or any field never reaches the container log (#972).
+ */
+export function createLogger(options: LoggerOptions = {}): pino.Logger {
+  const production = process.env.NODE_ENV === 'production';
+  return pino(
+    {
+      level: options.level ?? (production ? 'info' : 'debug'),
+      hooks: { streamWrite: redactSecrets },
+      transport:
+        options.destination === undefined && !production
+          ? { target: 'pino-pretty', options: { colorize: true } }
+          : undefined,
+    },
+    options.destination,
+  );
+}
+
+export const logger = createLogger();
 
 export const botLogger = logger.child({ module: 'bot' });
 export const dbLogger = logger.child({ module: 'db' });

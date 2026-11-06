@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations';
 import { AlertRepository } from '../../../src/database/repositories/alert.repository';
 import { runMigrations } from '../../../src/database/schema';
+import { FAKE_GETME_URL, FAKE_TELEGRAM_TOKEN } from '../../helpers/fake-secrets.ts';
 
 function createTestDb(): Database {
   const db = new Database(':memory:');
@@ -54,5 +55,14 @@ describe('AlertRepository', () => {
     expect(typeof alert!.id).toBe('number');
     expect(typeof alert!.created_at).toBe('string');
     expect(alert!.created_at.length).toBeGreaterThan(0);
+  });
+
+  test('push stores the text without a Telegram bot token, whoever produced the alert (#972)', () => {
+    repo.push(`Bot unhandled rejection: TypeError: request to ${FAKE_GETME_URL} failed`, 'bot-crash');
+
+    const alert = repo.pop();
+    expect(alert!.text).not.toContain(FAKE_TELEGRAM_TOKEN);
+    expect(alert!.text).toContain('Bot unhandled rejection');
+    expect(alert!.text).toContain('/getMe');
   });
 });

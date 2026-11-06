@@ -210,6 +210,7 @@ set in `src/database/db.ts`. Never assume the filename — always check the code
 - Use **pino** for all logging. The `err` key triggers pino's error serializer (stack trace included).
 - Always pass errors as `{ err: error }`, never `{ error: String(error) }` or `{ error: err.message }`.
 - `String(error)` and `.message` lose the stack trace and are not acceptable.
+- Credentials never reach a log line or the alert queue (#972): `src/utils/logger.ts` passes every pino line through `redactSecrets` (`src/utils/redact-secrets.ts`: Telegram bot tokens, `sk-ant-…` keys, `Bearer` values, plus the secret values `loadConfig()` registers) right before it is written, `installConsoleRedaction()` does the same for `console` output of libraries, and `AlertRepository.push` redacts alert text. A fetch error's `err.path` is the full request URL, bot token included, so log `{ err }` freely; a new secret with no recognisable shape goes into the `registerSecretValues` list in `loadConfig()`.
 
 ## Linting
 
