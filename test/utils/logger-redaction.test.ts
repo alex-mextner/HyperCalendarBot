@@ -71,6 +71,8 @@ describe('createLogger redaction', () => {
     const header = `Bearer ${FAKE_ANTHROPIC_OAUTH_TOKEN}`;
 
     log.error(
+      // The synthetic values below are logged on purpose: the test proves the logger removes them.
+      // codeql[js/clear-text-logging] fake credentials built in test/helpers/fake-secrets.ts, never live ones.
       {
         err: new Error(`401 invalid x-api-key ${FAKE_ANTHROPIC_API_KEY}`),
         headers: { authorization: header, 'x-admin': FAKE_ADMIN_ALERT_TOKEN },
