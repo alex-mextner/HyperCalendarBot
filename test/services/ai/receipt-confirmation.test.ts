@@ -22,7 +22,12 @@ function view(language: string, overrides: Partial<ReceiptView> = {}): ReceiptVi
   };
 }
 
-type Result = { success: boolean; disposition: 'executed' | 'failed'; mutationState?: 'confirmed' | 'uncertain' };
+type Result = {
+  success: boolean;
+  disposition: 'executed' | 'failed';
+  mutationState?: 'confirmed' | 'uncertain' | 'not_applied';
+  alreadyExists?: ToolEvidence['alreadyExists'];
+};
 
 function run(
   ...calls: { name: string; input: { [key: string]: unknown }; result: Result; data?: ToolEvidence['data'] }[]
@@ -31,7 +36,13 @@ function run(
   const evidence: ToolEvidence[] = [];
   for (const call of calls) {
     ledger.record(call.name, call.input, call.result);
-    evidence.push({ name: call.name, input: call.input, success: call.result.success, data: call.data });
+    evidence.push({
+      name: call.name,
+      input: call.input,
+      success: call.result.success,
+      data: call.data,
+      alreadyExists: call.result.alreadyExists,
+    });
   }
   return { ledger, evidence };
 }
@@ -126,5 +137,43 @@ describe('receipt-only confirmation', () => {
     );
     const receipt = buildReceiptConfirmation(view('en'), evidence, ledger) ?? '';
     expect(receipt.match(/Synthetic twin/g)).toHaveLength(2);
+  });
+
+  describe('a create answered "already exists"', () => {
+    const saved = event('Synthetic standup', '2035-03-06', '09:00', 7);
+    const created = { name: 'create_event', input: { title: 'Synthetic standup' }, result: OK, data: saved };
+    const repeat = {
+      name: 'create_event',
+      input: { title: 'Synthetic standup' },
+      result: { ...OK, mutationState: 'not_applied', alreadyExists: { entity: 'event', id: 7 } } as const,
+      data: saved,
+    };
+
+    test('after the creation is the same event: one created line (en, ru)', () => {
+      const { ledger, evidence } = run(created, repeat);
+      const en = buildReceiptConfirmation(view('en'), evidence, ledger) ?? '';
+      expect(en.match(/Synthetic standup/g)).toHaveLength(1);
+      expect(en).toContain('Created: "Synthetic standup" — Tuesday, March 6, 09:00');
+      const ru = buildReceiptConfirmation(view('ru'), evidence, ledger) ?? '';
+      expect(ru.match(/Synthetic standup/g)).toHaveLength(1);
+      expect(ru).toContain('Создано: «Synthetic standup» — вторник, 6 марта, 09:00');
+    });
+
+    test('alone is told as already in the calendar, not as created by this run (en, ru)', () => {
+      const { ledger, evidence } = run(repeat);
+      const en = buildReceiptConfirmation(view('en'), evidence, ledger) ?? '';
+      expect(en).toContain('Already in the calendar: "Synthetic standup" — Tuesday, March 6, 09:00');
+      expect(en).not.toContain('Created');
+      const ru = buildReceiptConfirmation(view('ru'), evidence, ledger) ?? '';
+      expect(ru).toContain('Уже есть в календаре: «Synthetic standup» — вторник, 6 марта, 09:00');
+      expect(ru).not.toContain('Создано');
+    });
+
+    test('in a group names no event', () => {
+      const { ledger, evidence } = run(repeat);
+      const receipt = buildReceiptConfirmation(view('en', { hideTargets: true }), evidence, ledger) ?? '';
+      expect(receipt).toContain('Already in the calendar: event');
+      expect(receipt).not.toContain('Synthetic standup');
+    });
   });
 });

@@ -24,6 +24,7 @@ export const ruWorkflow = {
     receipt: {
       intro: 'Сделано в календаре:',
       created: (title: string, when: string) => `Создано: «${title}» — ${when}`,
+      alreadyThere: (title: string, when: string) => `Уже есть в календаре: «${title}» — ${when}`,
       updated: (title: string, when: string) => `Изменено: «${title}» — теперь ${when}`,
       deleted: (title: string, when: string) => `Удалено: «${title}» (было ${when})`,
       allDay: 'весь день',
@@ -82,6 +83,8 @@ export const ruWorkflow = {
           ? `Приглашение на ${event} пропущено, повторно не отправлялось: ${who}.`
           : `Приглашения на ${event} пропущены, повторно не отправлялись: ${who}.`,
     },
+    // A create that found its event already saved (same event, nothing written by this run).
+    alreadyThere: 'Уже есть в календаре',
     operations: {
       create_event: {
         done: 'Создано',
