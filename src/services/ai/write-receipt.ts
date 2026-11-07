@@ -53,6 +53,8 @@ export interface WriteOutcome {
   disposition: 'executed' | 'failed' | 'skipped' | 'waiting';
   mutationState?: ToolResult['mutationState'];
   effect?: ToolResult['effect'];
+  /** A create that wrote nothing because the calendar already held that event: the same event, not a second creation. */
+  alreadyExists?: ToolResult['alreadyExists'];
   /** An earlier try at this same write ended unknown: this success may have been written twice. */
   unknownRetried: boolean;
   /** Later repeats of this successful create that ended unknown (what each asked for): the event may now exist twice. */
@@ -372,7 +374,8 @@ function plainLineOf(
 ): { base: string; reason: string | null } {
   const standing = standingOf(outcome);
   const labels = isEventOperation(outcome.operation) ? tr.operations[outcome.operation] : tr.otherWrite;
-  const prefix = standing === 'done' ? labels.done : standing === 'unknown' ? labels.unknown : labels.notDone;
+  const done = outcome.alreadyExists ? tr.alreadyThere : labels.done;
+  const prefix = standing === 'done' ? done : standing === 'unknown' ? labels.unknown : labels.notDone;
   const when = ref ? whenOf(ref, view) : null;
   const subject = isEventOperation(outcome.operation) ? (ref ? tr.eventNamed(ref.title, when) : tr.anEvent) : tr.change;
   const reason = standing === 'rejected' ? tr.nothingChanged : standing === 'skipped' ? tr.skipped : null;
@@ -412,6 +415,20 @@ function refOf(outcome: WriteOutcome, events: ReadonlyMap<number, KnownEvent>, v
 /** Every title in the receipt passes through here: it is the model's text or the user's, never ours. */
 function inertRef(named: EventRef | null, view: ReceiptView): EventRef | null {
   return view.hideTargets || !named ? null : { ...named, title: inert(named.title) };
+}
+
+/**
+ * A create answered "already exists" is the event found again by its id: it tells nothing that a successful
+ * create of that same event recorded before it (made by this run, or found there by an earlier repeat) has not told.
+ */
+function repeatsToldEvent(outcomes: readonly WriteOutcome[], index: number): boolean {
+  const id = outcomes[index]?.alreadyExists?.id;
+  return (
+    id !== undefined &&
+    outcomes.some(
+      (other, i) => i < index && other.operation === 'create_event' && other.success && other.eventId === id,
+    )
+  );
 }
 
 /** Files one recorded write under the kind of line it is told as: an invitation, a side effect or an event change. */
@@ -472,7 +489,9 @@ export function renderReceipt(
   const rejected = standings.includes('rejected');
   const duplicateRisk = outcomes.some((outcome) => outcome.unknownRetried);
 
-  for (const outcome of outcomes) addOutcome(draft, outcome, events, view, tr, outcomes);
+  outcomes.forEach((outcome, index) => {
+    if (!repeatsToldEvent(outcomes, index)) addOutcome(draft, outcome, events, view, tr, outcomes);
+  });
 
   const lines = draft.entries.flatMap((entry) => renderEntry(entry, view, tr));
   if (duplicateRisk) lines.push(tr.retriedAfterUnknown);

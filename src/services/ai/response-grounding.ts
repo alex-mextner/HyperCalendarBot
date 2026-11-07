@@ -7,7 +7,7 @@
 import { TZDate } from '@date-fns/tz';
 import { addDays, format } from 'date-fns';
 import type { EventSummary } from '../intent/variable-resolver.ts';
-import type { ToolResultData } from './types.ts';
+import type { ToolResult, ToolResultData } from './types.ts';
 
 /** Tools whose results describe the user's schedule. */
 export const SCHEDULE_READ_TOOLS: ReadonlySet<string> = new Set([
@@ -25,6 +25,8 @@ export interface ToolEvidence {
   success: boolean;
   output?: string;
   data?: ToolResultData;
+  /** A create that found its event already saved: the same event, not a creation of this run. */
+  alreadyExists?: ToolResult['alreadyExists'];
 }
 
 export interface GroundingReport {

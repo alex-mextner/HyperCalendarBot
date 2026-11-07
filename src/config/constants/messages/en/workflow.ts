@@ -24,6 +24,7 @@ export const enWorkflow = {
     receipt: {
       intro: 'Done in your calendar:',
       created: (title: string, when: string) => `Created: "${title}" — ${when}`,
+      alreadyThere: (title: string, when: string) => `Already in the calendar: "${title}" — ${when}`,
       updated: (title: string, when: string) => `Updated: "${title}" — now ${when}`,
       deleted: (title: string, when: string) => `Deleted: "${title}" (was ${when})`,
       allDay: 'all day',
@@ -85,6 +86,8 @@ export const enWorkflow = {
           ? `The invitation to ${event} was skipped and not sent again: ${who}.`
           : `The invitations to ${event} were skipped and not sent again: ${who}.`,
     },
+    // A create that found its event already saved (same event, nothing written by this run).
+    alreadyThere: 'Already in the calendar',
     operations: {
       create_event: {
         done: 'Created',

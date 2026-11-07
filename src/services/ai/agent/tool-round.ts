@@ -100,6 +100,7 @@ function recordExecuted(ledger: ToolRunLedger, name: string, input: ToolInput, t
     success: toolResult.success,
     output: toolResult.output,
     data: toolResult.data,
+    alreadyExists: toolResult.alreadyExists,
   });
 }
 

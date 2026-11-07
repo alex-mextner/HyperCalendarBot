@@ -357,6 +357,7 @@ export class WriteOutcomes {
       disposition: result.disposition,
       mutationState: result.mutationState,
       effect: result.effect,
+      alreadyExists: result.alreadyExists,
       unknownRetried: false,
       repeatUnknown: [],
       create: createKeysOf(requested, owner, fields, isGroup, timezone),
@@ -458,9 +459,10 @@ export class WriteOutcomes {
     });
   }
 
-  /** The id of the event a successful create returned. */
+  /** The id of the event a successful create returned: the saved one when the create found it already there. */
   private createdEventId(operation: string, result: ToolResult): number | null {
-    return operation === 'create_event' ? (extractEventSummaries(result.data)?.[0]?.id ?? null) : null;
+    if (operation !== 'create_event') return null;
+    return result.alreadyExists?.id ?? extractEventSummaries(result.data)?.[0]?.id ?? null;
   }
 
   /**

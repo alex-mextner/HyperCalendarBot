@@ -58,7 +58,13 @@ function eventLines(language: string, writes: readonly ToolEvidence[]): string |
     const verb = receiptVerbOf(write.name);
     const event = write.success ? extractEventSummaries(write.data)?.[0] : undefined;
     if (!verb || !event) return null;
-    lines.set(`${verb}:${event.id}`, `• ${tr[verb](event.title, whenLabel(event, language))}`);
+    const text = `• ${(write.alreadyExists ? tr.alreadyThere : tr[verb])(event.title, whenLabel(event, language))}`;
+    if (!write.alreadyExists) {
+      lines.set(`${verb}:${event.id}`, text);
+      continue;
+    }
+    // A repeat answered "already exists" is the event itself: a creation of this run already stands for it.
+    if (!lines.has(`${verb}:${event.id}`)) lines.set(`existing:${event.id}`, text);
   }
   return [...lines.values()].join('\n');
 }
