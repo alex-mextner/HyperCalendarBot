@@ -104,7 +104,7 @@ describe('scripts/provider-circuit-state.ts', () => {
       ['account', null, 'open'],
       ['model', 'vendor/main', 'closed'],
       ['model', 'vendor/fast', 'closed'],
-      ['model', 'deepseek/deepseek-v4.1-flash', 'closed'],
+      ['model', 'deepseek/deepseek-v4.1-flash-1017', 'closed'],
     ]);
     expect(openrouter[0]).toMatchObject({ failureClass: 'auth_failed', status: 401 });
     expect(providers.filter((row) => row.provider !== 'openrouter').every((row) => row.scope === 'account')).toBe(true);
