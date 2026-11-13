@@ -12,7 +12,6 @@ import {
 import { type Admission, admitProvider, type CircuitContext, settleAnswered } from '../provider-circuit.ts';
 import { withinProviderDeadline } from '../provider-deadline.ts';
 import { clearBlock, isBlocked } from '../provider-eligibility.ts';
-import { prioritizeProviders } from '../provider-ids.ts';
 import { roleForPurpose, rolesApplyTo } from '../role-routing.ts';
 import { classifyProviderError } from '../usage-classification.ts';
 import { type AttemptScope, answeredAttempt, failedAttempt, recordAiUsage, skippedAttempt } from '../usage-recorder.ts';
@@ -99,6 +98,7 @@ export function attemptScopeOf(state: RoundState, slot: ProviderSlot): AttemptSc
  * A role chain is tried first and the legacy chain follows it, minus models the role chain already asked:
  * roles can fail or be skipped at runtime (open circuit, bench, deadline) as well as fail to load, and a
  * user must not get no answer from a role chain while the legacy chain they were on yesterday is healthy.
+ * HF slots stay behind every selected priority provider, retaining their role and model settings.
  */
 export function buildRoundChain(options: StreamRoundOptions): ProviderSlot[] {
   const cfg = loadConfig();
@@ -106,7 +106,7 @@ export function buildRoundChain(options: StreamRoundOptions): ProviderSlot[] {
   const roleChain = role && rolesApplyTo(cfg, options.userId) ? buildRoleChain(role, cfg) : [];
   const legacyChain = options.fast ? buildFastChain(cfg) : buildSmartChain(cfg);
   const combined = roleChain.length > 0 ? [...roleChain, ...withoutModelsOf(roleChain, legacyChain)] : legacyChain;
-  return prioritizeProviders(combined, (slot) => slot.provider);
+  return [...combined.filter((slot) => slot.provider !== 'hf'), ...combined.filter((slot) => slot.provider === 'hf')];
 }
 
 function recordSkips(

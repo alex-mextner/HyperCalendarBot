@@ -200,7 +200,9 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
 
     await ask({ fast: true });
 
-    expect(rows().map((row) => [row.chain, row.model, row.purpose])).toEqual([['fast', 'claude-haiku-5-5', 'unlabeled']]);
+    expect(rows().map((row) => [row.chain, row.model, row.purpose])).toEqual([
+      ['fast', 'claude-haiku-5-5', 'unlabeled'],
+    ]);
   });
 
   test('a provider that reports no usage leaves its token columns NULL, never 0', async () => {

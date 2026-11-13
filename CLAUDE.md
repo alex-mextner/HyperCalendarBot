@@ -299,7 +299,7 @@ legacy `smart`/`fast` bench, and its ledger `chain` reads `role:<role>`; the gat
 reads `preset.qualifications[provider]`, so a preset measured through OpenRouter does not load on z.ai); a preset slot never runs a
 live-model replacement (neither a cached nor a fresh heuristic one) because that would serve the role unmeasured; and a role chain is
 followed by the legacy chain (minus models the role chain already asked), so a role chain whose slots all fail, are benched or sit behind an
-open circuit at runtime hands the round to the legacy chain instead of answering nobody.
+open circuit at runtime hands the round to the legacy chain instead of answering nobody. Claude leads the selected providers within each role or legacy chain; legacy Claude never moves ahead of a non-HF role override. HF slots remain last across the combined chain.
 
 **A depleted or rejected provider account is skipped, not retried**: `src/services/ai/provider-circuit.ts`
 keeps one durable circuit per provider account for every provider in the chain (key = fingerprint
@@ -348,7 +348,7 @@ Historical provider rows remain readable: the report lists any provider id found
 
 **Cost of the order**: Claude is the primary and every successful primary request is billed to its API account. Claude keeps its `CLAUDE_MAX_OUTPUT_TOKENS` (128000) `max_tokens` and its thinking
 behaviour unchanged. Watch `bun scripts/report-ai-usage.ts` and set `AI_SMART_CHAIN`/`AI_FAST_CHAIN` (e.g. `zai,hf`, or `hf` alone) if the cost
-is not acceptable; the ExpenseSyncBot OCR chain is separate and stays Claude vision → HF vision.
+is not acceptable. These variables select providers: Claude stays first when selected and HF stays last, regardless of where they are written; the other providers keep their relative order. The effective smart/fast order is logged once per explicit selection. The ExpenseSyncBot OCR chain is separate and stays Claude vision → HF vision.
 The fallback accounts have had quota and credit failures before. Those failures stay visible in usage/error telemetry and do not block the primary. A configured OpenRouter route runs before HF. Circuit-open providers are skipped; the remaining selected priority providers keep their relative order. Fast and smart requests retain their existing per-provider deadlines.
 
 Optional features that depend on an env var must deactivate gracefully when the var is absent — never throw at startup. Validate at the point of use, not at startup.

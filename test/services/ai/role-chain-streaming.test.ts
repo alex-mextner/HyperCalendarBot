@@ -110,9 +110,8 @@ afterEach(() => {
 const messages: OpenAI.ChatCompletionMessageParam[] = [{ role: 'user', content: 'hi' }];
 
 describe('AI_ROUTING=roles', () => {
-  test('an agent round runs on the selected executor preset when Claude is omitted', async () => {
+  test('an explicit executor preset runs before the legacy Claude fallback', async () => {
     process.env.AI_EXECUTOR_CHAIN = 'openrouter:qualified-test';
-    process.env.AI_SMART_CHAIN = 'zai';
     const result = await aiStreamRound({ messages, maxTokens: 100, purpose: 'agent', userId: 5 });
 
     expect(result.text).toBe('from openrouter');
@@ -122,6 +121,7 @@ describe('AI_ROUTING=roles', () => {
       reasoning: { effort: 'low' },
     });
     expect(zai.requests).toHaveLength(0);
+    expect(claude.requests).toHaveLength(0);
   });
 
   test('a validator retry runs on the repair chain only when the preset is qualified for repair', async () => {
@@ -157,11 +157,10 @@ describe('AI_ROUTING=roles', () => {
   test('the canary list limits roles to the listed users', async () => {
     process.env.AI_ROUTING_USER_IDS = '7';
     process.env.AI_EXECUTOR_CHAIN = 'openrouter:qualified-test';
-    process.env.AI_SMART_CHAIN = 'zai';
     const other = await aiStreamRound({ messages, maxTokens: 100, purpose: 'agent', userId: 5 });
     const listed = await aiStreamRound({ messages, maxTokens: 100, purpose: 'agent', userId: 7 });
 
-    expect(other.text).toBe('from zai');
+    expect(other.text).toBe('from claude');
     expect(listed.text).toBe('from openrouter');
   });
 });

@@ -663,7 +663,9 @@ describe('durable provider circuit', () => {
   });
 
   test('the incident notice never contains the provider error body', async () => {
-    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required SECRET-BODY-TEXT') }] });
+    claude = makeProvider({
+      behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required SECRET-BODY-TEXT') }],
+    });
     hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
 
     await ask();
@@ -840,15 +842,15 @@ describe('provider order', () => {
     process.env.AI_SMART_CHAIN = 'zai,claude';
     process.env.AI_FAST_CHAIN = 'zai,claude';
     Object.assign(process.env, { CLAUDE_API_TOKEN: 'claude-key', CLAUDE_MODEL: model, CLAUDE_FAST_MODEL: model });
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'summary' }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
+    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'summary' }] });
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens, fast });
 
     expect(claude.requests).toMatchObject([{ max_tokens: 128_000 }]);
     expect(claude.requests[0]?.reasoning_effort).toBeUndefined();
     expect(claude.requests[0]?.thinking).toBeUndefined();
-    expect(zai.requests).toEqual([]);
+    expect(zai.requests).toMatchObject([{ max_tokens: maxTokens }]);
   });
 
   // The caller's limit binds Claude's visible output only, so the stream reader enforces it:

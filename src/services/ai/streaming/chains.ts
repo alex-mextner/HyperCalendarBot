@@ -10,7 +10,7 @@ import { claudeClient, hfClient, openrouterClient, zaiClient } from '../clients.
 import { excludedModelReason, isQualifiedFor, type ModelRole, presetById } from '../model-presets.ts';
 import { providerCircuitKey } from '../provider-circuit.ts';
 import type { BenchChain } from '../provider-eligibility.ts';
-import { prioritizeProviders, type ProviderId } from '../provider-ids.ts';
+import { type ProviderId, prioritizeProviders } from '../provider-ids.ts';
 import { aiLogger } from './logger.ts';
 import { type ProviderSlot, streamingSlot } from './slot.ts';
 

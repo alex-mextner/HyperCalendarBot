@@ -1,7 +1,7 @@
 // src/config/env.ts
 
 import { MODEL_ROLES } from '../services/ai/model-presets.ts';
-import { prioritizeProviders, PROVIDER_IDS, type ProviderId } from '../services/ai/provider-ids.ts';
+import { PROVIDER_IDS, type ProviderId, prioritizeProviders } from '../services/ai/provider-ids.ts';
 import {
   AI_ROUTING_MODES,
   type AiRoutingMode,
@@ -61,7 +61,11 @@ function parseChain(name: string, fallback: ProviderId[]): ChainOrder {
     );
     return { order: fallback, fromEnv: false, fallback };
   }
-  return { order: prioritizeProviders(parsed, (provider) => provider), fromEnv: true, fallback };
+  const order = prioritizeProviders(parsed, (provider) => provider);
+  logOnce(`${name}:priority:${parsed.join(',')}`, () =>
+    logger.info({ name, configured: parsed, effective: order }, 'Effective provider order'),
+  );
+  return { order, fromEnv: true, fallback };
 }
 
 export interface EnvConfig {

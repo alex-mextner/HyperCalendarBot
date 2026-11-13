@@ -4,7 +4,7 @@ Task: UB-178. Base revision: `128846b7e4c31667ee41b2fc1dae274e0bef3fcd`.
 
 ## Changes
 
-Claude is first among selected providers in smart, fast and role chains. Other priority providers keep their relative order; Hugging Face stays last, including the combined role and legacy fallback chain. Provider selection, credential availability, preset qualification, circuits, deadlines and output validation stay active.
+Claude is first among selected providers in smart, fast and role chains. Other priority providers keep their relative order; Hugging Face stays last, including the combined role and legacy fallback chain. An explicit role chain precedes the legacy fallback; legacy Claude cannot displace a qualified role override. Provider selection, credential availability, preset qualification, circuits, deadlines and output validation stay active.
 
 Remove obsolete provider references from active source, scripts, fixtures and current configuration guidance. Historical usage rows remain readable through the existing generic provider handling; no database content is changed.
 

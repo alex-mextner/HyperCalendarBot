@@ -176,11 +176,13 @@ const tools: OpenAI.ChatCompletionTool[] = [
 ];
 
 describe('the ledger tells a role round from a legacy one', () => {
-  test('an executor round records its role, preset, chain label and the cost from the price table', async () => {
+  test('an executor round records its role and preset before legacy Claude can answer', async () => {
+    delete process.env.AI_SMART_CHAIN;
     await aiStreamRound({ messages, maxTokens: 100, purpose: 'agent', userId: 5 });
 
     const [row, ...rest] = rows();
     expect(rest).toEqual([]);
+    expect(claude.requests).toHaveLength(0);
     expect(row).toMatchObject({
       provider: 'openrouter',
       model: OR_PRESET_MODEL,
@@ -372,6 +374,22 @@ describe('a role chain that has nothing left to try falls through to the legacy 
     expect(skipped.map((row) => [row.provider, row.chain])).toEqual([
       ['claude', 'role:executor'],
       ['openrouter', 'role:executor'],
+    ]);
+  });
+
+  test('an HF role slot stays behind the legacy priority providers and keeps its role ledger', async () => {
+    process.env.AI_EXECUTOR_CHAIN = 'hf';
+    delete process.env.AI_SMART_CHAIN;
+    claude = fakeProvider({ error: apiError(503, 'primary unavailable') });
+    zai = fakeProvider({ error: apiError(503, 'reserve unavailable') });
+
+    const result = await aiStreamRound({ messages, maxTokens: 100, purpose: 'agent', userId: 5 });
+
+    expect(result.text).toBe('from hf');
+    expect(rows().map((row) => [row.provider, row.outcome, row.chain, row.role])).toEqual([
+      ['claude', 'error', 'smart', null],
+      ['zai', 'error', 'smart', null],
+      ['hf', 'ok', 'role:executor', 'executor'],
     ]);
   });
 
