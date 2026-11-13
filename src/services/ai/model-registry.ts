@@ -445,15 +445,18 @@ async function waitForCatalog(
   }
 }
 
-export async function resolveModelOverride(options: ResolveModelOverrideOptions): Promise<string | null> {
+function shouldSkipModelLookup(options: ResolveModelOverrideOptions): boolean {
   // The HF catalog lists base ids without provider pins. Replacing an explicit
   // route from that list would silently change its provider; use normal failover.
-  if (options.provider === 'hf' && options.configuredModel.includes(':')) return null;
-  if (
-    options.signal?.aborted ||
+  if (options.provider === 'hf' && options.configuredModel.includes(':')) return true;
+  return (
+    options.signal?.aborted === true ||
     (options.providerDeadlineAt !== undefined && options.providerDeadlineAt <= performance.now())
-  )
-    return null;
+  );
+}
+
+export async function resolveModelOverride(options: ResolveModelOverrideOptions): Promise<string | null> {
+  if (shouldSkipModelLookup(options)) return null;
   const key = cacheKey(options.provider, options.configuredModel);
   const pending = inFlight.get(key);
   const forced = options.forceRefresh === true;
