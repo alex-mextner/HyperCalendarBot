@@ -14,3 +14,9 @@
 export const PROVIDER_IDS = ['zai', 'claude', 'hf', 'openrouter'] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
+
+/** Keep Claude first and Hugging Face last among the selected providers. */
+export function prioritizeProviders<T>(entries: readonly T[], providerOf: (entry: T) => ProviderId): T[] {
+  const rank = (entry: T) => (providerOf(entry) === 'claude' ? 0 : providerOf(entry) === 'hf' ? 2 : 1);
+  return [...entries].sort((a, b) => rank(a) - rank(b));
+}

@@ -45,7 +45,7 @@ const rows = [
     completionTokens: null,
   }),
   // A provider retired from the code whose rows remain in the ledger.
-  event({ provider: 'gemini', model: 'gemini-3-flash', promptTokens: null, completionTokens: null }),
+  event({ provider: 'retired', model: 'historical-model', promptTokens: null, completionTokens: null }),
 ];
 
 describe('formatUsageReport', () => {
@@ -79,11 +79,11 @@ describe('formatUsageReport', () => {
     const text = formatUsageReport(summarizeAiUsage(rows, WINDOW), 7, t('en').aiStats);
 
     expect(text).toContain('tokens: in 2400 · out 160');
-    // gemini reported nothing: dashes and a count of answers without usage, not 0.
-    const gemini = text.slice(text.indexOf('gemini:gemini-3-flash'));
-    expect(gemini).toContain('tokens: in — · out —');
-    expect(gemini).toContain('answers without usage: 1');
-    expect(gemini).not.toMatch(/in 0 /);
+    // retired reported nothing: dashes and a count of answers without usage, not 0.
+    const retired = text.slice(text.indexOf('retired:historical-model'));
+    expect(retired).toContain('tokens: in — · out —');
+    expect(retired).toContain('answers without usage: 1');
+    expect(retired).not.toMatch(/in 0 /);
   });
 
   test('lists the provider verdicts before the models', () => {
@@ -91,7 +91,7 @@ describe('formatUsageReport', () => {
 
     expect(text.indexOf('Providers')).toBeLessThan(text.indexOf('Models'));
     expect(text).toContain('zai: degraded');
-    expect(text).toContain('gemini: healthy');
+    expect(text).toContain('retired: healthy');
   });
 
   test('says skipped providers were never contacted and what skipped them', () => {

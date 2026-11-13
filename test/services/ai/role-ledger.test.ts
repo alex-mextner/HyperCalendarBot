@@ -85,7 +85,7 @@ const realPresetById = roleRoutingSeams.presetById;
 const savedEnv = { ...process.env };
 
 // A route the seeded price table knows (0.3 / 1.2 USD per million tokens), so the fallback price applies to a role row.
-const OR_PRESET_MODEL = 'deepseek/deepseek-v4.1-flash';
+const OR_PRESET_MODEL = 'deepseek/deepseek-v4.1-flash-1017';
 const GATE = { sha: 'abc1234', measuredAt: '2026-10-23', rolePass: { executor: 1, repair: 1 }, historyPass: 1 };
 const OPENROUTER_PRESET: ModelPreset = {
   id: 'or-test',
@@ -135,10 +135,10 @@ beforeEach(() => {
     OPENROUTER_MODEL: 'vendor/legacy-model',
     OPENROUTER_FAST_MODEL: 'vendor/legacy-fast',
     AI_ROUTING: 'roles',
-    AI_EXECUTOR_CHAIN: 'openrouter:or-test,claude',
-    AI_REPAIR_CHAIN: 'openrouter:or-test,claude',
-    AI_SMART_CHAIN: 'zai,claude',
-    AI_FAST_CHAIN: 'zai,claude',
+    AI_EXECUTOR_CHAIN: 'openrouter:or-test',
+    AI_REPAIR_CHAIN: 'openrouter:or-test',
+    AI_SMART_CHAIN: 'zai',
+    AI_FAST_CHAIN: 'zai',
   });
   for (const name of ['AI_ROUTING_USER_IDS', 'AI_PLANNER_CHAIN']) delete process.env[name];
   resetLogOnce();
@@ -176,11 +176,13 @@ const tools: OpenAI.ChatCompletionTool[] = [
 ];
 
 describe('the ledger tells a role round from a legacy one', () => {
-  test('an executor round records its role, preset, chain label and the cost from the price table', async () => {
+  test('an executor round records its role and preset before legacy Claude can answer', async () => {
+    delete process.env.AI_SMART_CHAIN;
     await aiStreamRound({ messages, maxTokens: 100, purpose: 'agent', userId: 5 });
 
     const [row, ...rest] = rows();
     expect(rest).toEqual([]);
+    expect(claude.requests).toHaveLength(0);
     expect(row).toMatchObject({
       provider: 'openrouter',
       model: OR_PRESET_MODEL,
@@ -247,6 +249,7 @@ describe('the ledger tells a role round from a legacy one', () => {
 
 describe('a role round cannot bench a provider for legacy traffic', () => {
   test('a size rejection on the role slot benches that role and model only', async () => {
+    process.env.AI_EXECUTOR_CHAIN = 'openrouter:or-test,zai';
     process.env.AI_SMART_CHAIN = 'openrouter,zai';
     openrouter = fakeProvider({ error: apiError(413, 'Request too large') });
 
@@ -258,6 +261,7 @@ describe('a role round cannot bench a provider for legacy traffic', () => {
   });
 
   test('a legacy round still reaches OpenRouter after the role slot was benched', async () => {
+    process.env.AI_EXECUTOR_CHAIN = 'openrouter:or-test,zai';
     process.env.AI_SMART_CHAIN = 'openrouter,zai';
     openrouter = fakeProvider({ error: apiError(413, 'Request too large') }, { text: 'legacy answer' });
     await aiStreamRound({ messages, maxTokens: 100, purpose: 'agent', userId: 5, tools });
@@ -284,18 +288,20 @@ describe('a role round cannot bench a provider for legacy traffic', () => {
 
 describe('a preset slot runs only the measured model', () => {
   test('a model that is gone is not swapped for a live-model guess, and the next entry serves', async () => {
-    process.env.AI_EXECUTOR_CHAIN = 'zai:zai-test,claude';
+    process.env.AI_EXECUTOR_CHAIN = 'zai:zai-test,hf';
+    process.env.AI_SMART_CHAIN = 'hf';
     zai = fakeProvider({ error: apiError(404, 'model not found') });
 
     const result = await aiStreamRound({ messages, maxTokens: 100, purpose: 'agent', userId: 5 });
 
-    expect(result.text).toBe('from claude');
+    expect(result.text).toBe('from hf');
     expect(zai.listCalls).toBe(0);
     expect(zai.requests.map((request) => request.model)).toEqual(['zai-preset-model']);
   });
 
   test('a cached replacement from the legacy chain is not used by the preset slot either', async () => {
-    process.env.AI_EXECUTOR_CHAIN = 'zai:zai-test,claude';
+    process.env.AI_EXECUTOR_CHAIN = 'zai:zai-test,hf';
+    process.env.AI_SMART_CHAIN = 'hf';
     process.env.ZAI_MODEL = 'zai-preset-model';
     zai = fakeProvider({ error: apiError(404, 'model not found') }, { text: 'from replacement', usage: USAGE });
     delete process.env.AI_ROUTING;
@@ -304,6 +310,7 @@ describe('a preset slot runs only the measured model', () => {
     expect(zai.listCalls).toBe(1);
 
     process.env.AI_ROUTING = 'roles';
+    process.env.AI_SMART_CHAIN = 'hf';
     const requestsBefore = zai.requests.length;
     await aiStreamRound({ messages, maxTokens: 100, purpose: 'agent', userId: 5 });
 
@@ -311,7 +318,7 @@ describe('a preset slot runs only the measured model', () => {
   });
 
   test('a plain provider entry keeps live-model discovery', async () => {
-    process.env.AI_EXECUTOR_CHAIN = 'zai,claude';
+    process.env.AI_EXECUTOR_CHAIN = 'zai,hf';
     zai = fakeProvider({ error: apiError(404, 'model not found') }, { text: 'from replacement', usage: USAGE });
 
     const result = await aiStreamRound({ messages, maxTokens: 100, purpose: 'agent', userId: 5 });
@@ -322,6 +329,10 @@ describe('a preset slot runs only the measured model', () => {
 });
 
 describe('a role chain that has nothing left to try falls through to the legacy chain', () => {
+  beforeEach(() => {
+    process.env.AI_EXECUTOR_CHAIN = 'openrouter:or-test,claude';
+    process.env.AI_SMART_CHAIN = 'zai,claude';
+  });
   test('every role slot failing at runtime hands the round to the legacy chain', async () => {
     openrouter = fakeProvider({ error: apiError(500, 'upstream down') });
     claude = fakeProvider({ error: apiError(500, 'also down') });
@@ -331,8 +342,8 @@ describe('a role chain that has nothing left to try falls through to the legacy 
     expect(result.text).toBe('from zai');
     const written = rows();
     expect(written.map((row) => [row.provider, row.outcome, row.chain, row.role])).toEqual([
-      ['openrouter', 'error', 'role:executor', 'executor'],
       ['claude', 'error', 'role:executor', 'executor'],
+      ['openrouter', 'error', 'role:executor', 'executor'],
       ['zai', 'ok', 'smart', null],
     ]);
   });
@@ -361,8 +372,24 @@ describe('a role chain that has nothing left to try falls through to the legacy 
     expect(openrouter.requests).toHaveLength(1);
     const skipped = rows().filter((row) => row.skipReason === 'circuit_open');
     expect(skipped.map((row) => [row.provider, row.chain])).toEqual([
-      ['openrouter', 'role:executor'],
       ['claude', 'role:executor'],
+      ['openrouter', 'role:executor'],
+    ]);
+  });
+
+  test('an HF role slot stays behind the legacy priority providers and keeps its role ledger', async () => {
+    process.env.AI_EXECUTOR_CHAIN = 'hf';
+    delete process.env.AI_SMART_CHAIN;
+    claude = fakeProvider({ error: apiError(503, 'primary unavailable') });
+    zai = fakeProvider({ error: apiError(503, 'reserve unavailable') });
+
+    const result = await aiStreamRound({ messages, maxTokens: 100, purpose: 'agent', userId: 5 });
+
+    expect(result.text).toBe('from hf');
+    expect(rows().map((row) => [row.provider, row.outcome, row.chain, row.role])).toEqual([
+      ['claude', 'error', 'smart', null],
+      ['zai', 'error', 'smart', null],
+      ['hf', 'ok', 'role:executor', 'executor'],
     ]);
   });
 

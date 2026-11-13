@@ -711,7 +711,6 @@ SAFE_PROPER = frozenset(
         "GPT",
         "ChatGPT",
         "Claude",
-        "Gemini",
         "ИИ",
         "Бот",
         "Календарь",

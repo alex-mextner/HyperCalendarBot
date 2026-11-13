@@ -98,13 +98,15 @@ export function attemptScopeOf(state: RoundState, slot: ProviderSlot): AttemptSc
  * A role chain is tried first and the legacy chain follows it, minus models the role chain already asked:
  * roles can fail or be skipped at runtime (open circuit, bench, deadline) as well as fail to load, and a
  * user must not get no answer from a role chain while the legacy chain they were on yesterday is healthy.
+ * HF slots stay behind every selected priority provider, retaining their role and model settings.
  */
 export function buildRoundChain(options: StreamRoundOptions): ProviderSlot[] {
   const cfg = loadConfig();
   const role = roleForPurpose(options.purpose);
   const roleChain = role && rolesApplyTo(cfg, options.userId) ? buildRoleChain(role, cfg) : [];
   const legacyChain = options.fast ? buildFastChain(cfg) : buildSmartChain(cfg);
-  return roleChain.length > 0 ? [...roleChain, ...withoutModelsOf(roleChain, legacyChain)] : legacyChain;
+  const combined = roleChain.length > 0 ? [...roleChain, ...withoutModelsOf(roleChain, legacyChain)] : legacyChain;
+  return [...combined.filter((slot) => slot.provider !== 'hf'), ...combined.filter((slot) => slot.provider === 'hf')];
 }
 
 function recordSkips(

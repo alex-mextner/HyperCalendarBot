@@ -168,7 +168,7 @@ function ask(overrides: Partial<StreamRoundOptions> = {}) {
 
 describe('aiStreamRound records one usage row per provider attempt', () => {
   test('an answered attempt records provider, model, chain, purpose, duration and every reported token count', async () => {
-    zai = makeProvider({ kind: 'text', text: 'hello', usage: USAGE });
+    claude = makeProvider({ kind: 'text', text: 'hello', usage: USAGE });
     const before = Date.now();
 
     await ask({ purpose: 'agent', requestId: 'req-42' });
@@ -176,8 +176,8 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
     const [row, ...rest] = rows();
     expect(rest).toEqual([]);
     expect(row).toMatchObject({
-      provider: 'zai',
-      model: 'glm-5.1',
+      provider: 'claude',
+      model: 'claude-sonnet-5-5',
       chain: 'smart',
       purpose: 'agent',
       outcome: 'ok',
@@ -196,15 +196,17 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
   });
 
   test('the fast chain is recorded as fast and an unlabeled caller as unlabeled', async () => {
-    zai = makeProvider({ kind: 'text', text: 'hello', usage: USAGE });
+    claude = makeProvider({ kind: 'text', text: 'hello', usage: USAGE });
 
     await ask({ fast: true });
 
-    expect(rows().map((row) => [row.chain, row.model, row.purpose])).toEqual([['fast', 'glm-5.1-air', 'unlabeled']]);
+    expect(rows().map((row) => [row.chain, row.model, row.purpose])).toEqual([
+      ['fast', 'claude-haiku-5-5', 'unlabeled'],
+    ]);
   });
 
   test('a provider that reports no usage leaves its token columns NULL, never 0', async () => {
-    zai = makeProvider({ kind: 'text', text: 'hello' });
+    claude = makeProvider({ kind: 'text', text: 'hello' });
 
     await ask();
 
@@ -219,7 +221,7 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
   });
 
   test('a usage object that omits some details keeps those fields NULL and the reported ones as given', async () => {
-    zai = makeProvider({
+    claude = makeProvider({
       kind: 'text',
       text: 'hello',
       usage: { prompt_tokens: 10, completion_tokens: 0, total_tokens: 10 },
@@ -236,50 +238,50 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
   });
 
   test('a fallback leaves a failed row for every provider that failed and an ok row for the one that answered', async () => {
-    zai = makeProvider({ kind: 'throw', error: apiError(402, 'Insufficient balance') });
-    hf = makeProvider({ kind: 'throw', error: apiError(401, 'Invalid API key') });
-    claude = makeProvider({ kind: 'text', text: 'answer', usage: USAGE });
+    claude = makeProvider({ kind: 'throw', error: apiError(402, 'Insufficient balance') });
+    zai = makeProvider({ kind: 'throw', error: apiError(401, 'Invalid API key') });
+    hf = makeProvider({ kind: 'text', text: 'answer', usage: USAGE });
 
     const result = await ask({ purpose: 'agent' });
 
     expect(result.text).toBe('answer');
     expect(rows().map((row) => [row.provider, row.outcome, row.errorClass, row.httpStatus, row.promptTokens])).toEqual([
-      ['zai', 'error', 'quota', 402, null],
-      ['hf', 'error', 'auth', 401, null],
-      ['claude', 'ok', null, null, 1200],
+      ['claude', 'error', 'quota', 402, null],
+      ['zai', 'error', 'auth', 401, null],
+      ['hf', 'ok', null, null, 1200],
     ]);
   });
 
   test('server errors, rate limits and rejected requests are classified from the status', async () => {
-    zai = makeProvider({ kind: 'throw', error: apiError(503, 'overloaded') });
-    hf = makeProvider({ kind: 'throw', error: apiError(429, 'Rate limit reached for model') });
-    claude = makeProvider({ kind: 'throw', error: apiError(400, 'Invalid JSON payload') });
+    claude = makeProvider({ kind: 'throw', error: apiError(503, 'overloaded') });
+    zai = makeProvider({ kind: 'throw', error: apiError(429, 'Rate limit reached for model') });
+    hf = makeProvider({ kind: 'throw', error: apiError(400, 'Invalid JSON payload') });
 
     await expect(ask()).rejects.toThrow('All 3 AI providers failed');
 
     expect(rows().map((row) => [row.provider, row.errorClass, row.httpStatus])).toEqual([
-      ['zai', 'server', 503],
-      ['hf', 'rate_limit', 429],
-      ['claude', 'bad_request', 400],
+      ['claude', 'server', 503],
+      ['zai', 'rate_limit', 429],
+      ['hf', 'bad_request', 400],
     ]);
   });
 
   test('a provider that never answers is a timeout row whose duration is the time spent waiting', async () => {
-    zai = makeProvider({ kind: 'hang' });
-    hf = makeProvider({ kind: 'text', text: 'second' });
+    claude = makeProvider({ kind: 'hang' });
+    zai = makeProvider({ kind: 'text', text: 'second' });
 
     const result = await ask({ providerTimeoutMs: 40 });
 
     expect(result.text).toBe('second');
     const [timedOut, answered] = rows();
-    expect(timedOut).toMatchObject({ provider: 'zai', outcome: 'error', errorClass: 'timeout', httpStatus: null });
+    expect(timedOut).toMatchObject({ provider: 'claude', outcome: 'error', errorClass: 'timeout', httpStatus: null });
     expect(timedOut?.durationMs).toBeGreaterThanOrEqual(30);
-    expect(answered).toMatchObject({ provider: 'hf', outcome: 'ok' });
+    expect(answered).toMatchObject({ provider: 'zai', outcome: 'ok' });
   });
 
   test('a caller abort is recorded as aborted and the chain stops there', async () => {
     const controller = new AbortController();
-    zai = makeProvider({
+    claude = makeProvider({
       kind: 'throw-after',
       error: new OpenAI.APIUserAbortError(),
       before: () => controller.abort(),
@@ -287,18 +289,18 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
 
     await expect(ask({ signal: controller.signal })).rejects.toThrow();
 
-    expect(rows().map((row) => [row.provider, row.outcome, row.errorClass])).toEqual([['zai', 'error', 'aborted']]);
+    expect(rows().map((row) => [row.provider, row.outcome, row.errorClass])).toEqual([['claude', 'error', 'aborted']]);
   });
 
   test('a 200 OK with no output is an empty row that still keeps the tokens the provider billed', async () => {
-    zai = makeProvider({ kind: 'empty', usage: USAGE });
-    hf = makeProvider({ kind: 'text', text: 'second' });
+    claude = makeProvider({ kind: 'empty', usage: USAGE });
+    zai = makeProvider({ kind: 'text', text: 'second' });
 
     await ask();
 
     const [empty, answered] = rows();
     expect(empty).toMatchObject({
-      provider: 'zai',
+      provider: 'claude',
       outcome: 'error',
       errorClass: 'empty',
       httpStatus: null,
@@ -306,12 +308,12 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
       completionTokens: 80,
       reasoningTokens: 30,
     });
-    expect(answered).toMatchObject({ provider: 'hf', outcome: 'ok' });
+    expect(answered).toMatchObject({ provider: 'zai', outcome: 'ok' });
   });
 
   test('an empty answer without any usage object leaves the tokens NULL', async () => {
-    zai = makeProvider({ kind: 'empty' });
-    hf = makeProvider({ kind: 'text', text: 'second' });
+    claude = makeProvider({ kind: 'empty' });
+    zai = makeProvider({ kind: 'text', text: 'second' });
 
     await ask();
 
@@ -319,57 +321,57 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
   });
 
   test('an open circuit is recorded as a skip with the status that opened it, and sends nothing', async () => {
-    zai = makeProvider({ kind: 'throw', error: apiError(402, 'Insufficient balance') });
-    hf = makeProvider({ kind: 'text', text: 'first' }, { kind: 'text', text: 'second' });
+    claude = makeProvider({ kind: 'throw', error: apiError(402, 'Insufficient balance') });
+    zai = makeProvider({ kind: 'text', text: 'first' }, { kind: 'text', text: 'second' });
 
     await ask();
     await ask();
 
-    expect(zai.requests).toHaveLength(1);
+    expect(claude.requests).toHaveLength(1);
     expect(rows().map((row) => [row.provider, row.outcome, row.errorClass, row.skipReason, row.httpStatus])).toEqual([
-      ['zai', 'error', 'quota', null, 402],
-      ['hf', 'ok', null, null, null],
-      ['zai', 'skipped', null, 'circuit_open', 402],
-      ['hf', 'ok', null, null, null],
+      ['claude', 'error', 'quota', null, 402],
+      ['zai', 'ok', null, null, null],
+      ['claude', 'skipped', null, 'circuit_open', 402],
+      ['zai', 'ok', null, null, null],
     ]);
   });
 
   test('a provider benched after a request that was too large with the tool catalog is a skip on the next round', async () => {
     const tools = [{ type: 'function' as const, function: { name: 'list_events', parameters: {} } }];
-    zai = makeProvider({ kind: 'throw', error: apiError(413, 'Request too large for model') });
-    hf = makeProvider({ kind: 'text', text: 'first' }, { kind: 'text', text: 'second' });
+    claude = makeProvider({ kind: 'throw', error: apiError(413, 'Request too large for model') });
+    zai = makeProvider({ kind: 'text', text: 'first' }, { kind: 'text', text: 'second' });
 
     await ask({ tools });
     await ask({ tools });
 
-    expect(zai.requests).toHaveLength(1);
+    expect(claude.requests).toHaveLength(1);
     expect(rows().map((row) => [row.provider, row.outcome, row.errorClass, row.skipReason])).toEqual([
-      ['zai', 'error', 'rate_limit', null],
-      ['hf', 'ok', null, null],
-      ['zai', 'skipped', null, 'eligibility_bench'],
-      ['hf', 'ok', null, null],
+      ['claude', 'error', 'rate_limit', null],
+      ['zai', 'ok', null, null],
+      ['claude', 'skipped', null, 'eligibility_bench'],
+      ['zai', 'ok', null, null],
     ]);
   });
 
   test('providers left unattempted when the round deadline passes are recorded as skipped', async () => {
     let clock = 0;
     performance.now = () => clock;
-    zai = makeProvider({
+    claude = makeProvider({
       kind: 'throw-after',
       error: apiError(503, 'slow'),
       before: () => {
         clock = 29_800;
       },
     });
+    zai = makeProvider({ kind: 'throw', error: new Error('must not be called') });
     hf = makeProvider({ kind: 'throw', error: new Error('must not be called') });
-    claude = makeProvider({ kind: 'throw', error: new Error('must not be called') });
 
     await expect(ask()).rejects.toThrow();
 
     expect(rows().map((row) => [row.provider, row.outcome, row.skipReason])).toEqual([
-      ['zai', 'error', null],
+      ['claude', 'error', null],
+      ['zai', 'skipped', 'round_deadline'],
       ['hf', 'skipped', 'round_deadline'],
-      ['claude', 'skipped', 'round_deadline'],
     ]);
   });
 
@@ -379,8 +381,8 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
       clock += 12.7;
       return clock;
     };
-    zai = makeProvider({ kind: 'throw', error: apiError(503, 'down') });
-    hf = makeProvider({ kind: 'text', text: 'answer' });
+    claude = makeProvider({ kind: 'throw', error: apiError(503, 'down') });
+    zai = makeProvider({ kind: 'text', text: 'answer' });
 
     await ask();
 
@@ -403,7 +405,7 @@ describe('aiStreamRound records one usage row per provider attempt', () => {
   });
 
   test('stores no text: the row holds only the documented columns', async () => {
-    zai = makeProvider({ kind: 'text', text: 'SECRET-ANSWER', usage: USAGE });
+    claude = makeProvider({ kind: 'text', text: 'SECRET-ANSWER', usage: USAGE });
 
     await ask({ messages: [{ role: 'user', content: 'SECRET-PROMPT' }], userId: 777_000_111 });
 
@@ -419,7 +421,7 @@ describe('recording never disturbs the answer', () => {
         throw new Error('database is locked');
       },
     });
-    zai = makeProvider({ kind: 'text', text: 'the answer', usage: USAGE });
+    claude = makeProvider({ kind: 'text', text: 'the answer', usage: USAGE });
 
     const result = await ask();
     flushAiUsageEvents();
@@ -437,7 +439,7 @@ describe('recording never disturbs the answer', () => {
         written += events.length;
       },
     });
-    zai = makeProvider({ kind: 'text', text: 'the answer' });
+    claude = makeProvider({ kind: 'text', text: 'the answer' });
 
     await ask();
 
@@ -448,7 +450,7 @@ describe('recording never disturbs the answer', () => {
 
   test('without a configured sink nothing is recorded and nothing breaks', async () => {
     configureAiUsageRecording(null);
-    zai = makeProvider({ kind: 'text', text: 'the answer' });
+    claude = makeProvider({ kind: 'text', text: 'the answer' });
 
     expect((await ask()).text).toBe('the answer');
     expect([...repo.iterateSince(0)]).toEqual([]);

@@ -35,8 +35,9 @@ describe('seeded presets', () => {
     expect(presetById('nope')).toBeNull();
   });
 
-  test('carry the ids measured on 2026-09-27 and verified on OpenRouter on 2026-10-23', () => {
-    expect(presetById('deepseek41-flash')?.models.openrouter).toBe('deepseek/deepseek-v4.1-flash');
+  test('carry verified route ids, including the latest DeepSeek snapshot', () => {
+    expect(presetById('deepseek41-flash')?.models.openrouter).toBe('deepseek/deepseek-v4.1-flash-1017');
+    expect(presetById('deepseek41-flash')?.prices.openrouter?.asOf).toBe('2026-11-13');
     expect(presetById('glm53-flash-low')?.models.openrouter).toBe('z-ai/glm-5.3-flash');
     expect(presetById('glm53-flash-low')?.models.zai).toBe('glm-5.3-flash');
     expect(presetById('glm53-flash-low')?.effort).toBe('low');
@@ -84,7 +85,7 @@ describe('the excluded list', () => {
   });
 
   test.each([
-    'deepseek/deepseek-v4.1-flash',
+    'deepseek/deepseek-v4.1-flash-1017',
     'z-ai/glm-5.3',
     'claude-haiku-5-5',
     'glm-5.3-flash',
@@ -194,7 +195,7 @@ describe('estimateCostMicroUsd (the dated price table, used only when the provid
   });
 
   test('defaults to the seeded registry, which prices the OpenRouter models', () => {
-    expect(estimateCostMicroUsd('openrouter', 'deepseek/deepseek-v4.1-flash', 1_000_000, 0)).toBe(300_000);
+    expect(estimateCostMicroUsd('openrouter', 'deepseek/deepseek-v4.1-flash-1017', 1_000_000, 0)).toBe(300_000);
     expect(estimateCostMicroUsd('claude', 'claude-haiku-5-5', 1000, 1000)).toBeNull();
   });
 });

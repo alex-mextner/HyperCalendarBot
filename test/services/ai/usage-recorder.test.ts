@@ -244,7 +244,7 @@ describe('attempt rows carry role, preset and cost', () => {
     preset: 'deepseek41-flash',
   } as const;
   const tokens = { promptTokens: 1000, completionTokens: 500, reasoningTokens: null, cachedTokens: null };
-  const OPENROUTER_DEEPSEEK = 'deepseek/deepseek-v4.1-flash';
+  const OPENROUTER_DEEPSEEK = 'deepseek/deepseek-v4.1-flash-1017';
 
   test('role and preset come from the slot, and a legacy slot has neither', () => {
     const row = answeredAttempt(scope, 'openrouter', OPENROUTER_DEEPSEEK, 5, 100, tokens);

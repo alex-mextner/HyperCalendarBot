@@ -60,7 +60,7 @@ describe('AiUsageRepository', () => {
 
   test('rows of retired providers and retired skip reasons are read back as stored', () => {
     repo.insertMany([
-      event({ at: 1, provider: 'gemini', model: 'gemini-3-flash' }),
+      event({ at: 1, provider: 'retired', model: 'historical-model' }),
       event({
         at: 2,
         provider: 'groq',
@@ -68,14 +68,14 @@ describe('AiUsageRepository', () => {
         outcome: 'skipped',
         skipReason: 'preflight_size',
       }),
-      event({ at: 3, provider: 'gemini', outcome: 'skipped', skipReason: 'local_budget' }),
+      event({ at: 3, provider: 'retired', outcome: 'skipped', skipReason: 'local_budget' }),
     ]);
 
     const rows = [...repo.iterateSince(0)];
     expect(rows.map((row) => [row.provider, row.skipReason])).toEqual([
-      ['gemini', null],
+      ['retired', null],
       ['groq', 'preflight_size'],
-      ['gemini', 'local_budget'],
+      ['retired', 'local_budget'],
     ]);
   });
 

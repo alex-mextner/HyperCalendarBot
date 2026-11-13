@@ -64,7 +64,7 @@ interface ModelPreferenceTable {
 
 /**
  * Known-good chat model ids per provider, best first. Claude is pinned to the 5.5 models by
- * owner decision (2026-10-10): no older fallbacks. It is a paid reserve and every id
+ * owner decision (2026-10-10): no older fallbacks. It is the primary provider and every id
  * shares the `claude` family, so the heuristic would pick `claude-fable-*`/`claude-opus-*`;
  * it is preferred-only and never switches to a pricier tier on its own. Other
  * providers with an empty list fall back to the heuristic in `selectReplacementModel`.
@@ -445,12 +445,18 @@ async function waitForCatalog(
   }
 }
 
-export async function resolveModelOverride(options: ResolveModelOverrideOptions): Promise<string | null> {
-  if (
-    options.signal?.aborted ||
+function shouldSkipModelLookup(options: ResolveModelOverrideOptions): boolean {
+  // The HF catalog lists base ids without provider pins. Replacing an explicit
+  // route from that list would silently change its provider; use normal failover.
+  if (options.provider === 'hf' && options.configuredModel.includes(':')) return true;
+  return (
+    options.signal?.aborted === true ||
     (options.providerDeadlineAt !== undefined && options.providerDeadlineAt <= performance.now())
-  )
-    return null;
+  );
+}
+
+export async function resolveModelOverride(options: ResolveModelOverrideOptions): Promise<string | null> {
+  if (shouldSkipModelLookup(options)) return null;
   const key = cacheKey(options.provider, options.configuredModel);
   const pending = inFlight.get(key);
   const forced = options.forceRefresh === true;

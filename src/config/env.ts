@@ -1,7 +1,7 @@
 // src/config/env.ts
 
 import { MODEL_ROLES } from '../services/ai/model-presets.ts';
-import { PROVIDER_IDS, type ProviderId } from '../services/ai/provider-ids.ts';
+import { PROVIDER_IDS, type ProviderId, prioritizeProviders } from '../services/ai/provider-ids.ts';
 import {
   AI_ROUTING_MODES,
   type AiRoutingMode,
@@ -13,15 +13,12 @@ import { TOOL_SCHEMA_MODES, type ToolSchemaMode } from '../services/ai/tool-sche
 import { logger, logOnce } from '../utils/logger.ts';
 import { GOOGLE_OAUTH_CALLBACK_PATH, publicUrl } from './public-url.ts';
 
-/** Owner-chosen order for main requests: z.ai, then Claude, then Hugging Face.
- * Explicit operator order (AI_SMART_CHAIN) wins; token-fit guards, circuits and fallback stay intact.
- * A provider without its key or the chain's model is skipped, so a depleted z.ai falls through to Claude.
- */
-export const DEFAULT_SMART_CHAIN: ProviderId[] = ['zai', 'claude', 'hf'];
+/** Claude is primary; Hugging Face is the last reserve. Selection stays configurable. */
+export const DEFAULT_SMART_CHAIN: ProviderId[] = ['claude', 'zai', 'hf'];
 /** Short requests use the same owner-chosen order, with each provider's fast model.
- * Explicit operator order (AI_FAST_CHAIN) still wins.
+ * Selected Claude stays first and Hugging Face stays last.
  */
-export const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'claude', 'hf'];
+export const DEFAULT_FAST_CHAIN: ProviderId[] = ['claude', 'zai', 'hf'];
 
 export const DEFAULT_OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
@@ -64,7 +61,11 @@ function parseChain(name: string, fallback: ProviderId[]): ChainOrder {
     );
     return { order: fallback, fromEnv: false, fallback };
   }
-  return { order: parsed, fromEnv: true, fallback };
+  const order = prioritizeProviders(parsed, (provider) => provider);
+  logOnce(`${name}:priority:${parsed.join(',')}`, () =>
+    logger.info({ name, configured: parsed, effective: order }, 'Effective provider order'),
+  );
+  return { order, fromEnv: true, fallback };
 }
 
 export interface EnvConfig {
@@ -72,7 +73,7 @@ export interface EnvConfig {
   DATABASE_PATH: string;
   NODE_ENV: 'development' | 'production';
 
-  // AI primary provider (z.ai coding endpoint)
+  // AI fallback provider (z.ai coding endpoint)
   ZAI_API_KEY: string;
   ZAI_BASE_URL: string;
   ZAI_MODEL: string;
@@ -97,7 +98,7 @@ export interface EnvConfig {
   MTPROTO_SERVICE_USER_ID?: number;
   // Whisper voice transcription only; Groq is not an AI chat provider any more
   GROQ_API_KEY?: string;
-  // Anthropic Claude (paid reserve after z.ai; OpenAI-compatible endpoint)
+  // Anthropic Claude (primary when configured; OpenAI-compatible endpoint)
   CLAUDE_API_TOKEN?: string;
   /** Independent backup credential, used with the same Claude models and request settings. */
   CLAUDE_API_TOKEN2?: string;
@@ -261,7 +262,7 @@ export function loadConfig(): EnvConfig {
     DATABASE_PATH: process.env.DATABASE_PATH || './data/calendar.db',
     NODE_ENV: (process.env.NODE_ENV as EnvConfig['NODE_ENV']) || 'development',
 
-    // AI primary (z.ai)
+    // AI fallback (z.ai)
     ZAI_API_KEY: requireEnv('ZAI_API_KEY'),
     ZAI_BASE_URL: requireEnv('ZAI_BASE_URL'),
     ZAI_MODEL: requireEnv('ZAI_MODEL'),

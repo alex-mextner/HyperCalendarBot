@@ -74,7 +74,7 @@ beforeEach(() => {
     CLAUDE_MODEL: 'claude-main',
     CLAUDE_FAST_MODEL: 'claude-fast',
     OPENROUTER_API_KEY: 'or-key',
-    OPENROUTER_MODEL: 'deepseek/deepseek-v4.1-flash',
+    OPENROUTER_MODEL: 'deepseek/deepseek-v4.1-flash-1017',
     OPENROUTER_FAST_MODEL: 'z-ai/glm-5.3-flash',
   });
   delete process.env.AI_SMART_CHAIN;
@@ -101,15 +101,15 @@ const messages: OpenAI.ChatCompletionMessageParam[] = [{ role: 'user', content: 
 
 describe('optional OpenRouter provider', () => {
   test('answers when named first in the smart chain, with the smart model and usage', async () => {
-    process.env.AI_SMART_CHAIN = 'openrouter,claude';
+    process.env.AI_SMART_CHAIN = 'openrouter,zai';
     const result = await aiStreamRound({ messages, maxTokens: 100 });
 
     expect(result.text).toBe('from openrouter');
-    expect(result.providerUsed).toBe('OpenRouter (deepseek/deepseek-v4.1-flash)');
+    expect(result.providerUsed).toBe('OpenRouter (deepseek/deepseek-v4.1-flash-1017)');
     expect(result.metrics?.provider).toBe('openrouter');
     expect(result.metrics?.usage?.promptTokens).toBe(7);
     expect(openrouter.requests[0]).toMatchObject({
-      model: 'deepseek/deepseek-v4.1-flash',
+      model: 'deepseek/deepseek-v4.1-flash-1017',
       temperature: 0.3,
       max_tokens: 100,
       stream_options: { include_usage: true },
@@ -118,7 +118,7 @@ describe('optional OpenRouter provider', () => {
   });
 
   test('the fast chain uses the fast model', async () => {
-    process.env.AI_FAST_CHAIN = 'openrouter,claude';
+    process.env.AI_FAST_CHAIN = 'openrouter,zai';
     const result = await aiStreamRound({ messages, maxTokens: 100, fast: true });
 
     expect(result.providerUsed).toBe('OpenRouter (z-ai/glm-5.3-flash)');
@@ -128,44 +128,44 @@ describe('optional OpenRouter provider', () => {
   test('is never tried when the chains are the defaults, even if fully configured', async () => {
     const result = await aiStreamRound({ messages, maxTokens: 100 });
 
-    expect(result.text).toBe('from zai');
+    expect(result.text).toBe('from claude');
     expect(openrouter.requests).toHaveLength(0);
   });
 
   test('is skipped without a key', async () => {
-    process.env.AI_SMART_CHAIN = 'openrouter,claude';
+    process.env.AI_SMART_CHAIN = 'openrouter,zai';
     delete process.env.OPENROUTER_API_KEY;
     const result = await aiStreamRound({ messages, maxTokens: 100 });
 
-    expect(result.text).toBe('from claude');
+    expect(result.text).toBe('from zai');
     expect(openrouter.requests).toHaveLength(0);
   });
 
   test('is skipped without the chain model', async () => {
-    process.env.AI_FAST_CHAIN = 'openrouter,claude';
+    process.env.AI_FAST_CHAIN = 'openrouter,zai';
     delete process.env.OPENROUTER_FAST_MODEL;
     const result = await aiStreamRound({ messages, maxTokens: 100, fast: true });
 
-    expect(result.text).toBe('from claude');
+    expect(result.text).toBe('from zai');
     expect(openrouter.requests).toHaveLength(0);
   });
 
   test('an OpenRouter failure falls through to the next provider like any other', async () => {
-    process.env.AI_SMART_CHAIN = 'openrouter,claude';
+    process.env.AI_SMART_CHAIN = 'openrouter,zai';
     openrouter = makeProvider({
       error: new OpenAI.APIError(402, { error: { message: 'no credits' } }, 'no credits', new Headers()),
     });
     const result = await aiStreamRound({ messages, maxTokens: 100 });
 
-    expect(result.text).toBe('from claude');
+    expect(result.text).toBe('from zai');
     expect(result.metrics?.failedProviders).toEqual([
-      { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash' },
+      { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash-1017' },
     ]);
   });
 
   test('a rate limit on the smart model does not bench the fast model behind the same key', async () => {
-    process.env.AI_SMART_CHAIN = 'openrouter,claude';
-    process.env.AI_FAST_CHAIN = 'openrouter,claude';
+    process.env.AI_SMART_CHAIN = 'openrouter,zai';
+    process.env.AI_FAST_CHAIN = 'openrouter,zai';
     openrouter = makeProvider({
       error: new OpenAI.APIError(
         429,
@@ -175,7 +175,7 @@ describe('optional OpenRouter provider', () => {
       ),
     });
     await aiStreamRound({ messages, maxTokens: 100 });
-    expect(openrouter.requests.map((r) => r.model)).toEqual(['deepseek/deepseek-v4.1-flash']);
+    expect(openrouter.requests.map((r) => r.model)).toEqual(['deepseek/deepseek-v4.1-flash-1017']);
 
     openrouter = makeProvider({ text: 'fast answer' });
     const fast = await aiStreamRound({ messages, maxTokens: 100, fast: true });

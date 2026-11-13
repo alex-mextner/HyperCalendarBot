@@ -236,10 +236,10 @@ describe('summarizeAiUsage — one verdict per provider', () => {
     expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'openrouter', 'retired']);
   });
 
-  test('a historical gemini ledger row still appears after the configured providers and does not throw', () => {
-    const summary = summarizeAiUsage([event({ provider: 'gemini', model: 'gemini-3-flash' }), event()], WINDOW);
-    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'openrouter', 'gemini']);
-    expect(summary.providers.find((p) => p.provider === 'gemini')).toMatchObject({ verdict: 'healthy', ok: 1 });
+  test('a historical retired ledger row still appears after the configured providers and does not throw', () => {
+    const summary = summarizeAiUsage([event({ provider: 'retired', model: 'historical-model' }), event()], WINDOW);
+    expect(summary.providers.map((p) => p.provider)).toEqual(['zai', 'claude', 'hf', 'openrouter', 'retired']);
+    expect(summary.providers.find((p) => p.provider === 'retired')).toMatchObject({ verdict: 'healthy', ok: 1 });
   });
 
   test('a historical groq ledger row still appears after the configured providers and does not throw', () => {
@@ -249,13 +249,13 @@ describe('summarizeAiUsage — one verdict per provider', () => {
     expect(summary.models.map((m) => `${m.provider}:${m.model}`)).toContain('groq:openai/gpt-oss-120b');
   });
 
-  test('a historical gemini local_budget skip row is counted, not rejected', () => {
+  test('a historical retired local_budget skip row is counted, not rejected', () => {
     const summary = summarizeAiUsage(
-      [event({ provider: 'gemini', model: 'gemini-3-flash', outcome: 'skipped', skipReason: 'local_budget' })],
+      [event({ provider: 'retired', model: 'historical-model', outcome: 'skipped', skipReason: 'local_budget' })],
       WINDOW,
     );
-    const gemini = summary.providers.find((p) => p.provider === 'gemini');
-    expect(gemini).toMatchObject({ verdict: 'skipped_only', skipped: 1 });
+    const retired = summary.providers.find((p) => p.provider === 'retired');
+    expect(retired).toMatchObject({ verdict: 'skipped_only', skipped: 1 });
     expect(summary.models[0]?.skippedByReason).toEqual({ local_budget: 1 });
   });
 
